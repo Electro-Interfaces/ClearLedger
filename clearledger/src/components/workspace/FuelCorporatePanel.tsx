@@ -38,6 +38,9 @@ import {
   type FuelCounterpartyRow, type FuelTimeseriesResponse,
 } from '@/services/fuelSalesService'
 import { useFuelKindFilter } from '@/hooks/useFuelKindFilter'
+import { formatBucket } from '@/lib/formatDate'
+import { rechartsTooltipTheme } from '@/components/ui/chart-utils'
+import { TrendSpark } from '@/components/ui/trend-spark'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 const nf1 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 })
@@ -58,22 +61,6 @@ function exportRows(name: string, columns: string[], rows: (string | number | nu
 }
 function ExportOnlyTable({ name, columns, rows }: { name: string; columns: string[]; rows: (string | number | null)[][] }) {
   return <table hidden aria-hidden {...exportRows(name, columns, rows)} />
-}
-
-/** Мини-график тренда в строке таблицы (SVG-полилиния). */
-function Sparkline({ values }: { values: (number | null)[] }) {
-  const w = 60, h = 16
-  const vals = values.map((v) => v ?? 0)
-  if (vals.length < 2) return <span className="text-muted-foreground/40">—</span>
-  const max = Math.max(...vals), min = Math.min(...vals)
-  const range = max - min || 1
-  const pts = vals.map((v, i) => `${((i / (vals.length - 1)) * w).toFixed(1)},${(h - ((v - min) / range) * h).toFixed(1)}`).join(' ')
-  const up = vals[vals.length - 1] >= vals[0]
-  return (
-    <svg width={w} height={h} className="inline-block align-middle overflow-visible">
-      <polyline points={pts} fill="none" stroke={up ? 'hsl(152, 69%, 45%)' : 'hsl(0, 84%, 60%)'} strokeWidth="1" />
-    </svg>
-  )
 }
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
@@ -110,7 +97,7 @@ const fmtDshort = (s: string | null): string => {
   const d = new Date(s)
   return Number.isNaN(d.getTime()) ? s : d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' })
 }
-const fmtMonth = (m: string): string => (m.length >= 7 ? `${m.slice(5, 7)}.${m.slice(2, 4)}` : m)
+const fmtMonth = formatBucket
 
 /* ────────────────────────── Обзор ────────────────────────── */
 
@@ -167,7 +154,7 @@ function CorpOverview({ companyId, dateFrom, dateTo }: TabProps) {
                     stroke="hsl(var(--muted-foreground))" tickFormatter={fmtMonth} />
                   <YAxis tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} stroke="hsl(var(--muted-foreground))"
                     width={52} tickFormatter={(v: number) => fmtFuelMetricShort('amount', v)} />
-                  <Tooltip cursor={{ fill: 'hsl(var(--muted) / 0.3)' }} labelFormatter={(m) => String(m)}
+                  <Tooltip {...rechartsTooltipTheme} cursor={{ fill: 'hsl(var(--muted) / 0.3)' }} labelFormatter={(m) => String(m)}
                     formatter={(v) => [fmtRub0(Number(v)), 'Выручка']} />
                   <Bar dataKey="amount" fill={CHART_SERIES[0]} fillOpacity={0.75} radius={[3, 3, 0, 0]} isAnimationActive={false} />
                 </BarChart>
@@ -323,7 +310,7 @@ function CorpCounterparties({ companyId, dateFrom, dateTo }: TabProps) {
                   <td className="p-2 text-right font-mono">{r.avg_price.toFixed(2)}</td>
                   <td className="p-2 text-right font-mono text-muted-foreground">{nf0.format(r.stations)}</td>
                   <td className="p-2 text-right font-mono text-muted-foreground">{r.cards ? nf0.format(r.cards) : '—'}</td>
-                  <td className="p-2 text-right"><Sparkline values={r.trend} /></td>
+                  <td className="p-2 text-right"><TrendSpark values={r.trend} placeholder={<span className="text-muted-foreground/40">—</span>} /></td>
                 </tr>
               ))}
               <tr className="bg-muted/60 font-medium">
@@ -468,7 +455,7 @@ function CorpCards({ companyId, dateFrom, dateTo }: TabProps) {
                       <td className="p-2 text-right font-mono text-muted-foreground">{nf0.format(r.fuels)}</td>
                       <td className="p-2 text-right font-mono text-muted-foreground whitespace-nowrap">{fmtDshort(r.first_dt)}</td>
                       <td className="p-2 text-right font-mono text-muted-foreground whitespace-nowrap">{fmtDshort(r.last_dt)}</td>
-                      <td className="p-2 text-right"><Sparkline values={r.trend} /></td>
+                      <td className="p-2 text-right"><TrendSpark values={r.trend} placeholder={<span className="text-muted-foreground/40">—</span>} /></td>
                     </tr>
                   ))}
                 </tbody>

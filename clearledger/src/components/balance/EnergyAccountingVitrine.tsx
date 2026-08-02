@@ -8,6 +8,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { DEMO_EZS, sumBuy, sumRelease, fmtN } from './balanceCalc'
+import { MetricTile as Kpi } from '@/components/ui/metric-tile'
 
 const all = DEMO_EZS
 const VAT_RATE = 0.22 // НДС, ставка 2026
@@ -43,16 +44,6 @@ function Head({ title, subtitle }: { title: string; subtitle: string }) {
     </div>
   )
 }
-function Kpi({ label, value, accent }: { label: string; value: string; accent?: 'warn' | 'danger' }) {
-  const tone = accent === 'danger' ? 'text-red-600 dark:text-red-400' : accent === 'warn' ? 'text-amber-600 dark:text-amber-400' : 'text-foreground'
-  return (
-    <Card><CardContent className="pt-4">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className={`mt-1 text-lg font-semibold tabular-nums ${tone}`}>{value}</div>
-    </CardContent></Card>
-  )
-}
-
 /* ── агрегаты сети из DEMO_EZS ── */
 // Выручка зарядки — с НДС (как в release.rub). НДС выделяется обратным счётом.
 const revenueGross = all.reduce((a, s) => a + sumRelease(s).rub, 0)

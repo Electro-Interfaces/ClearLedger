@@ -17,6 +17,7 @@ import { fmtMoney, fmtMoneyShort } from '@/services/analyticsService'
 import { StorePlanMonitor } from './StorePlanMonitor'
 import { StoreExceptionsWidget } from './StoreExceptionsWidget'
 import { StoreMovementSummary } from './StoreMovementSummary'
+import { rechartsTooltipTheme } from '@/components/ui/chart-utils'
 
 const nf0 = (n: number) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 }).format(n)
 
@@ -148,7 +149,7 @@ export function StoreOverviewPanel({ companyId, dateFrom, dateTo, stations }: {
                 <CartesianGrid strokeDasharray="3 3" opacity={0.12} />
                 <XAxis dataKey="date" tick={{ fontSize: 10 }} tickFormatter={(d: string) => d.slice(5)} />
                 <YAxis tick={{ fontSize: 10 }} tickFormatter={(v: number) => fmtMoneyShort(v)} width={52} />
-                <Tooltip
+                <Tooltip {...rechartsTooltipTheme}
                   formatter={(value) => fmtMoney(Number(value))}
                   contentStyle={{ background: 'hsl(var(--popover))', border: '1px solid hsl(var(--border))', borderRadius: 8, fontSize: 12 }}
                 />

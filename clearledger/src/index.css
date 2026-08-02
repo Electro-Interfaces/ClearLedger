@@ -362,12 +362,80 @@
     html, body {
       overscroll-behavior-y: contain;
     }
+
+    /* ── Палец вместо курсора ──
+       Обход телефоном нашёл кнопки высотой 16–24 px (фильтры «Контрагентов»,
+       дерево «Инфо», переключатели «Каналов»): мышью попасть легко, пальцем —
+       нет. Поднимаем цель до 32 px там, где элемент и так строится флексом,
+       поэтому текст остаётся на месте, растёт только область нажатия.
+       Строки таблиц не трогаем: у них своя высота и свои обработчики. */
+    button:not([data-slot="table-cell"] button),
+    [role="tab"],
+    [role="button"] {
+      min-height: 32px;
+    }
+
+    /* Иконочные кнопки квадратные: без ширины цель остаётся узкой полоской.
+       Высоту им поднимаем и внутри таблиц — это «изменить/удалить» в строках
+       справочников, по ним чаще всего и промахиваются. Прибавка 4 px строку
+       не разгоняет: по ширине они уже 32. */
+    button:has(> svg:only-child) {
+      min-width: 32px;
+      min-height: 32px;
+    }
+
+    /* Поля ввода: 28 px — это и мелкая цель, и повод для iOS увеличить страницу
+       при фокусе. Ширину не трогаем, она задана раскладкой. */
+    input:not([type="checkbox"]):not([type="radio"]),
+    select,
+    textarea {
+      min-height: 32px;
+    }
+
+    /* Флажки выбора строк — 13 px. Мышью попасть можно, пальцем нет: в реестре
+       «Проектов» их сотня в столбик, промах отмечает соседнюю строку. 18 px —
+       компромисс: заметно крупнее, но высоту строки ещё не задаёт. */
+    input[type="checkbox"],
+    input[type="radio"] {
+      min-width: 18px;
+      min-height: 18px;
+    }
+
+    /* ── Читаемость важнее плотности ──
+       Плотная шкала оправдана под курсором: в таблицу влезает больше строк, и
+       это осознанный выбор. Под пальцем те же 9–10 px не читаются — обход дал
+       1046 таких узлов в «Контрагентах» и 503 в «Заявках». Правило привязано к
+       вводу, а не к ширине: планшет держат в руках так же, как телефон, а на
+       ноутбуке с узким окном плотность остаётся.
+       ponytail: ловит существующие text-[9px|10px|11px] и их sm:-варианты;
+       новый размер вроде text-[8px] придётся дописать сюда же. */
+    .text-\[9px\],
+    .text-\[10px\],
+    /* Плитки рабочего стола заданы как text-[12px] sm:text-[10px] — «на телефоне
+       крупнее, дальше плотнее». Но sm: начинается с 640 px, а планшет держат в
+       руках так же, как телефон. */
+    .sm\:text-\[10px\] {
+      font-size: 11px;
+      line-height: 1.35;
+    }
+    .text-\[11px\] {
+      font-size: 12px;
+      line-height: 1.4;
+    }
+
+    /* Подписи осей графиков: размер приходит атрибутом font-size="10" прямо в
+       SVG (recharts, ~20 мест в разметке). Атрибут презентации слабее CSS,
+       поэтому одного правила хватает — !important не нужен. */
+    .recharts-cartesian-axis-tick-value {
+      font-size: 11px;
+    }
   }
 
   /* iOS input zoom fix */
   .ios-input-fix {
     font-size: 16px !important;
   }
+
 }
 
 @layer components {
@@ -612,21 +680,101 @@
 }
 .cl-map-label.leaflet-tooltip::before { display: none; }
 
-/* Число станций внутри маркера-группы: подпись сидит В круге, поэтому без
-   подложки, рамки и хвостика — иначе поверх маркера появляется второй объект. */
-.cl-map-count.leaflet-tooltip {
-  background: transparent;
+/* ── Маркер-группа: круг С ЧИСЛОМ станций ─────────────────────────────────
+   Число — часть иконки (L.divIcon), а не отдельный постоянный tooltip: у слоя
+   Leaflet может быть только один tooltip, и подсказка при наведении затирала
+   счётчик — группа выходила безымянным синим пятном. Канон тот же, что у
+   Leaflet.markercluster, Яндекс.Карт и Google: сколько объектов внутри — видно
+   всегда, без наведения и без клика.
+
+   Двойное кольцо (внешнее полупрозрачное + плотное ядро) — оттуда же: на тёмной
+   карте одиночная заливка сливается с фоном, а кольцо задаёт границу группы. */
+.cl-map-cluster {
+  cursor: zoom-in;        /* группа кликабельна — курсор обязан это показать */
+  background: none;
   border: none;
-  box-shadow: none;
+}
+.cl-map-cluster > span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  border-radius: 9999px;
+  border-style: solid;
+  border-width: 2px;
+  /* Заливка приходит инлайном — это цвет ВЕЛИЧИНЫ группы по активной метрике. */
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.45);
   color: #fff;
   font-size: 12px;
   font-weight: 700;
-  padding: 0;
-  pointer-events: none;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  /* Цифра поверх любого оттенка заливки: тень отделяет её от круга. */
+  text-shadow: 0 1px 2px rgb(0 0 0 / 0.7), 0 0 3px rgb(0 0 0 / 0.5);
 }
-.cl-map-count.leaflet-tooltip::before { display: none; }
-/* Группа кликабельна — курсор обязан это показать. */
-.cl-map-cluster { cursor: zoom-in; }
+.cl-map-cluster:hover > span {
+  filter: brightness(1.12);
+  box-shadow: 0 0 0 4px rgb(255 255 255 / 0.18), 0 1px 4px rgb(0 0 0 / 0.5);
+}
+
+/* ── Выноска с действующими ценами (вид «Цены») ────────────────────────────
+   Цены живут не в карте, а в разделе «Цены» — берутся из того же источника
+   (/api/fuel/pricing/spread), поэтому на карте и в прайс-листе одно и то же
+   число. Плашка компактная и с подложкой: цифры обязаны читаться на любом
+   участке карты, а обводкой текста ряд из четырёх строк не спасти. */
+.cl-map-priced { background: none; border: none; }
+.cl-map-priced .cl-dot {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 9px;
+  height: 9px;
+  margin-top: -4.5px;
+  border-radius: 9999px;
+  border: 2px solid hsl(var(--background));
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.5);
+}
+.cl-map-priced .cl-plate {
+  position: absolute;
+  left: 13px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 0 6px;
+  padding: 3px 5px;
+  border-radius: 5px;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--popover) / 0.94);
+  color: hsl(var(--popover-foreground));
+  font-size: 10px;
+  line-height: 1.35;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  box-shadow: 0 2px 6px rgb(0 0 0 / 0.35);
+}
+.cl-map-priced .cl-plate b { font-weight: 600; }
+
+/* Номер станции — тем же отдельным маркером, что и цены (см. PointLabel):
+   обводка тенью вместо подложки, чтобы не закрывать карту прямоугольником. */
+.cl-map-name { background: none; border: none; }
+.cl-map-name .cl-name {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  color: hsl(var(--foreground));
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  text-shadow:
+    0 0 3px hsl(var(--background)), 0 0 3px hsl(var(--background)),
+    0 0 5px hsl(var(--background));
+}
+.cl-map-priced .cl-plate .cl-num { text-align: right; font-weight: 700; }
+/* Цена не пересматривалась дольше остальных — отметка тем же янтарём, что в
+   «Разбросе по сети». */
+.cl-map-priced .cl-plate .cl-stale { color: hsl(38 92% 55%); }
 
 /* ── Печать и сохранение в PDF ─────────────────────────────────────────────
    Отчёт руководителю печатают из браузера: диалог печати умеет «Сохранить как

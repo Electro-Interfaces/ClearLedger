@@ -51,6 +51,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { format } from 'date-fns'
+import { MONTHS_SHORT_NOM } from '@/lib/formatDate'
 
 type TabId = 'overview' | 'data' | 'mapping' | 'settings'
 
@@ -125,10 +126,6 @@ const MONTH_NAMES_RU = [
   'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь',
 ]
 
-const MONTH_SHORT_RU = [
-  'янв', 'фев', 'мар', 'апр', 'май', 'июн',
-  'июл', 'авг', 'сен', 'окт', 'ноя', 'дек',
-]
 
 /** Компактная подпись периода для кнопки запуска: «Май 2026», «апр–май 2026»,
  *  «дек 2025 – янв 2026». null, если диапазон не задан. */
@@ -138,8 +135,8 @@ function periodShortLabel(dateFrom?: string | null, dateTo?: string | null): str
   const [y2, m2] = dateTo.slice(0, 7).split('-').map(Number)
   if (!y1 || !m1 || !y2 || !m2) return null
   if (y1 === y2 && m1 === m2) return `${MONTH_NAMES_RU[m1 - 1]} ${y1}`
-  if (y1 === y2) return `${MONTH_SHORT_RU[m1 - 1]}–${MONTH_SHORT_RU[m2 - 1]} ${y1}`
-  return `${MONTH_SHORT_RU[m1 - 1]} ${y1} – ${MONTH_SHORT_RU[m2 - 1]} ${y2}`
+  if (y1 === y2) return `${MONTHS_SHORT_NOM[m1 - 1]}–${MONTHS_SHORT_NOM[m2 - 1]} ${y1}`
+  return `${MONTHS_SHORT_NOM[m1 - 1]} ${y1} – ${MONTHS_SHORT_NOM[m2 - 1]} ${y2}`
 }
 
 function monthKey(year: number, month0: number): string {

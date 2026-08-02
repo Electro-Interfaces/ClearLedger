@@ -227,3 +227,103 @@ async def enrich_nomenclature(body: EnrichNomBody) -> dict:
         return runtime.op_enrich_nomenclature(body.refs)
     except Exception as exc:
         raise HTTPException(500, f"{type(exc).__name__}: {exc}") from exc
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Операции канала ЦБ ЭЛСИ.АЗК. Без них Linux-контейнер не может ни забрать смены
+# (сопутка/общепит), ни обновить остатки — данные в Ledger замирают на дате
+# последней выгрузки, а экраны «Склада» показывают позапрошлый месяц.
+# ─────────────────────────────────────────────────────────────────────────────
+class RegisterBalanceBody(BaseModel):
+    register: str
+    dimensions: list[str] | None = None
+    resources: list[str] | None = None
+    on_date: str | None = None
+    top: int | None = None
+
+
+@app.post("/fetch_register_balance", dependencies=[Depends(auth)])
+async def fetch_register_balance(body: RegisterBalanceBody) -> list[dict]:
+    try:
+        return runtime.op_fetch_register_balance(
+            register=body.register,
+            dimensions=body.dimensions,
+            resources=body.resources,
+            on_date=body.on_date,
+            top=body.top,
+        )
+    except Exception as exc:
+        raise HTTPException(500, f"{type(exc).__name__}: {exc}") from exc
+
+
+class QueryTabularBody(BaseModel):
+    doc_type: str
+    tabular: str
+    select: list[str] | None = None
+    where: str | None = None
+    top: int | None = None
+
+
+@app.post("/query_tabular", dependencies=[Depends(auth)])
+async def query_tabular(body: QueryTabularBody) -> list[dict]:
+    try:
+        return runtime.op_query_tabular(
+            doc_type=body.doc_type,
+            tabular=body.tabular,
+            select=body.select,
+            where=body.where,
+            top=body.top,
+        )
+    except Exception as exc:
+        raise HTTPException(500, f"{type(exc).__name__}: {exc}") from exc
+
+
+class CbShiftsBody(BaseModel):
+    period_from: str
+    period_to: str
+    station: str = "208"
+    limit: int = 50
+
+
+@app.post("/fetch_cb_shifts", dependencies=[Depends(auth)])
+async def fetch_cb_shifts(body: CbShiftsBody) -> list[dict]:
+    try:
+        return runtime.op_fetch_cb_shifts(
+            period_from=body.period_from,
+            period_to=body.period_to,
+            station=body.station,
+            limit=body.limit,
+        )
+    except Exception as exc:
+        raise HTTPException(500, f"{type(exc).__name__}: {exc}") from exc
+
+
+class PeriodStationBody(BaseModel):
+    period_from: str
+    period_to: str
+    station: str = "208"
+
+
+@app.post("/fetch_production", dependencies=[Depends(auth)])
+async def fetch_production(body: PeriodStationBody) -> list[dict]:
+    """Выпуск блюд — себестоимость общепита, которую 1С считает по рецептуре."""
+    try:
+        return runtime.op_fetch_production(body.period_from, body.period_to, body.station)
+    except Exception as exc:
+        raise HTTPException(500, f"{type(exc).__name__}: {exc}") from exc
+
+
+@app.post("/fetch_gain", dependencies=[Depends(auth)])
+async def fetch_gain(body: PeriodStationBody) -> list[dict]:
+    try:
+        return runtime.op_fetch_gain(body.period_from, body.period_to, body.station)
+    except Exception as exc:
+        raise HTTPException(500, f"{type(exc).__name__}: {exc}") from exc
+
+
+@app.post("/fetch_returns", dependencies=[Depends(auth)])
+async def fetch_returns(body: PeriodStationBody) -> list[dict]:
+    try:
+        return runtime.op_fetch_returns(body.period_from, body.period_to, body.station)
+    except Exception as exc:
+        raise HTTPException(500, f"{type(exc).__name__}: {exc}") from exc

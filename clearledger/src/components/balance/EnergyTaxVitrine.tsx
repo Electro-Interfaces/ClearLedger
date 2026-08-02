@@ -14,6 +14,7 @@ import {
   DEMO_EZS, sumBuy, sumRelease, supplierContract, fmtN,
   type StationBalance,
 } from './balanceCalc'
+import { MetricTile as Kpi } from '@/components/ui/metric-tile'
 
 const all = DEMO_EZS
 const VAT_RATE = 0.22   // НДС, ставка 2026
@@ -56,16 +57,6 @@ function Head({ title, subtitle }: { title: string; subtitle: string }) {
     </div>
   )
 }
-function Kpi({ label, value, accent }: { label: string; value: string; accent?: 'warn' | 'danger' }) {
-  const tone = accent === 'danger' ? 'text-red-600 dark:text-red-400' : accent === 'warn' ? 'text-amber-600 dark:text-amber-400' : 'text-foreground'
-  return (
-    <Card><CardContent className="pt-4">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className={`mt-1 text-lg font-semibold tabular-nums ${tone}`}>{value}</div>
-    </CardContent></Card>
-  )
-}
-
 export function TaxVitrine() {
   // ── агрегаты по сети ──
   const net = all.reduce((a, s) => {

@@ -273,6 +273,20 @@ export async function getObjectTickets(
 }
 
 /**
+ * Завести заявку по объекту, не выходя из карточки.
+ *
+ * Граница: работа меняет состав или положение станции — это проект; работа
+ * восстанавливает работоспособность — это заявка.
+ */
+export async function createObjectTicket(
+  companyId: string, objectId: string,
+  body: { description: string; title?: string; priority?: string }, app = 'support',
+): Promise<{ display_number: string; number: string | number; status: string }> {
+  const qs = new URLSearchParams({ company_id: companyId, app })
+  return post(`/api/registry/objects/${encodeURIComponent(objectId)}/tickets?${qs}`, body)
+}
+
+/**
  * Отправить сотрудников компании в приложение. Пароли не передаются: вход в приложение
  * идёт единым входом Ядра, а у кого локальный пароль уже был — он сохраняется.
  */

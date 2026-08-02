@@ -17,21 +17,21 @@ const severityOrder: Record<string, number> = { critical: 0, warning: 1, info: 2
 const severityConfig = {
   critical: {
     icon: AlertOctagon,
-    iconBg: 'hsl(0 84% 60% / 0.12)',
+    iconBg: 'hsl(var(--error) / 0.12)',
     iconColor: 'text-red-400/80',
     badgeClass: 'border-red-400/50 text-red-300/80',
     label: 'Критично',
   },
   warning: {
     icon: AlertTriangle,
-    iconBg: 'hsl(45 100% 55% / 0.12)',
+    iconBg: 'hsl(var(--warning) / 0.12)',
     iconColor: 'text-amber-400/80',
     badgeClass: 'border-amber-400/50 text-amber-300/80',
     label: 'Внимание',
   },
   info: {
     icon: Info,
-    iconBg: 'hsl(217 91% 60% / 0.12)',
+    iconBg: 'hsl(var(--chart-1) / 0.12)',
     iconColor: 'text-blue-400/80',
     badgeClass: 'border-blue-400/50 text-blue-300/80',
     label: 'Информация',

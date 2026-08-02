@@ -14,16 +14,18 @@ from fastapi import (
     APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect, status,
 )
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, func, or_, select, text
+from sqlalchemy import and_, delete as sa_delete, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import decode_token, get_current_user
 from app.database import async_session_factory, get_db
 from app.deps import capture_company_header, scope_company_id
 from app.models import (
-    ChatFolder, ChatMessage, ChatMessageReaction, ChatParticipant, ChatRoom, Company,
-    User, UserCompany,
+    ChatFolder, ChatMessage, ChatMessageReaction, ChatParticipant, ChatPushSubscription,
+    ChatRoom, ChatTicketLink, Company, Counterparty, ServiceLocation, User, UserCompany,
 )
+from app.services import web_push
+from app.services.space_projection import ProjectionError, create_object_ticket
 from app.services.chat_ws import manager
 
 # capture_company_header кладёт X-Company-Id в contextvar до тела эндпоинта —
@@ -35,6 +37,14 @@ GENERAL_ROOM_NAME = "Общий чат"
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
+async def _assert_company_object(object_id: str, cid: uuid.UUID, db: AsyncSession) -> None:
+    """Объект должен принадлежать компании чата — чужой привязать нельзя."""
+    loc_cid = (await db.execute(select(ServiceLocation.company_id).where(
+        ServiceLocation.id == object_id))).scalar_one_or_none()
+    if loc_cid != cid:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Объект не из этого пространства")
+
+
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -134,8 +144,10 @@ async def _assert_participant(room_id: uuid.UUID, user: User, db: AsyncSession) 
 # 30.07.2026). Больше — по потребности, руками: пусто открывшееся пространство не
 # объясняет человеку, зачем ему чат, а десяток заготовок он закроет и не вернётся.
 #
-#   Обновления Элси+  — канал разработчика платформы: что нового в продуктах,
+#   Обновления платформы — канал разработчика платформы: что нового в продуктах,
 #                       регламентные работы. Пишем в него мы, пространство читает.
+#                       Без бренда в имени: пространство заказчика не упоминает
+#                       Элси+ (проверка white-label, 31.07.2026).
 #   Объявления        — канал компании: слово руководства сотрудникам. Владельца
 #                       назначает администратор (директор, секретарь, кадры).
 #   Общий чат         — группа со всеми людьми пространства, включая партнёров:
@@ -153,16 +165,17 @@ async def _assert_participant(room_id: uuid.UUID, user: User, db: AsyncSession) 
 SYSTEM_ROOMS = [
     ("general", GENERAL_ROOM_NAME, "group"),
     ("news", "Объявления", "channel"),
-    ("platform", "Обновления Элси+", "channel"),
+    ("platform", "Обновления платформы", "channel"),
 ]
 
 async def ensure_company_rooms(user: User, cid: uuid.UUID, db: AsyncSession) -> None:
     """Базовый набор чатов пространства + членство ВСЕХ его людей.
 
     Идемпотентно при любом заходе: комнаты создаются раз, участники добираются.
-    Кроме трёх общих комнат (`SYSTEM_ROOMS`) создаются группы подключённых
-    приложений — по одной на рабочее место, с привязкой `scope_product`, чтобы в
-    самом приложении правая рельса открывала его группу без выбора.
+    Создаются ТОЛЬКО три общих комнаты (`SYSTEM_ROOMS`) — групп под приложения
+    пространство не заводит (решение МАГа, подтверждено 31.07.2026: у пилотов
+    автогруппы трижды вычищали руками): группу создают люди сами, привязку к
+    приложению задают в диалоге создания.
     """
     for kind, room_name, room_type in SYSTEM_ROOMS:
         room = (await db.execute(select(ChatRoom).where(
@@ -258,6 +271,15 @@ class RoomOut(BaseModel):
     # Приложение, к которому привязан чат: панель свойств объясняет, ПОЧЕМУ этот чат
     # здесь виден — «группа приложения Топливо», а не просто «группа».
     scopeProduct: str | None = None
+    # Аватар чата (/api/files/<id>); NULL — иконка по типу комнаты.
+    avatarUrl: str | None = None
+    # «Без звука» до этого момента: чат не шлёт push и не красит общий счётчик.
+    mutedUntil: str | None = None
+    # Объект пространства, при котором живёт чат («группа по станции»).
+    scopeObjectId: str | None = None
+    scopeObjectName: str | None = None
+    # Чат заявки: скрыт из общего списка, открывается из её карточки.
+    scopeTicketId: str | None = None
 
 
 class ParticipantOut(BaseModel):
@@ -306,6 +328,8 @@ class MessageOut(BaseModel):
     readCount: int = 0
     reactions: list[ReactionOut] = Field(default_factory=list)
     createdAt: str
+    # Пересланное: имя автора оригинала («Переслано от …»).
+    forwardedFrom: str | None = None
     # Кто написал: vendor | internal | partner. Признак стоит у КАЖДОГО сообщения, а не
     # только в списке участников: читая переписку, важно видеть, кто говорит, не сверяясь
     # со составом комнаты.
@@ -316,6 +340,8 @@ class CreateRoomBody(BaseModel):
     type: str = "group"                    # direct | group | channel
     name: str | None = None
     participantIds: list[str] = Field(default_factory=list)
+    # Объект пространства, при котором живёт чат («группа по станции»).
+    scopeObjectId: str | None = None
     # Приложение, из которого чат создан: чат остаётся в его контексте.
     scopeProduct: str | None = None
 
@@ -361,6 +387,8 @@ async def list_rooms(
     archived: bool = Query(False),
     product: str | None = Query(
         None, description="Код приложения: вернуть его чаты и общие чаты пространства"),
+    object_id: str | None = Query(
+        None, description="Только чаты этого объекта — для карточки объекта"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -370,7 +398,8 @@ async def list_rooms(
     # Только комнаты ВЫБРАННОЙ организации — иначе мультикомпанийный юзер увидел
     # бы чаты двух орг вперемешку. Строгая изоляция пространств.
     rows = (await db.execute(
-        select(ChatRoom, ChatParticipant.last_read_at, ChatParticipant.role)
+        select(ChatRoom, ChatParticipant.last_read_at, ChatParticipant.role,
+               ChatParticipant.muted_until)
         .join(ChatParticipant, and_(ChatParticipant.room_id == ChatRoom.id,
                                     ChatParticipant.user_id == current_user.id))
         .where(ChatRoom.is_active.is_(True), ChatRoom.is_archived.is_(archived),
@@ -380,11 +409,21 @@ async def list_rooms(
                # (личные, «Общий чат», «Объявления»). Верхняя кнопка параметр не
                # передаёт и получает всё: один чат, разные предустановки.
                or_(ChatRoom.scope_product.is_(None), ChatRoom.scope_product == product)
-               if product else text("true"))
+               if product else text("true"),
+               ChatRoom.scope_object_id == object_id if object_id else text("true"),
+               # Чаты заявок скрыты из общего пространства: их видно только из
+               # карточки заявки (решение МАГа) — сюда попадают лишь обычные комнаты.
+               ChatRoom.scope_ticket_id.is_(None))
     )).all()
 
+    # Имена привязанных объектов — одним запросом, а не по комнате.
+    obj_ids = {room.scope_object_id for room, *_ in rows if room.scope_object_id}
+    obj_names: dict[str, str] = dict((await db.execute(
+        select(ServiceLocation.id, ServiceLocation.name)
+        .where(ServiceLocation.id.in_(obj_ids)))).all()) if obj_ids else {}
+
     out: list[RoomOut] = []
-    for room, last_read, my_role in rows:
+    for room, last_read, my_role, muted_until in rows:
         pcount = (await db.execute(select(func.count()).select_from(ChatParticipant)
                   .where(ChatParticipant.room_id == room.id))).scalar() or 0
         unread = (await db.execute(select(func.count()).select_from(ChatMessage).where(
@@ -415,6 +454,10 @@ async def list_rooms(
             pinnedMessage=pinned,
             myRole=my_role,
             scopeProduct=room.scope_product,
+            avatarUrl=room.avatar_url,
+            mutedUntil=muted_until.isoformat() if muted_until else None,
+            scopeObjectId=room.scope_object_id,
+            scopeObjectName=obj_names.get(room.scope_object_id or ""),
         ))
     # системные комнаты вверх (Общий чат, Объявления), затем по времени последнего сообщения
     # В контексте приложения его собственный чат идёт ПЕРВЫМ: человек открыл рельсу в
@@ -496,10 +539,16 @@ async def create_room(
         if existing:
             return await get_room(str(existing), current_user, db)
 
+    scope_object = None
+    if body.type != "direct" and body.scopeObjectId:
+        await _assert_company_object(body.scopeObjectId, cid, db)
+        scope_object = body.scopeObjectId
+
     room = ChatRoom(type=body.type, kind=None, name=body.name, company_id=cid,
                     created_by=current_user.id,
                     # Личный чат контекста не имеет: он про людей, а не про экран.
-                    scope_product=(body.scopeProduct or None) if body.type != "direct" else None)
+                    scope_product=(body.scopeProduct or None) if body.type != "direct" else None,
+                    scope_object_id=scope_object)
     db.add(room)
     await db.flush()
     # Создатель — ВЛАДЕЛЕЦ: в канале только он и назначенные им админы пишут, и его
@@ -549,11 +598,23 @@ async def get_room(
             if p.userId != str(current_user.id):
                 peer_id = p.userId
                 name = name or p.name
+    obj_name = None
+    if room.scope_object_id:
+        obj_name = (await db.execute(select(ServiceLocation.name).where(
+            ServiceLocation.id == room.scope_object_id))).scalar_one_or_none()
+    # Скрытые комнаты (чат заявки) не попадают в общий список — фронт строит их
+    # шапку из детали, поэтому роль зрителя нужна прямо здесь.
+    my_role = next((p.role for p in plist if p.userId == str(current_user.id)), None)
     return RoomDetailOut(
         id=str(room.id), type=room.type, kind=room.kind, name=name,
         isArchived=room.is_archived, participantCount=len(plist), directPeerId=peer_id,
         createdBy=str(room.created_by) if room.created_by else None, participants=plist,
         pinnedMessage=await _pinned_out(room, db),
+        avatarUrl=room.avatar_url,
+        scopeProduct=room.scope_product,
+        scopeObjectId=room.scope_object_id, scopeObjectName=obj_name,
+        scopeTicketId=str(room.scope_ticket_id) if room.scope_ticket_id else None,
+        myRole=my_role,
     )
 
 
@@ -576,6 +637,7 @@ def _msg_out(m: ChatMessage, read_count: int, reply: ChatMessage | None,
         reactions=reactions or [],
         createdAt=m.created_at.isoformat(),
         authorParty=author_party,
+        forwardedFrom=None if deleted else m.forwarded_from,
     )
 
 
@@ -624,7 +686,7 @@ async def list_messages(
         rid = uuid.UUID(room_id)
     except (ValueError, TypeError):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID")
-    await _assert_participant(rid, current_user, db)
+    room = await _assert_participant(rid, current_user, db)
     stmt = select(ChatMessage).where(ChatMessage.room_id == rid)
     if before:
         try:
@@ -702,6 +764,11 @@ async def send_message(
     await db.commit()
     # live-рассылка участникам комнаты
     await manager.broadcast(f"chat:{rid}", {"type": "chat:message", **payload.model_dump()})
+    # Web Push тем, кого нет в системе: вкладка закрыта — сообщение всё равно догонит.
+    web_push.push_room_async(
+        rid, room.name or current_user.name,
+        f"{current_user.name}: {(content or msg.file_name or 'вложение')[:140]}",
+        current_user.id)
     # персональные пуши упомянутым (@) — только реальным участникам комнаты, ≠ автор
     if body.mentions:
         want = {str(u) for u in _uuid_list(body.mentions)} - {str(current_user.id)}
@@ -1032,6 +1099,493 @@ async def add_participant(
     return {"ok": True}
 
 
+# ── самоуправление чата: владелец и админы ведут его без админа пространства ─
+# Роли комнаты (owner/admin/member) существовали, но распоряжаться ими мог только
+# админ пространства из «Управления → Чаты». Создатель группы не мог ни переименовать
+# её, ни убрать человека — хотя группу завёл он и вести её должен он.
+
+class RoomRenameBody(BaseModel):
+    name: str | None = None
+    # Аватар: путь файла пространства (/api/files/<id>); "" — убрать аватар.
+    # camelCase — как во всех Body этого роутера (userId, scopeProduct): конвертации нет.
+    avatarUrl: str | None = None
+    # Привязка к приложению («специализированная группа»): "" — отвязать.
+    scopeProduct: str | None = None
+    # Привязка к объекту пространства: "" — отвязать.
+    scopeObjectId: str | None = None
+
+
+class ParticipantRoleBody(BaseModel):
+    role: str   # admin | member
+
+
+async def _my_room_role(rid: uuid.UUID, user: User, db: AsyncSession) -> str | None:
+    return (await db.execute(select(ChatParticipant.role).where(
+        ChatParticipant.room_id == rid, ChatParticipant.user_id == user.id))).scalar_one_or_none()
+
+
+@router.patch("/rooms/{room_id}")
+async def rename_room(
+    room_id: str, body: RoomRenameBody,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Переименовать чат или сменить аватар — владелец или админ чата.
+    Имя системного чата закрыто, аватар — можно (его меняет владелец комнаты)."""
+    try:
+        rid = uuid.UUID(room_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID")
+    room = await _assert_participant(rid, current_user, db)
+    my = await _my_room_role(rid, current_user, db)
+    if not (current_user.is_superadmin or room.created_by == current_user.id
+            or my in ("owner", "admin")):
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Менять чат может его владелец или админ")
+    if room.type == "direct":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Личную переписку не настраивают")
+    if body.name is not None:
+        if room.kind is not None:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "Имя системного чата — часть устройства пространства")
+        name = body.name.strip()
+        if not name:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Имя не может быть пустым")
+        room.name = name
+    if body.avatarUrl is not None:
+        url = body.avatarUrl.strip()
+        # Только файлы пространства: внешний адрес в src — чужой контент и утечка.
+        if url and not url.startswith("/api/files/"):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "Аватар — файл пространства (/api/files/…)")
+        room.avatar_url = url or None
+    if body.scopeProduct is not None:
+        # Привязка группы к приложению: системным не meняем — они общие по устройству.
+        if room.kind is not None:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "Системный чат — общий для пространства, привязки у него нет")
+        room.scope_product = body.scopeProduct.strip() or None
+    if body.scopeObjectId is not None:
+        if room.kind is not None:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "Системный чат — общий для пространства, привязки у него нет")
+        oid = body.scopeObjectId.strip()
+        if oid:
+            await _assert_company_object(oid, room.company_id, db)
+        room.scope_object_id = oid or None
+    await db.commit()
+    return {"ok": True, "name": room.name, "avatarUrl": room.avatar_url,
+            "scopeProduct": room.scope_product, "scopeObjectId": room.scope_object_id}
+
+
+@router.delete("/rooms/{room_id}/participants/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_participant(
+    room_id: str, user_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Убрать участника: владелец — любого, админ чата — обычных участников."""
+    try:
+        rid, uid = uuid.UUID(room_id), uuid.UUID(user_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID")
+    room = await _assert_participant(rid, current_user, db)
+    my = await _my_room_role(rid, current_user, db)
+    is_owner = (current_user.is_superadmin or room.created_by == current_user.id
+                or my == "owner")
+    if not (is_owner or my == "admin"):
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Убирать участников может владелец или админ чата")
+    if room.kind is not None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Состав системного чата ведёт пространство")
+    if room.type == "direct":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Личную переписку не редактируют")
+    p = (await db.execute(select(ChatParticipant).where(
+        ChatParticipant.room_id == rid, ChatParticipant.user_id == uid))).scalar_one_or_none()
+    if p is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Участник не найден")
+    if p.user_id == current_user.id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Себя убрать нельзя")
+    if p.role == "owner":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Владельца чата убрать нельзя")
+    if not is_owner and p.role == "admin":
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Админа чата убирает только владелец")
+    await db.delete(p)
+    await db.commit()
+
+
+@router.post("/rooms/{room_id}/leave", status_code=status.HTTP_204_NO_CONTENT)
+async def leave_room(
+    room_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Выйти из группы самому. Системные чаты пространства и каналы — без выхода:
+    «Общий чат», «Объявления» и «Обновления платформы» обязательны для всех, от
+    канала не отписываются — его состав ведёт владелец."""
+    try:
+        rid = uuid.UUID(room_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID")
+    room = await _assert_participant(rid, current_user, db)
+    if room.kind is not None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Из чатов пространства не выходят — они обязательны для всех")
+    if room.type != "group":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Выйти можно из группы; канал и личную переписку можно архивировать")
+    p = (await db.execute(select(ChatParticipant).where(
+        ChatParticipant.room_id == rid,
+        ChatParticipant.user_id == current_user.id))).scalar_one_or_none()
+    if p is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Вы не участник этого чата")
+    if p.role == "owner":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Владелец не выходит из своей группы — сначала передайте её в «Управлении»")
+    await db.delete(p)
+    await db.commit()
+
+
+class MuteBody(BaseModel):
+    # 'forever' — навсегда, ISO-время — до момента, null — включить уведомления.
+    until: str | None = None
+
+
+@router.post("/rooms/{room_id}/mute")
+async def mute_room(
+    room_id: str, body: MuteBody,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """«Без звука»: чат перестаёт слать push и красить общий счётчик."""
+    try:
+        rid = uuid.UUID(room_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID")
+    await _assert_participant(rid, current_user, db)
+    p = (await db.execute(select(ChatParticipant).where(
+        ChatParticipant.room_id == rid,
+        ChatParticipant.user_id == current_user.id))).scalar_one_or_none()
+    if p is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Вы не участник этого чата")
+    if body.until is None:
+        p.muted_until = None
+    elif body.until == "forever":
+        p.muted_until = datetime(9999, 1, 1, tzinfo=timezone.utc)
+    else:
+        try:
+            p.muted_until = datetime.fromisoformat(body.until)
+        except ValueError:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "until: 'forever', ISO-время или null")
+    await db.commit()
+    return {"mutedUntil": p.muted_until.isoformat() if p.muted_until else None}
+
+
+class ForwardBody(BaseModel):
+    toRoomIds: list[str]
+
+
+@router.post("/messages/{message_id}/forward", response_model=list[MessageOut])
+async def forward_message(
+    message_id: str, body: ForwardBody,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Переслать сообщение в другие чаты. Копия несёт имя автора ОРИГИНАЛА:
+    форвард форварда оригинал не теряет."""
+    try:
+        mid = uuid.UUID(message_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID")
+    src = await db.get(ChatMessage, mid)
+    if src is None or src.deleted_at is not None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Сообщение не найдено")
+    await _assert_participant(src.room_id, current_user, db)
+    origin = src.forwarded_from or src.user_name
+
+    made: list[tuple[ChatMessage, ChatRoom]] = []
+    for rid_s in body.toRoomIds[:20]:
+        try:
+            rid = uuid.UUID(rid_s)
+        except (ValueError, TypeError):
+            continue
+        room = await _assert_participant(rid, current_user, db)
+        room_role = (await db.execute(select(ChatParticipant.role).where(
+            ChatParticipant.room_id == rid,
+            ChatParticipant.user_id == current_user.id))).scalar_one_or_none()
+        if not _can_write(room, current_user, room_role):
+            raise HTTPException(status.HTTP_403_FORBIDDEN,
+                                f"В «{room.name or 'этот канал'}» вам писать нельзя")
+        msg = ChatMessage(
+            room_id=rid, user_id=current_user.id, user_name=current_user.name,
+            type=src.type, content=src.content, forwarded_from=origin,
+            file_url=src.file_url, file_name=src.file_name, file_size=src.file_size,
+        )
+        db.add(msg)
+        room.updated_at = _now()
+        made.append((msg, room))
+    if not made:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Не выбран ни один чат")
+    await db.flush()
+    parties = await _party_types(db, made[0][1].company_id, {current_user.id})
+    outs = [_msg_out(m, 0, None, None, parties.get(current_user.id)) for m, _ in made]
+    await db.commit()
+    for out_msg, (m, room) in zip(outs, made):
+        await manager.broadcast(f"chat:{m.room_id}", {"type": "chat:message", **out_msg.model_dump()})
+        web_push.push_room_async(
+            m.room_id, room.name or current_user.name,
+            f"{current_user.name}: {(m.content or m.file_name or 'вложение')[:140]}",
+            current_user.id)
+    return outs
+
+
+@router.get("/search")
+async def search_all_messages(
+    q: str = Query(..., min_length=2),
+    limit: int = Query(30, ge=1, le=100),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Глобальный поиск по всем чатам, где человек участник (в пределах организации)."""
+    cid = await _company_of(current_user, db)
+    rows = (await db.execute(
+        select(ChatMessage, ChatRoom)
+        .join(ChatRoom, ChatRoom.id == ChatMessage.room_id)
+        .join(ChatParticipant, and_(ChatParticipant.room_id == ChatRoom.id,
+                                    ChatParticipant.user_id == current_user.id))
+        .where(ChatRoom.company_id == cid, ChatRoom.is_active.is_(True),
+               ChatMessage.deleted_at.is_(None),
+               ChatMessage.content.ilike(f"%{q}%"))
+        .order_by(ChatMessage.created_at.desc()).limit(limit)
+    )).all()
+    return [{
+        "messageId": str(m.id), "roomId": str(r.id),
+        "roomName": r.name or ("Личная переписка" if r.type == "direct" else "Чат"),
+        "userName": m.user_name, "preview": m.content[:160],
+        "createdAt": m.created_at.isoformat(),
+    } for m, r in rows]
+
+
+# ── сопряжение с заявками (docs/TICKETS.md, решение МАГа 31.07.2026) ─────────
+class TicketFromMessageBody(BaseModel):
+    # Не задан — объект чата; нет и его — «Офис» (type=office): бизнес-заявка без
+    # станции всё равно чья-то (правило МАГа 31.07.2026).
+    objectId: str | None = None
+    title: str | None = None
+    priority: str = "medium"
+
+
+@router.post("/messages/{message_id}/ticket")
+async def ticket_from_message(
+    message_id: str, body: TicketFromMessageBody,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Заявка из сообщения: обсудили — отправили на выполнение.
+
+    Создание идёт через эко-канал Поддержки (`create_object_ticket`) — там заявке
+    начисляются стадия, SLA и аудит; напрямую в public.tickets не пишем. След
+    остаётся с обеих сторон: связь в `chat_ticket_links` + системное сообщение."""
+    try:
+        mid = uuid.UUID(message_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID")
+    msg = await db.get(ChatMessage, mid)
+    if msg is None or msg.deleted_at is not None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Сообщение не найдено")
+    room = await _assert_participant(msg.room_id, current_user, db)
+    # Объект: явный выбор → привязка чата → «Офис» по умолчанию.
+    object_id = (body.objectId or "").strip() or room.scope_object_id
+    if not object_id:
+        object_id = (await db.execute(select(ServiceLocation.id).where(
+            ServiceLocation.company_id == room.company_id,
+            ServiceLocation.type == "office").limit(1))).scalar_one_or_none()
+    if not object_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Выберите объект: объекта «Офис» в реестре пространства нет")
+    await _assert_company_object(object_id, room.company_id, db)
+
+    src_text = (msg.content or msg.file_name or "").strip()
+    description = (f"{msg.user_name or 'Участник'}: {src_text}\n\n"
+                   f"(из обсуждения «{room.name or 'чат'}»)")
+    try:
+        res = await create_object_ticket(
+            db, room.company_id, object_id,
+            description=description, title=(body.title or None),
+            priority=body.priority if body.priority in ("low", "medium", "high") else "medium",
+            author_email=current_user.email)
+    except ProjectionError as e:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(e))
+
+    ticket = res.get("ticket") if isinstance(res.get("ticket"), dict) else res
+    t_id = ticket.get("id") or res.get("id")
+    t_num = str(ticket.get("displayNumber") or ticket.get("display_number")
+                or ticket.get("number") or "")
+    try:
+        t_uuid = uuid.UUID(str(t_id))
+    except (ValueError, TypeError):
+        t_uuid = None
+    if t_uuid is not None:
+        db.add(ChatTicketLink(room_id=room.id, message_id=mid, ticket_id=t_uuid,
+                              ticket_number=t_num or None, created_by=current_user.id))
+
+    note = ChatMessage(
+        room_id=room.id, user_id=current_user.id, user_name=current_user.name,
+        type="text",
+        content=f"→ Создана заявка{f' №{t_num}' if t_num else ''}"
+                f"{f': {body.title}' if body.title else ''} — открыть в «Заявках»",
+        reply_to=mid,
+    )
+    db.add(note)
+    room.updated_at = _now()
+    await db.flush()
+    parties = await _party_types(db, room.company_id, {current_user.id})
+    payload = _msg_out(note, 0, msg, None, parties.get(current_user.id))
+    await db.commit()
+    await manager.broadcast(f"chat:{room.id}", {"type": "chat:message", **payload.model_dump()})
+    return {"ok": True, "ticketId": str(t_id) if t_id else None, "ticketNumber": t_num or None}
+
+
+@router.post("/tickets/{ticket_id}/room", response_model=RoomDetailOut)
+async def ensure_ticket_room(
+    ticket_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Чат заявки: скрытая группа «быстро обсудить и записать следующий шаг».
+
+    В общий список чатов не попадает — увидеть её можно только из карточки заявки.
+    Создаётся при первом обращении; участники — подключённые к заявке (автор,
+    исполнители; матч между схемами по email) плюс открывший."""
+    cid = await _company_of(current_user, db)
+    try:
+        tid = uuid.UUID(ticket_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID")
+
+    existing = (await db.execute(select(ChatRoom).where(
+        ChatRoom.scope_ticket_id == tid, ChatRoom.company_id == cid,
+        ChatRoom.is_active.is_(True)))).scalar_one_or_none()
+    if existing is not None:
+        p = (await db.execute(select(ChatParticipant.id).where(
+            ChatParticipant.room_id == existing.id,
+            ChatParticipant.user_id == current_user.id))).scalar_one_or_none()
+        if p is None:
+            db.add(ChatParticipant(room_id=existing.id, user_id=current_user.id, role="member"))
+            await db.commit()
+        return await get_room(str(existing.id), current_user, db)
+
+    t = (await db.execute(text(
+        "select id, number, display_number, title, customer_user_id, assigned_to, "
+        "current_assignee_id from public.tickets where id = :t"), {"t": str(tid)})).first()
+    if t is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Заявка не найдена")
+
+    num = t.display_number or (str(t.number) if t.number is not None else "")
+    room = ChatRoom(type="group", kind=None,
+                    name=f"Заявка {('№' + num) if num else ''}".strip(),
+                    company_id=cid, created_by=current_user.id, scope_ticket_id=tid)
+    db.add(room)
+    await db.flush()
+    db.add(ChatParticipant(room_id=room.id, user_id=current_user.id, role="owner"))
+    # Подключённые к заявке — люди Поддержки; в пространство их приводит email.
+    sup_ids = [x for x in (t.customer_user_id, t.assigned_to, t.current_assignee_id) if x]
+    if sup_ids:
+        emails = [e for (e,) in (await db.execute(text(
+            "select lower(email) from public.users where id = any(:ids)"),
+            {"ids": sup_ids})).all() if e]
+        if emails:
+            core_ids = (await db.execute(select(User.id).where(
+                func.lower(User.email).in_(emails),
+                User.id != current_user.id))).scalars().all()
+            for uid in core_ids:
+                if cid in await _member_ids(uid, db):
+                    db.add(ChatParticipant(room_id=room.id, user_id=uid, role="member"))
+    await db.commit()
+    return await get_room(str(room.id), current_user, db)
+
+
+# ── Web Push: подписки браузера ──────────────────────────────────────────────
+class PushSubscribeBody(BaseModel):
+    endpoint: str
+    keys: dict   # {p256dh, auth} — как отдаёт PushSubscription.toJSON()
+
+
+@router.get("/push/vapid")
+async def push_vapid_key(db: AsyncSession = Depends(get_db),
+                         _: User = Depends(get_current_user)):
+    """Публичный VAPID-ключ стека — applicationServerKey для подписки браузера."""
+    keys = await web_push.get_or_create_keys(db)
+    return {"key": keys.public_key}
+
+
+@router.post("/push/subscribe", status_code=status.HTTP_201_CREATED)
+async def push_subscribe(
+    body: PushSubscribeBody,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Сохранить подписку браузера. Идемпотентно по endpoint: браузер один — строка одна."""
+    p256dh = (body.keys or {}).get("p256dh", "")
+    auth = (body.keys or {}).get("auth", "")
+    if not body.endpoint or not p256dh or not auth:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Неполная подписка")
+    existing = (await db.execute(select(ChatPushSubscription).where(
+        ChatPushSubscription.endpoint == body.endpoint))).scalar_one_or_none()
+    if existing is not None:
+        existing.user_id, existing.p256dh, existing.auth = current_user.id, p256dh, auth
+    else:
+        db.add(ChatPushSubscription(user_id=current_user.id, endpoint=body.endpoint,
+                                    p256dh=p256dh, auth=auth))
+    await db.commit()
+    return {"ok": True}
+
+
+@router.post("/push/unsubscribe", status_code=status.HTTP_204_NO_CONTENT)
+async def push_unsubscribe(
+    body: PushSubscribeBody,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await db.execute(sa_delete(ChatPushSubscription).where(
+        ChatPushSubscription.endpoint == body.endpoint,
+        ChatPushSubscription.user_id == current_user.id))
+    await db.commit()
+
+
+@router.patch("/rooms/{room_id}/participants/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def set_participant_role(
+    room_id: str, user_id: str, body: ParticipantRoleBody,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Назначить или снять админа чата — только владелец. Админов может быть несколько."""
+    if body.role not in ("admin", "member"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Роль: admin или member")
+    try:
+        rid, uid = uuid.UUID(room_id), uuid.UUID(user_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID")
+    room = await _assert_participant(rid, current_user, db)
+    my = await _my_room_role(rid, current_user, db)
+    if not (current_user.is_superadmin or room.created_by == current_user.id
+            or my == "owner"):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Роли в чате раздаёт его владелец")
+    if room.type == "direct":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "В личной переписке нет ролей")
+    p = (await db.execute(select(ChatParticipant).where(
+        ChatParticipant.room_id == rid, ChatParticipant.user_id == uid))).scalar_one_or_none()
+    if p is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Участник не найден")
+    if p.role == "owner":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "У чата один владелец — передача владения в «Управлении»")
+    p.role = body.role
+    await db.commit()
+
+
 # ── поиск юзеров компании ────────────────────────────────────────────────────
 @router.get("/users/search")
 async def search_users(
@@ -1052,6 +1606,42 @@ async def search_users(
     online = manager.online_user_ids()
     return [{"userId": str(uid), "name": nm, "email": em, "online": str(uid) in online}
             for uid, nm, em in rows]
+
+
+# ── карточка человека ────────────────────────────────────────────────────────
+@router.get("/users/{user_id}/profile")
+async def user_profile(
+    user_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """«Кто это» по клику на человека в чатах: то, что о нём знает пространство.
+
+    Доступно любому участнику пространства (не только админу): должность,
+    принадлежность и последний вход — не секрет от коллег, это и есть ответ
+    на вопрос «с кем я говорю»."""
+    try:
+        uid = uuid.UUID(user_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID")
+    cid = await _company_of(current_user, db)
+    m = await db.get(UserCompany, (uid, cid))
+    if m is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Человек не из вашего пространства")
+    u = await db.get(User, uid)
+    if u is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Пользователь не найден")
+    org = await db.get(Counterparty, m.organization_id) if m.organization_id else None
+    return {
+        "userId": str(uid),
+        "name": u.name,
+        "email": u.email,
+        "position": m.position,
+        "role": m.role,
+        "partyType": getattr(m, "party_type", None) or "internal",
+        "organizationName": (org.short_name or org.name) if org else None,
+        "lastSeenAt": u.last_seen_at.isoformat() if u.last_seen_at else None,
+    }
 
 
 # ── presence ─────────────────────────────────────────────────────────────────

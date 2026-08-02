@@ -26,6 +26,7 @@ from app.models import (
     User,
 )
 from app.routers.online_orders_router import ingest_online_orders
+from app.utils import MSK
 
 router = APIRouter(prefix="/reconciliation/online", tags=["Сверка / Онлайн-заказы"])
 
@@ -85,9 +86,11 @@ def _bounds(date_from: date, date_to: date) -> tuple[datetime, datetime]:
         raise HTTPException(400, "Дата окончания раньше даты начала")
     if (date_to - date_from).days > 92:
         raise HTTPException(400, "Период сверки не должен превышать 93 дня")
+    # Сутки московские — как в остальном топливном контуре: заказ, оформленный
+    # ночью, должен попадать в тот же день, что и реализация по нему.
     return (
-        datetime.combine(date_from, time.min, tzinfo=timezone.utc),
-        datetime.combine(date_to + timedelta(days=1), time.min, tzinfo=timezone.utc),
+        datetime.combine(date_from, time.min, tzinfo=MSK),
+        datetime.combine(date_to + timedelta(days=1), time.min, tzinfo=MSK),
     )
 
 

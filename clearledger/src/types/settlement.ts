@@ -4,6 +4,8 @@
  * Бэкенд: StationContractSettlement + /references/settlements + /payment-discipline/summary.
  */
 
+import { MONTHS_SHORT_NOM } from '@/lib/formatDate'
+
 export type SettlementRole = 'energy' | 'rent' | 'service'
 export type PaymentStatus = 'paid' | 'unpaid' | 'unknown' | 'special'
 
@@ -177,8 +179,7 @@ export function paidThroughLabel(s: Pick<StationSettlement, 'paymentStatus' | 'p
   if (s.paymentStatus === 'paid' && s.paidThrough) {
     const m = s.paidThrough.slice(0, 7) // YYYY-MM
     const [y, mo] = m.split('-')
-    const months = ['', 'янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек']
-    return `оплачено по ${months[Number(mo)] || mo} ${y}`
+    return `оплачено по ${MONTHS_SHORT_NOM[Number(mo) - 1] || mo} ${y}`
   }
   return PAYMENT_META[s.paymentStatus]?.label ?? s.paymentStatus
 }

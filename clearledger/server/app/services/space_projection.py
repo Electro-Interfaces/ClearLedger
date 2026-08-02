@@ -172,6 +172,41 @@ async def object_tickets(
     }
 
 
+async def create_object_ticket(
+    db: AsyncSession, company_id: uuid.UUID, object_id: str, *,
+    description: str, title: str | None = None, priority: str = "medium",
+    author_email: str | None = None, app_code: str = "support",
+) -> dict[str, Any]:
+    """Завести заявку по объекту, не выходя из карточки Учёта.
+
+    Граница простая: работа меняет состав или положение станции — это проект; работа
+    восстанавливает работоспособность (заменить автомат в щите) — это заявка. Ручка
+    существует ровно затем, чтобы вторую не заводили проектом: иначе реестр проектов
+    перестаёт быть реестром капвложений.
+    """
+    app_row, link, token = await _target(db, company_id, app_code)
+    async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
+        try:
+            resp = await client.post(
+                f"{_internal_base_url(app_row, app_code)}/api/v1/eco/objects/{object_id}/tickets",
+                json={
+                    "companyId": link.external_company_id,
+                    "title": title or None,
+                    "description": description,
+                    "priority": priority,
+                    "authorEmail": author_email,
+                },
+                headers={"Authorization": f"Bearer {token}"},
+            )
+        except httpx.HTTPError as e:
+            raise ProjectionError(f"Приложение недоступно: {e}") from e
+
+    if resp.status_code >= 400:
+        raise ProjectionError(
+            f"Заявку завести не удалось (HTTP {resp.status_code}): {_error_text(resp)}")
+    return {"app": app_code, **resp.json()}
+
+
 async def _target(
     db: AsyncSession, company_id: uuid.UUID, app_code: str,
 ) -> tuple[App, AppCompanyLink, str]:

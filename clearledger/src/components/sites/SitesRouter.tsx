@@ -14,11 +14,13 @@ import { TechConnectionsPanel } from './TechConnectionsPanel'
 import { ProjectEquipmentPanel } from './ProjectEquipmentPanel'
 import { AwaitingAccountingPanel } from './AwaitingAccountingPanel'
 import { ProjectBudgetPanel } from './ProjectBudgetPanel'
+import { ParkWorkPlanPanel } from './ParkWorkPlanPanel'
 import { ProjectChangesPanel } from './ProjectChangesPanel'
 
 export function SitesRouter({ tab, companyId }: { tab: string; companyId: string }) {
   // Один пункт: без выбранного проекта — реестр, с выбранным — рабочий экран.
   if (tab === 'pr_project') return <ProjectWorkspacePanel companyId={companyId} />
+  if (tab === 'pr_plan') return <ParkWorkPlanPanel companyId={companyId} />
   if (tab === 'pr_tp') return <TechConnectionsPanel companyId={companyId} />
   if (tab === 'pr_equipment') return <ProjectEquipmentPanel companyId={companyId} />
   if (tab === 'pr_budget') return <ProjectBudgetPanel companyId={companyId} />

@@ -2,7 +2,7 @@
  * Клиент API сетевых срезов «Топлива» (/api/fuel/analytics/pumps|silent|abc-xyz|
  * clients|visits|insights).
  *
- * Отдельно от `fuelSalesService` (разрезы наливов) намеренно: там вопрос «сколько
+ * Отдельно от `fuelSalesService` (разрезы реализаций) намеренно: там вопрос «сколько
  * продали и в каком разрезе», здесь — «где сеть не работает и где лежат деньги».
  * Разные вопросы, разные экраны, разный ритм изменений.
  */
@@ -41,7 +41,7 @@ export interface PumpRow {
   amount: number
   avg_fill: number
   avg_check: number
-  /** Наливов в сутки — метрика сравнения: абсолютные цифры зависят от размера АЗС. */
+  /** Реализаций в сутки — метрика сравнения: абсолютные цифры зависят от размера АЗС. */
   fills_per_day: number
   liters_per_day: number
   active_days: number
@@ -58,6 +58,16 @@ export interface PumpsResponse {
   level: PumpLevel
   days: number
   lines: PumpRow[]
+  /** Ряд по дням периода для спарклайнов плиток — считается тем же сканом. */
+  series: {
+    axis: string[]
+    fills: number[]
+    amount: number[]
+    /** Сколько единиц оборудования отпускало в этот день. */
+    units: number[]
+    /** Реализаций на работавшую единицу — сравнимо между днями. */
+    fills_per_unit: (number | null)[]
+  }
   totals: {
     units: number; active: number; silent: number; stations: number
     fills: number; liters: number; amount: number
@@ -218,7 +228,7 @@ export interface VisitsResponse {
     avg_visit_check: number; avg_fill_check: number; avg_visit_liters: number
   }
   distribution: { fills: number; visits: number; amount: number; share_pct: number }[]
-  /** Однотопливные приезды в разрезе продукта — чек приезда «за ДТ», а не средний. */
+  /** Однотопливные визиты в разрезе продукта — чек визита «за ДТ», а не средний. */
   by_fuel: {
     fuel_name: string; visits: number; amount: number; liters: number
     avg_visit_check: number; avg_visit_liters: number
@@ -250,4 +260,93 @@ export interface FuelInsight {
 export async function getFuelInsights(p: { companyId: string; dateFrom: string; dateTo: string }):
 Promise<{ period: { from: string; to: string }; insights: FuelInsight[] }> {
   return get('/api/fuel/analytics/insights', { date_from: p.dateFrom, date_to: p.dateTo })
+}
+
+// ─── Расшифровка единицы оборудования (клик по строке «Загрузки ТРК») ────
+
+export interface UnitDaily {
+  date: string; fills: number; liters: number; amount: number; price: number | null
+}
+export interface UnitGap { from: string; to: string; days: number }
+
+export interface UnitDetailResponse {
+  period: { from: string; to: string }
+  unit: {
+    station_code: number; station: string
+    pos: number | null; nozzle: number | null
+    fuel_code: number | null; fuel_name: string | null
+  }
+  totals: {
+    fills: number; liters: number; amount: number
+    avg_fill: number; avg_check: number; avg_price: number | null
+    fills_per_day: number; active_days: number; idle_days: number; days: number
+  }
+  daily: UnitDaily[]
+  hourly: { hour: number; fills: number; liters: number }[]
+  gaps: UnitGap[]
+  /** Откуда цифры: таблица, грейн, объём и границы выборки — для проверки доверия. */
+  source: {
+    table: string; grain: string; rows: number
+    first_dt: string | null; last_dt: string | null
+    shifts: number; cards: number; pay_types: number; tanks: number
+    keys: string[]; channel: string
+  }
+}
+
+export async function getFuelUnitDetail(p: {
+  companyId: string; dateFrom: string; dateTo: string
+  stationCode: number; pos?: number | null; nozzle?: number | null; fuelCode?: number | null
+}): Promise<UnitDetailResponse> {
+  return get<UnitDetailResponse>('/api/fuel/analytics/unit', {
+    date_from: p.dateFrom, date_to: p.dateTo,
+    station_code: String(p.stationCode),
+    ...(p.pos != null ? { pos: String(p.pos) } : {}),
+    ...(p.nozzle != null ? { nozzle: String(p.nozzle) } : {}),
+    ...(p.fuelCode != null ? { fuel_code: String(p.fuelCode) } : {}),
+  })
+}
+
+// ─── Полнота сменных отчётов ─────────────────────────────────────────────
+
+export type CoverageState = 'ok' | 'nodata' | 'miss'
+
+export interface CoverageStation {
+  station_code: number
+  station: string
+  first_day: string
+  last_day: string
+  /** Сутки периода до подключения станции к контуру — не пробел, но их надо видеть. */
+  not_connected_days: number
+  expected_days: number
+  ok_days: number
+  nodata_days: number
+  miss_days: number
+  coverage_pct: number | null
+  gaps: { from: string; to: string; days: number }[]
+  cells: { day: string; state: CoverageState; shifts: number; amount: number }[]
+}
+
+export interface ShiftCoverageResponse {
+  period: { from: string; to: string }
+  days: string[]
+  stations: CoverageStation[]
+  totals: {
+    stations: number
+    expected_days: number
+    ok_days: number
+    nodata_days: number
+    miss_days: number
+    coverage_pct: number | null
+    stations_full: number
+    worst_gap: { from: string; to: string; days: number } | null
+  }
+}
+
+export async function getFuelShiftCoverage(p: {
+  companyId: string; dateFrom: string; dateTo: string; stationCodes?: number[]
+}): Promise<ShiftCoverageResponse> {
+  return get<ShiftCoverageResponse>('/api/fuel/analytics/shift-coverage', {
+    date_from: p.dateFrom, date_to: p.dateTo,
+    ...(p.stationCodes?.length ? { station_codes: p.stationCodes.join(',') } : {}),
+  })
 }

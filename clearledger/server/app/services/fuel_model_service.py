@@ -3,7 +3,7 @@
 Тот же контракт, что AnalyticsService.charge_model (слои L1→L4, звёздная схема
 факт+измерения, качество/канонизация) — фронт-витрина EnergyNormalizationModel
 переиспользуется как есть. Три набора данных по коннекторам ГИГ:
-  • shifts    — смены STS (FuelShift + строки продаж + наливы fuel_transactions);
+  • shifts    — смены STS (FuelShift + строки продаж + реализации fuel_transactions);
   • receipts  — поступления ТТН (FuelReceipt + себестоимость FIFO-партий);
   • sidegoods — сопутка/общепит ЦБ (DataEntry oneC + НСИ-кеши Cb*).
 По всему датасету компании (без периода).
@@ -61,7 +61,7 @@ async def fuel_shifts_model(db: AsyncSession, company_id) -> dict[str, Any]:
         return {"rows": 0, "l1_files": 0, "layers": [], "fact": None,
                 "dimensions": [], "quality": None}
 
-    # строки продаж (агрегат смена×канал×топливо) и наливы (операции ТРК)
+    # строки продаж (агрегат смена×канал×топливо) и реализации (операции ТРК)
     sales = (await db.execute(select(
         func.count().label("rows"),
         func.count(distinct(FuelShiftSale.payment_channel)).label("d_channel"),
@@ -106,7 +106,7 @@ async def fuel_shifts_model(db: AsyncSession, company_id) -> dict[str, Any]:
          "desc": "Сменные отчёты STS API «как есть» (psm/release/sales/receipt/money) — источник эталонной формы смены.",
          "records": l1, "unit": "отчётов", "tone": "raw"},
         {"key": "l2", "code": "L2 · CLEAN", "title": "Нормализованная база",
-         "desc": "Смены + строки продаж (канал оплаты × топливо, канонизация 18 видов оплаты STS) + наливы (операции ТРК, дедуп по STS id).",
+         "desc": "Смены + строки продаж (канал оплаты × топливо, канонизация 18 видов оплаты STS) + реализации (операции ТРК, дедуп по STS id).",
          "records": rows, "unit": "смен", "tone": "clean"},
         {"key": "l3", "code": "L3 · EXPORT", "title": "Витрины / срезы (OLAP)",
          "desc": "Продажи/Обзор/Каналы/Операции/Маржа FIFO — агрегаты куба под дашборды и экспорт.",
@@ -130,7 +130,7 @@ async def fuel_shifts_model(db: AsyncSession, company_id) -> dict[str, Any]:
             {"key": "count", "label": "Смены", "value": rows, "unit": "шт", "agg": "COUNT"},
             {"key": "amount", "label": "Выручка", "value": round(amount, 2), "unit": "₽", "agg": "SUM"},
             {"key": "liters", "label": "Топливо", "value": round(liters, 0), "unit": "л", "agg": "SUM"},
-            {"key": "tx", "label": "Наливы (операции ТРК)", "value": tx_rows, "unit": "шт", "agg": "COUNT"},
+            {"key": "tx", "label": "Реализации (операции ТРК)", "value": tx_rows, "unit": "шт", "agg": "COUNT"},
             {"key": "sales_rows", "label": "Строк продаж (канал×топливо)", "value": int(sales.rows or 0), "unit": "шт", "agg": "COUNT"},
             {"key": "avg_shift", "label": "Средняя выручка смены", "value": round(amount / rows, 0) if rows else 0, "unit": "₽", "agg": "AVG"},
         ],
@@ -163,8 +163,8 @@ async def fuel_shifts_model(db: AsyncSession, company_id) -> dict[str, Any]:
         {"field": "total_liters", "label": "Литры смены", "role": "мера (>0)", "fill_pct": _pct(int(agg.f_liters or 0), rows)},
         {"field": "raw_report", "label": "Сырой отчёт STS (L1)", "role": "источник эталонной формы", "fill_pct": _pct(l1, rows)},
         {"field": "source_uuid", "label": "ИсточникUUID (для 1С)", "role": "ключ идемпотентности", "fill_pct": 100.0},
-        {"field": "tx.shift_number", "label": "Налив привязан к смене", "role": "связь фактов", "fill_pct": _pct(int(tx.f_shift or 0), tx_rows) if tx_rows else 0.0},
-        {"field": "tx.card", "label": "Карта в наливе", "role": "атрибут (корпоратив)", "fill_pct": _pct(int(tx.f_card or 0), tx_rows) if tx_rows else 0.0},
+        {"field": "tx.shift_number", "label": "Реализация привязана к смене", "role": "связь фактов", "fill_pct": _pct(int(tx.f_shift or 0), tx_rows) if tx_rows else 0.0},
+        {"field": "tx.card", "label": "Карта в реализации", "role": "атрибут (корпоратив)", "fill_pct": _pct(int(tx.f_card or 0), tx_rows) if tx_rows else 0.0},
     ]
     canonicalization = [
         {"name": "Канал оплаты", "from": f"вид оплаты STS ({int(tx.d_pay or 0)} сырых)", "to": "канон-канал (PaymentChannel)",
@@ -173,9 +173,9 @@ async def fuel_shifts_model(db: AsyncSession, company_id) -> dict[str, Any]:
          "members": int(sales.d_fuel or 0), "coverage_pct": 100.0},
         {"name": "Дедупликация смен", "from": "станция + № смены", "to": "UNIQUE(station_id, shift_number)",
          "members": rows, "coverage_pct": 100.0},
-        {"name": "Дедупликация наливов", "from": "STS transaction id", "to": "UNIQUE(company, station, ext_id)",
+        {"name": "Дедупликация реализаций", "from": "STS transaction id", "to": "UNIQUE(company, station, ext_id)",
          "members": tx_rows, "coverage_pct": 100.0},
-        {"name": "Связь наливов со сменой", "from": "shift_number налива", "to": "смена (факт-к-факту)",
+        {"name": "Связь реализаций со сменой", "from": "shift_number реализации", "to": "смена (факт-к-факту)",
          "members": None, "coverage_pct": _pct(int(tx.f_shift or 0), tx_rows) if tx_rows else 0.0},
     ]
 

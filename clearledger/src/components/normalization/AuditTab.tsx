@@ -32,9 +32,9 @@ import { useApplyAuditEnrichment, useCreateEntryFromAudit } from '@/hooks/useNor
 // ---- Конфиги ----
 
 const auditSeverityConfig = {
-  critical: { icon: AlertOctagon, iconBg: 'hsl(0 84% 60% / 0.12)', iconColor: 'text-red-400/80' },
-  warning: { icon: AlertTriangle, iconBg: 'hsl(45 100% 55% / 0.12)', iconColor: 'text-amber-400/80' },
-  info: { icon: Info, iconBg: 'hsl(217 91% 60% / 0.12)', iconColor: 'text-blue-400/80' },
+  critical: { icon: AlertOctagon, iconBg: 'hsl(var(--error) / 0.12)', iconColor: 'text-red-400/80' },
+  warning: { icon: AlertTriangle, iconBg: 'hsl(var(--warning) / 0.12)', iconColor: 'text-amber-400/80' },
+  info: { icon: Info, iconBg: 'hsl(var(--chart-1) / 0.12)', iconColor: 'text-blue-400/80' },
 } as const
 
 const resolutionConfig: Record<AuditFindingResolution, { label: string; badgeClass: string } | null> = {
@@ -288,7 +288,7 @@ export function AuditTab({ result, isAuditing, localDone }: {
       <DisclosureSection
         title="Проверенные записи"
         icon={ShieldCheck}
-        iconBg="hsl(120 60% 45% / 0.15)"
+        iconBg="hsl(var(--success) / 0.15)"
         iconColor="text-emerald-400/80"
         count={result.verifiedEntries.length}
         defaultOpen={false}
@@ -325,7 +325,7 @@ export function AuditTab({ result, isAuditing, localDone }: {
       <DisclosureSection
         title="Предложения обогащения"
         icon={Sparkles}
-        iconBg="hsl(280 80% 55% / 0.15)"
+        iconBg="hsl(var(--accent-purple) / 0.15)"
         iconColor="text-purple-500"
         count={result.enrichmentProposals.length}
         badge={pendingEnrichments > 0
@@ -409,7 +409,7 @@ export function AuditTab({ result, isAuditing, localDone }: {
       <DisclosureSection
         title="Соответствия CL↔1С"
         icon={Link2}
-        iconBg="hsl(217 91% 60% / 0.15)"
+        iconBg="hsl(var(--chart-1) / 0.15)"
         iconColor="text-blue-500"
         count={result.correspondences.length}
         defaultOpen={false}
@@ -460,7 +460,7 @@ export function AuditTab({ result, isAuditing, localDone }: {
       <DisclosureSection
         title="Не найдены в TradeLedger"
         icon={FilePlus}
-        iconBg="hsl(0 84% 60% / 0.15)"
+        iconBg="hsl(var(--error) / 0.15)"
         iconColor="text-red-400/80"
         count={result.missingEntries.length}
         badge={pendingMissing > 0
@@ -492,7 +492,7 @@ export function AuditTab({ result, isAuditing, localDone }: {
                 <CardContent className="flex items-center gap-3">
                   <div
                     className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full"
-                    style={{ background: 'hsl(0 84% 60% / 0.15)' }}
+                    style={{ background: 'hsl(var(--error) / 0.15)' }}
                   >
                     <FilePlus className="size-3.5 text-red-400/80" />
                   </div>
@@ -536,7 +536,7 @@ export function AuditTab({ result, isAuditing, localDone }: {
       <DisclosureSection
         title="Находки"
         icon={AlertTriangle}
-        iconBg="hsl(45 100% 55% / 0.15)"
+        iconBg="hsl(var(--warning) / 0.15)"
         iconColor="text-amber-400/80"
         count={result.findings.length}
         badge={pendingFindings > 0

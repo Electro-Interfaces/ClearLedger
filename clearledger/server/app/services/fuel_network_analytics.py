@@ -1,5 +1,5 @@
 """
-Аналитика СЕТИ АЗС по наливам: оборудование, актив, клиенты, визиты, инсайты.
+Аналитика СЕТИ АЗС по реализациям: оборудование, актив, клиенты, визиты, инсайты.
 
 Перенос приёмов ЭЗС-контура (`overview_insights`, `station_abcxyz`, `charge_visits`,
 `charge_clients`) на топливный грейн. Разница в вопросе, на который отвечают эти
@@ -9,7 +9,7 @@
   • `pumps`    — загрузка ТРК и пистолетов. Выручка станции без нормировки на
     железо обманывает: АЗС с восемью пистолетами выглядит лидером, а на пистолет
     даёт меньше маленькой. У ГИГ 27 ТРК и 337 пистолетов — экрана про них не было.
-  • `silent`   — точки без единого налива за период (станция/ТРК/пистолет). Счётчик
+  • `silent`   — точки без единой реализации за период (станция/ТРК/пистолет). Счётчик
     «активных АЗС» такую дыру не показывает: он считает работавших, а не молчавших.
   • `abc_xyz`  — ABC (вклад в выручку) × XYZ (стабильность спроса) по станциям,
     видам топлива и парам «станция × топливо». Тринадцати станций для ABC мало,
@@ -17,8 +17,8 @@
   • `clients`  — карты по частоте покупок + движение базы (новые/вернувшиеся/
     ушедшие). На данных ГИГ 1,6 % карт дают больше половины оборота: это меняет
     приоритет с привлечения на удержание.
-  • `visits`   — склейка наливов одной карты на одной станции в один приезд.
-    Два бака подряд или налив после мойки — это ОДИН визит, а в отчёте два, и
+  • `visits`   — склейка реализаций одной карты на одной станции в один визит.
+    Два бака подряд или реализация после мойки — это ОДИН визит, а в отчёте два, и
     средний чек занижен ровно на эту склейку.
   • `insights` — те же находки в виде коротких выводов для шапки «Обзора».
 
@@ -29,15 +29,16 @@
 from __future__ import annotations
 
 import math
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import case, distinct, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import FuelTransaction
+from app.models import FuelShift, FuelStation, FuelTransaction
 from app.services.analytics_cache import cached_report
 from app.services.fuel_sales_analytics import CARD, FuelSalesAnalytics
+from app.utils import msk_day_end, msk_day_start
 
 T = FuelTransaction
 
@@ -84,7 +85,7 @@ CLIENT_BUCKETS: list[tuple[str, str, int, int]] = [
     ("core", "Ядро (50+)", 51, 10_000_000),
 ]
 
-# Порог склейки наливов в визит, мин. У ЭЗС 15 мин (переподключение разъёма);
+# Порог склейки реализаций в визит, мин. У ЭЗС 15 мин (переподключение разъёма);
 # на АЗС сюжет другой — второй бак, канистра, доливка после кассы, — и разрыв
 # короче: дольше 10 минут на колонке машина не стоит, это уже новый заезд.
 VISIT_GAP_MIN = 10
@@ -239,7 +240,7 @@ def _slope_pct(vals: list[float]) -> float:
 
 
 class FuelNetworkAnalytics:
-    """Сетевые срезы по наливам. Кешируются версионным кешем компании."""
+    """Сетевые срезы по реализациям. Кешируются версионным кешем компании."""
 
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -261,13 +262,13 @@ class FuelNetworkAnalytics:
                     level: str = "nozzle",
                     station_codes: tuple[int, ...] = (), fuel_codes: tuple[int, ...] = (),
                     segment: str | None = None, channel: str | None = None) -> dict[str, Any]:
-        """Загрузка оборудования: наливы/литры/выручка на ТРК или пистолет.
+        """Загрузка оборудования: реализации/литры/выручка на ТРК или пистолет.
 
         `level='pos'` — колонка целиком, `'nozzle'` — отдельный пистолет (у него свой
         вид топлива, поэтому именно на этом уровне видно, что «загружен» не пост, а
         один рукав из четырёх).
 
-        Ключевая колонка — не выручка, а **наливов в сутки на единицу**: она
+        Ключевая колонка — не выручка, а **реализаций в сутки на единицу**: она
         сравнивает станции разного размера, чего абсолютные цифры не умеют.
         """
         conds = await self._base(company_id, date_from, date_to,
@@ -306,7 +307,7 @@ class FuelNetworkAnalytics:
                 "amount": round(amount, 2),
                 "avg_fill": round(liters / fills, 2) if fills else 0.0,
                 "avg_check": round(amount / fills, 2) if fills else 0.0,
-                # Сутки периода, а не «дни с наливами»: простой — это тоже факт
+                # Сутки периода, а не «дни с реализациями»: простой — это тоже факт
                 # работы единицы, и делить на рабочие дни значит его спрятать.
                 "fills_per_day": round(fills / days, 2),
                 "liters_per_day": round(liters / days, 1),
@@ -317,14 +318,14 @@ class FuelNetworkAnalytics:
                 "silent": False,
             })
 
-        # Молчащие единицы: были в истории компании, но за период — ни одного налива.
+        # Молчащие единицы: были в истории компании, но за период — ни одной реализации.
         # Без них список выглядит благополучным: то, чего нет в выборке, не видно.
         hist_keys = [T.station_code, T.pos] + ([T.nozzle] if level == "nozzle" else [])
         hist = (await self.db.execute(
             select(*hist_keys, func.max(T.dt).label("last_at"),
                    func.min(T.fuel_name).label("fuel_name"))
             .where(T.company_id == company_id,
-                   T.dt < datetime(date_from.year, date_from.month, date_from.day))
+                   T.dt < msk_day_start(date_from))
             .group_by(*hist_keys)
         )).all()
         seen = {(l["station_code"], l["pos"], l["nozzle"]) for l in lines}
@@ -365,11 +366,45 @@ class FuelNetworkAnalytics:
         active = [l for l in lines if not l["silent"]]
         per_day = sorted(l["fills_per_day"] for l in active)
         median = per_day[len(per_day) // 2] if per_day else 0.0
+
+        # ─── ряд по дням для спарклайнов плиток ───
+        # Один скан того же периода на все плитки сразу — тем же приёмом, что
+        # `OverviewService._bucket_series`, а не по запросу на каждую цифру.
+        # Ключ единицы склеиваем строкой: count(DISTINCT (a,b,c)) в PG кортежи
+        # считает, но через ORM выражение читается хуже склейки.
+        unit_key = func.concat(T.station_code, "-", T.pos,
+                               *(("-", T.nozzle) if level == "nozzle" else ()))
+        day_expr = func.date(self.sales._msk())
+        day_rows = (await self.db.execute(
+            select(day_expr.label("d"),
+                   func.count().label("fills"),
+                   func.coalesce(func.sum(T.amount), 0).label("amount"),
+                   func.count(distinct(unit_key)).label("units"))
+            .where(*conds).group_by(day_expr).order_by(day_expr)
+        )).all()
+        by_day = {(r.d.isoformat() if hasattr(r.d, "isoformat") else str(r.d)): r
+                  for r in day_rows}
+        axis = [(date_from + timedelta(days=i)).isoformat() for i in range(days)]
+        # День без реализаций — честный ноль, а не пропуск: простой сети надо видеть.
+        s_fills = [int(by_day[b].fills) if b in by_day else 0 for b in axis]
+        s_amount = [round(float(by_day[b].amount), 2) if b in by_day else 0.0 for b in axis]
+        s_units = [int(by_day[b].units) if b in by_day else 0 for b in axis]
+        # Нагрузка на работавшую единицу сравнима между днями, в отличие от общего
+        # числа реализаций: оно падает вместе с числом открытых АЗС.
+        s_per_unit = [round(f / u, 2) if u else None for f, u in zip(s_fills, s_units)]
+
         return {
             "period": {"from": date_from.isoformat(), "to": date_to.isoformat()},
             "level": level,
             "days": days,
             "lines": lines,
+            "series": {
+                "axis": axis,
+                "fills": s_fills,
+                "amount": s_amount,
+                "units": s_units,
+                "fills_per_unit": s_per_unit,
+            },
             "totals": {
                 "units": len(lines),
                 "active": len(active),
@@ -388,7 +423,7 @@ class FuelNetworkAnalytics:
     @cached_report("fuel:silent")
     async def silent(self, company_id, date_from: date, date_to: date,
                      fuel_codes: tuple[int, ...] = ()) -> dict[str, Any]:
-        """Станции, ТРК и пистолеты без единого налива за период (но с историей).
+        """Станции, ТРК и пистолеты без единой реализации за период (но с историей).
 
         Отдельно от `pumps`, потому что вопрос другой: не «кто сколько отпустил»,
         а «что стоит». Ответ нужен коротким списком, а не строкой в таблице на 337 позиций.
@@ -397,8 +432,8 @@ class FuelNetworkAnalytics:
         этот продукт»: пистолет под ДТ может молчать при живой станции, и увидеть это
         можно только так.
         """
-        start = datetime(date_from.year, date_from.month, date_from.day)
-        end = datetime(date_to.year, date_to.month, date_to.day, 23, 59, 59)
+        start = msk_day_start(date_from)
+        end = msk_day_end(date_to)
         fuel_cond = [T.fuel_code.in_(fuel_codes)] if fuel_codes else []
 
         async def _agg(keys: list) -> tuple[dict, dict]:
@@ -658,7 +693,7 @@ class FuelNetworkAnalytics:
                 "avg_card": round(b["amount"] / b["cards"], 2) if b["cards"] else 0.0,
             })
 
-        # Движение базы. «Новая» — та, у которой ПЕРВЫЙ налив вообще пришёлся на
+        # Движение базы. «Новая» — та, у которой ПЕРВЫЙ реализация вообще пришёлся на
         # период; иначе новичком выглядел бы любой, кто просто не заезжал полгода.
         prev_len = (date_to - date_from).days + 1
         prev_to = date_from - timedelta(days=1)
@@ -760,7 +795,7 @@ class FuelNetworkAnalytics:
                      gap_min: int = VISIT_GAP_MIN,
                      station_codes: tuple[int, ...] = (), fuel_codes: tuple[int, ...] = (),
                      segment: str | None = None, channel: str | None = None) -> dict[str, Any]:
-        """Приезд вместо налива: склейка соседних наливов одной карты на одной АЗС.
+        """Визит вместо реализации: склейка соседних реализаций одной карты на одной АЗС.
 
         Считается на лету оконными функциями, без материализации (у ЭЗС визит
         хранится в колонках сессии): на топливе визит нужен только в отчёте, а
@@ -779,7 +814,7 @@ class FuelNetworkAnalytics:
                                     order_by=[T.dt, T.ext_id]).label("prev_dt"),
             ).where(*conds, valid)
         ).subquery("b")
-        # Новый визит: первый налив карты на станции либо разрыв больше порога.
+        # Новый визит: первая реализация карты на станции либо разрыв больше порога.
         is_new = case(
             (base.c.prev_dt.is_(None), 1),
             (func.extract("epoch", base.c.dt - base.c.prev_dt) / 60.0 > gap_min, 1),
@@ -796,7 +831,7 @@ class FuelNetworkAnalytics:
             func.count().label("fills"),
             func.sum(grp.c.amount).label("amount"),
             func.sum(grp.c.liters).label("liters"),
-            # Сколько РАЗНЫХ видов топлива в одном приезде: два бака одной машины
+            # Сколько РАЗНЫХ видов топлива в одном визите: два бака одной машины
             # и заправка «себе + канистра ДТ» — принципиально разные сюжеты.
             func.count(distinct(grp.c.fuel)).label("fuels"),
             func.min(grp.c.fuel).label("fuel"),
@@ -848,13 +883,13 @@ class FuelNetworkAnalytics:
                 "multi_fuel_pct": round(int(agg.multi_fuel or 0) / visits_n * 100, 2) if visits_n else 0.0,
                 "multi_pct": round(int(agg.multi or 0) / visits_n * 100, 2) if visits_n else 0.0,
                 "fills_per_visit": round(fills_n / visits_n, 3) if visits_n else 0.0,
-                # Ради этой пары цифр всё и считается: чек визита выше чека налива
+                # Ради этой пары цифр всё и считается: чек визита выше чека реализации
                 # ровно на склейку, и сравнивать с рынком надо именно его.
                 "avg_visit_check": round(amount / visits_n, 2) if visits_n else 0.0,
                 "avg_fill_check": round(amount / fills_n, 2) if fills_n else 0.0,
                 "avg_visit_liters": round(liters / visits_n, 2) if visits_n else 0.0,
             },
-            # Однотопливные приезды в разрезе продукта: «чек приезда за ДТ» —
+            # Однотопливные визиты в разрезе продукта: «чек визита за ДТ» —
             # то, что сравнивают с конкурентом, а не средняя по всем видам.
             "by_fuel": sorted([{
                 "fuel_name": str(f.fuel), "visits": int(f.visits),
@@ -898,7 +933,7 @@ class FuelNetworkAnalytics:
                 "key": "silent",
                 "tone": "warning",
                 "title": f"Молчат {idle_nozzles} пистолетов",
-                "text": f"Ни одного налива за период. Дольше всех — {worst['station']}, "
+                "text": f"Ни одной реализации за период. Дольше всех — {worst['station']}, "
                         f"ТРК {worst['pos']}/{worst['nozzle']}: "
                         f"{worst['days_idle']} дней с последней операции.",
                 "link": {"sub": "pumps"},
@@ -913,7 +948,7 @@ class FuelNetworkAnalytics:
                 "key": "pump_spread",
                 "tone": "info",
                 "title": f"Разброс загрузки пистолетов — {round(top / med, 1)}×",
-                "text": f"Лучший рукав отпускает {top} наливов в сутки при медиане {med}. "
+                "text": f"Лучший рукав отпускает {top} реализаций в сутки при медиане {med}. "
                         f"Разница внутри одной станции решается ценником и указателями, "
                         f"а не вложениями в железо.",
                 "link": {"sub": "pumps"},
@@ -975,12 +1010,307 @@ class FuelNetworkAnalytics:
             out.append({
                 "key": "visits",
                 "tone": "info",
-                "title": f"Чек приезда — {round(t['avg_visit_check'])} ₽ против "
-                         f"{round(t['avg_fill_check'])} ₽ по наливам",
-                "text": f"{t['multi_pct']} % приездов состоят из нескольких наливов "
-                        f"(второй бак, канистра, доливка). По наливам средний чек занижен.",
+                "title": f"Чек визита — {round(t['avg_visit_check'])} ₽ против "
+                         f"{round(t['avg_fill_check'])} ₽ по реализациям",
+                "text": f"{t['multi_pct']} % визитов состоят из нескольких реализаций "
+                        f"(второй бак, канистра, доливка). По реализациям средний чек занижен.",
                 "link": {"sub": "visits"},
             })
 
         return {"period": {"from": date_from.isoformat(), "to": date_to.isoformat()},
                 "insights": out}
+
+    # ─── Расшифровка одной единицы оборудования ─────────────────────────
+
+    @cached_report("fuel:unit_detail")
+    async def unit_detail(self, company_id, date_from: date, date_to: date,
+                          station_code: int, pos: int | None = None,
+                          nozzle: int | None = None, fuel_code: int | None = None,
+                          ) -> dict[str, Any]:
+        """Из чего сложилась строка «Загрузки ТРК»: динамика, часы, простои, источник.
+
+        Отвечает на вопрос «откуда эти цифры»: строка таблицы — агрегат по паре
+        (АЗС, ТРК[, пистолет][, топливо]), и без разворота непонятно, что стоит за
+        «56 дней без работы» — сломанный рукав, сезон или конец периода.
+
+        Считается ровно тем же WHERE, что и сама таблица (`_base`), иначе итог
+        расшифровки не сошёлся бы со строкой, из которой её открыли.
+
+        Отдаётся четыре разреза одной сущности:
+          • daily   — по суткам МСК: реализации, литры, выручка, средняя цена;
+          • hourly  — профиль по часам: когда рукав реально работает;
+          • gaps    — интервалы простоя (сутки без единой реализации), от длинных к коротким;
+          • source  — что за данными: таблица, число строк, границы, смены, карты.
+        """
+        conds = await self._base(company_id, date_from, date_to, (station_code,),
+                                 (fuel_code,) if fuel_code else ())
+        if pos is not None:
+            conds.append(T.pos == pos)
+        if nozzle is not None:
+            conds.append(T.nozzle == nozzle)
+
+        day = func.date(self.sales._msk()).label("d")
+        rows = (await self.db.execute(
+            select(
+                day,
+                func.count().label("fills"),
+                func.coalesce(func.sum(T.liters), 0).label("liters"),
+                func.coalesce(func.sum(T.amount), 0).label("amount"),
+            ).where(*conds).group_by(day).order_by(day)
+        )).all()
+        daily = [{
+            "date": r.d.isoformat(),
+            "fills": int(r.fills),
+            "liters": round(float(r.liters), 1),
+            "amount": round(float(r.amount), 2),
+            # Цена по факту: выручка ÷ литры за сутки. Номинал стеллы живёт в
+            # «Изменениях цен» — здесь важно, по какой цене реально отпускали.
+            "price": round(float(r.amount) / float(r.liters), 2) if float(r.liters) else None,
+        } for r in rows]
+
+        hour = func.extract("hour", self.sales._msk()).label("h")
+        hrows = (await self.db.execute(
+            select(hour, func.count().label("fills"),
+                   func.coalesce(func.sum(T.liters), 0).label("liters"))
+            .where(*conds).group_by(hour).order_by(hour)
+        )).all()
+        by_hour = {int(r.h): r for r in hrows}
+        hourly = [{
+            "hour": h,
+            "fills": int(by_hour[h].fills) if h in by_hour else 0,
+            "liters": round(float(by_hour[h].liters), 1) if h in by_hour else 0.0,
+        } for h in range(24)]
+
+        # Простои: сутки периода без реализаций, склеенные в интервалы. Одиночный
+        # день — тоже интервал (длиной 1): «встал на день» — это факт для сервиса.
+        worked = {r.d for r in rows}
+        gaps: list[dict[str, Any]] = []
+        cur: date | None = None
+        prev: date | None = None
+        d = date_from
+        while d <= date_to:
+            if d not in worked:
+                if cur is None:
+                    cur = d
+                prev = d
+            elif cur is not None:
+                gaps.append({"from": cur.isoformat(), "to": (prev or cur).isoformat(),
+                             "days": ((prev or cur) - cur).days + 1})
+                cur = None
+            d += timedelta(days=1)
+        if cur is not None:
+            gaps.append({"from": cur.isoformat(), "to": (prev or cur).isoformat(),
+                         "days": ((prev or cur) - cur).days + 1})
+        gaps.sort(key=lambda g: -g["days"])
+
+        src = (await self.db.execute(
+            select(
+                func.count().label("rows"),
+                func.min(T.dt).label("first_dt"),
+                func.max(T.dt).label("last_dt"),
+                func.count(distinct(T.shift_number)).label("shifts"),
+                func.count(distinct(func.nullif(func.trim(T.card), ""))).label("cards"),
+                func.count(distinct(T.pay_type_name)).label("pay_types"),
+                func.count(distinct(T.tank)).label("tanks"),
+                func.min(T.fuel_name).label("fuel_name"),
+                func.coalesce(func.sum(T.liters), 0).label("liters"),
+                func.coalesce(func.sum(T.amount), 0).label("amount"),
+            ).where(*conds)
+        )).first()
+
+        names = await self.sales._station_names(company_id)
+        days_total = max(1, (date_to - date_from).days + 1)
+        fills = int(src.rows or 0)
+        liters = float(src.liters or 0)
+        amount = float(src.amount or 0)
+        return {
+            "period": {"from": date_from.isoformat(), "to": date_to.isoformat()},
+            "unit": {
+                "station_code": station_code,
+                "station": f"{names.get(station_code) or 'АЗС'} ({station_code})",
+                "pos": pos, "nozzle": nozzle,
+                "fuel_code": fuel_code, "fuel_name": src.fuel_name,
+            },
+            "totals": {
+                "fills": fills,
+                "liters": round(liters, 1),
+                "amount": round(amount, 2),
+                "avg_fill": round(liters / fills, 2) if fills else 0.0,
+                "avg_check": round(amount / fills, 2) if fills else 0.0,
+                "avg_price": round(amount / liters, 2) if liters else None,
+                "fills_per_day": round(fills / days_total, 2),
+                "active_days": len(worked),
+                "idle_days": days_total - len(worked),
+                "days": days_total,
+            },
+            "daily": daily,
+            "hourly": hourly,
+            "gaps": gaps[:12],
+            "source": {
+                "table": "core.fuel_transactions",
+                "grain": "одна реализация (операция отпуска на ТРК)",
+                "rows": fills,
+                "first_dt": src.first_dt.isoformat() if src.first_dt else None,
+                "last_dt": src.last_dt.isoformat() if src.last_dt else None,
+                "shifts": int(src.shifts or 0),
+                "cards": int(src.cards or 0),
+                "pay_types": int(src.pay_types or 0),
+                "tanks": int(src.tanks or 0),
+                "keys": ["station_code", "pos", "nozzle", "fuel_code"],
+                "channel": "STS /v2/transactions",
+            },
+        }
+
+    # ─── Пробелы сменных отчётов ────────────────────────────────────────
+
+    @cached_report("fuel:shift_coverage")
+    async def shift_coverage(self, company_id, date_from: date, date_to: date,
+                             station_codes: tuple[int, ...] = ()) -> dict[str, Any]:
+        """Полнота сменных отчётов: за каждый рабочий день станции ждём хотя бы одну смену.
+
+        Презумпция МАГа (30.07.2026): АЗС работает непрерывно, значит сутки без
+        сменного отчёта — это дефект данных, пока не доказано обратное. Остановки
+        бывают, но они должны быть ВИДНЫ и объяснены, а не растворяться в средних.
+
+        Ожидание считается не от начала периода, а от **первой смены станции** (и не
+        дальше сегодняшних суток): до подключения к контуру STS отчётов не существует,
+        и записывать их в пробелы значит утопить настоящие дыры в сотнях мнимых. На
+        пилоте у АЗС №210 это ровно 57 суток января–февраля.
+
+        Три состояния суток, а не два:
+          • `ok`     — смена есть и с суммами;
+          • `nodata` — смена есть, но выручка нулевая: источник не отдал детализацию
+                       (закрытая смена без данных — это пробел, а не пустой день);
+          • `miss`   — смены нет вовсе.
+        """
+        S, FS = FuelShift, FuelStation
+        lo = msk_day_start(date_from)
+        hi = msk_day_end(date_to)
+        conds = [S.company_id == company_id, S.opened_at.is_not(None)]
+        if station_codes:
+            conds.append(FS.code.in_(station_codes))
+
+        # Сутки со сменами в периоде: сколько смен и была ли хоть одна с суммой.
+        day = func.date(S.opened_at).label("d")
+        rows = (await self.db.execute(
+            select(FS.code.label("code"), day,
+                   func.count().label("shifts"),
+                   func.coalesce(func.sum(S.total_amount), 0).label("amount"),
+                   func.coalesce(func.sum(S.total_liters), 0).label("liters"))
+            .join(FS, FS.id == S.station_id)
+            .where(*conds, S.opened_at >= lo, S.opened_at <= hi)
+            .group_by(FS.code, day)
+        )).all()
+
+        # Границы жизни станции в данных — по всей истории, а не по периоду.
+        edges = (await self.db.execute(
+            select(FS.code.label("code"), FS.name.label("name"),
+                   func.min(func.date(S.opened_at)).label("first_d"),
+                   func.max(func.date(S.opened_at)).label("last_d"))
+            .join(FS, FS.id == S.station_id)
+            .where(*conds)
+            .group_by(FS.code, FS.name)
+        )).all()
+
+        by_station: dict[int, dict[date, dict[str, Any]]] = {}
+        for r in rows:
+            by_station.setdefault(int(r.code), {})[r.d] = {
+                "shifts": int(r.shifts),
+                "amount": float(r.amount),
+                "liters": float(r.liters),
+            }
+
+        today = datetime.now(timezone.utc).date()
+        stations: list[dict[str, Any]] = []
+        all_days = sorted({r.d for r in rows})
+        for e in sorted(edges, key=lambda x: int(x.code)):
+            code = int(e.code)
+            got = by_station.get(code, {})
+            # Окно ожидания: пересечение периода с жизнью станции; правый край не
+            # дальше вчерашних суток — сегодняшняя смена ещё не закрыта.
+            start = max(date_from, e.first_d)
+            end = min(date_to, e.last_d, today)
+            days_expected: list[date] = []
+            d = start
+            while d <= end:
+                days_expected.append(d)
+                d += timedelta(days=1)
+
+            cells: list[dict[str, Any]] = []
+            miss_days: list[date] = []
+            nodata_days = 0
+            for d in days_expected:
+                g = got.get(d)
+                if g is None:
+                    state = "miss"
+                    miss_days.append(d)
+                elif g["amount"] <= 0:
+                    state = "nodata"
+                    nodata_days += 1
+                else:
+                    state = "ok"
+                cells.append({"day": d.isoformat(), "state": state,
+                              "shifts": g["shifts"] if g else 0,
+                              "amount": round(g["amount"], 2) if g else 0.0})
+
+            # Пропуски склеиваются в интервалы: «встал на неделю» и «семь разных дней»
+            # это разные истории, и по списку суток их не различить.
+            gaps: list[dict[str, Any]] = []
+            cur = prev = None
+            for d in miss_days:
+                if cur is None:
+                    cur = prev = d
+                elif (d - prev).days == 1:
+                    prev = d
+                else:
+                    gaps.append({"from": cur.isoformat(), "to": prev.isoformat(),
+                                 "days": (prev - cur).days + 1})
+                    cur = prev = d
+            if cur is not None:
+                gaps.append({"from": cur.isoformat(), "to": prev.isoformat(),
+                             "days": (prev - cur).days + 1})
+            gaps.sort(key=lambda g: -g["days"])
+
+            expected = len(days_expected)
+            stations.append({
+                "station_code": code,
+                "station": f"{e.name or 'АЗС'} ({code})",
+                "first_day": e.first_d.isoformat(),
+                "last_day": e.last_d.isoformat(),
+                # Сутки до подключения станции к контуру — не пробел, но их надо
+                # показать: иначе «покрытие 73 %» выглядит как потеря данных.
+                "not_connected_days": max(0, (min(e.first_d, date_to) - date_from).days) if e.first_d > date_from else 0,
+                "expected_days": expected,
+                "ok_days": expected - len(miss_days) - nodata_days,
+                "nodata_days": nodata_days,
+                "miss_days": len(miss_days),
+                "coverage_pct": round((expected - len(miss_days) - nodata_days) / expected * 100, 1) if expected else None,
+                "gaps": gaps[:8],
+                "cells": cells,
+            })
+
+        stations.sort(key=lambda s: (s["coverage_pct"] if s["coverage_pct"] is not None else 101,
+                                     -s["miss_days"]))
+        tot_exp = sum(s["expected_days"] for s in stations)
+        tot_ok = sum(s["ok_days"] for s in stations)
+        tot_miss = sum(s["miss_days"] for s in stations)
+        tot_nodata = sum(s["nodata_days"] for s in stations)
+        worst = max(
+            (g for s in stations for g in s["gaps"]),
+            key=lambda g: g["days"], default=None,
+        )
+        return {
+            "period": {"from": date_from.isoformat(), "to": date_to.isoformat()},
+            "days": sorted({d.isoformat() for d in all_days}),
+            "stations": stations,
+            "totals": {
+                "stations": len(stations),
+                "expected_days": tot_exp,
+                "ok_days": tot_ok,
+                "nodata_days": tot_nodata,
+                "miss_days": tot_miss,
+                "coverage_pct": round(tot_ok / tot_exp * 100, 1) if tot_exp else None,
+                "stations_full": sum(1 for s in stations if s["miss_days"] == 0 and s["nodata_days"] == 0),
+                "worst_gap": worst,
+            },
+        }

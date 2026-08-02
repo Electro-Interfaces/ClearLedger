@@ -100,16 +100,16 @@ export function ValidationResultsTable({ results }: Props) {
 
 /** Цвет левого бордюра — по severity */
 function borderColor(r: EntryValidationResult): string {
-  if (r.errorCount > 0) return 'hsl(0 84% 60%)'     // red
-  if (r.warningCount > 0) return 'hsl(45 100% 55%)'  // yellow
-  return 'hsl(120 100% 40%)'                          // green
+  if (r.errorCount > 0) return 'hsl(var(--error))'     // red
+  if (r.warningCount > 0) return 'hsl(var(--warning))'  // yellow
+  return 'hsl(var(--success))'                          // green
 }
 
 /** Inline-bar цвет полноты */
 function completenessColor(pct: number): string {
-  if (pct >= 80) return 'hsl(120 100% 40%)'
-  if (pct >= 50) return 'hsl(45 100% 55%)'
-  return 'hsl(0 84% 60%)'
+  if (pct >= 80) return 'hsl(var(--success))'
+  if (pct >= 50) return 'hsl(var(--warning))'
+  return 'hsl(var(--error))'
 }
 
 function IssueRow({
@@ -182,8 +182,8 @@ function IssueRow({
                     className="inline-block w-1.5 h-1.5 rounded-full shrink-0 mt-1.5"
                     style={{
                       backgroundColor: issue.severity === 'error'
-                        ? 'hsl(0 84% 60%)'
-                        : 'hsl(45 100% 55%)',
+                        ? 'hsl(var(--error))'
+                        : 'hsl(var(--warning))',
                     }}
                   />
                   <span className="text-foreground font-medium">{issue.label}:</span>

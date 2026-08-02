@@ -39,28 +39,10 @@ import {
 } from '@/services/opsService'
 import { PAYMENT_META, ROLE_LABEL, paidThroughLabel, type PaymentStatus, type SettlementRole } from '@/types/settlement'
 import { fmtN } from '@/components/balance/balanceCalc'
+import { formatBucket } from '@/lib/formatDate'
+import { MetricTile as Kpi } from '@/components/ui/metric-tile'
 
-const MONTH_SHORT = ['', 'янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек']
-const mLabel = (iso: string) => {
-  const [y, m] = iso.split('-')
-  return `${MONTH_SHORT[Number(m)] || m} ${y.slice(2)}`
-}
 const dLabel = (iso?: string | null) => (iso ? iso.split('-').reverse().join('.') : null)
-
-function Kpi({ label, value, sub, accent }: { label: string; value: string; sub?: string; accent?: 'warn' | 'danger' }) {
-  const tone = accent === 'danger' ? 'text-red-600 dark:text-red-400'
-    : accent === 'warn' ? 'text-amber-600 dark:text-amber-400' : 'text-foreground'
-  return (
-    <Card><CardContent className="pt-4">
-      <div className="flex items-center gap-1 text-xs text-muted-foreground">
-        <span>{label}</span>
-        <span className="rounded bg-emerald-500/15 px-1 text-[9px] font-medium text-emerald-600 dark:text-emerald-400">факт</span>
-      </div>
-      <div className={`mt-1 text-lg font-semibold tabular-nums ${tone}`}>{value}</div>
-      {sub && <div className="text-[11px] text-muted-foreground/70">{sub}</div>}
-    </CardContent></Card>
-  )
-}
 
 /* ── фильтр по региону (селект из данных ответа) ── */
 function RegionSelect({ regions, value, onChange }: {
@@ -184,7 +166,7 @@ export function StationDrillModal({ locationId, onClose }: { locationId: string 
                 </TableRow></TableHeader><TableBody>
                   {last12.map((p) => (
                     <TableRow key={p.period}>
-                      <TableCell className="font-medium whitespace-nowrap">{mLabel(p.period)}</TableCell>
+                      <TableCell className="font-medium whitespace-nowrap">{formatBucket(p.period)}</TableCell>
                       <TableCell>
                         <div className="space-y-0.5">
                           <div className="h-1.5 rounded-sm bg-primary/70" style={{ width: `${Math.max(1, ((p.intakeKwh ?? 0) / maxKwh) * 100)}%` }} />
@@ -363,16 +345,16 @@ export function OpsOverviewVitrine() {
           <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
             Общая ситуация по обязательствам и энергобалансу сети + конкретные проблемы с рабочими
             списками — что требует действий во внешнем мире (контрагенты, договоры, счета).
-            {k.refPeriod && <> Опорный месяц анализа — <b className="text-foreground">{mLabel(k.refPeriod)}</b> (последний с полными данными входа).</>}
+            {k.refPeriod && <> Опорный месяц анализа — <b className="text-foreground">{formatBucket(k.refPeriod)}</b> (последний с полными данными входа).</>}
           </p>
         </div>
         <RegionSelect regions={d.regions} value={region} onChange={setRegion} />
       </div>
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <Kpi label={`Затраты на э/э (${k.refPeriod ? mLabel(k.refPeriod) : '—'}), ₽`} value={k.energyCostRef != null ? fmtN(k.energyCostRef) : '—'} sub="вход × входящий тариф (оценка)" />
+        <Kpi label={`Затраты на э/э (${k.refPeriod ? formatBucket(k.refPeriod) : '—'}), ₽`} value={k.energyCostRef != null ? fmtN(k.energyCostRef) : '—'} sub="вход × входящий тариф (оценка)" />
         <Kpi label="Аренда, ₽/мес (постоянная часть)" value={fmtN(k.rentMonthly)} sub={`${k.rentContractsWithAmount} договоров с суммой`} />
-        <Kpi label={`Выручка сессий (${k.refPeriod ? mLabel(k.refPeriod) : '—'}), ₽`} value={k.revenueRef != null ? fmtN(k.revenueRef) : '—'} sub={region ? region : 'вся сеть, вкл. корп-тарифы'} />
+        <Kpi label={`Выручка сессий (${k.refPeriod ? formatBucket(k.refPeriod) : '—'}), ₽`} value={k.revenueRef != null ? fmtN(k.revenueRef) : '—'} sub={region ? region : 'вся сеть, вкл. корп-тарифы'} />
         <Kpi label="Проблемных позиций" value={fmtN(k.issuesTotal)} sub={`${k.issuesRed} красных зон`} accent={k.issuesRed ? 'danger' : undefined} />
       </div>
 
@@ -399,7 +381,7 @@ export function OpsOverviewVitrine() {
             return (
               <TableRow key={s.period} className={dataGap ? 'opacity-60' : ''}>
                 <TableCell className="font-medium whitespace-nowrap">
-                  {mLabel(s.period)}
+                  {formatBucket(s.period)}
                   {dataGap && <span className="ml-1 rounded bg-amber-500/15 px-1 text-[9px] text-amber-600 dark:text-amber-400">нет счетов</span>}
                 </TableCell>
                 <TableCell>
@@ -510,7 +492,7 @@ export function OpsBalanceVitrine() {
         <div className="flex items-center gap-2">
           <h1 className="text-xl font-semibold">Энергобаланс по объектам</h1>
           <Badge className="bg-emerald-500/15 text-[10px] text-emerald-600 dark:text-emerald-400">реальные данные</Badge>
-          <ExportButton title="Энергобаланс по объектам" subtitle={d.period ? mLabel(d.period) : undefined} getEl={() => rootRef.current} />
+          <ExportButton title="Энергобаланс по объектам" subtitle={d.period ? formatBucket(d.period) : undefined} getEl={() => rootRef.current} />
         </div>
         <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
           Вход по счетам vs отпуск по сессиям vs собственные нужды (СН ≈{fmtN(d.ownUseFleetMedianKwh)} кВт·ч/мес медиана парка,
@@ -523,7 +505,7 @@ export function OpsBalanceVitrine() {
         <Select value={d.period} onValueChange={(v) => setPeriod(v)}>
           <SelectTrigger className="h-8 w-[140px] text-xs"><SelectValue /></SelectTrigger>
           <SelectContent>
-            {[...d.months].reverse().map((m) => <SelectItem key={m} value={m}>{mLabel(m)}</SelectItem>)}
+            {[...d.months].reverse().map((m) => <SelectItem key={m} value={m}>{formatBucket(m)}</SelectItem>)}
           </SelectContent>
         </Select>
         <RegionSelect regions={d.regions} value={region} onChange={setRegion} />

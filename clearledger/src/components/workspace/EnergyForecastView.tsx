@@ -14,6 +14,7 @@ import {
   DEMO_EZS, sumBuy, sumRelease, lossKwh, fmtN,
   revenue3way, releaseCheck, tariffCheck, supplierContract, openClaimsCount,
 } from '../balance/balanceCalc'
+import { MetricTile as Kpi } from '@/components/ui/metric-tile'
 
 const all = DEMO_EZS
 
@@ -37,19 +38,6 @@ function Head({ title, subtitle }: { title: string; subtitle: string }) {
     </div>
   )
 }
-function Kpi({ label, value, sub, accent }: { label: string; value: string; sub?: string; accent?: 'ok' | 'warn' | 'danger' }) {
-  const tone = accent === 'danger' ? 'text-red-600 dark:text-red-400'
-    : accent === 'warn' ? 'text-amber-600 dark:text-amber-400'
-    : accent === 'ok' ? 'text-emerald-600 dark:text-emerald-400' : 'text-foreground'
-  return (
-    <Card><CardContent className="pt-4">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className={`mt-1 text-lg font-semibold tabular-nums ${tone}`}>{value}</div>
-      {sub && <div className="mt-0.5 text-[11px] text-muted-foreground/70">{sub}</div>}
-    </CardContent></Card>
-  )
-}
-
 // ── чек-лист закрытия периода (энерго-язык, без 1С/ОРП/проводок БП) ──────────
 type CheckTone = 'done' | 'partial' | 'pending'
 const CHECK_META: Record<CheckTone, { label: string; cls: string; mark: string }> = {

@@ -208,7 +208,10 @@ async def list_projects(db: AsyncSession, company_id, *, site_id=None, location_
     if location_id is not None:
         q = q.where(EzsProject.location_id == str(location_id))
     if kind:
-        q = q.where(EzsProject.kind == kind)
+        # Несколько видов через запятую: «План работ по парку» спрашивает переносы,
+        # модернизации и демонтажи одним запросом — это один вопрос, а не три.
+        kinds = [k.strip() for k in kind.split(",") if k.strip()]
+        q = q.where(EzsProject.kind.in_(kinds))
     rows = (await db.execute(q.order_by(EzsProject.created_at.desc()))).all()
     return [_out(p, site=s, location=loc, owner=owner) for p, s, loc, owner in rows]
 
@@ -235,16 +238,19 @@ _MIRRORED = (
 async def sync_from_site(db: AsyncSession, company_id, site: EzsSite) -> EzsProject:
     """Создать проект площадки, если его нет, и подтянуть в него поля площадки.
 
-    Зеркалим только ПЕРВЫЙ проект (`new_build`): у ретрофита своя стадия и свой
-    ответственный, и правка площадки не должна их переписывать.
+    Зеркалим только ПЕРВЫЙ проект своего вида: у следующей работы на том же месте
+    своя стадия и свой ответственный, и правка площадки не должна их переписывать.
+    Вид берём у площадки — иначе заведённый руками перенос отразился бы стройкой и
+    не попал бы в «План работ», который стройку как раз не берёт.
     """
+    kind = site.kind or "new_build"
     p = (await db.execute(
         select(EzsProject).where(
             EzsProject.company_id == company_id, EzsProject.site_id == site.id,
-            EzsProject.kind == "new_build")
+            EzsProject.kind == kind)
         .order_by(EzsProject.created_at).limit(1))).scalars().first()
     if p is None:
-        p = EzsProject(company_id=company_id, site_id=site.id, kind="new_build",
+        p = EzsProject(company_id=company_id, site_id=site.id, kind=kind,
                        stage=site.stage or "lead")
         db.add(p)
     for f in _MIRRORED:

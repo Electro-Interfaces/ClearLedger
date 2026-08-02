@@ -3,13 +3,40 @@
 """
 
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Company
+
+# Сеть живёт по московскому времени: смены, отчёты и сверка с 1С считают
+# московскими сутками. Данные лежат в UTC, поэтому период задаём смещённой
+# границей, а не функцией от колонки: `dt >= <момент>` использует индекс, а
+# `timezone('Europe/Moscow', dt) >= <дата>` убивает его на каждом скане.
+MSK = timezone(timedelta(hours=3))
+
+
+def msk_day_start(d: date) -> datetime:
+    """Начало московских суток как момент времени (сравнивается с dt в UTC)."""
+    return datetime(d.year, d.month, d.day, tzinfo=MSK)
+
+
+def msk_day_end(d: date) -> datetime:
+    """Конец московских суток, включительно.
+
+    Без этого «31 июля» означало 23:59:59 UTC, то есть 02:59 московского
+    1 августа: ночная выручка последнего дня попадала в период, а первые три
+    часа первого дня — нет. Замер на ГИГ 01.08.2026: на месяце расхождение
+    871 тыс. ₽ (0,53 %), на отдельных сутках до 4,35 %.
+    """
+    return datetime(d.year, d.month, d.day, 23, 59, 59, 999999, tzinfo=MSK)
+
+
+def msk_bounds(date_from: date, date_to: date) -> tuple[datetime, datetime]:
+    """Границы периода как московские сутки — пара для WHERE по dt."""
+    return msk_day_start(date_from), msk_day_end(date_to)
 
 
 def _parse_bound(value: str) -> datetime:

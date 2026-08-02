@@ -26,6 +26,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { fmtN } from '@/components/balance/balanceCalc'
 import { Database, ChevronRight } from 'lucide-react'
 import { EnergyNormalizationModel } from './EnergyNormalizationModel'
+import { MetricTile as Kpi } from '@/components/ui/metric-tile'
 
 /* Карта: шаблон канала ГИГ → набор данных нормализации. */
 const NORM_TEMPLATES: Record<string, { entity: string; dataset: FuelModelDataset }> = {
@@ -59,16 +60,6 @@ const DATASET_PROPS: Record<FuelModelDataset, { title: string; subtitle: string;
     entityUnit: 'Смен',
     emptyText: 'Нет данных сопутки. Прогоните пул смен ЦБ (коннектор «Сопутка»), затем модель данных отобразится здесь.',
   },
-}
-
-function Kpi({ label, value, sub }: { label: string; value: string; sub?: string }) {
-  return (
-    <Card><CardContent className="pt-4">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="mt-1 text-lg font-semibold tabular-nums">{value}</div>
-      {sub && <div className="text-[11px] text-muted-foreground/70">{sub}</div>}
-    </CardContent></Card>
-  )
 }
 
 /* ── Обзор: кросс-канальное здоровье нормализации ── */

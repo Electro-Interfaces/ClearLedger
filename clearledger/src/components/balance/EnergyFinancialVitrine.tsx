@@ -8,6 +8,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { DEMO_EZS, sumBuy, sumRelease, supplierContract, fmtN } from './balanceCalc'
+import { MetricTile as Kpi } from '@/components/ui/metric-tile'
 
 const all = DEMO_EZS
 
@@ -22,19 +23,6 @@ function Head({ title, subtitle }: { title: string; subtitle: string }) {
     </div>
   )
 }
-function Kpi({ label, value, accent }: { label: string; value: string; accent?: 'warn' | 'danger' | 'good' }) {
-  const tone = accent === 'danger' ? 'text-red-600 dark:text-red-400'
-    : accent === 'warn' ? 'text-amber-600 dark:text-amber-400'
-    : accent === 'good' ? 'text-emerald-600 dark:text-emerald-400'
-    : 'text-foreground'
-  return (
-    <Card><CardContent className="pt-4">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className={`mt-1 text-lg font-semibold tabular-nums ${tone}`}>{value}</div>
-    </CardContent></Card>
-  )
-}
-
 /* ── категории предстоящих платежей (платёжный календарь, на моках) ── */
 type PayKind = 'energy' | 'rent' | 'ofd' | 'acquiring'
 const PAY_KIND_META: Record<PayKind, { label: string; cls: string }> = {

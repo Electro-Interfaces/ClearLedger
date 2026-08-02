@@ -20,6 +20,8 @@ import { exportChargeSessionsXlsx } from '@/services/chargeSessionsService'
 import { getChargeTimeseries, fmtMoneyShort } from '@/services/analyticsService'
 import { useNetScope } from '@/hooks/useScopeReset'
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
+import { formatBucket } from '@/lib/formatDate'
+import { rechartsTooltipTheme } from '@/components/ui/chart-utils'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 const nf1 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 })
@@ -185,12 +187,12 @@ function CorpOverview({ companyId, dateFrom, dateTo }: TabProps) {
                   <BarChart data={trendRows} margin={{ top: 8, right: 8, left: 4, bottom: 4 }}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
                     <XAxis dataKey="b" tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} stroke="hsl(var(--muted-foreground))"
-                      tickFormatter={(b: string) => (b.length === 7 ? `${b.slice(5)}.${b.slice(2, 4)}` : b)} />
+                      tickFormatter={formatBucket} />
                     <YAxis tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} stroke="hsl(var(--muted-foreground))"
                       width={52} tickFormatter={(v: number) => fmtMoneyShort(v)} />
-                    <Tooltip cursor={{ fill: 'hsl(var(--muted) / 0.3)' }}
+                    <Tooltip {...rechartsTooltipTheme} cursor={{ fill: 'hsl(var(--muted) / 0.3)' }}
                       labelFormatter={(b) => String(b)} formatter={(v) => [`${moneyK(Number(v))}`, 'Выручка']} />
-                    <Bar dataKey="v" fill="hsl(217, 91%, 60%)" radius={[3, 3, 0, 0]} isAnimationActive={false} />
+                    <Bar dataKey="v" fill="hsl(var(--chart-1))" radius={[3, 3, 0, 0]} isAnimationActive={false} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -381,12 +383,12 @@ function CorpDynamics({ companyId, dateFrom, dateTo }: TabProps) {
             <LineChart data={rows} margin={{ top: 8, right: 8, left: 4, bottom: 4 }}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
               <XAxis dataKey="bucket" tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} stroke="hsl(var(--muted-foreground))"
-                tickFormatter={(b: string) => (b.length === 7 ? `${b.slice(5)}.${b.slice(2, 4)}` : b)} />
+                tickFormatter={formatBucket} />
               <YAxis tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} stroke="hsl(var(--muted-foreground))"
                 width={52} tickFormatter={(v: number) => fmtMoneyShort(v)} />
-              <Tooltip cursor={{ stroke: 'hsl(var(--muted-foreground))', strokeDasharray: '3 3' }}
+              <Tooltip {...rechartsTooltipTheme} cursor={{ stroke: 'hsl(var(--muted-foreground))', strokeDasharray: '3 3' }}
                 labelFormatter={(b) => String(b)} formatter={(v) => [moneyK(Number(v)), 'Выручка']} />
-              <Line type="monotone" dataKey="value" stroke="hsl(217, 91%, 60%)" strokeWidth={2} dot={{ r: 2 }} isAnimationActive={false} />
+              <Line type="monotone" dataKey="value" stroke="hsl(var(--chart-1))" strokeWidth={2} dot={{ r: 2 }} isAnimationActive={false} />
             </LineChart>
           </ResponsiveContainer>
         </div>

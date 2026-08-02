@@ -313,3 +313,49 @@ async def refresh_shifts(
     stats["recovered_liters"] = round(stats["recovered_liters"], 2)
     stats["details"] = details[:500]
     return stats
+
+
+async def followup_fuel_sales(company_id: uuid.UUID, date_from: str, date_to: str) -> dict:
+    """Доводка после прогона канала продаж: дописать смены и догрузить реализации.
+
+    Зачем отдельный шаг. Приём смен дедуплицирует по натуральному ключу, поэтому
+    смена, снятая в момент, когда она ещё ОТКРЫТА, остаётся с нулевой выручкой
+    навсегда: следующий прогон видит её как уже загруженную и пропускает. Ночной
+    прогон в 03:00 попадает ровно в открытую суточную смену — и у ГИГ так молча
+    пропали 23–26 и 28–29 июля, при живой сети и работающем расписании.
+
+    Реализации (`fuel_transactions`) вторая половина проблемы: у них не было расписания
+    вообще — только кнопка «Синхронизировать» в реестре операций. У ГИГ они встали
+    11 июля, потому что в этот день их последний раз загрузили руками.
+
+    Обе операции идемпотентны: `refresh_shifts` обновляет смену только «вверх»
+    (пустой ответ источника сохранённое не затирает), приём реализаций дедуплицирует
+    по STS id. Ошибка доводки не должна влиять на статус самого прогона — вызывающий
+    ловит её и пишет в лог.
+    """
+    from app.database import async_session_factory
+    from app.services.fuel_transactions import (
+        ingest_station_window, list_stations, month_windows, resolve_sts,
+    )
+
+    out: dict = {"shifts": {}, "tx_created": 0, "tx_errors": 0}
+    async with async_session_factory() as db:
+        out["shifts"] = await refresh_shifts(
+            db, company_id, date_from=date_from, date_to=date_to, only_zero=True)
+
+        conn = await resolve_sts(db, company_id)
+        if conn is None:
+            return out
+        stations = await list_stations(db, company_id, conn)
+        for st in stations:
+            for wf, wt in month_windows(date_from, date_to):
+                try:
+                    r = await ingest_station_window(db, company_id, st, conn, wf, wt)
+                    # Коммит обязателен здесь: ingest только пишет в транзакцию, и без
+                    # коммита всё вставленное откатится на выходе из сессии.
+                    await db.commit()
+                    out["tx_created"] += int(r.get("created") or 0)
+                except Exception:  # noqa: BLE001 — одна станция не валит доводку
+                    await db.rollback()
+                    out["tx_errors"] += 1
+    return out

@@ -8,17 +8,19 @@ async def test_list_companies(auth_client: AsyncClient):
     assert resp.status_code == 200
     data = resp.json()
     assert isinstance(data, list)
-    assert len(data) >= 5  # seed: npk, rti, ts94, ofptk, rushydro
+    # Сид держит ровно тот каталог, что в seed.COMPANIES: legacy-компании
+    # (НПК, РТИ, ТС-94, ОФ ПТК) убраны 2026-06-27 и не воскресают.
+    assert len(data) >= 2
     slugs = {c["slug"] for c in data}
-    assert {"npk", "rti", "ts94", "ofptk", "rushydro"} <= slugs
+    assert {"gig", "rushydro"} <= slugs
 
 
 async def test_get_company_by_slug(auth_client: AsyncClient):
-    resp = await auth_client.get("/api/companies/npk")
+    resp = await auth_client.get("/api/companies/gig")
     assert resp.status_code == 200
     data = resp.json()
-    assert data["slug"] == "npk"
-    assert data["name"] == "НПК"
+    assert data["slug"] == "gig"
+    assert data["name"] == "ООО ГИГ (ГазИнвестГрупп)"
     assert data["profile_id"] == "fuel"
 
 
@@ -54,7 +56,7 @@ async def test_create_duplicate_slug(auth_client: AsyncClient):
         "/api/companies",
         json={
             "name": "Дубликат",
-            "slug": "npk",
+            "slug": "gig",
             "profile_id": "fuel",
         },
     )
@@ -63,7 +65,7 @@ async def test_create_duplicate_slug(auth_client: AsyncClient):
 
 async def test_update_company(auth_client: AsyncClient):
     resp = await auth_client.patch(
-        "/api/companies/npk",
+        "/api/companies/gig",
         json={"color": "#0000ff"},
     )
     assert resp.status_code == 200

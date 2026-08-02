@@ -58,6 +58,7 @@ from sqlalchemy.orm import selectinload
 from app.auth import assert_company_member, get_current_user
 from app.database import get_db, async_session_factory
 from app.deps import capture_company_header, scope_company_id
+from app.utils import msk_day_end, msk_day_start
 from app.models import (
     FuelStation, FuelShift, FuelTank, FuelPump, FuelCashMovement,
     FuelReceipt, FuelReceiptOverride, FuelReceiptCost, FuelOpeningBalance, FuelPurchaseBatch,
@@ -431,8 +432,10 @@ async def delete_period(
     cid = await _company_id(user, db)
     df = (body.date_from or "")[:10] or None
     dt = (body.date_to or "")[:10] or None
-    lo = datetime.fromisoformat(df) if df else None
-    hi = (datetime.fromisoformat(dt) + timedelta(days=1)) if dt else None
+    # Границы удаления — московские сутки, как и весь топливный контур: иначе
+    # «удалить за 15 июля» захватывало бы ночь 16-го и оставляло ночь 15-го.
+    lo = msk_day_start(date.fromisoformat(df)) if df else None
+    hi = msk_day_start(date.fromisoformat(dt) + timedelta(days=1)) if dt else None
 
     st_ids: list[uuid.UUID] = []
     if body.station_codes:
@@ -2302,8 +2305,8 @@ async def fuel_readiness(
     station_ids = await _resolve_station_filter(db, cid, stations)
     df = date.fromisoformat(date_from)
     dtt = date.fromisoformat(date_to)
-    dt_from = datetime(df.year, df.month, df.day)
-    dt_to = datetime(dtt.year, dtt.month, dtt.day, 23, 59, 59)
+    dt_from = msk_day_start(df)
+    dt_to = msk_day_end(dtt)
 
     # ── Смены периода ──
     sq = select(FuelShift).where(
@@ -2924,8 +2927,8 @@ def _tx_conds(cid, df: str, dt: str, station_code, fuel_codes: list[int], pay_ty
     d0, d1 = date.fromisoformat(df), date.fromisoformat(dt)
     T = FuelTransaction
     conds = [T.company_id == cid,
-             T.dt >= datetime(d0.year, d0.month, d0.day),
-             T.dt <= datetime(d1.year, d1.month, d1.day, 23, 59, 59)]
+             T.dt >= msk_day_start(d0),
+             T.dt <= msk_day_end(d1)]
     if station_code:
         conds.append(T.station_code == station_code)
     if fuel_codes:
@@ -3102,7 +3105,7 @@ async def receipts_pivot(
         conds.append(FuelReceipt.received_at >= datetime.fromisoformat(date_from))
     if date_to:
         d1 = date.fromisoformat(date_to)
-        conds.append(FuelReceipt.received_at <= datetime(d1.year, d1.month, d1.day, 23, 59, 59))
+        conds.append(FuelReceipt.received_at <= msk_day_end(d1))
     if station_code is not None:
         st = (await db.execute(select(FuelStation.id).where(
             FuelStation.company_id == cid, FuelStation.code == station_code))).scalar()
@@ -3424,11 +3427,14 @@ async def analytics_fills(
     segment: str | None = Query(None), channel: str | None = Query(None),
     card: str | None = Query(None), top: int = Query(500, le=2000),
     dim: str | None = Query(None), dim_val: str | None = Query(None),
+    with_series: bool = Query(False),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
     """Разрез реализаций: выручка/литры/реализации/ср.чек/ср.заправка/ср.цена по группе.
 
     `dim`/`dim_val` — сужение до одного значения ДРУГОГО разреза (провал вглубь).
+    `with_series=1` — плюс ряд тоталов по бакетам для спарклайнов плиток: это
+    дополнительный скан периода, поэтому по умолчанию выключено.
     """
     cid = await _company_id(user, db)
     _fa_check(group_by, _FA_GROUPS, "group_by")
@@ -3438,7 +3444,7 @@ async def analytics_fills(
         cid, df, dt, group_by=group_by,
         station_codes=tuple(_csv_ints(station_codes)), fuel_codes=tuple(_csv_ints(fuel_codes)),
         segment=segment or None, channel=channel or None, card=card or None, top=top,
-        dim=dim or None, dim_val=dim_val)
+        dim=dim or None, dim_val=dim_val, with_series=with_series)
 
 
 @router.get("/analytics/fills/timeseries")
@@ -3918,8 +3924,8 @@ async def stations_map(
 
     def _window(a: date, b: date):
         return [T.company_id == cid,
-                T.dt >= datetime(a.year, a.month, a.day),
-                T.dt <= datetime(b.year, b.month, b.day, 23, 59, 59)]
+                T.dt >= msk_day_start(a),
+                T.dt <= msk_day_end(b)]
 
     agg = (await db.execute(select(
         T.station_code, func.count().label("n"),

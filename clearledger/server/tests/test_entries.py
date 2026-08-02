@@ -12,7 +12,7 @@ _ENTRY_PAYLOAD = {
     "title": "Тестовый документ",
     "category_id": "fuel-purchase",
     "subcategory_id": "fuel-purchase-invoice",
-    "company_id": "npk",
+    "company_id": "rushydro",
     "source": "manual",
     "source_label": "Ручной ввод",
     "metadata": {},
@@ -35,7 +35,7 @@ async def test_create_entry(auth_client: AsyncClient):
 
 
 async def test_list_entries(auth_client: AsyncClient):
-    resp = await auth_client.get("/api/entries", params={"company_id": "npk"})
+    resp = await auth_client.get("/api/entries", params={"company_id": "rushydro"})
     assert resp.status_code == 200
     data = resp.json()
     assert "items" in data

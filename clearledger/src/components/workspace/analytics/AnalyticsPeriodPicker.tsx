@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input'
 import { Calendar } from 'lucide-react'
 import { type Period, PERIOD_PRESETS, monthFirstISO, todayISO } from './periodPresets'
 import { MetricHint } from './MetricHint'
+import { SparkLineChart } from '@/components/ui/spark-chart'
 
 export type { Period } from './periodPresets'
 
@@ -73,12 +74,16 @@ export function AnalyticsPeriodPicker({ period, onChange }: Props) {
   )
 }
 
-export function KpiCard({ label, value, hint, accent, info }: {
+export function KpiCard({ label, value, hint, accent, info, spark, sparkLabel }: {
   label: string
   value: React.ReactNode
   hint?: string
   accent?: 'success' | 'danger' | 'warning' | 'info'
   info?: string   // пояснение «что это значит» — иконкой-подсказкой у подписи
+  /** Ряд за период под цифрой: само число не говорит, растёт метрика или падает.
+   *  Даём только там, где ряд уже загружен экраном — плитка не ходит в сеть сама. */
+  spark?: (number | null)[]
+  sparkLabel?: string   // чем подписан ряд в подсказке
 }) {
   const accentCls: Record<string, string> = {
     success: 'text-emerald-600 dark:text-emerald-400',
@@ -86,13 +91,32 @@ export function KpiCard({ label, value, hint, accent, info }: {
     warning: 'text-amber-600 dark:text-amber-400',
     info:    'text-blue-600 dark:text-blue-400',
   }
+  // Две точки — это не тренд, а отрезок: рисовать нечего.
+  const sparkData = spark && spark.length >= 3
+    ? spark.map((v, i) => ({ i, v }))
+    : null
   return (
+    // Контракт выгрузки: первые три ребёнка — label/value/hint, спарклайн идёт после.
     <div data-kpi className="rounded-md border bg-card/40 p-3">
       <div className="text-xs uppercase tracking-wider text-muted-foreground flex items-center gap-1">
         {label}{info && <MetricHint text={info} />}
       </div>
       <div className={`text-lg font-semibold mt-1 ${accent ? accentCls[accent] : ''}`}>{value}</div>
       {hint && <div className="text-xs text-muted-foreground mt-0.5">{hint}</div>}
+      {sparkData && (
+        // Линия без заливки — как спарклайны на «Обзорах»: у одинаковых по смыслу
+        // элементов на соседних экранах должен быть один вид.
+        <SparkLineChart
+          className="mt-2 h-8 w-full"
+          data={sparkData}
+          index="i"
+          categories={['v']}
+          colors={[accent === 'danger' ? 'error' : accent === 'warning' ? 'warning' : 'brand']}
+          connectNulls
+          autoMinValue
+          aria-label={sparkLabel ?? `Динамика: ${label}`}
+        />
+      )}
     </div>
   )
 }

@@ -28,6 +28,7 @@ import {
   getRetailAccounts, getRetailDimensions, getRetailProfile, getRetailAccount, getRetailMarketing, getRetailDashboard,
   type RetailSegment, type RetailAccount, type HeatCell,
 } from '@/services/retailService'
+import { rechartsTooltipTheme } from '@/components/ui/chart-utils'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 const nf1 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 })
@@ -199,8 +200,8 @@ function AccountDetailDialog({ companyId, dateFrom, dateTo, account, onClose }: 
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
                     <XAxis dataKey="label" tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} />
                     <YAxis tick={{ fontSize: 9, fill: 'hsl(var(--muted-foreground))' }} width={40} tickFormatter={(v) => moneyK(Number(v)).replace(' ₽', '')} />
-                    <Tooltip cursor={{ fill: 'hsl(var(--muted) / 0.3)' }} formatter={(v) => [moneyK(Number(v)), 'Выручка']} />
-                    <Bar dataKey="revenue" fill="hsl(217, 91%, 60%)" radius={[2, 2, 0, 0]} isAnimationActive={false} />
+                    <Tooltip {...rechartsTooltipTheme} cursor={{ fill: 'hsl(var(--muted) / 0.3)' }} formatter={(v) => [moneyK(Number(v)), 'Выручка']} />
+                    <Bar dataKey="revenue" fill="hsl(var(--chart-1))" radius={[2, 2, 0, 0]} isAnimationActive={false} />
                   </BarChart>
                 </ResponsiveContainer></div>
               </Widget>
@@ -210,8 +211,8 @@ function AccountDetailDialog({ companyId, dateFrom, dateTo, account, onClose }: 
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
                     <XAxis dataKey="hour" tick={{ fontSize: 9, fill: 'hsl(var(--muted-foreground))' }} interval={2} tickFormatter={(h) => String(h).padStart(2, '0')} />
                     <YAxis tick={{ fontSize: 9, fill: 'hsl(var(--muted-foreground))' }} width={28} />
-                    <Tooltip cursor={{ fill: 'hsl(var(--muted) / 0.3)' }} labelFormatter={(h) => `${String(h).padStart(2, '0')}:00`} formatter={(v) => [`${nf0.format(Number(v))} сес`, 'Сессий']} />
-                    <Bar dataKey="sessions" fill="hsl(152, 60%, 45%)" radius={[2, 2, 0, 0]} isAnimationActive={false} />
+                    <Tooltip {...rechartsTooltipTheme} cursor={{ fill: 'hsl(var(--muted) / 0.3)' }} labelFormatter={(h) => `${String(h).padStart(2, '0')}:00`} formatter={(v) => [`${nf0.format(Number(v))} сес`, 'Сессий']} />
+                    <Bar dataKey="sessions" fill="hsl(var(--chart-2))" radius={[2, 2, 0, 0]} isAnimationActive={false} />
                   </BarChart>
                 </ResponsiveContainer></div>
               </Widget>
@@ -352,11 +353,11 @@ function RetailOverviewTab({ companyId, dateFrom, dateTo }: TabProps) {
                 <BarChart data={dyn} margin={{ top: 8, right: 8, left: 4, bottom: 4 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
                   <XAxis dataKey="m" tick={AX.tick} /><YAxis tick={AX.tick} width={36} />
-                  <Tooltip cursor={{ fill: 'hsl(var(--muted) / 0.3)' }} />
+                  <Tooltip {...rechartsTooltipTheme} cursor={{ fill: 'hsl(var(--muted) / 0.3)' }} />
                   <Legend wrapperStyle={{ fontSize: 10 }} />
-                  <Bar dataKey="Новые" stackId="a" fill="hsl(217, 91%, 60%)" isAnimationActive={false} />
-                  <Bar dataKey="Вернувшиеся" stackId="a" fill="hsl(152, 60%, 45%)" isAnimationActive={false} />
-                  <Bar dataKey="Реактив" stackId="a" fill="hsl(38, 92%, 60%)" radius={[2, 2, 0, 0]} isAnimationActive={false} />
+                  <Bar dataKey="Новые" stackId="a" fill="hsl(var(--chart-1))" isAnimationActive={false} />
+                  <Bar dataKey="Вернувшиеся" stackId="a" fill="hsl(var(--chart-2))" isAnimationActive={false} />
+                  <Bar dataKey="Реактив" stackId="a" fill="hsl(var(--warning))" radius={[2, 2, 0, 0]} isAnimationActive={false} />
                 </BarChart>
               </ResponsiveContainer></div>
             </Widget>
@@ -366,8 +367,8 @@ function RetailOverviewTab({ companyId, dateFrom, dateTo }: TabProps) {
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
                   <XAxis dataKey="m" tick={AX.tick} />
                   <YAxis tick={AX.tick} width={48} tickFormatter={(v) => moneyK(Number(v)).replace(' ₽', '')} />
-                  <Tooltip cursor={{ fill: 'hsl(var(--muted) / 0.3)' }} formatter={(v) => [moneyK(Number(v)), 'Выручка']} />
-                  <Bar dataKey="revenue" fill="hsl(217, 91%, 60%)" radius={[2, 2, 0, 0]} isAnimationActive={false} />
+                  <Tooltip {...rechartsTooltipTheme} cursor={{ fill: 'hsl(var(--muted) / 0.3)' }} formatter={(v) => [moneyK(Number(v)), 'Выручка']} />
+                  <Bar dataKey="revenue" fill="hsl(var(--chart-1))" radius={[2, 2, 0, 0]} isAnimationActive={false} />
                 </BarChart>
               </ResponsiveContainer></div>
             </Widget>
@@ -384,8 +385,8 @@ function RetailOverviewTab({ companyId, dateFrom, dateTo }: TabProps) {
                 <LineChart data={ret} margin={{ top: 8, right: 8, left: 4, bottom: 4 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
                   <XAxis dataKey="m" tick={AX.tick} /><YAxis tick={AX.tick} width={36} unit="%" domain={[0, 100]} />
-                  <Tooltip formatter={(v) => [`${nf1.format(Number(v))}%`, 'Активны']} />
-                  <Line type="monotone" dataKey="pct" stroke="hsl(152, 60%, 45%)" strokeWidth={2} dot={{ r: 2 }} isAnimationActive={false} />
+                  <Tooltip {...rechartsTooltipTheme} formatter={(v) => [`${nf1.format(Number(v))}%`, 'Активны']} />
+                  <Line type="monotone" dataKey="pct" stroke="hsl(var(--chart-2))" strokeWidth={2} dot={{ r: 2 }} isAnimationActive={false} />
                 </LineChart>
               </ResponsiveContainer></div>
             </Widget>
@@ -437,8 +438,8 @@ function RetailOverviewTab({ companyId, dateFrom, dateTo }: TabProps) {
                   <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                   <XAxis dataKey="pop" tick={AX.tick} unit="%" type="number" domain={[0, 100]} />
                   <YAxis tick={AX.tick} width={36} unit="%" domain={[0, 100]} />
-                  <Tooltip formatter={(v, nm) => [`${nf1.format(Number(v))}%`, String(nm)]} labelFormatter={(l) => `${nf1.format(Number(l))}% аккаунтов`} />
-                  <Line type="monotone" dataKey="Выручка" stroke="hsl(217, 91%, 60%)" strokeWidth={2} dot={false} isAnimationActive={false} />
+                  <Tooltip {...rechartsTooltipTheme} formatter={(v, nm) => [`${nf1.format(Number(v))}%`, String(nm)]} labelFormatter={(l) => `${nf1.format(Number(l))}% аккаунтов`} />
+                  <Line type="monotone" dataKey="Выручка" stroke="hsl(var(--chart-1))" strokeWidth={2} dot={false} isAnimationActive={false} />
                   <Line type="monotone" dataKey="Равенство" stroke="hsl(var(--muted-foreground))" strokeDasharray="4 4" strokeWidth={1} dot={false} isAnimationActive={false} />
                 </LineChart>
               </ResponsiveContainer></div>
@@ -794,7 +795,7 @@ function ChartBox({ data, xKey, color, tip }: { data: { sessions: number }[]; xK
           <XAxis dataKey={xKey} tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} interval={xKey === 'hour' ? 1 : 0}
             tickFormatter={(v) => (xKey === 'hour' ? String(v).padStart(2, '0') : String(v))} />
           <YAxis tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} width={34} />
-          <Tooltip cursor={{ fill: 'hsl(var(--muted) / 0.3)' }}
+          <Tooltip {...rechartsTooltipTheme} cursor={{ fill: 'hsl(var(--muted) / 0.3)' }}
             labelFormatter={(v) => (xKey === 'hour' ? `${String(v).padStart(2, '0')}:00` : String(v))}
             formatter={(v) => tip(Number(v))} />
           <Bar dataKey="sessions" fill={color} radius={[2, 2, 0, 0]} isAnimationActive={false} />
@@ -863,8 +864,8 @@ function RetailProfileTab({ companyId, dateFrom, dateTo }: TabProps) {
                   <Kpi label="Энергия" value={`${nf0.format(d.totals.energy_kwh)}`} sub="кВтч" />
                 </div>
                 <div className="grid gap-4 lg:grid-cols-2">
-                  <Widget title="Когда заряжаются — по часам суток"><ChartBox data={d.hourly} xKey="hour" color="hsl(217, 91%, 60%)" tip={tip} /></Widget>
-                  <Widget title="По дням недели"><ChartBox data={d.weekday} xKey="label" color="hsl(152, 60%, 45%)" tip={tip} /></Widget>
+                  <Widget title="Когда заряжаются — по часам суток"><ChartBox data={d.hourly} xKey="hour" color="hsl(var(--chart-1))" tip={tip} /></Widget>
+                  <Widget title="По дням недели"><ChartBox data={d.weekday} xKey="label" color="hsl(var(--chart-2))" tip={tip} /></Widget>
                 </div>
                 <div className="space-y-1.5">
                   <div className="flex flex-wrap items-center justify-between gap-2">

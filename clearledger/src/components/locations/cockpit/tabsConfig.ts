@@ -5,7 +5,7 @@
 import type { ComponentType } from 'react'
 import {
   ClipboardList, Cpu, Plug, Activity,
-  FileSignature, Wallet, Truck,
+  FileSignature, Wallet, Truck, MessageCircle,
 } from 'lucide-react'
 
 export type CockpitGroup = 'object' | 'connection' | 'service' | 'commerce'
@@ -32,6 +32,9 @@ export const COCKPIT_TABS: CockpitTab[] = [
   { value: 'contracts', label: 'Договоры', icon: FileSignature, group: 'commerce' },
   { value: 'sales', label: 'Реализация', icon: Wallet, group: 'commerce' },
   { value: 'supply', label: 'Снабжение', icon: Truck, group: 'commerce' },
+  // Обсуждения объекта: группы чата, привязанные к нему. Сквозная вкладка — как и
+  // сам объект, разговоры о нём не принадлежат одному продукту.
+  { value: 'chats', label: 'Чаты', icon: MessageCircle, group: 'service' },
 ]
 
 export type CockpitVariant = 'intake' | 'full'
@@ -51,7 +54,9 @@ export function cockpitTabsFor(variant: CockpitVariant = 'full', allowed?: strin
     ? COCKPIT_TABS.filter((t) => INTAKE_TAB_VALUES.includes(t.value))
     : COCKPIT_TABS
   if (!allowed?.length) return base
-  const shown = base.filter((t) => allowed.includes(t.value))
+  // «Чаты» сквозные: разрезы продуктов перечислены до появления вкладки и не знают
+  // о ней, а обсуждение объекта нужно из любого рабочего места.
+  const shown = base.filter((t) => allowed.includes(t.value) || t.value === 'chats')
   // Пустой разрез оставил бы окно вовсе без вкладок — лучше паспорт, чем ничего.
   return shown.length > 0 ? shown : base.filter((t) => t.value === 'passport')
 }

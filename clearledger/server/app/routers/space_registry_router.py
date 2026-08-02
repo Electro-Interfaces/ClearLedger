@@ -310,6 +310,39 @@ async def object_tickets(
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(e)) from e
 
 
+class ObjectTicketIn(BaseModel):
+    description: str = Field(min_length=10, max_length=4000)
+    title: str | None = Field(default=None, max_length=300)
+    priority: str = "medium"
+
+
+@router.post("/objects/{object_id}/tickets", status_code=status.HTTP_201_CREATED)
+async def create_object_ticket(
+    object_id: str,
+    body: ObjectTicketIn,
+    company_id: str = Query(...),
+    app: str = Query("support"),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Завести заявку по объекту прямо из карточки — не заводя проект.
+
+    Автором в приложении встаёт тот же человек: люди пространства уже спроецированы,
+    сопоставление идёт по почте. Заводит любой член компании — как и в самом разрезе
+    поддержки, где заявку подаёт заказчик, а не администратор.
+    """
+    cid = await _member(company_id, user, db)
+    if await space_registry.get_object(db, cid, object_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Объект не найден в этой компании")
+    try:
+        return await space_projection.create_object_ticket(
+            db, cid, object_id,
+            description=body.description, title=body.title, priority=body.priority,
+            author_email=user.email, app_code=app,
+        )
+    except space_projection.ProjectionError as e:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(e)) from e
+
+
 @router.get("/object-types")
 async def object_types(user: User = Depends(get_current_user)) -> dict:
     """Словари для форм Центра управления."""

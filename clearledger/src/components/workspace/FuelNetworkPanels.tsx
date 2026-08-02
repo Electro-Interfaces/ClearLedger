@@ -13,9 +13,10 @@ import { Fragment, useMemo, useRef, useState, type ReactNode } from 'react'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { AlertTriangle, CircleCheckBig, Gauge, Info, Loader2, TrendingUp } from 'lucide-react'
 import { PumpUnitModal, type PumpUnitRef } from './PumpUnitModal'
-import {
-  Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis,
-} from 'recharts'
+import { BarList } from '@/components/ui/bar-list'
+import { SparkLineChart } from '@/components/ui/spark-chart'
+import { Tracker } from '@/components/ui/tracker'
+import { formatBucket } from '@/lib/formatDate'
 import { Card, CardContent } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useCompany } from '@/contexts/CompanyContext'
@@ -91,9 +92,12 @@ function Failed({ error, onRetry }: { error: unknown; onRetry: () => void }) {
   )
 }
 
-function Metric({ label, value, hint, tone }: {
+function Metric({ label, value, hint, tone, spark }: {
   label: string; value: string; hint?: string; tone?: 'danger' | 'success' | 'info'
+  /** Ряд по дням периода: цифра говорит «сколько», ряд — «куда идёт». */
+  spark?: (number | null)[]
 }) {
+  const data = spark && spark.length >= 3 ? spark.map((v, i) => ({ i, v })) : null
   return (
     <div className="min-w-0 border-r border-border/70 px-4 py-3 last:border-r-0">
       <div className="text-xs text-muted-foreground">{label}</div>
@@ -102,6 +106,11 @@ function Metric({ label, value, hint, tone }: {
         tone === 'success' && 'text-emerald-400',
         tone === 'info' && 'text-blue-400')}>{value}</div>
       {hint ? <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{hint}</div> : null}
+      {data && (
+        <SparkLineChart className="mt-1.5 h-7 w-full" data={data} index="i" categories={['v']}
+          colors={[tone === 'danger' ? 'error' : 'brand']} connectNulls autoMinValue
+          aria-label={`Динамика по дням: ${label}`} />
+      )}
     </div>
   )
 }
@@ -177,14 +186,24 @@ export function FuelPumpsPanel({ companyId, dateFrom, dateTo }: {
 
   if (q.isLoading) return <Loading />
   if (q.isError) return <Failed error={q.error} onRetry={() => void q.refetch()} />
-  if (q.error) return <div className="p-6 text-sm text-destructive">Не удалось получить загрузку оборудования: {String(q.error)}</div>
   const data = q.data
   if (!data) return null
   const t = data.totals
   const active = data.lines.filter((l) => !l.silent)
+  // Подпись строки — словами, а не кодом `210·1/1`: по такому коду читатель не
+  // скажет ни станции, ни топлива. Название АЗС + номер ТРК + рукав + вид топлива.
   const chart = active.slice(0, 20).map((l) => ({
-    name: `${l.station_code}·${l.pos}${l.nozzle != null ? `/${l.nozzle}` : ''}`,
-    v: l.fills_per_day,
+    name: [
+      l.station,
+      l.pos != null ? `ТРК ${l.pos}` : null,
+      level === 'nozzle' && l.nozzle != null ? `рукав ${l.nozzle}` : null,
+      l.fuel_name,
+    ].filter(Boolean).join(' · '),
+    value: l.fills_per_day,
+    ref: {
+      stationCode: l.station_code, station: l.station, pos: l.pos,
+      nozzle: level === 'nozzle' ? l.nozzle : null, fuelName: l.fuel_name,
+    } satisfies PumpUnitRef,
   }))
 
   return (
@@ -201,35 +220,78 @@ export function FuelPumpsPanel({ companyId, dateFrom, dateTo }: {
           <Metric label={level === 'nozzle' ? 'Пистолетов' : 'ТРК'} value={nf0.format(t.units)}
             hint={`${t.stations} АЗС · ${data.days} дней`} />
           <Metric label="Работали" value={nf0.format(t.active)} tone="success"
-            hint={`${pct(t.units ? t.active / t.units * 100 : 0)} парка`} />
+            hint={`${pct(t.units ? t.active / t.units * 100 : 0)} парка`}
+            spark={data.series?.units} />
           <Metric label="Молчали" value={nf0.format(t.silent)} tone={t.silent ? 'danger' : undefined}
             hint="ни одной реализации за период" />
           <Metric label="Медиана" value={`${nf2.format(t.median_fills_per_day)}/сут`}
-            hint="реализаций в сутки на единицу" />
+            hint="реализаций в сутки на единицу" spark={data.series?.fills_per_unit} />
           <Metric label="Максимум" value={`${nf2.format(t.top_fills_per_day)}/сут`} tone="info"
             hint={t.median_fills_per_day
               ? `разброс ${nf1.format(t.top_fills_per_day / t.median_fills_per_day)}×` : undefined} />
           <Metric label="Выручка" value={`${fmtMoneyShort(t.amount)} ₽`}
-            hint={`${fmtLiters(t.liters)} · ${nf0.format(t.fills)} реализаций`} />
+            hint={`${fmtLiters(t.liters)} · ${nf0.format(t.fills)} реализаций`}
+            spark={data.series?.amount} />
         </CardContent>
       </Card>
+
+      {/* Парк по дням: «219 из 337 работали» — это итог за период, из него не
+          видно, был ли провал одним днём или сеть просела на неделю. */}
+      {data.series && data.series.axis.length >= 3 && (
+        <Card>
+          <CardContent className="pt-4">
+            <div className="mb-0.5 text-sm font-medium">Парк по дням</div>
+            <div className="mb-3 text-xs text-muted-foreground">
+              Доля {level === 'nozzle' ? 'рукавов' : 'ТРК'} с реализациями · всего в парке {nf0.format(t.units)}
+            </div>
+            <Tracker
+              className="h-9"
+              hoverEffect
+              data={data.series.axis.map((day, i) => {
+                const active = data.series!.units[i] ?? 0
+                const share = t.units ? active / t.units * 100 : 0
+                return {
+                  key: day,
+                  // Пороги те же, что у тона плиток: не заводим отдельную шкалу
+                  // «хорошо/плохо» там, где рядом уже есть своя.
+                  color: active === 0 ? 'bg-muted-foreground/30'
+                    : share >= 90 ? 'bg-success'
+                    : share >= 70 ? 'bg-warning'
+                    : 'bg-error',
+                  tooltip: `${formatBucket(day)} · ${nf0.format(active)} из ${nf0.format(t.units)} (${pct(share)})`,
+                }
+              })}
+            />
+            <div className="mt-2 flex flex-wrap items-center gap-3 text-[11px] text-muted-foreground">
+              <span className="flex items-center gap-1"><i className="size-2 rounded-[2px] bg-success" />от 90 %</span>
+              <span className="flex items-center gap-1"><i className="size-2 rounded-[2px] bg-warning" />70–90 %</span>
+              <span className="flex items-center gap-1"><i className="size-2 rounded-[2px] bg-error" />ниже 70 %</span>
+              <span className="flex items-center gap-1"><i className="size-2 rounded-[2px] bg-muted-foreground/30" />нет данных</span>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {chart.length > 0 && (
         <Card>
           <CardContent className="pt-4">
-            <div className="mb-2 text-sm font-medium">Топ-20 по загрузке</div>
-            <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={chart} margin={{ top: 4, right: 8, bottom: 4, left: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" opacity={0.2} vertical={false} />
-                <XAxis dataKey="name" tick={{ fontSize: 10 }} interval={0} angle={-45} textAnchor="end" height={54} />
-                <YAxis tick={{ fontSize: 10 }} width={38} />
-                <Tooltip formatter={(v) => [`${nf2.format(Number(v ?? 0))} реализаций/сут`, '']}
-                  contentStyle={{ fontSize: 12 }} />
-                <Bar dataKey="v" radius={[3, 3, 0, 0]}>
-                  {chart.map((_, i) => <Cell key={i} fill="hsl(217 91% 60%)" />)}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+            <div className="mb-0.5 text-sm font-medium">
+              Топ-20 {level === 'nozzle' ? 'рукавов' : 'ТРК'} по загрузке
+            </div>
+            {/* Цифра без опоры не читается: 104,91 — это много или мало? Медиана рядом
+                отвечает на вопрос сразу, поэтому она в подзаголовке, а не только в KPI. */}
+            <div className="mb-3 text-xs text-muted-foreground">
+              Реализаций в сутки на единицу · медиана по сети {nf2.format(t.median_fills_per_day)}
+            </div>
+            {/* Рейтинг, а не динамика: подписи двадцати столбцов вставали под 45° и не
+                читались, да и длины строк сравниваются глазом легче, чем высоты. */}
+            <BarList
+              className="max-h-80 overflow-y-auto pr-1"
+              data={chart}
+              sortOrder="none"
+              valueFormatter={(v) => `${nf2.format(v)} реализ./сут`}
+              onValueChange={(item) => setUnit(item.ref)}
+            />
           </CardContent>
         </Card>
       )}
@@ -293,6 +355,41 @@ export function FuelPumpsPanel({ companyId, dateFrom, dateTo }: {
               Всё оборудование сети отпускало топливо в этом периоде.
             </CardContent></Card>
           ) : (
+            <>
+            {/* Кто стоит дольше всех — первый вопрос к этому списку, а в таблице
+                на сотню строк он тонет: сортировка есть, глазомера нет. */}
+            {(() => {
+              const idle = [
+                ...(silentQ.data?.stations ?? []).map((r) => ({ ...r, kind: 'АЗС' })),
+                ...(silentQ.data?.pumps ?? []).map((r) => ({ ...r, kind: 'ТРК' })),
+                ...(silentQ.data?.nozzles ?? []).map((r) => ({ ...r, kind: 'рукав' })),
+              ].filter((r) => (r.days_idle ?? 0) > 0)
+                .sort((a, b) => (b.days_idle ?? 0) - (a.days_idle ?? 0))
+                .slice(0, 10)
+              if (idle.length < 3) return null
+              return (
+                <Card className="mb-3">
+                  <CardContent className="pt-4">
+                    <div className="mb-0.5 text-sm font-medium">Дольше всех без реализаций</div>
+                    <div className="mb-3 text-xs text-muted-foreground">
+                      Дней с последней операции · показаны десять первых из {nf0.format(
+                        (silentQ.data?.counts.stations ?? 0) + (silentQ.data?.counts.pumps ?? 0)
+                        + (silentQ.data?.counts.nozzles ?? 0))}
+                    </div>
+                    <BarList
+                      sortOrder="none"
+                      valueFormatter={(v) => `${nf0.format(v)} дн.`}
+                      data={idle.map((r) => ({
+                        name: [r.station, r.pos != null ? `ТРК ${r.pos}` : null,
+                          r.nozzle != null ? `рукав ${r.nozzle}` : null].filter(Boolean).join(' · ')
+                          + ` — ${r.kind}`,
+                        value: r.days_idle ?? 0,
+                      }))}
+                    />
+                  </CardContent>
+                </Card>
+              )
+            })()}
             <Card className="gap-0 overflow-hidden py-0"><CardContent className="p-0">
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[720px] text-xs">
@@ -319,6 +416,7 @@ export function FuelPumpsPanel({ companyId, dateFrom, dateTo }: {
                 </table>
               </div>
             </CardContent></Card>
+            </>
           )}
         </TabsContent>
       </Tabs>
@@ -354,8 +452,8 @@ function cellFill(sharePct: number, maxShare: number): { bg: string; ink: string
   // больше, а ступени дают предсказуемый контраст текста.
   const step = t > 0.66 ? 3 : t > 0.33 ? 2 : t > 0.1 ? 1 : 0
   return {
-    bg: ['hsl(217 91% 60% / 0.08)', 'hsl(217 91% 60% / 0.18)',
-      'hsl(217 91% 60% / 0.30)', 'hsl(217 91% 60% / 0.45)'][step],
+    bg: ['hsl(var(--chart-1) / 0.08)', 'hsl(var(--chart-1) / 0.18)',
+      'hsl(var(--chart-1) / 0.30)', 'hsl(var(--chart-1) / 0.45)'][step],
     ink: step >= 2 ? 'text-foreground' : 'text-foreground/90',
   }
 }

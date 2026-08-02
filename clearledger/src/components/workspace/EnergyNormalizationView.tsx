@@ -28,6 +28,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { fmtN } from '@/components/balance/balanceCalc'
 import { Database, ChevronRight } from 'lucide-react'
 import { EnergyNormalizationModel } from './EnergyNormalizationModel'
+import { MetricTile as Kpi } from '@/components/ui/metric-tile'
 
 /* Карта: шаблон канала → набор данных нормализации (метка L2-сущности).
    Канал без записи здесь в меню нормализации не попадёт (как в «Разрезах учёта»). */
@@ -40,16 +41,6 @@ const NORM_TEMPLATES: Record<string, { entity: string }> = {
 const STATIONS_SUBTITLE =
   'Внутренняя многослойная база объектов (L1 RAW → L2 CLEAN → L3 EXPORT → L4 1C_REF), организованная звёздной схемой: '
   + 'факт «Станция ЭЗС» (паспорт) + измерения (регион / владелец / бренд / мощность). Готова к сводным, карте и дашбордам.'
-
-function Kpi({ label, value, sub }: { label: string; value: string; sub?: string }) {
-  return (
-    <Card><CardContent className="pt-4">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="mt-1 text-lg font-semibold tabular-nums">{value}</div>
-      {sub && <div className="text-[11px] text-muted-foreground/70">{sub}</div>}
-    </CardContent></Card>
-  )
-}
 
 /* ── РЕАЛЬНЫЙ блок: нормализация канала реестров «Энергоснабжение и аренда ЭЗС».
    Тот же принцип, что у остальных каналов: L1 RAW (файлы-потоки) → сопряжение со

@@ -48,7 +48,18 @@ export function ShiftDetailsDialog({ shiftId, open, onClose, tankThreshold = 10 
 
   const thClass = isMobile ? 'px-1 py-0.5' : 'px-2 py-1'
   const tdClass = isMobile ? 'px-1 py-0.5' : 'px-2 py-1'
+  /**
+   * Числовая ячейка: ВПРАВО и табличными цифрами. По центру разряды не встают в
+   * колонку, и «222 954,71» рядом с «46 800,17» глазом не сравнить — а вся эта
+   * таблица существует ради сравнения показаний счётчиков.
+   */
+  const numCls = `${tdClass} text-right tabular-nums text-foreground`
+  /** Разделитель СМЫСЛОВОЙ группы колонок, а не каждой: 14 толстых линий читаются
+   *  как сетка Excel и заглушают сами цифры. */
+  const sep = 'border-r border-border/60'
 
+  /** Показания счётчиков — ru-RU с разрядами: без пробелов «4146258.96» не читается. */
+  const nf2 = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
   const formatCurrency = (value: number) =>
     value.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ₽'
   const formatDateTime = (s: string) => format(new Date(s), 'dd.MM.yyyy HH:mm', { locale: ru })
@@ -136,26 +147,26 @@ export function ShiftDetailsDialog({ shiftId, open, onClose, tankThreshold = 10 
                 <DualScrollX>
                   <table className={`w-max min-w-full border-collapse leading-tight ${isMobile ? 'text-xs' : 'text-[13px]'}`}>
                     <thead className="bg-secondary/80">
-                      <tr className="border-b-2 border-border">
-                        <th className={`${thClass} text-left text-foreground border-r-2 border-border`} rowSpan={4}>{isMobile ? 'Топливо' : 'Наименование нефтепродуктов'}</th>
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`} rowSpan={4}>{isMobile ? 'Рез.' : 'N Резервуара'}</th>
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`} rowSpan={4}>{isMobile ? 'Пл.' : 'Плотн кг/м3'}</th>
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`} colSpan={5}>{isMobile ? 'Показания ТРК' : 'Показание счетных механизмов'}</th>
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`} rowSpan={4}>{isMobile ? 'Цена' : 'Цена за литр руб.'}</th>
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`} rowSpan={4}>{isMobile ? 'Сумма' : 'Сумма, руб.'}</th>
+                      <tr className="border-b border-border">
+                        <th className={`${thClass} text-left text-foreground border-r border-border/60`} rowSpan={4}>{isMobile ? 'Топливо' : 'Наименование нефтепродуктов'}</th>
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`} rowSpan={4}>{isMobile ? 'Рез.' : 'N Резервуара'}</th>
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`} rowSpan={4}>{isMobile ? 'Пл.' : 'Плотн кг/м3'}</th>
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`} colSpan={5}>{isMobile ? 'Показания ТРК' : 'Показание счетных механизмов'}</th>
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`} rowSpan={4}>{isMobile ? 'Цена' : 'Цена за литр руб.'}</th>
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`} rowSpan={4}>{isMobile ? 'Сумма' : 'Сумма, руб.'}</th>
                         <th className={`${thClass} text-center text-foreground`} colSpan={2}>{isMobile ? 'Погр.' : 'Погрешность ТРК'}</th>
                       </tr>
-                      <tr className="border-b-2 border-border">
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`} rowSpan={3}>№ ТРК</th>
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`} rowSpan={3}>{isMobile ? 'Кон.' : 'на конец смены л'}</th>
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`} rowSpan={3}>{isMobile ? 'Нач.' : 'на начало смены л'}</th>
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`} colSpan={2}>расход</th>
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`} rowSpan={3}>{isMobile ? '%' : 'проц.'}</th>
+                      <tr className="border-b border-border">
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`} rowSpan={3}>№ ТРК</th>
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`} rowSpan={3}>{isMobile ? 'Кон.' : 'на конец смены л'}</th>
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`} rowSpan={3}>{isMobile ? 'Нач.' : 'на начало смены л'}</th>
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`} colSpan={2}>расход</th>
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`} rowSpan={3}>{isMobile ? '%' : 'проц.'}</th>
                         <th className={`${thClass} text-center text-foreground`} rowSpan={3}>л</th>
                       </tr>
-                      <tr className="border-b-2 border-border">
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`} rowSpan={2}>л</th>
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`} rowSpan={2}>кг</th>
+                      <tr className="border-b border-border">
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`} rowSpan={2}>л</th>
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`} rowSpan={2}>кг</th>
                       </tr>
                     </thead>
                     <tbody className="bg-card">
@@ -173,56 +184,62 @@ export function ShiftDetailsDialog({ shiftId, open, onClose, tankThreshold = 10 
                               <tr key={`${fuel.fuelCode}-${nozzle.nozzle}`} className="border-b border-border">
                                 {nIdx === 0 ? (
                                   <>
-                                    <td className={`${tdClass} text-foreground font-medium border-r-2 border-border`} rowSpan={nozzles.length + 1}>{fuel.fuelName}</td>
-                                    <td className={`${tdClass} text-center text-foreground border-r-2 border-border`} rowSpan={nozzles.length + 1}>{tank?.tankNumber || '—'}</td>
-                                    <td className={`${tdClass} text-center text-foreground border-r-2 border-border`} rowSpan={1}>{nozzle.density ? nozzle.density.toFixed(1) : '—'}</td>
+                                    <td className={`${tdClass} text-foreground font-medium border-r border-border/60`} rowSpan={nozzles.length + 1}>{fuel.fuelName}</td>
+                                    <td className={`${tdClass} text-center text-foreground border-r border-border/60`} rowSpan={nozzles.length + 1}>{tank?.tankNumber || '—'}</td>
+                                    <td className={`${tdClass} text-center text-foreground border-r border-border/60`} rowSpan={1}>{nozzle.density ? nozzle.density.toFixed(1) : '—'}</td>
                                   </>
                                 ) : (
-                                  <td className={`${tdClass} text-center text-foreground border-r-2 border-border`}></td>
+                                  <td className={`${tdClass} text-center text-foreground border-r border-border/60`}></td>
                                 )}
-                                <td className={`${tdClass} text-center text-foreground border-r-2 border-border`}>{nozzle.nozzle}</td>
-                                <td className={`${tdClass} text-center text-foreground border-r-2 border-border`}>{nozzle.endCounter.toFixed(2)}</td>
-                                <td className={`${tdClass} text-center text-foreground border-r-2 border-border`}>{nozzle.startCounter.toFixed(2)}</td>
-                                <td className={`${tdClass} text-center text-foreground font-medium border-r-2 border-border`}>{nozzle.volume.toFixed(2)}</td>
-                                <td className={`${tdClass} text-center text-foreground border-r-2 border-border`}>{nozzle.amount.toFixed(2)}</td>
-                                <td className={`${tdClass} text-center text-foreground font-medium border-r-2 border-border`}>{nozzle.price.toFixed(2)}</td>
-                                <td className={`${tdClass} text-right text-foreground font-medium border-r-2 border-border`}>{formatCurrency(nozzle.cost)}</td>
-                                <td className={`${tdClass} text-center text-muted-foreground border-r-2 border-border`}>0.00</td>
-                                <td className={`${tdClass} text-center text-muted-foreground`}>0.000</td>
+                                <td className={`${tdClass} text-center text-foreground ${sep}`}>{nozzle.nozzle}</td>
+                                <td className={numCls}>{nf2.format(nozzle.endCounter)}</td>
+                                <td className={`${numCls} ${sep}`}>{nf2.format(nozzle.startCounter)}</td>
+                                <td className={`${numCls} font-medium`}>{nf2.format(nozzle.volume)}</td>
+                                <td className={`${numCls} ${sep}`}>{nf2.format(nozzle.amount)}</td>
+                                <td className={`${numCls} font-medium ${sep}`}>{nf2.format(nozzle.price)}</td>
+                                <td className={`${numCls} font-medium ${sep}`}>{formatCurrency(nozzle.cost)}</td>
+                                {/* Погрешности в API нет — прочерк, а не выдуманный ноль:
+                                    «0.00» читается как измеренная погрешность. */}
+                                <td className={`${tdClass} text-right text-muted-foreground/50`}>—</td>
+                                <td className={`${tdClass} text-right text-muted-foreground/50`}>—</td>
                               </tr>
                             ))}
-                            <tr className="border-b-2 border-border bg-secondary/50">
+                            <tr className="border-b border-border bg-secondary/40">
                               <td className={`${tdClass} text-foreground font-bold`}>Всего:</td>
-                              <td className={`${tdClass} border-r-2 border-border`}></td>
-                              <td className={`${tdClass} text-center text-foreground font-bold border-r-2 border-border`}>{totalEndCounter.toFixed(2)}</td>
-                              <td className={`${tdClass} text-center text-foreground font-bold border-r-2 border-border`}>{totalStartCounter.toFixed(2)}</td>
-                              <td className={`${tdClass} text-center text-foreground font-bold border-r-2 border-border`}>{totalVolume.toFixed(2)}</td>
-                              <td className={`${tdClass} text-center text-foreground font-bold border-r-2 border-border`}>{totalAmount.toFixed(2)}</td>
-                              <td className={`${tdClass} border-r-2 border-border`}></td>
-                              <td className={`${tdClass} text-right text-foreground font-bold border-r-2 border-border`}>{formatCurrency(totalCost)}</td>
-                              <td className={`${tdClass} border-r-2 border-border`}></td>
+                              <td className={`${tdClass} ${sep}`}></td>
+                              <td className={`${numCls} font-semibold`}>{nf2.format(totalEndCounter)}</td>
+                              <td className={`${numCls} font-semibold ${sep}`}>{nf2.format(totalStartCounter)}</td>
+                              <td className={`${numCls} font-semibold`}>{nf2.format(totalVolume)}</td>
+                              <td className={`${numCls} font-semibold ${sep}`}>{nf2.format(totalAmount)}</td>
+                              <td className={`${tdClass} ${sep}`}></td>
+                              <td className={`${numCls} font-semibold ${sep}`}>{formatCurrency(totalCost)}</td>
+                              <td className={`${tdClass} ${sep}`}></td>
                               <td className={tdClass}></td>
                             </tr>
                           </React.Fragment>
                         )
                       })}
-                      <tr className="border-t-2 border-border bg-secondary">
-                        <td className={`${tdClass} text-foreground font-bold text-lg`}>ИТОГО:</td>
-                        <td className={`${tdClass} border-r-2 border-border`}></td>
-                        <td className={`${tdClass} border-r-2 border-border`}></td>
-                        <td className={`${tdClass} border-r-2 border-border`}></td>
-                        <td className={`${tdClass} text-center text-foreground font-bold border-r-2 border-border`}>{details.nozzleReadings.reduce((sum, n) => sum + n.endCounter, 0).toFixed(2)}</td>
-                        <td className={`${tdClass} text-center text-foreground font-bold border-r-2 border-border`}>{details.nozzleReadings.reduce((sum, n) => sum + n.startCounter, 0).toFixed(2)}</td>
-                        <td className={`${tdClass} text-center text-foreground font-bold border-r-2 border-border`}>{details.nozzleReadings.reduce((sum, n) => sum + n.volume, 0).toFixed(2)}</td>
-                        <td className={`${tdClass} text-center text-foreground font-bold border-r-2 border-border`}>{details.nozzleReadings.reduce((sum, n) => sum + n.amount, 0).toFixed(2)}</td>
-                        <td className={`${tdClass} border-r-2 border-border`}></td>
-                        <td className={`${tdClass} text-right text-foreground font-bold border-r-2 border-border`}>{formatCurrency(details.nozzleReadings.reduce((sum, n) => sum + n.cost, 0))}</td>
-                        <td className={`${tdClass} border-r-2 border-border`}></td>
+                      <tr className="border-t border-border bg-secondary/70">
+                        <td className={`${tdClass} text-foreground font-semibold`}>ИТОГО</td>
+                        <td className={tdClass}></td>
+                        <td className={`${tdClass} ${sep}`}></td>
+                        <td className={`${tdClass} ${sep}`}></td>
+                        <td className={`${numCls} font-semibold`}>{nf2.format(details.nozzleReadings.reduce((sum, n) => sum + n.endCounter, 0))}</td>
+                        <td className={`${numCls} font-semibold ${sep}`}>{nf2.format(details.nozzleReadings.reduce((sum, n) => sum + n.startCounter, 0))}</td>
+                        <td className={`${numCls} font-semibold`}>{nf2.format(details.nozzleReadings.reduce((sum, n) => sum + n.volume, 0))}</td>
+                        <td className={`${numCls} font-semibold ${sep}`}>{nf2.format(details.nozzleReadings.reduce((sum, n) => sum + n.amount, 0))}</td>
+                        <td className={`${tdClass} ${sep}`}></td>
+                        <td className={`${numCls} font-semibold ${sep}`}>{formatCurrency(details.nozzleReadings.reduce((sum, n) => sum + n.cost, 0))}</td>
+                        <td className={`${tdClass} ${sep}`}></td>
                         <td className={tdClass}></td>
                       </tr>
                     </tbody>
                   </table>
                 </DualScrollX>
+                <p className="mt-2 text-[11px] text-muted-foreground">
+                  Погрешность ТРК не приходит в текущей версии API STS — колонки показаны
+                  прочерком, а не нулём: ноль читался бы как измеренная погрешность.
+                </p>
                 <div className="mt-4 text-xs text-muted-foreground"><p>* Погрешность ТРК недоступна в текущей версии API</p></div>
               </TabsContent>
 
@@ -232,62 +249,62 @@ export function ShiftDetailsDialog({ shiftId, open, onClose, tankThreshold = 10 
                 <DualScrollX>
                   <table className={`w-max min-w-full border-collapse leading-tight ${isMobile ? 'text-xs' : 'text-[13px]'}`}>
                     <thead className="bg-secondary/80">
-                      <tr className="border-b-2 border-border">
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`} colSpan={2} rowSpan={2}>Нефтепродукты, товары</th>
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`} rowSpan={2}>Прокачка<br/>л.</th>
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`} colSpan={2}>По картам</th>
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`} rowSpan={2}>Скидка<br/>руб.</th>
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`} colSpan={2}>За наличные</th>
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`} rowSpan={2}>Безнал.<br/>л.</th>
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`} rowSpan={2}>Всего<br/>л.</th>
+                      <tr className="border-b border-border">
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`} colSpan={2} rowSpan={2}>Нефтепродукты, товары</th>
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`} rowSpan={2}>Прокачка<br/>л.</th>
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`} colSpan={2}>По картам</th>
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`} rowSpan={2}>Скидка<br/>руб.</th>
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`} colSpan={2}>За наличные</th>
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`} rowSpan={2}>Безнал.<br/>л.</th>
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`} rowSpan={2}>Всего<br/>л.</th>
                         <th className={`${thClass} text-center text-foreground`} rowSpan={2}>Разница<br/>л.</th>
                       </tr>
-                      <tr className="border-b-2 border-border">
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`}>л.</th>
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`}>руб.</th>
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`}>л.</th>
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`}>руб.</th>
+                      <tr className="border-b border-border">
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`}>л.</th>
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`}>руб.</th>
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`}>л.</th>
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`}>руб.</th>
                       </tr>
-                      <tr className="border-b-2 border-border">
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`}>Наименование</th>
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`}>Код</th>
-                        <th className={`${thClass} border-r-2 border-border`}></th>
-                        <th className={`${thClass} border-r-2 border-border`}></th>
-                        <th className={`${thClass} border-r-2 border-border`}></th>
-                        <th className={`${thClass} border-r-2 border-border`}></th>
-                        <th className={`${thClass} border-r-2 border-border`}></th>
-                        <th className={`${thClass} border-r-2 border-border`}></th>
-                        <th className={`${thClass} border-r-2 border-border`}></th>
-                        <th className={`${thClass} border-r-2 border-border`}></th>
+                      <tr className="border-b border-border">
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`}>Наименование</th>
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`}>Код</th>
+                        <th className={`${thClass} border-r border-border/60`}></th>
+                        <th className={`${thClass} border-r border-border/60`}></th>
+                        <th className={`${thClass} border-r border-border/60`}></th>
+                        <th className={`${thClass} border-r border-border/60`}></th>
+                        <th className={`${thClass} border-r border-border/60`}></th>
+                        <th className={`${thClass} border-r border-border/60`}></th>
+                        <th className={`${thClass} border-r border-border/60`}></th>
+                        <th className={`${thClass} border-r border-border/60`}></th>
                         <th className={thClass}></th>
                       </tr>
                     </thead>
                     <tbody className="bg-card">
                       {details.salesBreakdown.map((item, idx) => (
                         <tr key={idx} className="border-b border-border">
-                          <td className={`${tdClass} text-foreground font-medium border-r-2 border-border`}>{item.fuelName}</td>
-                          <td className={`${tdClass} text-center text-foreground border-r-2 border-border`}>{item.fuelCode}</td>
-                          <td className={`${tdClass} text-center text-foreground border-r-2 border-border`}>{item.pumpVolume.toFixed(2)}</td>
-                          <td className={`${tdClass} text-center text-foreground border-r-2 border-border`}>{item.cardVolume.toFixed(2)}</td>
-                          <td className={`${tdClass} text-right text-foreground border-r-2 border-border`}>{formatCurrency(item.cardCost)}</td>
-                          <td className={`${tdClass} text-right text-foreground border-r-2 border-border`}>{item.discountCost.toFixed(2)}</td>
-                          <td className={`${tdClass} text-center text-foreground border-r-2 border-border`}>{item.cashVolume.toFixed(2)}</td>
-                          <td className={`${tdClass} text-right text-foreground border-r-2 border-border`}>{formatCurrency(item.cashCost)}</td>
-                          <td className={`${tdClass} text-center text-foreground border-r-2 border-border`}>{item.nonCashVolume.toFixed(2)}</td>
-                          <td className={`${tdClass} text-center text-foreground font-medium border-r-2 border-border`}>{item.totalVolume.toFixed(2)}</td>
+                          <td className={`${tdClass} text-foreground font-medium border-r border-border/60`}>{item.fuelName}</td>
+                          <td className={`${tdClass} text-center text-foreground border-r border-border/60`}>{item.fuelCode}</td>
+                          <td className={`${tdClass} text-center text-foreground border-r border-border/60`}>{item.pumpVolume.toFixed(2)}</td>
+                          <td className={`${tdClass} text-center text-foreground border-r border-border/60`}>{item.cardVolume.toFixed(2)}</td>
+                          <td className={`${tdClass} text-right text-foreground border-r border-border/60`}>{formatCurrency(item.cardCost)}</td>
+                          <td className={`${tdClass} text-right text-foreground border-r border-border/60`}>{item.discountCost.toFixed(2)}</td>
+                          <td className={`${tdClass} text-center text-foreground border-r border-border/60`}>{item.cashVolume.toFixed(2)}</td>
+                          <td className={`${tdClass} text-right text-foreground border-r border-border/60`}>{formatCurrency(item.cashCost)}</td>
+                          <td className={`${tdClass} text-center text-foreground border-r border-border/60`}>{item.nonCashVolume.toFixed(2)}</td>
+                          <td className={`${tdClass} text-center text-foreground font-medium border-r border-border/60`}>{item.totalVolume.toFixed(2)}</td>
                           <td className={`${tdClass} text-center text-foreground`}>{item.difference.toFixed(2)}</td>
                         </tr>
                       ))}
-                      <tr className="border-t-2 border-border bg-secondary/50">
+                      <tr className="border-t border-border bg-secondary/50">
                         <td className={`${tdClass} text-foreground font-bold`} colSpan={2}>Всего:</td>
-                        <td className={`${tdClass} text-center text-foreground font-bold border-r-2 border-border`}>{details.salesBreakdown.reduce((s, i) => s + i.pumpVolume, 0).toFixed(2)}</td>
-                        <td className={`${tdClass} text-center text-foreground font-bold border-r-2 border-border`}>{details.salesBreakdown.reduce((s, i) => s + i.cardVolume, 0).toFixed(2)}</td>
-                        <td className={`${tdClass} text-right text-foreground font-bold border-r-2 border-border`}>{formatCurrency(details.salesBreakdown.reduce((s, i) => s + i.cardCost, 0))}</td>
-                        <td className={`${tdClass} text-right text-foreground font-bold border-r-2 border-border`}>{details.salesBreakdown.reduce((s, i) => s + i.discountCost, 0).toFixed(2)}</td>
-                        <td className={`${tdClass} text-center text-foreground font-bold border-r-2 border-border`}>{details.salesBreakdown.reduce((s, i) => s + i.cashVolume, 0).toFixed(2)}</td>
-                        <td className={`${tdClass} text-right text-foreground font-bold border-r-2 border-border`}>{formatCurrency(details.salesBreakdown.reduce((s, i) => s + i.cashCost, 0))}</td>
-                        <td className={`${tdClass} text-center text-foreground font-bold border-r-2 border-border`}>{details.salesBreakdown.reduce((s, i) => s + i.nonCashVolume, 0).toFixed(2)}</td>
-                        <td className={`${tdClass} text-center text-foreground font-bold border-r-2 border-border`}>{details.salesBreakdown.reduce((s, i) => s + i.totalVolume, 0).toFixed(2)}</td>
+                        <td className={`${tdClass} text-center text-foreground font-bold border-r border-border/60`}>{details.salesBreakdown.reduce((s, i) => s + i.pumpVolume, 0).toFixed(2)}</td>
+                        <td className={`${tdClass} text-center text-foreground font-bold border-r border-border/60`}>{details.salesBreakdown.reduce((s, i) => s + i.cardVolume, 0).toFixed(2)}</td>
+                        <td className={`${tdClass} text-right text-foreground font-bold border-r border-border/60`}>{formatCurrency(details.salesBreakdown.reduce((s, i) => s + i.cardCost, 0))}</td>
+                        <td className={`${tdClass} text-right text-foreground font-bold border-r border-border/60`}>{details.salesBreakdown.reduce((s, i) => s + i.discountCost, 0).toFixed(2)}</td>
+                        <td className={`${tdClass} text-center text-foreground font-bold border-r border-border/60`}>{details.salesBreakdown.reduce((s, i) => s + i.cashVolume, 0).toFixed(2)}</td>
+                        <td className={`${tdClass} text-right text-foreground font-bold border-r border-border/60`}>{formatCurrency(details.salesBreakdown.reduce((s, i) => s + i.cashCost, 0))}</td>
+                        <td className={`${tdClass} text-center text-foreground font-bold border-r border-border/60`}>{details.salesBreakdown.reduce((s, i) => s + i.nonCashVolume, 0).toFixed(2)}</td>
+                        <td className={`${tdClass} text-center text-foreground font-bold border-r border-border/60`}>{details.salesBreakdown.reduce((s, i) => s + i.totalVolume, 0).toFixed(2)}</td>
                         <td className={`${tdClass} text-center text-foreground font-bold`}>{details.salesBreakdown.reduce((s, i) => s + i.difference, 0).toFixed(2)}</td>
                       </tr>
                     </tbody>
@@ -336,11 +353,11 @@ export function ShiftDetailsDialog({ shiftId, open, onClose, tankThreshold = 10 
                       return (
                         <table className="w-full text-sm border-collapse">
                           <thead className="bg-secondary/80">
-                            <tr className="border-b-2 border-border">
-                              <th className={`${thClass} text-center text-foreground border-r-2 border-border`}>Наименование</th>
-                              <th className={`${thClass} text-center text-foreground border-r-2 border-border`}>Код</th>
+                            <tr className="border-b border-border">
+                              <th className={`${thClass} text-center text-foreground border-r border-border/60`}>Наименование</th>
+                              <th className={`${thClass} text-center text-foreground border-r border-border/60`}>Код</th>
                               {paymentTypes.map(([key, name]) => (
-                                <th key={key} className={`${thClass} text-center text-foreground border-r-2 border-border`}>{name}<br/>л.</th>
+                                <th key={key} className={`${thClass} text-center text-foreground border-r border-border/60`}>{name}<br/>л.</th>
                               ))}
                               <th className={`${thClass} text-center text-foreground`}>ИТОГО б/н<br/>л.</th>
                             </tr>
@@ -350,19 +367,19 @@ export function ShiftDetailsDialog({ shiftId, open, onClose, tankThreshold = 10 
                               const rowTotal = paymentTypes.reduce((s, [key]) => s + (row.byPayType[key] || 0), 0)
                               return (
                                 <tr key={idx} className="border-b border-border">
-                                  <td className={`${tdClass} text-foreground font-medium border-r-2 border-border`}>{row.fuelName}</td>
-                                  <td className={`${tdClass} text-center text-foreground border-r-2 border-border`}>{row.fuelCode}</td>
+                                  <td className={`${tdClass} text-foreground font-medium border-r border-border/60`}>{row.fuelName}</td>
+                                  <td className={`${tdClass} text-center text-foreground border-r border-border/60`}>{row.fuelCode}</td>
                                   {paymentTypes.map(([key]) => (
-                                    <td key={key} className={`${tdClass} text-center text-foreground border-r-2 border-border`}>{(row.byPayType[key] || 0).toFixed(2)}</td>
+                                    <td key={key} className={`${tdClass} text-center text-foreground border-r border-border/60`}>{(row.byPayType[key] || 0).toFixed(2)}</td>
                                   ))}
                                   <td className={`${tdClass} text-center text-foreground font-medium`}>{rowTotal.toFixed(2)}</td>
                                 </tr>
                               )
                             })}
-                            <tr className="border-t-2 border-border bg-secondary/50">
+                            <tr className="border-t border-border bg-secondary/50">
                               <td className={`${tdClass} text-foreground font-bold text-right`} colSpan={2}>Всего:</td>
                               {paymentTypes.map(([key]) => (
-                                <td key={key} className={`${tdClass} text-center text-foreground font-bold border-r-2 border-border`}>{totals[key].toFixed(2)}</td>
+                                <td key={key} className={`${tdClass} text-center text-foreground font-bold border-r border-border/60`}>{totals[key].toFixed(2)}</td>
                               ))}
                               <td className={`${tdClass} text-center text-foreground font-bold`}>{grandTotal.toFixed(2)}</td>
                             </tr>
@@ -380,35 +397,35 @@ export function ShiftDetailsDialog({ shiftId, open, onClose, tankThreshold = 10 
                 <DualScrollX>
                   <table className={`w-max min-w-full border-collapse leading-tight ${isMobile ? 'text-xs' : 'text-[13px]'}`}>
                     <thead className="bg-secondary/80">
-                      <tr className="border-b-2 border-border">
-                        <th className={`${thClass} text-left text-foreground border-r-2 border-border`} rowSpan={3}>Наименование<br/>нефте-<br/>продуктов</th>
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`} rowSpan={3}>N<br/>Резер-<br/>вуара</th>
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`} rowSpan={3}>Плотн.<br/>на<br/>начало<br/>смены<br/>г/см3</th>
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`} colSpan={2}>Книжный остаток<br/>на<br/>начало смены</th>
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`} colSpan={2}>Поступление<br/>в т.ч. прокачка</th>
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`} colSpan={2}>Расход</th>
+                      <tr className="border-b border-border">
+                        <th className={`${thClass} text-left text-foreground border-r border-border/60`} rowSpan={3}>Наименование<br/>нефте-<br/>продуктов</th>
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`} rowSpan={3}>N<br/>Резер-<br/>вуара</th>
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`} rowSpan={3}>Плотн.<br/>на<br/>начало<br/>смены<br/>г/см3</th>
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`} colSpan={2}>Книжный остаток<br/>на<br/>начало смены</th>
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`} colSpan={2}>Поступление<br/>в т.ч. прокачка</th>
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`} colSpan={2}>Расход</th>
                         <th className={`${thClass} text-center text-foreground`} colSpan={10}>Остаток на конец смены</th>
                       </tr>
-                      <tr className="border-b-2 border-border">
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`} rowSpan={2}>литры</th>
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`} rowSpan={2}>кг</th>
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`} rowSpan={2}>литры</th>
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`} rowSpan={2}>кг</th>
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`} rowSpan={2}>литры</th>
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`} rowSpan={2}>кг</th>
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`} rowSpan={2}>Плотн.<br/>г/см3</th>
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`} rowSpan={2}>Темп<br/>C</th>
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`} rowSpan={2}>общий<br/>уров.<br/>см</th>
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`} rowSpan={2}>общий<br/>объем<br/>л</th>
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`} rowSpan={2}>уров.<br/>воды<br/>см</th>
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`} rowSpan={2}>объем<br/>воды<br/>л</th>
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`} colSpan={2}>Факт.остаток н/п.</th>
+                      <tr className="border-b border-border">
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`} rowSpan={2}>литры</th>
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`} rowSpan={2}>кг</th>
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`} rowSpan={2}>литры</th>
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`} rowSpan={2}>кг</th>
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`} rowSpan={2}>литры</th>
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`} rowSpan={2}>кг</th>
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`} rowSpan={2}>Плотн.<br/>г/см3</th>
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`} rowSpan={2}>Темп<br/>C</th>
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`} rowSpan={2}>общий<br/>уров.<br/>см</th>
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`} rowSpan={2}>общий<br/>объем<br/>л</th>
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`} rowSpan={2}>уров.<br/>воды<br/>см</th>
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`} rowSpan={2}>объем<br/>воды<br/>л</th>
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`} colSpan={2}>Факт.остаток н/п.</th>
                         <th className={`${thClass} text-center text-foreground`} colSpan={2}>расчетн.кн.ост.</th>
                       </tr>
-                      <tr className="border-b-2 border-border">
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`}>литры</th>
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`}>кг</th>
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`}>литры</th>
+                      <tr className="border-b border-border">
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`}>литры</th>
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`}>кг</th>
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`}>литры</th>
                         <th className={`${thClass} text-center text-foreground`}>кг</th>
                       </tr>
                     </thead>
@@ -419,24 +436,24 @@ export function ShiftDetailsDialog({ shiftId, open, onClose, tankThreshold = 10 
                         details.tanks.map((tank, idx) => (
                           <tr key={idx} className={`border-b border-border ${tank.hasExcessError ? 'bg-destructive/10' : ''}`}
                             title={tank.hasExcessError ? `Расхождение: факт ${tank.volumeEnd.toFixed(2)} л vs расчёт ${tank.volumeCalculated.toFixed(2)} л (Δ ${tank.volumeDifference.toFixed(2)} л)` : undefined}>
-                            <td className={`${tdClass} text-foreground font-medium border-r-2 border-border`}>{tank.fuelName}</td>
-                            <td className={`${tdClass} text-center text-foreground border-r-2 border-border`}>{tank.tankNumber}</td>
-                            <td className={`${tdClass} text-center text-foreground border-r-2 border-border`}>{tank.density ? tank.density.toFixed(4) : '—'}</td>
-                            <td className={`${tdClass} text-right text-foreground font-medium border-r-2 border-border`}>{tank.volumeBegin.toFixed(2)}</td>
-                            <td className={`${tdClass} text-right text-foreground border-r-2 border-border`}>{(tank.volumeBegin * (tank.density || 1)).toFixed(2)}</td>
-                            <td className={`${tdClass} text-right text-foreground font-medium border-r-2 border-border`}>{tank.volumeReceived.toFixed(2)}</td>
-                            <td className={`${tdClass} text-right text-foreground border-r-2 border-border`}>{(tank.volumeReceived * (tank.density || 1)).toFixed(2)}</td>
-                            <td className={`${tdClass} text-right text-foreground font-medium border-r-2 border-border`}>{tank.volumeDispensed.toFixed(2)}</td>
-                            <td className={`${tdClass} text-right text-foreground border-r-2 border-border`}>{(tank.volumeDispensed * (tank.density || 1)).toFixed(2)}</td>
-                            <td className={`${tdClass} text-center text-foreground border-r-2 border-border`}>{tank.density ? tank.density.toFixed(4) : '—'}</td>
-                            <td className={`${tdClass} text-center text-foreground border-r-2 border-border`}>{tank.temperature?.toFixed(1) || '—'}</td>
-                            <td className={`${tdClass} text-center text-foreground border-r-2 border-border`}>{tank.level?.toFixed(2) || '—'}</td>
-                            <td className={`${tdClass} text-right text-foreground font-medium border-r-2 border-border`}>{tank.volumeEnd.toFixed(2)}</td>
-                            <td className={`${tdClass} text-center text-foreground border-r-2 border-border`}>{tank.waterLevel?.toFixed(2) || '—'}</td>
-                            <td className={`${tdClass} text-center text-foreground border-r-2 border-border`}>{tank.waterVolume?.toFixed(2) || '—'}</td>
-                            <td className={`${tdClass} text-right text-foreground font-medium border-r-2 border-border`}>{tank.volumeEnd.toFixed(2)}</td>
-                            <td className={`${tdClass} text-right text-foreground border-r-2 border-border`}>{(tank.volumeEnd * (tank.density || 1)).toFixed(2)}</td>
-                            <td className={`${tdClass} text-right font-medium border-r-2 border-border ${tank.hasExcessError ? 'text-destructive' : 'text-foreground'}`}>
+                            <td className={`${tdClass} text-foreground font-medium border-r border-border/60`}>{tank.fuelName}</td>
+                            <td className={`${tdClass} text-center text-foreground border-r border-border/60`}>{tank.tankNumber}</td>
+                            <td className={`${tdClass} text-center text-foreground border-r border-border/60`}>{tank.density ? tank.density.toFixed(4) : '—'}</td>
+                            <td className={`${tdClass} text-right text-foreground font-medium border-r border-border/60`}>{tank.volumeBegin.toFixed(2)}</td>
+                            <td className={`${tdClass} text-right text-foreground border-r border-border/60`}>{(tank.volumeBegin * (tank.density || 1)).toFixed(2)}</td>
+                            <td className={`${tdClass} text-right text-foreground font-medium border-r border-border/60`}>{tank.volumeReceived.toFixed(2)}</td>
+                            <td className={`${tdClass} text-right text-foreground border-r border-border/60`}>{(tank.volumeReceived * (tank.density || 1)).toFixed(2)}</td>
+                            <td className={`${tdClass} text-right text-foreground font-medium border-r border-border/60`}>{tank.volumeDispensed.toFixed(2)}</td>
+                            <td className={`${tdClass} text-right text-foreground border-r border-border/60`}>{(tank.volumeDispensed * (tank.density || 1)).toFixed(2)}</td>
+                            <td className={`${tdClass} text-center text-foreground border-r border-border/60`}>{tank.density ? tank.density.toFixed(4) : '—'}</td>
+                            <td className={`${tdClass} text-center text-foreground border-r border-border/60`}>{tank.temperature?.toFixed(1) || '—'}</td>
+                            <td className={`${tdClass} text-center text-foreground border-r border-border/60`}>{tank.level?.toFixed(2) || '—'}</td>
+                            <td className={`${tdClass} text-right text-foreground font-medium border-r border-border/60`}>{tank.volumeEnd.toFixed(2)}</td>
+                            <td className={`${tdClass} text-center text-foreground border-r border-border/60`}>{tank.waterLevel?.toFixed(2) || '—'}</td>
+                            <td className={`${tdClass} text-center text-foreground border-r border-border/60`}>{tank.waterVolume?.toFixed(2) || '—'}</td>
+                            <td className={`${tdClass} text-right text-foreground font-medium border-r border-border/60`}>{tank.volumeEnd.toFixed(2)}</td>
+                            <td className={`${tdClass} text-right text-foreground border-r border-border/60`}>{(tank.volumeEnd * (tank.density || 1)).toFixed(2)}</td>
+                            <td className={`${tdClass} text-right font-medium border-r border-border/60 ${tank.hasExcessError ? 'text-destructive' : 'text-foreground'}`}>
                               {tank.volumeCalculated.toFixed(2)}
                               {tank.hasExcessError && (
                                 <span className="block text-[10px] font-normal">Δ {tank.volumeDifference > 0 ? '+' : ''}{tank.volumeDifference.toFixed(2)} л</span>
@@ -457,26 +474,26 @@ export function ShiftDetailsDialog({ shiftId, open, onClose, tankThreshold = 10 
                 <DualScrollX>
                   <table className={`w-max min-w-full border-collapse leading-tight ${isMobile ? 'text-xs' : 'text-[13px]'}`}>
                     <thead className="bg-secondary/80">
-                      <tr className="border-b-2 border-border">
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`} colSpan={2}>Нефтепродукты</th>
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`} colSpan={2}>Поставщик</th>
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`} rowSpan={2}>№<br/>Докум.</th>
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`} rowSpan={2}>№<br/>рез</th>
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`} colSpan={4}>По документу</th>
+                      <tr className="border-b border-border">
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`} colSpan={2}>Нефтепродукты</th>
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`} colSpan={2}>Поставщик</th>
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`} rowSpan={2}>№<br/>Докум.</th>
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`} rowSpan={2}>№<br/>рез</th>
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`} colSpan={4}>По документу</th>
                         <th className={`${thClass} text-center text-foreground`} colSpan={4}>Фактически</th>
                       </tr>
-                      <tr className="border-b-2 border-border">
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`}>Наименование</th>
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`}>Код</th>
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`}>Наименование</th>
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`}>Код</th>
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`}>Объем<br/>л</th>
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`}>Плотн<br/>г/см3</th>
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`}>Масса<br/>кг</th>
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`}>Темп.<br/>°C</th>
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`}>Объем<br/>л</th>
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`}>Плотн<br/>г/см3</th>
-                        <th className={`${thClass} text-center text-foreground border-r-2 border-border`}>Масса<br/>кг</th>
+                      <tr className="border-b border-border">
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`}>Наименование</th>
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`}>Код</th>
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`}>Наименование</th>
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`}>Код</th>
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`}>Объем<br/>л</th>
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`}>Плотн<br/>г/см3</th>
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`}>Масса<br/>кг</th>
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`}>Темп.<br/>°C</th>
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`}>Объем<br/>л</th>
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`}>Плотн<br/>г/см3</th>
+                        <th className={`${thClass} text-center text-foreground border-r border-border/60`}>Масса<br/>кг</th>
                         <th className={`${thClass} text-center text-foreground`}>Темп.<br/>°C</th>
                       </tr>
                     </thead>
@@ -486,19 +503,19 @@ export function ShiftDetailsDialog({ shiftId, open, onClose, tankThreshold = 10 
                       ) : (
                         details.receipts.map((receipt, idx) => (
                           <tr key={idx} className="border-b border-border">
-                            <td className={`${tdClass} text-foreground border-r-2 border-border`}>{receipt.fuelName}</td>
-                            <td className={`${tdClass} text-center text-foreground border-r-2 border-border`}>{receipt.fuelCode}</td>
-                            <td className={`${tdClass} text-foreground border-r-2 border-border`}>{receipt.supplier || 'Нефтебаза'}</td>
-                            <td className={`${tdClass} text-center text-foreground border-r-2 border-border`}>1</td>
-                            <td className={`${tdClass} text-center text-foreground border-r-2 border-border`}>{receipt.documentNumber || '—'}</td>
-                            <td className={`${tdClass} text-center text-foreground border-r-2 border-border`}>{receipt.tankNumber}</td>
-                            <td className={`${tdClass} text-center text-foreground border-r-2 border-border`}>{receipt.volume.toFixed(0)}</td>
-                            <td className={`${tdClass} text-center text-foreground border-r-2 border-border`}>{receipt.density ? receipt.density.toFixed(4) : '—'}</td>
-                            <td className={`${tdClass} text-center text-foreground border-r-2 border-border`}>{receipt.amount ? receipt.amount.toFixed(0) : '—'}</td>
-                            <td className={`${tdClass} text-center text-foreground border-r-2 border-border`}>{receipt.temperature ? receipt.temperature.toFixed(1) : '—'}</td>
-                            <td className={`${tdClass} text-center text-foreground border-r-2 border-border`}>{receipt.actualVolume ? receipt.actualVolume.toFixed(0) : receipt.volume.toFixed(0)}</td>
-                            <td className={`${tdClass} text-center text-foreground border-r-2 border-border`}>{receipt.actualDensity ? receipt.actualDensity.toFixed(4) : (receipt.density ? receipt.density.toFixed(4) : '—')}</td>
-                            <td className={`${tdClass} text-center text-foreground border-r-2 border-border`}>{receipt.actualAmount ? receipt.actualAmount.toFixed(0) : (receipt.amount ? receipt.amount.toFixed(0) : '—')}</td>
+                            <td className={`${tdClass} text-foreground border-r border-border/60`}>{receipt.fuelName}</td>
+                            <td className={`${tdClass} text-center text-foreground border-r border-border/60`}>{receipt.fuelCode}</td>
+                            <td className={`${tdClass} text-foreground border-r border-border/60`}>{receipt.supplier || 'Нефтебаза'}</td>
+                            <td className={`${tdClass} text-center text-foreground border-r border-border/60`}>1</td>
+                            <td className={`${tdClass} text-center text-foreground border-r border-border/60`}>{receipt.documentNumber || '—'}</td>
+                            <td className={`${tdClass} text-center text-foreground border-r border-border/60`}>{receipt.tankNumber}</td>
+                            <td className={`${tdClass} text-center text-foreground border-r border-border/60`}>{receipt.volume.toFixed(0)}</td>
+                            <td className={`${tdClass} text-center text-foreground border-r border-border/60`}>{receipt.density ? receipt.density.toFixed(4) : '—'}</td>
+                            <td className={`${tdClass} text-center text-foreground border-r border-border/60`}>{receipt.amount ? receipt.amount.toFixed(0) : '—'}</td>
+                            <td className={`${tdClass} text-center text-foreground border-r border-border/60`}>{receipt.temperature ? receipt.temperature.toFixed(1) : '—'}</td>
+                            <td className={`${tdClass} text-center text-foreground border-r border-border/60`}>{receipt.actualVolume ? receipt.actualVolume.toFixed(0) : receipt.volume.toFixed(0)}</td>
+                            <td className={`${tdClass} text-center text-foreground border-r border-border/60`}>{receipt.actualDensity ? receipt.actualDensity.toFixed(4) : (receipt.density ? receipt.density.toFixed(4) : '—')}</td>
+                            <td className={`${tdClass} text-center text-foreground border-r border-border/60`}>{receipt.actualAmount ? receipt.actualAmount.toFixed(0) : (receipt.amount ? receipt.amount.toFixed(0) : '—')}</td>
                             <td className={`${tdClass} text-center text-foreground`}>{receipt.actualTemperature ? receipt.actualTemperature.toFixed(1) : (receipt.temperature ? receipt.temperature.toFixed(1) : '—')}</td>
                           </tr>
                         ))
@@ -672,7 +689,7 @@ function SalesEditor({ shiftId, sales, fuelName, isMobile, thClass, tdClass, not
       <div className="overflow-x-auto rounded-lg border border-border">
         <table className={`w-max min-w-full border-collapse leading-tight ${isMobile ? 'text-xs' : 'text-[13px]'}`}>
           <thead className="bg-secondary/80">
-            <tr className="border-b-2 border-border">
+            <tr className="border-b border-border">
               <th className={`${thClass} text-left text-foreground border-r border-border`}>Канал оплаты</th>
               <th className={`${thClass} text-left text-foreground border-r border-border`}>Топливо</th>
               <th className={`${thClass} text-center text-foreground border-r border-border`}>Литры</th>

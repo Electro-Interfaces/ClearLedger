@@ -5,7 +5,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
-import { PLATFORM_PRODUCT, PLATFORM_VENDOR } from '@/config/brand'
+import { PLATFORM_PRODUCT } from '@/config/brand'
 import * as authService from '@/services/authService'
 import { Boxes, Loader2, CheckCircle2 } from 'lucide-react'
 
@@ -112,7 +112,6 @@ export function LoginPage() {
               а не бренд компании: имя компании появится после входа. */}
           <p className="text-xs uppercase tracking-wide text-muted-foreground">Рабочее пространство</p>
           <h1 className="text-center text-2xl font-bold">{PLATFORM_PRODUCT}</h1>
-          <p className="text-sm text-muted-foreground">{PLATFORM_VENDOR}</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">

@@ -178,9 +178,9 @@ function MarginTrend({ data }: { data: CostingMargin }) {
               contentStyle={{ background: 'hsl(var(--popover))', border: '1px solid hsl(var(--border))', borderRadius: 8, fontSize: 12 }}
               formatter={(value, name) => [`${price.format(Number(value))} ₽/л`, name === 'avg_sale_price' ? 'Цена продажи' : name === 'avg_cost_per_liter' ? 'Себестоимость' : 'Маржа']}
             />
-            {hasCost && <Bar dataKey="margin_per_liter" fill="hsl(152 69% 45% / 0.22)" radius={[3, 3, 0, 0]} isAnimationActive={false} />}
-            <Line dataKey="avg_sale_price" stroke="hsl(217 91% 60%)" strokeWidth={2} dot={{ r: 3 }} isAnimationActive={false} />
-            {hasCost && <Line dataKey="avg_cost_per_liter" stroke="hsl(38 92% 50%)" strokeWidth={2} dot={{ r: 3 }} isAnimationActive={false} />}
+            {hasCost && <Bar dataKey="margin_per_liter" fill="hsl(var(--chart-2) / 0.22)" radius={[3, 3, 0, 0]} isAnimationActive={false} />}
+            <Line dataKey="avg_sale_price" stroke="hsl(var(--chart-1))" strokeWidth={2} dot={{ r: 3 }} isAnimationActive={false} />
+            {hasCost && <Line dataKey="avg_cost_per_liter" stroke="hsl(var(--warning))" strokeWidth={2} dot={{ r: 3 }} isAnimationActive={false} />}
           </ComposedChart>
         </ResponsiveContainer>
       </div>

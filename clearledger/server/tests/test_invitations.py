@@ -31,9 +31,9 @@ async def test_invitation_flow(client: AsyncClient, monkeypatch):
     monkeypatch.setattr(email_service, "send_invite", fake_send)
     admin = await _admin(client)
 
-    # Приглашаем нового сотрудника в npk с ролью admin.
+    # Приглашаем нового сотрудника в rushydro с ролью admin.
     r = await client.post("/api/invitations", headers=_h(admin), json={
-        "company_id": "npk", "email": "newhire@test.ru", "role": "admin",
+        "company_id": "rushydro", "email": "newhire@test.ru", "role": "admin",
     })
     assert r.status_code == 201, r.text
     token = sent["token"]
@@ -47,17 +47,17 @@ async def test_invitation_flow(client: AsyncClient, monkeypatch):
     assert p["company_name"]
 
     # Список pending у админа компании.
-    lst = await client.get("/api/invitations", headers=_h(admin), params={"company_id": "npk"})
+    lst = await client.get("/api/invitations", headers=_h(admin), params={"company_id": "rushydro"})
     assert any(i["email"] == "newhire@test.ru" for i in lst.json())
 
-    # Accept нового пользователя → автологин-токен, роль admin В npk.
+    # Accept нового пользователя → автологин-токен, роль admin В rushydro.
     a = await client.post(f"/api/invitations/accept/{token}",
                           json={"name": "New Hire", "password": "secret123"})
     assert a.status_code == 200, a.text
     new_token = a.json()["access_token"]
     me = (await client.get("/api/auth/me", headers=_h(new_token))).json()
     roles = {c["slug"]: c["role"] for c in me["companies"]}
-    assert roles.get("npk") == "admin"
+    assert roles.get("rushydro") == "admin"
 
     # Токен одноразовый — повторный accept → 404.
     a2 = await client.post(f"/api/invitations/accept/{token}",
@@ -66,7 +66,7 @@ async def test_invitation_flow(client: AsyncClient, monkeypatch):
 
     # Приглашение уже-члена → 409.
     dup = await client.post("/api/invitations", headers=_h(admin), json={
-        "company_id": "npk", "email": "newhire@test.ru", "role": "user",
+        "company_id": "rushydro", "email": "newhire@test.ru", "role": "user",
     })
     assert dup.status_code == 409
 
@@ -126,7 +126,7 @@ async def test_принадлежность_партнёра_доезжает_и
     admin = await _admin(client)
 
     r = await client.post("/api/invitations", headers=_h(admin), json={
-        "company_id": "npk", "email": "partner-rep@test.ru", "role": "user",
+        "company_id": "rushydro", "email": "partner-rep@test.ru", "role": "user",
         "party_type": "partner",
     })
     assert r.status_code == 201, r.text
@@ -135,7 +135,7 @@ async def test_принадлежность_партнёра_доезжает_и
     # Список приглашений тоже отдаёт принадлежность — иначе в таблице не видно,
     # кого именно ждём: своего сотрудника или человека со стороны.
     lst = (await client.get("/api/invitations", headers=_h(admin),
-                            params={"company_id": "npk"})).json()
+                            params={"company_id": "rushydro"})).json()
     assert any(i["email"] == "partner-rep@test.ru" and i["party_type"] == "partner" for i in lst)
 
     a = await client.post(f"/api/invitations/accept/{sent['token']}",
@@ -143,7 +143,7 @@ async def test_принадлежность_партнёра_доезжает_и
     assert a.status_code == 200, a.text
 
     members = (await client.get("/api/users", headers=_h(admin),
-                                params={"company_id": "npk"})).json()
+                                params={"company_id": "rushydro"})).json()
     rep = next(m for m in members if m["email"] == "partner-rep@test.ru")
     assert rep["party_type"] == "partner"
 
@@ -160,7 +160,7 @@ async def test_чужая_организация_в_приглашении_от�
     admin = await _admin(client)
 
     r = await client.post("/api/invitations", headers=_h(admin), json={
-        "company_id": "npk", "email": "ghost-org@test.ru", "role": "user",
+        "company_id": "rushydro", "email": "ghost-org@test.ru", "role": "user",
         "party_type": "partner",
         "organization_id": "00000000-0000-0000-0000-000000000001",
     })

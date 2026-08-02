@@ -49,7 +49,7 @@ async def test_register_requires_superadmin(client: AsyncClient):
         "/api/auth/register",
         json={
             "email": "x@test.com", "password": "secret123",
-            "name": "X", "company_id": "npk",
+            "name": "X", "company_id": "gig",
         },
     )
     assert resp.status_code in (401, 403)
@@ -63,7 +63,7 @@ async def test_register_new_user(auth_client: AsyncClient):
             "email": "newuser@test.com",
             "password": "secret123",
             "name": "Тестовый Пользователь",
-            "company_id": "npk",
+            "company_id": "gig",
         },
     )
     assert resp.status_code == 201
@@ -80,7 +80,7 @@ async def test_register_duplicate_email(auth_client: AsyncClient):
             "email": "admin@clearledger.ru",
             "password": "any123",
             "name": "Дубль",
-            "company_id": "npk",
+            "company_id": "gig",
         },
     )
     assert resp.status_code == 409
@@ -125,7 +125,7 @@ async def test_register_normalizes_email(auth_client: AsyncClient):
             "email": "  MixedCase@Test.COM ",
             "password": "secret123",
             "name": "Mixed Case",
-            "company_id": "npk",
+            "company_id": "gig",
         },
     )
     assert resp.status_code == 201, resp.text
@@ -150,7 +150,7 @@ async def test_register_duplicate_email_case_insensitive(auth_client: AsyncClien
             "email": "MixedCase@test.com",
             "password": "secret123",
             "name": "Dup",
-            "company_id": "npk",
+            "company_id": "gig",
         },
     )
     assert resp.status_code == 409

@@ -11,6 +11,9 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useQueries, useQuery } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
+import { AvailableChartColors, getColorClassName } from '@/components/ui/chart-utils'
+import { DonutChart } from '@/components/ui/donut-chart'
+import { cn } from '@/lib/utils'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
@@ -34,11 +37,13 @@ import { HorizonControl } from './HorizonControl'
 import { FuelDrillDialog, exportFuelPivot } from './FuelDrillDialog'
 import {
   getFuelFills, getFuelTimeseries, getFuelSlice, getFuelCompareMulti, getFuelHeatmap,
+  type FuelTotalsSeries,
   getFuelNewCards, getFuelNewCardsList,
   FUEL_METRIC_LABELS, fmtFuelMetric, fmtFuelMetricCompact, fuelChartFormat, isFuelRatio, fmtRub0,
   type FuelGroupBy, type FuelMetric, type FuelBucket, type FuelSegment, type FuelNarrow,
   type FuelFillsLine, type FuelTimeseriesResponse, type FuelNewCardsInterval,
 } from '@/services/fuelSalesService'
+import { TrendSpark } from '@/components/ui/trend-spark'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 const nf1 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 })
@@ -190,30 +195,16 @@ function BucketSelect({ value, onChange }: { value: FuelBucket; onChange: (v: Fu
   )
 }
 
-/** Мини-график тренда в строке таблицы (SVG-полилиния). */
-function Sparkline({ values }: { values: (number | null)[] }) {
-  const w = 60, h = 16
-  const vals = values.map((v) => v ?? 0)
-  if (vals.length < 2) return <span className="text-muted-foreground/40">—</span>
-  const max = Math.max(...vals), min = Math.min(...vals)
-  const range = max - min || 1
-  const pts = vals.map((v, i) => `${((i / (vals.length - 1)) * w).toFixed(1)},${(h - ((v - min) / range) * h).toFixed(1)}`).join(' ')
-  const up = vals[vals.length - 1] >= vals[0]
-  return (
-    <svg width={w} height={h} className="inline-block align-middle overflow-visible">
-      <polyline points={pts} fill="none" stroke={up ? 'hsl(152, 69%, 45%)' : 'hsl(0, 84%, 60%)'} strokeWidth="1" />
-    </svg>
-  )
-}
-
-function FillKpis({ t }: { t: FuelFillsLine }) {
+/** Ряд даём плиткам, чья метрика в нём есть. «Станций» и «Карт» — счётчики
+ *  уникальных за период, ряда под ними нет: их динамика считается иначе. */
+function FillKpis({ t, series }: { t: FuelFillsLine; series?: FuelTotalsSeries }) {
   return (
     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-      <KpiCard label="Выручка" value={fmtFuelMetricCompact('amount', t.amount) + ' ₽'} accent="success" />
-      <KpiCard label="Объём" value={nf0.format(t.liters) + ' л'} accent="info" />
-      <KpiCard label="Реализаций" value={nf0.format(t.fills)} />
-      <KpiCard label="Ср. цена" value={fmtFuelMetric('avg_price', t.avg_price)} />
-      <KpiCard label="Средний чек" value={fmtFuelMetric('avg_check', t.avg_check)} />
+      <KpiCard label="Выручка" value={fmtFuelMetricCompact('amount', t.amount) + ' ₽'} accent="success" spark={series?.amount} sparkLabel="Выручка по периодам" />
+      <KpiCard label="Объём" value={nf0.format(t.liters) + ' л'} accent="info" spark={series?.liters} sparkLabel="Объём по периодам" />
+      <KpiCard label="Реализаций" value={nf0.format(t.fills)} spark={series?.fills} sparkLabel="Реализации по периодам" />
+      <KpiCard label="Ср. цена" value={fmtFuelMetric('avg_price', t.avg_price)} spark={series?.avg_price} sparkLabel="Средняя цена по периодам" />
+      <KpiCard label="Средний чек" value={fmtFuelMetric('avg_check', t.avg_check)} spark={series?.avg_check} sparkLabel="Средний чек по периодам" />
       <KpiCard label="Ср. заправка" value={fmtFuelMetric('avg_fill', t.avg_fill)} />
       <KpiCard label="Станций" value={nf0.format(t.stations)} />
       <KpiCard label="Карт" value={nf0.format(t.cards)} hint="уникальных за период" />
@@ -221,11 +212,14 @@ function FillKpis({ t }: { t: FuelFillsLine }) {
   )
 }
 
-function useFills(companyId: string, dateFrom: string, dateTo: string, groupBy: FuelGroupBy) {
+/** withSeries — ряд тоталов для спарклайнов плиток: лишний скан периода,
+ *  поэтому просим только там, где плитки рисуются. */
+function useFills(companyId: string, dateFrom: string, dateTo: string, groupBy: FuelGroupBy, withSeries?: boolean) {
   const n = useFuelNarrow()
   return useQuery({
-    queryKey: ['fuel-fills', groupBy, companyId, dateFrom, dateTo, n.key],
-    queryFn: () => getFuelFills({ companyId, dateFrom, dateTo, groupBy, stationCodes: n.stationCodes, fuelCodes: n.fuelCodes, segment: n.segment }),
+    // withSeries в ключе: иначе экран без плиток отдал бы свой кеш экрану с ними.
+    queryKey: ['fuel-fills', groupBy, companyId, dateFrom, dateTo, n.key, withSeries ? 'series' : ''],
+    queryFn: () => getFuelFills({ companyId, dateFrom, dateTo, groupBy, stationCodes: n.stationCodes, fuelCodes: n.fuelCodes, segment: n.segment, withSeries }),
   })
 }
 
@@ -240,7 +234,7 @@ function FillsBreakdown({ companyId, dateFrom, dateTo }: { companyId: string; da
   })
   // Вид-срез: период — только из контура рабочей области.
   const period = { from: dateFrom, to: dateTo }
-  const { data, isLoading } = useFills(companyId, period.from, period.to, p.group)
+  const { data, isLoading } = useFills(companyId, period.from, period.to, p.group, true)
   const n = useFuelNarrow()
   const withSpark = SPARK_GROUPS.includes(p.group)
   const spark = useQuery({
@@ -318,7 +312,35 @@ function FillsBreakdown({ companyId, dateFrom, dateTo }: { companyId: string; da
           dim={p.group} dimVal={drill.key} label={`${col}: ${drill.label}`}
           narrow={{ stationCodes: n.stationCodes, fuelCodes: n.fuelCodes, segment: n.segment }} />
       )}
-      <FillKpis t={t} />
+      <FillKpis t={t} series={data.series} />
+      {/* Доля в таблице — колонка процентов, и структуру читатель складывает
+          глазами. Кольцо отвечает сразу, но только там, где категорий немного:
+          на сотне станций оно превращается в кашу из полосок. */}
+      {lines.length >= 2 && lines.length <= 8 && (
+        <Card>
+          <CardContent className="flex flex-wrap items-center gap-6 pt-4">
+            <DonutChart
+              className="h-40 w-40 shrink-0"
+              data={lines.map((l) => ({ name: l.label, amount: Math.max(0, l.amount) }))}
+              category="name"
+              value="amount"
+              valueFormatter={(v: number) => `${fmtFuelMetricCompact('amount', v)} ₽`}
+              showTooltip
+            />
+            <div className="min-w-[220px] flex-1 space-y-1 text-xs">
+              <div className="mb-1.5 text-sm font-medium">Структура выручки · {col.toLowerCase()}</div>
+              {lines.map((l, i) => (
+                <div key={l.key} className="flex items-center gap-2">
+                  <span className={cn('h-2.5 w-2.5 shrink-0 rounded-sm',
+                    getColorClassName(AvailableChartColors[i % AvailableChartColors.length], 'bg'))} />
+                  <span className="flex-1 truncate">{l.label}</span>
+                  <span className="tabular-nums text-muted-foreground">{nf1.format(l.share_pct)} %</span>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
       {data.truncated > 0 && (
         <div className="text-[11px] text-muted-foreground">Показан топ по обороту; ещё {nf0.format(data.truncated)} строк не выведено (сузьте период или фильтры).</div>
       )}
@@ -358,7 +380,7 @@ function FillsBreakdown({ companyId, dateFrom, dateTo }: { companyId: string; da
                   <td className="p-2 text-right font-mono text-muted-foreground">{nf1.format(l.avg_fill)}</td>
                   <td className="p-2 text-right font-mono">{l.avg_price.toFixed(2)}</td>
                   {showCards && <td className="p-2 text-right font-mono text-muted-foreground">{l.cards ? nf0.format(l.cards) : '—'}</td>}
-                  {withSpark && <td className="p-2 text-right"><Sparkline values={sparkMap[l.label] ?? []} /></td>}
+                  {withSpark && <td className="p-2 text-right"><TrendSpark values={sparkMap[l.label] ?? []} placeholder={<span className="text-muted-foreground/40">—</span>} /></td>}
                 </tr>
               ))}
               <tr className="bg-muted/60 font-medium">
@@ -430,7 +452,7 @@ function TimeLoad({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom
   const [p, patch] = useTabParams('fuel_fills/time', { metric: 'fills' as FuelMetric })
   // Вид-срез: период — только из контура рабочей области.
   const period = { from: dateFrom, to: dateTo }
-  const { data, isLoading } = useFills(companyId, period.from, period.to, 'hour')
+  const { data, isLoading } = useFills(companyId, period.from, period.to, 'hour', true)
   if (isLoading) return <Loading />
   if (!data || data.lines.length === 0) return <Empty />
   const max = Math.max(...data.lines.map((l) => l.fills), 1)
@@ -444,7 +466,7 @@ function TimeLoad({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom
           </Select>
         </Field>
       </ViewParamsBar>
-      <FillKpis t={data.totals} />
+      <FillKpis t={data.totals} series={data.series} />
       <FuelHeatmap companyId={companyId} dateFrom={period.from} dateTo={period.to} metric={p.metric} />
       <Card>
         <CardContent className="pt-4">
@@ -487,12 +509,13 @@ function PeriodSummaryKpis({ points, metric, unit }: { points: { label: string; 
   const cv = mean ? Math.sqrt(nums.reduce((a, b) => a + (b - mean) ** 2, 0) / nums.length) / Math.abs(mean) * 100 : 0
   return (
     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-      <KpiCard label="За период" value={fmtFuelMetric(metric, ratio ? mean : total)} accent="success" hint={ratio ? 'среднее' : 'сумма'} />
+      {/* Ряд уже на руках — показываем его тем цифрам, которые о нём и говорят. */}
+      <KpiCard label="За период" value={fmtFuelMetric(metric, ratio ? mean : total)} accent="success" hint={ratio ? 'среднее' : 'сумма'} spark={nums} sparkLabel={`Динамика по ${unit}`} />
       <KpiCard label={`Среднее / ${unit}`} value={fmtFuelMetric(metric, mean)} />
       <KpiCard label="Пик" value={fmtFuelMetric(metric, peak.v)} accent="info" hint={peak.label} />
       <KpiCard label="Минимум" value={fmtFuelMetric(metric, low.v)} hint={low.label} />
-      <KpiCard label="Тренд" value={`${trend >= 0 ? '+' : ''}${trend.toFixed(0)}%`} accent={trend >= 0 ? 'success' : 'danger'} hint="последний vs первый" />
-      <KpiCard label="Стабильность" value={`${cv.toFixed(0)}%`} accent={cv <= 30 ? 'success' : cv <= 70 ? 'warning' : 'danger'} hint="разброс (CV)" />
+      <KpiCard label="Тренд" value={`${trend >= 0 ? '+' : ''}${trend.toFixed(0)}%`} accent={trend >= 0 ? 'success' : 'danger'} hint="последний vs первый" spark={nums} sparkLabel="Как шёл ряд" />
+      <KpiCard label="Стабильность" value={`${cv.toFixed(0)}%`} accent={cv <= 30 ? 'success' : cv <= 70 ? 'warning' : 'danger'} hint="разброс (CV)" spark={nums} sparkLabel="Колебания ряда" />
     </div>
   )
 }

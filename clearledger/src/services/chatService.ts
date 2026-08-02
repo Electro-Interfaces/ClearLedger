@@ -18,7 +18,9 @@ export interface ChatRoom {
   id: string
   /** channel — односторонний (новости, рассылка): пишут владелец и админы канала. */
   type: 'company' | 'direct' | 'group' | 'channel'
-  kind: 'general' | 'news' | null
+  /** Системный чат пространства: общий, канал компании, канал платформы.
+      Значения задаёт chat_router (SYSTEM_ROOMS); null — обычная группа. */
+  kind: 'general' | 'news' | 'platform' | null
   /** Приложение, к которому привязан чат; null — чат всего пространства. */
   scopeProduct?: string | null
   name: string | null
@@ -32,12 +34,20 @@ export interface ChatRoom {
   pinnedMessage: ChatPinned | null
   /** Моя роль в этом чате: owner | admin | member. В канале пишут первые двое. */
   myRole?: string | null
-  /** Приложение, к которому привязан чат; null — чат всего пространства. */
-  scopeProduct?: string | null
+  /** Аватар чата (/api/files/<id>); null — иконка по типу комнаты. */
+  avatarUrl?: string | null
+  /** «Без звука» до этого момента: не шлём push и не красим общий счётчик. */
+  mutedUntil?: string | null
+  /** Объект пространства, при котором живёт чат («группа по станции»). */
+  scopeObjectId?: string | null
+  scopeObjectName?: string | null
+  /** Чат заявки: скрыт из общего списка, открывается из её карточки. */
+  scopeTicketId?: string | null
 }
 
-/** Кто это в пространстве: инженер разработчика платформы, свой сотрудник, партнёр. */
-export type PartyType = 'vendor' | 'internal' | 'partner'
+/** Чат сейчас «без звука»? (9999 год = навсегда) */
+export const isMuted = (r: Pick<ChatRoom, 'mutedUntil'>): boolean =>
+  !!r.mutedUntil && Date.parse(r.mutedUntil) > Date.now()
 
 /** Кто это в пространстве: инженер разработчика платформы, свой сотрудник, партнёр. */
 export type PartyType = 'vendor' | 'internal' | 'partner'
@@ -80,6 +90,8 @@ export interface ChatMessage {
   createdAt: string
   /** Кто написал: разработчик платформы, свой сотрудник или человек партнёра. */
   authorParty?: PartyType | null
+  /** Пересланное: имя автора оригинала («Переслано от …»). */
+  forwardedFrom?: string | null
 }
 
 export interface ChatUser { userId: string; name: string; email: string; online: boolean }
@@ -102,10 +114,11 @@ export interface SendPayload {
  * приложения (к ним всегда добавляются общие чаты пространства), верхняя кнопка
  * параметр не передаёт и получает всё. Один и тот же чат, разные предустановки.
  */
-export const getRooms = (archived = false, product?: string | null) =>
+export const getRooms = (archived = false, product?: string | null, objectId?: string | null) =>
   get<ChatRoom[]>('/api/chat/rooms', {
     archived: String(archived),
     ...(product ? { product } : {}),
+    ...(objectId ? { object_id: objectId } : {}),
   })
 
 export const getRoom = (roomId: string) =>
@@ -116,8 +129,9 @@ export const createRoom = (
   participantIds: string[],
   name?: string,
   scopeProduct?: string | null,
+  scopeObjectId?: string | null,
 ) =>
-  post<ChatRoomDetail>('/api/chat/rooms', { type, participantIds, name, scopeProduct })
+  post<ChatRoomDetail>('/api/chat/rooms', { type, participantIds, name, scopeProduct, scopeObjectId })
 
 export const archiveRoom = (roomId: string) =>
   post<{ ok: boolean; isArchived: boolean }>(`/api/chat/rooms/${roomId}/archive`, {})
@@ -127,6 +141,83 @@ export const unarchiveRoom = (roomId: string) =>
 
 export const addParticipant = (roomId: string, userId: string) =>
   post<{ ok: boolean }>(`/api/chat/rooms/${roomId}/participants`, { userId })
+
+/** Переименовать чат, сменить аватар, привязку к приложению или объекту — владелец
+ * или админ чата (у системных — только пространство; '' очищает значение). */
+export const patchRoom = (roomId: string,
+  body: { name?: string; avatarUrl?: string; scopeProduct?: string; scopeObjectId?: string }) =>
+  patch<{ ok: boolean; name: string | null; avatarUrl: string | null; scopeProduct: string | null; scopeObjectId: string | null }>(
+    `/api/chat/rooms/${roomId}`, body)
+
+/** Убрать участника: владелец — любого, админ чата — обычных участников. */
+export const removeParticipant = (roomId: string, userId: string) =>
+  del(`/api/chat/rooms/${roomId}/participants/${userId}`)
+
+/** Назначить или снять админа чата — только владелец; админов может быть несколько. */
+export const setParticipantRole = (roomId: string, userId: string, role: 'admin' | 'member') =>
+  patch(`/api/chat/rooms/${roomId}/participants/${userId}`, { role })
+
+/** Выйти из группы самому. Системные чаты и каналы — без выхода. */
+export const leaveRoom = (roomId: string) =>
+  post(`/api/chat/rooms/${roomId}/leave`, {})
+
+/** «Без звука»: until = 'forever' | ISO-время | null (включить уведомления). */
+export const muteRoom = (roomId: string, until: 'forever' | string | null) =>
+  post<{ mutedUntil: string | null }>(`/api/chat/rooms/${roomId}/mute`, { until })
+
+/** Переслать сообщение в другие чаты (копия несёт имя автора оригинала). */
+export const forwardMessage = (messageId: string, toRoomIds: string[]) =>
+  post<ChatMessage[]>(`/api/chat/messages/${messageId}/forward`, { toRoomIds })
+
+export interface ChatSearchHit {
+  messageId: string
+  roomId: string
+  roomName: string
+  userName: string | null
+  preview: string
+  createdAt: string
+}
+
+/** Глобальный поиск по всем чатам, где человек участник. */
+export const searchAllMessages = (q: string, limit = 30) =>
+  get<ChatSearchHit[]>('/api/chat/search', { q, limit: String(limit) })
+
+// ── сопряжение с заявками ──────────────────────────────────────────────────
+/** Заявка из сообщения: создаётся через эко-канал Поддержки (стадия, SLA, аудит).
+ * Объект не задан → объект чата → «Офис» по умолчанию (правило на сервере). */
+export const ticketFromMessage = (messageId: string,
+  body: { objectId?: string; title?: string; priority?: 'low' | 'medium' | 'high' }) =>
+  post<{ ok: boolean; ticketId: string | null; ticketNumber: string | null }>(
+    `/api/chat/messages/${messageId}/ticket`, body)
+
+/** Чат заявки (скрытая группа): создаётся при первом обращении из её карточки. */
+export const ensureTicketRoom = (ticketId: string) =>
+  post<ChatRoomDetail>(`/api/chat/tickets/${ticketId}/room`, {})
+
+// ── Web Push: уведомления при закрытой вкладке ─────────────────────────────
+export const getVapidKey = () => get<{ key: string }>('/api/chat/push/vapid')
+
+export const subscribePush = (sub: { endpoint: string; keys: { p256dh: string; auth: string } }) =>
+  post<{ ok: boolean }>('/api/chat/push/subscribe', sub)
+
+export const unsubscribePush = (endpoint: string) =>
+  post('/api/chat/push/unsubscribe', { endpoint, keys: {} })
+
+/** «Кто это» по клику на человека: то, что о нём знает пространство. */
+export interface ChatUserProfile {
+  userId: string
+  name: string
+  email: string
+  position?: string | null
+  /** Уровень в организации: admin | user. */
+  role?: string | null
+  partyType?: PartyType
+  organizationName?: string | null
+  lastSeenAt?: string | null
+}
+
+export const getUserProfile = (userId: string) =>
+  get<ChatUserProfile>(`/api/chat/users/${userId}/profile`)
 
 export const pinMessage = (roomId: string, messageId: string | null) =>
   post<{ roomId: string; pinnedMessage: ChatPinned | null }>(`/api/chat/rooms/${roomId}/pin`, { messageId })

@@ -118,9 +118,9 @@ async def test_operational_status(auth_client: AsyncClient):
 @pytest.mark.asyncio(loop_scope="session")
 async def test_permissions_and_isolation(client: AsyncClient):
     admin = await _admin_token(client)
-    # Обычный пользователь gig (роль user) и пользователь npk.
+    # Обычный пользователь gig (роль user) и пользователь rushydro.
     user_gig = await _create_user(client, admin, "lt_user@test.ru", "gig", "user")
-    user_npk = await _create_user(client, admin, "lt_npk@test.ru", "npk", "user")
+    user_rushydro = await _create_user(client, admin, "lt_rushydro@test.ru", "rushydro", "user")
 
     # Член компании читает каталог.
     assert (await client.get("/api/location-types", headers=_h(user_gig),
@@ -130,17 +130,17 @@ async def test_permissions_and_isolation(client: AsyncClient):
         "company_id": "gig", "code": "x_custom", "name": "X",
     })).status_code == 403
     # Не-член чужой компании не читает её каталог → 403.
-    assert (await client.get("/api/location-types", headers=_h(user_npk),
+    assert (await client.get("/api/location-types", headers=_h(user_rushydro),
                              params={"company_id": "gig"})).status_code == 403
 
-    # Изоляция: кастомный тип gig не виден в каталоге npk.
+    # Изоляция: кастомный тип gig не виден в каталоге rushydro.
     cr = await client.post("/api/location-types", headers=_h(admin), json={
         "company_id": "gig", "code": "gig_only", "name": "Только ГИГ",
     })
     assert cr.status_code == 200, cr.text
-    npk_types = (await client.get("/api/location-types", headers=_h(admin),
-                                  params={"company_id": "npk"})).json()
-    assert not any(t["code"] == "gig_only" for t in npk_types)
+    rushydro_types = (await client.get("/api/location-types", headers=_h(admin),
+                                  params={"company_id": "rushydro"})).json()
+    assert not any(t["code"] == "gig_only" for t in rushydro_types)
     # А в gig — виден.
     gig_types = (await client.get("/api/location-types", headers=_h(admin),
                                   params={"company_id": "gig"})).json()

@@ -10,7 +10,7 @@ from datetime import date, datetime, timezone
 
 import os
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -1448,3 +1448,80 @@ async def store_station_drafts(
     """
     cid = await scope_company_id(user, db)
     return await edge_nsi.station_drafts(db, cid, station_id)
+
+
+@router.post("/station-drafts/item/{draft_id}")
+async def store_resolve_item_draft(
+    draft_id: int,
+    body: dict = Body(...),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Решение по черновику карточки: привязать, завести новую или отклонить.
+
+    После признания станции уходит задание НСИ: она заменит свой черновик
+    каноном, переклеив на него движения и журнал цен. Без этого шага на станции
+    остались бы две карточки на один штрихкод — то, ради чего очередь и
+    заведена.
+    """
+    cid: uuid.UUID = await scope_company_id(user, db)
+    try:
+        res = await edge_nsi.resolve_item_draft(
+            db, cid, draft_id, str(body.get("action") or ""),
+            body.get("item_id"), body.get("note"))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+    if res["action"] in ("link", "create"):
+        row = (await db.execute(text("""
+            SELECT i.external_uuid, i.name, i.unit, i.vat_rate,
+                   coalesce((SELECT array_agg(b.code ORDER BY b.code) FROM edge.barcode b
+                              WHERE b.item_id = i.id AND b.status = 'active'), '{}') AS codes,
+                   (SELECT price FROM edge.price p
+                     WHERE p.item_id = i.id AND p.station_id = :s AND p.valid_to IS NULL) AS price,
+                   i.price_owner
+            FROM edge.item i WHERE i.id = :id
+        """), {"id": res["item_id"], "s": res["station_id"]})).mappings().first()
+        if row is not None:
+            db.add(EdgeDownlink(
+                # nsi_delta — вид, который агент умеет разбирать. Первая версия
+                # ставила «nsi_item», и станция честно писала «неизвестное
+                # задание центра», а признанная карточка до неё не доезжала.
+                company_id=cid, station_id=res["station_id"], kind="nsi_delta",
+                payload={"uuid": str(row["external_uuid"]), "name": row["name"],
+                         "unit": row["unit"], "vat_rate": row["vat_rate"],
+                         "barcodes": list(row["codes"] or []),
+                         "price": float(row["price"]) if row["price"] is not None else None,
+                         "price_owner": row["price_owner"], "deleted": False},
+            ))
+            await db.commit()
+            res["pushed"] = True
+    return res
+
+
+@router.post("/station-drafts/partner/{draft_id}")
+async def store_resolve_partner_draft(
+    draft_id: int,
+    body: dict = Body(...),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Решение по контрагенту станции: принять в справочник сети или отклонить."""
+    cid: uuid.UUID = await scope_company_id(user, db)
+    try:
+        return await edge_nsi.resolve_partner_draft(
+            db, cid, draft_id, str(body.get("action") or ""), body.get("note"))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.get("/station-drafts/candidates")
+async def store_draft_candidates(
+    barcodes: str = Query(..., description="штрихкоды через запятую"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Карточки сети, на которые похож черновик — по штрихкоду."""
+    cid: uuid.UUID = await scope_company_id(user, db)
+    codes = [c.strip() for c in barcodes.split(",") if c.strip()]
+    return {"candidates": await edge_nsi.draft_candidates(db, cid, codes)}

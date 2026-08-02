@@ -1,22 +1,22 @@
 """
-Аналитика продаж топлива по наливам (fuel_transactions) — раздел «Продажи» ГИГ,
-группы «Аналитика» (Наливы) и «Коммерция» (Тарифы / Корпоратив / Частные лица).
+Аналитика продаж топлива по реализациям (fuel_transactions) — раздел «Продажи» ГИГ,
+группы «Аналитика» (Реализация) и «Коммерция» (Тарифы / Корпоратив / Частные лица).
 
 Зеркало ЭЗС-контура (_cs_* в analytics_service + charge_clients), но на грейне
-«один налив»: литры, цена ₽/л, виды оплаты STS. Классификация вида оплаты в
+«одна реализация»: литры, цена ₽/л, виды оплаты STS. Классификация вида оплаты в
 канал — через MappingContext (единственный источник истины, подстрочный матч
 по sort_order): раз в запрос берём DISTINCT pay_type_name компании, резолвим
 каждое имя в Python и строим SQL CASE по ТОЧНЫМ именам (без LIKE в SQL).
 
-Семантика цен (разведка dev-БД 14.07.2026, 338 412 наливов ГИГ):
-  price  — номинал стеллы/ТРК на момент налива (₽/л);
-  amount — фактически уплачено; скидки на грейне налива ≈ 0 (живут в сменном
+Семантика цен (разведка dev-БД 14.07.2026, 338 412 реализаций ГИГ):
+  price  — номинал стеллы/ТРК на момент реализации (₽/л);
+  amount — фактически уплачено; скидки на грейне реализации ≈ 0 (живут в сменном
            sales-блоке fuel_shift_sales.discount);
   факт-цена ВЕЗДЕ = Σamount/Σliters — у «Наличных» встречается amount≠liters·price
   (смена цены внутри смены/округления), avg(price) не использовать.
 Дубли-аналитика («Дисконт»/«Кред.рубл») исключаются из всех сумм — на грейне
-наливов их нет (проверено), но защита обязательна. STS cost cap (1 млн) —
-артефакт сменного блока, на наливах недостижим.
+реализаций их нет (проверено), но защита обязательна. STS cost cap (1 млн) —
+артефакт сменного блока, на реализациях недостижим.
 """
 from __future__ import annotations
 
@@ -33,6 +33,7 @@ from app.models import (
 from app.services.analytics_cache import cached_report
 from app.services.analytics_service import AnalyticsService
 from app.services.fuel_mappings import _DUP_ANALYTIC_PAY, load_mapping_context
+from app.utils import msk_day_end, msk_day_start
 
 T = FuelTransaction
 
@@ -94,7 +95,7 @@ class _Classification:
 
 
 class FuelSalesAnalytics:
-    """Агрегаты продаж по наливам. Методы кешируются версионным кешем компании."""
+    """Агрегаты продаж по реализациям. Методы кешируются версионным кешем компании."""
 
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -128,8 +129,8 @@ class FuelSalesAnalytics:
         """Базовый WHERE. pay_names — уже развёрнутый фильтр канала/сегмента."""
         conds = [
             T.company_id == company_id,
-            T.dt >= datetime(date_from.year, date_from.month, date_from.day),
-            T.dt <= datetime(date_to.year, date_to.month, date_to.day, 23, 59, 59),
+            T.dt >= msk_day_start(date_from),
+            T.dt <= msk_day_end(date_to),
         ]
         if dup_names:
             conds.append(T.pay_type_name.notin_(dup_names))
@@ -245,7 +246,7 @@ class FuelSalesAnalytics:
         """Ratio-метрики: пустой бакет → null (не 0), чтобы линия не проваливалась."""
         return metric in ("avg_check", "avg_fill", "avg_price")
 
-    # ─── Наливы: разрезы ────────────────────────────────────────────────
+    # ─── Реализации: разрезы ────────────────────────────────────────────────
 
     @cached_report("fuel:fills")
     async def fills(self, company_id, date_from: date, date_to: date,
@@ -253,8 +254,9 @@ class FuelSalesAnalytics:
                     station_codes: tuple[int, ...] = (), fuel_codes: tuple[int, ...] = (),
                     segment: str | None = None, channel: str | None = None,
                     card: str | None = None, top: int = 500,
-                    dim: str | None = None, dim_val: str | None = None) -> dict[str, Any]:
-        """Разрез наливов: выручка/литры/наливы/ср.чек/ср.налив/ср.цена по группе.
+                    dim: str | None = None, dim_val: str | None = None,
+                    with_series: bool = False) -> dict[str, Any]:
+        """Разрез реализаций: выручка/литры/реализации/ср.чек/ср.заправка/ср.цена по группе.
 
         `dim`/`dim_val` сужают выборку до ОДНОГО значения другого разреза — на этом
         держится провал вглубь: строку «АИ-95» открываем по видам оплаты, часам и
@@ -317,7 +319,7 @@ class FuelSalesAnalytics:
             func.count(distinct(CARD)).filter(valid_card),
         ).where(*conds))).one()
         tc, tl, ta = int(tot[0]), float(tot[1]), float(tot[2])
-        return {
+        out = {
             "period": {"from": date_from.isoformat(), "to": date_to.isoformat()},
             "group_by": group_by,
             "lines": lines,
@@ -330,8 +332,51 @@ class FuelSalesAnalytics:
                 "stations": int(tot[3] or 0), "cards": int(tot[4] or 0), "share_pct": 100.0,
             },
         }
+        if with_series:
+            out["series"] = await self._totals_series(
+                company_id, date_from, date_to, cls, dups,
+                station_codes, fuel_codes, pay_names, card)
+        return out
 
-    # ─── Наливы: динамика / нарезка / сравнение / heatmap ──────────────
+    async def _totals_series(self, company_id, date_from: date, date_to: date,
+                             cls: _Classification, dups: list[str],
+                             station_codes=(), fuel_codes=(), pay_names=None,
+                             card=None) -> dict[str, Any]:
+        """Ряд тоталов по бакетам — для спарклайнов под цифрами разреза.
+
+        Один скан того же периода на все метрики сразу, гранулярность под длину
+        периода: месяц по дням, полгода по неделям, год по месяцам — иначе
+        спарклайн годового периода превращается в шум из 365 точек.
+        """
+        days = (date_to - date_from).days + 1
+        bucket = "day" if days <= 60 else ("week" if days <= 250 else "month")
+        rows = await self._aggregate_2d(company_id, date_from, date_to, bucket, None,
+                                        cls, dups, station_codes, fuel_codes, pay_names, card)
+        by = {r.b: r for r in rows}
+        axis = AnalyticsService._cs_bucket_axis(date_from, date_to, bucket)
+
+        def series(metric: str) -> list[float | None]:
+            # Средние (чек, заправка, цена) в пустом бакете — null: ноль читался бы
+            # как «продавали по нулю». Счётчики и суммы — честный ноль.
+            empty = None if self._is_ratio(metric) else 0
+            out_: list[float | None] = []
+            for b in axis:
+                r = by.get(b)
+                out_.append(self._metric_from_sums(metric, r.cnt, r.liters, r.amount)
+                            if r is not None else empty)
+            return out_
+
+        return {
+            "bucket": bucket,
+            "axis": axis,
+            "amount": series("amount"),
+            "liters": series("liters"),
+            "fills": series("fills"),
+            "avg_check": series("avg_check"),
+            "avg_price": series("avg_price"),
+        }
+
+    # ─── Реализации: динамика / нарезка / сравнение / heatmap ──────────────
 
     async def _aggregate_2d(self, company_id, date_from, date_to, bucket_by: str,
                             series_by: str | None, cls: _Classification, dups: list[str],
@@ -551,11 +596,11 @@ class FuelSalesAnalytics:
         return {"metric": metric, "cells": cells,
                 "period": {"from": date_from.isoformat(), "to": date_to.isoformat()}}
 
-    # ─── Наливы: когорты «новые карты» ──────────────────────────────────
+    # ─── Реализации: когорты «новые карты» ──────────────────────────────────
 
     def _card_conds(self, company_id, dups: list[str], pay_names: list[str] | None,
                     station_codes=(), fuel_codes=()) -> list:
-        """Условия для когорт: только наливы с валидной картой (без периода)."""
+        """Условия для когорт: только реализации с валидной картой (без периода)."""
         conds = [T.company_id == company_id,
                  CARD.is_not(None),
                  func.trim(T.card).op("!~")("^0+$")]
@@ -576,7 +621,7 @@ class FuelSalesAnalytics:
                               segment: str | None = None, channel: str | None = None) -> dict[str, Any]:
         """По интервалам: активные/новые/вернувшиеся карты + вклад новых.
 
-        «Новая» = первый налив карты за всю историю наблюдений попадает в
+        «Новая» = первая реализация карты за всю историю наблюдений попадает в
         интервал (история — в рамках фильтров: сегмент/станции/топливо)."""
         cls, dups = await self._classification(company_id)
         pay_names = self._pay_filter(cls, segment, channel)
@@ -595,8 +640,8 @@ class FuelSalesAnalytics:
                    func.sum(T.liters).label("liters"),
                    func.sum(T.amount).label("rub"))
             .where(*conds,
-                   T.dt >= datetime(date_from.year, date_from.month, date_from.day),
-                   T.dt <= datetime(date_to.year, date_to.month, date_to.day, 23, 59, 59))
+                   T.dt >= msk_day_start(date_from),
+                   T.dt <= msk_day_end(date_to))
             .group_by(CARD, day)
         )).all()
 
@@ -667,8 +712,8 @@ class FuelSalesAnalytics:
             select(CARD.label("k"), func.min(T.dt).label("fa"))
             .where(*conds).group_by(CARD).subquery()
         )
-        lo = datetime(date_from.year, date_from.month, date_from.day)
-        hi = datetime(date_to.year, date_to.month, date_to.day, 23, 59, 59)
+        lo = msk_day_start(date_from)
+        hi = msk_day_end(date_to)
         ch_case = cls.channel_case()
         rows = (await self.db.execute(
             select(
@@ -792,7 +837,7 @@ class FuelSalesAnalytics:
             })
         lines.sort(key=lambda x: -abs(x["delta"]))
 
-        # Скидки по каналам — из сменного sales-блока (на грейне наливов скидок нет)
+        # Скидки по каналам — из сменного sales-блока (на грейне реализаций скидок нет)
         disc_rows = (await self.db.execute(
             select(FuelShiftSale.payment_channel,
                    func.coalesce(func.sum(FuelShiftSale.amount), 0).label("amount"),
@@ -800,8 +845,8 @@ class FuelSalesAnalytics:
             .join(FuelShift, FuelShift.id == FuelShiftSale.shift_id)
             .where(FuelShiftSale.company_id == company_id,
                    FuelShift.closed_at.is_not(None),
-                   FuelShift.closed_at >= datetime(date_from.year, date_from.month, date_from.day),
-                   FuelShift.closed_at <= datetime(date_to.year, date_to.month, date_to.day, 23, 59, 59))
+                   FuelShift.closed_at >= msk_day_start(date_from),
+                   FuelShift.closed_at <= msk_day_end(date_to))
             .group_by(FuelShiftSale.payment_channel)
         )).all()
         labels = {c.code: c.name for c in (await self.db.execute(
@@ -985,8 +1030,8 @@ class FuelSalesAnalytics:
         pay_names = cls.segment_names(segment)
         conds = self._card_conds(company_id, dups, pay_names)
         conds += [
-            T.dt >= datetime(date_from.year, date_from.month, date_from.day),
-            T.dt <= datetime(date_to.year, date_to.month, date_to.day, 23, 59, 59),
+            T.dt >= msk_day_start(date_from),
+            T.dt <= msk_day_end(date_to),
         ]
         if search:
             conds.append(func.trim(T.card).ilike(f"%{search.strip()}%"))
@@ -1179,8 +1224,8 @@ class FuelSalesAnalytics:
         retail_names = cls.segment_names("retail")
         conds = self._card_conds(company_id, dups, retail_names)
         conds += [
-            T.dt >= datetime(date_from.year, date_from.month, date_from.day),
-            T.dt <= datetime(date_to.year, date_to.month, date_to.day, 23, 59, 59),
+            T.dt >= msk_day_start(date_from),
+            T.dt <= msk_day_end(date_to),
         ]
         rows = (await self.db.execute(
             select(CARD.label("card"), func.count().label("cnt"),

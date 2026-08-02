@@ -6,13 +6,14 @@
  * стадией «Лид» и сразу получает номер.
  */
 import { useState } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
-import { createSite } from '@/services/sitesService'
+import { createSite, getProjectKinds } from '@/services/sitesService'
 
 export function NewProjectDialog({ companyId, onClose, onCreated }: {
   companyId: string; onClose: () => void; onCreated: (id: string) => void
@@ -21,6 +22,12 @@ export function NewProjectDialog({ companyId, onClose, onCreated }: {
   const [form, setForm] = useState({
     title: '', region: '', city: '', address: '', install_place: '', owner: '',
   })
+  // Вид работы — ось маршрута: по нему процесс на входе решает, вести ли подбор
+  // земли и договор или сразу планировать работы. Спросить потом уже поздно:
+  // проект успеет уехать по чужой ветке.
+  const [kind, setKind] = useState('new_build')
+  const kinds = useQuery({ queryKey: ['pr-kinds', companyId], queryFn: () => getProjectKinds(companyId) })
+  const kindDef = (kinds.data?.kinds ?? []).find((k) => k.key === kind)
   const [busy, setBusy] = useState(false)
   // Место должно быть опознаваемо: без адреса или названия объекта проект
   // невозможно ни найти, ни отличить от соседнего.
@@ -29,7 +36,8 @@ export function NewProjectDialog({ companyId, onClose, onCreated }: {
   const save = async () => {
     setBusy(true)
     try {
-      const s = await createSite(companyId, { ...form, stage: 'lead' })
+      // Стадию старта берём у вида: переносу и демонтажу подбор локации не нужен.
+      const s = await createSite(companyId, { ...form, kind, stage: kindDef?.startStage ?? 'lead' })
       await qc.invalidateQueries({ queryKey: ['pr-projects', companyId] })
       await qc.invalidateQueries({ queryKey: ['pr-portfolio', companyId] })
       await qc.invalidateQueries({ queryKey: ['sites-list', companyId] })
@@ -55,9 +63,30 @@ export function NewProjectDialog({ companyId, onClose, onCreated }: {
         <DialogHeader><DialogTitle className="text-base">Новый проект</DialogTitle></DialogHeader>
         <div className="space-y-2">
           <p className="text-xs text-muted-foreground">
-            Заводится стадией «Лид» и получает номер. Право, мощность, экономика и документы
+            Проект сразу получает номер. Право, мощность, экономика и документы
             добавляются в карточке по мере проработки — гейт не пустит дальше без них.
           </p>
+          <div>
+            <div className="text-xs uppercase tracking-wide text-muted-foreground mb-0.5">Вид работы</div>
+            <Select value={kind} onValueChange={setKind}>
+              <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {(kinds.data?.kinds ?? []).map((k) => (
+                  <SelectItem key={k.key} value={k.key} className="text-sm">{k.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {kindDef && (
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {/* Подсказка вида — обрывок фразы («площадка становится станцией»):
+                    в справочнике она задумана как продолжение названия. Без него
+                    строка начинается со строчной буквы и читается как ошибка. */}
+                {kindDef.label} — {kindDef.hint}. {kind === 'new_build'
+                  ? 'Маршрут начнётся с подбора локации, договора и техприсоединения.'
+                  : 'Подбор локации и договор пропускаем — маршрут начнётся с планирования работ.'}
+              </p>
+            )}
+          </div>
           {field('title', 'Название проекта', 'ЭЗС на парковке ТЦ «Гринвич»')}
           <div className="grid grid-cols-2 gap-2">
             {field('region', 'Регион', 'Свердловская область')}

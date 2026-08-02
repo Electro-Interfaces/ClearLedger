@@ -68,18 +68,36 @@ export interface FuelFillsResponse {
   lines: FuelFillsLine[]
   truncated: number
   totals: FuelFillsLine & { label: 'Итого' }
+  /** Ряд тоталов по бакетам — приходит только при withSeries. */
+  series?: FuelTotalsSeries
+}
+
+/** Ряд тоталов для спарклайнов под цифрами разреза. Средние (чек, цена) в пустом
+ *  бакете приходят null, суммы и счётчики — нулём. */
+export interface FuelTotalsSeries {
+  bucket: FuelBucket
+  axis: string[]
+  amount: (number | null)[]
+  liters: (number | null)[]
+  fills: (number | null)[]
+  avg_check: (number | null)[]
+  avg_price: (number | null)[]
 }
 
 export async function getFuelFills(p: FuelPeriodParams & {
   groupBy?: FuelGroupBy; top?: number
   /** Провал вглубь: сузить до одного значения ДРУГОГО разреза («АИ-95», «АЗС 208»). */
   dim?: FuelGroupBy; dimVal?: string
+  /** Просить ряд тоталов для спарклайнов — лишний скан периода на сервере,
+   *  поэтому включают только экраны, которые его рисуют. */
+  withSeries?: boolean
 }): Promise<FuelFillsResponse> {
   return get<FuelFillsResponse>('/api/fuel/analytics/fills', {
     date_from: p.dateFrom, date_to: p.dateTo,
     group_by: p.groupBy ?? 'station',
     ...(p.top ? { top: p.top } : {}),
     ...(p.dim && p.dimVal != null ? { dim: p.dim, dim_val: p.dimVal } : {}),
+    ...(p.withSeries ? { with_series: '1' } : {}),
     ...narrowParams(p),
   })
 }
@@ -295,6 +313,120 @@ export async function getFuelPriceTimeseries(p: {
   })
 }
 
+// ─── Ценообразование (/api/fuel/pricing/*) ──────────────────────────
+// Отдельная секция от `tariffs/*`: та отвечает «по какой цене продали», эта — «кто,
+// когда и на сколько цену двинул».
+
+export interface FuelPriceEvent {
+  day: string
+  station_code: number
+  station: string
+  fuel_code: number
+  fuel_name: string
+  was: number
+  became: number
+  step: number
+  step_pct: number
+  held_days: number
+  liters_before: number | null
+  liters_after: number | null
+  response_pct: number | null
+  /** Окно реакции справа неполное — объём «после» ещё не набран, а не «реакции нет». */
+  window_full: boolean
+  /** Догоняющий скачок: станция стояла и пропустила ступени — не одно решение о цене. */
+  jump: boolean
+}
+
+export interface FuelPriceWave {
+  fuel_code: number
+  fuel_name: string
+  from: string
+  to: string
+  days: number
+  stations: number
+  step_avg: number
+  step_min: number
+  step_max: number
+  first: string[]
+  last: string[]
+  events: number
+}
+
+export interface FuelPriceChangesResponse {
+  period: { from: string; to: string }
+  window_days: number
+  events: FuelPriceEvent[]
+  waves: FuelPriceWave[]
+  totals: {
+    events: number; jumps: number; ups: number; downs: number
+    step_up_avg: number; step_down_avg: number
+    held_median: number; waves: number
+    response_median: number | null; responded: number
+  }
+}
+
+export async function getFuelPriceChanges(p: {
+  companyId: string; dateFrom: string; dateTo: string; fuelCodes?: number[]
+}): Promise<FuelPriceChangesResponse> {
+  return get<FuelPriceChangesResponse>('/api/fuel/pricing/changes', {
+    date_from: p.dateFrom, date_to: p.dateTo,
+    ...(p.fuelCodes?.length ? { fuel_codes: p.fuelCodes.join(',') } : {}),
+  })
+}
+
+export interface FuelPriceCalendarCell {
+  day: string; price: number; liters: number; changed: boolean; varies: boolean
+}
+
+export interface FuelPriceCalendarResponse {
+  period: { from: string; to: string }
+  fuel_code: number
+  fuel_name: string
+  days: string[]
+  rows: { station_code: number; station: string; liters: number; cells: FuelPriceCalendarCell[] }[]
+  price_min: number | null
+  price_max: number | null
+  /** Границы шкалы цвета — 5-й и 95-й процентиль, чтобы выброс не съедал контраст. */
+  scale_low: number | null
+  scale_high: number | null
+}
+
+export async function getFuelPriceCalendar(p: {
+  companyId: string; dateFrom: string; dateTo: string; fuelCode: number
+}): Promise<FuelPriceCalendarResponse> {
+  return get<FuelPriceCalendarResponse>('/api/fuel/pricing/calendar', {
+    date_from: p.dateFrom, date_to: p.dateTo, fuel_code: String(p.fuelCode),
+  })
+}
+
+export interface FuelSpreadLine {
+  station_code: number; station: string
+  fuel_code: number; fuel_name: string
+  price: number; priced_on: string
+  age_days: number; changes: number; liters: number
+  delta_median: number; rank: number
+}
+
+export interface FuelSpreadResponse {
+  period: { from: string; to: string }
+  as_of: string
+  fuels: {
+    fuel_code: number; fuel_name: string; stations: number
+    price_min: number; price_max: number; price_median: number; price_wavg: number
+    spread: number; spread_pct: number; age_max: number; liters: number
+  }[]
+  lines: FuelSpreadLine[]
+}
+
+export async function getFuelPriceSpread(p: {
+  companyId: string; dateFrom: string; dateTo: string; fuelCodes?: number[]
+}): Promise<FuelSpreadResponse> {
+  return get<FuelSpreadResponse>('/api/fuel/pricing/spread', {
+    date_from: p.dateFrom, date_to: p.dateTo,
+    ...(p.fuelCodes?.length ? { fuel_codes: p.fuelCodes.join(',') } : {}),
+  })
+}
+
 // ─── Корпоратив ─────────────────────────────────────────────────────
 
 export interface FuelBreakdownRow {
@@ -457,7 +589,7 @@ export const FUEL_METRIC_LABELS: Record<FuelMetric, string> = {
   liters: 'Объём, л',
   fills: 'Реализации',
   avg_check: 'Средний чек, ₽',
-  avg_fill: 'Ср. реализация, л',
+  avg_fill: 'Ср. заправка, л',
   avg_price: 'Цена, ₽/л',
 }
 

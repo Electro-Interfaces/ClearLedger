@@ -24,12 +24,8 @@ import { useCompany } from '@/contexts/CompanyContext'
 import { getOpsCompleteness, type OpsComplKind } from '@/services/opsService'
 import { StationDrillModal } from './OpsCockpit'
 import { fmtN } from '@/components/balance/balanceCalc'
+import { formatBucket } from '@/lib/formatDate'
 
-const MONTH_SHORT = ['', 'янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек']
-const mLabel = (iso: string) => {
-  const [y, m] = iso.split('-')
-  return `${MONTH_SHORT[Number(m)] || m} ${y.slice(2)}`
-}
 
 /** Цвет ячейки теплокарты по % полноты. */
 function heat(pct: number | null): string {
@@ -59,7 +55,7 @@ function KindDetails({ kind, onOpenStation }: { kind: OpsComplKind; onOpenStatio
             </TableCell>
             {kind.monthly && (
               <TableCell className="text-xs tabular-nums text-muted-foreground">
-                {r.months.map(mLabel).join(', ')}
+                {r.months.map(formatBucket).join(', ')}
               </TableCell>
             )}
             <TableCell className="max-w-[260px] text-xs text-muted-foreground">{r.note}</TableCell>
@@ -115,14 +111,14 @@ export function OpsCompletenessVitrine() {
           <Select value={d.from ?? ''} onValueChange={(v) => setFrom(v)}>
             <SelectTrigger className="h-8 w-[120px] text-xs"><SelectValue /></SelectTrigger>
             <SelectContent className="max-h-[300px]">
-              {d.monthsAll.map((m) => <SelectItem key={m} value={m}>{mLabel(m)}</SelectItem>)}
+              {d.monthsAll.map((m) => <SelectItem key={m} value={m}>{formatBucket(m)}</SelectItem>)}
             </SelectContent>
           </Select>
           <span className="text-xs text-muted-foreground">—</span>
           <Select value={d.to ?? ''} onValueChange={(v) => setTo(v)}>
             <SelectTrigger className="h-8 w-[120px] text-xs"><SelectValue /></SelectTrigger>
             <SelectContent className="max-h-[300px]">
-              {d.monthsAll.map((m) => <SelectItem key={m} value={m}>{mLabel(m)}</SelectItem>)}
+              {d.monthsAll.map((m) => <SelectItem key={m} value={m}>{formatBucket(m)}</SelectItem>)}
             </SelectContent>
           </Select>
           {d.regions.length > 0 && (
@@ -148,7 +144,7 @@ export function OpsCompletenessVitrine() {
         <div className="overflow-x-auto">
           <Table><TableHeader><TableRow>
             <TableHead className="min-w-[240px]">Вид данных / документ</TableHead>
-            {d.months.map((m) => <TableHead key={m} className="text-center">{mLabel(m)}</TableHead>)}
+            {d.months.map((m) => <TableHead key={m} className="text-center">{formatBucket(m)}</TableHead>)}
             <TableHead className="text-center">Итого</TableHead>
             <TableHead className="text-right">Не хватает</TableHead>
           </TableRow></TableHeader><TableBody>

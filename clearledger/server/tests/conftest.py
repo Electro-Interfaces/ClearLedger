@@ -20,6 +20,10 @@ os.environ.setdefault("SECRET_KEY", "test-secret-key")
 # (в проде их нет → бэкдор admin@clearledger.ru/admin123 не появляется).
 os.environ.setdefault("SEED_SUPERADMIN_EMAIL", "admin@clearledger.ru")
 os.environ.setdefault("SEED_SUPERADMIN_PASSWORD", "admin123")
+# Каталог компаний в тестах — полный. Стек компании сужает его до своей
+# (ECOSYSTEM_COMPANIES=rushydro), и прогон внутри такого контейнера ронял семь
+# тестов, которые ждут компанию gig, — падение окружения, а не кода.
+os.environ["ECOSYSTEM_COMPANIES"] = ""
 
 from collections.abc import AsyncGenerator
 

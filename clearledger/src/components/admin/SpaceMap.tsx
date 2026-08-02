@@ -21,6 +21,11 @@ import { getSpaceMap, type SpaceMapCompany, type SpaceMapPerson } from '@/servic
 
 type Filter = 'all' | 'online' | 'partners' | 'noAccess' | 'neverSeen'
 
+/** «31.07, 14:02» — последний вход с точностью до минуты: по голой дате не видно,
+ * человек работал час назад или мельком заглянул утром. */
+const seenLabel = (iso: string) => new Date(iso).toLocaleString('ru-RU',
+  { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+
 const FILTERS: { key: Filter; label: string }[] = [
   { key: 'all', label: 'Все' },
   { key: 'online', label: 'В сети' },
@@ -106,17 +111,26 @@ export function SpaceMap({ companyId, isSuperadmin = false }: {
 
 function CompanyCard({ company, windowDays }: { company: SpaceMapCompany; windowDays: number }) {
   const [filter, setFilter] = useState<Filter>('all')
+  // Сортировка по последнему входу — клик по заголовку «Был»: недавние сверху,
+  // вторым кликом — давние и «никогда» сверху (кого пора тормошить).
+  const [seenSort, setSeenSort] = useState<'desc' | 'asc' | null>(null)
   const apps = company.apps.filter((a) => a.enabled)
 
   const people = useMemo(() => {
+    let list = company.people
     switch (filter) {
-      case 'online': return company.people.filter((p) => p.online)
-      case 'partners': return company.people.filter((p) => p.partyType === 'partner')
-      case 'noAccess': return company.people.filter((p) => p.apps.length === 0)
-      case 'neverSeen': return company.people.filter((p) => !p.lastSeenAt)
-      default: return company.people
+      case 'online': list = list.filter((p) => p.online); break
+      case 'partners': list = list.filter((p) => p.partyType === 'partner'); break
+      case 'noAccess': list = list.filter((p) => p.apps.length === 0); break
+      case 'neverSeen': list = list.filter((p) => !p.lastSeenAt); break
     }
-  }, [company.people, filter])
+    if (seenSort) {
+      const ts = (p: SpaceMapPerson) =>
+        p.online ? Number.MAX_SAFE_INTEGER : p.lastSeenAt ? Date.parse(p.lastSeenAt) : 0
+      list = [...list].sort((a, b) => seenSort === 'desc' ? ts(b) - ts(a) : ts(a) - ts(b))
+    }
+    return list
+  }, [company.people, filter, seenSort])
 
   return (
     <section className="space-y-3 rounded-xl border border-border p-4">
@@ -152,6 +166,11 @@ function CompanyCard({ company, windowDays }: { company: SpaceMapCompany; window
         <span className="ml-auto text-xs text-muted-foreground">показано: {people.length}</span>
       </div>
 
+      <p className="text-[11px] text-muted-foreground">
+        «Заходил(а)» — дата и время последнего входа, сортируется нажатием на заголовок.
+        Галочка в колонке приложения — доступ открыт, прочерк — доступа нет.
+      </p>
+
       {/* Матрица «человек × приложение»: одним взглядом видно, кто куда допущен и
           где доступа нет вообще — в списках это приходится проверять по одному. */}
       <div className="overflow-x-auto rounded-lg border border-border">
@@ -160,12 +179,21 @@ function CompanyCard({ company, windowDays }: { company: SpaceMapCompany; window
             <tr>
               <th className="px-3 py-2 text-left font-medium">Человек</th>
               <th className="px-2 py-2 text-left font-medium">Кто это</th>
+              {/* «Заходил» — слева, до приложений: колонок доступа полтора десятка,
+                  и всё, что правее них, живёт за горизонтальным скроллом — время
+                  последнего входа там никто не находил. */}
+              <th className="px-2 py-2 text-left font-medium">
+                <button type="button" title="Сортировать по последнему входу"
+                  className="inline-flex items-center gap-0.5 hover:text-foreground"
+                  onClick={() => setSeenSort((s) => (s === 'desc' ? 'asc' : 'desc'))}>
+                  Заходил(а) {seenSort === 'desc' ? '↓' : seenSort === 'asc' ? '↑' : ''}
+                </button>
+              </th>
               {apps.map((a) => (
                 <th key={a.code} className="px-2 py-2 text-center font-medium" title={a.name}>
                   {a.name.length > 12 ? `${a.name.slice(0, 12)}…` : a.name}
                 </th>
               ))}
-              <th className="px-2 py-2 text-right font-medium">Был</th>
               <th className="px-2 py-2 text-right font-medium">Событий</th>
             </tr>
           </thead>
@@ -214,20 +242,26 @@ function PersonRow({ person, appCodes }: { person: SpaceMapPerson; appCodes: str
       <td className="px-2 py-2">
         <PartyBadge party={person} />
       </td>
+      <td className="px-2 py-2 text-left text-xs text-muted-foreground">
+        {person.online
+          ? <span className="font-medium text-emerald-600 dark:text-emerald-500">сейчас в сети</span>
+          : person.lastSeenAt
+            ? <span className="whitespace-nowrap tabular-nums"
+                title={new Date(person.lastSeenAt).toLocaleString('ru-RU')}>
+                {seenLabel(person.lastSeenAt)}
+              </span>
+            : <span className="text-amber-600 dark:text-amber-500">ни разу</span>}
+      </td>
+      {/* Один цвет у всех галочек: раньше полный доступ был синим, настроенный —
+          зелёным, и двухцветную матрицу читали как «заходил / не заходил». Цвет
+          здесь ничего не кодирует: галочка — доступ есть, прочерк — нет. */}
       {appCodes.map((code) => (
         <td key={code} className="px-2 py-2 text-center">
           {allowed.has(code)
-            ? <Check className={`mx-auto size-4 ${person.fullAccess ? 'text-primary' : 'text-emerald-600'}`} />
+            ? <Check className="mx-auto size-4 text-primary" />
             : <Minus className="mx-auto size-4 text-muted-foreground/40" />}
         </td>
       ))}
-      <td className="px-2 py-2 text-right text-xs text-muted-foreground">
-        {person.online
-          ? <span className="font-medium text-emerald-600 dark:text-emerald-500">в сети</span>
-          : person.lastSeenAt
-            ? new Date(person.lastSeenAt).toLocaleDateString('ru-RU')
-            : <span className="text-amber-600 dark:text-amber-500">никогда</span>}
-      </td>
       <td className="px-2 py-2 text-right text-xs tabular-nums text-muted-foreground">{person.events}</td>
     </tr>
   )

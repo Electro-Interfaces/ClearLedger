@@ -27,16 +27,18 @@ import { ExportButton } from './analytics/ExportButton'
 import { FuelInsightsBar } from './FuelNetworkPanels'
 import { CHART_SERIES as SERIES, seriesColor } from './analytics/palette'
 import { fmtMoney, fmtMoneyShort, fmtLiters } from '@/services/analyticsService'
-import { formatPeriod } from '@/lib/formatDate'
+import { formatPeriod, formatBucket } from '@/lib/formatDate'
 import {
   getShiftDashboard, getFuelReadiness, getCostingMargin,
   type ShiftDashboardData, type DashTrend, type DashStation, type DashOnboarding,
   type DashActivity, type DashCard,
 } from '@/services/fuel/fuelMappingService'
 import { useFuelKindFilter } from '@/hooks/useFuelKindFilter'
+import { rechartsTooltipTheme } from '@/components/ui/chart-utils'
+import { TrendSpark } from '@/components/ui/trend-spark'
 
 // Цвет маркеров подключения станций (спокойный emerald, тема-независимый).
-const ONBOARD_COLOR = 'hsl(160 60% 45%)'
+const ONBOARD_COLOR = 'hsl(var(--chart-2))'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 const nf1 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 })
@@ -59,7 +61,7 @@ function Empty({ text = 'Нет продаж за период' }: { text?: stri
 }
 
 // ─── дневная ось: '2026-06-04' → '04.06' ─────────────────────────────
-const dayTick = (b: string) => (b.length === 10 ? `${b.slice(8, 10)}.${b.slice(5, 7)}` : b)
+const dayTick = formatBucket
 const chartAxis = { fontSize: 10, fill: 'hsl(var(--muted-foreground))' } as const
 
 // ─── KPI-модель ──────────────────────────────────────────────────────
@@ -82,22 +84,6 @@ function kpiText(k: Kpi): string {
 function trendDelta(t?: DashTrend): number | null {
   if (!t || !(t.previous > 0)) return null
   return t.percent
-}
-
-/** Мини-спарклайн (inline SVG). Пустые бакеты (null) — разрыв линии. */
-function Sparkline({ data }: { data: (number | null)[] }) {
-  const vals = data.filter((v): v is number => v != null)
-  if (vals.length < 2) return null
-  const min = Math.min(...vals), max = Math.max(...vals), rng = max - min || 1
-  const n = data.length
-  const pts = data
-    .map((v, i) => (v == null ? null : `${((i / (n - 1)) * 100).toFixed(1)},${(100 - ((v - min) / rng) * 100).toFixed(1)}`))
-    .filter(Boolean).join(' ')
-  return (
-    <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="mt-2 h-7 w-full text-muted-foreground/60" aria-hidden>
-      <polyline points={pts} fill="none" stroke="currentColor" strokeWidth={3} strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
-    </svg>
-  )
 }
 
 /** Простая счётная плитка (label · value · hint). Порядок детей — контракт экспорта. */
@@ -128,7 +114,7 @@ function KpiCard({ k, baseline }: { k: Kpi; baseline?: string }) {
           {up ? '▲' : '▼'}{Math.abs(k.delta_pct!).toFixed(1)}%
         </span>
       )}
-      {k.spark && <Sparkline data={k.spark} />}
+      {k.spark && <TrendSpark values={k.spark} tone="muted" full />}
     </div>
   )
 }
@@ -289,7 +275,7 @@ function DailyRevenueBar({ daily, onboarding }: {
                 <YAxis yAxisId="left" tick={chartAxis} tickFormatter={(v: number) => fmtMoneyShort(v)} width={56} stroke="hsl(var(--muted-foreground))" />
                 <YAxis yAxisId="right" orientation="right" tick={chartAxis} width={26} allowDecimals={false}
                   domain={[0, maxActive]} stroke={ONBOARD_COLOR} hide={!showMarks} />
-                <Tooltip cursor={{ fill: 'hsl(var(--muted) / 0.3)' }} labelFormatter={(label) => dayTick(String(label))}
+                <Tooltip {...rechartsTooltipTheme} cursor={{ fill: 'hsl(var(--muted) / 0.3)' }} labelFormatter={(label) => dayTick(String(label))}
                   formatter={(value, name) => name === 'Активных АЗС'
                     ? [`${value}`, 'Активных АЗС']
                     : [`${fmtMoney(Number(value))} ₽`, name === 'revenue' ? 'Выручка' : String(name)]} />
@@ -556,7 +542,7 @@ function HourlyActivity({ a }: { a: DashActivity }) {
             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
             <XAxis dataKey="label" tick={chartAxis} interval={1} stroke="hsl(var(--muted-foreground))" />
             <YAxis tick={chartAxis} tickFormatter={(v: number) => nf0.format(v)} width={44} stroke="hsl(var(--muted-foreground))" />
-            <Tooltip cursor={{ fill: 'hsl(var(--muted) / 0.3)' }} labelFormatter={(l) => `${l}:00`} formatter={(v) => [`${nf0.format(Number(v))} реализаций`, 'Реализации']} />
+            <Tooltip {...rechartsTooltipTheme} cursor={{ fill: 'hsl(var(--muted) / 0.3)' }} labelFormatter={(l) => `${l}:00`} formatter={(v) => [`${nf0.format(Number(v))} реализаций`, 'Реализации']} />
             <Bar dataKey="count" fill={SERIES[0]} radius={[3, 3, 0, 0]} isAnimationActive={false} />
           </BarChart>
         </ResponsiveContainer>
@@ -579,9 +565,9 @@ function WeekdayActivity({ a }: { a: DashActivity }) {
             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
             <XAxis dataKey="label" tick={chartAxis} stroke="hsl(var(--muted-foreground))" />
             <YAxis tick={chartAxis} tickFormatter={(v: number) => fmtMoneyShort(v)} width={56} stroke="hsl(var(--muted-foreground))" />
-            <Tooltip cursor={{ fill: 'hsl(var(--muted) / 0.3)' }} formatter={(v) => `${fmtMoney(Number(v))} ₽`} />
+            <Tooltip {...rechartsTooltipTheme} cursor={{ fill: 'hsl(var(--muted) / 0.3)' }} formatter={(v) => `${fmtMoney(Number(v))} ₽`} />
             <Bar dataKey="amount" radius={[3, 3, 0, 0]} isAnimationActive={false}>
-              {a.weekday.map((d) => <Cell key={d.weekday} fill={d.weekday === best ? 'hsl(152, 69%, 45%)' : SERIES[0]} />)}
+              {a.weekday.map((d) => <Cell key={d.weekday} fill={d.weekday === best ? 'hsl(var(--chart-2))' : SERIES[0]} />)}
             </Bar>
           </BarChart>
         </ResponsiveContainer>

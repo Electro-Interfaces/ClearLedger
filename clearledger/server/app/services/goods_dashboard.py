@@ -37,6 +37,23 @@ def _day(smena: dict) -> str:
     return str(smena.get("Закрытие") or smena.get("Открытие") or "")[:10]
 
 
+def _cost_doubt(cost_unit: float | None, price: float | None, buy_unit: float | None) -> str | None:
+    """Верить ли партийной себестоимости остатка. Причина словами или None.
+
+    Партийный регистр на рознице смешанный (пересорт, старые партии), поэтому у части
+    позиций цифра мусорная: то выше розничной цены (маржа уходит в минус), то вдвое ниже
+    реальной закупки (экран рисует маржу 65% там, где её 23%). Обе проверки — грубые, но
+    ловят именно эти два случая; порог 1,4 взят с запасом на нормальный разброс партий.
+    """
+    if cost_unit is None:
+        return None
+    if price is not None and cost_unit > price:
+        return "выше розничной цены"
+    if buy_unit and (cost_unit < buy_unit * 0.6 or cost_unit > buy_unit * 1.4):
+        return f"расходится с закупкой ({round(buy_unit, 2)})"
+    return None
+
+
 class GoodsDashboardService:
     def __init__(self, session: AsyncSession, company_id: uuid.UUID):
         self.session = session
@@ -317,6 +334,50 @@ class GoodsDashboardService:
                 agg[ref][0] += float(ln.get("Сумма") or 0)
                 agg[ref][1] += qty
         return agg
+
+    async def _shift_index(self, date_from: date, date_to: date,
+                           stations: list[str] | None = None) -> dict[str, list[dict]]:
+        """Смены периода по станции: {станция: [{key, number, open, close, day}, …]}.
+
+        Источник — сменные отчёты ЦБ: только в них есть номер смены и её окно.
+        """
+        idx: dict[str, list[dict]] = defaultdict(list)
+        for m in self._select(await self._load(), date_from, date_to, stations):
+            smena = m.get("Смена") or {}
+            day = _day(smena)
+            station = str(smena.get("КодАЗС") or "—")
+            idx[station].append({
+                "key": str(smena.get("Смена") or f"{day}|{station}"),
+                "number": smena.get("НомерСмены") or smena.get("Номер"),
+                "open": smena.get("Открытие"), "close": smena.get("Закрытие"),
+                "day": day,
+            })
+        for lst in idx.values():
+            lst.sort(key=lambda x: str(x["open"] or ""))
+        return idx
+
+    @staticmethod
+    def _shift_of(shifts: list[dict], day: str) -> dict:
+        """Смены дня, к которым относится документ.
+
+        Витринные документы (инвентаризация, списания, перемещения) несут только дату,
+        без времени, поэтому смена определяется днём. В день с двумя сменами документ
+        относится к обеим — приписать его одной значило бы соврать, а прочерк спрятал бы
+        связь, которая есть. Так же устроен и учётный контур ЦБ: документ попадает в
+        смену по интервалу «НачалоДня(Открытие)…КонецДня(Закрытие)», а не по ссылке.
+        """
+        same_day = [sh for sh in shifts if sh["day"] == day]
+        if not same_day:
+            # Сменные отчёты загружены за более короткий период, чем документы движения:
+            # у документа просто нет смены в данных. Догружается обменом, не кодом.
+            return {"key": None, "number": None, "count": 0, "reason": "нет сменного отчёта"}
+        numbers = [str(sh["number"]) for sh in same_day if sh["number"]]
+        return {
+            "key": same_day[0]["key"] if len(same_day) == 1 else None,
+            "number": ", ".join(numbers) if numbers else None,
+            "count": len(same_day),
+            "reason": "в этот день две смены" if len(same_day) > 1 else None,
+        }
 
     async def _release_cost_unit(self, df: date, dt: date,
                                  stations: list[str] | None) -> dict[str, float]:
@@ -936,6 +997,7 @@ class GoodsDashboardService:
     async def receipts(self, date_from: date, date_to: date, stations: list[str] | None = None) -> dict:
         metas = await self._load_purchases(date_from, date_to, stations)
         cparty = await self._refs("counterparty")
+        nom_names = {ref: n.name for ref, n in (await self._names()).items()}
         docs = []
         tot_net = tot_vat = 0.0
         for m in metas:
@@ -947,9 +1009,19 @@ class GoodsDashboardService:
             docs.append({
                 "date": str(d.get("Дата") or "")[:10],
                 "number": d.get("Номер"),
+                # Смена берётся из самой записи: поступления приезжают из ЦБ вместе со
+                # сменным отчётом, гадать по дню (как для витринных) не надо.
+                "shift_number": (m.get("Смена") or {}).get("НомерСмены") or None,
                 "supplier": cparty.get(d.get("Контрагент")) or (d.get("Контрагент") or "—"),
                 "positions": len(lines),
                 "amount": round(amt, 2), "vat": round(vat, 2), "amount_net": round(net, 2),
+                # Состав накладной — для расшифровки строки реестра и поставщика. Формат
+                # тот же, что у остальных документных экранов (ref/name/qty/amount), чтобы
+                # фронт открывал их одной модалкой.
+                "lines": [{"ref": l.get("Номенклатура"), "name": nom_names.get(l.get("Номенклатура") or ""),
+                           "qty": float(l.get("Количество") or 0),
+                           "amount": round(float(l.get("Сумма") or 0), 2),
+                           "amount_net": round(self._purch_net(d, l), 2)} for l in lines],
             })
             tot_net += net
             tot_vat += vat
@@ -1199,16 +1271,25 @@ class GoodsDashboardService:
         rows = (await self.session.execute(select(StockOnHand).where(
             StockOnHand.company_id == self.company_id))).scalars().all()
         nom = await self._names()
+        # Средняя закупка — не вторая база себестоимости, а ПРОВЕРКА партийной: на рознице
+        # партийный регистр смешанный (пересорт, старые партии), и у каждой пятой позиции
+        # цифра мусорная — то выше розничной цены, то вдвое ниже реальной закупки.
+        buy = {g: c[0] for g, c in (await self._cost_unit_map()).items()}
 
         # склады: сводка (код → имя, SKU, стоимость остатка) для селектора
-        wh_agg: dict[str, dict] = defaultdict(lambda: {"name": None, "sku": 0, "retail_value": 0.0})
+        wh_agg: dict[str, dict] = defaultdict(
+            lambda: {"name": None, "sku": 0, "positive": 0, "retail_value": 0.0})
         for r in rows:
             w = wh_agg[r.warehouse_code]
             w["name"] = r.warehouse_name
             w["sku"] += 1
+            if float(r.quantity or 0) > 0:
+                w["positive"] += 1
             w["retail_value"] += float(r.quantity or 0) * float(r.retail_price or 0)
+        # positive в селекторе: у склада 20800002 из 140 позиций на полке 32, остальное —
+        # отрицательные хвосты, и «(140)» рядом с торговым залом обещает лишнего.
         warehouses = [{
-            "code": c, "name": v["name"], "sku": v["sku"],
+            "code": c, "name": v["name"], "sku": v["sku"], "positive": v["positive"],
             "retail_value": round(v["retail_value"], 2),
         } for c, v in wh_agg.items()]
         warehouses.sort(key=lambda x: -x["sku"])
@@ -1243,6 +1324,8 @@ class GoodsDashboardService:
                       if retail_value is not None and cost_amount is not None else None)
             margin_pct = (round(100 * margin / retail_value, 1)
                           if margin is not None and retail_value else None)
+            bu = buy.get(r.nomenclature_ref)
+            cost_doubt = _cost_doubt(cu, price, bu)
             items.append({
                 "guid": r.nomenclature_ref,
                 "name": name,
@@ -1259,12 +1342,21 @@ class GoodsDashboardService:
                 "cost_amount": cost_amount,
                 "margin": margin,
                 "margin_pct": margin_pct,
+                # Единица регистра: остаток весового товара хранится в базовой единице
+                # (молоко — в мл, соусы — в граммах), и без неё «71 510» читается как штуки.
+                "unit": (n.unit if n else None),
+                "cost_doubt": cost_doubt,
+                "buy_unit": round(bu, 2) if bu else None,
             })
         items.sort(key=lambda x: (x["retail_value"] is None, -(x["retail_value"] or 0)))
 
         pos = [i for i in items if i["qty"] > 0]
         neg = [i for i in items if i["qty"] < 0]
-        costed = [i for i in pos if i["cost_amount"] is not None]
+        # Сводная маржа считается по позициям, где себестоимость есть И не вызывает
+        # сомнений: иначе в неё попадали 48 позиций с себестоимостью выше цены и 66
+        # заниженных вдвое, и «потенц. маржа» жила своей жизнью.
+        costed = [i for i in pos if i["cost_amount"] is not None and not i["cost_doubt"]]
+        doubt = [i for i in pos if i["cost_amount"] is not None and i["cost_doubt"]]
         cost_value = sum(i["cost_amount"] for i in costed)
         retail_costed = sum((i["retail_value"] or 0) for i in costed)
         return {
@@ -1280,9 +1372,14 @@ class GoodsDashboardService:
                 # retail_value_all включает отрицательные позиции (для сверки).
                 "retail_value_positive": round(sum((i["retail_value"] or 0) for i in pos), 2),
                 "retail_value_all": round(sum((i["retail_value"] or 0) for i in items), 2),
-                # себест. остатка (закуп.) и потенц. маржа «на полке» — по costed-позициям
+                # Себест. остатка и потенц. маржа — по ОДНОМУ множеству (costed): без этого
+                # плитки стояли на разных базах (635 против 573) и разность одной из другой
+                # не давала показанного процента.
                 "cost_value": round(cost_value, 2),
                 "costed_count": len(costed),
+                "retail_costed": round(retail_costed, 2),   # база маржи — видна на экране
+                "doubt_count": len(doubt),                  # себестоимость есть, но ей нельзя верить
+                "no_cost_count": len(pos) - len(costed) - len(doubt),
                 "margin_value": round(retail_costed - cost_value, 2),
                 "margin_pct": round(100 * (retail_costed - cost_value) / retail_costed, 1) if retail_costed else None,
                 "marked_count": sum(1 for i in items if i["marked"]),
@@ -1309,6 +1406,12 @@ class GoodsDashboardService:
         docs = self._by_period((await self.session.execute(select(CbInventoryDoc).where(
             CbInventoryDoc.company_id == self.company_id,
             CbInventoryDoc.deleted.is_(False)))).scalars().all(), date_from, date_to)
+
+        # Смена документа: движение товара живёт внутри смены, поэтому смена нужна в
+        # реестре. У витринных документов есть только дата — в двухсменный день
+        # документ относится к обеим сменам, и это показывается, а не прячется.
+        _shifts = [sh for lst in (await self._shift_index(
+            date_from or date(2000, 1, 1), date_to or date(2100, 1, 1))).values() for sh in lst]
 
         # склады для селектора
         wh_agg: dict[str, dict] = defaultdict(lambda: {"name": None, "count": 0})
@@ -1337,6 +1440,7 @@ class GoodsDashboardService:
                     k = ln.get("ref") or ln.get("name")
                     s = sku_short[k]
                     s["name"] = ln.get("name")
+                    s["ref"] = ln.get("ref")   # чтобы строка топа вела в карточку товара
                     s["qty"] += float(ln.get("dev") or 0)
                     s["amount"] += float(ln.get("amount_dev") or 0)
                     s["docs"] += 1
@@ -1344,11 +1448,15 @@ class GoodsDashboardService:
                 "ref": d.external_ref, "number": d.number, "date": d.doc_date,
                 "warehouse_code": d.warehouse_code, "warehouse_name": d.warehouse_name,
                 "comment": d.comment, "dev_positions": d.dev_positions,
+                **{f"shift_{k}": v for k, v in
+                   self._shift_of(_shifts, (d.doc_date or "")[:10]).items()},
                 "shortage_qty": float(d.shortage_qty or 0), "shortage_amount": float(d.shortage_amount or 0),
                 "surplus_qty": float(d.surplus_qty or 0), "surplus_amount": float(d.surplus_amount or 0),
                 "net_amount": float(d.net_amount or 0),
-                # lines в БД — полная ТЧ; дрилл реестра показывает только отклонения
-                "lines": [ln for ln in (d.lines or []) if ln.get("dev")],
+                # lines в БД — полная ТЧ; дрилл реестра показывает только отклонения.
+                # Если отклонений нет вовсе — отдаём состав как есть, иначе документ
+                # «пересчитано 340 позиций, расхождений нет» открывался пустым.
+                "lines": [ln for ln in (d.lines or []) if ln.get("dev")] or (d.lines or []),
             })
         out_docs.sort(key=lambda x: (x["date"] or ""), reverse=True)
 
@@ -1382,6 +1490,12 @@ class GoodsDashboardService:
             CbMovementDoc.deleted.is_(False), CbMovementDoc.posted.is_(True),
             CbMovementDoc.kind == "writeoff"))).scalars().all(), date_from, date_to)
 
+        # Смена документа: движение товара живёт внутри смены, поэтому смена нужна в
+        # реестре. У витринных документов есть только дата — в двухсменный день
+        # документ относится к обеим сменам, и это показывается, а не прячется.
+        _shifts = [sh for lst in (await self._shift_index(
+            date_from or date(2000, 1, 1), date_to or date(2100, 1, 1))).values() for sh in lst]
+
         wh_agg: dict[str, dict] = defaultdict(lambda: {"name": None, "count": 0})
         reasons_all: dict[str, dict] = defaultdict(lambda: {"count": 0, "amount": 0.0})
         for d in docs:
@@ -1408,6 +1522,7 @@ class GoodsDashboardService:
             for ln in (d.lines or []):
                 k = ln.get("ref") or ln.get("name")
                 sk = sku[k]; sk["name"] = ln.get("name")
+                sk["ref"] = ln.get("ref")   # чтобы строка топа вела в карточку товара
                 sk["qty"] += float(ln.get("qty") or 0)
                 sk["amount"] += float(ln.get("amount") or 0)
                 sk["docs"] += 1
@@ -1415,6 +1530,8 @@ class GoodsDashboardService:
                 "ref": d.external_ref, "number": d.number, "date": d.doc_date,
                 "warehouse_code": d.warehouse_code, "warehouse_name": d.warehouse_name,
                 "reason": d.reason, "from_inventory": d.from_inventory, "comment": d.comment,
+                **{f"shift_{k}": v for k, v in
+                   self._shift_of(_shifts, (d.doc_date or "")[:10]).items()},
                 "positions": d.positions, "total_qty": float(d.total_qty or 0),
                 "total_amount": amt, "lines": d.lines or [],
             })
@@ -1456,6 +1573,12 @@ class GoodsDashboardService:
             CbMovementDoc.deleted.is_(False), CbMovementDoc.posted.is_(True),
             CbMovementDoc.kind == "transfer"))).scalars().all(), date_from, date_to)
 
+        # Смена документа: движение товара живёт внутри смены, поэтому смена нужна в
+        # реестре. У витринных документов есть только дата — в двухсменный день
+        # документ относится к обеим сменам, и это показывается, а не прячется.
+        _shifts = [sh for lst in (await self._shift_index(
+            date_from or date(2000, 1, 1), date_to or date(2100, 1, 1))).values() for sh in lst]
+
         dirs_all: dict[str, dict] = defaultdict(lambda: {"count": 0, "amount": 0.0})
         for d in docs:
             dirs_all[d.reason or "Прочее"]["count"] += 1
@@ -1475,6 +1598,7 @@ class GoodsDashboardService:
             for ln in (d.lines or []):
                 k = ln.get("ref") or ln.get("name")
                 sk = sku[k]; sk["name"] = ln.get("name")
+                sk["ref"] = ln.get("ref")   # чтобы строка топа вела в карточку товара
                 sk["qty"] += float(ln.get("qty") or 0)
                 sk["amount"] += float(ln.get("amount") or 0)
                 sk["docs"] += 1
@@ -1482,6 +1606,8 @@ class GoodsDashboardService:
                 "ref": d.external_ref, "number": d.number, "date": d.doc_date,
                 "from_code": d.warehouse_code, "from_name": d.warehouse_name,
                 "to_code": d.warehouse_to_code, "to_name": d.warehouse_to_name,
+                **{f"shift_{k}": v for k, v in
+                   self._shift_of(_shifts, (d.doc_date or "")[:10]).items()},
                 "direction": d.reason, "comment": d.comment,
                 "positions": d.positions, "total_qty": float(d.total_qty or 0),
                 "total_amount": amt, "lines": d.lines or [],
@@ -1565,6 +1691,8 @@ class GoodsDashboardService:
                 "ref": d.external_ref, "number": d.number, "date": d.doc_date,
                 "warehouse_code": d.warehouse_code, "warehouse_name": d.warehouse_name,
                 "reason": d.reason, "comment": d.comment,
+                # Смену здесь не показываем: переоценка меняет цену на складе, а не
+                # движение внутри смены — привязка к смене ничего бы не объясняла.
                 "positions": d.positions, "up_count": int(d.total_qty or 0),
                 "value_impact": float(d.total_amount or 0), "lines": d.lines or [],
             })
@@ -1612,7 +1740,9 @@ class GoodsDashboardService:
                 for ing in ln.get("Ингредиенты") or []:
                     ig = ing.get("Номенклатура")
                     n = nom.get(ig)
-                    ings.append({"name": (n.name if n else str(ig)[:8]), "qty": round(float(ing.get("Количество") or 0), 3)})
+                    # guid ингредиента — чтобы из состава ТТК открывалась его карточка
+                    ings.append({"guid": ig, "name": (n.name if n else str(ig)[:8]),
+                                 "qty": round(float(ing.get("Количество") or 0), 3)})
                 if ings:
                     dn = nom.get(g)
                     dishes[g] = {"guid": g, "name": (dn.name if dn else str(g)[:8]), "ingredients": ings, "ing_count": len(ings)}

@@ -8,10 +8,11 @@ import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.audit import log_audit
 from app.auth import (
     create_access_token,
     get_current_user,
@@ -37,13 +38,26 @@ from app.schemas import (
 router = APIRouter(prefix="/auth", tags=["Аутентификация"])
 
 
+def _client_ip(request: Request) -> str | None:
+    """IP входящего — за Traefik/nginx настоящий адрес живёт в X-Forwarded-For."""
+    xff = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
+    return xff or (request.client.host if request.client else None)
+
+
 @router.post("/login", response_model=TokenResponse)
-async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
+async def login(body: LoginRequest, request: Request, db: AsyncSession = Depends(get_db)):
     """Вход по email + пароль. Возвращает JWT."""
     result = await db.execute(select(User).where(User.email == body.email))
     user = result.scalar_one_or_none()
 
     if user is None or not verify_password(body.password, user.password_hash):
+        # Неудачную попытку по СУЩЕСТВУЮЩЕМУ email пишем в журнал его компании:
+        # админ должен видеть, что в учётку ломятся. Несуществующие email не пишем —
+        # журнал не место для перебора чужих адресов.
+        if user is not None and user.company_id is not None:
+            await log_audit(db, actor=user, company_id=user.company_id,
+                            action="auth.login_failed", target=_client_ip(request))
+            await db.commit()
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Неверный email или пароль",
@@ -52,6 +66,9 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
     # Отметка входа: без неё карта пространства показывала «не заходили» даже у тех, кто
     # работает каждый день — раньше last_seen_at обновлял только веб-сокет чата.
     user.last_seen_at = datetime.now(timezone.utc)
+    if user.company_id is not None:
+        await log_audit(db, actor=user, company_id=user.company_id,
+                        action="auth.login", target=_client_ip(request))
     await db.commit()
 
     token = create_access_token(str(user.id), user.email)
@@ -126,6 +143,9 @@ async def reset_password(
     user.password_hash = hash_password(body.password)
     user.reset_token_hash = None
     user.reset_token_expires = None
+    if user.company_id is not None:
+        await log_audit(db, actor=user, company_id=user.company_id,
+                        action="auth.password_reset")
     await db.flush()
     return {"ok": True}
 

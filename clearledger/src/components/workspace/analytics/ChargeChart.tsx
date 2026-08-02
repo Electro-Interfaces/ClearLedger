@@ -16,6 +16,7 @@ import {
 } from '@/services/analyticsService'
 
 import { CHART_SERIES as COLORS } from './palette'
+import { formatBucket } from '@/lib/formatDate'
 
 export type ChartType = 'bar' | 'line' | 'area'
 export type ChartMode = 'plain' | 'cumulative' | 'index'
@@ -104,7 +105,7 @@ export function ChargeChart({ data, series, metric = 'amount', view, height = 32
         {highlightBars && d.map((row, j) => {
           const v = row[series[0]]
           const op = v === max ? 1 : v === min ? 0.85 : 0.45
-          const c = v === min ? 'hsl(25, 100%, 55%)' : color
+          const c = v === min ? 'hsl(var(--chart-3))' : color
           return <Cell key={j} fill={c} fillOpacity={op} />
         })}
       </Bar>
@@ -116,7 +117,8 @@ export function ChargeChart({ data, series, metric = 'amount', view, height = 32
       <ComposedChart data={d} margin={{ top: 8, right: 16, left: 4, bottom: 4 }} stackOffset={percent ? 'expand' : undefined}>
         <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
         <XAxis dataKey="bucket" tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }} tickLine={false}
-          axisLine={{ stroke: 'hsl(var(--border))' }} interval="preserveStartEnd" />
+          axisLine={{ stroke: 'hsl(var(--border))' }} interval="preserveStartEnd"
+          tickFormatter={(v) => formatBucket(String(v))} />
         <YAxis tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 12 }} tickLine={false} axisLine={false} width={56}
           scale={view.log ? 'log' : 'auto'}
           domain={view.log ? [0.1, 'auto'] : percent ? [0, 1] : ['auto', 'auto']}

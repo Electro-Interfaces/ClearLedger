@@ -109,7 +109,15 @@ class OneCHttpAgentClient:
     # ─── lifecycle ──────────────────────────────────────────────────
 
     async def aclose(self) -> None:
+        # Лицензия 1С у агента ОДНА: пока соединение с базой открыто, следующий /connect
+        # падает «Не обнаружено свободной лицензии». Раньше закрывалась только HTTP-сессия,
+        # а соединение оставалось висеть — и второй прогон канала уже не проходил.
         if self._client is not None:
+            if self._connected:
+                try:
+                    await self._client.post(f"{self.agent_url}/disconnect", headers=self._headers())
+                except Exception:  # агент недоступен или уже отпустил — закрытию не мешаем
+                    logger.debug("agent /disconnect не прошёл", exc_info=True)
             try:
                 await self._client.aclose()
             finally:
@@ -223,3 +231,83 @@ class OneCHttpAgentClient:
     async def enrich_nomenclature(self, refs: list[str]) -> dict[str, dict[str, Any]]:
         await self._ensure_connected()
         return dict(await self._post("/enrich_nomenclature", {"refs": refs}) or {})
+
+    # ── Операции канала ЦБ ЭЛСИ.АЗК ─────────────────────────────────────────
+    # Сигнатуры 1:1 с OneCComClient: оркестратор и витрины не знают, каким
+    # транспортом ходят — subprocess на Windows или HTTP-агент из контейнера.
+
+    async def fetch_register_balance(
+        self,
+        register: str,
+        *,
+        dimensions: list[str] | None = None,
+        resources: list[str] | None = None,
+        on_date: str | None = None,
+        top: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Остатки регистра накопления (виртуальная таблица <Регистр>.Остатки)."""
+        await self._ensure_connected()
+        body: dict[str, Any] = {"register": register}
+        if dimensions is not None:
+            body["dimensions"] = dimensions
+        if resources is not None:
+            body["resources"] = resources
+        if on_date is not None:
+            body["on_date"] = on_date
+        if top is not None:
+            body["top"] = top
+        return list(await self._post("/fetch_register_balance", body) or [])
+
+    async def query_tabular(
+        self,
+        doc_type: str,
+        tabular: str,
+        *,
+        select: list[str] | None = None,
+        where: str | None = None,
+        top: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Строки ТЧ документа (движения товара: инвентаризации, списания, переоценки)."""
+        await self._ensure_connected()
+        body: dict[str, Any] = {"doc_type": doc_type, "tabular": tabular}
+        if select is not None:
+            body["select"] = select
+        if where is not None:
+            body["where"] = where
+        if top is not None:
+            body["top"] = top
+        return list(await self._post("/query_tabular", body) or [])
+
+    async def fetch_cb_shifts(
+        self,
+        period_from: str,
+        period_to: str,
+        station: str = "208",
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """Смены ЦБ (сопутка/общепит) за период → пакеты v2 для cb_normalize."""
+        await self._ensure_connected()
+        return list(await self._post("/fetch_cb_shifts", {
+            "period_from": period_from, "period_to": period_to,
+            "station": station, "limit": limit,
+        }) or [])
+
+    async def _period_op(self, path: str, period_from: str, period_to: str,
+                         station: str = "208") -> list[dict[str, Any]]:
+        await self._ensure_connected()
+        return list(await self._post(path, {
+            "period_from": period_from, "period_to": period_to, "station": station,
+        }) or [])
+
+    async def fetch_production(self, period_from: str, period_to: str,
+                               station: str = "208") -> list[dict[str, Any]]:
+        """Выпуск блюд: себестоимость общепита от 1С (по рецептуре в момент продажи)."""
+        return await self._period_op("/fetch_production", period_from, period_to, station)
+
+    async def fetch_gain(self, period_from: str, period_to: str,
+                         station: str = "208") -> list[dict[str, Any]]:
+        return await self._period_op("/fetch_gain", period_from, period_to, station)
+
+    async def fetch_returns(self, period_from: str, period_to: str,
+                            station: str = "208") -> list[dict[str, Any]]:
+        return await self._period_op("/fetch_returns", period_from, period_to, station)

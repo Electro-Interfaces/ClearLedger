@@ -22,6 +22,7 @@ import { cn } from '@/lib/utils'
 import { getFuelColor } from '@/utils/fuelColors'
 import { getShiftDashboard, getFuelReadiness, type ShiftDashboardData } from '@/services/fuel/fuelMappingService'
 import { useCompany } from '@/contexts/CompanyContext'
+import { rechartsTooltipTheme } from '@/components/ui/chart-utils'
 
 const rub = (v: number) => (v ?? 0).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const rub0 = (v: number) => (v ?? 0).toLocaleString('ru-RU', { maximumFractionDigits: 0 })
@@ -387,7 +388,7 @@ function ChartsBlock({ data }: { data: ShiftDashboardData }) {
             <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
             <XAxis dataKey="label" tick={{ fontSize: 11 }} />
             <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `${Math.round(v / 1000)}к`} />
-            <Tooltip formatter={(v) => `${rub(Number(v))} ₽`} />
+            <Tooltip {...rechartsTooltipTheme} formatter={(v) => `${rub(Number(v))} ₽`} />
             <Legend wrapperStyle={{ fontSize: 11 }} />
             <Bar dataKey="cash" stackId="r" name="Наличные" fill="#22c55e" />
             <Bar dataKey="card" stackId="r" name="Карты" fill="#3b82f6" />
@@ -405,7 +406,7 @@ function ChartsBlock({ data }: { data: ShiftDashboardData }) {
             <Pie data={payPie} dataKey="value" nameKey="name" innerRadius={45} outerRadius={80} paddingAngle={2}>
               {payPie.map((_, i) => <Cell key={i} fill={['#22c55e', '#3b82f6', '#8b5cf6', '#f97316', '#eab308', '#f59e0b'][i % 6]} />)}
             </Pie>
-            <Tooltip formatter={(v) => `${rub(Number(v))} ₽`} />
+            <Tooltip {...rechartsTooltipTheme} formatter={(v) => `${rub(Number(v))} ₽`} />
             <Legend wrapperStyle={{ fontSize: 11 }} />
           </PieChart>
         </ResponsiveContainer>

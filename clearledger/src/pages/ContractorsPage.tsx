@@ -39,6 +39,7 @@ import * as refs from '@/services/referenceService'
 import { getCorporateClients } from '@/services/corporateService'
 import { ROLE_LABEL, PAYMENT_META, paidThroughLabel } from '@/types/settlement'
 import { ContractScopeDialog, ContractScopeBadgeLabel } from '@/components/reference/ContractScopeDialog'
+import { OpsTermsBlock } from '@/components/balance/OpsTermDialog'
 import { AdvancedOnly, AdvancedHint } from '@/components/common/AdvancedOnly'
 import type { Counterparty, Contract, CounterpartyType } from '@/types'
 
@@ -231,6 +232,14 @@ function ContractDetailDialog({ contract: c, children }: { contract: Contract; c
             {isEnergy && <Req label="Охват точек" value={ContractScopeBadgeLabel(c.scopeType)} />}
             <Req label="Комментарий" value={c.comment || (raw.Комментарий as string)} span />
           </div>
+          {/* Условие — это договор, прочитанный учётом: «5000 ₽ в месяц до 10-го
+              числа». Держим его здесь же, а не отдельным реестром приложения:
+              иначе человек ищет связь, которую система знает сама. */}
+          {isEnergy && (
+            <div className="border-t border-border/50 pt-3">
+              <OpsTermsBlock contractId={c.id} />
+            </div>
+          )}
           <div className="space-y-2 border-t border-border/50 pt-3">
             <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/70">Все реквизиты из 1С</p>
             <RawRequisites raw={c.raw} hide={['Номер', 'Дата', 'ВидДоговора', 'СрокДействия', 'Сумма', 'ДоговорЗакрыт', 'СуммаВключаетНДС', 'Комментарий']} />

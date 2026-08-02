@@ -223,12 +223,35 @@ export const READINESS_LABEL: Record<Readiness, string> = {
  * но экранов у него пока нет. Пустая рабочая область читалась бы как поломка, поэтому
  * каждый такой продукт объясняет, что здесь появится и где эти функции сейчас.
  */
-export const PRODUCT_SETUP_NOTE: Record<string, { icon: LucideIcon; title: string; description: string }> = {
+export const PRODUCT_SETUP_NOTE: Record<string, {
+  icon: LucideIcon; title: string; description: string
+  /** Демонстрационный стенд продукта: «в подключении» — не значит «нечего показать».
+   *  `accounts` — доступы САМОГО ДЕМО (вымышленная сеть, не боевые данные), поэтому
+   *  показываются открыто: иначе стенд бесполезен — войти в него нечем. */
+  demo?: {
+    url: string; label: string; note: string
+    accounts?: { role: string; login: string; password: string }[]
+    /** Код боевого продукта: если он подключён компании — демо не показываем.
+     *  У ГИГ процессинг рабочий (мост `processing`), и звать его в демо незачем. */
+    hideIfApp?: string
+  }
+}> = {
   corp: {
     icon: Building2,
     title: 'Процессинг — в подключении',
     description: 'Рабочее место по юрлицам: договоры, лимиты и тарифные планы под ЮЛ. '
       + 'Пока корпоративные клиенты, тарифы и частные лица ведутся в «Продажах».',
+    demo: {
+      url: 'https://lkdemo.dataworker.ru',
+      label: 'Посмотреть демо процессинга',
+      note: 'Демо-стенд на данных вымышленной сети «НордТопливо»: эмитент, контрагенты, '
+        + 'карты, лимиты, тарифы и транзакции. Открывается в новой вкладке.',
+      accounts: [
+        { role: 'Эмитент — видит всю сеть', login: 'demo@nordtoplivo.ru', password: 'demo2026' },
+        { role: 'Контрагент — свои карты и лимиты', login: 'demo-client@translog.ru', password: 'demo2026' },
+      ],
+      hideIfApp: 'processing',
+    },
   },
   diag: {
     icon: Stethoscope,

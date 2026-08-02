@@ -17,6 +17,8 @@ import { useTabParams } from '@/hooks/useTabParams'
 import { getTariffGrid, getFactVsNominal, type FvnLine } from '@/services/tariffService'
 import { getChargeSessions, getChargeTimeseries, type ChargeSessionLine } from '@/services/analyticsService'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
+import { formatBucket } from '@/lib/formatDate'
+import { rechartsTooltipTheme } from '@/components/ui/chart-utils'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 const nf1 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 })
@@ -256,12 +258,12 @@ function TariffDynamics({ companyId, dateFrom, dateTo }: TabProps) {
             <LineChart data={rows} margin={{ top: 8, right: 8, left: 4, bottom: 4 }}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
               <XAxis dataKey="bucket" tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} stroke="hsl(var(--muted-foreground))"
-                tickFormatter={(b: string) => (b.length === 7 ? `${b.slice(5)}.${b.slice(2, 4)}` : b)} />
+                tickFormatter={formatBucket} />
               <YAxis tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} stroke="hsl(var(--muted-foreground))"
                 width={52} domain={['auto', 'auto']} tickFormatter={(v: number) => rub(v)} />
-              <Tooltip cursor={{ stroke: 'hsl(var(--muted-foreground))', strokeDasharray: '3 3' }}
+              <Tooltip {...rechartsTooltipTheme} cursor={{ stroke: 'hsl(var(--muted-foreground))', strokeDasharray: '3 3' }}
                 labelFormatter={(b) => String(b)} formatter={(v) => [`${rub(Number(v))} ₽/кВтч`, 'Тариф']} />
-              <Line type="monotone" dataKey="value" stroke="hsl(217, 91%, 60%)" strokeWidth={2} dot={{ r: 2 }} isAnimationActive={false} />
+              <Line type="monotone" dataKey="value" stroke="hsl(var(--chart-1))" strokeWidth={2} dot={{ r: 2 }} isAnimationActive={false} />
             </LineChart>
           </ResponsiveContainer>
         </div>

@@ -18,6 +18,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { getChargeLongTrend } from '@/services/analyticsService'
 import { useNetScope } from '@/hooks/useScopeReset'
 import { seriesColor } from './analytics/palette'
+import { rechartsTooltipTheme } from '@/components/ui/chart-utils'
 
 const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: d }).format(n)
 
@@ -131,7 +132,7 @@ export function ChargeTrendPanel({ companyId }: {
             <CartesianGrid strokeDasharray="3 3" stroke="currentColor" opacity={0.08} />
             <XAxis dataKey="period" tick={{ fontSize: 10 }} interval={2} />
             <YAxis tick={{ fontSize: 10 }} tickFormatter={(v: number) => nf(v / 1000) + 'к'} width={44} />
-            <Tooltip
+            <Tooltip {...rechartsTooltipTheme}
               formatter={(v, name) => [`${nf(Number(v))} кВт·ч`, DIM_LABEL[String(name)] ?? String(name)]}
               labelFormatter={(l) => {
                 const key = String(l)

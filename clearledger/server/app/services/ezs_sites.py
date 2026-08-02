@@ -1127,8 +1127,14 @@ async def list_sites(
         conds.append(S.stage.in_(STAGE_ORDER))
     if search:
         like = f"%{search.lower()}%"
-        conds.append(func.lower(func.coalesce(S.full_address, "") + " " + func.coalesce(S.city, "")
-                                 + " " + func.coalesce(S.owner, "") + " " + func.coalesce(S.install_place, "")).like(like))
+        # Название, номер и адрес карточки ищутся наравне: менеджер помнит проект по
+        # имени, а не по улице, и пустой ответ на точное название читается как потеря
+        # данных. `address` — то, что ввели руками, `full_address` — нормализованный.
+        conds.append(func.lower(
+            func.coalesce(S.title, "") + " " + func.coalesce(S.project_no, "") + " "
+            + func.coalesce(S.full_address, "") + " " + func.coalesce(S.address, "") + " "
+            + func.coalesce(S.city, "") + " " + func.coalesce(S.owner, "") + " "
+            + func.coalesce(S.install_place, "")).like(like))
     total = int((await db.execute(select(func.count()).select_from(S).where(*conds))).scalar_one() or 0)
     rows = (await db.execute(
         select(S, func.coalesce(User.name, User.email))

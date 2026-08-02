@@ -18,6 +18,7 @@ from app.models import (
     FuelShift, FuelShiftSale, FuelReceipt, FuelCashMovement, FuelStation, FuelTransaction,
 )
 from app.services.fuel_mappings import load_mapping_context
+from app.utils import msk_day_end, msk_day_start
 
 # payment_channel (код TradeLedger) → (тип оплаты для UI, только объём без выручки)
 _PAY_MAP: dict[str, tuple[str, bool]] = {
@@ -37,8 +38,8 @@ class FuelDashboardService:
 
     async def _load(self, date_from: date, date_to: date, station_ids: list[uuid.UUID] | None,
                     fuel_codes: tuple[int, ...] = ()):
-        dt_from = datetime(date_from.year, date_from.month, date_from.day)
-        dt_to = datetime(date_to.year, date_to.month, date_to.day, 23, 59, 59)
+        dt_from = msk_day_start(date_from)
+        dt_to = msk_day_end(date_to)
         q = select(FuelShift).where(
             FuelShift.company_id == self.company_id,
             FuelShift.opened_at >= dt_from,
@@ -83,14 +84,14 @@ class FuelDashboardService:
         by_station = await self._by_station(shifts, sales)
         onboarding = await self._onboarding()
         # Разрез оплат/топлива со счётчиком НАЛИВОВ — из пооперационных транзакций
-        # (fuel_transactions, грейн=налив). Фолбэк на сырые отчёты смен (без count),
+        # (fuel_transactions, грейн=реализация). Фолбэк на сырые отчёты смен (без count),
         # если транзакции за период ещё не загружены.
         payment_methods, fuel_types_raw = await self._tx_breakdowns(date_from, date_to, station_ids, fuel_codes)
         if not payment_methods:
             payment_methods, fuel_types_raw = await self._raw_breakdowns(date_from, date_to, station_ids)
         activity = await self._activity(date_from, date_to, station_ids)
         top_cards = await self._top_cards(date_from, date_to, station_ids)
-        # Средние показатели АЗС (по наливам): средний чек, средний объём заправки,
+        # Средние показатели АЗС (по реализациям): средний чек, средний объём заправки,
         # операций/день — как OverviewKPICards в TradeFrame. Из транзакций (count).
         _txc = sum(int(p.get("count") or 0) for p in payment_methods)
         _txa = sum(float(p.get("revenue") or 0) for p in payment_methods)
@@ -144,8 +145,8 @@ class FuelDashboardService:
         T = FuelTransaction
         conds = [
             T.company_id == self.company_id,
-            T.dt >= datetime(date_from.year, date_from.month, date_from.day),
-            T.dt <= datetime(date_to.year, date_to.month, date_to.day, 23, 59, 59),
+            T.dt >= msk_day_start(date_from),
+            T.dt <= msk_day_end(date_to),
         ]
         if station_codes:
             conds.append(T.station_code.in_(station_codes))
@@ -351,15 +352,15 @@ class FuelDashboardService:
     def _tx_conds(self, date_from: date, date_to: date, station_ids: list | None):
         T = FuelTransaction
         conds = [T.company_id == self.company_id,
-                 T.dt >= datetime(date_from.year, date_from.month, date_from.day),
-                 T.dt <= datetime(date_to.year, date_to.month, date_to.day, 23, 59, 59)]
+                 T.dt >= msk_day_start(date_from),
+                 T.dt <= msk_day_end(date_to)]
         if station_ids:
             conds.append(T.station_id.in_(station_ids))
         return conds
 
     async def _activity(self, date_from: date, date_to: date, station_ids: list | None) -> dict:
         """Профиль активности из транзакций: по часам суток (0-23) и дням недели (Пн-Вс),
-        число наливов + выручка. Час/день — в МСК (AT TIME ZONE), независимо от TZ сессии."""
+        число реализаций + выручка. Час/день — в МСК (AT TIME ZONE), независимо от TZ сессии."""
         T = FuelTransaction
         conds = self._tx_conds(date_from, date_to, station_ids) + [T.dt.is_not(None)]
         msk = func.timezone("Europe/Moscow", T.dt)
@@ -404,10 +405,10 @@ class FuelDashboardService:
     async def _tx_breakdowns(self, date_from: date, date_to: date,
                              station_ids: list | None,
                              fuel_codes: tuple[int, ...] = ()) -> tuple[list[dict], list[dict]]:
-        """Разрез по видам оплаты и топлива из пооперационных транзакций (наливов).
-        Даёт три колонки как в эталоне: наливы(count) · выручка · объём."""
-        dt_from = datetime(date_from.year, date_from.month, date_from.day)
-        dt_to = datetime(date_to.year, date_to.month, date_to.day, 23, 59, 59)
+        """Разрез по видам оплаты и топлива из пооперационных транзакций (реализаций).
+        Даёт три колонки как в эталоне: реализации(count) · выручка · объём."""
+        dt_from = msk_day_start(date_from)
+        dt_to = msk_day_end(date_to)
         T = FuelTransaction
         conds = [T.company_id == self.company_id, T.dt >= dt_from, T.dt <= dt_to]
         if station_ids:
@@ -451,8 +452,8 @@ class FuelDashboardService:
         Именно так «Способы оплаты» показывает эталонная система (все методы, вкл.
         Купон/Прокачку/Тех.отпуск). FuelShiftSale для этого не годится — он свёрнут в
         каналы 1С и роняет неучётные типы."""
-        dt_from = datetime(date_from.year, date_from.month, date_from.day)
-        dt_to = datetime(date_to.year, date_to.month, date_to.day, 23, 59, 59)
+        dt_from = msk_day_start(date_from)
+        dt_to = msk_day_end(date_to)
         params: dict = {"cid": self.company_id, "df": dt_from, "dt": dt_to}
         st_clause = ""
         if station_ids:

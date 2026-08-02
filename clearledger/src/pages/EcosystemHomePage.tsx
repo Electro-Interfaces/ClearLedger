@@ -33,7 +33,6 @@ import { listSsoApps, hasSideButton, type SsoApp } from '@/services/ssoService'
 import { useOpenApp } from '@/hooks/useOpenApp'
 import { useMaxWidth } from '@/hooks/use-mobile'
 import { READINESS_LABEL, productReadiness, type Readiness } from '@/config/spaceProducts'
-import { getDeskSummary, type DeskMetric } from '@/services/spaceDeskService'
 
 /** База сборки SPA (`/ClearLedger/`) — новая вкладка открывается по полному адресу. */
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, '')
@@ -71,7 +70,6 @@ interface TileProps {
   badge?: string
   busy?: boolean
   readiness?: Readiness
-  metrics?: DeskMetric[]
   onClick: () => void
 }
 
@@ -87,12 +85,12 @@ const DOT_CLASS: Record<Readiness, string> = {
  * внутренний контур (стройка сети, эксплуатация, связь, деньги). Деление по контуру,
  * а не по слою: слой говорит, ЧТО это (ядро/сервис/приложение), контур — про чей день.
  */
-// Рабочая строка стола. Порядок — как к продуктам обращаются за день: сначала
-// поддержка (заявки клиентов), потом продажи, стройка новых объектов и содержание
-// существующих (решение МАГа 01.08.2026; отменяет вынос «Поддержки» в сервисы от
-// 31.07.2026 — заявки оказались началом дня, а не общей утилитой вроде чата).
+// Рабочая строка стола. Порядок — как к продуктам обращаются за день: заявки,
+// продажи, стройка объектов, связь с ними и состояние систем (решение МАГа
+// 01.08.2026; отменяет вынос «Поддержки» в сервисы от 31.07.2026 — заявки
+// оказались началом дня, а не общей утилитой вроде чата).
 const COMMERCE_APPS = [
-  'support', 'sales', 'projects', 'ops',
+  'support', 'sales', 'projects', 'netlink', 'diag',
   'shop', 'corp', 'marketing', 'monitor', 'processing',
 ]
 // «Пульс» — рабочее место руководителя над ВСЕМ пространством, поэтому своя строка
@@ -100,35 +98,19 @@ const COMMERCE_APPS = [
 // Круг узкий: у кого права нет, тот этой строки не увидит вовсе.
 const LEAD_APPS = ['pulse']
 
-/** Тон показателя: цветом выделяем только то, что требует внимания или радует. */
-const TONE_CLASS: Record<string, string> = {
-  ok: 'text-emerald-500',
-  warn: 'text-amber-500',
-  bad: 'text-red-500',
-}
-
 /**
- * Карточка продукта: имя, точка готовности и два-три показателя его контура.
+ * Карточка продукта: имя, точка готовности и короткое пояснение.
  *
- * Плитка была строкой с названием — стол отвечал только «куда войти». Администратору
- * нужен и второй ответ: что за плиткой живёт. Поэтому под именем идут цифры из самого
- * продукта (люди, объекты, сессии, заявки, свежесть данных) — по ним видно, где работа
- * идёт, а где пусто, не заходя внутрь.
+ * Показатели с плитки убраны (решение МАГа 01.08.2026). Стол — это вход в продукт,
+ * а не сводка: цифры отвечали на случайные вопросы, у каждого продукта на свой лад,
+ * и при этом не помещались — «11 240 заявок» показывалось как «11 …».
  *
- * Описание из реестра длинное («Стройка сети: подбор площадок, портфель проектов…») и в
- * карточку не помещается — оно осталось в подсказке; строку заняли показатели, потому
- * что их читают каждый день, а описание один раз.
+ * Пояснение берётся из реестра приложений; полный текст остаётся в подсказке плитки.
  *
- * Показателей нет (мост, пустой продукт) — карточка честно остаётся без цифр: место
- * держит подпись состояния, а не выдуманный ноль.
- *
- * На телефоне плитка складывается в ОДНУ строку: имя слева, показатели справа тем же
- * рядом. Двухэтажная карточка занимала 99 px, и до нижних продуктов приходилось
- * листать три экрана — на десктопе стол помещается целиком, а на телефоне терял это
- * свойство. Цель нажатия остаётся во всю ширину строки.
+ * На телефоне плитка складывается в ОДНУ строку — имя во всю ширину. Двухэтажная
+ * карточка занимала 99 px, и до нижних продуктов приходилось листать три экрана.
  */
-function Tile({ title, subtitle, icon: Icon, badge, busy, readiness, metrics, onClick }: TileProps) {
-  const shown = (metrics ?? []).slice(0, 3)
+function Tile({ title, subtitle, icon: Icon, badge, busy, readiness, onClick }: TileProps) {
   return (
     <button
       type="button"
@@ -136,54 +118,33 @@ function Tile({ title, subtitle, icon: Icon, badge, busy, readiness, metrics, on
       disabled={busy}
       title={[title, subtitle, badge, readiness && READINESS_LABEL[readiness]]
         .filter(Boolean).join(' · ')}
-      className="group relative flex min-h-12 items-center gap-2.5 rounded-xl border border-border bg-card px-3 py-2 text-left
+      className="group relative flex h-full min-h-12 items-center gap-2.5 rounded-xl border border-border bg-card px-3 py-2.5 text-left
                  transition-colors duration-200 hover:border-primary/50 hover:bg-accent/40 disabled:opacity-60
-                 sm:min-h-0 sm:flex-col sm:items-stretch sm:gap-2 sm:py-2.5"
+                 sm:min-h-0 sm:flex-col sm:items-stretch sm:gap-2"
     >
-      {/* Готовность продукта — точка в углу. Расшифровка в подсказке плитки: цвет
-          читается с одного взгляда, слова нужны только при первом знакомстве. */}
-      {readiness && (
-        <span aria-hidden="true"
-          className={`absolute right-2 top-1/2 size-2 -translate-y-1/2 rounded-full sm:top-2 sm:translate-y-0 ${DOT_CLASS[readiness]}`} />
-      )}
-      {/* Имя продукта — приоритет строки: место сначала ему, показатели ужимаются
-          вокруг. Иначе на трёх метриках «Пульс» превращался в «Г». */}
+      {/* Имя продукта. Готовность — точка в конце строки, а не абсолютом в углу:
+          в потоке она занимает своё место и не наезжает на длинное название. */}
       <span className="flex min-w-0 flex-1 items-center gap-2.5 sm:w-full sm:flex-none">
         <span className="shrink-0 rounded-lg bg-primary/10 p-1.5 text-primary transition-colors group-hover:bg-primary group-hover:text-white">
           {busy ? <Loader2 className="size-4 animate-spin" /> : <Icon className="size-4" />}
         </span>
-        <span className="min-w-0 flex-1 truncate text-sm font-medium leading-snug sm:pr-3 sm:whitespace-normal">{title}</span>
+        <span className="min-w-0 flex-1 truncate text-sm font-medium leading-snug">{title}</span>
         {/* Свой вход — значком, а не подписью: важен при первом знакомстве, а места
             в строке занимает как буква. Расшифровка — в подсказке всей плитки. */}
         {badge && <ExternalLink className="size-3.5 shrink-0 text-muted-foreground" />}
+        {readiness && (
+          <span aria-hidden="true"
+            className={`size-2 shrink-0 rounded-full ${DOT_CLASS[readiness]}`} />
+        )}
       </span>
-      {shown.length > 0 ? (
-        <span className="flex shrink-0 items-baseline gap-2.5 pr-4
-                         sm:items-end sm:gap-3 sm:border-t sm:border-border/60 sm:pr-0 sm:pt-1.5">
-          {shown.map((m, i) => (
-            /* В строку телефона помещается один показатель — главный. Остальные
-               живут на десктопе, где у плитки своя строка под цифры. */
-            <span key={m.label}
-              className={`items-baseline gap-1 sm:flex sm:min-w-0 sm:flex-1 sm:gap-0 ${i === 0 ? 'flex' : 'hidden'}`}>
-              <span className={`whitespace-nowrap text-[13px] font-semibold leading-tight tabular-nums sm:block sm:truncate
-                                ${m.tone ? TONE_CLASS[m.tone] ?? '' : ''}`}>
-                {m.value}
-              </span>
-              <span className="whitespace-nowrap text-[11px] leading-tight text-muted-foreground/70 sm:block sm:truncate sm:text-[10px]">
-                {m.label}
-              </span>
-            </span>
-          ))}
-        </span>
-      ) : (
-        /* Без показателей место держит описание — но только на десктопе. В строке
-           телефона оно вытесняло имя продукта, а обрезок «Чем пространство связано
-           с в…» не сообщает ничего: полный текст и так лежит в подсказке плитки. */
-        <span className="hidden text-[10px] leading-tight text-muted-foreground/60
-                         sm:block sm:border-t sm:border-border/60 sm:pt-1.5">
-          {subtitle}
-        </span>
-      )}
+      {/* Пояснение вместо показателей (решение МАГа 01.08.2026): цифры на столе
+          читались как сводка, но отвечали на случайные вопросы и жили своей жизнью
+          от продукта к продукту. Стол — это вход, а не отчёт. Две строки максимум:
+          третья уводит плитку в высоту, полный текст лежит в подсказке. */}
+      <span className="hidden text-[11px] leading-snug text-muted-foreground/90
+                       sm:line-clamp-2 sm:border-t sm:border-border/60 sm:pt-2">
+        {subtitle}
+      </span>
     </button>
   )
 }
@@ -200,15 +161,18 @@ function Section({ title, hint, children, divider }: {
   divider?: boolean
 }) {
   return (
-    <section className={`grid gap-x-4 gap-y-2 md:grid-cols-[132px_1fr]
+    <section className={`grid gap-x-4 gap-y-2 md:grid-cols-[116px_1fr]
                          ${divider ? 'border-t border-border/60 pt-4' : ''}`}>
       <div className="md:pt-2">
         <h2 className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/60">{title}</h2>
         {hint && <p className="mt-0.5 hidden text-[11px] text-muted-foreground/50 md:block">{hint}</p>}
       </div>
-      {/* Колонка чуть шире прежней: в карточке теперь строка показателей, и на 200 px
-          три числа с подписями наезжали друг на друга. */}
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(232px,1fr))] gap-2">
+      {/* Верхняя граница ширины обязательна: с `1fr` карточки растягивались на всю
+          строку и внутри оставался воздух, а показатели всё равно обрезались —
+          выигрывал только пустой фон. Нижняя — предел, за которым три числа с
+          подписями наезжают друг на друга. */}
+      <div className="grid grid-cols-1 gap-2
+                      sm:grid-cols-[repeat(auto-fill,minmax(208px,244px))] sm:justify-start">
         {children}
       </div>
     </section>
@@ -232,25 +196,18 @@ export function EcosystemHomePage() {
     enabled: isApiEnabled(),
     staleTime: 5 * 60_000,
   })
-  // Показатели продуктов — отдельным запросом: каталог плиток приходит первым и стол
-  // рисуется сразу, цифры доезжают следом (все они COUNT'ы, но ждать их незачем).
-  const desk = useQuery({
-    queryKey: ['desk-summary', companyId],
-    queryFn: () => getDeskSummary(companyId),
-    enabled: isApiEnabled() && !!companyId,
-    staleTime: 60_000,
-  })
   // RBAC-гейт стола: allowed_apps — коды, доступных ролью в компании (null = не ограничено,
   // напр. админ). Бэкенд уже отфильтровал apps; здесь гейтим внутренние плитки Ledger и Чат.
   const allowed = q.data?.allowed_apps ?? null
   const canOpen = (code: string) => allowed === null || allowed.includes(code)
   const all: SsoApp[] = (q.data?.apps ?? []).filter((a) => canOpen(a.code))
-  const management = all.filter((a) => a.layer === 'admin')
-  // Поддержка живёт в сервисном слое каталога, но на столе стоит в рабочей строке
-  // (решение МАГа 01.08.2026): с неё начинается день у большинства.
+  // Слой каталога говорит, ЧТО это (ядро/сервис/приложение), но место на столе
+  // задаёт рабочий контур: «Поддержка» числится сервисом, «Диагностика» — ядром,
+  // а работают с ними в общей строке дня (решение МАГа 01.08.2026).
+  const management = all.filter((a) => a.layer === 'admin' && !COMMERCE_APPS.includes(a.code))
   const services = all.filter((a) => a.layer === 'service' && !COMMERCE_APPS.includes(a.code))
-  const apps = all.filter((a) => a.layer !== 'admin'
-    && (a.layer !== 'service' || COMMERCE_APPS.includes(a.code)))
+  const apps = all.filter((a) => COMMERCE_APPS.includes(a.code)
+    || (a.layer !== 'admin' && a.layer !== 'service'))
   // Два контура приложений: обращённый к клиенту (продать, обслужить) и внутренний
   // (построить, содержать, посчитать).
   const lead = apps.filter((a) => LEAD_APPS.includes(a.code))
@@ -259,8 +216,16 @@ export function EcosystemHomePage() {
   const commerce = COMMERCE_APPS
     .map((code) => apps.find((a) => a.code === code))
     .filter((a): a is SsoApp => !!a)
-  const internal = apps.filter(
-    (a) => !COMMERCE_APPS.includes(a.code) && !LEAD_APPS.includes(a.code))
+  // Учётная строка: содержание сети и деньги за неё — в том порядке, в каком
+  // цифра идёт от объекта к отчётности.
+  const INTERNAL_ORDER = ['ops', 'finance', 'accounting']
+  const internal = apps
+    .filter((a) => !COMMERCE_APPS.includes(a.code) && !LEAD_APPS.includes(a.code))
+    .sort((a, b) => {
+      const ia = INTERNAL_ORDER.indexOf(a.code), ib = INTERNAL_ORDER.indexOf(b.code)
+      // Незаданные продукты идут следом за перечисленными, порядком реестра.
+      return (ia < 0 ? INTERNAL_ORDER.length : ia) - (ib < 0 ? INTERNAL_ORDER.length : ib)
+    })
 
   /**
    * Открыть продукт. На десктопе рабочее место уходит в НОВУЮ вкладку (решение МАГа
@@ -304,7 +269,6 @@ export function EcosystemHomePage() {
         badge={a.mode === 'link' ? 'вход отдельный' : undefined}
         busy={busy === a.code}
         readiness={productReadiness(a.code, company.profileId)}
-        metrics={desk.data?.products[a.code]?.metrics}
         onClick={() => openProduct(a)}
       />
     )

@@ -14,6 +14,7 @@ import {
   type PlanFactCard, type PlanRow, type PlanTraffic,
 } from '@/services/storeService'
 import { fmtMoney } from '@/services/analyticsService'
+import { TrendSpark } from '@/components/ui/trend-spark'
 
 const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: d }).format(n)
 const fmtVal = (metric: string, v: number) => (metric === 'revenue' ? fmtMoney(v) : nf(v))
@@ -28,19 +29,6 @@ const keyOf = (c: { scope_kind: string; scope_key: string; metric: string }) =>
   `${c.scope_kind}|${c.scope_key}|${c.metric}`
 
 /** Мини-спарклайн выручки по дням (SVG, без recharts). */
-function Sparkline({ pts }: { pts: { date: string; value: number }[] }) {
-  if (pts.length < 2) return null
-  const w = 120, h = 28
-  const max = Math.max(1, ...pts.map((p) => p.value))
-  const step = w / (pts.length - 1)
-  const d = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${(i * step).toFixed(1)},${(h - (p.value / max) * (h - 2) - 1).toFixed(1)}`).join(' ')
-  return (
-    <svg width={w} height={h} className="opacity-70" aria-hidden>
-      <path d={d} fill="none" stroke="currentColor" strokeWidth={1.4} className="text-primary" />
-    </svg>
-  )
-}
-
 function TrafficCard({ c, compact = false }: { c: PlanFactCard; compact?: boolean }) {
   const t = c.traffic ? TRAFFIC[c.traffic] : null
   return (
@@ -64,7 +52,7 @@ function TrafficCard({ c, compact = false }: { c: PlanFactCard; compact?: boolea
       ) : (
         <div className="mt-1 text-[11px] text-muted-foreground/60">план не задан</div>
       )}
-      {c.sparkline && c.sparkline.length > 1 && <div className="mt-1.5"><Sparkline pts={c.sparkline} /></div>}
+      {c.sparkline && c.sparkline.length > 1 && <div className="mt-1.5"><TrendSpark values={c.sparkline.map((p) => p.value)} tone="brand" full /></div>}
     </div>
   )
 }

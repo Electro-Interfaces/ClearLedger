@@ -11,6 +11,7 @@ import { useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
+import { BarList } from '@/components/ui/bar-list'
 import { Button } from '@/components/ui/button'
 import { Loader2, Upload, MapPin, AlertTriangle } from 'lucide-react'
 import { KpiCard } from '@/components/workspace/analytics/AnalyticsPeriodPicker'
@@ -89,7 +90,6 @@ export function SitesOverviewPanel({ companyId }: { companyId: string }) {
   const total = d?.total ?? 0
   const active = d?.active ?? 0
   const maxFunnel = Math.max(...(d?.funnel ?? []).map((s) => s.count), 1)
-  const maxRegion = Math.max(...(d?.byRegion ?? []).map((r) => r.count), 1)
 
   return (
     <div className="p-4 space-y-4">
@@ -224,16 +224,14 @@ export function SitesOverviewPanel({ companyId }: { companyId: string }) {
               <div className="px-3 py-2 text-sm font-semibold text-muted-foreground border-b bg-muted/40 flex items-center gap-1">
                 <MapPin className="h-3.5 w-3.5" />Топ-регионы по числу проектов
               </div>
-              <div className="p-3 space-y-1.5">
-                {d!.byRegion.map((r) => (
-                  <div key={r.region} className="flex items-center gap-2">
-                    <span className="text-sm w-48 shrink-0 truncate" title={r.region}>{r.region}</span>
-                    <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
-                      <div className="h-full bg-primary/60" style={{ width: `${(r.count / maxRegion) * 100}%` }} />
-                    </div>
-                    <span className="font-mono text-sm text-muted-foreground w-10 text-right">{nf0.format(r.count)}</span>
-                  </div>
-                ))}
+              <div className="p-3">
+                {/* Рейтинг — общим компонентом, а не своей полоской: один вид с
+                    рейтингами «Топлива» и «Продаж» (см. канон, раздел «Графики»). */}
+                <BarList
+                  sortOrder="none"
+                  valueFormatter={(v) => nf0.format(v)}
+                  data={d!.byRegion.map((r) => ({ name: r.region, value: r.count }))}
+                />
               </div>
             </CardContent>
           </Card>

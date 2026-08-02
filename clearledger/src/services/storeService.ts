@@ -981,3 +981,78 @@ export const addNsiBarcode = (ident: string, code: string) =>
 
 export const retireNsiBarcode = (barcodeId: number) =>
   post<{ ok: boolean }>(`/api/store/nsi/barcodes/${barcodeId}/retire`, {})
+
+
+/* ── Очередь признания: что станции решили сами ───────────────────────────
+ *
+ * Карточки и контрагенты, заведённые на местах, и цены, назначенные станциями.
+ * Первые два ждут решения человека в центре: каноном карточку делает он,
+ * сопоставляя по штрихкоду — дедуп возможен только там, где виден справочник
+ * всей сети. Цены не подтверждают: это журнал, по нему видно, кто и почему
+ * поменял цену на полке.
+ */
+export interface StationItemDraft {
+  station_id: number
+  source_uuid: string
+  name: string
+  unit: string
+  vat_rate: string | null
+  barcodes: string[]
+  created_at: string
+  id?: number
+}
+
+export interface StationPartnerDraft {
+  station_id: number
+  source_uuid: string
+  name: string
+  inn: string | null
+  kpp: string | null
+  role: string
+  comment: string | null
+  created_at: string
+  id?: number
+}
+
+export interface StationPriceChange {
+  station_id: number
+  item_uuid: string
+  barcode: string | null
+  old_price: number | null
+  new_price: number
+  author: string
+  reason: string | null
+  changed_at: string
+}
+
+export interface StationDrafts {
+  items: StationItemDraft[]
+  partners: StationPartnerDraft[]
+  prices: StationPriceChange[]
+}
+
+/** Карточка сети, на которую похож черновик (совпал штрихкод). */
+export interface DraftCandidate {
+  item_id: number
+  uuid: string
+  name: string
+  unit: string
+  vat_rate: string
+  barcode: string
+  barcode_status: string
+}
+
+export const getStationDrafts = (stationId?: number) =>
+  get<StationDrafts>(`/api/store/station-drafts${stationId ? `?station_id=${stationId}` : ''}`)
+
+export const getDraftCandidates = (barcodes: string[]) =>
+  get<{ candidates: DraftCandidate[] }>(
+    `/api/store/station-drafts/candidates?barcodes=${encodeURIComponent(barcodes.join(','))}`)
+
+export const resolveItemDraft = (
+  draftId: number, body: { action: 'link' | 'create' | 'reject'; item_id?: number; note?: string },
+) => post<Record<string, unknown>>(`/api/store/station-drafts/item/${draftId}`, body)
+
+export const resolvePartnerDraft = (
+  draftId: number, body: { action: 'accept' | 'reject'; note?: string },
+) => post<Record<string, unknown>>(`/api/store/station-drafts/partner/${draftId}`, body)

@@ -3,10 +3,13 @@
  * разделители дат, скругление баблов. Порт из TSupport под camelCase-поля Ledger.
  */
 
-// 8 цветов для имён (Telegram-стиль)
+// 8 цветов для имён (Telegram-стиль). Каждый — парой на обе темы: 400-е тона
+// читаются на тёмном, но растворяются на светлом фоне (жёлтый — первым).
 const NAME_COLORS = [
-  'text-red-400', 'text-green-400', 'text-blue-400', 'text-yellow-500',
-  'text-purple-400', 'text-pink-400', 'text-cyan-400', 'text-orange-400',
+  'text-red-600 dark:text-red-400', 'text-green-700 dark:text-green-400',
+  'text-blue-600 dark:text-blue-400', 'text-amber-600 dark:text-yellow-400',
+  'text-purple-600 dark:text-purple-400', 'text-pink-600 dark:text-pink-400',
+  'text-cyan-700 dark:text-cyan-400', 'text-orange-600 dark:text-orange-400',
 ] as const
 
 /** Детерминированный цвет для userId (hash → 1 из 8 цветов) */

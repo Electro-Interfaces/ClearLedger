@@ -13,6 +13,7 @@ import {
   ChevronLeft, ChevronRight, FileText, MoreVertical, Archive, ArchiveRestore,
   Trash2, Reply, Pencil, X, Check, Megaphone, Lock, Pin, Video, UserPlus,
   Folder, AtSign, Loader2, Paperclip, Camera, Search as SearchIcon,
+  Shield, ShieldOff, UserMinus, LogOut, Bell, BellOff, Forward, MapPin, ClipboardList,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/contexts/AuthContext'
@@ -23,6 +24,7 @@ import { useIsMobile } from '@/hooks/use-mobile'
 import { useChatWs, type WsEvent } from '@/hooks/useChatWs'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
@@ -36,7 +38,11 @@ import {
 } from './telegram-helpers'
 import { AuthImage, AuthVideo, AuthFileChip, useAuthBlobUrl } from './AuthMedia'
 import { RegionCapture } from './RegionCapture'
+import { ensurePushSubscription, pushSupported, requestPushPermission } from '@/lib/chatPush'
 import * as chat from '@/services/chatService'
+import { isMuted } from '@/services/chatService'
+import { listSpaceObjects } from '@/services/spaceObjectsService'
+import { useSupportContext } from '@/contexts/SupportContext'
 import type {
   ChatRoom, ChatMessage, ChatParticipant, ChatPresence, ChatFolder as ChatFolderModel,
 } from '@/services/chatService'
@@ -185,17 +191,47 @@ function Lightbox({ items, index, onClose, onNavigate }: {
 }
 
 // ── панель информации о комнате (участники) ──────────────────────────────────
-function RoomInfoPanel({ room, participants, userId, canManage, onAdd, onMessageUser, presenceMap }: {
+function RoomInfoPanel({
+  room, participants, userId, canManage, canOwn, onAdd, onRename, onAvatar, onScope,
+  onObject, onRemove, onSetRole, onLeave, onMessageUser, onShowProfile, presenceMap,
+}: {
   room?: ChatRoom
   participants?: ChatParticipant[]
   userId?: string
+  /** Ведение чата: владелец или админ чата (добавить/убрать участника, имя). */
   canManage: boolean
+  /** Права владельца: раздача ролей и снятие админов. */
+  canOwn: boolean
   onAdd: (uid: string) => void
+  onRename: (name: string) => void
+  /** Файл нового аватара; null — убрать аватар. */
+  onAvatar: (file: File | null) => void
+  /** Смена привязки к приложению; '' — отвязать (чат всего пространства). */
+  onScope: (code: string) => void
+  /** Смена привязки к объекту; '' — отвязать. */
+  onObject: (objectId: string) => void
+  onRemove: (uid: string) => void
+  onSetRole: (uid: string, role: 'admin' | 'member') => void
+  onLeave: () => void
   onMessageUser: (uid: string) => void
+  onShowProfile: (uid: string) => void
   presenceMap: Map<string, ChatPresence>
 }) {
   const { companyId } = useCompany()
   const [q, setQ] = useState('')
+  // Переименование — инлайн у заголовка: отдельного «меню чата» в панели нет.
+  const [nameDraft, setNameDraft] = useState<string | null>(null)
+  // Поиск объекта для привязки: объектов сотни, селектом их не выбрать.
+  const [objQ, setObjQ] = useState('')
+  const { data: objHits = [] } = useQuery({
+    queryKey: ['space-objects-pick', companyId, objQ],
+    queryFn: () => listSpaceObjects(companyId!, objQ),
+    enabled: !!companyId && objQ.trim().length >= 2,
+  })
+  // Состав системных чатов ведёт пространство, у личной переписки имени нет.
+  const editable = canManage && !room?.kind && room?.type !== 'direct'
+  // Аватар шире имени: у системного чата имя закрыто, а картинку владелец менять может.
+  const avatarEditable = canManage && room?.type !== 'direct'
   const { data: found = [] } = useQuery({
     queryKey: ['chat-user-search', companyId, q],
     queryFn: () => chat.searchUsers(q),
@@ -213,7 +249,9 @@ function RoomInfoPanel({ room, participants, userId, canManage, onAdd, onMessage
   const kindText = room?.kind === 'platform' ? 'Канал разработчика платформы'
     : room?.kind === 'news' ? 'Канал компании — пишут владелец и администраторы'
     : room?.kind === 'general' ? 'Общая группа пространства'
-    : room?.kind?.startsWith('app:') ? 'Группа приложения'
+    // Группа приложения опознаётся по scopeProduct (ниже), а не по kind:
+    // прежней метки `app:<код>` бэкенд не ставит.
+    : room?.scopeProduct ? 'Группа приложения'
     : room?.type === 'channel' ? 'Канал — односторонний: пишут владелец и админы'
     : room?.type === 'group' ? 'Группа — пишут все участники'
     : room?.type === 'direct' ? 'Личная переписка' : 'Чат пространства'
@@ -223,7 +261,58 @@ function RoomInfoPanel({ room, participants, userId, canManage, onAdd, onMessage
   return (
     <div className="flex-1 min-h-0 overflow-y-auto p-3">
       <div className="mb-3 rounded-lg border border-border/70 bg-muted/25 p-2.5">
-        <div className="text-[13px] font-medium">{room?.name || peer?.name || 'Чат'}</div>
+        <div className="mb-2 flex items-center gap-2.5">
+          {room?.avatarUrl ? (
+            <AuthImage path={room.avatarUrl} alt={room?.name || 'Чат'}
+              className="size-10 shrink-0 rounded-full object-cover" />
+          ) : (
+            <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+              {(() => { const I = roomIcon(room ?? { type: 'group' }); return <I className="size-5" /> })()}
+            </div>
+          )}
+          {avatarEditable && (
+            <div className="flex items-center gap-2 text-[11px]">
+              <label className="cursor-pointer text-primary hover:underline">
+                {room?.avatarUrl ? 'Сменить аватар' : 'Загрузить аватар'}
+                <input type="file" accept="image/*" className="hidden"
+                  onChange={(e) => { const f = e.target.files?.[0]; if (f) onAvatar(f); e.target.value = '' }} />
+              </label>
+              {room?.avatarUrl && (
+                <button type="button" onClick={() => onAvatar(null)}
+                  className="text-muted-foreground hover:text-destructive">Убрать</button>
+              )}
+            </div>
+          )}
+        </div>
+        {nameDraft !== null ? (
+          <div className="flex items-center gap-1">
+            <Input autoFocus value={nameDraft} onChange={(e) => setNameDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && nameDraft.trim()) { onRename(nameDraft.trim()); setNameDraft(null) }
+                if (e.key === 'Escape') setNameDraft(null)
+              }}
+              className="h-7 text-[13px]" placeholder="Название чата" />
+            <button onClick={() => { if (nameDraft.trim()) { onRename(nameDraft.trim()); setNameDraft(null) } }}
+              className="rounded p-1 text-primary hover:bg-accent" title="Сохранить">
+              <Check className="size-4" />
+            </button>
+            <button onClick={() => setNameDraft(null)}
+              className="rounded p-1 text-muted-foreground hover:text-foreground" title="Отмена">
+              <X className="size-4" />
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-1.5">
+            <div className="min-w-0 truncate text-[13px] font-medium">{room?.name || peer?.name || 'Чат'}</div>
+            {editable && (
+              <button onClick={() => setNameDraft(room?.name || '')}
+                className="shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground"
+                title="Переименовать чат">
+                <Pencil className="size-3.5" />
+              </button>
+            )}
+          </div>
+        )}
         <div className="mt-0.5 text-[11px] text-muted-foreground">{kindText}</div>
         <dl className="mt-2 space-y-1 text-[11px]">
           {peer ? (
@@ -263,10 +352,68 @@ function RoomInfoPanel({ room, participants, userId, canManage, onAdd, onMessage
               </div>
             </>
           )}
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2">
             <dt className="w-24 shrink-0 text-muted-foreground">Приложение</dt>
-            <dd className="min-w-0 truncate">{scopeLabel || 'всё пространство'}</dd>
+            {/* Владелец меняет привязку на месте: «специализированная группа» — это
+                настройка самой группы, а не привилегия админа пространства. */}
+            {editable ? (
+              <dd className="min-w-0 flex-1">
+                <Select value={room?.scopeProduct || 'none'}
+                  onValueChange={(v) => onScope(v === 'none' ? '' : v)}>
+                  <SelectTrigger className="h-6 w-full max-w-[180px] px-2 text-[11px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Всё пространство</SelectItem>
+                    {SPACE_PRODUCTS.map((p) => (
+                      <SelectItem key={p.code} value={p.code}>{p.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </dd>
+            ) : (
+              <dd className="min-w-0 truncate">{scopeLabel || 'всё пространство'}</dd>
+            )}
           </div>
+          {/* Объект: группа «по станции» видна из карточки этого объекта, и наоборот —
+              карточка показывает свои обсуждения. Привязку ведёт владелец чата. */}
+          {room?.type !== 'direct' && !room?.kind && (
+            <div className="flex items-start gap-2">
+              <dt className="w-24 shrink-0 pt-0.5 text-muted-foreground">Объект</dt>
+              <dd className="min-w-0 flex-1">
+                {room?.scopeObjectId ? (
+                  <span className="flex items-center gap-1">
+                    <span className="min-w-0 truncate">{room.scopeObjectName || room.scopeObjectId}</span>
+                    {editable && (
+                      <button type="button" onClick={() => onObject('')}
+                        className="shrink-0 rounded p-0.5 text-muted-foreground hover:text-destructive"
+                        title="Отвязать от объекта">
+                        <X className="size-3" />
+                      </button>
+                    )}
+                  </span>
+                ) : editable ? (
+                  <div className="relative">
+                    <Input value={objQ} onChange={(e) => setObjQ(e.target.value)}
+                      placeholder="Найти объект…" className="h-6 px-2 text-[11px]" />
+                    {objQ.trim().length >= 2 && objHits.length > 0 && (
+                      <div className="absolute z-20 mt-1 max-h-40 w-full overflow-y-auto rounded-md border border-border bg-popover p-0.5 shadow-md">
+                        {objHits.slice(0, 8).map((o) => (
+                          <button key={o.id} type="button"
+                            onClick={() => { onObject(o.id); setObjQ('') }}
+                            className="block w-full truncate rounded px-1.5 py-1 text-left text-[11px] hover:bg-accent">
+                            {o.name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <span className="text-muted-foreground">не привязан</span>
+                )}
+              </dd>
+            </div>
+          )}
           <div className="flex gap-2">
             <dt className="w-24 shrink-0 text-muted-foreground">Моя роль</dt>
             <dd>{room?.myRole === 'owner' ? 'владелец' : room?.myRole === 'admin' ? 'админ' : 'участник'}</dd>
@@ -280,6 +427,10 @@ function RoomInfoPanel({ room, participants, userId, canManage, onAdd, onMessage
             const online = presenceMap.get(p.userId)?.online || p.online
             return (
               <div key={p.userId} className="flex items-center gap-2.5 rounded-md px-1.5 py-1.5 hover:bg-accent">
+                {/* Клик по человеку — карточка «кто это»: должность, компания, входы. */}
+                <button type="button" onClick={() => onShowProfile(p.userId)}
+                  className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
+                  title="Кто это — карточка человека">
                 <Avatar seed={p.userId} name={p.name} online={online} size={32} />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">
@@ -298,10 +449,42 @@ function RoomInfoPanel({ room, participants, userId, canManage, onAdd, onMessage
                     {p.isExternal && p.companyName ? ` · ${p.companyName}` : ''}
                   </div>
                 </div>
+                </button>
                 {p.userId !== userId && room?.type !== 'direct' && (
                   <button onClick={() => onMessageUser(p.userId)} className="rounded p-1 text-muted-foreground hover:text-foreground" title="Написать лично">
                     <MessageCircle className="size-4" />
                   </button>
+                )}
+                {/* Опасные действия (роль, убрать) — не в общем ряду иконок, а за «⋮»:
+                    случайный клик по ряду не должен выкидывать человека из чата. */}
+                {editable && p.userId !== userId && p.role !== 'owner'
+                  && (canOwn || p.role === 'member') && (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button className="rounded p-1 text-muted-foreground hover:text-foreground"
+                        title="Управление участником">
+                        <MoreVertical className="size-4" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="text-[13px]">
+                      {canOwn && (
+                        p.role === 'admin' ? (
+                          <DropdownMenuItem onClick={() => onSetRole(p.userId, 'member')}>
+                            <ShieldOff className="mr-2 size-4" /> Снять админа чата
+                          </DropdownMenuItem>
+                        ) : (
+                          <DropdownMenuItem onClick={() => onSetRole(p.userId, 'admin')}>
+                            <Shield className="mr-2 size-4" /> Сделать админом чата
+                          </DropdownMenuItem>
+                        )
+                      )}
+                      {canOwn && <DropdownMenuSeparator />}
+                      <DropdownMenuItem onClick={() => onRemove(p.userId)}
+                        className="text-destructive focus:text-destructive">
+                        <UserMinus className="mr-2 size-4" /> Убрать из чата
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 )}
               </div>
             )
@@ -329,18 +512,320 @@ function RoomInfoPanel({ room, participants, userId, canManage, onAdd, onMessage
           </div>
         </div>
       )}
+      {/* Выход — только из обычных групп: системные чаты и каналы обязательны,
+          владелец сначала передаёт группу. */}
+      {room?.type === 'group' && !room?.kind && room?.myRole !== 'owner' && (
+        <button onClick={onLeave}
+          className="mt-3 inline-flex items-center gap-1.5 rounded-md px-1.5 py-1 text-[12px] text-muted-foreground hover:text-destructive">
+          <LogOut className="size-3.5" /> Выйти из группы
+        </button>
+      )}
     </div>
   )
 }
 
+// ── глобальный поиск по сообщениям всех чатов ────────────────────────────────
+function GlobalSearchResults({ q, onOpen }: {
+  q: string
+  onOpen: (roomId: string) => void
+}) {
+  const { data: hits = [], isLoading } = useQuery({
+    queryKey: ['chat-global-search', q],
+    queryFn: () => chat.searchAllMessages(q),
+    enabled: q.trim().length >= 3,
+  })
+  if (q.trim().length < 3) return null
+  return (
+    <div className="border-t border-border/50 px-1 pt-2">
+      <div className="px-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+        Сообщения
+      </div>
+      {isLoading && (
+        <div className="flex items-center gap-2 px-2 py-2 text-xs text-muted-foreground">
+          <Loader2 className="size-3.5 animate-spin" /> Ищем…
+        </div>
+      )}
+      {!isLoading && hits.length === 0 && (
+        <p className="px-2 py-2 text-xs text-muted-foreground">Ничего не найдено</p>
+      )}
+      {hits.map((h) => (
+        <button key={h.messageId} type="button" onClick={() => onOpen(h.roomId)}
+          className="block w-full rounded-lg px-2 py-1.5 text-left hover:bg-accent">
+          <span className="flex items-baseline justify-between gap-2">
+            <span className="min-w-0 truncate text-xs font-medium">{h.roomName}</span>
+            <span className="shrink-0 text-[10px] text-muted-foreground">{fmtAge(h.createdAt)}</span>
+          </span>
+          <span className="block truncate text-[11px] text-muted-foreground">
+            {h.userName ? `${h.userName}: ` : ''}{h.preview}
+          </span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// ── «В заявку»: обсудили — отправили на выполнение ───────────────────────────
+function TicketFromMessageDialog({ message, defaultObjectId, defaultObjectName, onClose, onDone }: {
+  message: ChatMessage
+  defaultObjectId: string | null
+  defaultObjectName: string | null
+  onClose: () => void
+  onDone: (ticketNumber: string | null) => void
+}) {
+  const { companyId } = useCompany()
+  const [title, setTitle] = useState((message.content || message.fileName || '').slice(0, 90))
+  const [priority, setPriority] = useState<'low' | 'medium' | 'high'>('medium')
+  // Объект обязателен: заявка в Поддержке живёт при объекте (эко-канал).
+  const [objectId, setObjectId] = useState<string | null>(defaultObjectId)
+  const [objectName, setObjectName] = useState<string | null>(defaultObjectName)
+  const [objQ, setObjQ] = useState('')
+  const [busy, setBusy] = useState(false)
+  const { data: objHits = [] } = useQuery({
+    queryKey: ['space-objects-pick', companyId, objQ],
+    queryFn: () => listSpaceObjects(companyId!, objQ),
+    enabled: !!companyId && !objectId && objQ.trim().length >= 2,
+  })
+  const send = async () => {
+    setBusy(true)
+    try {
+      const res = await chat.ticketFromMessage(message.id,
+        { objectId: objectId || undefined, title: title.trim() || undefined, priority })
+      onDone(res.ticketNumber)
+    } catch (e) {
+      toast.error((e as Error).message || 'Не удалось создать заявку')
+    } finally { setBusy(false) }
+  }
+  return (
+    <Dialog open onOpenChange={(o) => { if (!o) onClose() }}>
+      <DialogContent className="max-w-sm gap-0 p-0 sm:max-w-sm">
+        <DialogHeader className="border-b border-border/50 px-4 py-3">
+          <DialogTitle className="text-sm">Заявка из сообщения</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3 p-4">
+          <p className="max-h-20 overflow-hidden rounded-md bg-muted/40 px-2.5 py-1.5 text-xs text-muted-foreground">
+            {message.userName ? `${message.userName}: ` : ''}{message.content || message.fileName || 'вложение'}
+          </p>
+          <div className="space-y-1">
+            <label className="text-xs font-medium">Заголовок</label>
+            <Input value={title} onChange={(e) => setTitle(e.target.value)}
+              placeholder="Что нужно сделать" className="h-8 text-sm" />
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs font-medium">Объект</label>
+            {objectId ? (
+              <div className="flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-sm">
+                <MapPin className="size-3.5 shrink-0 text-muted-foreground" />
+                <span className="min-w-0 flex-1 truncate">{objectName || objectId}</span>
+                <button type="button" onClick={() => { setObjectId(null); setObjectName(null) }}
+                  className="shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground" title="Выбрать другой">
+                  <X className="size-3.5" />
+                </button>
+              </div>
+            ) : (
+              <>
+                <div className="flex items-center gap-1.5 rounded-md border border-dashed border-border px-2.5 py-1.5 text-sm text-muted-foreground">
+                  <MapPin className="size-3.5 shrink-0" />
+                  <span className="min-w-0 flex-1 truncate">Офис — по умолчанию</span>
+                </div>
+                <div className="relative">
+                  <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                  <Input value={objQ} onChange={(e) => setObjQ(e.target.value)}
+                    placeholder="Или укажите станцию…" className="h-8 pl-8 text-sm" />
+                  {objQ.trim().length >= 2 && objHits.length > 0 && (
+                    <div className="absolute z-20 mt-1 max-h-44 w-full overflow-y-auto rounded-md border border-border bg-popover p-0.5 shadow-md">
+                      {objHits.slice(0, 8).map((o) => (
+                        <button key={o.id} type="button"
+                          onClick={() => { setObjectId(o.id); setObjectName(o.name); setObjQ('') }}
+                          className="block w-full truncate rounded px-2 py-1.5 text-left text-sm hover:bg-accent">
+                          {o.name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+            <p className="text-[11px] text-muted-foreground">
+              Заявка живёт при объекте: там ей начислятся стадия и срок. Не про
+              станцию — уйдёт на «Офис».
+            </p>
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs font-medium">Приоритет</label>
+            <Select value={priority} onValueChange={(v) => setPriority(v as typeof priority)}>
+              <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="low">Низкий</SelectItem>
+                <SelectItem value="medium">Обычный</SelectItem>
+                <SelectItem value="high">Высокий</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <Button className="w-full" size="sm" disabled={busy} onClick={send}>
+            {busy && <Loader2 className="mr-1 size-3.5 animate-spin" />}
+            Создать заявку
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ── пересылка: выбор чатов-получателей ───────────────────────────────────────
+function ForwardDialog({ message, rooms, onClose, onDone }: {
+  message: ChatMessage
+  rooms: ChatRoom[]
+  onClose: () => void
+  onDone: (roomIds: string[]) => void
+}) {
+  const [picked, setPicked] = useState<Record<string, boolean>>({})
+  const [q, setQ] = useState('')
+  const [busy, setBusy] = useState(false)
+  const ids = Object.keys(picked).filter((k) => picked[k])
+  const list = rooms.filter((r) => !q.trim()
+    || (r.name || '').toLowerCase().includes(q.trim().toLowerCase()))
+  const send = async () => {
+    if (!ids.length) return
+    setBusy(true)
+    try {
+      await chat.forwardMessage(message.id, ids)
+      onDone(ids)
+    } catch (e) {
+      toast.error((e as Error).message || 'Не удалось переслать')
+    } finally { setBusy(false) }
+  }
+  return (
+    <Dialog open onOpenChange={(o) => { if (!o) onClose() }}>
+      <DialogContent className="max-w-sm gap-0 p-0 sm:max-w-sm">
+        <DialogHeader className="border-b border-border/50 px-4 py-3">
+          <DialogTitle className="text-sm">Переслать сообщение</DialogTitle>
+        </DialogHeader>
+        <div className="p-4">
+          <p className="mb-2 truncate rounded-md bg-muted/40 px-2.5 py-1.5 text-xs text-muted-foreground">
+            {message.content || message.fileName || 'вложение'}
+          </p>
+          <div className="relative mb-2">
+            <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Поиск чата…" className="h-8 pl-8 text-xs" />
+          </div>
+          <div className="max-h-64 space-y-0.5 overflow-y-auto">
+            {list.map((r) => (
+              <button key={r.id} type="button"
+                onClick={() => setPicked((p) => ({ ...p, [r.id]: !p[r.id] }))}
+                className={cn('flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent',
+                  picked[r.id] && 'bg-primary/10')}>
+                <span className="min-w-0 flex-1 truncate">{r.name || 'Личная переписка'}</span>
+                {picked[r.id] && <Check className="size-4 shrink-0 text-primary" />}
+              </button>
+            ))}
+            {list.length === 0 && <p className="py-4 text-center text-xs text-muted-foreground">Чатов не найдено</p>}
+          </div>
+          <Button className="mt-3 w-full" size="sm" disabled={!ids.length || busy} onClick={send}>
+            {busy && <Loader2 className="mr-1 size-3.5 animate-spin" />}
+            Переслать{ids.length > 1 ? ` (${ids.length})` : ''}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ── карточка человека: «кто это» по клику на участника или автора сообщения ──
+function PersonProfileDialog({ userId, online, selfId, onClose, onMessage }: {
+  userId: string
+  online?: boolean
+  selfId?: string
+  onClose: () => void
+  onMessage: (uid: string) => void
+}) {
+  const { data: p, isLoading } = useQuery({
+    queryKey: ['chat-user-profile', userId],
+    queryFn: () => chat.getUserProfile(userId),
+    retry: false,
+  })
+  const seen = p?.lastSeenAt
+    ? new Date(p.lastSeenAt).toLocaleString('ru-RU',
+        { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+    : null
+  return (
+    <Dialog open onOpenChange={(o) => { if (!o) onClose() }}>
+      <DialogContent className="max-w-xs gap-0 p-0 sm:max-w-xs">
+        <DialogHeader className="border-b border-border/50 px-4 py-3">
+          <DialogTitle className="text-sm">Кто это</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3 p-4">
+          {isLoading && (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="size-4 animate-spin" /> Загрузка…
+            </div>
+          )}
+          {!isLoading && !p && (
+            <div className="text-sm text-muted-foreground">Сведений нет: человек не из вашего пространства.</div>
+          )}
+          {p && (
+            <>
+              <div className="flex items-center gap-3">
+                <Avatar seed={p.userId} name={p.name} online={online} size={40} />
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <span className="truncate text-sm font-semibold">{p.name}</span>
+                    <PartyBadge party={{
+                      partyType: p.partyType ?? 'internal',
+                      role: p.role === 'admin' ? 'admin' : undefined,
+                      orgName: p.organizationName,
+                    }} />
+                  </div>
+                  <div className="truncate text-xs text-muted-foreground">{p.email}</div>
+                </div>
+              </div>
+              <dl className="space-y-1 text-xs">
+                {p.position && (
+                  <div className="flex gap-2">
+                    <dt className="w-20 shrink-0 text-muted-foreground">Должность</dt>
+                    <dd className="min-w-0 truncate">{p.position}</dd>
+                  </div>
+                )}
+                {p.organizationName && (
+                  <div className="flex gap-2">
+                    <dt className="w-20 shrink-0 text-muted-foreground">Компания</dt>
+                    <dd className="min-w-0 truncate">{p.organizationName}</dd>
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  <dt className="w-20 shrink-0 text-muted-foreground">Уровень</dt>
+                  <dd>{p.role === 'admin' ? 'администратор организации' : 'сотрудник'}</dd>
+                </div>
+                <div className="flex gap-2">
+                  <dt className="w-20 shrink-0 text-muted-foreground">Сейчас</dt>
+                  <dd>{online ? 'в сети' : seen ? `заходил(а) ${seen}` : 'ещё не заходил(а)'}</dd>
+                </div>
+              </dl>
+              {p.userId !== selfId && (
+                <Button size="sm" className="h-8 w-full" onClick={() => onMessage(p.userId)}>
+                  <MessageCircle className="mr-1.5 size-4" /> Написать лично
+                </Button>
+              )}
+            </>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 // ── диалог создания чата (личный / группа) ────────────────────────────────────
-function CreateChatDialog({ open, onOpenChange, onCreated }: {
+function CreateChatDialog({ open, onOpenChange, onCreated, scopeProduct }: {
   open: boolean; onOpenChange: (o: boolean) => void; onCreated: (roomId: string) => void
+  /** Контекст рельсы: группа, созданная из приложения, по умолчанию его и держится. */
+  scopeProduct?: string | null
 }) {
   const { companyId } = useCompany()
   const [q, setQ] = useState('')
   const [picked, setPicked] = useState<Record<string, string>>({})
   const [groupName, setGroupName] = useState('')
+  // Привязка к приложению — та самая пометка «специализированная группа»: рельса
+  // этого приложения покажет её первой, остальные приложения — не покажут вовсе.
+  const [scopeSel, setScopeSel] = useState<string>(scopeProduct || 'none')
   const [busy, setBusy] = useState(false)
   const { data: users = [] } = useQuery({
     queryKey: ['chat-user-search', companyId, q],
@@ -349,13 +834,16 @@ function CreateChatDialog({ open, onOpenChange, onCreated }: {
   })
   const ids = Object.keys(picked)
   const isGroup = ids.length > 1
-  useEffect(() => { if (!open) { setQ(''); setPicked({}); setGroupName('') } }, [open])
+  useEffect(() => {
+    if (!open) { setQ(''); setPicked({}); setGroupName(''); setScopeSel(scopeProduct || 'none') }
+  }, [open, scopeProduct])
   async function create() {
     if (!ids.length) return
     setBusy(true)
     try {
       const room = isGroup
-        ? await chat.createRoom('group', ids, groupName.trim() || `Группа (${ids.length + 1})`)
+        ? await chat.createRoom('group', ids, groupName.trim() || `Группа (${ids.length + 1})`,
+            scopeSel === 'none' ? null : scopeSel)
         : await chat.createRoom('direct', ids)
       onCreated(room.id)
       onOpenChange(false)
@@ -369,7 +857,20 @@ function CreateChatDialog({ open, onOpenChange, onCreated }: {
         </DialogHeader>
         <div className="p-3">
           {isGroup && (
-            <Input placeholder="Название группы" value={groupName} onChange={(e) => setGroupName(e.target.value)} className="mb-2 h-8" />
+            <>
+              <Input placeholder="Название группы" value={groupName} onChange={(e) => setGroupName(e.target.value)} className="mb-2 h-8" />
+              <Select value={scopeSel} onValueChange={setScopeSel}>
+                <SelectTrigger className="mb-2 h-8 text-xs">
+                  <SelectValue placeholder="Приложение" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Всё пространство</SelectItem>
+                  {SPACE_PRODUCTS.map((p) => (
+                    <SelectItem key={p.code} value={p.code}>{p.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </>
           )}
           <div className="relative mb-2">
             <Search className="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -413,7 +914,7 @@ function CreateChatDialog({ open, onOpenChange, onCreated }: {
 function ChatBubble({
   message, album, isOwn, grouping, canDelete, editingId, editText, searchHighlight,
   onReply, onEditStart, onEditCancel, onEditSave, onEditTextChange, onDelete,
-  onAuthorClick, onReact, onPin, onImageClick,
+  onAuthorClick, onReact, onPin, onForward, onTicket, onImageClick,
 }: {
   message: ChatMessage
   album?: ChatMessage[]
@@ -432,6 +933,8 @@ function ChatBubble({
   onAuthorClick?: () => void
   onReact?: (emoji: string) => void
   onPin?: () => void
+  onForward?: () => void
+  onTicket?: () => void
   onImageClick?: (path: string) => void
 }) {
   const { isFirstInGroup, isLastInGroup, showDate } = grouping
@@ -479,6 +982,10 @@ function ChatBubble({
             {onReact && <span className="mx-0.5 h-5 w-px bg-border" />}
             <button onClick={onReply} title="Ответить"
               className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"><Reply className="size-4" /></button>
+            {onForward && <button onClick={onForward} title="Переслать"
+              className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"><Forward className="size-4" /></button>}
+            {onTicket && <button onClick={onTicket} title="Создать заявку из сообщения"
+              className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"><ClipboardList className="size-4" /></button>}
             {onPin && <button onClick={onPin} title="Закрепить"
               className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"><Pin className="size-4" /></button>}
             {isOwn && <button onClick={onEditStart} title="Редактировать"
@@ -490,7 +997,7 @@ function ChatBubble({
           {!isOwn && isFirstInGroup && (
             <div className="mb-0.5 flex items-center gap-1.5">
               <button type="button" onClick={onAuthorClick} disabled={!onAuthorClick}
-                title={onAuthorClick ? 'Написать лично' : undefined}
+                title={onAuthorClick ? 'Кто это — карточка человека' : undefined}
                 className={cn('text-left text-[11px] font-semibold', getUserColor(message.userId || ''), onAuthorClick && 'cursor-pointer hover:underline')}>
                 {message.userName || 'Пользователь'}
               </button>
@@ -503,10 +1010,26 @@ function ChatBubble({
             </div>
           )}
 
+          {message.forwardedFrom && (
+            <div className={cn('mb-0.5 flex items-center gap-1 text-[11px] italic',
+              isOwn ? 'text-primary-foreground/80' : 'text-muted-foreground')}>
+              <Forward className="size-3" /> Переслано от {message.forwardedFrom}
+            </div>
+          )}
+
+          {/* Цитата красится ОТ ФОНА пузыря: на синем исходящем синяя рамка и
+              голубое имя сливались в нечитаемое пятно (замечание МАГа 31.07.2026). */}
           {message.replyTo && message.replyPreview && (
-            <div className="mb-1 rounded-r border-l-2 border-blue-500 pl-1.5">
-              <div className="text-[11px] font-medium text-blue-400">{message.replyAuthor || 'Пользователь'}</div>
-              <div className="max-w-[220px] truncate text-[11px] opacity-70">{message.replyPreview}</div>
+            <div className={cn('mb-1 rounded-md border-l-2 py-0.5 pl-2 pr-1.5',
+              isOwn ? 'border-white/80 bg-white/15' : 'border-primary bg-primary/10')}>
+              <div className={cn('text-[11px] font-semibold',
+                isOwn ? 'text-white' : 'text-primary')}>
+                {message.replyAuthor || 'Пользователь'}
+              </div>
+              <div className={cn('max-w-[220px] truncate text-[11px]',
+                isOwn ? 'text-primary-foreground/85' : 'text-foreground/75')}>
+                {message.replyPreview}
+              </div>
             </div>
           )}
 
@@ -566,14 +1089,20 @@ function ChatBubble({
                 <button key={r.emoji} onClick={() => onReact?.(r.emoji)}
                   title={r.users?.length ? r.users.join(', ') : undefined}
                   className={cn('inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[13px] leading-4 transition-colors',
-                    r.mine ? 'border-blue-500/60 bg-blue-500/20 text-blue-500 dark:text-blue-200' : 'border-border bg-background/60 text-muted-foreground hover:border-foreground/30')}>
+                    isOwn
+                      ? (r.mine
+                          ? 'border-white/80 bg-white/25 text-white'
+                          : 'border-white/35 bg-white/10 text-primary-foreground/90 hover:border-white/60')
+                      : (r.mine
+                          ? 'border-primary/60 bg-primary/15 text-primary'
+                          : 'border-border bg-background/60 text-muted-foreground hover:border-foreground/30'))}>
                   {r.emoji}<span className="text-[10px] tabular-nums">{r.count}</span>
                 </button>
               ))}
             </div>
           )}
 
-          <span className={cn('absolute bottom-1 right-2 flex items-center gap-0.5 text-[10px]', isOwn ? 'text-primary-foreground/60' : 'text-muted-foreground/70')}>
+          <span className={cn('absolute bottom-1 right-2 flex items-center gap-0.5 text-[10px]', isOwn ? 'text-primary-foreground/80' : 'text-muted-foreground')}>
             {message.isEdited && <span className="text-[10px] opacity-70">ред.</span>}
             {formatTime(message.createdAt)}
             {isOwn && (
@@ -640,6 +1169,15 @@ export function ChatPanel({ compact, scopeProduct }: {
   const [dragOver, setDragOver] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
   const [showRoomInfo, setShowRoomInfo] = useState(false)
+  // «Кто это» по клику на человека: участника в составе или автора сообщения.
+  const [profileFor, setProfileFor] = useState<string | null>(null)
+  // Пересылка: сообщение, для которого открыт выбор чатов-получателей.
+  const [forwardMsg, setForwardMsg] = useState<ChatMessage | null>(null)
+  // «В заявку»: сообщение, из которого создаётся заявка.
+  const [ticketMsg, setTicketMsg] = useState<ChatMessage | null>(null)
+  // Разрешение на браузерные уведомления — для кнопки-колокольчика в шапке списка.
+  const [pushPerm, setPushPerm] = useState<NotificationPermission | 'unsupported'>(
+    () => (pushSupported() ? Notification.permission : 'unsupported'))
   // Ширина колонки списка: тянется разделителем, помнится между сессиями.
   const [listWidth, setListWidth] = useState(() => {
     const saved = Number(localStorage.getItem('cl-chat-list-width'))
@@ -793,6 +1331,7 @@ export function ChatPanel({ compact, scopeProduct }: {
     onSuccess: () => {
       setMessageText(''); setPendingFiles([]); setReplyTo(null); setMentionQuery(null)
       mentionMapRef.current.clear()
+      if (selectedRoom) localStorage.removeItem(`cl-draft-${selectedRoom}`)
       qc.invalidateQueries({ queryKey: ['chat-messages', selectedRoom] })
       qc.invalidateQueries({ queryKey: ['chat-rooms'] })
     },
@@ -846,6 +1385,37 @@ export function ChatPanel({ compact, scopeProduct }: {
     if (selectedRoom) chat.markRead(selectedRoom).then(() => qc.invalidateQueries({ queryKey: ['chat-rooms'] })).catch(() => {})
   }, [selectedRoom, messages.length, qc])
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages.length, typingUsers])
+  // Тихая переподписка Web Push: разрешение уже дано — восстановить подписку после
+  // чистки браузера или пересоздания SW. Один раз на открытие чата.
+  useEffect(() => { ensurePushSubscription().catch(() => {}) }, [])
+  // Открытие конкретной комнаты извне: карточка объекта зовёт
+  // openInteraction('chat', 'room:<id>') — контекст доносит, какой чат показать.
+  const { interactionContext } = useSupportContext()
+  useEffect(() => {
+    if (interactionContext?.startsWith('room:')) {
+      setSelectedRoom(interactionContext.slice(5))
+      setShowRoomInfo(false)
+    }
+  }, [interactionContext])
+  // Черновики: набранное живёт per-чат. Уход из комнаты сохраняет текст, вход —
+  // восстанавливает; отправка чистит (в sendMutation.onSuccess).
+  // ponytail: localStorage, без синка между устройствами — добавить серверное поле,
+  // если понадобится продолжать с телефона.
+  const msgTextRef = useRef('')
+  useEffect(() => { msgTextRef.current = messageText }, [messageText])
+  const prevRoomRef = useRef<string | null>(null)
+  useEffect(() => {
+    const prev = prevRoomRef.current
+    if (prev && prev !== selectedRoom) {
+      const t = msgTextRef.current.trim()
+      if (t) localStorage.setItem(`cl-draft-${prev}`, t)
+      else localStorage.removeItem(`cl-draft-${prev}`)
+    }
+    if (selectedRoom && selectedRoom !== prev) {
+      setMessageText(localStorage.getItem(`cl-draft-${selectedRoom}`) || '')
+    }
+    prevRoomRef.current = selectedRoom
+  }, [selectedRoom])
 
   // ── действия ──
   const handleSend = () => {
@@ -906,7 +1476,14 @@ export function ChatPanel({ compact, scopeProduct }: {
   }
 
   // ── производные ──
-  const activeRoom = selectedRoom ? rooms.find((r) => r.id === selectedRoom) : undefined
+  // Скрытые комнаты (чат заявки) в общий список не входят — их шапку и права
+  // строим из детали; роль зрителя деталь отдаёт сама (myRole).
+  const activeRoom = useMemo(() => {
+    const inList = selectedRoom ? rooms.find((r) => r.id === selectedRoom) : undefined
+    if (inList) return inList
+    if (roomDetail && roomDetail.id === selectedRoom) return { ...roomDetail, unreadCount: 0 }
+    return undefined
+  }, [rooms, selectedRoom, roomDetail])
   const isAdmin = user?.role === 'admin' || !!user?.is_superadmin
   // Канал односторонний: писать в него могут владелец и назначенные им админы —
   // роль В КОМНАТЕ, а не должность в компании. «Объявления» пространства ведёт ещё и
@@ -980,6 +1557,19 @@ export function ChatPanel({ compact, scopeProduct }: {
           <span className="text-sm font-semibold">Чаты</span>
           {totalUnread > 0 && <span className="rounded-full bg-primary/15 px-1.5 text-[10px] text-primary">{totalUnread}</span>}
           <div className="flex-1" />
+          {/* Уведомления при закрытой вкладке: колокольчик виден, пока разрешение не
+              спрошено. После «granted» подписка живёт сама (тихая переподписка). */}
+          {pushPerm === 'default' && (
+            <button title="Включить уведомления браузера о новых сообщениях"
+              onClick={() => requestPushPermission().then((r) => {
+                setPushPerm(pushSupported() ? Notification.permission : 'unsupported')
+                if (r === 'ok') toast.success('Уведомления включены')
+                else if (r === 'denied') toast.error('Уведомления запрещены в браузере')
+              })}
+              className="inline-flex size-7 items-center justify-center rounded-md text-primary transition-colors hover:bg-accent">
+              <Bell className="size-4" />
+            </button>
+          )}
           <button onClick={() => setShowArchived((v) => !v)} title={showArchived ? 'Активные' : 'Архив'}
             className={cn('inline-flex size-7 items-center justify-center rounded-md transition-colors', showArchived ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent hover:text-foreground')}>
             <Archive className="size-4" />
@@ -1040,14 +1630,17 @@ export function ChatPanel({ compact, scopeProduct }: {
         ) : filteredRooms.map((room) => {
           const Icon = roomIcon(room)
           const isSystem = room.kind === 'news' || room.kind === 'general'
-            || room.kind === 'platform' || !!room.kind?.startsWith('app:')
+            || room.kind === 'platform'
           const peerOnline = room.type === 'direct' && room.directPeerId ? presenceMap.get(room.directPeerId)?.online : false
           return (
             <div key={room.id} onClick={() => { setSelectedRoom(room.id); setShowRoomInfo(false) }}
               className={cn('group/room flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 py-2 text-left transition-colors hover:bg-accent',
                 selectedRoom === room.id && 'bg-accent')}>
               <div className="relative">
-                {isSystem ? (
+                {room.avatarUrl ? (
+                  <AuthImage path={room.avatarUrl} alt={room.name || 'Чат'}
+                    className="size-10 shrink-0 rounded-full object-cover" />
+                ) : isSystem ? (
                   <div className="flex size-10 items-center justify-center rounded-full bg-muted text-muted-foreground"><Icon className="size-5" /></div>
                 ) : room.type === 'direct' ? (
                   <Avatar seed={room.id} name={room.name} online={!!peerOnline} size={40} />
@@ -1057,7 +1650,24 @@ export function ChatPanel({ compact, scopeProduct }: {
               </div>
               <div className="min-w-0 flex-1">
                 <div className="flex items-center justify-between gap-1">
-                  <span className="truncate text-sm font-medium">{room.name || 'Чат'}</span>
+                  <span className="flex min-w-0 items-center gap-1">
+                    <span className="truncate text-sm font-medium">{room.name || 'Чат'}</span>
+                    {/* Метка «специализированной» группы: видно, при каком она приложении. */}
+                    {room.scopeProduct && (
+                      <span className="shrink-0 rounded bg-primary/10 px-1 py-px text-[10px] font-medium leading-tight text-primary">
+                        {SPACE_PRODUCTS.find((p) => p.code === room.scopeProduct)?.label || room.scopeProduct}
+                      </span>
+                    )}
+                    {/* Группа «по станции»: видно, при каком объекте живёт разговор. */}
+                    {room.scopeObjectName && (
+                      <span className="flex min-w-0 max-w-[110px] shrink-0 items-center gap-0.5 rounded bg-emerald-500/10 px-1 py-px text-[10px] font-medium leading-tight text-emerald-600 dark:text-emerald-400"
+                        title={room.scopeObjectName}>
+                        <MapPin className="size-2.5 shrink-0" />
+                        <span className="truncate">{room.scopeObjectName}</span>
+                      </span>
+                    )}
+                    {isMuted(room) && <BellOff className="size-3 shrink-0 text-muted-foreground/70" />}
+                  </span>
                   <div className="flex shrink-0 items-center gap-0.5">
                     <span className="text-[10px] text-muted-foreground">{fmtAge(room.lastMessageAt)}</span>
                     <DropdownMenu>
@@ -1067,6 +1677,16 @@ export function ChatPanel({ compact, scopeProduct }: {
                         </button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+                        {/* «Без звука» доступен и системным чатам: выйти из «Объявлений»
+                            нельзя, а не получать push о каждом — можно. */}
+                        <DropdownMenuItem className="gap-2 text-xs"
+                          onClick={() => chat.muteRoom(room.id, isMuted(room) ? null : 'forever')
+                            .then(() => qc.invalidateQueries({ queryKey: ['chat-rooms'] }))
+                            .catch(() => toast.error('Не удалось изменить уведомления'))}>
+                          {isMuted(room)
+                            ? <><Bell className="size-3.5" />Со звуком</>
+                            : <><BellOff className="size-3.5" />Без звука</>}
+                        </DropdownMenuItem>
                         {!isSystem && (showArchived ? (
                           <DropdownMenuItem className="gap-2 text-xs" onClick={() => archiveRoom(room.id, false)}>
                             <ArchiveRestore className="size-3.5" />Вернуть из архива
@@ -1092,17 +1712,36 @@ export function ChatPanel({ compact, scopeProduct }: {
                 </div>
                 <div className="flex items-center gap-1.5">
                   <p className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
-                    {room.pinnedMessage && <Pin className="mr-1 inline size-3 text-blue-400" />}
-                    {room.lastMessage || 'Нет сообщений'}
+                    {(() => {
+                      // Черновик заметнее последнего сообщения: человек сам не дописал.
+                      const draft = !room.unreadCount && localStorage.getItem(`cl-draft-${room.id}`)
+                      if (draft) return <><span className="text-amber-600 dark:text-amber-500">Черновик:</span> {draft}</>
+                      return <>
+                        {room.pinnedMessage && <Pin className="mr-1 inline size-3 text-primary" />}
+                        {room.lastMessage || 'Нет сообщений'}
+                      </>
+                    })()}
                   </p>
                   {(room.unreadCount ?? 0) > 0 && (
-                    <span className="shrink-0 rounded-full bg-primary px-1.5 text-[10px] font-bold text-primary-foreground">{room.unreadCount}</span>
+                    <span className={cn('shrink-0 rounded-full px-1.5 text-[10px] font-bold',
+                      isMuted(room) ? 'bg-muted-foreground/30 text-foreground/80' : 'bg-primary text-primary-foreground')}>
+                      {room.unreadCount}
+                    </span>
                   )}
                 </div>
               </div>
             </div>
           )
         })}
+        {/* Глобальный поиск: тот же ввод, что фильтрует комнаты, от трёх символов
+            ищет и по содержимому сообщений всех чатов. */}
+        <GlobalSearchResults q={listSearch}
+          onOpen={(roomId) => {
+            setSelectedRoom(roomId)
+            setMessageSearch(listSearch)
+            setShowMessageSearch(true)
+            setShowRoomInfo(false)
+          }} />
       </div>
     </div>
   )
@@ -1118,7 +1757,10 @@ export function ChatPanel({ compact, scopeProduct }: {
         </button>
         <button onClick={() => setShowRoomInfo((v) => !v)} className="group/header flex min-w-0 flex-1 items-center gap-2.5 text-left">
           <div className="relative">
-            {activeRoom?.kind === 'news' || activeRoom?.kind === 'general' ? (
+            {activeRoom?.avatarUrl ? (
+              <AuthImage path={activeRoom.avatarUrl} alt={activeRoom.name || 'Чат'}
+                className="size-8 shrink-0 rounded-full object-cover" />
+            ) : activeRoom?.kind === 'news' || activeRoom?.kind === 'general' ? (
               <div className="flex size-8 items-center justify-center rounded-full bg-muted text-muted-foreground">
                 {activeRoom.kind === 'news' ? <Megaphone className="size-4" /> : <Building2 className="size-4" />}
               </div>
@@ -1162,17 +1804,35 @@ export function ChatPanel({ compact, scopeProduct }: {
 
       {showRoomInfo ? (
         <RoomInfoPanel room={activeRoom} participants={roomDetail?.participants} userId={user?.id}
-          canManage={isAdmin || activeRoom?.createdBy === user?.id}
+          canManage={isAdmin || activeRoom?.createdBy === user?.id
+            || activeRoom?.myRole === 'owner' || activeRoom?.myRole === 'admin'}
+          canOwn={isAdmin || activeRoom?.createdBy === user?.id || activeRoom?.myRole === 'owner'}
           onAdd={(uid) => { chat.addParticipant(selectedRoom!, uid).then(() => { qc.invalidateQueries({ queryKey: ['chat-room-detail', selectedRoom] }); toast.success('Участник добавлен') }).catch(() => toast.error('Не удалось добавить')) }}
+          onRename={(name) => { chat.patchRoom(selectedRoom!, { name }).then(() => { qc.invalidateQueries({ queryKey: ['chat-rooms'] }); qc.invalidateQueries({ queryKey: ['chat-room-detail', selectedRoom] }); toast.success('Чат переименован') }).catch((e: Error) => toast.error(e.message || 'Не удалось переименовать')) }}
+          onAvatar={(file) => {
+            const apply = (url: string) => chat.patchRoom(selectedRoom!, { avatarUrl: url })
+              .then(() => { qc.invalidateQueries({ queryKey: ['chat-rooms'] }); qc.invalidateQueries({ queryKey: ['chat-room-detail', selectedRoom] }); toast.success(url ? 'Аватар обновлён' : 'Аватар убран') })
+              .catch((e: Error) => toast.error(e.message || 'Не удалось обновить аватар'))
+            if (!file) { apply(''); return }
+            chat.uploadAttachment(file, user?.default_company_id)
+              .then((r) => apply(r.fileUrl))
+              .catch(() => toast.error('Не удалось загрузить файл'))
+          }}
+          onScope={(code) => { chat.patchRoom(selectedRoom!, { scopeProduct: code }).then(() => { qc.invalidateQueries({ queryKey: ['chat-rooms'] }); qc.invalidateQueries({ queryKey: ['chat-room-detail', selectedRoom] }); toast.success(code ? 'Группа привязана к приложению' : 'Группа отвязана — чат всего пространства') }).catch((e: Error) => toast.error(e.message || 'Не удалось сменить привязку')) }}
+          onObject={(objectId) => { chat.patchRoom(selectedRoom!, { scopeObjectId: objectId }).then(() => { qc.invalidateQueries({ queryKey: ['chat-rooms'] }); qc.invalidateQueries({ queryKey: ['chat-room-detail', selectedRoom] }); toast.success(objectId ? 'Группа привязана к объекту' : 'Группа отвязана от объекта') }).catch((e: Error) => toast.error(e.message || 'Не удалось сменить привязку')) }}
+          onRemove={(uid) => { chat.removeParticipant(selectedRoom!, uid).then(() => { qc.invalidateQueries({ queryKey: ['chat-room-detail', selectedRoom] }); qc.invalidateQueries({ queryKey: ['chat-rooms'] }); toast.success('Участник убран из чата') }).catch((e: Error) => toast.error(e.message || 'Не удалось убрать участника')) }}
+          onSetRole={(uid, role) => { chat.setParticipantRole(selectedRoom!, uid, role).then(() => { qc.invalidateQueries({ queryKey: ['chat-room-detail', selectedRoom] }); toast.success(role === 'admin' ? 'Назначен админом чата' : 'Роль снята — участник') }).catch((e: Error) => toast.error(e.message || 'Не удалось изменить роль')) }}
+          onLeave={() => { chat.leaveRoom(selectedRoom!).then(() => { setShowRoomInfo(false); setSelectedRoom(null); qc.invalidateQueries({ queryKey: ['chat-rooms'] }); toast.success('Вы вышли из группы') }).catch((e: Error) => toast.error(e.message || 'Не удалось выйти')) }}
+          onShowProfile={(uid) => setProfileFor(uid)}
           onMessageUser={(uid) => openDirectMutation.mutate(uid)} presenceMap={presenceMap} />
       ) : (
         <>
           {/* Закреп */}
           {activeRoom?.pinnedMessage && (
             <div className="flex shrink-0 items-center gap-2 border-b border-border/50 bg-muted/40 px-3 py-1.5">
-              <Pin className="size-3 shrink-0 text-blue-400" />
+              <Pin className="size-3 shrink-0 text-primary" />
               <div className="min-w-0 flex-1">
-                <div className="text-[9px] font-medium text-blue-400">Закреплено · {activeRoom.pinnedMessage.userName || ''}</div>
+                <div className="text-[10px] font-medium text-primary">Закреплено · {activeRoom.pinnedMessage.userName || ''}</div>
                 <div className="truncate text-[11px] text-muted-foreground">{activeRoom.pinnedMessage.content}</div>
               </div>
               <button onClick={() => pinMutation.mutate(null)} className="shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground" title="Открепить"><X className="size-3" /></button>
@@ -1211,9 +1871,11 @@ export function ChatPanel({ compact, scopeProduct }: {
                       onEditSave={() => editMutation.mutate({ id: msg.id, content: editText })}
                       onEditTextChange={setEditText}
                       onDelete={() => deleteMutation.mutate(msg.id)}
-                      onAuthorClick={!isOwn && msg.userId && activeRoom?.type !== 'direct' ? () => openDirectMutation.mutate(msg.userId!) : undefined}
+                      onAuthorClick={!isOwn && msg.userId && activeRoom?.type !== 'direct' ? () => setProfileFor(msg.userId!) : undefined}
                       onReact={(emoji) => reactMutation.mutate({ id: msg.id, emoji })}
                       onPin={() => pinMutation.mutate(msg.id)}
+                      onForward={() => setForwardMsg(msg)}
+                      onTicket={activeRoom?.type !== 'direct' ? () => setTicketMsg(msg) : undefined}
                       onImageClick={openImage} />
                   )
                 })
@@ -1229,9 +1891,9 @@ export function ChatPanel({ compact, scopeProduct }: {
 
           {replyTo && (
             <div className="flex shrink-0 items-center gap-2 border-t border-border/50 bg-muted/30 px-3 py-1.5">
-              <div className="h-6 w-0.5 shrink-0 rounded-full bg-blue-500" />
+              <div className="h-6 w-0.5 shrink-0 rounded-full bg-primary" />
               <div className="min-w-0 flex-1">
-                <div className="text-[10px] font-medium text-blue-400">{replyTo.userName}</div>
+                <div className="text-[10px] font-medium text-primary">{replyTo.userName}</div>
                 <div className="truncate text-[10px] text-muted-foreground">{replyTo.content || (replyTo.fileName ? `📎 ${replyTo.fileName}` : '')}</div>
               </div>
               <button onClick={() => setReplyTo(null)} className="shrink-0 text-muted-foreground hover:text-foreground"><X className="size-3" /></button>
@@ -1314,7 +1976,35 @@ export function ChatPanel({ compact, scopeProduct }: {
   // Диалоги (общие для обоих режимов)
   const dialogs = (
     <>
-      <CreateChatDialog open={createOpen} onOpenChange={setCreateOpen}
+      {profileFor && (
+        <PersonProfileDialog userId={profileFor} selfId={user?.id}
+          online={presenceMap.get(profileFor)?.online}
+          onClose={() => setProfileFor(null)}
+          onMessage={(uid) => { setProfileFor(null); openDirectMutation.mutate(uid) }} />
+      )}
+      {forwardMsg && (
+        <ForwardDialog message={forwardMsg} rooms={rooms.filter((r) => !r.isArchived)}
+          onClose={() => setForwardMsg(null)}
+          onDone={(ids) => {
+            setForwardMsg(null)
+            toast.success(ids.length > 1 ? `Переслано в ${ids.length} чата(ов)` : 'Переслано')
+            qc.invalidateQueries({ queryKey: ['chat-rooms'] })
+            qc.invalidateQueries({ queryKey: ['chat-messages'] })
+          }} />
+      )}
+      {ticketMsg && (
+        <TicketFromMessageDialog message={ticketMsg}
+          defaultObjectId={activeRoom?.scopeObjectId ?? null}
+          defaultObjectName={activeRoom?.scopeObjectName ?? null}
+          onClose={() => setTicketMsg(null)}
+          onDone={(num) => {
+            setTicketMsg(null)
+            toast.success(num ? `Заявка №${num} создана` : 'Заявка создана')
+            qc.invalidateQueries({ queryKey: ['chat-messages', selectedRoom] })
+            qc.invalidateQueries({ queryKey: ['chat-rooms'] })
+          }} />
+      )}
+      <CreateChatDialog open={createOpen} onOpenChange={setCreateOpen} scopeProduct={scope}
         onCreated={(id) => { qc.invalidateQueries({ queryKey: ['chat-rooms'] }); setSelectedRoom(id); setShowRoomInfo(false) }} />
       <Dialog open={folderDialogOpen} onOpenChange={setFolderDialogOpen}>
         <DialogContent className="max-w-xs gap-3 sm:max-w-xs">

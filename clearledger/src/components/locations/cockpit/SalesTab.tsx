@@ -5,7 +5,6 @@
  */
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import {
   Wallet, Fuel, Banknote, CreditCard, Ticket, GitCompare, ChevronLeft, ChevronRight, Zap, Box,
@@ -16,23 +15,12 @@ import { useStationPnL, useStationPaymentMix, useStationLastShift } from '@/hook
 import { fmtMoney, fmtMoneyShort, fmtLiters, fmtPct } from '@/services/analyticsService'
 import type { ServiceLocation } from '@/types/location'
 import { SectionCard, InfoRow, Placeholder, WipBadge, ScrollTab, typeFlags } from './shared'
+import { MetricTile as Kpi } from '@/components/ui/metric-tile'
 
 function monthBounds(year: number, month: number) {
   const first = new Date(year, month - 1, 1)
   const last = new Date(year, month, 0)
   return { from: first.toISOString().slice(0, 10), to: last.toISOString().slice(0, 10) }
-}
-
-function Kpi({ label, value, sub }: { label: string; value: string; sub?: string }) {
-  return (
-    <Card>
-      <CardContent className="pt-4">
-        <div className="text-xs text-muted-foreground">{label}</div>
-        <div className="mt-1 text-lg font-semibold tabular-nums">{value}</div>
-        {sub && <div className="text-xs text-muted-foreground">{sub}</div>}
-      </CardContent>
-    </Card>
-  )
 }
 
 export function SalesTab({ location }: { location: ServiceLocation }) {

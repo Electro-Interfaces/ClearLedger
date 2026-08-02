@@ -55,7 +55,7 @@ GIG_PAYMENT_MAPPINGS: list[dict] = [
     {"pattern": "кредит",       "channel_code": "ledger",        "warehouse_override": "Ведомости"},
     {"pattern": "кред.рубл",    "channel_code": "",              "warehouse_override": None},
     # ↓ транзакционный грейн STS (/v2/transactions) — имена видов оплаты отличаются
-    # от сменного sales-блока: «Карта МПС» = банковские карты (64% наливов ГИГ),
+    # от сменного sales-блока: «Карта МПС» = банковские карты (64% реализаций ГИГ),
     # «КР» = локальные топливные карты. ПОРЯДОК: 'кр' строго после 'кредит'/'кред.рубл',
     # иначе подстрочный матч перехватит «Кредит».
     {"pattern": "мпс",          "channel_code": "retail_card",   "warehouse_override": None},

@@ -164,6 +164,20 @@ export interface ChargeSessionsResponse {
   lines: ChargeSessionLine[]
   totals: ChargeSessionLine
   period_days?: number
+  /** Ряд сетевых тоталов по бакетам — приходит только при withSeries. */
+  series?: ChargeTotalsSeries
+}
+
+/** Ряд тоталов для спарклайнов под цифрами разреза. Доли (успех, ср. чек) в
+ *  пустом бакете приходят null, счётчики — нулём. */
+export interface ChargeTotalsSeries {
+  bucket: ChargeBucket
+  axis: string[]
+  amount: (number | null)[]
+  sessions: (number | null)[]
+  energy: (number | null)[]
+  success_pct: (number | null)[]
+  avg_check: (number | null)[]
 }
 export type ChargeGroupBy = 'station' | 'region' | 'connector' | 'user_type' | 'client' | 'charge_type' | 'tariff' | 'hour' | 'day' | 'result'
 export type ChargeMetric = 'sessions' | 'energy_kwh' | 'amount' | 'avg_check' | 'avg_energy' | 'avg_duration_min' | 'success_pct' | 'price_per_kwh'
@@ -965,11 +979,17 @@ function narrowParams(p: { stations?: string[]; regions?: string[]; stationId?: 
   }
 }
 
-export async function getChargeSessions(p: PeriodParams & { groupBy?: ChargeGroupBy; tz?: 'msk' | 'local' }): Promise<ChargeSessionsResponse> {
+export async function getChargeSessions(p: PeriodParams & {
+  groupBy?: ChargeGroupBy; tz?: 'msk' | 'local'
+  /** Просить ряд тоталов для спарклайнов — это лишний скан периода на сервере,
+   *  поэтому включают только экраны, которые его рисуют. */
+  withSeries?: boolean
+}): Promise<ChargeSessionsResponse> {
   return get<ChargeSessionsResponse>('/api/analytics/charge-sessions', {
     company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo,
     group_by: p.groupBy ?? 'station',
     ...(p.tz ? { tz: p.tz } : {}),
+    ...(p.withSeries ? { with_series: '1' } : {}),
     ...narrowParams(p),
   })
 }

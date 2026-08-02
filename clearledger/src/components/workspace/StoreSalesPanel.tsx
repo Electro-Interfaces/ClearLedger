@@ -21,6 +21,7 @@ import {
   getStoreSales, type SalesGroupBy, type SalesCategory, type SalesMarked,
 } from '@/services/storeService'
 import { fmtMoney, fmtMoneyShort } from '@/services/analyticsService'
+import { rechartsTooltipTheme } from '@/components/ui/chart-utils'
 
 const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: d }).format(n)
 
@@ -124,7 +125,7 @@ export function StoreSalesPanel({ companyId, dateFrom, dateTo, stations }: { com
                   <CartesianGrid strokeDasharray="3 3" opacity={0.12} />
                   <XAxis dataKey="date" tick={{ fontSize: 10 }} tickFormatter={(d: string) => d.slice(5)} />
                   <YAxis tick={{ fontSize: 10 }} tickFormatter={(v: number) => fmtMoneyShort(v)} width={52} />
-                  <Tooltip formatter={(value) => fmtMoney(Number(value))}
+                  <Tooltip {...rechartsTooltipTheme} formatter={(value) => fmtMoney(Number(value))}
                     contentStyle={{ background: 'hsl(var(--popover))', border: '1px solid hsl(var(--border))', borderRadius: 8, fontSize: 12 }} />
                   <Bar dataKey="revenue" fill={seriesColor(0, 2)} radius={[2, 2, 0, 0]} />
                 </BarChart>

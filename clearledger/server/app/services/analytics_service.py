@@ -46,6 +46,7 @@ from app.models import (
 from app.services.mapping import normalize_default
 from app.services.fuel_balance import build_fuel_balance
 from app.services.tz_offsets import shifted_started_at
+from app.utils import msk_day_end, msk_day_start
 
 
 # ─── helpers ─────────────────────────────────────────────────────────
@@ -212,8 +213,8 @@ class AnalyticsService:
         stmt = select(FuelShift).where(
             FuelShift.company_id == f.company_id,
             FuelShift.closed_at.is_not(None),
-            FuelShift.closed_at >= datetime.combine(f.date_from, datetime.min.time()),
-            FuelShift.closed_at <= datetime.combine(f.date_to, datetime.max.time()),
+            FuelShift.closed_at >= msk_day_start(f.date_from),
+            FuelShift.closed_at <= msk_day_end(f.date_to),
         )
         if f.station_id is not None:
             stmt = stmt.where(FuelShift.station_id == f.station_id)
@@ -230,8 +231,8 @@ class AnalyticsService:
         """
         stmt = select(FuelShift).where(
             FuelShift.company_id == f.company_id,
-            FuelShift.opened_at >= datetime.combine(f.date_from, datetime.min.time()),
-            FuelShift.opened_at <= datetime.combine(f.date_to, datetime.max.time()),
+            FuelShift.opened_at >= msk_day_start(f.date_from),
+            FuelShift.opened_at <= msk_day_end(f.date_to),
         )
         if f.station_id is not None:
             stmt = stmt.where(FuelShift.station_id == f.station_id)
@@ -920,12 +921,15 @@ class AnalyticsService:
         return out
 
     async def charge_sessions(self, f: PeriodFilter, group_by: str = "station",
-                              with_totals: bool = True, tz: str = "msk") -> dict[str, Any]:
+                              with_totals: bool = True, tz: str = "msk",
+                              with_series: bool = False) -> dict[str, Any]:
         """Разрез зарядных сессий ЭЗС: выручка/энергия/сессии/ср.чек/успех по группе.
 
         with_totals=False — не считать сетевые distinct-тоталы портов/станций
         (2 доп. скана). Для разрезов, где вызывающий читает только `lines`
         (доли/профиль в overview), это экономит 2 полнотабличных distinct-скана.
+        with_series=True — добавить ряд сетевых тоталов по бакетам (+1 скан) для
+        спарклайнов под цифрами; запрашивают только экраны, которые их рисуют.
         tz='local' — час/день недели по местному времени станции (для профиля
         активности); прочие разрезы игнорируют tz."""
         period_days = (f.date_to - f.date_from).days + 1
@@ -973,8 +977,51 @@ class AnalyticsService:
         }
         for l in lines:
             l.pop("_dur_sum", None); l.pop("_success", None); l.pop("_paid", None); l.pop("_cnt_retail", None)
-        return {"period": {"from": f.date_from.isoformat(), "to": f.date_to.isoformat()},
-                "group_by": group_by, "lines": lines, "totals": totals, "period_days": period_days}
+        out: dict[str, Any] = {
+            "period": {"from": f.date_from.isoformat(), "to": f.date_to.isoformat()},
+            "group_by": group_by, "lines": lines, "totals": totals, "period_days": period_days}
+        if with_series:
+            out["series"] = await self._cs_totals_series(f, period_days, tz=tz)
+        return out
+
+    async def _cs_totals_series(self, f: PeriodFilter, period_days: int,
+                                tz: str = "msk") -> dict[str, Any]:
+        """Ряд СЕТЕВЫХ тоталов по бакетам — для спарклайнов под цифрами разреза.
+
+        Один скан того же периода (`_cs_aggregate_2d` без разреза) сразу на все
+        метрики: цифра отвечает «сколько», ряд — «куда идёт». Гранулярность под
+        длину периода, как в «Обзоре»: месяц по дням, полгода по неделям, год по
+        месяцам — иначе спарклайн годового периода превращается в шум из 365 точек.
+        """
+        bucket = "day" if period_days <= 60 else ("week" if period_days <= 250 else "month")
+        rows = await self._cs_aggregate_2d(
+            f.company_id, f.date_from, f.date_to, bucket, None,
+            f.station_codes, f.regions, f.dim_by, f.dim_val,
+            station_id=f.station_id, tz=tz)
+        by = {r.b: r for r in rows}
+        axis = self._cs_bucket_axis(f.date_from, f.date_to, bucket)
+
+        def series(metric: str) -> list[float | None]:
+            # Доля (успех, ср. чек, ₽/кВтч) в пустом бакете — null: ноль читался бы
+            # как «все сессии провалились». Счётчик в пустом бакете — честный ноль.
+            empty = None if self._cs_is_ratio(metric) else 0
+            out_: list[float | None] = []
+            for b in axis:
+                r = by.get(b)
+                out_.append(self._cs_metric_from_sums(
+                    metric, r.cnt, r.energy, r.amount, r.duration, r.success)
+                    if r is not None else empty)
+            return out_
+
+        return {
+            "bucket": bucket,
+            "axis": axis,
+            "amount": series("amount"),
+            "sessions": series("sessions"),
+            "energy": series("energy"),
+            "success_pct": series("success_pct"),
+            "avg_check": series("avg_check"),
+        }
 
     async def charge_sessions_compare(
         self, company_id, a_from, a_to, b_from, b_to, group_by: str = "station",
@@ -1787,8 +1834,8 @@ class AnalyticsService:
         shifts_in_period = (await self.session.execute(
             select(FuelShift).where(
                 FuelShift.company_id == company_id,
-                FuelShift.closed_at >= datetime.combine(first, datetime.min.time()),
-                FuelShift.closed_at <= datetime.combine(elapsed_to, datetime.max.time()),
+                FuelShift.closed_at >= msk_day_start(first),
+                FuelShift.closed_at <= msk_day_end(elapsed_to),
                 FuelShift.status.in_(("pending", "verified")),
             )
         )).scalars().all() if days_elapsed > 0 else []

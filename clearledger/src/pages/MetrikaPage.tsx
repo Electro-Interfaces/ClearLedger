@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
 import { BarChart2, Loader2, Link2, CheckCircle2, AlertTriangle, ExternalLink, Trash2, RefreshCw } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
+import { rechartsTooltipTheme } from '@/components/ui/chart-utils'
 import {
   getMetrikaStatus, saveMetrikaConnection, deleteMetrikaConnection, testMetrikaConnection,
   getMetrikaSummary, getMetrikaTimeseries, getMetrikaSources, type MetrikaStatus,
@@ -138,9 +139,9 @@ function MetrikaDashboard({ companyId, status, onEdit }: { companyId: string; st
                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
                       <XAxis dataKey="d" tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} />
                       <YAxis tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} width={40} />
-                      <Tooltip cursor={{ fill: 'hsl(var(--muted) / 0.3)' }} />
-                      <Bar dataKey="Визиты" fill="hsl(217, 91%, 60%)" radius={[2, 2, 0, 0]} isAnimationActive={false} />
-                      <Bar dataKey="Просмотры" fill="hsl(152, 60%, 45%)" radius={[2, 2, 0, 0]} isAnimationActive={false} />
+                      <Tooltip {...rechartsTooltipTheme} cursor={{ fill: 'hsl(var(--muted) / 0.3)' }} />
+                      <Bar dataKey="Визиты" fill="hsl(var(--chart-1))" radius={[2, 2, 0, 0]} isAnimationActive={false} />
+                      <Bar dataKey="Просмотры" fill="hsl(var(--chart-2))" radius={[2, 2, 0, 0]} isAnimationActive={false} />
                     </BarChart>
                   </ResponsiveContainer></div>
                 )}

@@ -55,9 +55,9 @@ const DEMO_RESULT: AuditorNormResult = {
 }
 
 const severityConfig = {
-  critical: { icon: AlertOctagon, iconBg: 'hsl(0 84% 60% / 0.12)', iconColor: 'text-red-400/80', badgeClass: 'border-red-400/50 text-red-300/80' },
-  warning: { icon: AlertTriangle, iconBg: 'hsl(45 100% 55% / 0.12)', iconColor: 'text-amber-400/80', badgeClass: 'border-amber-400/50 text-amber-300/80' },
-  info: { icon: Info, iconBg: 'hsl(217 91% 60% / 0.12)', iconColor: 'text-blue-400/80', badgeClass: 'border-blue-400/50 text-blue-300/80' },
+  critical: { icon: AlertOctagon, iconBg: 'hsl(var(--error) / 0.12)', iconColor: 'text-red-400/80', badgeClass: 'border-red-400/50 text-red-300/80' },
+  warning: { icon: AlertTriangle, iconBg: 'hsl(var(--warning) / 0.12)', iconColor: 'text-amber-400/80', badgeClass: 'border-amber-400/50 text-amber-300/80' },
+  info: { icon: Info, iconBg: 'hsl(var(--chart-1) / 0.12)', iconColor: 'text-blue-400/80', badgeClass: 'border-blue-400/50 text-blue-300/80' },
 } as const
 
 interface Props {
@@ -84,7 +84,7 @@ export function AuditorNormSection({ localDone }: Props) {
         <div className="flex items-center gap-3">
           <div
             className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full"
-            style={{ background: 'hsl(280 100% 65% / 0.15)' }}
+            style={{ background: 'hsl(var(--accent-purple) / 0.15)' }}
           >
             <Bot className="size-4 text-purple-500" />
           </div>

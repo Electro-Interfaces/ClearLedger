@@ -26,6 +26,7 @@ import { fmtN } from '@/components/balance/balanceCalc'
 import { ArrowRight, Database, Download, KeyRound, Layers, Ruler, Sparkles, Star } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ChargePivotExportDialog } from './analytics/ChargePivotExportDialog'
+import { MetricTile as Kpi } from '@/components/ui/metric-tile'
 
 /* ── тона слоёв (theme-aware) ── */
 const LAYER_TONE: Record<ChargeModelLayer['tone'], { badge: string; bar: string; border: string }> = {
@@ -54,16 +55,6 @@ function FillBar({ pct, tone = 'bg-primary/70' }: { pct: number; tone?: string }
         {pct.toLocaleString('ru-RU')}%
       </span>
     </div>
-  )
-}
-
-function Kpi({ label, value, sub }: { label: string; value: string; sub?: string }) {
-  return (
-    <Card><CardContent className="pt-4">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="mt-1 text-lg font-semibold tabular-nums">{value}</div>
-      {sub && <div className="text-[11px] text-muted-foreground/70">{sub}</div>}
-    </CardContent></Card>
   )
 }
 

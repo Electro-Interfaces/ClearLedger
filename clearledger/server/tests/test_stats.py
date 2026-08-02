@@ -5,7 +5,7 @@ from httpx import AsyncClient
 
 async def test_kpi_returns_structure(auth_client: AsyncClient):
     resp = await auth_client.get(
-        "/api/stats/kpi", params={"company_id": "npk"}
+        "/api/stats/kpi", params={"company_id": "rushydro"}
     )
     assert resp.status_code == 200
     data = resp.json()
@@ -17,7 +17,7 @@ async def test_kpi_returns_structure(auth_client: AsyncClient):
 
 async def test_category_stats(auth_client: AsyncClient):
     resp = await auth_client.get(
-        "/api/stats/categories", params={"company_id": "npk"}
+        "/api/stats/categories", params={"company_id": "rushydro"}
     )
     assert resp.status_code == 200
     data = resp.json()
@@ -26,6 +26,6 @@ async def test_category_stats(auth_client: AsyncClient):
 
 async def test_kpi_no_auth(client: AsyncClient):
     resp = await client.get(
-        "/api/stats/kpi", params={"company_id": "npk"}
+        "/api/stats/kpi", params={"company_id": "rushydro"}
     )
     assert resp.status_code in (401, 403)

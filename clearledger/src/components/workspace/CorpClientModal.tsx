@@ -18,14 +18,15 @@ import { getCorporateClientCard, type CorpClientCard, type CorpBreakdown } from 
 import { fmtMoney, fmtMoneyShort } from '@/services/analyticsService'
 import { seriesColor } from './analytics/palette'
 import { TzToggle, type Tz } from './analytics/TzToggle'
+import { rechartsTooltipTheme } from '@/components/ui/chart-utils'
+import { MONTHS_SHORT_NOM } from '@/lib/formatDate'
 
 const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: d }).format(n)
 
 /** «янв 2026» — ось графика и первая колонка таблицы месяцев. */
 function monthLabel(iso: string): string {
   const [y, m] = iso.split('-').map(Number)
-  const MM = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек']
-  return `${MM[m - 1]} ${y}`
+  return `${MONTHS_SHORT_NOM[m - 1]} ${y}`
 }
 
 /** Дней от даты до сегодня — «последняя зарядка 7 дней назад». */
@@ -157,7 +158,7 @@ function Body({ d, horizon, setHorizon, tz, setTz }: {
                   <XAxis dataKey="month" tickFormatter={monthLabel} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
                   <YAxis yAxisId="l" tickFormatter={(v) => fmtMoneyShort(Number(v))} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} width={52} />
                   <YAxis yAxisId="r" orientation="right" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} width={38} />
-                  <Tooltip
+                  <Tooltip {...rechartsTooltipTheme}
                     labelFormatter={(v) => monthLabel(String(v))}
                     formatter={(value, name) => name === 'Выручка'
                       ? [`${fmtMoney(Number(value))} ₽`, name]

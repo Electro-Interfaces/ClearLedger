@@ -132,7 +132,13 @@ export function fuelModeForKey(key: string): 'management' | 'sales_sessions' | '
  * «Управленческий» — именем, которого нет ни у продукта, ни в разговоре инженера.
  */
 // ХОЗЯЙСТВО — подключаемые модули денежного контура площадок.
+// «Закрытие месяца» первым: это рабочий стол, с которого сотрудник не уходит
+// весь месяц, а «Энергозакупка» и «Аренда» — витрины к нему.
 export const ENERGY_MGMT: CentralMenuItem[] = [
+  { key: 'ops_closing',  label: 'Закрытие месяца' },
+  { key: 'ops_charges',  label: 'Затраты объектов' },
+  { key: 'ops_docs',     label: 'Документы' },
+  { key: 'ops_parties',  label: 'Контрагенты' },
   { key: 'procurement',  label: 'Энергозакупка' },
   { key: 'rent',         label: 'Аренда' },
 ]

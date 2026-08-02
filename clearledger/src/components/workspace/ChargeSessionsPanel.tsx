@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Loader2, AlertTriangle, ArrowUp, ArrowDown, ChevronsUpDown, ChevronRight, ChevronDown, Search, X } from 'lucide-react'
 import { KpiCard } from './analytics/AnalyticsPeriodPicker'
+import { BarList } from '@/components/ui/bar-list'
 import { HINTS, MetricHint } from './analytics/MetricHint'
 import { TzToggle, type Tz } from './analytics/TzToggle'
 import { seriesColor } from './analytics/palette'
@@ -34,10 +35,11 @@ import {
   getChargeNewClients, getChargeNewClientsList, getChargeVisits, getChargeUnpaid, getChargeUnpaidStation,
   getChargeBrandReliability,
   fmtMoney, fmtMoneyShort, fmtMetric, fmtMetricCompact, CHARGE_METRIC_LABELS,
-  type ChargeGroupBy, type ChargeSessionLine, type ChargeMetric, type ChargeBucket,
+  type ChargeGroupBy, type ChargeSessionLine, type ChargeMetric, type ChargeBucket, type ChargeTotalsSeries,
   type ChargeSeriesBy, type ChargeTimeseriesResponse, type ChargeSliceResponse, type ChargeSessionsResponse,
   type ChargeNewClientsInterval, type StationReliabilityRow,
 } from '@/services/analyticsService'
+import { TrendSpark } from '@/components/ui/trend-spark'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 const nf1 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 })
@@ -143,32 +145,18 @@ const succTxt = (v: number) => (v >= 85 ? 'text-emerald-600 dark:text-emerald-40
 /** Физический разрез — порт-нормированные метрики (загрузка) имеют смысл. */
 const PHYSICAL_GROUPS = ['station', 'connector', 'region']
 
-/** Мини-график тренда в строке таблицы (SVG-полилиния). */
-function Sparkline({ values }: { values: (number | null)[] }) {
-  const w = 60, h = 16
-  const vals = values.map((v) => v ?? 0)
-  if (vals.length < 2) return <span className="text-muted-foreground/40">—</span>
-  const max = Math.max(...vals), min = Math.min(...vals)
-  const range = max - min || 1
-  const pts = vals.map((v, i) => `${((i / (vals.length - 1)) * w).toFixed(1)},${(h - ((v - min) / range) * h).toFixed(1)}`).join(' ')
-  const up = vals[vals.length - 1] >= vals[0]
-  return (
-    <svg width={w} height={h} className="inline-block align-middle overflow-visible">
-      <polyline points={pts} fill="none" stroke={up ? 'hsl(152, 69%, 45%)' : 'hsl(0, 84%, 60%)'} strokeWidth="1" />
-    </svg>
-  )
-}
-
-function SessionKpis({ t }: { t: ChargeSessionLine }) {
+/** Ряд под цифрой даём только тем плиткам, чья метрика в нём есть: у загрузки,
+ *  цены и throughput своего ряда нет — рисовать под ними чужой было бы враньём. */
+function SessionKpis({ t, series }: { t: ChargeSessionLine; series?: ChargeTotalsSeries }) {
   return (
     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-      <KpiCard label="Выручка" value={fmtMoneyShort(t.amount) + ' ₽'} accent="success" />
+      <KpiCard label="Выручка" value={fmtMoneyShort(t.amount) + ' ₽'} accent="success" spark={series?.amount} sparkLabel="Выручка по периодам" />
       <KpiCard label="Загрузка (util)" value={t.utilization_pct.toFixed(1) + '%'} accent={utilAccent(t.utilization_pct)} hint={`${nf0.format(t.ports)} портов`} info={HINTS.utilization} />
-      <KpiCard label="Успешных" value={t.success_pct.toFixed(1) + '%'} accent={succAccent(t.success_pct)} info={HINTS.sessionSuccess} />
-      <KpiCard label="Сессий" value={nf0.format(t.sessions)} />
-      <KpiCard label="Энергия" value={kwh(t.energy_kwh)} accent="info" />
+      <KpiCard label="Успешных" value={t.success_pct.toFixed(1) + '%'} accent={succAccent(t.success_pct)} info={HINTS.sessionSuccess} spark={series?.success_pct} sparkLabel="Успешность по периодам" />
+      <KpiCard label="Сессий" value={nf0.format(t.sessions)} spark={series?.sessions} sparkLabel="Сессии по периодам" />
+      <KpiCard label="Энергия" value={kwh(t.energy_kwh)} accent="info" spark={series?.energy} sparkLabel="Энергия по периодам" />
       <KpiCard label="Цена ₽/кВтч" value={fmtMoney(t.price_per_kwh)} />
-      <KpiCard label="Средний чек" value={fmtMoney(t.avg_check) + ' ₽'} />
+      <KpiCard label="Средний чек" value={fmtMoney(t.avg_check) + ' ₽'} spark={series?.avg_check} sparkLabel="Средний чек по периодам" />
       <KpiCard label="кВтч/день/порт" value={nf1.format(t.throughput_port)} hint="throughput" />
     </div>
   )
@@ -196,11 +184,15 @@ function useNarrow() {
 }
 type Narrow = ReturnType<typeof useNarrow>
 
-function useCS(companyId: string, dateFrom: string, dateTo: string, groupBy: ChargeGroupBy, tz?: Tz) {
+/** withSeries — просить ряд тоталов для спарклайнов плиток. Это лишний скан
+ *  периода, поэтому включают только экраны, где плитки действительно рисуются. */
+function useCS(companyId: string, dateFrom: string, dateTo: string, groupBy: ChargeGroupBy, tz?: Tz, withSeries?: boolean) {
   const n = useNarrow()
   return useQuery({
-    queryKey: ['charge-sessions', groupBy, companyId, dateFrom, dateTo, n.key, tz ?? 'msk'],
-    queryFn: () => getChargeSessions({ companyId, dateFrom, dateTo, groupBy, stations: n.stations, regions: n.regions, dim: n.dim, dimVal: n.dimVal, tz }),
+    // withSeries в ключе: без него переход между экранами с плитками и без них
+    // отдавал бы кеш без ряда, и спарклайны пропадали через раз.
+    queryKey: ['charge-sessions', groupBy, companyId, dateFrom, dateTo, n.key, tz ?? 'msk', withSeries ? 'series' : ''],
+    queryFn: () => getChargeSessions({ companyId, dateFrom, dateTo, groupBy, stations: n.stations, regions: n.regions, dim: n.dim, dimVal: n.dimVal, tz, withSeries }),
   })
 }
 
@@ -219,7 +211,7 @@ function BreakdownTable({ companyId, dateFrom, dateTo, groupBy, firstCol, withKp
   const period = { from: dateFrom, to: dateTo }
   const distMetric = controls ? p.metric : 'amount'
   const col = controls ? (GROUP_LABELS[gb] ?? firstCol) : firstCol
-  const { data, isLoading, error } = useCS(companyId, period.from, period.to, gb)
+  const { data, isLoading, error } = useCS(companyId, period.from, period.to, gb, undefined, withKpis)
   const n = useNarrow()
   const physical = PHYSICAL_GROUPS.includes(gb)
   const showStations = physical && gb !== 'station'   // число станций в группе; для разреза «станция» = 1, скрываем
@@ -288,7 +280,7 @@ function BreakdownTable({ companyId, dateFrom, dateTo, groupBy, firstCol, withKp
           </Field>
         </ViewParamsBar>
       )}
-      {withKpis && <SessionKpis t={t} />}
+      {withKpis && <SessionKpis t={t} series={data.series} />}
       {data.lines.length >= 3 && (
         <div className="space-y-1.5">
           <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Распределение по разрезу: {CHARGE_METRIC_LABELS[distMetric]}</div>
@@ -337,7 +329,7 @@ function BreakdownTable({ companyId, dateFrom, dateTo, groupBy, firstCol, withKp
                   <td className="p-2 text-right font-mono text-muted-foreground">{fmtMoney(l.avg_check)}</td>
                   <td className="p-2 text-right font-mono">{fmtMoney(l.price_per_kwh)}</td>
                   <td className={`p-2 text-right font-mono ${succTxt(l.success_pct)}`}>{l.success_pct.toFixed(0)}%</td>
-                  {physical && <td className="p-2 text-right"><Sparkline values={sparkMap[l.label] ?? []} /></td>}
+                  {physical && <td className="p-2 text-right"><TrendSpark values={sparkMap[l.label] ?? []} placeholder={<span className="text-muted-foreground/40">—</span>} /></td>}
                 </tr>
               ))}
               <tr className="bg-muted/60 font-medium">
@@ -423,19 +415,17 @@ function ShareCard({ title, rows }: { title: string; rows: ChargeSessionLine[] }
     <Card>
       <CardContent className="pt-4">
         <div className="text-xs uppercase tracking-wider text-muted-foreground mb-2">{title}</div>
-        <div className="space-y-1.5 text-xs">
-          {rows.map((r) => (
-            <div key={r.label}>
-              <div className="flex items-center justify-between mb-0.5">
-                <span className="truncate max-w-[180px]">{r.label}</span>
-                <span className="font-mono">{fmtMoneyShort(r.amount)} ₽ · {r.share_pct.toFixed(1)}%</span>
-              </div>
-              <div className="h-1.5 bg-muted rounded overflow-hidden">
-                <div className="h-full bg-primary" style={{ width: `${Math.min(100, r.share_pct)}%` }} />
-              </div>
-            </div>
-          ))}
-        </div>
+        {/* Рейтинг общим компонентом: длина полосы пропорциональна выручке, доля —
+            в подписи. Раньше ширина считалась вручную от share_pct. */}
+        <BarList
+          sortOrder="none"
+          valueFormatter={(v) => `${fmtMoneyShort(v)} ₽`}
+          data={rows.map((r) => ({
+            key: r.label,
+            name: `${r.label} · ${r.share_pct.toFixed(1)} %`,
+            value: r.amount,
+          }))}
+        />
       </CardContent>
     </Card>
   )
@@ -788,12 +778,17 @@ function PeriodSummaryKpis({ points, metric, unit }: { points: { label: string; 
   const cv = mean ? Math.sqrt(nums.reduce((a, b) => a + (b - mean) ** 2, 0) / nums.length) / Math.abs(mean) * 100 : 0
   return (
     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-      <KpiCard label="За период" value={fmtMetric(metric, isRatio ? mean : total)} accent="success" hint={isRatio ? 'среднее' : 'сумма'} />
+      {/* Ряд у плиток уже на руках — показываем его там, где цифра о нём и говорит:
+          итог, направление и разброс. «Пик» и «Минимум» точечные, им ряд не нужен. */}
+      <KpiCard label="За период" value={fmtMetric(metric, isRatio ? mean : total)} accent="success" hint={isRatio ? 'среднее' : 'сумма'}
+        spark={nums} sparkLabel={`Динамика по ${unit}`} />
       <KpiCard label={`Среднее / ${unit}`} value={fmtMetric(metric, mean)} />
       <KpiCard label="Пик" value={fmtMetric(metric, peak.v)} accent="info" hint={peak.label} />
       <KpiCard label="Минимум" value={fmtMetric(metric, low.v)} hint={low.label} />
-      <KpiCard label="Тренд" value={`${trend >= 0 ? '+' : ''}${trend.toFixed(0)}%`} accent={trend >= 0 ? 'success' : 'danger'} hint="последний vs первый" />
-      <KpiCard label="Стабильность" value={`${cv.toFixed(0)}%`} accent={cv <= 30 ? 'success' : cv <= 70 ? 'warning' : 'danger'} hint="разброс (CV)" />
+      <KpiCard label="Тренд" value={`${trend >= 0 ? '+' : ''}${trend.toFixed(0)}%`} accent={trend >= 0 ? 'success' : 'danger'} hint="последний vs первый"
+        spark={nums} sparkLabel="Как шёл ряд" />
+      <KpiCard label="Стабильность" value={`${cv.toFixed(0)}%`} accent={cv <= 30 ? 'success' : cv <= 70 ? 'warning' : 'danger'} hint="разброс (CV)"
+        spark={nums} sparkLabel="Колебания ряда" />
     </div>
   )
 }
@@ -954,7 +949,7 @@ function SliceCompactTable({ data, metric, onRow, drillable }: {
                 <tr key={r.l.label} onClick={() => onRow(r.l.label)}
                   className={`border-b border-border/30 hover:bg-muted/30 ${drillable ? 'cursor-pointer' : ''}`}>
                   <td className="p-2 font-medium truncate max-w-[220px]">{r.l.label}</td>
-                  <td className="p-2 text-center"><Sparkline values={r.l.values} /></td>
+                  <td className="p-2 text-center"><TrendSpark values={r.l.values} placeholder={<span className="text-muted-foreground/40">—</span>} /></td>
                   <td className="p-2 text-right font-mono">{fmtMetricCompact(metric, r.agg)}</td>
                   <td className="p-2 text-right font-mono text-muted-foreground">{fmtMetricCompact(metric, r.mn)}</td>
                   <td className="p-2 text-right font-mono text-muted-foreground">{fmtMetricCompact(metric, r.mx)}</td>
@@ -2153,11 +2148,18 @@ function Reliability({ companyId, dateFrom, dateTo }: { companyId: string; dateF
   const stations = byStation.data?.lines ?? []
   const risk = stations.filter((l) => l.sessions >= 30 && l.success_pct < 70)
   const worst = [...stations].filter((l) => l.sessions >= 30).sort((a, b) => a.success_pct - b.success_pct).slice(0, 15)
+  // Ряд для плитки берём из того же запроса, что кормит график ниже: динамика под
+  // цифрой не стоит экрану ни одного лишнего обращения.
+  const netSpark = trend.data?.data.map((d) => {
+    const v = d[trend.data!.series[0]]
+    return typeof v === 'number' ? v : null
+  })
 
   return (
     <div className="p-4 space-y-4">
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <KpiCard label="Успешных" value={t.success_pct.toFixed(1) + '%'} accent={succAccent(t.success_pct)} hint={`${nf0.format(complete)} из ${nf0.format(t.sessions)}`} info={HINTS.sessionSuccess} />
+        <KpiCard label="Успешных" value={t.success_pct.toFixed(1) + '%'} accent={succAccent(t.success_pct)} hint={`${nf0.format(complete)} из ${nf0.format(t.sessions)}`} info={HINTS.sessionSuccess}
+          spark={netSpark} sparkLabel="Успешность по месяцам" />
         <KpiCard label="С ошибкой" value={nf0.format(errors)} accent="danger" hint={`${(errors / t.sessions * 100).toFixed(1)}% сессий`} />
         <KpiCard label="Станций риска" value={nf0.format(risk.length)} accent={risk.length ? 'warning' : 'success'} hint="success < 70% (≥30 сессий)" />
         <KpiCard label="Без оплаты" value={t.unpaid_pct.toFixed(1) + '%'} accent={t.unpaid_pct >= 10 ? 'danger' : t.unpaid_pct >= 3 ? 'warning' : 'success'} hint="сессий без отметки оплаты" />

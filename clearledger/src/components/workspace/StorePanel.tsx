@@ -36,6 +36,7 @@ import { StoreShiftsPanel } from './StoreShiftsPanel'
 import { BpExportPanel } from './BpExportPanel'
 import { StoreDedupPanel } from './StoreDedupPanel'
 import { StoreStationsPanel } from './StoreStationsPanel'
+import { StoreStationDraftsPanel } from './StoreStationDraftsPanel'
 import { StoreReceiptDocsPanel } from './StoreReceiptDocsPanel'
 import {
   STORE_KEYS, STORE_MODES, STORE_MENU, STORE_HELP_KEYS, getStoreView, storeDefaultKey, storeModeForKey,
@@ -246,6 +247,13 @@ export function StorePanel() {
     return (
       <div className="h-full overflow-y-auto">
         <StoreMrcPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />
+      </div>
+    )
+  }
+  if (sub === 'station-drafts') {
+    return (
+      <div className="h-full overflow-y-auto">
+        <StoreStationDraftsPanel />
       </div>
     )
   }

@@ -240,16 +240,19 @@ async def get_charge_sessions(
     dim: str | None = None,
     dim_val: str | None = None,
     tz: str = Query("msk", pattern="^(msk|local)$"),
+    with_series: bool = False,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Зарядные сессии ЭЗС по разрезу: выручка/энергия/сессии/ср.чек/успех.
-    tz=local — почасовой разрез (group_by=hour) по местному времени станции."""
+    tz=local — почасовой разрез (group_by=hour) по местному времени станции.
+    with_series=1 — плюс ряд сетевых тоталов по бакетам для спарклайнов плиток:
+    это дополнительный скан периода, поэтому по умолчанию выключено."""
     f = await _filter_from_query(company_id, date_from, date_to, station_id, db, current_user, "management")
     f.station_codes = _csv(stations); f.regions = _csv(regions)
     f.dim_by = dim; f.dim_val = dim_val
     svc = AnalyticsService(db)
-    return await svc.charge_sessions(f, group_by=group_by, tz=tz)
+    return await svc.charge_sessions(f, group_by=group_by, tz=tz, with_series=with_series)
 
 
 @router.get("/charge-sessions/reliability-brands")
@@ -745,7 +748,7 @@ async def get_fuel_model(
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Модель данных топливного контура (ГИГ) для «Нормализации» — контракт charge_model.
-    dataset: shifts (смены STS + наливы) | receipts (ТТН) | sidegoods (сопутка/общепит ЦБ)."""
+    dataset: shifts (смены STS + реализации) | receipts (ТТН) | sidegoods (сопутка/общепит ЦБ)."""
     from app.services import fuel_model_service as fms
     cid = await assert_company_module(company_id, current_user, db, "management")
     fn = {"shifts": fms.fuel_shifts_model, "receipts": fms.fuel_receipts_model,

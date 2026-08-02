@@ -77,7 +77,9 @@ export function SupportProvider({ children }: { children: ReactNode }) {
     enabled: isApiEnabled() && !!getToken(),
     refetchInterval: 60000,
   })
-  const chatUnread = (rooms || []).reduce((a, r) => a + (r.unreadCount || 0), 0)
+  // «Без звука» не красит общий счётчик: замьюченный чат человек откроет сам.
+  const chatUnread = (rooms || []).reduce((a, r) => a + (
+    r.mutedUntil && Date.parse(r.mutedUntil) > Date.now() ? 0 : (r.unreadCount || 0)), 0)
   const unreadCounts = { chat: chatUnread, tickets: 0 }
 
   return (

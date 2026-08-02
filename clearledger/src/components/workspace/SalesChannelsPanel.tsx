@@ -21,6 +21,7 @@ import {
   type SalesChannelMetrics, type SalesChannelsAnalytics,
 } from '@/services/fuel/fuelMappingService'
 import { PivotView } from './PivotView'
+import { rechartsTooltipTheme } from '@/components/ui/chart-utils'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 const nf1 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 })
@@ -423,7 +424,7 @@ export function SalesChannelsPanel({ companyId, dateFrom, dateTo }: {
                     <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 3" vertical={false} />
                     <XAxis dataKey="label" tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" minTickGap={18} />
                     <YAxis tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" width={54} tickFormatter={(value) => trendInfo.format(Number(value)).replace(` ${trendInfo.short}`, '')} />
-                    <Tooltip
+                    <Tooltip {...rechartsTooltipTheme}
                       formatter={(value) => [trendInfo.format(Number(value)), trendInfo.label]}
                       labelFormatter={(_, payload) => payload?.[0]?.payload?.date ? new Date(`${payload[0].payload.date}T00:00:00`).toLocaleDateString('ru-RU') : ''}
                       contentStyle={{ background: 'hsl(var(--popover))', border: '1px solid hsl(var(--border))', borderRadius: 8, fontSize: 12 }}

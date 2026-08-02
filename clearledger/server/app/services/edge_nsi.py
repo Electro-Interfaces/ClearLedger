@@ -357,11 +357,11 @@ async def station_drafts(db: AsyncSession, company_id, station_id: int | None = 
         args["st"] = station_id
 
     items = (await db.execute(text(f"""
-        SELECT station_id, source_uuid, name, unit, vat_rate, barcodes, created_at
+        SELECT id, station_id, source_uuid, name, unit, vat_rate, barcodes, created_at
         FROM edge.item_draft WHERE {условие} ORDER BY created_at
     """), args)).mappings().all()
     partners = (await db.execute(text(f"""
-        SELECT station_id, source_uuid, name, inn, kpp, role, comment, created_at
+        SELECT id, station_id, source_uuid, name, inn, kpp, role, comment, created_at
         FROM edge.partner_draft WHERE {условие} ORDER BY created_at
     """), args)).mappings().all()
     prices = (await db.execute(text("""
@@ -385,3 +385,127 @@ async def station_drafts(db: AsyncSession, company_id, station_id: int | None = 
 
     return {"items": плоско(items), "partners": плоско(partners),
             "prices": плоско(prices)}
+
+
+async def draft_candidates(db: AsyncSession, company_id, barcodes: list[str]) -> list[dict]:
+    """Карточки сети, на которые похож черновик.
+
+    Сопоставляем по штрихкоду — больше не по чему: наименования на станциях
+    расходятся («LD Blue» и «LD Autograph» оказались одним товаром), а
+    нормализация имён даёт ложные пары. Штрихкод либо совпал, либо нет.
+    """
+    if not barcodes:
+        return []
+    rows = (await db.execute(text("""
+        SELECT DISTINCT i.id, i.external_uuid, i.name, i.unit, i.vat_rate, b.code, b.status
+        FROM edge.barcode b JOIN edge.item i ON i.id = b.item_id
+        WHERE b.code = ANY(:codes)
+        ORDER BY i.name
+    """), {"codes": barcodes})).mappings().all()
+    return [{"item_id": r["id"], "uuid": str(r["external_uuid"]), "name": r["name"],
+             "unit": r["unit"], "vat_rate": r["vat_rate"],
+             "barcode": r["code"], "barcode_status": r["status"]} for r in rows]
+
+
+async def resolve_item_draft(db: AsyncSession, company_id, draft_id: int,
+                             action: str, item_id: int | None = None,
+                             note: str | None = None) -> dict:
+    """Решение центра по черновику карточки.
+
+    Три исхода, и все три обязаны быть явными:
+
+      · link   — это уже известный сети товар, просто станция про него не знала.
+                 Привязываем штрихкоды к существующей карточке.
+      · create — товара в сети нет, заводим новый и переносим штрихкоды.
+      · reject — заведено ошибочно (опечатка в ШК, дубль внутри станции).
+
+    Молчаливого «оставим как есть» тут быть не должно: черновик, который никто
+    не разобрал, — это товар, который станция продаёт, а сеть не видит.
+    """
+    draft = (await db.execute(text("""
+        SELECT id, station_id, name, unit, vat_rate, barcodes, resolved_at
+        FROM edge.item_draft WHERE id = :id AND company_id = :cid
+    """), {"id": draft_id, "cid": company_id})).mappings().first()
+    if draft is None:
+        raise ValueError("черновик не найден")
+    if draft["resolved_at"] is not None:
+        raise ValueError("черновик уже разобран")
+
+    codes = list(draft["barcodes"] or [])
+
+    if action == "reject":
+        await db.execute(text("""
+            UPDATE edge.item_draft SET resolved_at = now(), rejected = true, note = :n
+            WHERE id = :id
+        """), {"id": draft_id, "n": note})
+        await db.commit()
+        return {"action": "reject", "draft_id": draft_id}
+
+    if action == "create":
+        row = (await db.execute(text("""
+            INSERT INTO edge.item (external_uuid, name, unit, vat_rate, source, price_owner)
+            VALUES (gen_random_uuid(), :name, :unit, :vat, 'station', 'station')
+            RETURNING id, external_uuid
+        """), {"name": draft["name"], "unit": draft["unit"] or "шт",
+               # Ставка обязательна в схеме, и форма станции её всегда
+               # спрашивает. Подставляем розничную только на случай карточки,
+               # заведённой до появления поля: молча уронить признание хуже.
+               "vat": draft["vat_rate"] or "НДС22"})).mappings().first()
+        item_id = row["id"]
+        canon_uuid = str(row["external_uuid"])
+    elif action == "link":
+        if not item_id:
+            raise ValueError("не указана карточка, к которой привязываем")
+        row = (await db.execute(text(
+            "SELECT external_uuid FROM edge.item WHERE id = :id"), {"id": item_id})).first()
+        if row is None:
+            raise ValueError("карточка не найдена")
+        canon_uuid = str(row.external_uuid)
+    else:
+        raise ValueError(f"неизвестное решение: {action}")
+
+    # Штрихкоды черновика переносим на канон. Чужой активный код не трогаем:
+    # это коллизия справочника, и решать её отдельно — перевесить молча значит
+    # сломать кассу тому товару, который сейчас по нему пробивается.
+    привязано, коллизий = 0, 0
+    for code in codes:
+        занят = (await db.execute(text("""
+            SELECT item_id FROM edge.barcode WHERE code = :c AND status = 'active'
+        """), {"c": code})).first()
+        if занят is not None:
+            if занят.item_id != item_id:
+                коллизий += 1
+            continue
+        await db.execute(text("""
+            INSERT INTO edge.barcode (item_id, code, status) VALUES (:i, :c, 'active')
+            ON CONFLICT DO NOTHING
+        """), {"i": item_id, "c": code})
+        привязано += 1
+
+    await db.execute(text("""
+        UPDATE edge.item_draft SET resolved_at = now(), resolved_item = :item, note = :n
+        WHERE id = :id
+    """), {"id": draft_id, "item": item_id, "n": note})
+    await db.commit()
+    return {"action": action, "draft_id": draft_id, "item_id": item_id,
+            "uuid": canon_uuid, "barcodes_linked": привязано, "collisions": коллизий,
+            "station_id": draft["station_id"], "codes": codes}
+
+
+async def resolve_partner_draft(db: AsyncSession, company_id, draft_id: int,
+                                action: str, note: str | None = None) -> dict:
+    """Решение по контрагенту: принять в справочник сети или отклонить."""
+    if action not in ("accept", "reject"):
+        raise ValueError(f"неизвестное решение: {action}")
+    res = await db.execute(text("""
+        UPDATE edge.partner_draft
+           SET resolved_at = now(), rejected = :rej, note = :n
+         WHERE id = :id AND company_id = :cid AND resolved_at IS NULL
+     RETURNING station_id, name
+    """), {"id": draft_id, "cid": company_id, "rej": action == "reject", "n": note})
+    row = res.mappings().first()
+    if row is None:
+        raise ValueError("черновик не найден или уже разобран")
+    await db.commit()
+    return {"action": action, "draft_id": draft_id, "name": row["name"],
+            "station_id": row["station_id"]}

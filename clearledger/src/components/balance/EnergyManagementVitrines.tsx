@@ -12,6 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { fmtN } from './balanceCalc'
 import { usePaymentDisciplineSummary, useSettlementsDetail, useEnergyPeriodsSummary } from '@/hooks/useReferences'
 import { ROLE_LABEL, PAYMENT_META, paidThroughLabel, type SettlementRole } from '@/types/settlement'
+import { formatBucket } from '@/lib/formatDate'
 
 
 /* ── Платёжная дисциплина (РЕАЛЬНЫЕ данные реестра «Энергоснабжение и аренда ЭЗС»).
@@ -174,11 +175,6 @@ function SettlementDetailTable({ role }: { role: SettlementRole }) {
 
 /* ── Энергозакупка (РЕАЛЬНЫЕ данные: объёмы входящей э/э из «Сводной» реестра,
    тарифы из «Тарифы Электроэнергия_Входящие»; стоимость — оценка объём×тариф). ── */
-const MONTH_SHORT = ['', 'янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек']
-function periodLabel(iso: string): string {
-  const [y, m] = iso.split('-')
-  return `${MONTH_SHORT[Number(m)] || m} ${y.slice(2)}`
-}
 
 export function ProcurementVitrine() {
   const rootRef = useRef<HTMLDivElement>(null)
@@ -221,7 +217,7 @@ export function ProcurementVitrine() {
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
             <Kpi real label="Входящая э/э за 12 мес, кВт·ч" value={fmtN(Math.round(kwh12))} />
             <Kpi real label="Оценка стоимости за 12 мес, ₽" value={cost12 ? fmtN(Math.round(cost12)) : '—'} />
-            <Kpi real label={`Средний входящий тариф${lastTariff ? ` (${periodLabel(lastTariff.period)})` : ''}, ₽/кВт·ч`} value={lastTariff?.tariffAvg != null ? lastTariff.tariffAvg.toFixed(2) : '—'} />
+            <Kpi real label={`Средний входящий тариф${lastTariff ? ` (${formatBucket(lastTariff.period)})` : ''}, ₽/кВт·ч`} value={lastTariff?.tariffAvg != null ? lastTariff.tariffAvg.toFixed(2) : '—'} />
             <Kpi real label="ЭЗС с объёмами / с тарифом" value={`${s.stationsWithVolumes} / ${s.stationsWithTariff}`} />
           </div>
 
@@ -251,7 +247,7 @@ export function ProcurementVitrine() {
             </TableRow></TableHeader><TableBody>
               {last12.map((p) => (
                 <TableRow key={p.period}>
-                  <TableCell className="font-medium whitespace-nowrap">{periodLabel(p.period)}</TableCell>
+                  <TableCell className="font-medium whitespace-nowrap">{formatBucket(p.period)}</TableCell>
                   <TableCell>
                     <div className="h-2 rounded-sm bg-primary/70" style={{ width: `${Math.max(2, (p.kwh / maxKwh) * 100)}%` }} />
                   </TableCell>
@@ -299,7 +295,7 @@ export function ProcurementVitrine() {
                   const margin = comparable && p.saleRevenue != null && p.costEst != null ? p.saleRevenue - p.costEst : null
                   return (
                     <TableRow key={p.period}>
-                      <TableCell className="font-medium whitespace-nowrap">{periodLabel(p.period)}</TableCell>
+                      <TableCell className="font-medium whitespace-nowrap">{formatBucket(p.period)}</TableCell>
                       <TableCell>
                         <div className="space-y-1">
                           <div className="h-1.5 rounded-sm bg-primary/60" style={{ width: `${Math.max(2, (p.kwh / maxBalKwh) * 100)}%` }} />

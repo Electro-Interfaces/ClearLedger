@@ -18,6 +18,7 @@ import { Banknote, ChevronDown, ChevronRight, Loader2 } from 'lucide-react'
 import { ExportButton } from './analytics/ExportButton'
 import { useScopeSubtitle } from '@/hooks/useScopeReset'
 import { get } from '@/services/apiClient'
+import { MetricTile as Kpi } from '@/components/ui/metric-tile'
 
 const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { minimumFractionDigits: d, maximumFractionDigits: d }).format(n)
 const fmtDT = (iso: string | null) => {
@@ -86,18 +87,6 @@ function StationCashDetail({ companyId, stationCode }: { companyId: string; stat
         появится после подключения источника терминалов.
       </p>
     </div>
-  )
-}
-
-function Kpi({ label, value, sub, accent }: { label: string; value: string; sub?: string; accent?: 'warn' | 'danger' }) {
-  const tone = accent === 'danger' ? 'text-red-600 dark:text-red-400'
-    : accent === 'warn' ? 'text-amber-600 dark:text-amber-400' : 'text-foreground'
-  return (
-    <Card><CardContent className="pt-4">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className={`mt-1 text-lg font-semibold tabular-nums ${tone}`}>{value}</div>
-      {sub && <div className="text-[11px] text-muted-foreground/70">{sub}</div>}
-    </CardContent></Card>
   )
 }
 

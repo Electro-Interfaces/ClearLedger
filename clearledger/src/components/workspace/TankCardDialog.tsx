@@ -16,6 +16,7 @@
  *   3. из чего сложилось — дефекты учёта, сливы, рабочие смены;
  *   4. динамика, условия замера, накладные, смены-виновники.
  */
+import { formatBucket } from '@/lib/formatDate'
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
@@ -42,11 +43,6 @@ const gapTone = (v: number | null | undefined, tol = 50) =>
   v == null || Math.abs(v) <= tol ? 'text-muted-foreground'
     : v > 0 ? 'text-red-600 dark:text-red-400' : 'text-amber-600 dark:text-amber-400'
 
-const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек']
-const monthLabel = (ym: string) => {
-  const [y, m] = ym.split('-')
-  return `${MONTHS[Number(m) - 1]} ${y.slice(2)}`
-}
 
 /** Причины разрыва, которые считаем дефектом учёта, а не движением топлива. */
 const DEFECT_KINDS = new Set(['book_reset', 'manual', 'pulled_to_fact', 'renumber', 'unexplained'])
@@ -336,7 +332,7 @@ export function TankCardDialog({ target, tol, companyId, dateFrom, dateTo, onClo
                     // Гасим их, иначе они читаются как слагаемые сегодняшней цифры.
                     <tr key={ym} className={cn('border-t border-border/50',
                       resetMonth && ym < resetMonth && 'opacity-45')}>
-                      <td className="px-3 py-1.5 font-medium">{monthLabel(ym)}</td>
+                      <td className="px-3 py-1.5 font-medium">{formatBucket(ym)}</td>
                       <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
                         {m.shifts}{m.measured < m.shifts && (
                           <span className="ml-1 text-[10px]">({m.shifts - m.measured} без замера)</span>
