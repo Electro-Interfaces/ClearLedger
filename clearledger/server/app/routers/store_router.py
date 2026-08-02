@@ -71,7 +71,7 @@ async def store_stations(
         select(EdgeAgent).where(EdgeAgent.company_id == cid).order_by(EdgeAgent.station_id)
     )).scalars().all()
 
-    desired = os.environ.get("EDGE_DESIRED_AGENT_VERSION", "0.26.0")
+    desired = os.environ.get("EDGE_DESIRED_AGENT_VERSION", "0.27.0")
     now = datetime.now(timezone.utc)
     stations = []
     for r in rows:
@@ -173,6 +173,49 @@ async def _queue_nsi_delta(db: AsyncSession, cid, item_id: int, station_id: int 
             note="НСИ: %s" % card["name"][:60],
         ))
     return len(targets)
+
+
+@router.get("/places")
+async def store_places(
+    station_id: int = Query(208),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Остатки станции в разрезе мест хранения.
+
+    Отвечает на вопрос «где лежит товар», который у 1С был, а у Ledger — нет:
+    остаток хранился одной цифрой на станцию, и склад с торговым залом
+    складывались в кучу. Источник — снимок агента, а не выгрузка ЦБ: он
+    приходит каждый час, а не раз в три недели.
+    """
+    сводка = (await db.execute(text("""
+        SELECT s.place,
+               coalesce(pl.name, 'место ' || s.place)                    AS name,
+               coalesce(pl.is_sales_floor, s.place = s.station_id::text) AS sales_floor,
+               count(*)                                                  AS positions,
+               sum(s.qty)                                                AS qty,
+               max(s.updated_at)                                         AS updated_at
+        FROM edge.stock s
+        LEFT JOIN edge.place pl ON pl.station_id = s.station_id AND pl.code = s.place
+        WHERE s.station_id = :st
+        GROUP BY s.place, pl.name, pl.is_sales_floor, s.station_id
+        ORDER BY sales_floor DESC, s.place
+    """), {"st": station_id})).mappings().all()
+
+    # Товар, лежащий не в зале: он не пробивается кассой, пока его не выложат.
+    # Это и есть рабочий список товароведа на смену.
+    не_в_зале = (await db.execute(text("""
+        SELECT v.place_name, v.item_name, v.barcode, v.qty
+        FROM edge.v_stock_by_place v
+        WHERE v.station_id = :st AND NOT v.is_sales_floor AND v.qty > 0
+        ORDER BY v.qty DESC LIMIT 200
+    """), {"st": station_id})).mappings().all()
+
+    return {
+        "station_id": station_id,
+        "places": [{**dict(r), "qty": float(r["qty"] or 0)} for r in сводка],
+        "not_on_floor": [{**dict(r), "qty": float(r["qty"] or 0)} for r in не_в_зале],
+    }
 
 
 @router.post("/nsi/push/{station_id}")

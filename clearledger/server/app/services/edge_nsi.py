@@ -53,7 +53,7 @@ async def sync_from_snapshot(db: AsyncSession, station_id: int, payload: dict) -
     book_rows = doc.get("Учет") or []
 
     stats = {"barcodes_new": 0, "collisions": 0, "prices_changed": 0,
-             "ns_codes": 0, "stock_rows": 0, "stock_dropped": 0}
+             "ns_codes": 0, "stock_rows": 0, "stock_dropped": 0, "places": 0}
 
     # ── Штрихкоды ────────────────────────────────────────────────────────
     # Источник — обе половины снимка: касса знает, чем товар пробивается,
@@ -170,40 +170,67 @@ async def sync_from_snapshot(db: AsyncSession, station_id: int, payload: dict) -
         """), {"s": station_id, "n": ns, "b": bc})
         stats["ns_codes"] += 1
 
+    # ── Места хранения ───────────────────────────────────────────────────
+    # Справочник приезжает вместе со снимком: свои склады станция знает из 1С,
+    # центру их выдумывать неоткуда. Торговый зал определяем по коду, равному
+    # номеру станции, — так заведено в 1С на всей сети.
+    места: dict[str, str] = {}
+    for r in book_rows:
+        код = str(r.get("Место") or "")
+        if код:
+            места[код] = str(r.get("МестоНаименование") or "") or ("место " + код)
+    for код, имя in места.items():
+        await db.execute(text("""
+            INSERT INTO edge.place (station_id, code, name, is_sales_floor)
+            VALUES (:s, :c, :n, :f)
+            ON CONFLICT (station_id, code) DO UPDATE
+               SET name = excluded.name, updated_at = now()
+        """), {"s": station_id, "c": код, "n": имя, "f": код == str(station_id)})
+    stats["places"] = len(места)
+
     # ── Остатки ──────────────────────────────────────────────────────────
-    # Берём физику учёта, а не витрину кассы: касса — производная, и класть
-    # её в остаток значило бы считать одно и то же дважды.
-    qty_by_code: dict[str, float] = {}
+    # Берём физику учёта, а не витрину кассы: касса — производная, и класть её
+    # в остаток значило бы считать одно и то же дважды.
+    #
+    # Ключ — ПАРА (место, штрихкод). Складывать места в одну цифру нельзя:
+    # тогда товар со склада попадёт в витрину кассы, хотя на полке его нет.
+    qty_by_key: dict[tuple[str, str], float] = {}
     for r in book_rows:
         code = str(r.get("ШтрихКод") or "")
-        if code:
-            qty_by_code[code] = qty_by_code.get(code, 0.0) + float(r.get("Остаток") or 0)
+        if not code:
+            continue
+        место = str(r.get("Место") or "") or str(station_id)
+        qty_by_key[(место, code)] = qty_by_key.get((место, code), 0.0) + float(r.get("Остаток") or 0)
 
-    # Снимок — ПОЛНАЯ картина остатков станции, а не список изменений. Значит
-    # строка, которой в снимке нет, означает ноль, и держать её дальше нельзя:
-    # к 02.08 в edge.stock накопилось 1159 строк-сирот, из них 1021 с
-    # отрицательным остатком, и 33 позиции на 27 142 ₽ протекли в витрину кассы
-    # как товар, которого на станции нет. Витрина — будущий источник artdesc:
-    # ровно так в июле и появлялись фантомы на полке.
-    живые = [c for c in qty_by_code if c]
-    if живые:
-        удалено = await db.execute(text("""
-            DELETE FROM edge.stock s
-            WHERE s.station_id = :st
-              AND s.barcode_id NOT IN (
-                  SELECT b.id FROM edge.barcode b
-                  WHERE b.code = ANY(:codes) AND b.status = 'active')
-        """), {"st": station_id, "codes": живые})
-        stats["stock_dropped"] = удалено.rowcount or 0
+    # Снимок — ПОЛНАЯ картина остатков станции, а не список изменений. Строка,
+    # которой в снимке нет, означает ноль, и держать её дальше нельзя: к 02.08
+    # накопилось 1159 строк-сирот, из них 1021 с отрицательным остатком, и 33
+    # позиции на 27 142 ₽ протекли в витрину кассы как товар, которого нет.
+    for место in set(m for m, _ in qty_by_key) | set(места):
+        живые = [c for m, c in qty_by_key if m == место and c]
+        if живые:
+            удалено = await db.execute(text("""
+                DELETE FROM edge.stock s
+                WHERE s.station_id = :st AND s.place = :pl
+                  AND s.barcode_id NOT IN (
+                      SELECT b.id FROM edge.barcode b
+                      WHERE b.code = ANY(:codes) AND b.status = 'active')
+            """), {"st": station_id, "pl": место, "codes": живые})
+        else:
+            # Место есть, а строк по нему в снимке нет — значит там пусто.
+            удалено = await db.execute(text(
+                "DELETE FROM edge.stock WHERE station_id = :st AND place = :pl"),
+                {"st": station_id, "pl": место})
+        stats["stock_dropped"] += удалено.rowcount or 0
 
-    for code, qty in qty_by_code.items():
+    for (место, code), qty in qty_by_key.items():
         res = await db.execute(text("""
-            INSERT INTO edge.stock (station_id, barcode_id, qty)
-            SELECT :s, b.id, :q FROM edge.barcode b
+            INSERT INTO edge.stock (station_id, place, barcode_id, qty)
+            SELECT :s, :pl, b.id, :q FROM edge.barcode b
             WHERE b.code = :c AND b.status = 'active'
-            ON CONFLICT (station_id, barcode_id)
+            ON CONFLICT (station_id, place, barcode_id)
             DO UPDATE SET qty = excluded.qty, updated_at = now()
-        """), {"s": station_id, "c": code, "q": qty})
+        """), {"s": station_id, "pl": место, "c": code, "q": qty})
         stats["stock_rows"] += res.rowcount or 0
 
     await db.commit()
