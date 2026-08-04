@@ -161,8 +161,10 @@ async def store_exchange(
     """
     cid: uuid.UUID = await scope_company_id(user, db)
     d1, d2 = date.fromisoformat(date_from), date.fromisoformat(date_to)
-    p = {"cid": str(cid), "d1": d1, "d2": d2, "gap": EXCHANGE_SESSION_GAP_MIN}
-    period = ("received_at >= :d1 AND received_at < (:d2::date + 1)")
+    p = {"cid": cid, "d1": d1, "d2": d2, "gap": EXCHANGE_SESSION_GAP_MIN}
+    # CAST, а не `:d2::date`: двойное двоеточие в именованном параметре
+    # SQLAlchemy разбирает как продолжение имени и валит запрос синтаксисом.
+    period = "received_at >= :d1 AND received_at < (CAST(:d2 AS date) + 1)"
 
     by_kind = [dict(r) for r in (await db.execute(text(f"""
         SELECT kind, count(*) AS packets, coalesce(sum(size_bytes), 0) AS bytes,
@@ -203,7 +205,7 @@ async def store_exchange(
                count(*) FILTER (WHERE delivered_at IS NOT NULL AND acked_at IS NULL) AS unacked,
                count(*) FILTER (WHERE acked_at IS NOT NULL) AS acked
         FROM edge_downlink WHERE company_id = :cid GROUP BY station_id
-    """), {"cid": str(cid)})).mappings().all()}
+    """), {"cid": cid})).mappings().all()}
 
     # Лента последних обменов в обе стороны: она объясняет цифры выше — видно,
     # чем именно занят канал и когда станция выходила на связь последний раз.
@@ -219,7 +221,7 @@ async def store_exchange(
                     ELSE 'ждёт станции' END AS note
         FROM edge_downlink WHERE company_id = :cid
         ORDER BY at DESC LIMIT 30
-    """), {"cid": str(cid)})).mappings().all()]
+    """), {"cid": cid})).mappings().all()]
     for r in recent:
         r["label"] = PACKET_KIND_LABEL.get(r["kind"], r["kind"])
 
