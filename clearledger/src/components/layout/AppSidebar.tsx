@@ -46,10 +46,14 @@ export function NavItem({ to, icon: Icon, label, end, collapsed, onNavigate, act
               end={end}
               onClick={onNavigate}
               className={({ isActive }) =>
-                `flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                // Выбранный раздел обязан отличаться от того, на что просто навели
+                // мышь: у наведения свой фон, и при одинаковой силе заливки человек
+                // не понимает, где находится. Отсюда более плотный фон, полужирное
+                // начертание и вертикальный маркер слева.
+                `relative flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
                   (active ?? isActive)
-                    ? 'bg-primary/10 text-primary'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-accent'
+                    ? 'bg-primary/15 font-semibold text-primary before:absolute before:left-0 before:top-1.5 before:bottom-1.5 before:w-0.5 before:rounded-full before:bg-primary'
+                    : 'font-medium text-muted-foreground hover:bg-accent hover:text-foreground'
                 } ${collapsed ? 'justify-center px-2' : ''}`
               }
             >
@@ -244,7 +248,10 @@ function SidebarNavBody({ collapsed = false, onNavigate }: {
         || productModuleAllowed(product.code, s.mode, canModule, company.profileId)))
     const urlMode = new URLSearchParams(search).get('mode')
     const activeMode = modes.some((s) => s.mode === urlMode) ? urlMode : modes[0]?.mode
-    const onProductRoute = pathname === product.route
+    // Хвостовой слэш тоже рабочая область продукта: nginx нормализует адрес до
+    // «/shop/», и точное сравнение гасило подсветку выбранного раздела — меню
+    // выглядело так, будто не выбрано ничего.
+    const onProductRoute = pathname.replace(/\/$/, '') === product.route
     // Страницы («Документы», «Коннекторы») — тоже право: код = сегмент ИСХОДНОГО пути.
     const allowedPage = (code: string) => productModuleAllowed(product.code, code, canModule, company.profileId)
     // Страницы продукта делятся надвое: своё рабочее (Организация) идёт сразу под
