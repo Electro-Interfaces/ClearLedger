@@ -24,6 +24,7 @@ import {
   FUEL_NETWORK_MENU, FUEL_ANALYTICS_MENU, FUEL_COMMERCE_MENU, FUEL_GOODS_MENU, FUEL_HELP_MENU,
 } from './workspaceMenus'
 import { storeMenu, STORE_HELP_MENU } from './storeCatalog'
+import { MODULE_COMPONENTS, ACCOUNTING_SECTIONS, componentSection } from './moduleComponents'
 import { SPACE_PAGES, SPACE_PRODUCTS, pageCode } from './spaceProducts'
 
 export interface ProductModuleDef {
@@ -46,6 +47,22 @@ function pages(paths: string[]): ProductModuleDef[] {
 /** Пункты меню раздела → модули доступа (группа из самого пункта или общая). */
 function items(list: { key: string; label: string; group?: string }[], group?: string): ProductModuleDef[] {
   return list.map((i) => ({ code: i.key, label: i.label, group: group ?? i.group ?? 'Разделы' }))
+}
+
+/**
+ * Пункты «Бухгалтерии» в матрице доступа, сгруппированные по разделам рельсы.
+ *
+ * Строка права стоит там же, где пункт в интерфейсе: администратор видит матрицу в
+ * том же порядке, в каком бухгалтер видит меню, и не гадает, что такое `cb_recon`.
+ */
+function accountingItems(): ProductModuleDef[] {
+  const label = new Map(ACCOUNTING_SECTIONS.map((s) => [s.mode, s.label]))
+  return MODULE_COMPONENTS
+    .filter((c) => c.moduleId === 'accounting')
+    .flatMap((c) => (c.menuItems ?? []).map((i) => ({
+      code: i.key, label: i.label,
+      group: label.get(componentSection(c)) ?? 'Бухгалтерия',
+    })))
 }
 
 /**
@@ -77,7 +94,6 @@ export const PRODUCT_MODULES: Record<string, ProductModuleDef[]> = {
     ...items(storeMenu('store'), 'Торговля'),
     ...items(storeMenu('store_catering'), 'Общепит'),
     ...items(storeMenu('store_stock'), 'Склад'),
-    ...items(storeMenu('store_closing'), 'Закрытие'),
     ...items(storeMenu('store_catalog'), 'Каталог'),
     ...items(storeMenu('store_marking'), 'Маркировка'),
     ...items(storeMenu('store_network'), 'Станции'),
@@ -87,8 +103,13 @@ export const PRODUCT_MODULES: Record<string, ProductModuleDef[]> = {
   finance: [
     // «Финансовый» и «Налоговый» сняты с витрины (workspaceSections) — прав на них нет:
     // роль не должна раздавать доступ к разделу, которого в интерфейсе не существует.
-    { code: 'accounting', label: 'Бухгалтерский', group: 'Разделы' },
-    { code: 'export', label: 'Выгрузка', group: 'Разделы' },
+    //
+    // Право теперь на ПУНКТ, а не на раздел целиком: у потоков разные люди. Тот, кто
+    // ведёт топливо, не обязан видеть пакет магазина, а тому, кто сверяет, не нужна
+    // правка смен. Группа в матрице = раздел рельсы, коды берутся из каталога
+    // компонентов — второго списка для прав не заводим.
+    ...accountingItems(),
+    { code: 'accounting', label: 'Бухгалтерия (весь раздел)', group: 'Совместимость' },
     ...pages(['/organization']),
   ],
   data: [

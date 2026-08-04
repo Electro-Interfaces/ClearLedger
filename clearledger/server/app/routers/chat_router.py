@@ -17,14 +17,15 @@ from pydantic import BaseModel, Field
 from sqlalchemy import and_, delete as sa_delete, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import decode_token, get_current_user
+from app.auth import decode_token, get_company_by_api_key, get_current_user
+from app.config import get_settings
 from app.database import async_session_factory, get_db
 from app.deps import capture_company_header, scope_company_id
 from app.models import (
     ChatFolder, ChatMessage, ChatMessageReaction, ChatParticipant, ChatPushSubscription,
     ChatRoom, ChatTicketLink, Company, Counterparty, ServiceLocation, User, UserCompany,
 )
-from app.services import web_push
+from app.services import chat_mail, web_push
 from app.services.space_projection import ProjectionError, create_object_ticket
 from app.services.chat_ws import manager
 
@@ -295,6 +296,10 @@ class ParticipantOut(BaseModel):
     # `isExternal` оставлен для совместимости — он отвечает только «не наш ли», а
     # инженера поддержки от подрядчика заказчика не отличает.
     partyType: str = "internal"
+    # Участник живёт в своей почте: сообщения уходят ему письмом. Автору важно
+    # видеть это ДО отправки — разговор при таком участнике идёт иначе.
+    mailOnly: bool = False
+    email: str | None = None
 
 
 class RoomDetailOut(RoomOut):
@@ -328,6 +333,9 @@ class MessageOut(BaseModel):
     readCount: int = 0
     reactions: list[ReactionOut] = Field(default_factory=list)
     createdAt: str
+    # Сообщение пришло письмом, а не из интерфейса: собеседник живёт в почте, и
+    # это видно в ленте — иначе непонятно, почему он «не читает» и отвечает не сразу.
+    externalSource: str | None = None
     # Пересланное: имя автора оригинала («Переслано от …»).
     forwardedFrom: str | None = None
     # Кто написал: vendor | internal | partner. Признак стоит у КАЖДОГО сообщения, а не
@@ -577,7 +585,8 @@ async def get_room(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID")
     room = await _assert_participant(rid, current_user, db)
     parts = (await db.execute(
-        select(ChatParticipant.user_id, ChatParticipant.role, User.name, User.company_id)
+        select(ChatParticipant.user_id, ChatParticipant.role, User.name, User.company_id,
+               User.mail_only, User.email)
         .join(User, User.id == ChatParticipant.user_id)
         .where(ChatParticipant.room_id == rid))).all()
     online = manager.online_user_ids()
@@ -590,8 +599,9 @@ async def get_room(
     plist = [ParticipantOut(userId=str(uid), name=nm, role=rl, online=str(uid) in online,
                             isExternal=(ucid is not None and ucid != room.company_id),
                             companyName=titles.get(ucid) if ucid != room.company_id else None,
-                            partyType=parties.get(uid, "internal"))
-                        for uid, rl, nm, ucid in parts]
+                            partyType=parties.get(uid, "internal"),
+                            mailOnly=bool(mail_only), email=mail if mail_only else None)
+                        for uid, rl, nm, ucid, mail_only, mail in parts]
     name, peer_id = room.name, None
     if room.type == "direct":
         for p in plist:
@@ -637,6 +647,7 @@ def _msg_out(m: ChatMessage, read_count: int, reply: ChatMessage | None,
         reactions=reactions or [],
         createdAt=m.created_at.isoformat(),
         authorParty=author_party,
+        externalSource=m.external_source,
         forwardedFrom=None if deleted else m.forwarded_from,
     )
 
@@ -769,6 +780,11 @@ async def send_message(
         rid, room.name or current_user.name,
         f"{current_user.name}: {(content or msg.file_name or 'вложение')[:140]}",
         current_user.id)
+    # Участникам, живущим в своей почте, сообщение уходит письмом: для них это
+    # единственный способ увидеть разговор, вкладки у них нет вовсе.
+    chat_mail.push_room_mail_async(
+        rid, room.name, current_user.name,
+        content or msg.file_name or "(вложение)", current_user.id)
     # персональные пуши упомянутым (@) — только реальным участникам комнаты, ≠ автор
     if body.mentions:
         want = {str(u) for u in _uuid_list(body.mentions)} - {str(current_user.id)}
@@ -1097,6 +1113,150 @@ async def add_participant(
         db.add(ChatParticipant(room_id=rid, user_id=target, role="member"))
         await db.commit()
     return {"ok": True}
+
+
+class AddMailParticipantBody(BaseModel):
+    email: str
+    name: str | None = None
+    # Организация внешнего участника — карточка юрлица пространства (`counterparties`).
+    # Не обязательна: без неё человек просто «внешний», принадлежность проставят позже
+    # в Центре управления, как и любому партнёру.
+    organizationId: str | None = None
+
+
+@router.post("/rooms/{room_id}/participants/mail", status_code=status.HTTP_201_CREATED)
+async def add_mail_participant(
+    room_id: str,
+    body: AddMailParticipantBody,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Позвать в чат человека, который живёт в своей почте.
+
+    Он не заходит в пространство и не заводит пароль: сообщения комнаты уходят
+    ему письмом, ответ возвращается в ленту. Учётка нужна лишь для того, чтобы у
+    его сообщений был автор, а у комнаты — состав; войти ею нельзя.
+    """
+    try:
+        rid = uuid.UUID(room_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID")
+    email = (body.email or "").strip().lower()
+    if "@" not in email or " " in email:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Нужен адрес электронной почты")
+    if not get_settings().chat_mail_inbox:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "В пространстве не настроен ящик приёма — писать по почте некуда")
+
+    room = await _assert_participant(rid, current_user, db)
+    my = await _my_room_role(rid, current_user, db)
+    if not (current_user.is_superadmin or room.created_by == current_user.id or my in ("owner", "admin")):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Нет прав добавлять участников")
+    # Личный чат — разговор двоих; третьего, пусть и почтового, туда не вводят.
+    if room.type == "direct":
+        raise HTTPException(status.HTTP_409_CONFLICT, "В личный чат участников не добавляют")
+
+    user = (await db.execute(select(User).where(func.lower(User.email) == email))).scalar_one_or_none()
+    if user is None:
+        user = User(
+            email=email, name=(body.name or "").strip() or email.split("@")[0],
+            # Пароля у почтового участника нет: строка-заглушка не является
+            # валидным bcrypt-хешем, поэтому проверка пароля всегда отвергнет вход.
+            password_hash="!", role="user", company_id=room.company_id, mail_only=True,
+        )
+        db.add(user)
+        await db.flush()
+        org_id = None
+        if body.organizationId:
+            try:
+                org_id = uuid.UUID(body.organizationId)
+            except (ValueError, TypeError):
+                org_id = None
+        db.add(UserCompany(user_id=user.id, company_id=room.company_id,
+                           role="user", party_type="partner", organization_id=org_id))
+    elif not user.mail_only and not await _member_ids(user.id, db):
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Такой адрес уже занят учётной записью пространства")
+
+    exists = (await db.execute(select(ChatParticipant.id).where(
+        ChatParticipant.room_id == rid, ChatParticipant.user_id == user.id))).scalar_one_or_none()
+    if exists is None:
+        db.add(ChatParticipant(room_id=rid, user_id=user.id, role="member"))
+    await db.commit()
+    return {"ok": True, "userId": str(user.id), "email": email,
+            "replyAddress": chat_mail.reply_address(rid)}
+
+
+class InboundEmailBody(BaseModel):
+    """Письмо, пришедшее в комнату (зовёт почтовый мост Поддержки)."""
+    fromAddress: str
+    fromName: str | None = None
+    text: str
+    # Message-ID письма: ключ идемпотентности, повторная доставка дубля не создаёт.
+    messageId: str | None = None
+    # Ссылка на письмо-первоисточник в архиве Поддержки — чтобы из ленты чата
+    # можно было дойти до оригинала, а не только до вычищенного текста.
+    emailMessageId: str | None = None
+
+
+@router.post("/rooms/{room_id}/inbound-email", status_code=status.HTTP_201_CREATED)
+async def inbound_email(
+    room_id: str,
+    body: InboundEmailBody,
+    company: Company = Depends(get_company_by_api_key),
+    db: AsyncSession = Depends(get_db),
+):
+    """Ответ почтового участника → сообщение в ленте комнаты.
+
+    Пишет только тот, кто уже в комнате: адрес комнаты может утечь пересылкой
+    письма, и по нему не должен получать слово посторонний. Незнакомый
+    отправитель отклоняется — карантин ведёт почтовый мост, у него для этого
+    есть и оригинал письма, и экран.
+    """
+    try:
+        rid = uuid.UUID(room_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID")
+    room = await db.get(ChatRoom, rid)
+    if room is None or room.company_id != company.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Чат не найден")
+
+    email = (body.fromAddress or "").strip().lower()
+    author = (await db.execute(
+        select(User).join(ChatParticipant, ChatParticipant.user_id == User.id)
+        .where(ChatParticipant.room_id == rid, func.lower(User.email) == email)
+    )).scalar_one_or_none()
+    if author is None:
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            f"Отправитель {email or '(без адреса)'} не участник этого чата")
+
+    external_key = (body.messageId or "").strip() or None
+    if external_key:
+        dup = (await db.execute(select(ChatMessage.id).where(
+            ChatMessage.room_id == rid, ChatMessage.external_id == external_key))).scalar_one_or_none()
+        if dup is not None:
+            return {"ok": True, "messageId": str(dup), "duplicate": True}
+
+    text_body = (body.text or "").strip() or "(письмо без текста)"
+    msg = ChatMessage(
+        room_id=rid, user_id=author.id, user_name=author.name, type="text",
+        content=text_body, external_id=external_key,
+        external_source="email", external_ref=(body.emailMessageId or None),
+    )
+    db.add(msg)
+    room.updated_at = _now()
+    await db.flush()
+    parties = await _party_types(db, room.company_id, {author.id})
+    payload = _msg_out(msg, 0, None, None, parties.get(author.id))
+    await db.commit()
+
+    await manager.broadcast(f"chat:{rid}", {"type": "chat:message", **payload.model_dump()})
+    web_push.push_room_async(rid, room.name or author.name,
+                             f"{author.name}: {text_body[:140]}", author.id)
+    # Письмо ушло одному участнику, но разговор общий: остальные почтовые
+    # участники комнаты должны увидеть ответ так же, как видят его в ленте.
+    chat_mail.push_room_mail_async(rid, room.name, author.name, text_body, author.id)
+    return {"ok": True, "messageId": str(msg.id)}
 
 
 # ── самоуправление чата: владелец и админы ведут его без админа пространства ─

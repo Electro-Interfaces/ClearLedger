@@ -106,6 +106,7 @@ async def send_invite(
 
 async def send_notice(
     to_emails: list[str], subject: str, text: str, html: str | None = None,
+    reply_to: str | None = None,
 ) -> bool:
     """Служебное письмо-оповещение нескольким адресатам (события пространства).
 
@@ -131,6 +132,10 @@ async def send_notice(
     from_domain = parseaddr(settings.smtp_from)[1].split("@")[-1] or "localhost"
     msg["Date"] = formatdate(localtime=True)
     msg["Message-ID"] = make_msgid(domain=from_domain)
+    # Куда придёт ответ. Для писем из чатов это адрес самой комнаты
+    # (плюс-адресация), поэтому ответ возвращается в нужное обсуждение.
+    if reply_to:
+        msg["Reply-To"] = reply_to
     msg.set_content(text)
     if html:
         msg.add_alternative(html, subtype="html")

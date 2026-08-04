@@ -8,6 +8,10 @@
  */
 import type { CoreMode } from '@/contexts/WorkspaceContext'
 import { STORE_MENU, storeMenu } from './storeCatalog'
+import { ACCOUNTING_MENU } from './moduleComponents'
+
+/** Пункты «Бухгалтерии» одной картой: разделы делят общий словарь подписей. */
+const ACC_SUBS = Object.fromEntries(ACCOUNTING_MENU.map((m) => [m.key, m.label]))
 
 export const MODE_LABELS: Record<CoreMode, string> = {
   // Разделы продукта продаж. `management` — исторический код первого («Сеть» у обоих
@@ -29,14 +33,21 @@ export const MODE_LABELS: Record<CoreMode, string> = {
   store: 'Магазин',
   store_catering: 'Магазин · Общепит',
   store_stock: 'Магазин · Склад',
-  store_closing: 'Магазин · Закрытие',
   store_catalog: 'Магазин · Каталог',
   store_marking: 'Магазин · Маркировка',
   store_network: 'Магазин · Станции',
   corporate: 'Процессинг',
   marketing: 'Маркетинг',
   financial: 'Финансовый',
-  accounting: 'Бухгалтерский',
+  // Разделы «Бухгалтерии»: потоки + сквозное. `accounting` — первый раздел
+  // («Нефтепродукты»), исторический код продукта и ключ доступа.
+  accounting: 'Бухгалтерия · Нефтепродукты',
+  acc_period: 'Бухгалтерия · Период',
+  acc_store: 'Бухгалтерия · Магазин',
+  acc_food: 'Бухгалтерия · Общепит',
+  acc_recon: 'Бухгалтерия · Сверка',
+  acc_docs: 'Бухгалтерия · Документы',
+  acc_results: 'Бухгалтерия · Итоги',
   tax: 'Налоговый',
   export: 'Выгрузка',
   normalize: 'Нормализация',
@@ -120,17 +131,21 @@ const SUB_LABELS: Partial<Record<CoreMode, Record<string, string>>> = {
   store: Object.fromEntries(STORE_MENU.map((m) => [m.key, m.label])),
   store_catering: Object.fromEntries(storeMenu('store_catering').map((m) => [m.key, m.label])),
   store_stock: Object.fromEntries(storeMenu('store_stock').map((m) => [m.key, m.label])),
-  store_closing: Object.fromEntries(storeMenu('store_closing').map((m) => [m.key, m.label])),
   store_catalog: Object.fromEntries(storeMenu('store_catalog').map((m) => [m.key, m.label])),
   store_marking: Object.fromEntries(storeMenu('store_marking').map((m) => [m.key, m.label])),
   store_network: Object.fromEntries(storeMenu('store_network').map((m) => [m.key, m.label])),
   financial: {
     overview: 'Обзор', cashflow: 'Денежный поток', receivables: 'Дебиторка', payables: 'Кредиторка',
   },
-  accounting: {
-    shifts: 'Смены', ttn: 'Поступления', margin: 'Маржинальность', reports: 'Дашборды', cash: 'Касса и инкассация', recon1c: 'Сверка с 1С',
-    cb_load: 'Загрузка из ЦБ', cb_shifts: 'Смены сопутки', export: 'Выгрузка в БП', cb_recon: 'Сверка сопутки',
-  },
+  // Подписи пунктов «Бухгалтерии» — из самого каталога компонентов: меню и заголовок
+  // закладки обязаны называться одинаково, а второго списка для этого не нужно.
+  accounting: ACC_SUBS,
+  acc_period: ACC_SUBS,
+  acc_store: ACC_SUBS,
+  acc_food: ACC_SUBS,
+  acc_recon: ACC_SUBS,
+  acc_docs: ACC_SUBS,
+  acc_results: ACC_SUBS,
   tax: {
     vat: 'НДС', profit: 'Налог на прибыль', compliance: 'Соответствие',
   },

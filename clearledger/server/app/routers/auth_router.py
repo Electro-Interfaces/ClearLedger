@@ -76,6 +76,17 @@ async def login(body: LoginRequest, request: Request, db: AsyncSession = Depends
                    "нажмите «Забыли пароль?», и приглашение придёт заново.",
         )
 
+    # Почтовый участник чатов учётной записью не пользуется: он живёт в своей
+    # почте, пароля у него нет вовсе. Говорим это прямо — иначе человек будет
+    # ломиться в «Забыли пароль?» и получать письма, которые ничего не меняют.
+    if user is not None and user.mail_only:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Этот адрес участвует в обсуждениях по электронной почте и входа "
+                   "в пространство не имеет. Отвечайте письмом на сообщения, которые "
+                   "приходят вам от участников.",
+        )
+
     if user is None or not verify_password(body.password, user.password_hash):
         # Неудачную попытку по СУЩЕСТВУЮЩЕМУ email пишем в журнал его компании:
         # админ должен видеть, что в учётку ломятся. Несуществующие email не пишем —
@@ -124,6 +135,10 @@ async def forgot_password(
     user = (
         await db.execute(select(User).where(User.email == body.email))
     ).scalar_one_or_none()
+    # Почтовому участнику восстанавливать нечего: учётка держит его в составе
+    # чатов, но входа не даёт. Ссылка на смену пароля только запутала бы.
+    if user is not None and user.mail_only:
+        return {"ok": True}
     if user is not None:
         raw = secrets.token_urlsafe(32)
         user.reset_token_hash = _hash_token(raw)

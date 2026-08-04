@@ -69,6 +69,13 @@ import { ShiftDetailsDialog } from '@/components/fuel/ShiftDetailsDialog'
 import { ShiftDashboardPanel } from '@/components/fuel/ShiftDashboardPanel'
 import { AccountingCashPanel } from './AccountingCashPanel'
 import { SyncWith1CPanel } from '@/components/fuel/SyncWith1CPanel'
+import { StoreCateringPanel } from './StoreCateringPanel'
+import {
+  AccountingPeriodPanel, FuelLoadControlPanel, CateringPackagePanel, AccountingDocsBridge,
+} from './AccountingWorkPanels'
+import {
+  ACCOUNTING_MODES, ACCOUNTING_KEYS, accountingModeForKey, type AccountingSection,
+} from '@/config/moduleComponents'
 import { ReceiptsSection } from '@/components/fuel/ReceiptsSection'
 import {
   getLoadedShifts, getCostingMargin, type LoadedShift,
@@ -493,22 +500,56 @@ function FinContragents({ companyId, dateFrom, dateTo, mode }: { companyId: stri
 // компоненты компании; здесь только маршрутизация под-разделов на контент.
 
 export function AccountingPanel() {
+  // Раздел = поток (или сквозная тема); валидные пункты — только его собственные,
+  // иначе в «Общепите» остался бы валидным «Смены» из нефтепродуктов.
+  const { coreMode, setCoreMode } = useWorkspace()
+  const mode = (ACCOUNTING_MODES.includes(coreMode) ? coreMode : 'accounting') as AccountingSection
   const sections = useWorkspaceSections()
-  const section = sections.find((s) => s.mode === 'accounting')
+  const section = sections.find((s) => s.mode === mode)
   const items = section?.items ?? []
-  const [tab] = useWorkspaceSubView(items[0]?.key ?? 'overview', items.map((i) => i.key))
+  const [raw] = useWorkspaceSubView(items[0]?.key ?? 'overview', ACCOUNTING_KEYS)
+  // Пункт из ЧУЖОГО раздела — старая ссылка (`?mode=accounting&sub=export`) или
+  // закладка: уводим в его раздел ВМЕСТЕ с пунктом, а не на первый экран.
+  const owner = accountingModeForKey(raw)
+  useEffect(() => {
+    if (ACCOUNTING_KEYS.includes(raw) && owner !== mode) setCoreMode(owner, raw)
+  }, [owner, mode, raw, setCoreMode])
+  const tab = owner === mode ? raw : (items[0]?.key ?? '')
   const { company, companyId } = useCompany()
   const { period } = useFilters()
   const isEnergy = company.profileId === 'energy'
-  if (!section?.connected) return <SectionEmpty section="Бухгалтерский" org={company.shortName || company.name} />
+  if (!section?.connected) return <SectionEmpty section="Бухгалтерия" org={company.shortName || company.name} />
   if (isEnergy) return <div className="h-full overflow-y-auto"><AccountingVitrine /></div>
 
   return (
     <ScrollArea className="h-full">
-        {/* Специализированные ГИГ — смены/ТТН с корректировкой перед выгрузкой */}
+        {/* Период — где стоит закрытие по всем трём потокам сразу */}
+        {tab === 'period_status' && <AccountingPeriodPanel />}
+
+        {/* Поток 1 · нефтепродукты: работа с первичкой и контроль загрузки в 1С */}
         {tab === 'shifts' && <ShiftsPanel />}
         {tab === 'ttn' && <ReceiptsSection />}
-        {tab === 'margin' && (
+        {tab === 'reports' && <ShiftDashboardPanel />}
+        {tab === 'cash' && <AccountingCashPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
+        {tab === 'recon1c' && <FuelLoadControlPanel />}
+
+        {/* Поток 2 · магазин: приём из ЦБ/edge и пакет в БП */}
+        {(tab === 'cb_load' || tab === 'cb_shifts' || tab === 'cb_recon') && (
+          <AccountingStreamsPanel tab={tab} companyId={companyId} dateFrom={period.from} dateTo={period.to} />
+        )}
+        {tab === 'export' && <BpExportPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
+
+        {/* Поток 3 · общепит: своя работа, но ТОТ ЖЕ пакет — здесь его разрез */}
+        {tab === 'food_menu' && (
+          <StoreCateringPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />
+        )}
+        {tab === 'food_release' && <CateringPackagePanel />}
+
+        {/* Сквозное: сверка с 1С, первичка, итоги */}
+        {(tab === 'recon_docs' || tab === 'recon_diff') && <SyncWith1CPanel focus={tab} />}
+        {tab === 'docs_1c' && <AccountingDocsBridge kind="docs" />}
+        {tab === 'docs_parties' && <AccountingDocsBridge kind="parties" />}
+        {tab === 'res_margin' && (
           <div className="p-4 space-y-4">
             <FifoMarginView companyId={companyId} dateFrom={period.from} dateTo={period.to} />
             <div>
@@ -519,13 +560,7 @@ export function AccountingPanel() {
             </div>
           </div>
         )}
-        {tab === 'reports' && <ShiftDashboardPanel />}
-        {tab === 'cash' && <AccountingCashPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
-        {tab === 'export' && <BpExportPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
-        {(tab === 'cb_load' || tab === 'cb_shifts' || tab === 'cb_recon') && (
-          <AccountingStreamsPanel tab={tab} companyId={companyId} dateFrom={period.from} dateTo={period.to} />
-        )}
-        {tab === 'recon1c' && <SyncWith1CPanel />}
+        {tab === 'res_tax' && <TaxPanel />}
     </ScrollArea>
   )
 }
@@ -759,7 +794,9 @@ function ShiftsPanel() {
               </p>
             ) : shown.map((s) => (
               <div key={s.id} onClick={() => setOpenShift(s.id)}
-                className={`${gridCols} cursor-pointer rounded-xl bg-di-surface-low px-3 py-2.5 text-xs transition-colors hover:bg-di-surface-high ${s.has_corrections ? 'border-l-2 border-l-amber-400 bg-amber-50/60 dark:bg-amber-400/[0.06]' : ''}`}>
+                // Правленая смена и так помечена фоном и бейджем «испр.» — цветная
+                // полоса слева была третьим носителем одного сигнала.
+                className={`${gridCols} cursor-pointer rounded-xl bg-di-surface-low px-3 py-2.5 text-xs transition-colors hover:bg-di-surface-high ${s.has_corrections ? 'bg-amber-50/60 dark:bg-amber-400/[0.06]' : ''}`}>
                 <span className="font-medium inline-flex items-center gap-1.5">
                   #{s.shift_number}
                   {s.has_corrections && (

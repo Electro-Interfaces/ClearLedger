@@ -13,15 +13,22 @@ import { useSearchParams } from 'react-router-dom'
 // «Сессии» и «Коммерция» (решение МАГа 28.07.2026).
 // `ops_equipment`/`ops_economy` — то же для «Эксплуатации»: `operations` остался
 // разделом «Мониторинг» (у топливного профиля — его «Управленческий»).
-// `store_catering`/`store_stock`/`store_closing`/`store_catalog`/`store_marking` — разделы «Магазина»:
-// склад, закрытие дня, карточка товара, маркировка. `store` остался кодом первого
-// раздела («Торговля») — по нему идут старые ссылки и ключ доступа.
+// `store_catering`/`store_stock`/`store_catalog`/`store_marking` — разделы «Магазина»:
+// склад, карточка товара, маркировка. `store` остался кодом первого раздела
+// («Торговля») — по нему идут старые ссылки и ключ доступа. Раздела `store_closing`
+// больше нет: закрытие периода уехало в «Бухгалтерский» (04.08.2026), и старая
+// ссылка `?mode=store_closing` откатывается на дефолтный режим.
 // `sales_goods` — «Товародвижение» «Топлива» (fuel): топливо как товар — маржа,
 // приход, книга резервуаров. У ЭЗС такого раздела нет: там продают киловатт-часы,
 // склада и приёмки не бывает.
-export type CoreMode = 'normalize' | 'reconcile' | 'management' | 'sales_sessions' | 'sales_commerce' | 'sales_goods' | 'sales_help' | 'operations' | 'ops_equipment' | 'ops_economy' | 'projects' | 'projects_analytics' | 'store' | 'store_catering' | 'store_stock' | 'store_closing' | 'store_catalog' | 'store_marking' | 'store_network' | 'store_help' | 'corporate' | 'marketing' | 'financial' | 'accounting' | 'tax' | 'export'
+// `acc_period`/`acc_store`/`acc_food`/`acc_recon`/`acc_docs`/`acc_results` — разделы
+// «Бухгалтерии»: рельса режется по ПОТОКАМ (нефтепродукты · магазин · общепит), а
+// сквозное — период, сверка, первичка, итоги — стоит своими разделами (04.08.2026).
+// `accounting` остался кодом первого раздела («Нефтепродукты»): по нему выданы права
+// и идут старые ссылки.
+export type CoreMode = 'normalize' | 'reconcile' | 'management' | 'sales_sessions' | 'sales_commerce' | 'sales_goods' | 'sales_help' | 'operations' | 'ops_equipment' | 'ops_economy' | 'projects' | 'projects_analytics' | 'store' | 'store_catering' | 'store_stock' | 'store_catalog' | 'store_marking' | 'store_network' | 'store_help' | 'corporate' | 'marketing' | 'financial' | 'accounting' | 'acc_period' | 'acc_store' | 'acc_food' | 'acc_recon' | 'acc_docs' | 'acc_results' | 'tax' | 'export'
 
-const VALID_MODES: CoreMode[] = ['normalize', 'reconcile', 'management', 'sales_sessions', 'sales_commerce', 'sales_goods', 'sales_help', 'operations', 'ops_equipment', 'ops_economy', 'projects', 'projects_analytics', 'store', 'store_catering', 'store_stock', 'store_closing', 'store_catalog', 'store_marking', 'store_network', 'store_help', 'corporate', 'marketing', 'financial', 'accounting', 'tax', 'export']
+const VALID_MODES: CoreMode[] = ['normalize', 'reconcile', 'management', 'sales_sessions', 'sales_commerce', 'sales_goods', 'sales_help', 'operations', 'ops_equipment', 'ops_economy', 'projects', 'projects_analytics', 'store', 'store_catering', 'store_stock', 'store_catalog', 'store_marking', 'store_network', 'store_help', 'corporate', 'marketing', 'financial', 'accounting', 'acc_period', 'acc_store', 'acc_food', 'acc_recon', 'acc_docs', 'acc_results', 'tax', 'export']
 function readMode(sp: URLSearchParams): CoreMode {
   const m = sp.get('mode')
   return m && (VALID_MODES as string[]).includes(m) ? (m as CoreMode) : 'management'

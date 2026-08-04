@@ -14,6 +14,7 @@ import {
   Trash2, Reply, Pencil, X, Check, Megaphone, Lock, Pin, Video, UserPlus,
   Folder, AtSign, Loader2, Paperclip, Camera, Search as SearchIcon,
   Shield, ShieldOff, UserMinus, LogOut, Bell, BellOff, Forward, MapPin, ClipboardList,
+  Mail,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/contexts/AuthContext'
@@ -190,10 +191,61 @@ function Lightbox({ items, index, onClose, onNavigate }: {
   )
 }
 
+/** Позвать в чат по адресу: собеседник останется в своей почте. */
+function MailInvite({ roomId, onAdded }: { roomId: string; onAdded: () => void }) {
+  const [open, setOpen] = useState(false)
+  const [email, setEmail] = useState('')
+  const [name, setName] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const invite = async () => {
+    const addr = email.trim().toLowerCase()
+    if (!addr.includes('@')) { toast.error('Нужен адрес электронной почты'); return }
+    setBusy(true)
+    try {
+      await chat.addMailParticipant(roomId, addr, name.trim() || undefined)
+      toast.success(`${addr} — участник чата, сообщения будут уходить письмом`)
+      setEmail(''); setName(''); setOpen(false); onAdded()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Не удалось позвать по почте')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (!open) {
+    return (
+      <button onClick={() => setOpen(true)}
+        className="mt-2 inline-flex items-center gap-1.5 text-[12px] text-muted-foreground hover:text-foreground">
+        <Mail className="size-3.5" /> Позвать по почте
+      </button>
+    )
+  }
+  return (
+    <div className="mt-2 space-y-1.5 rounded-md border border-border p-2">
+      <div className="text-[11px] text-muted-foreground">
+        Человек останется в своей почте: сообщения этого чата придут ему письмом, а его
+        ответ появится здесь. Вход в пространство ему не нужен.
+      </div>
+      <Input value={email} onChange={(e) => setEmail(e.target.value)}
+        placeholder="адрес@компания.ру" className="h-8 text-xs" />
+      <Input value={name} onChange={(e) => setName(e.target.value)}
+        placeholder="Имя (необязательно)" className="h-8 text-xs" />
+      <div className="flex items-center gap-1.5">
+        <Button size="sm" className="h-7 text-xs" onClick={invite} disabled={busy}>
+          {busy ? 'Добавляю…' : 'Позвать'}
+        </Button>
+        <Button size="sm" variant="ghost" className="h-7 text-xs"
+          onClick={() => { setOpen(false); setEmail(''); setName('') }}>Отмена</Button>
+      </div>
+    </div>
+  )
+}
+
 // ── панель информации о комнате (участники) ──────────────────────────────────
 function RoomInfoPanel({
-  room, participants, userId, canManage, canOwn, onAdd, onRename, onAvatar, onScope,
-  onObject, onRemove, onSetRole, onLeave, onMessageUser, onShowProfile, presenceMap,
+  room, participants, userId, canManage, canOwn, onAdd, onMailAdded, onRename, onAvatar,
+  onScope, onObject, onRemove, onSetRole, onLeave, onMessageUser, onShowProfile, presenceMap,
 }: {
   room?: ChatRoom
   participants?: ChatParticipant[]
@@ -203,6 +255,8 @@ function RoomInfoPanel({
   /** Права владельца: раздача ролей и снятие админов. */
   canOwn: boolean
   onAdd: (uid: string) => void
+  /** Позвали участника по почте — перечитать состав комнаты. */
+  onMailAdded: () => void
   onRename: (name: string) => void
   /** Файл нового аватара; null — убрать аватар. */
   onAvatar: (file: File | null) => void
@@ -445,7 +499,9 @@ function RoomInfoPanel({
                     }} />
                   </div>
                   <div className="truncate text-[11px] text-muted-foreground">
-                    {p.role === 'owner' ? 'владелец' : p.role === 'admin' ? 'админ' : 'участник'}
+                    {p.mailOnly
+                      ? `по почте · ${p.email ?? ''}`
+                      : p.role === 'owner' ? 'владелец' : p.role === 'admin' ? 'админ' : 'участник'}
                     {p.isExternal && p.companyName ? ` · ${p.companyName}` : ''}
                   </div>
                 </div>
@@ -510,6 +566,10 @@ function RoomInfoPanel({
               </button>
             ))}
           </div>
+          {/* Собеседник может вообще не заходить в пространство — подрядчик,
+              поставщик, инженер заказчика. Его зовут по адресу, и разговор для
+              него выглядит перепиской в собственной почте. */}
+          <MailInvite roomId={room!.id} onAdded={onMailAdded} />
         </div>
       )}
       {/* Выход — только из обычных групп: системные чаты и каналы обязательны,
@@ -1014,6 +1074,16 @@ function ChatBubble({
             <div className={cn('mb-0.5 flex items-center gap-1 text-[11px] italic',
               isOwn ? 'text-primary-foreground/80' : 'text-muted-foreground')}>
               <Forward className="size-3" /> Переслано от {message.forwardedFrom}
+            </div>
+          )}
+
+          {/* Пришло письмом: собеседник читает разговор в своей почте и отвечает
+              оттуда же. Без пометки его молчание читается как «не заходил», хотя
+              заходить ему некуда. */}
+          {message.externalSource === 'email' && (
+            <div className={cn('mb-0.5 flex items-center gap-1 text-[11px]',
+              isOwn ? 'text-primary-foreground/80' : 'text-muted-foreground')}>
+              <Mail className="size-3" /> письмом
             </div>
           )}
 
@@ -1808,6 +1878,7 @@ export function ChatPanel({ compact, scopeProduct }: {
             || activeRoom?.myRole === 'owner' || activeRoom?.myRole === 'admin'}
           canOwn={isAdmin || activeRoom?.createdBy === user?.id || activeRoom?.myRole === 'owner'}
           onAdd={(uid) => { chat.addParticipant(selectedRoom!, uid).then(() => { qc.invalidateQueries({ queryKey: ['chat-room-detail', selectedRoom] }); toast.success('Участник добавлен') }).catch(() => toast.error('Не удалось добавить')) }}
+          onMailAdded={() => qc.invalidateQueries({ queryKey: ['chat-room-detail', selectedRoom] })}
           onRename={(name) => { chat.patchRoom(selectedRoom!, { name }).then(() => { qc.invalidateQueries({ queryKey: ['chat-rooms'] }); qc.invalidateQueries({ queryKey: ['chat-room-detail', selectedRoom] }); toast.success('Чат переименован') }).catch((e: Error) => toast.error(e.message || 'Не удалось переименовать')) }}
           onAvatar={(file) => {
             const apply = (url: string) => chat.patchRoom(selectedRoom!, { avatarUrl: url })

@@ -64,6 +64,10 @@ export interface ChatParticipant {
   companyName?: string | null
   /** vendor | internal | partner — та же категория, что в Центре управления. */
   partyType?: PartyType
+  /** Участник живёт в своей почте: сообщения уходят ему письмом, ответ — в ленту. */
+  mailOnly?: boolean
+  /** Адрес почтового участника — показываем, куда именно уходит разговор. */
+  email?: string | null
 }
 
 export interface ChatRoomDetail extends ChatRoom {
@@ -92,6 +96,8 @@ export interface ChatMessage {
   authorParty?: PartyType | null
   /** Пересланное: имя автора оригинала («Переслано от …»). */
   forwardedFrom?: string | null
+  /** 'email' — сообщение пришло письмом от участника, живущего в своей почте. */
+  externalSource?: string | null
 }
 
 export interface ChatUser { userId: string; name: string; email: string; online: boolean }
@@ -141,6 +147,12 @@ export const unarchiveRoom = (roomId: string) =>
 
 export const addParticipant = (roomId: string, userId: string) =>
   post<{ ok: boolean }>(`/api/chat/rooms/${roomId}/participants`, { userId })
+
+/** Позвать в чат человека, который работает в своей почте и в пространство не заходит.
+ * Сообщения комнаты уходят ему письмом, ответ возвращается в ленту. */
+export const addMailParticipant = (roomId: string, email: string, name?: string) =>
+  post<{ ok: boolean; userId: string; email: string; replyAddress: string | null }>(
+    `/api/chat/rooms/${roomId}/participants/mail`, { email, name })
 
 /** Переименовать чат, сменить аватар, привязку к приложению или объекту — владелец
  * или админ чата (у системных — только пространство; '' очищает значение). */

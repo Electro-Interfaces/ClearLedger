@@ -143,6 +143,12 @@ class Settings(BaseSettings):
     smtp_servername: str = ""
     smtp_secure: bool = False  # True для 465 SMTPS; False для 587 STARTTLS
 
+    # Ящик приёма пространства: адрес, на который отвечают внешние участники чатов.
+    # Ответ адресуется комнате плюс-адресацией (`ящик+r<комната>@домен`), поэтому
+    # тема письма может быть любой — человек отвечает как обычно, из своей почты.
+    # Пусто = почтовых участников в чатах нет, письма из комнат не уходят.
+    chat_mail_inbox: str = ""
+
     # Публичный URL приложения для ссылок в письмах (с base-path).
     # ⚠ Путь = /ClearLedger (vite base + nginx), хотя имя продукта TradeLedger.
     # Переименование пути /ClearLedger→/TradeLedger — отдельная риск-миграция.
@@ -174,3 +180,8 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """Кешированный экземпляр настроек."""
     return Settings()
+
+
+# Модульный алиас: часть кода (`services/chat_mail.py`) обращается к настройкам
+# как к объекту, а не зовёт фабрику. Кеш общий — это тот же экземпляр.
+settings = get_settings()

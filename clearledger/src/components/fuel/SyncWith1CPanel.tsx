@@ -1,51 +1,45 @@
 /**
- * Раздел «Сверка с 1С» — готовность к загрузке + разница приложение↔1С.
- * Секции: воронка загрузки (пакеты L2→L3→L4) · разница приложение↔1С (reconciliation
- * по AccountingDoc из 1С) · проблемы (отклонённые пакеты, расхождения) с переходами.
- * Переиспользует: /fuel/readiness, /export-packets/stats, /reconciliation/summary.
+ * Раздел «Сверка» — наши факты против того, что проведено в БП ГИГ.
+ *
+ * Два фокуса одного экрана (пункты «Ledger ↔ 1С» и «Расхождения»): первый отвечает
+ * «сошлось ли», второй — «что именно разошлось и куда идти чинить».
+ *
+ * Воронки пакетов draft→queued→sent→acked здесь больше нет (04.08.2026). Она
+ * описывала доставку, которой не существует: очередь `/export-packets/queue`
+ * реализована, но расширение TradeLedger.cfe к ней не обращается — топливо оно
+ * тянет из STS напрямую, сопутка едет файлом пакета. Счётчики стояли на `draft`
+ * вечно и читались как «ничего не загружено», хотя документы в БП были.
+ *
+ * Переиспользует: /fuel/readiness, /reconciliation/summary.
  */
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { format, subMonths } from 'date-fns'
 import {
-  ClipboardCheck, Upload, CheckCircle2, AlertTriangle, RefreshCw,
-  ArrowRight, GitCompare, ExternalLink, XCircle,
+  ClipboardCheck, CheckCircle2, AlertTriangle, RefreshCw,
+  GitCompare, ExternalLink, XCircle,
 } from 'lucide-react'
 
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { useCompany } from '@/contexts/CompanyContext'
-import { get, isApiEnabled } from '@/services/apiClient'
+import { isApiEnabled } from '@/services/apiClient'
 import { getFuelReadiness } from '@/services/fuel/fuelMappingService'
-import { getReconciliationSummary, runReconciliation } from '@/services/accountingDocService'
-
-const KIND_LABEL: Record<string, string> = {
-  shift_orp: 'Смены → ОРП',
-  purchase_ttn: 'ТТН → Поступление',
-  ttn_transfer: 'ТТН → Перемещение',
-  ttn_assembly: 'ТТН → Комплектация',
-  fuel_transfer: 'Перемещение топлива',
-  cash_pko: 'Касса → ПКО',
-  production: 'Общепит → ОПЗС',
-  correction: 'Корректировки',
-}
-// Воронка выгрузки: этап пакета → 1С
-const FUNNEL: { key: string; label: string; cls: string }[] = [
-  { key: 'draft', label: 'Готово к отправке', cls: 'text-blue-600 dark:text-blue-400' },
-  { key: 'queued', label: 'В очереди', cls: 'text-muted-foreground' },
-  { key: 'sent', label: 'Отправлено', cls: 'text-muted-foreground' },
-  { key: 'acked', label: 'Загружено в 1С', cls: 'text-emerald-600 dark:text-emerald-400' },
-  { key: 'rejected', label: 'Отклонено 1С', cls: 'text-red-500' },
-]
+import {
+  getReconciliationSummary, runReconciliation, getAccountingDocs,
+} from '@/services/accountingDocService'
+import { fmtMoney } from '@/services/analyticsService'
+import { DOC_TYPE_LABELS } from '@/config/statuses'
 
 const H3 = 'text-xs font-semibold uppercase tracking-wide text-muted-foreground'
 const fmtN = (v: number) => (v ?? 0).toLocaleString('ru-RU')
 
-interface PacketStats { total: number; byStatus: Record<string, number>; byKind: Record<string, number> }
+/** Фокус экрана: сводка «сошлось ли» либо разбор того, что разошлось. */
+export type ReconFocus = 'recon_docs' | 'recon_diff'
 
-export function SyncWith1CPanel() {
+export function SyncWith1CPanel({ focus = 'recon_docs' }: { focus?: ReconFocus } = {}) {
   const { company } = useCompany()
   const companyId = company.id
   const qc = useQueryClient()
@@ -57,12 +51,14 @@ export function SyncWith1CPanel() {
   const api = isApiEnabled()
 
   const readiness = useQuery({ queryKey: ['fuel-readiness', companyId, from, to], queryFn: () => getFuelReadiness(from, to) })
-  const pk = useQuery({
-    queryKey: ['export-packets-stats', companyId],
-    queryFn: () => get<PacketStats>('/api/export-packets/stats', { company_id: companyId }),
-    enabled: api,
-  })
   const recon = useQuery({ queryKey: ['reconciliation-summary', companyId], queryFn: () => getReconciliationSummary(companyId) })
+  // Построчный разбор нужен только на «Расхождениях»: на сводке это лишний запрос
+  // и лишняя таблица, которую всё равно никто не читает до вопроса «а что не так».
+  const diffs = useQuery({
+    queryKey: ['acc-docs', companyId, 'discrepancy', from, to],
+    queryFn: () => getAccountingDocs(companyId, { matchStatus: 'discrepancy', dateFrom: from, dateTo: to }),
+    enabled: focus === 'recon_diff',
+  })
 
   const runRecon = async () => {
     setRunning(true)
@@ -72,16 +68,19 @@ export function SyncWith1CPanel() {
     } finally { setRunning(false) }
   }
 
-  const byStatus = pk.data?.byStatus ?? {}
-  const byKind = pk.data?.byKind ?? {}
   const rs = recon.data
   const noOneC = !rs || rs.totalAccDocs === 0
+  const diffOnly = focus === 'recon_diff'
 
   return (
     <div className="space-y-5 p-4">
       <div className="flex flex-wrap items-center gap-2">
-        <h2 className="text-sm font-semibold">Сверка с 1С</h2>
-        <span className="text-xs text-muted-foreground">готовность к загрузке · разница приложение ↔ 1С</span>
+        <h2 className="text-sm font-semibold">{diffOnly ? 'Расхождения' : 'Сверка Ledger ↔ 1С'}</h2>
+        <span className="text-xs text-muted-foreground">
+          {diffOnly
+            ? 'что разошлось по суммам и что не нашло пары'
+            : 'наши факты против проведённых документов БП ГИГ'}
+        </span>
         <div className="ml-auto flex gap-1 rounded-lg bg-card p-1">
           {(['month', 'quarter'] as const).map((p) => (
             <button key={p} onClick={() => setPeriod(p)}
@@ -92,47 +91,7 @@ export function SyncWith1CPanel() {
         </div>
       </div>
 
-      {/* ── Секция 1: Воронка загрузки ── */}
-      <Card>
-        <CardContent className="pt-4">
-          <div className="mb-3 flex items-center gap-2"><Upload className="h-4 w-4 text-primary" /><h3 className={H3}>Воронка загрузки в 1С</h3></div>
-          {!api ? (
-            <p className="py-4 text-center text-sm text-muted-foreground">Доступно при подключённом API-бэкенде.</p>
-          ) : (
-            <>
-              <div className="flex flex-wrap items-stretch gap-2">
-                {FUNNEL.map((f, i) => (
-                  <div key={f.key} className="flex items-center gap-2">
-                    <div className="min-w-[120px] rounded-lg border border-border bg-background p-3">
-                      <div className="text-[11px] text-muted-foreground">{f.label}</div>
-                      <div className={cn('mt-0.5 text-xl font-bold tabular-nums', f.cls)}>{fmtN(byStatus[f.key] ?? 0)}</div>
-                    </div>
-                    {i < FUNNEL.length - 1 && <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground/40" />}
-                  </div>
-                ))}
-              </div>
-              {Object.keys(byKind).length > 0 && (
-                <table className="mt-3 w-full text-sm">
-                  <thead><tr className="border-b border-border/60 text-[11px] text-muted-foreground">
-                    <th className="py-1.5 text-left font-medium">Тип документа</th>
-                    <th className="py-1.5 text-right font-medium">Пакетов</th>
-                  </tr></thead>
-                  <tbody>
-                    {Object.entries(byKind).sort((a, b) => b[1] - a[1]).map(([k, n]) => (
-                      <tr key={k} className="border-b border-border/30">
-                        <td className="py-1.5">{KIND_LABEL[k] ?? k}</td>
-                        <td className="py-1.5 text-right tabular-nums">{fmtN(n)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* ── Секция 2: Разница приложение ↔ 1С ── */}
+      {/* ── Разница приложение ↔ 1С ── */}
       <Card>
         <CardContent className="pt-4">
           <div className="mb-3 flex items-center gap-2">
@@ -166,41 +125,101 @@ export function SyncWith1CPanel() {
         </CardContent>
       </Card>
 
-      {/* ── Секция 3: Требует внимания + переходы ── */}
-      <Card>
-        <CardContent className="pt-4">
-          <div className="mb-3 flex items-center gap-2"><ClipboardCheck className="h-4 w-4 text-primary" /><h3 className={H3}>Требует внимания</h3></div>
-          <div className="grid gap-2 sm:grid-cols-3">
-            <ActionRow
-              label="Не загружено в 1С"
-              value={(byStatus.draft ?? 0) + (byStatus.queued ?? 0) + (byStatus.sent ?? 0)}
-              hint="готовы, но ещё не в 1С"
-              onClick={() => nav('/1c/export')}
-              danger={false}
-            />
-            <ActionRow
-              label="Отклонено 1С"
-              value={byStatus.rejected ?? 0}
-              hint="требуется разбор причины"
-              onClick={() => nav('/1c/export')}
-              danger={(byStatus.rejected ?? 0) > 0}
-            />
-            <ActionRow
-              label="Расхождения сумм"
-              value={rs?.discrepancy ?? 0}
-              hint="открыть документы с Δ"
-              onClick={() => nav('/1c/documents')}
-              danger={(rs?.discrepancy ?? 0) > 0}
-            />
-          </div>
-          {readiness.data && readiness.data.receipts.pending > 0 && (
-            <p className="mt-2 flex items-center gap-1.5 text-[11px] text-amber-600 dark:text-amber-400">
-              <AlertTriangle className="h-3 w-3 shrink-0" />
-              {fmtN(readiness.data.receipts.pending)} ТТН ещё не проверены — подтвердите приёмку до выгрузки (раздел «Поступления»).
-            </p>
-          )}
-        </CardContent>
-      </Card>
+      {/* ── Построчный разбор: только на «Расхождениях» ── */}
+      {diffOnly && !noOneC && (
+        <Card>
+          <CardContent className="pt-4">
+            <div className="mb-3 flex items-center gap-2">
+              <XCircle className="h-4 w-4 text-red-500" />
+              <h3 className={H3}>Документы с расхождением сумм</h3>
+              <span className="ml-auto text-[11px] text-muted-foreground">
+                {diffs.data ? `${fmtN(diffs.data.length)} за период` : ''}
+              </span>
+            </div>
+            {diffs.isLoading ? (
+              <p className="py-4 text-sm text-muted-foreground">Загружаем разбор…</p>
+            ) : (diffs.data?.length ?? 0) === 0 ? (
+              <p className="py-4 text-sm text-muted-foreground">
+                Расхождений за период нет — суммы наших фактов сошлись с документами БП.
+              </p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[640px] text-sm">
+                  <thead>
+                    <tr className="border-b border-border/60 text-[11px] text-muted-foreground">
+                      <th className="py-1.5 text-left font-medium">Дата</th>
+                      <th className="py-1.5 text-left font-medium">Документ</th>
+                      <th className="py-1.5 text-left font-medium">Контрагент</th>
+                      <th className="py-1.5 text-right font-medium">Сумма 1С</th>
+                      <th className="py-1.5 text-left font-medium">В чём разница</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {diffs.data!.slice(0, 100).map((d) => (
+                      <tr key={d.id} className="cursor-pointer border-b border-border/30 hover:bg-accent/40"
+                        onClick={() => nav('/1c/documents')}>
+                        <td className="py-1.5 tabular-nums">{d.date}</td>
+                        <td className="py-1.5">
+                          {DOC_TYPE_LABELS[d.docType] ?? d.docType}
+                          <span className="ml-1 text-muted-foreground">№{d.number}</span>
+                        </td>
+                        <td className="max-w-[220px] truncate py-1.5">{d.counterpartyName}</td>
+                        <td className="py-1.5 text-right tabular-nums">{fmtMoney(d.amount)}</td>
+                        <td className="py-1.5 text-xs text-muted-foreground">
+                          {d.discrepancySummary ?? 'расхождение свыше 1%'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {(diffs.data?.length ?? 0) > 100 && (
+                  <p className="mt-2 text-[11px] text-muted-foreground">
+                    Показаны первые 100 из {fmtN(diffs.data!.length)}; остальные — в реестре документов.
+                  </p>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ── Что разбирать: наши факты без пары и расхождения сумм ── */}
+      {!noOneC && (
+        <Card>
+          <CardContent className="pt-4">
+            <div className="mb-3 flex items-center gap-2"><ClipboardCheck className="h-4 w-4 text-primary" /><h3 className={H3}>Требует разбора</h3></div>
+            <div className="grid gap-2 sm:grid-cols-3">
+              <ActionRow
+                label="Наших фактов без пары"
+                value={rs!.unmatchedEntry}
+                hint="не загружено в БП либо не найдено"
+                onClick={() => nav('/1c/documents')}
+                danger={false}
+              />
+              <ActionRow
+                label="Документы 1С без оригинала"
+                value={rs!.unmatchedAcc}
+                hint="заведены в БП помимо нас"
+                onClick={() => nav('/1c/documents')}
+                danger={false}
+              />
+              <ActionRow
+                label="Расхождения сумм"
+                value={rs!.discrepancy}
+                hint="отличие свыше 1%"
+                onClick={() => nav('/1c/documents')}
+                danger={rs!.discrepancy > 0}
+              />
+            </div>
+            {readiness.data && readiness.data.receipts.pending > 0 && (
+              <p className="mt-2 flex items-center gap-1.5 text-[11px] text-amber-600 dark:text-amber-400">
+                <AlertTriangle className="h-3 w-3 shrink-0" />
+                {fmtN(readiness.data.receipts.pending)} ТТН ещё не проверены — подтвердите приёмку в разделе «Нефтепродукты → Поступления».
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
     </div>
   )
 }

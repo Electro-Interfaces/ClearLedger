@@ -95,8 +95,10 @@ export const SPACE_PRODUCTS: SpaceProduct[] = [
     // Магазин — товароучёт сопутки и общепита на объектах. Общепит вынесен в свой
     // раздел: меню, экономика блюда и версионные ТТК не смешиваются с торговлей
     // готовым товаром. Состав — в config/storeCatalog.ts, второго источника нет.
+    // Закрытия периода здесь нет: приём из 1С и выгрузка в БП ГИГ — работа бухгалтера,
+    // они живут в «Бухгалтерском» (`finance`), поток «Магазин и общепит» (04.08.2026).
     code: 'shop', route: '/shop', label: 'Магазин',
-    modes: ['store', 'store_catering', 'store_stock', 'store_closing', 'store_catalog', 'store_marking', 'store_network', 'store_help'], paths: [],
+    modes: ['store', 'store_catering', 'store_stock', 'store_catalog', 'store_marking', 'store_network', 'store_help'], paths: [],
     objectTabs: ['passport', 'sales'],
   },
   {
@@ -116,8 +118,11 @@ export const SPACE_PRODUCTS: SpaceProduct[] = [
     // Страниц контура 1С здесь нет: разрез включён профилю `energy`, а у него 1С
     // отключён (`RequireFuel`), и пункты вели бы в редирект. Вернутся вместе с
     // разрезом для топливного профиля.
+    // Разделы = потоки бухгалтерии (нефтепродукты · магазин · общепит) плюс сквозное
+    // (период, сверка, документы, итоги). `accounting` — код первого раздела.
     code: 'finance', route: '/finance', label: 'Финансы',
-    modes: ['accounting', 'financial', 'tax', 'export'],
+    modes: ['accounting', 'acc_period', 'acc_store', 'acc_food', 'acc_recon', 'acc_docs',
+            'acc_results', 'financial', 'tax', 'export'],
     paths: ['/organization'],
     objectTabs: ['passport', 'contracts', 'sales', 'supply'],
   },

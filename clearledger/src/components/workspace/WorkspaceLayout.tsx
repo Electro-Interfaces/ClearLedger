@@ -18,6 +18,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 import { STORE_MODES } from '@/config/storeCatalog'
+import { ACCOUNTING_MODES } from '@/config/moduleComponents'
 import { OnboardingScreen } from './OnboardingScreen'
 import { WorkspaceToolbar } from './WorkspaceToolbar'
 import { WorkspaceModeSidebar } from './WorkspaceModeSidebar'
@@ -153,7 +154,9 @@ function ModePanel() {
       {coreMode === 'corporate' && <ProductStub code="corp" />}
       {coreMode === 'marketing' && <ManagementPanel mode="marketing" />}
       {coreMode === 'financial' && <FinancialPanel />}
-      {coreMode === 'accounting' && <AccountingPanel />}
+      {/* Разделы «Бухгалтерии» — потоки и сквозное; панель одна, различаются
+          составом пунктов (см. moduleComponents). */}
+      {ACCOUNTING_MODES.includes(coreMode) && <AccountingPanel />}
       {coreMode === 'tax' && <TaxPanel />}
       {coreMode === 'export' && <ExportLayerPanel />}
     </Suspense>

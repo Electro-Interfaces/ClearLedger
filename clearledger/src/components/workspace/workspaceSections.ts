@@ -18,7 +18,9 @@ import { carvedModes, isCarvedProfile } from '@/config/spaceProducts'
 import type { CentralMenuItem } from './CentralPanelLayout'
 import { getWorkspaceModule } from '@/config/workspaceModules'
 import { useModuleConnections, isModuleConnected, isComponentEnabled } from '@/services/moduleConnectionService'
-import { getModuleComponentDefs } from '@/config/moduleComponents'
+import {
+  getModuleComponentDefs, componentSection, ACCOUNTING_SECTIONS, type AccountingSection,
+} from '@/config/moduleComponents'
 import { STORE_SECTIONS, STORE_HELP_MENU, storeMenu } from '@/config/storeCatalog'
 import {
   MGMT_MENU, MGMT_MENU_KEYS, ENERGY_MGMT, ENERGY_MGMT_KEYS, OPS_MONITOR_MENU,
@@ -106,15 +108,16 @@ export function useWorkspaceSections(): WorkspaceSection[] {
   const storeOn = on('store_module')
   const accOn = isEnergy ? on('acc_energy') : on('accounting')
 
-  // Бухгалтерский (fuel) — меню собирается из включённых компонентов модуля под компанию.
-  // energy остаётся цельной витриной (у acc_energy нет компонентов в реестре).
-  const accItems: CentralMenuItem[] = !isEnergy && accOn
-    ? dedupeByKey(
-        getModuleComponentDefs('accounting', company.profileId)
-          .filter((c) => isComponentEnabled(conn, c, company.profileId))
-          .flatMap((c) => c.menuItems ?? []),
-      )
+  // Бухгалтерия (fuel) — меню собирается из включённых компонентов модуля под компанию
+  // и режется по разделам-потокам: пункт живёт в том разделе, который указал его
+  // компонент (`section`). energy остаётся цельной витриной (у acc_energy компонентов
+  // в реестре нет).
+  const accComponents = !isEnergy && accOn
+    ? getModuleComponentDefs('accounting', company.profileId)
+        .filter((c) => isComponentEnabled(conn, c, company.profileId))
     : []
+  const accItemsOf = (section: AccountingSection): CentralMenuItem[] => dedupeByKey(
+    accComponents.filter((c) => componentSection(c) === section).flatMap((c) => c.menuItems ?? []))
 
   // Продукт продаж разложен на разделы у обоих профилей: у ЭЗС «Сеть» — состояние и
   // деньги сети, «Сессии» — как заряжают, «Коммерция» — кто платит и по какой цене;
@@ -154,10 +157,10 @@ export function useWorkspaceSections(): WorkspaceSection[] {
   // «Хозяйство» — подключаемые модули: нет ни одного включённого, раздела нет.
   const opsEconomy: WorkspaceSection = { mode: 'ops_economy', label: 'Хозяйство',
     icon: Receipt, items: isEnergy ? energyOps : [], connected: energyOps.length > 0 }
-  // Магазин разложен на пять разделов рельсы (решение МАГа 29.07.2026): «Торговля» —
-  // деньги и спрос, «Склад» — остаток и движение, «Закрытие» — чем закрыт день и что
-  // уехало в бухгалтерию, «Каталог» — карточка товара, «Маркировка» — что мы должны
-  // государству. Раньше это были 25 пунктов одним списком с гармошкой заголовков.
+  // Магазин разложен по предметам работы: «Торговля» — сопутка, деньги и спрос,
+  // «Общепит» — меню и ТТК, «Склад» — остаток и движение, «Каталог» — карточка
+  // товара, «Маркировка» — регуляторика, «Станции» — парк АЗС. Закрытие периода
+  // здесь не живёт: приём из 1С и выгрузка в БП — в «Бухгалтерском» (04.08.2026).
   const storeSections: WorkspaceSection[] = STORE_SECTIONS.map((sec) => ({
     mode: sec.mode, label: sec.label, icon: sec.icon,
     items: storeOn ? storeMenu(sec.mode) : [], connected: storeOn,
@@ -174,7 +177,15 @@ export function useWorkspaceSections(): WorkspaceSection[] {
   // «Маркетинг» получил первый рабочий раздел — рынок вокруг сети (docs/MARKET.md).
   const marketing: WorkspaceSection = { mode: 'marketing', label: 'Рынок',
     icon: Megaphone, items: isEnergy ? MARKET_MENU : [], connected: isEnergy }
-  const acc: WorkspaceSection   = { mode: 'accounting', label: 'Бухгалтерский',  icon: BookOpen,     items: accItems, connected: accOn }
+  // Разделы «Бухгалтерии» = потоки + сквозное; состав каждого — его компоненты.
+  // Раздел без единого включённого компонента в рельсе не показывается: пустая
+  // вторая панель читается как поломка.
+  const accSections: WorkspaceSection[] = isEnergy
+    ? [{ mode: 'accounting', label: 'Бухгалтерский', icon: BookOpen, items: [], connected: accOn }]
+    : ACCOUNTING_SECTIONS.map((sec) => {
+        const items = accItemsOf(sec.mode)
+        return { mode: sec.mode, label: sec.label, icon: sec.icon, items, connected: accOn && items.length > 0 }
+      }).filter((s) => s.items.length > 0 || s.mode === 'accounting')
   const exp: WorkspaceSection   = { mode: 'export',     label: 'Выгрузка',       icon: FileOutput,   items: [], connected: true }
   // Разделы продукта «Данные» — у ОБОИХ профилей: без них рабочее место открывается
   // панелью нормализации, которой нет в меню, а право `data:normalize` указывает в
@@ -187,12 +198,15 @@ export function useWorkspaceSections(): WorkspaceSection[] {
 
   // Порядок разделов: топливный профиль (ГИГ) — Продажи → Магазин → Управленческий →
   // Бухгалтерский (порядок МАГа 13.07.2026); energy (РусГидро, без магазина) — как было.
+  // «Выгрузка» отдельным разделом осталась только у energy: у топливного профиля
+  // выгрузка — стадия внутри потока («Пакет в БП», «Контроль загрузки в 1С»), а не
+  // самостоятельное место (04.08.2026).
   const all = isEnergy
     ? [sales, salesSessions, salesCommerce, corporate, marketing,
        projects, projectsAnalytics, ops, opsEquipment, opsEconomy,
-       storeSections[0], acc, exp, normalize, reconcile]
-    : [sales, salesSessions, salesCommerce, salesGoods, salesHelp, ...storeSections, storeHelp, ops, acc, exp,
-       normalize, reconcile]
+       storeSections[0], ...accSections, exp, normalize, reconcile]
+    : [sales, salesSessions, salesCommerce, salesGoods, salesHelp, ...storeSections, storeHelp, ops,
+       ...accSections, normalize, reconcile]
   // Права на пункты продукта режутся ЗДЕСЬ, а не в меню: тот же массив читают панели
   // (`AccountingPanels`), и урезать его в одном месте — значит не показать закрытый
   // пункт ни в гармошке, ни в контенте. Гейт есть только у продуктов разреза: там код
