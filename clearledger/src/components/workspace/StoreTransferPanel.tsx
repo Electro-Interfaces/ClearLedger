@@ -6,6 +6,7 @@
  */
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { StationDocsBlock } from './StationDocsBlock'
 import { getStoreTransfers, type StoreTransferDoc } from '@/services/storeService'
 import { SnapshotBadge } from '@/components/common/SnapshotBadge'
 import { fmtMoney } from '@/services/analyticsService'
@@ -183,6 +184,10 @@ export function StoreTransferPanel({ companyId, dateFrom, dateTo }: { companyId:
           </div>
         </div>
       )}
+
+      {/* Второй источник того же предмета: реестр выше — история 1С, здесь —
+          то, что заводят на самой АЗС. Пока 1С ведёт станцию, они идут рядом. */}
+      <StationDocsBlock kind="transfer" dateFrom={dateFrom} dateTo={dateTo} title="Перемещения станции" />
     </div>
   )
 }

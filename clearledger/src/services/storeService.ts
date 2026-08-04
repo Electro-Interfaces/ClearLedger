@@ -195,6 +195,8 @@ export const getStoreSales = (
 // ── Остатки: достоверный остаток из регистров ЦБ (снимок, не оценка) ──
 export interface StoreStockItem {
   guid: string; name: string; article: string | null; vat: string | null
+  /** Чей это остаток: станция и место хранения. Есть у остатка агента. */
+  station_id?: number; place_code?: string; place_name?: string
   marked: boolean; weighed: boolean; barcode: string | null
   qty: number; negative: boolean
   retail_price: number | null; retail_value: number | null
@@ -207,6 +209,17 @@ export interface StoreStockItem {
   /** Средняя закупка по накладным — то, с чем сверялась партия. */
   buy_unit: number | null
 }
+/** Свод остатка по станции: сколько мест, позиций, денег и когда снят снимок. */
+export interface StoreStockStation {
+  station_id: number
+  places: number
+  sku: number
+  positive: number
+  negative: number
+  retail_value: number
+  snapshot_at: string | null
+}
+
 export interface StoreStockWarehouse {
   code: string; name: string | null; sku: number
   station_id?: number; place_code?: string
@@ -214,6 +227,8 @@ export interface StoreStockWarehouse {
   retail_value: number
 }
 export interface StoreStockData {
+  /** Свод по станциям; у переходного среза ЦБ его нет. */
+  stations?: StoreStockStation[]
   source?: 'edge_agent' | 'legacy_cb_snapshot'
   warehouse: string | null
   warehouses: StoreStockWarehouse[]
@@ -984,6 +999,43 @@ export interface StoreExchangeStationDetail {
 export const getStoreExchangeStation = (stationId: number, dateFrom: string, dateTo: string) =>
   get<StoreExchangeStationDetail>(
     `/api/store/exchange/${stationId}?date_from=${dateFrom}&date_to=${dateTo}`)
+
+/** Документы, заведённые на станции: то, что сделал агент, а не 1С. */
+export interface StoreStationDoc {
+  station_id: number
+  kind: string
+  label: string
+  number: string | null
+  doc_date: string
+  place_from: string
+  place_to: string
+  note: string
+  author: string
+  positions: number
+  amount: number
+  received_at: string
+  packet_uuid: string
+  shift_number: string | null
+}
+
+export interface StoreStationDocsData {
+  docs: StoreStationDoc[]
+  total: number
+  by_kind: { kind: string; label: string; docs: number; positions: number; amount: number; last_at: string | null }[]
+  by_station: { station_id: number; docs: number }[]
+  kinds: Record<string, string>
+  truncated: boolean
+}
+
+export const getStoreStationDocs = (opts: {
+  kind?: string; stationId?: number | null; dateFrom?: string; dateTo?: string; limit?: number
+}) => get<StoreStationDocsData>('/api/store/station-docs', {
+  kind: opts.kind || undefined,
+  station_id: opts.stationId ?? undefined,
+  date_from: opts.dateFrom || undefined,
+  date_to: opts.dateTo || undefined,
+  limit: opts.limit ?? undefined,
+})
 
 /** Коды маркировки, которыми мы владеем: откуда пришёл каждый и куда ушёл. */
 export interface StoreMarkCode {
@@ -1780,6 +1832,20 @@ export interface SupplierCard {
     price_delta_pct: number | null
   }[]
   returns: { date: string; number: string | null; positions: number; amount: number }[]
+  /** Что за категории он возит — по группам каталога. */
+  by_group: { group: string; amount_net: number; positions: number }[]
+  /** Как шли закупки по месяцам. */
+  by_month: { month: string; docs: number; amount_net: number }[]
+  analytics: {
+    /** Доля в закупках периода: насколько мы от него зависим. */
+    share_pct: number | null
+    avg_doc: number | null
+    /** Позиции, которые возит только он: его срыв нечем закрыть. */
+    exclusive_positions: number
+    marked_share_pct: number | null
+    price_up: number
+    price_down: number
+  }
 }
 
 export const getSupplierCard = (

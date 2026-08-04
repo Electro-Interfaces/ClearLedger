@@ -8,6 +8,7 @@
  */
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { StationDocsBlock } from './StationDocsBlock'
 import { getStoreInventory, type StoreInventoryDoc } from '@/services/storeService'
 import { SnapshotBadge } from '@/components/common/SnapshotBadge'
 import { fmtMoney } from '@/services/analyticsService'
@@ -190,6 +191,10 @@ export function StoreInventoryPanel({ companyId, dateFrom, dateTo }: { companyId
       )}
 
       {sku && <NomenclatureCardModal guid={sku} companyId={companyId} dateFrom={dateFrom ?? ''} dateTo={dateTo ?? ''} onClose={() => setSku(null)} />}
+
+      {/* Второй источник того же предмета: реестр выше — история 1С, здесь —
+          то, что заводят на самой АЗС. Пока 1С ведёт станцию, они идут рядом. */}
+      <StationDocsBlock kind="inventory" dateFrom={dateFrom} dateTo={dateTo} title="Инвентаризации станции" />
     </div>
   )
 }

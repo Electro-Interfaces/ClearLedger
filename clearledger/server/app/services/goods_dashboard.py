@@ -15,7 +15,7 @@ import uuid
 from collections import defaultdict
 from datetime import date, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
@@ -1090,6 +1090,32 @@ class GoodsDashboardService:
         }
 
     # ── Поставщики ──
+    async def _item_groups(self) -> dict[str, str]:
+        """Карта «номенклатура 1С → ветка каталога».
+
+        Карточки Ledger и номенклатура ЦБ связаны по UUID полностью, поэтому
+        закупки раскладываются по тем же группам, что и ассортимент. Без этого
+        про поставщика можно сказать только «сумма и документы» — а вопрос у
+        товароведа другой: что именно он у него берёт.
+        """
+        if getattr(self, "_grp_cache", None) is not None:
+            return self._grp_cache
+        rows = (await self.session.execute(text("""
+            SELECT i.external_uuid::text AS ref, g.path
+            FROM edge.item i JOIN edge.item_group g ON g.id = i.group_id
+        """))).mappings().all()
+        self._grp_cache = {r["ref"]: r["path"] for r in rows}
+        return self._grp_cache
+
+    async def _item_marked(self) -> set[str]:
+        """Маркируемые позиции — по каталогу Ledger, обогащённому из 1С."""
+        if getattr(self, "_marked_cache", None) is not None:
+            return self._marked_cache
+        rows = (await self.session.execute(text(
+            "SELECT external_uuid::text AS ref FROM edge.item WHERE marked"))).mappings().all()
+        self._marked_cache = {r["ref"] for r in rows}
+        return self._marked_cache
+
     async def supplier_history(self, station: str | None = None) -> dict[str, dict]:
         """Сводка работы с каждым поставщиком по документам 1С: {имя: {...}}.
 
@@ -1237,6 +1263,56 @@ class GoodsDashboardService:
             })
         возвраты.sort(key=lambda x: x["date"], reverse=True)
 
+        # Разрезы, ради которых карточку и открывают: что за категории он
+        # возит, как шли закупки по месяцам, велика ли зависимость от него.
+        группы_карта = await self._item_groups()
+        маркируемые = await self._item_marked()
+        по_группам: dict[str, dict] = {}
+        по_месяцам: dict[str, dict] = {}
+        маркир_сумма = 0.0
+        for дата, d, _ in свои:
+            if not (date_from.isoformat() <= дата <= date_to.isoformat()):
+                continue
+            месяц = дата[:7]
+            м = по_месяцам.setdefault(месяц, {"month": месяц, "docs": 0, "amount_net": 0.0})
+            м["docs"] += 1
+            for l in (d.get("Товары") or []):
+                ref = l.get("Номенклатура") or ""
+                net = self._purch_net(d, l)
+                м["amount_net"] += net
+                путь = группы_карта.get(ref) or "— не разобрано"
+                г = по_группам.setdefault(путь, {"group": путь, "amount_net": 0.0, "positions": set()})
+                г["amount_net"] += net
+                г["positions"].add(ref)
+                if ref in маркируемые:
+                    маркир_сумма += net
+
+        группы = [{"group": г["group"], "amount_net": round(г["amount_net"], 2),
+                   "positions": len(г["positions"])} for г in по_группам.values()]
+        группы.sort(key=lambda x: -x["amount_net"])
+        месяцы = [{"month": м["month"], "docs": м["docs"],
+                   "amount_net": round(м["amount_net"], 2)} for м in по_месяцам.values()]
+        месяцы.sort(key=lambda x: x["month"])
+
+        # Доля в закупках и монополия на позиции: зависимость от поставщика —
+        # не абстракция. Если он один возит сорок позиций, его срыв это дыра на
+        # полке, которую нечем закрыть.
+        все = await self._load_purchases(date_from, date_to, stations)
+        всего_закупки = 0.0
+        поставщики_позиции: dict[str, set[str]] = {}
+        for m in все:
+            d = m.get("Документ") or {}
+            имя = cparty.get(d.get("Контрагент")) or (d.get("Контрагент") or "—")
+            for l in (d.get("Товары") or []):
+                всего_закупки += self._purch_net(d, l)
+                ref = l.get("Номенклатура")
+                if ref:
+                    поставщики_позиции.setdefault(ref, set()).add(имя)
+        эксклюзив = sum(1 for i in items
+                        if поставщики_позиции.get(i["ref"], set()) == {name})
+        подорожало = sum(1 for i in items if (i["price_delta_pct"] or 0) > 0)
+        подешевело = sum(1 for i in items if (i["price_delta_pct"] or 0) < 0)
+
         даты = [дата for дата, _, _ in свои]
         интервал = None
         if len(даты) > 1:
@@ -1255,6 +1331,14 @@ class GoodsDashboardService:
                 "returns": len(возвраты),
             },
             "docs": docs, "items": items, "returns": возвраты,
+            "by_group": группы, "by_month": месяцы,
+            "analytics": {
+                "share_pct": round(оборот / всего_закупки * 100, 1) if всего_закупки else None,
+                "avg_doc": round(оборот / len(docs), 2) if docs else None,
+                "exclusive_positions": эксклюзив,
+                "marked_share_pct": round(маркир_сумма / оборот * 100, 1) if оборот else None,
+                "price_up": подорожало, "price_down": подешевело,
+            },
         }
 
     async def suppliers(self, date_from: date, date_to: date, stations: list[str] | None = None) -> dict:
@@ -1519,17 +1603,22 @@ class GoodsDashboardService:
                       for key, value in wh_agg.items()]
         warehouses.sort(key=lambda item: (-item["sku"], item["code"]))
 
+        # «all» — вся сеть разом: пока станция одна, это то же самое, но при
+        # двенадцати АЗС вопрос «где вообще лежит этот товар» задают чаще, чем
+        # «что лежит на конкретной полке», и ответ не должен требовать двенадцати
+        # переключений. Строка при этом всегда знает свою станцию и место.
         selected = warehouse
-        if selected and selected not in wh_agg:
+        if selected and selected != "all" and selected not in wh_agg:
             matches = [key for key, value in wh_agg.items()
                        if value["place_code"] == selected]
             selected = matches[0] if len(matches) == 1 else None
-        selected = selected or (warehouses[0]["code"] if warehouses else None)
+        selected = selected or "all"
+        всё = selected == "all"
         ql = (q or "").lower().strip()
 
         items = []
         for row in rows:
-            if selected != f"{row.station_id}:{row.place}":
+            if not всё and selected != f"{row.station_id}:{row.place}":
                 continue
             card = nom.get(row.item_uuid)
             is_marked = bool(card and card.marked)
@@ -1557,6 +1646,12 @@ class GoodsDashboardService:
                           if margin is not None and value else None)
             items.append({
                 "guid": row.item_uuid,
+                # Станция и место в самой строке: в сводном разрезе без них
+                # непонятно, чей это остаток, а «остаток вообще» бессмыслен —
+                # товар лежит на конкретной полке конкретной АЗС.
+                "station_id": row.station_id,
+                "place_code": row.place,
+                "place_name": row.place_name or f"место {row.place}",
                 "name": name,
                 "article": card.article if card else None,
                 "vat": card.vat if card else None,
@@ -1584,10 +1679,35 @@ class GoodsDashboardService:
         cost_value = sum(item["cost_amount"] or 0 for item in costed)
         retail_costed = sum(item["retail_value"] or 0 for item in costed)
         snapshot_at = max((row.snapshot_at for row in rows), default=None)
+
+        # Свод по станциям: сколько мест, позиций, денег на полке и когда
+        # приходил последний снимок. Свежесть здесь не украшение — остаток
+        # станции, молчащей вторые сутки, стоит читать иначе.
+        по_станциям: dict[int, dict] = defaultdict(
+            lambda: {"places": 0, "sku": 0, "positive": 0, "negative": 0,
+                     "retail_value": 0.0, "snapshot_at": None})
+        for key, value in wh_agg.items():
+            узел = по_станциям[value["station_id"]]
+            узел["places"] += 1
+            узел["sku"] += value["sku"]
+            узел["positive"] += value["positive"]
+            узел["retail_value"] += value["retail_value"]
+        for row in rows:
+            узел = по_станциям[row.station_id]
+            if float(row.quantity or 0) < 0:
+                узел["negative"] += 1
+            снято = row.snapshot_at.isoformat() if row.snapshot_at else None
+            if снято and (узел["snapshot_at"] is None or снято > узел["snapshot_at"]):
+                узел["snapshot_at"] = снято
+        stations = [{"station_id": sid, **value,
+                     "retail_value": round(value["retail_value"], 2)}
+                    for sid, value in sorted(по_станциям.items())]
+
         return {
             "source": "edge_agent",
             "warehouse": selected,
             "warehouses": warehouses,
+            "stations": stations,
             "items": items,
             "snapshot_at": snapshot_at.isoformat() if snapshot_at else None,
             "summary": {

@@ -1020,6 +1020,104 @@ MARK_GROUPS = {
 }
 
 
+# Виды документов станции, которые ведёт агент. Ключ — тип в пакете, значение —
+# как это называется на экране: «writeoff» человеку ничего не говорит.
+STATION_DOC_KINDS = {
+    "writeoff": "Списание",
+    "transfer": "Перемещение",
+    "inventory": "Инвентаризация",
+    "purchase": "Приёмка",
+    "return_supplier": "Возврат поставщику",
+    "return_sale": "Возврат покупателя",
+    "production_release": "Производство",
+    "revaluation": "Переоценка",
+}
+
+
+@router.get("/station-docs")
+async def store_station_docs(
+    kind: str | None = Query(None, description="вид документа; пусто — все"),
+    station_id: int | None = Query(None, description="код АЗС; пусто — все"),
+    date_from: str | None = Query(None),
+    date_to: str | None = Query(None),
+    limit: int = Query(200, ge=1, le=1000),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Документы, заведённые НА СТАНЦИИ, — то, что сделал агент, а не 1С.
+
+    Реестры склада исторически читают документы ЦБ: их полтора десятка тысяч и
+    они кончаются датой, когда 1С перестанет вести станцию. Документы агента
+    живут в пакетах, и без этого разреза работа станции в разделе не видна
+    вовсе — а именно она и остаётся, когда 1С уходит.
+
+    Источник — сырой пакет: разбор в документы Ledger идёт своим путём, но
+    реестр обязан показывать то, что станция реально прислала.
+    """
+    cid: uuid.UUID = await scope_company_id(user, db)
+    p: dict = {"cid": cid, "lim": limit}
+    условия = ["p.company_id = :cid"]
+    if station_id is not None:
+        условия.append("p.station_id = :st")
+        p["st"] = station_id
+    if kind:
+        условия.append("d->>'Тип' = :kind")
+        p["kind"] = kind
+    else:
+        условия.append("d->>'Тип' = ANY(:kinds)")
+        p["kinds"] = list(STATION_DOC_KINDS)
+    if date_from:
+        условия.append("coalesce((d->>'Дата')::timestamptz, p.received_at) >= :d1")
+        p["d1"] = date.fromisoformat(date_from)
+    if date_to:
+        условия.append("coalesce((d->>'Дата')::timestamptz, p.received_at) < (CAST(:d2 AS date) + 1)")
+        p["d2"] = date.fromisoformat(date_to)
+
+    rows = [dict(r) for r in (await db.execute(text(f"""
+        SELECT p.station_id,
+               d->>'Тип' AS kind,
+               d->>'Номер' AS number,
+               coalesce((d->>'Дата')::timestamptz, p.received_at) AS doc_date,
+               coalesce(d->>'Склад', d->>'СкладОтправитель', '') AS place_from,
+               coalesce(d->>'СкладПолучатель', '') AS place_to,
+               coalesce(d->>'Причина', d->>'Комментарий', '') AS note,
+               coalesce(d->>'Автор', '') AS author,
+               coalesce(jsonb_array_length(d->'Товары'), 0) AS positions,
+               coalesce((d->>'СуммаДокумента')::numeric, 0) AS amount,
+               p.received_at, p.packet_uuid, p.shift_number
+        FROM edge_packets p,
+             LATERAL jsonb_array_elements(coalesce(p.payload->'Документы', '[]'::jsonb)) d
+        WHERE {' AND '.join(условия)}
+        ORDER BY 4 DESC
+        LIMIT :lim
+    """), p)).mappings().all()]
+    for r in rows:
+        r["label"] = STATION_DOC_KINDS.get(r["kind"], r["kind"])
+        r["amount"] = float(r["amount"] or 0)
+
+    свод: dict[str, dict] = {}
+    станции: dict[int, int] = {}
+    for r in rows:
+        узел = свод.setdefault(r["kind"], {
+            "kind": r["kind"], "label": r["label"], "docs": 0,
+            "positions": 0, "amount": 0.0, "last_at": None})
+        узел["docs"] += 1
+        узел["positions"] += int(r["positions"] or 0)
+        узел["amount"] += r["amount"]
+        if узел["last_at"] is None or r["doc_date"] > узел["last_at"]:
+            узел["last_at"] = r["doc_date"]
+        станции[r["station_id"]] = станции.get(r["station_id"], 0) + 1
+
+    return {
+        "docs": rows,
+        "total": len(rows),
+        "by_kind": sorted(свод.values(), key=lambda x: -x["docs"]),
+        "by_station": [{"station_id": sid, "docs": n} for sid, n in sorted(станции.items())],
+        "kinds": STATION_DOC_KINDS,
+        "truncated": len(rows) >= limit,
+    }
+
+
 @router.get("/marking/codes")
 async def store_marking_codes(
     station_id: int | None = Query(None, description="код АЗС; пусто — все"),

@@ -1,7 +1,6 @@
 /**
- * «Остатки» раздела «Магазин» — ДОСТОВЕРНЫЙ остаток из регистров ЦБ ЭЛСИ.АЗК
- * (снимок ТоварыНаАЗК + себестоимость из ПартииТоваровНаСкладах), НЕ оценка
- * «закупка − продажи». Источник: /api/store/stock (GoodsDashboardService.stock_onhand).
+ * «Остатки» раздела «Магазин» — собственный журнал движений Edge Agent.
+ * Старый срез ЦБ используется только как переходный fallback до первого снимка агента.
  *
  * Остаток — снимок на момент выгрузки (не за период): фильтр периода не применяется.
  * Отрицательные остатки — норма для розничных АЗС (учёт по средней) → флаг.
@@ -65,6 +64,9 @@ export function StoreStockPanel({ companyId, dateFrom, dateTo }: { companyId: st
   const kpiRetailCosted = costed.reduce((s, i) => s + (i.retail_value ?? 0), 0)
   const kpiMarginPct = kpiRetailCosted ? ((kpiRetailCosted - kpiCost) / kpiRetailCosted) * 100 : null
   const curWh = data.warehouses.find((w) => w.code === data.warehouse)
+  // В сводном разрезе один и тот же товар встречается несколько раз — по разу
+  // на каждую полку, поэтому колонка «где лежит» появляется только здесь.
+  const всяСеть = !curWh
 
   const KPIS: { label: string; value: string; hint?: string; danger?: boolean }[] = [
     { label: 'Позиций (SKU)', value: nf(items.length) },
@@ -90,8 +92,13 @@ export function StoreStockPanel({ companyId, dateFrom, dateTo }: { companyId: st
             <SnapshotBadge at={data.snapshot_at} />
           </div>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Снимок остатка из 1С (ТоварыНаАЗК + партии). Не за период — текущий остаток базы.
-            {curWh && <> Склад: <span className="text-foreground">{curWh.name}</span>.</>}
+            {data.source === 'edge_agent'
+              ? 'Собственный остаток агента АЗС: стартовый перенос + документы и продажи станции.'
+              : 'Переходный снимок 1С: агент ещё не прислал собственный остаток.'}
+            {' '}Не за период — текущее состояние.
+            {curWh
+              ? <> Место: <span className="text-foreground">{curWh.name}</span> (АЗС {curWh.station_id}).</>
+              : <> Показана <span className="text-foreground">вся сеть</span>: у каждой строки видно, чья это полка.</>}
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -100,6 +107,10 @@ export function StoreStockPanel({ companyId, dateFrom, dateTo }: { companyId: st
             onChange={(e) => setWarehouse(e.target.value || undefined)}
             className="text-xs px-2 py-1.5 rounded-md border border-border/50 bg-background"
           >
+            {/* Вся сеть — первый пункт: вопрос «где вообще лежит этот товар»
+                задают чаще, чем «что на конкретной полке», и он не должен
+                требовать перебора станций. */}
+            <option value="all">Вся сеть — все станции и места</option>
             {data.warehouses.map((w) => (
               <option key={w.code} value={w.code}>{w.name ?? w.code} — на полке {w.positive} из {w.sku}</option>
             ))}
@@ -123,6 +134,27 @@ export function StoreStockPanel({ companyId, dateFrom, dateTo }: { companyId: st
         </div>
       </div>
 
+      {(data.stations?.length ?? 0) > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {data.stations!.map((st) => (
+            <button key={st.station_id} type="button"
+              onClick={() => setWarehouse(`${st.station_id}:${data.warehouses.find((w) => w.station_id === st.station_id)?.place_code ?? ''}`)}
+              className="rounded-lg border border-border/50 bg-card/40 px-3 py-2 text-left transition-colors hover:border-primary/50">
+              <div className="text-xs font-medium">АЗС {st.station_id}</div>
+              <div className="text-[11px] text-muted-foreground">
+                {nf(st.positive)} на полке из {nf(st.sku)} · {st.places} мест{st.negative > 0
+                  ? <> · <span className="text-amber-300/90">{nf(st.negative)} в минусе</span></> : ''}
+              </div>
+              <div className="text-[11px] tabular-nums text-muted-foreground">
+                {fmtMoney(st.retail_value)} · снимок {st.snapshot_at
+                  ? new Date(st.snapshot_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+                  : '—'}
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="grid gap-2.5 grid-cols-2 sm:grid-cols-3 lg:grid-cols-6">
         {KPIS.map((k) => (
           <div key={k.label} className="rounded-lg border border-border/50 bg-card/40 p-3">
@@ -135,9 +167,10 @@ export function StoreStockPanel({ companyId, dateFrom, dateTo }: { companyId: st
 
       <p className="text-[11px] text-muted-foreground/70 -mt-1">
         Остаток — в базовой единице регистра (молоко в мл, соусы в г), она указана рядом с числом.
-        Себестоимость — удельная из партий ЦБ (Стоимость/Количество). Где партия выше розничной цены
-        или расходится со средней закупкой более чем в 1,4 раза, цифра помечена «?» и в сводную маржу
-        не входит. <span className="text-muted-foreground">Минус по остатку</span> — расход прошёл, а
+        {data.source === 'edge_agent'
+          ? 'Себестоимость — средняя по собственным приёмкам агента; неполное покрытие стартового остатка помечено «?». '
+          : 'Себестоимость — переходная оценка из партий ЦБ; сомнительные значения помечены «?». '}
+        <span className="text-muted-foreground">Минус по остатку</span> — расход прошёл, а
         приход в этом контуре не оформлен: так ведут себя расходники общепита (стаканы, соусы,
         упаковка) и товар, чьи накладные заводятся вне контура. Это не долг по приёмке.
       </p>
@@ -147,6 +180,7 @@ export function StoreStockPanel({ companyId, dateFrom, dateTo }: { companyId: st
           <thead className="bg-muted/30 text-muted-foreground">
             <tr>
               <th className="px-3 py-2 font-medium text-left">Товар</th>
+              {всяСеть && <th className="px-3 py-2 font-medium text-left whitespace-nowrap">Где лежит</th>}
               <th className="px-3 py-2 font-medium text-center">ЧЗ</th>
               <th className="px-3 py-2 font-medium text-left whitespace-nowrap">Штрихкод</th>
               <th className="px-3 py-2 font-medium text-right">Остаток</th>
@@ -159,13 +193,19 @@ export function StoreStockPanel({ companyId, dateFrom, dateTo }: { companyId: st
           </thead>
           <tbody>
             {items.slice(0, 400).map((i) => (
-              <tr key={i.guid}
+              <tr key={`${i.station_id ?? ''}:${i.place_code ?? ''}:${i.guid}`}
                   {...rowDrill(() => setOpenSku(i.guid), `${i.name} — карточка товара`,
                     'border-t border-border/30')}>
                 <td className="px-3 py-1.5">
                   {i.name}
                   {i.weighed && <span className="ml-1 text-[10px] text-muted-foreground/60" title="весовой — остаток в базовых единицах">вес.</span>}
                 </td>
+                {всяСеть && (
+                  <td className="px-3 py-1.5 whitespace-nowrap text-muted-foreground">
+                    {i.station_id ? `АЗС ${i.station_id}` : '—'}
+                    {i.place_name && <span className="ml-1 text-[11px] text-muted-foreground/70">{i.place_name.replace(/^АЗС\s*№?\d+,\s*/, '')}</span>}
+                  </td>
+                )}
                 <td className="px-3 py-1.5 text-center">{i.marked && <ChzBadge />}</td>
                 <td className="px-3 py-1.5 text-muted-foreground tabular-nums">{i.barcode ?? '—'}</td>
                 <td className={`px-3 py-1.5 text-right tabular-nums ${i.negative ? 'text-red-400/80 font-medium' : ''}`}>
@@ -195,7 +235,7 @@ export function StoreStockPanel({ companyId, dateFrom, dateTo }: { companyId: st
         )}
         {items.length === 0 && (
           <div className="px-3 py-6 text-sm text-muted-foreground text-center">
-            Нет позиций. Если пусто целиком — наполните остаток: <code>py -3.13 scripts/pull_cb_stock_dev.py</code>
+            Нет позиций. Проверьте стартовый остаток и время последнего снимка агента.
           </div>
         )}
       </div>
