@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
     DataEntry, CbNomenclature, CbRef, CbBarcode, StockOnHand,
-    CbInventoryDoc, CbMovementDoc, StorePlan, TobaccoMrc,
+    CbInventoryDoc, CbMovementDoc, StorePlan, StoreStockBalance, TobaccoMrc,
 )
 
 # секция meta → категория UI
@@ -35,6 +35,59 @@ _TTK_COVERAGE_MIN = 0.9
 def _day(smena: dict) -> str:
     """Дата смены для группировки — по закрытию (фолбэк — открытие)."""
     return str(smena.get("Закрытие") or smena.get("Открытие") or "")[:10]
+
+
+def _prefer_edge_sales(rows: list[DataEntry]) -> list[DataEntry]:
+    """Не считать параллельные oneC- и Edge-проекции одной смены дважды."""
+    edge = [row for row in rows if row.source == "edge"]
+    if not edge:
+        return rows
+
+    def marks(row: DataEntry) -> tuple[tuple[str, str], tuple[str, str], tuple[str, str]]:
+        shift = (row.meta or {}).get("Смена") or {}
+        station = str(shift.get("КодАЗС") or "")
+        number = str(shift.get("ОСЭНомер") or shift.get("НомерСмены") or "")
+        opened = str(shift.get("Открытие") or "")[:16]
+        return (station, number), (station, opened), (station, _day(shift))
+
+    exact = {marks(row)[0] for row in edge}
+    opened = {marks(row)[1] for row in edge if marks(row)[1][1]}
+    edge_days: dict[tuple[str, str], int] = defaultdict(int)
+    onec_days: dict[tuple[str, str], int] = defaultdict(int)
+    for row in edge:
+        edge_days[marks(row)[2]] += 1
+    for row in rows:
+        if row.source == "oneC":
+            onec_days[marks(row)[2]] += 1
+
+    result = list(edge)
+    for row in rows:
+        if row.source == "edge":
+            continue
+        by_number, by_opened, by_day = marks(row)
+        duplicate = by_number in exact or (by_opened[1] and by_opened in opened)
+        duplicate = duplicate or (edge_days[by_day] == 1 and onec_days[by_day] == 1)
+        if not duplicate:
+            result.append(row)
+    return result
+
+
+def _prefer_edge_documents(rows: list[DataEntry]) -> list[DataEntry]:
+    """Предпочесть Edge при точном совпадении номера/дня/станции/суммы документа."""
+    def key(row: DataEntry) -> tuple[str, str, str, str, float]:
+        meta = row.meta or {}
+        shift = meta.get("Смена") or {}
+        doc = meta.get("Документ") or {}
+        return (
+            str(row.doc_type_id or ""),
+            str(shift.get("КодАЗС") or ""),
+            _day(shift),
+            str(doc.get("Номер") or "").strip().casefold(),
+            round(float(doc.get("СуммаДокумента") or 0), 2),
+        )
+
+    edge_keys = {key(row) for row in rows if row.source == "edge" and key(row)[3]}
+    return [row for row in rows if row.source == "edge" or key(row) not in edge_keys]
 
 
 def _cost_doubt(cost_unit: float | None, price: float | None, buy_unit: float | None) -> str | None:
@@ -63,11 +116,12 @@ class GoodsDashboardService:
         """Все clean-продажи сопутки/общепита компании (объём мал — фильтр по дате в
         Python). Мемоизация на инстанс — метод зовётся многократно за запрос (К-27)."""
         if getattr(self, "_sales_cache", None) is None:
-            self._sales_cache = (await self.session.execute(select(DataEntry).where(
+            rows = (await self.session.execute(select(DataEntry).where(
                 DataEntry.company_id == self.company_id,
                 DataEntry.layer == "clean",
                 DataEntry.doc_type_id == "retail_sale_sidegoods",
             ))).scalars().all()
+            self._sales_cache = _prefer_edge_sales(rows)
         return self._sales_cache
 
     @staticmethod
@@ -262,9 +316,10 @@ class GoodsDashboardService:
 
     async def _load_purchases(self, df: date, dt: date, stations: list[str] | None) -> list[dict]:
         if getattr(self, "_purch_cache", None) is None:  # мемоизация сырых строк (К-27)
-            self._purch_cache = (await self.session.execute(select(DataEntry).where(
+            rows = (await self.session.execute(select(DataEntry).where(
                 DataEntry.company_id == self.company_id, DataEntry.layer == "clean",
                 DataEntry.doc_type_id == "purchase"))).scalars().all()
+            self._purch_cache = _prefer_edge_documents(rows)
         # F1 (P0): один ПТУ прицеплен к двум смежным сменам (дневное окно прицепки —
         # зеркало эталона) → две DataEntry с общим Документ.ИсточникUUID; витрины
         # суммировали обе. Дедуп по ИсточникUUID: считаем документ один раз (пакет
@@ -286,9 +341,10 @@ class GoodsDashboardService:
         Вычитаются из закупочной базы себестоимости (иначе возвращённый товар завышает
         закупленное количество и искажает удельную закупку). Возвраты часто 0."""
         if getattr(self, "_ret_cache", None) is None:
-            self._ret_cache = (await self.session.execute(select(DataEntry).where(
+            rows = (await self.session.execute(select(DataEntry).where(
                 DataEntry.company_id == self.company_id, DataEntry.layer == "clean",
                 DataEntry.doc_type_id == "return_purchase"))).scalars().all()
+            self._ret_cache = _prefer_edge_documents(rows)
         selected = self._select(self._ret_cache, date(2000, 1, 1), date(2100, 1, 1), None)
         out: list[dict] = []
         seen: set[str] = set()
@@ -316,7 +372,8 @@ class GoodsDashboardService:
         if getattr(self, "_release_cache", None) is None:
             self._release_cache = (await self.session.execute(select(DataEntry).where(
                 DataEntry.company_id == self.company_id, DataEntry.layer == "clean",
-                DataEntry.doc_type_id == "production_release"))).scalars().all()
+                DataEntry.doc_type_id == "production_release",
+                DataEntry.source == "oneC"))).scalars().all()
         selected = self._select(self._release_cache, df, dt, stations)
         agg: dict[str, list[float]] = defaultdict(lambda: [0.0, 0.0])   # ref → [сумма, кол-во]
         seen: set[str] = set()
@@ -1033,6 +1090,122 @@ class GoodsDashboardService:
         }
 
     # ── Поставщики ──
+    async def supplier_card(self, name: str, date_from: date, date_to: date,
+                            stations: list[str] | None = None) -> dict:
+        """Карточка одного поставщика: история поставок, что возит, как менялись цены.
+
+        Отношения с поставщиком — половина работы товароведа, а до сих пор про него
+        была строка в отчёте: сумма, документы, число SKU. На вопросы «почём в прошлый
+        раз», «когда привозил», «что вообще у него берём» отвечать было нечем — данные
+        в 1С есть, просто никто их не разворачивал.
+
+        Период ограничивает документы, а НЕ историю цен: сравнение «стало дороже»
+        имеет смысл только с прошлой поставкой, даже если она была до начала периода.
+        """
+        metas = await self._load_purchases(date(2000, 1, 1), date(2100, 1, 1), stations)
+        cparty = await self._refs("counterparty")
+        nom_names = {ref: n.name for ref, n in (await self._names()).items()}
+        returns = await self._load_returns()
+
+        свои = []
+        for m in metas:
+            d = m.get("Документ") or {}
+            имя = cparty.get(d.get("Контрагент")) or (d.get("Контрагент") or "—")
+            if имя != name:
+                continue
+            свои.append((str(d.get("Дата") or "")[:10], d, m))
+        свои.sort(key=lambda x: x[0], reverse=True)
+
+        docs, позиции = [], {}
+        оборот = 0.0
+        for дата, d, m in свои:
+            lines = d.get("Товары") or []
+            net = sum(self._purch_net(d, l) for l in lines)
+            в_периоде = date_from.isoformat() <= дата <= date_to.isoformat()
+            if в_периоде:
+                docs.append({
+                    "date": дата, "number": d.get("Номер"),
+                    "incoming": d.get("ВходящийНомер") or None,
+                    "station": (m.get("Смена") or {}).get("Станция")
+                               or m.get("Станция") or None,
+                    "positions": len(lines),
+                    "amount": round(sum(float(l.get("Сумма") or 0) for l in lines), 2),
+                    "amount_net": round(net, 2),
+                    "lines": [{"ref": l.get("Номенклатура"),
+                               "name": nom_names.get(l.get("Номенклатура") or ""),
+                               "qty": float(l.get("Количество") or 0),
+                               "price": round(float(l.get("Цена") or 0), 2),
+                               "amount_net": round(self._purch_net(d, l), 2)} for l in lines],
+                })
+                оборот += net
+            # Позиции и цены собираем по ВСЕЙ истории: «в прошлый раз было столько»
+            # не должно зависеть от того, какой период выбран на экране.
+            for l in lines:
+                ref = l.get("Номенклатура")
+                if not ref:
+                    continue
+                qty = float(l.get("Количество") or 0)
+                цена = round(float(l.get("Цена") or 0), 2)
+                it = позиции.setdefault(ref, {
+                    "ref": ref, "name": nom_names.get(ref) or ref, "qty": 0.0,
+                    "amount_net": 0.0, "docs": 0, "last_price": None,
+                    "prev_price": None, "last_date": None,
+                })
+                if в_периоде:
+                    it["qty"] += qty
+                    it["amount_net"] += self._purch_net(d, l)
+                    it["docs"] += 1
+                if цена > 0:
+                    if it["last_price"] is None:
+                        it["last_price"], it["last_date"] = цена, дата
+                    elif it["prev_price"] is None and цена != it["last_price"]:
+                        it["prev_price"] = цена
+
+        items = [i for i in позиции.values() if i["docs"] > 0]
+        for i in items:
+            i["amount_net"] = round(i["amount_net"], 2)
+            if i["last_price"] and i["prev_price"]:
+                i["price_delta_pct"] = round(
+                    (i["last_price"] - i["prev_price"]) / i["prev_price"] * 100, 1)
+            else:
+                i["price_delta_pct"] = None
+        items.sort(key=lambda x: -x["amount_net"])
+
+        # Возвраты этому поставщику: разговор о качестве начинается с них.
+        возвраты = []
+        for m in returns:
+            d = m.get("Документ") or {}
+            если_имя = cparty.get(d.get("Контрагент")) or (d.get("Контрагент") or "—")
+            if если_имя != name:
+                continue
+            возвраты.append({
+                "date": str(d.get("Дата") or "")[:10], "number": d.get("Номер"),
+                "positions": len(d.get("Товары") or []),
+                "amount": round(sum(float(l.get("Сумма") or 0)
+                                    for l in (d.get("Товары") or [])), 2),
+            })
+        возвраты.sort(key=lambda x: x["date"], reverse=True)
+
+        даты = [дата for дата, _, _ in свои]
+        интервал = None
+        if len(даты) > 1:
+            первая, последняя = date.fromisoformat(даты[-1]), date.fromisoformat(даты[0])
+            интервал = round((последняя - первая).days / (len(даты) - 1), 1)
+        return {
+            "name": name,
+            "period": {"from": date_from.isoformat(), "to": date_to.isoformat()},
+            "totals": {
+                "docs": len(docs), "amount_net": round(оборот, 2),
+                "positions": len(items),
+                "docs_all_time": len(свои),
+                "first": даты[-1] if даты else None,
+                "last": даты[0] if даты else None,
+                "avg_days": интервал,
+                "returns": len(возвраты),
+            },
+            "docs": docs, "items": items, "returns": возвраты,
+        }
+
     async def suppliers(self, date_from: date, date_to: date, stations: list[str] | None = None) -> dict:
         metas = await self._load_purchases(date_from, date_to, stations)
         cparty = await self._refs("counterparty")
@@ -1260,7 +1433,134 @@ class GoodsDashboardService:
             "items": items,
         }
 
-    # ── Остатки: достоверный остаток из регистров ЦБ (StockOnHand) ──
+    async def _edge_stock_onhand(self, *, warehouse: str | None, q: str,
+                                 marked: str, only_negative: bool) -> dict | None:
+        """Последний полный остаток собственного журнала агента.
+
+        Возвращает None только пока компания не прислала новый edge_ledger-снимок;
+        это оставляет безопасный переходный fallback на прежний срез ЦБ.
+        """
+        rows = (await self.session.execute(select(StoreStockBalance).where(
+            StoreStockBalance.company_id == self.company_id,
+            StoreStockBalance.source == "edge_ledger",
+        ))).scalars().all()
+        if not rows:
+            return None
+
+        nom = await self._names()
+        wh_agg: dict[str, dict] = defaultdict(
+            lambda: {"station_id": 0, "place_code": "", "name": "", "sku": 0,
+                     "positive": 0, "retail_value": 0.0})
+        for row in rows:
+            key = f"{row.station_id}:{row.place}"
+            item = wh_agg[key]
+            item["station_id"] = row.station_id
+            item["place_code"] = row.place
+            item["name"] = row.place_name or f"место {row.place}"
+            item["sku"] += 1
+            qty = float(row.quantity or 0)
+            price = float(row.retail_price) if row.retail_price is not None else 0
+            if qty > 0:
+                item["positive"] += 1
+            item["retail_value"] += qty * price
+        warehouses = [{"code": key, **value,
+                       "retail_value": round(value["retail_value"], 2)}
+                      for key, value in wh_agg.items()]
+        warehouses.sort(key=lambda item: (-item["sku"], item["code"]))
+
+        selected = warehouse
+        if selected and selected not in wh_agg:
+            matches = [key for key, value in wh_agg.items()
+                       if value["place_code"] == selected]
+            selected = matches[0] if len(matches) == 1 else None
+        selected = selected or (warehouses[0]["code"] if warehouses else None)
+        ql = (q or "").lower().strip()
+
+        items = []
+        for row in rows:
+            if selected != f"{row.station_id}:{row.place}":
+                continue
+            card = nom.get(row.item_uuid)
+            is_marked = bool(card and card.marked)
+            if marked == "marked" and not is_marked:
+                continue
+            if marked == "plain" and is_marked:
+                continue
+            name = row.name or (card.name if card else row.item_uuid[:8])
+            if ql and ql not in name.lower() and ql not in row.barcode.lower():
+                continue
+            qty = float(row.quantity or 0)
+            if only_negative and qty >= 0:
+                continue
+            price = float(row.retail_price) if row.retail_price is not None else None
+            value = round(qty * price, 2) if price is not None else None
+            cost_unit = float(row.cost_unit) if row.cost_unit is not None else None
+            coverage = float(row.cost_known_pct or 0)
+            cost_doubt = (f"себестоимость известна для {coverage:.0f}% остатка"
+                          if cost_unit is not None and coverage < 99.5 else None)
+            cost_amount = (round(qty * cost_unit, 2)
+                           if cost_unit is not None and coverage >= 99.5 else None)
+            margin = (round(value - cost_amount, 2)
+                      if value is not None and cost_amount is not None else None)
+            margin_pct = (round(100 * margin / value, 1)
+                          if margin is not None and value else None)
+            items.append({
+                "guid": row.item_uuid,
+                "name": name,
+                "article": card.article if card else None,
+                "vat": card.vat if card else None,
+                "marked": is_marked,
+                "weighed": bool(card and card.weighed),
+                "barcode": row.barcode,
+                "qty": round(qty, 3),
+                "negative": qty < 0,
+                "retail_price": round(price, 2) if price is not None else None,
+                "retail_value": value,
+                "cost_unit": round(cost_unit, 4) if cost_unit is not None else None,
+                "cost_amount": cost_amount,
+                "margin": margin,
+                "margin_pct": margin_pct,
+                "unit": card.unit if card else None,
+                "cost_doubt": cost_doubt,
+                "buy_unit": None,
+            })
+        items.sort(key=lambda item: (item["retail_value"] is None,
+                                     -(item["retail_value"] or 0)))
+        positive = [item for item in items if item["qty"] > 0]
+        negative = [item for item in items if item["qty"] < 0]
+        costed = [item for item in positive if item["cost_amount"] is not None]
+        doubt = [item for item in positive if item["cost_doubt"]]
+        cost_value = sum(item["cost_amount"] or 0 for item in costed)
+        retail_costed = sum(item["retail_value"] or 0 for item in costed)
+        snapshot_at = max((row.snapshot_at for row in rows), default=None)
+        return {
+            "source": "edge_agent",
+            "warehouse": selected,
+            "warehouses": warehouses,
+            "items": items,
+            "snapshot_at": snapshot_at.isoformat() if snapshot_at else None,
+            "summary": {
+                "sku_count": len(items),
+                "positive": len(positive),
+                "negative": len(negative),
+                "retail_value_positive": round(sum(
+                    (item["retail_value"] or 0) for item in positive), 2),
+                "retail_value_all": round(sum(
+                    (item["retail_value"] or 0) for item in items), 2),
+                "cost_value": round(cost_value, 2),
+                "costed_count": len(costed),
+                "retail_costed": round(retail_costed, 2),
+                "doubt_count": len(doubt),
+                "no_cost_count": len(positive) - len(costed) - len(doubt),
+                "margin_value": round(retail_costed - cost_value, 2),
+                "margin_pct": (round(100 * (retail_costed - cost_value) / retail_costed, 1)
+                               if retail_costed else None),
+                "marked_count": sum(1 for item in items if item["marked"]),
+                "units_positive": round(sum(item["qty"] for item in positive), 3),
+            },
+        }
+
+    # ── Остатки: основной источник — собственный журнал агента ──
     async def stock_onhand(self, *, warehouse: str | None = None, q: str = "",
                            marked: str = "all", only_negative: bool = False) -> dict:
         """Достоверный остаток товара (снимок регистров ЦБ), не оценка stock_est.
@@ -1268,6 +1568,11 @@ class GoodsDashboardService:
         warehouse — код склада (по умолчанию склад с наибольшим числом SKU, обычно 208
         Торговый зал). Возвращает позиции выбранного склада + список складов для селектора.
         """
+        edge = await self._edge_stock_onhand(
+            warehouse=warehouse, q=q, marked=marked, only_negative=only_negative)
+        if edge is not None:
+            return edge
+
         rows = (await self.session.execute(select(StockOnHand).where(
             StockOnHand.company_id == self.company_id))).scalars().all()
         nom = await self._names()
@@ -1360,6 +1665,7 @@ class GoodsDashboardService:
         cost_value = sum(i["cost_amount"] for i in costed)
         retail_costed = sum((i["retail_value"] or 0) for i in costed)
         return {
+            "source": "legacy_cb_snapshot",
             "warehouse": wh,
             "warehouses": warehouses,
             "items": items,

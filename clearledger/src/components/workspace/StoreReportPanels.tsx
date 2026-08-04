@@ -13,6 +13,7 @@ import {
 } from '@/services/storeService'
 import { fmtMoney } from '@/services/analyticsService'
 import { useResetOnScopeChange } from '@/hooks/useScopeReset'
+import { SupplierCardModal } from './SupplierCardModal'
 import { NomenclatureCardModal } from './NomenclatureCardModal'
 import { DocsModal } from './DocsModal'
 import { rowDrill } from './rowDrill'
@@ -106,31 +107,23 @@ export function StoreReceiptsPanel(p: PanelProps) {
 
 export function StoreSuppliersPanel(p: PanelProps) {
   const q = useReport<StoreSuppliersData>('suppliers', p)
-  // Накладные поставщика — из того же реестра приёмки: своей ручки у контрагента нет,
-  // и заводить её ради расшифровки незачем.
-  const rq = useReport<StoreReceiptsData>('receipts-report', p)
   const [open, setOpen] = useState<string | null>(null)
   const [sku, setSku] = useState<string | null>(null)
   return wrap(q, () => {
     const d = q.data!
-    const docs = (rq.data?.docs ?? []).filter((r) => r.supplier === open)
     return (
       <Shell title="Поставщики"
-        sub={`${d.period.from} – ${d.period.to} · ${d.summary.count} поставщиков · закупки нетто ${fmtMoney(d.summary.amount_net)} · клик по строке — его накладные`}>
+        sub={`${d.period.from} – ${d.period.to} · ${d.summary.count} поставщиков · закупки нетто ${fmtMoney(d.summary.amount_net)} · клик по строке — карточка поставщика`}>
         <Table
           head={[{ label: 'Поставщик' }, { label: 'Закупки (нетто)', num: true }, { label: 'Документов', num: true }, { label: 'SKU', num: true }]}
           rows={d.suppliers.map((r) => [r.name, fmtMoney(r.amount_net), nf(r.docs), nf(r.sku_count)])}
           onRowClick={(i) => setOpen(d.suppliers[i].name)}
-          rowLabel={(i) => `накладные поставщика ${d.suppliers[i].name}`}
+          rowLabel={(i) => `карточка поставщика ${d.suppliers[i].name}`}
         />
         {open && (
-          <DocsModal
-            title={open}
-            subtitle={`${docs.length} накладных за период · нетто ${fmtMoney(docs.reduce((a, r) => a + r.amount_net, 0))}`}
-            docs={docs.map((r) => ({
-              number: r.number, lines: r.lines ?? [],
-              meta: `${r.date} · ${nf(r.positions)} поз. · нетто ${fmtMoney(r.amount_net)}`,
-            }))}
+          <SupplierCardModal
+            name={open} companyId={p.companyId}
+            dateFrom={p.dateFrom} dateTo={p.dateTo} stations={p.stations}
             onOpenSku={setSku} onClose={() => setOpen(null)}
           />
         )}

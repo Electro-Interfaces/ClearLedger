@@ -3007,6 +3007,26 @@ async def store_sales(
     )
 
 
+@router.get("/suppliers/card")
+async def supplier_card(
+    name: str = Query(..., description="наименование контрагента"),
+    date_from: str = Query(...),
+    date_to: str = Query(...),
+    stations: str | None = Query(None),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Карточка поставщика: поставки, что возит, как менялись цены, возвраты.
+
+    Имя, а не идентификатор: документы 1С ссылаются на контрагента ссылкой, но
+    на экране и в отчётах он живёт наименованием, и переход из списка должен
+    работать без второго справочника.
+    """
+    return await GoodsDashboardService(db, await scope_company_id(user, db)).supplier_card(
+        name, date.fromisoformat(date_from), date.fromisoformat(date_to), _stations(stations),
+    )
+
+
 @router.get("/catalog/health")
 async def catalog_health(
     user: User = Depends(get_current_user),

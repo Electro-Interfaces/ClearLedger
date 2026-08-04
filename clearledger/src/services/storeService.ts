@@ -1755,6 +1755,40 @@ export interface CatalogHealth {
 
 export const getCatalogHealth = () => get<CatalogHealth>('/api/store/catalog/health')
 
+/* ── Карточка поставщика: история работы с ним ────────────────────────────
+ *
+ * Период ограничивает документы, но НЕ историю цен: «в прошлый раз было
+ * столько» сравнивается с прошлой поставкой, даже если она была до начала
+ * выбранного периода.
+ */
+export interface SupplierCard {
+  name: string
+  period: { from: string; to: string }
+  totals: {
+    docs: number; amount_net: number; positions: number
+    docs_all_time: number; first: string | null; last: string | null
+    avg_days: number | null; returns: number
+  }
+  docs: {
+    date: string; number: string | null; incoming: string | null
+    station: string | null; positions: number; amount: number; amount_net: number
+    lines: { ref: string; name: string | null; qty: number; price: number; amount_net: number }[]
+  }[]
+  items: {
+    ref: string; name: string; qty: number; amount_net: number; docs: number
+    last_price: number | null; prev_price: number | null; last_date: string | null
+    price_delta_pct: number | null
+  }[]
+  returns: { date: string; number: string | null; positions: number; amount: number }[]
+}
+
+export const getSupplierCard = (
+  name: string, dateFrom: string, dateTo: string, stations?: string[],
+) => get<SupplierCard>('/api/store/suppliers/card', {
+  name, date_from: dateFrom, date_to: dateTo,
+  stations: stations?.length ? stations.join(',') : undefined,
+})
+
 export interface ItemGroup {
   id: number; parent_id: number | null; name: string; path: string; sort: number
   marked_default: boolean | null; adult_default: boolean | null
