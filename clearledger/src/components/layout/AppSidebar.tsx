@@ -246,12 +246,21 @@ function SidebarNavBody({ collapsed = false, onNavigate }: {
       .filter((s) => product.modes.includes(s.mode))
       .filter((s) => !s.restricted && (!productHasModule(product.code, s.mode, company.profileId)
         || productModuleAllowed(product.code, s.mode, canModule, company.profileId)))
-    const urlMode = new URLSearchParams(search).get('mode')
-    const activeMode = modes.some((s) => s.mode === urlMode) ? urlMode : modes[0]?.mode
-    // Хвостовой слэш тоже рабочая область продукта: nginx нормализует адрес до
-    // «/shop/», и точное сравнение гасило подсветку выбранного раздела — меню
-    // выглядело так, будто не выбрано ничего.
-    const onProductRoute = pathname.replace(/\/$/, '') === product.route
+    const params = new URLSearchParams(search)
+    const urlMode = params.get('mode')
+    const urlSub = params.get('sub')
+    // Активный раздел ищем прежде всего по ОТКРЫТОМУ ПУНКТУ: во второй колонке
+    // виден он, и подсветка обязана сойтись именно с ним. Дальше — режим из
+    // адреса, и лишь в конце первый раздел (его же покажет рабочая область,
+    // когда в адресе нет ничего).
+    const bySub = urlSub ? modes.find((s) => s.items.some((i) => i.key === urlSub)) : undefined
+    const activeMode = bySub?.mode
+      ?? (modes.some((s) => s.mode === urlMode) ? urlMode : modes[0]?.mode)
+    // Разделы подсвечиваем везде, кроме страниц продукта («Объекты», «Документы»):
+    // там открыт не раздел, а страница, и она подсветит себя сама. Сравнивать
+    // путь с маршрутом точно нельзя — адрес приходит и с хвостовым слэшем.
+    const onProductRoute = !SPACE_PAGES.some(
+      (p) => pathname === `${product.route}${p}` || pathname.startsWith(`${product.route}${p}/`))
     // Страницы («Документы», «Коннекторы») — тоже право: код = сегмент ИСХОДНОГО пути.
     const allowedPage = (code: string) => productModuleAllowed(product.code, code, canModule, company.profileId)
     // Страницы продукта делятся надвое: своё рабочее (Организация) идёт сразу под
