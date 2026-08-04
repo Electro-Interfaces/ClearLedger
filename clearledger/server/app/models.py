@@ -4719,6 +4719,10 @@ class ChatPoll(Base):
     options: Mapped[list] = mapped_column(JSONB, nullable=False)
     multiple: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     anonymous: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Участник может дописать свой вариант: спрашивающий редко знает все ответы
+    # заранее, а «Другое ___» без текста не отвечает ни на что.
+    allow_custom: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false"))
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

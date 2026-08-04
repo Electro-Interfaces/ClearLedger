@@ -1442,6 +1442,8 @@ class PollCreateBody(BaseModel):
     options: list[str] = Field(min_length=2, max_length=10)
     multiple: bool = False
     anonymous: bool = False
+    # Участник может дописать свой вариант — опрос со свободным ответом.
+    allowCustom: bool = False
 
 
 class PollVoteBody(BaseModel):
@@ -1479,6 +1481,7 @@ async def _poll_out(poll: ChatPoll, me: uuid.UUID, db: AsyncSession) -> dict:
         "voters": None if poll.anonymous else voters,
         "multiple": poll.multiple,
         "anonymous": poll.anonymous,
+        "allowCustom": poll.allow_custom,
         "myVotes": sorted(mine),
         "totalVoters": len(people),
         "isClosed": poll.closed_at is not None,
@@ -1521,7 +1524,8 @@ async def create_poll(
     db.add(msg)
     await db.flush()
     poll = ChatPoll(room_id=rid, message_id=msg.id, question=question, options=options,
-                    multiple=body.multiple, anonymous=body.anonymous, created_by=current_user.id)
+                    multiple=body.multiple, anonymous=body.anonymous,
+                    allow_custom=body.allowCustom, created_by=current_user.id)
     db.add(poll)
     room.updated_at = _now()
     await db.flush()
@@ -1575,6 +1579,73 @@ async def vote_poll(
     data = await _poll_out(poll, current_user.id, db)
     await db.commit()
     # Результат меняется у всех, кто смотрит на опрос, — рассылаем как реакцию.
+    await manager.broadcast(f"chat:{poll.room_id}",
+                            {"type": "chat:poll", "roomId": str(poll.room_id),
+                             "messageId": str(poll.message_id)})
+    return data
+
+
+class PollOptionBody(BaseModel):
+    text: str = Field(min_length=1, max_length=150)
+
+
+@router.post("/polls/{poll_id}/options")
+async def add_poll_option(
+    poll_id: str, body: PollOptionBody,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Дописать свой вариант и сразу отдать за него голос.
+
+    Спрашивающий редко знает все ответы заранее, поэтому опрос может быть
+    открытым. Вариант дописывается в список АТОМАРНО, прямо в базе
+    (`options || to_jsonb(...)`): двое, ответивших одновременно, иначе затёрли бы
+    ответ друг друга — прочитали бы один и тот же список и записали каждый свой.
+
+    Совпадение с существующим вариантом (без учёта регистра и пробелов) не
+    плодит дубль: голос уходит за то, что уже есть.
+    """
+    try:
+        pid = uuid.UUID(poll_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID")
+    poll = await db.get(ChatPoll, pid)
+    if poll is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Опрос не найден")
+    await _assert_participant(poll.room_id, current_user, db)
+    if poll.closed_at is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Опрос завершён")
+    if not poll.allow_custom:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "В этом опросе свои варианты не принимаются")
+
+    text_value = " ".join(body.text.split())[:150]
+    if not text_value:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Пустой вариант")
+
+    existing = [str(o).strip().lower() for o in poll.options]
+    if text_value.lower() in existing:
+        index = existing.index(text_value.lower())
+    else:
+        if len(poll.options) >= 20:
+            raise HTTPException(status.HTTP_409_CONFLICT, "Слишком много вариантов")
+        row = (await db.execute(text(
+            "UPDATE chat_polls SET options = options || to_jsonb(CAST(:t AS text)) "
+            "WHERE id = :id RETURNING jsonb_array_length(options) - 1 AS idx"
+        ), {"t": text_value, "id": str(pid)})).first()
+        index = int(row[0])
+        await db.refresh(poll)
+
+    if not poll.multiple:
+        await db.execute(sa_delete(ChatPollVote).where(
+            ChatPollVote.poll_id == pid, ChatPollVote.user_id == current_user.id))
+    already = (await db.execute(select(ChatPollVote.id).where(
+        ChatPollVote.poll_id == pid, ChatPollVote.user_id == current_user.id,
+        ChatPollVote.option_index == index))).scalar_one_or_none()
+    if already is None:
+        db.add(ChatPollVote(poll_id=pid, user_id=current_user.id, option_index=index))
+    await db.flush()
+    data = await _poll_out(poll, current_user.id, db)
+    await db.commit()
     await manager.broadcast(f"chat:{poll.room_id}",
                             {"type": "chat:poll", "roomId": str(poll.room_id),
                              "messageId": str(poll.message_id)})

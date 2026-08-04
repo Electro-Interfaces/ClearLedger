@@ -758,6 +758,8 @@ async def create_all() -> None:
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url VARCHAR(300)",
             # Закреплённый чат — личная настройка каждого участника, не свойство комнаты.
             "ALTER TABLE chat_participants ADD COLUMN IF NOT EXISTS pinned_at TIMESTAMPTZ",
+            # Опрос со свободным ответом: участник дописывает свой вариант.
+            "ALTER TABLE chat_polls ADD COLUMN IF NOT EXISTS allow_custom BOOLEAN NOT NULL DEFAULT FALSE",
             "ALTER TABLE chat_rooms ADD COLUMN IF NOT EXISTS pinned_message_id UUID",
             # Сообщение, пришедшее письмом: источник, Message-ID (идемпотентность
             # повторной доставки) и ссылка на письмо в архиве Поддержки.
@@ -1394,6 +1396,15 @@ async def create_all() -> None:
         for stmt in (
             "ALTER TABLE edge_downlink ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMPTZ",
             "ALTER TABLE edge_downlink ADD COLUMN IF NOT EXISTS cancelled_by UUID",
+        ):
+            await conn.execute(_sa.text(stmt))
+
+        # «Пульс»: карточку можно не только принять на сегодня, но и отложить —
+        # «вернуться через три дня». Без срока «Принято» означало «я видел», и
+        # решение руководителя нигде не оставляло следа до самого провала.
+        for stmt in (
+            "ALTER TABLE pulse_acks ADD COLUMN IF NOT EXISTS snooze_until DATE",
+            "ALTER TABLE pulse_acks ADD COLUMN IF NOT EXISTS note TEXT",
         ):
             await conn.execute(_sa.text(stmt))
 

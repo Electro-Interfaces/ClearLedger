@@ -116,6 +116,8 @@ export interface ChatPoll {
   voters: string[][] | null
   multiple: boolean
   anonymous: boolean
+  /** Участник может дописать свой вариант. */
+  allowCustom: boolean
   myVotes: number[]
   totalVoters: number
   isClosed: boolean
@@ -123,8 +125,12 @@ export interface ChatPoll {
 }
 
 export const createPoll = (roomId: string, body: {
-  question: string; options: string[]; multiple: boolean; anonymous: boolean
+  question: string; options: string[]; multiple: boolean; anonymous: boolean; allowCustom: boolean
 }) => post<ChatMessage & { poll: ChatPoll }>(`/api/chat/rooms/${roomId}/polls`, body)
+
+/** Дописать свой вариант и сразу отдать за него голос (если опрос открытый). */
+export const addPollOption = (pollId: string, text: string) =>
+  post<ChatPoll>(`/api/chat/polls/${pollId}/options`, { text })
 
 /** Отдать голос; пустой список — снять свой выбор. */
 export const votePoll = (pollId: string, options: number[]) =>

@@ -264,6 +264,7 @@ function PollCard({ poll, isOwn, selfId }: {
 }) {
   const qc = useQueryClient()
   const [busy, setBusy] = useState(false)
+  const [custom, setCustom] = useState('')
   const voted = poll.myVotes.length > 0
   const total = poll.counts.reduce((a, b) => a + b, 0)
 
@@ -280,6 +281,21 @@ function PollCard({ poll, isOwn, selfId }: {
       refresh()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Не удалось проголосовать')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const addOwn = async () => {
+    const value = custom.trim()
+    if (!value || busy) return
+    setBusy(true)
+    try {
+      await chat.addPollOption(poll.id, value)
+      setCustom('')
+      refresh()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Не удалось добавить вариант')
     } finally {
       setBusy(false)
     }
@@ -343,6 +359,23 @@ function PollCard({ poll, isOwn, selfId }: {
         })}
       </div>
 
+      {/* Свой вариант: спрашивающий редко знает все ответы заранее. Ввод стоит
+          под списком и работает как «дописать и сразу проголосовать». */}
+      {poll.allowCustom && !poll.isClosed && (
+        <div className="mt-1 flex items-center gap-1">
+          <input value={custom} onChange={(e) => setCustom(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') addOwn() }}
+            placeholder="свой вариант"
+            className={cn('h-6 min-w-0 flex-1 rounded border px-1.5 text-[11px] outline-none',
+              isOwn ? 'border-white/25 bg-white/10 placeholder:text-primary-foreground/50'
+                    : 'border-border bg-background/60')} />
+          <button type="button" onClick={addOwn} disabled={busy || !custom.trim()}
+            className="shrink-0 rounded px-1.5 py-0.5 text-[11px] text-primary hover:underline disabled:opacity-50">
+            Добавить
+          </button>
+        </div>
+      )}
+
       <div className={cn('mt-1 flex items-center gap-2 text-[10px]',
         isOwn ? 'text-primary-foreground/70' : 'text-muted-foreground')}>
         <span>{poll.totalVoters ? `проголосовали: ${poll.totalVoters}` : 'голосов пока нет'}</span>
@@ -363,6 +396,7 @@ function CreatePollDialog({ roomId, onClose }: { roomId: string; onClose: () => 
   const [options, setOptions] = useState(['', ''])
   const [multiple, setMultiple] = useState(false)
   const [anonymous, setAnonymous] = useState(false)
+  const [allowCustom, setAllowCustom] = useState(false)
   const [busy, setBusy] = useState(false)
 
   const send = async () => {
@@ -371,7 +405,7 @@ function CreatePollDialog({ roomId, onClose }: { roomId: string; onClose: () => 
     if (opts.length < 2) { toast.error('Нужно хотя бы два варианта'); return }
     setBusy(true)
     try {
-      await chat.createPoll(roomId, { question: question.trim(), options: opts, multiple, anonymous })
+      await chat.createPoll(roomId, { question: question.trim(), options: opts, multiple, anonymous, allowCustom })
       qc.invalidateQueries({ queryKey: ['chat-messages', roomId] })
       qc.invalidateQueries({ queryKey: ['chat-rooms'] })
       onClose()
@@ -418,6 +452,10 @@ function CreatePollDialog({ roomId, onClose }: { roomId: string; onClose: () => 
           <label className="flex items-center gap-2 text-[11px] text-muted-foreground">
             <input type="checkbox" checked={anonymous} onChange={(e) => setAnonymous(e.target.checked)} />
             анонимно — без имён голосовавших
+          </label>
+          <label className="flex items-center gap-2 text-[11px] text-muted-foreground">
+            <input type="checkbox" checked={allowCustom} onChange={(e) => setAllowCustom(e.target.checked)} />
+            можно дописать свой вариант
           </label>
           <div className="flex justify-end gap-1.5 pt-1">
             <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={onClose}>Отмена</Button>
