@@ -204,75 +204,41 @@ export function AccountingPeriodPanel() {
         </span>
       </div>
 
-      {/* ── Реестр месяцев ── */}
-      <Card>
-        <CardContent className="pt-4">
-          <div className="mb-3 flex items-center gap-2">
-            <CalendarCheck className="h-4 w-4 text-primary" />
-            <h3 className={H3}>Месяцы</h3>
-          </div>
-          {periods.isLoading ? (
-            <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" /> Загружаем реестр периодов…
-            </div>
-          ) : items.length === 0 ? (
-            <p className="py-4 text-sm text-muted-foreground">
-              Периодов пока нет: они появляются вместе с документами из 1С.
-            </p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[560px] text-sm">
-                <thead>
-                  <tr className="border-b border-border/60 text-[11px] text-muted-foreground">
-                    <th className="py-1.5 pr-4 text-left font-medium">Месяц</th>
-                    <th className="py-1.5 pr-4 text-left font-medium">Состояние</th>
-                    <th className="py-1.5 pr-6 text-right font-medium">Документов 1С</th>
-                    <th className="py-1.5 text-left font-medium">Данные</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {items.map((p) => {
-                    const on = active?.year === p.year && active?.month === p.month
-                    const future = isFuture(p)
-                    return (
-                      <tr key={`${p.year}-${p.month}`}
-                        onClick={() => setSelected({ year: p.year, month: p.month })}
-                        className={cn('cursor-pointer border-b border-border/30 transition-colors hover:bg-accent/40',
-                          on && 'bg-primary/10')}>
-                        <td className={cn('py-1.5 pr-4 font-medium', future && 'text-muted-foreground')}>
-                          {MONTHS[p.month - 1]} {p.year}
-                          {/* Месяц из будущего — не период, а след ошибочной даты в
-                              документе. Молча показывать его в одном ряду с рабочими
-                              месяцами значит предлагать закрывать несуществующее. */}
-                          {future && (
-                            <span className="ml-2 text-[10px] font-normal text-amber-600 dark:text-amber-400">
-                              дата в будущем
-                            </span>
-                          )}
-                        </td>
-                        <td className="py-1.5 pr-4">
-                          <span className={cn('inline-flex items-center gap-1.5 text-xs',
-                            p.status === 'closed'
-                              ? 'text-muted-foreground'
-                              : 'text-amber-600 dark:text-amber-400')}>
-                            {p.status === 'closed'
-                              ? <><Lock className="h-3 w-3" />закрыт</>
-                              : <><Unlock className="h-3 w-3" />открыт</>}
-                          </span>
-                        </td>
-                        <td className="py-1.5 pr-6 text-right tabular-nums">{fmtN(p.docsCount)}</td>
-                        <td className="py-1.5 tabular-nums text-muted-foreground">
-                          {p.minDate ?? '—'} — {p.maxDate ?? '—'}
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      {/* ── Выбор месяца: полоса, а не таблица ──
+          Полный реестр из двух десятков строк занимал весь первый экран, и всё,
+          ради чего сюда приходят — готовность, полнота, пропуски, — оказывалось
+          под ним. Наверху остаётся выбор из последних месяцев, история закрытий
+          уезжает вниз под раскрывающийся заголовок. */}
+      {periods.isLoading ? (
+        <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" /> Загружаем реестр периодов…
+        </div>
+      ) : items.length === 0 ? (
+        <p className="py-4 text-sm text-muted-foreground">
+          Периодов пока нет: они появляются вместе с документами из 1С.
+        </p>
+      ) : (
+        <div className="flex flex-wrap gap-1.5">
+          {items.slice(0, 10).map((p) => {
+            const on = active?.year === p.year && active?.month === p.month
+            const future = isFuture(p)
+            return (
+              <button key={`${p.year}-${p.month}`}
+                onClick={() => setSelected({ year: p.year, month: p.month })}
+                className={cn('flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs transition-colors',
+                  on ? 'border-primary bg-primary/10 text-foreground'
+                     : 'border-border text-muted-foreground hover:bg-accent/40',
+                  future && !on && 'opacity-60')}>
+                {p.status === 'closed'
+                  ? <Lock className="h-3 w-3 shrink-0 opacity-70" />
+                  : <Unlock className="h-3 w-3 shrink-0 text-amber-500" />}
+                {MONTHS[p.month - 1]} {p.year}
+                {future && <span className="text-[10px] text-amber-600 dark:text-amber-400">в будущем</span>}
+              </button>
+            )
+          })}
+        </div>
+      )}
 
       {active && <PeriodReadinessCard data={readinessDocs.data} loading={readinessDocs.isLoading}
         month={`${MONTHS[active.month - 1]} ${active.year}`}
@@ -428,9 +394,74 @@ export function AccountingPeriodPanel() {
           </Card>
         </>
       )}
+
+      {/* ── История закрытий: тот же реестр, но вниз и свёрнутым ── */}
+      {items.length > 0 && (
+      <details className="group rounded-lg border border-border/60 bg-card/30">
+        <summary className="flex cursor-pointer items-center gap-2 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground transition-colors hover:text-foreground">
+          <CalendarCheck className="h-4 w-4 text-primary" />
+          История закрытий · {items.length} месяцев
+        </summary>
+        <div className="px-4 pb-4">
+          {(
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[560px] text-sm">
+                <thead>
+                  <tr className="border-b border-border/60 text-[11px] text-muted-foreground">
+                    <th className="py-1.5 pr-4 text-left font-medium">Месяц</th>
+                    <th className="py-1.5 pr-4 text-left font-medium">Состояние</th>
+                    <th className="py-1.5 pr-6 text-right font-medium">Документов 1С</th>
+                    <th className="py-1.5 text-left font-medium">Данные</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.map((p) => {
+                    const on = active?.year === p.year && active?.month === p.month
+                    const future = isFuture(p)
+                    return (
+                      <tr key={`${p.year}-${p.month}`}
+                        onClick={() => setSelected({ year: p.year, month: p.month })}
+                        className={cn('cursor-pointer border-b border-border/30 transition-colors hover:bg-accent/40',
+                          on && 'bg-primary/10')}>
+                        <td className={cn('py-1.5 pr-4 font-medium', future && 'text-muted-foreground')}>
+                          {MONTHS[p.month - 1]} {p.year}
+                          {/* Месяц из будущего — не период, а след ошибочной даты в
+                              документе. Молча показывать его в одном ряду с рабочими
+                              месяцами значит предлагать закрывать несуществующее. */}
+                          {future && (
+                            <span className="ml-2 text-[10px] font-normal text-amber-600 dark:text-amber-400">
+                              дата в будущем
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-1.5 pr-4">
+                          <span className={cn('inline-flex items-center gap-1.5 text-xs',
+                            p.status === 'closed'
+                              ? 'text-muted-foreground'
+                              : 'text-amber-600 dark:text-amber-400')}>
+                            {p.status === 'closed'
+                              ? <><Lock className="h-3 w-3" />закрыт</>
+                              : <><Unlock className="h-3 w-3" />открыт</>}
+                          </span>
+                        </td>
+                        <td className="py-1.5 pr-6 text-right tabular-nums">{fmtN(p.docsCount)}</td>
+                        <td className="py-1.5 tabular-nums text-muted-foreground">
+                          {p.minDate ?? '—'} — {p.maxDate ?? '—'}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </details>
+      )}
     </div>
   )
 }
+
 
 /**
  * Готовность периода к закрытию: четыре проверки, которые бухгалтер делает руками.
