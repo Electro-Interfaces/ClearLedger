@@ -75,7 +75,7 @@ const wrap = (q: { isLoading: boolean; error: unknown }, render: () => ReactNode
 }
 
 export function StoreReceiptsPanel(p: PanelProps) {
-  const q = useReport<StoreReceiptsData>('receipts', p)
+  const q = useReport<StoreReceiptsData>('receipts-report', p)
   const [open, setOpen] = useState<number | null>(null)
   const [sku, setSku] = useState<string | null>(null)
   return wrap(q, () => {
@@ -108,7 +108,7 @@ export function StoreSuppliersPanel(p: PanelProps) {
   const q = useReport<StoreSuppliersData>('suppliers', p)
   // Накладные поставщика — из того же реестра приёмки: своей ручки у контрагента нет,
   // и заводить её ради расшифровки незачем.
-  const rq = useReport<StoreReceiptsData>('receipts', p)
+  const rq = useReport<StoreReceiptsData>('receipts-report', p)
   const [open, setOpen] = useState<string | null>(null)
   const [sku, setSku] = useState<string | null>(null)
   return wrap(q, () => {

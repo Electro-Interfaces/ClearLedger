@@ -2766,6 +2766,25 @@ async def scan_receipt_barcode(
     return result
 
 
+@router.get("/receipts-report")
+async def store_receipts_report(
+    date_from: str = Query(...),
+    date_to: str = Query(...),
+    stations: str | None = Query(None),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Отчёт «Приёмка» за период: реестр накладных со составом.
+
+    Отдельный путь, а не `/receipts`: тот занят журналом документов приёмки, и
+    FastAPI отдавал отчёту его ответ — экран падал на отсутствующем периоде.
+    Один путь на два разных ресурса не работает, как бы ни хотелось.
+    """
+    svc = GoodsDashboardService(db, await scope_company_id(user, db))
+    return await svc.receipts(date.fromisoformat(date_from), date.fromisoformat(date_to),
+                              _stations(stations))
+
+
 @router.get("/receipts")
 async def list_receipts(
     station_id: int | None = Query(None),
