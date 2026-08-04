@@ -35,7 +35,6 @@ import { StoreAssortmentPanel } from './StoreAssortmentPanel'
 import { StoreAssortmentPolicyPanel } from './StoreAssortmentPolicyPanel'
 import { StoreMrcPanel } from './StoreMrcPanel'
 import { StoreShiftsPanel } from './StoreShiftsPanel'
-import { BpExportPanel } from './BpExportPanel'
 import { StoreDedupPanel } from './StoreDedupPanel'
 import { StoreStationsPanel } from './StoreStationsPanel'
 import { StoreStationConsolePanel } from './StoreStationConsolePanel'
@@ -276,13 +275,6 @@ export function StorePanel() {
       </div>
     )
   }
-  if (sub === 'export') {
-    return (
-      <div className="h-full overflow-y-auto">
-        <BpExportPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />
-      </div>
-    )
-  }
   if (sub === 'recipes') {
     return (
       <div className="h-full overflow-y-auto">
@@ -313,7 +305,7 @@ export function StorePanel() {
   if (sub === 'stations') {
     return (
       <div className="h-full overflow-y-auto">
-        <StoreStationsPanel />
+        <StoreStationsPanel dateFrom={period.from} dateTo={period.to} />
       </div>
     )
   }

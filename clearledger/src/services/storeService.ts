@@ -883,6 +883,46 @@ export interface StoreStationsData {
 
 export const getStoreStations = () => get<StoreStationsData>('/api/store/stations')
 
+/** Обмен станции с центром за период: сеансы, пакеты, объём, очередь вниз. */
+export interface StoreExchangeStation {
+  station_id: number
+  state: string
+  silence_seconds: number | null
+  version: string | null
+  queue_pending: number
+  queue_sent: number
+  last_shift: number | null
+  snapshot_at: string | null
+  packets: number
+  bytes: number
+  sessions: number
+  last_packet_at: string | null
+  down_waiting: number
+  down_unacked: number
+  down_acked: number
+}
+
+export interface StoreExchangeData {
+  from: string
+  to: string
+  session_gap_minutes: number
+  totals: {
+    packets: number; bytes: number; sessions: number; online: number; stations: number
+    queue_pending: number; down_waiting: number; down_unacked: number
+    last_packet_at: string | null
+  }
+  by_kind: { kind: string; label: string; packets: number; bytes: number; last_at: string }[]
+  by_day: { day: string; packets: number; bytes: number }[]
+  stations: StoreExchangeStation[]
+  recent: {
+    at: string; station_id: number; kind: string; label: string
+    size_bytes: number; direction: 'вверх' | 'вниз'; note: string | null
+  }[]
+}
+
+export const getStoreExchange = (dateFrom: string, dateTo: string) =>
+  get<StoreExchangeData>(`/api/store/exchange?date_from=${dateFrom}&date_to=${dateTo}`)
+
 export interface StoreAssortmentRule {
   item_uuid: string
   name: string

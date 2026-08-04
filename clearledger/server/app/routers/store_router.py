@@ -5,6 +5,8 @@
 динамика/станции по продажам из канала ЦБ ЭЛСИ.АЗК (DataEntry clean).
 Далее: ABC, маржа/GMROI (FIFO с поступлениями), остатки, инвентаризация.
 """
+import hashlib
+import json
 import math
 import uuid
 from datetime import date, datetime, timezone
@@ -19,8 +21,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import check_module_access, get_current_user
 from app.database import get_db
 from app.deps import capture_company_header, scope_company_id
-from app.models import EdgeAgent, EdgeDownlink, StoreReceipt, User
-from app.services import edge_nsi, edge_service
+from app.models import (
+    EdgeAgent, EdgeDownlink, StoreAssortmentRule, StoreItemAlias, StoreReceipt,
+    StoreRecipeVersion, StoreStockBalance,
+    User, UserCompany,
+)
+from app.services import edge_nsi, edge_projection, edge_service
+from app.services import recipe_versions
 from app.services.export_audit import log_export
 from app.services.edo_upd import parse_upd
 from app.services.goods_dashboard import GoodsDashboardService
@@ -73,7 +80,7 @@ async def store_stations(
         select(EdgeAgent).where(EdgeAgent.company_id == cid).order_by(EdgeAgent.station_id)
     )).scalars().all()
 
-    desired = os.environ.get("EDGE_DESIRED_AGENT_VERSION", "0.55.0")
+    desired = os.environ.get("EDGE_DESIRED_AGENT_VERSION", "0.58.10")
     now = datetime.now(timezone.utc)
     stations = []
     for r in rows:
@@ -113,6 +120,177 @@ async def store_stations(
     }
 
 
+# Пакеты приходят пачкой: агент, дождавшись канала, отдаёт всё накопленное
+# подряд. Пауза свыше четверти часа — это уже следующий выход на связь, а не
+# та же передача. Отдельной истории heartbeat в базе нет, и заводить её ради
+# счётчика незачем: сеанс виден по самим пакетам.
+EXCHANGE_SESSION_GAP_MIN = 15
+
+PACKET_KIND_LABEL = {
+    "shift": "Смена",
+    "stock": "Снимок остатков",
+    "receipt": "Приёмка",
+    "inventory": "Инвентаризация",
+    "writeoff": "Списание",
+    "transfer": "Перемещение",
+    "production": "Производство",
+    "return_sale": "Возврат покупателя",
+    "station-nsi": "Черновики НСИ",
+    "station-recipes": "Рецептуры станции",
+    "nsi_delta": "Карточка НСИ",
+    "price_update": "Цена",
+    "goods_receipt_expected": "Заготовка приёмки",
+    "cash_policy": "Политика кассы",
+    "command": "Команда",
+}
+
+
+@router.get("/exchange")
+async def store_exchange(
+    date_from: str = Query(..., description="начало периода, ISO"),
+    date_to: str = Query(..., description="конец периода, ISO (включительно)"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Обмен станций с центром: сеансы, пакеты, объёмы, очередь вниз.
+
+    Экран парка отвечает на один вопрос — доехало ли то, что станция насчитала,
+    и дошло ли вниз то, что центр решил. Онлайн-индикатор его не заменяет:
+    канал может быть живым, а пакеты не уходить, и наоборот — станция может
+    сутки быть офлайн и отдать всё разом одним сеансом.
+    """
+    cid: uuid.UUID = await scope_company_id(user, db)
+    d1, d2 = date.fromisoformat(date_from), date.fromisoformat(date_to)
+    p = {"cid": str(cid), "d1": d1, "d2": d2, "gap": EXCHANGE_SESSION_GAP_MIN}
+    period = ("received_at >= :d1 AND received_at < (:d2::date + 1)")
+
+    by_kind = [dict(r) for r in (await db.execute(text(f"""
+        SELECT kind, count(*) AS packets, coalesce(sum(size_bytes), 0) AS bytes,
+               max(received_at) AS last_at
+        FROM edge_packets WHERE company_id = :cid AND {period}
+        GROUP BY kind ORDER BY count(*) DESC
+    """), p)).mappings().all()]
+    for k in by_kind:
+        k["label"] = PACKET_KIND_LABEL.get(k["kind"], k["kind"])
+
+    by_day = [dict(r) for r in (await db.execute(text(f"""
+        SELECT received_at::date AS day, count(*) AS packets,
+               coalesce(sum(size_bytes), 0) AS bytes
+        FROM edge_packets WHERE company_id = :cid AND {period}
+        GROUP BY 1 ORDER BY 1
+    """), p)).mappings().all()]
+
+    # Сеанс = серия пакетов без паузы больше EXCHANGE_SESSION_GAP_MIN. Разрыв
+    # ищется оконной функцией по станции: считать это в Python значило бы
+    # тащить сюда все пакеты периода ради одного числа.
+    by_station = {r["station_id"]: dict(r) for r in (await db.execute(text(f"""
+        SELECT station_id, count(*) AS packets, coalesce(sum(size_bytes), 0) AS bytes,
+               max(received_at) AS last_at,
+               count(*) FILTER (
+                   WHERE prev IS NULL
+                      OR received_at - prev > make_interval(mins => :gap)) AS sessions
+        FROM (
+            SELECT station_id, received_at, size_bytes,
+                   lag(received_at) OVER (
+                       PARTITION BY station_id ORDER BY received_at) AS prev
+            FROM edge_packets WHERE company_id = :cid AND {period}
+        ) t GROUP BY station_id
+    """), p)).mappings().all()}
+
+    down = {r["station_id"]: dict(r) for r in (await db.execute(text("""
+        SELECT station_id,
+               count(*) FILTER (WHERE delivered_at IS NULL) AS waiting,
+               count(*) FILTER (WHERE delivered_at IS NOT NULL AND acked_at IS NULL) AS unacked,
+               count(*) FILTER (WHERE acked_at IS NOT NULL) AS acked
+        FROM edge_downlink WHERE company_id = :cid GROUP BY station_id
+    """), {"cid": str(cid)})).mappings().all()}
+
+    # Лента последних обменов в обе стороны: она объясняет цифры выше — видно,
+    # чем именно занят канал и когда станция выходила на связь последний раз.
+    recent = [dict(r) for r in (await db.execute(text("""
+        SELECT received_at AS at, station_id, kind, size_bytes, 'вверх' AS direction,
+               shift_number AS note
+        FROM edge_packets WHERE company_id = :cid
+        UNION ALL
+        SELECT coalesce(acked_at, delivered_at, created_at) AS at, station_id, kind,
+               0 AS size_bytes, 'вниз' AS direction,
+               CASE WHEN acked_at IS NOT NULL THEN 'применено'
+                    WHEN delivered_at IS NOT NULL THEN 'доставлено'
+                    ELSE 'ждёт станции' END AS note
+        FROM edge_downlink WHERE company_id = :cid
+        ORDER BY at DESC LIMIT 30
+    """), {"cid": str(cid)})).mappings().all()]
+    for r in recent:
+        r["label"] = PACKET_KIND_LABEL.get(r["kind"], r["kind"])
+
+    agents = (await db.execute(
+        select(EdgeAgent).where(EdgeAgent.company_id == cid).order_by(EdgeAgent.station_id)
+    )).scalars().all()
+    now = datetime.now(timezone.utc)
+    stations = []
+    for a in agents:
+        silence = int((now - a.last_seen).total_seconds()) if a.last_seen else None
+        ex = by_station.get(a.station_id, {})
+        d = down.get(a.station_id, {})
+        stations.append({
+            "station_id": a.station_id,
+            "state": ("молчит" if silence is None or silence > STATION_STALE_AFTER
+                      else "офлайн" if silence > STATION_OFFLINE_AFTER else "онлайн"),
+            "silence_seconds": silence,
+            "version": a.version,
+            "queue_pending": a.queue_pending,
+            "queue_sent": a.queue_sent,
+            "last_shift": a.last_shift,
+            "snapshot_at": (a.payload or {}).get("snapshot_at"),
+            "packets": int(ex.get("packets") or 0),
+            "bytes": int(ex.get("bytes") or 0),
+            "sessions": int(ex.get("sessions") or 0),
+            "last_packet_at": ex.get("last_at"),
+            "down_waiting": int(d.get("waiting") or 0),
+            "down_unacked": int(d.get("unacked") or 0),
+            "down_acked": int(d.get("acked") or 0),
+        })
+
+    # Станции, чьи пакеты в базе есть, а телеметрии нет: так выглядит АЗС, с
+    # которой обмен шёл до появления таблицы агентов, или разовая заливка. Без
+    # этих строк сумма по таблице не сходилась бы с итогом сверху.
+    for sid in sorted(set(by_station) - {s["station_id"] for s in stations}):
+        ex, d = by_station[sid], down.get(sid, {})
+        stations.append({
+            "station_id": sid, "state": "нет агента", "silence_seconds": None,
+            "version": None, "queue_pending": 0, "queue_sent": 0, "last_shift": None,
+            "snapshot_at": None,
+            "packets": int(ex.get("packets") or 0), "bytes": int(ex.get("bytes") or 0),
+            "sessions": int(ex.get("sessions") or 0), "last_packet_at": ex.get("last_at"),
+            "down_waiting": int(d.get("waiting") or 0),
+            "down_unacked": int(d.get("unacked") or 0),
+            "down_acked": int(d.get("acked") or 0),
+        })
+
+    return {
+        "from": d1, "to": d2,
+        "session_gap_minutes": EXCHANGE_SESSION_GAP_MIN,
+        "totals": {
+            "packets": sum(k["packets"] for k in by_kind),
+            "bytes": sum(int(k["bytes"]) for k in by_kind),
+            "sessions": sum(s["sessions"] for s in stations),
+            "online": sum(1 for s in stations if s["state"] == "онлайн"),
+            # Знаменатель «на связи X из Y» — только станции с агентом: строки
+            # без телеметрии не станции парка, а следы старого обмена.
+            "stations": len(agents),
+            "queue_pending": sum(s["queue_pending"] for s in stations),
+            "down_waiting": sum(s["down_waiting"] for s in stations),
+            "down_unacked": sum(s["down_unacked"] for s in stations),
+            "last_packet_at": max((s["last_packet_at"] for s in stations
+                                   if s["last_packet_at"]), default=None),
+        },
+        "by_kind": by_kind,
+        "by_day": by_day,
+        "stations": stations,
+        "recent": recent,
+    }
+
+
 # -- Мастер-НСИ ------------------------------------------------------------
 # Карточки, штрихкоды и цены Ledger — не зеркало 1С, а собственный справочник.
 # Он наполняется потоком снимков со станции (справочника ШК в 1С не существует)
@@ -126,6 +304,7 @@ class NsiItemIn(BaseModel):
     kind: str | None = None
     sku_class: str | None = None
     is_dish: bool | None = None
+    price_owner: str | None = None
     deleted: bool | None = None
 
 
@@ -151,7 +330,8 @@ async def _queue_nsi_delta(db: AsyncSession, cid, item_id: int, station_id: int 
     идемпотентен — применить его дважды безопасно.
     """
     card = (await db.execute(text("""
-        SELECT i.external_uuid, i.name, i.unit, i.vat_rate, i.deleted
+        SELECT i.external_uuid, i.name, i.unit, i.vat_rate, i.deleted,
+               coalesce(i.price_owner, 'master') AS price_owner
         FROM edge.item i WHERE i.id = :id
     """), {"id": item_id})).mappings().first()
     if card is None:
@@ -174,7 +354,8 @@ async def _queue_nsi_delta(db: AsyncSession, cid, item_id: int, station_id: int 
             payload={"uuid": str(card["external_uuid"]), "name": card["name"],
                      "unit": card["unit"], "vat_rate": card["vat_rate"],
                      "deleted": bool(card["deleted"]), "barcodes": codes,
-                     "price": float(price) if price is not None else None},
+                     "price": float(price) if price is not None else None,
+                     "price_owner": card["price_owner"]},
             note="НСИ: %s" % card["name"][:60],
         ))
     return len(targets)
@@ -186,46 +367,197 @@ async def nsi_push_recipes(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Отправить станции техкарты блюд.
-
-    Без них продажа кофе не списывает ни зерно, ни стакан: остаток сырья растёт
-    вечно, а каждая инвентаризация даёт недостачу, которую закрывают руками.
-    Карт немного (на 208 — 32), поэтому шлём одним заданием целиком: дельтами
-    управлять дороже, чем переслать всё.
-    """
+    """Отправить станции атомарный набор действующих версий ТТК."""
     cid: uuid.UUID = await scope_company_id(user, db)
-    rows = (await db.execute(text("""
-        SELECT r.dish_uuid, r.output_qty,
-               coalesce(d.name, '')                         AS dish_name,
-               json_agg(json_build_object(
-                   'item', l.item_uuid, 'qty', l.qty, 'unit', l.unit,
-                   'name', coalesce(i.name, '')) ORDER BY l.item_uuid) AS lines
-        FROM edge.recipe r
-        JOIN edge.recipe_line l ON l.recipe_id = r.id
-        LEFT JOIN edge.item d ON d.external_uuid = r.dish_uuid
-        LEFT JOIN edge.item i ON i.external_uuid = l.item_uuid
-        GROUP BY r.dish_uuid, r.output_qty, d.name
-        ORDER BY d.name
-    """))).mappings().all()
-    if not rows:
-        raise HTTPException(404, "Техкарт нет — сначала импортируйте их из пакетов ЦБ")
+    bundle = recipe_versions.build_bundle(await recipe_versions.active_versions(db, cid))
+    agent = (await db.execute(select(EdgeAgent).where(
+        EdgeAgent.company_id == cid, EdgeAgent.station_id == station_id
+    ))).scalar_one_or_none()
+    applied = ((agent.payload or {}).get("recipe_bundle") or {}).get("bundle_id") if agent else None
+    if applied == bundle["bundle_id"]:
+        return {"ok": True, "already_current": True, "station_id": station_id,
+                "bundle_id": bundle["bundle_id"], "блюд": len(bundle["recipes"])}
 
-    карты = [{
-        "dish": str(r["dish_uuid"]), "name": r["dish_name"],
-        "output": float(r["output_qty"] or 1),
-        "lines": [{"item": str(l["item"]), "qty": float(l["qty"]),
-                   "unit": l["unit"] or "", "name": l["name"] or ""}
-                  for l in r["lines"]],
-    } for r in rows]
+    pending = (await db.execute(select(EdgeDownlink).where(
+        EdgeDownlink.company_id == cid, EdgeDownlink.station_id == station_id,
+        EdgeDownlink.kind == "recipes", EdgeDownlink.acked_at.is_(None),
+    ).order_by(EdgeDownlink.created_at.desc()))).scalars().first()
+    if pending and (pending.payload or {}).get("bundle_id") == bundle["bundle_id"]:
+        return {"ok": True, "already_queued": True, "station_id": station_id,
+                "bundle_id": bundle["bundle_id"], "task_id": str(pending.id),
+                "блюд": len(bundle["recipes"])}
 
-    db.add(EdgeDownlink(
+    task = EdgeDownlink(
         company_id=cid, station_id=station_id, kind="recipes",
-        payload={"recipes": карты},
-        note="техкарты: %d блюд" % len(карты),
-    ))
+        payload=bundle,
+        note="ТТК %s: %d карт" % (bundle["bundle_id"], len(bundle["recipes"])),
+    )
+    db.add(task)
     await db.commit()
-    return {"ok": True, "station_id": station_id, "блюд": len(карты),
-            "ингредиентов": sum(len(k["lines"]) for k in карты)}
+    return {"ok": True, "station_id": station_id, "bundle_id": bundle["bundle_id"],
+            "task_id": str(task.id), "блюд": len(bundle["recipes"]),
+            "ингредиентов": sum(len(recipe["lines"]) for recipe in bundle["recipes"])}
+
+
+class RecipeDraftIn(BaseModel):
+    dish_uuid: str
+    dish_name: str | None = None
+    recipe_kind: str | None = None
+    output_qty: float | None = None
+    output_unit: str | None = None
+    lines: list[dict] | None = None
+
+
+class RecipeUpdateIn(BaseModel):
+    dish_name: str | None = None
+    recipe_kind: str | None = None
+    output_qty: float | None = None
+    output_unit: str | None = None
+    lines: list[dict] | None = None
+
+
+class RecipeActivateIn(BaseModel):
+    valid_from: datetime | None = None
+
+
+def _delivery_state(latest: EdgeDownlink | None, agent: EdgeAgent | None,
+                    current_bundle: str | None) -> dict:
+    payload = latest.payload if latest else {}
+    queued_bundle = payload.get("bundle_id")
+    details = agent.payload if agent else {}
+    applied_info = details.get("recipe_bundle") or {}
+    applied = applied_info.get("bundle_id")
+    latest_is_current = queued_bundle == current_bundle
+    if current_bundle and current_bundle == applied:
+        state = "applied"
+    elif latest is None or not latest_is_current:
+        state = "outdated" if applied else "not_sent"
+    elif latest.acked_at is not None:
+        state = "mismatch"
+    elif latest.delivered_at is not None:
+        state = "delivered"
+    else:
+        state = "queued"
+    return {
+        "station_id": latest.station_id if latest else agent.station_id,
+        "state": state, "desired_bundle": current_bundle,
+        "queued_bundle": queued_bundle, "applied_bundle": applied,
+        "created_at": latest.created_at if latest else None,
+        "delivered_at": latest.delivered_at if latest else None,
+        "acked_at": latest.acked_at if latest else None,
+        "agent_last_seen": agent.last_seen if agent else None,
+        "recipe_bundle": applied_info,
+        "readiness": details.get("catering_readiness"),
+    }
+
+
+@router.get("/recipes/versions")
+async def recipe_versions_workspace(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    cid = await scope_company_id(user, db)
+    rows = list((await db.execute(select(StoreRecipeVersion).where(
+        StoreRecipeVersion.company_id == cid
+    ).order_by(StoreRecipeVersion.dish_name, StoreRecipeVersion.version.desc()))).scalars().all())
+    grouped: dict[str, dict] = {}
+    for row in rows:
+        item = grouped.setdefault(row.dish_uuid, {
+            "dish_uuid": row.dish_uuid, "dish_name": row.dish_name,
+            "recipe_kind": row.recipe_kind, "active": None, "draft": None, "history": [],
+        })
+        data = recipe_versions.row_dict(row)
+        item["history"].append(data)
+        if row.status == "draft" and item["draft"] is None:
+            item["draft"] = data
+        if row.status == "active" and row.valid_to is None and item["active"] is None:
+            item["active"] = data
+
+    active = await recipe_versions.active_versions(db, cid)
+    bundle = recipe_versions.build_bundle(active) if active else None
+    active_ids = {row.id for row in active}
+    for item in grouped.values():
+        item["active"] = next(
+            (version for version in item["history"]
+             if uuid.UUID(version["id"]) in active_ids), None)
+    agents = list((await db.execute(select(EdgeAgent).where(
+        EdgeAgent.company_id == cid))).scalars().all())
+    tasks = list((await db.execute(select(EdgeDownlink).where(
+        EdgeDownlink.company_id == cid, EdgeDownlink.kind == "recipes",
+    ).order_by(EdgeDownlink.station_id, EdgeDownlink.created_at.desc()))).scalars().all())
+    latest_by_station: dict[int, EdgeDownlink] = {}
+    for task in tasks:
+        latest_by_station.setdefault(task.station_id, task)
+    agent_by_station = {agent.station_id: agent for agent in agents}
+    station_ids = sorted(set(latest_by_station) | set(agent_by_station))
+    current_bundle = bundle["bundle_id"] if bundle else None
+    deliveries = [_delivery_state(latest_by_station.get(station_id),
+                                  agent_by_station.get(station_id), current_bundle)
+                  for station_id in station_ids]
+
+    legacy_available = 0
+    if not rows:
+        try:
+            legacy_available = int((await db.execute(text(
+                "SELECT count(*) FROM edge.recipe"))).scalar() or 0)
+        except Exception:
+            await db.rollback()
+    return {
+        "bundle": bundle, "legacy_available": legacy_available,
+        "summary": {
+            "recipes": len(grouped),
+            "active": sum(1 for item in grouped.values() if item["active"]),
+            "drafts": sum(1 for item in grouped.values() if item["draft"]),
+        },
+        "recipes": list(grouped.values()), "deliveries": deliveries,
+    }
+
+
+@router.post("/recipes/bootstrap")
+async def recipe_versions_bootstrap(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    cid = await scope_company_id(user, db)
+    count = await recipe_versions.bootstrap_legacy(db, cid, user.id)
+    return {"ok": True, "created": count}
+
+
+@router.post("/recipes/draft")
+async def recipe_create_draft(
+    body: RecipeDraftIn,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    row = await recipe_versions.create_draft(
+        db, await scope_company_id(user, db), user.id, body.model_dump(exclude_none=True))
+    return recipe_versions.row_dict(row)
+
+
+@router.put("/recipes/{version_id}")
+async def recipe_update_draft(
+    version_id: uuid.UUID,
+    body: RecipeUpdateIn,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    row = await recipe_versions.update_draft(
+        db, await scope_company_id(user, db), version_id,
+        body.model_dump(exclude_none=True))
+    return recipe_versions.row_dict(row)
+
+
+@router.post("/recipes/{version_id}/activate")
+async def recipe_activate(
+    version_id: uuid.UUID,
+    body: RecipeActivateIn | None = Body(default=None),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    row = await recipe_versions.activate(
+        db, await scope_company_id(user, db), version_id,
+        body.valid_from if body else None)
+    return recipe_versions.row_dict(row)
 
 
 @router.get("/parity")
@@ -259,34 +591,183 @@ async def store_places(
     складывались в кучу. Источник — снимок агента, а не выгрузка ЦБ: он
     приходит каждый час, а не раз в три недели.
     """
-    сводка = (await db.execute(text("""
-        SELECT s.place,
-               coalesce(pl.name, 'место ' || s.place)                    AS name,
-               coalesce(pl.is_sales_floor, s.place = s.station_id::text) AS sales_floor,
-               count(*)                                                  AS positions,
-               sum(s.qty)                                                AS qty,
-               max(s.updated_at)                                         AS updated_at
-        FROM edge.stock s
-        LEFT JOIN edge.place pl ON pl.station_id = s.station_id AND pl.code = s.place
-        WHERE s.station_id = :st
-        GROUP BY s.place, pl.name, pl.is_sales_floor, s.station_id
-        ORDER BY sales_floor DESC, s.place
-    """), {"st": station_id})).mappings().all()
+    cid = await scope_company_id(user, db)
+    agent = (await db.execute(select(EdgeAgent.id).where(
+        EdgeAgent.company_id == cid, EdgeAgent.station_id == station_id,
+    ))).scalar_one_or_none()
+    if agent is None:
+        raise HTTPException(404, "Станция не принадлежит выбранной компании")
+    rows = (await db.execute(select(StoreStockBalance).where(
+        StoreStockBalance.company_id == cid,
+        StoreStockBalance.station_id == station_id,
+    ))).scalars().all()
+    по_местам: dict[str, dict] = {}
+    for row in rows:
+        place = по_местам.setdefault(row.place, {
+            "place": row.place,
+            "name": row.place_name or f"место {row.place}",
+            "sales_floor": row.place == str(station_id),
+            "positions": 0,
+            "qty": 0.0,
+            "updated_at": row.snapshot_at,
+        })
+        place["positions"] += 1
+        place["qty"] += float(row.quantity or 0)
+        if row.snapshot_at > place["updated_at"]:
+            place["updated_at"] = row.snapshot_at
+    сводка = sorted(по_местам.values(), key=lambda row: (
+        not row["sales_floor"], row["place"]))
 
-    # Товар, лежащий не в зале: он не пробивается кассой, пока его не выложат.
-    # Это и есть рабочий список товароведа на смену.
-    не_в_зале = (await db.execute(text("""
-        SELECT v.place_name, v.item_name, v.barcode, v.qty
-        FROM edge.v_stock_by_place v
-        WHERE v.station_id = :st AND NOT v.is_sales_floor AND v.qty > 0
-        ORDER BY v.qty DESC LIMIT 200
-    """), {"st": station_id})).mappings().all()
+    не_в_зале = [{
+        "place_name": row.place_name or f"место {row.place}",
+        "item_name": row.name,
+        "barcode": row.barcode,
+        "qty": float(row.quantity or 0),
+    } for row in rows if row.place != str(station_id) and float(row.quantity or 0) > 0]
+    не_в_зале.sort(key=lambda row: -row["qty"])
 
     return {
         "station_id": station_id,
-        "places": [{**dict(r), "qty": float(r["qty"] or 0)} for r in сводка],
-        "not_on_floor": [{**dict(r), "qty": float(r["qty"] or 0)} for r in не_в_зале],
+        "source": "edge_agent",
+        "places": сводка,
+        "not_on_floor": не_в_зале[:200],
     }
+
+
+class AssortmentRuleIn(BaseModel):
+    active: bool = True
+    valid_from: datetime | None = None
+    valid_to: datetime | None = None
+    reason: str | None = None
+
+
+@router.get("/assortment/{station_id}")
+async def assortment_rules(
+    station_id: int,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Явные включения и стопы ассортиментной матрицы станции."""
+    cid = await scope_company_id(user, db)
+    rows = (await db.execute(text("""
+        SELECT r.item_uuid, coalesce(i.name, r.item_uuid) AS name, r.active,
+               r.valid_from, r.valid_to, r.reason, r.updated_at
+        FROM store_assortment_rules r
+        LEFT JOIN edge.item i ON i.external_uuid::text = r.item_uuid
+        WHERE r.company_id = :cid AND r.station_id = :st
+        ORDER BY r.active, coalesce(i.name, r.item_uuid)
+    """), {"cid": cid, "st": station_id})).mappings().all()
+    return {"station_id": station_id, "rules": [dict(row) for row in rows]}
+
+
+@router.put("/assortment/{station_id}/{item_uuid}")
+async def assortment_rule_set(
+    station_id: int,
+    item_uuid: str,
+    body: AssortmentRuleIn,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    cid = await scope_company_id(user, db)
+    if body.valid_from and body.valid_to and body.valid_to <= body.valid_from:
+        raise HTTPException(400, "Дата окончания должна быть позже даты начала")
+    agent = (await db.execute(select(EdgeAgent.id).where(
+        EdgeAgent.company_id == cid, EdgeAgent.station_id == station_id,
+    ))).scalar_one_or_none()
+    if agent is None:
+        raise HTTPException(404, "Станция не принадлежит выбранной компании")
+    row = (await db.execute(select(StoreAssortmentRule).where(
+        StoreAssortmentRule.company_id == cid,
+        StoreAssortmentRule.station_id == station_id,
+        StoreAssortmentRule.item_uuid == item_uuid,
+    ))).scalar_one_or_none()
+    if row is None:
+        row = StoreAssortmentRule(
+            company_id=cid, station_id=station_id, item_uuid=item_uuid)
+        db.add(row)
+    row.active = body.active
+    row.valid_from = body.valid_from
+    row.valid_to = body.valid_to
+    row.reason = body.reason
+    row.updated_by = user.id
+    await db.commit()
+    return {"ok": True, "station_id": station_id, "item_uuid": item_uuid,
+            "active": row.active}
+
+
+@router.post("/assortment/{station_id}/publish")
+async def assortment_publish(
+    station_id: int,
+    default_active: bool = Query(
+        True, description="товары без явного правила остаются разрешены"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Отправить матрицу агенту для проверки против NeftoMS без записи в кассу."""
+    cid = await scope_company_id(user, db)
+    agent = (await db.execute(select(EdgeAgent).where(
+        EdgeAgent.company_id == cid, EdgeAgent.station_id == station_id,
+    ))).scalar_one_or_none()
+    if agent is None:
+        raise HTTPException(404, "Станция не принадлежит выбранной компании")
+    rules = (await db.execute(select(StoreAssortmentRule).where(
+        StoreAssortmentRule.company_id == cid,
+        StoreAssortmentRule.station_id == station_id,
+    ).order_by(StoreAssortmentRule.item_uuid))).scalars().all()
+    payload_rules = [{
+        "item_uuid": row.item_uuid,
+        "active": row.active,
+        "valid_from": row.valid_from.isoformat() if row.valid_from else None,
+        "valid_to": row.valid_to.isoformat() if row.valid_to else None,
+        "reason": row.reason,
+    } for row in rules]
+    content = json.dumps({"default_active": default_active, "rules": payload_rules},
+                         ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    policy_id = hashlib.sha256(content.encode("utf-8")).hexdigest()
+    pending = (await db.execute(select(EdgeDownlink).where(
+        EdgeDownlink.company_id == cid,
+        EdgeDownlink.station_id == station_id,
+        EdgeDownlink.kind == "cash_policy",
+        EdgeDownlink.acked_at.is_(None),
+    ).order_by(EdgeDownlink.created_at.desc()))).scalars().first()
+    if pending and (pending.payload or {}).get("policy_id") == policy_id:
+        return {"ok": True, "already_queued": True, "task_id": str(pending.id),
+                "policy_id": policy_id}
+    task = EdgeDownlink(
+        company_id=cid,
+        station_id=station_id,
+        kind="cash_policy",
+        payload={"policy_id": policy_id, "default_active": default_active,
+                 "prepared_food_vat": "НДС22", "rules": payload_rules},
+        note=f"Ассортимент: {len(payload_rules)} правил; только dry-run кассы",
+    )
+    db.add(task)
+    await db.commit()
+    return {"ok": True, "task_id": str(task.id), "policy_id": policy_id,
+            "rules": len(payload_rules), "mode": "dry-run"}
+
+
+@router.get("/assortment/{station_id}/publications")
+async def assortment_publications(
+    station_id: int,
+    limit: int = Query(20, ge=1, le=100),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    cid = await scope_company_id(user, db)
+    rows = (await db.execute(select(EdgeDownlink).where(
+        EdgeDownlink.company_id == cid,
+        EdgeDownlink.station_id == station_id,
+        EdgeDownlink.kind == "cash_policy",
+    ).order_by(EdgeDownlink.created_at.desc()).limit(limit))).scalars().all()
+    return {"station_id": station_id, "publications": [{
+        "id": str(row.id),
+        "policy_id": (row.payload or {}).get("policy_id"),
+        "created_at": row.created_at,
+        "delivered_at": row.delivered_at,
+        "acked_at": row.acked_at,
+        "mode": "dry-run",
+    } for row in rows]}
 
 
 @router.post("/nsi/push/{station_id}")
@@ -320,6 +801,7 @@ async def nsi_push(
 
     rows = (await db.execute(text(f"""
         SELECT i.external_uuid, i.name, i.unit, i.vat_rate, i.deleted,
+               coalesce(i.price_owner, 'master') AS price_owner,
                (SELECT price FROM edge.price p
                  WHERE p.item_id = i.id AND p.station_id = :s AND p.valid_to IS NULL) AS price,
                coalesce((SELECT array_agg(b.code ORDER BY b.code) FROM edge.barcode b
@@ -332,6 +814,7 @@ async def nsi_push(
     items = [{"uuid": str(r["external_uuid"]), "name": r["name"], "unit": r["unit"],
               "vat_rate": r["vat_rate"], "deleted": bool(r["deleted"]),
               "price": float(r["price"]) if r["price"] is not None else None,
+              "price_owner": r["price_owner"],
               "barcodes": list(r["codes"] or [])} for r in rows]
     if not items:
         raise HTTPException(404, "Для станции нет ни одной связанной карточки")
@@ -354,6 +837,7 @@ async def nsi_push(
 
 
 VAT_CODES = ("НДС22", "НДС20", "НДС10", "НДС5", "НДС18_118", "БезНДС")
+PRICE_OWNERS = ("master", "station")
 
 
 async def _nsi_item_id(db: AsyncSession, ident: str) -> int:
@@ -478,7 +962,8 @@ async def nsi_item(
     item_id = await _nsi_item_id(db, item_id)
     item = (await db.execute(text("""
         SELECT id, external_uuid, code_1c, name, name_full, unit, vat_rate,
-               kind, sku_class, is_dish, deleted, created_at, updated_at
+               kind, sku_class, is_dish, coalesce(price_owner, 'master') AS price_owner,
+               deleted, created_at, updated_at
         FROM edge.item WHERE id = :id
     """), {"id": item_id})).mappings().first()
     if item is None:
@@ -516,6 +1001,8 @@ async def nsi_item_update(
     item_id = await _nsi_item_id(db, item_id)
     if body.vat_rate is not None and body.vat_rate not in VAT_CODES:
         raise HTTPException(400, f"Неизвестная ставка НДС: {body.vat_rate}")
+    if body.price_owner is not None and body.price_owner not in PRICE_OWNERS:
+        raise HTTPException(400, f"Неизвестный владелец цены: {body.price_owner}")
 
     fields = {k: v for k, v in body.model_dump().items() if v is not None}
     if not fields:
@@ -544,6 +1031,15 @@ async def nsi_set_price(
     if body.price < 0:
         raise HTTPException(400, "Цена не может быть отрицательной")
     item_id = await _nsi_item_id(db, item_id)
+    owner = (await db.execute(text(
+        "SELECT coalesce(price_owner, 'master') FROM edge.item WHERE id = :id"
+    ), {"id": item_id})).scalar_one()
+    if owner == "station":
+        raise HTTPException(
+            409,
+            "Право на цену передано станции: измените её на рабочем месте станции "
+            "или сначала верните владельца цены центру",
+        )
 
     await db.execute(text("""
         UPDATE edge.price SET valid_to = now()
@@ -1693,7 +2189,7 @@ async def store_bp_package(
     try:
         return await BpPackageEmitter(db, await scope_company_id(user, db)).build_shift_package(shift_key)
     except ValueError as e:
-        raise HTTPException(404, str(e))
+        raise HTTPException(404 if str(e).startswith("смена не найдена") else 409, str(e))
     except Exception as e:
         raise HTTPException(400, f"Сборка пакета: {e}")
 
@@ -1711,7 +2207,7 @@ async def store_bp_package_emit(
     try:
         res = await BpPackageEmitter(db, cid).emit_to_dir(shift_key, BP_EXPORT_DIR)
     except ValueError as e:
-        raise HTTPException(404, str(e))
+        raise HTTPException(409, str(e))
     except Exception as e:
         raise HTTPException(400, f"Выгрузка в каталог: {e}")
 
@@ -1720,7 +2216,7 @@ async def store_bp_package_emit(
     # опознать, какой именно пакет приёмник забрал (идемпотентность по ХешПакета).
     docs = sum(res.get("documents", {}).values())
     log_export(db, cid, user,
-               f"Пакет ЦБ→БП, смена {shift_key}: {res.get('file')}, "
+               f"Пакет Ledger→БП, смена {shift_key}: {res.get('file')}, "
                f"{docs} документов, НСИ {res.get('nsi')}, хеш {res.get('hash')}")
     return res
 
@@ -1737,9 +2233,26 @@ async def store_bp_package_verify(
     try:
         return await BpPackageEmitter(db, await scope_company_id(user, db)).verify_shift_package(shift_key)
     except ValueError as e:
-        raise HTTPException(404, str(e))
+        raise HTTPException(404 if str(e).startswith("смена не найдена") else 409, str(e))
     except Exception as e:
         raise HTTPException(400, f"Сверка: {e}")
+
+
+@router.post("/edge/reproject")
+async def store_edge_reproject(
+    station_id: int | None = Query(None),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Пересобрать канонические документы Ledger из ранее принятых EdgePacket."""
+    cid = await scope_company_id(user, db)
+    if not user.is_superadmin:
+        membership = await db.get(UserCompany, (user.id, cid))
+        if membership is None or membership.role != "admin":
+            raise HTTPException(403, "Пересборка Edge доступна только администратору компании")
+    result = await edge_projection.reproject_packets(db, cid, station_id)
+    await db.commit()
+    return result
 
 
 @router.get("/barcodes")
@@ -2016,6 +2529,27 @@ async def store_resolve_partner_draft(
         raise HTTPException(400, str(exc)) from exc
 
 
+@router.post("/station-drafts/proposal/{proposal_id}")
+async def store_resolve_nsi_proposal(
+    proposal_id: int,
+    body: dict = Body(...),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Решение по заявке станции об ошибке в сетевой карточке.
+
+    Принять — правка применяется к канону: на станции она всё это время не
+    применялась, карточка там оставалась прежней. Отклонить — заявка
+    закрывается с пояснением, чтобы её не слали снова.
+    """
+    cid: uuid.UUID = await scope_company_id(user, db)
+    try:
+        return await edge_nsi.resolve_nsi_proposal(
+            db, cid, proposal_id, str(body.get("action") or ""), body.get("note"))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
 @router.get("/station-drafts/candidates")
 async def store_draft_candidates(
     barcodes: str = Query(..., description="штрихкоды через запятую"),
@@ -2043,6 +2577,189 @@ async def store_barcode_collisions(
     """
     cid: uuid.UUID = await scope_company_id(user, db)
     return {"collisions": await edge_nsi.barcode_collisions(db, cid, limit)}
+
+
+class EdgeItemMergeIn(BaseModel):
+    alias_id: int
+    canonical_id: int
+    reason: str | None = None
+
+
+@router.post("/nsi/merge-items")
+async def edge_merge_items(
+    body: EdgeItemMergeIn,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Слить дубль в канон внутри Ledger и отправить результат агентам.
+
+    Операция не вызывает 1С и не строит карту для обработки ссылок БП.
+    """
+    if body.alias_id == body.canonical_id:
+        raise HTTPException(400, "Дубль и канон совпадают")
+    cid = await scope_company_id(user, db)
+    cards = (await db.execute(text("""
+        SELECT id, external_uuid::text AS uuid, name, deleted
+        FROM edge.item WHERE id = ANY(:ids)
+    """), {"ids": [body.alias_id, body.canonical_id]})).mappings().all()
+    by_id = {row["id"]: row for row in cards}
+    alias = by_id.get(body.alias_id)
+    canonical = by_id.get(body.canonical_id)
+    if alias is None or canonical is None:
+        raise HTTPException(404, "Карточка дубля или канона не найдена")
+    linked = (await db.execute(select(StoreStockBalance.id).where(
+        StoreStockBalance.company_id == cid,
+        StoreStockBalance.item_uuid == alias["uuid"],
+    ).limit(1))).scalar_one_or_none()
+    if linked is None:
+        raise HTTPException(409, "Дубль не связан с остатком выбранной компании")
+    exists = (await db.execute(select(StoreItemAlias.id).where(
+        StoreItemAlias.company_id == cid,
+        StoreItemAlias.alias_uuid == alias["uuid"],
+    ))).scalar_one_or_none()
+    if exists is not None:
+        raise HTTPException(409, "Карточка уже была слита")
+
+    stats = {"barcodes": 0, "prices": 0, "stock_rows": 0, "recipes": 0,
+             "assortment": 0}
+    canonical_codes = set((await db.execute(text("""
+        SELECT code FROM edge.barcode WHERE item_id = :id AND status = 'active'
+    """), {"id": body.canonical_id})).scalars().all())
+    alias_barcodes = (await db.execute(text("""
+        SELECT id, code, status::text AS status FROM edge.barcode WHERE item_id = :id
+    """), {"id": body.alias_id})).mappings().all()
+    for barcode in alias_barcodes:
+        if barcode["code"] in canonical_codes:
+            await db.execute(text("""
+                UPDATE edge.barcode SET status = 'historical',
+                    note = coalesce(note || ' · ', '') || :note WHERE id = :id
+            """), {"id": barcode["id"], "note": "карточка слита в канон"})
+        else:
+            await db.execute(text(
+                "UPDATE edge.barcode SET item_id = :canon WHERE id = :id"),
+                {"canon": body.canonical_id, "id": barcode["id"]})
+            if barcode["status"] == "active":
+                canonical_codes.add(barcode["code"])
+        stats["barcodes"] += 1
+
+    stations = (await db.execute(select(EdgeAgent.station_id).where(
+        EdgeAgent.company_id == cid))).scalars().all()
+    for station_id in stations:
+        canonical_price = (await db.execute(text("""
+            SELECT id FROM edge.price WHERE item_id = :id AND station_id = :st
+              AND valid_to IS NULL
+        """), {"id": body.canonical_id, "st": station_id})).scalar_one_or_none()
+        if canonical_price is not None:
+            result = await db.execute(text("""
+                UPDATE edge.price SET valid_to = now()
+                WHERE item_id = :alias AND station_id = :st AND valid_to IS NULL
+            """), {"alias": body.alias_id, "st": station_id})
+        else:
+            result = await db.execute(text("""
+                UPDATE edge.price SET item_id = :canon
+                WHERE item_id = :alias AND station_id = :st AND valid_to IS NULL
+            """), {"alias": body.alias_id, "canon": body.canonical_id,
+                     "st": station_id})
+        stats["prices"] += result.rowcount or 0
+
+    balances = (await db.execute(select(StoreStockBalance).where(
+        StoreStockBalance.company_id == cid,
+        StoreStockBalance.item_uuid == alias["uuid"],
+    ))).scalars().all()
+    for balance in balances:
+        target = (await db.execute(select(StoreStockBalance).where(
+            StoreStockBalance.company_id == cid,
+            StoreStockBalance.station_id == balance.station_id,
+            StoreStockBalance.place == balance.place,
+            StoreStockBalance.item_uuid == canonical["uuid"],
+            StoreStockBalance.barcode == balance.barcode,
+        ))).scalar_one_or_none()
+        if target is not None:
+            target.quantity = float(target.quantity or 0) + float(balance.quantity or 0)
+            await db.delete(balance)
+        else:
+            balance.item_uuid = canonical["uuid"]
+            balance.name = canonical["name"]
+            balance.balance_key = hashlib.sha256(
+                f"{canonical['uuid']}|{balance.barcode}".encode("utf-8")).hexdigest()
+        stats["stock_rows"] += 1
+
+    alias_rules = (await db.execute(select(StoreAssortmentRule).where(
+        StoreAssortmentRule.company_id == cid,
+        StoreAssortmentRule.item_uuid == alias["uuid"],
+    ))).scalars().all()
+    for rule in alias_rules:
+        target_rule = (await db.execute(select(StoreAssortmentRule).where(
+            StoreAssortmentRule.company_id == cid,
+            StoreAssortmentRule.station_id == rule.station_id,
+            StoreAssortmentRule.item_uuid == canonical["uuid"],
+        ))).scalar_one_or_none()
+        if target_rule is None:
+            rule.item_uuid = canonical["uuid"]
+        else:
+            await db.delete(rule)
+        stats["assortment"] += 1
+
+    recipes = (await db.execute(select(StoreRecipeVersion).where(
+        StoreRecipeVersion.company_id == cid))).scalars().all()
+    recipe_keys = {(recipe.dish_uuid, recipe.version) for recipe in recipes}
+    for recipe in recipes:
+        changed = False
+        if (recipe.dish_uuid == alias["uuid"] and
+                (canonical["uuid"], recipe.version) not in recipe_keys):
+            recipe.dish_uuid = canonical["uuid"]
+            recipe.dish_name = canonical["name"]
+            changed = True
+        lines = []
+        for line in recipe.lines or []:
+            line = dict(line)
+            for key in ("item_uuid", "ingredient_uuid", "Номенклатура"):
+                if str(line.get(key) or "") == alias["uuid"]:
+                    line[key] = canonical["uuid"]
+                    changed = True
+            lines.append(line)
+        if changed:
+            recipe.lines = lines
+            stats["recipes"] += 1
+
+    await db.execute(text("""
+        UPDATE edge.item SET deleted = true, updated_at = now() WHERE id = :id
+    """), {"id": body.alias_id})
+    db.add(StoreItemAlias(
+        company_id=cid, alias_uuid=alias["uuid"], canonical_uuid=canonical["uuid"],
+        reason=body.reason, created_by=user.id,
+    ))
+    for station_id in stations:
+        card = (await db.execute(text("""
+            SELECT i.external_uuid, i.name, i.unit, i.vat_rate, i.deleted,
+                   coalesce(i.price_owner, 'master') AS price_owner,
+                   coalesce((SELECT array_agg(b.code ORDER BY b.code)
+                             FROM edge.barcode b WHERE b.item_id = i.id
+                               AND b.status = 'active'), '{}') AS codes,
+                   (SELECT p.price FROM edge.price p
+                     WHERE p.item_id = i.id AND p.station_id = :st
+                       AND p.valid_to IS NULL) AS price
+            FROM edge.item i WHERE i.id = :id
+        """), {"id": body.canonical_id, "st": station_id})).mappings().first()
+        db.add(EdgeDownlink(
+            company_id=cid, station_id=station_id, kind="item_alias",
+            payload={
+                "alias_uuid": alias["uuid"],
+                "canonical": {
+                    "uuid": str(card["external_uuid"]), "name": card["name"],
+                    "unit": card["unit"], "vat_rate": card["vat_rate"],
+                    "deleted": bool(card["deleted"]),
+                    "price_owner": card["price_owner"],
+                    "price": float(card["price"]) if card["price"] is not None else None,
+                    "barcodes": list(card["codes"] or []),
+                },
+            },
+            note=f"Слияние {alias['name']} → {canonical['name']}",
+        ))
+    await db.commit()
+    return {"ok": True, "alias_uuid": alias["uuid"],
+            "canonical_uuid": canonical["uuid"], "stats": stats,
+            "stations_queued": len(stations)}
 
 
 @router.post("/barcode-collisions/{claim_id}")
