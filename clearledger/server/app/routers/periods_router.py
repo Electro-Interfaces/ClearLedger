@@ -145,7 +145,9 @@ class UnpostedRow(BaseModel):
 
 class PeriodReadiness(BaseModel):
     year: int
-    month: int
+    month: int | None = None
+    quarter: int | None = None
+    scope: str                    # month | quarter | year
     docsInPeriod: int
     unposted: list[UnpostedRow]
     unpostedTotal: int
@@ -163,11 +165,17 @@ class PeriodReadiness(BaseModel):
 async def period_readiness(
     company_id: str = Query(...),
     year: int = Query(...),
-    month: int = Query(..., ge=1, le=12),
+    month: int | None = Query(None, ge=1, le=12),
+    quarter: int | None = Query(None, ge=1, le=4),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Готовность периода к закрытию — то, что бухгалтер проверяет руками.
+
+    Масштаб задают параметры: `month` — месяц, `quarter` — квартал (НДС и
+    авансовые платежи считаются именно по нему), ни того ни другого — год.
+    Проверки одни и те же, меняется только окно дат: закрывают месяц, а сдают
+    квартал, и смотреть их приходится в обоих масштабах.
 
     Четыре вопроса, на каждый свой счётчик:
 
@@ -185,9 +193,20 @@ async def period_readiness(
        которые всплывают на сдаче отчётности.
     """
     cid = await assert_company_member(company_id, current_user, db)
-    prefix = f"{year}-{month:02d}"
 
-    in_period = (AccountingDoc.company_id == cid, AccountingDoc.date.like(f"{prefix}%"))
+    # Окно дат: месяц — по префиксу, квартал и год — по границам, потому что
+    # даты хранятся строкой «YYYY-MM-DD» и лексикографическое сравнение для них
+    # совпадает с хронологическим.
+    if month is not None:
+        scope, start, end = "month", f"{year}-{month:02d}-01", f"{year}-{month:02d}-32"
+    elif quarter is not None:
+        first = quarter * 3 - 2
+        scope, start, end = "quarter", f"{year}-{first:02d}-01", f"{year}-{first + 2:02d}-32"
+    else:
+        scope, start, end = "year", f"{year}-01-01", f"{year}-12-32"
+
+    in_period = (AccountingDoc.company_id == cid,
+                 AccountingDoc.date >= start, AccountingDoc.date <= end)
 
     docs_in_period = (await db.execute(
         select(func.count(AccountingDoc.id)).where(*in_period)
@@ -236,7 +255,7 @@ async def period_readiness(
     )).scalar_one() or 0
 
     return PeriodReadiness(
-        year=year, month=month,
+        year=year, month=month, quarter=quarter, scope=scope,
         docsInPeriod=int(docs_in_period),
         unposted=unposted,
         unpostedTotal=sum(u.count for u in unposted),

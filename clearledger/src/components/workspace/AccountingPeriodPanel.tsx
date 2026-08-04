@@ -48,10 +48,38 @@ interface PeriodRow {
 }
 interface PeriodsSummary { items: PeriodRow[]; totalDocs: number }
 
+/** Масштаб периода: закрывают месяц, сдают квартал, отчитываются за год. */
+type Scope = 'month' | 'quarter' | 'year'
+
+/**
+ * Сроки, которые задаёт не система, а закон.
+ *
+ * Квартальные — НДС: декларация до 25-го числа месяца, следующего за кварталом,
+ * уплата тремя равными долями до 28-го числа каждого из трёх следующих месяцев.
+ * Годовые — бухотчётность и налог на прибыль. Даты зашиты, потому что меняются
+ * законом, а не данными; при переносе срока правится одна строка.
+ */
+const QUARTER_DEADLINES = (year: number, quarter: number) => {
+  const after = quarter * 3 + 1
+  const y = after > 12 ? year + 1 : year
+  const m = after > 12 ? after - 12 : after
+  return [
+    { what: 'Декларация по НДС', when: `25.${String(m).padStart(2, '0')}.${y}` },
+    { what: 'Первая треть НДС к уплате', when: `28.${String(m).padStart(2, '0')}.${y}` },
+  ]
+}
+const YEAR_DEADLINES = (year: number) => [
+  { what: 'Бухгалтерская отчётность в ФНС', when: `31.03.${year + 1}` },
+  { what: 'Декларация по налогу на прибыль', when: `25.03.${year + 1}` },
+  { what: 'Годовая инвентаризация (до отчётности)', when: `31.12.${year}` },
+]
+
 /** Готовность периода к закрытию — четыре проверки бухгалтера (см. periods_router). */
 interface PeriodReadiness {
   year: number
-  month: number
+  month: number | null
+  quarter: number | null
+  scope: Scope
   docsInPeriod: number
   unposted: { docType: string; count: number }[]
   unpostedTotal: number
@@ -91,6 +119,7 @@ export function AccountingPeriodPanel() {
   const { setCoreMode } = useWorkspace()
   const [selected, setSelected] = useState<{ year: number; month: number } | null>(null)
   const [stream, setStream] = useState<'fuel' | 'store'>('fuel')
+  const [scope, setScope] = useState<Scope>('month')
 
   const periods = useQuery({
     queryKey: ['periods-summary', companyId],
@@ -113,7 +142,21 @@ export function AccountingPeriodPanel() {
   const active = selected ?? (fallback
     ? { year: fallback.year, month: fallback.month }
     : (items.length ? currentKey : null))
-  const range = active ? monthRange(active.year, active.month) : null
+
+  // Окно данных для сводок и карты полноты. Месяц — сам месяц, квартал — три
+  // его месяца, год — двенадцать: закрывают месяц, а сдают квартал, и один
+  // масштаб другой не заменяет.
+  const activeQuarter = active ? Math.ceil(active.month / 3) : null
+  const range = !active ? null
+    : scope === 'month' ? monthRange(active.year, active.month)
+    : scope === 'quarter'
+      ? { from: monthRange(active.year, activeQuarter! * 3 - 2).from,
+          to: monthRange(active.year, activeQuarter! * 3).to }
+      : { from: `${active.year}-01-01`, to: `${active.year}-12-31` }
+  // Карта «станция × день» осмысленна только на месяце: 90 клеток в ряд ещё
+  // читаются, 365 — уже нет. В крупных масштабах вместо неё идут пропуски по
+  // месяцам, посчитанные из того же ряда.
+  const dayMapAllowed = scope === 'month'
 
   const fuelShifts = useQuery({
     queryKey: ['fuel-shifts-period', companyId, range?.from, range?.to],
@@ -135,9 +178,14 @@ export function AccountingPeriodPanel() {
     queryFn: () => getReconciliationSummary(companyId),
   })
   const readinessDocs = useQuery({
-    queryKey: ['period-readiness', companyId, active?.year, active?.month],
-    queryFn: () => get<PeriodReadiness>('/api/periods/readiness',
-      { company_id: companyId, year: String(active!.year), month: String(active!.month) }),
+    queryKey: ['period-readiness', companyId, active?.year, active?.month, scope],
+    queryFn: () => get<PeriodReadiness>('/api/periods/readiness', {
+      company_id: companyId,
+      year: String(active!.year),
+      // Месяц и квартал взаимоисключающи, год — отсутствие обоих.
+      ...(scope === 'month' ? { month: String(active!.month) } : {}),
+      ...(scope === 'quarter' ? { quarter: String(activeQuarter) } : {}),
+    }),
     enabled: !!active,
   })
 
@@ -145,11 +193,18 @@ export function AccountingPeriodPanel() {
   // но не дальше сегодняшнего: пустые клетки будущего — не пробел, а просто «ещё
   // не наступило», и красить их значило бы пугать зря.
   const map = useMemo(() => {
-    if (!active || !range) return { days: [] as string[], stations: [] as string[], cells: new Map<string, Cell>() }
+    if (!active || !range) {
+      return { days: [] as string[], stations: [] as string[], cells: new Map<string, Cell>() }
+    }
     const today = new Date().toISOString().slice(0, 10)
     const last = range.to < today ? range.to : today
+    // Дни перебираем по календарю, а не арифметикой от начала месяца: в квартале
+    // и годе окно шире одного месяца, и «прибавить номер дня к префиксу» даёт
+    // несуществующие даты вроде 2026-02-31.
     const days: string[] = []
-    for (let d = 1; d <= Number(last.slice(8, 10)); d++) days.push(`${range.from.slice(0, 8)}${pad(d)}`)
+    for (const d = new Date(range.from); d.toISOString().slice(0, 10) <= last; d.setDate(d.getDate() + 1)) {
+      days.push(d.toISOString().slice(0, 10))
+    }
 
     const cells = new Map<string, Cell>()
     const stations = new Set<string>()
@@ -175,6 +230,31 @@ export function AccountingPeriodPanel() {
     return { days, stations: [...stations].sort((a, b) => Number(a) - Number(b)), cells }
   }, [active, range, stream, fuelShifts.data, storeShifts.data])
 
+  /**
+   * Пропуски, свёрнутые по месяцам — для квартала и года.
+   *
+   * Сетка «станция × день» на 90 клетках ещё читается со скроллом, на 365 — нет.
+   * В крупном масштабе тот же факт полезнее словами: в каком месяце сколько
+   * станций недосчитались и сколько дней суммарно потеряно.
+   */
+  const monthGaps = useMemo(() => {
+    if (dayMapAllowed) return []
+    const byMonth = new Map<string, { days: number; stations: Set<string> }>()
+    for (const st of map.stations) {
+      for (const d of map.days) {
+        if (map.cells.has(`${st}|${d}`)) continue
+        const key = d.slice(0, 7)
+        const g = byMonth.get(key) ?? { days: 0, stations: new Set<string>() }
+        g.days += 1
+        g.stations.add(st)
+        byMonth.set(key, g)
+      }
+    }
+    return [...byMonth.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([key, g]) => ({ key, days: g.days, stations: g.stations.size }))
+  }, [dayMapAllowed, map])
+
   // Пробелы: день без единой смены по станции, которая в этом месяце работала.
   // Станция, не работавшая весь месяц, в список не попадает — это не пробел
   // данных, а закрытая точка, и разбираться с ней надо не здесь.
@@ -190,6 +270,48 @@ export function AccountingPeriodPanel() {
   const openShifts = useMemo(
     () => [...map.cells.entries()].filter(([, v]) => v === 'open').length, [map])
 
+  /**
+   * Чипы выбора в текущем масштабе.
+   *
+   * Месяц берётся из реестра как есть; квартал и год собираются из месяцев:
+   * закрытым считается только тот охват, где закрыты ВСЕ месяцы — квартал с
+   * одним открытым месяцем не сдан, и показывать его замком значило бы врать.
+   * Выбор всегда возвращает конкретный месяц (первый в охвате): состояние
+   * панели одно, а масштаб — способ на него смотреть.
+   */
+  const chips = useMemo(() => {
+    if (!items.length) return []
+    if (scope === 'month') {
+      return items.slice(0, 10).map((p) => ({
+        key: `${p.year}-${p.month}`, year: p.year, month: p.month,
+        label: `${MONTHS[p.month - 1]} ${p.year}`,
+        closed: p.status === 'closed', future: isFuture(p),
+        on: active?.year === p.year && active?.month === p.month,
+      }))
+    }
+    const groups = new Map<string, { year: number; month: number; months: PeriodRow[] }>()
+    for (const p of items) {
+      const q = Math.ceil(p.month / 3)
+      const key = scope === 'quarter' ? `${p.year}-Q${q}` : `${p.year}`
+      const first = scope === 'quarter' ? q * 3 - 2 : 1
+      const g = groups.get(key) ?? { year: p.year, month: first, months: [] }
+      g.months.push(p)
+      groups.set(key, g)
+    }
+    return [...groups.entries()].slice(0, 8).map(([key, g]) => {
+      const q = Math.ceil(g.month / 3)
+      const activeQ = active ? Math.ceil(active.month / 3) : null
+      return {
+        key, year: g.year, month: g.month,
+        label: scope === 'quarter' ? `${q} кв. ${g.year}` : String(g.year),
+        closed: g.months.every((m) => m.status === 'closed'),
+        future: g.months.every((m) => isFuture(m)),
+        on: !!active && active.year === g.year
+          && (scope === 'year' || activeQ === q),
+      }
+    })
+  }, [items, scope, active])
+
   const rs = recon.data
   const storeRows = storeShifts.data?.shifts ?? []
   const obshepit = storeRows.reduce((s, r) => s + (r.obshepit ?? 0), 0)
@@ -197,11 +319,25 @@ export function AccountingPeriodPanel() {
 
   return (
     <div className="space-y-5 p-4">
-      <div className="flex flex-wrap items-baseline gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <h2 className="text-sm font-semibold">Периоды</h2>
         <span className="text-xs text-muted-foreground">
-          какой месяц закрыт, что в открытом собрано и чего не хватает
+          {scope === 'month' ? 'какой месяц закрыт, что в нём собрано и чего не хватает'
+            : scope === 'quarter' ? 'квартал целиком — им отчитываются по НДС'
+            : 'год целиком — бухотчётность и налог на прибыль'}
         </span>
+        {/* Закрывают месяц, сдают квартал, отчитываются за год — три разных
+            вопроса к одним и тем же данным, поэтому масштаб переключается, а не
+            выбирается заново. */}
+        <div className="ml-auto flex gap-1 rounded-lg bg-card p-1">
+          {([['month', 'Месяц'], ['quarter', 'Квартал'], ['year', 'Год']] as const).map(([k, label]) => (
+            <button key={k} onClick={() => setScope(k)}
+              className={cn('rounded px-3 py-1 text-xs transition-colors',
+                scope === k ? 'bg-primary text-white' : 'text-muted-foreground hover:bg-accent/40')}>
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* ── Выбор месяца: полоса, а не таблица ──
@@ -219,29 +355,55 @@ export function AccountingPeriodPanel() {
         </p>
       ) : (
         <div className="flex flex-wrap gap-1.5">
-          {items.slice(0, 10).map((p) => {
-            const on = active?.year === p.year && active?.month === p.month
-            const future = isFuture(p)
-            return (
-              <button key={`${p.year}-${p.month}`}
-                onClick={() => setSelected({ year: p.year, month: p.month })}
-                className={cn('flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs transition-colors',
-                  on ? 'border-primary bg-primary/10 text-foreground'
+          {chips.map((c) => (
+            <button key={c.key} onClick={() => setSelected({ year: c.year, month: c.month })}
+              className={cn('flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs transition-colors',
+                c.on ? 'border-primary bg-primary/10 text-foreground'
                      : 'border-border text-muted-foreground hover:bg-accent/40',
-                  future && !on && 'opacity-60')}>
-                {p.status === 'closed'
-                  ? <Lock className="h-3 w-3 shrink-0 opacity-70" />
-                  : <Unlock className="h-3 w-3 shrink-0 text-amber-500" />}
-                {MONTHS[p.month - 1]} {p.year}
-                {future && <span className="text-[10px] text-amber-600 dark:text-amber-400">в будущем</span>}
-              </button>
-            )
-          })}
+                c.future && !c.on && 'opacity-60')}>
+              {/* Замок закрыт только когда закрыты ВСЕ месяцы охвата: квартал с
+                  одним открытым месяцем не сдан, как бы ни выглядели два других. */}
+              {c.closed
+                ? <Lock className="h-3 w-3 shrink-0 opacity-70" />
+                : <Unlock className="h-3 w-3 shrink-0 text-amber-500" />}
+              {c.label}
+              {c.future && <span className="text-[10px] text-amber-600 dark:text-amber-400">в будущем</span>}
+            </button>
+          ))}
         </div>
       )}
 
+      {/* ── Сроки, которые задаёт закон, а не система ── */}
+      {active && scope !== 'month' && (
+        <Card>
+          <CardContent className="pt-4">
+            <div className="mb-3 flex items-center gap-2">
+              <CalendarCheck className="h-4 w-4 text-primary" />
+              <h3 className={H3}>Сроки отчётности</h3>
+            </div>
+            <ul className="space-y-1.5">
+              {(scope === 'quarter'
+                ? QUARTER_DEADLINES(active.year, activeQuarter!)
+                : YEAR_DEADLINES(active.year)
+              ).map((d) => (
+                <li key={d.what} className="flex items-baseline justify-between gap-3 text-sm">
+                  <span>{d.what}</span>
+                  <span className="tabular-nums text-muted-foreground">{d.when}</span>
+                </li>
+              ))}
+            </ul>
+            <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
+              Даты нормативные: система их не считает и не следит за переносами на выходные —
+              она показывает, готов ли период к тому, чтобы эти сроки было чем закрывать.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
       {active && <PeriodReadinessCard data={readinessDocs.data} loading={readinessDocs.isLoading}
-        month={`${MONTHS[active.month - 1]} ${active.year}`}
+        month={scope === 'month' ? `${MONTHS[active.month - 1]} ${active.year}`
+          : scope === 'quarter' ? `${activeQuarter} кв. ${active.year}`
+          : `${active.year} год`}
         goDocs={() => setCoreMode('acc_docs', 'docs_1c')} />}
 
       {active && (
@@ -299,8 +461,28 @@ export function AccountingPeriodPanel() {
                 </div>
               ) : map.stations.length === 0 ? (
                 <p className="py-4 text-sm text-muted-foreground">
-                  За этот месяц смен нет — считать полноту не по чему.
+                  За этот период смен нет — считать полноту не по чему.
                 </p>
+              ) : !dayMapAllowed ? (
+                /* Квартал и год: сетка на 90–365 клеток нечитаема, тот же факт
+                   полезнее словами — где и сколько потеряно. */
+                <div className="space-y-1.5">
+                  {monthGaps.length === 0 ? (
+                    <p className="py-2 text-sm text-muted-foreground">
+                      Пропусков по дням нет во всём периоде.
+                    </p>
+                  ) : monthGaps.map((g) => (
+                    <div key={g.key} className="flex items-baseline justify-between gap-3 text-sm">
+                      <span>{MONTHS[Number(g.key.slice(5, 7)) - 1]} {g.key.slice(0, 4)}</span>
+                      <span className="text-muted-foreground">
+                        {fmtN(g.days)} дн. без данных · станций затронуто {fmtN(g.stations)}
+                      </span>
+                    </div>
+                  ))}
+                  <p className="pt-1 text-[11px] text-muted-foreground">
+                    Карта по дням — в масштабе месяца: 90 клеток в ряд ещё читаются, 365 уже нет.
+                  </p>
+                </div>
               ) : (
                 <>
                   <div className="overflow-x-auto">
@@ -353,7 +535,11 @@ export function AccountingPeriodPanel() {
             <CardContent className="pt-4">
               <div className="mb-3 flex items-center gap-2">
                 <AlertTriangle className="h-4 w-4 text-primary" />
-                <h3 className={H3}>Что мешает закрыть месяц</h3>
+                <h3 className={H3}>
+                  {scope === 'month' ? 'Что мешает закрыть месяц'
+                    : scope === 'quarter' ? 'Что мешает сдать квартал'
+                    : 'Что мешает закрыть год'}
+                </h3>
               </div>
               <ul className="space-y-1.5 text-sm">
                 {gaps.length === 0 ? (
