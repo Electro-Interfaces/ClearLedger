@@ -18,7 +18,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import assert_company_member, get_current_user
 from app.database import get_db
-from app.models import AccountingDoc, Period, User
+from app.models import (
+    AccountingDoc, OneCConnection, OneCSyncLog, Period, StockOnHand, User,
+)
 
 router = APIRouter(prefix="/periods", tags=["Учётные периоды"])
 
@@ -129,6 +131,121 @@ async def periods_summary(
         totalDocs=sum(b["count"] for b in doc_buckets.values()),
         openCount=sum(1 for it in items if it.status == "open"),
         closedCount=sum(1 for it in items if it.status == "closed"),
+    )
+
+
+# ─── GET /periods/readiness ──────────────────────────────────
+
+class UnpostedRow(BaseModel):
+    docType: str
+    count: int
+
+
+class PeriodReadiness(BaseModel):
+    year: int
+    month: int
+    docsInPeriod: int
+    unposted: list[UnpostedRow]
+    unpostedTotal: int
+    lastDocDate: str | None = None
+    lastSyncAt: str | None = None
+    lastSyncStatus: str | None = None
+    negativePositions: int
+    negativeWarehouses: int
+    stockSnapshotAt: str | None = None
+    futureDated: int
+    backdatedIntoClosed: int
+
+
+@router.get("/readiness", response_model=PeriodReadiness)
+async def period_readiness(
+    company_id: str = Query(...),
+    year: int = Query(...),
+    month: int = Query(..., ge=1, le=12),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Готовность периода к закрытию — то, что бухгалтер проверяет руками.
+
+    Четыре вопроса, на каждый свой счётчик:
+
+    1. Свежие ли данные. Экраны периода складывают то, что доехало из БП; если
+       обратный поток стоит месяц, сводка будет выглядеть правдоподобно и врать.
+       Поэтому дата последней синхронизации и дата самого свежего документа —
+       первое, что показывается.
+    2. Всё ли проведено. Документ со статусом «Записан» проводок не делает:
+       период с непроведёнными закрыт только на бумаге.
+    3. Нет ли отрицательных остатков. Минус на складе роняет расчёт
+       себестоимости при закрытии месяца в БП. Считаем по последнему снимку —
+       он не привязан к периоду, и подпись на экране об этом говорит.
+    4. Нет ли документов не из своего времени: дата в будущем и документы,
+       заведённые в уже закрытый период. Это классические ошибки ввода,
+       которые всплывают на сдаче отчётности.
+    """
+    cid = await assert_company_member(company_id, current_user, db)
+    prefix = f"{year}-{month:02d}"
+
+    in_period = (AccountingDoc.company_id == cid, AccountingDoc.date.like(f"{prefix}%"))
+
+    docs_in_period = (await db.execute(
+        select(func.count(AccountingDoc.id)).where(*in_period)
+    )).scalar_one() or 0
+
+    unposted_rows = (await db.execute(
+        select(AccountingDoc.doc_type, func.count(AccountingDoc.id))
+        .where(*in_period, AccountingDoc.status_1c != "Проведён")
+        .group_by(AccountingDoc.doc_type)
+        .order_by(func.count(AccountingDoc.id).desc())
+    )).all()
+    unposted = [UnpostedRow(docType=t or "—", count=int(c or 0)) for t, c in unposted_rows]
+
+    last_doc_date = (await db.execute(
+        select(func.max(AccountingDoc.date)).where(AccountingDoc.company_id == cid)
+    )).scalar_one_or_none()
+
+    # Последняя синхронизация именно ИЗ 1С: выгрузка наверх о свежести данных
+    # ничего не говорит.
+    sync_row = (await db.execute(
+        select(OneCSyncLog.finished_at, OneCSyncLog.started_at, OneCSyncLog.status)
+        .join(OneCConnection, OneCConnection.id == OneCSyncLog.connection_id)
+        .where(OneCConnection.company_id == cid, OneCSyncLog.direction == "import")
+        .order_by(OneCSyncLog.started_at.desc())
+        .limit(1)
+    )).first()
+
+    neg = (await db.execute(
+        select(func.count(StockOnHand.id), func.count(func.distinct(StockOnHand.warehouse_code)))
+        .where(StockOnHand.company_id == cid, StockOnHand.quantity < 0)
+    )).first()
+    snapshot_at = (await db.execute(
+        select(func.max(StockOnHand.snapshot_at)).where(StockOnHand.company_id == cid)
+    )).scalar_one_or_none()
+
+    today = datetime.now(timezone.utc).date().isoformat()
+    future_dated = (await db.execute(
+        select(func.count(AccountingDoc.id))
+        .where(AccountingDoc.company_id == cid, AccountingDoc.date > today)
+    )).scalar_one() or 0
+
+    backdated = (await db.execute(
+        select(func.count(AccountingDoc.id))
+        .where(AccountingDoc.company_id == cid, AccountingDoc.period_status == "closed",
+               AccountingDoc.status_1c != "Проведён")
+    )).scalar_one() or 0
+
+    return PeriodReadiness(
+        year=year, month=month,
+        docsInPeriod=int(docs_in_period),
+        unposted=unposted,
+        unpostedTotal=sum(u.count for u in unposted),
+        lastDocDate=last_doc_date,
+        lastSyncAt=_ts(sync_row[0] or sync_row[1]) if sync_row else None,
+        lastSyncStatus=sync_row[2] if sync_row else None,
+        negativePositions=int(neg[0] or 0) if neg else 0,
+        negativeWarehouses=int(neg[1] or 0) if neg else 0,
+        stockSnapshotAt=_ts(snapshot_at),
+        futureDated=int(future_dated),
+        backdatedIntoClosed=int(backdated),
     )
 
 

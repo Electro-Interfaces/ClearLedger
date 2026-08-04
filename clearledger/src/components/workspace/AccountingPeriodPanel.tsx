@@ -48,6 +48,34 @@ interface PeriodRow {
 }
 interface PeriodsSummary { items: PeriodRow[]; totalDocs: number }
 
+/** Готовность периода к закрытию — четыре проверки бухгалтера (см. periods_router). */
+interface PeriodReadiness {
+  year: number
+  month: number
+  docsInPeriod: number
+  unposted: { docType: string; count: number }[]
+  unpostedTotal: number
+  lastDocDate: string | null
+  lastSyncAt: string | null
+  lastSyncStatus: string | null
+  negativePositions: number
+  negativeWarehouses: number
+  stockSnapshotAt: string | null
+  futureDated: number
+  backdatedIntoClosed: number
+}
+
+/** «12 мая, 14 дней назад» — возраст важнее самой даты. */
+function ageOf(iso: string | null): { text: string; stale: boolean } {
+  if (!iso) return { text: 'не запускалась ни разу', stale: true }
+  const d = new Date(iso)
+  const days = Math.floor((Date.now() - d.getTime()) / 86_400_000)
+  const date = d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })
+  if (days <= 0) return { text: `${date}, сегодня`, stale: false }
+  if (days === 1) return { text: `${date}, вчера`, stale: false }
+  return { text: `${date}, ${days} дн. назад`, stale: days > 3 }
+}
+
 const pad = (n: number) => String(n).padStart(2, '0')
 const monthRange = (year: number, month: number) => ({
   from: `${year}-${pad(month)}-01`,
@@ -93,6 +121,12 @@ export function AccountingPeriodPanel() {
   const recon = useQuery({
     queryKey: ['reconciliation-summary', companyId],
     queryFn: () => getReconciliationSummary(companyId),
+  })
+  const readinessDocs = useQuery({
+    queryKey: ['period-readiness', companyId, active?.year, active?.month],
+    queryFn: () => get<PeriodReadiness>('/api/periods/readiness',
+      { company_id: companyId, year: String(active!.year), month: String(active!.month) }),
+    enabled: !!active,
   })
 
   // Карта полноты: станция → день → состояние. Дни берём все, что есть в месяце,
@@ -216,6 +250,10 @@ export function AccountingPeriodPanel() {
           )}
         </CardContent>
       </Card>
+
+      {active && <PeriodReadinessCard data={readinessDocs.data} loading={readinessDocs.isLoading}
+        month={`${MONTHS[active.month - 1]} ${active.year}`}
+        goDocs={() => setCoreMode('acc_docs', 'docs_1c')} />}
 
       {active && (
         <>
@@ -368,6 +406,102 @@ export function AccountingPeriodPanel() {
         </>
       )}
     </div>
+  )
+}
+
+/**
+ * Готовность периода к закрытию: четыре проверки, которые бухгалтер делает руками.
+ *
+ * Свежесть данных стоит первой не для порядка. Всё остальное на экране считается
+ * из того, что доехало из БП; если обратный поток стоит месяц, сводка сложится и
+ * будет выглядеть правдоподобно. Пока «в БП за август ноль документов» не сказано
+ * вслух, любая цифра ниже вводит в заблуждение.
+ */
+function PeriodReadinessCard({ data, loading, month, goDocs }: {
+  data?: PeriodReadiness; loading: boolean; month: string; goDocs: () => void
+}) {
+  const sync = ageOf(data?.lastSyncAt ?? null)
+  const noDocs = (data?.docsInPeriod ?? 0) === 0
+  const checks = [
+    {
+      bad: noDocs || sync.stale,
+      title: noDocs
+        ? `Документов 1С за ${month}: нет`
+        : `Документов 1С за ${month}: ${fmtN(data!.docsInPeriod)}`,
+      detail: `Синхронизация из БП — ${sync.text}` +
+        (data?.lastDocDate ? `; самый свежий документ ${data.lastDocDate}` : ''),
+      go: undefined as (() => void) | undefined,
+    },
+    {
+      bad: (data?.unpostedTotal ?? 0) > 0,
+      title: (data?.unpostedTotal ?? 0) > 0
+        ? `Не проведено документов: ${fmtN(data!.unpostedTotal)}`
+        : 'Все документы периода проведены',
+      detail: (data?.unposted ?? []).map((u) => `${u.docType} — ${u.count}`).join(' · ')
+        || 'Документ со статусом «Записан» проводок не делает: период с такими закрыт только на бумаге.',
+      go: (data?.unpostedTotal ?? 0) > 0 ? goDocs : undefined,
+    },
+    {
+      bad: (data?.negativePositions ?? 0) > 0,
+      title: (data?.negativePositions ?? 0) > 0
+        ? `Отрицательные остатки: ${fmtN(data!.negativePositions)} позиций на ${fmtN(data!.negativeWarehouses)} складах`
+        : 'Отрицательных остатков нет',
+      detail: 'Минус на складе роняет расчёт себестоимости при закрытии месяца в БП. '
+        + (data?.stockSnapshotAt
+          ? `Снимок остатков от ${new Date(data.stockSnapshotAt).toLocaleDateString('ru-RU')} — он не привязан к периоду.`
+          : 'Снимок остатков ещё не поднимался.'),
+      go: undefined,
+    },
+    {
+      bad: (data?.futureDated ?? 0) > 0 || (data?.backdatedIntoClosed ?? 0) > 0,
+      title: (data?.futureDated ?? 0) + (data?.backdatedIntoClosed ?? 0) > 0
+        ? 'Документы не из своего времени'
+        : 'Даты документов в порядке',
+      detail: [
+        (data?.futureDated ?? 0) > 0 ? `${fmtN(data!.futureDated)} с датой в будущем` : '',
+        (data?.backdatedIntoClosed ?? 0) > 0
+          ? `${fmtN(data!.backdatedIntoClosed)} непроведённых в уже закрытых периодах` : '',
+      ].filter(Boolean).join(' · ') || 'Ни одного документа за пределами своего периода.',
+      go: (data?.futureDated ?? 0) > 0 ? goDocs : undefined,
+    },
+  ]
+
+  return (
+    <Card>
+      <CardContent className="pt-4">
+        <div className="mb-3 flex items-center gap-2">
+          <CheckCircle2 className="h-4 w-4 text-primary" />
+          <h3 className={H3}>Готовность периода</h3>
+        </div>
+        {loading ? (
+          <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" /> Проверяем период…
+          </div>
+        ) : !data ? (
+          <p className="py-4 text-sm text-muted-foreground">Проверки недоступны: нет ответа от сервера.</p>
+        ) : (
+          <ul className="space-y-2.5">
+            {checks.map((c) => (
+              <li key={c.title} className="flex items-start gap-2">
+                {c.bad
+                  ? <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                  : <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />}
+                <div className="min-w-0 flex-1">
+                  <div className={cn('text-sm', !c.bad && 'text-muted-foreground')}>{c.title}</div>
+                  <div className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">{c.detail}</div>
+                </div>
+                {c.go && (
+                  <button onClick={c.go}
+                    className="shrink-0 rounded-md px-2 py-1 text-[11px] text-primary transition-colors hover:bg-accent/40">
+                    разобрать
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
   )
 }
 
