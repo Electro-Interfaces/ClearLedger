@@ -19,6 +19,7 @@
 
 import type { ComponentType } from 'react'
 import {
+  MonitorSmartphone,
   LayoutDashboard, TrendingUp, Package, Tag, UtensilsCrossed,
   Plug, FileOutput,
   Boxes, Barcode, FolderTree, ChefHat, Truck,
@@ -41,16 +42,20 @@ export type StoreStatus = 'ready' | 'wip' | 'planned'
  * `store` остаётся кодом первого раздела: по нему идут старые ссылки, подписи режимов и
  * ключ доступа. Раздел задаётся полем `section` записи — второго источника правды нет.
  */
-export type StoreMode = 'store' | 'store_stock' | 'store_closing' | 'store_catalog' | 'store_marking'
+export type StoreMode = 'store' | 'store_catering' | 'store_stock' | 'store_closing' | 'store_catalog' | 'store_marking' | 'store_network'
 
 export const STORE_SECTIONS: {
   mode: StoreMode; label: string; icon: ComponentType<{ className?: string }>
 }[] = [
   { mode: 'store', label: 'Торговля', icon: ShoppingCart },
+  { mode: 'store_catering', label: 'Общепит', icon: UtensilsCrossed },
   { mode: 'store_stock', label: 'Склад', icon: Warehouse },
   { mode: 'store_closing', label: 'Закрытие', icon: FileOutput },
   { mode: 'store_catalog', label: 'Каталог', icon: Boxes },
   { mode: 'store_marking', label: 'Маркировка', icon: QrCode },
+  // Станции — свой раздел, а не хвост «Закрытия»: здесь не закрывают месяц, а
+  // смотрят парк АЗС и заходят работать на конкретную станцию.
+  { mode: 'store_network', label: 'Станции', icon: RadioTower },
 ]
 
 export const STORE_MODES: string[] = STORE_SECTIONS.map((s) => s.mode)
@@ -91,7 +96,7 @@ export interface StoreView {
 }
 
 export const STORE_VIEWS: StoreView[] = [
-  /* ───────────────────── ТОРГОВЛЯ — деньги и спрос ───────────────────── */
+  /* ───────────────────── ТОРГОВЛЯ — сопутка, деньги и спрос ───────────────────── */
   {
     key: 'overview', label: 'Обзор', section: 'store', icon: LayoutDashboard,
     title: 'Обзор',
@@ -153,7 +158,7 @@ export const STORE_VIEWS: StoreView[] = [
     ],
   },
   {
-    key: 'menu', label: 'Общепит', section: 'store', icon: UtensilsCrossed,
+    key: 'menu', label: 'Меню и экономика', section: 'store_catering', icon: UtensilsCrossed,
     title: 'Общепит',
     subtitle: 'Инструмент менеджера: прибыльность блюд и управление меню. Данные 208: 23 блюда, фудкост 39%, маржа 61%. Клик по блюду — состав ТТК и динамика продаж.',
     status: 'ready',
@@ -275,7 +280,7 @@ export const STORE_VIEWS: StoreView[] = [
     ],
   },
   {
-    key: 'stations', label: 'Станции', section: 'store_closing', icon: RadioTower,
+    key: 'stations', label: 'Парк станций', section: 'store_network', icon: RadioTower,
     title: 'Станции',
     subtitle: 'Парк агентов АЗС: связь, версия кода, очередь пакетов. Станция ведёт учёт локально и работает при мёртвой связи — здесь видно, какие данные ещё в пути и где код отстал.',
     status: 'ready',
@@ -284,6 +289,17 @@ export const STORE_VIEWS: StoreView[] = [
       { name: 'Версия кода', desc: 'Версия агента против той, что центр считает текущей (EDGE_DESIRED_AGENT_VERSION). Расхождение — не авария: обновление идёт по команде, а не автоматически.' },
       { name: 'Очередь пакетов', desc: 'Сколько фактов станция накопила и ещё не отдала: при обрыве связи очередь растёт, после восстановления уходит сама.' },
       { name: 'Последняя смена и снимок', desc: 'Номер последней собранной смены и время последнего снимка остатков 1С — видно, отстаёт ли станция по данным.' },
+    ],
+  },
+  {
+    key: 'station_console', label: 'Рабочее место АЗС', section: 'store_network', icon: MonitorSmartphone,
+    title: 'Рабочее место АЗС',
+    subtitle: 'Работа на конкретной станции из центра: приёмка, инвентаризация, остатки, карточки. Это не копия экранов, а сам агент АЗС — источник правды станции.',
+    status: 'ready',
+    blocks: [
+      { name: 'Как это работает', desc: 'Станция за CGNAT, входящих соединений к ней нет. Запрос идёт через хаб TradeLink по overlay — тому самому каналу, по которому станция и так на связи.', source: 'хаб TradeLink · /integration/stations/{id}/console' },
+      { name: 'Кто работает', desc: 'Ваше имя уезжает на станцию и становится автором: цена, заявка и документ помечаются «(из центра)». Пересчёт, сделанный не у полки, — другая работа, и сверка обязана это видеть.' },
+      { name: 'Когда недоступно', desc: 'Станция офлайн — открывать нечего: работа идёт на её локальной базе, и без канала центр до неё не дотянется. Данные при этом не теряются, станция копит их у себя.' },
     ],
   },
   /* ───────────────────── КАТАЛОГ — товар как карточка ───────────────────── */
@@ -345,7 +361,7 @@ export const STORE_VIEWS: StoreView[] = [
     ],
   },
   {
-    key: 'recipes', label: 'Рецептуры', section: 'store_catalog', icon: ChefHat,
+    key: 'recipes', label: 'Рецептуры и ТТК', section: 'store_catering', icon: ChefHat,
     title: 'Рецептуры',
     subtitle: 'Рецептуры блюд общепита: состав, выход, ингредиенты. Основа расчёта себестоимости и списания сырья.',
     status: 'ready',
