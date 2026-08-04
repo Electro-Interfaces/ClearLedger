@@ -97,10 +97,22 @@ export function AccountingPeriodPanel() {
     queryFn: () => get<PeriodsSummary>('/api/periods/summary', { company_id: companyId }),
   })
 
-  // По умолчанию — самый свежий период: с него человек и начинает, закрытые месяцы
-  // смотрят реже и по поводу.
+  // По умолчанию — текущий месяц, а если его в данных нет, последний НЕ будущий.
+  //
+  // «Самый свежий период» брать нельзя: один документ с ошибочной датой создаёт
+  // целый месяц в будущем (на стенде так появился ноябрь 2026 с единственным
+  // документом), и экран открывался на месяце, которого ещё не было, — готовность
+  // и полнота считались ни для чего.
   const items = periods.data?.items ?? []
-  const active = selected ?? (items[0] ? { year: items[0].year, month: items[0].month } : null)
+  const now = new Date()
+  const currentKey = { year: now.getFullYear(), month: now.getMonth() + 1 }
+  const isFuture = (p: { year: number; month: number }) =>
+    p.year > currentKey.year || (p.year === currentKey.year && p.month > currentKey.month)
+  const fallback = items.find((p) => p.year === currentKey.year && p.month === currentKey.month)
+    ?? items.find((p) => !isFuture(p))
+  const active = selected ?? (fallback
+    ? { year: fallback.year, month: fallback.month }
+    : (items.length ? currentKey : null))
   const range = active ? monthRange(active.year, active.month) : null
 
   const fuelShifts = useQuery({
@@ -212,23 +224,33 @@ export function AccountingPeriodPanel() {
               <table className="w-full min-w-[560px] text-sm">
                 <thead>
                   <tr className="border-b border-border/60 text-[11px] text-muted-foreground">
-                    <th className="py-1.5 text-left font-medium">Месяц</th>
-                    <th className="py-1.5 text-left font-medium">Состояние</th>
-                    <th className="py-1.5 text-right font-medium">Документов 1С</th>
-                    <th className="py-1.5 text-left font-medium">Данные с</th>
-                    <th className="py-1.5 text-left font-medium">по</th>
+                    <th className="py-1.5 pr-4 text-left font-medium">Месяц</th>
+                    <th className="py-1.5 pr-4 text-left font-medium">Состояние</th>
+                    <th className="py-1.5 pr-6 text-right font-medium">Документов 1С</th>
+                    <th className="py-1.5 text-left font-medium">Данные</th>
                   </tr>
                 </thead>
                 <tbody>
                   {items.map((p) => {
                     const on = active?.year === p.year && active?.month === p.month
+                    const future = isFuture(p)
                     return (
                       <tr key={`${p.year}-${p.month}`}
                         onClick={() => setSelected({ year: p.year, month: p.month })}
                         className={cn('cursor-pointer border-b border-border/30 transition-colors hover:bg-accent/40',
                           on && 'bg-primary/10')}>
-                        <td className="py-1.5 font-medium">{MONTHS[p.month - 1]} {p.year}</td>
-                        <td className="py-1.5">
+                        <td className={cn('py-1.5 pr-4 font-medium', future && 'text-muted-foreground')}>
+                          {MONTHS[p.month - 1]} {p.year}
+                          {/* Месяц из будущего — не период, а след ошибочной даты в
+                              документе. Молча показывать его в одном ряду с рабочими
+                              месяцами значит предлагать закрывать несуществующее. */}
+                          {future && (
+                            <span className="ml-2 text-[10px] font-normal text-amber-600 dark:text-amber-400">
+                              дата в будущем
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-1.5 pr-4">
                           <span className={cn('inline-flex items-center gap-1.5 text-xs',
                             p.status === 'closed'
                               ? 'text-muted-foreground'
@@ -238,9 +260,10 @@ export function AccountingPeriodPanel() {
                               : <><Unlock className="h-3 w-3" />открыт</>}
                           </span>
                         </td>
-                        <td className="py-1.5 text-right tabular-nums">{fmtN(p.docsCount)}</td>
-                        <td className="py-1.5 tabular-nums text-muted-foreground">{p.minDate ?? '—'}</td>
-                        <td className="py-1.5 tabular-nums text-muted-foreground">{p.maxDate ?? '—'}</td>
+                        <td className="py-1.5 pr-6 text-right tabular-nums">{fmtN(p.docsCount)}</td>
+                        <td className="py-1.5 tabular-nums text-muted-foreground">
+                          {p.minDate ?? '—'} — {p.maxDate ?? '—'}
+                        </td>
                       </tr>
                     )
                   })}
