@@ -9,7 +9,7 @@ import hashlib
 import json
 import math
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timezone
 
 import os
 
@@ -261,6 +261,34 @@ async def store_exchange(
         i["projects_docs"] = i["kind"] not in ("stock", "station-nsi", "station-recipes")
         i["unprojected"] = int(i["packets"]) - int(i["projected"])
 
+    # Доступность канала по станциям: минуты со следом телеметрии против минут
+    # с момента, как станция впервые вышла на связь.
+    uptime = {r["station_id"]: dict(r) for r in (await db.execute(text("""
+        SELECT station_id, count(DISTINCT date_trunc('minute', at)) AS minutes,
+               min(at) AS first_at
+        FROM edge_heartbeats
+        WHERE company_id = :cid AND at >= :d1 AND at < (CAST(:d2 AS date) + 1)
+        GROUP BY station_id
+    """), p)).mappings().all()}
+
+    # Что станции прислали на решение центра: карточки и поставщики, заведённые
+    # при мёртвой связи, заявки об ошибке в сетевой карточке, цены, назначенные
+    # на месте. Сами экраны живут в «Каталоге» — здесь сигнал, что там ждут.
+    нси = {r["вид"]: int(r["n"]) for r in (await db.execute(text("""
+        SELECT 'карточки' AS вид, count(*) AS n FROM edge.item_draft
+          WHERE company_id = :cid AND resolved_at IS NULL
+        UNION ALL
+        SELECT 'поставщики', count(*) FROM edge.partner_draft
+          WHERE company_id = :cid AND resolved_at IS NULL
+        UNION ALL
+        SELECT 'заявки', count(*) FROM edge.nsi_proposal
+          WHERE company_id = :cid AND resolved_at IS NULL
+        UNION ALL
+        SELECT 'цены станций', count(*) FROM edge.station_price_change
+          WHERE company_id = :cid
+            AND changed_at >= :d1 AND changed_at < (CAST(:d2 AS date) + 1)
+    """), {"cid": cid, "d1": d1, "d2": d2})).mappings().all()}
+
     agents = (await db.execute(
         select(EdgeAgent).where(EdgeAgent.company_id == cid).order_by(EdgeAgent.station_id)
     )).scalars().all()
@@ -291,6 +319,7 @@ async def store_exchange(
             "down_waiting": int(d.get("waiting") or 0),
             "down_unacked": int(d.get("unacked") or 0),
             "down_acked": int(d.get("acked") or 0),
+            "uptime_pct": _uptime_pct(uptime.get(a.station_id), d1, d2, now),
         })
 
     # Станции, чьи пакеты в базе есть, а телеметрии нет: так выглядит АЗС, с
@@ -331,7 +360,32 @@ async def store_exchange(
         "stations": stations,
         "recent": recent,
         "ingest": ingest,
+        "nsi": нси,
     }
+
+
+def _uptime_pct(строка, d1: date, d2: date, now: datetime) -> float | None:
+    """Доступность станции за период, %. None — следа телеметрии ещё нет."""
+    if not строка or not строка.get("minutes"):
+        return None
+    всего = _minutes_since(строка, d1, d2, now)
+    if всего <= 0:
+        return None
+    return round(min(100.0, int(строка["minutes"]) / всего * 100), 1)
+
+
+def _minutes_since(строка, d1: date, d2: date, now: datetime) -> int:
+    """Знаменатель доступности: минуты периода, когда станция уже была на связи.
+
+    Считать от начала периода нечестно — агента могли поставить позже, и
+    доступность вышла бы 3% там, где канал не падал ни разу.
+    """
+    начало = строка["first_at"] if строка and строка["first_at"] else None
+    старт = datetime.combine(d1, time.min, tzinfo=timezone.utc)
+    if начало and начало > старт:
+        старт = начало
+    конец = min(now, datetime.combine(d2, time.max, tzinfo=timezone.utc))
+    return max(0, int((конец - старт).total_seconds() // 60))
 
 
 @router.get("/exchange/{station_id}")
@@ -409,6 +463,35 @@ async def store_exchange_station(
                       "применено" if d["acked_at"] else
                       "доставлено" if d["delivered_at"] else "ждёт станции")
 
+    # Доступность канала — по следу телеметрии, а не по пакетам: пакеты идут
+    # неравномерно (снимок раз в час), и по ним нельзя сказать, была ли связь
+    # между ними. Минута с heartbeat считается доступной.
+    доступность = (await db.execute(text("""
+        SELECT count(DISTINCT date_trunc('minute', at)) AS minutes,
+               min(at) AS first_at, max(at) AS last_at
+        FROM edge_heartbeats
+        WHERE company_id = :cid AND station_id = :st
+          AND at >= :d1 AND at < (CAST(:d2 AS date) + 1)
+    """), p)).mappings().first()
+
+    # Обрыв = пауза между соседними heartbeat дольше порога офлайна. Это и
+    # есть «станция была недоступна», в отличие от «сеанса обмена».
+    обрывы = [dict(r) for r in (await db.execute(text(f"""
+        SELECT prev AS started, at AS ended,
+               round(EXTRACT(epoch FROM at - prev) / 60) AS minutes
+        FROM (
+            SELECT at, lag(at) OVER (ORDER BY at) AS prev
+            FROM edge_heartbeats
+            WHERE company_id = :cid AND station_id = :st
+              AND at >= :d1 AND at < (CAST(:d2 AS date) + 1)
+        ) t
+        WHERE prev IS NOT NULL
+          AND at - prev > make_interval(secs => {STATION_OFFLINE_AFTER})
+        ORDER BY at - prev DESC LIMIT 20
+    """), p)).mappings().all()]
+    for о in обрывы:
+        о["minutes"] = int(о["minutes"] or 0)
+
     agent = (await db.execute(select(EdgeAgent).where(
         EdgeAgent.company_id == cid, EdgeAgent.station_id == station_id
     ))).scalar_one_or_none()
@@ -450,6 +533,17 @@ async def store_exchange_station(
             "down_waiting": sum(1 for d in downlink if d["state"] == "ждёт станции"),
             "down_unacked": sum(1 for d in downlink if d["state"] == "доставлено"),
             "down_acked": sum(1 for d in downlink if d["state"] == "применено"),
+        },
+        # Доля минут периода, в которые агент выходил на связь. Считается от
+        # первого heartbeat станции: до него канала не было не потому, что
+        # связь падала, а потому, что агента ещё не поставили.
+        "availability": {
+            "minutes_seen": int(доступность["minutes"] or 0) if доступность else 0,
+            "minutes_total": _minutes_since(доступность, d1, d2, now) if доступность else 0,
+            "first_at": доступность["first_at"] if доступность else None,
+            "last_at": доступность["last_at"] if доступность else None,
+            "outages": обрывы,
+            "outage_minutes": sum(о["minutes"] for о in обрывы),
         },
         "sessions": sessions,
         "by_kind": by_kind,
@@ -792,6 +886,121 @@ class AgentVersionIn(BaseModel):
     version: str
 
 
+class StorageCleanupIn(BaseModel):
+    """Правило прореживания сырья. Значения по умолчанию — рабочие."""
+    thin_after_days: int = 14
+    heartbeat_days: int = 90
+    dry_run: bool = True
+
+
+@router.get("/storage")
+async def store_storage(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Сколько занимает сырьё станций и что можно проредить.
+
+    Снимок остатков приходит каждый час и весит около полумегабайта: за месяц
+    одна станция откладывает треть гигабайта. Документы и смены — первичка,
+    из них строится учёт, их не трогаем; снимок же нужен свежий, а история
+    снимков нужна только для разбирательств, и одного за день хватает.
+    """
+    cid: uuid.UUID = await scope_company_id(user, db)
+    виды = [dict(r) for r in (await db.execute(text("""
+        SELECT kind, count(*) AS packets, coalesce(sum(size_bytes), 0) AS bytes,
+               min(received_at) AS oldest, max(received_at) AS newest
+        FROM edge_packets WHERE company_id = :cid
+        GROUP BY kind ORDER BY sum(size_bytes) DESC NULLS LAST
+    """), {"cid": cid})).mappings().all()]
+    for v in виды:
+        v["label"] = PACKET_KIND_LABEL.get(v["kind"], v["kind"])
+        v["keep"] = v["kind"] != "stock"
+
+    станции = [dict(r) for r in (await db.execute(text("""
+        SELECT station_id, count(*) AS packets, coalesce(sum(size_bytes), 0) AS bytes
+        FROM edge_packets WHERE company_id = :cid
+        GROUP BY station_id ORDER BY station_id
+    """), {"cid": cid})).mappings().all()]
+
+    heartbeats = (await db.execute(text("""
+        SELECT count(*) AS rows, min(at) AS oldest FROM edge_heartbeats
+        WHERE company_id = :cid
+    """), {"cid": cid})).mappings().first()
+
+    return {
+        "kinds": виды,
+        "stations": станции,
+        "total_bytes": sum(int(v["bytes"]) for v in виды),
+        "heartbeats": {"rows": int(heartbeats["rows"] or 0),
+                       "oldest": heartbeats["oldest"] if heartbeats else None},
+    }
+
+
+@router.post("/storage/cleanup")
+async def store_storage_cleanup(
+    body: StorageCleanupIn,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Проредить историю снимков и след телеметрии.
+
+    Снимок остатков документов учёта не порождает — его проекция ничего не
+    строит, поэтому лишние снимки удаляются без последствий для отчётов.
+    Остаётся самый свежий снимок каждой станции за каждый день; свежее
+    указанного возраста не трогаем вовсе.
+
+    По умолчанию это предпросмотр: сначала показать, сколько уйдёт, и только
+    потом удалять — данные станции восстановить неоткуда.
+    """
+    cid: uuid.UUID = await scope_company_id(user, db)
+    if not user.is_superadmin:
+        m = (await db.execute(select(UserCompany).where(
+            UserCompany.user_id == user.id, UserCompany.company_id == cid))).scalar_one_or_none()
+        if m is None or m.role != "admin":
+            raise HTTPException(403, "Чистку хранилища выполняет администратор компании")
+    if body.thin_after_days < 3 or body.heartbeat_days < 7:
+        raise HTTPException(400, "Слишком короткое хранение: минимум 3 дня для снимков "
+                                 "и 7 дней для телеметрии")
+
+    p = {"cid": cid, "thin": body.thin_after_days, "hb": body.heartbeat_days}
+    лишние = """
+        SELECT id, size_bytes FROM (
+            SELECT id, size_bytes, row_number() OVER (
+                       PARTITION BY station_id, received_at::date
+                       ORDER BY received_at DESC) AS n
+            FROM edge_packets
+            WHERE company_id = :cid AND kind = 'stock'
+              AND received_at < now() - make_interval(days => :thin)
+        ) t WHERE n > 1
+    """
+    оценка = (await db.execute(text(f"""
+        SELECT count(*) AS packets, coalesce(sum(size_bytes), 0) AS bytes FROM ({лишние}) x
+    """), p)).mappings().first()
+    hb = (await db.execute(text("""
+        SELECT count(*) AS rows FROM edge_heartbeats
+        WHERE company_id = :cid AND at < now() - make_interval(days => :hb)
+    """), p)).mappings().first()
+
+    итог = {
+        "dry_run": body.dry_run,
+        "snapshots": int(оценка["packets"] or 0),
+        "bytes": int(оценка["bytes"] or 0),
+        "heartbeats": int(hb["rows"] or 0),
+        "thin_after_days": body.thin_after_days,
+        "heartbeat_days": body.heartbeat_days,
+    }
+    if body.dry_run:
+        return итог
+
+    await db.execute(text(f"DELETE FROM edge_packets WHERE id IN (SELECT id FROM ({лишние}) d)"), p)
+    await db.execute(text("""
+        DELETE FROM edge_heartbeats
+        WHERE company_id = :cid AND at < now() - make_interval(days => :hb)
+    """), p)
+    await db.commit()
+    return итог
+
+
 @router.get("/agent-versions")
 async def store_agent_versions(
     user: User = Depends(get_current_user),
@@ -984,7 +1193,19 @@ async def store_station_health(
     доезжали до людей письмом; экран снимает посредника.
     """
     cid = await scope_company_id(user, db)
-    return await edge_service.alerts(db, cid, station_id)
+    отчёт = await edge_service.alerts(db, cid, station_id)
+
+    # Ушедшие находки — тоже ответ: «касса не пробьёт» пропало вчера значит,
+    # что кто-то нажал «Загрузить ККМ», и повторять письмо не нужно.
+    отчёт["resolved"] = [dict(r) for r in (await db.execute(text("""
+        SELECT topic, level, text, first_seen, last_seen, resolved_at
+        FROM store_station_alerts
+        WHERE company_id = :cid AND station_id = :st
+          AND resolved_at IS NOT NULL
+          AND resolved_at > now() - interval '14 days'
+        ORDER BY resolved_at DESC LIMIT 20
+    """), {"cid": cid, "st": station_id})).mappings().all()]
+    return отчёт
 
 
 @router.get("/reconcile")

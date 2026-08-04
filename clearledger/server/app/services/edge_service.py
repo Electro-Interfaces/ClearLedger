@@ -546,10 +546,59 @@ def build_alerts(stock: dict, recon: dict | None = None) -> list[dict]:
     return alerts
 
 
-async def alerts(db: AsyncSession, company_id, station_id: int) -> dict:
+# Темы, которые умеет находить расчёт по снимку остатков. Сходимости смен
+# среди них нет: снимок про неё ничего не знает и закрывать её не вправе.
+STOCK_TOPICS = {"снимок", "касса", "выгрузка", "учёт", "НСИ", "коды кассы"}
+
+
+async def sync_alerts(db: AsyncSession, company_id, station_id: int,
+                      items: list[dict], topics: set[str] | None = None) -> list[dict]:
+    """Запомнить находки как события: когда появились и когда ушли.
+
+    `topics` ограничивает синхронизацию темами, которые данный расчёт вообще
+    умеет находить: снимок остатков ничего не знает про сходимость смен, и
+    закрывать её находку он не вправе — иначе расхождение «уходило» бы каждый
+    час само собой.
+
+    Возвращает те же находки, дополненные временем первого появления, — по
+    нему видно, висит проблема третью неделю или возникла сегодня.
+    """
+    from app.models import StoreStationAlert   # локально: цикл импорта модулей
+
+    now = datetime.now(timezone.utc)
+    открытые = {r.topic: r for r in (await db.execute(select(StoreStationAlert).where(
+        StoreStationAlert.company_id == company_id,
+        StoreStationAlert.station_id == station_id,
+        StoreStationAlert.resolved_at.is_(None)))).scalars().all()}
+
+    видимые = {a["topic"] for a in items}
+    for a in items:
+        row = открытые.get(a["topic"])
+        if row is None:
+            row = StoreStationAlert(company_id=company_id, station_id=station_id,
+                                    topic=a["topic"], first_seen=now)
+            db.add(row)
+        row.level = a["level"]
+        row.text = a["text"][:500]
+        row.items = a.get("items") or []
+        row.last_seen = now
+        a["first_seen"] = row.first_seen or now
+
+    охват = topics if topics is not None else set(открытые) | видимые
+    for topic, row in открытые.items():
+        if topic not in видимые and topic in охват:
+            row.resolved_at = now
+    await db.commit()
+    return items
+
+
+async def alerts(db: AsyncSession, company_id, station_id: int,
+                 remember: bool = True) -> dict:
     stock = await stock_report(db, company_id, station_id)
     recon = await reconcile(db, company_id, station_id, limit=20)
     items = build_alerts(stock, recon)
+    if remember:
+        items = await sync_alerts(db, company_id, station_id, items)
     return {
         "station_id": station_id,
         "critical": sum(1 for a in items if a["level"] == "critical"),

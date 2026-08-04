@@ -902,6 +902,8 @@ export interface StoreExchangeStation {
   down_waiting: number
   down_unacked: number
   down_acked: number
+  /** Доля минут периода со следом телеметрии; null — истории ещё нет. */
+  uptime_pct: number | null
 }
 
 export interface StoreExchangeData {
@@ -920,6 +922,8 @@ export interface StoreExchangeData {
     at: string; station_id: number; kind: string; label: string
     size_bytes: number; direction: 'вверх' | 'вниз'; note: string | null
   }[]
+  /** Что станции прислали на решение центра: черновики, заявки, свои цены. */
+  nsi: Record<string, number>
   /** Приём (L1) против разбора в документы Ledger (L2) — по видам пакетов. */
   ingest: {
     kind: string; label: string; packets: number; projected: number
@@ -959,6 +963,14 @@ export interface StoreExchangeStationDetail {
     avg_silence_min: number | null; max_silence_min: number | null
     down_waiting: number; down_unacked: number; down_acked: number
   }
+  availability: {
+    minutes_seen: number
+    minutes_total: number
+    first_at: string | null
+    last_at: string | null
+    outage_minutes: number
+    outages: { started: string; ended: string; minutes: number }[]
+  }
   sessions: StoreExchangeSession[]
   by_kind: { kind: string; label: string; packets: number; bytes: number; last_at: string }[]
   downlink: {
@@ -970,6 +982,32 @@ export interface StoreExchangeStationDetail {
 export const getStoreExchangeStation = (stationId: number, dateFrom: string, dateTo: string) =>
   get<StoreExchangeStationDetail>(
     `/api/store/exchange/${stationId}?date_from=${dateFrom}&date_to=${dateTo}`)
+
+/** Сколько занимает сырьё станций и что можно проредить. */
+export interface StoreStorageData {
+  total_bytes: number
+  kinds: {
+    kind: string; label: string; packets: number; bytes: number
+    oldest: string | null; newest: string | null; keep: boolean
+  }[]
+  stations: { station_id: number; packets: number; bytes: number }[]
+  heartbeats: { rows: number; oldest: string | null }
+}
+
+export interface StoreStorageCleanup {
+  dry_run: boolean
+  snapshots: number
+  bytes: number
+  heartbeats: number
+  thin_after_days: number
+  heartbeat_days: number
+}
+
+export const getStoreStorage = () => get<StoreStorageData>('/api/store/storage')
+
+export const cleanupStoreStorage = (body: {
+  thin_after_days: number; heartbeat_days: number; dry_run: boolean
+}) => post<StoreStorageCleanup>('/api/store/storage/cleanup', body)
 
 /** Парк версий агента: какая объявлена целевой и у кого какая стоит. */
 export interface StoreAgentVersions {
@@ -1037,6 +1075,13 @@ export interface StoreStationHealth {
     topic: string
     text: string
     items?: string[]
+    /** Когда находка появилась впервые — висит третью неделю или возникла сегодня. */
+    first_seen?: string
+  }[]
+  /** Находки, ушедшие за последние две недели: их чинить уже не надо. */
+  resolved: {
+    topic: string; level: string; text: string
+    first_seen: string; last_seen: string; resolved_at: string
   }[]
 }
 
@@ -1415,6 +1460,20 @@ export interface NsiCard {
     kind: string | null; sku_class: string | null; is_dish: boolean
     price_owner: 'master' | 'station'; deleted: boolean
     created_at: string; updated_at: string
+    /* Классификация: группа — ветка дерева, класс — чем товар является,
+       назначение — куда он поехал документом (магазин/кафе). */
+    group_id: number | null; group_path: string | null
+    purpose: string | null; classified_by: string
+    /* Регуляторика: за это штрафуют, поэтому поля отдельные. */
+    gtin: string | null; marked: boolean; mark_group: string | null
+    adult_only: boolean; mrc: number | null
+    shelf_life_days: number | null; storage_mode: string | null
+    /* Товарные свойства и обогащение. */
+    brand: string | null; manufacturer: string | null; country: string | null
+    net_qty: number | null; net_unit: string | null; pack_qty: number | null
+    photo_url: string | null; composition: string | null; allergens: string | null
+    kcal: number | null; description: string | null
+    enriched_from: string | null; enriched_at: string | null
   }
   barcodes: NsiBarcode[]
   prices: NsiPriceRow[]
@@ -1426,9 +1485,14 @@ export const NSI_VAT_CODES = ['НДС22', 'НДС10', 'НДС20', 'НДС18_118'
 export const getNsiCard = (ident: string, stationId = 208) =>
   get<NsiCard>(`/api/store/nsi/items/${encodeURIComponent(ident)}`, { station_id: stationId })
 
-export const findNsiItems = (query: string, stationId = 208, limit = 20) =>
+export const findNsiItems = (
+  query: string, stationId = 208, limit = 20,
+  opts?: { groupPath?: string; skuClass?: string },
+) =>
   get<{ items: NsiListItem[]; total: number }>('/api/store/nsi/items', {
     q: query, station_id: stationId, limit,
+    group_path: opts?.groupPath || undefined,
+    sku_class: opts?.skuClass || undefined,
   })
 
 export const saveNsiCard = (ident: string, patch: Partial<NsiCard['item']>) =>
@@ -1576,6 +1640,41 @@ export interface BarcodeCollision {
 
 export const getBarcodeCollisions = () =>
   get<{ collisions: BarcodeCollision[] }>('/api/store/barcode-collisions')
+
+/* ── Каталог: здоровье справочника и группы номенклатуры ──────────────────
+ *
+ * Заполненность считается по живому ассортименту (торгуется: код кассы, цена
+ * или остаток), дефекты — по всему справочнику: устаревшая ставка НДС врёт в
+ * бухгалтерию и из архивной карточки.
+ */
+export interface CatalogHealth {
+  итого: {
+    всего: number; живых: number
+    без_класса: number; без_группы: number; без_штрихкода: number; без_цены: number
+    без_фото: number; без_бренда: number; без_состава: number
+    ставка_устарела: number; маркируемые_без_gtin: number; табак_без_мрц: number
+    коллизии_шк: number; блюда_без_ттк: number; предложений_ждёт: number
+  }
+  дубли: { групп: number; лишних: number }
+  по_группам: { path: string; карточек: number; живых: number }[]
+  по_классам: { класс: string; карточек: number }[]
+}
+
+export const getCatalogHealth = () => get<CatalogHealth>('/api/store/catalog/health')
+
+export interface ItemGroup {
+  id: number; parent_id: number | null; name: string; path: string; sort: number
+  marked_default: boolean | null; adult_default: boolean | null
+  price_owner_default: string | null; note: string | null
+  карточек: number; живых: number
+}
+
+export const getItemGroups = () => get<{ groups: ItemGroup[] }>('/api/store/catalog/groups')
+
+export const createItemGroup = (body: {
+  name: string; parent_id?: number | null; marked_default?: boolean
+  adult_default?: boolean; price_owner_default?: string; note?: string
+}) => post<{ ok: boolean; id: number; path: string }>('/api/store/catalog/groups', body)
 
 export const resolveBarcodeCollision = (
   claimId: number, body: { action: 'move' | 'drop'; note?: string },

@@ -20,6 +20,7 @@ import {
   getStoreExchange, getStoreExchangeStation, type StoreExchangeStation,
 } from '@/services/storeService'
 import { useCompany } from '@/contexts/CompanyContext'
+import { useWorkspace } from '@/contexts/WorkspaceContext'
 
 /** Молчание в человеческих единицах: секунды оператору ничего не говорят. */
 function silence(sec: number | null): string {
@@ -138,6 +139,52 @@ function StationExchangeDialog({ stationId, dateFrom, dateTo, onClose }: {
               <Факт label="Очередь наверх" value={data.agent?.queue_pending ?? '—'} />
             </div>
 
+            <div className="rounded-lg border border-border p-3">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <div className="text-sm font-medium">
+                  Доступность канала{' '}
+                  <span className="tabular-nums">
+                    {data.availability.minutes_total > 0
+                      ? `${Math.round((data.availability.minutes_seen / data.availability.minutes_total) * 1000) / 10}%`
+                      : '—'}
+                  </span>
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {data.availability.outages.length > 0
+                    ? `обрывов ${data.availability.outages.length} · всего ${длительность(data.availability.outage_minutes)}`
+                    : 'обрывов не было'}
+                </div>
+              </div>
+              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
+                <div className="h-full bg-emerald-500/70"
+                     style={{ width: `${data.availability.minutes_total > 0
+                       ? Math.min(100, (data.availability.minutes_seen / data.availability.minutes_total) * 100)
+                       : 0}%` }} />
+              </div>
+              <div className="mt-1 text-[10px] text-muted-foreground">
+                Считается по следу телеметрии от первого выхода станции на связь
+                ({когда(data.availability.first_at)}), а не по пакетам: снимок раз в час не
+                доказывает, что между снимками канал был.
+              </div>
+              {data.availability.outages.length > 0 && (
+                <div className="mt-2 max-h-40 overflow-y-auto">
+                  <table className="w-full text-xs">
+                    <tbody>
+                      {data.availability.outages.map((o, i) => (
+                        <tr key={`${o.started}-${i}`} className="border-t border-border/30 first:border-t-0">
+                          <td className="py-1 text-muted-foreground">{когда(o.started)}</td>
+                          <td className="py-1 text-muted-foreground">→ {когда(o.ended)}</td>
+                          <td className="py-1 text-right tabular-nums text-amber-400/90">
+                            {длительность(o.minutes)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
             {data.agent && (
               <div className="grid grid-cols-2 gap-3 rounded-lg border border-border p-3 sm:grid-cols-3 lg:grid-cols-6">
                 <Факт label="Последний ответ" value={silence(data.agent.silence_seconds)} />
@@ -252,6 +299,7 @@ function StationExchangeDialog({ stationId, dateFrom, dateTo, onClose }: {
 
 export function StoreStationsPanel({ dateFrom, dateTo }: { dateFrom: string; dateTo: string }) {
   const { company } = useCompany()
+  const { setCoreMode } = useWorkspace()
   // Два уровня чтения: сверху сеть целиком, по клику — конкретная АЗС. Смешивать
   // их в одной таблице нельзя: у сети вопрос «где плохо», у станции — «что там
   // произошло», и ответы на них живут в разных разрезах.
@@ -340,6 +388,7 @@ export function StoreStationsPanel({ dateFrom, dateTo }: { dateFrom: string; dat
                 <th className="px-3 py-2 text-left">АЗС</th>
                 <th className="px-3 py-2 text-left">Связь</th>
                 <th className="px-3 py-2 text-left">Последний ответ</th>
+                <th className="px-3 py-2 text-right">Доступность</th>
                 <th className="px-3 py-2 text-right">Сеансов</th>
                 <th className="px-3 py-2 text-right">Пакетов ↑</th>
                 <th className="px-3 py-2 text-right">Объём ↑</th>
@@ -359,6 +408,11 @@ export function StoreStationsPanel({ dateFrom, dateTo }: { dateFrom: string; dat
                   <td className="px-3 py-2 font-medium">{s.station_id}</td>
                   <td className="px-3 py-2"><StateDot state={s.state} /></td>
                   <td className="px-3 py-2 text-muted-foreground">{silence(s.silence_seconds)}</td>
+                  <td className={`px-3 py-2 text-right tabular-nums ${
+                    s.uptime_pct !== null && s.uptime_pct < 95 ? 'text-amber-400/90' : ''}`}
+                      title="Доля минут периода, в которые агент выходил на связь">
+                    {s.uptime_pct === null ? '—' : `${s.uptime_pct}%`}
+                  </td>
                   <td className="px-3 py-2 text-right tabular-nums">{s.sessions || '—'}</td>
                   <td className="px-3 py-2 text-right tabular-nums">{s.packets || '—'}</td>
                   <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">{объём(s.bytes)}</td>
@@ -379,6 +433,23 @@ export function StoreStationsPanel({ dateFrom, dateTo }: { dateFrom: string; dat
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {Object.values(data.nsi ?? {}).some((n) => n > 0) && (
+        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border px-3 py-2.5">
+          <span className="text-xs text-muted-foreground">Станции прислали на решение центра:</span>
+          {Object.entries(data.nsi).filter(([, n]) => n > 0).map(([вид, n]) => (
+            <span key={вид} className="text-sm">
+              <span className="tabular-nums font-medium">{n}</span>{' '}
+              <span className="text-muted-foreground">{вид}</span>
+            </span>
+          ))}
+          <button type="button"
+            onClick={() => setCoreMode('store_catalog', 'station-drafts')}
+            className="ml-auto text-xs text-primary hover:underline">
+            разобрать в «Каталоге» →
+          </button>
         </div>
       )}
 

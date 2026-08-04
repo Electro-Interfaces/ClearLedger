@@ -26,7 +26,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_company_by_api_key
 from app.database import get_db
-from app.models import Company, EdgeAgent, EdgeDownlink, EdgePacket, StoreReceipt
+from app.models import (
+    Company, EdgeAgent, EdgeDownlink, EdgeHeartbeat, EdgePacket, StoreReceipt,
+)
 
 log = logging.getLogger(__name__)
 from app.services import edge_nsi, edge_projection, edge_service, edge_stock, edge_transfers, recipe_versions
@@ -169,6 +171,17 @@ async def _sync_stock_packet(db: AsyncSession, company_id, station_id: int,
     """Сохранить остаток независимо от старой общей проекции каталога."""
     stock = await edge_stock.sync_from_snapshot(db, company_id, station_id, payload)
     await db.commit()
+    # Снимок — момент, когда находки по станции меняются: касса, выгрузка,
+    # минусы, ставки. Запоминаем их здесь, а не только когда кто-то откроет
+    # экран, иначе история «появилось — ушло» зависела бы от чужого внимания.
+    try:
+        отчёт = await edge_service.stock_report(db, company_id, station_id)
+        await edge_service.sync_alerts(
+            db, company_id, station_id,
+            edge_service.build_alerts(отчёт), edge_service.STOCK_TOPICS)
+    except Exception as exc:  # noqa: BLE001
+        await db.rollback()
+        log.warning("станция %s: находки не сохранены: %s", station_id, exc)
     try:
         catalog = await edge_nsi.sync_from_snapshot(db, station_id, payload)
         await db.commit()
@@ -220,6 +233,10 @@ async def heartbeat(
     row.last_shift = body.get("last_shift") if isinstance(body.get("last_shift"), int) else None
     row.payload = body
     row.last_seen = now
+    # След телеметрии: `edge_agents` помнит только последнее состояние, а
+    # «сколько станция была недоступна за месяц» читается лишь по истории.
+    db.add(EdgeHeartbeat(company_id=company.id, station_id=station_id, at=now,
+                         version=row.version, queue_pending=row.queue_pending))
     await db.commit()
 
     pending = (await db.execute(

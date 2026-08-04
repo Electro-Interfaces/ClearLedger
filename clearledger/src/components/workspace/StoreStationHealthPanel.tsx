@@ -11,7 +11,7 @@
  */
 import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { ShieldAlert, TriangleAlert, CheckCircle2, RadioTower } from 'lucide-react'
+import { ShieldAlert, TriangleAlert, CheckCircle2, RadioTower, History } from 'lucide-react'
 import {
   getStoreStations, getStoreStationHealth, type StoreStation,
 } from '@/services/storeService'
@@ -21,6 +21,20 @@ const УРОВЕНЬ = {
   critical: { label: 'критично', icon: ShieldAlert, точка: 'bg-red-500', текст: 'text-red-400/90' },
   warning: { label: 'внимание', icon: TriangleAlert, точка: 'bg-amber-500', текст: 'text-amber-300/90' },
 } as const
+
+/** Сколько находка держится — «висит третью неделю» читается иначе, чем «сегодня». */
+function держится(iso?: string): string | null {
+  if (!iso) return null
+  const дней = Math.floor((Date.now() - new Date(iso).getTime()) / 86400000)
+  if (дней <= 0) return 'замечено сегодня'
+  if (дней === 1) return 'держится со вчера'
+  return `держится ${дней} дн.`
+}
+
+function когда(iso: string): string {
+  return new Date(iso).toLocaleString('ru-RU',
+    { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+}
 
 function Сводка({ label, value, cls, hint }: {
   label: string; value: string | number; cls?: string; hint?: string
@@ -134,6 +148,11 @@ export function StoreStationHealthPanel() {
                           </span>
                         </div>
                         <div className="mt-1 text-sm leading-relaxed">{a.text}</div>
+                        {держится(a.first_seen) && (
+                          <div className="mt-0.5 text-[11px] text-muted-foreground">
+                            {держится(a.first_seen)}
+                          </div>
+                        )}
                         {a.items && a.items.length > 0 && (
                           <ul className="mt-2 space-y-0.5 text-xs text-muted-foreground">
                             {a.items.map((it, j) => (
@@ -146,6 +165,31 @@ export function StoreStationHealthPanel() {
                   </div>
                 )
               })}
+            </div>
+          )}
+          {data.resolved.length > 0 && (
+            <div className="rounded-lg border border-border/50 bg-card/30">
+              <div className="flex items-center gap-1.5 border-b border-border/30 px-3 py-2 text-xs text-muted-foreground">
+                <History className="h-3.5 w-3.5" />Ушло за последние две недели
+              </div>
+              <table className="w-full text-xs">
+                <tbody>
+                  {data.resolved.map((r, i) => (
+                    <tr key={`${r.topic}-${i}`} className="border-t border-border/20 first:border-t-0">
+                      <td className="px-3 py-1.5">{r.topic}</td>
+                      <td className="max-w-[420px] truncate px-3 py-1.5 text-muted-foreground" title={r.text}>
+                        {r.text}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-1.5 text-right text-muted-foreground">
+                        было с {когда(r.first_seen)}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-1.5 text-right text-emerald-400/80">
+                        ушло {когда(r.resolved_at)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
         </>

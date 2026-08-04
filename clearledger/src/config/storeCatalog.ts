@@ -28,8 +28,8 @@ import {
   LayoutDashboard, TrendingUp, Package, Tag, UtensilsCrossed,
   Boxes, Barcode, FolderTree, ChefHat, Truck,
   PackagePlus, Warehouse, ArrowLeftRight, ClipboardList, Trash2, Undo2, RefreshCw,
-  QrCode, ScanLine, PackageMinus, ShieldAlert, CalendarClock, CopyCheck, ShoppingCart,
-  RadioTower,
+  QrCode, ScanLine, PackageMinus, ShieldAlert, CalendarClock, CopyCheck, ShoppingCart, Database,
+  RadioTower, HeartPulse,
 } from 'lucide-react'
 
 export type StoreStatus = 'ready' | 'wip' | 'planned'
@@ -307,6 +307,18 @@ export const STORE_VIEWS: StoreView[] = [
     ],
   },
   {
+    key: 'storage', label: 'Хранение сырья', section: 'store_network', icon: Database,
+    title: 'Хранение сырья',
+    subtitle: 'Пакет станции хранится как есть — из него можно переиграть разбор. Но снимок остатков приходит каждый час и весит около полумегабайта: одна станция откладывает треть гигабайта в месяц, а нужен из них последний.',
+    status: 'ready',
+    blocks: [
+      { name: 'Чем занято', desc: 'Объём по видам пакетов и станциям, возраст самого старого. Видно, что растёт быстрее всего.', source: 'edge_packets · /api/store/storage' },
+      { name: 'Что прореживается', desc: 'Только снимки остатков: остаётся самый свежий за каждый день. Документы и смены — первичка учёта, они не трогаются вовсе.' },
+      { name: 'Почему это безопасно', desc: 'Снимок документов Ledger не порождает — его разбор ничего не строит, поэтому отчёты от чистки не меняются.' },
+      { name: 'Сначала посчитать', desc: 'Действие идёт предпросмотром: сколько уйдёт и сколько освободится. Данные станции восстановить неоткуда, поэтому удаление выполняет администратор компании.' },
+    ],
+  },
+  {
     key: 'station_console', label: 'Рабочее место АЗС', section: 'store_network', icon: MonitorSmartphone,
     title: 'Рабочее место АЗС',
     subtitle: 'Работа на конкретной станции из центра: приёмка, инвентаризация, остатки, карточки. Это не копия экранов, а сам агент АЗС — источник правды станции.',
@@ -330,6 +342,17 @@ export const STORE_VIEWS: StoreView[] = [
     ],
   },
   /* ───────────────────── КАТАЛОГ — товар как карточка ───────────────────── */
+  {
+    key: 'catalog-health', label: 'Здоровье каталога', section: 'store_catalog', icon: HeartPulse,
+    title: 'Здоровье каталога',
+    subtitle: 'Чего не хватает справочнику и где он врёт. Заполненность — по живому ассортименту (торгуется: код кассы, цена или остаток), а не по всему справочнику: архив хоронит любую метрику.',
+    status: 'ready',
+    blocks: [
+      { name: 'Заполненность', desc: 'Штрихкод, группа, цена, бренд, состав, фото — доля карточек, у которых поле есть. Замер 04.08.2026: у 76% справочника не было штрихкода, класс SKU пуст у всех.', source: 'store_router.catalog_health · /api/store/catalog/health' },
+      { name: 'Дефекты', desc: 'Коллизии ШК, маркируемые без GTIN, табак без МРЦ, блюда без ТТК, устаревшие ставки НДС, дубли карточек. Каждый пункт — работа, а не статистика.' },
+      { name: 'Классы и группы', desc: 'Сколько карточек в каждом классе (сопутка / блюдо / сырьё / архив) и в каждой ветке дерева, с выделением торгуемых.' },
+    ],
+  },
   {
     key: 'nomenclature', label: 'Номенклатура', section: 'store_catalog', icon: Boxes,
     title: 'Номенклатура',

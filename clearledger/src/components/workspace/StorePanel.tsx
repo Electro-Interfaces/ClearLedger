@@ -41,9 +41,11 @@ import { StoreStationConsolePanel } from './StoreStationConsolePanel'
 import { StoreStationHealthPanel } from './StoreStationHealthPanel'
 import { StoreDownlinkPanel } from './StoreDownlinkPanel'
 import { StoreAgentVersionsPanel } from './StoreAgentVersionsPanel'
+import { StoreStoragePanel } from './StoreStoragePanel'
 import { StoreParityPanel } from './StoreParityPanel'
 import { StoreStationDraftsPanel } from './StoreStationDraftsPanel'
 import { StoreBarcodeCollisionsPanel } from './StoreBarcodeCollisionsPanel'
+import { StoreCatalogHealthPanel } from './StoreCatalogHealthPanel'
 import { StoreReceiptDocsPanel } from './StoreReceiptDocsPanel'
 import {
   STORE_KEYS, STORE_MODES, STORE_MENU, STORE_HELP_KEYS, getStoreView, storeDefaultKey, storeModeForKey,
@@ -265,6 +267,13 @@ export function StorePanel() {
       </div>
     )
   }
+  if (sub === 'catalog-health') {
+    return (
+      <div className="h-full overflow-y-auto">
+        <StoreCatalogHealthPanel />
+      </div>
+    )
+  }
   if (sub === 'station-drafts') {
     return (
       <div className="h-full overflow-y-auto">
@@ -310,6 +319,13 @@ export function StorePanel() {
     return (
       <div className="h-full overflow-y-auto">
         <StoreStationsPanel dateFrom={period.from} dateTo={period.to} />
+      </div>
+    )
+  }
+  if (sub === 'storage') {
+    return (
+      <div className="h-full overflow-y-auto">
+        <StoreStoragePanel />
       </div>
     )
   }

@@ -5905,6 +5905,66 @@ class EdgeDownlink(Base):
     )
 
 
+class StoreStationAlert(Base):
+    """Находка по станции как СОБЫТИЕ, а не как срез на момент взгляда.
+
+    Отчёт «что требует внимания» считался на лету, и ответить на вопрос «это
+    появилось вчера или висит третью неделю» было нечем. Идентичность находки —
+    тема (касса, выгрузка, учёт, НСИ, коды кассы, сверка смен): текст меняется
+    вместе с числами, а проблема остаётся той же.
+
+    Закрытие проставляет тот же расчёт: если при очередном пересчёте темы среди
+    находок нет, она ушла — и это тоже событие, которое стоит помнить.
+    """
+    __tablename__ = "store_station_alerts"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    station_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    topic: Mapped[str] = mapped_column(String(40), nullable=False)
+    level: Mapped[str] = mapped_column(String(20), nullable=False, default="warning")
+    text: Mapped[str] = mapped_column(String(500), nullable=False, default="")
+    items: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    first_seen: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False)
+    last_seen: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("ix_store_station_alerts_open", "company_id", "station_id", "resolved_at"),
+    )
+
+
+class EdgeHeartbeat(Base):
+    """След телеметрии: одна строка на каждый выход агента на связь.
+
+    `edge_agents` хранит только последнее состояние, и по нему нельзя ответить
+    на вопрос «сколько станция была недоступна за месяц» — а это и есть
+    качество канала, ради которого затевался офлайн-первый агент. Сеансы
+    обмена считаются по пакетам, но пакеты идут неравномерно: снимок раз в час
+    не доказывает, что между ними связь была.
+
+    Строка в минуту на станцию — примерно 43 тысячи в месяц; хранение
+    ограничено чисткой, история старше квартала ничего не решает.
+    """
+    __tablename__ = "edge_heartbeats"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    station_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False)
+    version: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    queue_pending: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    __table_args__ = (
+        Index("ix_edge_heartbeats_station_at", "company_id", "station_id", "at"),
+    )
+
+
 class EdgeAgent(Base):
     """Состояние агента станции: кто на связи, какая версия, что в очереди.
 
