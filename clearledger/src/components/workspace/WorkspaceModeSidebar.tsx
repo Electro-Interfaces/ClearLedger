@@ -16,6 +16,22 @@ import { ChevronDown, ChevronRight, PanelLeftClose, PanelLeftOpen } from 'lucide
 const COLLAPSE_KEY = 'cl-mode-sidebar-collapsed'
 const GROUPS_KEY = 'cl-mode-sidebar-groups-v2'
 
+/**
+ * Свёрнута ли группа по умолчанию.
+ *
+ * Аккордеон («открыта только та, где активный пункт») бережёт высоту, когда групп
+ * много. У разделов из двух групп он вредит: половина смысла раздела спрятана за
+ * стрелкой, и «Закрытие» в бухгалтерии человек просто не находил. Мало групп и
+ * мало пунктов — показываем всё сразу; ручное сворачивание пользователем (override)
+ * сильнее любого правила.
+ */
+function groupCollapsedByDefault(
+  groups: { name?: string; items: CentralMenuItem[] }[], total: number, groupActive: boolean,
+): boolean {
+  const compact = groups.length <= 2 && total <= 8
+  return compact ? false : !groupActive
+}
+
 /** Сгруппировать под-разделы по полю group, сохраняя порядок. */
 function groupItems(items: CentralMenuItem[]): { name?: string; items: CentralMenuItem[] }[] {
   const groups: { name?: string; items: CentralMenuItem[] }[] = []
@@ -117,11 +133,13 @@ export function WorkspaceModeSidebar() {
             <PanelLeftClose className="h-4 w-4" />
           </button>
         </div>
-        {groupItems(section.items).map((grp) => {
+        {groupItems(section.items).map((grp, _i, grps) => {
           const gKey = `${section.mode}:${grp.name ?? ''}`
           const groupActive = grp.items.some((i) => i.key === activeSub)
           const override = grp.name ? groupOverrides[gKey] : undefined
-          const gCollapsed = !!grp.name && (override !== undefined ? override : !groupActive)
+          const gCollapsed = !!grp.name && (override !== undefined
+            ? override
+            : groupCollapsedByDefault(grps, section.items.length, groupActive))
           return (
             <div key={gKey}>
               {grp.name && (
@@ -230,12 +248,13 @@ export function WorkspaceModeSidebar() {
             {/* Под-разделы раскрытого раздела — гармошка со сворачиваемыми группами */}
             {expanded && hasItems && (
               <div className="mt-0.5 mb-1 ml-4 pl-2 border-l border-border/40 flex flex-col gap-0.5">
-                {groupItems(section.items).map((grp) => {
+                {groupItems(section.items).map((grp, _i, grps) => {
                   const gKey = `${section.mode}:${grp.name ?? ''}`
                   const groupActive = grp.items.some((i) => i.key === activeSub)
                   const override = grp.name ? groupOverrides[gKey] : undefined
-                  // Дефолт: свёрнута, если НЕ содержит активный под-раздел; override переопределяет.
-                  const gCollapsed = !!grp.name && (override !== undefined ? override : !groupActive)
+                  const gCollapsed = !!grp.name && (override !== undefined
+                    ? override
+                    : groupCollapsedByDefault(grps, section.items.length, groupActive))
                   return (
                     <div key={gKey}>
                       {grp.name && (

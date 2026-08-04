@@ -224,6 +224,93 @@ function Blocker({ done, text, go }: { done: boolean; text: string; go: () => vo
 }
 
 /* ══════════════════════════════════════════════════════════════════════════ */
+/*  ПОЛОСА СОСТОЯНИЯ · общая шапка рабочих экранов потока                     */
+/* ══════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * Одна строка над журналом: сколько набралось за период, сколько ушло в БП и что
+ * мешает закрыть.
+ *
+ * Журналы смен и поступлений отвечают на вопрос «что было», но бухгалтер приходит
+ * с другим — «где я в закрытии периода». Раньше ответ на него жил только в чужом
+ * разделе, и человек листал журнал, не понимая, всё ли уже отдано.
+ *
+ * Полоса, а не плитки: это шапка экрана, а не его содержание. Кубики метрик здесь
+ * отобрали бы у журнала первый экран.
+ */
+export function AccountingStageBar({ stream }: { stream: 'fuel' | 'store' }) {
+  const { companyId } = useCompany()
+  const { period } = useFilters()
+  const { setCoreMode } = useWorkspace()
+
+  const fuel = useQuery({
+    queryKey: ['fuel-readiness', companyId, period.from, period.to],
+    queryFn: () => getFuelReadiness(period.from, period.to),
+    enabled: stream === 'fuel',
+  })
+  const store = useQuery({
+    queryKey: ['store-shifts', companyId, period.from, period.to],
+    queryFn: () => getStoreShifts(period.from, period.to),
+    enabled: stream === 'store',
+  })
+  const recon = useQuery({
+    queryKey: ['reconciliation-summary', companyId],
+    queryFn: () => getReconciliationSummary(companyId),
+  })
+
+  const rs = recon.data
+  const inOneC = !rs || rs.totalAccDocs === 0
+    ? 'документы 1С не поднимались'
+    : `${fmtN(rs.matched)} из ${fmtN(rs.totalEntries)} сопоставлено с БП`
+
+  const facts = stream === 'fuel'
+    ? [
+        { value: fmtN(fuel.data?.shifts.total ?? 0), label: 'смен за период' },
+        { value: fmtN(fuel.data?.shifts.corrected ?? 0), label: 'с правками' },
+        { value: fmtN(fuel.data?.receipts.confirmed ?? 0), label: 'ТТН принято' },
+      ]
+    : [
+        { value: fmtN(store.data?.summary.count ?? 0), label: 'смен за период' },
+        { value: fmtMoney(store.data?.summary.revenue ?? 0), label: 'товарная выручка' },
+        { value: fmtMoney(store.data?.summary.returns ?? 0), label: 'возвраты' },
+      ]
+
+  // Что мешает: одна ближайшая помеха, а не список — список живёт в «Периоде».
+  const blocker = stream === 'fuel' && (fuel.data?.receipts.pending ?? 0) > 0
+    ? { text: `${fmtN(fuel.data!.receipts.pending)} ТТН ждут подтверждения приёмки`,
+        go: () => setCoreMode('accounting', 'ttn') }
+    : stream === 'store' && (store.data?.summary.count ?? 0) === 0
+      ? { text: 'за период не загружено ни одной смены',
+          go: () => setCoreMode('acc_store', 'cb_load') }
+      : null
+
+  return (
+    <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-b border-border/50 bg-card/30 px-4 py-2.5">
+      {facts.map((f) => (
+        <div key={f.label} className="flex items-baseline gap-1.5">
+          <span className="text-sm font-semibold tabular-nums">{f.value}</span>
+          <span className="text-[11px] text-muted-foreground">{f.label}</span>
+        </div>
+      ))}
+
+      <div className="flex items-baseline gap-1.5">
+        <span className="text-[11px] text-muted-foreground">в 1С:</span>
+        <span className="text-[11px] text-foreground/80">{inOneC}</span>
+      </div>
+
+      {blocker && (
+        <button onClick={blocker.go}
+          className="ml-auto flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] text-amber-600 transition-colors hover:bg-accent/40 dark:text-amber-400">
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+          {blocker.text}
+          <ArrowRight className="h-3 w-3 shrink-0" />
+        </button>
+      )}
+    </div>
+  )
+}
+
+/* ══════════════════════════════════════════════════════════════════════════ */
 /*  НЕФТЕПРОДУКТЫ · контроль загрузки в 1С                                    */
 /* ══════════════════════════════════════════════════════════════════════════ */
 

@@ -24,7 +24,7 @@ import { useCompany } from '@/contexts/CompanyContext'
 import { mainNavItems, dataItems, oneCItems, settingsItems, navByPath } from '@/config/navigation'
 import { routeAllowed } from '@/config/accessModules'
 import {
-  SPACE_LINKS, SPACE_PAGES, isCarvedProfile, productForPath, productNav, spaceNav,
+  SPACE_LINKS, SPACE_PAGES, isCarvedProfile, isOneCPath, productForPath, productNav, spaceNav,
 } from '@/config/spaceProducts'
 import { productModuleAllowed, productHasModule } from '@/config/productAccess'
 import { useWorkspaceSections } from '@/components/workspace/workspaceSections'
@@ -247,7 +247,13 @@ function SidebarNavBody({ collapsed = false, onNavigate }: {
     const onProductRoute = pathname === product.route
     // Страницы («Документы», «Коннекторы») — тоже право: код = сегмент ИСХОДНОГО пути.
     const allowedPage = (code: string) => productModuleAllowed(product.code, code, canModule, company.profileId)
-    const items = productNav(product, allowedPage, company.profileId)
+    // Страницы продукта делятся надвое: своё рабочее (Организация) идёт сразу под
+    // разделами, а контур обмена с 1С — двенадцать настроечных экранов — уезжает в
+    // свёрнутую группу. Раньше они лежали одним списком с разделами, и половина
+    // левого меню бухгалтера была настройкой обмена, а не его работой (04.08.2026).
+    const allItems = productNav(product, allowedPage, company.profileId)
+    const items = allItems.filter((i) => !isOneCPath(i.to))
+    const oneCPages = allItems.filter((i) => isOneCPath(i.to))
     // Функции Ядра — одни на все рабочие места (`SPACE_PAGES`), поэтому отдельным блоком
     // ниже разделов и страниц продукта: сверху то, чем человек занят, ниже — пространство.
     const spaceItems = spaceNav(product, allowedPage)
@@ -273,6 +279,38 @@ function SidebarNavBody({ collapsed = false, onNavigate }: {
             ))}
           </SidebarMenu>
         </SidebarGroup>
+
+        {oneCPages.length > 0 && (
+          <>
+            <SidebarSeparator className="my-2" />
+            <SidebarGroup className="py-0">
+              {collapsed ? (
+                <SidebarMenu>
+                  <NavItem to={oneCPages[0].to} icon={Database} label="Обмен с 1С" collapsed />
+                </SidebarMenu>
+              ) : (
+                <Collapsible open={oneCOpen} onOpenChange={setOneCOpen}>
+                  <CollapsibleTrigger asChild>
+                    <button className="flex w-full items-center justify-between px-3 py-1.5 text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/60 transition-colors hover:text-muted-foreground">
+                      <span className="flex items-center gap-1.5">
+                        <Database className="h-3 w-3" />
+                        Обмен с 1С
+                      </span>
+                      <ChevronDown className={`h-3 w-3 transition-transform ${oneCOpen ? '' : '-rotate-90'}`} />
+                    </button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <SidebarMenu>
+                      {oneCPages.map((item) => (
+                        <NavItem key={item.to} {...item} collapsed={collapsed} onNavigate={onNavigate} />
+                      ))}
+                    </SidebarMenu>
+                  </CollapsibleContent>
+                </Collapsible>
+              )}
+            </SidebarGroup>
+          </>
+        )}
 
         {(spaceItems.length > 0 || links.length > 0) && (
           <>

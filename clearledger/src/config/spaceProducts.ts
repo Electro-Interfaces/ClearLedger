@@ -309,7 +309,10 @@ export function isCarvedProfile(profileId: string | null | undefined): boolean {
  */
 const LABEL_BY_PROFILE: Record<string, Record<string, string>> = {
   fuel: {
-    sales: 'Топливо', shop: 'Магазин', ops: 'Управленческий', finance: 'Бухгалтерский',
+    // «Бухгалтерия», а не «Бухгалтерский»: это рабочее место, а не вид учёта.
+    // Прилагательное осталось от разреза по видам учёта, из которого продукт вырос,
+    // и в шапке читалось как незаконченное словосочетание (04.08.2026).
+    sales: 'Топливо', shop: 'Магазин', ops: 'Управленческий', finance: 'Бухгалтерия',
   },
 }
 
@@ -430,13 +433,27 @@ export function productNav(
  * Контур 1С — рабочее место бухгалтера топливного профиля, и живёт он в «Бухгалтерском»
  * (`finance`). У энергетики эти маршруты закрыты гардом `RequireFuel`, поэтому пункт там
  * вёл бы в редирект — отсюда профильный фильтр, а не общий список страниц продукта.
+ *
+ * Две страницы из контура в меню НЕ выводятся (04.08.2026): они дублируют разделы, к
+ * которым бухгалтерия теперь разложена по потокам, и человек читал в одном списке два
+ * одинаковых слова.
+ *
+ *   `/1c/documents` — тот же реестр, что открывает раздел «Документы»;
+ *   `/1c/export`    — очередь пакетов, которой не существует: расширение к ней не
+ *                     обращается, а выгрузка стала стадией внутри потока.
+ *
+ * Сами маршруты живы: на них ведут кнопки из разделов и старые закладки.
  */
 const ONEC_PRODUCT = 'finance'
+const ONEC_HIDDEN = new Set(['/1c/documents', '/1c/export'])
 
 function fuelOnlyPaths(product: SpaceProduct, profileId?: string | null): string[] {
   if (profileId !== 'fuel' || product.code !== ONEC_PRODUCT) return []
-  return oneCItems.map((i) => i.to)
+  return oneCItems.map((i) => i.to).filter((to) => !ONEC_HIDDEN.has(to))
 }
+
+/** Страница продукта из контура 1С — её место в свёрнутой группе «Обмен с 1С». */
+export const isOneCPath = (to: string) => to.startsWith('/1c/')
 
 /** Функции Ядра для левого меню продукта — один и тот же состав в каждом рабочем месте. */
 export function spaceNav(product: SpaceProduct, allowed?: PageGate): NavItemDef[] {

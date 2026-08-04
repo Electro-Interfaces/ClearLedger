@@ -72,6 +72,7 @@ import { SyncWith1CPanel } from '@/components/fuel/SyncWith1CPanel'
 import { StoreCateringPanel } from './StoreCateringPanel'
 import {
   AccountingPeriodPanel, FuelLoadControlPanel, CateringPackagePanel, AccountingDocsBridge,
+  AccountingStageBar,
 } from './AccountingWorkPanels'
 import {
   ACCOUNTING_MODES, ACCOUNTING_KEYS, accountingModeForKey, type AccountingSection,
@@ -526,16 +527,21 @@ export function AccountingPanel() {
         {/* Период — где стоит закрытие по всем трём потокам сразу */}
         {tab === 'period_status' && <AccountingPeriodPanel />}
 
-        {/* Поток 1 · нефтепродукты: работа с первичкой и контроль загрузки в 1С */}
-        {tab === 'shifts' && <ShiftsPanel />}
-        {tab === 'ttn' && <ReceiptsSection />}
+        {/* Поток 1 · нефтепродукты: работа с первичкой и контроль загрузки в 1С.
+            Над журналами — полоса состояния: журнал отвечает «что было», а бухгалтер
+            приходит с вопросом «где я в закрытии периода». */}
+        {tab === 'shifts' && <><AccountingStageBar stream="fuel" /><ShiftsPanel /></>}
+        {tab === 'ttn' && <><AccountingStageBar stream="fuel" /><ReceiptsSection /></>}
         {tab === 'reports' && <ShiftDashboardPanel />}
         {tab === 'cash' && <AccountingCashPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
         {tab === 'recon1c' && <FuelLoadControlPanel />}
 
         {/* Поток 2 · магазин: приём из ЦБ/edge и пакет в БП */}
         {(tab === 'cb_load' || tab === 'cb_shifts' || tab === 'cb_recon') && (
-          <AccountingStreamsPanel tab={tab} companyId={companyId} dateFrom={period.from} dateTo={period.to} />
+          <>
+            {tab !== 'cb_recon' && <AccountingStageBar stream="store" />}
+            <AccountingStreamsPanel tab={tab} companyId={companyId} dateFrom={period.from} dateTo={period.to} />
+          </>
         )}
         {tab === 'export' && <BpExportPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
 
