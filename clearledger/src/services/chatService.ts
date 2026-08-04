@@ -38,6 +38,8 @@ export interface ChatRoom {
   avatarUrl?: string | null
   /** «Без звука» до этого момента: не шлём push и не красим общий счётчик. */
   mutedUntil?: string | null
+  /** Чат закреплён вверху МОЕГО списка (личная настройка). */
+  isPinned?: boolean
   /** Объект пространства, при котором живёт чат («группа по станции»). */
   scopeObjectId?: string | null
   scopeObjectName?: string | null
@@ -64,6 +66,8 @@ export interface ChatParticipant {
   companyName?: string | null
   /** vendor | internal | partner — та же категория, что в Центре управления. */
   partyType?: PartyType
+  /** Фото человека (/api/files/<id>); нет — генеративный кружок с инициалами. */
+  avatarUrl?: string | null
   /** Участник живёт в своей почте: сообщения уходят ему письмом, ответ — в ленту. */
   mailOnly?: boolean
   /** Адрес почтового участника — показываем, куда именно уходит разговор. */
@@ -100,7 +104,11 @@ export interface ChatMessage {
   externalSource?: string | null
 }
 
-export interface ChatUser { userId: string; name: string; email: string; online: boolean }
+export interface ChatUser {
+  userId: string; name: string; email: string; online: boolean
+  /** Фото человека (/api/files/<id>) — то же, что у участника комнаты. */
+  avatarUrl?: string | null
+}
 export interface ChatPresence { userId: string; name: string; online: boolean }
 export interface ChatFolder { id: string; name: string; roomIds: string[]; sortOrder: number }
 
@@ -173,7 +181,12 @@ export const setParticipantRole = (roomId: string, userId: string, role: 'admin'
 export const leaveRoom = (roomId: string) =>
   post(`/api/chat/rooms/${roomId}/leave`, {})
 
+/** Закрепить чат вверху своего списка / открепить (переключатель). */
+export const pinRoom = (roomId: string) =>
+  post<{ ok: boolean; isPinned: boolean }>(`/api/chat/rooms/${roomId}/pin-room`, {})
+
 /** «Без звука»: until = 'forever' | ISO-время | null (включить уведомления). */
+
 export const muteRoom = (roomId: string, until: 'forever' | string | null) =>
   post<{ mutedUntil: string | null }>(`/api/chat/rooms/${roomId}/mute`, { until })
 
@@ -226,7 +239,15 @@ export interface ChatUserProfile {
   partyType?: PartyType
   organizationName?: string | null
   lastSeenAt?: string | null
+  /** Фото человека (/api/files/<id>). */
+  avatarUrl?: string | null
+  /** Живёт в своей почте: в пространство не заходит, разговор идёт письмами. */
+  mailOnly?: boolean
 }
+
+/** Своё имя и фото — то, что человек меняет о себе сам. */
+export const updateMe = (body: { name?: string; avatarUrl?: string }) =>
+  patch<{ ok: boolean; name: string; avatarUrl: string | null }>('/api/chat/me', body)
 
 export const getUserProfile = (userId: string) =>
   get<ChatUserProfile>(`/api/chat/users/${userId}/profile`)

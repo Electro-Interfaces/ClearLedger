@@ -264,6 +264,8 @@ class RoomOut(BaseModel):
     lastMessageAt: str | None = None
     createdBy: str | None = None
     pinnedMessage: PinnedOut | None = None
+    # Чат закреплён вверху МОЕГО списка (личная настройка участия).
+    isPinned: bool = False
     # Моя роль В ЭТОЙ комнате (owner | admin | member) — по ней панель решает, показывать
     # ли поле ввода: в канале пишут владелец и его админы. Без этого поля фронт судил по
     # виду комнаты, и в канале, открытом администратором, поле ввода было у всех — а
@@ -300,6 +302,8 @@ class ParticipantOut(BaseModel):
     # видеть это ДО отправки — разговор при таком участнике идёт иначе.
     mailOnly: bool = False
     email: str | None = None
+    # Фото человека (/api/files/<id>). Пусто — рисуется генеративный кружок.
+    avatarUrl: str | None = None
 
 
 class RoomDetailOut(RoomOut):
@@ -407,7 +411,7 @@ async def list_rooms(
     # бы чаты двух орг вперемешку. Строгая изоляция пространств.
     rows = (await db.execute(
         select(ChatRoom, ChatParticipant.last_read_at, ChatParticipant.role,
-               ChatParticipant.muted_until)
+               ChatParticipant.muted_until, ChatParticipant.pinned_at)
         .join(ChatParticipant, and_(ChatParticipant.room_id == ChatRoom.id,
                                     ChatParticipant.user_id == current_user.id))
         .where(ChatRoom.is_active.is_(True), ChatRoom.is_archived.is_(archived),
@@ -431,7 +435,7 @@ async def list_rooms(
         .where(ServiceLocation.id.in_(obj_ids)))).all()) if obj_ids else {}
 
     out: list[RoomOut] = []
-    for room, last_read, my_role, muted_until in rows:
+    for room, last_read, my_role, muted_until, pinned_at in rows:
         pcount = (await db.execute(select(func.count()).select_from(ChatParticipant)
                   .where(ChatParticipant.room_id == room.id))).scalar() or 0
         unread = (await db.execute(select(func.count()).select_from(ChatMessage).where(
@@ -443,15 +447,19 @@ async def list_rooms(
             ChatMessage.room_id == room.id, ChatMessage.deleted_at.is_(None))
             .order_by(ChatMessage.created_at.desc()).limit(1))).scalar_one_or_none()
         name, peer_id = room.name, None
+        # У личного чата лицо собеседника, а не иконка комнаты: список из десяти
+        # одинаковых кружков не отличить, а человека узнают по фото.
+        peer_avatar = None
         if room.type == "direct":
             other = (await db.execute(
-                select(ChatParticipant.user_id, User.name)
+                select(ChatParticipant.user_id, User.name, User.avatar_url)
                 .join(User, User.id == ChatParticipant.user_id)
                 .where(ChatParticipant.room_id == room.id, ChatParticipant.user_id != current_user.id)
                 .limit(1))).first()
             if other:
                 peer_id = str(other[0])
                 name = name or other[1]
+                peer_avatar = other[2]
         pinned = await _pinned_out(room, db)
         out.append(RoomOut(
             id=str(room.id), type=room.type, kind=room.kind, name=name,
@@ -462,8 +470,9 @@ async def list_rooms(
             pinnedMessage=pinned,
             myRole=my_role,
             scopeProduct=room.scope_product,
-            avatarUrl=room.avatar_url,
+            avatarUrl=room.avatar_url or peer_avatar,
             mutedUntil=muted_until.isoformat() if muted_until else None,
+            isPinned=pinned_at is not None,
             scopeObjectId=room.scope_object_id,
             scopeObjectName=obj_names.get(room.scope_object_id or ""),
         ))
@@ -586,7 +595,7 @@ async def get_room(
     room = await _assert_participant(rid, current_user, db)
     parts = (await db.execute(
         select(ChatParticipant.user_id, ChatParticipant.role, User.name, User.company_id,
-               User.mail_only, User.email)
+               User.mail_only, User.email, User.avatar_url)
         .join(User, User.id == ChatParticipant.user_id)
         .where(ChatParticipant.room_id == rid))).all()
     online = manager.online_user_ids()
@@ -600,8 +609,9 @@ async def get_room(
                             isExternal=(ucid is not None and ucid != room.company_id),
                             companyName=titles.get(ucid) if ucid != room.company_id else None,
                             partyType=parties.get(uid, "internal"),
-                            mailOnly=bool(mail_only), email=mail if mail_only else None)
-                        for uid, rl, nm, ucid, mail_only, mail in parts]
+                            mailOnly=bool(mail_only), email=mail if mail_only else None,
+                            avatarUrl=avatar)
+                        for uid, rl, nm, ucid, mail_only, mail, avatar in parts]
     name, peer_id = room.name, None
     if room.type == "direct":
         for p in plist:
@@ -1412,6 +1422,32 @@ class MuteBody(BaseModel):
     until: str | None = None
 
 
+@router.post("/rooms/{room_id}/pin-room")
+async def pin_room(
+    room_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Закрепить чат вверху своего списка (повторный вызов — открепить).
+
+    Настройка личная: важные разговоры у каждого свои, и закреплять их за всех
+    участников было бы вмешательством в чужой список.
+    """
+    try:
+        rid = uuid.UUID(room_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID")
+    await _assert_participant(rid, current_user, db)
+    p = (await db.execute(select(ChatParticipant).where(
+        ChatParticipant.room_id == rid,
+        ChatParticipant.user_id == current_user.id))).scalar_one_or_none()
+    if p is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Вы не участник этого чата")
+    p.pinned_at = None if p.pinned_at else _now()
+    await db.commit()
+    return {"ok": True, "isPinned": p.pinned_at is not None}
+
+
 @router.post("/rooms/{room_id}/mute")
 async def mute_room(
     room_id: str, body: MuteBody,
@@ -1756,7 +1792,7 @@ async def search_users(
     cid = await _company_of(current_user, db)
     # Только сотрудники ВЫБРАННОЙ организации (user_companies) ≠ я — сотрудников
     # другой организации не видно (изоляция пространств).
-    stmt = (select(User.id, User.name, User.email)
+    stmt = (select(User.id, User.name, User.email, User.avatar_url)
             .join(UserCompany, UserCompany.user_id == User.id)
             .where(UserCompany.company_id == cid, User.id != current_user.id))
     if q.strip():
@@ -1764,8 +1800,9 @@ async def search_users(
         stmt = stmt.where(or_(User.name.ilike(like), User.email.ilike(like)))
     rows = (await db.execute(stmt.order_by(User.name).limit(20))).all()
     online = manager.online_user_ids()
-    return [{"userId": str(uid), "name": nm, "email": em, "online": str(uid) in online}
-            for uid, nm, em in rows]
+    return [{"userId": str(uid), "name": nm, "email": em, "online": str(uid) in online,
+             "avatarUrl": av}
+            for uid, nm, em, av in rows]
 
 
 # ── карточка человека ────────────────────────────────────────────────────────
@@ -1801,7 +1838,40 @@ async def user_profile(
         "partyType": getattr(m, "party_type", None) or "internal",
         "organizationName": (org.short_name or org.name) if org else None,
         "lastSeenAt": u.last_seen_at.isoformat() if u.last_seen_at else None,
+        "avatarUrl": u.avatar_url,
+        "mailOnly": u.mail_only,
     }
+
+
+class MyProfileBody(BaseModel):
+    """Что человек меняет о себе сам. Имя — то, как его зовут в разговоре."""
+    name: str | None = None
+    # Файл пространства (/api/files/<id>); "" — убрать фото.
+    avatarUrl: str | None = None
+
+
+@router.patch("/me")
+async def update_me(
+    body: MyProfileBody,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Своё имя и фото. Должность и принадлежность правит администратор —
+    это сведения о месте человека в пространстве, а не его личное дело."""
+    if body.name is not None:
+        name = body.name.strip()
+        if len(name) < 2:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Имя слишком короткое")
+        current_user.name = name[:255]
+    if body.avatarUrl is not None:
+        url = body.avatarUrl.strip()
+        # Только файл пространства: чужой URL превратил бы аватар в трекер,
+        # который отдаёт стороннему серверу, кто и когда открыл чат.
+        if url and not url.startswith("/api/files/"):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Ожидается файл пространства")
+        current_user.avatar_url = url or None
+    await db.commit()
+    return {"ok": True, "name": current_user.name, "avatarUrl": current_user.avatar_url}
 
 
 # ── presence ─────────────────────────────────────────────────────────────────

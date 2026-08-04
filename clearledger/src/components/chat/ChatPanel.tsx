@@ -5,7 +5,7 @@
  * удаление, медиа-альбомы + Lightbox, архив, видеозвонок. REST — chatService,
  * live — useChatWs. Рендерится в InteractionHost (модалка «Взаимодействие»).
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
@@ -14,7 +14,7 @@ import {
   Trash2, Reply, Pencil, X, Check, Megaphone, Lock, Pin, Video, UserPlus,
   Folder, AtSign, Loader2, Paperclip, Camera, Search as SearchIcon,
   Shield, ShieldOff, UserMinus, LogOut, Bell, BellOff, Forward, MapPin, ClipboardList,
-  Mail,
+  Mail, Palette,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/contexts/AuthContext'
@@ -131,15 +131,56 @@ function highlightText(text: string, query: string): React.ReactNode {
 }
 
 // ── аватар ───────────────────────────────────────────────────────────────────
-function Avatar({ seed, name, icon: Icon, online, size = 40 }: {
+/**
+ * Фон ленты — личная настройка человека, не свойство комнаты: для остальных
+ * участников он ничего не значит, поэтому хранится в браузере. Узоры собраны
+ * из CSS-градиентов, а не из картинок: лишних файлов в сборке не появляется,
+ * и в тёмной теме фон остаётся приглушённым (полупрозрачные цвета поверх фона).
+ */
+const CHAT_SKINS: Record<string, { label: string; style?: React.CSSProperties }> = {
+  none: { label: 'Обычный' },
+  paper: {
+    label: 'Бумага',
+    style: {
+      backgroundImage:
+        'radial-gradient(circle at 1px 1px, color-mix(in srgb, currentColor 8%, transparent) 1px, transparent 0)',
+      backgroundSize: '18px 18px',
+    },
+  },
+  grid: {
+    label: 'Клетка',
+    style: {
+      backgroundImage:
+        'linear-gradient(color-mix(in srgb, currentColor 6%, transparent) 1px, transparent 1px),' +
+        'linear-gradient(90deg, color-mix(in srgb, currentColor 6%, transparent) 1px, transparent 1px)',
+      backgroundSize: '22px 22px',
+    },
+  },
+  warm: {
+    label: 'Тёплый',
+    style: { backgroundImage: 'linear-gradient(160deg, rgba(245,158,11,0.10), transparent 55%)' },
+  },
+  cool: {
+    label: 'Холодный',
+    style: { backgroundImage: 'linear-gradient(160deg, rgba(56,189,248,0.12), transparent 55%)' },
+  },
+}
+
+function Avatar({ seed, name, icon: Icon, online, size = 40, src }: {
   seed: string; name?: string | null; icon?: typeof UserIcon; online?: boolean; size?: number
+  /** Фото человека или чата (/api/files/<id>); нет — генеративный кружок с инициалами. */
+  src?: string | null
 }) {
   return (
     <div className="relative shrink-0" style={{ width: size, height: size }}>
-      <div className={cn('flex h-full w-full items-center justify-center rounded-full font-semibold text-white', avatarColor(seed))}
-        style={{ fontSize: size * 0.4 }}>
-        {Icon ? <Icon style={{ width: size * 0.5, height: size * 0.5 }} /> : initials(name)}
-      </div>
+      {src ? (
+        <AuthImage path={src} alt={name || ''} className="h-full w-full rounded-full object-cover" />
+      ) : (
+        <div className={cn('flex h-full w-full items-center justify-center rounded-full font-semibold text-white', avatarColor(seed))}
+          style={{ fontSize: size * 0.4 }}>
+          {Icon ? <Icon style={{ width: size * 0.5, height: size * 0.5 }} /> : initials(name)}
+        </div>
+      )}
       {online && <span className="absolute -bottom-px -right-px h-2.5 w-2.5 rounded-full bg-emerald-500 ring-2 ring-card" />}
     </div>
   )
@@ -485,7 +526,7 @@ function RoomInfoPanel({
                 <button type="button" onClick={() => onShowProfile(p.userId)}
                   className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
                   title="Кто это — карточка человека">
-                <Avatar seed={p.userId} name={p.name} online={online} size={32} />
+                <Avatar seed={p.userId} name={p.name} online={online} size={32} src={p.avatarUrl} />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">
                     <span className="truncate text-[13px]">{p.name}{p.userId === userId && ' (вы)'}</span>
@@ -557,7 +598,7 @@ function RoomInfoPanel({
           <div className="space-y-0.5">
             {addable.map((u) => (
               <button key={u.userId} onClick={() => onAdd(u.userId)} className="flex w-full items-center gap-2.5 rounded-md px-1.5 py-1.5 text-left hover:bg-accent">
-                <Avatar seed={u.userId} name={u.name} online={u.online} size={30} />
+                <Avatar seed={u.userId} name={u.name} online={u.online} size={30} src={u.avatarUrl} />
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm">{u.name}</div>
                   <div className="truncate text-[11px] text-muted-foreground">{u.email}</div>
@@ -791,6 +832,55 @@ function ForwardDialog({ message, rooms, onClose, onDone }: {
 }
 
 // ── карточка человека: «кто это» по клику на участника или автора сообщения ──
+/** Своё фото: клик по кружку — выбрать файл, крестик — убрать. */
+function MyAvatarPicker({ current, name, userId }: {
+  current?: string | null; name?: string | null; userId: string
+}) {
+  const qc = useQueryClient()
+  const fileRef = useRef<HTMLInputElement>(null)
+  const [busy, setBusy] = useState(false)
+  const { companyId } = useCompany()
+
+  const save = async (file: File | null) => {
+    setBusy(true)
+    try {
+      let url = ''
+      if (file) {
+        if (!file.type.startsWith('image/')) throw new Error('Нужна картинка')
+        const up = await chat.uploadAttachment(file, companyId)
+        url = up.fileUrl
+      }
+      await chat.updateMe({ avatarUrl: url })
+      // Фото стоит в составе комнаты, в ленте и в карточке — обновляем всё разом.
+      qc.invalidateQueries({ queryKey: ['chat-user-profile', userId] })
+      qc.invalidateQueries({ queryKey: ['chat-room-detail'] })
+      toast.success(file ? 'Фото обновлено' : 'Фото убрано')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Не удалось сохранить фото')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="relative">
+      <button type="button" onClick={() => fileRef.current?.click()} disabled={busy}
+        title="Сменить фото" className="block">
+        <Avatar seed={userId} name={name} size={40} src={current} />
+        {busy && <Loader2 className="absolute inset-0 m-auto size-4 animate-spin text-white" />}
+      </button>
+      {current && !busy && (
+        <button type="button" onClick={() => save(null)} title="Убрать фото"
+          className="absolute -right-1 -top-1 rounded-full bg-card p-0.5 text-muted-foreground hover:text-destructive">
+          <X className="size-3" />
+        </button>
+      )}
+      <input ref={fileRef} type="file" accept="image/*" className="hidden"
+        onChange={(e) => { const f = e.target.files?.[0]; if (f) save(f); e.target.value = '' }} />
+    </div>
+  )
+}
+
 function PersonProfileDialog({ userId, online, selfId, onClose, onMessage }: {
   userId: string
   online?: boolean
@@ -825,7 +915,13 @@ function PersonProfileDialog({ userId, online, selfId, onClose, onMessage }: {
           {p && (
             <>
               <div className="flex items-center gap-3">
-                <Avatar seed={p.userId} name={p.name} online={online} size={40} />
+                {/* Своё фото меняется прямо здесь: отдельного экрана «мой профиль»
+                    ради одной картинки заводить незачем. */}
+                {p.userId === selfId ? (
+                  <MyAvatarPicker current={p.avatarUrl} name={p.name} userId={p.userId} />
+                ) : (
+                  <Avatar seed={p.userId} name={p.name} online={online} size={40} src={p.avatarUrl} />
+                )}
                 <div className="min-w-0">
                   <div className="flex items-center gap-1.5">
                     <span className="truncate text-sm font-semibold">{p.name}</span>
@@ -834,6 +930,9 @@ function PersonProfileDialog({ userId, online, selfId, onClose, onMessage }: {
                       role: p.role === 'admin' ? 'admin' : undefined,
                       orgName: p.organizationName,
                     }} />
+                    {p.mailOnly && (
+                      <span className="shrink-0 rounded border border-border px-1 text-[10px] text-muted-foreground">по почте</span>
+                    )}
                   </div>
                   <div className="truncate text-xs text-muted-foreground">{p.email}</div>
                 </div>
@@ -950,7 +1049,7 @@ function CreateChatDialog({ open, onOpenChange, onCreated, scopeProduct }: {
             {users.map((u) => (
               <button key={u.userId} onClick={() => setPicked((p) => (p[u.userId] ? (() => { const n = { ...p }; delete n[u.userId]; return n })() : { ...p, [u.userId]: u.name }))}
                 className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left hover:bg-accent">
-                <Avatar seed={u.userId} name={u.name} online={u.online} size={32} />
+                <Avatar seed={u.userId} name={u.name} online={u.online} size={32} src={u.avatarUrl} />
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm">{u.name}</div>
                   <div className="truncate text-xs text-muted-foreground">{u.email}</div>
@@ -974,7 +1073,7 @@ function CreateChatDialog({ open, onOpenChange, onCreated, scopeProduct }: {
 function ChatBubble({
   message, album, isOwn, grouping, canDelete, editingId, editText, searchHighlight,
   onReply, onEditStart, onEditCancel, onEditSave, onEditTextChange, onDelete,
-  onAuthorClick, onReact, onPin, onForward, onTicket, onImageClick,
+  onAuthorClick, authorAvatar, withAvatar, onReact, onPin, onForward, onTicket, onImageClick,
 }: {
   message: ChatMessage
   album?: ChatMessage[]
@@ -991,6 +1090,10 @@ function ChatBubble({
   onEditTextChange: (t: string) => void
   onDelete: () => void
   onAuthorClick?: () => void
+  /** Фото автора: в групповом чате оно слева от пузыря, как в привычных мессенджерах. */
+  authorAvatar?: string | null
+  /** Показывать колонку аватара (группа/канал, чужое сообщение). */
+  withAvatar?: boolean
   onReact?: (emoji: string) => void
   onPin?: () => void
   onForward?: () => void
@@ -1019,7 +1122,17 @@ function ChatBubble({
   return (
     <>
       {showDate && <DateChip iso={message.createdAt} />}
-      <div className={cn('group/bubble flex', isOwn ? 'justify-end' : 'justify-start', isLastInGroup ? 'mb-2' : 'mb-[2px]')}>
+      <div className={cn('group/bubble flex items-end gap-1.5', isOwn ? 'justify-end' : 'justify-start', isLastInGroup ? 'mb-2' : 'mb-[2px]')}>
+        {/* Аватар автора — у последнего сообщения серии, как в мессенджерах:
+            лицо стоит рядом с концом реплики, а не улетает к её началу. Место
+            под него держим всегда, иначе пузыри серии съезжают по горизонтали. */}
+        {withAvatar && !isOwn && (
+          isLastInGroup
+            ? <button type="button" onClick={onAuthorClick} disabled={!onAuthorClick} className="mb-0.5 shrink-0">
+                <Avatar seed={message.userId || message.id} name={message.userName} size={26} src={authorAvatar} />
+              </button>
+            : <span className="w-[26px] shrink-0" />
+        )}
         <div className={cn(
           'relative max-w-[85%] px-2.5 py-1.5',
           bubbleRadius(isOwn, isFirstInGroup, isLastInGroup),
@@ -1582,8 +1695,18 @@ export function ChatPanel({ compact, scopeProduct }: {
       if (custom && !custom.roomIds.includes(r.id)) return false
       return !s || (r.name || '').toLowerCase().includes(s) || (r.lastMessage || '').toLowerCase().includes(s)
     })
+    // Порядок как в привычных мессенджерах: закреплённые сверху, дальше по
+    // свежести разговора. Прежняя сортировка держала «Общий чат» и «Объявления»
+    // первыми всегда — активная переписка уезжала вниз под молчащие каналы.
+    // Системный ранг остался тай-брейком для чатов без сообщений.
     const rank = (r: ChatRoom) => (r.kind === 'general' ? 0 : r.kind === 'news' ? 1 : 2)
-    return [...visible].sort((a, b) => rank(a) - rank(b))
+    const at = (r: ChatRoom) => (r.lastMessageAt ? Date.parse(r.lastMessageAt) : 0)
+    return [...visible].sort((a, b) => {
+      if (!!a.isPinned !== !!b.isPinned) return a.isPinned ? -1 : 1
+      const d = at(b) - at(a)
+      if (d) return d
+      return rank(a) - rank(b)
+    })
   }, [rooms, listSearch, folder, folders])
 
   const unreadByFolder = useMemo(() => {
@@ -1600,6 +1723,37 @@ export function ChatPanel({ compact, scopeProduct }: {
     return acc
   }, [rooms, folders])
   const totalUnread = useMemo(() => rooms.reduce((a, r) => a + (r.unreadCount || 0), 0), [rooms])
+
+  // Фон ленты: личная настройка, живёт в браузере (см. CHAT_SKINS).
+  const [skin, setSkin] = useState<string>(() => localStorage.getItem('cl-chat-skin') || 'none')
+  useEffect(() => { localStorage.setItem('cl-chat-skin', skin) }, [skin])
+
+  // Непрочитанные видны в заголовке вкладки: человек работает в другом окне, и
+  // единственное, что до него дотягивается, — строка «(3) …» в списке вкладок.
+  useEffect(() => {
+    const base = document.title.replace(/^\(\d+\)\s*/, '')
+    document.title = totalUnread > 0 ? `(${totalUnread}) ${base}` : base
+    return () => { document.title = document.title.replace(/^\(\d+\)\s*/, '') }
+  }, [totalUnread])
+
+  // Сколько было непрочитано в момент открытия чата: линия «непрочитанные»
+  // должна стоять там, где человек остановился, и не съезжать вниз, пока он
+  // читает. Считаем от конца ленты, поэтому число, а не id сообщения.
+  const [unreadFrom, setUnreadFrom] = useState<number | null>(null)
+  useEffect(() => {
+    const n = rooms.find((r) => r.id === selectedRoom)?.unreadCount || 0
+    setUnreadFrom(n > 0 ? n : null)
+    // Только на смену комнаты: перечитывание rooms не должно двигать линию.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedRoom])
+
+  // Фото авторов берём из состава комнаты — он уже загружен. Отдельный запрос
+  // на аватары авторов страницы был бы вторым источником тех же данных.
+  const avatarByUser = useMemo(() => {
+    const m = new Map<string, string | null>()
+    for (const p of roomDetail?.participants || []) m.set(p.userId, p.avatarUrl ?? null)
+    return m
+  }, [roomDetail])
 
   const mentionCandidates = useMemo(() => {
     if (mentionQuery === null) return []
@@ -1707,13 +1861,15 @@ export function ChatPanel({ compact, scopeProduct }: {
               className={cn('group/room flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 py-2 text-left transition-colors hover:bg-accent',
                 selectedRoom === room.id && 'bg-accent')}>
               <div className="relative">
-                {room.avatarUrl ? (
+                {/* Личный чат первым: у него фото собеседника и точка присутствия —
+                    показ через AuthImage их бы потерял. */}
+                {room.type === 'direct' ? (
+                  <Avatar seed={room.id} name={room.name} online={!!peerOnline} size={40} src={room.avatarUrl} />
+                ) : room.avatarUrl ? (
                   <AuthImage path={room.avatarUrl} alt={room.name || 'Чат'}
                     className="size-10 shrink-0 rounded-full object-cover" />
                 ) : isSystem ? (
                   <div className="flex size-10 items-center justify-center rounded-full bg-muted text-muted-foreground"><Icon className="size-5" /></div>
-                ) : room.type === 'direct' ? (
-                  <Avatar seed={room.id} name={room.name} online={!!peerOnline} size={40} />
                 ) : (
                   <Avatar seed={room.id} name={room.name} icon={Icon} size={40} />
                 )}
@@ -1737,6 +1893,7 @@ export function ChatPanel({ compact, scopeProduct }: {
                       </span>
                     )}
                     {isMuted(room) && <BellOff className="size-3 shrink-0 text-muted-foreground/70" />}
+                    {room.isPinned && <Pin className="size-3 shrink-0 text-muted-foreground/70" />}
                   </span>
                   <div className="flex shrink-0 items-center gap-0.5">
                     <span className="text-[10px] text-muted-foreground">{fmtAge(room.lastMessageAt)}</span>
@@ -1747,6 +1904,14 @@ export function ChatPanel({ compact, scopeProduct }: {
                         </button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+                        {/* Закрепление — личное: список у каждого свой, и «важное
+                            сверху» не должно навязываться остальным участникам. */}
+                        <DropdownMenuItem className="gap-2 text-xs"
+                          onClick={() => chat.pinRoom(room.id)
+                            .then(() => qc.invalidateQueries({ queryKey: ['chat-rooms'] }))
+                            .catch(() => toast.error('Не удалось закрепить чат'))}>
+                          <Pin className="size-3.5" />{room.isPinned ? 'Открепить' : 'Закрепить сверху'}
+                        </DropdownMenuItem>
                         {/* «Без звука» доступен и системным чатам: выйти из «Объявлений»
                             нельзя, а не получать push о каждом — можно. */}
                         <DropdownMenuItem className="gap-2 text-xs"
@@ -1855,6 +2020,22 @@ export function ChatPanel({ compact, scopeProduct }: {
           className={cn('inline-flex size-7 items-center justify-center rounded-md transition-colors', showMessageSearch ? 'bg-accent text-primary' : 'text-muted-foreground hover:bg-accent hover:text-foreground')}>
           <SearchIcon className="size-4" />
         </button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button title="Фон переписки"
+              className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
+              <Palette className="size-4" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="text-[13px]">
+            {Object.entries(CHAT_SKINS).map(([key, s]) => (
+              <DropdownMenuItem key={key} className="gap-2 text-xs" onClick={() => setSkin(key)}>
+                {skin === key ? <Check className="size-3.5" /> : <span className="size-3.5" />}
+                {s.label}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
         <button onClick={() => setShowRoomInfo((v) => !v)} title="Участники"
           className={cn('inline-flex size-7 items-center justify-center rounded-md transition-colors', showRoomInfo ? 'bg-accent text-primary' : 'text-muted-foreground hover:bg-accent hover:text-foreground')}>
           <UserPlus className="size-4" />
@@ -1910,8 +2091,9 @@ export function ChatPanel({ compact, scopeProduct }: {
             </div>
           )}
 
-          {/* Лента */}
-          <div className="flex-1 overflow-y-auto">
+          {/* Лента. Фон — личная настройка: он ничего не значит для других
+              участников, поэтому живёт в браузере, а не в базе пространства. */}
+          <div className="flex-1 overflow-y-auto" style={CHAT_SKINS[skin]?.style}>
             <div className="flex flex-col p-2.5">
               {(() => {
                 const grouping = computeGrouping(messages)
@@ -1933,7 +2115,18 @@ export function ChatPanel({ compact, scopeProduct }: {
                 return items.map(({ msg, album, index }) => {
                   const isOwn = msg.userId === user?.id
                   return (
-                    <ChatBubble key={msg.id} message={msg} album={album} isOwn={isOwn} grouping={grouping[index]}
+                    <Fragment key={msg.id}>
+                    {/* Где я остановился: линия стоит перед первым непрочитанным
+                        и не двигается, пока чат открыт (иначе она уезжала бы вниз
+                        с каждым новым сообщением и теряла смысл). */}
+                    {unreadFrom !== null && index === messages.length - unreadFrom && (
+                      <div className="my-2 flex items-center gap-2">
+                        <span className="h-px flex-1 bg-primary/40" />
+                        <span className="text-[10px] uppercase tracking-wide text-primary">непрочитанные</span>
+                        <span className="h-px flex-1 bg-primary/40" />
+                      </div>
+                    )}
+                    <ChatBubble message={msg} album={album} isOwn={isOwn} grouping={grouping[index]}
                       canDelete={isOwn || isAdmin || activeRoom?.createdBy === user?.id}
                       editingId={editingId} editText={editText} searchHighlight={messageSearch}
                       onReply={() => setReplyTo(msg)}
@@ -1943,11 +2136,14 @@ export function ChatPanel({ compact, scopeProduct }: {
                       onEditTextChange={setEditText}
                       onDelete={() => deleteMutation.mutate(msg.id)}
                       onAuthorClick={!isOwn && msg.userId && activeRoom?.type !== 'direct' ? () => setProfileFor(msg.userId!) : undefined}
+                      withAvatar={activeRoom?.type !== 'direct'}
+                      authorAvatar={msg.userId ? avatarByUser.get(msg.userId) : null}
                       onReact={(emoji) => reactMutation.mutate({ id: msg.id, emoji })}
                       onPin={() => pinMutation.mutate(msg.id)}
                       onForward={() => setForwardMsg(msg)}
                       onTicket={activeRoom?.type !== 'direct' ? () => setTicketMsg(msg) : undefined}
                       onImageClick={openImage} />
+                    </Fragment>
                   )
                 })
               })()}
@@ -1988,7 +2184,7 @@ export function ChatPanel({ compact, scopeProduct }: {
                 <div className="absolute bottom-full left-2 z-20 mb-1 w-64 overflow-hidden rounded-lg border border-border bg-popover shadow-xl">
                   {mentionCandidates.map((p) => (
                     <button key={p.userId} onClick={() => insertMention(p)} className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left hover:bg-accent">
-                      <Avatar seed={p.userId} name={p.name} size={24} />
+                      <Avatar seed={p.userId} name={p.name} size={24} src={p.avatarUrl} />
                       <span className="min-w-0 flex-1 truncate text-xs">{p.name}</span>
                       <AtSign className="size-3 shrink-0 text-muted-foreground" />
                     </button>

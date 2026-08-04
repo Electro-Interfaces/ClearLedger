@@ -753,6 +753,11 @@ async def create_all() -> None:
             # Участник чата, который живёт в своей почте: сообщения комнаты уходят
             # ему письмом, ответ возвращается в ленту. Войти такой учёткой нельзя.
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS mail_only BOOLEAN NOT NULL DEFAULT FALSE",
+            # Фото человека: в чате и в составе пространства лицо читается быстрее
+            # буквы в кружке — особенно в смешанной группе со сторонними.
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url VARCHAR(300)",
+            # Закреплённый чат — личная настройка каждого участника, не свойство комнаты.
+            "ALTER TABLE chat_participants ADD COLUMN IF NOT EXISTS pinned_at TIMESTAMPTZ",
             "ALTER TABLE chat_rooms ADD COLUMN IF NOT EXISTS pinned_message_id UUID",
             # Сообщение, пришедшее письмом: источник, Message-ID (идемпотентность
             # повторной доставки) и ссылка на письмо в архиве Поддержки.
