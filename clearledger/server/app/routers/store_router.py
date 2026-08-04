@@ -229,6 +229,31 @@ async def store_exchange(
     for r in recent:
         r["label"] = PACKET_KIND_LABEL.get(r["kind"], r["kind"])
 
+    # Приём и разбор — разные события. Пакет ложится сырьём (L1), документы
+    # Ledger рождает проекция (L2); если она упала, пакет так и останется
+    # принятым, но неусвоенным, и в отчётах его не будет. Связь ищется по
+    # происхождению, которое проекция кладёт в metadata документа, — отдельного
+    # журнала для этого заводить не пришлось.
+    ingest = [dict(r) for r in (await db.execute(text(f"""
+        SELECT p.kind, count(*) AS packets,
+               count(*) FILTER (WHERE de.n > 0) AS projected,
+               coalesce(sum(de.n), 0) AS entries
+        FROM edge_packets p
+        LEFT JOIN LATERAL (
+            SELECT count(*) AS n FROM data_entries d
+            WHERE d.company_id = p.company_id AND d.source = 'edge'
+              AND d.metadata->'Edge'->>'packet_uuid' = p.packet_uuid
+        ) de ON true
+        WHERE p.company_id = :cid AND {period}
+        GROUP BY p.kind ORDER BY count(*) DESC
+    """), p)).mappings().all()]
+    for i in ingest:
+        i["label"] = PACKET_KIND_LABEL.get(i["kind"], i["kind"])
+        # Снимки, черновики НСИ и рецептуры документов учёта не порождают —
+        # у них своя дорога, и «не разобрано» для них не дефект.
+        i["projects_docs"] = i["kind"] not in ("stock", "station-nsi", "station-recipes")
+        i["unprojected"] = int(i["packets"]) - int(i["projected"])
+
     agents = (await db.execute(
         select(EdgeAgent).where(EdgeAgent.company_id == cid).order_by(EdgeAgent.station_id)
     )).scalars().all()
@@ -298,6 +323,7 @@ async def store_exchange(
         "by_day": by_day,
         "stations": stations,
         "recent": recent,
+        "ingest": ingest,
     }
 
 
@@ -707,6 +733,39 @@ async def store_parity(
     """
     cid = await scope_company_id(user, db)
     return await edge_service.parity(db, cid, station_id, days)
+
+
+@router.get("/station-health")
+async def store_station_health(
+    station_id: int = Query(..., description="код АЗС"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Что на станции требует человека: касса, выгрузка, учёт, коды, сверка.
+
+    Тот же отчёт, что агент забирает по api-key, — но для менеджера в
+    «Магазине». Раньше эти находки существовали только в машинном контуре и
+    доезжали до людей письмом; экран снимает посредника.
+    """
+    cid = await scope_company_id(user, db)
+    return await edge_service.alerts(db, cid, station_id)
+
+
+@router.get("/reconcile")
+async def store_reconcile(
+    station_id: int | None = Query(None, description="код АЗС; пусто — все"),
+    limit: int = Query(60, ge=1, le=200),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Теневая сверка смен: пакет агента против пакета 1С.
+
+    Пока 1С ведёт учёт станции параллельно, сходимость по каждой смене — это
+    единственное доказательство, что агент считает правильно. Критерий этапа —
+    четырнадцать чистых дней ПОДРЯД и свежих, а не «столько-то совпало».
+    """
+    cid = await scope_company_id(user, db)
+    return await edge_service.reconcile(db, cid, station_id, limit)
 
 
 @router.get("/places")

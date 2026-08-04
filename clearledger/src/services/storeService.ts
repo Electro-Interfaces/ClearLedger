@@ -920,6 +920,11 @@ export interface StoreExchangeData {
     at: string; station_id: number; kind: string; label: string
     size_bytes: number; direction: 'вверх' | 'вниз'; note: string | null
   }[]
+  /** Приём (L1) против разбора в документы Ledger (L2) — по видам пакетов. */
+  ingest: {
+    kind: string; label: string; packets: number; projected: number
+    entries: number; unprojected: number; projects_docs: boolean
+  }[]
 }
 
 export const getStoreExchange = (dateFrom: string, dateTo: string) =>
@@ -965,6 +970,75 @@ export interface StoreExchangeStationDetail {
 export const getStoreExchangeStation = (stationId: number, dateFrom: string, dateTo: string) =>
   get<StoreExchangeStationDetail>(
     `/api/store/exchange/${stationId}?date_from=${dateFrom}&date_to=${dateTo}`)
+
+/** Что на станции требует человека: касса, выгрузка, учёт, коды, сверка смен. */
+export interface StoreStationHealth {
+  station_id: number
+  critical: number
+  warnings: number
+  shifts_clean: boolean | null
+  alerts: {
+    level: 'critical' | 'warning'
+    topic: string
+    text: string
+    items?: string[]
+  }[]
+}
+
+export const getStoreStationHealth = (stationId: number) =>
+  get<StoreStationHealth>(`/api/store/station-health?station_id=${stationId}`)
+
+/** Теневая сверка смен: пакет агента против пакета 1С. */
+export interface StoreReconcileShift {
+  station: number
+  shift: string | null
+  shift_internal_no?: number | null
+  opened_at?: string | null
+  closed_at?: string | null
+  status: 'совпало' | 'расхождение' | 'нет пары' | 'нет данных'
+  detail?: string | null
+  note?: string | null
+  issues?: string[]
+  agent?: Record<string, number>
+  cb?: Record<string, number>
+}
+
+export interface StoreReconcileData {
+  station_id: number | null
+  shifts_compared: number
+  matched: number
+  mismatched: number
+  clean: boolean
+  criterion: {
+    target_days: number; days: number; met: boolean
+    from: string | null; to: string | null
+    stale: number | null; broken_by: string | null
+  }
+  shifts: StoreReconcileShift[]
+}
+
+export const getStoreReconcile = (stationId: number | null, limit = 60) =>
+  get<StoreReconcileData>('/api/store/reconcile', {
+    station_id: stationId ?? undefined, limit,
+  })
+
+/** Паритет с 1С: какие виды документов она делает и делаем ли их мы. */
+export interface StoreParityData {
+  station_id: number
+  days: number
+  covered: number
+  missing: number
+  kinds: {
+    kind: string; title: string
+    onec: number; ledger: number
+    onec_period: number; ledger_period: number
+    onec_last: string | null; ledger_last: string | null
+    covered: boolean; used: boolean; own: boolean
+  }[]
+}
+
+export const getStoreParity = (stationId: number, days = 30) =>
+  get<StoreParityData>('/api/store/parity', { station_id: stationId, days })
 
 export interface StoreAssortmentRule {
   item_uuid: string

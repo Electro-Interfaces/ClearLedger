@@ -267,8 +267,12 @@ export function StoreStationsPanel({ dateFrom, dateTo }: { dateFrom: string; dat
   if (error) return <div className="p-6 text-sm text-red-400/90">Не удалось получить состояние обмена</div>
   if (!data) return null
 
-  const { totals, stations, by_kind, by_day, recent } = data
+  const { totals, stations, by_kind, by_day, recent, ingest } = data
   const пик = Math.max(1, ...by_day.map((d) => d.packets))
+  // Принято ≠ усвоено: пакет ложится сырьём, документы рождает разбор. Считаем
+  // только те виды, которые обязаны порождать документы.
+  const неразобрано = (ingest ?? []).filter((i) => i.projects_docs)
+    .reduce((a, i) => a + i.unprojected, 0)
 
   return (
     <div className="space-y-4 p-6">
@@ -380,22 +384,39 @@ export function StoreStationsPanel({ dateFrom, dateTo }: { dateFrom: string; dat
 
       <div className="grid gap-4 lg:grid-cols-2">
         <div className="rounded-lg border border-border">
-          <div className="border-b border-border px-3 py-2 text-xs text-muted-foreground">
-            Что везёт канал наверх — по видам пакетов
+          <div className="flex flex-wrap items-baseline gap-x-2 border-b border-border px-3 py-2 text-xs text-muted-foreground">
+            <span>Что везёт канал наверх — по видам пакетов</span>
+            <span className={`ml-auto ${неразобрано > 0 ? 'text-amber-400/90' : ''}`}>
+              {неразобрано > 0
+                ? `не разобрано в документы: ${неразобрано}`
+                : 'всё принятое разобрано'}
+            </span>
           </div>
           {by_kind.length === 0 ? (
             <div className="p-4 text-sm text-muted-foreground">За период станции ничего не отдавали.</div>
           ) : (
             <table className="w-full text-sm">
               <tbody>
-                {by_kind.map((k) => (
-                  <tr key={k.kind} className="border-b border-border last:border-0">
-                    <td className="px-3 py-1.5">{k.label}</td>
-                    <td className="px-3 py-1.5 text-right tabular-nums">{k.packets}</td>
-                    <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{объём(k.bytes)}</td>
-                    <td className="px-3 py-1.5 text-right text-muted-foreground">{когда(k.last_at)}</td>
-                  </tr>
-                ))}
+                {by_kind.map((k) => {
+                  const раз = (ingest ?? []).find((i) => i.kind === k.kind)
+                  return (
+                    <tr key={k.kind} className="border-b border-border last:border-0">
+                      <td className="px-3 py-1.5">
+                        {k.label}
+                        {раз && раз.projects_docs && (
+                          <span className={`ml-2 text-[11px] ${раз.unprojected > 0 ? 'text-amber-400/90' : 'text-muted-foreground'}`}>
+                            {раз.unprojected > 0
+                              ? `${раз.unprojected} без документов`
+                              : `${раз.entries} документов`}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-3 py-1.5 text-right tabular-nums">{k.packets}</td>
+                      <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{объём(k.bytes)}</td>
+                      <td className="px-3 py-1.5 text-right text-muted-foreground">{когда(k.last_at)}</td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           )}

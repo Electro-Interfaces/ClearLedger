@@ -38,6 +38,8 @@ import { StoreShiftsPanel } from './StoreShiftsPanel'
 import { StoreDedupPanel } from './StoreDedupPanel'
 import { StoreStationsPanel } from './StoreStationsPanel'
 import { StoreStationConsolePanel } from './StoreStationConsolePanel'
+import { StoreStationHealthPanel } from './StoreStationHealthPanel'
+import { StoreParityPanel } from './StoreParityPanel'
 import { StoreStationDraftsPanel } from './StoreStationDraftsPanel'
 import { StoreBarcodeCollisionsPanel } from './StoreBarcodeCollisionsPanel'
 import { StoreReceiptDocsPanel } from './StoreReceiptDocsPanel'
@@ -306,6 +308,20 @@ export function StorePanel() {
     return (
       <div className="h-full overflow-y-auto">
         <StoreStationsPanel dateFrom={period.from} dateTo={period.to} />
+      </div>
+    )
+  }
+  if (sub === 'station_health') {
+    return (
+      <div className="h-full overflow-y-auto">
+        <StoreStationHealthPanel />
+      </div>
+    )
+  }
+  if (sub === 'parity') {
+    return (
+      <div className="h-full overflow-y-auto">
+        <StoreParityPanel />
       </div>
     )
   }
