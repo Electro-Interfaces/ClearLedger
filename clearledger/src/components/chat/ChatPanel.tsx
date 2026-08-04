@@ -14,7 +14,7 @@ import {
   Trash2, Reply, Pencil, X, Check, Megaphone, Lock, Pin, Video, UserPlus,
   Folder, AtSign, Loader2, Paperclip, Camera, Search as SearchIcon,
   Shield, ShieldOff, UserMinus, LogOut, Bell, BellOff, Forward, MapPin, ClipboardList,
-  Mail, Palette, Smile, Images, Volume2, VolumeX,
+  Mail, Palette, Smile, Images, Volume2, VolumeX, Mic,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/contexts/AuthContext'
@@ -249,6 +249,39 @@ function RoomMediaDialog({ roomId, onClose, onImageClick }: {
         </div>
       </DialogContent>
     </Dialog>
+  )
+}
+
+/**
+ * Голосовые сообщения — заявленная, но ещё не сделанная возможность.
+ *
+ * Кнопка стоит на своём месте и честно объясняет, чего не хватает: расшифровка
+ * речи в контуре уже работает (записи разговоров контакт-центра разбирает своя
+ * модель), но она считает на процессоре — минута речи занимает ощутимое время.
+ * Поток голосовых сообщений так не обслужить, нужна видеокарта. Показываем это
+ * прямо, чтобы человек понимал: возможность не забыта, а ждёт железа.
+ */
+function VoiceSoon() {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button title="Голосовое сообщение"
+          className="inline-flex size-8 max-md:size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-accent hover:text-foreground">
+          <Mic className="size-4" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" side="top" className="w-72 text-xs leading-relaxed">
+        <div className="mb-1 font-semibold">Голосовые сообщения — скоро</div>
+        <p className="text-muted-foreground">
+          Записанная речь будет приходить и текстом: расшифровка в пространстве уже
+          работает — так разбираются записи разговоров контакт-центра. Пока она
+          считает на процессоре, и на поток голосовых этого не хватает.
+        </p>
+        <p className="mt-1.5 text-muted-foreground">
+          Возможность включим, как только в контур встанет видеокарта.
+        </p>
+      </PopoverContent>
+    </Popover>
   )
 }
 
@@ -2482,6 +2515,7 @@ export function ChatPanel({ compact, scopeProduct }: {
                     <EmojiPicker onPick={(e) => setMessageText((t) => t + e)} />
                   </PopoverContent>
                 </Popover>
+                <VoiceSoon />
                 <textarea value={messageText} onChange={(e) => handleTextChange(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() } }}
                   onPaste={handlePaste}
