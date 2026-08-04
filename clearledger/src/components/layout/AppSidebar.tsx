@@ -28,6 +28,7 @@ import {
 } from '@/config/spaceProducts'
 import { productModuleAllowed, productHasModule } from '@/config/productAccess'
 import { useWorkspaceSections } from '@/components/workspace/workspaceSections'
+import { useActiveMode } from '@/contexts/ActiveModeContext'
 
 /** Пункт левого меню. Общий для Учёта и Управления — вид навигации один на приложения.
  *  `active` — переопределить подсветку: у разделов рабочей области адрес один и тот же,
@@ -150,6 +151,10 @@ function SidebarNavBody({ collapsed = false, onNavigate }: {
   // теперь уровнем выше (пространство), и внутри продукта верхний уровень навигации
   // принадлежит ему самому. Гармошка WorkspaceModeSidebar оставляет только под-разделы.
   const sections = useWorkspaceSections()
+  // Раздел, открытый рабочей областью прямо сейчас. Пока рельса угадывала его
+  // по адресу, подсветка расходилась с экраном: открыт «Каталог», а выбранным
+  // не выглядел никто.
+  const { activeMode: openMode } = useActiveMode()
   // В продукте пространства («Финансы», «Данные», …) меню — только его разделы и
   // страницы: рабочее место не должно показывать чужие. Модулями Учёта пункты внутри не
   // фильтруются (у роли с ключом `finance` их нет, и «Документы» исчезли бы из
@@ -254,7 +259,8 @@ function SidebarNavBody({ collapsed = false, onNavigate }: {
     // адреса, и лишь в конце первый раздел (его же покажет рабочая область,
     // когда в адресе нет ничего).
     const bySub = urlSub ? modes.find((s) => s.items.some((i) => i.key === urlSub)) : undefined
-    const activeMode = bySub?.mode
+    const activeMode = (openMode && modes.some((s) => s.mode === openMode) ? openMode : null)
+      ?? bySub?.mode
       ?? (modes.some((s) => s.mode === urlMode) ? urlMode : modes[0]?.mode)
     // Разделы подсвечиваем везде, кроме страниц продукта («Объекты», «Документы»):
     // там открыт не раздел, а страница, и она подсветит себя сама. Сравнивать

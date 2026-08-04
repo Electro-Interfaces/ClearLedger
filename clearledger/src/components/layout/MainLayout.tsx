@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { SidebarProvider, SidebarInset } from '@/components/ui/sidebar'
 import { Sheet, SheetContent, SheetTitle, SheetDescription } from '@/components/ui/sheet'
 import { AppSidebar, SidebarNavContent } from './AppSidebar'
+import { ActiveModeProvider } from '@/contexts/ActiveModeContext'
 import { MobileBottomNav } from './MobileBottomNav'
 import { Header } from './Header'
 import { WorkspaceTabBar } from './WorkspaceTabBar'
@@ -98,6 +99,7 @@ export function MainLayout() {
   const isWorkspace = isWorkspacePath(location.pathname)
 
   return (
+    <ActiveModeProvider>
     <SidebarProvider
       open={sidebarOpen}
       onOpenChange={setSidebarOpen}
@@ -160,5 +162,6 @@ export function MainLayout() {
       {/* Нижняя навигация телефонов (<768px; сама скрывается md:hidden) */}
       {isMobile && <MobileBottomNav />}
     </SidebarProvider>
+    </ActiveModeProvider>
   )
 }

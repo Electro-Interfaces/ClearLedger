@@ -3,7 +3,7 @@
  * Вертикальное меню разделов + единая рабочая область (core) на всю ширину.
  */
 
-import { lazy, Suspense } from 'react'
+import { lazy, Suspense, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Copy, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -13,6 +13,7 @@ import { PRODUCT_SETUP_NOTE } from '@/config/spaceProducts'
 import { useAppEnabled } from '@/hooks/useCompanyRegistry'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useWorkspace, WorkspaceProvider, type CoreMode } from '@/contexts/WorkspaceContext'
+import { useActiveMode } from '@/contexts/ActiveModeContext'
 import { getSettings } from '@/services/settingsService'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -305,7 +306,23 @@ function MobileWorkspace() {
 export function WorkspaceLayout({ modes }: { modes?: CoreMode[] } = {}) {
   return (
     <WorkspaceProvider lockModes={modes}>
+      <ModeBeacon />
       <WorkspaceContent />
     </WorkspaceProvider>
   )
+}
+
+/**
+ * Маячок открытого раздела для левой рельсы: она живёт снаружи рабочей области
+ * и её состояния не видит, а подсветка обязана совпадать с тем, что на экране.
+ * Ничего не рисует — только публикует текущий раздел наверх.
+ */
+function ModeBeacon() {
+  const { coreMode } = useWorkspace()
+  const { publishMode } = useActiveMode()
+  useEffect(() => {
+    publishMode(coreMode)
+    return () => publishMode(null)
+  }, [coreMode, publishMode])
+  return null
 }
