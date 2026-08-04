@@ -102,7 +102,36 @@ export interface ChatMessage {
   forwardedFrom?: string | null
   /** 'email' — сообщение пришло письмом от участника, живущего в своей почте. */
   externalSource?: string | null
+  /** Опрос, если сообщение — опрос (type='poll'). */
+  poll?: ChatPoll | null
 }
+
+/** Опрос в чате: вопрос, варианты и текущий расклад голосов. */
+export interface ChatPoll {
+  id: string
+  question: string
+  options: string[]
+  counts: number[]
+  /** Кто за что голосовал; null — опрос анонимный. */
+  voters: string[][] | null
+  multiple: boolean
+  anonymous: boolean
+  myVotes: number[]
+  totalVoters: number
+  isClosed: boolean
+  createdBy: string | null
+}
+
+export const createPoll = (roomId: string, body: {
+  question: string; options: string[]; multiple: boolean; anonymous: boolean
+}) => post<ChatMessage & { poll: ChatPoll }>(`/api/chat/rooms/${roomId}/polls`, body)
+
+/** Отдать голос; пустой список — снять свой выбор. */
+export const votePoll = (pollId: string, options: number[]) =>
+  post<ChatPoll>(`/api/chat/polls/${pollId}/vote`, { options })
+
+export const closePoll = (pollId: string) =>
+  post<ChatPoll>(`/api/chat/polls/${pollId}/close`, {})
 
 export interface ChatUser {
   userId: string; name: string; email: string; online: boolean

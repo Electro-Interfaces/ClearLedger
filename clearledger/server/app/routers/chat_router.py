@@ -23,7 +23,8 @@ from app.database import async_session_factory, get_db
 from app.deps import capture_company_header, scope_company_id
 from app.models import (
     ChatFolder, ChatMessage, ChatMessageReaction, ChatParticipant, ChatPushSubscription,
-    ChatRoom, ChatTicketLink, Company, Counterparty, ServiceLocation, User, UserCompany,
+    ChatPoll, ChatPollVote, ChatRoom, ChatTicketLink, Company, Counterparty,
+    ServiceLocation, User, UserCompany,
 )
 from app.services import chat_mail, web_push
 from app.services import link_preview as link_preview_service
@@ -338,6 +339,8 @@ class MessageOut(BaseModel):
     readCount: int = 0
     reactions: list[ReactionOut] = Field(default_factory=list)
     createdAt: str
+    # Опрос, если сообщение — опрос: вопрос, варианты, голоса и мой выбор.
+    poll: dict | None = None
     # Сообщение пришло письмом, а не из интерфейса: собеседник живёт в почте, и
     # это видно в ленте — иначе непонятно, почему он «не читает» и отвечает не сразу.
     externalSource: str | None = None
@@ -729,14 +732,25 @@ async def list_messages(
     # Принадлежность авторов — одним запросом на всю страницу переписки.
     parties = await _party_types(db, room.company_id,
                                  {m.user_id for m in msgs if m.user_id})
+    # Опросы страницы — одним запросом: результат нужен сразу, иначе карточка
+    # опроса в ленте появлялась бы пустой и дозагружалась по одному.
+    poll_ids = [m.id for m in msgs if m.type == "poll"]
+    polls: dict[uuid.UUID, dict] = {}
+    if poll_ids:
+        for poll in (await db.execute(select(ChatPoll).where(
+                ChatPoll.message_id.in_(poll_ids)))).scalars():
+            polls[poll.message_id] = await _poll_out(poll, current_user.id, db)
+
     out = []
     for m in msgs:
         rc = (await db.execute(select(func.count()).select_from(ChatParticipant).where(
             ChatParticipant.room_id == rid, ChatParticipant.user_id != m.user_id,
             ChatParticipant.last_read_at.is_not(None),
             ChatParticipant.last_read_at >= m.created_at))).scalar() or 0
-        out.append(_msg_out(m, int(rc), replies.get(m.reply_to), reactions.get(m.id),
-                            parties.get(m.user_id) if m.user_id else None))
+        item = _msg_out(m, int(rc), replies.get(m.reply_to), reactions.get(m.id),
+                        parties.get(m.user_id) if m.user_id else None)
+        item.poll = polls.get(m.id)
+        out.append(item)
     return out
 
 
@@ -1421,6 +1435,183 @@ async def leave_room(
 class MuteBody(BaseModel):
     # 'forever' — навсегда, ISO-время — до момента, null — включить уведомления.
     until: str | None = None
+
+
+class PollCreateBody(BaseModel):
+    question: str = Field(min_length=2, max_length=300)
+    options: list[str] = Field(min_length=2, max_length=10)
+    multiple: bool = False
+    anonymous: bool = False
+
+
+class PollVoteBody(BaseModel):
+    # Пустой список = снять свой голос: передумать — нормально, пока опрос открыт.
+    options: list[int] = Field(default_factory=list)
+
+
+async def _poll_out(poll: ChatPoll, me: uuid.UUID, db: AsyncSession) -> dict:
+    """Опрос с результатами. Имена голосовавших — только у неанонимного:
+    в рабочем чате важно знать, кто едет на объект, но решает это автор."""
+    rows = (await db.execute(
+        select(ChatPollVote.option_index, ChatPollVote.user_id, User.name)
+        .join(User, User.id == ChatPollVote.user_id)
+        .where(ChatPollVote.poll_id == poll.id))).all()
+    counts = [0] * len(poll.options)
+    voters: list[list[str]] = [[] for _ in poll.options]
+    mine: list[int] = []
+    people: set[uuid.UUID] = set()
+    for idx, uid, name in rows:
+        if 0 <= idx < len(counts):
+            counts[idx] += 1
+            people.add(uid)
+            if uid == me:
+                mine.append(idx)
+            elif not poll.anonymous:
+                voters[idx].append(name or "—")
+    if not poll.anonymous:
+        for idx in mine:
+            voters[idx].insert(0, "Вы")
+    return {
+        "id": str(poll.id),
+        "question": poll.question,
+        "options": list(poll.options),
+        "counts": counts,
+        "voters": None if poll.anonymous else voters,
+        "multiple": poll.multiple,
+        "anonymous": poll.anonymous,
+        "myVotes": sorted(mine),
+        "totalVoters": len(people),
+        "isClosed": poll.closed_at is not None,
+        "createdBy": str(poll.created_by) if poll.created_by else None,
+    }
+
+
+@router.post("/rooms/{room_id}/polls", status_code=status.HTTP_201_CREATED)
+async def create_poll(
+    room_id: str, body: PollCreateBody,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Спросить мнение участников чата.
+
+    Опрос идёт сообщением в ленту: его видно в переписке наравне со всем
+    остальным, а не в отдельном разделе, куда надо ещё зайти. Право создавать —
+    то же, что право писать: в канале это владелец и его админы.
+    """
+    try:
+        rid = uuid.UUID(room_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID")
+    room = await _assert_participant(rid, current_user, db)
+    room_role = (await db.execute(select(ChatParticipant.role).where(
+        ChatParticipant.room_id == room.id,
+        ChatParticipant.user_id == current_user.id))).scalar_one_or_none()
+    if not _can_write(room, current_user, room_role):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "В этом чате писать может не каждый")
+
+    options = [o.strip()[:150] for o in body.options if o and o.strip()]
+    if len(options) < 2:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Нужно минимум два варианта")
+    if len(set(options)) != len(options):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Варианты повторяются")
+
+    question = body.question.strip()
+    msg = ChatMessage(room_id=rid, user_id=current_user.id, user_name=current_user.name,
+                      type="poll", content=question)
+    db.add(msg)
+    await db.flush()
+    poll = ChatPoll(room_id=rid, message_id=msg.id, question=question, options=options,
+                    multiple=body.multiple, anonymous=body.anonymous, created_by=current_user.id)
+    db.add(poll)
+    room.updated_at = _now()
+    await db.flush()
+
+    parties = await _party_types(db, room.company_id, {current_user.id})
+    payload = _msg_out(msg, 0, None, None, parties.get(current_user.id))
+    poll_data = await _poll_out(poll, current_user.id, db)
+    await db.commit()
+
+    body_out = {**payload.model_dump(), "poll": poll_data}
+    await manager.broadcast(f"chat:{rid}", {"type": "chat:message", **body_out})
+    web_push.push_room_async(rid, room.name or current_user.name,
+                             f"{current_user.name}: опрос «{question[:100]}»", current_user.id)
+    chat_mail.push_room_mail_async(rid, room.name, current_user.name,
+                                   f"Опрос: {question}\n\n" + "\n".join(f"— {o}" for o in options),
+                                   current_user.id)
+    return body_out
+
+
+@router.post("/polls/{poll_id}/vote")
+async def vote_poll(
+    poll_id: str, body: PollVoteBody,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Отдать голос (или снять его, прислав пустой список).
+
+    Переголосование заменяет прежний выбор целиком: опрос отвечает на вопрос
+    «что думают сейчас», а не «кто когда передумал».
+    """
+    try:
+        pid = uuid.UUID(poll_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID")
+    poll = await db.get(ChatPoll, pid)
+    if poll is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Опрос не найден")
+    await _assert_participant(poll.room_id, current_user, db)
+    if poll.closed_at is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Опрос завершён")
+
+    picks = sorted({i for i in body.options if 0 <= i < len(poll.options)})
+    if not poll.multiple and len(picks) > 1:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "В этом опросе выбирают один вариант")
+
+    await db.execute(sa_delete(ChatPollVote).where(
+        ChatPollVote.poll_id == pid, ChatPollVote.user_id == current_user.id))
+    for i in picks:
+        db.add(ChatPollVote(poll_id=pid, user_id=current_user.id, option_index=i))
+    await db.flush()
+    data = await _poll_out(poll, current_user.id, db)
+    await db.commit()
+    # Результат меняется у всех, кто смотрит на опрос, — рассылаем как реакцию.
+    await manager.broadcast(f"chat:{poll.room_id}",
+                            {"type": "chat:poll", "roomId": str(poll.room_id),
+                             "messageId": str(poll.message_id)})
+    return data
+
+
+@router.post("/polls/{poll_id}/close")
+async def close_poll(
+    poll_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Завершить опрос: голоса больше не принимаются, итог виден всем.
+
+    Закрывает автор, владелец чата или админ пространства — тот же круг, что
+    отвечает за порядок в переписке.
+    """
+    try:
+        pid = uuid.UUID(poll_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID")
+    poll = await db.get(ChatPoll, pid)
+    if poll is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Опрос не найден")
+    room = await _assert_participant(poll.room_id, current_user, db)
+    my_role = await _my_room_role(poll.room_id, current_user, db)
+    if not (poll.created_by == current_user.id or current_user.is_superadmin
+            or room.created_by == current_user.id or my_role in ("owner", "admin")):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Завершить опрос может тот, кто его создал")
+    if poll.closed_at is None:
+        poll.closed_at = _now()
+    data = await _poll_out(poll, current_user.id, db)
+    await db.commit()
+    await manager.broadcast(f"chat:{poll.room_id}",
+                            {"type": "chat:poll", "roomId": str(poll.room_id),
+                             "messageId": str(poll.message_id)})
+    return data
 
 
 @router.get("/link-preview")

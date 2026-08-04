@@ -4694,6 +4694,56 @@ class ChatPushSubscription(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class ChatPoll(Base):
+    """Опрос в чате: собрать мнение, не собирая совещание.
+
+    Живёт при сообщении (`message_id`), поэтому попадает в ленту на общих
+    правах — его видно в переписке, можно процитировать и переслать. Варианты
+    хранятся списком в jsonb: у опроса они неизменны после создания, отдельная
+    таблица строк дала бы только join на каждом чтении.
+
+    Анонимность — свойство опроса, а не настройка показа: в рабочем чате чаще
+    важно знать, кто как ответил («кто едет на объект»), но бывает и обратное,
+    и это решает автор в момент создания.
+    """
+    __tablename__ = "chat_polls"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    room_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("chat_rooms.id", ondelete="CASCADE"), nullable=False, index=True)
+    message_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("chat_messages.id", ondelete="CASCADE"),
+        nullable=False, unique=True)
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    # ["Да", "Нет", …] — порядок вариантов и есть их идентификатор (индекс).
+    options: Mapped[list] = mapped_column(JSONB, nullable=False)
+    multiple: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    anonymous: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ChatPollVote(Base):
+    """Голос за вариант. Переголосование — это удаление прежних строк и вставка
+    новых, поэтому история «кто передумал» не хранится: опрос отвечает на вопрос
+    «что думают сейчас»."""
+    __tablename__ = "chat_poll_votes"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    poll_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("chat_polls.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    option_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("uq_chat_poll_vote", "poll_id", "user_id", "option_index", unique=True),
+    )
+
+
 class ChatMessageReaction(Base):
     """Реакция-эмодзи на сообщение. Одна на пользователя (UNIQUE)."""
     __tablename__ = "chat_message_reactions"
@@ -5635,6 +5685,31 @@ class PulseAck(Base):
     user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     acked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # Отложено до этой даты: «вернуться через три дня». NULL — обычное «принято
+    # на сегодня». Карточка не показывается, пока срок не наступил, но остаётся
+    # в списке отложенного — это обязательство руководителя, а не забывание.
+    snooze_until: Mapped[date_type | None] = mapped_column(Date, nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class PulseTarget(Base):
+    """Порог эскалации «Пульса», заданный компанией.
+
+    Норма — мнение компании, а не константа в коде: 19% пропущенных звонков для
+    одной сети катастрофа, для другой — обычный вторник. Реестр допустимых
+    ключей и дефолты живут в `routers/pulse_router.THRESHOLDS`; здесь только то,
+    что руководитель поменял руками.
+    """
+    __tablename__ = "pulse_targets"
+
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), primary_key=True)
+    key: Mapped[str] = mapped_column(String(60), primary_key=True)
+    value: Mapped[float] = mapped_column(Numeric(14, 3), nullable=False)
+    updated_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
 # ---------------------------------------------------------------------------

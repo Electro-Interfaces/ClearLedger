@@ -14,7 +14,7 @@ import {
   Trash2, Reply, Pencil, X, Check, Megaphone, Lock, Pin, Video, UserPlus,
   Folder, AtSign, Loader2, Paperclip, Camera, Search as SearchIcon,
   Shield, ShieldOff, UserMinus, LogOut, Bell, BellOff, Forward, MapPin, ClipboardList,
-  Mail, Palette, Smile, Images, Volume2, VolumeX, Mic,
+  Mail, Palette, Smile, Images, Volume2, VolumeX, Mic, BarChart3,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/contexts/AuthContext'
@@ -46,7 +46,7 @@ import { isMuted } from '@/services/chatService'
 import { listSpaceObjects } from '@/services/spaceObjectsService'
 import { useSupportContext } from '@/contexts/SupportContext'
 import type {
-  ChatRoom, ChatMessage, ChatParticipant, ChatPresence, ChatFolder as ChatFolderModel,
+  ChatRoom, ChatMessage, ChatParticipant, ChatPresence, ChatFolder as ChatFolderModel, ChatPoll,
 } from '@/services/chatService'
 
 // ── константы ────────────────────────────────────────────────────────────────
@@ -246,6 +246,185 @@ function RoomMediaDialog({ roomId, onClose, onImageClick }: {
               ))}
             </div>
           )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/**
+ * Опрос в ленте: вопрос, варианты и расклад голосов.
+ *
+ * Пока человек не ответил, чужие голоса видны числом, но не мешают выбирать;
+ * после ответа появляются доли. Это не про красоту: показать проценты ДО
+ * голосования — значит подтолкнуть к большинству, а опрос нужен ради мнения.
+ */
+function PollCard({ poll, isOwn, selfId }: {
+  poll: ChatPoll; isOwn: boolean; selfId?: string
+}) {
+  const qc = useQueryClient()
+  const [busy, setBusy] = useState(false)
+  const voted = poll.myVotes.length > 0
+  const total = poll.counts.reduce((a, b) => a + b, 0)
+
+  const refresh = () => qc.invalidateQueries({ queryKey: ['chat-messages'] })
+
+  const toggle = async (i: number) => {
+    if (poll.isClosed || busy) return
+    const next = poll.multiple
+      ? (poll.myVotes.includes(i) ? poll.myVotes.filter((v) => v !== i) : [...poll.myVotes, i])
+      : (poll.myVotes.includes(i) ? [] : [i])
+    setBusy(true)
+    try {
+      await chat.votePoll(poll.id, next)
+      refresh()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Не удалось проголосовать')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const close = async () => {
+    setBusy(true)
+    try { await chat.closePoll(poll.id); refresh(); toast.success('Опрос завершён') }
+    catch (e) { toast.error(e instanceof Error ? e.message : 'Не удалось завершить') }
+    finally { setBusy(false) }
+  }
+
+  return (
+    <div className={cn('mt-1 rounded-md border p-2',
+      isOwn ? 'border-white/25 bg-white/10' : 'border-border bg-background/40')}>
+      <div className="mb-1 flex items-start gap-1.5">
+        <BarChart3 className="mt-0.5 size-3.5 shrink-0 opacity-70" />
+        <div className="min-w-0 flex-1">
+          <div className="text-[13px] font-medium leading-snug">{poll.question}</div>
+          <div className={cn('text-[10px]', isOwn ? 'text-primary-foreground/70' : 'text-muted-foreground')}>
+            {poll.multiple ? 'несколько ответов' : 'один ответ'}
+            {poll.anonymous ? ' · анонимно' : ''}
+            {poll.isClosed ? ' · завершён' : ''}
+          </div>
+        </div>
+      </div>
+
+      <div className="space-y-1">
+        {poll.options.map((opt, i) => {
+          const count = poll.counts[i] || 0
+          const share = total ? Math.round((count / total) * 100) : 0
+          const mine = poll.myVotes.includes(i)
+          const showShare = voted || poll.isClosed
+          return (
+            <button key={i} type="button" onClick={() => toggle(i)} disabled={poll.isClosed || busy}
+              className={cn('relative w-full overflow-hidden rounded px-2 py-1 text-left text-[12px]',
+                mine ? 'ring-1 ring-primary' : '',
+                poll.isClosed ? 'cursor-default' : 'hover:bg-accent/50',
+                isOwn ? 'bg-white/10' : 'bg-muted/60')}>
+              {showShare && (
+                <span className="absolute inset-y-0 left-0 bg-primary/20" style={{ width: `${share}%` }} />
+              )}
+              <span className="relative flex items-center gap-1.5">
+                <span className={cn('flex size-3.5 shrink-0 items-center justify-center rounded-full border',
+                  mine ? 'border-primary bg-primary text-primary-foreground' : 'border-muted-foreground/50')}>
+                  {mine && <Check className="size-2.5" />}
+                </span>
+                <span className="min-w-0 flex-1 truncate">{opt}</span>
+                {showShare && <span className="shrink-0 tabular-nums text-[11px] opacity-80">{share}% · {count}</span>}
+              </span>
+              {/* Кто как ответил — в неанонимном опросе это и есть результат:
+                  «кто едет на объект» важнее процента. */}
+              {showShare && poll.voters?.[i]?.length ? (
+                <span className={cn('relative mt-0.5 block truncate text-[10px]',
+                  isOwn ? 'text-primary-foreground/70' : 'text-muted-foreground')}>
+                  {poll.voters[i].join(', ')}
+                </span>
+              ) : null}
+            </button>
+          )
+        })}
+      </div>
+
+      <div className={cn('mt-1 flex items-center gap-2 text-[10px]',
+        isOwn ? 'text-primary-foreground/70' : 'text-muted-foreground')}>
+        <span>{poll.totalVoters ? `проголосовали: ${poll.totalVoters}` : 'голосов пока нет'}</span>
+        {!poll.isClosed && poll.createdBy === selfId && (
+          <button type="button" onClick={close} disabled={busy} className="ml-auto hover:underline">
+            Завершить опрос
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/** Собрать опрос: вопрос и варианты. */
+function CreatePollDialog({ roomId, onClose }: { roomId: string; onClose: () => void }) {
+  const qc = useQueryClient()
+  const [question, setQuestion] = useState('')
+  const [options, setOptions] = useState(['', ''])
+  const [multiple, setMultiple] = useState(false)
+  const [anonymous, setAnonymous] = useState(false)
+  const [busy, setBusy] = useState(false)
+
+  const send = async () => {
+    const opts = options.map((o) => o.trim()).filter(Boolean)
+    if (question.trim().length < 2) { toast.error('Напишите вопрос'); return }
+    if (opts.length < 2) { toast.error('Нужно хотя бы два варианта'); return }
+    setBusy(true)
+    try {
+      await chat.createPoll(roomId, { question: question.trim(), options: opts, multiple, anonymous })
+      qc.invalidateQueries({ queryKey: ['chat-messages', roomId] })
+      qc.invalidateQueries({ queryKey: ['chat-rooms'] })
+      onClose()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Не удалось создать опрос')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={(o) => { if (!o) onClose() }}>
+      <DialogContent className="max-w-sm gap-0 p-0">
+        <DialogHeader className="border-b border-border/50 px-4 py-3">
+          <DialogTitle className="text-sm">Опрос</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-2 p-4">
+          <Input value={question} onChange={(e) => setQuestion(e.target.value)}
+            placeholder="Вопрос" className="h-8 text-xs" autoFocus />
+          <div className="space-y-1">
+            {options.map((o, i) => (
+              <div key={i} className="flex items-center gap-1">
+                <Input value={o} onChange={(e) => setOptions((p) => p.map((v, k) => (k === i ? e.target.value : v)))}
+                  placeholder={`Вариант ${i + 1}`} className="h-8 text-xs" />
+                {options.length > 2 && (
+                  <button onClick={() => setOptions((p) => p.filter((_, k) => k !== i))}
+                    className="rounded p-1 text-muted-foreground hover:text-destructive" title="Убрать">
+                    <X className="size-3.5" />
+                  </button>
+                )}
+              </div>
+            ))}
+            {options.length < 10 && (
+              <button onClick={() => setOptions((p) => [...p, ''])}
+                className="text-[11px] text-muted-foreground hover:text-foreground">
+                + добавить вариант
+              </button>
+            )}
+          </div>
+          <label className="flex items-center gap-2 text-[11px] text-muted-foreground">
+            <input type="checkbox" checked={multiple} onChange={(e) => setMultiple(e.target.checked)} />
+            можно выбрать несколько
+          </label>
+          <label className="flex items-center gap-2 text-[11px] text-muted-foreground">
+            <input type="checkbox" checked={anonymous} onChange={(e) => setAnonymous(e.target.checked)} />
+            анонимно — без имён голосовавших
+          </label>
+          <div className="flex justify-end gap-1.5 pt-1">
+            <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={onClose}>Отмена</Button>
+            <Button size="sm" className="h-7 text-xs" onClick={send} disabled={busy}>
+              {busy ? 'Отправляю…' : 'Отправить'}
+            </Button>
+          </div>
         </div>
       </DialogContent>
     </Dialog>
@@ -1260,7 +1439,7 @@ function CreateChatDialog({ open, onOpenChange, onCreated, scopeProduct }: {
 function ChatBubble({
   message, album, isOwn, grouping, canDelete, editingId, editText, searchHighlight,
   onReply, onEditStart, onEditCancel, onEditSave, onEditTextChange, onDelete,
-  onAuthorClick, authorAvatar, withAvatar, onReact, onPin, onForward, onTicket, onImageClick,
+  onAuthorClick, authorAvatar, withAvatar, selfId, onReact, onPin, onForward, onTicket, onImageClick,
 }: {
   message: ChatMessage
   album?: ChatMessage[]
@@ -1281,6 +1460,8 @@ function ChatBubble({
   authorAvatar?: string | null
   /** Показывать колонку аватара (группа/канал, чужое сообщение). */
   withAvatar?: boolean
+  /** Кто смотрит: у своего опроса видна кнопка «Завершить». */
+  selfId?: string
   onReact?: (emoji: string) => void
   onPin?: () => void
   onForward?: () => void
@@ -1445,7 +1626,9 @@ function ChatBubble({
               </div>
             </div>
           ) : (
-            message.content && (
+            message.poll ? (
+              <PollCard poll={message.poll} isOwn={isOwn} selfId={selfId} />
+            ) : message.content && (
               <>
                 <p className="whitespace-pre-wrap break-words text-[13px] leading-[1.45]">
                   {searchHighlight ? highlightText(message.content, searchHighlight) : linkifyText(message.content)}
@@ -1670,6 +1853,7 @@ export function ChatPanel({ compact, scopeProduct }: {
         if (e.userId && String(e.userId) !== user?.id
             && (String(e.roomId ?? '') !== selectedRoom || document.hidden)) beep()
         break
+      case 'chat:poll':      // проголосовали или завершили — расклад изменился у всех
       case 'chat:read':
       case 'chat:reaction':
       case 'message:edited':
@@ -1949,6 +2133,7 @@ export function ChatPanel({ compact, scopeProduct }: {
   const totalUnread = useMemo(() => rooms.reduce((a, r) => a + (r.unreadCount || 0), 0), [rooms])
 
   const [showMedia, setShowMedia] = useState(false)
+  const [pollOpen, setPollOpen] = useState(false)
 
   // Прокрутка к найденному сообщению: id цели ставит поиск, эффект ниже доезжает
   // до неё, как только лента отрисована, и на пару секунд подсвечивает.
@@ -2292,6 +2477,13 @@ export function ChatPanel({ compact, scopeProduct }: {
           className={cn('inline-flex size-7 items-center justify-center rounded-md transition-colors', showMessageSearch ? 'bg-accent text-primary' : 'text-muted-foreground hover:bg-accent hover:text-foreground')}>
           <SearchIcon className="size-4" />
         </button>
+        {/* Опрос — способ собрать мнение, не собирая совещание. Место ему в
+            шапке рядом с прочими действиями над чатом, а не в строке ввода:
+            там живёт то, что набирают, а опрос — то, что затевают. */}
+        <button onClick={() => setPollOpen(true)} title="Опрос"
+          className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
+          <BarChart3 className="size-4" />
+        </button>
         <button onClick={() => setShowMedia(true)} title="Вложения чата"
           className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
           <Images className="size-4" />
@@ -2429,6 +2621,7 @@ export function ChatPanel({ compact, scopeProduct }: {
                       onDelete={() => deleteMutation.mutate(msg.id)}
                       onAuthorClick={!isOwn && msg.userId && activeRoom?.type !== 'direct' ? () => setProfileFor(msg.userId!) : undefined}
                       withAvatar={activeRoom?.type !== 'direct'}
+                      selfId={user?.id}
                       authorAvatar={msg.userId ? avatarByUser.get(msg.userId) : null}
                       onReact={(emoji) => reactMutation.mutate({ id: msg.id, emoji })}
                       onPin={() => pinMutation.mutate(msg.id)}
@@ -2533,6 +2726,9 @@ export function ChatPanel({ compact, scopeProduct }: {
             </div>
           )}
         </>
+      )}
+      {pollOpen && selectedRoom && (
+        <CreatePollDialog roomId={selectedRoom} onClose={() => setPollOpen(false)} />
       )}
       {showMedia && selectedRoom && (
         <RoomMediaDialog roomId={selectedRoom} onClose={() => setShowMedia(false)} onImageClick={openImage} />
