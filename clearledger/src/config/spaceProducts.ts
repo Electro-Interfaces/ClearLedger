@@ -92,12 +92,11 @@ export const SPACE_PRODUCTS: SpaceProduct[] = [
     objectTabs: ['passport', 'contracts', 'sales'],
   },
   {
-    // Магазин — товароучёт сопутки и общепита на объектах. Пять разделов в рельсе:
-    // «Торговля» (деньги и спрос), «Склад» (остаток и движение), «Закрытие» (чем закрыт
-    // день и что уехало в бухгалтерию), «Каталог» (карточка товара), «Маркировка»
-    // (регуляторика). Состав — в config/storeCatalog.ts, второго источника нет.
+    // Магазин — товароучёт сопутки и общепита на объектах. Общепит вынесен в свой
+    // раздел: меню, экономика блюда и версионные ТТК не смешиваются с торговлей
+    // готовым товаром. Состав — в config/storeCatalog.ts, второго источника нет.
     code: 'shop', route: '/shop', label: 'Магазин',
-    modes: ['store', 'store_stock', 'store_closing', 'store_catalog', 'store_marking', 'store_help'], paths: [],
+    modes: ['store', 'store_catering', 'store_stock', 'store_closing', 'store_catalog', 'store_marking', 'store_network', 'store_help'], paths: [],
     objectTabs: ['passport', 'sales'],
   },
   {
