@@ -2,8 +2,8 @@
  * Раздел «Магазин» — товароучёт сопутки/общепита (профиль fuel, компания ГИГ).
  *
  * Полная целевая карта раздела задаётся data-driven в `@/config/storeCatalog`
- * (STORE_VIEWS): 22 под-экрана в 5 группах — Аналитика, Данные, Товары, Движение,
- * Честный Знак. Часть — заглушки (status='planned'), наполняются по мере данных.
+ * (STORE_VIEWS): под-экраны разложены по самостоятельным предметным разделам,
+ * включая отдельный «Общепит». Часть — заглушки (status='planned').
  *
  * Под-навигация (меню с под-разделами) рисуется гармошкой WorkspaceModeSidebar
  * из STORE_MENU — здесь только КОНТЕНТ активного под-раздела (без своего меню-столбца,
@@ -27,15 +27,18 @@ import { StoreInventoryPanel } from './StoreInventoryPanel'
 import { StoreWriteoffPanel } from './StoreWriteoffPanel'
 import { StoreTransferPanel } from './StoreTransferPanel'
 import { StoreRevaluationPanel } from './StoreRevaluationPanel'
-import { StoreReceiptsPanel, StoreSuppliersPanel, StoreCategoriesPanel, StoreBarcodesPanel, StoreRecipesPanel } from './StoreReportPanels'
+import { StoreReceiptsPanel, StoreSuppliersPanel, StoreCategoriesPanel, StoreBarcodesPanel } from './StoreReportPanels'
+import { StoreRecipeVersionsPanel } from './StoreRecipeVersionsPanel'
 import { StoreCateringPanel } from './StoreCateringPanel'
 import { StorePricingPanel } from './StorePricingPanel'
 import { StoreAssortmentPanel } from './StoreAssortmentPanel'
+import { StoreAssortmentPolicyPanel } from './StoreAssortmentPolicyPanel'
 import { StoreMrcPanel } from './StoreMrcPanel'
 import { StoreShiftsPanel } from './StoreShiftsPanel'
 import { BpExportPanel } from './BpExportPanel'
 import { StoreDedupPanel } from './StoreDedupPanel'
 import { StoreStationsPanel } from './StoreStationsPanel'
+import { StoreStationConsolePanel } from './StoreStationConsolePanel'
 import { StoreStationDraftsPanel } from './StoreStationDraftsPanel'
 import { StoreBarcodeCollisionsPanel } from './StoreBarcodeCollisionsPanel'
 import { StoreReceiptDocsPanel } from './StoreReceiptDocsPanel'
@@ -53,7 +56,7 @@ const SKU_MODES: Record<string, SkuMode> = {
 const REPORT_PANELS: Record<string, typeof StoreReceiptsPanel> = {
   receipts: StoreReceiptsPanel, suppliers: StoreSuppliersPanel,
   categories: StoreCategoriesPanel,
-  barcodes: StoreBarcodesPanel, recipes: StoreRecipesPanel,
+  barcodes: StoreBarcodesPanel,
 }
 
 const STATUS_STYLE: Record<StoreStatus, { label: string; cls: string }> = {
@@ -240,6 +243,7 @@ export function StorePanel() {
   if (sub === 'assortment') {
     return (
       <div className="h-full overflow-y-auto">
+        <StoreAssortmentPolicyPanel />
         <StoreAssortmentPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} stations={scopeStations} />
       </div>
     )
@@ -279,6 +283,13 @@ export function StorePanel() {
       </div>
     )
   }
+  if (sub === 'recipes') {
+    return (
+      <div className="h-full overflow-y-auto">
+        <StoreRecipeVersionsPanel />
+      </div>
+    )
+  }
   // «Приёмка» — два источника в одном пункте: сверху документы, которые ведём мы
   // (центр и станция вводят один и тот же документ), снизу исторические
   // поступления из ЦБ. Пока станция не перешла на Ledger, вторая часть остаётся
@@ -293,6 +304,11 @@ export function StorePanel() {
         </div>
       </div>
     )
+  }
+  if (sub === 'station_console') {
+    // Рабочее место АЗС занимает холст целиком: внутри работают, и прокрутка
+    // должна быть у самой станции, а не у обёртки вокруг неё.
+    return <div className="h-full"><StoreStationConsolePanel /></div>
   }
   if (sub === 'stations') {
     return (
