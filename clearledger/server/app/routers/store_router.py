@@ -4069,7 +4069,7 @@ async def store_push_partners(
                      WHERE ps.partner_id = p.id AND ps.station_id = :s)
     """
     rows = (await db.execute(text(f"""
-        SELECT p.id, p.name, p.inn, p.kpp, p.role, p.comment, p.archived
+        SELECT p.id, p.name, p.name_full, p.inn, p.kpp, p.role, p.comment, p.archived
         FROM edge.partner p
         WHERE p.company_id = :cid AND NOT p.archived {фильтр}
         ORDER BY p.name
@@ -4077,15 +4077,27 @@ async def store_push_partners(
     if not rows:
         raise HTTPException(404, "Для станции нет ни одного контрагента")
 
+    # История работы — из документов 1С, а не только из локальных приёмок.
+    #
+    # Станция видит лишь то, что принимала сама: на 208 это единицы документов,
+    # а реальные поставки за годы лежат в ЦБ. Без них справочник на станции
+    # выглядел пустым («поставок —»), хотя человек точно помнит, что этот
+    # поставщик возит каждую неделю. Считаем в центре и отдаём сводкой: цифры
+    # маленькие, канал не жалко, зато на станции они доступны офлайн.
+    svc = GoodsDashboardService(db, cid)
+    история = await svc.supplier_history(str(station_id))
+
     db.add(EdgeDownlink(
         company_id=cid, station_id=station_id, kind="partners",
         payload={"partners": [
-            {"id": f"m{r['id']}", "name": r["name"], "inn": r["inn"] or "",
-             "kpp": r["kpp"] or "", "role": r["role"], "comment": r["comment"] or "",
-             "archived": r["archived"]} for r in rows]},
+            {"id": f"m{r['id']}", "name": r["name"], "name_full": r["name_full"] or "",
+             "inn": r["inn"] or "", "kpp": r["kpp"] or "", "role": r["role"],
+             "comment": r["comment"] or "", "archived": r["archived"],
+             **(история.get(r["name"]) or {})} for r in rows]},
     ))
     await db.commit()
-    return {"station_id": station_id, "partners": len(rows)}
+    return {"station_id": station_id, "partners": len(rows),
+            "с_историей": sum(1 for r in rows if r["name"] in история)}
 
 
 # ─────────────────────── Отчёты по периоду (ПОСЛЕДНИМИ) ─────────────────────

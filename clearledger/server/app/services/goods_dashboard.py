@@ -1090,6 +1090,57 @@ class GoodsDashboardService:
         }
 
     # ── Поставщики ──
+    async def supplier_history(self, station: str | None = None) -> dict[str, dict]:
+        """Сводка работы с каждым поставщиком по документам 1С: {имя: {...}}.
+
+        Нужна станции. Она видит только то, что принимала сама, а реальные
+        поставки за годы лежат в ЦБ — без них её справочник выглядит пустым,
+        хотя товаровед точно помнит, что этот поставщик возит каждую неделю.
+        Считаем здесь и отдаём вниз сводкой: три числа и дата на контрагента,
+        канал не жалко.
+        """
+        metas = await self._load_purchases(date(2000, 1, 1), date(2100, 1, 1),
+                                           [station] if station else None)
+        cparty = await self._refs("counterparty")
+        свод: dict[str, dict] = {}
+        даты: dict[str, list[str]] = {}
+        for m in metas:
+            d = m.get("Документ") or {}
+            имя = cparty.get(d.get("Контрагент")) or (d.get("Контрагент") or "")
+            if not имя:
+                continue
+            lines = d.get("Товары") or []
+            запись = свод.setdefault(имя, {
+                "docs_1c": 0, "amount_1c": 0.0, "positions_1c": set(), "last_1c": None,
+            })
+            запись["docs_1c"] += 1
+            запись["amount_1c"] += sum(self._purch_net(d, l) for l in lines)
+            for l in lines:
+                if l.get("Номенклатура"):
+                    запись["positions_1c"].add(l["Номенклатура"])
+            дата = str(d.get("Дата") or "")[:10]
+            if дата:
+                даты.setdefault(имя, []).append(дата)
+                if not запись["last_1c"] or дата > запись["last_1c"]:
+                    запись["last_1c"] = дата
+        out: dict[str, dict] = {}
+        for имя, з in свод.items():
+            свои = sorted(даты.get(имя, []))
+            интервал = None
+            if len(свои) > 1:
+                интервал = round(
+                    (date.fromisoformat(свои[-1]) - date.fromisoformat(свои[0])).days
+                    / (len(свои) - 1), 1)
+            out[имя] = {
+                "docs_1c": з["docs_1c"],
+                "amount_1c": round(з["amount_1c"], 2),
+                "positions_1c": len(з["positions_1c"]),
+                "last_1c": з["last_1c"],
+                "first_1c": свои[0] if свои else None,
+                "avg_days_1c": интервал,
+            }
+        return out
+
     async def supplier_card(self, name: str, date_from: date, date_to: date,
                             stations: list[str] | None = None) -> dict:
         """Карточка одного поставщика: история поставок, что возит, как менялись цены.
