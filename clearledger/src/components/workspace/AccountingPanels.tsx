@@ -74,6 +74,7 @@ import {
   FuelLoadControlPanel, CateringPackagePanel, AccountingDocsBridge, AccountingStageBar,
 } from './AccountingWorkPanels'
 import { AccountingPeriodPanel } from './AccountingPeriodPanel'
+import { AccountingTrendPanel, StreamMarginSummary } from './AccountingResultsPanels'
 import {
   ACCOUNTING_MODES, ACCOUNTING_KEYS, accountingModeForKey, type AccountingSection,
 } from '@/config/moduleComponents'
@@ -555,8 +556,12 @@ export function AccountingPanel() {
         {(tab === 'recon_docs' || tab === 'recon_diff') && <SyncWith1CPanel focus={tab} />}
         {tab === 'docs_1c' && <AccountingDocsBridge kind="docs" />}
         {tab === 'docs_parties' && <AccountingDocsBridge kind="parties" />}
+        {tab === 'res_trend' && <AccountingTrendPanel />}
         {tab === 'res_margin' && (
           <div className="p-4 space-y-4">
+            {/* Сначала три потока рядом — потом две маржи топлива по отдельности:
+                вопрос «где станция зарабатывает» шире, чем «сколько на литре». */}
+            <StreamMarginSummary />
             <FifoMarginView companyId={companyId} dateFrom={period.from} dateTo={period.to} />
             <div>
               <p className="mb-2 text-xs text-muted-foreground">

@@ -19,8 +19,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import assert_company_member, get_current_user
 from app.database import get_db
 from app.models import (
-    AccountingDoc, OneCConnection, OneCSyncLog, Period, StockOnHand, User,
+    AccountingDoc, DataEntry, FuelShift, OneCConnection, OneCSyncLog, Period,
+    StockOnHand, User,
 )
+from app.services.goods_dashboard import _day
 
 router = APIRouter(prefix="/periods", tags=["Учётные периоды"])
 
@@ -247,6 +249,124 @@ async def period_readiness(
         futureDated=int(future_dated),
         backdatedIntoClosed=int(backdated),
     )
+
+
+# ─── GET /periods/trend ──────────────────────────────────────
+
+class TrendMonth(BaseModel):
+    year: int
+    month: int
+    fuelShifts: int
+    fuelAmount: float
+    fuelLiters: float
+    storeShifts: int
+    soputka: float
+    obshepit: float
+    docs1c: int
+    unposted: int
+
+
+@router.get("/trend", response_model=list[TrendMonth])
+async def periods_trend(
+    company_id: str = Query(...),
+    months: int = Query(6, ge=2, le=24),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Помесячный ряд по трём потокам — чтобы провал был виден без арифметики.
+
+    Закрытие смотрят по одному месяцу, но понимают его только в сравнении: «в
+    июле тридцать смен, в августе двенадцать» — это либо станция встала, либо
+    данные не доехали, и оба ответа требуют действий. Одна цифра за месяц такого
+    вопроса не задаёт.
+
+    Считается из тех же источников, что и разделы потоков: топливо из смен STS,
+    магазин и общепит — из секций сменного документа (там они разделены на
+    приёме), документы — из поднятой первички БП.
+    """
+    cid = await assert_company_member(company_id, current_user, db)
+
+    today = datetime.now(timezone.utc).date()
+    keys: list[tuple[int, int]] = []
+    y, m = today.year, today.month
+    for _ in range(months):
+        keys.append((y, m))
+        m -= 1
+        if m == 0:
+            y, m = y - 1, 12
+    keys.reverse()
+    since = f"{keys[0][0]}-{keys[0][1]:02d}-01"
+
+    buckets: dict[tuple[int, int], TrendMonth] = {
+        k: TrendMonth(year=k[0], month=k[1], fuelShifts=0, fuelAmount=0, fuelLiters=0,
+                      storeShifts=0, soputka=0, obshepit=0, docs1c=0, unposted=0)
+        for k in keys
+    }
+
+    # Топливо: смена относится к месяцу по ОТКРЫТИЮ — так её датирует и 1С.
+    month_col = func.to_char(FuelShift.opened_at, "YYYY-MM")
+    fuel_rows = (await db.execute(
+        select(month_col, func.count(FuelShift.id),
+               func.coalesce(func.sum(FuelShift.total_amount), 0),
+               func.coalesce(func.sum(FuelShift.total_liters), 0))
+        .where(FuelShift.company_id == cid, FuelShift.opened_at.is_not(None))
+        .group_by(month_col)
+    )).all()
+    for key, cnt, amount, liters in fuel_rows:
+        k = _month_key(key)
+        if k in buckets:
+            buckets[k].fuelShifts = int(cnt or 0)
+            buckets[k].fuelAmount = round(float(amount or 0), 2)
+            buckets[k].fuelLiters = round(float(liters or 0), 2)
+
+    # Магазин и общепит: суммы лежат в секциях сменного документа — там они
+    # разделены ещё на приёме, и складывать их заново по номенклатуре незачем.
+    entries = (await db.execute(
+        select(DataEntry.meta).where(
+            DataEntry.company_id == cid,
+            DataEntry.doc_type_id == "retail_sale_sidegoods",
+            DataEntry.source.in_(("edge", "oneC")),
+        )
+    )).scalars().all()
+    for meta in entries:
+        day = _day((meta or {}).get("Смена") or {})
+        if not day or day < since:
+            continue
+        k = _month_key(day[:7])
+        b = buckets.get(k)
+        if b is None:
+            continue
+        sec = (meta or {}).get("Секции") or {}
+        b.storeShifts += 1
+        b.soputka += float((sec.get("продажа_сопутка") or {}).get("сумма") or 0)
+        b.obshepit += float((sec.get("продажа_общепит") or {}).get("сумма") or 0)
+
+    doc_rows = (await db.execute(
+        select(func.substring(AccountingDoc.date, 1, 7), func.count(AccountingDoc.id),
+               func.count(AccountingDoc.id).filter(AccountingDoc.status_1c != "Проведён"))
+        .where(AccountingDoc.company_id == cid, AccountingDoc.date >= since)
+        .group_by(func.substring(AccountingDoc.date, 1, 7))
+    )).all()
+    for key, cnt, unposted in doc_rows:
+        k = _month_key(key)
+        if k in buckets:
+            buckets[k].docs1c = int(cnt or 0)
+            buckets[k].unposted = int(unposted or 0)
+
+    out = [buckets[k] for k in keys]
+    for b in out:
+        b.soputka = round(b.soputka, 2)
+        b.obshepit = round(b.obshepit, 2)
+    return out
+
+
+def _month_key(value: str | None) -> tuple[int, int]:
+    """«2026-08» → (2026, 8); мусор → (0, 0), такой ключ просто не найдётся."""
+    try:
+        y, m = str(value).split("-")[:2]
+        return int(y), int(m)
+    except (AttributeError, ValueError):
+        return (0, 0)
 
 
 # ─── POST /periods/toggle ────────────────────────────────────
