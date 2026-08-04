@@ -22,10 +22,11 @@ from app.auth import check_module_access, get_current_user
 from app.database import get_db
 from app.deps import capture_company_header, scope_company_id
 from app.models import (
-    EdgeAgent, EdgeDownlink, StoreAssortmentRule, StoreItemAlias, StoreReceipt,
+    Company, EdgeAgent, EdgeDownlink, StoreAssortmentRule, StoreItemAlias, StoreReceipt,
     StoreRecipeVersion, StoreStockBalance,
     User, UserCompany,
 )
+from app.routers import edge_router
 from app.services import edge_nsi, edge_projection, edge_service
 from app.services import recipe_versions
 from app.services.export_audit import log_export
@@ -80,7 +81,9 @@ async def store_stations(
         select(EdgeAgent).where(EdgeAgent.company_id == cid).order_by(EdgeAgent.station_id)
     )).scalars().all()
 
-    desired = os.environ.get("EDGE_DESIRED_AGENT_VERSION", "0.58.10")
+    # Целевая версия — одна на компанию и объявляется в «Версиях агента»:
+    # два разных ответа на «какой код текущий» рассинхронизировали бы экраны.
+    desired = edge_router.desired_version(await db.get(Company, cid))
     now = datetime.now(timezone.utc)
     stations = []
     for r in rows:
@@ -203,10 +206,13 @@ async def store_exchange(
         ) t GROUP BY station_id
     """), p)).mappings().all()}
 
+    # Отменённые задания не ждут станцию и не считаются недоставленными: их
+    # сняли осознанно, и в счётчике тревоги им не место.
     down = {r["station_id"]: dict(r) for r in (await db.execute(text("""
         SELECT station_id,
-               count(*) FILTER (WHERE delivered_at IS NULL) AS waiting,
-               count(*) FILTER (WHERE delivered_at IS NOT NULL AND acked_at IS NULL) AS unacked,
+               count(*) FILTER (WHERE delivered_at IS NULL AND cancelled_at IS NULL) AS waiting,
+               count(*) FILTER (WHERE delivered_at IS NOT NULL AND acked_at IS NULL
+                                  AND cancelled_at IS NULL) AS unacked,
                count(*) FILTER (WHERE acked_at IS NOT NULL) AS acked
         FROM edge_downlink WHERE company_id = :cid GROUP BY station_id
     """), {"cid": cid})).mappings().all()}
@@ -220,7 +226,8 @@ async def store_exchange(
         UNION ALL
         SELECT coalesce(acked_at, delivered_at, created_at) AS at, station_id, kind,
                0 AS size_bytes, 'вниз' AS direction,
-               CASE WHEN acked_at IS NOT NULL THEN 'применено'
+               CASE WHEN cancelled_at IS NOT NULL THEN 'отменено'
+                    WHEN acked_at IS NOT NULL THEN 'применено'
                     WHEN delivered_at IS NOT NULL THEN 'доставлено'
                     ELSE 'ждёт станции' END AS note
         FROM edge_downlink WHERE company_id = :cid
@@ -391,13 +398,15 @@ async def store_exchange_station(
         k["label"] = PACKET_KIND_LABEL.get(k["kind"], k["kind"])
 
     downlink = [dict(r) for r in (await db.execute(text("""
-        SELECT kind, note, created_at, delivered_at, acked_at
+        SELECT id, kind, note, created_at, delivered_at, acked_at, cancelled_at
         FROM edge_downlink WHERE company_id = :cid AND station_id = :st
         ORDER BY created_at DESC LIMIT 50
     """), {"cid": cid, "st": station_id})).mappings().all()]
     for d in downlink:
+        d["id"] = str(d["id"])
         d["label"] = PACKET_KIND_LABEL.get(d["kind"], d["kind"])
-        d["state"] = ("применено" if d["acked_at"] else
+        d["state"] = ("отменено" if d["cancelled_at"] else
+                      "применено" if d["acked_at"] else
                       "доставлено" if d["delivered_at"] else "ждёт станции")
 
     agent = (await db.execute(select(EdgeAgent).where(
@@ -463,6 +472,38 @@ class NsiItemIn(BaseModel):
     is_dish: bool | None = None
     price_owner: str | None = None
     deleted: bool | None = None
+    # Классификация
+    group_id: int | None = None
+    purpose: str | None = None
+    # Регуляторика: за это штрафуют, поэтому поля отдельные, а не в описании
+    gtin: str | None = None
+    marked: bool | None = None
+    mark_group: str | None = None
+    adult_only: bool | None = None
+    mrc: float | None = None
+    shelf_life_days: int | None = None
+    storage_mode: str | None = None
+    # Товарные свойства и обогащение
+    brand: str | None = None
+    manufacturer: str | None = None
+    country: str | None = None
+    net_qty: float | None = None
+    net_unit: str | None = None
+    pack_qty: float | None = None
+    photo_url: str | None = None
+    composition: str | None = None
+    allergens: str | None = None
+    kcal: float | None = None
+    description: str | None = None
+
+
+class ItemGroupIn(BaseModel):
+    name: str
+    parent_id: int | None = None
+    marked_default: bool | None = None
+    adult_default: bool | None = None
+    price_owner_default: str | None = None
+    note: str | None = None
 
 
 class NsiPriceIn(BaseModel):
@@ -488,8 +529,12 @@ async def _queue_nsi_delta(db: AsyncSession, cid, item_id: int, station_id: int 
     """
     card = (await db.execute(text("""
         SELECT i.external_uuid, i.name, i.unit, i.vat_rate, i.deleted,
-               coalesce(i.price_owner, 'master') AS price_owner
-        FROM edge.item i WHERE i.id = :id
+               coalesce(i.price_owner, 'master') AS price_owner,
+               g.path AS group_path, i.sku_class, i.marked, i.mark_group,
+               i.adult_only, i.mrc, i.brand, i.photo_url
+        FROM edge.item i
+        LEFT JOIN edge.item_group g ON g.id = i.group_id
+        WHERE i.id = :id
     """), {"id": item_id})).mappings().first()
     if card is None:
         return 0
@@ -512,7 +557,15 @@ async def _queue_nsi_delta(db: AsyncSession, cid, item_id: int, station_id: int 
                      "unit": card["unit"], "vat_rate": card["vat_rate"],
                      "deleted": bool(card["deleted"]), "barcodes": codes,
                      "price": float(price) if price is not None else None,
-                     "price_owner": card["price_owner"]},
+                     "price_owner": card["price_owner"],
+                     # Свойства товара едут вниз вместе с ним: приёмка обязана
+                     # требовать DataMatrix у маркируемого, а касса — паспорт
+                     # у 18+, и решаться это должно на станции, офлайн.
+                     "group_path": card["group_path"], "sku_class": card["sku_class"],
+                     "marked": bool(card["marked"]), "mark_group": card["mark_group"],
+                     "adult_only": bool(card["adult_only"]),
+                     "mrc": float(card["mrc"]) if card["mrc"] is not None else None,
+                     "brand": card["brand"], "photo_url": card["photo_url"]},
             note="НСИ: %s" % card["name"][:60],
         ))
     return len(targets)
@@ -733,6 +786,189 @@ async def store_parity(
     """
     cid = await scope_company_id(user, db)
     return await edge_service.parity(db, cid, station_id, days)
+
+
+class AgentVersionIn(BaseModel):
+    version: str
+
+
+@router.get("/agent-versions")
+async def store_agent_versions(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Парк версий агента: какая объявлена целевой и у кого какая стоит.
+
+    Обновление агента — осознанная операция с окном и откатом, а не автоматика
+    по факту расхождения. Центр здесь только объявляет, какой код считается
+    текущим; станция показывает расхождение у себя, а выкат выполняет деплой.
+    """
+    cid: uuid.UUID = await scope_company_id(user, db)
+    company = await db.get(Company, cid)
+    желаемая = edge_router.desired_version(company)
+    объявлена = bool(((company.customization or {}).get("edge") or {})
+                     .get("desired_agent_version"))
+
+    rows = (await db.execute(
+        select(EdgeAgent).where(EdgeAgent.company_id == cid).order_by(EdgeAgent.station_id)
+    )).scalars().all()
+    now = datetime.now(timezone.utc)
+    stations = []
+    versions: dict[str, int] = {}
+    for r in rows:
+        silence = int((now - r.last_seen).total_seconds()) if r.last_seen else None
+        versions[r.version or "неизвестна"] = versions.get(r.version or "неизвестна", 0) + 1
+        stations.append({
+            "station_id": r.station_id,
+            "version": r.version,
+            "version_ok": r.version == желаемая,
+            "state": ("молчит" if silence is None or silence > STATION_STALE_AFTER
+                      else "офлайн" if silence > STATION_OFFLINE_AFTER else "онлайн"),
+            "silence_seconds": silence,
+            "last_seen": r.last_seen,
+            "first_seen": r.first_seen,
+        })
+    return {
+        "desired_version": желаемая,
+        "declared": объявлена,
+        "fallback_version": edge_router.DESIRED_AGENT_VERSION,
+        "total": len(stations),
+        "outdated": sum(1 for s in stations if s["version"] and not s["version_ok"]),
+        "versions": [{"version": v, "stations": n}
+                     for v, n in sorted(versions.items(), key=lambda x: -x[1])],
+        "stations": stations,
+    }
+
+
+@router.put("/agent-versions")
+async def store_set_agent_version(
+    body: AgentVersionIn,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Объявить целевую версию агента для парка.
+
+    Раньше её знала только переменная окружения бэкенда: объявить новую версию
+    означало передеплоить стек. Право — у администратора компании: строка
+    решает, все ли станции считаются отставшими.
+    """
+    cid: uuid.UUID = await scope_company_id(user, db)
+    if not user.is_superadmin:
+        m = (await db.execute(select(UserCompany).where(
+            UserCompany.user_id == user.id, UserCompany.company_id == cid))).scalar_one_or_none()
+        if m is None or m.role != "admin":
+            raise HTTPException(403, "Целевую версию агента объявляет администратор компании")
+
+    версия = body.version.strip()
+    if not версия or len(версия) > 40:
+        raise HTTPException(400, "Версия не задана или слишком длинная")
+
+    company = await db.get(Company, cid)
+    cust = dict(company.customization or {})
+    edge = dict(cust.get("edge") or {})
+    edge["desired_agent_version"] = версия
+    cust["edge"] = edge
+    # Присваиваем НОВЫЙ словарь: JSONB-колонку SQLAlchemy не считает изменённой
+    # при правке вложенного объекта на месте, и настройка молча не сохранилась бы.
+    company.customization = cust
+    await db.commit()
+    return {"ok": True, "desired_version": версия}
+
+
+def _downlink_state(r: EdgeDownlink) -> str:
+    if r.cancelled_at:
+        return "отменено"
+    if r.acked_at:
+        return "применено"
+    if r.delivered_at:
+        return "доставлено"
+    return "ждёт станции"
+
+
+@router.get("/downlink")
+async def store_downlink(
+    station_id: int | None = Query(None, description="код АЗС; пусто — все"),
+    state: str | None = Query(None, description="ждёт станции | доставлено | применено | отменено"),
+    limit: int = Query(200, ge=1, le=1000),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Очередь заданий центра станциям: НСИ, цены, заготовки приёмки, команды.
+
+    Станция за CGNAT и забирает задания сама, поэтому «отправлено» здесь не
+    значит «доехало»: между созданием и подтверждением может пройти сколько
+    угодно, и зависшее задание видно только отсюда.
+    """
+    cid: uuid.UUID = await scope_company_id(user, db)
+    q = select(EdgeDownlink).where(EdgeDownlink.company_id == cid)
+    if station_id is not None:
+        q = q.where(EdgeDownlink.station_id == station_id)
+    rows = (await db.execute(
+        q.order_by(EdgeDownlink.created_at.desc()).limit(limit))).scalars().all()
+
+    tasks = [{
+        "id": str(r.id), "station_id": r.station_id, "kind": r.kind,
+        "label": PACKET_KIND_LABEL.get(r.kind, r.kind),
+        "note": r.note, "state": _downlink_state(r),
+        "created_at": r.created_at, "delivered_at": r.delivered_at,
+        "acked_at": r.acked_at, "cancelled_at": r.cancelled_at,
+    } for r in rows]
+    if state:
+        tasks = [t for t in tasks if t["state"] == state]
+
+    свод = {"ждёт станции": 0, "доставлено": 0, "применено": 0, "отменено": 0}
+    for r in rows:
+        свод[_downlink_state(r)] += 1
+    return {"total": len(rows), "by_state": свод, "tasks": tasks}
+
+
+@router.post("/downlink/{task_id}/resend")
+async def store_downlink_resend(
+    task_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Отправить задание станции заново.
+
+    Снимаем отметки доставки и применения — станция заберёт его следующим
+    тактом. Повтор безопасен: приёмная сторона идемпотентна, и то же задание
+    уже приходило дважды при обрыве связи до подтверждения.
+    """
+    cid: uuid.UUID = await scope_company_id(user, db)
+    row = (await db.execute(select(EdgeDownlink).where(
+        EdgeDownlink.id == task_id, EdgeDownlink.company_id == cid))).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(404, "Задание не найдено")
+    row.delivered_at = None
+    row.acked_at = None
+    row.cancelled_at = None
+    row.cancelled_by = None
+    await db.commit()
+    return {"ok": True, "state": _downlink_state(row)}
+
+
+@router.post("/downlink/{task_id}/cancel")
+async def store_downlink_cancel(
+    task_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Снять задание с очереди станции.
+
+    Отмена не притворяется применением: у неё своё время и автор, и станция
+    больше не получит это задание.
+    """
+    cid: uuid.UUID = await scope_company_id(user, db)
+    row = (await db.execute(select(EdgeDownlink).where(
+        EdgeDownlink.id == task_id, EdgeDownlink.company_id == cid))).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(404, "Задание не найдено")
+    if row.acked_at:
+        raise HTTPException(409, "Станция уже применила задание — отменять нечего")
+    row.cancelled_at = datetime.now(timezone.utc)
+    row.cancelled_by = user.id
+    await db.commit()
+    return {"ok": True, "state": _downlink_state(row)}
 
 
 @router.get("/station-health")
@@ -992,11 +1228,14 @@ async def nsi_push(
     rows = (await db.execute(text(f"""
         SELECT i.external_uuid, i.name, i.unit, i.vat_rate, i.deleted,
                coalesce(i.price_owner, 'master') AS price_owner,
+               g.path AS group_path, i.sku_class, i.marked, i.mark_group,
+               i.adult_only, i.mrc, i.brand, i.photo_url,
                (SELECT price FROM edge.price p
                  WHERE p.item_id = i.id AND p.station_id = :s AND p.valid_to IS NULL) AS price,
                coalesce((SELECT array_agg(b.code ORDER BY b.code) FROM edge.barcode b
                           WHERE b.item_id = i.id AND b.status = 'active'), '{{}}') AS codes
         FROM edge.item i
+        LEFT JOIN edge.item_group g ON g.id = i.group_id
         WHERE NOT i.deleted {фильтр}
         ORDER BY i.name
     """), {"s": station_id})).mappings().all()
@@ -1005,6 +1244,11 @@ async def nsi_push(
               "vat_rate": r["vat_rate"], "deleted": bool(r["deleted"]),
               "price": float(r["price"]) if r["price"] is not None else None,
               "price_owner": r["price_owner"],
+              "group_path": r["group_path"], "sku_class": r["sku_class"],
+              "marked": bool(r["marked"]), "mark_group": r["mark_group"],
+              "adult_only": bool(r["adult_only"]),
+              "mrc": float(r["mrc"]) if r["mrc"] is not None else None,
+              "brand": r["brand"], "photo_url": r["photo_url"],
               "barcodes": list(r["codes"] or [])} for r in rows]
     if not items:
         raise HTTPException(404, "Для станции нет ни одной связанной карточки")
@@ -1050,6 +1294,8 @@ async def nsi_items(
     q: str = Query("", description="часть наименования, штрихкода или кода 1С"),
     station_id: int = Query(208),
     only_problem: bool = Query(False, description="только с дефектами НСИ"),
+    group_path: str = Query("", description="ветка дерева групп, например «Табак»"),
+    sku_class: str = Query("", description="Сопутка | Блюдо | Сырьё | Архив"),
     limit: int = Query(100, le=500),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -1058,6 +1304,8 @@ async def nsi_items(
     sql = """
         SELECT i.id, i.external_uuid, i.code_1c, i.name, i.unit, i.vat_rate,
                i.kind, i.sku_class, i.is_dish, i.deleted,
+               i.group_id, g.path AS group_path, i.marked, i.adult_only,
+               i.photo_url IS NOT NULL AS has_photo,
                (SELECT count(*) FROM edge.barcode b
                  WHERE b.item_id = i.id AND b.status = 'active')      AS barcodes,
                (SELECT count(*) FROM edge.barcode b
@@ -1069,10 +1317,17 @@ async def nsi_items(
                   JOIN edge.barcode b2 ON b2.id = s.barcode_id
                  WHERE b2.item_id = i.id AND s.station_id = :st)      AS qty
         FROM edge.item i
+        LEFT JOIN edge.item_group g ON g.id = i.group_id
         WHERE (:q = '' OR i.name ILIKE :like OR coalesce(i.code_1c,'') ILIKE :like
                OR EXISTS (SELECT 1 FROM edge.barcode b3
                            WHERE b3.item_id = i.id AND b3.code ILIKE :like))
     """
+    # Отбор по ветке дерева, а не по одной группе: «Табак» должен показывать и
+    # сигареты, и стики — иначе группировкой невозможно пользоваться.
+    if group_path:
+        sql += " AND (g.path = :gpath OR g.path LIKE :gpath_like)"
+    if sku_class:
+        sql += " AND coalesce(i.sku_class, '') = :sku_class"
     if only_problem:
         # Дефект НСИ — то, из-за чего товар не пробьётся или уедет с неверным
         # налогом: устаревшая ставка, коллизия ШК, остаток без цены.
@@ -1088,7 +1343,9 @@ async def nsi_items(
         """
     sql += " ORDER BY i.name LIMIT :lim"
     rows = (await db.execute(text(sql), {
-        "q": q, "like": f"%{q}%", "st": station_id, "lim": limit})).mappings().all()
+        "q": q, "like": f"%{q}%", "st": station_id, "lim": limit,
+        "gpath": group_path, "gpath_like": f"{group_path} / %",
+        "sku_class": sku_class})).mappings().all()
     return {"items": [dict(r) for r in rows], "total": len(rows), "station_id": station_id}
 
 
@@ -1151,10 +1408,19 @@ async def nsi_item(
     """Карточка целиком: поля, штрихкоды, история цен, коды кассы, остаток."""
     item_id = await _nsi_item_id(db, item_id)
     item = (await db.execute(text("""
-        SELECT id, external_uuid, code_1c, name, name_full, unit, vat_rate,
-               kind, sku_class, is_dish, coalesce(price_owner, 'master') AS price_owner,
-               deleted, created_at, updated_at
-        FROM edge.item WHERE id = :id
+        SELECT i.id, i.external_uuid, i.code_1c, i.name, i.name_full, i.unit, i.vat_rate,
+               i.kind, i.sku_class, i.is_dish,
+               coalesce(i.price_owner, 'master') AS price_owner,
+               i.deleted, i.created_at, i.updated_at,
+               i.group_id, g.path AS group_path, i.purpose, i.classified_by,
+               i.gtin, i.marked, i.mark_group, i.adult_only, i.mrc,
+               i.shelf_life_days, i.storage_mode,
+               i.brand, i.manufacturer, i.country, i.net_qty, i.net_unit, i.pack_qty,
+               i.photo_url, i.composition, i.allergens, i.kcal, i.description,
+               i.enriched_from, i.enriched_at
+        FROM edge.item i
+        LEFT JOIN edge.item_group g ON g.id = i.group_id
+        WHERE i.id = :id
     """), {"id": item_id})).mappings().first()
     if item is None:
         raise HTTPException(404, "Карточка не найдена")
@@ -1197,6 +1463,11 @@ async def nsi_item_update(
     fields = {k: v for k, v in body.model_dump().items() if v is not None}
     if not fields:
         raise HTTPException(400, "Нечего менять")
+    # Классификация, тронутая человеком, перестаёт быть автоматической: иначе
+    # следующий прогон 008_catalog_classify.sql вернёт карточку в ту группу,
+    # из которой её только что забрали.
+    if {"group_id", "sku_class", "purpose"} & set(fields):
+        fields["classified_by"] = "manual"
     sets = ", ".join(f"{k} = :{k}" for k in fields)
     fields["id"] = item_id
     await db.execute(
@@ -2085,6 +2356,132 @@ async def store_sales(
         date.fromisoformat(date_from), date.fromisoformat(date_to),
         group_by=group_by, category=category, marked=marked, q=q, stations=st,
     )
+
+
+@router.get("/catalog/health")
+async def catalog_health(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Здоровье каталога: чего в справочнике не хватает и где он врёт.
+
+    Не витрина, а список работы: каждая цифра — отбор, который можно открыть и
+    разобрать. Считается по живому ассортименту отдельно от всего справочника —
+    иначе шеститысячный архив хоронит любую метрику: «фото нет у 7 500 карточек»
+    звучит безнадёжно, «нет у 865 торгуемых» это работа на неделю.
+    """
+    await scope_company_id(user, db)
+    строка = (await db.execute(text("""
+        WITH живой AS (
+            SELECT i.* FROM edge.item i
+            WHERE NOT i.deleted AND i.sku_class IN ('Сопутка', 'Блюдо')
+        )
+        SELECT
+          (SELECT count(*) FROM edge.item WHERE NOT deleted)              AS всего,
+          (SELECT count(*) FROM живой)                                    AS живых,
+          (SELECT count(*) FROM edge.item WHERE sku_class IS NULL AND NOT deleted) AS без_класса,
+          (SELECT count(*) FROM живой WHERE group_id IS NULL
+              OR group_id IN (SELECT id FROM edge.item_group WHERE path = 'Прочее'))
+                                                                          AS без_группы,
+          (SELECT count(*) FROM живой i WHERE NOT EXISTS
+              (SELECT 1 FROM edge.barcode b WHERE b.item_id = i.id AND b.status = 'active'))
+                                                                          AS без_штрихкода,
+          (SELECT count(*) FROM живой i WHERE NOT EXISTS
+              (SELECT 1 FROM edge.price p WHERE p.item_id = i.id AND p.valid_to IS NULL))
+                                                                          AS без_цены,
+          (SELECT count(*) FROM живой WHERE photo_url IS NULL)            AS без_фото,
+          (SELECT count(*) FROM живой WHERE brand IS NULL)                AS без_бренда,
+          (SELECT count(*) FROM живой WHERE composition IS NULL)          AS без_состава,
+          (SELECT count(*) FROM edge.item WHERE NOT deleted
+             AND vat_rate IN ('НДС18_118', 'НДС20'))                      AS ставка_устарела,
+          (SELECT count(*) FROM живой WHERE marked AND gtin IS NULL)      AS маркируемые_без_gtin,
+          (SELECT count(*) FROM живой i
+             WHERE i.group_id IN (SELECT id FROM edge.item_group WHERE path LIKE 'Табак%')
+               AND i.mrc IS NULL)                                         AS табак_без_мрц,
+          (SELECT count(*) FROM edge.barcode WHERE status = 'rejected')   AS коллизии_шк,
+          (SELECT count(*) FROM edge.item i WHERE i.sku_class = 'Блюдо'
+             AND NOT EXISTS (SELECT 1 FROM edge.recipe r WHERE r.dish_uuid = i.external_uuid))
+                                                                          AS блюда_без_ттк,
+          (SELECT count(*) FROM edge.item_enrichment WHERE resolved_at IS NULL)
+                                                                          AS предложений_ждёт
+    """))).mappings().first()
+
+    # Дубли считаем нормализованным именем — тем же способом, что и раздел
+    # «Дубли»: пока карточки не сведены, обогащать их бессмысленно, обогатим
+    # не ту из пары.
+    дубли = (await db.execute(text("""
+        WITH n AS (
+            SELECT id, lower(regexp_replace(name, '[^a-zа-я0-9]', '', 'g')) k
+            FROM edge.item WHERE NOT deleted
+        ), g AS (SELECT k, count(*) c FROM n GROUP BY k HAVING count(*) > 1)
+        SELECT count(*) AS групп, coalesce(sum(c) - count(*), 0) AS лишних FROM g
+    """))).mappings().first()
+
+    группы = (await db.execute(text("""
+        SELECT g.path, count(i.id) AS карточек,
+               count(i.id) FILTER (WHERE i.sku_class IN ('Сопутка','Блюдо')) AS живых
+        FROM edge.item_group g
+        LEFT JOIN edge.item i ON i.group_id = g.id AND NOT i.deleted
+        GROUP BY g.path ORDER BY g.path
+    """))).mappings().all()
+
+    классы = (await db.execute(text("""
+        SELECT coalesce(sku_class, '— не разобрано') AS класс, count(*) AS карточек
+        FROM edge.item WHERE NOT deleted GROUP BY 1 ORDER BY 2 DESC
+    """))).mappings().all()
+
+    return {"итого": dict(строка), "дубли": dict(дубли),
+            "по_группам": [dict(g) for g in группы],
+            "по_классам": [dict(k) for k in классы]}
+
+
+@router.get("/catalog/groups")
+async def catalog_groups(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Дерево групп номенклатуры со счётчиками."""
+    await scope_company_id(user, db)
+    rows = (await db.execute(text("""
+        SELECT g.id, g.parent_id, g.name, g.path, g.sort,
+               g.marked_default, g.adult_default, g.price_owner_default, g.note,
+               count(i.id) AS карточек,
+               count(i.id) FILTER (WHERE i.sku_class IN ('Сопутка','Блюдо')) AS живых
+        FROM edge.item_group g
+        LEFT JOIN edge.item i ON i.group_id = g.id AND NOT i.deleted
+        GROUP BY g.id ORDER BY g.sort, g.path
+    """))).mappings().all()
+    return {"groups": [dict(r) for r in rows]}
+
+
+@router.post("/catalog/groups")
+async def catalog_group_create(
+    body: ItemGroupIn,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Завести группу. Путь строится от родителя — руками его не задают."""
+    await scope_company_id(user, db)
+    путь = body.name.strip()
+    if not путь:
+        raise HTTPException(400, "Имя группы пустое")
+    if body.parent_id:
+        родитель = (await db.execute(text(
+            "SELECT path FROM edge.item_group WHERE id = :id"), {"id": body.parent_id})).scalar()
+        if родитель is None:
+            raise HTTPException(404, "Родительская группа не найдена")
+        путь = f"{родитель} / {путь}"
+    new_id = (await db.execute(text("""
+        INSERT INTO edge.item_group (parent_id, name, path, marked_default,
+                                     adult_default, price_owner_default, note)
+        VALUES (:p, :n, :path, :m, :a, :po, :note)
+        ON CONFLICT (parent_id, name) DO UPDATE SET note = excluded.note
+        RETURNING id
+    """), {"p": body.parent_id, "n": body.name.strip(), "path": путь,
+           "m": body.marked_default, "a": body.adult_default,
+           "po": body.price_owner_default, "note": body.note})).scalar()
+    await db.commit()
+    return {"ok": True, "id": new_id, "path": путь}
 
 
 @router.get("/nomenclature")

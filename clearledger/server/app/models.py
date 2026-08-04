@@ -93,6 +93,13 @@ class User(Base):
     last_seen_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Человек живёт в своей почте и в пространство не заходит: сообщения чатов
+    # уходят ему письмом, а ответ возвращается в ленту. Учётка нужна только чтобы
+    # он был участником комнаты и автором сообщений — вход ею невозможен
+    # (пароля нет, `login` такие учётки отклоняет).
+    mail_only: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -4620,6 +4627,13 @@ class ChatMessage(Base):
     # Пересланное: имя автора ОРИГИНАЛА (денормализовано, как user_name). Цепочка
     # пересылок оригинал не теряет: форвард форварда несёт то же имя.
     forwarded_from: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Сообщение пришло не из интерфейса, а извне (пока единственный случай — почта).
+    # `external_id` — Message-ID письма: повторная доставка дубля не создаёт.
+    # `external_ref` — письмо-первоисточник в архиве Поддержки, чтобы из ленты
+    # можно было дойти до оригинала, а не только до вычищенного текста.
+    external_source: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    external_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    external_ref: Mapped[str | None] = mapped_column(String(64), nullable=True)
     is_edited: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     edited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -5623,11 +5637,11 @@ class EdgePacket(Base):
     """Пакет смены, пришедший с агента станции, как он есть.
 
     Хранится сырьём: разбор идёт отдельно и может быть переигран. Уникальность
-    по packet_uuid даёт идемпотентность — агент повторяет отправку при любой
+    по (company_id, packet_uuid) даёт идемпотентность — агент повторяет отправку при любой
     неопределённости (обрыв на ответе), и повтор не создаёт дубль.
 
-    Этап v0 — теневой режим: пакеты складываются и сверяются с тем, что даёт
-    1С, документы из них НЕ создаются.
+    Пакет остаётся неизменным L1; edge_projection идемпотентно материализует
+    из него канонические документы Ledger L2.
     """
     __tablename__ = "edge_packets"
 
@@ -5635,7 +5649,7 @@ class EdgePacket(Base):
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     company_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
-    packet_uuid: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    packet_uuid: Mapped[str] = mapped_column(String(64), nullable=False)
     station_id: Mapped[int] = mapped_column(Integer, nullable=False)
     kind: Mapped[str] = mapped_column(String(40), nullable=False)
     shift_number: Mapped[str | None] = mapped_column(String(32), nullable=True)
@@ -5647,7 +5661,47 @@ class EdgePacket(Base):
         DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
+        UniqueConstraint("company_id", "packet_uuid",
+                         name="uq_edge_packets_company_packet"),
         Index("ix_edge_packets_station_shift", "company_id", "station_id", "shift_internal_no"),
+    )
+
+
+class StoreStockBalance(Base):
+    """Последний полный остаток собственного учёта агента.
+
+    Таблица намеренно находится в основном контуре Ledger и содержит company_id:
+    старые edge.stock/edge.item создавались до мультитенантности и различали
+    станции только по номеру, поэтому две компании с АЗС №208 пересекались бы.
+    """
+    __tablename__ = "store_stock_balances"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    station_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    place: Mapped[str] = mapped_column(String(80), nullable=False)
+    place_name: Mapped[str] = mapped_column(String(200), nullable=False, default="")
+    balance_key: Mapped[str] = mapped_column(String(200), nullable=False)
+    item_uuid: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    barcode: Mapped[str] = mapped_column(String(100), nullable=False, default="")
+    name: Mapped[str] = mapped_column(String(500), nullable=False, default="")
+    quantity: Mapped[float] = mapped_column(Numeric(16, 3), nullable=False, default=0)
+    retail_price: Mapped[float | None] = mapped_column(Numeric(16, 2), nullable=True)
+    cost_unit: Mapped[float | None] = mapped_column(Numeric(16, 4), nullable=True)
+    cost_known_pct: Mapped[float] = mapped_column(Numeric(6, 2), nullable=False, default=0)
+    source: Mapped[str] = mapped_column(String(40), nullable=False, default="edge_ledger")
+    snapshot_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("company_id", "station_id", "place", "balance_key",
+                         name="uq_store_stock_balance"),
+        Index("ix_store_stock_company_place", "company_id", "station_id", "place"),
+        Index("ix_store_stock_item", "company_id", "item_uuid"),
+        Index("ix_store_stock_barcode", "company_id", "barcode"),
     )
 
 
@@ -5723,6 +5777,98 @@ class StoreReceipt(Base):
     )
 
 
+class StoreRecipeVersion(Base):
+    """Версия ТТК, которой владеет центр Ledger.
+
+    Строки лежат одним JSONB-снимком: версия неизменяема после активации, а
+    станция получает весь согласованный набор атомарно. Историческую ТТК нельзя
+    восстановить из текущей edge.recipe — поэтому это отдельный первичный слой,
+    а не дополнительные флаги поверх импортированного среза 1С.
+    """
+    __tablename__ = "store_recipe_versions"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    dish_uuid: Mapped[str] = mapped_column(String(64), nullable=False)
+    dish_name: Mapped[str] = mapped_column(String(300), nullable=False, default="")
+    recipe_kind: Mapped[str] = mapped_column(String(20), nullable=False, default="dish")
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft")
+    output_qty: Mapped[float] = mapped_column(Numeric(16, 6), nullable=False, default=1)
+    output_unit: Mapped[str] = mapped_column(String(20), nullable=False, default="шт")
+    lines: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    source: Mapped[str] = mapped_column(String(20), nullable=False, default="center")
+    source_station_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    change_note: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    source_bundle_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    valid_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    valid_to: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("company_id", "dish_uuid", "version",
+                         name="uq_store_recipe_version"),
+        Index("ix_store_recipe_active", "company_id", "status", "valid_from"),
+    )
+
+
+class StoreAssortmentRule(Base):
+    """Матрица станции: разрешён ли товар к продаже и в какой период."""
+    __tablename__ = "store_assortment_rules"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    station_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    item_uuid: Mapped[str] = mapped_column(String(64), nullable=False)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    valid_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    valid_to: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reason: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    updated_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("company_id", "station_id", "item_uuid",
+                         name="uq_store_assortment_rule"),
+        Index("ix_store_assortment_station", "company_id", "station_id", "active"),
+    )
+
+
+class StoreItemAlias(Base):
+    """Неизменяемая трасса слияния карточки-дубля в канон Ledger."""
+    __tablename__ = "store_item_aliases"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    alias_uuid: Mapped[str] = mapped_column(String(64), nullable=False)
+    canonical_uuid: Mapped[str] = mapped_column(String(64), nullable=False)
+    reason: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("company_id", "alias_uuid", name="uq_store_item_alias"),
+        Index("ix_store_item_alias_canon", "company_id", "canonical_uuid"),
+    )
+
+
 class EdgeDownlink(Base):
     """Очередь заданий центра для станции.
 
@@ -5747,6 +5893,11 @@ class EdgeDownlink(Base):
         DateTime(timezone=True), server_default=func.now())
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     acked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Отмена — не то же, что применение. Задание, снятое из центра, обязано
+    # выглядеть снятым: иначе история говорит, что станция его выполнила.
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cancelled_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     note: Mapped[str | None] = mapped_column(String(300), nullable=True)
 
     __table_args__ = (

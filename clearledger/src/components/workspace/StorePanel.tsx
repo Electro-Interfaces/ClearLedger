@@ -39,6 +39,8 @@ import { StoreDedupPanel } from './StoreDedupPanel'
 import { StoreStationsPanel } from './StoreStationsPanel'
 import { StoreStationConsolePanel } from './StoreStationConsolePanel'
 import { StoreStationHealthPanel } from './StoreStationHealthPanel'
+import { StoreDownlinkPanel } from './StoreDownlinkPanel'
+import { StoreAgentVersionsPanel } from './StoreAgentVersionsPanel'
 import { StoreParityPanel } from './StoreParityPanel'
 import { StoreStationDraftsPanel } from './StoreStationDraftsPanel'
 import { StoreBarcodeCollisionsPanel } from './StoreBarcodeCollisionsPanel'
@@ -308,6 +310,20 @@ export function StorePanel() {
     return (
       <div className="h-full overflow-y-auto">
         <StoreStationsPanel dateFrom={period.from} dateTo={period.to} />
+      </div>
+    )
+  }
+  if (sub === 'agent_versions') {
+    return (
+      <div className="h-full overflow-y-auto">
+        <StoreAgentVersionsPanel />
+      </div>
+    )
+  }
+  if (sub === 'downlink') {
+    return (
+      <div className="h-full overflow-y-auto">
+        <StoreDownlinkPanel />
       </div>
     )
   }

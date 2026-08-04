@@ -750,7 +750,17 @@ async def create_all() -> None:
         # вложения) на существующих таблицах.
         for stmt in (
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ",
+            # Участник чата, который живёт в своей почте: сообщения комнаты уходят
+            # ему письмом, ответ возвращается в ленту. Войти такой учёткой нельзя.
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS mail_only BOOLEAN NOT NULL DEFAULT FALSE",
             "ALTER TABLE chat_rooms ADD COLUMN IF NOT EXISTS pinned_message_id UUID",
+            # Сообщение, пришедшее письмом: источник, Message-ID (идемпотентность
+            # повторной доставки) и ссылка на письмо в архиве Поддержки.
+            "ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS external_source VARCHAR(20)",
+            "ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS external_id TEXT",
+            "ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS external_ref VARCHAR(64)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_chat_msg_external "
+            "ON chat_messages (room_id, external_id) WHERE external_id IS NOT NULL",
             "ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS file_url TEXT",
             "ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS file_name VARCHAR(500)",
             "ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS file_size INTEGER",
@@ -1295,6 +1305,32 @@ async def create_all() -> None:
                 f"ALTER TABLE {tbl} ADD COLUMN IF NOT EXISTS channel_id UUID "
                 f"REFERENCES channels(id) ON DELETE SET NULL"))
 
+        # v2.34: единица выхода нужна для вложенных ТТК: полуфабрикат с
+        # выходом 500 г нельзя использовать строкой в миллилитрах.
+        await conn.execute(_sa.text(
+            "ALTER TABLE store_recipe_versions ADD COLUMN IF NOT EXISTS "
+            "output_unit VARCHAR(20) NOT NULL DEFAULT 'шт'"))
+        await conn.execute(_sa.text(
+            "ALTER TABLE store_recipe_versions ADD COLUMN IF NOT EXISTS "
+            "source VARCHAR(20) NOT NULL DEFAULT 'center'"))
+        await conn.execute(_sa.text(
+            "ALTER TABLE store_recipe_versions ADD COLUMN IF NOT EXISTS "
+            "source_station_id INTEGER"))
+        await conn.execute(_sa.text(
+            "ALTER TABLE store_recipe_versions ADD COLUMN IF NOT EXISTS "
+            "change_note VARCHAR(500)"))
+        await conn.execute(_sa.text(
+            "ALTER TABLE store_recipe_versions ADD COLUMN IF NOT EXISTS "
+            "source_bundle_id VARCHAR(100)"))
+
+        # v2.35: UUID пакета детерминирован номером станции и сменой. Одинаковые
+        # номера станций в разных компаниях не должны блокировать друг друга.
+        await conn.execute(_sa.text(
+            "ALTER TABLE edge_packets DROP CONSTRAINT IF EXISTS "
+            "edge_packets_packet_uuid_key"))
+        await conn.execute(_sa.text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_edge_packets_company_packet "
+            "ON edge_packets (company_id, packet_uuid)"))
 
         # v2.36: две схемы доставки и два маршрута подписания приёмки.
         for stmt in (
@@ -1316,6 +1352,46 @@ async def create_all() -> None:
             "JSONB NOT NULL DEFAULT '[]'::jsonb",
         ):
             await conn.execute(_sa.text(stmt))
+
+        # v2.37: станция заявляет об ошибке в сетевой карточке.
+        #
+        # Канон ведёт центр, но ошибку в карточке первым видит тот, кто стоит у
+        # полки: не та ставка, кривое название, штрихкод, который не сканируется.
+        # Раньше у станции было два выхода — звонить или завести дубль; на 208
+        # так набралось 95 групп дублей. Теперь у неё есть право заявить, а
+        # решение остаётся за центром.
+        await conn.execute(_sa.text("""
+            CREATE TABLE IF NOT EXISTS edge.nsi_proposal (
+                id          BIGSERIAL PRIMARY KEY,
+                company_id  UUID NOT NULL,
+                station_id  INTEGER NOT NULL,
+                source_uuid VARCHAR(64) NOT NULL,
+                item_uuid   VARCHAR(64) NOT NULL,
+                field       VARCHAR(30) NOT NULL,
+                current     TEXT NOT NULL DEFAULT '',
+                proposed    TEXT NOT NULL,
+                author      VARCHAR(120) NOT NULL DEFAULT '',
+                comment     TEXT NOT NULL DEFAULT '',
+                created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+                resolved_at TIMESTAMPTZ,
+                rejected    BOOLEAN NOT NULL DEFAULT false,
+                note        TEXT,
+                CONSTRAINT uq_nsi_proposal UNIQUE (company_id, station_id, source_uuid)
+            )
+        """))
+
+        # v2.38: задание центра можно отменить, не выдавая его за применённое.
+        #
+        # Агент забирает всё неподтверждённое, поэтому единственным способом
+        # убрать ошибочное задание из очереди было проставить ему acked_at —
+        # то есть соврать, что станция его применила. Отмена — отдельное
+        # событие со своим временем и автором.
+        for stmt in (
+            "ALTER TABLE edge_downlink ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMPTZ",
+            "ALTER TABLE edge_downlink ADD COLUMN IF NOT EXISTS cancelled_by UUID",
+        ):
+            await conn.execute(_sa.text(stmt))
+
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Dependency — асинхронная сессия БД."""

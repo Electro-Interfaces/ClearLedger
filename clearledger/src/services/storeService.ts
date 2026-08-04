@@ -971,6 +971,61 @@ export const getStoreExchangeStation = (stationId: number, dateFrom: string, dat
   get<StoreExchangeStationDetail>(
     `/api/store/exchange/${stationId}?date_from=${dateFrom}&date_to=${dateTo}`)
 
+/** Парк версий агента: какая объявлена целевой и у кого какая стоит. */
+export interface StoreAgentVersions {
+  desired_version: string
+  /** true — версию объявили в интерфейсе; false — она взята из окружения. */
+  declared: boolean
+  fallback_version: string
+  total: number
+  outdated: number
+  versions: { version: string; stations: number }[]
+  stations: {
+    station_id: number; version: string | null; version_ok: boolean
+    state: string; silence_seconds: number | null
+    last_seen: string; first_seen: string
+  }[]
+}
+
+export const getStoreAgentVersions = () =>
+  get<StoreAgentVersions>('/api/store/agent-versions')
+
+export const setStoreAgentVersion = (version: string) =>
+  put<{ ok: boolean; desired_version: string }>('/api/store/agent-versions', { version })
+
+/** Очередь заданий центра станциям: НСИ, цены, заготовки приёмки, команды. */
+export type DownlinkState = 'ждёт станции' | 'доставлено' | 'применено' | 'отменено'
+
+export interface StoreDownlinkTask {
+  id: string
+  station_id: number
+  kind: string
+  label: string
+  note: string | null
+  state: DownlinkState
+  created_at: string
+  delivered_at: string | null
+  acked_at: string | null
+  cancelled_at: string | null
+}
+
+export interface StoreDownlinkData {
+  total: number
+  by_state: Record<DownlinkState, number>
+  tasks: StoreDownlinkTask[]
+}
+
+export const getStoreDownlink = (stationId?: number | null, state?: string) =>
+  get<StoreDownlinkData>('/api/store/downlink', {
+    station_id: stationId ?? undefined, state: state || undefined,
+  })
+
+export const resendStoreDownlink = (id: string) =>
+  post<{ ok: boolean; state: DownlinkState }>(`/api/store/downlink/${id}/resend`, {})
+
+export const cancelStoreDownlink = (id: string) =>
+  post<{ ok: boolean; state: DownlinkState }>(`/api/store/downlink/${id}/cancel`, {})
+
 /** Что на станции требует человека: касса, выгрузка, учёт, коды, сверка смен. */
 export interface StoreStationHealth {
   station_id: number

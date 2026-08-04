@@ -53,6 +53,18 @@ async def health(company: Company = Depends(get_company_by_api_key)):
 DESIRED_AGENT_VERSION = os.environ.get("EDGE_DESIRED_AGENT_VERSION", "0.58.13")
 
 
+def desired_version(company: Company | None) -> str:
+    """Целевая версия агента для компании.
+
+    Объявляется в интерфейсе и хранится в настройках компании: раньше её знала
+    только переменная окружения бэкенда, и «объявить новую версию» означало
+    передеплоить стек. Переменная осталась значением по умолчанию — для
+    компании, которая ничего не объявляла.
+    """
+    edge = ((company.customization or {}).get("edge") or {}) if company else {}
+    return str(edge.get("desired_agent_version") or "").strip() or DESIRED_AGENT_VERSION
+
+
 async def _ingest_receipts(db: AsyncSession, company_id, station_id: int,
                            payload: dict, docs: list) -> None:
     """Развернуть документы `purchase` пакета в документы приёмки центра.
@@ -232,12 +244,13 @@ async def heartbeat(
 
     return {
         "server_time": now.isoformat(),
-        "desired_version": DESIRED_AGENT_VERSION,
+        "desired_version": desired_version(company),
         # Сколько заданий ждёт станцию: агент пойдёт за ними только если есть
         # что забирать — лишний запрос в минуту по LTE не нужен.
         "downlink_pending": int(pending),
         "stations": stations,
-        "update_required": bool(row.version and row.version != DESIRED_AGENT_VERSION),
+        "update_required": bool(row.version
+                               and row.version != desired_version(company)),
     }
 
 
@@ -263,7 +276,10 @@ async def downlink(
         select(EdgeDownlink)
         .where(EdgeDownlink.company_id == company.id,
                EdgeDownlink.station_id == station_id,
-               EdgeDownlink.acked_at.is_(None))
+               EdgeDownlink.acked_at.is_(None),
+               # Отменённое центром станции не отдаём — иначе отмена
+               # существовала бы только на экране.
+               EdgeDownlink.cancelled_at.is_(None))
         .order_by(EdgeDownlink.created_at).limit(20)
     )).scalars().all()
 
@@ -302,6 +318,7 @@ async def agents(
     db: AsyncSession = Depends(get_db),
 ):
     """Парк станций для «Магазина»: кто на связи, какой код, что в очереди."""
+    желаемая = desired_version(company)
     rows = (await db.execute(
         select(EdgeAgent).where(EdgeAgent.company_id == company.id)
         .order_by(EdgeAgent.station_id)
@@ -318,8 +335,8 @@ async def agents(
             "state": state,
             "silence_seconds": int(silence) if silence is not None else None,
             "version": r.version,
-            "version_ok": r.version == DESIRED_AGENT_VERSION,
-            "desired_version": DESIRED_AGENT_VERSION,
+            "version_ok": r.version == желаемая,
+            "desired_version": желаемая,
             "queue_pending": r.queue_pending,
             "queue_sent": r.queue_sent,
             "last_shift": r.last_shift,
@@ -327,7 +344,7 @@ async def agents(
             "first_seen": r.first_seen,
             "details": r.payload,
         })
-    return {"desired_version": DESIRED_AGENT_VERSION, "agents": out,
+    return {"desired_version": желаемая, "agents": out,
             "online": sum(1 for a in out if a["state"] == "онлайн"), "total": len(out)}
 
 
