@@ -860,6 +860,12 @@ export interface StoreStation {
   last_shift: number | null
   snapshot_at: string | null
   onec_ok: boolean | null
+  ledger_stock_ok: boolean
+  stock_source: string | null
+  cash_policy: {
+    policy_id: string; checked_at: string; mode: 'dry-run'; ready: boolean
+    missing: number; extra: number; price_diff: number; code_diff: number; skipped: number
+  } | null
   last_seen: string
   first_seen: string
 }
@@ -885,13 +891,44 @@ export interface StoreReceiptLine {
   qty_fact: number
   price: number
   vat_rate: string | null
+  vat_amount?: number
   amount: number
+  unit?: string | null
+  retail_price?: number
+  markup?: number
+  pack_factor?: number
+  purpose?: string | null
+  series?: string | null
+  expiry?: string | null
+  upd_codes?: string[]
+  mark_codes?: string[]
+  pack_codes?: string[]
+  requires_mark?: boolean
+  no_card?: boolean
+}
+
+export interface ResolvedStoreBarcode {
+  item_uuid: string
+  name: string
+  unit: string | null
+  vat_rate: string | null
+  barcode: string
+  retail_price: number | null
+}
+
+export type StoreDeliveryScheme = 'supplier_to_station' | 'central_warehouse'
+export type StoreSigningMode = 'office_director' | 'station_mchd'
+export interface StoreReceiptDistribution {
+  id: string
+  station_id: number
+  created_at: string
+  lines: { line_index: number; qty: number }[]
 }
 
 /** Документ приёмки. Статусы — ордерная схема 1С:Розница. */
 export interface StoreReceipt {
   id: string
-  station_id: number
+  station_id: number | null
   number: string
   doc_date: string
   supplier: string | null
@@ -903,6 +940,17 @@ export interface StoreReceipt {
   /** center | station | edo — кто завёл документ. */
   origin: string
   comment: string | null
+  delivery_scheme: StoreDeliveryScheme
+  receiving_warehouse: string | null
+  signing_mode: StoreSigningMode
+  signer_name: string | null
+  mchd_guid: string | null
+  mchd_registry: string | null
+  mchd_valid_until: string | null
+  signature_status: 'pending' | 'signed'
+  signature_ref: string | null
+  signed_at: string | null
+  distribution: StoreReceiptDistribution[]
   lines: StoreReceiptLine[]
   lines_count: number
   diff_count: number
@@ -914,7 +962,7 @@ export interface StoreReceipt {
 }
 
 export interface StoreReceiptInput {
-  station_id: number
+  station_id: number | null
   number?: string | null
   doc_date?: string | null
   supplier?: string | null
@@ -922,6 +970,15 @@ export interface StoreReceiptInput {
   incoming_number?: string | null
   incoming_date?: string | null
   comment?: string | null
+  delivery_scheme?: StoreDeliveryScheme
+  receiving_warehouse?: string | null
+  signing_mode?: StoreSigningMode
+  signer_name?: string | null
+  mchd_guid?: string | null
+  mchd_registry?: string | null
+  mchd_valid_until?: string | null
+  signature_status?: 'pending' | 'signed'
+  signature_ref?: string | null
   lines: StoreReceiptLine[]
 }
 
@@ -939,6 +996,48 @@ export const updateStoreReceipt = (id: string, body: StoreReceiptInput) =>
 
 export const setStoreReceiptStatus = (id: string, status: 'expected' | 'accepted') =>
   post<StoreReceipt>(`/api/store/receipts/${id}/status?status=${status}`, {})
+
+export const sendStoreReceiptToStation = (id: string) =>
+  post<{ ok: boolean; station_id: number; number: string; lines: number }>(
+    `/api/store/receipts/${id}/send-to-station`, {})
+
+export const recordStoreReceiptSignature = (
+  id: string,
+  body: Pick<StoreReceiptInput, 'signature_status' | 'signature_ref' | 'signer_name' |
+    'mchd_guid' | 'mchd_registry' | 'mchd_valid_until'>,
+) => post<StoreReceipt>(`/api/store/receipts/${id}/signature`, body)
+
+export const distributeStoreReceipt = (
+  id: string, stationId: number, lines: { line_index: number; qty: number }[],
+) => post<{ ok: boolean; task_id: string; station_id: number; lines: number }>(
+  `/api/store/receipts/${id}/distribute`, { station_id: stationId, lines })
+
+export interface StoreReceiptScanResult extends StoreReceipt {
+  scan: { type: string; barcode: string; line_index: number; qty_added: number; name: string }
+}
+
+export const scanStoreReceipt = (
+  id: string, code: string, qty = 1, lines?: StoreReceiptLine[],
+) => post<StoreReceiptScanResult>(`/api/store/receipts/${id}/scan`, { code, qty, lines })
+
+export const createStoreReceiptFromUPD = (
+  file: File,
+  options: Pick<StoreReceiptInput, 'station_id' | 'delivery_scheme' | 'receiving_warehouse' |
+    'signing_mode' | 'signer_name' | 'mchd_guid' | 'mchd_registry' | 'mchd_valid_until'>,
+) => {
+  const query = new URLSearchParams()
+  Object.entries(options).forEach(([key, value]) => {
+    if (value !== null && value !== undefined && value !== '') query.set(key, String(value))
+  })
+  const form = new FormData()
+  form.append('file', file)
+  return upload<StoreReceipt>(`/api/store/receipts/from-upd?${query.toString()}`, form)
+}
+
+export const resolveStoreBarcode = (code: string, stationId = 208) =>
+  get<ResolvedStoreBarcode>('/api/store/nsi/resolve-barcode', {
+    code, station_id: String(stationId),
+  })
 
 /* ───────────────── Мастер-НСИ: правка карточки, цены, штрихкодов ─────────────────
  * Собственный справочник Ledger (схема edge), а не зеркало 1С. Ключ — GUID

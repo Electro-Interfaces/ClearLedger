@@ -5690,6 +5690,21 @@ class StoreReceipt(Base):
     # владеет правкой, и не затирать фактическую приёмку заявкой из центра.
     origin: Mapped[str] = mapped_column(String(20), nullable=False, default="center")
 
+    # Логистика и юридически значимое подписание — независимые оси.
+    delivery_scheme: Mapped[str] = mapped_column(
+        String(30), nullable=False, default="supplier_to_station")
+    receiving_warehouse: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    signing_mode: Mapped[str] = mapped_column(
+        String(30), nullable=False, default="office_director")
+    signer_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    mchd_guid: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    mchd_registry: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    mchd_valid_until: Mapped[date_type | None] = mapped_column(Date, nullable=True)
+    signature_status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    signature_ref: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    signed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    distribution: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+
     lines: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     total_amount: Mapped[float] = mapped_column(Numeric(16, 2), nullable=False, default=0)
     vat_amount: Mapped[float] = mapped_column(Numeric(16, 2), nullable=False, default=0)
