@@ -3078,27 +3078,6 @@ async def store_barcodes(
     return await GoodsDashboardService(db, await scope_company_id(user, db)).barcodes()
 
 
-@router.get("/{report}")
-async def store_report(
-    report: str,
-    date_from: str = Query(...),
-    date_to: str = Query(...),
-    stations: str | None = Query(None),
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Отчёты раздела по периоду: receipts · suppliers · catering · categories · recipes.
-    barcodes — отдельный маршрут выше (справочник вне периода)."""
-    svc = GoodsDashboardService(db, await scope_company_id(user, db))
-    method = {"receipts": svc.receipts, "suppliers": svc.suppliers,
-              "catering": svc.catering, "categories": svc.categories,
-              "recipes": svc.recipes}.get(report)
-    if method is None:
-        from fastapi import HTTPException
-        raise HTTPException(404, f"Неизвестный отчёт: {report}")
-    return await method(date.fromisoformat(date_from), date.fromisoformat(date_to), _stations(stations))
-
-
 # ─────────────────────────── Контроль дублей ────────────────────────────────
 # Анализ дублей номенклатуры по цепочке Нефтосервер → локальная 1С 208 → ЦБ.
 from app.services import dedup_service
@@ -3664,3 +3643,32 @@ async def store_push_partners(
     ))
     await db.commit()
     return {"station_id": station_id, "partners": len(rows)}
+
+
+# ─────────────────────── Отчёты по периоду (ПОСЛЕДНИМИ) ─────────────────────
+#
+# Маршрут с одним подставляемым сегментом обязан стоять В КОНЦЕ файла: FastAPI
+# перебирает пути в порядке объявления, и «/{report}» съедает любой конкретный
+# односегментный путь, объявленный после него. Так и случилось — «Признание со
+# станций» и «Коллизии ШК» отвечали «query.date_from: Field required», хотя
+# периода у них нет и в помине: запрос уходил не в свой обработчик.
+#
+# Ниже этой строки конкретные маршруты не добавлять.
+@router.get("/{report}")
+async def store_report(
+    report: str,
+    date_from: str = Query(...),
+    date_to: str = Query(...),
+    stations: str | None = Query(None),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Отчёты раздела по периоду: receipts · suppliers · catering · categories · recipes.
+    barcodes — отдельный маршрут выше (справочник вне периода)."""
+    svc = GoodsDashboardService(db, await scope_company_id(user, db))
+    method = {"receipts": svc.receipts, "suppliers": svc.suppliers,
+              "catering": svc.catering, "categories": svc.categories,
+              "recipes": svc.recipes}.get(report)
+    if method is None:
+        raise HTTPException(404, f"Неизвестный отчёт: {report}")
+    return await method(date.fromisoformat(date_from), date.fromisoformat(date_to), _stations(stations))
