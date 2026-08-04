@@ -44,11 +44,37 @@ def _client_ip(request: Request) -> str | None:
     return xff or (request.client.host if request.client else None)
 
 
+async def _pending_invite(email: str, db: AsyncSession):
+    """Живое приглашение на этот адрес, если человека самого ещё нет.
+
+    Приглашённый, который не прошёл по ссылке, в системе НЕ существует: вход отвечает
+    ему «неверный email или пароль», а восстановление пароля молчит — оба ответа
+    заводят в тупик и человек идёт к администратору. Обе двери смотрят сюда.
+    """
+    from app.models import Invitation
+    inv = (await db.execute(
+        select(Invitation)
+        .where(Invitation.email == email, Invitation.status == "pending")
+        .order_by(Invitation.created_at.desc())
+    )).scalars().first()
+    if inv is None or inv.expires_at < datetime.now(timezone.utc):
+        return None
+    return inv
+
+
 @router.post("/login", response_model=TokenResponse)
 async def login(body: LoginRequest, request: Request, db: AsyncSession = Depends(get_db)):
     """Вход по email + пароль. Возвращает JWT."""
     result = await db.execute(select(User).where(User.email == body.email))
     user = result.scalar_one_or_none()
+
+    if user is None and await _pending_invite(body.email, db) is not None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Вас пригласили в это пространство, но приглашение ещё не принято: "
+                   "пароль задаётся по ссылке из письма-приглашения. Не нашли письмо — "
+                   "нажмите «Забыли пароль?», и приглашение придёт заново.",
+        )
 
     if user is None or not verify_password(body.password, user.password_hash):
         # Неудачную попытку по СУЩЕСТВУЮЩЕМУ email пишем в журнал его компании:
@@ -107,6 +133,26 @@ async def forgot_password(
             await email_service.send_password_reset(user.email, raw)
         except Exception as exc:  # noqa: BLE001 — сбой письма не должен ронять запрос
             _reset_log.error("send_password_reset failed: %s", exc)
+        return {"ok": True}
+
+    # Пароля ещё нет, но человека звали — высылаем приглашение заново (с новым токеном:
+    # старая ссылка из письма могла потеряться или истечь). Так приглашённый выбирается
+    # из тупика сам, не дожидаясь администратора.
+    inv = await _pending_invite(body.email, db)
+    if inv is not None:
+        from app.routers.invitations_router import INVITE_TTL  # ленивый: там свой импорт этого модуля
+        raw = secrets.token_urlsafe(32)
+        inv.token_hash = _hash_token(raw)
+        inv.expires_at = datetime.now(timezone.utc) + INVITE_TTL
+        await db.flush()
+        company = await db.get(Company, inv.company_id)
+        try:
+            await email_service.send_invite(
+                inv.email, raw, company.name if company else "",
+                None, inv.role, inv.expires_at,
+            )
+        except Exception as exc:  # noqa: BLE001 — сбой письма не должен ронять запрос
+            _reset_log.error("send_invite (forgot-password) failed: %s", exc)
     return {"ok": True}
 
 

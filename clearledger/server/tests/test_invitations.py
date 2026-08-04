@@ -24,7 +24,7 @@ async def _admin(client: AsyncClient) -> str:
 async def test_invitation_flow(client: AsyncClient, monkeypatch):
     sent = {}
 
-    async def fake_send(to, token, company_name, inviter, role):
+    async def fake_send(to, token, company_name, inviter, role, expires_at=None):
         sent["token"] = token
         return False
 
@@ -59,10 +59,10 @@ async def test_invitation_flow(client: AsyncClient, monkeypatch):
     roles = {c["slug"]: c["role"] for c in me["companies"]}
     assert roles.get("rushydro") == "admin"
 
-    # Токен одноразовый — повторный accept → 404.
+    # Токен одноразовый — повторный accept → 410 «приглашение уже принято».
     a2 = await client.post(f"/api/invitations/accept/{token}",
                            json={"name": "x", "password": "secret123"})
-    assert a2.status_code == 404
+    assert a2.status_code == 410
 
     # Приглашение уже-члена → 409.
     dup = await client.post("/api/invitations", headers=_h(admin), json={
@@ -75,7 +75,7 @@ async def test_invitation_flow(client: AsyncClient, monkeypatch):
 async def test_invitation_permissions_and_revoke(client: AsyncClient, monkeypatch):
     sent = {}
 
-    async def fake_send(to, token, company_name, inviter, role):
+    async def fake_send(to, token, company_name, inviter, role, expires_at=None):
         sent["token"] = token
         return False
 
@@ -103,7 +103,8 @@ async def test_invitation_permissions_and_revoke(client: AsyncClient, monkeypatc
     tok = sent["token"]
     assert (await client.get(f"/api/invitations/accept/{tok}")).status_code == 200
     assert (await client.delete(f"/api/invitations/{rid}", headers=_h(admin))).status_code == 204
-    assert (await client.get(f"/api/invitations/accept/{tok}")).status_code == 404
+    # Отозванное приглашение — 410 с причиной, а не безликое «не найдено».
+    assert (await client.get(f"/api/invitations/accept/{tok}")).status_code == 410
 
 
 @pytest.mark.asyncio(loop_scope="session")
@@ -118,7 +119,7 @@ async def test_принадлежность_партнёра_доезжает_и
     """
     sent = {}
 
-    async def fake_send(to, token, company_name, inviter, role):
+    async def fake_send(to, token, company_name, inviter, role, expires_at=None):
         sent["token"] = token
         return False
 
@@ -153,7 +154,7 @@ async def test_чужая_организация_в_приглашении_от�
     """`resolve_org_id` не даёт привязать участника к контрагенту чужого пространства:
     иначе внешний человек был бы подписан в чатах организацией, которой в его компании
     не существует."""
-    async def fake_send(to, token, company_name, inviter, role):
+    async def fake_send(to, token, company_name, inviter, role, expires_at=None):
         return False
 
     monkeypatch.setattr(email_service, "send_invite", fake_send)
@@ -165,3 +166,39 @@ async def test_чужая_организация_в_приглашении_от�
         "organization_id": "00000000-0000-0000-0000-000000000001",
     })
     assert r.status_code == 404, r.text
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_приглашённый_не_упирается_в_неверный_пароль(client: AsyncClient, monkeypatch):
+    """Человек, которого пригласили, но который не прошёл по ссылке, в системе ещё не
+    существует. Раньше вход отвечал ему «неверный email или пароль», а восстановление
+    пароля молчало — тупик, из которого выводил только администратор."""
+    sent = {}
+
+    async def fake_send(to, token, company_name, inviter, role, expires_at=None):
+        sent["token"] = token
+        return False
+
+    monkeypatch.setattr(email_service, "send_invite", fake_send)
+    admin = await _admin(client)
+
+    r = await client.post("/api/invitations", headers=_h(admin), json={
+        "company_id": "rushydro", "email": "waiting@test.ru", "role": "user",
+    })
+    assert r.status_code == 201, r.text
+    first_token = sent["token"]
+
+    # Вход: вместо «неверный email или пароль» — что делать дальше.
+    login = await client.post("/api/auth/login", json={
+        "email": "waiting@test.ru", "password": "любой",
+    })
+    assert login.status_code == 401
+    assert "приглашение" in login.json()["detail"].lower()
+
+    # «Забыли пароль?» высылает приглашение заново, новой ссылкой.
+    sent.clear()
+    f = await client.post("/api/auth/forgot-password", json={"email": "waiting@test.ru"})
+    assert f.status_code == 200
+    assert sent.get("token") and sent["token"] != first_token
+    assert (await client.get(f"/api/invitations/accept/{sent['token']}")).status_code == 200
+    assert (await client.get(f"/api/invitations/accept/{first_token}")).status_code == 404
