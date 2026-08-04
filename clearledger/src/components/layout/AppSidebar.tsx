@@ -37,6 +37,16 @@ export function NavItem({ to, icon: Icon, label, end, collapsed, onNavigate, act
   to: string; icon: React.ComponentType<{ className?: string }>; label: string
   end?: boolean; collapsed?: boolean; onNavigate?: () => void; active?: boolean
 }) {
+  // Раздел рабочей области узнаёт себя САМ — по `?mode=` в собственной ссылке
+  // против `?mode=` в адресе. Три попытки вычислить это снаружи промахнулись
+  // (путь, пункт, состояние области), поэтому решение принимает тот, кто знает
+  // оба значения наверняка: сама ссылка. Пропс `active` остаётся для остальных
+  // пунктов и для случая, когда режима в адресе ещё нет.
+  const { search } = useLocation()
+  const linkMode = new URLSearchParams(to.split('?')[1] ?? '').get('mode')
+  const urlMode = new URLSearchParams(search).get('mode')
+  const modeActive = linkMode ? (urlMode ? linkMode === urlMode : active) : undefined
+
   return (
     <SidebarMenuItem>
       <Tooltip>
@@ -52,7 +62,7 @@ export function NavItem({ to, icon: Icon, label, end, collapsed, onNavigate, act
                 // не понимает, где находится. Отсюда более плотный фон, полужирное
                 // начертание и вертикальный маркер слева.
                 `relative flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
-                  (active ?? isActive)
+                  (modeActive ?? active ?? isActive)
                     ? 'bg-primary/15 font-semibold text-primary before:absolute before:left-0 before:top-1.5 before:bottom-1.5 before:w-0.5 before:rounded-full before:bg-primary'
                     : 'font-medium text-muted-foreground hover:bg-accent hover:text-foreground'
                 } ${collapsed ? 'justify-center px-2' : ''}`
