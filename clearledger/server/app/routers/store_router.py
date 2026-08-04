@@ -5,6 +5,7 @@
 динамика/станции по продажам из канала ЦБ ЭЛСИ.АЗК (DataEntry clean).
 Далее: ABC, маржа/GMROI (FIFO с поступлениями), остатки, инвентаризация.
 """
+import math
 import uuid
 from datetime import date, datetime, timezone
 
@@ -414,6 +415,55 @@ async def nsi_items(
     return {"items": [dict(r) for r in rows], "total": len(rows), "station_id": station_id}
 
 
+def _barcode_candidates(raw: str) -> list[str]:
+    code = raw.strip(" \t\r\n\x00\x02\x03")
+    if len(code) >= 3 and code[0] == "]" and code[1].isalpha() and code[2].isalnum():
+        code = code[3:]
+    result = [code]
+    if code.isascii() and code.isdigit():
+        if len(code) == 12:
+            result.append("0" + code)
+        elif len(code) in (13, 14) and code.startswith("0"):
+            result.append(code[1:])
+    return list(dict.fromkeys(value for value in result if value))
+
+
+@router.get("/nsi/resolve-barcode")
+async def nsi_resolve_barcode(
+    code: str = Query(...),
+    station_id: int = Query(208),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Точное сопоставление скана с карточкой, включая UPC↔EAN и GTIN-14."""
+    candidates = _barcode_candidates(code)
+    if not candidates:
+        raise HTTPException(400, "Штрихкод пуст")
+    rows = (await db.execute(text("""
+        SELECT i.id, i.external_uuid, i.name, i.unit, i.vat_rate, b.code,
+               (SELECT p.price FROM edge.price p
+                 WHERE p.item_id = i.id AND p.station_id = :st
+                   AND p.valid_to IS NULL) AS price
+          FROM edge.barcode b
+          JOIN edge.item i ON i.id = b.item_id
+         WHERE b.status = 'active' AND b.code = ANY(CAST(:codes AS text[]))
+           AND NOT i.deleted
+         ORDER BY array_position(CAST(:codes AS text[]), b.code)
+    """), {"codes": candidates, "st": station_id})).mappings().all()
+    item_ids = {int(row["id"]) for row in rows}
+    if not rows:
+        raise HTTPException(404, "Штрихкод не найден в мастер-НСИ")
+    if len(item_ids) > 1:
+        raise HTTPException(409, "Штрихкод связан с несколькими карточками — нужна проверка НСИ")
+    row = rows[0]
+    return {
+        "item_uuid": str(row["external_uuid"]), "name": row["name"],
+        "unit": row["unit"], "vat_rate": row["vat_rate"],
+        "barcode": row["code"],
+        "retail_price": float(row["price"]) if row["price"] is not None else None,
+    }
+
+
 @router.get("/nsi/items/{item_id}")
 async def nsi_item(
     item_id: str,
@@ -576,11 +626,24 @@ class ReceiptLine(BaseModel):
     qty_fact: float = 0          # посчитано по факту
     price: float = 0
     vat_rate: str | None = None
+    vat_amount: float = 0
     amount: float = 0
+    unit: str | None = None
+    retail_price: float = 0
+    markup: float = 0
+    pack_factor: float = 0
+    purpose: str | None = None
+    series: str | None = None
+    expiry: str | None = None
+    upd_codes: list[str] = []
+    mark_codes: list[str] = []
+    pack_codes: list[str] = []
+    requires_mark: bool = False
+    no_card: bool = False
 
 
 class ReceiptIn(BaseModel):
-    station_id: int
+    station_id: int | None = None
     number: str | None = None
     doc_date: str | None = None
     supplier: str | None = None
@@ -588,11 +651,98 @@ class ReceiptIn(BaseModel):
     incoming_number: str | None = None
     incoming_date: str | None = None
     comment: str | None = None
+    delivery_scheme: str = "supplier_to_station"
+    receiving_warehouse: str | None = None
+    signing_mode: str = "office_director"
+    signer_name: str | None = None
+    mchd_guid: str | None = None
+    mchd_registry: str | None = None
+    mchd_valid_until: str | None = None
+    signature_status: str = "pending"
+    signature_ref: str | None = None
     lines: list[ReceiptLine] = []
 
 
+class ReceiptSignatureIn(BaseModel):
+    signature_status: str
+    signature_ref: str | None = None
+    signer_name: str | None = None
+    mchd_guid: str | None = None
+    mchd_registry: str | None = None
+    mchd_valid_until: str | None = None
+
+
+class ReceiptDistributionLine(BaseModel):
+    line_index: int
+    qty: float
+
+
+class ReceiptDistributionIn(BaseModel):
+    station_id: int
+    lines: list[ReceiptDistributionLine]
+
+
+class ReceiptScanIn(BaseModel):
+    code: str
+    qty: float = 1
+    lines: list[ReceiptLine] | None = None
+
+
+def _parse_mchd_date(value: str | None):
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError as exc:
+        raise HTTPException(400, "Срок МЧД должен быть датой") from exc
+
+
+def _validate_receipt_route(
+    delivery_scheme: str, station_id: int | None, receiving_warehouse: str | None,
+    signing_mode: str, signer_name: str | None, mchd_guid: str | None,
+    mchd_registry: str | None, mchd_valid_until, signature_status: str,
+    signature_ref: str | None, require_signature: bool = False,
+) -> None:
+    if delivery_scheme not in ("supplier_to_station", "central_warehouse"):
+        raise HTTPException(400, "Неизвестная схема доставки")
+    if delivery_scheme == "supplier_to_station" and not station_id:
+        raise HTTPException(400, "Для прямой поставки выберите АЗС")
+    if delivery_scheme == "central_warehouse" and not (receiving_warehouse or "").strip():
+        raise HTTPException(400, "Укажите центральный или промежуточный склад")
+    if signing_mode not in ("office_director", "station_mchd"):
+        raise HTTPException(400, "Неизвестная схема подписания")
+    if delivery_scheme == "central_warehouse" and signing_mode != "office_director":
+        raise HTTPException(400, "Центральный приход подписывает офис")
+    if signature_status not in ("pending", "signed"):
+        raise HTTPException(400, "Неизвестный статус подписи")
+    if signature_status == "signed" and not (signature_ref or "").strip():
+        raise HTTPException(400, "Укажите идентификатор подписи из оператора ЭДО")
+    if signing_mode == "station_mchd":
+        if not all((signer_name, mchd_guid, mchd_registry, mchd_valid_until)):
+            raise HTTPException(400, "Для подписания на АЗС заполните представителя и МЧД")
+        if mchd_valid_until < date.today():
+            raise HTTPException(400, "Срок действия МЧД истёк")
+        if require_signature and signature_status != "signed":
+            raise HTTPException(400, "Администратор должен подписать УПД личной УКЭП по МЧД")
+    if require_signature and delivery_scheme == "central_warehouse" and signature_status != "signed":
+        raise HTTPException(400, "Перед центральной приёмкой офис должен подписать УПД")
+
+
+def _normalized_receipt_lines(r: StoreReceipt) -> list[dict]:
+    lines = []
+    for source in r.lines or []:
+        line = dict(source)
+        # До разделения кодов УПД и фактических сканов входящие коды лежали в
+        # mark_codes. Старые ожидаемые документы нормализуем при чтении.
+        if r.origin == "edo" and "upd_codes" not in line:
+            line["upd_codes"] = list(line.get("mark_codes") or [])
+            line["mark_codes"] = []
+        lines.append(line)
+    return lines
+
+
 def _receipt_out(r: StoreReceipt) -> dict:
-    lines = r.lines or []
+    lines = _normalized_receipt_lines(r)
     # Расхождение считаем на сервере: это главная колонка приёмки, и считать её
     # в двух местах нельзя -- разъедется.
     diff = sum(1 for l in lines
@@ -602,6 +752,13 @@ def _receipt_out(r: StoreReceipt) -> dict:
         "doc_date": r.doc_date, "supplier": r.supplier, "contract": r.contract,
         "incoming_number": r.incoming_number, "incoming_date": r.incoming_date,
         "status": r.status, "origin": r.origin, "comment": r.comment,
+        "delivery_scheme": r.delivery_scheme,
+        "receiving_warehouse": r.receiving_warehouse,
+        "signing_mode": r.signing_mode, "signer_name": r.signer_name,
+        "mchd_guid": r.mchd_guid, "mchd_registry": r.mchd_registry,
+        "mchd_valid_until": r.mchd_valid_until,
+        "signature_status": r.signature_status, "signature_ref": r.signature_ref,
+        "signed_at": r.signed_at, "distribution": r.distribution or [],
         "lines": lines, "lines_count": len(lines), "diff_count": diff,
         "total_amount": float(r.total_amount or 0), "vat_amount": float(r.vat_amount or 0),
         "created_at": r.created_at, "updated_at": r.updated_at, "accepted_at": r.accepted_at,
@@ -618,9 +775,87 @@ def _recalc(lines: list[dict]) -> float:
     return round(total, 2)
 
 
+def _canonical_mark_code(raw: str) -> str:
+    code = str(raw or "").strip(" \t\r\n\x00\x02\x03")
+    if len(code) >= 3 and code[0] == "]" and code[1].isalpha() and code[2].isalnum():
+        code = code[3:]
+    return code.replace("<GS>", "\x1d")
+
+
+def _valid_gtin(code: str) -> bool | None:
+    if len(code) not in (8, 12, 13, 14) or not code.isascii() or not code.isdigit():
+        return None
+    total = 0
+    for position, digit in enumerate(reversed(code[:-1])):
+        total += int(digit) * (3 if position % 2 == 0 else 1)
+    return (10 - total % 10) % 10 == int(code[-1])
+
+
+def _parse_scanned_product(raw: str) -> tuple[str, str | None, str]:
+    code = str(raw or "").strip(" \t\r\n\x00\x02\x03")
+    aim = code[:3] if len(code) >= 3 and code[0] == "]" else ""
+    if aim and aim[1].isalpha() and aim[2].isalnum():
+        code = code[3:]
+    if not code:
+        raise HTTPException(400, "Сканер не передал код")
+    if len(code) > 512:
+        raise HTTPException(400, "Код со сканера длиннее 512 символов")
+    gs1 = code.replace("<GS>", "\x1d")
+    mark_code = None
+    label = "Code 128 / внутренний"
+    if len(gs1) >= 16 and gs1.startswith("01") and gs1[2:16].isdigit():
+        product = gs1[2:16]
+        mark_code = code
+        label = "GS1-128" if aim == "]C1" else "GS1 DataMatrix"
+    elif len(gs1) >= 21 and gs1[:14].isdigit():
+        product = gs1[:14]
+        mark_code = code
+        label = "табачная маркировка"
+    else:
+        product = code
+        labels = {8: "EAN-8", 12: "UPC-A", 13: "EAN-13", 14: "GTIN-14"}
+        if product.isdigit():
+            label = labels.get(len(product), label)
+    if _valid_gtin(product) is False:
+        raise HTTPException(400, f"{label}: контрольная цифра не сходится — повторите сканирование")
+    if len(product) == 14 and product.startswith("0"):
+        product = product[1:]
+    return product, mark_code, label
+
+
+def _validate_scanned_marks(lines: list[dict]) -> None:
+    all_codes: set[str] = set()
+    for index, line in enumerate(lines, 1):
+        scanned = [_canonical_mark_code(code) for code in line.get("mark_codes") or []]
+        if len(scanned) != len(set(scanned)):
+            raise HTTPException(400, f"В строке {index} один код маркировки отсканирован дважды")
+        if any(code in all_codes for code in scanned):
+            raise HTTPException(400, "Один код маркировки попал в несколько строк")
+        all_codes.update(scanned)
+        if not (line.get("requires_mark") or scanned or line.get("upd_codes")):
+            continue
+        qty = float(line.get("qty_fact") or 0)
+        if abs(qty - round(qty)) > 1e-6:
+            raise HTTPException(400, f"Строка {index}: маркированный товар принимается поштучно")
+        if len(scanned) != int(round(qty)):
+            raise HTTPException(
+                400, f"Строка {index}: факт {qty:g}, отсканировано кодов {len(scanned)}")
+        expected = {_canonical_mark_code(code) for code in line.get("upd_codes") or []}
+        extra = [code for code in scanned if expected and code not in expected]
+        if extra:
+            raise HTTPException(400, f"Строка {index}: отсканирован код, которого нет в УПД")
+
+
 @router.post("/receipts/from-upd", status_code=201)
 async def receipt_from_upd(
-    station_id: int = Query(..., description="код АЗС, куда идёт поставка"),
+    station_id: int | None = Query(None, description="код АЗС для прямой поставки"),
+    delivery_scheme: str = Query("supplier_to_station"),
+    receiving_warehouse: str | None = Query(None),
+    signing_mode: str = Query("office_director"),
+    signer_name: str | None = Query(None),
+    mchd_guid: str | None = Query(None),
+    mchd_registry: str | None = Query(None),
+    mchd_valid_until: str | None = Query(None),
     file: UploadFile = None,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -646,16 +881,23 @@ async def receipt_from_upd(
     if not parsed["lines"]:
         raise HTTPException(400, "В документе не найдено ни одной строки товара")
 
+    valid_until = _parse_mchd_date(mchd_valid_until)
+    _validate_receipt_route(
+        delivery_scheme, station_id, receiving_warehouse, signing_mode,
+        signer_name, mchd_guid, mchd_registry, valid_until, "pending", None)
+
     cid: uuid.UUID = await scope_company_id(user, db)
     now = datetime.now(timezone.utc)
-    number = "УПД-%d-%s" % (station_id, now.strftime("%y%m%d-%H%M"))
+    destination = str(station_id) if station_id else "ЦС"
+    number = "УПД-%s-%s" % (destination, now.strftime("%y%m%d-%H%M"))
     lines = [{
         "nomenclature_ref": None,
         "name": l["name"], "barcode": l["barcode"] or None,
         "qty_expected": l["qty_expected"], "qty_fact": 0,
         "price": l["price"], "vat_rate": l["vat_rate"] or None,
         "amount": 0,
-        "mark_codes": l["mark_codes"], "pack_codes": l["pack_codes"],
+        "upd_codes": l["mark_codes"], "mark_codes": [], "pack_codes": l["pack_codes"],
+        "requires_mark": bool(l["mark_codes"]),
     } for l in parsed["lines"]]
 
     row = StoreReceipt(
@@ -665,6 +907,10 @@ async def receipt_from_upd(
         # «К поступлению»: товар заявлен, но на складе его ещё нет — ровно
         # смысл ордерной схемы. Приёмщик переведёт в «принят», пересчитав.
         status="expected", origin="edo", lines=lines,
+        delivery_scheme=delivery_scheme, receiving_warehouse=receiving_warehouse,
+        signing_mode=signing_mode, signer_name=signer_name,
+        mchd_guid=mchd_guid, mchd_registry=mchd_registry,
+        mchd_valid_until=valid_until, signature_status="pending",
         total_amount=0, vat_amount=0,
         comment="Загружен из УПД поставщика",
     )
@@ -697,6 +943,8 @@ async def send_receipt_to_station(
         raise HTTPException(404, "Документ не найден")
     if row.status == "accepted":
         raise HTTPException(409, "Документ уже принят — отправлять нечего")
+    if row.delivery_scheme != "supplier_to_station" or row.station_id is None:
+        raise HTTPException(409, "Центральный приход не отправляется как поставка на АЗС")
 
     db.add(EdgeDownlink(
         company_id=cid, station_id=row.station_id,
@@ -705,7 +953,19 @@ async def send_receipt_to_station(
             "id": str(row.id), "number": row.number,
             "supplier": row.supplier, "incoming_number": row.incoming_number,
             "doc_date": row.doc_date.isoformat() if row.doc_date else None,
-            "lines": row.lines or [],
+            "delivery_scheme": row.delivery_scheme,
+            "receiving_warehouse": row.receiving_warehouse,
+            "signing_mode": row.signing_mode, "signer_name": row.signer_name,
+            "mchd_guid": row.mchd_guid, "mchd_registry": row.mchd_registry,
+            "mchd_valid_until": row.mchd_valid_until.isoformat() if row.mchd_valid_until else None,
+            "signature_status": row.signature_status, "signature_ref": row.signature_ref,
+            "signed_at": row.signed_at.isoformat() if row.signed_at else None,
+            "lines": [{
+                **line,
+                # Агент ожидает в mark_codes именно коды поставщика из УПД;
+                # физические сканы на станции он ведёт отдельно.
+                "mark_codes": line.get("upd_codes") or line.get("mark_codes") or [],
+            } for line in row.lines or []],
         },
         note="приёмка %s" % row.number,
     ))
@@ -714,6 +974,206 @@ async def send_receipt_to_station(
     await db.commit()
     return {"ok": True, "station_id": row.station_id, "number": row.number,
             "lines": len(row.lines or [])}
+
+
+@router.post("/receipts/{receipt_id}/signature")
+async def record_receipt_signature(
+    receipt_id: uuid.UUID,
+    body: ReceiptSignatureIn,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Зафиксировать уже выполненную подпись оператора ЭДО и полномочие МЧД."""
+    cid: uuid.UUID = await scope_company_id(user, db)
+    row = (await db.execute(select(StoreReceipt).where(
+        StoreReceipt.id == receipt_id, StoreReceipt.company_id == cid))).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(404, "Документ не найден")
+    valid_until = _parse_mchd_date(body.mchd_valid_until)
+    signer_name = body.signer_name if row.signing_mode == "station_mchd" else row.signer_name
+    mchd_guid = body.mchd_guid if row.signing_mode == "station_mchd" else row.mchd_guid
+    mchd_registry = body.mchd_registry if row.signing_mode == "station_mchd" else row.mchd_registry
+    mchd_until = valid_until if row.signing_mode == "station_mchd" else row.mchd_valid_until
+    _validate_receipt_route(
+        row.delivery_scheme, row.station_id, row.receiving_warehouse,
+        row.signing_mode, signer_name, mchd_guid, mchd_registry, mchd_until,
+        body.signature_status, body.signature_ref)
+    row.signer_name = signer_name
+    row.mchd_guid = mchd_guid
+    row.mchd_registry = mchd_registry
+    row.mchd_valid_until = mchd_until
+    row.signature_status = body.signature_status
+    row.signature_ref = body.signature_ref
+    row.signed_at = datetime.now(timezone.utc) if body.signature_status == "signed" else None
+    await db.commit()
+    await db.refresh(row)
+    return _receipt_out(row)
+
+
+@router.post("/receipts/{receipt_id}/distribute", status_code=201)
+async def distribute_central_receipt(
+    receipt_id: uuid.UUID,
+    body: ReceiptDistributionIn,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Передать часть центрального прихода на АЗС внутренним перемещением."""
+    cid: uuid.UUID = await scope_company_id(user, db)
+    row = (await db.execute(select(StoreReceipt).where(
+        StoreReceipt.id == receipt_id, StoreReceipt.company_id == cid))).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(404, "Документ не найден")
+    if row.delivery_scheme != "central_warehouse" or row.status != "accepted":
+        raise HTTPException(409, "Распределять можно только принятый центральный приход")
+    agent = (await db.execute(select(EdgeAgent.id).where(
+        EdgeAgent.company_id == cid, EdgeAgent.station_id == body.station_id,
+    ))).scalar_one_or_none()
+    if agent is None:
+        raise HTTPException(400, "АЗС не подключена к «Магазину»")
+
+    lines = row.lines or []
+    distribution = list(row.distribution or [])
+    used: dict[int, float] = {}
+    for allocation in distribution:
+        for item in allocation.get("lines") or []:
+            idx = int(item.get("line_index", -1))
+            used[idx] = used.get(idx, 0) + float(item.get("qty") or 0)
+
+    task_lines = []
+    allocation_lines = []
+    seen = set()
+    for requested in body.lines:
+        idx, qty = requested.line_index, requested.qty
+        if idx in seen or idx < 0 or idx >= len(lines) or qty <= 0:
+            raise HTTPException(400, "Некорректные строки распределения")
+        seen.add(idx)
+        source = lines[idx]
+        available = float(source.get("qty_fact") or 0) - used.get(idx, 0)
+        if qty > available + 1e-6:
+            raise HTTPException(400, f"По строке {idx + 1} доступно только {available:g}")
+        marks = source.get("mark_codes") or []
+        selected_marks = []
+        if source.get("requires_mark") or marks:
+            if abs(qty - round(qty)) > 1e-6:
+                raise HTTPException(400, "Маркированный товар распределяется поштучно")
+            offset = int(round(used.get(idx, 0)))
+            selected_marks = marks[offset:offset + int(round(qty))]
+            if len(selected_marks) != int(round(qty)):
+                raise HTTPException(400, f"По строке {idx + 1} недостаточно кодов маркировки")
+        task_lines.append({
+            "item_uuid": source.get("nomenclature_ref") or "",
+            "name": source.get("name") or "", "barcode": source.get("barcode") or "",
+            "qty_sent": qty, "mark_codes": selected_marks,
+            "unknown": not bool(source.get("nomenclature_ref")),
+        })
+        allocation_lines.append({"line_index": idx, "qty": qty})
+    if not task_lines:
+        raise HTTPException(400, "Укажите количество хотя бы по одной позиции")
+
+    allocation_id = str(uuid.uuid4())
+    task_id = f"central:{row.id}:{allocation_id}"
+    now = datetime.now(timezone.utc)
+    db.add(EdgeDownlink(
+        company_id=cid, station_id=body.station_id, kind="incoming_transfer",
+        payload={
+            "id": task_id, "number": f"ЦР-{row.number}", "doc_date": now.isoformat(),
+            "from_station": 0, "to_station": body.station_id,
+            "from_name": row.receiving_warehouse, "to_name": f"АЗС {body.station_id}",
+            "from_place": "warehouse",
+            "comment": f"Распределение центральной приёмки {row.number}",
+            "lines": task_lines,
+        },
+        note=f"central-distribution:{row.id}:{allocation_id}"[:300],
+    ))
+    distribution.append({
+        "id": allocation_id, "station_id": body.station_id,
+        "created_at": now.isoformat(), "lines": allocation_lines,
+    })
+    row.distribution = distribution
+    await db.commit()
+    return {"ok": True, "task_id": task_id, "station_id": body.station_id,
+            "lines": len(task_lines)}
+
+
+@router.post("/receipts/{receipt_id}/scan")
+async def scan_receipt_barcode(
+    receipt_id: uuid.UUID,
+    body: ReceiptScanIn,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Атомарно принять один скан USB/радиосканера в центральном складе."""
+    cid: uuid.UUID = await scope_company_id(user, db)
+    row = (await db.execute(select(StoreReceipt).where(
+        StoreReceipt.id == receipt_id, StoreReceipt.company_id == cid,
+    ).with_for_update())).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(404, "Документ не найден")
+    if row.status == "accepted":
+        raise HTTPException(409, "Документ уже принят — сканирование закрыто")
+    if row.delivery_scheme != "central_warehouse":
+        raise HTTPException(409, "Прямую поставку сканируют на агенте АЗС")
+
+    product_barcode, mark_code, scan_type = _parse_scanned_product(body.code)
+    qty = 1.0 if mark_code else float(body.qty)
+    if not math.isfinite(qty) or qty <= 0 or qty > 100000:
+        raise HTTPException(400, "Количество за один скан должно быть больше нуля")
+    lines = ([line.model_dump() for line in body.lines]
+             if body.lines is not None else _normalized_receipt_lines(row))
+
+    def matches(stored: str | None) -> bool:
+        return bool(set(_barcode_candidates(stored or "")) &
+                    set(_barcode_candidates(product_barcode)))
+
+    line_index = next((index for index, line in enumerate(lines)
+                       if matches(line.get("barcode"))), None)
+    if line_index is None:
+        candidates = _barcode_candidates(product_barcode)
+        found = (await db.execute(text("""
+            SELECT i.id, i.external_uuid, i.name, i.unit, i.vat_rate, b.code
+              FROM edge.barcode b JOIN edge.item i ON i.id = b.item_id
+             WHERE b.status = 'active' AND NOT i.deleted
+               AND b.code = ANY(CAST(:codes AS text[]))
+             ORDER BY array_position(CAST(:codes AS text[]), b.code)
+        """), {"codes": candidates})).mappings().all()
+        item_ids = {int(item["id"]) for item in found}
+        if len(item_ids) > 1:
+            raise HTTPException(409, "Штрихкод связан с несколькими карточками — исправьте коллизию НСИ")
+        if not found:
+            raise HTTPException(404, "Штрихкод не найден в мастер-НСИ; товар не добавлен")
+        item = found[0]
+        lines.append({
+            "nomenclature_ref": str(item["external_uuid"]), "name": item["name"],
+            "barcode": item["code"], "qty_expected": 0, "qty_fact": 0,
+            "price": 0, "vat_rate": item["vat_rate"], "amount": 0,
+            "unit": item["unit"], "upd_codes": [], "mark_codes": [],
+            "pack_codes": [], "requires_mark": bool(mark_code), "no_card": False,
+        })
+        line_index = len(lines) - 1
+
+    line = lines[line_index]
+    if mark_code:
+        canonical = _canonical_mark_code(mark_code)
+        if any(canonical == _canonical_mark_code(existing)
+               for candidate in lines for existing in candidate.get("mark_codes") or []):
+            raise HTTPException(409, "Этот код маркировки уже отсканирован — количество не изменено")
+        expected = {_canonical_mark_code(code) for code in line.get("upd_codes") or []}
+        if expected and canonical not in expected:
+            raise HTTPException(409, "Кода маркировки нет в УПД поставщика — товар не принят")
+        line["mark_codes"] = [*(line.get("mark_codes") or []), mark_code]
+        line["requires_mark"] = True
+    line["qty_fact"] = round(float(line.get("qty_fact") or 0) + qty, 3)
+    row.lines = lines
+    row.total_amount = _recalc(lines)
+    await db.commit()
+    await db.refresh(row)
+    result = _receipt_out(row)
+    result["scan"] = {
+        "type": scan_type, "barcode": product_barcode,
+        "line_index": line_index, "qty_added": qty,
+        "name": line.get("name") or "",
+    }
+    return result
 
 
 @router.get("/receipts")
@@ -745,6 +1205,11 @@ async def create_receipt(
 ):
     """Завести приёмку в центре: накладная поставщика на конкретную станцию."""
     cid: uuid.UUID = await scope_company_id(user, db)
+    valid_until = _parse_mchd_date(body.mchd_valid_until)
+    _validate_receipt_route(
+        body.delivery_scheme, body.station_id, body.receiving_warehouse,
+        body.signing_mode, body.signer_name, body.mchd_guid, body.mchd_registry,
+        valid_until, body.signature_status, body.signature_ref)
     lines = [l.model_dump() for l in body.lines]
     total = _recalc(lines)
     now = datetime.now(timezone.utc)
@@ -753,7 +1218,8 @@ async def create_receipt(
         doc_date = doc_date.replace(tzinfo=timezone.utc)
     # Номер по умолчанию -- дата и станция: различимый документ нужен сразу,
     # сквозная нумерация появится вместе со справочником поставщиков.
-    number = body.number or ("П-%d-%s" % (body.station_id, now.strftime("%y%m%d-%H%M")))
+    destination = str(body.station_id) if body.station_id else "ЦС"
+    number = body.number or ("П-%s-%s" % (destination, now.strftime("%y%m%d-%H%M")))
 
     row = StoreReceipt(
         company_id=cid, station_id=body.station_id, number=number, doc_date=doc_date,
@@ -761,6 +1227,13 @@ async def create_receipt(
         incoming_number=body.incoming_number,
         incoming_date=datetime.fromisoformat(body.incoming_date) if body.incoming_date else None,
         status="draft", origin="center", lines=lines,
+        delivery_scheme=body.delivery_scheme,
+        receiving_warehouse=body.receiving_warehouse,
+        signing_mode=body.signing_mode, signer_name=body.signer_name,
+        mchd_guid=body.mchd_guid, mchd_registry=body.mchd_registry,
+        mchd_valid_until=valid_until, signature_status=body.signature_status,
+        signature_ref=body.signature_ref,
+        signed_at=now if body.signature_status == "signed" else None,
         total_amount=total, vat_amount=0, comment=body.comment,
     )
     db.add(row)
@@ -799,6 +1272,11 @@ async def update_receipt(
     if row.status == "accepted":
         raise HTTPException(409, "Документ уже принят -- правка запрещена")
 
+    valid_until = _parse_mchd_date(body.mchd_valid_until)
+    _validate_receipt_route(
+        body.delivery_scheme, body.station_id, body.receiving_warehouse,
+        body.signing_mode, body.signer_name, body.mchd_guid, body.mchd_registry,
+        valid_until, body.signature_status, body.signature_ref)
     lines = [l.model_dump() for l in body.lines]
     row.total_amount = _recalc(lines)
     row.lines = lines
@@ -807,6 +1285,18 @@ async def update_receipt(
     row.incoming_number = body.incoming_number
     row.incoming_date = datetime.fromisoformat(body.incoming_date) if body.incoming_date else None
     row.comment = body.comment
+    row.station_id = body.station_id
+    row.delivery_scheme = body.delivery_scheme
+    row.receiving_warehouse = body.receiving_warehouse
+    row.signing_mode = body.signing_mode
+    row.signer_name = body.signer_name
+    row.mchd_guid = body.mchd_guid
+    row.mchd_registry = body.mchd_registry
+    row.mchd_valid_until = valid_until
+    row.signature_status = body.signature_status
+    row.signature_ref = body.signature_ref
+    row.signed_at = (datetime.now(timezone.utc) if body.signature_status == "signed"
+                     and row.signed_at is None else row.signed_at)
     if body.number:
         row.number = body.number
     await db.commit()
@@ -836,10 +1326,18 @@ async def set_receipt_status(
     if row.status == "accepted":
         raise HTTPException(409, "Документ уже принят")
     if status == "accepted":
+        if row.delivery_scheme == "supplier_to_station":
+            raise HTTPException(409, "Прямую поставку принимает агент на станции")
+        _validate_receipt_route(
+            row.delivery_scheme, row.station_id, row.receiving_warehouse,
+            row.signing_mode, row.signer_name, row.mchd_guid, row.mchd_registry,
+            row.mchd_valid_until, row.signature_status, row.signature_ref,
+            require_signature=True)
         if not row.lines:
             raise HTTPException(400, "В документе нет позиций")
         if not any(float(l.get("qty_fact") or 0) > 0 for l in row.lines):
             raise HTTPException(400, "Ни одна позиция не посчитана по факту")
+        _validate_scanned_marks(row.lines or [])
         row.accepted_at = datetime.now(timezone.utc)
     row.status = status
     await db.commit()

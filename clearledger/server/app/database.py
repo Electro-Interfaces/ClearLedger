@@ -1296,6 +1296,27 @@ async def create_all() -> None:
                 f"REFERENCES channels(id) ON DELETE SET NULL"))
 
 
+        # v2.36: две схемы доставки и два маршрута подписания приёмки.
+        for stmt in (
+            "ALTER TABLE store_receipts ALTER COLUMN station_id DROP NOT NULL",
+            "ALTER TABLE store_receipts ADD COLUMN IF NOT EXISTS delivery_scheme "
+            "VARCHAR(30) NOT NULL DEFAULT 'supplier_to_station'",
+            "ALTER TABLE store_receipts ADD COLUMN IF NOT EXISTS receiving_warehouse VARCHAR(200)",
+            "ALTER TABLE store_receipts ADD COLUMN IF NOT EXISTS signing_mode "
+            "VARCHAR(30) NOT NULL DEFAULT 'office_director'",
+            "ALTER TABLE store_receipts ADD COLUMN IF NOT EXISTS signer_name VARCHAR(200)",
+            "ALTER TABLE store_receipts ADD COLUMN IF NOT EXISTS mchd_guid VARCHAR(100)",
+            "ALTER TABLE store_receipts ADD COLUMN IF NOT EXISTS mchd_registry VARCHAR(200)",
+            "ALTER TABLE store_receipts ADD COLUMN IF NOT EXISTS mchd_valid_until DATE",
+            "ALTER TABLE store_receipts ADD COLUMN IF NOT EXISTS signature_status "
+            "VARCHAR(20) NOT NULL DEFAULT 'pending'",
+            "ALTER TABLE store_receipts ADD COLUMN IF NOT EXISTS signature_ref VARCHAR(200)",
+            "ALTER TABLE store_receipts ADD COLUMN IF NOT EXISTS signed_at TIMESTAMPTZ",
+            "ALTER TABLE store_receipts ADD COLUMN IF NOT EXISTS distribution "
+            "JSONB NOT NULL DEFAULT '[]'::jsonb",
+        ):
+            await conn.execute(_sa.text(stmt))
+
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Dependency — асинхронная сессия БД."""
     async with async_session_factory() as session:
