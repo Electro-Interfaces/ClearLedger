@@ -341,11 +341,15 @@ async def periods_trend(
         b.soputka += float((sec.get("продажа_сопутка") or {}).get("сумма") or 0)
         b.obshepit += float((sec.get("продажа_общепит") or {}).get("сумма") or 0)
 
+    # Выражение группировки — ОДИН объект: два одинаковых с виду `func.substring`
+    # несут разные bindparam, и Postgres не признаёт их за одно и то же поле
+    # («must appear in the GROUP BY clause»).
+    doc_month = func.substring(AccountingDoc.date, 1, 7)
     doc_rows = (await db.execute(
-        select(func.substring(AccountingDoc.date, 1, 7), func.count(AccountingDoc.id),
+        select(doc_month, func.count(AccountingDoc.id),
                func.count(AccountingDoc.id).filter(AccountingDoc.status_1c != "Проведён"))
         .where(AccountingDoc.company_id == cid, AccountingDoc.date >= since)
-        .group_by(func.substring(AccountingDoc.date, 1, 7))
+        .group_by(doc_month)
     )).all()
     for key, cnt, unposted in doc_rows:
         k = _month_key(key)
