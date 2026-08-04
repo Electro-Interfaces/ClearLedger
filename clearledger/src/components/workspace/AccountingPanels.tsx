@@ -71,9 +71,9 @@ import { AccountingCashPanel } from './AccountingCashPanel'
 import { SyncWith1CPanel } from '@/components/fuel/SyncWith1CPanel'
 import { StoreCateringPanel } from './StoreCateringPanel'
 import {
-  AccountingPeriodPanel, FuelLoadControlPanel, CateringPackagePanel, AccountingDocsBridge,
-  AccountingStageBar,
+  FuelLoadControlPanel, CateringPackagePanel, AccountingDocsBridge, AccountingStageBar,
 } from './AccountingWorkPanels'
+import { AccountingPeriodPanel } from './AccountingPeriodPanel'
 import {
   ACCOUNTING_MODES, ACCOUNTING_KEYS, accountingModeForKey, type AccountingSection,
 } from '@/config/moduleComponents'
