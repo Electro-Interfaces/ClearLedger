@@ -181,6 +181,32 @@ export const setParticipantRole = (roomId: string, userId: string, role: 'admin'
 export const leaveRoom = (roomId: string) =>
   post(`/api/chat/rooms/${roomId}/leave`, {})
 
+/** Карточка ссылки: заголовок, описание, домен. Пустой объект — превью нет. */
+export interface LinkPreview {
+  url?: string
+  site?: string
+  title?: string
+  description?: string
+  image?: string
+}
+
+export const getLinkPreview = (url: string) =>
+  get<LinkPreview>('/api/chat/link-preview', { url })
+
+/** Вложения чата: фотографии и файлы одним списком (последние 200). */
+export interface ChatMediaItem {
+  messageId: string
+  fileUrl: string
+  fileName: string | null
+  fileSize: number | null
+  type: string
+  userName: string | null
+  createdAt: string
+}
+
+export const getRoomMedia = (roomId: string) =>
+  get<ChatMediaItem[]>(`/api/chat/rooms/${roomId}/media`)
+
 /** Закрепить чат вверху своего списка / открепить (переключатель). */
 export const pinRoom = (roomId: string) =>
   post<{ ok: boolean; isPinned: boolean }>(`/api/chat/rooms/${roomId}/pin-room`, {})

@@ -14,7 +14,7 @@ import {
   Trash2, Reply, Pencil, X, Check, Megaphone, Lock, Pin, Video, UserPlus,
   Folder, AtSign, Loader2, Paperclip, Camera, Search as SearchIcon,
   Shield, ShieldOff, UserMinus, LogOut, Bell, BellOff, Forward, MapPin, ClipboardList,
-  Mail, Palette,
+  Mail, Palette, Smile, Images, Volume2, VolumeX,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/contexts/AuthContext'
@@ -26,6 +26,7 @@ import { useChatWs, type WsEvent } from '@/hooks/useChatWs'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
@@ -37,7 +38,7 @@ import {
   getUserColor, getDateLabel, formatTime, computeGrouping, bubbleRadius,
   type GroupingInfo,
 } from './telegram-helpers'
-import { AuthImage, AuthVideo, AuthFileChip, useAuthBlobUrl } from './AuthMedia'
+import { AuthImage, AuthVideo, AuthFileChip, useAuthBlobUrl, downloadAttachment } from './AuthMedia'
 import { RegionCapture } from './RegionCapture'
 import { ensurePushSubscription, pushSupported, requestPushPermission } from '@/lib/chatPush'
 import * as chat from '@/services/chatService'
@@ -131,6 +132,159 @@ function highlightText(text: string, query: string): React.ReactNode {
 }
 
 // ── аватар ───────────────────────────────────────────────────────────────────
+/**
+ * Эмодзи для сообщения. Набор свой, а не библиотека: emoji-mart тянет мегабайт
+ * данных и свой рендер ради панели, которой пользуются раз в день. Здесь —
+ * ходовые символы по темам, этого хватает для рабочей переписки.
+ */
+const EMOJI_GROUPS: { name: string; items: string }[] = [
+  { name: 'Часто', items: '👍👌✅❌🔥💪🙏👏🤝😀😁😂🤣🙂😉😊😍🤔🤷‍♂️🤦‍♂️' },
+  { name: 'Лица', items: '😃😄😅😆😋😎🥳🤩😐😑😕😟😢😭😤😠🤬😱😴🤒🤕🥱🤗🤨' },
+  { name: 'Жесты', items: '👋🤚✋👊✊🤛🤜👈👉👆👇☝️✌️🤞🤟🤙💅👐🙌🤲' },
+  { name: 'Работа', items: '📌📍📎🗂️📁📄📃📊📈📉🗒️📝✏️🔧🔨⚙️🛠️🧰🔑🔒⏰📅✔️❗❓' },
+  { name: 'Связь', items: '📞☎️📱💬💡📣📢🔔🔕📧✉️📬🌐🛰️🖥️💻⌨️🖱️🔌🔋' },
+  { name: 'Место', items: '🏢🏭🚧🚗🚚🛻⛽🔥💧⚡🌡️🌦️❄️🌙☀️🧯🚨🅿️🛞🧭' },
+  { name: 'Символы', items: '⭐🌟💯⚠️🚫♻️🔴🟠🟡🟢🔵🟣⚫⚪🔺🔻▶️⏸️⏹️🔄' },
+]
+
+/**
+ * Карточка ссылки под сообщением: о чём страница, без открывания вкладки.
+ * Тянется по требованию и кешируется react-query — одну и ту же ссылку в чате
+ * разворачивают многие, повторно ходить на сервер незачем.
+ */
+function LinkCard({ url, mine }: { url: string; mine: boolean }) {
+  const { data } = useQuery({
+    queryKey: ['link-preview', url],
+    queryFn: () => chat.getLinkPreview(url),
+    staleTime: 60 * 60 * 1000,
+    retry: false,
+  })
+  if (!data?.title && !data?.description) return null
+  return (
+    <a href={url} target="_blank" rel="noreferrer noopener"
+      className={cn('mt-1 block rounded-md border-l-2 py-1 pl-2 pr-1.5 no-underline',
+        mine ? 'border-white/70 bg-white/10' : 'border-primary bg-primary/5')}>
+      {data.site && (
+        <div className={cn('text-[10px]', mine ? 'text-primary-foreground/70' : 'text-muted-foreground')}>
+          {data.site}
+        </div>
+      )}
+      {data.title && <div className="text-[11px] font-semibold leading-snug">{data.title}</div>}
+      {data.description && (
+        <div className={cn('line-clamp-2 text-[11px] leading-snug',
+          mine ? 'text-primary-foreground/80' : 'text-muted-foreground')}>
+          {data.description}
+        </div>
+      )}
+    </a>
+  )
+}
+
+/** Вложения чата одним экраном: фотографии сеткой, файлы списком. */
+function RoomMediaDialog({ roomId, onClose, onImageClick }: {
+  roomId: string; onClose: () => void; onImageClick: (path: string) => void
+}) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['chat-room-media', roomId],
+    queryFn: () => chat.getRoomMedia(roomId),
+  })
+  const items = data || []
+  const images = items.filter((i) => i.type === 'image' || /\.(png|jpe?g|gif|webp|bmp|avif)$/i.test(i.fileName || i.fileUrl))
+  const files = items.filter((i) => !images.includes(i))
+  const [tab, setTab] = useState<'images' | 'files'>('images')
+  const list = tab === 'images' ? images : files
+
+  return (
+    <Dialog open onOpenChange={(o) => { if (!o) onClose() }}>
+      <DialogContent className="max-w-lg gap-0 p-0">
+        <DialogHeader className="border-b border-border/50 px-4 py-3">
+          <DialogTitle className="text-sm">Вложения чата</DialogTitle>
+        </DialogHeader>
+        <div className="flex gap-1 border-b border-border/50 px-4 py-2">
+          {(['images', 'files'] as const).map((t) => (
+            <button key={t} onClick={() => setTab(t)}
+              className={cn('rounded-md px-2 py-1 text-xs',
+                tab === t ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground')}>
+              {t === 'images' ? `Фото (${images.length})` : `Файлы (${files.length})`}
+            </button>
+          ))}
+        </div>
+        <div className="max-h-[60vh] overflow-y-auto p-3">
+          {isLoading && <div className="text-xs text-muted-foreground">Загрузка…</div>}
+          {!isLoading && list.length === 0 && (
+            <div className="py-6 text-center text-xs text-muted-foreground">
+              {tab === 'images' ? 'Фотографий пока нет' : 'Файлов пока нет'}
+            </div>
+          )}
+          {tab === 'images' ? (
+            <div className="grid grid-cols-3 gap-1.5">
+              {images.map((i) => (
+                <button key={i.messageId} onClick={() => { onImageClick(i.fileUrl); onClose() }}
+                  className="aspect-square overflow-hidden rounded-md">
+                  <AuthImage path={i.fileUrl} alt={i.fileName || ''} className="h-full w-full object-cover" />
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="space-y-1">
+              {files.map((i) => (
+                <div key={i.messageId} className="flex items-center gap-2 rounded-md px-1.5 py-1.5 hover:bg-accent">
+                  <FileText className="size-4 shrink-0 text-muted-foreground" />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-xs">{i.fileName || 'файл'}</div>
+                    <div className="text-[10px] text-muted-foreground">
+                      {i.userName || ''} · {fmtAge(i.createdAt)}
+                      {i.fileSize ? ` · ${Math.max(1, Math.round(i.fileSize / 1024))} КБ` : ''}
+                    </div>
+                  </div>
+                  <button type="button" title="Скачать"
+                    onClick={() => downloadAttachment(i.fileUrl, i.fileName || undefined)}
+                    className="shrink-0 rounded p-1 text-muted-foreground hover:text-foreground">
+                    <FileText className="size-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function EmojiPicker({ onPick }: { onPick: (emoji: string) => void }) {
+  const [group, setGroup] = useState(0)
+  return (
+    <div className="w-[268px] p-1.5">
+      <div className="mb-1 flex gap-0.5 overflow-x-auto">
+        {EMOJI_GROUPS.map((g, i) => (
+          <button key={g.name} onClick={() => setGroup(i)}
+            className={cn('shrink-0 rounded px-1.5 py-0.5 text-[10px]',
+              group === i ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground')}>
+            {g.name}
+          </button>
+        ))}
+      </div>
+      <div className="grid max-h-[176px] grid-cols-8 gap-0.5 overflow-y-auto">
+        {[...EMOJI_GROUPS[group].items].reduce<string[]>((acc, ch) => {
+          // Составные эмодзи (жест + модификатор) — это несколько кодовых точек,
+          // и посимвольный разбор рвал бы их пополам.
+          const last = acc[acc.length - 1]
+          if (last && /[‍️\u{1F3FB}-\u{1F3FF}]/u.test(ch)) acc[acc.length - 1] = last + ch
+          else if (last && /[‍]$/u.test(last)) acc[acc.length - 1] = last + ch
+          else acc.push(ch)
+          return acc
+        }, []).map((e, i) => (
+          <button key={`${e}-${i}`} onClick={() => onPick(e)} title={e}
+            className="flex size-8 items-center justify-center rounded text-[19px] leading-none hover:bg-accent">
+            {e}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 /**
  * Фон ленты — личная настройка человека, не свойство комнаты: для остальных
  * участников он ничего не значит, поэтому хранится в браузере. Узоры собраны
@@ -628,7 +782,7 @@ function RoomInfoPanel({
 // ── глобальный поиск по сообщениям всех чатов ────────────────────────────────
 function GlobalSearchResults({ q, onOpen }: {
   q: string
-  onOpen: (roomId: string) => void
+  onOpen: (roomId: string, messageId: string) => void
 }) {
   const { data: hits = [], isLoading } = useQuery({
     queryKey: ['chat-global-search', q],
@@ -650,7 +804,7 @@ function GlobalSearchResults({ q, onOpen }: {
         <p className="px-2 py-2 text-xs text-muted-foreground">Ничего не найдено</p>
       )}
       {hits.map((h) => (
-        <button key={h.messageId} type="button" onClick={() => onOpen(h.roomId)}
+        <button key={h.messageId} type="button" onClick={() => onOpen(h.roomId, h.messageId)}
           className="block w-full rounded-lg px-2 py-1.5 text-left hover:bg-accent">
           <span className="flex items-baseline justify-between gap-2">
             <span className="min-w-0 truncate text-xs font-medium">{h.roomName}</span>
@@ -1101,6 +1255,16 @@ function ChatBubble({
   onImageClick?: (path: string) => void
 }) {
   const { isFirstInGroup, isLastInGroup, showDate } = grouping
+  // Ответ свайпом: сдвиг пузыря вправо ставит его в цитату — привычный жест
+  // мобильных мессенджеров, на мыши остаётся кнопка «Ответить».
+  const [swipeX, setSwipeX] = useState(0)
+  const touchRef = useRef<{ x: number; y: number } | null>(null)
+
+  // Первая ссылка сообщения — кандидат на карточку превью.
+  const firstLink = useMemo(() => {
+    const m = /https?:\/\/[^\s<>"']+/.exec(message.content || '')
+    return m ? m[0].replace(/[.,;:!?)]+$/, '') : null
+  }, [message.content])
   const isImage = isImageMessage(message)
   const isVideo = message.fileUrl && !message.isDeleted
     && (message.type === 'video' || /\.(mp4|webm|mov|m4v)$/i.test(message.fileName || message.fileUrl))
@@ -1137,7 +1301,25 @@ function ChatBubble({
           'relative max-w-[85%] px-2.5 py-1.5',
           bubbleRadius(isOwn, isFirstInGroup, isLastInGroup),
           isOwn ? 'bg-primary text-primary-foreground' : 'bg-muted',
-        )}>
+        )}
+          style={swipeX ? { transform: `translateX(${swipeX}px)`, transition: 'transform .05s linear' } : undefined}
+          onTouchStart={(e) => { touchRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY } }}
+          onTouchMove={(e) => {
+            const start = touchRef.current
+            if (!start) return
+            const dx = e.touches[0].clientX - start.x
+            const dy = Math.abs(e.touches[0].clientY - start.y)
+            // Только горизонтальный жест: вертикальный — это прокрутка ленты.
+            if (dy > 24) { touchRef.current = null; setSwipeX(0); return }
+            setSwipeX(Math.max(0, Math.min(dx, 64)))
+          }}
+          onTouchEnd={() => {
+            // Порог в 44 px: случайное касание при прокрутке не должно
+            // подставлять цитату, а осознанный сдвиг — должен.
+            if (swipeX > 44) onReply()
+            touchRef.current = null
+            setSwipeX(0)
+          }}>
           {/* Меню действий: hover на мыши, всегда видно на тач-устройствах */}
           <div className={cn(
             'absolute -top-5 z-10 flex items-center gap-0.5 rounded-lg border border-border bg-popover px-1 py-1 shadow-lg opacity-0 transition-opacity group-hover/bubble:opacity-100 [@media(pointer:coarse)]:opacity-100',
@@ -1231,10 +1413,15 @@ function ChatBubble({
             </div>
           ) : (
             message.content && (
-              <p className="whitespace-pre-wrap break-words text-[13px] leading-[1.45]">
-                {searchHighlight ? highlightText(message.content, searchHighlight) : linkifyText(message.content)}
-                <span className={cn('inline-block', isOwn ? 'w-16' : 'w-11')} />
-              </p>
+              <>
+                <p className="whitespace-pre-wrap break-words text-[13px] leading-[1.45]">
+                  {searchHighlight ? highlightText(message.content, searchHighlight) : linkifyText(message.content)}
+                  <span className={cn('inline-block', isOwn ? 'w-16' : 'w-11')} />
+                </p>
+                {/* Первая ссылка сообщения разворачивается в карточку: «посмотри
+                    вот это» перестаёт требовать открытия вкладки. */}
+                {firstLink && <LinkCard url={firstLink} mine={isOwn} />}
+              </>
             )
           )}
 
@@ -1445,6 +1632,10 @@ export function ChatPanel({ compact, scopeProduct }: {
       case 'chat:message':
         qc.invalidateQueries({ queryKey: ['chat-messages', selectedRoom] })
         qc.invalidateQueries({ queryKey: ['chat-rooms'] })
+        // Звук — на чужое сообщение и только если человек не смотрит в этот чат:
+        // пикать на собственную отправку и на открытую переписку незачем.
+        if (e.userId && String(e.userId) !== user?.id
+            && (String(e.roomId ?? '') !== selectedRoom || document.hidden)) beep()
         break
       case 'chat:read':
       case 'chat:reaction':
@@ -1724,6 +1915,51 @@ export function ChatPanel({ compact, scopeProduct }: {
   }, [rooms, folders])
   const totalUnread = useMemo(() => rooms.reduce((a, r) => a + (r.unreadCount || 0), 0), [rooms])
 
+  const [showMedia, setShowMedia] = useState(false)
+
+  // Прокрутка к найденному сообщению: id цели ставит поиск, эффект ниже доезжает
+  // до неё, как только лента отрисована, и на пару секунд подсвечивает.
+  const [jumpTo, setJumpTo] = useState<string | null>(null)
+  const msgRefs = useRef<Map<string, HTMLDivElement>>(new Map())
+  useEffect(() => {
+    if (!jumpTo) return
+    const el = msgRefs.current.get(jumpTo)
+    if (!el) return
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    el.classList.add('ring-2', 'ring-primary', 'rounded-lg')
+    const t = setTimeout(() => {
+      el.classList.remove('ring-2', 'ring-primary', 'rounded-lg')
+      setJumpTo(null)
+    }, 2200)
+    return () => clearTimeout(t)
+  }, [jumpTo, messages])
+
+  // Звук входящего: тихий двойной сигнал, только когда сообщение пришло не от
+  // меня и не в открытый чат. Файла нет намеренно — короткий тон рисуется
+  // осциллятором, лишний ассет в сборке ради двух нот не нужен.
+  const [soundOn, setSoundOn] = useState(() => localStorage.getItem('cl-chat-sound') !== 'off')
+  useEffect(() => { localStorage.setItem('cl-chat-sound', soundOn ? 'on' : 'off') }, [soundOn])
+  const beep = useCallback(() => {
+    if (!soundOn) return
+    try {
+      const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
+      const ctx = new Ctx()
+      const play = (freq: number, at: number) => {
+        const osc = ctx.createOscillator()
+        const gain = ctx.createGain()
+        osc.frequency.value = freq
+        osc.type = 'sine'
+        gain.gain.setValueAtTime(0.0001, ctx.currentTime + at)
+        gain.gain.exponentialRampToValueAtTime(0.06, ctx.currentTime + at + 0.01)
+        gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + at + 0.16)
+        osc.connect(gain); gain.connect(ctx.destination)
+        osc.start(ctx.currentTime + at); osc.stop(ctx.currentTime + at + 0.18)
+      }
+      play(880, 0); play(1170, 0.09)
+      setTimeout(() => ctx.close().catch(() => {}), 600)
+    } catch { /* браузер не дал звук — не беда, есть бейдж и push */ }
+  }, [soundOn])
+
   // Фон ленты: личная настройка, живёт в браузере (см. CHAT_SKINS).
   const [skin, setSkin] = useState<string>(() => localStorage.getItem('cl-chat-skin') || 'none')
   useEffect(() => { localStorage.setItem('cl-chat-skin', skin) }, [skin])
@@ -1971,11 +2207,14 @@ export function ChatPanel({ compact, scopeProduct }: {
         {/* Глобальный поиск: тот же ввод, что фильтрует комнаты, от трёх символов
             ищет и по содержимому сообщений всех чатов. */}
         <GlobalSearchResults q={listSearch}
-          onOpen={(roomId) => {
+          onOpen={(roomId, messageId) => {
             setSelectedRoom(roomId)
             setMessageSearch(listSearch)
             setShowMessageSearch(true)
             setShowRoomInfo(false)
+            // Найденное сообщение может быть глубоко в истории: открыть чат мало,
+            // надо к нему доехать — иначе человек ищет глазами то, что уже нашли.
+            setJumpTo(messageId)
           }} />
       </div>
     </div>
@@ -2020,9 +2259,13 @@ export function ChatPanel({ compact, scopeProduct }: {
           className={cn('inline-flex size-7 items-center justify-center rounded-md transition-colors', showMessageSearch ? 'bg-accent text-primary' : 'text-muted-foreground hover:bg-accent hover:text-foreground')}>
           <SearchIcon className="size-4" />
         </button>
+        <button onClick={() => setShowMedia(true)} title="Вложения чата"
+          className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
+          <Images className="size-4" />
+        </button>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button title="Фон переписки"
+            <button title="Оформление и звук"
               className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
               <Palette className="size-4" />
             </button>
@@ -2034,6 +2277,11 @@ export function ChatPanel({ compact, scopeProduct }: {
                 {s.label}
               </DropdownMenuItem>
             ))}
+            <DropdownMenuSeparator />
+            {/* Звук здесь же: и фон, и сигнал — про то, как чат ощущается лично мне. */}
+            <DropdownMenuItem className="gap-2 text-xs" onClick={() => setSoundOn((v) => !v)}>
+              {soundOn ? <><Volume2 className="size-3.5" />Звук включён</> : <><VolumeX className="size-3.5" />Звук выключен</>}
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
         <button onClick={() => setShowRoomInfo((v) => !v)} title="Участники"
@@ -2092,8 +2340,18 @@ export function ChatPanel({ compact, scopeProduct }: {
           )}
 
           {/* Лента. Фон — личная настройка: он ничего не значит для других
-              участников, поэтому живёт в браузере, а не в базе пространства. */}
-          <div className="flex-1 overflow-y-auto" style={CHAT_SKINS[skin]?.style}>
+              участников, поэтому живёт в браузере, а не в базе пространства.
+              Файл можно просто бросить в переписку — это привычнее, чем искать
+              скрепку, и ровно так работают мессенджеры. */}
+          <div className={cn('flex-1 overflow-y-auto', dragOver && 'ring-2 ring-inset ring-primary')}
+            style={CHAT_SKINS[skin]?.style}
+            onDragOver={(e) => { if (e.dataTransfer.types.includes('Files')) { e.preventDefault(); setDragOver(true) } }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={(e) => {
+              if (!e.dataTransfer.files.length) return
+              e.preventDefault(); setDragOver(false)
+              setPendingFiles((p) => [...p, ...Array.from(e.dataTransfer.files)].slice(0, 5))
+            }}>
             <div className="flex flex-col p-2.5">
               {(() => {
                 const grouping = computeGrouping(messages)
@@ -2126,6 +2384,7 @@ export function ChatPanel({ compact, scopeProduct }: {
                         <span className="h-px flex-1 bg-primary/40" />
                       </div>
                     )}
+                    <div ref={(el) => { if (el) msgRefs.current.set(msg.id, el); else msgRefs.current.delete(msg.id) }}>
                     <ChatBubble message={msg} album={album} isOwn={isOwn} grouping={grouping[index]}
                       canDelete={isOwn || isAdmin || activeRoom?.createdBy === user?.id}
                       editingId={editingId} editText={editText} searchHighlight={messageSearch}
@@ -2143,6 +2402,7 @@ export function ChatPanel({ compact, scopeProduct }: {
                       onForward={() => setForwardMsg(msg)}
                       onTicket={activeRoom?.type !== 'direct' ? () => setTicketMsg(msg) : undefined}
                       onImageClick={openImage} />
+                    </div>
                     </Fragment>
                   )
                 })
@@ -2211,6 +2471,17 @@ export function ChatPanel({ compact, scopeProduct }: {
                     <Camera className="size-4" />
                   </button>
                 )}
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <button disabled={uploading || sendMutation.isPending} title="Эмодзи"
+                      className="inline-flex size-8 max-md:size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50">
+                      <Smile className="size-4" />
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent align="start" side="top" className="w-auto p-0">
+                    <EmojiPicker onPick={(e) => setMessageText((t) => t + e)} />
+                  </PopoverContent>
+                </Popover>
                 <textarea value={messageText} onChange={(e) => handleTextChange(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() } }}
                   onPaste={handlePaste}
@@ -2228,6 +2499,9 @@ export function ChatPanel({ compact, scopeProduct }: {
             </div>
           )}
         </>
+      )}
+      {showMedia && selectedRoom && (
+        <RoomMediaDialog roomId={selectedRoom} onClose={() => setShowMedia(false)} onImageClick={openImage} />
       )}
       {lightbox && (
         <Lightbox items={lightbox.items} index={lightbox.index} onClose={() => setLightbox(null)}

@@ -26,6 +26,7 @@ from app.models import (
     ChatRoom, ChatTicketLink, Company, Counterparty, ServiceLocation, User, UserCompany,
 )
 from app.services import chat_mail, web_push
+from app.services import link_preview as link_preview_service
 from app.services.space_projection import ProjectionError, create_object_ticket
 from app.services.chat_ws import manager
 
@@ -1420,6 +1421,53 @@ async def leave_room(
 class MuteBody(BaseModel):
     # 'forever' — навсегда, ISO-время — до момента, null — включить уведомления.
     until: str | None = None
+
+
+@router.get("/link-preview")
+async def link_preview(
+    url: str = Query(..., max_length=2000),
+    current_user: User = Depends(get_current_user),
+):
+    """Заголовок и описание страницы по ссылке из переписки.
+
+    Ходит только по публичным адресам и не следует за редиректами — иначе
+    ручка превращается в сканер внутренней сети чужими руками (см.
+    services/link_preview.py). Молчание страницы — не ошибка: фронт просто
+    оставит обычную ссылку.
+    """
+    data = await link_preview_service.fetch_preview(url)
+    return data or {}
+
+
+@router.get("/rooms/{room_id}/media")
+async def room_media(
+    room_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Всё, что присылали в чат: фотографии и файлы одним списком.
+
+    Искать вложение прокруткой ленты — работа на минуту; здесь оно находится
+    сразу. Отдаём последние 200 — на практике этого хватает, а полная выгрузка
+    переписки за годы в панель всё равно не помещается.
+    """
+    try:
+        rid = uuid.UUID(room_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID")
+    await _assert_participant(rid, current_user, db)
+    rows = (await db.execute(
+        select(ChatMessage.id, ChatMessage.file_url, ChatMessage.file_name,
+               ChatMessage.file_size, ChatMessage.type, ChatMessage.user_name,
+               ChatMessage.created_at)
+        .where(ChatMessage.room_id == rid, ChatMessage.deleted_at.is_(None),
+               ChatMessage.file_url.is_not(None))
+        .order_by(ChatMessage.created_at.desc()).limit(200)
+    )).all()
+    return [{
+        "messageId": str(mid), "fileUrl": url, "fileName": name, "fileSize": size,
+        "type": mtype, "userName": author, "createdAt": created.isoformat(),
+    } for mid, url, name, size, mtype, author, created in rows]
 
 
 @router.post("/rooms/{room_id}/pin-room")
