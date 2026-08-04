@@ -10,9 +10,15 @@
  * обмен возможен», а не «идёт передача». Станция работает и офлайн — данные
  * копятся локально и уходят одним сеансом, когда связь вернётся.
  */
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { RadioTower, PackageOpen, ArrowUpFromLine, ArrowDownToLine } from 'lucide-react'
-import { getStoreExchange, type StoreExchangeStation } from '@/services/storeService'
+import {
+  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog'
+import {
+  getStoreExchange, getStoreExchangeStation, type StoreExchangeStation,
+} from '@/services/storeService'
 import { useCompany } from '@/contexts/CompanyContext'
 
 /** Молчание в человеческих единицах: секунды оператору ничего не говорят. */
@@ -36,6 +42,19 @@ function когда(iso: string | null): string {
   if (!iso) return '—'
   return new Date(iso).toLocaleString('ru-RU',
     { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+}
+
+function дата(iso: string): string {
+  return new Date(iso).toLocaleDateString('ru-RU', { day: '2-digit', month: 'short' })
+}
+
+/** Длительность сеанса и паузы между ними — в тех же единицах, что молчание. */
+function длительность(min: number | null): string {
+  if (min === null) return '—'
+  if (min < 1) return 'меньше минуты'
+  if (min < 60) return `${min} мин`
+  if (min < 1440) return `${Math.round(min / 60)} ч`
+  return `${Math.round(min / 1440)} сут`
 }
 
 const STATE_STYLE: Record<string, string> = {
@@ -67,8 +86,176 @@ function Kpi({ icon: Icon, label, value, hint, alarm }: {
   )
 }
 
+/** Пара «подпись — значение» в шапке карточки станции. */
+function Факт({ label, value }: { label: string; value: string | number | null }) {
+  return (
+    <div>
+      <div className="text-[11px] text-muted-foreground">{label}</div>
+      <div className="text-sm">{value ?? '—'}</div>
+    </div>
+  )
+}
+
+/**
+ * Карточка станции: сеть отвечает «где плохо», станция — «что там произошло».
+ * Сеансы перечислены поимённо, с паузой перед каждым: длина молчания и есть
+ * качество канала, а средняя по парку её прячет.
+ */
+function StationExchangeDialog({ stationId, dateFrom, dateTo, onClose }: {
+  stationId: number; dateFrom: string; dateTo: string; onClose: () => void
+}) {
+  const { company } = useCompany()
+  const { data, isLoading } = useQuery({
+    queryKey: ['store-exchange-station', company.id, stationId, dateFrom, dateTo],
+    queryFn: () => getStoreExchangeStation(stationId, dateFrom, dateTo),
+  })
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-h-[85vh] max-w-4xl overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            АЗС {stationId} · обмен с центром
+            {data?.agent && <StateDot state={data.agent.state} />}
+          </DialogTitle>
+          <DialogDescription>
+            {data
+              ? `${дата(data.from)} — ${дата(data.to)} · сеанс считается по паузе дольше ${data.session_gap_minutes} минут`
+              : 'Загрузка…'}
+          </DialogDescription>
+        </DialogHeader>
+
+        {isLoading || !data ? (
+          <div className="p-4 text-sm text-muted-foreground">Загрузка обмена станции…</div>
+        ) : (
+          <div className="space-y-5">
+            <div className="grid grid-cols-2 gap-3 rounded-lg border border-border p-3 sm:grid-cols-3 lg:grid-cols-6">
+              <Факт label="Сеансов" value={data.totals.sessions} />
+              <Факт label="Пакетов" value={data.totals.packets} />
+              <Факт label="Объём" value={объём(data.totals.bytes)} />
+              <Факт label="Пауза в среднем" value={длительность(data.totals.avg_silence_min)} />
+              <Факт label="Дольше всего молчала" value={длительность(data.totals.max_silence_min)} />
+              <Факт label="Очередь наверх" value={data.agent?.queue_pending ?? '—'} />
+            </div>
+
+            {data.agent && (
+              <div className="grid grid-cols-2 gap-3 rounded-lg border border-border p-3 sm:grid-cols-3 lg:grid-cols-6">
+                <Факт label="Последний ответ" value={silence(data.agent.silence_seconds)} />
+                <Факт label="Версия агента"
+                      value={`${data.agent.version ?? '—'}${data.agent.version_ok ? '' : ' (отстаёт)'}`} />
+                <Факт label="Отдано всего" value={data.agent.queue_sent} />
+                <Факт label="Последняя смена" value={data.agent.last_shift} />
+                <Факт label="Снимок остатков" value={когда(data.agent.snapshot_at)} />
+                <Факт label="На связи с" value={когда(data.agent.first_seen)} />
+              </div>
+            )}
+
+            <div>
+              <div className="mb-1.5 text-xs text-muted-foreground">
+                Выходы на связь — свежие сверху
+              </div>
+              {data.sessions.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-border/50 p-4 text-sm text-muted-foreground">
+                  За период станция ничего не передавала.
+                </div>
+              ) : (
+                <div className="overflow-x-auto rounded-lg border border-border">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-border text-xs text-muted-foreground">
+                        <th className="px-3 py-2 text-left">Начало</th>
+                        <th className="px-3 py-2 text-left">Длился</th>
+                        <th className="px-3 py-2 text-right">Пакетов</th>
+                        <th className="px-3 py-2 text-right">Объём</th>
+                        <th className="px-3 py-2 text-left">Что везла</th>
+                        <th className="px-3 py-2 text-left">Молчала перед этим</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.sessions.map((s) => (
+                        <tr key={s.session_no} className="border-b border-border last:border-0">
+                          <td className="px-3 py-1.5">{когда(s.started)}</td>
+                          <td className="px-3 py-1.5 text-muted-foreground">{длительность(s.duration_min)}</td>
+                          <td className="px-3 py-1.5 text-right tabular-nums">{s.packets}</td>
+                          <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{объём(s.bytes)}</td>
+                          <td className="px-3 py-1.5 text-muted-foreground">{s.kinds.join(' · ')}</td>
+                          <td className="px-3 py-1.5 text-muted-foreground">
+                            {длительность(s.silence_before_min)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            <div className="grid gap-4 lg:grid-cols-2">
+              <div className="rounded-lg border border-border">
+                <div className="border-b border-border px-3 py-2 text-xs text-muted-foreground">
+                  Состав переданного
+                </div>
+                {data.by_kind.length === 0 ? (
+                  <div className="p-3 text-sm text-muted-foreground">Пусто.</div>
+                ) : (
+                  <table className="w-full text-sm">
+                    <tbody>
+                      {data.by_kind.map((k) => (
+                        <tr key={k.kind} className="border-b border-border last:border-0">
+                          <td className="px-3 py-1.5">{k.label}</td>
+                          <td className="px-3 py-1.5 text-right tabular-nums">{k.packets}</td>
+                          <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{объём(k.bytes)}</td>
+                          <td className="px-3 py-1.5 text-right text-muted-foreground">{когда(k.last_at)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+
+              <div className="rounded-lg border border-border">
+                <div className="border-b border-border px-3 py-2 text-xs text-muted-foreground">
+                  Задания центра станции — ждёт {data.totals.down_waiting} ·
+                  без подтверждения {data.totals.down_unacked} · применено {data.totals.down_acked}
+                </div>
+                {data.downlink.length === 0 ? (
+                  <div className="p-3 text-sm text-muted-foreground">
+                    Центр этой станции ничего не отправлял.
+                  </div>
+                ) : (
+                  <div className="max-h-64 overflow-y-auto">
+                    <table className="w-full text-sm">
+                      <tbody>
+                        {data.downlink.map((d, i) => (
+                          <tr key={`${d.created_at}-${i}`} className="border-b border-border last:border-0">
+                            <td className="px-3 py-1.5 text-muted-foreground">{когда(d.created_at)}</td>
+                            <td className="px-3 py-1.5">{d.label}</td>
+                            <td className="px-3 py-1.5 text-muted-foreground">{d.note ?? ''}</td>
+                            <td className={`px-3 py-1.5 text-right ${
+                              d.state === 'ждёт станции' ? 'text-amber-400/90' : 'text-muted-foreground'}`}>
+                              {d.state}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 export function StoreStationsPanel({ dateFrom, dateTo }: { dateFrom: string; dateTo: string }) {
   const { company } = useCompany()
+  // Два уровня чтения: сверху сеть целиком, по клику — конкретная АЗС. Смешивать
+  // их в одной таблице нельзя: у сети вопрос «где плохо», у станции — «что там
+  // произошло», и ответы на них живут в разных разрезах.
+  const [выбрана, выбрать] = useState<number | null>(null)
   const { data, isLoading, error } = useQuery({
     queryKey: ['store-exchange', company.id, dateFrom, dateTo],
     queryFn: () => getStoreExchange(dateFrom, dateTo),
@@ -94,6 +281,9 @@ export function StoreStationsPanel({ dateFrom, dateTo }: { dateFrom: string; dat
         </p>
       </div>
 
+      <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        По сети целиком
+      </div>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Kpi icon={RadioTower} label="На связи" value={`${totals.online} из ${totals.stations}`}
              hint={`сеансов обмена за период: ${totals.sessions}`}
@@ -126,6 +316,13 @@ export function StoreStationsPanel({ dateFrom, dateTo }: { dateFrom: string; dat
         </div>
       )}
 
+      <div className="flex items-baseline justify-between gap-4 pt-2">
+        <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          По каждой станции
+        </div>
+        <div className="text-xs text-muted-foreground">клик по строке — сеансы и состав обмена АЗС</div>
+      </div>
+
       {stations.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border/50 p-6 text-sm text-muted-foreground">
           Ни одна станция ещё не выходила на связь. Агент ставится на рабочую станцию и сам
@@ -151,7 +348,10 @@ export function StoreStationsPanel({ dateFrom, dateTo }: { dateFrom: string; dat
             </thead>
             <tbody>
               {stations.map((s: StoreExchangeStation) => (
-                <tr key={s.station_id} className="border-b border-border last:border-0">
+                <tr key={s.station_id}
+                    className="cursor-pointer border-b border-border last:border-0 hover:bg-muted/40"
+                    onClick={() => выбрать(s.station_id)}
+                    title={`АЗС ${s.station_id}: сеансы, состав обмена, задания вниз`}>
                   <td className="px-3 py-2 font-medium">{s.station_id}</td>
                   <td className="px-3 py-2"><StateDot state={s.state} /></td>
                   <td className="px-3 py-2 text-muted-foreground">{silence(s.silence_seconds)}</td>
@@ -234,6 +434,11 @@ export function StoreStationsPanel({ dateFrom, dateTo }: { dateFrom: string; dat
         дождавшись канала, отдаёт накопленное подряд. Работать на самой станции —
         в пункте «Рабочее место АЗС».
       </p>
+
+      {выбрана !== null && (
+        <StationExchangeDialog stationId={выбрана} dateFrom={dateFrom} dateTo={dateTo}
+                               onClose={() => выбрать(null)} />
+      )}
     </div>
   )
 }

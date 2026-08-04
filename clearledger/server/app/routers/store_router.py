@@ -293,6 +293,127 @@ async def store_exchange(
     }
 
 
+@router.get("/exchange/{station_id}")
+async def store_exchange_station(
+    station_id: int,
+    date_from: str = Query(..., description="начало периода, ISO"),
+    date_to: str = Query(..., description="конец периода, ISO (включительно)"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Обмен ОДНОЙ станции: её сеансы поимённо, состав и канал вниз.
+
+    Сводка по парку отвечает «где плохо», карточка станции — «что именно там
+    произошло»: когда АЗС выходила на связь, сколько молчала перед этим, что
+    привезла в каждый выход и какие задания центра до неё ещё не дошли.
+    """
+    cid: uuid.UUID = await scope_company_id(user, db)
+    d1, d2 = date.fromisoformat(date_from), date.fromisoformat(date_to)
+    p = {"cid": cid, "st": station_id, "d1": d1, "d2": d2,
+         "gap": EXCHANGE_SESSION_GAP_MIN}
+    period = "received_at >= :d1 AND received_at < (CAST(:d2 AS date) + 1)"
+
+    # Сеанс собирается нарастающей суммой признака «новый выход на связь»:
+    # такая нумерация даёт границы серии без временных таблиц и второго запроса.
+    sessions = [dict(r) for r in (await db.execute(text(f"""
+        WITH шаги AS (
+            SELECT received_at, size_bytes, kind,
+                   lag(received_at) OVER (ORDER BY received_at) AS prev
+            FROM edge_packets
+            WHERE company_id = :cid AND station_id = :st AND {period}
+        ), помеченные AS (
+            SELECT *,
+                   (prev IS NULL
+                    OR received_at - prev > make_interval(mins => :gap)) AS новый,
+                   EXTRACT(epoch FROM received_at - prev) / 60 AS пауза
+            FROM шаги
+        ), пронумерованные AS (
+            SELECT *, sum(CASE WHEN новый THEN 1 ELSE 0 END)
+                        OVER (ORDER BY received_at) AS session_no
+            FROM помеченные
+        )
+        SELECT session_no, min(received_at) AS started, max(received_at) AS finished,
+               count(*) AS packets, coalesce(sum(size_bytes), 0) AS bytes,
+               string_agg(DISTINCT kind, ', ') AS kinds,
+               max(пауза) FILTER (WHERE новый) AS silence_before_min
+        FROM пронумерованные GROUP BY session_no ORDER BY started DESC LIMIT 100
+    """), p)).mappings().all()]
+    for s in sessions:
+        s["kinds"] = [PACKET_KIND_LABEL.get(k.strip(), k.strip())
+                      for k in (s["kinds"] or "").split(",") if k.strip()]
+        s["silence_before_min"] = (round(float(s["silence_before_min"]))
+                                   if s["silence_before_min"] is not None else None)
+        s["duration_min"] = round(
+            (s["finished"] - s["started"]).total_seconds() / 60)
+
+    by_kind = [dict(r) for r in (await db.execute(text(f"""
+        SELECT kind, count(*) AS packets, coalesce(sum(size_bytes), 0) AS bytes,
+               max(received_at) AS last_at
+        FROM edge_packets
+        WHERE company_id = :cid AND station_id = :st AND {period}
+        GROUP BY kind ORDER BY count(*) DESC
+    """), p)).mappings().all()]
+    for k in by_kind:
+        k["label"] = PACKET_KIND_LABEL.get(k["kind"], k["kind"])
+
+    downlink = [dict(r) for r in (await db.execute(text("""
+        SELECT kind, note, created_at, delivered_at, acked_at
+        FROM edge_downlink WHERE company_id = :cid AND station_id = :st
+        ORDER BY created_at DESC LIMIT 50
+    """), {"cid": cid, "st": station_id})).mappings().all()]
+    for d in downlink:
+        d["label"] = PACKET_KIND_LABEL.get(d["kind"], d["kind"])
+        d["state"] = ("применено" if d["acked_at"] else
+                      "доставлено" if d["delivered_at"] else "ждёт станции")
+
+    agent = (await db.execute(select(EdgeAgent).where(
+        EdgeAgent.company_id == cid, EdgeAgent.station_id == station_id
+    ))).scalar_one_or_none()
+    now = datetime.now(timezone.utc)
+    silence = (int((now - agent.last_seen).total_seconds())
+               if agent and agent.last_seen else None)
+    details = (agent.payload or {}) if agent else {}
+    паузы = [s["silence_before_min"] for s in sessions
+             if s["silence_before_min"] is not None]
+
+    return {
+        "station_id": station_id,
+        "from": d1, "to": d2,
+        "session_gap_minutes": EXCHANGE_SESSION_GAP_MIN,
+        "agent": None if agent is None else {
+            "state": ("молчит" if silence is None or silence > STATION_STALE_AFTER
+                      else "офлайн" if silence > STATION_OFFLINE_AFTER else "онлайн"),
+            "silence_seconds": silence,
+            "version": agent.version,
+            "version_ok": bool(agent.version) and agent.version == os.environ.get(
+                "EDGE_DESIRED_AGENT_VERSION", "0.58.10"),
+            "queue_pending": agent.queue_pending,
+            "queue_sent": agent.queue_sent,
+            "last_shift": agent.last_shift,
+            "snapshot_at": details.get("snapshot_at"),
+            "onec_ok": details.get("onec_ok"),
+            "stock_source": details.get("stock_source"),
+            "first_seen": agent.first_seen,
+            "last_seen": agent.last_seen,
+        },
+        "totals": {
+            "sessions": len(sessions),
+            "packets": sum(s["packets"] for s in sessions),
+            "bytes": sum(int(s["bytes"]) for s in sessions),
+            # Средняя и худшая пауза между выходами на связь: экран про канал, а
+            # длина молчания и есть его качество.
+            "avg_silence_min": round(sum(паузы) / len(паузы)) if паузы else None,
+            "max_silence_min": max(паузы) if паузы else None,
+            "down_waiting": sum(1 for d in downlink if d["state"] == "ждёт станции"),
+            "down_unacked": sum(1 for d in downlink if d["state"] == "доставлено"),
+            "down_acked": sum(1 for d in downlink if d["state"] == "применено"),
+        },
+        "sessions": sessions,
+        "by_kind": by_kind,
+        "downlink": downlink,
+    }
+
+
 # -- Мастер-НСИ ------------------------------------------------------------
 # Карточки, штрихкоды и цены Ledger — не зеркало 1С, а собственный справочник.
 # Он наполняется потоком снимков со станции (справочника ШК в 1С не существует)

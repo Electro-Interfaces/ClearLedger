@@ -923,6 +923,47 @@ export interface StoreExchangeData {
 export const getStoreExchange = (dateFrom: string, dateTo: string) =>
   get<StoreExchangeData>(`/api/store/exchange?date_from=${dateFrom}&date_to=${dateTo}`)
 
+/** Детализация обмена одной станции: сеансы поимённо, состав, канал вниз. */
+export interface StoreExchangeSession {
+  session_no: number
+  started: string
+  finished: string
+  duration_min: number
+  packets: number
+  bytes: number
+  kinds: string[]
+  /** Сколько станция молчала перед этим выходом на связь, минут. */
+  silence_before_min: number | null
+}
+
+export interface StoreExchangeStationDetail {
+  station_id: number
+  from: string
+  to: string
+  session_gap_minutes: number
+  agent: {
+    state: string; silence_seconds: number | null; version: string | null; version_ok: boolean
+    queue_pending: number; queue_sent: number; last_shift: number | null
+    snapshot_at: string | null; onec_ok: boolean | null; stock_source: string | null
+    first_seen: string; last_seen: string
+  } | null
+  totals: {
+    sessions: number; packets: number; bytes: number
+    avg_silence_min: number | null; max_silence_min: number | null
+    down_waiting: number; down_unacked: number; down_acked: number
+  }
+  sessions: StoreExchangeSession[]
+  by_kind: { kind: string; label: string; packets: number; bytes: number; last_at: string }[]
+  downlink: {
+    kind: string; label: string; note: string | null; state: string
+    created_at: string; delivered_at: string | null; acked_at: string | null
+  }[]
+}
+
+export const getStoreExchangeStation = (stationId: number, dateFrom: string, dateTo: string) =>
+  get<StoreExchangeStationDetail>(
+    `/api/store/exchange/${stationId}?date_from=${dateFrom}&date_to=${dateTo}`)
+
 export interface StoreAssortmentRule {
   item_uuid: string
   name: string
