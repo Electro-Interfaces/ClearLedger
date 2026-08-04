@@ -106,6 +106,10 @@ async def store_stations(
             "ledger_stock_ok": details.get("ledger_stock_ok", False),
             "stock_source": details.get("stock_source"),
             "cash_policy": details.get("cash_policy"),
+            # Кто работает на станции прямо сейчас — по её же телеметрии.
+            # Открывать рабочее место вслепую, когда там считают склад, значит
+            # столкнуться на одном документе и потерять чью-то работу.
+            "active_users": details.get("active_users") or [],
             "last_seen": r.last_seen,
             "first_seen": r.first_seen,
         })
@@ -244,6 +248,10 @@ async def store_exchange(
             "queue_sent": a.queue_sent,
             "last_shift": a.last_shift,
             "snapshot_at": (a.payload or {}).get("snapshot_at"),
+            # Кто работает на станции прямо сейчас — по её же телеметрии.
+            # Открывать рабочее место вслепую, когда там считают склад, значит
+            # столкнуться на одном документе и потерять чью-то работу.
+            "active_users": (a.payload or {}).get("active_users") or [],
             "packets": int(ex.get("packets") or 0),
             "bytes": int(ex.get("bytes") or 0),
             "sessions": int(ex.get("sessions") or 0),

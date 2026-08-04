@@ -20,17 +20,23 @@ import { Button } from '@/components/ui/button'
 
 export function StoreStationConsolePanel() {
   const { company } = useCompany()
-  const [station, setStation] = useState<number | null>(null)
   const [открываем, setОткрываем] = useState<number | null>(null)
 
-  // Сессию открываем ДО показа рамки: иначе первая же страница станции придёт
+  // Станция открывается отдельной вкладкой: центр остаётся там, где был, и к
+  // нему возвращаются одним переключением, не теряя фильтров и экрана.
+  // Вкладку заводим сразу по клику — после await браузер счёл бы её попапом.
+  // Сессию открываем ДО перехода: иначе первая же страница станции придёт
   // с «Требуется авторизация», и человек решит, что сломано рабочее место.
   async function войти(id: number) {
+    const вкладка = window.open('about:blank', '_blank')
     setОткрываем(id)
     try {
       await openStationSession(id)
-      setStation(id)
+      const адрес = `/api/store/station/${id}/console/`
+      if (вкладка) вкладка.location.href = адрес
+      else window.open(адрес, '_blank') // попапы запрещены — пробуем ещё раз, уже с браузерным вопросом
     } catch (e) {
+      вкладка?.close()
       toast.error('Не удалось открыть рабочее место', { description: (e as Error).message })
     } finally {
       setОткрываем(null)
@@ -49,37 +55,6 @@ export function StoreStationConsolePanel() {
 
   const stations = data.stations as StoreStation[]
 
-  // Открытая станция занимает весь холст: в рабочем месте работают, а не
-  // заглядывают в него — тесная рамка мешала бы вводить документы.
-  if (station !== null) {
-    return (
-      <div className="flex h-full flex-col">
-        <div className="flex items-center justify-between gap-4 border-b border-border px-4 py-2">
-          <div className="text-sm">
-            <b>АЗС {station}</b>
-            <span className="ml-2 text-muted-foreground">
-              рабочее место станции · вы работаете на ней из центра, документы уйдут вашим именем
-            </span>
-          </div>
-          <div className="flex items-center gap-3">
-            <a className="text-xs text-muted-foreground hover:text-foreground"
-               href={`/api/store/station/${station}/console/`} target="_blank" rel="noreferrer">
-              отдельной вкладкой
-            </a>
-            <Button size="sm" variant="outline" onClick={() => setStation(null)}>
-              К списку станций
-            </Button>
-          </div>
-        </div>
-        <iframe
-          title={`Рабочее место АЗС ${station}`}
-          src={`/api/store/station/${station}/console/`}
-          className="w-full flex-1 border-0"
-        />
-      </div>
-    )
-  }
-
   return (
     <div className="max-w-4xl space-y-6 p-6">
       <div>
@@ -89,7 +64,8 @@ export function StoreStationConsolePanel() {
         <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
           Выберите станцию, чтобы работать на ней из центра: приёмка, инвентаризация, остатки,
           карточки. Открывается сам агент станции, а не копия его экранов, — всё введённое
-          сразу становится учётом АЗС и помечается вашим именем.
+          сразу становится учётом АЗС и помечается вашим именем. Станция открывается
+          отдельной вкладкой, эта остаётся здесь.
         </p>
       </div>
 
@@ -110,6 +86,15 @@ export function StoreStationConsolePanel() {
                       ? `на связи · агент ${s.version ?? '—'}${s.queue_pending > 0 ? ` · в очереди ${s.queue_pending}` : ''}`
                       : `${s.state} · работа идёт на станции, данные копятся у неё`}
                   </div>
+                  {/* Кто уже там. Видно до входа: столкнуться на одном документе
+                      дешевле предупредить, чем потом объяснять отказ в сохранении.
+                      Данные приезжают телеметрией раз в минуту — отсюда «минуту назад». */}
+                  {(s.active_users?.length ?? 0) > 0 && (
+                    <div className="mt-1 text-xs text-amber-500">
+                      сейчас работает: {s.active_users.map((u) =>
+                        u.remote ? `${u.name} (из центра)` : u.name).join(', ')}
+                    </div>
+                  )}
                 </div>
                 <Button size="sm" disabled={!онлайн || открываем !== null}
                         onClick={() => void войти(s.station_id)}

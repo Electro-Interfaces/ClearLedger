@@ -868,6 +868,8 @@ export interface StoreStation {
     policy_id: string; checked_at: string; mode: 'dry-run'; ready: boolean
     missing: number; extra: number; price_diff: number; code_diff: number; skipped: number
   } | null
+  /** Кто работает на станции прямо сейчас: имя, откуда, когда последнее действие. */
+  active_users: { name: string; remote: boolean; last_seen: string }[]
   last_seen: string
   first_seen: string
 }
