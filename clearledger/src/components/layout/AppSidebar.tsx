@@ -37,15 +37,26 @@ export function NavItem({ to, icon: Icon, label, end, collapsed, onNavigate, act
   to: string; icon: React.ComponentType<{ className?: string }>; label: string
   end?: boolean; collapsed?: boolean; onNavigate?: () => void; active?: boolean
 }) {
-  // Раздел рабочей области узнаёт себя САМ — по `?mode=` в собственной ссылке
-  // против `?mode=` в адресе. Три попытки вычислить это снаружи промахнулись
-  // (путь, пункт, состояние области), поэтому решение принимает тот, кто знает
-  // оба значения наверняка: сама ссылка. Пропс `active` остаётся для остальных
-  // пунктов и для случая, когда режима в адресе ещё нет.
-  const { search } = useLocation()
-  const linkMode = new URLSearchParams(to.split('?')[1] ?? '').get('mode')
+  // Активность считаем САМИ и передаём готовой строкой классов.
+  //
+  // Функция-className у `NavLink` здесь не работает: кнопка обёрнута в
+  // `SidebarMenuButton asChild`, а Slot склеивает свой класс с классом ребёнка
+  // ДО того, как NavLink успеет вызвать функцию, — и в атрибут уезжает
+  // исходный текст функции. Ни `isActive`, ни любой расчёт внутри неё до
+  // страницы не доходили, поэтому выбранный раздел и не подсвечивался.
+  //
+  // Раздел узнаёт себя по `?mode=` в собственной ссылке против `?mode=` в
+  // адресе — тот же приём, что в «Поддержке» (TSupport `itemActive`).
+  const { pathname, search } = useLocation()
+  const [toPath, toQuery] = to.split('?')
+  const linkMode = new URLSearchParams(toQuery ?? '').get('mode')
   const urlMode = new URLSearchParams(search).get('mode')
-  const modeActive = linkMode ? (urlMode ? linkMode === urlMode : active) : undefined
+  const pathActive = end
+    ? pathname === toPath
+    : pathname === toPath || pathname.startsWith(`${toPath}/`)
+  const selected = linkMode
+    ? (urlMode ? linkMode === urlMode : (active ?? pathActive))
+    : (active ?? pathActive)
 
   return (
     <SidebarMenuItem>
@@ -56,17 +67,15 @@ export function NavItem({ to, icon: Icon, label, end, collapsed, onNavigate, act
               to={to}
               end={end}
               onClick={onNavigate}
-              className={({ isActive }) =>
-                // Выбранный раздел обязан отличаться от того, на что просто навели
-                // мышь: у наведения свой фон, и при одинаковой силе заливки человек
-                // не понимает, где находится. Отсюда более плотный фон, полужирное
-                // начертание и вертикальный маркер слева.
-                `relative flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
-                  (modeActive ?? active ?? isActive)
-                    ? 'bg-primary/15 font-semibold text-primary before:absolute before:left-0 before:top-1.5 before:bottom-1.5 before:w-0.5 before:rounded-full before:bg-primary'
-                    : 'font-medium text-muted-foreground hover:bg-accent hover:text-foreground'
-                } ${collapsed ? 'justify-center px-2' : ''}`
-              }
+              // Выбранный раздел обязан отличаться от того, на что просто навели
+              // мышь: у наведения свой фон, и при одинаковой силе заливки человек
+              // не понимает, где находится. Отсюда более плотный фон, полужирное
+              // начертание и вертикальный маркер слева.
+              className={`relative flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
+                selected
+                  ? 'bg-primary/15 font-semibold text-primary before:absolute before:left-0 before:top-1.5 before:bottom-1.5 before:w-0.5 before:rounded-full before:bg-primary'
+                  : 'font-medium text-muted-foreground hover:bg-accent hover:text-foreground'
+              } ${collapsed ? 'justify-center px-2' : ''}`}
             >
               <Icon className="h-4 w-4 shrink-0" />
               {!collapsed && <span>{label}</span>}
