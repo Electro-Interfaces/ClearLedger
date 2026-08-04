@@ -28,20 +28,21 @@ function Плитка({ label, value, hint }: { label: string; value: string; hi
   )
 }
 
-const ВКЛАДКИ = ['items', 'docs', 'returns'] as const
+const ВКЛАДКИ = ['overview', 'items', 'docs', 'returns'] as const
 type Вкладка = (typeof ВКЛАДКИ)[number]
 
 export function SupplierCardModal({ name, companyId, dateFrom, dateTo, stations, onClose, onOpenSku }: {
   name: string; companyId: string; dateFrom: string; dateTo: string
   stations?: string[]; onClose: () => void; onOpenSku?: (ref: string) => void
 }) {
-  const [tab, setTab] = useState<Вкладка>('items')
+  const [tab, setTab] = useState<Вкладка>('overview')
   const { data, isLoading } = useQuery<SupplierCard>({
     queryKey: ['supplier-card', companyId, name, dateFrom, dateTo, stations?.join(',')],
     queryFn: () => getSupplierCard(name, dateFrom, dateTo, stations),
   })
 
   const подпись: Record<Вкладка, string> = {
+    overview: 'Обзор',
     items: `Что возит${data ? ` (${data.items.length})` : ''}`,
     docs: `Поставки${data ? ` (${data.docs.length})` : ''}`,
     returns: `Возвраты${data ? ` (${data.returns.length})` : ''}`,
@@ -90,6 +91,94 @@ export function SupplierCardModal({ name, companyId, dateFrom, dateTo, stations,
                 </button>
               ))}
             </div>
+
+            {tab === 'overview' && (
+              <div className="mt-3 space-y-4">
+                {/* Зависимость от поставщика — не абстракция: если он один
+                    возит сорок позиций, его срыв это дыра на полке, которую
+                    нечем закрыть. Поэтому доля и монополия идут первыми. */}
+                <div className="grid gap-3 sm:grid-cols-4">
+                  <Плитка label="Доля в закупках"
+                          value={data.analytics.share_pct != null ? `${data.analytics.share_pct}%` : '—'}
+                          hint="от всех закупок периода" />
+                  <Плитка label="Средняя накладная"
+                          value={data.analytics.avg_doc != null ? fmtMoney(data.analytics.avg_doc) : '—'} />
+                  <Плитка label="Возит только он"
+                          value={String(data.analytics.exclusive_positions)}
+                          hint="позиций без второго источника" />
+                  <Плитка label="Маркированного"
+                          value={data.analytics.marked_share_pct != null
+                            ? `${data.analytics.marked_share_pct}%` : '—'}
+                          hint="доля суммы · нужен DataMatrix" />
+                </div>
+
+                {data.by_group.length > 0 && (
+                  <div>
+                    <div className="mb-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">
+                      Что берём: по группам каталога
+                    </div>
+                    <table className="w-full text-sm">
+                      <tbody>
+                        {data.by_group.map((g) => {
+                          const доля = data.totals.amount_net > 0
+                            ? Math.round(g.amount_net / data.totals.amount_net * 100) : 0
+                          return (
+                            <tr key={g.group} className="border-b border-border/50">
+                              <td className="py-1.5">{g.group}</td>
+                              <td className="w-32 py-1.5">
+                                <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                                  <div className="h-full bg-primary" style={{ width: `${доля}%` }} />
+                                </div>
+                              </td>
+                              <td className="w-14 py-1.5 text-right tabular-nums text-muted-foreground">{доля}%</td>
+                              <td className="w-28 py-1.5 text-right tabular-nums">{fmtMoney(g.amount_net)}</td>
+                              <td className="w-20 py-1.5 text-right tabular-nums text-muted-foreground">
+                                {g.positions} поз.
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {data.by_month.length > 0 && (
+                  <div>
+                    <div className="mb-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">
+                      Закупки по месяцам
+                    </div>
+                    <table className="w-full text-sm">
+                      <tbody>
+                        {data.by_month.map((m) => {
+                          const макс = Math.max(...data.by_month.map((x) => x.amount_net)) || 1
+                          return (
+                            <tr key={m.month} className="border-b border-border/50">
+                              <td className="w-24 py-1.5">{m.month}</td>
+                              <td className="py-1.5">
+                                <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                                  <div className="h-full bg-primary/70"
+                                       style={{ width: `${Math.round(m.amount_net / макс * 100)}%` }} />
+                                </div>
+                              </td>
+                              <td className="w-28 py-1.5 text-right tabular-nums">{fmtMoney(m.amount_net)}</td>
+                              <td className="w-24 py-1.5 text-right tabular-nums text-muted-foreground">
+                                {m.docs} накл.
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                <div className="text-xs text-muted-foreground">
+                  Цены за период: подорожало {data.analytics.price_up} позиций,
+                  подешевело {data.analytics.price_down}. Подробности — на вкладке «Что возит».
+                </div>
+              </div>
+            )}
 
             {tab === 'items' && (
               <table className="mt-3 w-full text-sm">
