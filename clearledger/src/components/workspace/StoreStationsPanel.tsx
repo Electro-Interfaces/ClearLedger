@@ -13,8 +13,9 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { RadioTower, PackageOpen, GitCompareArrows, ExternalLink, X } from 'lucide-react'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
-import { getStoreStations, type StoreStation } from '@/services/storeService'
+import { getStoreStations, openStationSession, type StoreStation } from '@/services/storeService'
 import { useCompany } from '@/contexts/CompanyContext'
 
 /** Молчание в человеческих единицах: секунды оператору ничего не говорят. */
@@ -60,6 +61,17 @@ export function StoreStationsPanel() {
   // Открытая станция: рабочее место разворачивается на весь холст, а не в
   // модалке — в нём работают, а не заглядывают.
   const [openStation, setOpenStation] = useState<number | null>(null)
+
+  // Сессия работы открывается до показа рамки: у навигации внутри неё нет
+  // токена приложения, и без cookie станция ответит «требуется авторизация».
+  async function открыть(id: number) {
+    try {
+      await openStationSession(id)
+      setOpenStation(id)
+    } catch (e) {
+      toast.error('Не удалось открыть рабочее место', { description: (e as Error).message })
+    }
+  }
   const { data, isLoading, error } = useQuery({
     queryKey: ['store-stations', company.id],
     queryFn: getStoreStations,
@@ -150,7 +162,7 @@ export function StoreStationsPanel() {
                       title={s.state === 'онлайн'
                         ? 'Открыть рабочее место станции: приёмка, инвентаризация, остатки'
                         : 'Станция не на связи — рабочее место недоступно'}
-                      onClick={() => setOpenStation(s.station_id)}>
+                      onClick={() => void открыть(s.station_id)}>
                       <ExternalLink className="h-3.5 w-3.5 mr-1" />Открыть
                     </Button>
                   </td>

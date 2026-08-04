@@ -209,10 +209,12 @@ export interface StoreStockItem {
 }
 export interface StoreStockWarehouse {
   code: string; name: string | null; sku: number
+  station_id?: number; place_code?: string
   positive: number   // сколько позиций реально на полке — остальное отрицательные хвосты
   retail_value: number
 }
 export interface StoreStockData {
+  source?: 'edge_agent' | 'legacy_cb_snapshot'
   warehouse: string | null
   warehouses: StoreStockWarehouse[]
   items: StoreStockItem[]
@@ -881,6 +883,33 @@ export interface StoreStationsData {
 
 export const getStoreStations = () => get<StoreStationsData>('/api/store/stations')
 
+export interface StoreAssortmentRule {
+  item_uuid: string
+  name: string
+  active: boolean
+  valid_from: string | null
+  valid_to: string | null
+  reason: string | null
+  updated_at: string
+}
+
+export const getStoreAssortmentRules = (stationId: number) =>
+  get<{ station_id: number; rules: StoreAssortmentRule[] }>(`/api/store/assortment/${stationId}`)
+
+export const setStoreAssortmentRule = (
+  stationId: number,
+  itemUuid: string,
+  body: { active: boolean; valid_from?: string | null; valid_to?: string | null; reason?: string | null },
+) => put<{ ok: boolean }>(`/api/store/assortment/${stationId}/${encodeURIComponent(itemUuid)}`, body)
+
+export const publishStoreAssortment = (stationId: number, defaultActive = true) =>
+  post<{ ok: boolean; policy_id: string; task_id?: string; mode: 'dry-run'; rules: number }>(
+    `/api/store/assortment/${stationId}/publish?default_active=${defaultActive ? 'true' : 'false'}`, {})
+
+export const mergeEdgeItems = (body: { alias_id: number; canonical_id: number; reason?: string }) =>
+  post<{ ok: boolean; stats: Record<string, number>; stations_queued: number }>(
+    '/api/store/nsi/merge-items', body)
+
 
 /** Строка приёмки: заявленное и фактическое ведутся раздельно — платим за факт. */
 export interface StoreReceiptLine {
@@ -1047,15 +1076,132 @@ export interface NsiBarcode {
   id: number; code: string; status: 'active' | 'historical' | 'rejected'
   note: string | null; first_seen: string; ns_code: number | null; qty: number | null
 }
+
+export type StoreRecipeKind = 'dish' | 'semi' | 'combo'
+
+export interface StoreRecipeLine {
+  item: string
+  name: string
+  qty: number
+  unit: string
+}
+
+export interface StoreRecipeVersion {
+  id: string
+  dish_uuid: string
+  dish_name: string
+  recipe_kind: StoreRecipeKind
+  version: number
+  status: 'draft' | 'active' | 'archived'
+  output_qty: number
+  output_unit: string
+  lines: StoreRecipeLine[]
+  content_hash: string
+	source: 'center' | 'station' | 'import'
+	source_station_id: number | null
+	change_note: string | null
+	source_bundle_id: string | null
+  valid_from: string | null
+  valid_to: string | null
+  activated_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface StoreRecipeEntry {
+  dish_uuid: string
+  dish_name: string
+  recipe_kind: StoreRecipeKind
+  active: StoreRecipeVersion | null
+  draft: StoreRecipeVersion | null
+  history: StoreRecipeVersion[]
+}
+
+export interface StoreRecipeDelivery {
+  station_id: number
+  state: 'applied' | 'queued' | 'delivered' | 'mismatch' | 'outdated' | 'not_sent'
+  desired_bundle: string | null
+  queued_bundle: string | null
+  applied_bundle: string | null
+  created_at: string | null
+  delivered_at: string | null
+  acked_at: string | null
+  agent_last_seen: string | null
+  recipe_bundle: { bundle_id?: string; applied_at?: string; recipes?: number } | null
+  readiness: {
+    ready?: boolean
+    checked_at?: string
+    bundle_id?: string
+    critical?: number
+    warnings?: number
+    issues?: Array<{ code: string; message: string; dish?: string }>
+  } | null
+}
+
+export interface StoreRecipeWorkspace {
+  bundle: {
+    bundle_id: string
+    schema_version: number
+    generated_at: string
+    effective_from: string
+    content_hash: string
+    recipes: unknown[]
+  } | null
+  legacy_available: number
+  summary: { recipes: number; active: number; drafts: number }
+  recipes: StoreRecipeEntry[]
+  deliveries: StoreRecipeDelivery[]
+}
+
+export interface StoreRecipeDraftInput {
+  dish_uuid: string
+  dish_name?: string
+  recipe_kind?: StoreRecipeKind
+  output_qty?: number
+  output_unit?: string
+  lines?: StoreRecipeLine[]
+}
+
+export const getStoreRecipeWorkspace = () =>
+  get<StoreRecipeWorkspace>('/api/store/recipes/versions')
+
+export const bootstrapStoreRecipes = () =>
+  post<{ ok: boolean; created: number }>('/api/store/recipes/bootstrap')
+
+export const createStoreRecipeDraft = (input: StoreRecipeDraftInput) =>
+  post<StoreRecipeVersion>('/api/store/recipes/draft', input)
+
+export const updateStoreRecipeDraft = (id: string, input: Omit<StoreRecipeDraftInput, 'dish_uuid'>) =>
+  put<StoreRecipeVersion>(`/api/store/recipes/${id}`, input)
+
+export const activateStoreRecipe = (id: string, validFrom?: string) =>
+  post<StoreRecipeVersion>(`/api/store/recipes/${id}/activate`, validFrom ? { valid_from: validFrom } : {})
+
+export const pushStoreRecipes = (stationId: number) =>
+  post<{ ok: boolean; bundle_id: string; already_current?: boolean; already_queued?: boolean }>(
+    `/api/store/nsi/push-recipes/${stationId}`,
+  )
 export interface NsiPriceRow {
   id: number; station_id: number; price: number
   valid_from: string; valid_to: string | null; author: string | null
+}
+export interface NsiListItem {
+  id: number
+  external_uuid: string
+  name: string
+  unit: string
+  vat_rate: string
+  price: number | null
+  qty: number
+  barcodes: number
+  collisions: number
 }
 export interface NsiCard {
   item: {
     id: number; external_uuid: string; code_1c: string | null
     name: string; name_full: string | null; unit: string; vat_rate: string
-    kind: string | null; sku_class: string | null; is_dish: boolean; deleted: boolean
+    kind: string | null; sku_class: string | null; is_dish: boolean
+    price_owner: 'master' | 'station'; deleted: boolean
     created_at: string; updated_at: string
   }
   barcodes: NsiBarcode[]
@@ -1067,6 +1213,11 @@ export const NSI_VAT_CODES = ['НДС22', 'НДС10', 'НДС20', 'НДС18_118'
 
 export const getNsiCard = (ident: string, stationId = 208) =>
   get<NsiCard>(`/api/store/nsi/items/${encodeURIComponent(ident)}`, { station_id: stationId })
+
+export const findNsiItems = (query: string, stationId = 208, limit = 20) =>
+  get<{ items: NsiListItem[]; total: number }>('/api/store/nsi/items', {
+    q: query, station_id: stationId, limit,
+  })
 
 export const saveNsiCard = (ident: string, patch: Partial<NsiCard['item']>) =>
   put<{ ok: boolean; changed: string[] }>(`/api/store/nsi/items/${encodeURIComponent(ident)}`, patch)
@@ -1124,10 +1275,25 @@ export interface StationPriceChange {
   changed_at: string
 }
 
+/** Заявка станции: в сетевой карточке ошибка, вот как должно быть. */
+export interface StationNSIProposal {
+  id: number
+  station_id: number
+  item_uuid: string
+  item_name: string | null
+  field: string
+  current: string
+  proposed: string
+  author: string
+  comment: string
+  created_at: string
+}
+
 export interface StationDrafts {
   items: StationItemDraft[]
   partners: StationPartnerDraft[]
   prices: StationPriceChange[]
+  proposals: StationNSIProposal[]
 }
 
 /** Карточка сети, на которую похож черновик (совпал штрихкод). */
@@ -1151,6 +1317,21 @@ export const getDraftCandidates = (barcodes: string[]) =>
 export const resolveItemDraft = (
   draftId: number, body: { action: 'link' | 'create' | 'reject'; item_id?: number; note?: string },
 ) => post<Record<string, unknown>>(`/api/store/station-drafts/item/${draftId}`, body)
+
+/**
+ * Открыть сессию работы на станции.
+ *
+ * Рамка рабочего места ходит на мастер обычной навигацией, а токен приложения
+ * живёт в localStorage и уходит только заголовком — которого у навигации нет.
+ * Поэтому вход делается один раз: токен обменивается на короткую cookie,
+ * привязанную к этой АЗС.
+ */
+export const openStationSession = (stationId: number) =>
+  post<void>(`/api/store/station/${stationId}/session`)
+
+export const resolveNSIProposal = (
+  proposalId: number, body: { action: 'accept' | 'reject'; note?: string },
+) => post<Record<string, unknown>>(`/api/store/station-drafts/proposal/${proposalId}`, body)
 
 export const resolvePartnerDraft = (
   draftId: number, body: { action: 'accept' | 'reject'; note?: string },

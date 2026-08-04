@@ -11,15 +11,31 @@
  * и это честно: её база живёт на месте, без канала центр до неё не дотянется.
  */
 import { useState } from 'react'
+import { toast } from 'sonner'
 import { useQuery } from '@tanstack/react-query'
 import { MonitorSmartphone, RadioTower } from 'lucide-react'
-import { getStoreStations, type StoreStation } from '@/services/storeService'
+import { getStoreStations, openStationSession, type StoreStation } from '@/services/storeService'
 import { useCompany } from '@/contexts/CompanyContext'
 import { Button } from '@/components/ui/button'
 
 export function StoreStationConsolePanel() {
   const { company } = useCompany()
   const [station, setStation] = useState<number | null>(null)
+  const [открываем, setОткрываем] = useState<number | null>(null)
+
+  // Сессию открываем ДО показа рамки: иначе первая же страница станции придёт
+  // с «Требуется авторизация», и человек решит, что сломано рабочее место.
+  async function войти(id: number) {
+    setОткрываем(id)
+    try {
+      await openStationSession(id)
+      setStation(id)
+    } catch (e) {
+      toast.error('Не удалось открыть рабочее место', { description: (e as Error).message })
+    } finally {
+      setОткрываем(null)
+    }
+  }
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['store-stations', company.id],
@@ -95,9 +111,10 @@ export function StoreStationConsolePanel() {
                       : `${s.state} · работа идёт на станции, данные копятся у неё`}
                   </div>
                 </div>
-                <Button size="sm" disabled={!онлайн} onClick={() => setStation(s.station_id)}
+                <Button size="sm" disabled={!онлайн || открываем !== null}
+                        onClick={() => void войти(s.station_id)}
                         title={онлайн ? 'Открыть рабочее место станции' : 'Станция не на связи'}>
-                  Работать
+                  {открываем === s.station_id ? 'Открываем…' : 'Работать'}
                 </Button>
               </div>
             </div>

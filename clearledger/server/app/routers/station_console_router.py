@@ -25,12 +25,16 @@ from __future__ import annotations
 
 import os
 import re
+from urllib.parse import quote
+from datetime import datetime, timedelta, timezone
 
 import httpx
+import jwt
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user
+from app.config import get_settings
 from app.database import get_db
 from app.deps import scope_company_id
 from app.models import User
@@ -43,6 +47,39 @@ HUB_KEY = os.environ.get("TRADELINK_INTEGRATION_KEY", "")
 # Заголовки, которые нельзя переносить как есть: hop-by-hop и всё, что описывает
 # уже раскодированное тело.
 СЛУЖЕБНЫЕ = {"content-encoding", "content-length", "transfer-encoding", "connection"}
+
+# Рабочее место открывается в рамке приложения, а рамка не носит с собой токен:
+# он живёт в localStorage и уходит заголовком, которого у обычной навигации нет.
+# Поэтому вход в станцию открывается один раз — обменом токена на короткую
+# cookie-сессию, привязанную к конкретной АЗС.
+COOKIE = "station_console"
+СЕССИЯ_МИНУТ = 60
+
+
+def _выдать_сессию(user: User, station_id: int) -> str:
+    payload = {
+        "sub": str(user.id),
+        "station": station_id,
+        "name": (user.name or user.email or "").strip(),
+        "exp": datetime.now(timezone.utc) + timedelta(minutes=СЕССИЯ_МИНУТ),
+        "iat": datetime.now(timezone.utc),
+        "typ": "station_console",
+    }
+    return jwt.encode(payload, get_settings().secret_key, algorithm=get_settings().algorithm)
+
+
+def _имя_из_сессии(request: Request, station_id: int) -> str | None:
+    """Кто работает по cookie-сессии. None — сессии нет или она чужая."""
+    raw = request.cookies.get(COOKIE)
+    if not raw:
+        return None
+    try:
+        payload = jwt.decode(raw, get_settings().secret_key, algorithms=[get_settings().algorithm])
+    except jwt.PyJWTError:
+        return None
+    if payload.get("typ") != "station_console" or int(payload.get("station", -1)) != station_id:
+        return None
+    return str(payload.get("name") or "")
 
 
 def _префикс(station_id: int) -> str:
@@ -60,6 +97,29 @@ def _переписать(html: str, prefix: str) -> str:
     return html
 
 
+@router.post("/{station_id}/session")
+async def station_console_session(
+    station_id: int,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """Открыть сессию работы на станции.
+
+    Вызывается с обычным токеном приложения — и ставит cookie, с которой рамка
+    рабочего места уже ходит сама. Cookie привязана к станции и живёт час:
+    вернуться к работе на другой АЗС без нового входа нельзя, а забытая
+    вкладка перестаёт быть доступом сама.
+    """
+    await scope_company_id(user, db)
+    ответ = Response(status_code=204)
+    ответ.set_cookie(
+        COOKIE, _выдать_сессию(user, station_id),
+        max_age=СЕССИЯ_МИНУТ * 60, httponly=True, samesite="lax", secure=True,
+        path=f"/api/store/station/{station_id}/console",
+    )
+    return ответ
+
+
 @router.api_route(
     "/{station_id}/console/{path:path}",
     methods=["GET", "POST", "PUT", "DELETE", "HEAD"],
@@ -68,21 +128,22 @@ async def station_console(
     station_id: int,
     path: str,
     request: Request,
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
 ) -> Response:
     """Прокси к рабочему месту станции."""
-    await scope_company_id(user, db)  # право на компанию проверяется здесь же
+    # Права проверены при выдаче сессии; здесь достаточно её подписи. Иначе
+    # каждая картинка и каждая форма станции требовали бы заголовка, которого у
+    # навигации в рамке нет.
+    автор = _имя_из_сессии(request, station_id)
+    if автор is None:
+        raise HTTPException(401, "сессия работы на станции не открыта или истекла")
     if not HUB_KEY:
         raise HTTPException(503, "не настроен ключ интеграции с хабом TradeLink")
 
-    # Имя человека едет на станцию: там оно станет автором документа. Фамилия
-    # понятнее адреса — в журнале станции его читает товаровед, а не админ.
-    автор = (user.name or user.email or "").strip()
-
     заголовки = {
         "X-Integration-Key": HUB_KEY,
-        "X-Ledger-User": автор,
+        # Фамилия едет процентным кодированием: заголовки HTTP — latin-1, а имя
+        # русское, и без этого прокси падает на первом же «Жукова».
+        "X-Ledger-User": quote(автор, safe=""),
     }
     if ct := request.headers.get("content-type"):
         заголовки["content-type"] = ct
