@@ -6,6 +6,7 @@
 Далее: ABC, маржа/GMROI (FIFO с поступлениями), остатки, инвентаризация.
 """
 import hashlib
+import httpx
 import json
 import math
 import uuid
@@ -22,7 +23,7 @@ from app.auth import check_module_access, get_current_user
 from app.database import get_db
 from app.deps import capture_company_header, scope_company_id
 from app.models import (
-    Company, EdgeAgent, EdgeDownlink, StoreAssortmentRule, StoreItemAlias, StoreReceipt,
+    Company, EdgeAgent, EdgeDownlink, MarkingIntegration, StoreAssortmentRule, StoreItemAlias, StoreReceipt,
     StoreRecipeVersion, StoreStockBalance,
     User, UserCompany,
 )
@@ -32,6 +33,7 @@ from app.services import recipe_versions
 from app.services.export_audit import log_export
 from app.services.edo_upd import parse_upd
 from app.services.goods_dashboard import GoodsDashboardService
+from app.services.onec.crypto import encrypt_password
 
 # Каталог выгрузки пакетов БП — ТОЛЬКО из окружения сервера (не из клиентского
 # Query — закрыта directory-injection: раньше любой аутентиф. пользователь мог
@@ -1102,6 +1104,129 @@ async def store_marking_codes(
             "limit": limit, "truncated": len(rows) >= limit}
 
 
+# Системы маркировки и их реквизиты. Схема живёт на сервере, а форма ввода
+# рисуется по ней: добавить систему — значит дописать сюда запись, а не
+# править экран. Поле с secret=True шифруется и наружу уходит только маской.
+MARKING_SYSTEMS: list[dict] = [
+    {
+        "key": "gismt", "name": "ГИС МТ (Честный ЗНАК)",
+        "gives": "Статус и история кода, остатки за участником, ввод и вывод из оборота, приёмка и отгрузка",
+        "needs": "УКЭП организации, договор с ЦРПТ, доступ к True API",
+        "limits": "Токен живёт ≤ 10 часов; 50 запросов в секунду; до 30 000 кодов и 30 МБ в документе",
+        "fields": [
+            {"key": "base_url", "label": "Адрес API", "type": "url", "required": True,
+             "default": "https://markirovka.crpt.ru/api/v3/true-api",
+             "help": "Боевой контур ЦРПТ. Для проверки интеграции есть песочница demo.crpt.tech."},
+            {"key": "inn", "label": "ИНН участника оборота", "type": "text", "required": True,
+             "help": "ИНН организации, от имени которой работаем в ГИС МТ."},
+            {"key": "product_groups", "label": "Товарные группы", "type": "text",
+             "placeholder": "tobacco, beer, water",
+             "help": "Группы, по которым оформлен доступ: у каждой свой набор методов."},
+            {"key": "cert_thumbprint", "label": "Отпечаток сертификата УКЭП", "type": "text",
+             "help": "Каким сертификатом подписываем запрос авторизации (auth/key → auth/simpleSignIn)."},
+            {"key": "sign_service_url", "label": "Сервис подписи", "type": "url",
+             "help": "Адрес крипто-сервиса, если подпись выполняется не на этом сервере "
+                     "(КриптоПро DSS, сервис оператора ЭДО). Пусто — подписываем локально."},
+            {"key": "token", "label": "Готовый токен (если выдан)", "type": "password", "secret": True,
+             "help": "Обычно не нужен: токен берётся по УКЭП и живёт 10 часов. Заполняется, "
+                     "только если доступ выдан статическим ключом."},
+        ],
+    },
+    {
+        "key": "edo", "name": "Оператор ЭДО",
+        "gives": "Входящие УПД с кодами маркировки от поставщика и подтверждение приёмки",
+        "needs": "Договор с оператором ЭДО либо ЭДО Лайт внутри ГИС МТ",
+        "limits": "УПД приходит XML 5.03; подпись — УКЭП организации",
+        "fields": [
+            {"key": "provider", "label": "Оператор", "type": "text",
+             "placeholder": "СБИС / Диадок / Такском / ЭДО Лайт"},
+            {"key": "base_url", "label": "Адрес API", "type": "url"},
+            {"key": "login", "label": "Логин", "type": "text"},
+            {"key": "password", "label": "Пароль", "type": "password", "secret": True},
+            {"key": "api_key", "label": "Ключ API", "type": "password", "secret": True},
+        ],
+    },
+    {
+        "key": "ofd", "name": "ОФД",
+        "gives": "Чеки с кодами маркировки: подтверждение выбытия продажей, которое мы не заявляем сами",
+        "needs": "Договор с ОФД и ключ к его API",
+        "limits": "Код есть только в электронном чеке, в печатном его нет",
+        "fields": [
+            {"key": "provider", "label": "Оператор", "type": "text",
+             "placeholder": "ОФД.ру / Платформа ОФД / Такском"},
+            {"key": "base_url", "label": "Адрес API", "type": "url",
+             "default": "https://ofd-api.ofd.ru"},
+            {"key": "inn", "label": "ИНН", "type": "text"},
+            {"key": "api_key", "label": "Ключ API", "type": "password", "secret": True},
+        ],
+    },
+    {
+        "key": "nk", "name": "Национальный каталог",
+        "gives": "Карточки товаров по GTIN: наименование, упаковка, признак маркируемости",
+        "needs": "Тот же доступ, что к ГИС МТ",
+        "limits": "Заполняет справочник, но не заменяет наш учёт",
+        "fields": [
+            {"key": "base_url", "label": "Адрес API", "type": "url",
+             "default": "https://апи.национальный-каталог.рф"},
+            {"key": "api_key", "label": "Ключ API", "type": "password", "secret": True},
+        ],
+    },
+    {
+        "key": "egais", "name": "ЕГАИС",
+        "gives": "Пиво и слабый алкоголь: приёмка ТТН и журнал розничных продаж",
+        "needs": "УТМ на станции и ключ РСА (JaCarta) в её кассовой машине",
+        "limits": "УТМ живёт на станции — центр обращается к нему через overlay",
+        "fields": [
+            {"key": "utm_url", "label": "Адрес УТМ", "type": "url",
+             "placeholder": "http://127.0.0.1:8080"},
+            {"key": "fsrar_id", "label": "FSRAR ID", "type": "text"},
+        ],
+    },
+    {
+        "key": "mercury", "name": "ФГИС «Меркурий» (ВетИС)",
+        "gives": "Ветеринарные документы на молочную продукцию",
+        "needs": "Учётная запись ВетИС и ключ API",
+        "limits": "Нужна только при появлении молочки в ассортименте",
+        "fields": [
+            {"key": "base_url", "label": "Адрес API", "type": "url"},
+            {"key": "issuer_id", "label": "Issuer ID", "type": "text"},
+            {"key": "login", "label": "Логин", "type": "text"},
+            {"key": "password", "label": "Пароль", "type": "password", "secret": True},
+            {"key": "api_key", "label": "Ключ API", "type": "password", "secret": True},
+        ],
+    },
+    {
+        "key": "local_module", "name": "Локальный модуль ЧЗ на станциях",
+        "gives": "Разрешение на продажу маркированного без интернета — требование ПП РФ №1944",
+        "needs": "Модуль установлен на кассовой машине; агент знает его адрес",
+        "limits": "База блокировок обновляется, когда у станции есть канал",
+        "fields": [
+            {"key": "default_url", "label": "Адрес модуля по умолчанию", "type": "url",
+             "placeholder": "http://127.0.0.1:5995/api/v1/status",
+             "help": "Справочное значение для настройки станций: агент берёт адрес из своего "
+                     "конфига (mark_module_url) — до localhost станции центр не дотянется."},
+        ],
+    },
+]
+
+MARKING_BY_KEY = {с["key"]: с for с in MARKING_SYSTEMS}
+
+
+class MarkingIntegrationIn(BaseModel):
+    enabled: bool | None = None
+    settings: dict = {}
+    # Пустая строка в секрете означает «не менять»: форма не знает значения и
+    # не должна его стирать простым сохранением. Явная очистка — clear_secrets.
+    secrets: dict = {}
+    clear_secrets: list[str] = []
+
+
+async def _интеграции(db: AsyncSession, cid: uuid.UUID) -> dict[str, MarkingIntegration]:
+    rows = (await db.execute(select(MarkingIntegration).where(
+        MarkingIntegration.company_id == cid))).scalars().all()
+    return {r.system: r for r in rows}
+
+
 @router.get("/marking/integrations")
 async def store_marking_integrations(
     user: User = Depends(get_current_user),
@@ -1109,14 +1234,12 @@ async def store_marking_integrations(
 ):
     """Чем мы подключены к внешним системам маркировки и что каждая даёт.
 
-    Экран честности: пока договора и УКЭП нет, ГИС МТ ничего нам не расскажет,
-    и все цифры раздела — наш собственный учёт. Локальный модуль на станции —
-    единственное подключение, которое обязано работать без интернета, и его
-    состояние приходит с телеметрией агента.
+    Экран честности: пока доступа нет, ГИС МТ ничего не расскажет, и цифры
+    раздела — наш собственный учёт. Реквизиты вводятся здесь же; секреты
+    возвращаются маской, расшифровка живёт только на сервере.
     """
     cid: uuid.UUID = await scope_company_id(user, db)
-    company = await db.get(Company, cid)
-    настройки = ((company.customization or {}).get("marking") or {}) if company else {}
+    сохранённые = await _интеграции(db, cid)
 
     agents = (await db.execute(
         select(EdgeAgent).where(EdgeAgent.company_id == cid).order_by(EdgeAgent.station_id)
@@ -1138,53 +1261,153 @@ async def store_marking_integrations(
             "url": м.get("url"),
         })
 
-    маркированных = (await db.execute(text("""
-        SELECT count(*) FROM edge.item WHERE marked = true
-    """))).scalar() or 0
+    маркированных = (await db.execute(text(
+        "SELECT count(*) FROM edge.item WHERE marked = true"))).scalar() or 0
 
-    системы = [
-        {
-            "key": "gismt", "name": "ГИС МТ (Честный ЗНАК)",
-            "connected": bool(настройки.get("gismt_connected")),
-            "gives": "Статус и история кода, остатки за участником, ввод и вывод из оборота, приёмка и отгрузка",
-            "needs": "УКЭП организации, договор с ЦРПТ, доступ к True API (auth/key → auth/simpleSignIn, токен ≤ 10 ч)",
-            "limits": "50 запросов в секунду, до 30 000 кодов и 30 МБ в документе",
-        },
-        {
-            "key": "local_module", "name": "Локальный модуль ЧЗ на станциях",
-            "connected": any(m["ok"] for m in модули),
-            "gives": "Разрешение на продажу маркированного без интернета — требование ПП РФ №1944 с 01.03.2025",
-            "needs": "Модуль установлен на кассовой машине, агент знает его адрес (mark_module_url)",
-            "limits": "База блокировок обновляется, когда у станции есть канал",
-        },
-        {
-            "key": "ofd", "name": "ОФД",
-            "connected": bool(настройки.get("ofd_connected")),
-            "gives": "Чеки с кодами маркировки: подтверждение выбытия продажей, которое мы сами не заявляем",
-            "needs": "Договор с ОФД и ключ к его API",
-            "limits": "Код есть только в электронном чеке, в печатном его нет",
-        },
-        {
-            "key": "nk", "name": "Национальный каталог",
-            "connected": bool(настройки.get("nk_connected")),
-            "gives": "Карточки товаров по GTIN: наименование, упаковка, признак маркируемости",
-            "needs": "Тот же доступ, что к ГИС МТ",
-            "limits": "Заполняет справочник, но не заменяет наш учёт",
-        },
-        {
-            "key": "egais", "name": "ЕГАИС и «Меркурий»",
-            "connected": False,
-            "gives": "Пиво и слабый алкоголь — ЕГАИС; молочная продукция — «Меркурий»",
-            "needs": "УТМ на станции (ЕГАИС) и учётная запись ВетИС",
-            "limits": "В ассортименте 208 таких групп нет — зона заложена, работа не ведётся",
-        },
-    ]
+    системы = []
+    for схема in MARKING_SYSTEMS:
+        строка = сохранённые.get(схема["key"])
+        значения = dict((строка.settings or {}) if строка else {})
+        секреты = (строка.secrets or {}) if строка else {}
+        поля = []
+        for f in схема["fields"]:
+            поле = dict(f)
+            if f.get("secret"):
+                # Наружу отдаём факт наличия и хвост, а не сам секрет.
+                поле["filled"] = bool(секреты.get(f["key"]))
+                поле["value"] = ""
+                поле["masked"] = "••••" if секреты.get(f["key"]) else ""
+            else:
+                поле["value"] = значения.get(f["key"], f.get("default", ""))
+            поля.append(поле)
+
+        подключено = bool(строка and строка.enabled)
+        if схема["key"] == "local_module":
+            # Тут «подключено» решает не форма, а станция: модуль либо
+            # отвечает кассе, либо нет, и настройка центра этого не меняет.
+            подключено = any(m["ok"] for m in модули)
+        системы.append({
+            "key": схема["key"], "name": схема["name"],
+            "gives": схема["gives"], "needs": схема["needs"], "limits": схема["limits"],
+            "connected": подключено,
+            "enabled": bool(строка and строка.enabled),
+            "fields": поля,
+            "last_check_at": строка.last_check_at if строка else None,
+            "last_check_ok": строка.last_check_ok if строка else None,
+            "last_check_note": строка.last_check_note if строка else None,
+            "updated_at": строка.updated_at if строка else None,
+        })
+
     return {
         "systems": системы,
         "modules": модули,
         "marked_skus": int(маркированных),
         "groups": MARK_GROUPS,
     }
+
+
+@router.put("/marking/integrations/{system}")
+async def store_marking_integration_save(
+    system: str,
+    body: MarkingIntegrationIn,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Сохранить реквизиты подключения.
+
+    Секреты шифруются Fernet тем же ключом, что пароли подключений к 1С.
+    Пустая строка в секретном поле означает «оставить как было»: форма не
+    знает текущего значения и не должна стирать ключ обычным сохранением.
+    """
+    cid: uuid.UUID = await scope_company_id(user, db)
+    схема = MARKING_BY_KEY.get(system)
+    if схема is None:
+        raise HTTPException(404, "Неизвестная система")
+    if not user.is_superadmin:
+        m = (await db.execute(select(UserCompany).where(
+            UserCompany.user_id == user.id, UserCompany.company_id == cid))).scalar_one_or_none()
+        if m is None or m.role != "admin":
+            raise HTTPException(403, "Реквизиты подключения вводит администратор компании")
+
+    строка = (await db.execute(select(MarkingIntegration).where(
+        MarkingIntegration.company_id == cid,
+        MarkingIntegration.system == system))).scalar_one_or_none()
+    if строка is None:
+        строка = MarkingIntegration(company_id=cid, system=system, settings={}, secrets={})
+        db.add(строка)
+
+    открытые = {f["key"] for f in схема["fields"] if not f.get("secret")}
+    секретные = {f["key"] for f in схема["fields"] if f.get("secret")}
+
+    настройки = dict(строка.settings or {})
+    for k, v in (body.settings or {}).items():
+        if k in открытые:
+            настройки[k] = ("" if v is None else str(v)).strip()
+    строка.settings = настройки
+
+    секреты = dict(строка.secrets or {})
+    for k, v in (body.secrets or {}).items():
+        if k not in секретные:
+            continue
+        значение = ("" if v is None else str(v)).strip()
+        if значение:
+            секреты[k] = encrypt_password(значение)
+    for k in body.clear_secrets or []:
+        секреты.pop(k, None)
+    строка.secrets = секреты
+
+    if body.enabled is not None:
+        строка.enabled = bool(body.enabled)
+    строка.updated_by = user.id
+    await db.commit()
+    return {"ok": True, "system": system, "enabled": строка.enabled}
+
+
+@router.post("/marking/integrations/{system}/check")
+async def store_marking_integration_check(
+    system: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Проверить, отвечает ли система по заданному адресу.
+
+    Это проверка связи, а не полномочий: без УКЭП ГИС МТ всё равно не пустит
+    дальше авторизации, и делать вид, что интеграция готова, нельзя. Ответ
+    сервера (пусть даже 401) доказывает ровно одно — адрес верный и канал есть.
+    """
+    cid: uuid.UUID = await scope_company_id(user, db)
+    схема = MARKING_BY_KEY.get(system)
+    if схема is None:
+        raise HTTPException(404, "Неизвестная система")
+
+    строка = (await db.execute(select(MarkingIntegration).where(
+        MarkingIntegration.company_id == cid,
+        MarkingIntegration.system == system))).scalar_one_or_none()
+    настройки = (строка.settings or {}) if строка else {}
+    адрес = (настройки.get("base_url") or настройки.get("utm_url")
+             or настройки.get("default_url") or "").strip()
+    if not адрес:
+        raise HTTPException(400, "Адрес системы не задан")
+
+    ok, заметка = False, ""
+    try:
+        async with httpx.AsyncClient(timeout=10, verify=True) as client:
+            r = await client.get(адрес)
+        ok = r.status_code < 500
+        заметка = f"HTTP {r.status_code}"
+        if r.status_code in (401, 403):
+            заметка += " — адрес отвечает, но доступ не оформлен"
+    except Exception as exc:  # noqa: BLE001
+        заметка = str(exc)[:400]
+
+    if строка is None:
+        строка = MarkingIntegration(company_id=cid, system=system, settings={}, secrets={})
+        db.add(строка)
+    строка.last_check_at = datetime.now(timezone.utc)
+    строка.last_check_ok = ok
+    строка.last_check_note = заметка[:500]
+    await db.commit()
+    return {"ok": ok, "note": заметка, "checked_at": строка.last_check_at}
 
 
 @router.get("/agent-versions")

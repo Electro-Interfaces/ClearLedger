@@ -93,6 +93,10 @@ class User(Base):
     last_seen_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Фотография человека (/api/files/<id>). Пространство — рабочее место, а не
+    # реестр: в списке участников и у сообщений должно быть лицо, а не буква в
+    # кружке. Генеративный кружок остаётся, пока фото не загружено.
+    avatar_url: Mapped[str | None] = mapped_column(String(300), nullable=True)
     # Человек живёт в своей почте и в пространство не заходит: сообщения чатов
     # уходят ему письмом, а ответ возвращается в ленту. Учётка нужна только чтобы
     # он был участником комнаты и автором сообщений — вход ею невозможен
@@ -4595,6 +4599,9 @@ class ChatParticipant(Base):
     # NULL — уведомления включены; 9999 год — навсегда.
     muted_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     is_muted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Чат закреплён вверху списка — настройка ЛИЧНАЯ (у каждого свои важные
+    # разговоры), поэтому живёт в участии, а не в комнате.
+    pinned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
@@ -5902,6 +5909,43 @@ class EdgeDownlink(Base):
 
     __table_args__ = (
         Index("ix_edge_downlink_pending", "company_id", "station_id", "acked_at"),
+    )
+
+
+class MarkingIntegration(Base):
+    """Подключение компании к внешней системе маркировки.
+
+    Реквизиты вводятся в интерфейсе, а не правкой окружения: доступ к ГИС МТ
+    оформляет бухгалтерия и юрист, а не тот, кто умеет перевыкатывать стек.
+
+    Секреты лежат отдельным полем и зашифрованы Fernet тем же ключом, что
+    пароли подключений к 1С: `settings` можно показывать и логировать,
+    `secrets` — никогда. Наружу секрет уходит только маской вида «••••1234»,
+    расшифровка живёт на сервере и нужна лишь в момент запроса к системе.
+    """
+    __tablename__ = "marking_integrations"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    # gismt | ofd | nk | egais | mercury | local_module
+    system: Mapped[str] = mapped_column(String(30), nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    settings: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    # Ключ поля → Fernet-токен. Отдельно от settings, чтобы дамп настроек
+    # физически не мог вынести секрет.
+    secrets: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    last_check_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_check_ok: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    last_check_note: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    updated_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("company_id", "system", name="uq_marking_integration"),
     )
 
 

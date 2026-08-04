@@ -1019,10 +1019,31 @@ export const getStoreMarkCodes = (opts?: {
 })
 
 /** Подключения к внешним системам маркировки и модуль ЧЗ на станциях. */
+export interface MarkingField {
+  key: string
+  label: string
+  type: 'text' | 'url' | 'password'
+  required?: boolean
+  secret?: boolean
+  help?: string
+  placeholder?: string
+  default?: string
+  /** Открытое значение (для несекретных полей). */
+  value?: string
+  /** Секрет заполнен — сервер отдаёт только этот признак и маску. */
+  filled?: boolean
+  masked?: string
+}
+
 export interface StoreMarkingIntegrations {
   systems: {
-    key: string; name: string; connected: boolean
+    key: string; name: string; connected: boolean; enabled: boolean
     gives: string; needs: string; limits: string
+    fields: MarkingField[]
+    last_check_at: string | null
+    last_check_ok: boolean | null
+    last_check_note: string | null
+    updated_at: string | null
   }[]
   modules: {
     station_id: number
@@ -1041,6 +1062,19 @@ export interface StoreMarkingIntegrations {
 
 export const getStoreMarkingIntegrations = () =>
   get<StoreMarkingIntegrations>('/api/store/marking/integrations')
+
+/** Сохранить реквизиты. Пустой секрет = «не менять»; очистка — clear_secrets. */
+export const saveStoreMarkingIntegration = (system: string, body: {
+  enabled?: boolean
+  settings?: Record<string, string>
+  secrets?: Record<string, string>
+  clear_secrets?: string[]
+}) => put<{ ok: boolean; system: string; enabled: boolean }>(
+  `/api/store/marking/integrations/${system}`, body)
+
+export const checkStoreMarkingIntegration = (system: string) =>
+  post<{ ok: boolean; note: string; checked_at: string }>(
+    `/api/store/marking/integrations/${system}/check`, {})
 
 /** Сколько занимает сырьё станций и что можно проредить. */
 export interface StoreStorageData {
