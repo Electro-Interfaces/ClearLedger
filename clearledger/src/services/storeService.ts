@@ -966,6 +966,8 @@ export interface StoreExchangeStationDetail {
   availability: {
     minutes_seen: number
     minutes_total: number
+    /** Доступность за период, %; null — следа телеметрии ещё нет. */
+    pct: number | null
     first_at: string | null
     last_at: string | null
     outage_minutes: number

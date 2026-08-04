@@ -539,7 +539,12 @@ async def store_exchange_station(
         # связь падала, а потому, что агента ещё не поставили.
         "availability": {
             "minutes_seen": int(доступность["minutes"] or 0) if доступность else 0,
-            "minutes_total": _minutes_since(доступность, d1, d2, now) if доступность else 0,
+            # Знаменатель не может быть меньше числителя: минуты heartbeat
+            # считаются по границам, и на коротком окне их выходит на одну
+            # больше, чем прошло целых минут.
+            "minutes_total": max(_minutes_since(доступность, d1, d2, now),
+                                 int(доступность["minutes"] or 0)) if доступность else 0,
+            "pct": _uptime_pct(доступность, d1, d2, now) if доступность else None,
             "first_at": доступность["first_at"] if доступность else None,
             "last_at": доступность["last_at"] if доступность else None,
             "outages": обрывы,

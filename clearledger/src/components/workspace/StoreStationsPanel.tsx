@@ -144,9 +144,7 @@ function StationExchangeDialog({ stationId, dateFrom, dateTo, onClose }: {
                 <div className="text-sm font-medium">
                   Доступность канала{' '}
                   <span className="tabular-nums">
-                    {data.availability.minutes_total > 0
-                      ? `${Math.round((data.availability.minutes_seen / data.availability.minutes_total) * 1000) / 10}%`
-                      : '—'}
+                    {data.availability.pct === null ? '—' : `${data.availability.pct}%`}
                   </span>
                 </div>
                 <div className="text-xs text-muted-foreground">
@@ -157,9 +155,7 @@ function StationExchangeDialog({ stationId, dateFrom, dateTo, onClose }: {
               </div>
               <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
                 <div className="h-full bg-emerald-500/70"
-                     style={{ width: `${data.availability.minutes_total > 0
-                       ? Math.min(100, (data.availability.minutes_seen / data.availability.minutes_total) * 100)
-                       : 0}%` }} />
+                     style={{ width: `${data.availability.pct ?? 0}%` }} />
               </div>
               <div className="mt-1 text-[10px] text-muted-foreground">
                 Считается по следу телеметрии от первого выхода станции на связь
