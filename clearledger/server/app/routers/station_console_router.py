@@ -53,6 +53,9 @@ HUB_KEY = os.environ.get("TRADELINK_INTEGRATION_KEY", "")
 # Поэтому вход в станцию открывается один раз — обменом токена на короткую
 # cookie-сессию, привязанную к конкретной АЗС.
 COOKIE = "station_console"
+# Час БЕЗДЕЙСТВИЯ, а не час работы: cookie продлевается на каждом запросе
+# (см. _поставить_cookie). Иначе приёмка на двести позиций упирается в
+# «сессия истекла» на середине, и введённое приходится набирать заново.
 СЕССИЯ_МИНУТ = 60
 
 
@@ -64,6 +67,21 @@ def _выдать_сессию(user: User, station_id: int) -> str:
         "exp": datetime.now(timezone.utc) + timedelta(minutes=СЕССИЯ_МИНУТ),
         "iat": datetime.now(timezone.utc),
         "typ": "station_console",
+    }
+    return jwt.encode(payload, get_settings().secret_key, algorithm=get_settings().algorithm)
+
+
+def _выдать_сессию_из_имени(name: str, station_id: int) -> str:
+    """Продление: тот же владелец и станция, новый срок.
+
+    Пользователя из базы не перечитываем — сессия уже подписана нами, и права
+    проверены при её выдаче. Ходить в базу на каждой картинке рабочего места
+    значило бы платить запросом за каждый килобайт.
+    """
+    payload = {
+        "sub": "", "station": station_id, "name": name,
+        "exp": datetime.now(timezone.utc) + timedelta(minutes=СЕССИЯ_МИНУТ),
+        "iat": datetime.now(timezone.utc), "typ": "station_console",
     }
     return jwt.encode(payload, get_settings().secret_key, algorithm=get_settings().algorithm)
 
@@ -84,6 +102,51 @@ def _имя_из_сессии(request: Request, station_id: int) -> str | None:
 
 def _префикс(station_id: int) -> str:
     return f"/api/store/station/{station_id}/console"
+
+
+def _поставить_cookie(ответ: Response, token: str, station_id: int) -> None:
+    ответ.set_cookie(
+        COOKIE, token, max_age=СЕССИЯ_МИНУТ * 60, httponly=True,
+        samesite="lax", secure=True, path=_префикс(station_id),
+    )
+
+
+# Страница вместо JSON, когда сессии нет.
+#
+# Рабочее место открыто отдельной вкладкой, и её жизнь длиннее часа: человек
+# уходит на склад, возвращается, жмёт «Провести» — и получает
+# {"detail":"сессия работы на станции не открыта или истекла"} без единого
+# способа что-то сделать. Тупик.
+#
+# Вкладка живёт на том же домене, что и «Магазин», значит токен приложения ей
+# доступен: страница сама открывает сессию заново и возвращает человека туда,
+# где он был. Если токена нет (зашли по ссылке из другого браузера) — честно
+# отправляем в центр, а не оставляем с JSON-ом.
+СТРАНИЦА_СЕССИИ = """<!doctype html><html lang="ru"><meta charset="utf-8">
+<title>Рабочее место АЗС {station}</title>
+<body style="font:16px/1.55 system-ui;max-width:640px;margin:70px auto;padding:0 20px;
+             background:#0f1115;color:#dfe3ea">
+<h2 style="font-size:20px">Сессия работы на АЗС {station} истекла</h2>
+<p id="что">Восстанавливаю вход…</p>
+<p><a id="назад" href="/" style="color:#6aa9ff">Вернуться в «Магазин»</a></p>
+<script>
+const token = localStorage.getItem('clearledger-token')
+const что = document.getElementById('что')
+if (!token) {{
+  что.textContent = 'Войдите в «Магазин» и откройте станцию кнопкой «Работать» — '
+    + 'эта вкладка открыта без входа в приложение.'
+}} else {{
+  fetch('/api/store/station/{station}/session', {{
+    method: 'POST', headers: {{ Authorization: 'Bearer ' + token }},
+  }}).then((r) => {{
+    if (!r.ok) throw new Error('код ' + r.status)
+    location.reload()
+  }}).catch((e) => {{
+    что.textContent = 'Не удалось восстановить вход: ' + e.message
+      + '. Откройте станцию заново из «Магазина».'
+  }})
+}}
+</script></body></html>"""
 
 
 def _переписать(html: str, prefix: str) -> str:
@@ -112,11 +175,7 @@ async def station_console_session(
     """
     await scope_company_id(user, db)
     ответ = Response(status_code=204)
-    ответ.set_cookie(
-        COOKIE, _выдать_сессию(user, station_id),
-        max_age=СЕССИЯ_МИНУТ * 60, httponly=True, samesite="lax", secure=True,
-        path=f"/api/store/station/{station_id}/console",
-    )
+    _поставить_cookie(ответ, _выдать_сессию(user, station_id), station_id)
     return ответ
 
 
@@ -135,6 +194,13 @@ async def station_console(
     # навигации в рамке нет.
     автор = _имя_из_сессии(request, station_id)
     if автор is None:
+        # Страницу отдаём людям, JSON — фоновым запросам самой станции: скрипт
+        # рабочего места должен получить понятный код, а не HTML в ответ.
+        if "text/html" in request.headers.get("accept", ""):
+            return Response(
+                content=СТРАНИЦА_СЕССИИ.format(station=station_id),
+                status_code=401, media_type="text/html; charset=utf-8",
+            )
         raise HTTPException(401, "сессия работы на станции не открыта или истекла")
     if not HUB_KEY:
         raise HTTPException(503, "не настроен ключ интеграции с хабом TradeLink")
@@ -173,14 +239,21 @@ async def station_console(
 
     тип = ответ.headers.get("content-type", "")
     if тип.startswith("text/html"):
-        return Response(
+        итог = Response(
             content=_переписать(ответ.text, prefix),
             status_code=ответ.status_code,
             headers=исходящие,
             media_type=тип,
         )
-    return Response(content=ответ.content, status_code=ответ.status_code,
-                    headers=исходящие, media_type=тип or None)
+    else:
+        итог = Response(content=ответ.content, status_code=ответ.status_code,
+                        headers=исходящие, media_type=тип or None)
+
+    # Сессия продлевается работой: час отсчитывается от последнего действия, а
+    # не от входа. Товаровед считает склад дольше часа, и обрывать его посреди
+    # инвентаризации значит терять пересчёт.
+    _поставить_cookie(итог, _выдать_сессию_из_имени(автор, station_id), station_id)
+    return итог
 
 
 @router.get("/{station_id}/state")
