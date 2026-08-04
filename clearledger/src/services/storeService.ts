@@ -985,6 +985,63 @@ export const getStoreExchangeStation = (stationId: number, dateFrom: string, dat
   get<StoreExchangeStationDetail>(
     `/api/store/exchange/${stationId}?date_from=${dateFrom}&date_to=${dateTo}`)
 
+/** Коды маркировки, которыми мы владеем: откуда пришёл каждый и куда ушёл. */
+export interface StoreMarkCode {
+  код: string
+  station_id: number | null
+  name: string | null
+  barcode: string | null
+  gtin: string | null
+  источник: string
+  status: 'в обороте' | 'выбыл'
+  received_at: string | null
+  receipt_doc: string | null
+  gone_at: string | null
+  gone_kind: string | null
+  gone_doc: string | null
+}
+
+export interface StoreMarkCodesData {
+  total: number
+  by_status: Record<string, number>
+  codes: StoreMarkCode[]
+  limit: number
+  truncated: boolean
+}
+
+export const getStoreMarkCodes = (opts?: {
+  stationId?: number | null; q?: string; status?: string; limit?: number
+}) => get<StoreMarkCodesData>('/api/store/marking/codes', {
+  station_id: opts?.stationId ?? undefined,
+  q: opts?.q || undefined,
+  status: opts?.status || undefined,
+  limit: opts?.limit ?? undefined,
+})
+
+/** Подключения к внешним системам маркировки и модуль ЧЗ на станциях. */
+export interface StoreMarkingIntegrations {
+  systems: {
+    key: string; name: string; connected: boolean
+    gives: string; needs: string; limits: string
+  }[]
+  modules: {
+    station_id: number
+    station_online: boolean
+    configured: boolean
+    ok: boolean
+    status: string | null
+    version: string | null
+    checked_at: string | null
+    error: string | null
+    url: string | null
+  }[]
+  marked_skus: number
+  groups: Record<string, string>
+}
+
+export const getStoreMarkingIntegrations = () =>
+  get<StoreMarkingIntegrations>('/api/store/marking/integrations')
+
 /** Сколько занимает сырьё станций и что можно проредить. */
 export interface StoreStorageData {
   total_bytes: number

@@ -42,6 +42,8 @@ import { StoreStationHealthPanel } from './StoreStationHealthPanel'
 import { StoreDownlinkPanel } from './StoreDownlinkPanel'
 import { StoreAgentVersionsPanel } from './StoreAgentVersionsPanel'
 import { StoreStoragePanel } from './StoreStoragePanel'
+import { StoreMarkCodesPanel } from './StoreMarkCodesPanel'
+import { StoreMarkingIntegrationsPanel } from './StoreMarkingIntegrationsPanel'
 import { StoreParityPanel } from './StoreParityPanel'
 import { StoreStationDraftsPanel } from './StoreStationDraftsPanel'
 import { StoreBarcodeCollisionsPanel } from './StoreBarcodeCollisionsPanel'
@@ -319,6 +321,20 @@ export function StorePanel() {
     return (
       <div className="h-full overflow-y-auto">
         <StoreStationsPanel dateFrom={period.from} dateTo={period.to} />
+      </div>
+    )
+  }
+  if (sub === 'mark_codes') {
+    return (
+      <div className="h-full overflow-y-auto">
+        <StoreMarkCodesPanel />
+      </div>
+    )
+  }
+  if (sub === 'perm_mode' || sub === 'gismt') {
+    return (
+      <div className="h-full overflow-y-auto">
+        <StoreMarkingIntegrationsPanel view={sub} />
       </div>
     )
   }

@@ -1006,6 +1006,187 @@ async def store_storage_cleanup(
     return итог
 
 
+# Товарные группы ИСМП, до которых нам есть дело сейчас или в обозримом
+# будущем: правила и сроки у них разные, поэтому группа — справочник, а не флаг.
+MARK_GROUPS = {
+    "tobacco": "Табак",
+    "nicotine": "Никотинсодержащая продукция",
+    "water": "Упакованная вода",
+    "beer": "Пиво и слабый алкоголь",
+    "milk": "Молочная продукция",
+    "other": "Прочее",
+}
+
+
+@router.get("/marking/codes")
+async def store_marking_codes(
+    station_id: int | None = Query(None, description="код АЗС; пусто — все"),
+    q: str | None = Query(None, description="поиск по коду, GTIN или товару"),
+    status: str | None = Query(None, description="в обороте | выбыл"),
+    limit: int = Query(300, ge=1, le=2000),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Коды маркировки, которыми мы владеем: откуда пришёл каждый и куда ушёл.
+
+    Наша сторона правды. Приход берётся из приёмок (сканы DataMatrix на
+    станции и коды из УПД), выбытие — из документов станции, где код указан:
+    списание, возврат поставщику, перемещение. Продажа сюда не попадает: её
+    закрывает касса через ОФД, и дублировать это выбытие нельзя.
+    """
+    cid: uuid.UUID = await scope_company_id(user, db)
+    p = {"cid": cid, "lim": limit}
+    where_station = ""
+    if station_id is not None:
+        where_station = " AND r.station_id = :st"
+        p["st"] = station_id
+
+    приход = f"""
+        SELECT DISTINCT ON (код)
+               код, r.station_id, r.doc_date AS at, r.number AS doc,
+               l->>'name' AS name, l->>'barcode' AS barcode,
+               CASE WHEN l->'mark_codes' ? код THEN 'скан' ELSE 'УПД' END AS источник
+        FROM store_receipts r,
+             LATERAL jsonb_array_elements(r.lines) l,
+             LATERAL jsonb_array_elements_text(
+                 coalesce(l->'mark_codes', '[]'::jsonb)
+                 || coalesce(l->'upd_codes', '[]'::jsonb)) AS код
+        WHERE r.company_id = :cid{where_station}
+        ORDER BY код, r.doc_date DESC
+    """
+
+    # Выбытие ищем в сыром пакете станции: документ списания несёт коды в тех
+    # же строках, и отдельного реестра для этого заводить не нужно.
+    выбытие = """
+        SELECT DISTINCT ON (код)
+               код, p.station_id, p.received_at AS at,
+               d->>'Тип' AS kind, d->>'Номер' AS doc
+        FROM edge_packets p,
+             LATERAL jsonb_array_elements(coalesce(p.payload->'Документы', '[]'::jsonb)) d,
+             LATERAL jsonb_array_elements(coalesce(d->'Товары', '[]'::jsonb)) t,
+             LATERAL jsonb_array_elements_text(
+                 coalesce(t->'КодыМаркировки', '[]'::jsonb)) AS код
+        WHERE p.company_id = :cid
+          AND d->>'Тип' IN ('writeoff', 'return_supplier', 'transfer', 'production_release')
+        ORDER BY код, p.received_at DESC
+    """
+
+    rows = [dict(r) for r in (await db.execute(text(f"""
+        WITH пришли AS ({приход}), ушли AS ({выбытие})
+        SELECT пришли.код, пришли.station_id, пришли.name, пришли.barcode,
+               пришли.at AS received_at, пришли.doc AS receipt_doc, пришли.источник,
+               ушли.at AS gone_at, ушли.kind AS gone_kind, ушли.doc AS gone_doc
+        FROM пришли LEFT JOIN ушли USING (код)
+        ORDER BY пришли.at DESC NULLS LAST
+        LIMIT :lim
+    """), p)).mappings().all()]
+
+    for r in rows:
+        r["status"] = "выбыл" if r["gone_at"] else "в обороте"
+        # GTIN лежит в самом коде: AI 01 — первые 16 символов «01» + 14 цифр.
+        код = r["код"] or ""
+        r["gtin"] = код[2:16] if код.startswith("01") and len(код) >= 16 else None
+    if status:
+        rows = [r for r in rows if r["status"] == status]
+    if q:
+        игла = q.strip().lower()
+        rows = [r for r in rows
+                if игла in (r["код"] or "").lower()
+                or игла in (r["name"] or "").lower()
+                or игла in (r["gtin"] or "")]
+
+    итог = {"в обороте": 0, "выбыл": 0}
+    for r in rows:
+        итог[r["status"]] += 1
+    return {"total": len(rows), "by_status": итог, "codes": rows,
+            "limit": limit, "truncated": len(rows) >= limit}
+
+
+@router.get("/marking/integrations")
+async def store_marking_integrations(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Чем мы подключены к внешним системам маркировки и что каждая даёт.
+
+    Экран честности: пока договора и УКЭП нет, ГИС МТ ничего нам не расскажет,
+    и все цифры раздела — наш собственный учёт. Локальный модуль на станции —
+    единственное подключение, которое обязано работать без интернета, и его
+    состояние приходит с телеметрией агента.
+    """
+    cid: uuid.UUID = await scope_company_id(user, db)
+    company = await db.get(Company, cid)
+    настройки = ((company.customization or {}).get("marking") or {}) if company else {}
+
+    agents = (await db.execute(
+        select(EdgeAgent).where(EdgeAgent.company_id == cid).order_by(EdgeAgent.station_id)
+    )).scalars().all()
+    now = datetime.now(timezone.utc)
+    модули = []
+    for a in agents:
+        м = ((a.payload or {}).get("mark_module") or {})
+        silence = int((now - a.last_seen).total_seconds()) if a.last_seen else None
+        модули.append({
+            "station_id": a.station_id,
+            "station_online": silence is not None and silence <= STATION_OFFLINE_AFTER,
+            "configured": bool(м),
+            "ok": bool(м.get("ok")),
+            "status": м.get("status"),
+            "version": м.get("version"),
+            "checked_at": м.get("checked_at"),
+            "error": м.get("error"),
+            "url": м.get("url"),
+        })
+
+    маркированных = (await db.execute(text("""
+        SELECT count(*) FROM edge.item WHERE marked = true
+    """))).scalar() or 0
+
+    системы = [
+        {
+            "key": "gismt", "name": "ГИС МТ (Честный ЗНАК)",
+            "connected": bool(настройки.get("gismt_connected")),
+            "gives": "Статус и история кода, остатки за участником, ввод и вывод из оборота, приёмка и отгрузка",
+            "needs": "УКЭП организации, договор с ЦРПТ, доступ к True API (auth/key → auth/simpleSignIn, токен ≤ 10 ч)",
+            "limits": "50 запросов в секунду, до 30 000 кодов и 30 МБ в документе",
+        },
+        {
+            "key": "local_module", "name": "Локальный модуль ЧЗ на станциях",
+            "connected": any(m["ok"] for m in модули),
+            "gives": "Разрешение на продажу маркированного без интернета — требование ПП РФ №1944 с 01.03.2025",
+            "needs": "Модуль установлен на кассовой машине, агент знает его адрес (mark_module_url)",
+            "limits": "База блокировок обновляется, когда у станции есть канал",
+        },
+        {
+            "key": "ofd", "name": "ОФД",
+            "connected": bool(настройки.get("ofd_connected")),
+            "gives": "Чеки с кодами маркировки: подтверждение выбытия продажей, которое мы сами не заявляем",
+            "needs": "Договор с ОФД и ключ к его API",
+            "limits": "Код есть только в электронном чеке, в печатном его нет",
+        },
+        {
+            "key": "nk", "name": "Национальный каталог",
+            "connected": bool(настройки.get("nk_connected")),
+            "gives": "Карточки товаров по GTIN: наименование, упаковка, признак маркируемости",
+            "needs": "Тот же доступ, что к ГИС МТ",
+            "limits": "Заполняет справочник, но не заменяет наш учёт",
+        },
+        {
+            "key": "egais", "name": "ЕГАИС и «Меркурий»",
+            "connected": False,
+            "gives": "Пиво и слабый алкоголь — ЕГАИС; молочная продукция — «Меркурий»",
+            "needs": "УТМ на станции (ЕГАИС) и учётная запись ВетИС",
+            "limits": "В ассортименте 208 таких групп нет — зона заложена, работа не ведётся",
+        },
+    ]
+    return {
+        "systems": системы,
+        "modules": модули,
+        "marked_skus": int(маркированных),
+        "groups": MARK_GROUPS,
+    }
+
+
 @router.get("/agent-versions")
 async def store_agent_versions(
     user: User = Depends(get_current_user),
