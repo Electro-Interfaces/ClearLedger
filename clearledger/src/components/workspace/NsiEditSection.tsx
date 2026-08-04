@@ -16,7 +16,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Pencil, Barcode, Wallet, AlertTriangle } from 'lucide-react'
 import {
   getNsiCard, saveNsiCard, setNsiPrice, addNsiBarcode, retireNsiBarcode,
-  NSI_VAT_CODES, type NsiCard,
+  getItemGroups, NSI_VAT_CODES, type NsiCard,
 } from '@/services/storeService'
 import { fmtMoney } from '@/services/analyticsService'
 
@@ -51,16 +51,53 @@ export function NsiEditSection({ guid, companyId, stationId = 208 }: {
     queryFn: () => getNsiCard(guid, stationId),
     retry: false,   // 404 «нет в мастере» — штатный ответ, а не сбой связи
   })
+  // Дерево групп общее на пространство и меняется редко — держим его дольше
+  // обычного, чтобы открытие каждой карточки не дёргало сервер.
+  const { data: groups } = useQuery({
+    queryKey: ['item-groups', companyId],
+    queryFn: getItemGroups,
+    staleTime: 5 * 60_000,
+  })
 
-  const [form, setForm] = useState<{ name: string; unit: string; vat_rate: string }>(
-    { name: '', unit: '', vat_rate: '' })
+  // Классификация и свойства правятся здесь же, а не отдельным экраном: товар
+  // один, и ходить за его группой в другое место — верный способ не заполнить
+  // её никогда.
+  const [form, setForm] = useState<{
+    name: string; unit: string; vat_rate: string; price_owner: 'master' | 'station'
+    group_id: number | null; sku_class: string; purpose: string
+    gtin: string; marked: boolean; mark_group: string; adult_only: boolean
+    mrc: string; shelf_life_days: string; storage_mode: string
+    brand: string; manufacturer: string; country: string
+    net_qty: string; net_unit: string; pack_qty: string
+    photo_url: string; composition: string; allergens: string; kcal: string
+  }>({
+    name: '', unit: '', vat_rate: '', price_owner: 'master',
+    group_id: null, sku_class: '', purpose: '',
+    gtin: '', marked: false, mark_group: '', adult_only: false,
+    mrc: '', shelf_life_days: '', storage_mode: '',
+    brand: '', manufacturer: '', country: '',
+    net_qty: '', net_unit: '', pack_qty: '',
+    photo_url: '', composition: '', allergens: '', kcal: '',
+  })
   const [price, setPrice] = useState('')
   const [newCode, setNewCode] = useState('')
   const [msg, setMsg] = useState<{ text: string; bad?: boolean } | null>(null)
 
   useEffect(() => {
     if (!data) return
-    setForm({ name: data.item.name, unit: data.item.unit, vat_rate: data.item.vat_rate })
+    const i = data.item
+    const s = (v: string | number | null | undefined) => (v == null ? '' : String(v))
+    setForm({
+      name: i.name, unit: i.unit, vat_rate: i.vat_rate, price_owner: i.price_owner,
+      group_id: i.group_id, sku_class: s(i.sku_class), purpose: s(i.purpose),
+      gtin: s(i.gtin), marked: !!i.marked, mark_group: s(i.mark_group),
+      adult_only: !!i.adult_only, mrc: s(i.mrc),
+      shelf_life_days: s(i.shelf_life_days), storage_mode: s(i.storage_mode),
+      brand: s(i.brand), manufacturer: s(i.manufacturer), country: s(i.country),
+      net_qty: s(i.net_qty), net_unit: s(i.net_unit), pack_qty: s(i.pack_qty),
+      photo_url: s(i.photo_url), composition: s(i.composition),
+      allergens: s(i.allergens), kcal: s(i.kcal),
+    })
     setPrice(data.prices.find((p) => p.valid_to == null)?.price?.toString() ?? '')
   }, [data])
 
@@ -70,8 +107,28 @@ export function NsiEditSection({ guid, companyId, stationId = 208 }: {
   }
   const failed = (e: unknown) => setMsg({ text: e instanceof Error ? e.message : String(e), bad: true })
 
+  // Пустая строка в форме означает «не заполнено», а PUT принимает только
+  // непустые поля: иначе очистка одного поля молча стирала бы остальные.
   const saveCard = useMutation({
-    mutationFn: () => saveNsiCard(guid, form),
+    mutationFn: () => {
+      const число = (v: string) => (v.trim() === '' ? undefined : Number(v.replace(',', '.')))
+      const строка = (v: string) => (v.trim() === '' ? undefined : v.trim())
+      return saveNsiCard(guid, {
+        name: form.name, unit: form.unit, vat_rate: form.vat_rate,
+        price_owner: form.price_owner,
+        group_id: form.group_id ?? undefined,
+        sku_class: строка(form.sku_class), purpose: строка(form.purpose),
+        gtin: строка(form.gtin), marked: form.marked,
+        mark_group: строка(form.mark_group), adult_only: form.adult_only,
+        mrc: число(form.mrc), shelf_life_days: число(form.shelf_life_days),
+        storage_mode: строка(form.storage_mode),
+        brand: строка(form.brand), manufacturer: строка(form.manufacturer),
+        country: строка(form.country), net_qty: число(form.net_qty),
+        net_unit: строка(form.net_unit), pack_qty: число(form.pack_qty),
+        photo_url: строка(form.photo_url), composition: строка(form.composition),
+        allergens: строка(form.allergens), kcal: число(form.kcal),
+      })
+    },
     onSuccess: () => done('Карточка сохранена.'), onError: failed,
   })
   const savePrice = useMutation({
@@ -99,7 +156,15 @@ export function NsiEditSection({ guid, companyId, stationId = 208 }: {
   }
 
   const it = data.item
-  const dirty = form.name !== it.name || form.unit !== it.unit || form.vat_rate !== it.vat_rate
+  // «Есть что сохранять» считаем по всем полям формы разом: перечислять их
+  // руками — гарантированно забыть одно, и кнопка останется серой на правке,
+  // которую человек уже сделал.
+  const s = (v: string | number | boolean | null | undefined) =>
+    v == null ? '' : typeof v === 'boolean' ? String(v) : String(v)
+  const dirty = Object.entries(form).some(([k, v]) => {
+    const было = (it as unknown as Record<string, unknown>)[k]
+    return s(v as string) !== s(было as string)
+  })
   const current = data.prices.find((p) => p.valid_to == null)
   const priceDirty = price !== (current?.price?.toString() ?? '')
   const active = data.barcodes.filter((b) => b.status === 'active')
@@ -135,6 +200,162 @@ export function NsiEditSection({ guid, companyId, stationId = 208 }: {
               {NSI_VAT_CODES.map((v) => <option key={v} value={v}>{v}</option>)}
             </select>
           </label>
+          <label className="block md:col-span-2">
+            <span className="text-[10px] uppercase tracking-wide text-muted-foreground/70">Кто задаёт цену</span>
+            <select value={form.price_owner}
+              onChange={(e) => setForm({ ...form, price_owner: e.target.value as 'master' | 'station' })}
+              className="mt-0.5 w-full text-sm px-2 py-1.5 rounded-md border border-border/50 bg-background">
+              <option value="master">Центр — единая цена сети</option>
+              <option value="station">Станция — локальная цена с журналом изменений</option>
+            </select>
+          </label>
+
+          {/* Классификация. Группу и класс скрипт расставляет сам, но его
+              решение — предложение: тронутая здесь карточка перестаёт быть
+              автоматической и следующим прогоном не откатывается. */}
+          <label className="block">
+            <span className="text-[10px] uppercase tracking-wide text-muted-foreground/70">Группа</span>
+            <select value={form.group_id ?? ''}
+              onChange={(e) => setForm({ ...form, group_id: e.target.value ? Number(e.target.value) : null })}
+              className="mt-0.5 w-full text-sm px-2 py-1.5 rounded-md border border-border/50 bg-background">
+              <option value="">— не выбрана</option>
+              {(groups?.groups ?? []).map((g) => (
+                <option key={g.id} value={g.id}>{g.path}</option>
+              ))}
+            </select>
+          </label>
+          <label className="block">
+            <span className="text-[10px] uppercase tracking-wide text-muted-foreground/70">Класс SKU</span>
+            <select value={form.sku_class} onChange={(e) => setForm({ ...form, sku_class: e.target.value })}
+              className="mt-0.5 w-full text-sm px-2 py-1.5 rounded-md border border-border/50 bg-background">
+              <option value="">— не задан</option>
+              <option value="Сопутка">Сопутка — продаётся на кассе</option>
+              <option value="Блюдо">Блюдо — готовится по ТТК</option>
+              <option value="Сырьё">Сырьё — списывается выпуском, не продаётся</option>
+              <option value="Архив">Архив — не в ассортименте</option>
+            </select>
+          </label>
+        </div>
+
+        {it.classified_by === 'auto' && (
+          <div className="mt-2 text-[11px] text-muted-foreground">
+            Группа и класс расставлены автоматически по названию и рецептурам — проверьте.
+          </div>
+        )}
+
+        {/* Регуляторика: за это штрафуют, поэтому отдельным блоком и выше
+            обогащения. Признаки едут на станцию и работают офлайн. */}
+        <div className="mt-3 rounded-md border border-border/50 p-3">
+          <div className="mb-2 text-[10px] uppercase tracking-wide text-muted-foreground/70">
+            Ограничения и маркировка
+          </div>
+          <div className="grid gap-3 md:grid-cols-3">
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={form.marked}
+                onChange={(e) => setForm({ ...form, marked: e.target.checked })} />
+              Маркируемый (ЧЗ)
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={form.adult_only}
+                onChange={(e) => setForm({ ...form, adult_only: e.target.checked })} />
+              18+
+            </label>
+            <label className="block">
+              <span className="text-[10px] uppercase tracking-wide text-muted-foreground/70">Группа ЧЗ</span>
+              <input value={form.mark_group} onChange={(e) => setForm({ ...form, mark_group: e.target.value })}
+                placeholder="Табачная продукция"
+                className="mt-0.5 w-full text-sm px-2 py-1.5 rounded-md border border-border/50 bg-background" />
+            </label>
+            <label className="block">
+              <span className="text-[10px] uppercase tracking-wide text-muted-foreground/70">GTIN</span>
+              <input value={form.gtin} onChange={(e) => setForm({ ...form, gtin: e.target.value })}
+                className="mt-0.5 w-full text-sm px-2 py-1.5 rounded-md border border-border/50 bg-background" />
+            </label>
+            <label className="block">
+              <span className="text-[10px] uppercase tracking-wide text-muted-foreground/70">МРЦ, ₽</span>
+              <input value={form.mrc} onChange={(e) => setForm({ ...form, mrc: e.target.value })}
+                className="mt-0.5 w-full text-sm px-2 py-1.5 rounded-md border border-border/50 bg-background" />
+            </label>
+            <label className="block">
+              <span className="text-[10px] uppercase tracking-wide text-muted-foreground/70">Срок годности, дней</span>
+              <input value={form.shelf_life_days}
+                onChange={(e) => setForm({ ...form, shelf_life_days: e.target.value })}
+                className="mt-0.5 w-full text-sm px-2 py-1.5 rounded-md border border-border/50 bg-background" />
+            </label>
+          </div>
+        </div>
+
+        {/* Обогащение: приезжает из ЧЗ, накладных ЭДО и от поставщика, но
+            подтверждает человек — чужая ошибка не должна молча стать нашим
+            составом продукта. */}
+        <div className="mt-3 rounded-md border border-border/50 p-3">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-[10px] uppercase tracking-wide text-muted-foreground/70">
+              Свойства товара
+            </span>
+            {it.enriched_from && (
+              <span className="text-[10px] text-muted-foreground">
+                обогащено: {it.enriched_from}
+                {it.enriched_at && ` · ${new Date(it.enriched_at).toLocaleDateString('ru-RU')}`}
+              </span>
+            )}
+          </div>
+          <div className="grid gap-3 md:grid-cols-3">
+            <label className="block">
+              <span className="text-[10px] uppercase tracking-wide text-muted-foreground/70">Бренд</span>
+              <input value={form.brand} onChange={(e) => setForm({ ...form, brand: e.target.value })}
+                className="mt-0.5 w-full text-sm px-2 py-1.5 rounded-md border border-border/50 bg-background" />
+            </label>
+            <label className="block">
+              <span className="text-[10px] uppercase tracking-wide text-muted-foreground/70">Производитель</span>
+              <input value={form.manufacturer}
+                onChange={(e) => setForm({ ...form, manufacturer: e.target.value })}
+                className="mt-0.5 w-full text-sm px-2 py-1.5 rounded-md border border-border/50 bg-background" />
+            </label>
+            <label className="block">
+              <span className="text-[10px] uppercase tracking-wide text-muted-foreground/70">Страна</span>
+              <input value={form.country} onChange={(e) => setForm({ ...form, country: e.target.value })}
+                className="mt-0.5 w-full text-sm px-2 py-1.5 rounded-md border border-border/50 bg-background" />
+            </label>
+            <label className="block">
+              <span className="text-[10px] uppercase tracking-wide text-muted-foreground/70">Нетто</span>
+              <input value={form.net_qty} onChange={(e) => setForm({ ...form, net_qty: e.target.value })}
+                placeholder="0,5"
+                className="mt-0.5 w-full text-sm px-2 py-1.5 rounded-md border border-border/50 bg-background" />
+            </label>
+            <label className="block">
+              <span className="text-[10px] uppercase tracking-wide text-muted-foreground/70">Ед. нетто</span>
+              <input value={form.net_unit} onChange={(e) => setForm({ ...form, net_unit: e.target.value })}
+                placeholder="л"
+                className="mt-0.5 w-full text-sm px-2 py-1.5 rounded-md border border-border/50 bg-background" />
+            </label>
+            <label className="block">
+              <span className="text-[10px] uppercase tracking-wide text-muted-foreground/70">В упаковке, шт</span>
+              <input value={form.pack_qty} onChange={(e) => setForm({ ...form, pack_qty: e.target.value })}
+                placeholder="12"
+                className="mt-0.5 w-full text-sm px-2 py-1.5 rounded-md border border-border/50 bg-background" />
+            </label>
+            <label className="block md:col-span-3">
+              <span className="text-[10px] uppercase tracking-wide text-muted-foreground/70">Ссылка на фото</span>
+              <input value={form.photo_url} onChange={(e) => setForm({ ...form, photo_url: e.target.value })}
+                className="mt-0.5 w-full text-sm px-2 py-1.5 rounded-md border border-border/50 bg-background" />
+            </label>
+            <label className="block md:col-span-2">
+              <span className="text-[10px] uppercase tracking-wide text-muted-foreground/70">Состав</span>
+              <textarea value={form.composition} rows={2}
+                onChange={(e) => setForm({ ...form, composition: e.target.value })}
+                className="mt-0.5 w-full text-sm px-2 py-1.5 rounded-md border border-border/50 bg-background" />
+            </label>
+            <label className="block">
+              <span className="text-[10px] uppercase tracking-wide text-muted-foreground/70">Аллергены</span>
+              <textarea value={form.allergens} rows={2}
+                onChange={(e) => setForm({ ...form, allergens: e.target.value })}
+                className="mt-0.5 w-full text-sm px-2 py-1.5 rounded-md border border-border/50 bg-background" />
+            </label>
+          </div>
+          {form.photo_url && (
+            <img src={form.photo_url} alt="" className="mt-2 h-24 rounded-md border border-border/50 object-contain" />
+          )}
         </div>
 
         {STALE_VAT.has(it.vat_rate) && (
@@ -159,13 +380,21 @@ export function NsiEditSection({ guid, companyId, stationId = 208 }: {
             <label className="flex-1">
               <span className="text-[10px] uppercase tracking-wide text-muted-foreground/70">Розничная цена</span>
               <input value={price} onChange={(e) => setPrice(e.target.value)} inputMode="decimal"
+                disabled={it.price_owner === 'station'}
                 className="mt-0.5 w-full text-sm px-2 py-1.5 rounded-md border border-border/50 bg-background tabular-nums" />
             </label>
-            <button disabled={!priceDirty || savePrice.isPending} onClick={() => savePrice.mutate()}
+            <button disabled={it.price_owner === 'station' || !priceDirty || savePrice.isPending}
+              onClick={() => savePrice.mutate()}
               className="text-xs px-3 py-1.5 rounded-md bg-primary text-primary-foreground disabled:opacity-40">
               Установить
             </button>
           </div>
+          {it.price_owner === 'station' && (
+            <p className="mt-2 text-[11px] text-muted-foreground">
+              Право на цену у станции. Изменение выполняется локально и возвращается
+              в центр с автором, причиной и историей.
+            </p>
+          )}
           {data.prices.length > 0 && (
             <table className="w-full text-xs mt-2.5">
               <tbody>
