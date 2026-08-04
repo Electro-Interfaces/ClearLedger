@@ -9,8 +9,8 @@
 считается агентом успехом. Это единственный корректный ответ на обрыв связи
 в момент ответа — иначе смена либо потеряется, либо задвоится.
 
-v0 — теневой режим: пакеты складываются сырьём и сверяются с данными 1С;
-документы из них не создаются.
+Сырой пакет остаётся неизменным L1, а бухгалтерские факты идемпотентно
+материализуются в канонические документы Ledger L2.
 """
 import gzip
 import logging
@@ -18,7 +18,7 @@ import zlib
 import json
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy import func, select
@@ -29,7 +29,7 @@ from app.database import get_db
 from app.models import Company, EdgeAgent, EdgeDownlink, EdgePacket, StoreReceipt
 
 log = logging.getLogger(__name__)
-from app.services import edge_nsi, edge_service
+from app.services import edge_nsi, edge_projection, edge_service, edge_stock, edge_transfers, recipe_versions
 
 router = APIRouter(prefix="/edge", tags=["Edge (агенты АЗС)"])
 
@@ -50,7 +50,7 @@ async def health(company: Company = Depends(get_company_by_api_key)):
 #
 # В переменной окружения, а не константой: номер версии меняется каждым
 # релизом агента, и пересобирать ради него образ backend — глупо.
-DESIRED_AGENT_VERSION = os.environ.get("EDGE_DESIRED_AGENT_VERSION", "0.55.0")
+DESIRED_AGENT_VERSION = os.environ.get("EDGE_DESIRED_AGENT_VERSION", "0.58.13")
 
 
 async def _ingest_receipts(db: AsyncSession, company_id, station_id: int,
@@ -68,10 +68,9 @@ async def _ingest_receipts(db: AsyncSession, company_id, station_id: int,
         source_uuid = doc.get("ИсточникUUID") or payload.get("ИдентификаторПакета")
         if not source_uuid:
             continue
-        exists = (await db.execute(select(StoreReceipt.id).where(
+        existing = (await db.execute(select(StoreReceipt).where(
+            StoreReceipt.company_id == company_id,
             StoreReceipt.source_uuid == source_uuid))).scalar_one_or_none()
-        if exists:
-            continue
 
         lines = []
         for item in doc.get("Товары") or []:
@@ -83,7 +82,16 @@ async def _ingest_receipts(db: AsyncSession, company_id, station_id: int,
                 "qty_fact": float(item.get("Количество") or 0),
                 "price": float(item.get("Цена") or 0),
                 "vat_rate": item.get("СтавкаНДС"),
+                "vat_amount": float(item.get("СуммаНДС") or 0),
                 "amount": float(item.get("Сумма") or 0),
+                "unit": item.get("Единица") or "",
+                "series": item.get("Серия") or None,
+                "expiry": item.get("ГоденДо") or None,
+                "mark_codes": item.get("КодыМаркировки") or [],
+                "retail_price": float(item.get("ЦенаРозничная") or 0),
+                "markup": float(item.get("ПроцентНаценки") or 0),
+                "pack_factor": float(item.get("КоэффициентУпаковки") or 0),
+                "purpose": item.get("МестоОприходования") or None,
                 # Станция не опознала штрихкод — карточку заводит центр.
                 "no_card": bool(item.get("КарточкаНеОпознана")),
             })
@@ -96,16 +104,67 @@ async def _ingest_receipts(db: AsyncSession, company_id, station_id: int,
         if parsed.tzinfo is None:
             parsed = parsed.replace(tzinfo=timezone.utc)
 
-        db.add(StoreReceipt(
-            company_id=company_id, station_id=station_id,
-            number=str(doc.get("Номер") or "")[:40] or "б/н",
-            doc_date=parsed,
-            supplier=(doc.get("Контрагент") or None),
-            incoming_number=(doc.get("НомерВходящегоДокумента") or None),
-            status="accepted", origin="station", lines=lines,
-            total_amount=float(doc.get("СуммаДокумента") or 0), vat_amount=0,
-            accepted_at=datetime.now(timezone.utc), source_uuid=str(source_uuid)[:64],
-        ))
+        mchd_until = None
+        try:
+            if doc.get("МЧДДействительнаДо"):
+                mchd_until = date.fromisoformat(str(doc["МЧДДействительнаДо"]))
+        except ValueError:
+            mchd_until = None
+        signed_at = None
+        try:
+            if doc.get("ДатаПодписания"):
+                signed_at = datetime.fromisoformat(str(doc["ДатаПодписания"]))
+        except ValueError:
+            signed_at = None
+
+        values = {
+            "station_id": station_id,
+            "number": str(doc.get("Номер") or "")[:40] or "б/н",
+            "doc_date": parsed,
+            "supplier": doc.get("Контрагент") or None,
+            "contract": doc.get("ДоговорКонтрагента") or None,
+            "incoming_number": doc.get("НомерВходящегоДокумента") or None,
+            "status": "accepted",
+            "origin": "station",
+            "delivery_scheme": doc.get("СхемаДоставки") or "supplier_to_station",
+            "receiving_warehouse": doc.get("СкладПриемки") or None,
+            "signing_mode": doc.get("СхемаПодписания") or "office_director",
+            "signer_name": doc.get("Подписант") or None,
+            "mchd_guid": doc.get("ИдентификаторМЧД") or None,
+            "mchd_registry": doc.get("РеестрМЧД") or None,
+            "mchd_valid_until": mchd_until,
+            "signature_status": doc.get("СтатусЭП") or "pending",
+            "signature_ref": doc.get("ИдентификаторЭП") or None,
+            "signed_at": signed_at,
+            "lines": lines,
+            "total_amount": float(doc.get("СуммаДокумента") or 0),
+            "vat_amount": round(sum(float(line.get("vat_amount") or 0) for line in lines), 2),
+            "accepted_at": datetime.now(timezone.utc),
+        }
+        if existing is None:
+            db.add(StoreReceipt(
+                company_id=company_id,
+                source_uuid=str(source_uuid)[:64],
+                **values,
+            ))
+        else:
+            for key, value in values.items():
+                setattr(existing, key, value)
+
+
+async def _sync_stock_packet(db: AsyncSession, company_id, station_id: int,
+                             payload: dict) -> dict:
+    """Сохранить остаток независимо от старой общей проекции каталога."""
+    stock = await edge_stock.sync_from_snapshot(db, company_id, station_id, payload)
+    await db.commit()
+    try:
+        catalog = await edge_nsi.sync_from_snapshot(db, station_id, payload)
+        await db.commit()
+        return {"stock": stock, "catalog": catalog}
+    except Exception as exc:  # noqa: BLE001
+        await db.rollback()
+        log.warning("станция %s: каталог снимка не синхронизирован: %s", station_id, exc)
+        return {"stock": stock, "catalog_error": str(exc)[:200]}
 
 
 @router.post("/heartbeat")
@@ -157,12 +216,27 @@ async def heartbeat(
             EdgeDownlink.station_id == station_id,
             EdgeDownlink.acked_at.is_(None)))).scalar() or 0
 
+    peers = (await db.execute(select(EdgeAgent).where(
+        EdgeAgent.company_id == company.id,
+        EdgeAgent.station_id != station_id,
+    ).order_by(EdgeAgent.station_id))).scalars().all()
+    stations = []
+    for peer in peers:
+        silence = (now - peer.last_seen).total_seconds() if peer.last_seen else None
+        details = peer.payload or {}
+        stations.append({
+            "station_id": peer.station_id,
+            "name": details.get("station_name") or f"АЗС {peer.station_id}",
+            "state": "онлайн" if silence is not None and silence <= 180 else "офлайн",
+        })
+
     return {
         "server_time": now.isoformat(),
         "desired_version": DESIRED_AGENT_VERSION,
         # Сколько заданий ждёт станцию: агент пойдёт за ними только если есть
         # что забирать — лишний запрос в минуту по LTE не нужен.
         "downlink_pending": int(pending),
+        "stations": stations,
         "update_required": bool(row.version and row.version != DESIRED_AGENT_VERSION),
     }
 
@@ -257,6 +331,16 @@ async def agents(
             "online": sum(1 for a in out if a["state"] == "онлайн"), "total": len(out)}
 
 
+async def _route_transfer_packet(
+    db: AsyncSession, company_id, station_id: int, payload: dict,
+) -> int:
+    try:
+        return await edge_transfers.route_transfer_tasks(
+            db, company_id, station_id, payload)
+    except edge_transfers.TransferRoutingError as exc:
+        raise HTTPException(422, f"Перемещение не маршрутизировано: {exc}") from exc
+
+
 @router.post("/packets", status_code=status.HTTP_201_CREATED)
 async def receive_packet(
     request: Request,
@@ -298,6 +382,7 @@ async def receive_packet(
         if not header_station or not header_station.isdigit():
             raise HTTPException(400, "Не определён код АЗС")
         station_id = int(header_station)
+    packet_kind = request.headers.get("X-Packet-Kind") or "shift"
 
     # Идемпотентность: повтор — не ошибка агента, а штатный исход обрыва связи.
     #
@@ -308,46 +393,81 @@ async def receive_packet(
     # значит навсегда оставить в мастере данные, о которых уже известно, что они
     # неверны — и никакая починка агента не долетит до сверки.
     existing = (await db.execute(
-        select(EdgePacket).where(EdgePacket.packet_uuid == packet_uuid)
+        select(EdgePacket).where(
+            EdgePacket.company_id == company.id,
+            EdgePacket.packet_uuid == packet_uuid,
+        )
     )).scalar_one_or_none()
     if existing is not None:
+        if existing.station_id != int(station_id):
+            raise HTTPException(status.HTTP_409_CONFLICT,
+                                "Пакет с таким идентификатором принадлежит другой станции")
+        packet_kind = request.headers.get("X-Packet-Kind") or existing.kind
         прежний = (existing.payload or {}).get("ХешПакета")
         новый = payload.get("ХешПакета")
         if not новый or новый == прежний:
+            if packet_kind == "station-recipes":
+                await recipe_versions.ingest_station_bundle(
+                    db, company.id, int(station_id),
+                    (existing.payload or {}).get("recipe_bundle") or {})
+            routed = 0
+            if packet_kind == "transfer":
+                routed = await _route_transfer_packet(
+                    db, company.id, int(station_id), existing.payload)
+            # Старые пакеты могли быть приняты ещё в теневом режиме. Повторная
+            # доставка безопасно достраивает L2 и лишь затем получает штатный 409.
+            await edge_projection.project_packet(
+                db, company.id, str(packet_uuid), int(station_id), existing.payload)
+            await db.commit()
             raise HTTPException(status.HTTP_409_CONFLICT, "Пакет уже принят ранее")
-        # Пакет мог прийти от другой компании или другой станции: UUID строится
-        # детерминированно из номера станции и смены, без тенанта, поэтому у
-        # двух сетей со станцией №208 он совпадает побайтно. Перезаписать чужой
-        # пакет — значит подменить компании учёт.
-        if existing.company_id != company.id or existing.station_id != int(station_id):
-            raise HTTPException(status.HTTP_409_CONFLICT,
-                                "Пакет с таким идентификатором принадлежит другой станции")
         existing.payload = payload
         existing.size_bytes = len(raw)
         existing.source = str(payload.get("Источник") or "") or existing.source
         existing.received_at = datetime.now(timezone.utc)
+        docs = payload.get("Документы") or []
+        routed = 0
+        if packet_kind == "transfer":
+            routed = await _route_transfer_packet(
+                db, company.id, int(station_id), payload)
+        projection = await edge_projection.project_packet(
+            db, company.id, str(packet_uuid), int(station_id), payload)
+        await _ingest_receipts(db, company.id, int(station_id), payload, docs)
         await db.commit()
-        # Синхронизацию НСИ раньше пропускали: возврат стоял до неё, и повторно
-        # присланный снимок не обновлял справочник никогда.
-        if (request.headers.get("X-Packet-Kind") or "") == "stock":
+        if packet_kind == "station-nsi":
             try:
-                nsi = await edge_nsi.sync_from_snapshot(db, int(station_id), payload)
+                await edge_nsi.ingest_station_nsi(db, company.id, int(station_id), docs)
             except Exception as exc:  # noqa: BLE001
+                await db.rollback()
+                log.warning("станция %s: черновики не приняты: %s", station_id, exc)
+        nsi = None
+        if packet_kind == "stock":
+            try:
+                nsi = await _sync_stock_packet(
+                    db, company.id, int(station_id), payload)
+            except Exception as exc:  # noqa: BLE001
+                await db.rollback()
                 nsi = {"error": str(exc)[:200]}
-            return {"ok": True, "перевыгрузка": True, "packet_uuid": packet_uuid, "nsi": nsi}
-        return {"ok": True, "перевыгрузка": True, "packet_uuid": packet_uuid}
+        if packet_kind == "station-recipes":
+            nsi = await recipe_versions.ingest_station_bundle(
+                db, company.id, int(station_id), payload.get("recipe_bundle") or {})
+        return {"ok": True, "перевыгрузка": True, "packet_uuid": packet_uuid,
+                "projection": projection, "nsi": nsi, "routed_transfers": routed}
 
     db.add(EdgePacket(
         company_id=company.id,
         packet_uuid=packet_uuid,
         station_id=int(station_id),
-        kind=request.headers.get("X-Packet-Kind") or "shift",
+        kind=packet_kind,
         shift_number=str(shift.get("НомерСмены") or "") or None,
         shift_internal_no=shift.get("НомерСменыВнутр"),
         payload=payload,
         size_bytes=len(raw),
         source=str(payload.get("Источник") or "") or None,
     ))
+    routed = 0
+    if packet_kind == "transfer":
+        routed = await _route_transfer_packet(
+            db, company.id, int(station_id), payload)
     await db.commit()
 
     docs = payload.get("Документы") or []
@@ -356,6 +476,9 @@ async def receive_packet(
     # центре. Иначе фактическое поступление осталось бы в пакетах, а товаровед
     # в «Магазине» его не увидел бы.
     await _ingest_receipts(db, company.id, int(station_id), payload, docs)
+    projection = await edge_projection.project_packet(
+        db, company.id, str(packet_uuid), int(station_id), payload)
+    await db.commit()
 
     # Снимок наполняет мастер-НСИ: справочника штрихкодов в 1С не существует
     # (ШК там — измерение регистра), поэтому поток снимков со станции остаётся
@@ -369,13 +492,21 @@ async def receive_packet(
         try:
             await edge_nsi.ingest_station_nsi(db, company.id, int(station_id), docs)
         except Exception as exc:  # noqa: BLE001
+            await db.rollback()
             log.warning("станция %s: черновики не приняты: %s", station_id, exc)
+
+    recipe_stats = None
+    if (request.headers.get("X-Packet-Kind") or "") == "station-recipes":
+        recipe_stats = await recipe_versions.ingest_station_bundle(
+            db, company.id, int(station_id), payload.get("recipe_bundle") or {})
 
     nsi_stats = None
     if (request.headers.get("X-Packet-Kind") or "") == "stock":
         try:
-            nsi_stats = await edge_nsi.sync_from_snapshot(db, int(station_id), payload)
+            nsi_stats = await _sync_stock_packet(
+                db, company.id, int(station_id), payload)
         except Exception as exc:  # noqa: BLE001
+            await db.rollback()
             nsi_stats = {"error": str(exc)[:200]}
 
     return {
@@ -384,8 +515,11 @@ async def receive_packet(
         "station_id": int(station_id),
         "shift": shift.get("НомерСмены"),
         "documents": len(docs),
+        "recipes": recipe_stats,
         "size_bytes": len(raw),
+        "projection": projection,
         "nsi": nsi_stats,
+        "routed_transfers": routed,
     }
 
 

@@ -10,8 +10,10 @@
  * обмен возможен», а не «идёт передача». Станция работает и офлайн — данные
  * копятся локально и уходят сами, когда связь вернётся.
  */
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { RadioTower, PackageOpen, GitCompareArrows } from 'lucide-react'
+import { RadioTower, PackageOpen, GitCompareArrows, ExternalLink, X } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import { getStoreStations, type StoreStation } from '@/services/storeService'
 import { useCompany } from '@/contexts/CompanyContext'
 
@@ -55,6 +57,9 @@ function Kpi({ icon: Icon, label, value, hint, alarm }: {
 
 export function StoreStationsPanel() {
   const { company } = useCompany()
+  // Открытая станция: рабочее место разворачивается на весь холст, а не в
+  // модалке — в нём работают, а не заглядывают.
+  const [openStation, setOpenStation] = useState<number | null>(null)
   const { data, isLoading, error } = useQuery({
     queryKey: ['store-stations', company.id],
     queryFn: getStoreStations,
@@ -90,7 +95,7 @@ export function StoreStationsPanel() {
 
       {stations.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border/50 p-6 text-sm text-muted-foreground">
-          Ни одна станция ещё не выходила на связь. Агент ставится на машину с 1С и сам
+          Ни одна станция ещё не выходила на связь. Агент ставится на рабочую станцию и сам
           начинает присылать телеметрию — отдельной настройки в центре не нужно.
         </div>
       ) : (
@@ -105,7 +110,9 @@ export function StoreStationsPanel() {
                 <th className="px-3 py-2 text-right">В очереди</th>
                 <th className="px-3 py-2 text-right">Отправлено</th>
                 <th className="px-3 py-2 text-right">Смена</th>
-                <th className="px-3 py-2 text-left">Учёт 1С</th>
+                <th className="px-3 py-2 text-left">Учёт агента</th>
+                <th className="px-3 py-2 text-left">Касса</th>
+                <th className="px-3 py-2 text-right">Рабочее место</th>
               </tr>
             </thead>
             <tbody>
@@ -130,10 +137,29 @@ export function StoreStationsPanel() {
                   <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">{s.queue_sent}</td>
                   <td className="px-3 py-2 text-right tabular-nums">{s.last_shift ?? '—'}</td>
                   <td className="px-3 py-2 text-muted-foreground">
-                    {s.onec_ok === false ? <span className="text-red-400/90">снимок не снят</span>
+                    {!s.ledger_stock_ok ? <span className="text-red-400/90">снимок не снят</span>
                       : s.snapshot_at ? new Date(s.snapshot_at).toLocaleString('ru-RU',
                           { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
                       : '—'}
+                  </td>
+                  <td className="px-3 py-2 text-right">
+                    {/* Работа на станции из центра: открываем не копию экранов,
+                        а сам агент — он и есть источник правды станции. Офлайн
+                        кнопка не жмётся: открывать нечего, канала нет. */}
+                    <Button size="sm" variant="outline" disabled={s.state !== 'онлайн'}
+                      title={s.state === 'онлайн'
+                        ? 'Открыть рабочее место станции: приёмка, инвентаризация, остатки'
+                        : 'Станция не на связи — рабочее место недоступно'}
+                      onClick={() => setOpenStation(s.station_id)}>
+                      <ExternalLink className="h-3.5 w-3.5 mr-1" />Открыть
+                    </Button>
+                  </td>
+                  <td className="px-3 py-2 text-muted-foreground">
+                    {!s.cash_policy ? 'политика не отправлена'
+                      : s.cash_policy.ready ? <span className="text-emerald-400/90">dry-run совпал</span>
+                      : <span className="text-amber-400/90">
+                          расхождений {s.cash_policy.missing + s.cash_policy.extra + s.cash_policy.price_diff + s.cash_policy.code_diff + s.cash_policy.skipped}
+                        </span>}
                   </td>
                 </tr>
               ))}
@@ -146,6 +172,36 @@ export function StoreStationsPanel() {
         Расхождение версий — не авария: обновление агента идёт по команде из центра, а не
         по факту расхождения, и только в рабочее окно с проверенным откатом.
       </p>
+
+      {/* Рабочее место станции внутри «Магазина». Показываем сам агент через
+          прокси мастера: это те же экраны, что видит товаровед на АЗС, и всё
+          введённое здесь ложится в документы станции именем вошедшего. */}
+      {openStation !== null && (
+        <div className="fixed inset-0 z-50 flex flex-col bg-background">
+          <div className="flex items-center justify-between gap-4 border-b border-border px-4 py-2">
+            <div className="text-sm">
+              <b>АЗС {openStation}</b>
+              <span className="text-muted-foreground ml-2">
+                рабочее место станции · вы работаете на ней из центра
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <a className="text-xs text-muted-foreground hover:text-foreground"
+                 href={`/api/store/station/${openStation}/console/`} target="_blank" rel="noreferrer">
+                открыть отдельной вкладкой
+              </a>
+              <Button size="sm" variant="outline" onClick={() => setOpenStation(null)}>
+                <X className="h-3.5 w-3.5 mr-1" />Закрыть
+              </Button>
+            </div>
+          </div>
+          <iframe
+            title={`Рабочее место АЗС ${openStation}`}
+            src={`/api/store/station/${openStation}/console/`}
+            className="flex-1 w-full border-0"
+          />
+        </div>
+      )}
     </div>
   )
 }
