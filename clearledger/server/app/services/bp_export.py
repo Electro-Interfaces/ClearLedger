@@ -1,15 +1,8 @@
-"""
-Эмиттер пакета «смена ЦБ→БП» (Фаза 2) — Ledger как продюсер пакетов вместо
-1С-обработки TL_ЭкспортБП. Собирает JSON-пакет строго по контракту
-STORE_BP_EXPORT_CONTRACT.md из наших данных (DataEntry.meta + CbNomenclature/
-CbRef/StockOnHand), считает ХешПакета через bp_canon.
+"""Ручной пакет Ledger → БП ГИГ по контракту STORE_BP_EXPORT_CONTRACT.md.
 
-СТАТУС: ядро продажного контура (Смена + retail_sale_sidegoods + Оплаты + НСИ).
-⚠ ПРОБЕЛЫ Фазы 1 (нужно добрать из ЦБ, помечено TODO-Ф1):
-  - НСИ Номенклатура.КодЦБ — не тянули Код (сейчас "" → приёмник мягко матчит по имени).
-  - НСИ Организация.ИНН/КПП/ОГРН — не тянули справочник организаций (известные — по карте ORG_REQ).
-  - НСИ Склад.ВидСклада — константа "АЗК" (не тянули).
-  - Типы purchase(B2B-поля)/production_release/return_purchase/gain/recipe — отдельно.
+Основной путь строится из канонических Edge-документов и мастер-НСИ. Старый
+oneC-путь сохранён как переходный fallback. Документы всегда непроведённые,
+идентификатор и хеш стабильны для неизменной версии фактов.
 """
 from __future__ import annotations
 
@@ -17,9 +10,11 @@ import json as _json
 import os as _os
 import re as _re
 import uuid as _uuid
-from datetime import datetime
+from copy import deepcopy
+from datetime import datetime, timezone
+from types import SimpleNamespace
 
-from sqlalchemy import select, func, or_
+from sqlalchemy import select, func, or_, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import DataEntry, CbNomenclature, StockOnHand, CbRef, CbInventoryDoc, CbMovementDoc
@@ -40,6 +35,11 @@ _NDS_MAP = {
 # Ставки, которые сопоставляет приёмник (TL_МаппингЦБ.СопоставитьСтавкуНДС). Всё, что
 # вне списка, роняет документ в поступлениях и возвратах поставщику.
 _BP_VAT_NAMES = frozenset(_NDS_MAP.values())
+_DOC_ORDER = {
+    "recipe": 0, "purchase": 1, "production_release": 2,
+    "retail_sale_sidegoods": 3, "return_purchase": 4, "inventory": 5,
+    "gain": 6, "writeoff": 7, "transfer": 8,
+}
 
 
 def _nds(v: str | None) -> str:
@@ -67,8 +67,36 @@ def _iso(v) -> str:
     return s.replace("+00:00", "+03:00")
 
 
-def _new_packet_uuid() -> str:
-    return str(_uuid.uuid4())
+def _timestamp(value) -> float | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.timestamp()
+
+
+def _stable_uuid(name: str) -> str:
+    return str(_uuid.uuid5(_uuid.NAMESPACE_URL, f"ledger.elsyplus.ru/{name}"))
+
+
+def _vat_from_gross(amount: float, rate: str) -> float:
+    match = _re.search(r"(22|20|18|10|7|5|0)", rate or "")
+    percent = float(match.group(1)) if match else 0.0
+    return round(amount * percent / (100 + percent), 2) if percent else 0.0
+
+
+def _document_sort_key(doc: dict) -> tuple[int, str, str, str]:
+    return (
+        _DOC_ORDER.get(str(doc.get("Тип") or ""), 99),
+        str(doc.get("Дата") or ""),
+        str(doc.get("ИсточникUUID") or ""),
+        str(doc.get("Номер") or ""),
+    )
 
 
 def package_filename(pkt: dict) -> str:
@@ -96,14 +124,416 @@ class BpPackageEmitter:
             CbRef.company_id == self.company_id, CbRef.kind == kind))).scalars().all()
         return {r.external_ref: r for r in rows}
 
+    async def _edge_nom_map(self) -> dict[str, SimpleNamespace]:
+        rows = (await self.session.execute(text("""
+            SELECT i.external_uuid, i.code_1c, i.name, i.name_full, i.unit,
+                   i.vat_rate, i.kind, i.sku_class, i.is_dish, i.deleted,
+                   coalesce(array_agg(b.code ORDER BY b.code)
+                            FILTER (WHERE b.status = 'active'), '{}') AS barcodes
+            FROM edge.item i
+            LEFT JOIN edge.barcode b ON b.item_id = i.id
+            GROUP BY i.id
+        """))).mappings().all()
+        return {str(row["external_uuid"]): SimpleNamespace(
+            external_ref=str(row["external_uuid"]), code=row["code_1c"],
+            name=row["name"], full_name=row["name_full"], article=None,
+            vat=row["vat_rate"], unit=row["unit"], kind=row["kind"],
+            sku_class=row["sku_class"], is_dish=row["is_dish"],
+            deleted=row["deleted"], barcodes=list(row["barcodes"] or []),
+        ) for row in rows}
+
+    async def _edge_partners(self) -> dict[str, dict]:
+        rows = (await self.session.execute(text("""
+            SELECT id, name, name_full, inn, kpp, role, archived
+            FROM edge.partner
+            WHERE company_id = :company_id
+        """), {"company_id": self.company_id})).mappings().all()
+        return {str(row["name"] or "").strip().casefold(): dict(row) for row in rows}
+
+    async def _build_edge_shift_package(self, target: DataEntry, shift_key: str) -> dict:
+        meta = target.meta or {}
+        sm = meta.get("Смена") or {}
+        nom = await self._edge_nom_map()
+        orgs = await self._refs("organization")
+        whs = await self._refs("warehouse")
+        partners = await self._edge_partners()
+        company_name = (await self.session.execute(text(
+            "SELECT name FROM companies WHERE id = :company_id"
+        ), {"company_id": self.company_id})).scalar_one_or_none() or ""
+        station_rows = (await self.session.execute(text(
+            "SELECT id, name, warehouse_uuid FROM edge.station"
+        ))).mappings().all()
+        station_wh = {int(row["id"]): str(row["warehouse_uuid"]) for row in station_rows}
+        warehouse_names = {str(row["warehouse_uuid"]): str(row["name"] or "") for row in station_rows}
+
+        org_uuid = str(sm.get("Организация") or "")
+        wh_uuid = str(sm.get("Склад") or "")
+        station = str(sm.get("КодАЗС") or "")
+        shift_day = _day(sm)
+        shift_open = _timestamp(sm.get("Открытие"))
+        shift_close = _timestamp(sm.get("Закрытие"))
+        if shift_open is not None and shift_close is not None and shift_open > shift_close:
+            shift_open, shift_close = shift_close, shift_open
+        target_internal = str(sm.get("НомерСменыВнутр") or "").strip()
+        target_number = str(sm.get("НомерСмены") or sm.get("ОСЭНомер") or "").strip()
+
+        try:
+            station_code = int(station)
+        except ValueError:
+            station_code = 0
+        shift = {
+            "КодАЗС": station_code,
+            "СкладUUID": wh_uuid,
+            "ОрганизацияUUID": org_uuid,
+            "НомерСмены": str(sm.get("НомерСмены") or sm.get("ОСЭНомер") or ""),
+            "НомерСменыВнутр": sm.get("НомерСменыВнутр") or 0,
+            "Открытие": _iso(sm.get("Открытие")),
+            "Закрытие": _iso(sm.get("Закрытие")),
+            "Оператор": str(sm.get("Оператор") or ""),
+            "Касса": str(sm.get("Касса") or ""),
+            "ОСЭНомер": str(sm.get("ОСЭНомер") or sm.get("НомерСмены") or ""),
+        }
+
+        nsi_nom: set[str] = set()
+        nsi_org = {org_uuid} if org_uuid else set()
+        nsi_wh = {wh_uuid} if wh_uuid else set()
+        partner_nsi: dict[str, dict] = {}
+
+        def item_line(line: dict, number: int, with_vat: bool = True) -> dict:
+            result = deepcopy(line)
+            item_uuid = str(result.get("Номенклатура") or "")
+            if item_uuid:
+                nsi_nom.add(item_uuid)
+            card = nom.get(item_uuid)
+            result["НомерСтроки"] = result.get("НомерСтроки") or number
+            result["Единица"] = result.get("Единица") or (card.unit if card else "")
+            if with_vat:
+                result["СтавкаНДС"] = _nds(result.get("СтавкаНДС")) or _nds(card.vat if card else "")
+                if "СуммаНДС" not in result:
+                    result["СуммаНДС"] = _vat_from_gross(
+                        float(result.get("Сумма") or 0), result["СтавкаНДС"])
+            return result
+
+        def partner_uuid(value: str) -> str:
+            name = str(value or "").strip()
+            if not name:
+                return ""
+            try:
+                _uuid.UUID(name)
+                return name
+            except ValueError:
+                pass
+            row = partners.get(name.casefold())
+            uid = _stable_uuid(f"edge-partner/{self.company_id}/{row['id'] if row else name.casefold()}")
+            partner_nsi[uid] = {
+                "name": row["name"] if row else name,
+                "full_name": (row.get("name_full") if row else None) or (row["name"] if row else name),
+                "inn": (row.get("inn") if row else None) or "",
+                "kpp": (row.get("kpp") if row else None) or "",
+                "archived": bool(row.get("archived")) if row else False,
+            }
+            return uid
+
+        sec = meta.get("Секции") or {}
+        retail_lines: list[dict] = []
+        dishes: set[str] = set()
+        inline_recipes: dict[str, list[dict]] = {}
+        for key, sku_class in (("продажа_сопутка", "Сопутка"),
+                               ("продажа_общепит", "Общепит")):
+            for line in (sec.get(key) or {}).get("строки") or []:
+                result = item_line(line, len(retail_lines) + 1)
+                result["КлассSKU"] = sku_class
+                if sku_class == "Общепит":
+                    result["ЭтоБлюдо"] = True
+                    # Блюдо сначала выпускается по ТТК, затем продаётся как
+                    # сопутствующий товар. Льготные ставки ингредиентов на
+                    # продажу готового блюда не переносятся.
+                    result["СтавкаНДС"] = "НДС22"
+                    result["СуммаНДС"] = _vat_from_gross(
+                        float(result.get("Сумма") or 0), "НДС22")
+                    dish_uuid = str(result.get("Номенклатура") or "")
+                    if dish_uuid:
+                        dishes.add(dish_uuid)
+                        inline_recipes[dish_uuid] = result.pop("Ингредиенты", []) or []
+                retail_lines.append(result)
+        returned = [item_line(line, index) for index, line in enumerate(
+            (sec.get("возвраты") or {}).get("строки") or [], 1)]
+        payments = []
+        for payment in (sec.get("оплаты") or {}).get("строки") or []:
+            kind = str(payment.get("ВидОплаты") or payment.get("ФормаОплатыКанон")
+                       or payment.get("ФормаОплаты") or "")
+            payments.append({"ВидОплаты": kind, "Сумма": round(float(payment.get("Сумма") or 0), 2)})
+        source_doc = meta.get("Документ") or {}
+        retail = {
+            "Тип": "retail_sale_sidegoods",
+            "ИсточникUUID": str(source_doc.get("ИсточникUUID") or sm.get("Смена") or ""),
+            "Номер": str(source_doc.get("Номер") or shift["НомерСмены"]),
+            "Дата": _iso(source_doc.get("Дата") or sm.get("Закрытие")),
+            "Проведен": False,
+            "ПометкаУдаления": bool(source_doc.get("ПометкаУдаления", False)),
+            "Организация": str(source_doc.get("Организация") or org_uuid),
+            "Склад": str(source_doc.get("Склад") or wh_uuid),
+            "Подразделение": "",
+            "СуммаДокумента": round(float(source_doc.get("СуммаДокумента") or 0), 2),
+            "ВалютаДокумента": "RUB", "СуммаВключаетНДС": True,
+            "Товары": retail_lines, "ВозвращенныеТовары": returned,
+            "СуммаНДС": round(sum(float(line.get("СуммаНДС") or 0) for line in retail_lines)
+                                      - sum(float(line.get("СуммаНДС") or 0) for line in returned), 2),
+            "Оплаты": payments,
+        }
+        if retail["Организация"]:
+            nsi_org.add(retail["Организация"])
+        if retail["Склад"]:
+            nsi_wh.add(retail["Склад"])
+
+        entries = (await self.session.execute(select(DataEntry).where(
+            DataEntry.company_id == self.company_id,
+            DataEntry.source == "edge",
+        ))).scalars().all()
+
+        def in_shift(entry: DataEntry) -> bool:
+            entry_shift = (entry.meta or {}).get("Смена") or {}
+            if str(entry_shift.get("КодАЗС") or "") != station:
+                return False
+            entry_internal = str(entry_shift.get("НомерСменыВнутр") or "").strip()
+            if target_internal and entry_internal:
+                return target_internal == entry_internal
+            entry_number = str(entry_shift.get("НомерСмены")
+                               or entry_shift.get("ОСЭНомер") or "").strip()
+            if entry.doc_type_id in {"production_release", "recipe"} \
+                    and target_number and entry_number:
+                return target_number == entry_number
+            doc = (entry.meta or {}).get("Документ") or {}
+            moment = _timestamp(doc.get("Дата") or entry_shift.get("Открытие"))
+            if moment is None or shift_open is None:
+                return bool(shift_day) and _day(entry_shift) == shift_day
+            if shift_close is None or shift_close <= shift_open:
+                return moment == shift_open
+            # Полуинтервал не относит документ ровно на границе сразу к двум
+            # соседним сменам. Выпуск связывается выше по номеру смены.
+            return shift_open <= moment < shift_close
+
+        related = [entry for entry in entries if in_shift(entry) and entry.id != target.id]
+        unsupported = sorted({entry.doc_type_id for entry in related
+                              if entry.doc_type_id in {"return_sale", "ingredients_writeoff"}})
+        if unsupported:
+            raise ValueError("Пакет БП не собран: приёмник пока не поддерживает " + ", ".join(unsupported))
+
+        purchases: list[dict] = []
+        productions: list[dict] = []
+        returns: list[dict] = []
+        inventories: list[dict] = []
+        gains: list[dict] = []
+        writeoffs: list[dict] = []
+        transfers: list[dict] = []
+        seen: set[tuple[str, str]] = set()
+        code2guid = {str((ref.extra or {}).get("code") or ""): uid for uid, ref in whs.items()}
+        for entry in related:
+            kind = str(entry.doc_type_id or "")
+            if kind in {"recipe", "retail_sale_sidegoods"}:
+                continue
+            doc = deepcopy((entry.meta or {}).get("Документ") or {})
+            source_uuid = str(doc.get("ИсточникUUID") or entry.source_id or "")
+            dedup = (kind, source_uuid)
+            if dedup in seen or doc.get("ПометкаУдаления"):
+                continue
+            seen.add(dedup)
+            doc["Тип"] = kind
+            doc["ИсточникUUID"] = source_uuid
+            doc["Дата"] = _iso(doc.get("Дата"))
+            doc["Проведен"] = False
+            doc["Организация"] = str(doc.get("Организация") or org_uuid)
+            if doc["Организация"]:
+                nsi_org.add(doc["Организация"])
+            if kind != "transfer":
+                doc["Склад"] = str(doc.get("Склад") or wh_uuid)
+                nsi_wh.add(doc["Склад"])
+            if kind == "production_release":
+                releases = []
+                for index, line in enumerate(doc.get("ВыпускБлюд") or [], 1):
+                    item_uuid = str(line.get("Номенклатура") or "")
+                    if item_uuid:
+                        nsi_nom.add(item_uuid)
+                    releases.append({
+                        **line,
+                        "НомерСтроки": line.get("НомерСтроки") or index,
+                        "Идентификатор": str(line.get("Идентификатор") or f"dish-{index}"),
+                        "Номенклатура": item_uuid,
+                        "Единица": line.get("Единица") or (nom[item_uuid].unit if nom.get(item_uuid) else "шт"),
+                        "Количество": float(line.get("Количество") or 0),
+                        "Цена": float(line.get("Цена") or 0),
+                        "Сумма": round(float(line.get("Сумма") or 0), 2),
+                    })
+                ingredients = []
+                for index, line in enumerate(doc.get("Ингредиенты") or [], 1):
+                    item_uuid = str(line.get("Номенклатура") or "")
+                    if item_uuid:
+                        nsi_nom.add(item_uuid)
+                    ingredients.append({
+                        **line,
+                        "НомерСтроки": line.get("НомерСтроки") or index,
+                        "ИдентификаторПродукция": str(line.get("ИдентификаторПродукция") or ""),
+                        "Номенклатура": item_uuid,
+                        "Единица": line.get("Единица") or (nom[item_uuid].unit if nom.get(item_uuid) else ""),
+                        "Количество": float(line.get("Количество") or 0),
+                    })
+                doc["ВыпускБлюд"] = releases
+                doc["Ингредиенты"] = ingredients
+                doc["ВалютаДокумента"] = str(doc.get("ВалютаДокумента") or "RUB")
+                doc["СуммаДокумента"] = round(float(doc.get("СуммаДокумента") or 0), 2)
+                productions.append(doc)
+                continue
+            doc["Товары"] = [item_line(line, index, kind not in {"inventory", "writeoff", "transfer"})
+                              for index, line in enumerate(doc.get("Товары") or [], 1)]
+            if kind == "purchase":
+                doc["Контрагент"] = partner_uuid(doc.get("Контрагент"))
+                for index, service in enumerate(doc.get("Услуги") or [], 1):
+                    service["НомерСтроки"] = service.get("НомерСтроки") or index
+                    service["СтавкаНДС"] = _nds(service.get("СтавкаНДС"))
+                    if "СуммаНДС" not in service:
+                        service["СуммаНДС"] = _vat_from_gross(
+                            float(service.get("Сумма") or 0), service["СтавкаНДС"])
+                purchases.append(doc)
+            elif kind == "return_purchase":
+                doc["Контрагент"] = partner_uuid(doc.get("Контрагент"))
+                returns.append(doc)
+            elif kind == "inventory":
+                for line in doc["Товары"]:
+                    price = float(line.get("Цена") or 0)
+                    line["Сумма"] = round(float(line.get("Количество") or 0) * price, 2)
+                    line["СуммаУчет"] = round(float(line.get("КоличествоУчет") or 0) * price, 2)
+                inventories.append(doc)
+            elif kind == "gain":
+                gains.append(doc)
+            elif kind == "writeoff":
+                writeoffs.append(doc)
+            elif kind == "transfer":
+                direction = str(doc.get("Направление") or "")
+                from_uuid = code2guid.get(str(doc.get("МестоОтправитель") or ""), "")
+                to_uuid = code2guid.get(str(doc.get("МестоПолучатель") or ""), "")
+                if direction == "out":
+                    from_uuid = from_uuid or wh_uuid
+                    to_uuid = to_uuid or station_wh.get(int(doc.get("КодАЗСПолучателя") or 0), "")
+                elif direction == "in":
+                    to_uuid = to_uuid or wh_uuid
+                doc["СкладОтправитель"] = from_uuid
+                doc["СкладПолучатель"] = to_uuid
+                if not from_uuid or not to_uuid:
+                    raise ValueError(f"Перемещение {doc.get('Номер') or source_uuid}: не определены оба склада БП")
+                nsi_wh.update({from_uuid, to_uuid})
+                transfers.append(doc)
+
+        # Рецепт берём из того же контекста смены, что и выпуск. Глобальная
+        # «последняя карта блюда» делает повторный экспорт старой смены
+        # недостоверным после изменения ТТК.
+        recipe_entries = [entry for entry in related if entry.doc_type_id == "recipe"]
+        recipe_by_dish = {}
+        for entry in recipe_entries:
+            doc = (entry.meta or {}).get("Документ") or {}
+            dish_uuid = str(doc.get("БлюдоUUID") or "")
+            if dish_uuid:
+                recipe_by_dish[dish_uuid] = doc
+        recipes = []
+        for dish_uuid in sorted(dishes):
+            source_recipe = recipe_by_dish.get(dish_uuid) or {}
+            ingredients = source_recipe.get("Ингредиенты") or inline_recipes.get(dish_uuid) or []
+            output_ingredients = []
+            for ingredient in ingredients:
+                ingredient_uuid = str(ingredient.get("НоменклатураUUID") or ingredient.get("Номенклатура") or "")
+                if not ingredient_uuid:
+                    continue
+                nsi_nom.add(ingredient_uuid)
+                output_ingredients.append({
+                    "НоменклатураUUID": ingredient_uuid,
+                    "Количество": float(ingredient.get("Количество") or 0),
+                    "Единица": ingredient.get("Единица") or (nom[ingredient_uuid].unit if nom.get(ingredient_uuid) else ""),
+                })
+            recipes.append({
+                "Тип": "recipe",
+                "ИсточникUUID": str(source_recipe.get("ИсточникUUID") or _stable_uuid(f"edge-recipe/{dish_uuid}")),
+                "БлюдоUUID": dish_uuid,
+                "БлюдоНаименование": str(source_recipe.get("БлюдоНаименование") or (nom[dish_uuid].name if nom.get(dish_uuid) else "")),
+                "ВидРецептуры": source_recipe.get("ВидРецептуры") or "dish",
+                "ВерсияТТК": int(source_recipe.get("ВерсияТТК") or 0),
+                "ВерсияНабораТТК": str(source_recipe.get("ВерсияНабораТТК") or ""),
+                "Выход": float(source_recipe.get("Выход") or 1),
+                "ЕдиницаВыхода": str(source_recipe.get("ЕдиницаВыхода") or "шт"),
+                "Ингредиенты": output_ingredients,
+            })
+
+        released_dishes = {
+            str(line.get("Номенклатура") or "")
+            for production in productions
+            for line in (production.get("ВыпускБлюд") or [])
+            if line.get("Номенклатура")
+        }
+        missing_release = sorted(dishes - released_dishes)
+        if missing_release:
+            raise ValueError(
+                "Пакет БП не собран: для проданных блюд нет выпуска этой смены: "
+                + ", ".join(missing_release[:5])
+            )
+
+        documents = [*recipes, *purchases, retail, *productions, *returns, *inventories, *gains, *writeoffs, *transfers]
+        documents.sort(key=_document_sort_key)
+        for doc in documents:
+            if doc.get("Тип") != "recipe":
+                doc["Проведен"] = False
+
+        def clean(value) -> str:
+            return str(value or "").strip()
+
+        nsi = []
+        for uid in sorted(nsi_org):
+            ref = orgs.get(uid)
+            extra = (ref.extra or {}) if ref else {}
+            nsi.append({"Тип": "Организация", "ИсточникUUID": uid,
+                        "Наименование": clean(ref.name if ref else company_name),
+                        "НаименованиеПолное": clean(extra.get("full_name")) or clean(ref.name if ref else company_name),
+                        "ИНН": clean(extra.get("inn")), "КПП": clean(extra.get("kpp")),
+                        "ОГРН": clean(extra.get("ogrn")), "ОКПО": clean(extra.get("okpo")),
+                        "ЮрФизЛицо": clean(extra.get("jur_fiz")) or "ЮрЛицо", "ПометкаУдаления": False})
+        for uid in sorted(nsi_wh):
+            ref = whs.get(uid)
+            extra = (ref.extra or {}) if ref else {}
+            nsi.append({"Тип": "Склад", "ИсточникUUID": uid,
+                        "Наименование": clean(ref.name if ref else warehouse_names.get(uid)) or f"АЗС {station}",
+                        "Код": clean(extra.get("code")), "ВидСклада": clean(extra.get("kind_name")) or "АЗК",
+                        "ПометкаУдаления": False})
+        for uid, row in sorted(partner_nsi.items()):
+            nsi.append({"Тип": "Контрагент", "ИсточникUUID": uid,
+                        "Наименование": clean(row["name"]), "НаименованиеПолное": clean(row["full_name"]),
+                        "ИНН": clean(row["inn"]), "КПП": clean(row["kpp"]), "ВидКонтрагента": "ЮрЛицо",
+                        "ПометкаУдаления": row["archived"]})
+        for uid in sorted(nsi_nom):
+            card = nom.get(uid)
+            sku_class = clean(card.sku_class if card else "") or ("Общепит" if card and card.is_dish else "Сопутка")
+            nsi.append({"Тип": "Номенклатура", "ИсточникUUID": uid,
+                        "КодЦБ": clean(card.code if card else ""), "Наименование": clean(card.name if card else ""),
+                        "НаименованиеПолное": clean(card.full_name if card else "") or clean(card.name if card else ""),
+                        "Артикул": clean(card.article if card else ""), "СтавкаНДС": _nds(card.vat if card else ""),
+                        "Единица": clean(card.unit if card else ""), "ВидНоменклатуры": clean(card.kind if card else ""),
+                        "КлассSKU": sku_class, "ЭтоБлюдо": bool(card.is_dish) if card else uid in dishes,
+                        "ШтрихКоды": list(card.barcodes if card else []), "ПометкаУдаления": bool(card.deleted) if card else False})
+
+        packet = {
+            "ВерсияФормата": "2",
+            "ВремяВыгрузки": shift["Закрытие"] or shift["Открытие"],
+            "ИдентификаторПакета": _stable_uuid(f"bp-package/{self.company_id}/edge/{target.source_id or shift_key}"),
+            "Источник": "Ledger Edge → Ledger",
+            "Смена": shift, "Документы": documents, "НСИ": nsi, "ХешПакета": "",
+        }
+        packet["ХешПакета"] = packet_hash(packet)
+        return packet
+
     async def build_shift_package(self, shift_key: str) -> dict:
         """Собрать пакет для одной смены (retail_sale + НСИ). shift_key = GUID смены."""
         # найти retail-запись смены
         rows = (await self.session.execute(select(DataEntry).where(
-            DataEntry.company_id == self.company_id, DataEntry.source == "oneC",
+            DataEntry.company_id == self.company_id, DataEntry.source.in_(("edge", "oneC")),
             DataEntry.doc_type_id == "retail_sale_sidegoods"))).scalars().all()
         target = None
-        for r in rows:
+        for r in sorted(rows, key=lambda row: row.source != "edge"):
             sm = (r.meta or {}).get("Смена") or {}
             k = str(sm.get("Смена") or f"{_day(sm)}|{sm.get('КодАЗС') or '—'}")
             if k == shift_key:
@@ -111,6 +541,8 @@ class BpPackageEmitter:
                 break
         if target is None:
             raise ValueError(f"смена не найдена: {shift_key}")
+        if target.source == "edge":
+            return await self._build_edge_shift_package(target, shift_key)
 
         meta = target.meta or {}
         sm = meta.get("Смена") or {}
@@ -547,11 +979,24 @@ class BpPackageEmitter:
             recipe_entries = (await self.session.execute(select(DataEntry).where(
                 DataEntry.company_id == self.company_id, DataEntry.source == "oneC",
                 DataEntry.doc_type_id == "recipe"))).scalars().all()
+            # У блюда бывает несколько ТТК-записей: ЦБ присылал их разными заходами, и
+            # часть приехала без `ИсточникUUID`. Приёмник на пустом ключе документ
+            # ОТБРАСЫВАЕТ (`ОбработатьРецепт`: «пустой ИсточникUUID» → ЗаписатьОшибкуНСИ),
+            # спецификация не создаётся, Комплектация не собирается, и блюдо уходит в
+            # ОРП товаром без себестоимости — 41.02 по нему в минус.
+            #
+            # Поэтому из дублей берём ту, у которой ключ есть; при прочих равных —
+            # свежую. Раньше побеждала просто последняя в выборке, и на боевых данных
+            # 484 ТТК из 511 уезжали с пустым ключом.
             recipe_by_dish: dict[str, dict] = {}
             for re_ in recipe_entries:
                 rd = (re_.meta or {}).get("Документ") or {}
                 bu = str(rd.get("БлюдоUUID") or "")
-                if bu:
+                if not bu:
+                    continue
+                prev = recipe_by_dish.get(bu)
+                if prev is None or (not str(prev.get("ИсточникUUID") or "").strip()
+                                    and str(rd.get("ИсточникUUID") or "").strip()):
                     recipe_by_dish[bu] = rd
             for du in sorted(dish_uuids):
                 rd = recipe_by_dish.get(du)
@@ -573,15 +1018,24 @@ class BpPackageEmitter:
                 nsi_nom.add(du)  # блюдо → в НСИ
                 recipes.append({
                     "Тип": "recipe",
-                    "ИсточникUUID": str(rd.get("ИсточникUUID") or "") if rd else f"inline:{du}",
+                    # Ключ обязателен: приёмник отбрасывает ТТК без него. Если в ЦБ
+                    # ключа не оказалось вовсе, ставим детерминированный `inline:<блюдо>` —
+                    # он стабилен между выгрузками, поэтому идемпотентность приёмника
+                    # сохраняется, а спецификация создаётся.
+                    "ИсточникUUID": (str(rd.get("ИсточникUUID") or "").strip() if rd else "")
+                                    or f"inline:{du}",
                     "БлюдоUUID": du,
                     "БлюдоНаименование": str((rd.get("БлюдоНаименование") if rd else None)
                                              or (nom[du].name if nom.get(du) else "")),
                     "Ингредиенты": ингредиенты,
                 })
 
-        # Порядок контракта: recipe → purchase → retail → production → return → inventory → gain → writeoff → transfer
+        # Сначала собираем блюдо по ТТК, затем продаём его как сопутку.
         документы = [*recipes, *purchases, retail, *productions, *returns, *inventories, *gains, *writeoffs, *transfers]
+        документы.sort(key=_document_sort_key)
+        for документ in документы:
+            if документ.get("Тип") != "recipe":
+                документ["Проведен"] = False
 
         # ── НСИ ──
         def _s(v) -> str:
@@ -637,8 +1091,9 @@ class BpPackageEmitter:
 
         пакет = {
             "ВерсияФормата": "2",
-            "ВремяВыгрузки": _iso(datetime.now().astimezone().isoformat(timespec="seconds")),
-            "ИдентификаторПакета": _new_packet_uuid(),
+            "ВремяВыгрузки": shift["Закрытие"] or shift["Открытие"],
+            "ИдентификаторПакета": _stable_uuid(
+                f"bp-package/{self.company_id}/oneC/{target.source_id or shift_key}"),
             "Источник": "TradeLedger (Ledger)",
             "Смена": shift,
             "Документы": документы,
@@ -651,6 +1106,10 @@ class BpPackageEmitter:
     async def emit_to_dir(self, shift_key: str, directory: str) -> dict:
         """Собрать пакет и записать JSON-файл в каталог (Ф3). Формат: UTF-8 без
         BOM, отступ таб (как ЗаписатьJSON приёмника). Возвращает сводку."""
+        verification = await self.verify_shift_package(shift_key)
+        if not verification["ok"]:
+            failed = [check["Проверка"] for check in verification["checks"] if not check["ok"]]
+            raise ValueError("Пакет не прошёл обязательную сверку: " + "; ".join(failed))
         пакет = await self.build_shift_package(shift_key)
         fname = package_filename(пакет)
         _os.makedirs(directory, exist_ok=True)
@@ -680,49 +1139,83 @@ class BpPackageEmitter:
         for n in нси:
             nsi_by_type.setdefault(n.get("Тип"), set()).add(n.get("ИсточникUUID"))
         nom_set = nsi_by_type.get("Номенклатура", set())
+        incomplete_nsi = [f"{n.get('Тип')}: {n.get('ИсточникUUID') or 'без UUID'}"
+                          for n in нси if not n.get("ИсточникUUID") or not str(n.get("Наименование") or "").strip()]
 
         h = pkt.get("ХешПакета") or ""
         add("Хеш пакета — 64 hex", len(h) == 64 and all(c in "0123456789abcdef" for c in h), (h[:12] + "…") if h else "нет")
         add("Версия формата = 2", pkt.get("ВерсияФормата") == "2", str(pkt.get("ВерсияФормата")))
         add("НСИ-инвариант: документы>0 → НСИ непуста", not (docs and not нси), f"документов={len(docs)} НСИ={len(нси)}")
+        add("НСИ: у каждой карточки заполнены UUID и наименование",
+            not incomplete_nsi, f"ошибок: {incomplete_nsi[:5]}")
+        posted = [f"{doc.get('Тип')} №{doc.get('Номер') or doc.get('ИсточникUUID')}"
+                  for doc in docs if doc.get("Тип") != "recipe" and doc.get("Проведен") is not False]
+        add("Все учётные документы передаются непроведёнными", not posted,
+            f"нарушения: {posted[:5]}")
 
-        ref_nom: set = set(); ref_org: set = set(); ref_wh: set = set()
+        ref_nom: set = set(); ref_org: set = set(); ref_wh: set = set(); ref_partner: set = set()
+        lines_without_nom: list[str] = []
         for d in docs:
             for t in (d.get("Товары") or []):
                 if t.get("Номенклатура"):
                     ref_nom.add(t["Номенклатура"])
+                else:
+                    lines_without_nom.append(f"{d.get('Тип')} №{d.get('Номер')}")
+            for t in (d.get("ВозвращенныеТовары") or []):
+                if t.get("Номенклатура"):
+                    ref_nom.add(t["Номенклатура"])
+                else:
+                    lines_without_nom.append(f"{d.get('Тип')} №{d.get('Номер')} / возврат")
             for ing in (d.get("Ингредиенты") or []):
-                if ing.get("НоменклатураUUID"):
-                    ref_nom.add(ing["НоменклатураUUID"])
+                ingredient_uuid = ing.get("НоменклатураUUID") or ing.get("Номенклатура")
+                if ingredient_uuid:
+                    ref_nom.add(ingredient_uuid)
+            for release in (d.get("ВыпускБлюд") or []):
+                if release.get("Номенклатура"):
+                    ref_nom.add(release["Номенклатура"])
             if d.get("БлюдоUUID"):
                 ref_nom.add(d["БлюдоUUID"])
             for k in ("Организация",):
                 if d.get(k):
                     ref_org.add(d[k])
+            if d.get("Контрагент"):
+                ref_partner.add(d["Контрагент"])
             for k in ("Склад", "СкладОтправитель", "СкладПолучатель"):
                 if d.get(k):
                     ref_wh.add(d[k])
         add("Номенклатура документов вся в НСИ", not (ref_nom - nom_set), f"нет в НСИ: {len(ref_nom - nom_set)}")
+        add("Во всех строках определена номенклатура", not lines_without_nom,
+            f"ошибок: {lines_without_nom[:5]}")
         add("Организации документов в НСИ", not (ref_org - nsi_by_type.get("Организация", set())), f"нет: {len(ref_org - nsi_by_type.get('Организация', set()))}")
         add("Склады документов в НСИ", not (ref_wh - nsi_by_type.get("Склад", set())), f"нет: {len(ref_wh - nsi_by_type.get('Склад', set()))}")
+        add("Контрагенты документов в НСИ", not (ref_partner - nsi_by_type.get("Контрагент", set())),
+            f"нет: {len(ref_partner - nsi_by_type.get('Контрагент', set()))}")
 
         retail = next((d for d in docs if d.get("Тип") == "retail_sale_sidegoods"), None)
         if retail:
             товары = retail.get("Товары") or []
+            возвраты = retail.get("ВозвращенныеТовары") or []
             s_d = float(retail.get("СуммаДокумента") or 0)
-            s_t = round(sum(float(t.get("Сумма") or 0) for t in товары), 2)
-            add("Розница: Σ строк = СуммаДокумента", abs(s_t - s_d) < 0.02, f"{s_t} ↔ {s_d}")
-            s_nds = round(sum(float(t.get("СуммаНДС") or 0) for t in товары), 2)
+            s_t = round(sum(float(t.get("Сумма") or 0) for t in товары)
+                        - sum(float(t.get("Сумма") or 0) for t in возвраты), 2)
+            add("Розница: Σ продаж − возвраты = СуммаДокумента", abs(s_t - s_d) < 0.02, f"{s_t} ↔ {s_d}")
+            s_nds = round(sum(float(t.get("СуммаНДС") or 0) for t in товары)
+                          - sum(float(t.get("СуммаНДС") or 0) for t in возвраты), 2)
             add("Розница: Σ СуммаНДС строк = СуммаНДС", abs(s_nds - float(retail.get("СуммаНДС") or 0)) < 0.02, f"{s_nds} ↔ {retail.get('СуммаНДС')}")
             s_p = round(sum(float(o.get("Сумма") or 0) for o in (retail.get("Оплаты") or [])), 2)
             add("Розница: Σ Оплаты = СуммаДокумента", abs(s_p - s_d) < 0.02, f"{s_p} ↔ {s_d}")
-            add("Розница: все ставки НДС распознаны", not [t for t in товары if not t.get("СтавкаНДС")], f"пустых: {len([t for t in товары if not t.get('СтавкаНДС')])}")
+            retail_bad_vat = [t.get("СтавкаНДС") or "пусто" for t in [*товары, *возвраты]
+                              if t.get("СтавкаНДС") not in _BP_VAT_NAMES]
+            add("Розница: все построчные ставки НДС приёмник сопоставит",
+                not retail_bad_vat, f"ошибок: {retail_bad_vat[:5]}")
 
         purch = [d for d in docs if d.get("Тип") == "purchase"]
         if purch:
             bad = [p.get("Номер") for p in purch
-                   if abs(round(sum(float(t.get("Сумма") or 0) for t in (p.get("Товары") or [])), 2) - float(p.get("СуммаДокумента") or 0)) >= 0.02]
-            add(f"Поступления ({len(purch)}): Σ строк = СуммаДокумента", not bad, f"расхождения: {bad}")
+                   if abs(round(sum(float(t.get("Сумма") or 0) for t in (p.get("Товары") or []))
+                                + sum(float(t.get("Сумма") or 0) for t in (p.get("Услуги") or [])), 2)
+                          - float(p.get("СуммаДокумента") or 0)) >= 0.02]
+            add(f"Поступления ({len(purch)}): Σ товаров и услуг = СуммаДокумента", not bad, f"расхождения: {bad}")
 
         recs = [d for d in docs if d.get("Тип") == "recipe"]
         if recs:
@@ -734,25 +1227,47 @@ class BpPackageEmitter:
         dishes_sold = {t.get("Номенклатура") for d in docs
                        if d.get("Тип") == "retail_sale_sidegoods"
                        for t in (d.get("Товары") or []) if t.get("ЭтоБлюдо") and t.get("Номенклатура")}
-        recipe_dishes = {r.get("БлюдоUUID") for r in recs}
+        # ТТК засчитывается только с непустым ключом: приёмник отбрасывает документ
+        # без `ИсточникUUID`, и «рецепт в пакете есть» тогда ничего не значит —
+        # спецификация не создастся, Комплектация не соберётся, блюдо уйдёт товаром.
+        # Раньше проверка смотрела только на наличие записи и считала такой пакет
+        # здоровым.
+        recipe_dishes = {r.get("БлюдоUUID") for r in recs
+                         if str(r.get("ИсточникUUID") or "").strip()}
+        keyless = [r.get("БлюдоНаименование") or r.get("БлюдоUUID")
+                   for r in recs if not str(r.get("ИсточникUUID") or "").strip()]
         missing = dishes_sold - recipe_dishes
         add(f"Все блюда смены ({len(dishes_sold)}) имеют ТТК в пакете",
             not missing, f"без рецепта: {len(missing)}" + (f" {list(missing)[:3]}" if missing else ""))
+        add("У каждой ТТК есть ключ ИсточникUUID",
+            not keyless, f"без ключа: {len(keyless)} {keyless[:3]}")
+        released_dishes = {line.get("Номенклатура") for d in docs
+                           if d.get("Тип") == "production_release"
+                           for line in (d.get("ВыпускБлюд") or []) if line.get("Номенклатура")}
+        missing_release = dishes_sold - released_dishes
+        add(f"Все блюда смены ({len(dishes_sold)}) выпущены до продажи",
+            not missing_release,
+            f"без выпуска: {len(missing_release)}"
+            + (f" {list(missing_release)[:3]}" if missing_release else ""))
 
-        empty_vat = [n.get("Наименование") for n in нси if n.get("Тип") == "Номенклатура" and not n.get("СтавкаНДС")]
-        add("НСИ: ставки НДС номенклатуры распознаны", not empty_vat, f"пустых: {len(empty_vat)}")
+        bad_nsi_vat = [f"{n.get('Наименование')}: {n.get('СтавкаНДС') or 'пусто'}"
+                       for n in нси if n.get("Тип") == "Номенклатура"
+                       and n.get("СтавкаНДС") not in _BP_VAT_NAMES]
+        add("НСИ: ставки НДС номенклатуры приёмник сопоставит",
+            not bad_nsi_vat, f"ошибок: {bad_nsi_vat[:5]}")
 
-        # Поступление и возврат поставщику приёмник роняет исключением на несопоставленной
-        # ставке (в розничных ветках она перекрывается форсом НДС22, поэтому там не важна).
-        # Ловим до выгрузки: иначе документ молча не доедет до бухгалтерии.
+        # Проверяем все документные ставки: общей подмены розницы на НДС22 больше нет.
         unmapped = [f"{d.get('Тип')} №{d.get('Номер')}: {t.get('СтавкаНДС') or 'пусто'}"
-                    for d in docs if d.get("Тип") in ("purchase", "return_purchase")
+                    for d in docs if d.get("Тип") in ("purchase", "return_purchase", "gain")
                     for t in (d.get("Товары") or []) if t.get("СтавкаНДС") not in _BP_VAT_NAMES]
-        add("Поступления и возвраты: ставки НДС приёмник сопоставит",
+        unmapped += [f"purchase №{d.get('Номер')} / услуга: {service.get('СтавкаНДС') or 'пусто'}"
+                     for d in docs if d.get("Тип") == "purchase"
+                     for service in (d.get("Услуги") or [])
+                     if service.get("СтавкаНДС") not in _BP_VAT_NAMES]
+        add("Поступления, возвраты, оприходования: ставки НДС приёмник сопоставит",
             not unmapped, f"строк: {len(unmapped)} {unmapped[:5]}")
 
-        # Приёмник (первая ветка, НЕ правим) принимает НДС18 МОЛЧА: purchase — в документ
-        # с ндс=0, retail — форс НДС22. Архаичную ставку ловим у себя ДО выгрузки.
+        # Архаичную ставку ловим у себя ДО выгрузки.
         _archaic = {"НДС18", "НДС18_118"}
         bad_vat = []
         for d in docs:
