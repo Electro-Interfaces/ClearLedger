@@ -5991,6 +5991,38 @@ class EdgeDownlink(Base):
     )
 
 
+class StoreDocMeta(Base):
+    """Реквизиты документа, которых нет в пакете станции: стороны и примечание.
+
+    Перемещение между станциями — не запись в журнале, а передача имущества:
+    один сдал, другой принял, и без двух фамилий документ не имеет смысла.
+    Агент сегодня передаёт только автора, поэтому ответственных дописывают в
+    центре — и они же уходят в печатную форму, которую подписывают.
+
+    Отдельная таблица, а не поля в пакете: сырьё станции неизменно по канону
+    проекта, дописывать в него центр не вправе.
+    """
+    __tablename__ = "store_doc_meta"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    doc_ref: Mapped[str] = mapped_column(String(120), nullable=False)
+    # Кто передал имущество и кто принял: фамилии, как в накладной.
+    responsible_from: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    responsible_to: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    note: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    updated_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("company_id", "doc_ref", name="uq_store_doc_meta"),
+    )
+
+
 class StoreDocFile(Base):
     """Образ первичного документа склада: скан накладной, УПД, акт, опись.
 

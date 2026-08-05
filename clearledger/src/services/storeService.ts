@@ -1041,6 +1041,12 @@ export const getStoreStationDocs = (opts: {
 
 /** Первичный документ станции целиком: шапка, стороны, строки. */
 export interface StoreStationDocFull {
+  /** Реквизиты организации для печатной формы. */
+  org?: { name: string; inn?: string | null }
+  /** Кто сдал и кто принял — дописывается в центре, если станция не прислала. */
+  responsible_from: string | null
+  responsible_to: string | null
+  meta_note: string | null
   packet_uuid: string
   index: number
   station_id: number
@@ -1085,6 +1091,11 @@ export interface StoreDocFile {
   uploaded_at: string
   url: string
 }
+
+export const saveStoreDocMeta = (docRef: string, body: {
+  responsible_from?: string | null; responsible_to?: string | null; note?: string | null
+}) => put<{ ok: boolean; doc_ref: string }>(
+  `/api/store/doc-meta?doc_ref=${encodeURIComponent(docRef)}`, body)
 
 export const getStoreDocFiles = (docRef: string) =>
   get<{ files: StoreDocFile[]; total: number }>('/api/store/doc-files', { doc_ref: docRef })

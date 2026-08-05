@@ -13,10 +13,12 @@
 import { useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Paperclip, Upload, Trash2, X, FileText } from 'lucide-react'
+import { Paperclip, Upload, Trash2, X, FileText, Printer, Save } from 'lucide-react'
 import {
   getStoreStationDoc, getStoreDocFiles, uploadStoreDocFile, deleteStoreDocFile,
+  saveStoreDocMeta,
 } from '@/services/storeService'
+import { printStationDoc } from './printStationDoc'
 import { fmtMoney } from '@/services/analyticsService'
 import { useCompany } from '@/contexts/CompanyContext'
 import { Button } from '@/components/ui/button'
@@ -53,6 +55,10 @@ export function StationDocModal({ packetUuid, index, onClose }: {
   const { company } = useCompany()
   const qc = useQueryClient()
   const [роль, задатьРоль] = useState(РОЛИ[0])
+  // Стороны документа правятся здесь: агент передаёт только автора, а
+  // перемещение между станциями без двух фамилий — просто запись в журнале.
+  const [сдал, задатьСдал] = useState<string | null>(null)
+  const [принял, задатьПринял] = useState<string | null>(null)
   const файл = useRef<HTMLInputElement>(null)
 
   const { data, isLoading } = useQuery({
@@ -64,6 +70,18 @@ export function StationDocModal({ packetUuid, index, onClose }: {
     queryKey: ['store-doc-files', company.id, docRef],
     queryFn: () => getStoreDocFiles(docRef as string),
     enabled: !!docRef,
+  })
+
+  const сохранитьСтороны = useMutation({
+    mutationFn: () => saveStoreDocMeta(docRef as string, {
+      responsible_from: сдал ?? data?.responsible_from ?? '',
+      responsible_to: принял ?? data?.responsible_to ?? '',
+    }),
+    onSuccess: () => {
+      toast.success('Стороны документа сохранены')
+      qc.invalidateQueries({ queryKey: ['store-station-doc'] })
+    },
+    onError: (e: Error) => toast.error('Не сохранилось', { description: e.message }),
   })
 
   const приложить = useMutation({
@@ -102,10 +120,21 @@ export function StationDocModal({ packetUuid, index, onClose }: {
               <div className="mt-0.5 text-[11px] text-muted-foreground">смена {data.shift_number}</div>
             )}
           </div>
-          <button onClick={onClose} aria-label="Закрыть"
-            className="rounded-md p-1 text-muted-foreground hover:bg-accent/30 hover:text-foreground">
-            <X className="h-4 w-4" />
-          </button>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="outline" disabled={!data}
+              onClick={() => data && printStationDoc({
+                ...data,
+                responsible_from: сдал ?? data.responsible_from,
+                responsible_to: принял ?? data.responsible_to,
+              })}
+              title="Печатная форма: акт или накладная с реквизитами и подписями">
+              <Printer className="mr-1 h-3.5 w-3.5" />Печать
+            </Button>
+            <button onClick={onClose} aria-label="Закрыть"
+              className="rounded-md p-1 text-muted-foreground hover:bg-accent/30 hover:text-foreground">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
         </div>
 
         {isLoading || !data ? (
@@ -172,6 +201,37 @@ export function StationDocModal({ packetUuid, index, onClose }: {
                   В документе нет строк — станция прислала только шапку.
                 </div>
               )}
+            </div>
+
+            <div className="rounded-lg border border-border/50 p-3">
+              <div className="mb-2 text-sm font-medium">Стороны документа</div>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <label className="text-xs">
+                  <div className="text-[11px] text-muted-foreground">Сдал / материально ответственный</div>
+                  <input value={сдал ?? data.responsible_from ?? ''}
+                    onChange={(e) => задатьСдал(e.target.value)}
+                    placeholder="фамилия и инициалы"
+                    className="mt-1 h-8 w-full rounded-md border border-border/60 bg-background/60 px-2.5 text-xs outline-none focus:border-primary/60" />
+                </label>
+                <label className="text-xs">
+                  <div className="text-[11px] text-muted-foreground">Принял</div>
+                  <input value={принял ?? data.responsible_to ?? ''}
+                    onChange={(e) => задатьПринял(e.target.value)}
+                    placeholder="фамилия и инициалы"
+                    className="mt-1 h-8 w-full rounded-md border border-border/60 bg-background/60 px-2.5 text-xs outline-none focus:border-primary/60" />
+                </label>
+                <div className="flex items-end">
+                  <Button size="sm" variant="outline" disabled={сохранитьСтороны.isPending}
+                    onClick={() => сохранитьСтороны.mutate()}>
+                    <Save className="mr-1 h-3.5 w-3.5" />Сохранить
+                  </Button>
+                </div>
+              </div>
+              <p className="mt-2 text-[10px] leading-relaxed text-muted-foreground">
+                Агент передаёт автора документа, но не материально ответственного. При передаче
+                имущества между станциями подписи двух сторон — не формальность: без них
+                непонятно, с кого спрашивать недостачу.
+              </p>
             </div>
 
             <div className="rounded-lg border border-border/50">

@@ -23,7 +23,7 @@ from app.auth import check_module_access, get_current_user
 from app.database import get_db
 from app.deps import capture_company_header, scope_company_id
 from app.models import (
-    Company, EdgeAgent, EdgeDownlink, EdgePacket, MarkingIntegration, StoreDocFile, StoreAssortmentRule, StoreItemAlias, StoreReceipt,
+    Company, EdgeAgent, EdgeDownlink, EdgePacket, MarkingIntegration, StoreDocFile, StoreDocMeta, StoreAssortmentRule, StoreItemAlias, StoreReceipt,
     StoreRecipeVersion, StoreStockBalance,
     User, UserCompany,
 )
@@ -1165,10 +1165,21 @@ async def store_station_doc(
             "marks": len(row.get("КодыМаркировки") or []),
         })
 
+    meta = (await db.execute(select(StoreDocMeta).where(
+        StoreDocMeta.company_id == cid,
+        StoreDocMeta.doc_ref == f"station:{packet_uuid}:{index}"))).scalar_one_or_none()
+    company = await db.get(Company, cid)
+
     return {
         "packet_uuid": packet_uuid,
         "index": index,
         "station_id": пакет.station_id,
+        # Реквизиты для печатной формы: без организации бумага не документ.
+        "org": {"name": company.name if company else "",
+                "inn": (company.customization or {}).get("inn") if company else None},
+        "responsible_from": meta.responsible_from if meta else None,
+        "responsible_to": meta.responsible_to if meta else None,
+        "meta_note": meta.note if meta else None,
         "kind": d.get("Тип"),
         "label": STATION_DOC_KINDS.get(d.get("Тип"), d.get("Тип")),
         "number": d.get("Номер"),
@@ -1189,6 +1200,45 @@ async def store_station_doc(
         "lines": строки,
         "doc_ref": f"station:{packet_uuid}:{index}",
     }
+
+
+class DocMetaIn(BaseModel):
+    responsible_from: str | None = None
+    responsible_to: str | None = None
+    note: str | None = None
+
+
+@router.put("/doc-meta")
+async def store_doc_meta_save(
+    doc_ref: str = Query(...),
+    body: DocMetaIn = Body(...),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Записать стороны документа: кто сдал имущество и кто принял.
+
+    Пишем в отдельную таблицу, а не в пакет: сырьё станции по канону проекта
+    неизменно, и дописывать в него центр не вправе — иначе через месяц никто не
+    скажет, что прислала станция, а что дорисовали в офисе.
+    """
+    cid: uuid.UUID = await scope_company_id(user, db)
+    row = (await db.execute(select(StoreDocMeta).where(
+        StoreDocMeta.company_id == cid,
+        StoreDocMeta.doc_ref == doc_ref))).scalar_one_or_none()
+    if row is None:
+        row = StoreDocMeta(company_id=cid, doc_ref=doc_ref)
+        db.add(row)
+    if body.responsible_from is not None:
+        row.responsible_from = body.responsible_from.strip() or None
+    if body.responsible_to is not None:
+        row.responsible_to = body.responsible_to.strip() or None
+    if body.note is not None:
+        row.note = body.note.strip() or None
+    row.updated_by = user.id
+    await db.commit()
+    return {"ok": True, "doc_ref": doc_ref,
+            "responsible_from": row.responsible_from,
+            "responsible_to": row.responsible_to, "note": row.note}
 
 
 class DocFileIn(BaseModel):
