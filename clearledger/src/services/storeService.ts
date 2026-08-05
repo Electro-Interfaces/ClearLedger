@@ -2,7 +2,7 @@
  * Клиент аналитики раздела «Магазин» (сопутка/общепит).
  * Пока — «Обзор магазина» (/api/store/overview → GoodsDashboardService).
  */
-import { get, put, post, upload } from './apiClient'
+import { get, put, post, upload, del } from './apiClient'
 
 export interface StoreCategory {
   category: string
@@ -1003,6 +1003,8 @@ export const getStoreExchangeStation = (stationId: number, dateFrom: string, dat
 /** Документы, заведённые на станции: то, что сделал агент, а не 1С. */
 export interface StoreStationDoc {
   station_id: number
+  /** Номер документа внутри пакета: по нему открывается карточка. */
+  doc_index: number
   kind: string
   label: string
   number: string | null
@@ -1036,6 +1038,71 @@ export const getStoreStationDocs = (opts: {
   date_to: opts.dateTo || undefined,
   limit: opts.limit ?? undefined,
 })
+
+/** Первичный документ станции целиком: шапка, стороны, строки. */
+export interface StoreStationDocFull {
+  packet_uuid: string
+  index: number
+  station_id: number
+  kind: string
+  label: string
+  number: string | null
+  doc_date: string | null
+  place_from: string | null
+  place_to: string | null
+  counterparty: string | null
+  contract: string | null
+  incoming_number: string | null
+  reason: string | null
+  author: string | null
+  responsible: string | null
+  basis: string | null
+  source_uuid: string | null
+  amount: number
+  shift_number: string | null
+  received_at: string
+  doc_ref: string
+  lines: {
+    name: string; barcode: string | null; qty: number
+    qty_expected: number | null; qty_book: number | null
+    price: number | null; amount: number | null
+    vat_rate: string | null; unit: string | null; marks: number
+  }[]
+}
+
+export const getStoreStationDoc = (packetUuid: string, index: number) =>
+  get<StoreStationDocFull>('/api/store/station-doc', { packet_uuid: packetUuid, index })
+
+/** Образы первичного документа: накладная, УПД, акт, опись, фото. */
+export interface StoreDocFile {
+  id: string
+  kind: string
+  file_id: string
+  file_name: string
+  mime: string | null
+  size_bytes: number
+  note: string | null
+  uploaded_at: string
+  url: string
+}
+
+export const getStoreDocFiles = (docRef: string) =>
+  get<{ files: StoreDocFile[]; total: number }>('/api/store/doc-files', { doc_ref: docRef })
+
+export const uploadStoreDocFile = ({ docRef, kind, stationId, file, note }: {
+  docRef: string; kind: string; stationId?: number | null; file: File; note?: string
+}) => {
+  const form = new FormData()
+  form.append('file', file)
+  const query = new URLSearchParams({ doc_ref: docRef, kind })
+  if (stationId != null) query.set('station_id', String(stationId))
+  if (note) query.set('note', note)
+  return upload<{ ok: boolean; id: string; file_id: string; url: string }>(
+    `/api/store/doc-files?${query.toString()}`, form)
+}
+
+export const deleteStoreDocFile = (id: string) =>
+  del<{ ok: boolean }>(`/api/store/doc-files/${id}`)
 
 /** Коды маркировки, которыми мы владеем: откуда пришёл каждый и куда ушёл. */
 export interface StoreMarkCode {

@@ -5991,6 +5991,46 @@ class EdgeDownlink(Base):
     )
 
 
+class StoreDocFile(Base):
+    """Образ первичного документа склада: скан накладной, УПД, акт, опись.
+
+    Учётная запись документа и его бумажное основание — разные вещи. Приёмка
+    может быть проведена, а накладной поставщика в системе нет; при проверке
+    предъявлять нечего, и товар считается принятым без документа.
+
+    Файл лежит в общем хранилище пространства (`source_files`) — том же, что у
+    документов проектов и затрат: второй способ хранить одно и то же расходится
+    с первым на первой же правке. Здесь только связь с документом и его роль.
+
+    `doc_ref` — ссылка вида «receipt:<uuid>» или «station:<packet_uuid>:<i>»:
+    документы приходят из разных контуров, и заводить внешний ключ на каждый
+    значит переписывать таблицу с каждым новым видом.
+    """
+    __tablename__ = "store_doc_files"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    doc_ref: Mapped[str] = mapped_column(String(120), nullable=False)
+    station_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # накладная | упд | акт | опись | фото | прочее
+    kind: Mapped[str] = mapped_column(String(30), nullable=False, default="накладная")
+    file_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    file_name: Mapped[str] = mapped_column(String(300), nullable=False, default="")
+    mime: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    note: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    uploaded_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    uploaded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index("ix_store_doc_files_ref", "company_id", "doc_ref"),
+    )
+
+
 class MarkingIntegration(Base):
     """Подключение компании к внешней системе маркировки.
 

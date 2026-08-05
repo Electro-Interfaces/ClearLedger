@@ -9,11 +9,13 @@
  * Поэтому блок не прячется, даже когда пуст: пустой список здесь — не «нет
  * данных», а «станция таких документов ещё не присылала», и это разные вещи.
  */
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { RadioTower } from 'lucide-react'
 import { getStoreStationDocs } from '@/services/storeService'
 import { fmtMoney } from '@/services/analyticsService'
 import { useCompany } from '@/contexts/CompanyContext'
+import { StationDocModal } from './StationDocModal'
 
 function когда(iso: string | null): string {
   if (!iso) return '—'
@@ -30,6 +32,7 @@ export function StationDocsBlock({ kind, dateFrom, dateTo, title }: {
     queryFn: () => getStoreStationDocs({ kind, dateFrom, dateTo }),
   })
 
+  const [открыт, открыть] = useState<{ packet: string; index: number } | null>(null)
   const docs = data?.docs ?? []
   const станции = data?.by_station ?? []
 
@@ -70,7 +73,10 @@ export function StationDocsBlock({ kind, dateFrom, dateTo, title }: {
             </thead>
             <tbody>
               {docs.map((d, i) => (
-                <tr key={`${d.packet_uuid}-${d.number}-${i}`} className="border-t border-border/30">
+                <tr key={`${d.packet_uuid}-${d.number}-${i}`}
+                    onClick={() => открыть({ packet: d.packet_uuid, index: d.doc_index })}
+                    title="Открыть документ: строки, стороны, образы"
+                    className="cursor-pointer border-t border-border/30 hover:bg-accent/20">
                   <td className="whitespace-nowrap px-3 py-1.5">{когда(d.doc_date)}</td>
                   <td className="px-3 py-1.5 tabular-nums">{d.station_id}</td>
                   <td className="px-3 py-1.5 tabular-nums text-muted-foreground">{d.number || '—'}</td>
@@ -91,6 +97,11 @@ export function StationDocsBlock({ kind, dateFrom, dateTo, title }: {
             </tbody>
           </table>
         </div>
+      )}
+
+      {открыт && (
+        <StationDocModal packetUuid={открыт.packet} index={открыт.index}
+                         onClose={() => открыть(null)} />
       )}
     </div>
   )

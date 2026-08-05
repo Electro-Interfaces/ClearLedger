@@ -14,7 +14,7 @@ from datetime import date, datetime, time, timezone
 
 import os
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,7 +23,7 @@ from app.auth import check_module_access, get_current_user
 from app.database import get_db
 from app.deps import capture_company_header, scope_company_id
 from app.models import (
-    Company, EdgeAgent, EdgeDownlink, MarkingIntegration, StoreAssortmentRule, StoreItemAlias, StoreReceipt,
+    Company, EdgeAgent, EdgeDownlink, EdgePacket, MarkingIntegration, StoreDocFile, StoreAssortmentRule, StoreItemAlias, StoreReceipt,
     StoreRecipeVersion, StoreStockBalance,
     User, UserCompany,
 )
@@ -1075,6 +1075,9 @@ async def store_station_docs(
 
     rows = [dict(r) for r in (await db.execute(text(f"""
         SELECT p.station_id,
+               -- Порядковый номер документа в пакете: карточка открывается по
+               -- нему, другого устойчивого ключа у документа станции нет.
+               (d_idx - 1) AS doc_index,
                d->>'Тип' AS kind,
                d->>'Номер' AS number,
                coalesce((d->>'Дата')::timestamptz, p.received_at) AS doc_date,
@@ -1086,9 +1089,12 @@ async def store_station_docs(
                coalesce((d->>'СуммаДокумента')::numeric, 0) AS amount,
                p.received_at, p.packet_uuid, p.shift_number
         FROM edge_packets p,
-             LATERAL jsonb_array_elements(coalesce(p.payload->'Документы', '[]'::jsonb)) d
+             LATERAL jsonb_array_elements(coalesce(p.payload->'Документы', '[]'::jsonb))
+                     WITH ORDINALITY AS t(d, d_idx)
         WHERE {' AND '.join(условия)}
-        ORDER BY 4 DESC
+        -- Сортировка по имени колонки, а не по номеру: номер сдвигается от
+        -- любой новой колонки, и реестр молча начинает сортироваться по чужому.
+        ORDER BY coalesce((d->>'Дата')::timestamptz, p.received_at) DESC
         LIMIT :lim
     """), p)).mappings().all()]
     for r in rows:
@@ -1116,6 +1122,157 @@ async def store_station_docs(
         "kinds": STATION_DOC_KINDS,
         "truncated": len(rows) >= limit,
     }
+
+
+@router.get("/station-doc")
+async def store_station_doc(
+    packet_uuid: str = Query(..., description="UUID пакета, в котором приехал документ"),
+    index: int = Query(..., ge=0, description="номер документа внутри пакета"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Первичный документ станции целиком: шапка, стороны, строки, основание.
+
+    Реестр отвечает «что было», карточка — «на основании чего и с чем именно».
+    Строки берутся из сырого пакета: разбор в документы Ledger идёт своим
+    путём, но предъявлять при разборе полётов нужно то, что прислала станция.
+    """
+    cid: uuid.UUID = await scope_company_id(user, db)
+    пакет = (await db.execute(select(EdgePacket).where(
+        EdgePacket.company_id == cid,
+        EdgePacket.packet_uuid == packet_uuid))).scalar_one_or_none()
+    if пакет is None:
+        raise HTTPException(404, "Пакет не найден")
+    документы = (пакет.payload or {}).get("Документы") or []
+    if index >= len(документы):
+        raise HTTPException(404, "Документ не найден в пакете")
+    d = документы[index]
+
+    строки = []
+    for row in (d.get("Товары") or []):
+        строки.append({
+            "name": row.get("Наименование") or row.get("Номенклатура") or "",
+            "barcode": row.get("ШтрихКод"),
+            "qty": float(row.get("Количество") or 0),
+            "qty_expected": (float(row["КоличествоЗаявлено"])
+                             if row.get("КоличествоЗаявлено") is not None else None),
+            "qty_book": (float(row["КоличествоУчет"])
+                         if row.get("КоличествоУчет") is not None else None),
+            "price": float(row.get("Цена") or 0) or None,
+            "amount": float(row.get("Сумма") or 0) or None,
+            "vat_rate": row.get("СтавкаНДС"),
+            "unit": row.get("Единица"),
+            "marks": len(row.get("КодыМаркировки") or []),
+        })
+
+    return {
+        "packet_uuid": packet_uuid,
+        "index": index,
+        "station_id": пакет.station_id,
+        "kind": d.get("Тип"),
+        "label": STATION_DOC_KINDS.get(d.get("Тип"), d.get("Тип")),
+        "number": d.get("Номер"),
+        "doc_date": d.get("Дата"),
+        "place_from": d.get("Склад") or d.get("СкладОтправитель"),
+        "place_to": d.get("СкладПолучатель"),
+        "counterparty": d.get("Контрагент"),
+        "contract": d.get("ДоговорКонтрагента"),
+        "incoming_number": d.get("НомерВходящегоДокумента"),
+        "reason": d.get("Причина") or d.get("Комментарий"),
+        "author": d.get("Автор"),
+        "responsible": d.get("Ответственный") or d.get("МОЛ"),
+        "basis": d.get("Основание"),
+        "source_uuid": d.get("ИсточникUUID"),
+        "amount": float(d.get("СуммаДокумента") or 0),
+        "shift_number": пакет.shift_number,
+        "received_at": пакет.received_at,
+        "lines": строки,
+        "doc_ref": f"station:{packet_uuid}:{index}",
+    }
+
+
+class DocFileIn(BaseModel):
+    doc_ref: str
+    kind: str = "накладная"
+    note: str | None = None
+
+
+@router.get("/doc-files")
+async def store_doc_files(
+    doc_ref: str = Query(..., description="ссылка на документ: receipt:<id> | station:<uuid>:<i>"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Образы, приложенные к документу: накладная, УПД, акт, опись, фото."""
+    cid: uuid.UUID = await scope_company_id(user, db)
+    rows = (await db.execute(select(StoreDocFile).where(
+        StoreDocFile.company_id == cid, StoreDocFile.doc_ref == doc_ref,
+    ).order_by(StoreDocFile.uploaded_at.desc()))).scalars().all()
+    return {"files": [{
+        "id": str(r.id), "kind": r.kind, "file_id": str(r.file_id),
+        "file_name": r.file_name, "mime": r.mime, "size_bytes": r.size_bytes,
+        "note": r.note, "uploaded_at": r.uploaded_at,
+        "url": f"/api/files/{r.file_id}",
+    } for r in rows], "total": len(rows)}
+
+
+@router.post("/doc-files", status_code=201)
+async def store_doc_file_upload(
+    doc_ref: str = Query(...),
+    kind: str = Query("накладная"),
+    note: str | None = Query(None),
+    station_id: int | None = Query(None),
+    file: UploadFile = File(...),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Приложить образ первичного документа.
+
+    Учётная запись документа и его бумажное основание — разные вещи: приёмка
+    может быть проведена, а накладной поставщика в системе нет, и предъявлять
+    при проверке нечего. Файл ложится в общее хранилище пространства, потому
+    что второй способ хранить одно и то же расходится с первым сразу.
+    """
+    cid: uuid.UUID = await scope_company_id(user, db)
+    content = await file.read()
+    if not content:
+        raise HTTPException(400, "Пустой файл")
+    if len(content) > 25 * 1024 * 1024:
+        raise HTTPException(400, "Файл больше 25 МБ — приложите скан меньшего разрешения")
+
+    from app.services import ops_terms
+    file_id = await ops_terms.store_file(db, cid, file.filename, file.content_type, content)
+    row = StoreDocFile(
+        company_id=cid, doc_ref=doc_ref, station_id=station_id, kind=kind,
+        file_id=file_id, file_name=file.filename or "документ",
+        mime=file.content_type, size_bytes=len(content), note=note,
+        uploaded_by=user.id,
+    )
+    db.add(row)
+    await db.commit()
+    return {"ok": True, "id": str(row.id), "file_id": str(file_id),
+            "url": f"/api/files/{file_id}"}
+
+
+@router.delete("/doc-files/{file_row_id}")
+async def store_doc_file_delete(
+    file_row_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Отвязать образ от документа.
+
+    Сам файл в хранилище остаётся: он мог быть приложен к другому документу —
+    один PDF со счётом и накладной внутри дело обычное.
+    """
+    cid: uuid.UUID = await scope_company_id(user, db)
+    row = (await db.execute(select(StoreDocFile).where(
+        StoreDocFile.id == file_row_id, StoreDocFile.company_id == cid))).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(404, "Образ не найден")
+    await db.delete(row)
+    await db.commit()
+    return {"ok": True}
 
 
 @router.get("/marking/codes")
