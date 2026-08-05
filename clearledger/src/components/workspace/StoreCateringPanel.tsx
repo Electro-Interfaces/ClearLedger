@@ -12,6 +12,8 @@ import { getStoreCateringMenu, type CateringDish, type MenuClass } from '@/servi
 import { fmtMoney } from '@/services/analyticsService'
 import { ExportButton } from './analytics/ExportButton'
 import { ChzBadge } from '@/components/common/ChzBadge'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { rowDrill } from './rowDrill'
 
 const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: d }).format(n)
 const pctStr = (v: number | null, d = 1) => (v == null ? '—' : `${nf(v, d)}%`)
@@ -70,8 +72,12 @@ export function StoreCateringPanel({ companyId, dateFrom, dateTo, stations }: { 
   ]
 
   const th = (k: SortKey, label: string) => (
-    <th onClick={() => toggleSort(k)} className="px-3 py-2 font-medium text-right whitespace-nowrap cursor-pointer select-none hover:text-foreground">
-      {label}{sortKey === k && <span className="ml-0.5 opacity-60">{sortDir === 'asc' ? '▲' : '▼'}</span>}
+    <th aria-sort={sortKey === k ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
+        className="px-3 py-2 font-medium text-right whitespace-nowrap">
+      <button type="button" onClick={() => toggleSort(k)}
+        className="cursor-pointer select-none hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm">
+        {label}{sortKey === k && <span className="ml-0.5 opacity-60">{sortDir === 'asc' ? '▲' : '▼'}</span>}
+      </button>
     </th>
   )
 
@@ -82,8 +88,8 @@ export function StoreCateringPanel({ companyId, dateFrom, dateTo, stations }: { 
           <h3 className="text-base font-semibold">Общепит</h3>
           <p className="text-xs text-muted-foreground mt-0.5">
             {data.period.from} – {data.period.to}. Блюда по популярности × маржинальности; клик по строке —
-            свойства блюда (состав ТТК и динамика продаж). Себестоимость — из выпуска 1С (считается по
-            рецептуре в момент продажи); где выпуска нет — сборка по ТТК из средних закупок.
+            свойства блюда (состав ТТК и динамика продаж). Продажи Edge считаются по версии ТТК,
+            действовавшей в смену; для прежней истории используется доступный переходный источник.
           </p>
         </div>
         <ExportButton title="Общепит — меню" subtitle={`${data.period.from} — ${data.period.to}`} getEl={() => ref.current} />
@@ -146,7 +152,8 @@ export function StoreCateringPanel({ companyId, dateFrom, dateTo, stations }: { 
             {dishes.map((d) => {
               const meta = CLASS_META[d.menu_class]
               return (
-                <tr key={d.guid} onClick={() => setOpenDish(d)} className="border-t border-border/30 hover:bg-accent/20 cursor-pointer">
+                <tr key={d.guid} {...rowDrill(() => setOpenDish(d), `${d.name} — состав и продажи`,
+                  'border-t border-border/30')}>
                   <td className="px-3 py-1.5">
                     <span className="font-medium">{d.name}</span>
                     <span className={`ml-2 inline-flex items-center rounded-full border px-1.5 py-0.5 text-[9px] uppercase tracking-wide ${meta.badge}`}>{meta.emoji} {meta.short}</span>
@@ -179,9 +186,9 @@ export function StoreCateringPanel({ companyId, dateFrom, dateTo, stations }: { 
   )
 }
 
-/** Откуда взялся итог: 1С считает себестоимость по рецептуре в момент продажи. */
+/** Откуда взялся итог: факт выпуска переходного контура либо расчёт по ТТК Ledger. */
 const costSourceLabel = (src: CateringDish['cost_source']) =>
-  src === 'release' ? '· по выпуску 1С' : src === 'ttk' ? '· сборка по ТТК' : ''
+  src === 'release' ? '· по факту выпуска' : src === 'ttk' ? '· сборка по ТТК' : ''
 
 function DishModal({ dish: d, onClose }: { dish: CateringDish; onClose: () => void }) {
   const meta = CLASS_META[d.menu_class]
@@ -201,19 +208,18 @@ function DishModal({ dish: d, onClose }: { dish: CateringDish; onClose: () => vo
   ]
 
   return (
-    <div className="fixed inset-0 z-[1200] flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
-      <div className="bg-card border border-border rounded-lg shadow-xl max-w-4xl w-full max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+    <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
+      <DialogContent className="max-w-4xl max-h-[85vh] flex flex-col gap-0 p-0" showCloseButton>
         {/* Шапка */}
-        <div className="flex items-start justify-between gap-3 px-5 py-3.5 border-b border-border/50">
+        <DialogHeader className="px-5 py-3.5 pr-12 border-b border-border/50">
           <div>
             <div className="flex items-center gap-2 flex-wrap">
-              <h3 className="text-base font-semibold">{d.name}</h3>
+              <DialogTitle className="text-base">{d.name}</DialogTitle>
               <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-wide ${meta.badge}`}>{meta.emoji} {meta.label}</span>
             </div>
-            <p className="text-xs text-muted-foreground mt-1 max-w-2xl leading-snug">{meta.desc}</p>
+            <DialogDescription className="text-xs mt-1 max-w-2xl leading-snug">{meta.desc}</DialogDescription>
           </div>
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground text-xl leading-none px-2 shrink-0">×</button>
-        </div>
+        </DialogHeader>
 
         <div className="overflow-auto p-5 space-y-4">
           {/* Метрики */}
@@ -269,7 +275,7 @@ function DishModal({ dish: d, onClose }: { dish: CateringDish; onClose: () => vo
                       <td className="px-2.5 py-1 text-right tabular-nums">{d.cost != null ? fmtMoney(d.cost) : '—'}</td>
                     </tr>
                     {/* Сумма колонки выше не сходится с итогом, когда итог пришёл из выпуска
-                        1С, а у части состава нет закупочной цены. Печатаем обе цифры, иначе
+                        переходного контура, а у части состава нет закупочной цены. Печатаем обе цифры, иначе
                         человек считает столбик и не понимает, почему не бьётся. */}
                     {d.cost_source === 'release' && ttk.known < d.ing_count && (
                       <tr className="text-[10px] text-muted-foreground/70">
@@ -306,7 +312,7 @@ function DishModal({ dish: d, onClose }: { dish: CateringDish; onClose: () => vo
             </div>
           </div>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   )
 }

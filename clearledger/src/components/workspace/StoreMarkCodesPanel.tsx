@@ -41,6 +41,7 @@ export function StoreMarkCodesPanel() {
   const [запрос, задатьЗапрос] = useState('')
   const [статус, задатьСтатус] = useState<string | null>(null)
   const [станция, выбрать] = useState<number | null>(null)
+  const [лимит, задатьЛимит] = useState(1000)
 
   const { data: парк } = useQuery({
     queryKey: ['store-stations', company.id],
@@ -49,8 +50,9 @@ export function StoreMarkCodesPanel() {
   const станции = (парк?.stations ?? []) as StoreStation[]
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ['store-mark-codes', company.id, станция, статус, запрос],
-    queryFn: () => getStoreMarkCodes({ stationId: станция, status: статус ?? undefined, q: запрос }),
+    queryKey: ['store-mark-codes', company.id, станция, статус, запрос, лимит],
+    queryFn: () => getStoreMarkCodes({ stationId: станция, status: статус ?? undefined,
+                                       q: запрос, limit: лимит }),
   })
 
   return (
@@ -157,9 +159,13 @@ export function StoreMarkCodesPanel() {
             </table>
           </div>
           {data.truncated && (
-            <p className="text-[11px] text-amber-300/80">
-              Показаны первые {data.limit} кодов — уточните поиск, чтобы увидеть нужный.
-            </p>
+            <div className="flex flex-wrap items-center gap-3 text-[11px]">
+              <span className="text-muted-foreground">Показаны первые {data.limit} кодов.</span>
+              <button type="button" onClick={() => задатьЛимит((l) => l + 5000)}
+                className="text-primary hover:underline">загрузить ещё</button>
+              <button type="button" onClick={() => задатьЛимит(50000)}
+                className="text-muted-foreground hover:text-foreground">загрузить все</button>
+            </div>
           )}
         </>
       )}

@@ -9,6 +9,7 @@ import { useMemo, useState } from 'react'
 import { rowDrill } from './rowDrill'
 import { SkuDetailModal } from './SkuDetailModal'
 import { useQuery } from '@tanstack/react-query'
+import { ShowMore, useVisible } from '@/components/common/ShowMore'
 import { getStoreStock, type StoreStockItem } from '@/services/storeService'
 import { fmtMoney } from '@/services/analyticsService'
 import { ChzBadge } from '@/components/common/ChzBadge'
@@ -82,6 +83,10 @@ export function StoreStockPanel({ companyId, dateFrom, dateTo }: { companyId: st
       hint: `от розницы ${fmtMoney(kpiRetailCosted)} тех же ${nf(costed.length)} SKU`,
     },
   ]
+
+  // Список показывается порциями: обрезать его молча нельзя —
+  // товаровед приходит смотреть весь ассортимент, а не первые строки.
+  const показ = useVisible(items)
 
   return (
     <div className="p-6 space-y-4">
@@ -192,7 +197,7 @@ export function StoreStockPanel({ companyId, dateFrom, dateTo }: { companyId: st
             </tr>
           </thead>
           <tbody>
-            {items.slice(0, 400).map((i) => (
+            {показ.visible.map((i) => (
               <tr key={`${i.station_id ?? ''}:${i.place_code ?? ''}:${i.guid}`}
                   {...rowDrill(() => setOpenSku(i.guid), `${i.name} — карточка товара`,
                     'border-t border-border/30')}>
@@ -228,11 +233,7 @@ export function StoreStockPanel({ companyId, dateFrom, dateTo }: { companyId: st
             ))}
           </tbody>
         </table>
-        {items.length > 400 && (
-          <div className="px-3 py-2 text-[11px] text-muted-foreground border-t border-border/30">
-            Показано 400 из {nf(items.length)}. Уточните поиск.
-          </div>
-        )}
+        <ShowMore {...показ} onMore={показ.more} onAll={показ.all} unit="позиций" />
         {items.length === 0 && (
           <div className="px-3 py-6 text-sm text-muted-foreground text-center">
             Нет позиций. Проверьте стартовый остаток и время последнего снимка агента.

@@ -8,6 +8,7 @@
  */
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { ShowMore, useVisible } from '@/components/common/ShowMore'
 import { StationDocsBlock } from './StationDocsBlock'
 import { getStoreInventory, type StoreInventoryDoc } from '@/services/storeService'
 import { SnapshotBadge } from '@/components/common/SnapshotBadge'
@@ -43,6 +44,10 @@ export function StoreInventoryPanel({ companyId, dateFrom, dateTo }: { companyId
     { label: 'Излишки', value: money(s.surplus_amount), cls: 'text-emerald-300/90', hint: 'оприходование' },
     { label: 'Итог (shrinkage)', value: money(s.net_amount), cls: s.net_amount < 0 ? 'text-red-400/90' : 'text-emerald-300/90' },
   ]
+
+  // Список показывается порциями: обрезать его молча нельзя —
+  // товаровед приходит смотреть весь ассортимент, а не первые строки.
+  const показ = useVisible(docs)
 
   return (
     <div className="p-6 space-y-4">
@@ -101,7 +106,7 @@ export function StoreInventoryPanel({ companyId, dateFrom, dateTo }: { companyId
               </tr>
             </thead>
             <tbody>
-              {docs.slice(0, 300).map((d) => (
+              {показ.visible.map((d) => (
                 <tr
                   key={d.ref}
                   onClick={() => d.dev_positions && setOpenDoc(d)}
@@ -120,7 +125,7 @@ export function StoreInventoryPanel({ companyId, dateFrom, dateTo }: { companyId
             </tbody>
           </table>
           {docs.length > 300 && (
-            <div className="px-3 py-2 text-[11px] text-muted-foreground border-t border-border/30">Показано 300 из {nf(docs.length)}.</div>
+            <ShowMore {...показ} onMore={показ.more} onAll={показ.all} unit="документов" />
           )}
           {docs.length === 0 && (
             <div className="px-3 py-6 text-sm text-muted-foreground text-center">

@@ -5,6 +5,7 @@
  */
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { ShowMore, useVisible } from '@/components/common/ShowMore'
 import { getStoreNomenclature, type SalesMarked } from '@/services/storeService'
 import { Kpi } from './analytics/Kpi'
 import { fmtMoney } from '@/services/analyticsService'
@@ -48,6 +49,10 @@ export function StoreNomenclaturePanel({ companyId, dateFrom, dateTo, stations }
     queryKey: ['store-nom', companyId, dateFrom, dateTo, kind, marked, weighed, hasSales, q, stations],
     queryFn: () => getStoreNomenclature(dateFrom, dateTo, { kind, marked, weighed, hasSales, q, stations }),
   })
+
+  // Список показывается порциями: обрезать его молча нельзя — товаровед
+  // приходит смотреть весь справочник, а не первые строки по чужой сортировке.
+  const показ = useVisible(data?.items ?? [])
 
   return (
     <div className="p-6 space-y-4">
@@ -97,7 +102,7 @@ export function StoreNomenclaturePanel({ companyId, dateFrom, dateTo, stations }
                 </tr>
               </thead>
               <tbody>
-                {data.items.slice(0, 400).map((i) => (
+                {показ.visible.map((i) => (
                   <tr key={i.guid} onClick={() => setOpenGuid(i.guid)}
                     className="border-t border-border/30 hover:bg-accent/20 cursor-pointer">
                     <td className="px-3 py-1.5">{i.name}</td>
@@ -113,11 +118,7 @@ export function StoreNomenclaturePanel({ companyId, dateFrom, dateTo, stations }
                 ))}
               </tbody>
             </table>
-            {data.items.length > 400 && (
-              <div className="px-3 py-2 text-[11px] text-muted-foreground border-t border-border/30">
-                Показано 400 из {data.items.length}. Уточните фильтр/поиск.
-              </div>
-            )}
+            <ShowMore {...показ} onMore={показ.more} onAll={показ.all} unit="позиций" />
             {data.items.length === 0 && (
               <div className="px-3 py-6 text-sm text-muted-foreground text-center">Ничего не найдено по фильтру.</div>
             )}

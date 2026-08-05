@@ -7,6 +7,7 @@
  */
 import { useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { ShowMore, useVisible } from '@/components/common/ShowMore'
 import { getStorePricing, type PricingSku, type PricingGroup, type PriceCategory } from '@/services/storeService'
 import { fmtMoney } from '@/services/analyticsService'
 import { SkuDetailModal } from './SkuDetailModal'
@@ -74,6 +75,10 @@ export function StorePricingPanel({ companyId, dateFrom, dateTo, stations }: { c
     { label: 'Наценка %', value: pctStr(s.markup_pct) },
     { label: 'Убыточных SKU', value: nf(s.loss_makers), cls: s.loss_makers > 0 ? 'text-red-400/90' : '' },
   ]
+
+  // Список показывается порциями: обрезать его молча нельзя —
+  // товаровед приходит смотреть весь ассортимент, а не первые строки.
+  const показ = useVisible(skus)
 
   return (
     <div ref={ref} className="p-6 space-y-4">
@@ -158,7 +163,7 @@ export function StorePricingPanel({ companyId, dateFrom, dateTo, stations }: { c
             </tr>
           </thead>
           <tbody>
-            {skus.slice(0, 400).map((d: PricingSku) => (
+            {показ.visible.map((d: PricingSku) => (
               <tr key={d.guid} onClick={() => setOpenGuid(d.guid)} className="border-t border-border/30 hover:bg-accent/20 cursor-pointer">
                 <td className="px-3 py-1.5">{d.name}</td>
                 <td className="px-3 py-1.5 text-center">{d.marked && <ChzBadge />}</td>
@@ -177,7 +182,7 @@ export function StorePricingPanel({ companyId, dateFrom, dateTo, stations }: { c
             ))}
           </tbody>
         </table>
-        {skus.length > 400 && <div className="px-3 py-2 text-[11px] text-muted-foreground border-t border-border/30">Показано 400 из {nf(skus.length)}. Уточните поиск.</div>}
+        <ShowMore {...показ} onMore={показ.more} onAll={показ.all} unit="позиций" />
         {skus.length === 0 && <div className="px-3 py-6 text-sm text-muted-foreground text-center">Нет товаров за период (поставьте апрель).</div>}
       </div>
 

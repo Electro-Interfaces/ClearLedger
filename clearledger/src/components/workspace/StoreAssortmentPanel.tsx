@@ -6,11 +6,13 @@
  */
 import { Fragment, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { ShowMore, useVisible } from '@/components/common/ShowMore'
 import { getStoreAssortment, type AssortmentSku, type PriceCategory, type StockStatus } from '@/services/storeService'
 import { fmtMoney } from '@/services/analyticsService'
 import { SkuDetailModal } from './SkuDetailModal'
 import { ExportButton } from './analytics/ExportButton'
 import { ChzBadge } from '@/components/common/ChzBadge'
+import { rowDrill } from './rowDrill'
 
 const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: d }).format(n)
 
@@ -77,8 +79,12 @@ export function StoreAssortmentPanel({ companyId, dateFrom, dateTo, stations }: 
     else { setSortKey(k); setSortDir('desc') }
   }
   const th = (k: SortKey, label: string) => (
-    <th onClick={() => toggleSort(k)} className="px-3 py-2 font-medium text-right whitespace-nowrap cursor-pointer select-none hover:text-foreground">
-      {label}{sortKey === k && <span className="ml-0.5 opacity-60">{sortDir === 'asc' ? '▲' : '▼'}</span>}
+    <th aria-sort={sortKey === k ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
+        className="px-3 py-2 font-medium text-right whitespace-nowrap">
+      <button type="button" onClick={() => toggleSort(k)}
+        className="cursor-pointer select-none hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm">
+        {label}{sortKey === k && <span className="ml-0.5 opacity-60">{sortDir === 'asc' ? '▲' : '▼'}</span>}
+      </button>
     </th>
   )
 
@@ -97,6 +103,10 @@ export function StoreAssortmentPanel({ companyId, dateFrom, dateTo, stations }: 
     { key: 'out_of_stock', label: 'Дефицит' }, { key: 'loss', label: 'Ниже себест.' },
     { key: 'overstock', label: 'Затоварка' },
   ]
+
+  // Список показывается порциями: обрезать его молча нельзя —
+  // товаровед приходит смотреть весь ассортимент, а не первые строки.
+  const показ = useVisible(skus)
 
   return (
     <div ref={ref} className="p-6 space-y-4">
@@ -218,10 +228,11 @@ export function StoreAssortmentPanel({ companyId, dateFrom, dateTo, stations }: 
             </tr>
           </thead>
           <tbody>
-            {skus.slice(0, 400).map((d: AssortmentSku) => {
+            {показ.visible.map((d: AssortmentSku) => {
               const stM = STATUS_META[d.status]
               return (
-                <tr key={d.guid} onClick={() => setOpenGuid(d.guid)} className="border-t border-border/30 hover:bg-accent/20 cursor-pointer">
+                <tr key={d.guid} {...rowDrill(() => setOpenGuid(d.guid), `${d.name} — карточка товара`,
+                  'border-t border-border/30')}>
                   <td className="px-3 py-1.5">{d.name}</td>
                   <td className="px-3 py-1.5 text-center">{d.marked && <ChzBadge />}</td>
                   <td className="px-3 py-1.5 text-center"><span className="font-mono text-[11px] text-muted-foreground">{d.abc_xyz}</span></td>
@@ -240,7 +251,7 @@ export function StoreAssortmentPanel({ companyId, dateFrom, dateTo, stations }: 
             })}
           </tbody>
         </table>
-        {skus.length > 400 && <div className="px-3 py-2 text-[11px] text-muted-foreground border-t border-border/30">Показано 400 из {nf(skus.length)}. Уточните фильтр.</div>}
+        <ShowMore {...показ} onMore={показ.more} onAll={показ.all} unit="позиций" />
         {skus.length === 0 && <div className="px-3 py-6 text-sm text-muted-foreground text-center">Нет товаров по фильтру.</div>}
       </div>
 

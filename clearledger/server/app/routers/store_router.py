@@ -1040,7 +1040,7 @@ async def store_station_docs(
     station_id: int | None = Query(None, description="код АЗС; пусто — все"),
     date_from: str | None = Query(None),
     date_to: str | None = Query(None),
-    limit: int = Query(200, ge=1, le=1000),
+    limit: int = Query(1000, ge=1, le=20000),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -1140,7 +1140,7 @@ async def store_cheques(
     shift_number: int | None = Query(None),
     q: str | None = Query(None, description="товар, номер чека или фискальный номер"),
     only_returns: bool = Query(False),
-    limit: int = Query(300, ge=1, le=2000),
+    limit: int = Query(1000, ge=1, le=20000),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -1281,7 +1281,9 @@ async def store_transfers_between(
                       AND d2->>'ИдентификаторДокумента' = о.doc_id
                     LIMIT 1)
         ORDER BY о.doc_date DESC
-        LIMIT 300
+        -- Потолок высокий и осознанный: передач между АЗС в сети немного, а
+        -- обрезать реестр молча нельзя — «в пути» не должно теряться за краем.
+        LIMIT 5000
     """), p)).mappings().all()]
 
     now = datetime.now(timezone.utc)
@@ -1662,7 +1664,7 @@ async def store_marking_codes(
     station_id: int | None = Query(None, description="код АЗС; пусто — все"),
     q: str | None = Query(None, description="поиск по коду, GTIN или товару"),
     status: str | None = Query(None, description="в обороте | выбыл"),
-    limit: int = Query(300, ge=1, le=2000),
+    limit: int = Query(1000, ge=1, le=50000),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):

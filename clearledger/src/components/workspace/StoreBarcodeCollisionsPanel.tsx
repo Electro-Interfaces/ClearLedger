@@ -15,13 +15,18 @@
  */
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Barcode, ArrowRightLeft, X, AlertTriangle } from 'lucide-react'
+import { Barcode, ArrowRightLeft, X, AlertTriangle, Combine } from 'lucide-react'
 import { toast } from 'sonner'
 import {
-  getBarcodeCollisions, resolveBarcodeCollision, type BarcodeCollision,
+  getBarcodeCollisions, mergeEdgeItems, resolveBarcodeCollision, type BarcodeCollision,
 } from '@/services/storeService'
 import { useCompany } from '@/contexts/CompanyContext'
 import { Button } from '@/components/ui/button'
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog'
 
 /** Нормализация имени только для подсказки «похоже на дубль» — не для решений. */
 function normName(s: string): string {
@@ -51,6 +56,20 @@ function CollisionCard({ c, onDone }: { c: BarcodeCollision; onDone: () => void 
       onDone()
     },
     onError: (e: Error) => toast.error('Не удалось', { description: e.message }),
+  })
+  const merge = useMutation({
+    mutationFn: () => mergeEdgeItems({
+      alias_id: c.claimant_id,
+      canonical_id: c.holder_id,
+      reason: note || `Дубль выявлен по штрихкоду ${c.code}`,
+    }),
+    onSuccess: (res) => {
+      toast.success(`Карточка «${c.claimant_name}» объединена с «${c.holder_name}»`, {
+        description: `Остатки, цены, ассортимент и рецептуры перенесены. Станциям отправлено заданий: ${res.stations_queued}.`,
+      })
+      onDone()
+    },
+    onError: (e: Error) => toast.error('Не удалось объединить карточки', { description: e.message }),
   })
 
   const рискованно = c.holder_stock > 0 || c.holder_ns_codes > 0
@@ -130,6 +149,31 @@ function CollisionCard({ c, onDone }: { c: BarcodeCollision; onDone: () => void 
           onClick={() => resolve.mutate('drop')}>
           <X className="h-3.5 w-3.5 mr-1" />Оставить как есть
         </Button>
+        {похожиНаДубль && (
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button size="sm" disabled={resolve.isPending || merge.isPending}>
+                <Combine className="h-3.5 w-3.5 mr-1" />Объединить карточки
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Объединить дубль с рабочей карточкой?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  «{c.holder_name}» останется основной. Остатки, штрихкоды, цены,
+                  правила ассортимента и рецептуры «{c.claimant_name}» будут перенесены,
+                  а карточка-дубль архивирована. Записи в кассу и 1С не выполняются.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Отмена</AlertDialogCancel>
+                <AlertDialogAction onClick={() => merge.mutate()}>
+                  Объединить
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        )}
       </div>
     </div>
   )

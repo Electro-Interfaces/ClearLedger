@@ -42,10 +42,13 @@ export function StoreChequesPanel({ companyId, dateFrom, dateTo }: {
   const [запрос, задатьЗапрос] = useState('')
   const [возвраты, задатьВозвраты] = useState(false)
   const [открыт, открыть] = useState<string | null>(null)
+  // Потолок выборки — состояние, а не константа: «показано 1000 из 4000» без
+  // способа увидеть остальное это не отчёт, а отговорка.
+  const [лимит, задатьЛимит] = useState(1000)
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ['store-cheques', companyId ?? company.id, dateFrom, dateTo, запрос, возвраты],
-    queryFn: () => getStoreCheques({ dateFrom, dateTo, q: запрос, onlyReturns: возвраты }),
+    queryKey: ['store-cheques', companyId ?? company.id, dateFrom, dateTo, запрос, возвраты, лимит],
+    queryFn: () => getStoreCheques({ dateFrom, dateTo, q: запрос, onlyReturns: возвраты, limit: лимит }),
   })
 
   const чеки = data?.cheques ?? []
@@ -191,9 +194,19 @@ export function StoreChequesPanel({ companyId, dateFrom, dateTo }: {
       )}
 
       {data?.truncated && (
-        <p className="text-[11px] text-amber-300/80">
-          Показаны первые {чеки.length} чеков — сузьте период или уточните поиск.
-        </p>
+        <div className="flex flex-wrap items-center gap-3 text-[11px]">
+          <span className="text-muted-foreground">
+            Показаны первые {nf(чеки.length)} чеков за период.
+          </span>
+          <button type="button" onClick={() => задатьЛимит((l) => l + 5000)}
+            className="text-primary hover:underline">
+            загрузить ещё
+          </button>
+          <button type="button" onClick={() => задатьЛимит(20000)}
+            className="text-muted-foreground hover:text-foreground">
+            загрузить все
+          </button>
+        </div>
       )}
     </div>
   )

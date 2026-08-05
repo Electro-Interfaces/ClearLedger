@@ -23,10 +23,20 @@ import { Boxes, Building2, Tag, Link2, PackagePlus, X } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   getStationDrafts, getDraftCandidates, resolveItemDraft, resolvePartnerDraft,
+  resolveNSIProposal,
   type StationItemDraft, type DraftCandidate,
 } from '@/services/storeService'
 import { useCompany } from '@/contexts/CompanyContext'
 import { Button } from '@/components/ui/button'
+
+/** Что именно станция просит исправить — теми же словами, что видит товаровед. */
+const FIELD_LABELS: Record<string, string> = {
+  name: 'наименование',
+  unit: 'единица',
+  vat: 'ставка НДС',
+  barcode_add: 'добавить штрихкод',
+  barcode_remove: 'убрать штрихкод',
+}
 
 function money(v: number | null): string {
   return v === null || v === undefined ? '—' : v.toFixed(2)
@@ -148,12 +158,25 @@ export function StoreStationDraftsPanel() {
     onError: (e: Error) => toast.error('Не удалось', { description: e.message }),
   })
 
+  const proposal = useMutation({
+    mutationFn: ({ id, action }: { id: number; action: 'accept' | 'reject' }) =>
+      resolveNSIProposal(id, { action }),
+    onSuccess: (res) => {
+      toast.success(res.action === 'accept'
+        ? `Правка принята${res.applied ? `: ${res.applied}` : ''}`
+        : 'Заявка отклонена')
+      refresh()
+    },
+    onError: (e: Error) => toast.error('Не удалось', { description: e.message }),
+  })
+
   if (isLoading) return <div className="p-6 text-sm text-muted-foreground">Загрузка очереди…</div>
   if (error) return <div className="p-6 text-sm text-red-400/90">Не удалось получить очередь: {(error as Error).message}</div>
 
   const items = data?.items ?? []
   const partners = data?.partners ?? []
   const prices = data?.prices ?? []
+  const proposals = data?.proposals ?? []
 
   return (
     <div className="p-6 space-y-6 max-w-5xl">
@@ -209,6 +232,58 @@ export function StoreStationDraftsPanel() {
                     onClick={() => partner.mutate({ id: p.id!, action: 'accept' })}>Принять</Button>
                   <Button size="sm" variant="ghost" disabled={partner.isPending}
                     onClick={() => partner.mutate({ id: p.id!, action: 'reject' })}>Отклонить</Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* Заявки об ошибках в сетевых карточках. Станция их не применяла: канон
+          правит центр, и до решения человека карточка остаётся прежней. */}
+      <section>
+        <div className="text-sm font-medium mb-2 flex items-center gap-2">
+          <Tag className="h-4 w-4 text-muted-foreground" />
+          Заявки об ошибках в карточках
+          {proposals.length > 0 && <span className="text-muted-foreground">· {proposals.length}</span>}
+        </div>
+        <p className="text-xs text-muted-foreground mb-2 leading-relaxed">
+          Ошибку в карточке первым видит тот, кто стоит у полки: не та ставка, кривое название,
+          штрихкод, который не сканируется. Заявка ничего не изменила — на станции карточка
+          прежняя. Примете — правка ляжет в канон и разъедется по сети обычным обновлением.
+        </p>
+        {proposals.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
+            Станции об ошибках не заявляли.
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {proposals.map((p) => (
+              <div key={p.id} className="rounded-lg border border-border p-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium truncate">
+                      {p.item_name ?? p.item_uuid}
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-0.5">
+                      АЗС {p.station_id} · {FIELD_LABELS[p.field] ?? p.field} ·{' '}
+                      {p.current ? <>было <span className="line-through">{p.current}</span> · </> : null}
+                      должно быть <span className="text-foreground font-medium">{p.proposed}</span>
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-0.5">
+                      {p.author}{p.comment ? ` · ${p.comment}` : ''} · {when(p.created_at)}
+                    </div>
+                  </div>
+                  <div className="flex gap-2 shrink-0">
+                    <Button size="sm" disabled={proposal.isPending}
+                      onClick={() => proposal.mutate({ id: p.id, action: 'accept' })}>
+                      Принять
+                    </Button>
+                    <Button size="sm" variant="outline" disabled={proposal.isPending}
+                      onClick={() => proposal.mutate({ id: p.id, action: 'reject' })}>
+                      Отклонить
+                    </Button>
+                  </div>
                 </div>
               </div>
             ))}

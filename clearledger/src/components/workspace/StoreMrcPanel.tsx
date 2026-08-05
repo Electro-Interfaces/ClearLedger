@@ -9,6 +9,7 @@ import { useMemo, useRef, useState } from 'react'
 import { rowDrill } from './rowDrill'
 import { SkuDetailModal } from './SkuDetailModal'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { ShowMore, useVisible } from '@/components/common/ShowMore'
 import { ShieldAlert, ShieldCheck, Upload, Loader2, FileWarning } from 'lucide-react'
 import { getStoreMrc, importStoreMrc, type MrcItem, type MrcImportRow, type MrcImportResult } from '@/services/storeService'
 import { fmtMoney } from '@/services/analyticsService'
@@ -100,6 +101,10 @@ export function StoreMrcPanel({ companyId, dateFrom, dateTo }: { companyId: stri
     { label: 'Табак без МРЦ', value: nf(s.missing_mrc), cls: s.missing_mrc > 0 ? 'text-amber-300/90' : '', hint: 'дозагрузить справочник' },
   ]
 
+  // Список показывается порциями: обрезать его молча нельзя —
+  // товаровед приходит смотреть весь ассортимент, а не первые строки.
+  const показ = useVisible(items)
+
   return (
     <div className="p-6 space-y-4">
       <div className="flex items-start justify-between gap-3 flex-wrap">
@@ -176,7 +181,7 @@ export function StoreMrcPanel({ companyId, dateFrom, dateTo }: { companyId: stri
                 </tr>
               </thead>
               <tbody>
-                {items.slice(0, 500).map((i: MrcItem) => (
+                {показ.visible.map((i: MrcItem) => (
                   <tr key={i.ref}
                       {...rowDrill(() => setOpenSku(i.ref), `${i.name} — карточка товара`,
                         `border-t border-border/30 ${i.over ? 'bg-red-400/[0.06]' : ''}`)}>
@@ -198,7 +203,7 @@ export function StoreMrcPanel({ companyId, dateFrom, dateTo }: { companyId: stri
                 ))}
               </tbody>
             </table>
-            {items.length > 500 && <div className="px-3 py-2 text-[11px] text-muted-foreground border-t border-border/30">Показано 500 из {nf(items.length)}. Уточните поиск.</div>}
+            <ShowMore {...показ} onMore={показ.more} onAll={показ.all} unit="позиций" />
             {items.length === 0 && <div className="px-3 py-6 text-sm text-muted-foreground text-center">Нет строк под фильтром.</div>}
           </div>
         </>
