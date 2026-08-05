@@ -788,6 +788,12 @@ async def create_all() -> None:
             # v2.50: чат заявки (скрытая группа при заявке Поддержки).
             "ALTER TABLE chat_rooms ADD COLUMN IF NOT EXISTS scope_ticket_id UUID",
             "CREATE INDEX IF NOT EXISTS idx_chat_rooms_ticket ON chat_rooms (scope_ticket_id)",
+            # v2.51: выдача вложения сверяется с участием в разговоре (а не только с
+            # компанией) — обратный поиск «файл → его сообщения» идёт на КАЖДУЮ картинку
+            # в ленте, галерея открывает их десятками. Частичный: у большинства
+            # сообщений вложения нет.
+            "CREATE INDEX IF NOT EXISTS idx_chat_msg_file_url "
+            "ON chat_messages (file_url) WHERE file_url IS NOT NULL",
         ):
             await conn.execute(__import__("sqlalchemy").text(stmt))
 
@@ -1396,6 +1402,21 @@ async def create_all() -> None:
         for stmt in (
             "ALTER TABLE edge_downlink ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMPTZ",
             "ALTER TABLE edge_downlink ADD COLUMN IF NOT EXISTS cancelled_by UUID",
+        ):
+            await conn.execute(_sa.text(stmt))
+
+        # v2.39: у документа станции появились сквозной номер центра и статус.
+        #
+        # Номер присваивает касса, и у двух АЗС он совпадает; в претензии
+        # поставщику нужен номер, который в сети один. Статус отвечает, что с
+        # документом сделали здесь: принят, проверен, спорный, закрыт.
+        for stmt in (
+            "ALTER TABLE store_doc_meta ADD COLUMN IF NOT EXISTS reg_number VARCHAR(40)",
+            "ALTER TABLE store_doc_meta ADD COLUMN IF NOT EXISTS registered_at TIMESTAMPTZ",
+            "ALTER TABLE store_doc_meta ADD COLUMN IF NOT EXISTS status "
+            "VARCHAR(20) NOT NULL DEFAULT 'принят'",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_store_doc_meta_reg "
+            "ON store_doc_meta (reg_number) WHERE reg_number IS NOT NULL",
         ):
             await conn.execute(_sa.text(stmt))
 
