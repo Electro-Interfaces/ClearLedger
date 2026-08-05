@@ -27,7 +27,7 @@ import { useCompany } from '@/contexts/CompanyContext'
 
 const TABS: { key: InteractionSection; label: string; icon: typeof MessageCircle }[] = [
   { key: 'chat', label: 'Чат', icon: MessageCircle },
-  { key: 'tickets', label: 'Заявки', icon: LifeBuoy },
+  { key: 'tickets', label: 'Поддержка', icon: LifeBuoy },
   { key: 'help', label: 'Инфо', icon: HelpCircle },
 ]
 

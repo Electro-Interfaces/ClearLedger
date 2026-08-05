@@ -15,7 +15,9 @@ import { TicketsPanel } from './InteractionPanels'
 import { InfoCenter } from '@/components/info/InfoCenter'
 import { useCompany } from '@/contexts/CompanyContext'
 
-const TITLES: Record<string, string> = { chat: 'Чат', tickets: 'Заявки', help: 'Инфо' }
+// Ключ секции остался `tickets` (он в localStorage у людей), а подпись — «Поддержка»:
+// это разговор с поставщиком программы, а не заявки компании и не «Задачи».
+const TITLES: Record<string, string> = { chat: 'Чат', tickets: 'Поддержка', help: 'Инфо' }
 
 export function InteractionModal() {
   const { interactionSection: section, interactionMode: mode, setInteractionMode, closeInteraction } = useSupportContext()

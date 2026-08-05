@@ -3,10 +3,12 @@
  * Используются и в модалке (шапка), и в правом доке (контекст).
  */
 import {
-  LifeBuoy, Sparkles, Phone, Keyboard, FileText, Database, GitBranch,
+  LifeBuoy, MessageCircle, Sparkles, Phone, Keyboard, FileText, Database, GitBranch,
 } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import { APP_VERSION } from '@/config/version'
 import { ECOSYSTEM_TITLE } from '@/config/brand'
+import { useSupportContext } from '@/contexts/SupportContext'
 
 export function ContactList() {
   const contacts = [
@@ -34,19 +36,33 @@ export function ContactList() {
   )
 }
 
+/**
+ * Поддержка ПОСТАВЩИКА ПРОГРАММЫ — не заявки компании по её объектам и не её «Задачи».
+ * Разговор идёт в чате: в группе приложения сидят инженеры платформы, и правый док
+ * открывает чат уже в разрезе того приложения, откуда человек пришёл. Канал
+ * «Обновления платформы» для этого не годится — он только на чтение (chat_router:
+ * `if room.kind == "platform": return user.is_superadmin`). Телефон куратора остаётся
+ * запасным выходом: он работает и тогда, когда сломалось само пространство.
+ */
 export function TicketsPanel() {
+  const { openInteraction } = useSupportContext()
   return (
     <div className="flex h-full flex-col items-center justify-center gap-4 px-6 text-center">
       <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10 dark:bg-primary/20">
         <LifeBuoy className="h-8 w-8 text-primary" />
       </div>
       <div className="space-y-1.5">
-        <h3 className="text-lg font-semibold text-foreground">Заявки в поддержку</h3>
+        <h3 className="text-lg font-semibold text-foreground">Поддержка платформы</h3>
         <p className="max-w-md text-sm text-muted-foreground">
-          Учёт заявок появится в следующих версиях. Сейчас вопросы и ошибки фиксируем напрямую
-          у куратора проекта — приложите скриншот и шаги воспроизведения.
+          Вопросы и ошибки по работе самой программы — сюда: приложите скриншот и шаги
+          воспроизведения. Работа по вашим объектам ведётся заявками, внутренние
+          поручения — «Задачами».
         </p>
       </div>
+      <Button onClick={() => openInteraction('chat')} className="gap-2">
+        <MessageCircle className="h-4 w-4" />
+        Написать в чат
+      </Button>
       <ContactList />
     </div>
   )

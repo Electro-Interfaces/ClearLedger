@@ -67,9 +67,12 @@ export function HeaderInteractionButtons({ conference = false }: { conference?: 
         <span className="hidden lg:inline">Чат</span>
         <Badge count={unreadCounts.chat} />
       </Button>
-      <Button variant="outline" size="sm" onClick={() => toggleInteraction('tickets')} className={btnCls(interactionSection === 'tickets')} title="Заявки в поддержку">
+      {/* «Поддержка», а не «Заявки»: за этим словом в пространстве уже стоят две
+          другие вещи — заявки сервисной службы компании по её объектам и «Задачи»
+          (внутренняя работа). Здесь третье: вопрос поставщику программы. */}
+      <Button variant="outline" size="sm" onClick={() => toggleInteraction('tickets')} className={btnCls(interactionSection === 'tickets')} title="Поддержка платформы: вопросы и ошибки по программе">
         <LifeBuoy className="h-4 w-4" />
-        <span className="hidden lg:inline">Заявки</span>
+        <span className="hidden lg:inline">Поддержка</span>
         <Badge count={unreadCounts.tickets} />
       </Button>
       {/* «Инфо» — четвёртая кнопка, на телефоне уже теснит имя экрана. Справка
