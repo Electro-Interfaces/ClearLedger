@@ -1097,9 +1097,17 @@ async def store_station_docs(
         ORDER BY coalesce((d->>'Дата')::timestamptz, p.received_at) DESC
         LIMIT :lim
     """), p)).mappings().all()]
+    ссылки = [f"station:{r['packet_uuid']}:{r['doc_index']}" for r in rows]
+    мета = {m.doc_ref: m for m in (await db.execute(select(StoreDocMeta).where(
+        StoreDocMeta.company_id == cid,
+        StoreDocMeta.doc_ref.in_(ссылки or [""])))).scalars().all()} if ссылки else {}
     for r in rows:
         r["label"] = STATION_DOC_KINDS.get(r["kind"], r["kind"])
         r["amount"] = float(r["amount"] or 0)
+        m = мета.get(f"station:{r['packet_uuid']}:{r['doc_index']}")
+        r["status"] = m.status if m else "принят"
+        r["reg_number"] = m.reg_number if m else None
+        r["has_files"] = False
 
     свод: dict[str, dict] = {}
     станции: dict[int, int] = {}
@@ -1373,6 +1381,10 @@ async def store_station_doc(
         "responsible_from": meta.responsible_from if meta else None,
         "responsible_to": meta.responsible_to if meta else None,
         "meta_note": meta.note if meta else None,
+        "status": meta.status if meta else "принят",
+        "reg_number": meta.reg_number if meta else None,
+        "registered_at": meta.registered_at if meta else None,
+        "statuses": list(DOC_STATUSES),
         "kind": d.get("Тип"),
         "label": STATION_DOC_KINDS.get(d.get("Тип"), d.get("Тип")),
         "number": d.get("Номер"),
@@ -1395,10 +1407,18 @@ async def store_station_doc(
     }
 
 
+# Что с документом сделали в центре. «Принят» ставится сразу: документ уже
+# существует, отрицать это бессмысленно. Дальше — работа человека.
+DOC_STATUSES = ("принят", "проверен", "спорный", "закрыт")
+
+
 class DocMetaIn(BaseModel):
     responsible_from: str | None = None
     responsible_to: str | None = None
     note: str | None = None
+    status: str | None = None
+    # Присвоить регистрационный номер центра, если его ещё нет.
+    register: bool = False
 
 
 @router.put("/doc-meta")
@@ -1427,11 +1447,28 @@ async def store_doc_meta_save(
         row.responsible_to = body.responsible_to.strip() or None
     if body.note is not None:
         row.note = body.note.strip() or None
+    if body.status is not None:
+        if body.status not in DOC_STATUSES:
+            raise HTTPException(400, f"Неизвестный статус: {body.status}")
+        row.status = body.status
+    if body.register and not row.reg_number:
+        # Номер сквозной по компании и году: год в номере отвечает на вопрос
+        # «за какой период искать», а не заставляет помнить нумерацию сети.
+        год = datetime.now(timezone.utc).year
+        последний = (await db.execute(text("""
+            SELECT max(NULLIF(regexp_replace(reg_number, '^.*-', ''), '')::int)
+            FROM store_doc_meta
+            WHERE company_id = :cid AND reg_number LIKE :маска
+        """), {"cid": cid, "маска": f"Д-{год}-%"})).scalar()
+        row.reg_number = f"Д-{год}-{(последний or 0) + 1:05d}"
+        row.registered_at = datetime.now(timezone.utc)
     row.updated_by = user.id
     await db.commit()
     return {"ok": True, "doc_ref": doc_ref,
             "responsible_from": row.responsible_from,
-            "responsible_to": row.responsible_to, "note": row.note}
+            "responsible_to": row.responsible_to, "note": row.note,
+            "status": row.status, "reg_number": row.reg_number,
+            "registered_at": row.registered_at}
 
 
 class DocFileIn(BaseModel):
@@ -1495,6 +1532,107 @@ async def store_doc_file_upload(
     await db.commit()
     return {"ok": True, "id": str(row.id), "file_id": str(file_id),
             "url": f"/api/files/{file_id}"}
+
+
+@router.get("/doc-files/archive")
+async def store_doc_files_archive(
+    date_from: str | None = Query(None),
+    date_to: str | None = Query(None),
+    station_id: int | None = Query(None),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Выгрузить образы пачкой: zip с файлами и описью.
+
+    Первичка хранится пять лет (ФЗ-402), и запрашивают её не по одному
+    документу, а за период: налоговая просит подтверждения к декларации,
+    аудитор — к месяцу. Скачивать по одному файлу через интерфейс — это часы.
+
+    В архив кладётся опись CSV: без неё пачка из ста сканов не отвечает на
+    вопрос, к какому документу относится каждый.
+    """
+    import csv
+    import io as _io
+    import os
+    import zipfile
+    from pathlib import Path
+
+    from fastapi.responses import StreamingResponse
+
+    from app.models import SourceFile
+
+    cid: uuid.UUID = await scope_company_id(user, db)
+    условия = [StoreDocFile.company_id == cid]
+    if station_id is not None:
+        условия.append(StoreDocFile.station_id == station_id)
+    if date_from:
+        условия.append(StoreDocFile.uploaded_at >= datetime.combine(
+            date.fromisoformat(date_from), time.min, tzinfo=timezone.utc))
+    if date_to:
+        условия.append(StoreDocFile.uploaded_at < datetime.combine(
+            date.fromisoformat(date_to), time.max, tzinfo=timezone.utc))
+
+    rows = (await db.execute(select(StoreDocFile).where(*условия)
+                             .order_by(StoreDocFile.uploaded_at))).scalars().all()
+    if not rows:
+        raise HTTPException(404, "За период образов нет")
+
+    upload_dir = Path(os.environ.get("UPLOAD_DIR", "/app/uploads"))
+    буфер = _io.BytesIO()
+    опись = _io.StringIO()
+    писатель = csv.writer(опись, delimiter=";")
+    писатель.writerow(["Файл", "Роль", "Документ", "АЗС", "Загружен", "Размер, байт", "Примечание"])
+
+    with zipfile.ZipFile(буфер, "w", zipfile.ZIP_DEFLATED) as архив:
+        for i, r in enumerate(rows, 1):
+            путь = (await db.execute(select(SourceFile.storage_path).where(
+                SourceFile.id == r.file_id))).scalar_one_or_none()
+            имя = f"{i:04d}_{r.kind}_{r.file_name}".replace("/", "_")
+            писатель.writerow([имя, r.kind, r.doc_ref, r.station_id or "",
+                               r.uploaded_at.strftime("%d.%m.%Y %H:%M"),
+                               r.size_bytes, r.note or ""])
+            файл = Path(путь) if путь else (upload_dir / str(r.file_id))
+            if файл.exists():
+                архив.write(файл, имя)
+            else:
+                # Запись есть, файла нет: молчать нельзя — при проверке это
+                # обнаружится, и лучше знать заранее.
+                архив.writestr(f"{имя}.ОТСУТСТВУЕТ.txt",
+                               "Файл не найден в хранилище\n")
+        архив.writestr("опись.csv", "\ufeff" + опись.getvalue())
+
+    буфер.seek(0)
+    имя_архива = f"образы-{date_from or 'все'}-{date_to or 'все'}.zip"
+    return StreamingResponse(
+        буфер, media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="documents.zip"',
+                 "X-Archive-Name": имя_архива, "X-Files-Count": str(len(rows))})
+
+
+@router.get("/doc-files/summary")
+async def store_doc_files_summary(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Сколько образов хранится, каких и с какого времени.
+
+    Первичка обязана храниться пять лет, поэтому в блоке хранения она стоит
+    отдельно от сырья станции: сырьё прореживают, образы — нет.
+    """
+    cid: uuid.UUID = await scope_company_id(user, db)
+    виды = [dict(r) for r in (await db.execute(text("""
+        SELECT kind, count(*) AS files, coalesce(sum(size_bytes), 0) AS bytes,
+               min(uploaded_at) AS oldest, max(uploaded_at) AS newest
+        FROM store_doc_files WHERE company_id = :cid
+        GROUP BY kind ORDER BY count(*) DESC
+    """), {"cid": cid})).mappings().all()]
+    итог = (await db.execute(text("""
+        SELECT count(*) AS files, coalesce(sum(size_bytes), 0) AS bytes,
+               count(DISTINCT doc_ref) AS docs, min(uploaded_at) AS oldest
+        FROM store_doc_files WHERE company_id = :cid
+    """), {"cid": cid})).mappings().first()
+    return {"kinds": виды, "total": dict(итог) if итог else {},
+            "retention_years": 5}
 
 
 @router.delete("/doc-files/{file_row_id}")

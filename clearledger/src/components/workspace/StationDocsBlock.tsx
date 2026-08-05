@@ -69,6 +69,7 @@ export function StationDocsBlock({ kind, dateFrom, dateTo, title }: {
                 <th className="px-3 py-2 text-right font-medium">Сумма</th>
                 <th className="px-3 py-2 text-left font-medium">Кто и почему</th>
                 <th className="px-3 py-2 text-left font-medium">Смена</th>
+                <th className="px-3 py-2 text-left font-medium">В центре</th>
               </tr>
             </thead>
             <tbody>
@@ -92,6 +93,12 @@ export function StationDocsBlock({ kind, dateFrom, dateTo, title }: {
                     {[d.author, d.note].filter(Boolean).join(' · ') || '—'}
                   </td>
                   <td className="px-3 py-1.5 tabular-nums text-muted-foreground">{d.shift_number ?? '—'}</td>
+                  <td className="px-3 py-1.5 text-muted-foreground">
+                    {d.reg_number && <span className="mr-1.5 text-primary">{d.reg_number}</span>}
+                    <span className={d.status === 'спорный' ? 'text-amber-300/90' : ''}>
+                      {d.status ?? 'принят'}
+                    </span>
+                  </td>
                 </tr>
               ))}
             </tbody>

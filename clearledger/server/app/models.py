@@ -6056,6 +6056,14 @@ class StoreDocMeta(Base):
     responsible_from: Mapped[str | None] = mapped_column(String(200), nullable=True)
     responsible_to: Mapped[str | None] = mapped_column(String(200), nullable=True)
     note: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # Регистрационный номер центра: номер станции присваивает касса, и у двух
+    # АЗС он совпадает. В переписке, в претензии поставщику и в акте нужен
+    # номер, который в сети один — этот присваивается при регистрации.
+    reg_number: Mapped[str | None] = mapped_column(String(40), nullable=True, unique=True)
+    registered_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    # принят | проверен | спорный | закрыт
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="принят")
     updated_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(

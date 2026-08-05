@@ -1018,6 +1018,9 @@ export interface StoreStationDoc {
   received_at: string
   packet_uuid: string
   shift_number: string | null
+  /** Что с документом сделали в центре и его сквозной номер. */
+  status?: string
+  reg_number?: string | null
 }
 
 export interface StoreStationDocsData {
@@ -1121,6 +1124,12 @@ export interface StoreStationDocFull {
   responsible_from: string | null
   responsible_to: string | null
   meta_note: string | null
+  /** Что с документом сделали в центре. */
+  status: string
+  statuses: string[]
+  /** Сквозной номер центра: номер станции у двух АЗС совпадает. */
+  reg_number: string | null
+  registered_at: string | null
   packet_uuid: string
   index: number
   station_id: number
@@ -1168,7 +1177,8 @@ export interface StoreDocFile {
 
 export const saveStoreDocMeta = (docRef: string, body: {
   responsible_from?: string | null; responsible_to?: string | null; note?: string | null
-}) => put<{ ok: boolean; doc_ref: string }>(
+  status?: string; register?: boolean
+}) => put<{ ok: boolean; doc_ref: string; status: string; reg_number: string | null }>(
   `/api/store/doc-meta?doc_ref=${encodeURIComponent(docRef)}`, body)
 
 export const getStoreDocFiles = (docRef: string) =>
@@ -1184,6 +1194,23 @@ export const uploadStoreDocFile = ({ docRef, kind, stationId, file, note }: {
   if (note) query.set('note', note)
   return upload<{ ok: boolean; id: string; file_id: string; url: string }>(
     `/api/store/doc-files?${query.toString()}`, form)
+}
+
+export const getStoreDocFilesSummary = () => get<{
+  kinds: { kind: string; files: number; bytes: number; oldest: string; newest: string }[]
+  total: { files: number; bytes: number; docs: number; oldest: string | null }
+  retention_years: number
+}>('/api/store/doc-files/summary')
+
+/** Адрес выгрузки образов пачкой: zip с файлами и описью. */
+export const storeDocFilesArchiveUrl = (opts: {
+  dateFrom?: string; dateTo?: string; stationId?: number | null
+}) => {
+  const q = new URLSearchParams()
+  if (opts.dateFrom) q.set('date_from', opts.dateFrom)
+  if (opts.dateTo) q.set('date_to', opts.dateTo)
+  if (opts.stationId != null) q.set('station_id', String(opts.stationId))
+  return `/api/store/doc-files/archive?${q.toString()}`
 }
 
 export const deleteStoreDocFile = (id: string) =>

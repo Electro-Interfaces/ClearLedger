@@ -84,6 +84,26 @@ export function StationDocModal({ packetUuid, index, onClose }: {
     onError: (e: Error) => toast.error('Не сохранилось', { description: e.message }),
   })
 
+  const статус = useMutation({
+    mutationFn: (v: string) => saveStoreDocMeta(docRef as string, { status: v }),
+    onSuccess: () => {
+      toast.success('Статус документа изменён')
+      qc.invalidateQueries({ queryKey: ['store-station-doc'] })
+      qc.invalidateQueries({ queryKey: ['store-station-docs'] })
+    },
+    onError: (e: Error) => toast.error('Не сохранилось', { description: e.message }),
+  })
+
+  const зарегистрировать = useMutation({
+    mutationFn: () => saveStoreDocMeta(docRef as string, { register: true }),
+    onSuccess: (r) => {
+      toast.success(`Документ зарегистрирован: ${r.reg_number}`)
+      qc.invalidateQueries({ queryKey: ['store-station-doc'] })
+      qc.invalidateQueries({ queryKey: ['store-station-docs'] })
+    },
+    onError: (e: Error) => toast.error('Не удалось зарегистрировать', { description: e.message }),
+  })
+
   const приложить = useMutation({
     mutationFn: (f: File) => uploadStoreDocFile({
       docRef: docRef as string, kind: роль, stationId: data?.station_id, file: f,
@@ -116,9 +136,30 @@ export function StationDocModal({ packetUuid, index, onClose }: {
                 АЗС {data.station_id} · {когда(data.doc_date ?? data.received_at)}
               </span>}
             </div>
-            {data?.shift_number && (
-              <div className="mt-0.5 text-[11px] text-muted-foreground">смена {data.shift_number}</div>
-            )}
+            <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+              {data?.shift_number && <span>смена {data.shift_number}</span>}
+              {data?.reg_number && (
+                <span className="rounded-full border border-primary/50 px-1.5 py-0.5 text-primary">
+                  {data.reg_number}
+                </span>
+              )}
+              {data && (
+                <select value={data.status}
+                  onChange={(e) => статус.mutate(e.target.value)}
+                  aria-label="Статус документа"
+                  className="h-6 rounded-md border border-border/60 bg-background/60 px-1.5 text-[11px] outline-none">
+                  {(data.statuses ?? ['принят']).map((с) => <option key={с} value={с}>{с}</option>)}
+                </select>
+              )}
+              {data && !data.reg_number && (
+                <button type="button" onClick={() => зарегистрировать.mutate()}
+                  disabled={зарегистрировать.isPending}
+                  title="Присвоить сквозной номер центра: номер станции у двух АЗС совпадает"
+                  className="text-primary hover:underline">
+                  зарегистрировать
+                </button>
+              )}
+            </div>
           </div>
           <div className="flex items-center gap-2">
             <Button size="sm" variant="outline" disabled={!data}

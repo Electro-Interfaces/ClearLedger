@@ -15,7 +15,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Database, Trash2, Eye } from 'lucide-react'
 import {
-  getStoreStorage, cleanupStoreStorage, type StoreStorageCleanup,
+  getStoreStorage, cleanupStoreStorage, getStoreDocFilesSummary,
+  storeDocFilesArchiveUrl, type StoreStorageCleanup,
 } from '@/services/storeService'
 import { useCompany } from '@/contexts/CompanyContext'
 import { Button } from '@/components/ui/button'
@@ -43,6 +44,12 @@ export function StoreStoragePanel() {
   const { data, isLoading, error } = useQuery({
     queryKey: ['store-storage', company.id],
     queryFn: getStoreStorage,
+  })
+  // Образы первички считаем отдельно от сырья: сырьё прореживают, а
+  // первичный документ обязан храниться пять лет (ФЗ-402).
+  const { data: образы } = useQuery({
+    queryKey: ['store-doc-files-summary', company.id],
+    queryFn: getStoreDocFilesSummary,
   })
 
   const чистка = useMutation({
@@ -122,6 +129,45 @@ export function StoreStoragePanel() {
             ))}
           </tbody>
         </table>
+      </div>
+
+      <div className="rounded-lg border border-border/50 bg-card/30 p-3">
+        <div className="mb-2 flex flex-wrap items-center gap-2">
+          <span className="text-sm font-medium">Образы первичных документов</span>
+          <span className="text-[11px] text-muted-foreground">
+            накладные, УПД, акты и описи — хранятся {образы?.retention_years ?? 5} лет и не прореживаются
+          </span>
+          <a href={storeDocFilesArchiveUrl({})} className="ml-auto text-xs text-primary hover:underline"
+             title="Скачать все образы пачкой: zip с файлами и описью">
+            выгрузить пачкой
+          </a>
+        </div>
+        {(образы?.total?.files ?? 0) === 0 ? (
+          <div className="text-xs text-muted-foreground">
+            Образов ещё нет. Документ без бумажного основания существует в учёте, но при
+            проверке предъявить нечего.
+          </div>
+        ) : (
+          <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs">
+            <span className="text-muted-foreground">Файлов{' '}
+              <span className="font-medium tabular-nums text-foreground">{образы!.total.files}</span>
+            </span>
+            <span className="text-muted-foreground">Документов{' '}
+              <span className="font-medium tabular-nums text-foreground">{образы!.total.docs}</span>
+            </span>
+            <span className="text-muted-foreground">Объём{' '}
+              <span className="font-medium tabular-nums text-foreground">{объём(образы!.total.bytes)}</span>
+            </span>
+            <span className="text-muted-foreground">Самый старый{' '}
+              <span className="tabular-nums text-foreground">{когда(образы!.total.oldest)}</span>
+            </span>
+            {образы!.kinds.length > 0 && (
+              <span className="text-muted-foreground">
+                {образы!.kinds.map((k) => `${k.kind}: ${k.files}`).join(' · ')}
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="rounded-lg border border-border/50 bg-card/30 p-3">
