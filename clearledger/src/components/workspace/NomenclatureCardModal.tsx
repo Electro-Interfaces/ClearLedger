@@ -4,6 +4,7 @@
  * движение (инвент./списания/перемещения), рецептура ТТК, МРЦ. Открывается
  * кликом по строке в «Номенклатуре». Данные: /api/store/sku-card/{guid}.
  */
+import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { ResponsiveContainer, BarChart, Bar, XAxis, Tooltip } from 'recharts'
 import {
@@ -58,6 +59,27 @@ export function NomenclatureCardModal({ guid, companyId, dateFrom, dateTo, onClo
 
   const m = data?.metrics
 
+  // Вкладки — по вопросам, которые задают карточке, а не по происхождению
+  // полей: «что это за товар», «сколько стоит и где лежит», «что с ним
+  // происходило». Свиток из семи блоков заставлял прокручивать мимо трёх
+  // чужих ответов ради одного нужного.
+  //
+  // Вкладка без содержимого не показывается: у обычной воды нет рецептуры, и
+  // пустой раздел в карточке читается как поломка данных.
+  const ВКЛАДКИ = useMemo(() => {
+    if (!data) return []
+    const список: { key: string; label: string; count?: number }[] = [
+      { key: 'card', label: 'Карточка' },
+      { key: 'price', label: 'Цена и остаток', count: data.stock.length || undefined },
+      { key: 'moves', label: 'Движение', count: (data.purchases.length + data.movement.length) || undefined },
+    ]
+    if (data.recipe.length) список.push({ key: 'recipe', label: 'Рецептура', count: data.recipe.length })
+    if (data.marked) список.push({ key: 'mark', label: 'Маркировка' })
+    return список
+  }, [data])
+  const [вкладка, выбрать] = useState('card')
+  const активна = ВКЛАДКИ.some((t) => t.key === вкладка) ? вкладка : 'card'
+
   return (
     <div className="fixed inset-0 z-[1200] flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
       <div className="bg-card border border-border rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
@@ -80,13 +102,65 @@ export function NomenclatureCardModal({ guid, companyId, dateFrom, dateTo, onClo
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground text-lg leading-none px-2 shrink-0">×</button>
         </div>
 
+        {/* Главные цифры видны на любой вкладке: сколько лежит, почём, сколько
+            заработали. Ради них карточку и открывают, и прятать их за
+            переключением разделов — значит менять один свиток на другой. */}
+        {data && m && (
+          <div className="flex flex-wrap gap-x-6 gap-y-1.5 border-b border-border/50 px-5 py-2 text-xs">
+            <span className="text-muted-foreground">На остатке{' '}
+              <span className="font-semibold tabular-nums text-foreground">
+                {nf(data.stock.reduce((a, x) => a + x.qty, 0), 3)}
+              </span>
+              {data.stock.length > 1 && (
+                <span className="text-muted-foreground/70"> в {data.stock.length} местах</span>
+              )}
+            </span>
+            <span className="text-muted-foreground">Цена{' '}
+              <span className="font-semibold tabular-nums text-foreground">
+                {money(data.stock.find((x) => x.retail_price != null)?.retail_price ?? null)}
+              </span>
+            </span>
+            <span className="text-muted-foreground">Продано{' '}
+              <span className="font-semibold tabular-nums text-foreground">{nf(m.qty, 3)}</span>
+              <span className="text-muted-foreground/70"> на {money(m.revenue)}</span>
+            </span>
+            <span className="text-muted-foreground">Маржа{' '}
+              <span className={`font-semibold tabular-nums ${(m.margin_pct ?? 0) < 0 ? 'text-red-400/90' : 'text-foreground'}`}>
+                {pct(m.margin_pct)}
+              </span>
+            </span>
+            {data.mrc?.over && (
+              <span className="text-red-400/90">цена выше МРЦ {money(data.mrc.mrc)} — нарушение</span>
+            )}
+          </div>
+        )}
+
         {isLoading || !data ? (
           <div className="p-6 text-sm text-muted-foreground">Загрузка карточки…</div>
         ) : (
+          <>
+          <div className="flex flex-wrap gap-1 border-b border-border/50 px-4 pt-2">
+            {ВКЛАДКИ.map((t) => (
+              <button key={t.key} type="button" onClick={() => выбрать(t.key)}
+                aria-current={активна === t.key ? 'page' : undefined}
+                className={`relative -mb-px rounded-t-md px-3 py-1.5 text-xs transition-colors ${
+                  активна === t.key
+                    ? 'border-x border-t border-border/60 bg-card font-semibold text-primary'
+                    : 'font-medium text-muted-foreground hover:text-foreground'}`}>
+                {t.label}
+                {t.count != null && (
+                  <span className="ml-1.5 rounded-full bg-muted/60 px-1.5 text-[10px] tabular-nums text-muted-foreground">
+                    {t.count}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
           <div className="overflow-auto p-4 space-y-3.5">
-            <NsiEditSection guid={guid} companyId={companyId} />
+            {активна === 'card' && <NsiEditSection guid={guid} companyId={companyId} />}
 
             {/* Паспорт + Штрихкоды */}
+            {активна === 'card' && (
             <div className="grid gap-3.5 md:grid-cols-2">
               <Section icon={Package} title="Паспорт">
                 <div className="grid grid-cols-2 gap-3">
@@ -122,8 +196,10 @@ export function NomenclatureCardModal({ guid, companyId, dateFrom, dateTo, onClo
                 )}
               </Section>
             </div>
+            )}
 
             {/* Цена и остаток */}
+            {активна === 'price' && (
             <Section icon={Wallet} title="Цена и остаток по складам"
               right={data.mrc && (
                 <span className={`inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded border ${data.mrc.over ? 'border-red-400/50 text-red-400/90' : 'border-emerald-400/40 text-emerald-300/80'}`}>
@@ -155,8 +231,10 @@ export function NomenclatureCardModal({ guid, companyId, dateFrom, dateTo, onClo
                 </table>
               )}
             </Section>
+            )}
 
             {/* Продажи за период */}
+            {(активна === 'price' || активна === 'moves') && (
             <Section icon={TrendingUp} title={`Продажи · ${dateFrom} – ${dateTo}`}>
               <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 mb-3">
                 {[
@@ -186,9 +264,10 @@ export function NomenclatureCardModal({ guid, companyId, dateFrom, dateTo, onClo
                 </div>
               )}
             </Section>
+            )}
 
             {/* Рецептура ТТК (для блюд общепита) */}
-            {data.recipe.length > 0 && (
+            {активна === 'recipe' && data.recipe.length > 0 && (
               <Section icon={ChefHat} title="Рецептура (ТТК)" right={<span className="text-[11px] text-muted-foreground">{data.recipe.length} ингр.</span>}>
                 <div className="grid sm:grid-cols-2 gap-x-4 gap-y-1">
                   {data.recipe.map((r, i) => (
@@ -201,6 +280,7 @@ export function NomenclatureCardModal({ guid, companyId, dateFrom, dateTo, onClo
             )}
 
             {/* Поставщики / Движение */}
+            {активна === 'moves' && (
             <div className="grid gap-3.5 md:grid-cols-2">
               <Section icon={PackagePlus} title="Поставки" right={<span className="text-[11px] text-muted-foreground">{data.purchases.length}</span>}>
                 {data.purchases.length === 0 ? <div className="text-xs text-muted-foreground">Нет закупок за период</div> : (
@@ -237,9 +317,10 @@ export function NomenclatureCardModal({ guid, companyId, dateFrom, dateTo, onClo
                 )}
               </Section>
             </div>
+            )}
 
             {/* История цен (переоценки) */}
-            {data.price_history.length > 0 && (
+            {(активна === 'price' || активна === 'moves') && data.price_history.length > 0 && (
               <Section icon={ShoppingCart} title="История цен (переоценки)" right={<span className="text-[11px] text-muted-foreground">{data.price_history.length}</span>}>
                 <div className="max-h-40 overflow-auto"><table className="w-full text-xs">
                   <tbody>
@@ -254,7 +335,26 @@ export function NomenclatureCardModal({ guid, companyId, dateFrom, dateTo, onClo
                 </table></div>
               </Section>
             )}
+
+            {активна === 'mark' && (
+              <Section icon={ShieldAlert} title="Маркировка «Честный знак»">
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <Field label="Требует DataMatrix">{data.marked ? 'да' : 'нет'}</Field>
+                  <Field label="GTIN">{data.barcodes.find((b) => b.barcode.length === 14)?.barcode ?? '—'}</Field>
+                  <Field label="МРЦ">{data.mrc ? money(data.mrc.mrc) : '—'}</Field>
+                </div>
+                <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
+                  Коды этого товара, которыми мы владеем, живут в разделе «Маркировка → Коды на
+                  остатке»: карточка отвечает за правила, а поэкземплярный учёт — за факты.
+                  {data.mrc?.over && (
+                    <span className="text-red-400/90"> Розничная цена выше МРЦ — это нарушение
+                      статьи 13 ФЗ-15, продавать так нельзя.</span>
+                  )}
+                </p>
+              </Section>
+            )}
           </div>
+          </>
         )}
       </div>
     </div>
