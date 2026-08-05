@@ -185,19 +185,26 @@ async def create_object_ticket(
     перестаёт быть реестром капвложений.
     """
     app_row, link, token = await _target(db, company_id, app_code)
+    url = f"{_internal_base_url(app_row, app_code)}/api/v1/eco/objects/{object_id}/tickets"
+    body = {
+        "companyId": link.external_company_id,
+        "title": title or None,
+        "description": description,
+        "priority": priority,
+        "authorEmail": author_email,
+    }
     async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
         try:
-            resp = await client.post(
-                f"{_internal_base_url(app_row, app_code)}/api/v1/eco/objects/{object_id}/tickets",
-                json={
-                    "companyId": link.external_company_id,
-                    "title": title or None,
-                    "description": description,
-                    "priority": priority,
-                    "authorEmail": author_email,
-                },
-                headers={"Authorization": f"Bearer {token}"},
-            )
+            resp = await client.post(url, json=body,
+                                     headers={"Authorization": f"Bearer {token}"})
+            if resp.status_code == 404:
+                # Объект завели ПОСЛЕ последней проекции: приложение о нём не знает, а
+                # проекция запускается только руками из Центра управления. Человеку в
+                # чате или в карточке объекта с этим ничего не сделать, поэтому досылаем
+                # справочник и повторяем один раз. Приём идемпотентен — лишнего не создаст.
+                await project(db, company_id, app_code, "objects")
+                resp = await client.post(url, json=body,
+                                         headers={"Authorization": f"Bearer {token}"})
         except httpx.HTTPError as e:
             raise ProjectionError(f"Приложение недоступно: {e}") from e
 
