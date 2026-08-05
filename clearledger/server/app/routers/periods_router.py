@@ -309,22 +309,45 @@ async def period_readiness(
 
 # ─── GET /periods/coverage ───────────────────────────────────
 
+# Контур, к которому относится документ. Смешивать их нельзя: на одной станции
+# топливо может идти каждый день, а магазин молчать неделю — и день, покрытый
+# топливной сменой, товарный пробел не закрывает.
+DOC_LINE: dict[str, str] = {
+    "shift_orp": "fuel", "purchase_ttn": "fuel",
+    "retail_sale_sidegoods": "store", "purchase": "store", "transfer": "store",
+    "inventory": "store", "writeoff": "store", "gain": "store", "return_sale": "store",
+    "production_release": "food",
+}
+# Сменный документ каждого контура — по нему считается его рабочий день.
+LINE_SHIFT_KIND = {"fuel": "shift_orp", "store": "retail_sale_sidegoods",
+                   "food": "production_release"}
+LINES = ("fuel", "store", "food")
+
+
 class CoverageCell(BaseModel):
     kind: str
+    line: str                # fuel | store | food
     count: int
     lastDate: str | None = None
-    silentDays: int          # рабочих дней станции ПОСЛЕ последнего такого документа
+    silentDays: int          # рабочих дней СВОЕГО контура после последнего документа
     typicalGap: int | None = None   # обычный интервал между такими документами, раб. дней
     status: str              # ok | attention | none
 
 
-class CoverageStation(BaseModel):
-    station: str
-    workedDays: int          # дней со сменой
-    expectedDays: int        # дней в окне работы станции внутри периода
-    missingDays: int         # дней окна БЕЗ смены — прямой пробел первички
+class CoverageLine(BaseModel):
+    line: str
+    present: bool            # контур на станции вообще есть
+    workedDays: int          # дней со сменным документом контура
+    expectedDays: int        # дней в окне работы контура внутри периода
+    missingDays: int         # дней окна БЕЗ сменного документа — прямой пробел
     firstDay: str | None = None
     lastDay: str | None = None
+    status: str              # ok | attention | absent
+
+
+class CoverageStation(BaseModel):
+    station: str
+    lines: list[CoverageLine]
     status: str              # ok | attention
     docs: list[CoverageCell]
 
@@ -382,54 +405,66 @@ async def periods_coverage(
 
     # Рабочие дни и дни по видам — одним проходом: данных за месяц немного, а два
     # запроса разошлись бы по фильтрам при первой же правке.
-    worked: dict[str, set[str]] = {}
+    # Рабочие дни считаются ОТДЕЛЬНО по каждому контуру: топливо, магазин, кухня.
+    # Раньше день с топливной сменой закрывал и товарный пробел — на 208, где есть
+    # и колонки, и магазин, это прятало отсутствие товарных смен целиком.
+    worked: dict[tuple[str, str], set[str]] = {}
     by_kind: dict[tuple[str, str], list[str]] = {}
-    SHIFT_KINDS = {"shift_orp", "retail_sale_sidegoods"}
     for station, kind, day in rows:
         st = str(station or "").strip()
         if not st or not day:
             continue
-        if kind in SHIFT_KINDS:
-            worked.setdefault(st, set()).add(day)
+        line = DOC_LINE.get(kind or "")
+        if line and LINE_SHIFT_KIND[line] == kind:
+            worked.setdefault((st, line), set()).add(day)
         by_kind.setdefault((st, kind or "—"), []).append(day)
 
+    stations = sorted({st for st, _ in worked} | {st for st, _ in by_kind},
+                      key=lambda s: (len(s), s))
     out: list[CoverageStation] = []
-    for st in sorted(worked, key=lambda s: (len(s), s)):
-        days = sorted(worked[st])
-        # Окно работы станции внутри периода: от первой смены до последней. Дни за
-        # его пределами — не пробел, станция тогда просто не торговала (открылась
-        # позже, закрылась раньше, стояла на ремонте).
-        window = _days_between(days[0], days[-1]) if days else 0
-        missing = max(0, window - len(days))
+    for st in stations:
+        line_rows: list[CoverageLine] = []
+        for line in LINES:
+            days = sorted(worked.get((st, line), ()))
+            # Окно работы контура внутри периода: от первого сменного документа до
+            # последнего. Дни за его пределами — не пробел: контура тогда просто не
+            # было (магазин не работал, кухня закрыта, станция стояла).
+            window = _days_between(days[0], days[-1]) if days else 0
+            missing = max(0, window - len(days))
+            line_rows.append(CoverageLine(
+                line=line, present=bool(days), workedDays=len(days),
+                expectedDays=window, missingDays=missing,
+                firstDay=days[0] if days else None, lastDay=days[-1] if days else None,
+                status=("absent" if not days else "attention" if missing else "ok"),
+            ))
 
         cells: list[CoverageCell] = []
         for (station, kind), kind_days in by_kind.items():
             if station != st:
                 continue
+            line = DOC_LINE.get(kind or "", "store")
+            # Тишина меряется рабочими днями СВОЕГО контура: приход товара молчит
+            # столько, сколько работал магазин, а не колонки.
+            base = sorted(worked.get((st, line), ()))
             uniq = sorted(set(kind_days))
             last = uniq[-1]
-            # Тишина считается в РАБОЧИХ днях: календарные дни закрытой станции
-            # тревогой не являются.
-            silent = sum(1 for d in days if d > last)
-            # Обычный ритм этого документа на этой станции: медиана интервалов.
-            # Приход не обязан быть ежедневным, и «десять дней без поставки» значат
-            # разное на станции, куда возят раз в три дня, и на той, куда раз в
-            # две недели. Сравнивать надо с её собственным ритмом.
-            gaps = [sum(1 for d in days if uniq[i] < d <= uniq[i + 1])
+            silent = sum(1 for d in base if d > last)
+            # Обычный ритм документа на этой станции: медиана интервалов. Приход не
+            # обязан быть ежедневным, и «десять дней без поставки» значат разное
+            # там, куда возят раз в три дня, и там, куда раз в две недели.
+            gaps = [sum(1 for d in base if uniq[i] < d <= uniq[i + 1])
                     for i in range(len(uniq) - 1)]
             typical = sorted(gaps)[len(gaps) // 2] if gaps else None
-            # Внимание, когда молчание вдвое дольше обычного ритма и при этом
-            # набежала хотя бы неделя рабочих дней: удвоение короткого интервала
-            # (был день — стало два) поводом не является.
             loud = silent >= 7 and (typical is None or silent >= max(2 * typical, 3))
             cells.append(CoverageCell(
-                kind=kind, count=len(kind_days), lastDate=last, silentDays=silent,
-                typicalGap=typical, status="attention" if loud else "ok"))
+                kind=kind, line=line, count=len(kind_days), lastDate=last,
+                silentDays=silent, typicalGap=typical,
+                status="attention" if loud else "ok"))
 
         out.append(CoverageStation(
-            station=st, workedDays=len(days), expectedDays=window, missingDays=missing,
-            firstDay=days[0] if days else None, lastDay=days[-1] if days else None,
-            status="attention" if (missing > 0 or any(c.status == "attention" for c in cells)) else "ok",
+            station=st, lines=line_rows,
+            status=("attention" if any(l.status == "attention" for l in line_rows)
+                    or any(c.status == "attention" for c in cells) else "ok"),
             docs=sorted(cells, key=lambda c: -c.count),
         ))
     return out

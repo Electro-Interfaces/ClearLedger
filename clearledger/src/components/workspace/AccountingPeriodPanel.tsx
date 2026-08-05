@@ -94,17 +94,30 @@ const OUR_DOC_KINDS: { kind: string; label: string; hint: string }[] = [
   { kind: 'return_sale', label: 'Возвраты', hint: 'от покупателя' },
 ]
 
+/**
+ * Три контура станции. Их нельзя мерить вместе: на 208 колонки работают каждый
+ * день, а магазин может молчать неделю — и день, закрытый топливной сменой,
+ * товарного пробела не закрывает.
+ */
+type Line = 'fuel' | 'store' | 'food'
+
+const LINE_TITLE: Record<Line, { label: string; icon: typeof Fuel; shift: string }> = {
+  fuel:  { label: 'Нефтепродукты', icon: Fuel,         shift: 'Смены' },
+  store: { label: 'Магазин',       icon: ShoppingCart, shift: 'Смены' },
+  food:  { label: 'Общепит',       icon: ChefHat,      shift: 'Выпуск' },
+}
+
 /** Покрытие рабочих дней станции документами (см. `/periods/coverage`). */
 interface CoverageStation {
   station: string
-  workedDays: number
-  expectedDays: number
-  missingDays: number
-  firstDay: string | null
-  lastDay: string | null
   status: 'ok' | 'attention'
+  lines: {
+    line: Line; present: boolean; workedDays: number; expectedDays: number
+    missingDays: number; firstDay: string | null; lastDay: string | null
+    status: 'ok' | 'attention' | 'absent'
+  }[]
   docs: {
-    kind: string; count: number; lastDate: string | null; silentDays: number
+    kind: string; line: Line; count: number; lastDate: string | null; silentDays: number
     typicalGap: number | null; status: 'ok' | 'attention' | 'none'
   }[]
 }
@@ -701,28 +714,33 @@ export function AccountingPeriodPanel() {
 
 
 /**
- * Закрыт ли период станции документами — вердикт, а не количество.
+ * Закрыт ли период станции документами — по каждому контуру отдельно.
  *
- * Прошлая версия давала числа: «20 приходов при 30 рабочих днях». Из такой строки
- * ничего не следует — двадцать это много или мало, зависит от того, как часто на
- * эту станцию возят. Поэтому каждый вид документа сравнивается с СОБСТВЕННЫМ
- * ритмом станции: обычный интервал считается по её же истории за период, и
- * тревога поднимается, когда молчание вдвое дольше привычного.
+ * Нефтепродукты, магазин и общепит живут по разным правилам и разными
+ * документами. Прежняя версия считала рабочий день общим: если пришла топливная
+ * смена, день выглядел закрытым, хотя товарной смены за него не было. На 208, где
+ * есть и колонки, и магазин, и кухня, это прятало товарный пробел целиком.
  *
- * Смены — другое дело: они обязаны быть за каждый рабочий день, и там вердикт
- * прямой — сколько дней окна работы осталось без сменного отчёта.
+ * Теперь у каждого контура свой рабочий день, своё окно работы и свой вердикт.
+ * Станция, где контура нет вовсе, показывает прочерк — не пробел, а отсутствие
+ * такой торговли.
  */
 function CoverageCard({ data, loading }: { data?: CoverageStation[]; loading: boolean }) {
   const rows = data ?? []
-  const kinds = useMemo(() => {
-    const seen = new Set(rows.flatMap((s) => s.docs.map((d) => d.kind)))
-    const known = OUR_DOC_KINDS.filter((k) => seen.has(k.kind))
-    const extra = [...seen].filter((k) => !OUR_DOC_KINDS.some((o) => o.kind === k))
-      .map((k) => ({ kind: k, label: k, hint: 'вид не описан в карте' }))
-    return [...known, ...extra]
-  }, [rows])
-  const missing = OUR_DOC_KINDS.filter((k) => !kinds.some((x) => x.kind === k.kind))
+
+  // Показываем только те контуры, что есть хоть у одной станции: колонки
+  // «Общепит» на сети без кухни — пустая ширина и лишний вопрос.
+  const lines = useMemo(() => (['fuel', 'store', 'food'] as Line[])
+    .filter((l) => rows.some((s) => s.lines.some((x) => x.line === l && x.present))), [rows])
+
+  // Виды документов каждого контура, кроме сменных: сменные уже стоят первой
+  // колонкой группы со своим, более строгим вердиктом.
+  const kindsOf = (line: Line) => {
+    const seen = new Set(rows.flatMap((s) => s.docs.filter((d) => d.line === line).map((d) => d.kind)))
+    return OUR_DOC_KINDS.filter((k) => seen.has(k.kind) && !SHIFT_KINDS.has(k.kind))
+  }
   const cell = (s: CoverageStation, kind: string) => s.docs.find((d) => d.kind === kind)
+  const lineOf = (s: CoverageStation, line: Line) => s.lines.find((l) => l.line === line)
   const problem = rows.filter((s) => s.status === 'attention')
 
   return (
@@ -730,12 +748,12 @@ function CoverageCard({ data, loading }: { data?: CoverageStation[]; loading: bo
       <CardContent className="pt-4">
         <div className="mb-1 flex flex-wrap items-center gap-2">
           <RadioTower className="h-4 w-4 text-primary" />
-          <h3 className={H3}>Закрытие периода по станциям</h3>
+          <h3 className={H3}>Закрытие периода по станциям и контурам</h3>
         </div>
         <p className="mb-3 text-[11px] text-muted-foreground">
           {problem.length === 0
-            ? 'Все станции закрыты документами: смены за каждый рабочий день, остальные виды в обычном ритме.'
-            : `Требуют разбора ${fmtN(problem.length)} из ${fmtN(rows.length)} станций — ниже отмечено, чем именно.`}
+            ? 'Все контуры закрыты: сменные документы за каждый рабочий день, остальные виды в обычном ритме.'
+            : `Требуют разбора ${fmtN(problem.length)} из ${fmtN(rows.length)} станций.`}
         </p>
 
         {loading ? (
@@ -751,13 +769,35 @@ function CoverageCard({ data, loading }: { data?: CoverageStation[]; loading: bo
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
+                  {/* Верхняя строка — контуры: без неё колонки «Смены» и «Приходы»
+                      повторяются трижды и не отличимы друг от друга. */}
+                  <tr className="text-[11px] text-muted-foreground">
+                    <th className="sticky left-0 bg-card pb-1 pr-3 text-left font-medium">АЗС</th>
+                    {lines.map((l) => {
+                      const t = LINE_TITLE[l]
+                      const width = 1 + kindsOf(l).length
+                      return (
+                        <th key={l} colSpan={width}
+                          className="border-l border-border/40 pb-1 pl-4 text-left font-semibold uppercase tracking-wide">
+                          <span className="flex items-center gap-1.5">
+                            <t.icon className="h-3.5 w-3.5 shrink-0 text-primary" />{t.label}
+                          </span>
+                        </th>
+                      )
+                    })}
+                  </tr>
                   <tr className="border-b border-border/60 text-[11px] text-muted-foreground">
-                    <th className="sticky left-0 bg-card py-1.5 pr-3 text-left font-medium">АЗС</th>
-                    <th className="py-1.5 pr-5 text-left font-medium">Смены за дни работы</th>
-                    {kinds.filter((k) => !SHIFT_KINDS.has(k.kind)).map((k) => (
-                      <th key={k.kind} className="py-1.5 pl-4 text-left font-medium whitespace-nowrap"
-                        title={k.hint}>{k.label}</th>
-                    ))}
+                    <th className="sticky left-0 bg-card py-1.5 pr-3 text-left font-normal" />
+                    {lines.flatMap((l) => [
+                      <th key={`${l}-shift`}
+                        className="border-l border-border/40 py-1.5 pl-4 text-left font-medium whitespace-nowrap">
+                        {LINE_TITLE[l].shift} за дни работы
+                      </th>,
+                      ...kindsOf(l).map((k) => (
+                        <th key={k.kind} className="py-1.5 pl-4 text-left font-medium whitespace-nowrap"
+                          title={k.hint}>{k.label}</th>
+                      )),
+                    ])}
                   </tr>
                 </thead>
                 <tbody>
@@ -766,48 +806,53 @@ function CoverageCard({ data, loading }: { data?: CoverageStation[]; loading: bo
                       <td className="sticky left-0 bg-card py-1.5 pr-3 font-medium tabular-nums">
                         {s.station}
                       </td>
-                      {/* Смены обязаны быть каждый рабочий день — вердикт прямой. */}
-                      <td className="py-1.5 pr-5"
-                        title={`окно работы ${s.firstDay} — ${s.lastDay}`}>
-                        {s.missingDays === 0 ? (
-                          <span className="flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400">
-                            <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
-                            все {fmtN(s.workedDays)} дн.
-                          </span>
-                        ) : (
-                          <span className="flex items-center gap-1.5 text-xs font-medium text-amber-600 dark:text-amber-400">
-                            <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-                            нет {fmtN(s.missingDays)} из {fmtN(s.expectedDays)} дн.
-                          </span>
-                        )}
-                      </td>
-                      {kinds.filter((k) => !SHIFT_KINDS.has(k.kind)).map((k) => {
-                        const c = cell(s, k.kind)
-                        if (!c) {
-                          return (
-                            <td key={k.kind} className="py-1.5 pl-4 text-xs text-muted-foreground/50">
-                              не было
-                            </td>
-                          )
-                        }
-                        const loud = c.status === 'attention'
-                        return (
-                          <td key={k.kind} className="py-1.5 pl-4"
-                            title={`${fmtN(c.count)} шт. за период, последний ${c.lastDate}`
-                              + (c.typicalGap ? `; обычно раз в ${c.typicalGap} раб. дн.` : '')}>
-                            <span className={cn('flex items-center gap-1.5 text-xs',
-                              loud ? 'font-medium text-amber-600 dark:text-amber-400' : 'text-muted-foreground')}>
-                              {loud
-                                ? <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-                                : <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600/70 dark:text-emerald-400/70" />}
-                              {c.silentDays === 0
-                                ? 'в срок'
-                                : loud
-                                  ? `молчит ${fmtN(c.silentDays)} дн.`
-                                  : `${fmtN(c.silentDays)} дн. назад`}
-                            </span>
-                          </td>
-                        )
+                      {lines.flatMap((l) => {
+                        const ln = lineOf(s, l)
+                        const absent = !ln || !ln.present
+                        return [
+                          <td key={`${l}-shift`} className="border-l border-border/40 py-1.5 pl-4"
+                            title={ln?.present ? `окно работы ${ln.firstDay} — ${ln.lastDay}` : undefined}>
+                            {absent ? (
+                              <span className="text-xs text-muted-foreground/40">контура нет</span>
+                            ) : ln!.missingDays === 0 ? (
+                              <span className="flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400">
+                                <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                                все {fmtN(ln!.workedDays)} дн.
+                              </span>
+                            ) : (
+                              <span className="flex items-center gap-1.5 text-xs font-medium text-amber-600 dark:text-amber-400">
+                                <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                                нет {fmtN(ln!.missingDays)} из {fmtN(ln!.expectedDays)} дн.
+                              </span>
+                            )}
+                          </td>,
+                          ...kindsOf(l).map((k) => {
+                            const c = cell(s, k.kind)
+                            if (absent || !c) {
+                              return (
+                                <td key={k.kind} className="py-1.5 pl-4 text-xs text-muted-foreground/40">
+                                  {absent ? '' : 'не было'}
+                                </td>
+                              )
+                            }
+                            const loud = c.status === 'attention'
+                            return (
+                              <td key={k.kind} className="py-1.5 pl-4"
+                                title={`${fmtN(c.count)} шт. за период, последний ${c.lastDate}`
+                                  + (c.typicalGap ? `; обычно раз в ${c.typicalGap} раб. дн.` : '')}>
+                                <span className={cn('flex items-center gap-1.5 text-xs',
+                                  loud ? 'font-medium text-amber-600 dark:text-amber-400' : 'text-muted-foreground')}>
+                                  {loud
+                                    ? <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                                    : <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600/70 dark:text-emerald-400/70" />}
+                                  {c.silentDays === 0 ? 'в срок'
+                                    : loud ? `молчит ${fmtN(c.silentDays)} дн.`
+                                    : `${fmtN(c.silentDays)} дн. назад`}
+                                </span>
+                              </td>
+                            )
+                          }),
+                        ]
                       })}
                     </tr>
                   ))}
@@ -816,17 +861,12 @@ function CoverageCard({ data, loading }: { data?: CoverageStation[]; loading: bo
             </div>
 
             <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">
-              Смены обязаны быть за каждый день работы станции — там вердикт прямой. Приход,
-              перемещение и списание ежедневными не бывают, поэтому сравниваются с обычным
-              ритмом самой станции: «молчит» значит вдвое дольше привычного и не меньше недели
-              рабочих дней. Наведите на ячейку — количество, дата последнего и обычный интервал.
+              У каждого контура свой рабочий день и свой счёт. Сменный документ обязан быть за
+              каждый день работы контура — там вердикт прямой. Приход, перемещение, списание
+              ежедневными не бывают и сравниваются с обычным ритмом станции: «молчит» значит
+              вдвое дольше привычного и не меньше недели рабочих дней. Пустая клетка — такой
+              торговли на станции нет.
             </p>
-            {missing.length > 0 && (
-              <p className="mt-1.5 flex items-start gap-1.5 text-[11px] leading-relaxed text-amber-600 dark:text-amber-400">
-                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                Ни по одной станции за период нет: {missing.map((m) => m.label.toLowerCase()).join(', ')}.
-              </p>
-            )}
           </>
         )}
       </CardContent>
@@ -834,10 +874,8 @@ function CoverageCard({ data, loading }: { data?: CoverageStation[]; loading: bo
   )
 }
 
-/** Виды, которые обязаны быть ежедневно: по ним вердикт считается иначе. */
-const SHIFT_KINDS = new Set(['shift_orp', 'retail_sale_sidegoods'])
-
-
+/** Сменные документы контуров: у них вердикт строже — обязаны быть каждый день. */
+const SHIFT_KINDS = new Set(['shift_orp', 'retail_sale_sidegoods', 'production_release'])
 /**
  * Готовность периода к закрытию: четыре проверки, которые бухгалтер делает руками.
  *
