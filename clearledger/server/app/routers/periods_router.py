@@ -300,6 +300,100 @@ async def period_readiness(
     )
 
 
+# ─── GET /periods/coverage ───────────────────────────────────
+
+class CoverageCell(BaseModel):
+    kind: str
+    count: int
+    lastDate: str | None = None
+    silentDays: int          # рабочих дней станции ПОСЛЕ последнего такого документа
+
+
+class CoverageStation(BaseModel):
+    station: str
+    workedDays: int          # дней, когда станция работала (была смена)
+    firstDay: str | None = None
+    lastDay: str | None = None
+    docs: list[CoverageCell]
+
+
+@router.get("/coverage", response_model=list[CoverageStation])
+async def periods_coverage(
+    company_id: str = Query(...),
+    year: int = Query(...),
+    month: int | None = Query(None, ge=1, le=12),
+    quarter: int | None = Query(None, ge=1, le=4),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Покрыт ли РАБОЧИЙ день станции документами — по видам.
+
+    Отсутствие документа само по себе ничего не значит: станция могла не работать,
+    поставки могло не быть, пересчёт бывает раз в месяц. Значение имеет другое —
+    станция работала, смены шли, а документа вида нет. Поэтому тишина меряется не
+    календарными днями, а РАБОЧИМИ: сколько дней после последнего прихода
+    (перемещения, списания…) станция отторговала, ничего такого не оформив.
+
+    Рабочий день = день, за который есть сменный документ: топливный `shift_orp`
+    либо товарный `retail_sale_sidegoods`. Это тот же признак, по которому день
+    считается отработанным в карте полноты, — второго определения быть не должно.
+    """
+    cid = await assert_company_member(company_id, current_user, db)
+
+    if month is not None:
+        start, end = f"{year}-{month:02d}-01", f"{year}-{month:02d}-32"
+    elif quarter is not None:
+        first = quarter * 3 - 2
+        start, end = f"{year}-{first:02d}-01", f"{year}-{first + 2:02d}-32"
+    else:
+        start, end = f"{year}-01-01", f"{year}-12-32"
+
+    day_expr = func.left(func.coalesce(
+        DataEntry.meta["Документ"]["Дата"].astext,
+        DataEntry.meta["Смена"]["Открытие"].astext), 10)
+    station_expr = DataEntry.meta["Смена"]["КодАЗС"].astext
+
+    rows = (await db.execute(
+        select(station_expr, DataEntry.doc_type_id, day_expr)
+        .where(DataEntry.company_id == cid,
+               DataEntry.source.in_(("edge", "oneC", "api")),
+               day_expr >= start, day_expr <= end)
+    )).all()
+
+    # Рабочие дни и дни по видам — одним проходом: данных за месяц немного, а два
+    # запроса разошлись бы по фильтрам при первой же правке.
+    worked: dict[str, set[str]] = {}
+    by_kind: dict[tuple[str, str], list[str]] = {}
+    SHIFT_KINDS = {"shift_orp", "retail_sale_sidegoods"}
+    for station, kind, day in rows:
+        st = str(station or "").strip()
+        if not st or not day:
+            continue
+        if kind in SHIFT_KINDS:
+            worked.setdefault(st, set()).add(day)
+        by_kind.setdefault((st, kind or "—"), []).append(day)
+
+    out: list[CoverageStation] = []
+    for st in sorted(worked, key=lambda s: (len(s), s)):
+        days = sorted(worked[st])
+        cells: list[CoverageCell] = []
+        for (station, kind), kind_days in by_kind.items():
+            if station != st:
+                continue
+            last = max(kind_days)
+            # Считаем именно рабочие дни после последнего документа: календарные
+            # дни на станции, закрытой на ремонт, тревогой не являются.
+            silent = sum(1 for d in days if d > last)
+            cells.append(CoverageCell(kind=kind, count=len(kind_days),
+                                      lastDate=last, silentDays=silent))
+        out.append(CoverageStation(
+            station=st, workedDays=len(days),
+            firstDay=days[0] if days else None, lastDay=days[-1] if days else None,
+            docs=sorted(cells, key=lambda c: -c.count),
+        ))
+    return out
+
+
 # ─── GET /periods/trend ──────────────────────────────────────
 
 class TrendMonth(BaseModel):

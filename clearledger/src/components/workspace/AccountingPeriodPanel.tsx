@@ -17,7 +17,7 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
-  AlertTriangle, CalendarCheck, ChefHat, CheckCircle2, FileStack, Fuel, Loader2, Lock, ShoppingCart, Unlock,
+  AlertTriangle, CalendarCheck, ChefHat, CheckCircle2, FileStack, Fuel, Loader2, Lock, RadioTower, ShoppingCart, Unlock,
 } from 'lucide-react'
 
 import { Card, CardContent } from '@/components/ui/card'
@@ -93,6 +93,15 @@ const OUR_DOC_KINDS: { kind: string; label: string; hint: string }[] = [
   { kind: 'gain', label: 'Оприходования', hint: 'излишки пересчёта' },
   { kind: 'return_sale', label: 'Возвраты', hint: 'от покупателя' },
 ]
+
+/** Покрытие рабочих дней станции документами (см. `/periods/coverage`). */
+interface CoverageStation {
+  station: string
+  workedDays: number
+  firstDay: string | null
+  lastDay: string | null
+  docs: { kind: string; count: number; lastDate: string | null; silentDays: number }[]
+}
 
 /** Готовность периода к закрытию — четыре проверки бухгалтера (см. periods_router). */
 interface PeriodReadiness {
@@ -197,6 +206,16 @@ export function AccountingPeriodPanel() {
   const recon = useQuery({
     queryKey: ['reconciliation-summary', companyId],
     queryFn: () => getReconciliationSummary(companyId),
+  })
+  const coverage = useQuery({
+    queryKey: ['period-coverage', companyId, active?.year, active?.month, scope],
+    queryFn: () => get<CoverageStation[]>('/api/periods/coverage', {
+      company_id: companyId,
+      year: String(active!.year),
+      ...(scope === 'month' ? { month: String(active!.month) } : {}),
+      ...(scope === 'quarter' ? { quarter: String(activeQuarter) } : {}),
+    }),
+    enabled: !!active,
   })
   const readinessDocs = useQuery({
     queryKey: ['period-readiness', companyId, active?.year, active?.month, scope],
@@ -422,6 +441,8 @@ export function AccountingPeriodPanel() {
       )}
 
       {active && <OurDocsCard data={readinessDocs.data} loading={readinessDocs.isLoading} />}
+
+      {active && <CoverageCard data={coverage.data} loading={coverage.isLoading} />}
 
       {active && <PeriodReadinessCard data={readinessDocs.data} loading={readinessDocs.isLoading}
         month={scope === 'month' ? `${MONTHS[active.month - 1]} ${active.year}`
@@ -671,6 +692,88 @@ export function AccountingPeriodPanel() {
   )
 }
 
+
+/**
+ * Покрыт ли рабочий день станции документами.
+ *
+ * Отсутствие прихода само по себе ничего не значит: поставки может не быть,
+ * пересчёт бывает раз в месяц, станция могла стоять. Тревога — другое: станция
+ * работала, смены шли, а документа нет. Поэтому тишина меряется рабочими днями,
+ * а не календарными, и порог здесь честный — не «давно», а «столько дней
+ * торговали, ничего не оформив».
+ */
+function CoverageCard({ data, loading }: { data?: CoverageStation[]; loading: boolean }) {
+  const rows = data ?? []
+  const label = (kind: string) => OUR_DOC_KINDS.find((k) => k.kind === kind)?.label ?? kind
+  // Порог внимания: неделя рабочих дней без документа. Меньше — обычный ритм
+  // поставок, больше — уже вопрос, который бухгалтер задаёт станции.
+  const ALERT = 7
+
+  return (
+    <Card>
+      <CardContent className="pt-4">
+        <div className="mb-3 flex items-center gap-2">
+          <RadioTower className="h-4 w-4 text-primary" />
+          <h3 className={H3}>Покрытие рабочих дней документами</h3>
+        </div>
+        {loading ? (
+          <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" /> Считаем покрытие…
+          </div>
+        ) : rows.length === 0 ? (
+          <p className="py-4 text-sm text-muted-foreground">
+            За период нет ни одной работавшей станции — считать покрытие не по чему.
+          </p>
+        ) : (
+          <>
+            <div className="space-y-3">
+              {rows.map((s) => {
+                const alerts = s.docs.filter((d) => d.silentDays >= ALERT)
+                return (
+                  <div key={s.station} className="rounded-lg border border-border bg-background p-3">
+                    <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                      <span className="text-sm font-semibold">АЗС {s.station}</span>
+                      <span className="text-[11px] text-muted-foreground">
+                        работала {fmtN(s.workedDays)} дн. · {s.firstDay} — {s.lastDay}
+                      </span>
+                      {alerts.length > 0 && (
+                        <span className="ml-auto flex items-center gap-1 text-[11px] text-amber-600 dark:text-amber-400">
+                          <AlertTriangle className="h-3.5 w-3.5" />
+                          молчит по {alerts.length} видам
+                        </span>
+                      )}
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1.5">
+                      {s.docs.map((d) => (
+                        <span key={d.kind} className="text-xs">
+                          <span className="text-muted-foreground">{label(d.kind)}</span>{' '}
+                          <span className="tabular-nums">{fmtN(d.count)}</span>
+                          {d.silentDays > 0 && (
+                            <span className={cn('ml-1 tabular-nums',
+                              d.silentDays >= ALERT
+                                ? 'text-amber-600 dark:text-amber-400'
+                                : 'text-muted-foreground/70')}>
+                              · тишина {fmtN(d.silentDays)} раб. дн.
+                            </span>
+                          )}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+            <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">
+              «Тишина» — сколько дней станция отработала после последнего документа этого вида.
+              Дни простоя не считаются: если станция не торговала, отсутствие прихода — не пробел.
+              Порог внимания — {ALERT} рабочих дней.
+            </p>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
 
 /**
  * Что наша линия собрала за период — по видам документов.
