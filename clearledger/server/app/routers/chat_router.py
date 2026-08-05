@@ -15,6 +15,7 @@ from fastapi import (
 )
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, delete as sa_delete, func, or_, select, text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import decode_token, get_company_by_api_key, get_current_user
@@ -73,13 +74,16 @@ async def _is_space_admin(user: User, cid: uuid.UUID, db: AsyncSession) -> bool:
     """Администратор ПРОСТРАНСТВА: только он создаёт каналы.
 
     Роль берётся из членства в этой организации, а не из `User.role`: один и тот же
-    человек бывает админом в своей компании и обычным участником в чужой.
+    человек бывает админом в своей компании и обычным участником в чужой. Глобальное
+    поле `users.role` тут НЕ смотрим — у перенесённых с прода людей оно стоит как
+    попало, и на пилоте четверо рядовых сотрудников получали доступ ко всему
+    управлению чатами пространства (та же грабля, что в `_is_company_admin`).
     """
     if user.is_superadmin:
         return True
     role = (await db.execute(select(UserCompany.role).where(
         UserCompany.user_id == user.id, UserCompany.company_id == cid))).scalar_one_or_none()
-    return role == "admin" or user.role == "admin"
+    return role == "admin"
 
 
 async def _is_insider(user: User, cid: uuid.UUID) -> bool:
@@ -225,10 +229,19 @@ async def ensure_company_rooms(user: User, cid: uuid.UUID, db: AsyncSession) -> 
             ))).scalars().all())
             space_ids.add(user.id)
             missing = space_ids - member_ids
-            for uid in missing:
-                db.add(ChatParticipant(room_id=room.id, user_id=uid, role="member"))
             if missing:
-                await db.flush()
+                # ON CONFLICT, а не просто `db.add`: эту дописку одновременно делают все
+                # открытые вкладки пространства (список чатов обновляется по таймеру), и
+                # без него второй пришедший ловил уникальный индекс `uq_chat_participants`
+                # → 500 на списке чатов. Ровно сценарий первого дня, когда четырнадцать
+                # человек заходят в пространство разом и у каждого `missing` не пуст.
+                # id и is_muted проставляем явно: у модели это python-side default, а
+                # он в core-insert по таблице не всегда доезжает (уже ловили на
+                # `space_inbound_keys` — NOT NULL id при вставке мимо ORM).
+                await db.execute(pg_insert(ChatParticipant.__table__).values([
+                    {"id": uuid.uuid4(), "room_id": room.id, "user_id": uid,
+                     "role": "member", "is_muted": False} for uid in missing
+                ]).on_conflict_do_nothing(index_elements=["room_id", "user_id"]))
 
 
 
@@ -447,7 +460,8 @@ async def list_rooms(
     # бы чаты двух орг вперемешку. Строгая изоляция пространств.
     rows = (await db.execute(
         select(ChatRoom, ChatParticipant.last_read_at, ChatParticipant.role,
-               ChatParticipant.muted_until, ChatParticipant.pinned_at)
+               ChatParticipant.muted_until, ChatParticipant.pinned_at,
+               ChatParticipant.joined_at)
         .join(ChatParticipant, and_(ChatParticipant.room_id == ChatRoom.id,
                                     ChatParticipant.user_id == current_user.id))
         .where(ChatRoom.is_active.is_(True), ChatRoom.is_archived.is_(archived),
@@ -472,13 +486,17 @@ async def list_rooms(
 
     company_admin = await _is_company_admin(db, cid, current_user)
     out: list[RoomOut] = []
-    for room, last_read, my_role, muted_until, pinned_at in rows:
+    for room, last_read, my_role, muted_until, pinned_at, joined_at in rows:
         pcount = (await db.execute(select(func.count()).select_from(ChatParticipant)
                   .where(ChatParticipant.room_id == room.id))).scalar() or 0
         unread = (await db.execute(select(func.count()).select_from(ChatMessage).where(
             ChatMessage.room_id == room.id, ChatMessage.deleted_at.is_(None),
             ChatMessage.user_id != current_user.id,
-            ChatMessage.created_at > (last_read or datetime(1970, 1, 1, tzinfo=timezone.utc)),
+            # Порог непрочитанного — момент ВСТУПЛЕНИЯ, а не начало времён: человека,
+            # которого только что вписали в «Общий чат», иначе встречает вся его
+            # история как непрочитанная, и счётчик показывает сотни.
+            ChatMessage.created_at > (
+                last_read or joined_at or datetime(1970, 1, 1, tzinfo=timezone.utc)),
         ))).scalar() or 0
         last = (await db.execute(select(ChatMessage).where(
             ChatMessage.room_id == room.id, ChatMessage.deleted_at.is_(None))
@@ -502,7 +520,9 @@ async def list_rooms(
             id=str(room.id), type=room.type, kind=room.kind, name=name,
             isArchived=room.is_archived, participantCount=int(pcount), unreadCount=int(unread),
             directPeerId=peer_id, createdBy=str(room.created_by) if room.created_by else None,
-            lastMessage=(last.content if last and not last.deleted_at else None) if last else None,
+            # Обрезаем: список чатов грузится у всех и постоянно, а одно длинное
+            # сообщение утяжеляло бы ответ каждому участнику навсегда.
+            lastMessage=((last.content or "")[:200] if last and not last.deleted_at else None),
             lastMessageAt=(last.created_at.isoformat() if last else None),
             pinnedMessage=pinned,
             myRole=my_role,
@@ -821,6 +841,14 @@ async def send_message(
             reply_to = uuid.UUID(body.replyTo)
         except (ValueError, TypeError):
             reply_to = None
+        # Отвечать можно только на сообщение ЭТОЙ комнаты. Лента подставляет в ответ
+        # первые 120 символов оригинала и имя автора — без проверки достаточно было
+        # подставить id сообщения из чужого чата, чтобы его текст увидели все здесь.
+        if reply_to is not None:
+            src_room = (await db.execute(select(ChatMessage.room_id).where(
+                ChatMessage.id == reply_to))).scalar_one_or_none()
+            if src_room != rid:
+                reply_to = None
     msg = ChatMessage(
         room_id=rid, user_id=current_user.id, user_name=current_user.name,
         type=mtype, content=content, reply_to=reply_to,
@@ -936,6 +964,14 @@ async def pin_message(
     except (ValueError, TypeError):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID")
     room = await _assert_participant(rid, current_user, db)
+    # Закреп — заявление на всю комнату, поэтому право то же, что и на публикацию:
+    # иначе в «Объявлениях» любой читатель перевешивает шапку канала.
+    my_role = (await db.execute(select(ChatParticipant.role).where(
+        ChatParticipant.room_id == rid,
+        ChatParticipant.user_id == current_user.id))).scalar_one_or_none()
+    if not _can_write(room, current_user, my_role,
+                      await _is_company_admin(db, room.company_id, current_user)):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Закреплять может ведущий канала")
     if body.messageId is None:
         room.pinned_message_id = None
     else:
@@ -1007,7 +1043,7 @@ async def delete_message(
     my = (await db.execute(select(ChatParticipant.role).where(
         ChatParticipant.room_id == rid, ChatParticipant.user_id == current_user.id))).scalar_one_or_none()
     can = (msg.user_id == current_user.id or current_user.is_superadmin
-           or room.created_by == current_user.id or my == "admin")
+           or room.created_by == current_user.id or my in ("owner", "admin"))
     if not can:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Нет прав удалять это сообщение")
     if msg.deleted_at is None:
@@ -1031,7 +1067,7 @@ async def _set_archived(room_id: str, flag: bool, current_user: User, db: AsyncS
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Системный чат нельзя архивировать")
     my = (await db.execute(select(ChatParticipant.role).where(
         ChatParticipant.room_id == rid, ChatParticipant.user_id == current_user.id))).scalar_one_or_none()
-    if not (current_user.is_superadmin or room.created_by == current_user.id or my == "admin"):
+    if not (current_user.is_superadmin or room.created_by == current_user.id or my in ("owner", "admin")):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Нет прав")
     room.is_archived = flag
     room.archived_at = _now() if flag else None
@@ -1166,7 +1202,7 @@ async def add_participant(
     # право добавлять: создатель, admin комнаты или суперадмин
     my = (await db.execute(select(ChatParticipant.role).where(
         ChatParticipant.room_id == rid, ChatParticipant.user_id == current_user.id))).scalar_one_or_none()
-    if not (current_user.is_superadmin or room.created_by == current_user.id or my == "admin"):
+    if not (current_user.is_superadmin or room.created_by == current_user.id or my in ("owner", "admin")):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Нет прав добавлять участников")
     if room.company_id not in await _member_ids(target, db):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Пользователь не из компании чата")
@@ -1237,9 +1273,12 @@ async def add_mail_participant(
                 org_id = None
         db.add(UserCompany(user_id=user.id, company_id=room.company_id,
                            role="user", party_type="partner", organization_id=org_id))
-    elif not user.mail_only and not await _member_ids(user.id, db):
+    elif not user.mail_only and room.company_id not in await _member_ids(user.id, db):
+        # Условие было вывернуто: отказ срабатывал, когда у найденной учётки НЕТ
+        # членств вообще, а человек из ЧУЖОЙ компании молча добавлялся в комнату
+        # обычным участником. Сверяем именно с компанией этой комнаты.
         raise HTTPException(status.HTTP_409_CONFLICT,
-                            "Такой адрес уже занят учётной записью пространства")
+                            "Такой адрес уже занят учётной записью другого пространства")
 
     exists = (await db.execute(select(ChatParticipant.id).where(
         ChatParticipant.room_id == rid, ChatParticipant.user_id == user.id))).scalar_one_or_none()
@@ -2011,6 +2050,28 @@ async def ensure_ticket_room(
     except (ValueError, TypeError):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID")
 
+    # Заявка — своей компании, и вызывающий к ней причастен. Без этой проверки чат
+    # заявки открывался ЛЮБОМУ сотруднику пространства по её id: комната скрытая, но
+    # ручка молча вписывала пришедшего в участники и отдавала всю переписку.
+    t = (await db.execute(text(
+        "select t.id, t.number, t.display_number, t.title, t.customer_user_id, "
+        "t.assigned_to, t.current_assignee_id, lower(cu.email) as customer_email, "
+        "lower(au.email) as assignee_email, lower(ca.email) as current_email "
+        "from public.tickets t "
+        "left join public.users cu on cu.id = t.customer_user_id "
+        "left join public.users au on au.id = t.assigned_to "
+        "left join public.users ca on ca.id = t.current_assignee_id "
+        "where t.id = :t"), {"t": str(tid)})).first()
+    if t is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Заявка не найдена")
+    my_email = (current_user.email or "").lower()
+    related = bool(my_email) and my_email in {
+        t.customer_email, t.assignee_email, t.current_email} - {None}
+    if not (related or current_user.is_superadmin
+            or await _is_space_admin(current_user, cid, db)):
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Обсуждение заявки доступно её участникам")
+
     existing = (await db.execute(select(ChatRoom).where(
         ChatRoom.scope_ticket_id == tid, ChatRoom.company_id == cid,
         ChatRoom.is_active.is_(True)))).scalar_one_or_none()
@@ -2022,12 +2083,6 @@ async def ensure_ticket_room(
             db.add(ChatParticipant(room_id=existing.id, user_id=current_user.id, role="member"))
             await db.commit()
         return await get_room(str(existing.id), current_user, db)
-
-    t = (await db.execute(text(
-        "select id, number, display_number, title, customer_user_id, assigned_to, "
-        "current_assignee_id from public.tickets where id = :t"), {"t": str(tid)})).first()
-    if t is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Заявка не найдена")
 
     num = t.display_number or (str(t.number) if t.number is not None else "")
     room = ChatRoom(type="group", kind=None,
@@ -2341,6 +2396,28 @@ async def _assert_space_admin(user: User, cid: uuid.UUID, db: AsyncSession) -> N
                             "Управление чатами доступно администраторам пространства")
 
 
+async def _admin_room(room_id: str, cid: uuid.UUID, db: AsyncSession) -> ChatRoom:
+    """Комната, которой администратор пространства вправе управлять.
+
+    Личная переписка двоих и скрытый чат заявки сюда НЕ попадают. Управление
+    составом — это право добавить кого угодно, в том числе себя: без этого фильтра
+    администратор вписывался в чужую личку и читал её обычной ручкой сообщений.
+    Список комнат он по-прежнему видит целиком (кто с кем говорит — вопрос
+    администрирования), но войти в разговор двоих не может.
+    """
+    try:
+        rid = uuid.UUID(room_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID")
+    room = await db.get(ChatRoom, rid)
+    if room is None or room.company_id != cid or not room.is_active:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Чат не найден")
+    if room.type == "direct" or room.scope_ticket_id is not None:
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Личной перепиской и обсуждением заявки управлять нельзя")
+    return room
+
+
 class AdminRoomOut(BaseModel):
     id: str
     type: str                       # company | channel | group | direct
@@ -2543,13 +2620,8 @@ async def admin_add_people(
     """
     cid = await _company_of(current_user, db)
     await _assert_space_admin(current_user, cid, db)
-    try:
-        rid = uuid.UUID(room_id)
-    except (ValueError, TypeError):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID")
-    room = await db.get(ChatRoom, rid)
-    if room is None or room.company_id != cid or not room.is_active:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Чат не найден")
+    room = await _admin_room(room_id, cid, db)
+    rid = room.id
 
     space_ids = set((await db.execute(select(User.id).where(or_(
         User.company_id == cid,
@@ -2582,13 +2654,8 @@ async def admin_patch_room(
     """Переименовать чат или перевесить его на другое приложение."""
     cid = await _company_of(current_user, db)
     await _assert_space_admin(current_user, cid, db)
-    try:
-        rid = uuid.UUID(room_id)
-    except (ValueError, TypeError):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID")
-    room = await db.get(ChatRoom, rid)
-    if room is None or room.company_id != cid or not room.is_active:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Чат не найден")
+    room = await _admin_room(room_id, cid, db)
+    rid = room.id
     # Системные комнаты («Общий чат», «Объявления») не переименовываем: их имя —
     # часть устройства пространства, а не пользовательская настройка.
     if body.name is not None and room.kind is None:
@@ -2614,13 +2681,12 @@ async def admin_set_role(
     await _assert_space_admin(current_user, cid, db)
     if body.role not in ("owner", "admin", "member"):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Роль: owner, admin или member")
+    room = await _admin_room(room_id, cid, db)
+    rid = room.id
     try:
-        rid, uid = uuid.UUID(room_id), uuid.UUID(user_id)
+        uid = uuid.UUID(user_id)
     except (ValueError, TypeError):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID")
-    room = await db.get(ChatRoom, rid)
-    if room is None or room.company_id != cid:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Чат не найден")
     p = (await db.execute(select(ChatParticipant).where(
         ChatParticipant.room_id == rid, ChatParticipant.user_id == uid))).scalar_one_or_none()
     if p is None:
@@ -2645,13 +2711,12 @@ async def admin_remove_participant(
     """Вывести человека из чата (владельца — нельзя, сначала передайте владение)."""
     cid = await _company_of(current_user, db)
     await _assert_space_admin(current_user, cid, db)
+    room = await _admin_room(room_id, cid, db)
+    rid = room.id
     try:
-        rid, uid = uuid.UUID(room_id), uuid.UUID(user_id)
+        uid = uuid.UUID(user_id)
     except (ValueError, TypeError):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID")
-    room = await db.get(ChatRoom, rid)
-    if room is None or room.company_id != cid:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Чат не найден")
     p = (await db.execute(select(ChatParticipant).where(
         ChatParticipant.room_id == rid, ChatParticipant.user_id == uid))).scalar_one_or_none()
     if p is None:

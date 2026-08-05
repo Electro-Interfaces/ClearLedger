@@ -24,6 +24,9 @@ from app.models import ChatParticipant, ChatPushKeys, ChatPushSubscription
 
 logger = logging.getLogger("clearledger.webpush")
 
+# Живые фоновые задачи: см. комментарий у create_task ниже.
+_tasks: set = set()
+
 _VAPID_CLAIM_SUB = "mailto:noreply@dataworker.ru"
 
 
@@ -110,6 +113,10 @@ def push_room_async(room_id: uuid.UUID, title: str, body: str,
             logger.warning("Рассылка push сорвалась: %s", e)
 
     try:
-        asyncio.get_running_loop().create_task(_run())
+        # Ссылку держим в модуле: голый create_task() сборщик мусора вправе убрать
+        # до того, как задача доработает — тихая потеря уведомления.
+        task = asyncio.get_running_loop().create_task(_run())
+        _tasks.add(task)
+        task.add_done_callback(_tasks.discard)
     except RuntimeError:
         pass  # нет цикла (тесты) — просто не шлём

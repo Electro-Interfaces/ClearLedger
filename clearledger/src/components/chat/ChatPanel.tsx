@@ -14,15 +14,17 @@ import {
   Trash2, Reply, Pencil, X, Check, Megaphone, Lock, Pin, Video, UserPlus,
   Folder, AtSign, Loader2, Paperclip, Camera, Search as SearchIcon,
   Shield, ShieldOff, UserMinus, LogOut, Bell, BellOff, Forward, MapPin, ClipboardList,
-  Mail, Palette, Smile, Images, Volume2, VolumeX, Mic, BarChart3,
+  Mail, Palette, Smile, Images, Volume2, VolumeX, Mic, BarChart3, WifiOff,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/contexts/AuthContext'
 import { useCompany } from '@/contexts/CompanyContext'
 import { SPACE_PRODUCTS } from '@/config/spaceProducts'
 import { PartyBadge } from '@/components/chat/PartyBadge'
+import { ConfirmActionDialog } from '@/components/common/ConfirmActionDialog'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { useChatWs, type WsEvent } from '@/hooks/useChatWs'
+import { createMeeting } from '@/services/conferenceService'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -1596,8 +1598,19 @@ function ChatBubble({
               className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"><Pin className="size-4" /></button>}
             {isOwn && <button onClick={onEditStart} title="Редактировать"
               className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"><Pencil className="size-4" /></button>}
-            {canDelete && <button onClick={onDelete} title="Удалить"
-              className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-red-500"><Trash2 className="size-4" /></button>}
+            {/* Удаление — через подтверждение: на тач-устройствах панель действий
+                видна всегда и висит выше пузыря, промах пальцем стирает чужое
+                сообщение, а восстановления нет. */}
+            {canDelete && (
+              <ConfirmActionDialog
+                trigger={<button title="Удалить"
+                  className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-red-500"><Trash2 className="size-4" /></button>}
+                title="Удалить сообщение?"
+                description={message.content
+                  ? <>Будет удалено: «{message.content.slice(0, 120)}{message.content.length > 120 ? '…' : ''}». Восстановить нельзя.</>
+                  : 'Сообщение с вложением будет удалено. Восстановить нельзя.'}
+                confirmLabel="Удалить" destructive onConfirm={onDelete} />
+            )}
           </div>
 
           {!isOwn && isFirstInGroup && (
@@ -1852,12 +1865,12 @@ export function ChatPanel({ compact, scopeProduct }: {
     : null
 
   // ── данные ──
-  const { data: rooms = [] } = useQuery({
+  const { data: rooms = [], isLoading: roomsLoading, isError: roomsError } = useQuery({
     queryKey: ['chat-rooms', companyId, showArchived, scope ?? 'all'],
     queryFn: () => chat.getRooms(showArchived, scope),
     refetchInterval: 60000,
   })
-  const { data: messages = [] } = useQuery({
+  const { data: messages = [], isLoading: msgLoading, isError: msgError } = useQuery({
     queryKey: ['chat-messages', selectedRoom, messageSearch],
     queryFn: () => chat.getMessages(selectedRoom!, messageSearch || undefined),
     enabled: !!selectedRoom,
@@ -1925,7 +1938,13 @@ export function ChatPanel({ compact, scopeProduct }: {
   }, [qc, selectedRoom, user?.id])
 
   const channels = useMemo(() => (selectedRoom ? [`chat:${selectedRoom}`] : []), [selectedRoom])
-  const { sendTyping } = useChatWs(channels, onWs)
+  const onReconnect = useCallback(() => {
+    // Пока связи не было, сообщения не доезжали. Дёргаем и ленту, и список: иначе
+    // человек видит переписку такой, какой она была до обрыва, и не знает об этом.
+    qc.invalidateQueries({ queryKey: ['chat-messages'] })
+    qc.invalidateQueries({ queryKey: ['chat-rooms'] })
+  }, [qc])
+  const { sendTyping, connected } = useChatWs(channels, onWs, onReconnect)
 
   // ── мутации ──
   const sendMutation = useMutation({
@@ -1987,12 +2006,17 @@ export function ChatPanel({ compact, scopeProduct }: {
     onError: (err: Error) => toast.error(err.message || 'Не удалось закрепить'),
   })
   const callMutation = useMutation({
+    // Конференция пространства, а не публичный meet.jit.si: тот открывал комнату с
+    // предсказуемым именем на чужом сервере, и войти мог любой, кому переслали
+    // ссылку. Организатор входит модератором по подписанному токену, в чат уходит
+    // гостевая ссылка.
     mutationFn: async () => {
-      const url = `https://meet.jit.si/TradeLedger-chat-${selectedRoom!.replaceAll('-', '')}`
-      window.open(url, '_blank', 'noopener,noreferrer')
-      return chat.sendMessage(selectedRoom!, { content: `📹 ${user?.name || 'Участник'} приглашает в видеозвонок — присоединяйтесь: ${url}` })
+      const m = await createMeeting()
+      window.open(m.moderator_url, '_blank', 'noopener,noreferrer')
+      return chat.sendMessage(selectedRoom!, { content: `📹 ${user?.name || 'Участник'} приглашает в видеозвонок — присоединяйтесь: ${m.guest_url}` })
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['chat-messages', selectedRoom] }),
+    onError: () => toast.error('Не удалось начать видеозвонок'),
   })
   const openDirectMutation = useMutation({
     mutationFn: (uid: string) => chat.createRoom('direct', [uid]),
@@ -2041,6 +2065,12 @@ export function ChatPanel({ compact, scopeProduct }: {
     }
     if (selectedRoom && selectedRoom !== prev) {
       setMessageText(localStorage.getItem(`cl-draft-${selectedRoom}`) || '')
+      // Приложенный файл и выбранная цитата привязаны к ТОЙ комнате. Раньше
+      // сбрасывался только текст, и скан, приложенный в личке, уходил следующим
+      // отправлением в общий чат — вместе с внешними участниками.
+      setPendingFiles([])
+      setReplyTo(null)
+      setMessageSearch('')
     }
     prevRoomRef.current = selectedRoom
   }, [selectedRoom])
@@ -2330,7 +2360,18 @@ export function ChatPanel({ compact, scopeProduct }: {
       </div>
 
       <div className="flex-1 overflow-y-auto p-1">
-        {filteredRooms.length === 0 ? (
+        {roomsLoading ? (
+          <div className="space-y-1 p-1">
+            {[0, 1, 2].map((i) => <div key={i} className="h-12 animate-pulse rounded-md bg-muted/60" />)}
+          </div>
+        ) : roomsError ? (
+          <div className="flex flex-col items-center gap-2 py-8 text-muted-foreground">
+            <WifiOff className="size-6 opacity-40" />
+            <span className="text-xs">Чаты не загрузились</span>
+            <Button variant="outline" size="sm" className="h-7 text-xs"
+              onClick={() => qc.invalidateQueries({ queryKey: ['chat-rooms'] })}>Повторить</Button>
+          </div>
+        ) : filteredRooms.length === 0 ? (
           <div className="flex flex-col items-center gap-2 py-8 text-muted-foreground">
             <MessageCircle className="size-6 opacity-20" />
             <span className="text-xs">Нет чатов</span>
@@ -2504,6 +2545,12 @@ export function ChatPanel({ compact, scopeProduct }: {
             <Video className="size-4" />
           </button>
         )}
+        {!connected && (
+          <span title="Связь потеряна: новые сообщения появятся, когда соединение восстановится"
+            className="inline-flex items-center gap-1 rounded-md bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-600 dark:text-amber-400">
+            <WifiOff className="size-3" />нет связи
+          </span>
+        )}
         <button onClick={() => { setShowMessageSearch((v) => !v); if (showMessageSearch) setMessageSearch('') }} title="Поиск"
           className={cn('inline-flex size-7 items-center justify-center rounded-md transition-colors', showMessageSearch ? 'bg-accent text-primary' : 'text-muted-foreground hover:bg-accent hover:text-foreground')}>
           <SearchIcon className="size-4" />
@@ -2664,7 +2711,20 @@ export function ChatPanel({ compact, scopeProduct }: {
                   )
                 })
               })()}
-              {messages.length === 0 && <p className="py-8 text-center text-sm text-muted-foreground">Пока нет сообщений. Напишите первым.</p>}
+              {messages.length === 0 && (
+                msgLoading
+                  ? <div className="space-y-2 py-8">{[0, 1, 2].map((i) => (
+                      <div key={i} className="mx-auto h-10 w-2/3 animate-pulse rounded-lg bg-muted/60" />))}</div>
+                  : msgError
+                    ? <div className="flex flex-col items-center gap-2 py-8 text-muted-foreground">
+                        <WifiOff className="size-5 opacity-40" />
+                        <span className="text-sm">Переписка не загрузилась</span>
+                        <Button variant="outline" size="sm" className="h-7 text-xs"
+                          onClick={() => qc.invalidateQueries({ queryKey: ['chat-messages', selectedRoom] })}>Повторить</Button>
+                      </div>
+                    : <p className="py-8 text-center text-sm text-muted-foreground">
+                        {messageSearch ? 'Ничего не нашлось' : 'Пока нет сообщений. Напишите первым.'}</p>
+              )}
               <div ref={endRef} />
             </div>
           </div>

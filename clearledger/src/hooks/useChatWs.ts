@@ -2,7 +2,7 @@
  * WebSocket-клиент чата: /api/chat/ws?token=JWT.
  * Подписка на каналы chat:{roomId}, typing, обработка live-событий, авто-реконнект.
  */
-import { useEffect, useRef, useCallback } from 'react'
+import { useEffect, useRef, useCallback, useState } from 'react'
 import { getToken } from '@/services/apiClient'
 
 export interface WsEvent {
@@ -24,8 +24,15 @@ function wsUrl(): string | null {
 /**
  * @param channels — каналы для подписки (напр. [`chat:${roomId}`]); меняются при смене комнаты.
  * @param onEvent — обработчик входящих WS-событий.
+ * @param onReconnect — связь восстановилась после обрыва. Пока её не было, сообщения
+ *   приходить перестали, а лента об этом не знала: человек час смотрел на «тихий» чат,
+ *   считая, что ему не пишут. Обработчик перезапрашивает то, что пропущено.
  */
-export function useChatWs(channels: string[], onEvent: (e: WsEvent) => void) {
+export function useChatWs(
+  channels: string[],
+  onEvent: (e: WsEvent) => void,
+  onReconnect?: () => void,
+) {
   const wsRef = useRef<WebSocket | null>(null)
   const subsRef = useRef<Set<string>>(new Set())
   const onEventRef = useRef(onEvent)
@@ -34,6 +41,10 @@ export function useChatWs(channels: string[], onEvent: (e: WsEvent) => void) {
   channelsRef.current = channels
   const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const aliveRef = useRef(true)
+  const onReconnectRef = useRef(onReconnect)
+  onReconnectRef.current = onReconnect
+  const wasOpenRef = useRef(false)
+  const [connected, setConnected] = useState(false)
 
   const subscribe = useCallback((ch: string) => {
     const ws = wsRef.current
@@ -56,6 +67,9 @@ export function useChatWs(channels: string[], onEvent: (e: WsEvent) => void) {
     ws.onopen = () => {
       subsRef.current.clear()
       channelsRef.current.forEach(subscribe)
+      setConnected(true)
+      if (wasOpenRef.current) onReconnectRef.current?.()
+      wasOpenRef.current = true
     }
     ws.onmessage = (ev) => {
       try {
@@ -65,6 +79,7 @@ export function useChatWs(channels: string[], onEvent: (e: WsEvent) => void) {
     ws.onclose = () => {
       wsRef.current = null
       subsRef.current.clear()
+      setConnected(false)
       if (aliveRef.current) reconnectRef.current = setTimeout(connect, 3000)
     }
     ws.onerror = () => ws.close()
@@ -85,5 +100,5 @@ export function useChatWs(channels: string[], onEvent: (e: WsEvent) => void) {
     channels.forEach(subscribe)
   }, [channels, subscribe])
 
-  return { subscribe, sendTyping }
+  return { subscribe, sendTyping, connected }
 }
