@@ -48,7 +48,7 @@ export class ApiError extends Error {
   status: number
   detail: string
   constructor(status: number, detail: string) {
-    super(detail)
+    super(detail || `HTTP ${status}`)
     this.name = 'ApiError'
     this.status = status
     this.detail = detail
@@ -81,7 +81,9 @@ async function handleResponse<T>(res: Response): Promise<T> {
     let body: Record<string, unknown> | undefined
     try {
       body = await res.json()
-      detail = (body?.detail as string) ?? JSON.stringify(body)
+      // Пустой detail оставлял экраны с сообщением «Не удалось …:» без причины —
+      // ошибку было видно, а что именно сломалось, приходилось искать в логах.
+      detail = (body?.detail as string) || JSON.stringify(body) || res.statusText
     } catch { /* ignore */ }
 
     if (res.status === 401 && !isRedirecting) {

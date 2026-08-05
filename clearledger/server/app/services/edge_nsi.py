@@ -282,7 +282,7 @@ def _ts(value) -> datetime | None:
 async def ingest_station_nsi(db: AsyncSession, company_id, station_id: int,
                              docs: list[dict]) -> dict:
     """Принять черновики справочников и изменения цен со станции."""
-    stats = {"item_drafts": 0, "partner_drafts": 0, "price_changes": 0}
+    stats = {"item_drafts": 0, "partner_drafts": 0, "price_changes": 0, "proposals": 0}
 
     for doc in docs:
         if not isinstance(doc, dict):
@@ -325,22 +325,68 @@ async def ingest_station_nsi(db: AsyncSession, company_id, station_id: int,
                    "comment": doc.get("Комментарий")})
             stats["partner_drafts"] += 1
 
+        elif вид == "nsi_proposal":
+            # Заявка станции на исправление сетевой карточки. Ничего не
+            # применяет: канон правит центр, здесь только очередь на разбор.
+            # Повтор пакета обновляет незакрытую заявку и не воскрешает
+            # разобранную — иначе решение центра откатывалось бы само.
+            await db.execute(text("""
+                INSERT INTO edge.nsi_proposal
+                    (company_id, station_id, source_uuid, item_uuid, field,
+                     current, proposed, author, comment, created_at)
+                VALUES (:cid, :st, :key, :item, :field, :cur, :prop, :author, :comment,
+                        coalesce(CAST(:at AS timestamptz), now()))
+                ON CONFLICT (company_id, station_id, source_uuid) DO UPDATE
+                   SET proposed = excluded.proposed, comment = excluded.comment
+                 WHERE edge.nsi_proposal.resolved_at IS NULL
+            """), {"cid": company_id, "st": station_id, "key": ключ,
+                   "item": doc.get("НоменклатураUUID") or "",
+                   "field": doc.get("Поле") or "", "cur": doc.get("ТекущееЗначение") or "",
+                   "prop": doc.get("ПредложеноЗначение") or "",
+                   "author": doc.get("Автор") or "", "comment": doc.get("Комментарий") or "",
+                   "at": _ts(doc.get("Момент"))})
+            stats["proposals"] += 1
+
         elif вид == "price_change":
             # Изменение цены неизменяемо: это запись о случившемся, а не
             # состояние. Повтор пакета не должен переписывать автора и причину.
-            await db.execute(text("""
+            inserted = (await db.execute(text("""
                 INSERT INTO edge.station_price_change
                     (company_id, station_id, source_uuid, item_uuid, barcode,
                      old_price, new_price, author, reason, changed_at)
                 VALUES (:cid, :st, :key, :item, :bc, :old, :new, :author, :reason,
                         coalesce(CAST(:at AS timestamptz), now()))
                 ON CONFLICT (company_id, station_id, source_uuid) DO NOTHING
+                RETURNING id
             """), {"cid": company_id, "st": station_id, "key": ключ,
                    "item": doc.get("НоменклатураUUID") or "", "bc": doc.get("Штрихкод"),
                    "old": doc.get("ЦенаБыла"), "new": doc.get("ЦенаСтала") or 0,
                    "author": doc.get("Автор") or "", "reason": doc.get("Причина"),
-                   "at": _ts(doc.get("Момент"))})
+                   "at": _ts(doc.get("Момент"))})).scalar_one_or_none()
+            if inserted is None:
+                continue
             stats["price_changes"] += 1
+
+            # Право станции на цену — не просто журнал. Если центр явно отдал
+            # карточку станции, её новая цена становится текущей ценой мастера
+            # и затем разъезжается по остальному контуру. Сетевую цену станция
+            # переписать не может даже подделанным пакетом.
+            item = (await db.execute(text("""
+                SELECT id, coalesce(price_owner, 'master') AS price_owner
+                FROM edge.item WHERE external_uuid::text = :u
+            """), {"u": doc.get("НоменклатураUUID") or ""})).first()
+            new_price = float(doc.get("ЦенаСтала") or 0)
+            if item is not None and item.price_owner == "station" and new_price >= 0:
+                changed_at = _ts(doc.get("Момент")) or datetime.now(timezone.utc)
+                await db.execute(text("""
+                    UPDATE edge.price SET valid_to = :at
+                    WHERE item_id = :item AND station_id = :st AND valid_to IS NULL
+                """), {"at": changed_at, "item": item.id, "st": station_id})
+                await db.execute(text("""
+                    INSERT INTO edge.price (item_id, station_id, price, valid_from, author)
+                    VALUES (:item, :st, :price, :at, :author)
+                """), {"item": item.id, "st": station_id, "price": new_price,
+                       "at": changed_at, "author": doc.get("Автор") or "станция"})
 
     await db.commit()
     if any(stats.values()):
@@ -383,8 +429,21 @@ async def station_drafts(db: AsyncSession, company_id, station_id: int | None = 
             out.append(d)
         return out
 
+    proposals = (await db.execute(text(f"""
+        SELECT p.id, p.station_id, p.item_uuid, p.field, p.current, p.proposed,
+               p.author, p.comment, p.created_at, i.name AS item_name
+        FROM edge.nsi_proposal p
+        -- Приводим к тексту, а не к uuid: в заявке станции ссылка на карточку
+        -- хранится строкой и бывает пустой, а CAST пустой строки к uuid роняет
+        -- весь запрос — экран «Признание со станций» падал целиком.
+        LEFT JOIN edge.item i ON i.external_uuid::text = p.item_uuid
+        WHERE p.company_id = :cid AND p.resolved_at IS NULL
+              {"AND p.station_id = :st" if station_id else ""}
+        ORDER BY p.created_at
+    """), args)).mappings().all()
+
     return {"items": плоско(items), "partners": плоско(partners),
-            "prices": плоско(prices)}
+            "prices": плоско(prices), "proposals": плоско(proposals)}
 
 
 async def draft_candidates(db: AsyncSession, company_id, barcodes: list[str]) -> list[dict]:
@@ -520,6 +579,81 @@ async def resolve_partner_draft(db: AsyncSession, company_id, draft_id: int,
     await db.commit()
     return {"action": action, "draft_id": draft_id, "name": row["name"],
             "station_id": row["station_id"]}
+
+
+async def resolve_nsi_proposal(db: AsyncSession, company_id, proposal_id: int,
+                               action: str, note: str | None = None) -> dict:
+    """Решение центра по заявке станции об ошибке в сетевой карточке.
+
+    Принять — значит применить правку к канону: со станции она не применялась,
+    там карточка всё это время оставалась прежней. Отклонить — значит закрыть
+    заявку с пояснением; станция увидит, что вопрос разобран, и не будет слать
+    его снова.
+
+    Правка применяется только к тому полю, о котором заявили. «Заодно поправлю
+    название» здесь не делается: заявка — это ответственность конкретного
+    человека за конкретное значение.
+    """
+    if action not in ("accept", "reject"):
+        raise ValueError(f"неизвестное решение: {action}")
+
+    p = (await db.execute(text("""
+        SELECT id, station_id, item_uuid, field, proposed, resolved_at
+        FROM edge.nsi_proposal WHERE id = :id AND company_id = :cid
+    """), {"id": proposal_id, "cid": company_id})).mappings().first()
+    if p is None:
+        raise ValueError("заявка не найдена")
+    if p["resolved_at"] is not None:
+        raise ValueError("заявка уже разобрана")
+
+    применено = None
+    if action == "accept":
+        item = (await db.execute(text("""
+            SELECT id FROM edge.item WHERE external_uuid = CAST(:u AS uuid)
+        """), {"u": p["item_uuid"]})).mappings().first()
+        if item is None:
+            raise ValueError("карточка сети не найдена — заявка относится к чужому товару")
+
+        поле, значение = p["field"], (p["proposed"] or "").strip()
+        if поле in ("name", "unit", "vat"):
+            колонка = {"name": "name", "unit": "unit", "vat": "vat_rate"}[поле]
+            await db.execute(text(f"""
+                UPDATE edge.item SET {колонка} = :v WHERE id = :id
+            """), {"v": значение, "id": item["id"]})
+            применено = f"{колонка} = {значение}"
+        elif поле == "barcode_add":
+            # Тот же приём, что при признании черновика: чужой активный код не
+            # перевешиваем молча — это ломает кассу тому, кто им сейчас торгует.
+            занят = (await db.execute(text("""
+                SELECT item_id FROM edge.barcode WHERE code = :c AND status = 'active'
+            """), {"c": значение})).scalar_one_or_none()
+            if занят is not None and занят != item["id"]:
+                raise ValueError(f"штрихкод {значение} активен у другой карточки — "
+                                 "разберите это как коллизию")
+            await db.execute(text("""
+                INSERT INTO edge.barcode (item_id, code, status) VALUES (:i, :c, 'active')
+                ON CONFLICT DO NOTHING
+            """), {"i": item["id"], "c": значение})
+            применено = f"добавлен штрихкод {значение}"
+        elif поле == "barcode_remove":
+            await db.execute(text("""
+                UPDATE edge.barcode SET status = 'historical',
+                       note = coalesce(note || ' · ', '') || :note
+                 WHERE item_id = :i AND code = :c AND status = 'active'
+            """), {"i": item["id"], "c": значение,
+                   "note": f"снят по заявке АЗС {p['station_id']}"})
+            применено = f"снят штрихкод {значение}"
+        else:
+            raise ValueError(f"неизвестное поле заявки: {поле}")
+
+    await db.execute(text("""
+        UPDATE edge.nsi_proposal
+           SET resolved_at = now(), rejected = :rej, note = :n
+         WHERE id = :id
+    """), {"id": proposal_id, "rej": action == "reject", "n": note})
+    await db.commit()
+    return {"action": action, "proposal_id": proposal_id,
+            "station_id": p["station_id"], "applied": применено}
 
 
 # ── Коллизии штрихкодов ─────────────────────────────────────────────────────
