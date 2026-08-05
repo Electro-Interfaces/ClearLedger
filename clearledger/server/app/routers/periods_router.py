@@ -143,12 +143,20 @@ class UnpostedRow(BaseModel):
     count: int
 
 
+class OurDocRow(BaseModel):
+    kind: str
+    count: int
+    lastDate: str | None = None
+    stations: int
+
+
 class PeriodReadiness(BaseModel):
     year: int
     month: int | None = None
     quarter: int | None = None
     scope: str                    # month | quarter | year
     docsInPeriod: int
+    ourDocs: list[OurDocRow] = []
     unposted: list[UnpostedRow]
     unpostedTotal: int
     lastDocDate: str | None = None
@@ -242,6 +250,27 @@ async def period_readiness(
         select(func.max(StockOnHand.snapshot_at)).where(StockOnHand.company_id == cid)
     )).scalar_one_or_none()
 
+    # Документы НАШЕЙ линии за период — по видам.
+    #
+    # Закрытый день это не только сменный отчёт: товар приходил, перемещался между
+    # складом и залом, списывался, пересчитывался. Пока этих документов нет, период
+    # выглядит полным по сменам и при этом неполон по товару — ровно так и получались
+    # минусы на кухне, где выпуск собран, а приход сырья нет.
+    day_expr = func.left(func.coalesce(
+        DataEntry.meta["Документ"]["Дата"].astext,
+        DataEntry.meta["Смена"]["Открытие"].astext), 10)
+    our_rows = (await db.execute(
+        select(DataEntry.doc_type_id, func.count(DataEntry.id), func.max(day_expr),
+               func.count(func.distinct(DataEntry.meta["Смена"]["КодАЗС"].astext)))
+        .where(DataEntry.company_id == cid,
+               DataEntry.source.in_(("edge", "oneC")),
+               day_expr >= start, day_expr <= end)
+        .group_by(DataEntry.doc_type_id)
+        .order_by(func.count(DataEntry.id).desc())
+    )).all()
+    our_docs = [OurDocRow(kind=k or "—", count=int(c or 0), lastDate=last, stations=int(st or 0))
+                for k, c, last, st in our_rows]
+
     today = datetime.now(timezone.utc).date().isoformat()
     future_dated = (await db.execute(
         select(func.count(AccountingDoc.id))
@@ -257,6 +286,7 @@ async def period_readiness(
     return PeriodReadiness(
         year=year, month=month, quarter=quarter, scope=scope,
         docsInPeriod=int(docs_in_period),
+        ourDocs=our_docs,
         unposted=unposted,
         unpostedTotal=sum(u.count for u in unposted),
         lastDocDate=last_doc_date,

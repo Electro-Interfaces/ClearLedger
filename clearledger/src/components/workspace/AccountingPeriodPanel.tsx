@@ -17,7 +17,7 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
-  AlertTriangle, CalendarCheck, ChefHat, CheckCircle2, Fuel, Loader2, Lock, ShoppingCart, Unlock,
+  AlertTriangle, CalendarCheck, ChefHat, CheckCircle2, FileStack, Fuel, Loader2, Lock, ShoppingCart, Unlock,
 } from 'lucide-react'
 
 import { Card, CardContent } from '@/components/ui/card'
@@ -74,8 +74,29 @@ const YEAR_DEADLINES = (year: number) => [
   { what: 'Годовая инвентаризация (до отчётности)', when: `31.12.${year}` },
 ]
 
+/**
+ * Виды документов нашей линии и что каждый значит для закрытия.
+ *
+ * Порядок — не по алфавиту, а по ходу товара: пришёл, переместился, был продан,
+ * пересчитан, списан. Отсутствие любого из них делает период неполным по товару,
+ * даже когда смены собраны все.
+ */
+const OUR_DOC_KINDS: { kind: string; label: string; hint: string }[] = [
+  { kind: 'purchase', label: 'Приходы', hint: 'поступление товара и сырья от поставщика' },
+  { kind: 'purchase_ttn', label: 'Приходы топлива (ТТН)', hint: 'слив в резервуар' },
+  { kind: 'transfer', label: 'Перемещения', hint: 'склад ↔ зал и между АЗС' },
+  { kind: 'shift_orp', label: 'Смены топлива', hint: 'сменный отчёт STS' },
+  { kind: 'retail_sale_sidegoods', label: 'Смены магазина', hint: 'продажи сопутки и кухни' },
+  { kind: 'production_release', label: 'Выпуск блюд', hint: 'что кухня произвела за смену' },
+  { kind: 'inventory', label: 'Инвентаризации', hint: 'пересчёт факта против учёта' },
+  { kind: 'writeoff', label: 'Списания', hint: 'брак, срок, недостача' },
+  { kind: 'gain', label: 'Оприходования', hint: 'излишки пересчёта' },
+  { kind: 'return_sale', label: 'Возвраты', hint: 'от покупателя' },
+]
+
 /** Готовность периода к закрытию — четыре проверки бухгалтера (см. periods_router). */
 interface PeriodReadiness {
+  ourDocs: { kind: string; count: number; lastDate: string | null; stations: number }[]
   year: number
   month: number | null
   quarter: number | null
@@ -400,6 +421,8 @@ export function AccountingPeriodPanel() {
         </Card>
       )}
 
+      {active && <OurDocsCard data={readinessDocs.data} loading={readinessDocs.isLoading} />}
+
       {active && <PeriodReadinessCard data={readinessDocs.data} loading={readinessDocs.isLoading}
         month={scope === 'month' ? `${MONTHS[active.month - 1]} ${active.year}`
           : scope === 'quarter' ? `${activeQuarter} кв. ${active.year}`
@@ -648,6 +671,79 @@ export function AccountingPeriodPanel() {
   )
 }
 
+
+/**
+ * Что наша линия собрала за период — по видам документов.
+ *
+ * Смены отвечают только за продажу. Закрытый день — это ещё и приход, перемещение,
+ * пересчёт, списание; пока их нет, период выглядит полным по выручке и пуст по
+ * товару. Виды, которых за период не было ни одного, показываются отдельно и
+ * прямым текстом: молчание здесь дороже цифры.
+ */
+function OurDocsCard({ data, loading }: { data?: PeriodReadiness; loading: boolean }) {
+  const have = new Map((data?.ourDocs ?? []).map((d) => [d.kind, d]))
+  const known = OUR_DOC_KINDS.filter((k) => have.has(k.kind))
+  const missing = OUR_DOC_KINDS.filter((k) => !have.has(k.kind))
+  // Вид, который приехал, но в словаре не описан, — тоже показываем: иначе новый
+  // тип документа молча пропадёт с экрана.
+  const extra = (data?.ourDocs ?? []).filter(
+    (d) => !OUR_DOC_KINDS.some((k) => k.kind === d.kind))
+
+  return (
+    <Card>
+      <CardContent className="pt-4">
+        <div className="mb-3 flex items-center gap-2">
+          <FileStack className="h-4 w-4 text-primary" />
+          <h3 className={H3}>Документы нашей линии за период</h3>
+        </div>
+        {loading ? (
+          <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" /> Считаем…
+          </div>
+        ) : (
+          <>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[520px] text-sm">
+                <thead>
+                  <tr className="border-b border-border/60 text-[11px] text-muted-foreground">
+                    <th className="py-1.5 pr-4 text-left font-medium">Вид документа</th>
+                    <th className="py-1.5 pr-6 text-right font-medium">За период</th>
+                    <th className="py-1.5 pr-6 text-right font-medium">Станций</th>
+                    <th className="py-1.5 text-left font-medium">Последний</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...known.map((k) => ({ ...k, row: have.get(k.kind)! })),
+                    ...extra.map((d) => ({ kind: d.kind, label: d.kind, hint: 'вид не описан в карте', row: d }))]
+                    .map(({ kind, label, hint, row }) => (
+                      <tr key={kind} className="border-b border-border/30">
+                        <td className="py-1.5 pr-4">
+                          {label}
+                          <span className="ml-2 text-[10px] text-muted-foreground">{hint}</span>
+                        </td>
+                        <td className="py-1.5 pr-6 text-right tabular-nums">{fmtN(row.count)}</td>
+                        <td className="py-1.5 pr-6 text-right tabular-nums text-muted-foreground">
+                          {fmtN(row.stations)}
+                        </td>
+                        <td className="py-1.5 tabular-nums text-muted-foreground">{row.lastDate ?? '—'}</td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+            {missing.length > 0 && (
+              <p className="mt-3 flex items-start gap-1.5 text-[11px] leading-relaxed text-amber-600 dark:text-amber-400">
+                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                За период не собрано ни одного документа вида: {missing.map((m) => m.label.toLowerCase()).join(', ')}.
+                По товару период неполон, даже если смены на месте.
+              </p>
+            )}
+          </>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
 
 /**
  * Готовность периода к закрытию: четыре проверки, которые бухгалтер делает руками.
