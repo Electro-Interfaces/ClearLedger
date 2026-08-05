@@ -17,7 +17,7 @@ from app.auth import assert_company_member, get_current_user
 from app.config import get_settings
 from app.database import get_db
 from app.deps import get_owned
-from app.models import SourceFile, User
+from app.models import ChatMessage, ChatParticipant, SourceFile, User
 
 router = APIRouter(tags=["Intake / Файлы"])
 
@@ -104,6 +104,28 @@ async def download_file(
 
     # 404 и для несуществующего, и для файла чужой компании (не раскрываем факт).
     source = await get_owned(SourceFile, uid, current_user, db)
+
+    # Вложение чата принадлежит РАЗГОВОРУ, а не компании: членства мало. Иначе любой
+    # сотрудник, которому попался адрес файла (переслали ссылку, увидел в логе), качает
+    # снимок из чужой личной переписки. Тем же запросом закрывается и мягкое удаление:
+    # сообщение убрали из ленты, а файл продолжал отдаваться по прямой ссылке.
+    # Файлы вне чата (аватары комнат и людей, выгрузки, распознавание) сюда не попадают —
+    # у них нет строки в chat_messages, и проверка их не касается.
+    rows = (await db.execute(
+        select(ChatMessage.room_id, ChatMessage.deleted_at)
+        .where(ChatMessage.file_url == f"/api/files/{uid}")
+    )).all()
+    if rows:
+        # Пересланное сообщение копирует адрес файла в другую комнату — достаточно
+        # одного живого сообщения в комнате, где человек состоит.
+        live_rooms = {r for r, deleted in rows if deleted is None}
+        allowed = current_user.is_superadmin or bool(live_rooms and (await db.execute(
+            select(ChatParticipant.id).where(
+                ChatParticipant.user_id == current_user.id,
+                ChatParticipant.room_id.in_(live_rooms),
+            ).limit(1))).scalar_one_or_none())
+        if not allowed:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Не найдено")
 
     file_path = Path(source.storage_path)
     if not file_path.exists():

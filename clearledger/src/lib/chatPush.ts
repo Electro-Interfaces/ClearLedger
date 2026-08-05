@@ -29,8 +29,18 @@ export async function ensurePushSubscription(): Promise<boolean> {
   if (!j.keys?.p256dh || !j.keys?.auth) return false
   await chat.subscribePush({
     endpoint: sub.endpoint, keys: { p256dh: j.keys.p256dh, auth: j.keys.auth },
+    showPreview: pushPreview(),
   })
   return true
+}
+
+/** Показывать ли текст сообщения в уведомлении — выбор этого устройства.
+ *  На общем мониторе всплывающее окно читает кто угодно. */
+export const pushPreview = (): boolean => localStorage.getItem('cl-push-preview') !== '0'
+
+export async function setPushPreview(on: boolean): Promise<void> {
+  localStorage.setItem('cl-push-preview', on ? '1' : '0')
+  await ensurePushSubscription()
 }
 
 /** Спросить разрешение и подписаться — по явному клику человека. */

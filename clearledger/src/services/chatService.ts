@@ -285,7 +285,8 @@ export const ensureTicketRoom = (ticketId: string) =>
 // ── Web Push: уведомления при закрытой вкладке ─────────────────────────────
 export const getVapidKey = () => get<{ key: string }>('/api/chat/push/vapid')
 
-export const subscribePush = (sub: { endpoint: string; keys: { p256dh: string; auth: string } }) =>
+export const subscribePush = (sub: { endpoint: string; keys: { p256dh: string; auth: string }
+                                     showPreview?: boolean }) =>
   post<{ ok: boolean }>('/api/chat/push/subscribe', sub)
 
 export const unsubscribePush = (endpoint: string) =>
@@ -319,8 +320,11 @@ export const pinMessage = (roomId: string, messageId: string | null) =>
   post<{ roomId: string; pinnedMessage: ChatPinned | null }>(`/api/chat/rooms/${roomId}/pin`, { messageId })
 
 // ── сообщения ──────────────────────────────────────────────────────────────
-export const getMessages = (roomId: string, search?: string) =>
-  get<ChatMessage[]>(`/api/chat/rooms/${roomId}/messages`, search ? { search } : undefined)
+/** Страница ленты. `before` — ISO-время самого раннего показанного сообщения:
+ *  сервер отдаёт то, что было ДО него (догрузка истории вверх). */
+export const getMessages = (roomId: string, search?: string, before?: string) =>
+  get<ChatMessage[]>(`/api/chat/rooms/${roomId}/messages`,
+    search || before ? { ...(search ? { search } : {}), ...(before ? { before } : {}) } : undefined)
 
 export const sendMessage = (roomId: string, payload: SendPayload) =>
   post<ChatMessage>(`/api/chat/rooms/${roomId}/messages`, payload)

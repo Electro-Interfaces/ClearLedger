@@ -4691,6 +4691,11 @@ class ChatPushSubscription(Base):
     endpoint: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
     p256dh: Mapped[str] = mapped_column(String(200), nullable=False)
     auth: Mapped[str] = mapped_column(String(100), nullable=False)
+    # Показывать ли текст сообщения в самом уведомлении: на заблокированном экране
+    # его читает любой, кто взял телефон в руки. Настройка на устройство, а не на
+    # человека: рабочий ноутбук и личный телефон — разные обстоятельства.
+    show_preview: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True,
+                                               server_default=text("true"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

@@ -90,11 +90,15 @@ def push_room_async(room_id: uuid.UUID, title: str, body: str,
                     ChatPushSubscription.user_id.in_(targets)))).scalars().all()
                 if not subs:
                     return
-                payload = json.dumps(
-                    {"title": title, "body": body, "roomId": str(room_id)},
-                    ensure_ascii=False)
+                full = json.dumps({"title": title, "body": body, "roomId": str(room_id)},
+                                  ensure_ascii=False)
+                # Устройство, которому текст показывать нельзя (общий стол, чужие руки
+                # у заблокированного экрана), получает только факт сообщения.
+                quiet = json.dumps({"title": title, "body": "Новое сообщение",
+                                    "roomId": str(room_id)}, ensure_ascii=False)
                 stale: list[ChatPushSubscription] = []
                 for s in subs:
+                    payload = full if s.show_preview else quiet
                     info = {"endpoint": s.endpoint,
                             "keys": {"p256dh": s.p256dh, "auth": s.auth}}
                     try:

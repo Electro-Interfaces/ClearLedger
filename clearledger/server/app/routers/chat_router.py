@@ -8,7 +8,7 @@ REST /api/chat/* + WebSocket /api/chat/ws?token=JWT.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import (
     APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect, status,
@@ -18,6 +18,7 @@ from sqlalchemy import and_, delete as sa_delete, func, or_, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.audit import log_audit
 from app.auth import decode_token, get_company_by_api_key, get_current_user
 from app.config import get_settings
 from app.database import async_session_factory, get_db
@@ -135,6 +136,31 @@ async def _company_titles(db: AsyncSession, ids: set[uuid.UUID]) -> dict[uuid.UU
     return {r[0]: (r[1] or r[2] or "—") for r in rows}
 
 
+# Когда о заходе в чужой разговор уже записали: (кто, куда) → момент. Троттлинг в
+# памяти процесса, а не запрос к журналу — `_assert_participant` зовётся на каждое
+# действие в чате, и без него листание ленты писало бы в аудит десятки строк подряд.
+# ponytail: словарь растёт, пока живёт процесс; чистить, если суперадминов станет много.
+_FOREIGN_SEEN: dict[tuple[uuid.UUID, uuid.UUID], datetime] = {}
+_FOREIGN_QUIET = timedelta(hours=1)
+
+
+async def _audit_foreign_access(room: ChatRoom, user: User, db: AsyncSession) -> None:
+    """Записать в журнал заход в разговор, участником которого человек не является.
+
+    Право суперадмина войти в любой чат остаётся (без него не разобрать инцидент),
+    но остаётся и след: «кто заходил» видно в журнале действий пространства.
+    """
+    key = (user.id, room.id)
+    now = datetime.now(timezone.utc)
+    seen = _FOREIGN_SEEN.get(key)
+    if seen and now - seen < _FOREIGN_QUIET:
+        return
+    _FOREIGN_SEEN[key] = now
+    await log_audit(db, actor=user, company_id=room.company_id, action="chat.foreign_access",
+                    target=room.name or ("личная переписка" if room.type == "direct" else "чат"),
+                    details={"roomId": str(room.id), "type": room.type})
+
+
 async def _assert_participant(room_id: uuid.UUID, user: User, db: AsyncSession) -> ChatRoom:
     """Комната существует, активна, и юзер в ней участник — иначе 404 (не палим чужое)."""
     room = await db.get(ChatRoom, room_id)
@@ -144,6 +170,8 @@ async def _assert_participant(room_id: uuid.UUID, user: User, db: AsyncSession) 
         ChatParticipant.room_id == room_id, ChatParticipant.user_id == user.id))).scalar_one_or_none()
     if p is None and not user.is_superadmin:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Чат не найден")
+    if p is None:
+        await _audit_foreign_access(room, user, db)
     return room
 
 
@@ -485,44 +513,76 @@ async def list_rooms(
         .where(ServiceLocation.id.in_(obj_ids)))).all()) if obj_ids else {}
 
     company_admin = await _is_company_admin(db, cid, current_user)
-    out: list[RoomOut] = []
-    for room, last_read, my_role, muted_until, pinned_at, joined_at in rows:
-        pcount = (await db.execute(select(func.count()).select_from(ChatParticipant)
-                  .where(ChatParticipant.room_id == room.id))).scalar() or 0
-        unread = (await db.execute(select(func.count()).select_from(ChatMessage).where(
-            ChatMessage.room_id == room.id, ChatMessage.deleted_at.is_(None),
-            ChatMessage.user_id != current_user.id,
-            # Порог непрочитанного — момент ВСТУПЛЕНИЯ, а не начало времён: человека,
-            # которого только что вписали в «Общий чат», иначе встречает вся его
-            # история как непрочитанная, и счётчик показывает сотни.
-            ChatMessage.created_at > (
-                last_read or joined_at or datetime(1970, 1, 1, tzinfo=timezone.utc)),
-        ))).scalar() or 0
-        last = (await db.execute(select(ChatMessage).where(
-            ChatMessage.room_id == room.id, ChatMessage.deleted_at.is_(None))
-            .order_by(ChatMessage.created_at.desc()).limit(1))).scalar_one_or_none()
-        name, peer_id = room.name, None
+
+    # Всё, что нужно строкам списка, — пакетными запросами, а не по комнате. Было пять
+    # запросов на каждую (состав, непрочитанные, последнее сообщение, собеседник,
+    # закреплённое), а список перечитывается на каждое событие чата: двадцать комнат
+    # превращались в сотню запросов на один показ.
+    rids = [room.id for room, *_ in rows]
+    epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
+    counts: dict[uuid.UUID, int] = {}
+    unread_map: dict[uuid.UUID, int] = {}
+    last_map: dict[uuid.UUID, ChatMessage] = {}
+    peer_map: dict[uuid.UUID, tuple[str, str | None, str | None]] = {}
+    pin_map: dict[uuid.UUID, ChatMessage] = {}
+    if rids:
+        counts = dict((await db.execute(
+            select(ChatParticipant.room_id, func.count())
+            .where(ChatParticipant.room_id.in_(rids))
+            .group_by(ChatParticipant.room_id))).all())
+        # Порог непрочитанного — момент ВСТУПЛЕНИЯ, а не начало времён: человека,
+        # которого только что вписали в «Общий чат», иначе встречает вся его история
+        # как непрочитанная, и счётчик показывает сотни. Порог у каждой комнаты свой,
+        # поэтому условие собирается по комнатам — но запрос остаётся один.
+        thresholds = [(room.id, last_read or joined_at or epoch)
+                      for room, last_read, _role, _mute, _pin, joined_at in rows]
+        unread_map = dict((await db.execute(
+            select(ChatMessage.room_id, func.count()).where(
+                ChatMessage.deleted_at.is_(None),
+                ChatMessage.user_id != current_user.id,
+                or_(*[and_(ChatMessage.room_id == r, ChatMessage.created_at > t)
+                      for r, t in thresholds]),
+            ).group_by(ChatMessage.room_id))).all())
+        # DISTINCT ON — последнее живое сообщение каждой комнаты одним проходом.
+        last_map = {m.room_id: m for m in (await db.execute(
+            select(ChatMessage).distinct(ChatMessage.room_id)
+            .where(ChatMessage.room_id.in_(rids), ChatMessage.deleted_at.is_(None))
+            .order_by(ChatMessage.room_id, ChatMessage.created_at.desc()))).scalars().all()}
         # У личного чата лицо собеседника, а не иконка комнаты: список из десяти
         # одинаковых кружков не отличить, а человека узнают по фото.
-        peer_avatar = None
-        if room.type == "direct":
-            other = (await db.execute(
-                select(ChatParticipant.user_id, User.name, User.avatar_url)
+        direct_ids = [room.id for room, *_ in rows if room.type == "direct"]
+        if direct_ids:
+            peer_map = {r: (str(uid), nm, av) for r, uid, nm, av in (await db.execute(
+                select(ChatParticipant.room_id, ChatParticipant.user_id, User.name, User.avatar_url)
                 .join(User, User.id == ChatParticipant.user_id)
-                .where(ChatParticipant.room_id == room.id, ChatParticipant.user_id != current_user.id)
-                .limit(1))).first()
-            if other:
-                peer_id = str(other[0])
-                name = name or other[1]
-                peer_avatar = other[2]
-        pinned = await _pinned_out(room, db)
+                .where(ChatParticipant.room_id.in_(direct_ids),
+                       ChatParticipant.user_id != current_user.id))).all()}
+        pin_ids = [room.pinned_message_id for room, *_ in rows if room.pinned_message_id]
+        if pin_ids:
+            pin_map = {m.id: m for m in (await db.execute(
+                select(ChatMessage).where(ChatMessage.id.in_(pin_ids),
+                                          ChatMessage.deleted_at.is_(None)))).scalars().all()}
+
+    out: list[RoomOut] = []
+    for room, last_read, my_role, muted_until, pinned_at, joined_at in rows:
+        pcount = counts.get(room.id, 0)
+        unread = unread_map.get(room.id, 0)
+        last = last_map.get(room.id)
+        name, peer_id, peer_avatar = room.name, None, None
+        if room.type == "direct" and room.id in peer_map:
+            peer_id, peer_name, peer_avatar = peer_map[room.id]
+            name = name or peer_name
+        pm = pin_map.get(room.pinned_message_id) if room.pinned_message_id else None
+        pinned = None if pm is None else PinnedOut(
+            id=str(pm.id), userName=pm.user_name,
+            content=((pm.content if pm.type == "text" else (pm.file_name or f"[{pm.type}]")) or "")[:200])
         out.append(RoomOut(
             id=str(room.id), type=room.type, kind=room.kind, name=name,
             isArchived=room.is_archived, participantCount=int(pcount), unreadCount=int(unread),
             directPeerId=peer_id, createdBy=str(room.created_by) if room.created_by else None,
             # Обрезаем: список чатов грузится у всех и постоянно, а одно длинное
             # сообщение утяжеляло бы ответ каждому участнику навсегда.
-            lastMessage=((last.content or "")[:200] if last and not last.deleted_at else None),
+            lastMessage=((last.content or "")[:200] if last else None),
             lastMessageAt=(last.created_at.isoformat() if last else None),
             pinnedMessage=pinned,
             myRole=my_role,
@@ -798,12 +858,17 @@ async def list_messages(
                 ChatPoll.message_id.in_(poll_ids)))).scalars():
             polls[poll.message_id] = await _poll_out(poll, current_user.id, db)
 
+    # «Кто прочитал» считается по отметкам участников — их берём один раз на комнату,
+    # а не запросом на каждое сообщение: страница ленты — сто сообщений, и столько же
+    # было запросов COUNT. Участников в комнате десятки, сравнение идёт в памяти.
+    reads = [(uid, ts) for uid, ts in (await db.execute(
+        select(ChatParticipant.user_id, ChatParticipant.last_read_at)
+        .where(ChatParticipant.room_id == rid,
+               ChatParticipant.last_read_at.is_not(None)))).all()]
+
     out = []
     for m in msgs:
-        rc = (await db.execute(select(func.count()).select_from(ChatParticipant).where(
-            ChatParticipant.room_id == rid, ChatParticipant.user_id != m.user_id,
-            ChatParticipant.last_read_at.is_not(None),
-            ChatParticipant.last_read_at >= m.created_at))).scalar() or 0
+        rc = sum(1 for uid, ts in reads if uid != m.user_id and ts >= m.created_at)
         item = _msg_out(m, int(rc), replies.get(m.reply_to), reactions.get(m.id),
                         parties.get(m.user_id) if m.user_id else None)
         item.poll = polls.get(m.id)
@@ -2111,7 +2176,8 @@ async def ensure_ticket_room(
 # ── Web Push: подписки браузера ──────────────────────────────────────────────
 class PushSubscribeBody(BaseModel):
     endpoint: str
-    keys: dict   # {p256dh, auth} — как отдаёт PushSubscription.toJSON()
+    keys: dict = {}   # {p256dh, auth} — как отдаёт PushSubscription.toJSON()
+    showPreview: bool = True   # текст сообщения в уведомлении (иначе «Новое сообщение»)
 
 
 @router.get("/push/vapid")
@@ -2137,9 +2203,10 @@ async def push_subscribe(
         ChatPushSubscription.endpoint == body.endpoint))).scalar_one_or_none()
     if existing is not None:
         existing.user_id, existing.p256dh, existing.auth = current_user.id, p256dh, auth
+        existing.show_preview = body.showPreview
     else:
         db.add(ChatPushSubscription(user_id=current_user.id, endpoint=body.endpoint,
-                                    p256dh=p256dh, auth=auth))
+                                    p256dh=p256dh, auth=auth, show_preview=body.showPreview))
     await db.commit()
     return {"ok": True}
 
@@ -2640,8 +2707,14 @@ async def admin_add_people(
                 wanted.add(u)
     have = set((await db.execute(select(ChatParticipant.user_id).where(
         ChatParticipant.room_id == rid))).scalars().all())
-    for uid in wanted - have:
+    added = wanted - have
+    for uid in added:
         db.add(ChatParticipant(room_id=rid, user_id=uid, role="member"))
+    # Состав чата меняет администратор — это видно в журнале пространства: человек
+    # должен иметь возможность узнать, кто добавил его в разговор и когда.
+    if added:
+        await log_audit(db, actor=current_user, company_id=cid, action="chat.people_add",
+                        target=room.name or "чат", details={"roomId": str(rid), "added": len(added)})
     await db.commit()
 
 
@@ -2662,6 +2735,8 @@ async def admin_patch_room(
         room.name = body.name.strip() or room.name
     if body.scopeProduct is not None:
         room.scope_product = body.scopeProduct.strip() or None
+    await log_audit(db, actor=current_user, company_id=cid, action="chat.room_patch",
+                    target=room.name or "чат", details={"roomId": str(rid)})
     await db.commit()
     rooms = await admin_rooms(archived=room.is_archived, current_user=current_user, db=db)
     found = next((x for x in rooms if x.id == str(rid)), None)
@@ -2699,6 +2774,9 @@ async def admin_set_role(
             ChatParticipant.user_id != uid))).scalars().all():
             other.role = "admin"
     p.role = body.role
+    await log_audit(db, actor=current_user, company_id=cid, action="chat.role_set",
+                    target=room.name or "чат",
+                    details={"roomId": str(rid), "userId": str(uid), "role": body.role})
     await db.commit()
 
 
@@ -2725,4 +2803,6 @@ async def admin_remove_participant(
         raise HTTPException(status.HTTP_409_CONFLICT,
                             "Нельзя вывести владельца: сначала передайте владение другому")
     await db.delete(p)
+    await log_audit(db, actor=current_user, company_id=cid, action="chat.participant_remove",
+                    target=room.name or "чат", details={"roomId": str(rid), "userId": str(uid)})
     await db.commit()

@@ -11,14 +11,15 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access_catalog import sanitize_modules
 from app.audit import log_audit
 from app.auth import get_current_user, hash_password, resolve_member_modules
 from app.database import get_db
-from app.models import Contract, Counterparty, Company, CompanyRole, Department, ServiceLocation, User, UserCompany
+from app.models import (ChatParticipant, ChatRoom, Contract, Counterparty, Company,
+                        CompanyRole, Department, ServiceLocation, User, UserCompany)
 from app.services import email_service
 from app.utils import resolve_company_id, resolve_org_id
 from app.schemas import (
@@ -460,6 +461,20 @@ async def issue_reset_link(
     return {"reset_url": email_service.reset_link(raw), "expires_at": expires}
 
 
+async def _leave_company_chats(uid: uuid.UUID, cid: uuid.UUID, db: AsyncSession) -> None:
+    """Вывести человека из всех чатов компании при отзыве членства.
+
+    Иначе уволенный остаётся в «Общем чате» и в личных переписках: доступа к
+    приложениям у него уже нет, а переписку он читает и в неё пишет — членство
+    в комнате самостоятельно, `ensure_company_rooms` его не пересматривает.
+    Личные переписки тоже: у второй стороны история остаётся, у ушедшего — нет.
+    """
+    await db.execute(delete(ChatParticipant).where(
+        ChatParticipant.user_id == uid,
+        ChatParticipant.room_id.in_(select(ChatRoom.id).where(ChatRoom.company_id == cid)),
+    ))
+
+
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def remove_user(
     user_id: str,
@@ -487,6 +502,7 @@ async def remove_user(
     if membership:
         await db.delete(membership)
         await db.flush()
+    await _leave_company_chats(uid, cid, db)
     await log_audit(db, actor=current_user, company_id=cid, action="user.remove", target=target.email)
     # Остались ли ещё членства?
     remaining = (
@@ -541,3 +557,5 @@ async def revoke_company(
     membership = await db.get(UserCompany, (uid, cid))
     if membership:
         await db.delete(membership)
+        await db.flush()
+    await _leave_company_chats(uid, cid, db)

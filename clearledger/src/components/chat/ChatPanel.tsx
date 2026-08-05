@@ -5,7 +5,7 @@
  * удаление, медиа-альбомы + Lightbox, архив, видеозвонок. REST — chatService,
  * live — useChatWs. Рендерится в InteractionHost (модалка «Взаимодействие»).
  */
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
@@ -21,6 +21,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useCompany } from '@/contexts/CompanyContext'
 import { SPACE_PRODUCTS } from '@/config/spaceProducts'
 import { PartyBadge } from '@/components/chat/PartyBadge'
+import { MetricHint } from '@/components/workspace/analytics/MetricHint'
 import { ConfirmActionDialog } from '@/components/common/ConfirmActionDialog'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { useChatWs, type WsEvent } from '@/hooks/useChatWs'
@@ -42,7 +43,7 @@ import {
 } from './telegram-helpers'
 import { AuthImage, AuthVideo, AuthFileChip, useAuthBlobUrl, downloadAttachment } from './AuthMedia'
 import { RegionCapture } from './RegionCapture'
-import { ensurePushSubscription, pushSupported, requestPushPermission } from '@/lib/chatPush'
+import { ensurePushSubscription, pushPreview, pushSupported, requestPushPermission, setPushPreview } from '@/lib/chatPush'
 import * as chat from '@/services/chatService'
 import { isMuted } from '@/services/chatService'
 import { listSpaceObjects } from '@/services/spaceObjectsService'
@@ -1814,6 +1815,8 @@ export function ChatPanel({ compact, scopeProduct }: {
   // Разрешение на браузерные уведомления — для кнопки-колокольчика в шапке списка.
   const [pushPerm, setPushPerm] = useState<NotificationPermission | 'unsupported'>(
     () => (pushSupported() ? Notification.permission : 'unsupported'))
+  const [preview, setPreview] = useState(pushPreview)
+  const [tabVisible, setTabVisible] = useState(() => !document.hidden)
   // Ширина колонки списка: тянется разделителем, помнится между сессиями.
   const [listWidth, setListWidth] = useState(() => {
     const saved = Number(localStorage.getItem('cl-chat-list-width'))
@@ -1870,12 +1873,50 @@ export function ChatPanel({ compact, scopeProduct }: {
     queryFn: () => chat.getRooms(showArchived, scope),
     refetchInterval: 60000,
   })
-  const { data: messages = [], isLoading: msgLoading, isError: msgError } = useQuery({
+  const { data: pageMessages = [], isLoading: msgLoading, isError: msgError } = useQuery({
     queryKey: ['chat-messages', selectedRoom, messageSearch],
     queryFn: () => chat.getMessages(selectedRoom!, messageSearch || undefined),
     enabled: !!selectedRoom,
     staleTime: 0,
   })
+  // История ДО последней страницы: сервер отдаёт сто сообщений, и всё, что было
+  // раньше, человеку было недоступно — в переписке полугодовой давности это
+  // означало «истории нет». Догруженное живёт отдельно от кэша страницы: живые
+  // события WS переписывают именно её, и склейка не должна их терять.
+  const [older, setOlder] = useState<ChatMessage[]>([])
+  const [loadingOlder, setLoadingOlder] = useState(false)
+  const [noMoreOlder, setNoMoreOlder] = useState(false)
+  const messages = useMemo(
+    () => (older.length ? [...older, ...pageMessages] : pageMessages),
+    [older, pageMessages])
+  const feedRef = useRef<HTMLDivElement>(null)
+  // Куда вернуть прокрутку после вставки истории сверху: без этого лента
+  // прыгает — браузер держит scrollTop, а контента над ним стало больше.
+  const keepScrollRef = useRef<number | null>(null)
+  useLayoutEffect(() => {
+    const el = feedRef.current
+    if (el && keepScrollRef.current !== null) {
+      el.scrollTop += el.scrollHeight - keepScrollRef.current
+      keepScrollRef.current = null
+    }
+  }, [older.length])
+  const loadOlder = async () => {
+    const first = messages[0]
+    if (!selectedRoom || !first || loadingOlder) return
+    setLoadingOlder(true)
+    keepScrollRef.current = feedRef.current?.scrollHeight ?? null
+    try {
+      const chunk = await chat.getMessages(selectedRoom, undefined, first.createdAt)
+      if (chunk.length < 100) setNoMoreOlder(true)
+      if (chunk.length) setOlder((prev) => [...chunk, ...prev])
+      else keepScrollRef.current = null
+    } catch {
+      keepScrollRef.current = null
+      toast.error('Не удалось загрузить историю')
+    } finally {
+      setLoadingOlder(false)
+    }
+  }
   const { data: roomDetail } = useQuery({
     queryKey: ['chat-room-detail', selectedRoom],
     queryFn: () => chat.getRoom(selectedRoom!),
@@ -1914,6 +1955,12 @@ export function ChatPanel({ compact, scopeProduct }: {
       case 'room:archived':
         qc.invalidateQueries({ queryKey: ['chat-rooms'] })
         qc.invalidateQueries({ queryKey: ['chat-room-detail', selectedRoom] })
+        break
+      case 'subscribe:denied':
+        // Живых обновлений в этом чате не будет (вывели из участников, комнату
+        // закрыли). Молчать нельзя: тихая лента читается как «мне не пишут».
+        toast.error('Чат больше не доступен для живых обновлений — обновите список')
+        qc.invalidateQueries({ queryKey: ['chat-rooms'] })
         break
       case 'presence':
         qc.invalidateQueries({ queryKey: ['chat-presence'] })
@@ -1970,13 +2017,20 @@ export function ChatPanel({ compact, scopeProduct }: {
         replyTo: replyTo?.id,
         mentions: mentions.length ? mentions : undefined,
       })
-      for (const f of uploaded.slice(1)) {
-        await chat.sendMessage(selectedRoom!, { content: '', type: typeOf(f.fileName), fileUrl: f.fileUrl, fileName: f.fileName, fileSize: f.fileSize })
+      // Каждый файл — отдельное сообщение. Упавшее на середине не должно ронять
+      // всю отправку: раньше ошибка на третьем файле оставляла композер как был,
+      // человек жал «отправить» снова — и первые два уезжали по второму разу.
+      const failed: File[] = []
+      for (const [i, f] of uploaded.slice(1).entries()) {
+        try {
+          await chat.sendMessage(selectedRoom!, { content: '', type: typeOf(f.fileName), fileUrl: f.fileUrl, fileName: f.fileName, fileSize: f.fileSize })
+        } catch { failed.push(pendingFiles[i + 1]) }
       }
-      return first
+      return { first, failed }
     },
-    onSuccess: () => {
-      setMessageText(''); setPendingFiles([]); setReplyTo(null); setMentionQuery(null)
+    onSuccess: ({ failed }) => {
+      if (failed.length) toast.error(`Не отправлено файлов: ${failed.length}. Попробуйте ещё раз`)
+      setMessageText(''); setPendingFiles(failed); setReplyTo(null); setMentionQuery(null)
       mentionMapRef.current.clear()
       if (selectedRoom) localStorage.removeItem(`cl-draft-${selectedRoom}`)
       qc.invalidateQueries({ queryKey: ['chat-messages', selectedRoom] })
@@ -2033,10 +2087,19 @@ export function ChatPanel({ compact, scopeProduct }: {
   })
 
   // ── эффекты ──
+  // Прочитано — только когда вкладка на экране. Фоновая гасила счётчик сама:
+  // человек возвращался к «нулю непрочитанных» и не знал, что ему написали.
   useEffect(() => {
-    if (selectedRoom) chat.markRead(selectedRoom).then(() => qc.invalidateQueries({ queryKey: ['chat-rooms'] })).catch(() => {})
-  }, [selectedRoom, messages.length, qc])
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages.length, typingUsers])
+    const on = () => setTabVisible(!document.hidden)
+    document.addEventListener('visibilitychange', on)
+    return () => document.removeEventListener('visibilitychange', on)
+  }, [])
+  useEffect(() => {
+    if (selectedRoom && tabVisible) chat.markRead(selectedRoom).then(() => qc.invalidateQueries({ queryKey: ['chat-rooms'] })).catch(() => {})
+  }, [selectedRoom, messages.length, tabVisible, qc])
+  // Длина СТРАНИЦЫ, а не всей ленты: догрузка истории вверх не должна утаскивать
+  // человека обратно вниз, к последнему сообщению.
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [pageMessages.length, typingUsers])
   // Тихая переподписка Web Push: разрешение уже дано — восстановить подписку после
   // чистки браузера или пересоздания SW. Один раз на открытие чата.
   useEffect(() => { ensurePushSubscription().catch(() => {}) }, [])
@@ -2071,9 +2134,21 @@ export function ChatPanel({ compact, scopeProduct }: {
       setPendingFiles([])
       setReplyTo(null)
       setMessageSearch('')
+      setOlder([])
+      setNoMoreOlder(false)
     }
     prevRoomRef.current = selectedRoom
   }, [selectedRoom])
+  // Панель закрыли (переключились на другое приложение, свернули стол) — набранное
+  // сохраняем так же, как при переходе в другой чат: иначе абзац, который человек
+  // писал пять минут, исчезает вместе с панелью.
+  useEffect(() => () => {
+    const rid = prevRoomRef.current
+    if (!rid) return
+    const t = msgTextRef.current.trim()
+    if (t) localStorage.setItem(`cl-draft-${rid}`, t)
+    else localStorage.removeItem(`cl-draft-${rid}`)
+  }, [])
 
   // ── действия ──
   const handleSend = () => {
@@ -2150,7 +2225,16 @@ export function ChatPanel({ compact, scopeProduct }: {
   // Право писать считает СЕРВЕР и присылает в canWrite. Фронт раньше выводил
   // его сам из глобальной роли пользователя — и расходился с сервером: поле
   // ввода показывалось тому, кому отправка возвращала 403, и наоборот.
-  const canWrite = activeRoom?.canWrite ?? true
+  // Пока комната не загрузилась — не разрешаем: `?? true` показывал поле ввода
+  // тому, кому отправка вернёт 403, и человек терял набранное.
+  const canWrite = !!activeRoom?.canWrite
+  const noWriteReason = activeRoom?.kind === 'platform'
+    ? 'Канал разработчика платформы: только чтение'
+    : activeRoom?.kind === 'news'
+      ? 'Объявления компании: публикуют администраторы пространства'
+      : activeRoom?.type === 'channel'
+        ? 'Канал: публикуют владелец и администраторы канала'
+        : 'Писать в этот чат нельзя'
   const peerPresence = activeRoom?.type === 'direct' && activeRoom.directPeerId ? presenceMap.get(activeRoom.directPeerId) : undefined
 
   const filteredRooms = useMemo(() => {
@@ -2294,6 +2378,7 @@ export function ChatPanel({ compact, scopeProduct }: {
         <div className="mb-2 flex items-center gap-2">
           <MessageCircle className="size-4 text-muted-foreground" />
           <span className="text-sm font-semibold">Чаты</span>
+          <MetricHint text="Касается всех — общий чат пространства. Касается работы одного приложения — его группа. Одного человека — личная переписка. Каналы («Платформа», «Объявления») читают все, пишут назначенные. Требует срока и следа — заявка, а не сообщение." />
           {totalUnread > 0 && <span className="rounded-full bg-primary/15 px-1.5 text-[10px] text-primary">{totalUnread}</span>}
           <div className="flex-1" />
           {/* Уведомления при закрытой вкладке: колокольчик виден, пока разрешение не
@@ -2307,6 +2392,17 @@ export function ChatPanel({ compact, scopeProduct }: {
               })}
               className="inline-flex size-7 items-center justify-center rounded-md text-primary transition-colors hover:bg-accent">
               <Bell className="size-4" />
+            </button>
+          )}
+          {/* Разрешение есть — остаётся выбор, что видно на заблокированном экране.
+              Выбор устройства, а не учётной записи: рабочий монитор в цеху и личный
+              телефон — разные истории. */}
+          {pushPerm === 'granted' && (
+            <button title={preview ? 'В уведомлении виден текст — скрыть' : 'В уведомлении только «Новое сообщение» — показывать текст'}
+              onClick={() => { const v = !preview; setPreview(v); setPushPreview(v).catch(() => toast.error('Не удалось сохранить')) }}
+              className={cn('inline-flex size-7 items-center justify-center rounded-md transition-colors hover:bg-accent',
+                preview ? 'text-muted-foreground' : 'text-primary')}>
+              {preview ? <Bell className="size-4" /> : <BellOff className="size-4" />}
             </button>
           )}
           <button onClick={() => setShowArchived((v) => !v)} title={showArchived ? 'Активные' : 'Архив'}
@@ -2539,6 +2635,7 @@ export function ChatPanel({ compact, scopeProduct }: {
             </span>
           </div>
         </button>
+        <MetricHint className="shrink-0" text="Переписку и вложения видят только участники этого чата. Метка рядом с именем говорит, кто перед вами: сотрудник компании, человек партнёра или поддержка платформы. Заход администратора в чужой рабочий чат записывается в журнал действий." />
         {canWrite && (
           <button onClick={() => callMutation.mutate()} disabled={callMutation.isPending} title="Видеозвонок"
             className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50">
@@ -2646,7 +2743,7 @@ export function ChatPanel({ compact, scopeProduct }: {
               участников, поэтому живёт в браузере, а не в базе пространства.
               Файл можно просто бросить в переписку — это привычнее, чем искать
               скрепку, и ровно так работают мессенджеры. */}
-          <div className={cn('flex-1 overflow-y-auto', dragOver && 'ring-2 ring-inset ring-primary')}
+          <div ref={feedRef} className={cn('flex-1 overflow-y-auto', dragOver && 'ring-2 ring-inset ring-primary')}
             style={CHAT_SKINS[skin]?.style}
             onDragOver={(e) => { if (e.dataTransfer.types.includes('Files')) { e.preventDefault(); setDragOver(true) } }}
             onDragLeave={() => setDragOver(false)}
@@ -2656,6 +2753,15 @@ export function ChatPanel({ compact, scopeProduct }: {
               setPendingFiles((p) => [...p, ...Array.from(e.dataTransfer.files)].slice(0, 5))
             }}>
             <div className="flex flex-col p-2.5">
+              {/* Кнопка, а не подгрузка по прокрутке: в переписке с картинками
+                  автозагрузка вверх дёргает ленту, и человек не понимает, куда
+                  его унесло. Прячем при поиске — там своя выборка. */}
+              {!messageSearch && !noMoreOlder && pageMessages.length >= 100 && (
+                <button onClick={loadOlder} disabled={loadingOlder}
+                  className="mx-auto mb-2 rounded-full border bg-background px-3 py-1 text-xs text-muted-foreground hover:bg-accent disabled:opacity-50">
+                  {loadingOlder ? 'Загружаю…' : 'Показать сообщения раньше'}
+                </button>
+              )}
               {(() => {
                 const grouping = computeGrouping(messages)
                 const items: { msg: ChatMessage; album?: ChatMessage[]; index: number }[] = []
@@ -2811,11 +2917,11 @@ export function ChatPanel({ compact, scopeProduct }: {
                 </button>
               </div>
             </div>
-          ) : (
+          ) : activeRoom ? (
             <div className="flex shrink-0 items-center gap-2 border-t border-border/50 px-3 py-2 text-[11px] text-muted-foreground">
-              <Lock className="size-3.5 shrink-0" />Канал объявлений: публикуют администраторы
+              <Lock className="size-3.5 shrink-0" />{noWriteReason}
             </div>
-          )}
+          ) : null}
         </>
       )}
       {pollOpen && selectedRoom && (

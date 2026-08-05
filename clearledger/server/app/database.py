@@ -794,6 +794,9 @@ async def create_all() -> None:
             # сообщений вложения нет.
             "CREATE INDEX IF NOT EXISTS idx_chat_msg_file_url "
             "ON chat_messages (file_url) WHERE file_url IS NOT NULL",
+            # v2.51: текст сообщения в уведомлении — по выбору устройства.
+            "ALTER TABLE chat_push_subscriptions ADD COLUMN IF NOT EXISTS "
+            "show_preview BOOLEAN NOT NULL DEFAULT TRUE",
         ):
             await conn.execute(__import__("sqlalchemy").text(stmt))
 
