@@ -3127,6 +3127,23 @@ async def receipt_from_upd(
         "requires_mark": bool(l["mark_codes"]),
     } for l in parsed["lines"]]
 
+    # Сопоставляем строки УПД с карточками каталога по штрихкоду СРАЗУ при
+    # загрузке. Иначе приход уедет на станцию под пустой карточкой и разъедется
+    # с продажами кассы, которые несут реальный GUID — именно на маркированной
+    # высокооборотке (табак, вода), ради которой ЭДО и вводят. Что не нашлось —
+    # опознает станция при скане (карточка приезжает к ней репликой).
+    коды_строк = [l["barcode"] for l in lines if l["barcode"]]
+    if коды_строк:
+        нашлось = (await db.execute(text("""
+            SELECT b.code, i.external_uuid::text
+            FROM edge.barcode b JOIN edge.item i ON i.id = b.item_id
+            WHERE b.status = 'active' AND b.code = ANY(:codes)
+        """), {"codes": коды_строк})).all()
+        по_коду = {c: u for c, u in нашлось}
+        for l in lines:
+            if l["barcode"] and l["barcode"] in по_коду:
+                l["nomenclature_ref"] = по_коду[l["barcode"]]
+
     row = StoreReceipt(
         company_id=cid, station_id=station_id, number=number, doc_date=now,
         supplier=parsed["supplier"] or None,
@@ -3189,6 +3206,9 @@ async def send_receipt_to_station(
             "signed_at": row.signed_at.isoformat() if row.signed_at else None,
             "lines": [{
                 **line,
+                # Карточка, сопоставленная при загрузке УПД: приход ляжет на
+                # реальный товар, а не под пустую карточку.
+                "item_uuid": line.get("nomenclature_ref") or "",
                 # Агент ожидает в mark_codes именно коды поставщика из УПД;
                 # физические сканы на станции он ведёт отдельно.
                 "mark_codes": line.get("upd_codes") or line.get("mark_codes") or [],

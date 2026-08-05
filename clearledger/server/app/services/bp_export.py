@@ -7,6 +7,7 @@ oneC-путь сохранён как переходный fallback. Докум�
 from __future__ import annotations
 
 import json as _json
+import logging as _logging
 import os as _os
 import re as _re
 import uuid as _uuid
@@ -20,6 +21,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import DataEntry, CbNomenclature, StockOnHand, CbRef, CbInventoryDoc, CbMovementDoc
 from app.services.bp_canon import packet_hash
 from app.services.goods_dashboard import _day
+
+_log = _logging.getLogger("edge.bp_export")
 
 _WH_208 = {"208", "20800002"}   # склады станции 208 (Торговый зал + Склад)
 
@@ -314,10 +317,29 @@ class BpPackageEmitter:
             return shift_open <= moment < shift_close
 
         related = [entry for entry in entries if in_shift(entry) and entry.id != target.id]
-        unsupported = sorted({entry.doc_type_id for entry in related
-                              if entry.doc_type_id in {"return_sale", "ingredients_writeoff"}})
-        if unsupported:
-            raise ValueError("Пакет БП не собран: приёмник пока не поддерживает " + ", ".join(unsupported))
+
+        # Документы, для которых приёмник TradeLedger.cfe пока не имеет раскладки
+        # (возврат покупателя, списание ингредиентов). Раньше их наличие роняло
+        # ValueError — и вся смена не выгружалась из-за одного возврата, хотя
+        # сопутка и топливо собраны. Возврат покупателя — штатная операция
+        # магазина, ронять из-за него всю смену нельзя.
+        #
+        # Правильная раскладка этих типов в БП требует стороны 1С (как их примет
+        # .cfe), поэтому здесь их не собираем, а откладываем: смена уходит без
+        # них, факт откладывания виден в логе, а сами документы остаются в
+        # DataEntry — перевыгрузка подхватит их, когда приёмник научится. Молча
+        # они не теряются, но и вслепую в пакет, который может уронить .cfe, не
+        # попадают.
+        DEFERRED_KINDS = {"return_sale", "ingredients_writeoff"}
+        отложено = [entry for entry in related if entry.doc_type_id in DEFERRED_KINDS]
+        related = [entry for entry in related if entry.doc_type_id not in DEFERRED_KINDS]
+        if отложено:
+            виды = sorted({e.doc_type_id for e in отложено})
+            _log.warning(
+                "смена %s: %d документ(ов) отложено (приёмник БП не поддерживает %s) — "
+                "смена выгружена без них, документы ждут в DataEntry",
+                shift_key, len(отложено), ", ".join(виды),
+            )
 
         purchases: list[dict] = []
         productions: list[dict] = []
