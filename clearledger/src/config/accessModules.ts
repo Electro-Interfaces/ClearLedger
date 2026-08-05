@@ -51,7 +51,7 @@ export const ACCESS_PRESETS: AccessPreset[] = [
  *  `plan`/`conf`, не по движку. Имена — те же, что в реестре. */
 export const APP_LABELS: Record<string, string> = {
   admin: 'Управление', ledger: 'Учёт', support: 'Поддержка',
-  chat: 'Чаты', plan: 'Заявки', conf: 'Конференции',
+  chat: 'Чаты', plan: 'Задачи', conf: 'Конференции',
   // Продукты разреза Учёта (config/spaceProducts.ts).
   projects: 'Проекты', ops: 'Эксплуатация', sales: 'Продажи',
   finance: 'Финансы', data: 'Данные',

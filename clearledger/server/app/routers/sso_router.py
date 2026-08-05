@@ -37,9 +37,11 @@ INTERNAL_ROUTES = {"admin": "/admin", "ledger": "/workspace", "chat": "/messages
                    "corp": "/corporate", "shop": "/shop", "marketing": "/marketing",
                    "finance": "/finance", "data": "/data", "info": "/info",
                    "connect": "/connect",
-                   # «Заявки»: движок — трекер Поддержки, витрина в этом SPA
-                   # (решение МАГа 31.07.2026, docs/TICKETS.md; мост на Plane снят).
-                   "plan": "/tickets",
+                   # «Задачи»: свой движок в Ядре — типы с маршрутами, переадресация,
+                   # сроки (решение МАГа 06.08.2026, docs/TASKS.md). Витрина заявок
+                   # Поддержки осталась на /tickets — её открывают из «Пульса»,
+                   # Центра управления и карточки объекта, продуктом она больше не числится.
+                   "plan": "/tasks",
                    # Продукты в подключении: маршрут есть, за ним заставка.
                    "netlink": "/netlink", "accounting": "/accounting", "diag": "/diagnostics"}
 # Слой рабочего стола: управление пространством и служебная кухня стоят отдельно от

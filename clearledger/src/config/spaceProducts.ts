@@ -371,6 +371,10 @@ export const pageCode = (path: string) => path.replace(/^\//, '').split('/')[0]
 const ROUTE_APPS: [string, string][] = [
   ['/admin', 'admin'], ['/data', 'data'], ['/messages', 'chat'],
   ['/info', 'info'], ['/workspace', 'ledger'], ['/pulse', 'pulse'],
+  // «Заявки» жили без записи: экран открывался под шапкой «Учёт» с чужим меню,
+  // хотя это самостоятельное приложение Ядра со своей витриной. Витрина осталась
+  // за Поддержкой, а код `plan` уехал на «Задачи» (docs/TASKS.md).
+  ['/tickets', 'support'], ['/tasks', 'plan'],
 ]
 
 /**
@@ -380,6 +384,7 @@ const ROUTE_APPS: [string, string][] = [
  */
 const CORE_APP_TITLES: Record<string, string> = {
   chat: 'Чаты', admin: 'Управление', data: 'Данные', info: 'Инфо', pulse: 'Пульс',
+  plan: 'Задачи', support: 'Заявки',
 }
 
 /** Имя приложения Ядра по адресу; null — адрес принадлежит Учёту или продукту. */

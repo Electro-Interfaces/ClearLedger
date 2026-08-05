@@ -6,7 +6,7 @@
  * скролла страницы (как раньше решала `MainLayout.isWorkspace`).
  */
 import { matchPath } from 'react-router-dom'
-import { Plug, HardHat, Gauge, BarChart3, Wallet, Database, LayoutDashboard, Building2, ShoppingCart, Megaphone, Activity } from 'lucide-react'
+import { Plug, HardHat, Gauge, BarChart3, Wallet, Database, LayoutDashboard, Building2, ShoppingCart, Megaphone, Activity, ListChecks } from 'lucide-react'
 import { SPACE_PRODUCTS, SPACE_PAGES, productLabel } from './spaceProducts'
 import type { ComponentType } from 'react'
 import {
@@ -25,6 +25,11 @@ const PRODUCT_ICONS: Record<string, ComponentType<{ className?: string }>> = {
 // маршруты продуктов пространства и полноэкранные страницы.
 const WORKSPACE_PATHS = new Set<string>([
   '/workspace', '/files', '/reconciliation', '/normalization',
+  // «Пульс» — такое же рабочее место, как продукты разреза: своя вторая колонка и
+  // свой скролл внутри. Без этих путей внешняя обёртка добавляла ему второй паддинг
+  // и второй `overflow-y-auto` поверх собственных — на 320 px до первой буквы
+  // уходило 56 px, а колонка пунктов не прилегала к рельсе, как в «Продажах».
+  '/pulse', '/pulse/business', '/pulse/team', '/pulse/week',
   ...SPACE_PRODUCTS.map((p) => p.route),
   // Та же страница под адресом продукта (`/finance/files`) — и раскладка та же.
   ...SPACE_PRODUCTS.map((p) => `${p.route}/files`),
@@ -44,6 +49,11 @@ for (const [to, label] of [['/pulse', 'Пульс'], ['/pulse/business', 'Биз
   ['/pulse/team', 'Команда'], ['/pulse/week', 'Неделя']] as const) {
   STATIC[to] = { to, icon: Activity, label }
 }
+
+// «Задачи» — свой продукт Ядра (docs/TASKS.md): вкладка нужна, чтобы список работы
+// можно было закрепить и возвращаться к нему одним кликом. Скролл у него обычный,
+// поэтому в WORKSPACE_PATHS запись не идёт.
+STATIC['/tasks'] = { to: '/tasks', icon: ListChecks, label: 'Задачи' }
 
 // Продукты пространства: в меню Учёта их нет (открываются плиткой со стола), но вкладка
 // и полноэкранная раскладка нужны такие же, как рабочей области.

@@ -47,6 +47,7 @@ from app.routers import (
     tariff_router,
     overview_router,
     store_router,
+    station_console_router,
     onec_router,
     equipment_router,
     sites_router,
@@ -76,6 +77,7 @@ from app.routers import (
     settings_router,
     source_types_router,
     pulse_router,
+    tasks_router,
     tickets_router,
     users_router,
     sources_router,
@@ -170,8 +172,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception as e:  # noqa: BLE001 — планировщик не критичен для API
         logger.warning(f"Планировщик каналов не запущен: {e}")
 
+    # Утренний дайджест «Пульса»: эскалации идут к человеку, а не ждут, пока он
+    # откроет экран. Своё расписание и свой лок — падение одного воркера не
+    # трогает другой.
+    digest_task: asyncio.Task | None = None
+    try:
+        from app.services.pulse_digest import run_forever as _digest
+        digest_task = asyncio.create_task(_digest())
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"Дайджест «Пульса» не запущен: {e}")
+
     logger.info("TradeLedger Server запущен")
     yield
+    if digest_task is not None:
+        digest_task.cancel()
     if scheduler_task is not None:
         scheduler_task.cancel()
     logger.info("TradeLedger Server остановлен")
@@ -204,7 +218,10 @@ app.add_middleware(
 API_PREFIX = "/api"
 
 app.include_router(auth_router.router, prefix=API_PREFIX)
+# Рабочее место станции: прокси к вебу агента через хаб TradeLink.
+app.include_router(station_console_router.router, prefix=API_PREFIX)
 app.include_router(tickets_router.router, prefix=API_PREFIX)
+app.include_router(tasks_router.router, prefix=API_PREFIX)  # «Задачи»: свой движок с маршрутами
 app.include_router(pulse_router.router, prefix=API_PREFIX)
 app.include_router(departments_router.router, prefix=API_PREFIX)
 app.include_router(users_router.router, prefix=API_PREFIX)

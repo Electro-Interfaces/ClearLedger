@@ -16,6 +16,7 @@ from sqlalchemy import (
     Index,
     Integer,
     Numeric,
+    Sequence,
     String,
     Text,
     UniqueConstraint,
@@ -6250,3 +6251,114 @@ class EdgeAgent(Base):
     __table_args__ = (
         UniqueConstraint("company_id", "station_id", name="uq_edge_agents_station"),
     )
+
+
+# ---------------------------------------------------------------------------
+# Задачи пространства — продукт «Задачи» (ecosystem-deploy/docs/TASKS.md)
+# ---------------------------------------------------------------------------
+class TaskType(Base):
+    """Тип задачи и его маршрут: чем задача отличается от задачи.
+
+    Маршрут — упорядоченный список стадий, а не скрипт: `[{"code","name"}]`.
+    Так тип заводит руководитель, а не разработчик, и правило видно целиком в
+    одной строке. Стадии живут в JSONB намеренно: отдельная таблица дала бы
+    ссылочную целостность, которая тут не нужна (стадию нельзя «потерять» —
+    она часть определения типа), зато потребовала бы транзакции на каждую
+    правку порядка.
+    """
+    __tablename__ = "task_types"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    code: Mapped[str] = mapped_column(String(40), nullable=False)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # [{"code": "new", "name": "Постановка"}, …] — порядок = порядок движения.
+    route: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    default_priority: Mapped[str] = mapped_column(String(20), nullable=False, default="medium")
+    # Срок по умолчанию от постановки; NULL — без срока.
+    due_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("company_id", "code", name="uq_task_types_code"),
+    )
+
+
+_tasks_number_seq = Sequence("tasks_number_seq", start=1, metadata=Base.metadata)
+
+
+class Task(Base):
+    """Задача пространства: кто, что и к какому сроку делает.
+
+    Не заявка Поддержки: та описывает поломку у заявителя и живёт в контуре
+    Поддержки со своим SLA и внешними сторонами. Задача — внутренняя работа
+    компании, её ставят люди пространства друг другу. Общее у них словари
+    (приоритет, «у кого мяч») и объект пространства, к которому привязана
+    работа; правда — раздельная, вторых копий никто не заводит.
+    """
+    __tablename__ = "tasks"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    # Человеческий номер. Сквозной по контейнеру: последовательность БД снимает
+    # гонку двух одновременных постановок, которую max(number)+1 не снимает.
+    number: Mapped[int] = mapped_column(
+        Integer, _tasks_number_seq, server_default=_tasks_number_seq.next_value(),
+        nullable=False, unique=True)
+    type_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("task_types.id", ondelete="SET NULL"), nullable=True)
+    title: Mapped[str] = mapped_column(String(300), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    priority: Mapped[str] = mapped_column(String(20), nullable=False, default="medium")
+    # open | done | cancelled. Стадия — где внутри маршрута, статус — жива ли.
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="open")
+    stage_code: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    assignee_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    author_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    # Объект пространства — общая ось с заявками, чатами и «Проектами».
+    object_id: Mapped[str | None] = mapped_column(
+        String(40), ForeignKey("service_locations.id", ondelete="SET NULL"), nullable=True)
+    due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class TaskEvent(Base):
+    """След задачи: постановка, движение по маршруту, переадресация, реплики.
+
+    Лента — единственный источник ответа «почему работа стоит»: без неё
+    переадресация выглядит как самопроизвольная смена исполнителя.
+    """
+    __tablename__ = "task_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    task_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    # created | stage | assign | status | comment
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    from_value: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    to_value: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())

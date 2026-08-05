@@ -39,6 +39,7 @@ const AdminSectionPage = lazy(() => import('@/pages/AdminSectionPage').then((m) 
 const AdminHomeRedirect = lazy(() => import('@/pages/AdminSectionPage').then((m) => ({ default: m.AdminHomeRedirect })))
 const MessagesPage = lazy(() => import('@/pages/MessagesPage').then((m) => ({ default: m.MessagesPage })))
 const TicketsAppPage = lazy(() => import('@/pages/TicketsAppPage').then((m) => ({ default: m.TicketsAppPage })))
+const TasksAppPage = lazy(() => import('@/pages/TasksAppPage').then((m) => ({ default: m.TasksAppPage })))
 const PulseAppPage = lazy(() => import('@/pulse/PulseAppPage').then((m) => ({ default: m.PulseAppPage })))
 const PulseBusinessPage = lazy(() => import('@/pulse/PulseSections').then((m) => ({ default: m.PulseBusinessPage })))
 const PulseTeamPage = lazy(() => import('@/pulse/PulseSections').then((m) => ({ default: m.PulseTeamPage })))
@@ -222,14 +223,22 @@ const router = createBrowserRouter([
           { path: '/objects', element: <LazyPage><LocationsPage cockpitVariant="full" /></LazyPage> },
           { path: '/files', element: <LazyPage><FilesPage /></LazyPage> },
           { path: '/messages', element: <LazyPage><MessagesPage /></LazyPage> },
-          // «Заявки» — трекер пространства на движке Поддержки (docs/TICKETS.md).
+          // «Заявки» — витрина Поддержки (docs/TICKETS.md). Продуктом пространства
+          // больше не числится: её открывают из «Пульса», Центра управления и
+          // карточки объекта, поэтому гарда по продукту здесь нет.
           { path: '/tickets', element: <LazyPage><TicketsAppPage /></LazyPage> },
+          // «Задачи» — работа компании на своём движке Ядра (docs/TASKS.md).
+          // Гард по продукту: задачи видят только те, кому продукт подключён.
+          { path: '/tasks', element: <RequireApp code="plan"><LazyPage><TasksAppPage /></LazyPage></RequireApp> },
           // «Пульс» — рабочее место руководителя (ecosystem-deploy/docs/PULSE.md):
           // разделы в рельсе приложения, их пункты — во второй колонке (PulseLayout),
           // как в «Продажах» и «Проектах».
           {
             path: '/pulse',
-            element: <LazyPage><PulseLayout /></LazyPage>,
+            // Гард такой же, как у продуктов разреза: «Пульс» показывает выручку сети,
+            // нарушения SLA и поимённую активность людей, а в пространстве есть внешние
+            // участники — прямая ссылка не должна обходить право на продукт.
+            element: <RequireApp code="pulse"><LazyPage><PulseLayout /></LazyPage></RequireApp>,
             children: [
               { index: true, element: <LazyPage><PulseAppPage /></LazyPage> },
               { path: 'business', element: <LazyPage><PulseBusinessPage /></LazyPage> },

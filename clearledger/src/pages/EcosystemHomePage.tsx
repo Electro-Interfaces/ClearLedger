@@ -16,7 +16,7 @@ import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
   Menu, LayoutGrid, ExternalLink, Loader2, LogOut,
-  LifeBuoy, ClipboardList, Video, FileText, MessagesSquare,
+  LifeBuoy, ClipboardList, ListChecks, Video, FileText, MessagesSquare,
   ShieldCheck, BookOpen, HardHat, Gauge, BarChart3, Wallet, Database, MessageCircle,
   Building2, ShoppingCart, Megaphone, Network, Calculator, Stethoscope, Activity,
 } from 'lucide-react'
@@ -29,7 +29,7 @@ import { Sheet, SheetContent, SheetDescription, SheetTitle, SheetTrigger } from 
 import { useAuth } from '@/contexts/AuthContext'
 import { useCompany } from '@/contexts/CompanyContext'
 import { isApiEnabled } from '@/services/apiClient'
-import { listSsoApps, hasSideButton, type SsoApp } from '@/services/ssoService'
+import { listSsoApps, hasSideButton, isCoreApp, type SsoApp } from '@/services/ssoService'
 import { useOpenApp } from '@/hooks/useOpenApp'
 import { useMaxWidth } from '@/hooks/use-mobile'
 import { READINESS_LABEL, productReadiness, type Readiness } from '@/config/spaceProducts'
@@ -42,6 +42,7 @@ const BASE = import.meta.env.BASE_URL.replace(/\/$/, '')
 const ICONS: Record<string, typeof FileText> = {
   'life-buoy': LifeBuoy,
   'clipboard-list': ClipboardList,
+  'list-checks': ListChecks,
   'video': Video,
   'file-text': FileText,
   'messages-square': MessagesSquare,
@@ -239,7 +240,10 @@ export function EcosystemHomePage() {
    */
   async function openProduct(app: SsoApp) {
     if (app.mode === 'internal' && app.route) {
-      if (narrow || hasSideButton(app.code)) navigate(app.route)
+      // В текущей вкладке: телефон, продукты с кнопкой рядом (Чат · Заявки ·
+      // Конференция) и функции Ядра — «Инфо», «Данные», «Управление», «Пульс».
+      // Последние не рабочие места продуктов, а экраны самого пространства.
+      if (narrow || hasSideButton(app.code) || isCoreApp(app.code)) navigate(app.route)
       else window.open(`${window.location.origin}${BASE}${app.route}`, '_blank', 'noopener,noreferrer')
       return
     }
