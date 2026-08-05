@@ -212,10 +212,17 @@ async def ensure_company_rooms(user: User, cid: uuid.UUID, db: AsyncSession) -> 
             # Выбираем ИЗ `users`, а не из членства напрямую: в `user_companies` бывают
             # осиротевшие строки (после переноса данных с прода остались членства
             # удалённых людей), и вставка такого id роняет всю операцию по внешнему ключу.
-            space_ids = set((await db.execute(select(User.id).where(or_(
-                User.company_id == cid,
-                User.id.in_(select(UserCompany.user_id).where(UserCompany.company_id == cid)),
-            )))).scalars().all())
+            # Почтовые участники сюда НЕ входят: человек, живущий в своей почте,
+            # попадает ровно в те разговоры, куда его позвали. Иначе ему письмами
+            # уходят и объявления компании, и новости платформы — рассылка, на
+            # которую он не подписывался.
+            space_ids = set((await db.execute(select(User.id).where(
+                User.mail_only.is_(False),
+                or_(
+                    User.company_id == cid,
+                    User.id.in_(select(UserCompany.user_id).where(UserCompany.company_id == cid)),
+                ),
+            ))).scalars().all())
             space_ids.add(user.id)
             missing = space_ids - member_ids
             for uid in missing:
@@ -225,7 +232,25 @@ async def ensure_company_rooms(user: User, cid: uuid.UUID, db: AsyncSession) -> 
 
 
 
-def _can_write(room: ChatRoom, user: User, room_role: str | None = None) -> bool:
+async def _is_company_admin(db: AsyncSession, company_id: uuid.UUID | None,
+                            user: User) -> bool:
+    """Администратор ЭТОГО пространства — по членству, а не по полю `users.role`.
+
+    Глобальная роль осталась от прежней модели и у перенесённых с прода людей
+    стоит как попало: на пилоте право писать в «Объявления» получили четверо
+    рядовых сотрудников, а настоящий администратор компании — нет.
+    """
+    if user.is_superadmin:
+        return True
+    if company_id is None:
+        return False
+    role = (await db.execute(select(UserCompany.role).where(
+        UserCompany.user_id == user.id, UserCompany.company_id == company_id))).scalar_one_or_none()
+    return role == "admin"
+
+
+def _can_write(room: ChatRoom, user: User, room_role: str | None = None,
+               company_admin: bool = False) -> bool:
     """Право писать. Канал — односторонний, группа и личный — для всех участников.
 
     В КАНАЛЕ пишут только владелец и админы канала: это его смысл — новости, рассылка,
@@ -237,10 +262,13 @@ def _can_write(room: ChatRoom, user: User, room_role: str | None = None) -> bool
     # не пишет туда от нашего имени — даже администратор компании.
     if room.kind == "platform":
         return user.is_superadmin
-    # «Объявления» — канал самой компании: её администратор говорит в нём по должности,
-    # назначенный владелец — по роли в комнате.
+    # «Объявления» — канал самой компании: её администратор говорит в нём по
+    # должности В ЭТОМ пространстве (членство), назначенный владелец — по роли в
+    # комнате. Раньше здесь стояло `user.role == "admin"` — глобальное поле,
+    # унаследованное от прежней модели: на пилоте оно дало право публиковать
+    # четверым рядовым и отняло у администратора компании.
     if room.kind == "news":
-        return user.is_superadmin or user.role == "admin" or room_role in ("owner", "admin")
+        return user.is_superadmin or company_admin or room_role in ("owner", "admin")
     if room.type == "channel":
         return user.is_superadmin or room_role in ("owner", "admin")
     return True
@@ -268,6 +296,10 @@ class RoomOut(BaseModel):
     pinnedMessage: PinnedOut | None = None
     # Чат закреплён вверху МОЕГО списка (личная настройка участия).
     isPinned: bool = False
+    # Могу ли я здесь писать. Считает СЕРВЕР: фронт раньше выводил это сам из
+    # глобальной роли пользователя и расходился с сервером — человек видел поле
+    # ввода, а отправка возвращала 403.
+    canWrite: bool = True
     # Моя роль В ЭТОЙ комнате (owner | admin | member) — по ней панель решает, показывать
     # ли поле ввода: в канале пишут владелец и его админы. Без этого поля фронт судил по
     # виду комнаты, и в канале, открытом администратором, поле ввода было у всех — а
@@ -438,6 +470,7 @@ async def list_rooms(
         select(ServiceLocation.id, ServiceLocation.name)
         .where(ServiceLocation.id.in_(obj_ids)))).all()) if obj_ids else {}
 
+    company_admin = await _is_company_admin(db, cid, current_user)
     out: list[RoomOut] = []
     for room, last_read, my_role, muted_until, pinned_at in rows:
         pcount = (await db.execute(select(func.count()).select_from(ChatParticipant)
@@ -477,6 +510,7 @@ async def list_rooms(
             avatarUrl=room.avatar_url or peer_avatar,
             mutedUntil=muted_until.isoformat() if muted_until else None,
             isPinned=pinned_at is not None,
+            canWrite=_can_write(room, current_user, my_role, company_admin),
             scopeObjectId=room.scope_object_id,
             scopeObjectName=obj_names.get(room.scope_object_id or ""),
         ))
@@ -629,11 +663,14 @@ async def get_room(
     # Скрытые комнаты (чат заявки) не попадают в общий список — фронт строит их
     # шапку из детали, поэтому роль зрителя нужна прямо здесь.
     my_role = next((p.role for p in plist if p.userId == str(current_user.id)), None)
+    can_write = _can_write(room, current_user, my_role,
+                           await _is_company_admin(db, room.company_id, current_user))
     return RoomDetailOut(
         id=str(room.id), type=room.type, kind=room.kind, name=name,
         isArchived=room.is_archived, participantCount=len(plist), directPeerId=peer_id,
         createdBy=str(room.created_by) if room.created_by else None, participants=plist,
         pinnedMessage=await _pinned_out(room, db),
+        canWrite=can_write,
         avatarUrl=room.avatar_url,
         scopeProduct=room.scope_product,
         scopeObjectId=room.scope_object_id, scopeObjectName=obj_name,
@@ -770,7 +807,8 @@ async def send_message(
     room_role = (await db.execute(select(ChatParticipant.role).where(
         ChatParticipant.room_id == room.id,
         ChatParticipant.user_id == current_user.id))).scalar_one_or_none()
-    if not _can_write(room, current_user, room_role):
+    if not _can_write(room, current_user, room_role,
+                      await _is_company_admin(db, room.company_id, current_user)):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "В «Объявления» пишут только администраторы")
     mtype = body.type if body.type in ("text", "image", "video", "file") else "text"
     content = (body.content or "").strip()
@@ -1509,7 +1547,8 @@ async def create_poll(
     room_role = (await db.execute(select(ChatParticipant.role).where(
         ChatParticipant.room_id == room.id,
         ChatParticipant.user_id == current_user.id))).scalar_one_or_none()
-    if not _can_write(room, current_user, room_role):
+    if not _can_write(room, current_user, room_role,
+                      await _is_company_admin(db, room.company_id, current_user)):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "В этом чате писать может не каждый")
 
     options = [o.strip()[:150] for o in body.options if o and o.strip()]
@@ -1821,7 +1860,8 @@ async def forward_message(
         room_role = (await db.execute(select(ChatParticipant.role).where(
             ChatParticipant.room_id == rid,
             ChatParticipant.user_id == current_user.id))).scalar_one_or_none()
-        if not _can_write(room, current_user, room_role):
+        if not _can_write(room, current_user, room_role,
+                          await _is_company_admin(db, room.company_id, current_user)):
             raise HTTPException(status.HTTP_403_FORBIDDEN,
                                 f"В «{room.name or 'этот канал'}» вам писать нельзя")
         msg = ChatMessage(

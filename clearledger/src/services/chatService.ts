@@ -40,6 +40,8 @@ export interface ChatRoom {
   mutedUntil?: string | null
   /** Чат закреплён вверху МОЕГО списка (личная настройка). */
   isPinned?: boolean
+  /** Могу ли я здесь писать — решает сервер, фронт не выводит это сам. */
+  canWrite?: boolean
   /** Объект пространства, при котором живёт чат («группа по станции»). */
   scopeObjectId?: string | null
   scopeObjectName?: string | null

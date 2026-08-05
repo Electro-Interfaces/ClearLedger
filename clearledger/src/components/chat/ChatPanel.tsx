@@ -51,7 +51,6 @@ import type {
 
 // ── константы ────────────────────────────────────────────────────────────────
 const QUICK_REACTIONS = ['👍', '❤️', '🔥', '😂', '😮', '👏']
-const NEWS_WRITER_ROLES = new Set(['admin', 'partner', 'coordinator', 'company', 'tech'])
 /**
  * Разделы списка — как в Telegram: канал, группа и личный чат это разные сущности,
  * а не «чат с разными настройками». Канал односторонний (новости, рассылка, слово
@@ -2118,16 +2117,10 @@ export function ChatPanel({ compact, scopeProduct }: {
   // роль В КОМНАТЕ, а не должность в компании. «Объявления» пространства ведёт ещё и
   // администратор компании: это канал самой организации, а канал платформы — наш,
   // пространство его только читает.
-  const canWrite = (() => {
-    if (!activeRoom) return true
-    const roomRole = activeRoom.myRole || 'member'
-    if (activeRoom.kind === 'platform') return false
-    if (activeRoom.kind === 'news') {
-      return NEWS_WRITER_ROLES.has(user?.role || '') || roomRole === 'owner' || roomRole === 'admin'
-    }
-    if (activeRoom.type === 'channel') return roomRole === 'owner' || roomRole === 'admin'
-    return true
-  })()
+  // Право писать считает СЕРВЕР и присылает в canWrite. Фронт раньше выводил
+  // его сам из глобальной роли пользователя — и расходился с сервером: поле
+  // ввода показывалось тому, кому отправка возвращала 403, и наоборот.
+  const canWrite = activeRoom?.canWrite ?? true
   const peerPresence = activeRoom?.type === 'direct' && activeRoom.directPeerId ? presenceMap.get(activeRoom.directPeerId) : undefined
 
   const filteredRooms = useMemo(() => {
