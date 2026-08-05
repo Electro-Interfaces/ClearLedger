@@ -1039,6 +1039,40 @@ export const getStoreStationDocs = (opts: {
   limit: opts.limit ?? undefined,
 })
 
+/** Передачи между АЗС: отправлено, принято, расхождение, в пути. */
+export interface StoreTransferBetween {
+  from_station: number
+  to_station: number
+  number: string | null
+  doc_date: string
+  doc_id: string
+  from_place: string
+  comment: string
+  positions: number
+  qty_sent: number
+  qty_accepted: number | null
+  difference: number | null
+  state: 'в пути' | 'принято' | 'расхождение'
+  accepted_at: string | null
+  hours_in_transit: number | null
+  task_delivered: boolean
+  task_acked: boolean
+  packet_uuid: string
+}
+
+export const getStoreTransfersBetween = (opts: {
+  dateFrom?: string; dateTo?: string; stationId?: number | null
+}) => get<{
+  transfers: StoreTransferBetween[]
+  total: number
+  by_state: Record<string, number>
+  stuck: StoreTransferBetween[]
+}>('/api/store/transfers-between', {
+  date_from: opts.dateFrom || undefined,
+  date_to: opts.dateTo || undefined,
+  station_id: opts.stationId ?? undefined,
+})
+
 /** Первичный документ станции целиком: шапка, стороны, строки. */
 export interface StoreStationDocFull {
   /** Реквизиты организации для печатной формы. */
