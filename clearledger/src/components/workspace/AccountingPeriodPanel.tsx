@@ -17,7 +17,7 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
-  AlertTriangle, CalendarCheck, ChefHat, CheckCircle2, FileStack, Fuel, Loader2, Lock, RadioTower, ShoppingCart, Unlock,
+  AlertTriangle, CalendarCheck, ChefHat, CheckCircle2, Fuel, Loader2, Lock, RadioTower, ShoppingCart, Unlock,
 } from 'lucide-react'
 
 import { Card, CardContent } from '@/components/ui/card'
@@ -440,8 +440,9 @@ export function AccountingPeriodPanel() {
         </Card>
       )}
 
-      {active && <OurDocsCard data={readinessDocs.data} loading={readinessDocs.isLoading} />}
-
+      {/* Сводка по видам за период отдельным блоком больше не нужна: те же числа
+          стоят итоговой строкой матрицы покрытия, а два блока про одно заставляли
+          сверять их между собой. */}
       {active && <CoverageCard data={coverage.data} loading={coverage.isLoading} />}
 
       {active && <PeriodReadinessCard data={readinessDocs.data} loading={readinessDocs.isLoading}
@@ -694,28 +695,51 @@ export function AccountingPeriodPanel() {
 
 
 /**
- * Покрыт ли рабочий день станции документами.
+ * Матрица «станция × вид документа» — главный ответ на вопрос «закрыт ли период».
  *
- * Отсутствие прихода само по себе ничего не значит: поставки может не быть,
- * пересчёт бывает раз в месяц, станция могла стоять. Тревога — другое: станция
- * работала, смены шли, а документа нет. Поэтому тишина меряется рабочими днями,
- * а не календарными, и порог здесь честный — не «давно», а «столько дней
- * торговали, ничего не оформив».
+ * Первая версия давала карточку на станцию: четырнадцать блоков подряд, и чтобы
+ * сравнить приходы двух АЗС, приходилось скроллить и держать числа в голове.
+ * Сравнение — это таблица; строки читаются глазом, а не памятью.
+ *
+ * Тревога считается не по календарю, а по РАБОЧИМ дням: станция работала, смены
+ * шли, а документа вида нет. Дни простоя молчанием не считаются — иначе закрытая
+ * на ремонт АЗС горела бы красным всю неделю.
  */
 function CoverageCard({ data, loading }: { data?: CoverageStation[]; loading: boolean }) {
   const rows = data ?? []
-  const label = (kind: string) => OUR_DOC_KINDS.find((k) => k.kind === kind)?.label ?? kind
   // Порог внимания: неделя рабочих дней без документа. Меньше — обычный ритм
-  // поставок, больше — уже вопрос, который бухгалтер задаёт станции.
+  // поставок, больше — вопрос, который бухгалтер задаёт станции.
   const ALERT = 7
+
+  // Колонки — только те виды, что реально встречались: десять пустых столбцов
+  // вместо ответа «этого нет» читаются как таблица с дырами.
+  const kinds = useMemo(() => {
+    const seen = new Set(rows.flatMap((s) => s.docs.map((d) => d.kind)))
+    const known = OUR_DOC_KINDS.filter((k) => seen.has(k.kind))
+    const extra = [...seen].filter((k) => !OUR_DOC_KINDS.some((o) => o.kind === k))
+      .map((k) => ({ kind: k, label: k, hint: 'вид не описан в карте' }))
+    return [...known, ...extra]
+  }, [rows])
+  const missing = OUR_DOC_KINDS.filter((k) => !kinds.some((x) => x.kind === k.kind))
+
+  const cell = (s: CoverageStation, kind: string) => s.docs.find((d) => d.kind === kind)
+  const totals = kinds.map((k) => rows.reduce((sum, s) => sum + (cell(s, k.kind)?.count ?? 0), 0))
+  const alarms = rows.reduce((n, s) => n + s.docs.filter((d) => d.silentDays >= ALERT).length, 0)
 
   return (
     <Card>
       <CardContent className="pt-4">
-        <div className="mb-3 flex items-center gap-2">
+        <div className="mb-3 flex flex-wrap items-center gap-2">
           <RadioTower className="h-4 w-4 text-primary" />
           <h3 className={H3}>Покрытие рабочих дней документами</h3>
+          {alarms > 0 && (
+            <span className="flex items-center gap-1 text-[11px] text-amber-600 dark:text-amber-400">
+              <AlertTriangle className="h-3.5 w-3.5" />
+              {fmtN(alarms)} видов молчат дольше {ALERT} рабочих дней
+            </span>
+          )}
         </div>
+
         {loading ? (
           <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" /> Считаем покрытие…
@@ -726,119 +750,80 @@ function CoverageCard({ data, loading }: { data?: CoverageStation[]; loading: bo
           </p>
         ) : (
           <>
-            <div className="space-y-3">
-              {rows.map((s) => {
-                const alerts = s.docs.filter((d) => d.silentDays >= ALERT)
-                return (
-                  <div key={s.station} className="rounded-lg border border-border bg-background p-3">
-                    <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                      <span className="text-sm font-semibold">АЗС {s.station}</span>
-                      <span className="text-[11px] text-muted-foreground">
-                        работала {fmtN(s.workedDays)} дн. · {s.firstDay} — {s.lastDay}
-                      </span>
-                      {alerts.length > 0 && (
-                        <span className="ml-auto flex items-center gap-1 text-[11px] text-amber-600 dark:text-amber-400">
-                          <AlertTriangle className="h-3.5 w-3.5" />
-                          молчит по {alerts.length} видам
-                        </span>
-                      )}
-                    </div>
-                    <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1.5">
-                      {s.docs.map((d) => (
-                        <span key={d.kind} className="text-xs">
-                          <span className="text-muted-foreground">{label(d.kind)}</span>{' '}
-                          <span className="tabular-nums">{fmtN(d.count)}</span>
-                          {d.silentDays > 0 && (
-                            <span className={cn('ml-1 tabular-nums',
-                              d.silentDays >= ALERT
-                                ? 'text-amber-600 dark:text-amber-400'
-                                : 'text-muted-foreground/70')}>
-                              · тишина {fmtN(d.silentDays)} раб. дн.
-                            </span>
-                          )}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-            <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">
-              «Тишина» — сколько дней станция отработала после последнего документа этого вида.
-              Дни простоя не считаются: если станция не торговала, отсутствие прихода — не пробел.
-              Порог внимания — {ALERT} рабочих дней.
-            </p>
-          </>
-        )}
-      </CardContent>
-    </Card>
-  )
-}
-
-/**
- * Что наша линия собрала за период — по видам документов.
- *
- * Смены отвечают только за продажу. Закрытый день — это ещё и приход, перемещение,
- * пересчёт, списание; пока их нет, период выглядит полным по выручке и пуст по
- * товару. Виды, которых за период не было ни одного, показываются отдельно и
- * прямым текстом: молчание здесь дороже цифры.
- */
-function OurDocsCard({ data, loading }: { data?: PeriodReadiness; loading: boolean }) {
-  const have = new Map((data?.ourDocs ?? []).map((d) => [d.kind, d]))
-  const known = OUR_DOC_KINDS.filter((k) => have.has(k.kind))
-  const missing = OUR_DOC_KINDS.filter((k) => !have.has(k.kind))
-  // Вид, который приехал, но в словаре не описан, — тоже показываем: иначе новый
-  // тип документа молча пропадёт с экрана.
-  const extra = (data?.ourDocs ?? []).filter(
-    (d) => !OUR_DOC_KINDS.some((k) => k.kind === d.kind))
-
-  return (
-    <Card>
-      <CardContent className="pt-4">
-        <div className="mb-3 flex items-center gap-2">
-          <FileStack className="h-4 w-4 text-primary" />
-          <h3 className={H3}>Документы нашей линии за период</h3>
-        </div>
-        {loading ? (
-          <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" /> Считаем…
-          </div>
-        ) : (
-          <>
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[520px] text-sm">
+              <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-border/60 text-[11px] text-muted-foreground">
-                    <th className="py-1.5 pr-4 text-left font-medium">Вид документа</th>
-                    <th className="py-1.5 pr-6 text-right font-medium">За период</th>
-                    <th className="py-1.5 pr-6 text-right font-medium">Станций</th>
-                    <th className="py-1.5 text-left font-medium">Последний</th>
+                    <th className="sticky left-0 bg-card py-1.5 pr-4 text-left font-medium">АЗС</th>
+                    <th className="py-1.5 pr-5 text-right font-medium">Раб. дн.</th>
+                    {kinds.map((k) => (
+                      <th key={k.kind} className="py-1.5 pl-4 text-right font-medium whitespace-nowrap"
+                        title={k.hint}>
+                        {k.label}
+                      </th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {[...known.map((k) => ({ ...k, row: have.get(k.kind)! })),
-                    ...extra.map((d) => ({ kind: d.kind, label: d.kind, hint: 'вид не описан в карте', row: d }))]
-                    .map(({ kind, label, hint, row }) => (
-                      <tr key={kind} className="border-b border-border/30">
-                        <td className="py-1.5 pr-4">
-                          {label}
-                          <span className="ml-2 text-[10px] text-muted-foreground">{hint}</span>
-                        </td>
-                        <td className="py-1.5 pr-6 text-right tabular-nums">{fmtN(row.count)}</td>
-                        <td className="py-1.5 pr-6 text-right tabular-nums text-muted-foreground">
-                          {fmtN(row.stations)}
-                        </td>
-                        <td className="py-1.5 tabular-nums text-muted-foreground">{row.lastDate ?? '—'}</td>
-                      </tr>
-                    ))}
+                  {rows.map((s) => (
+                    <tr key={s.station} className="border-b border-border/30">
+                      <td className="sticky left-0 bg-card py-1.5 pr-4 font-medium tabular-nums">
+                        {s.station}
+                      </td>
+                      <td className="py-1.5 pr-5 text-right tabular-nums text-muted-foreground">
+                        {fmtN(s.workedDays)}
+                      </td>
+                      {kinds.map((k) => {
+                        const c = cell(s, k.kind)
+                        if (!c) {
+                          // Прочерк, а не ноль: «документов вида не было» и «было ноль
+                          // штук» — разные утверждения, и ноль читался бы как ошибка.
+                          return <td key={k.kind} className="py-1.5 pl-4 text-right text-muted-foreground/40">—</td>
+                        }
+                        const loud = c.silentDays >= ALERT
+                        return (
+                          <td key={k.kind} className="py-1.5 pl-4 text-right"
+                            title={`последний ${c.lastDate}` + (c.silentDays ? `, тишина ${c.silentDays} раб. дн.` : '')}>
+                            <span className={cn('tabular-nums', loud && 'font-semibold text-amber-600 dark:text-amber-400')}>
+                              {fmtN(c.count)}
+                            </span>
+                            {c.silentDays > 0 && (
+                              <span className={cn('ml-1 text-[10px] tabular-nums',
+                                loud ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground/60')}>
+                                +{fmtN(c.silentDays)}д
+                              </span>
+                            )}
+                          </td>
+                        )
+                      })}
+                    </tr>
+                  ))}
                 </tbody>
+                <tfoot>
+                  <tr className="border-t border-border/60 text-[11px]">
+                    <td className="sticky left-0 bg-card py-1.5 pr-4 font-medium">Всего</td>
+                    <td className="py-1.5 pr-5 text-right tabular-nums text-muted-foreground">
+                      {fmtN(rows.reduce((n, s) => n + s.workedDays, 0))}
+                    </td>
+                    {totals.map((t, i) => (
+                      <td key={kinds[i].kind} className="py-1.5 pl-4 text-right font-medium tabular-nums">
+                        {fmtN(t)}
+                      </td>
+                    ))}
+                  </tr>
+                </tfoot>
               </table>
             </div>
+
+            <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">
+              Число — сколько документов вида за период; приписка «+Nд» — сколько рабочих дней
+              станция отторговала после последнего такого документа. Дни простоя в тишину не
+              входят. Порог внимания — {ALERT} рабочих дней, такие ячейки выделены.
+            </p>
             {missing.length > 0 && (
-              <p className="mt-3 flex items-start gap-1.5 text-[11px] leading-relaxed text-amber-600 dark:text-amber-400">
+              <p className="mt-1.5 flex items-start gap-1.5 text-[11px] leading-relaxed text-amber-600 dark:text-amber-400">
                 <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                За период не собрано ни одного документа вида: {missing.map((m) => m.label.toLowerCase()).join(', ')}.
-                По товару период неполон, даже если смены на месте.
+                Ни по одной станции за период нет: {missing.map((m) => m.label.toLowerCase()).join(', ')}.
               </p>
             )}
           </>
@@ -847,6 +832,7 @@ function OurDocsCard({ data, loading }: { data?: PeriodReadiness; loading: boole
     </Card>
   )
 }
+
 
 /**
  * Готовность периода к закрытию: четыре проверки, которые бухгалтер делает руками.
