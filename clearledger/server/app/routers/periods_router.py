@@ -314,13 +314,18 @@ class CoverageCell(BaseModel):
     count: int
     lastDate: str | None = None
     silentDays: int          # рабочих дней станции ПОСЛЕ последнего такого документа
+    typicalGap: int | None = None   # обычный интервал между такими документами, раб. дней
+    status: str              # ok | attention | none
 
 
 class CoverageStation(BaseModel):
     station: str
-    workedDays: int          # дней, когда станция работала (была смена)
+    workedDays: int          # дней со сменой
+    expectedDays: int        # дней в окне работы станции внутри периода
+    missingDays: int         # дней окна БЕЗ смены — прямой пробел первички
     firstDay: str | None = None
     lastDay: str | None = None
+    status: str              # ok | attention
     docs: list[CoverageCell]
 
 
@@ -391,22 +396,53 @@ async def periods_coverage(
     out: list[CoverageStation] = []
     for st in sorted(worked, key=lambda s: (len(s), s)):
         days = sorted(worked[st])
+        # Окно работы станции внутри периода: от первой смены до последней. Дни за
+        # его пределами — не пробел, станция тогда просто не торговала (открылась
+        # позже, закрылась раньше, стояла на ремонте).
+        window = _days_between(days[0], days[-1]) if days else 0
+        missing = max(0, window - len(days))
+
         cells: list[CoverageCell] = []
         for (station, kind), kind_days in by_kind.items():
             if station != st:
                 continue
-            last = max(kind_days)
-            # Считаем именно рабочие дни после последнего документа: календарные
-            # дни на станции, закрытой на ремонт, тревогой не являются.
+            uniq = sorted(set(kind_days))
+            last = uniq[-1]
+            # Тишина считается в РАБОЧИХ днях: календарные дни закрытой станции
+            # тревогой не являются.
             silent = sum(1 for d in days if d > last)
-            cells.append(CoverageCell(kind=kind, count=len(kind_days),
-                                      lastDate=last, silentDays=silent))
+            # Обычный ритм этого документа на этой станции: медиана интервалов.
+            # Приход не обязан быть ежедневным, и «десять дней без поставки» значат
+            # разное на станции, куда возят раз в три дня, и на той, куда раз в
+            # две недели. Сравнивать надо с её собственным ритмом.
+            gaps = [sum(1 for d in days if uniq[i] < d <= uniq[i + 1])
+                    for i in range(len(uniq) - 1)]
+            typical = sorted(gaps)[len(gaps) // 2] if gaps else None
+            # Внимание, когда молчание вдвое дольше обычного ритма и при этом
+            # набежала хотя бы неделя рабочих дней: удвоение короткого интервала
+            # (был день — стало два) поводом не является.
+            loud = silent >= 7 and (typical is None or silent >= max(2 * typical, 3))
+            cells.append(CoverageCell(
+                kind=kind, count=len(kind_days), lastDate=last, silentDays=silent,
+                typicalGap=typical, status="attention" if loud else "ok"))
+
         out.append(CoverageStation(
-            station=st, workedDays=len(days),
+            station=st, workedDays=len(days), expectedDays=window, missingDays=missing,
             firstDay=days[0] if days else None, lastDay=days[-1] if days else None,
+            status="attention" if (missing > 0 or any(c.status == "attention" for c in cells)) else "ok",
             docs=sorted(cells, key=lambda c: -c.count),
         ))
     return out
+
+
+def _days_between(first: str, last: str) -> int:
+    """Календарных дней в окне включительно; на кривых датах — 0, а не исключение."""
+    try:
+        a = datetime.fromisoformat(first).date()
+        b = datetime.fromisoformat(last).date()
+    except ValueError:
+        return 0
+    return (b - a).days + 1
 
 
 # ─── GET /periods/trend ──────────────────────────────────────

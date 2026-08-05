@@ -98,9 +98,15 @@ const OUR_DOC_KINDS: { kind: string; label: string; hint: string }[] = [
 interface CoverageStation {
   station: string
   workedDays: number
+  expectedDays: number
+  missingDays: number
   firstDay: string | null
   lastDay: string | null
-  docs: { kind: string; count: number; lastDate: string | null; silentDays: number }[]
+  status: 'ok' | 'attention'
+  docs: {
+    kind: string; count: number; lastDate: string | null; silentDays: number
+    typicalGap: number | null; status: 'ok' | 'attention' | 'none'
+  }[]
 }
 
 /** Готовность периода к закрытию — четыре проверки бухгалтера (см. periods_router). */
@@ -695,24 +701,19 @@ export function AccountingPeriodPanel() {
 
 
 /**
- * Матрица «станция × вид документа» — главный ответ на вопрос «закрыт ли период».
+ * Закрыт ли период станции документами — вердикт, а не количество.
  *
- * Первая версия давала карточку на станцию: четырнадцать блоков подряд, и чтобы
- * сравнить приходы двух АЗС, приходилось скроллить и держать числа в голове.
- * Сравнение — это таблица; строки читаются глазом, а не памятью.
+ * Прошлая версия давала числа: «20 приходов при 30 рабочих днях». Из такой строки
+ * ничего не следует — двадцать это много или мало, зависит от того, как часто на
+ * эту станцию возят. Поэтому каждый вид документа сравнивается с СОБСТВЕННЫМ
+ * ритмом станции: обычный интервал считается по её же истории за период, и
+ * тревога поднимается, когда молчание вдвое дольше привычного.
  *
- * Тревога считается не по календарю, а по РАБОЧИМ дням: станция работала, смены
- * шли, а документа вида нет. Дни простоя молчанием не считаются — иначе закрытая
- * на ремонт АЗС горела бы красным всю неделю.
+ * Смены — другое дело: они обязаны быть за каждый рабочий день, и там вердикт
+ * прямой — сколько дней окна работы осталось без сменного отчёта.
  */
 function CoverageCard({ data, loading }: { data?: CoverageStation[]; loading: boolean }) {
   const rows = data ?? []
-  // Порог внимания: неделя рабочих дней без документа. Меньше — обычный ритм
-  // поставок, больше — вопрос, который бухгалтер задаёт станции.
-  const ALERT = 7
-
-  // Колонки — только те виды, что реально встречались: десять пустых столбцов
-  // вместо ответа «этого нет» читаются как таблица с дырами.
   const kinds = useMemo(() => {
     const seen = new Set(rows.flatMap((s) => s.docs.map((d) => d.kind)))
     const known = OUR_DOC_KINDS.filter((k) => seen.has(k.kind))
@@ -721,24 +722,21 @@ function CoverageCard({ data, loading }: { data?: CoverageStation[]; loading: bo
     return [...known, ...extra]
   }, [rows])
   const missing = OUR_DOC_KINDS.filter((k) => !kinds.some((x) => x.kind === k.kind))
-
   const cell = (s: CoverageStation, kind: string) => s.docs.find((d) => d.kind === kind)
-  const totals = kinds.map((k) => rows.reduce((sum, s) => sum + (cell(s, k.kind)?.count ?? 0), 0))
-  const alarms = rows.reduce((n, s) => n + s.docs.filter((d) => d.silentDays >= ALERT).length, 0)
+  const problem = rows.filter((s) => s.status === 'attention')
 
   return (
     <Card>
       <CardContent className="pt-4">
-        <div className="mb-3 flex flex-wrap items-center gap-2">
+        <div className="mb-1 flex flex-wrap items-center gap-2">
           <RadioTower className="h-4 w-4 text-primary" />
-          <h3 className={H3}>Покрытие рабочих дней документами</h3>
-          {alarms > 0 && (
-            <span className="flex items-center gap-1 text-[11px] text-amber-600 dark:text-amber-400">
-              <AlertTriangle className="h-3.5 w-3.5" />
-              {fmtN(alarms)} видов молчат дольше {ALERT} рабочих дней
-            </span>
-          )}
+          <h3 className={H3}>Закрытие периода по станциям</h3>
         </div>
+        <p className="mb-3 text-[11px] text-muted-foreground">
+          {problem.length === 0
+            ? 'Все станции закрыты документами: смены за каждый рабочий день, остальные виды в обычном ритме.'
+            : `Требуют разбора ${fmtN(problem.length)} из ${fmtN(rows.length)} станций — ниже отмечено, чем именно.`}
+        </p>
 
         {loading ? (
           <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
@@ -754,71 +752,74 @@ function CoverageCard({ data, loading }: { data?: CoverageStation[]; loading: bo
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-border/60 text-[11px] text-muted-foreground">
-                    <th className="sticky left-0 bg-card py-1.5 pr-4 text-left font-medium">АЗС</th>
-                    <th className="py-1.5 pr-5 text-right font-medium">Раб. дн.</th>
-                    {kinds.map((k) => (
-                      <th key={k.kind} className="py-1.5 pl-4 text-right font-medium whitespace-nowrap"
-                        title={k.hint}>
-                        {k.label}
-                      </th>
+                    <th className="sticky left-0 bg-card py-1.5 pr-3 text-left font-medium">АЗС</th>
+                    <th className="py-1.5 pr-5 text-left font-medium">Смены за дни работы</th>
+                    {kinds.filter((k) => !SHIFT_KINDS.has(k.kind)).map((k) => (
+                      <th key={k.kind} className="py-1.5 pl-4 text-left font-medium whitespace-nowrap"
+                        title={k.hint}>{k.label}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {rows.map((s) => (
                     <tr key={s.station} className="border-b border-border/30">
-                      <td className="sticky left-0 bg-card py-1.5 pr-4 font-medium tabular-nums">
+                      <td className="sticky left-0 bg-card py-1.5 pr-3 font-medium tabular-nums">
                         {s.station}
                       </td>
-                      <td className="py-1.5 pr-5 text-right tabular-nums text-muted-foreground">
-                        {fmtN(s.workedDays)}
+                      {/* Смены обязаны быть каждый рабочий день — вердикт прямой. */}
+                      <td className="py-1.5 pr-5"
+                        title={`окно работы ${s.firstDay} — ${s.lastDay}`}>
+                        {s.missingDays === 0 ? (
+                          <span className="flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400">
+                            <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                            все {fmtN(s.workedDays)} дн.
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1.5 text-xs font-medium text-amber-600 dark:text-amber-400">
+                            <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                            нет {fmtN(s.missingDays)} из {fmtN(s.expectedDays)} дн.
+                          </span>
+                        )}
                       </td>
-                      {kinds.map((k) => {
+                      {kinds.filter((k) => !SHIFT_KINDS.has(k.kind)).map((k) => {
                         const c = cell(s, k.kind)
                         if (!c) {
-                          // Прочерк, а не ноль: «документов вида не было» и «было ноль
-                          // штук» — разные утверждения, и ноль читался бы как ошибка.
-                          return <td key={k.kind} className="py-1.5 pl-4 text-right text-muted-foreground/40">—</td>
+                          return (
+                            <td key={k.kind} className="py-1.5 pl-4 text-xs text-muted-foreground/50">
+                              не было
+                            </td>
+                          )
                         }
-                        const loud = c.silentDays >= ALERT
+                        const loud = c.status === 'attention'
                         return (
-                          <td key={k.kind} className="py-1.5 pl-4 text-right"
-                            title={`последний ${c.lastDate}` + (c.silentDays ? `, тишина ${c.silentDays} раб. дн.` : '')}>
-                            <span className={cn('tabular-nums', loud && 'font-semibold text-amber-600 dark:text-amber-400')}>
-                              {fmtN(c.count)}
+                          <td key={k.kind} className="py-1.5 pl-4"
+                            title={`${fmtN(c.count)} шт. за период, последний ${c.lastDate}`
+                              + (c.typicalGap ? `; обычно раз в ${c.typicalGap} раб. дн.` : '')}>
+                            <span className={cn('flex items-center gap-1.5 text-xs',
+                              loud ? 'font-medium text-amber-600 dark:text-amber-400' : 'text-muted-foreground')}>
+                              {loud
+                                ? <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                                : <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600/70 dark:text-emerald-400/70" />}
+                              {c.silentDays === 0
+                                ? 'в срок'
+                                : loud
+                                  ? `молчит ${fmtN(c.silentDays)} дн.`
+                                  : `${fmtN(c.silentDays)} дн. назад`}
                             </span>
-                            {c.silentDays > 0 && (
-                              <span className={cn('ml-1 text-[10px] tabular-nums',
-                                loud ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground/60')}>
-                                +{fmtN(c.silentDays)}д
-                              </span>
-                            )}
                           </td>
                         )
                       })}
                     </tr>
                   ))}
                 </tbody>
-                <tfoot>
-                  <tr className="border-t border-border/60 text-[11px]">
-                    <td className="sticky left-0 bg-card py-1.5 pr-4 font-medium">Всего</td>
-                    <td className="py-1.5 pr-5 text-right tabular-nums text-muted-foreground">
-                      {fmtN(rows.reduce((n, s) => n + s.workedDays, 0))}
-                    </td>
-                    {totals.map((t, i) => (
-                      <td key={kinds[i].kind} className="py-1.5 pl-4 text-right font-medium tabular-nums">
-                        {fmtN(t)}
-                      </td>
-                    ))}
-                  </tr>
-                </tfoot>
               </table>
             </div>
 
             <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">
-              Число — сколько документов вида за период; приписка «+Nд» — сколько рабочих дней
-              станция отторговала после последнего такого документа. Дни простоя в тишину не
-              входят. Порог внимания — {ALERT} рабочих дней, такие ячейки выделены.
+              Смены обязаны быть за каждый день работы станции — там вердикт прямой. Приход,
+              перемещение и списание ежедневными не бывают, поэтому сравниваются с обычным
+              ритмом самой станции: «молчит» значит вдвое дольше привычного и не меньше недели
+              рабочих дней. Наведите на ячейку — количество, дата последнего и обычный интервал.
             </p>
             {missing.length > 0 && (
               <p className="mt-1.5 flex items-start gap-1.5 text-[11px] leading-relaxed text-amber-600 dark:text-amber-400">
@@ -832,6 +833,9 @@ function CoverageCard({ data, loading }: { data?: CoverageStation[]; loading: bo
     </Card>
   )
 }
+
+/** Виды, которые обязаны быть ежедневно: по ним вердикт считается иначе. */
+const SHIFT_KINDS = new Set(['shift_orp', 'retail_sale_sidegoods'])
 
 
 /**
