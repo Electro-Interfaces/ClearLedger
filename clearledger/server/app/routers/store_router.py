@@ -1417,8 +1417,9 @@ class DocMetaIn(BaseModel):
     responsible_to: str | None = None
     note: str | None = None
     status: str | None = None
-    # Присвоить регистрационный номер центра, если его ещё нет.
-    register: bool = False
+    # Присвоить регистрационный номер центра, если его ещё нет. Имя не
+    # `register`: так называется метод самой BaseModel, и pydantic ругается.
+    assign_number: bool = False
 
 
 @router.put("/doc-meta")
@@ -1451,7 +1452,7 @@ async def store_doc_meta_save(
         if body.status not in DOC_STATUSES:
             raise HTTPException(400, f"Неизвестный статус: {body.status}")
         row.status = body.status
-    if body.register and not row.reg_number:
+    if body.assign_number and not row.reg_number:
         # Номер сквозной по компании и году: год в номере отвечает на вопрос
         # «за какой период искать», а не заставляет помнить нумерацию сети.
         год = datetime.now(timezone.utc).year

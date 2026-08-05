@@ -1177,7 +1177,7 @@ export interface StoreDocFile {
 
 export const saveStoreDocMeta = (docRef: string, body: {
   responsible_from?: string | null; responsible_to?: string | null; note?: string | null
-  status?: string; register?: boolean
+  status?: string; assign_number?: boolean
 }) => put<{ ok: boolean; doc_ref: string; status: string; reg_number: string | null }>(
   `/api/store/doc-meta?doc_ref=${encodeURIComponent(docRef)}`, body)
 

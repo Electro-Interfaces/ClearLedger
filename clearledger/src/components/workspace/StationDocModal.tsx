@@ -95,7 +95,7 @@ export function StationDocModal({ packetUuid, index, onClose }: {
   })
 
   const зарегистрировать = useMutation({
-    mutationFn: () => saveStoreDocMeta(docRef as string, { register: true }),
+    mutationFn: () => saveStoreDocMeta(docRef as string, { assign_number: true }),
     onSuccess: (r) => {
       toast.success(`Документ зарегистрирован: ${r.reg_number}`)
       qc.invalidateQueries({ queryKey: ['store-station-doc'] })
