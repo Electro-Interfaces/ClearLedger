@@ -28,7 +28,7 @@ import {
   LayoutDashboard, TrendingUp, Package, Tag, UtensilsCrossed,
   Boxes, Barcode, FolderTree, ChefHat, Truck,
   PackagePlus, Warehouse, ArrowLeftRight, ClipboardList, Trash2, Undo2, RefreshCw,
-  QrCode, ScanLine, PackageMinus, ShieldAlert, ShieldCheck, Plug, CalendarClock, CopyCheck, ShoppingCart, Database,
+  QrCode, ScanLine, PackageMinus, ShieldAlert, ShieldCheck, Plug, CalendarClock, CopyCheck, ShoppingCart, Database, Receipt,
   RadioTower, HeartPulse,
 } from 'lucide-react'
 
@@ -122,6 +122,18 @@ export const STORE_VIEWS: StoreView[] = [
       { name: 'Средний чек и структура', desc: 'Средний чек (на ОРП-агрегатах ≈), доля категорий, топ и аутсайдеры SKU.' },
       { name: 'Валовая прибыль', desc: 'Выручка − себестоимость (FIFO из поступлений); вклад категорий/поставщиков.' },
       { name: 'Корзина / cross-sell', desc: 'Market basket (Support/Confidence/Lift), аффинити товаров — требует чек-уровень (ОРП агрегирован по смене).', source: 'nice: доп.данные с кассы' },
+    ],
+  },
+  {
+    key: 'cheques', label: 'Чеки', section: 'store', icon: Receipt,
+    title: 'Чеки',
+    subtitle: 'Продажи на уровне покупки, а не смены: время, позиции, сумма, фискальный номер. Отчёт о розничных продажах закрывает смену сводом — этого хватает бухгалтерии, но спорную продажу, возврат и проверку маркированного товара разбирают по конкретному чеку.',
+    status: 'wip',
+    blocks: [
+      { name: 'Реестр чеков', desc: 'Время, АЗС, смена, номер чека и фискального документа, позиции, сумма, форма оплаты. Клик по чеку раскрывает состав.', source: 'store_cheques · /api/store/cheques' },
+      { name: 'Возвраты', desc: 'Возврат пробивается отдельным чеком: он виден фильтром и не попадает в средний чек — иначе среднее занижается дважды.' },
+      { name: 'Смешанные чеки', desc: 'Заправка плюс кофе — обычное дело на АЗС. Топливные строки в товарный контур не едут, но чек помечен: иначе его сумма читалась бы как весь чек.' },
+      { name: 'Откуда берётся', desc: 'Агент собирает чеки из контрольной ленты кассы при закрытии смены и шлёт отдельным пакетом. Лента на станции живёт около 110 смен — чек нужно поднять, пока он есть.', source: 'пакет cheques' },
     ],
   },
   {

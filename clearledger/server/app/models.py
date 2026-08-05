@@ -5991,6 +5991,49 @@ class EdgeDownlink(Base):
     )
 
 
+class StoreCheque(Base):
+    """Фискальный чек станции — продажа на уровне покупки, а не смены.
+
+    Отчёт о розничных продажах закрывает смену сводом, и этого хватает
+    бухгалтерии. Но спорная продажа, возврат, проверка маркированного товара и
+    разбор жалобы разбираются по конкретному чеку: когда, что, за сколько и по
+    какому фискальному номеру. Свод на такие вопросы не отвечает.
+
+    Хранится только товарная часть: топливо живёт в своём контуре, и дублировать
+    его здесь незачем. Признак `had_fuel` оставлен, потому что смешанный чек
+    (заправка плюс кофе) — обычное дело на АЗС, и по нему видно, что чек
+    показан не целиком.
+    """
+    __tablename__ = "store_cheques"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    station_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    shift_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    number: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Фискальный номер документа: по нему чек ищут в ОФД и в кассе.
+    fiscal_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    is_return: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    had_fuel: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    pay_type: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    pay_name: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    total: Mapped[float] = mapped_column(Numeric(16, 2), nullable=False, default=0)
+    positions: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    lines: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    packet_uuid: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("company_id", "station_id", "shift_number", "number",
+                         name="uq_store_cheque"),
+        Index("ix_store_cheques_at", "company_id", "station_id", "at"),
+    )
+
+
 class StoreDocMeta(Base):
     """Реквизиты документа, которых нет в пакете станции: стороны и примечание.
 

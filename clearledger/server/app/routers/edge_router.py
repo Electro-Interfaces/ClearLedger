@@ -166,6 +166,72 @@ async def _ingest_receipts(db: AsyncSession, company_id, station_id: int,
                 setattr(existing, key, value)
 
 
+async def _ingest_cheques(db: AsyncSession, company_id, station_id: int,
+                          payload: dict, packet_uuid: str) -> int:
+    """Разложить пакет чеков смены в реестр.
+
+    Идемпотентно по (станция, смена, номер чека): агент повторяет отправку при
+    любой неопределённости, и повтор обязан обновлять чек, а не плодить второй.
+    """
+    from app.models import StoreCheque
+
+    смена = payload.get("Смена") or {}
+    номер_смены = int(смена.get("НомерСменыВнутр") or смена.get("НомерСмены") or 0)
+    принято = 0
+    for doc in payload.get("Документы") or []:
+        if not isinstance(doc, dict) or doc.get("Тип") != "fiscal_receipts":
+            continue
+        for чек in doc.get("Чеки") or []:
+            номер = int(чек.get("Номер") or 0)
+            if номер <= 0:
+                continue
+            строки = []
+            for line in чек.get("Товары") or []:
+                строки.append({
+                    "item_uuid": line.get("Номенклатура") or "",
+                    "name": line.get("Наименование") or "",
+                    "ns_code": line.get("КодНС"),
+                    "qty": float(line.get("Количество") or 0),
+                    "price": float(line.get("Цена") or 0),
+                    "amount": float(line.get("Сумма") or 0),
+                    "section": line.get("Секция"),
+                })
+            момент = чек.get("Время")
+            try:
+                когда = (datetime.fromisoformat(момент) if момент
+                         else datetime.now(timezone.utc))
+            except ValueError:
+                когда = datetime.now(timezone.utc)
+            if когда.tzinfo is None:
+                когда = когда.replace(tzinfo=timezone.utc)
+
+            существующий = (await db.execute(select(StoreCheque).where(
+                StoreCheque.company_id == company_id,
+                StoreCheque.station_id == station_id,
+                StoreCheque.shift_number == номер_смены,
+                StoreCheque.number == номер))).scalar_one_or_none()
+            значения = {
+                "fiscal_number": чек.get("ФН"),
+                "at": когда,
+                "is_return": bool(чек.get("Возврат")),
+                "had_fuel": bool(чек.get("БылоТопливо")),
+                "pay_type": чек.get("ВидОплаты"),
+                "pay_name": (чек.get("ВидОплатыНазвание") or "")[:60] or None,
+                "total": float(чек.get("Сумма") or 0),
+                "positions": len(строки),
+                "lines": строки,
+                "packet_uuid": packet_uuid,
+            }
+            if существующий is None:
+                db.add(StoreCheque(company_id=company_id, station_id=station_id,
+                                   shift_number=номер_смены, number=номер, **значения))
+            else:
+                for k, v in значения.items():
+                    setattr(существующий, k, v)
+            принято += 1
+    return принято
+
+
 async def _sync_stock_packet(db: AsyncSession, company_id, station_id: int,
                              payload: dict) -> dict:
     """Сохранить остаток независимо от старой общей проекции каталога."""
@@ -510,6 +576,12 @@ async def receive_packet(
     # центре. Иначе фактическое поступление осталось бы в пакетах, а товаровед
     # в «Магазине» его не увидел бы.
     await _ingest_receipts(db, company.id, int(station_id), payload, docs)
+    if packet_kind == "cheques":
+        try:
+            await _ingest_cheques(db, company.id, int(station_id), payload, str(packet_uuid))
+        except Exception as exc:  # noqa: BLE001
+            await db.rollback()
+            log.warning("станция %s: чеки не приняты: %s", station_id, exc)
     projection = await edge_projection.project_packet(
         db, company.id, str(packet_uuid), int(station_id), payload)
     await db.commit()

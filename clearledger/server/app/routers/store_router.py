@@ -23,7 +23,7 @@ from app.auth import check_module_access, get_current_user
 from app.database import get_db
 from app.deps import capture_company_header, scope_company_id
 from app.models import (
-    Company, EdgeAgent, EdgeDownlink, EdgePacket, MarkingIntegration, StoreDocFile, StoreDocMeta, StoreAssortmentRule, StoreItemAlias, StoreReceipt,
+    Company, EdgeAgent, EdgeDownlink, EdgePacket, MarkingIntegration, StoreCheque, StoreDocFile, StoreDocMeta, StoreAssortmentRule, StoreItemAlias, StoreReceipt,
     StoreRecipeVersion, StoreStockBalance,
     User, UserCompany,
 )
@@ -1120,6 +1120,79 @@ async def store_station_docs(
         "by_kind": sorted(свод.values(), key=lambda x: -x["docs"]),
         "by_station": [{"station_id": sid, "docs": n} for sid, n in sorted(станции.items())],
         "kinds": STATION_DOC_KINDS,
+        "truncated": len(rows) >= limit,
+    }
+
+
+@router.get("/cheques")
+async def store_cheques(
+    date_from: str = Query(...),
+    date_to: str = Query(...),
+    station_id: int | None = Query(None),
+    shift_number: int | None = Query(None),
+    q: str | None = Query(None, description="товар, номер чека или фискальный номер"),
+    only_returns: bool = Query(False),
+    limit: int = Query(300, ge=1, le=2000),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Продажи на уровне чека, а не смены.
+
+    Отчёт о розничных продажах закрывает смену сводом — этого хватает
+    бухгалтерии, но не разбору: спорная продажа, возврат, проверка
+    маркированного товара и жалоба покупателя разбираются по конкретному чеку.
+
+    Топлива здесь нет: оно живёт в своём контуре. Смешанный чек (заправка плюс
+    кофе) помечен признаком «было топливо» — иначе показанная сумма выглядела
+    бы как весь чек, а это не так.
+    """
+    cid: uuid.UUID = await scope_company_id(user, db)
+    d1, d2 = date.fromisoformat(date_from), date.fromisoformat(date_to)
+    условия = [StoreCheque.company_id == cid,
+               StoreCheque.at >= datetime.combine(d1, time.min, tzinfo=timezone.utc),
+               StoreCheque.at < datetime.combine(d2, time.max, tzinfo=timezone.utc)]
+    if station_id is not None:
+        условия.append(StoreCheque.station_id == station_id)
+    if shift_number is not None:
+        условия.append(StoreCheque.shift_number == shift_number)
+    if only_returns:
+        условия.append(StoreCheque.is_return.is_(True))
+
+    rows = (await db.execute(select(StoreCheque).where(*условия)
+                             .order_by(StoreCheque.at.desc()).limit(limit))).scalars().all()
+
+    игла = (q or "").strip().lower()
+    чеки = []
+    for r in rows:
+        if игла:
+            свой = (игла in str(r.number) or игла in str(r.fiscal_number or "")
+                    or any(игла in str(l.get("name", "")).lower() for l in r.lines))
+            if not свой:
+                continue
+        чеки.append({
+            "id": str(r.id), "station_id": r.station_id, "shift_number": r.shift_number,
+            "number": r.number, "fiscal_number": r.fiscal_number, "at": r.at,
+            "is_return": r.is_return, "had_fuel": r.had_fuel,
+            "pay_type": r.pay_type, "pay_name": r.pay_name,
+            "total": float(r.total or 0), "positions": r.positions, "lines": r.lines,
+        })
+
+    возвраты = [c for c in чеки if c["is_return"]]
+    продажи = [c for c in чеки if not c["is_return"]]
+    сумма = sum(c["total"] for c in продажи)
+    return {
+        "cheques": чеки,
+        "total": len(чеки),
+        "summary": {
+            "sales": len(продажи),
+            "returns": len(возвраты),
+            "amount": round(сумма, 2),
+            "returns_amount": round(sum(c["total"] for c in возвраты), 2),
+            # Средний чек считается по продажам без возвратов: возврат — это не
+            # покупка, и включать его в среднее значит занижать его дважды.
+            "avg": round(сумма / len(продажи), 2) if продажи else None,
+            "with_fuel": sum(1 for c in чеки if c["had_fuel"]),
+        },
         "truncated": len(rows) >= limit,
     }
 

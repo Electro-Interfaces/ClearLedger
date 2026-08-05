@@ -43,6 +43,7 @@ import { StoreDownlinkPanel } from './StoreDownlinkPanel'
 import { StoreAgentVersionsPanel } from './StoreAgentVersionsPanel'
 import { StoreStoragePanel } from './StoreStoragePanel'
 import { StoreMarkCodesPanel } from './StoreMarkCodesPanel'
+import { StoreChequesPanel } from './StoreChequesPanel'
 import { StoreMarkingIntegrationsPanel } from './StoreMarkingIntegrationsPanel'
 import { StoreParityPanel } from './StoreParityPanel'
 import { StoreStationDraftsPanel } from './StoreStationDraftsPanel'
@@ -321,6 +322,13 @@ export function StorePanel() {
     return (
       <div className="h-full overflow-y-auto">
         <StoreStationsPanel dateFrom={period.from} dateTo={period.to} />
+      </div>
+    )
+  }
+  if (sub === 'cheques') {
+    return (
+      <div className="h-full overflow-y-auto">
+        <StoreChequesPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />
       </div>
     )
   }

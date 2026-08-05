@@ -1039,6 +1039,46 @@ export const getStoreStationDocs = (opts: {
   limit: opts.limit ?? undefined,
 })
 
+/** Фискальный чек: продажа на уровне покупки, а не смены. */
+export interface StoreCheque {
+  id: string
+  station_id: number
+  shift_number: number
+  number: number
+  fiscal_number: number | null
+  at: string
+  is_return: boolean
+  had_fuel: boolean
+  pay_type: number | null
+  pay_name: string | null
+  total: number
+  positions: number
+  lines: {
+    item_uuid: string; name: string; ns_code: number | null
+    qty: number; price: number; amount: number; section: number | null
+  }[]
+}
+
+export const getStoreCheques = (opts: {
+  dateFrom: string; dateTo: string; stationId?: number | null
+  shiftNumber?: number | null; q?: string; onlyReturns?: boolean; limit?: number
+}) => get<{
+  cheques: StoreCheque[]
+  total: number
+  summary: {
+    sales: number; returns: number; amount: number; returns_amount: number
+    avg: number | null; with_fuel: number
+  }
+  truncated: boolean
+}>('/api/store/cheques', {
+  date_from: opts.dateFrom, date_to: opts.dateTo,
+  station_id: opts.stationId ?? undefined,
+  shift_number: opts.shiftNumber ?? undefined,
+  q: opts.q || undefined,
+  only_returns: opts.onlyReturns ? 'true' : undefined,
+  limit: opts.limit ?? undefined,
+})
+
 /** Передачи между АЗС: отправлено, принято, расхождение, в пути. */
 export interface StoreTransferBetween {
   from_station: number
