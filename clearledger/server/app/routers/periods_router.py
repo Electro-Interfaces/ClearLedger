@@ -256,12 +256,19 @@ async def period_readiness(
     # складом и залом, списывался, пересчитывался. Пока этих документов нет, период
     # выглядит полным по сменам и при этом неполон по товару — ровно так и получались
     # минусы на кухне, где выпуск собран, а приход сырья нет.
+    # Дата и станция лежат по-разному: товарный контур в «Смене», топливный —
+    # плоскими полями STS. Читаем оба, иначе половина линии не считается.
     day_expr = func.left(func.coalesce(
         DataEntry.meta["Документ"]["Дата"].astext,
-        DataEntry.meta["Смена"]["Открытие"].astext), 10)
+        DataEntry.meta["Смена"]["Открытие"].astext,
+        DataEntry.meta["shift_date"].astext,
+        DataEntry.meta["docDate"].astext), 10)
+    station_any = func.coalesce(
+        DataEntry.meta["Смена"]["КодАЗС"].astext,
+        DataEntry.meta["station_code"].astext)
     our_rows = (await db.execute(
         select(DataEntry.doc_type_id, func.count(DataEntry.id), func.max(day_expr),
-               func.count(func.distinct(DataEntry.meta["Смена"]["КодАЗС"].astext)))
+               func.count(func.distinct(station_any)))
         .where(DataEntry.company_id == cid,
                DataEntry.source.in_(("edge", "oneC")),
                day_expr >= start, day_expr <= end)
@@ -348,10 +355,18 @@ async def periods_coverage(
     else:
         start, end = f"{year}-01-01", f"{year}-12-32"
 
+    # Код станции и дата лежат в разных полях у разных источников: товарный контур
+    # (edge/ЦБ) кладёт их в «Смену», топливный (STS) — плоскими `station_code` и
+    # `shift_date`. Первая версия смотрела только в «Смену», и тринадцать топливных
+    # станций из четырнадцати молча выпадали из покрытия.
     day_expr = func.left(func.coalesce(
         DataEntry.meta["Документ"]["Дата"].astext,
-        DataEntry.meta["Смена"]["Открытие"].astext), 10)
-    station_expr = DataEntry.meta["Смена"]["КодАЗС"].astext
+        DataEntry.meta["Смена"]["Открытие"].astext,
+        DataEntry.meta["shift_date"].astext,
+        DataEntry.meta["docDate"].astext), 10)
+    station_expr = func.coalesce(
+        DataEntry.meta["Смена"]["КодАЗС"].astext,
+        DataEntry.meta["station_code"].astext)
 
     rows = (await db.execute(
         select(station_expr, DataEntry.doc_type_id, day_expr)
