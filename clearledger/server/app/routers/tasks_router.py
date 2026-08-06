@@ -31,9 +31,9 @@ from app.database import get_db
 from app.models import (
     Company, ServiceLocation, SourceFile, Task, TaskAttachment, TaskChecklistItem,
     TaskEvent, TaskExternalRef, TaskLabel, TaskLabelLink, TaskLink, TaskParticipant,
-    TaskType, TaskWatcher, User, UserCompany,
+    TaskRecurrence, TaskTemplate, TaskType, TaskView, TaskWatcher, User, UserCompany,
 )
-from app.services import space_connectors, task_mail
+from app.services import space_connectors, task_mail, task_scheduler
 
 router = APIRouter(prefix="/tasks", tags=["Задачи"])
 
@@ -102,6 +102,8 @@ def _type_out(t: TaskType) -> dict[str, Any]:
         "id": str(t.id), "code": t.code, "name": t.name, "description": t.description,
         "route": _route_of(t), "default_priority": t.default_priority,
         "due_days": t.due_days, "is_active": t.is_active, "sort_order": t.sort_order,
+        "reaction_hours": t.reaction_hours,
+        "escalate_to_id": str(t.escalate_to_id) if t.escalate_to_id else None,
     }
 
 
@@ -439,6 +441,8 @@ class TypeIn(BaseModel):
     due_days: int | None = Field(None, ge=0, le=365)
     is_active: bool = True
     sort_order: int = 100
+    reaction_hours: int | None = Field(None, ge=1, le=720)
+    escalate_to_id: str | None = None
 
 
 def _clean_route(route: list[dict]) -> list[dict]:
@@ -477,7 +481,10 @@ async def create_type(
         company_id=cid, code=payload.code, name=payload.name,
         description=payload.description, route=_clean_route(payload.route),
         default_priority=payload.default_priority, due_days=payload.due_days,
-        is_active=payload.is_active, sort_order=payload.sort_order)
+        is_active=payload.is_active, sort_order=payload.sort_order,
+        reaction_hours=payload.reaction_hours,
+        escalate_to_id=(_uuid_or_400(payload.escalate_to_id, "escalate_to_id")
+                        if payload.escalate_to_id else None))
     db.add(t)
     await db.commit()
     await db.refresh(t)
@@ -500,6 +507,9 @@ async def update_type(
     t.route = _clean_route(payload.route)
     t.default_priority, t.due_days = payload.default_priority, payload.due_days
     t.is_active, t.sort_order = payload.is_active, payload.sort_order
+    t.reaction_hours = payload.reaction_hours
+    t.escalate_to_id = (_uuid_or_400(payload.escalate_to_id, "escalate_to_id")
+                        if payload.escalate_to_id else None)
     await db.commit()
     await db.refresh(t)
     return _type_out(t)
@@ -680,6 +690,254 @@ async def tasks_summary(
             "created_at": e.created_at.isoformat() if e.created_at else None,
         } for e, num, title in events],
     }
+
+
+# ── Представления: сохранённый отбор реестра ─────────────────────────────
+
+
+class ViewIn(BaseModel):
+    company_id: str
+    name: str = Field(min_length=1, max_length=120)
+    query: dict = Field(default_factory=dict)
+    shared: bool = False
+    position: int = 100
+
+
+@router.get("/views")
+async def list_views(
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Мои представления и общие компании — одним списком, как их видит панель."""
+    cid = await assert_company_product(company_id, current_user, db, "plan")
+    rows = (await db.execute(select(TaskView).where(
+        TaskView.company_id == cid,
+        or_(TaskView.user_id.is_(None), TaskView.user_id == current_user.id))
+        .order_by(TaskView.position, TaskView.name))).scalars().all()
+    return {"views": [{
+        "id": str(v.id), "name": v.name, "query": v.query or {},
+        "shared": v.user_id is None, "position": v.position,
+    } for v in rows]}
+
+
+@router.post("/views", status_code=status.HTTP_201_CREATED)
+async def create_view(
+    payload: ViewIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Сохранить отбор. Общее представление заводит администратор: иначе список
+    компании зарастает чужими черновиками."""
+    cid = await assert_company_product(payload.company_id, current_user, db, "plan")
+    if payload.shared:
+        await _assert_admin(db, cid, current_user)
+    v = TaskView(company_id=cid, user_id=None if payload.shared else current_user.id,
+                 name=payload.name.strip(), query=payload.query or {},
+                 position=payload.position)
+    db.add(v)
+    await db.commit()
+    await db.refresh(v)
+    return {"id": str(v.id), "name": v.name, "query": v.query,
+            "shared": v.user_id is None}
+
+
+@router.delete("/views/{view_id}")
+async def delete_view(
+    view_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cid = await assert_company_product(company_id, current_user, db, "plan")
+    v = await db.get(TaskView, _uuid_or_400(view_id, "view_id"))
+    if v is None or v.company_id != cid:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Представление не найдено")
+    # Своё снимает автор, общее — администратор.
+    if v.user_id is None:
+        await _assert_admin(db, cid, current_user)
+    elif v.user_id != current_user.id and not current_user.is_superadmin:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Это чужое представление")
+    await db.delete(v)
+    await db.commit()
+    return {"deleted": view_id}
+
+
+# ── Шаблоны и расписания ─────────────────────────────────────────────────
+
+
+class TemplateIn(BaseModel):
+    company_id: str
+    name: str = Field(min_length=1, max_length=160)
+    title: str = Field(min_length=3, max_length=300)
+    description: str | None = Field(None, max_length=8000)
+    type_id: str | None = None
+    assignee_id: str | None = None
+    object_id: str | None = None
+    priority: str | None = Field(None, pattern=_PRIORITY)
+    due_days: int | None = Field(None, ge=0, le=365)
+    checklist: list[str] = Field(default_factory=list)
+
+
+def _template_out(t: TaskTemplate) -> dict[str, Any]:
+    return {
+        "id": str(t.id), "name": t.name, "title": t.title,
+        "description": t.description,
+        "type_id": str(t.type_id) if t.type_id else None,
+        "assignee_id": str(t.assignee_id) if t.assignee_id else None,
+        "object_id": t.object_id, "priority": t.priority, "due_days": t.due_days,
+        "checklist": t.checklist or [],
+    }
+
+
+@router.get("/templates")
+async def list_templates(
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cid = await assert_company_product(company_id, current_user, db, "plan")
+    rows = (await db.execute(select(TaskTemplate).where(TaskTemplate.company_id == cid)
+                             .order_by(TaskTemplate.name))).scalars().all()
+    return {"templates": [_template_out(t) for t in rows]}
+
+
+@router.post("/templates", status_code=status.HTTP_201_CREATED)
+async def create_template(
+    payload: TemplateIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cid = await assert_company_product(payload.company_id, current_user, db, "plan")
+    tpl = TaskTemplate(
+        company_id=cid, name=payload.name.strip(), title=payload.title.strip(),
+        description=payload.description,
+        type_id=_uuid_or_400(payload.type_id, "type_id") if payload.type_id else None,
+        assignee_id=(_uuid_or_400(payload.assignee_id, "assignee_id")
+                     if payload.assignee_id else None),
+        object_id=payload.object_id or None, priority=payload.priority,
+        due_days=payload.due_days,
+        checklist=[str(x).strip()[:500] for x in payload.checklist if str(x).strip()])
+    db.add(tpl)
+    await db.commit()
+    await db.refresh(tpl)
+    return _template_out(tpl)
+
+
+@router.delete("/templates/{template_id}")
+async def delete_template(
+    template_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cid = await assert_company_product(company_id, current_user, db, "plan")
+    await _assert_admin(db, cid, current_user)
+    tpl = await db.get(TaskTemplate, _uuid_or_400(template_id, "template_id"))
+    if tpl is None or tpl.company_id != cid:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Шаблон не найден")
+    await db.delete(tpl)
+    await db.commit()
+    return {"deleted": template_id}
+
+
+@router.post("/templates/{template_id}/use", status_code=status.HTTP_201_CREATED)
+async def use_template(
+    template_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Поставить задачу по шаблону прямо сейчас — тем же кодом, что и расписание.
+
+    Один путь порождения на оба случая: иначе задача «руками» и задача «по
+    расписанию» разъезжаются по составу чек-листа при первой же правке.
+    """
+    cid = await assert_company_product(company_id, current_user, db, "plan")
+    tpl = await db.get(TaskTemplate, _uuid_or_400(template_id, "template_id"))
+    if tpl is None or tpl.company_id != cid:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Шаблон не найден")
+    holder = TaskRecurrence(company_id=cid, template_id=tpl.id, rule={},
+                            created_by=current_user.id)
+    t = await task_scheduler.spawn_from_template(db, holder, tpl)
+    if t is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Шаблон пуст")
+    await db.commit()
+    await db.refresh(t)
+    names = await _names(db, [t])
+    extras = await _extras(db, [t])
+    return _task_out(t, names[t.id]["route"], names[t.id], extras[t.id])
+
+
+class RecurrenceIn(BaseModel):
+    company_id: str
+    template_id: str
+    # {"mode": "daily|weekly|monthly", "at": "09:00", "weekday": 0, "day": 1, "tz": …}
+    rule: dict = Field(default_factory=dict)
+    enabled: bool = True
+
+
+@router.get("/recurrences")
+async def list_recurrences(
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cid = await assert_company_product(company_id, current_user, db, "plan")
+    rows = (await db.execute(
+        select(TaskRecurrence, TaskTemplate.name)
+        .join(TaskTemplate, TaskTemplate.id == TaskRecurrence.template_id)
+        .where(TaskRecurrence.company_id == cid)
+        .order_by(TaskTemplate.name))).all()
+    return {"recurrences": [{
+        "id": str(r.id), "template_id": str(r.template_id), "template": name,
+        "rule": r.rule or {}, "enabled": r.enabled,
+        "next_run_at": r.next_run_at.isoformat() if r.next_run_at else None,
+        "last_run_at": r.last_run_at.isoformat() if r.last_run_at else None,
+    } for r, name in rows]}
+
+
+@router.post("/recurrences", status_code=status.HTTP_201_CREATED)
+async def create_recurrence(
+    payload: RecurrenceIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Завести расписание. Первое срабатывание считаем сразу — человек должен
+    видеть в списке дату, а не «когда-нибудь»."""
+    cid = await assert_company_product(payload.company_id, current_user, db, "plan")
+    await _assert_admin(db, cid, current_user)
+    tpl = await db.get(TaskTemplate, _uuid_or_400(payload.template_id, "template_id"))
+    if tpl is None or tpl.company_id != cid:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Шаблон не найден")
+    rec = TaskRecurrence(
+        company_id=cid, template_id=tpl.id, rule=payload.rule or {},
+        enabled=payload.enabled, created_by=current_user.id,
+        next_run_at=task_scheduler.next_run(payload.rule or {},
+                                            datetime.now(timezone.utc)))
+    db.add(rec)
+    await db.commit()
+    await db.refresh(rec)
+    return {"id": str(rec.id), "template": tpl.name, "rule": rec.rule,
+            "enabled": rec.enabled,
+            "next_run_at": rec.next_run_at.isoformat() if rec.next_run_at else None}
+
+
+@router.delete("/recurrences/{rec_id}")
+async def delete_recurrence(
+    rec_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cid = await assert_company_product(company_id, current_user, db, "plan")
+    await _assert_admin(db, cid, current_user)
+    rec = await db.get(TaskRecurrence, _uuid_or_400(rec_id, "rec_id"))
+    if rec is None or rec.company_id != cid:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Расписание не найдено")
+    await db.delete(rec)
+    await db.commit()
+    return {"deleted": rec_id}
 
 
 # ── Метки компании ───────────────────────────────────────────────────────
@@ -940,6 +1198,12 @@ async def task_action(
     if payload.note and not logged:
         db.add(TaskEvent(task_id=t.id, kind="comment", user_id=current_user.id,
                          note=payload.note))
+    # Отклик исполнителя: двинул стадию или написал в ленту. По этой отметке
+    # считается время реакции — иначе эскалация уходит по задаче, которую уже
+    # взяли в работу, и её перестают читать.
+    if (t.reacted_at is None and current_user.id == t.assignee_id
+            and (logged or payload.note)):
+        t.reacted_at = datetime.now(timezone.utc)
     mentioned = await _watch_mentions(db, cid, t, payload.note, current_user)
 
     await db.commit()

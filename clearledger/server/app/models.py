@@ -6283,6 +6283,14 @@ class TaskType(Base):
     due_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
+    # Сколько часов даётся на первый отклик исполнителя. NULL — не следим.
+    # Время реакции — свойство ТИПА, а не задачи: это регламент, одинаковый для
+    # всех работ этого вида, и держать его в каждой задаче значило бы разрешить
+    # тихо разойтись правилу и практике.
+    reaction_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Кому сообщить, если отклика нет. NULL — сообщить автору задачи.
+    escalate_to_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
@@ -6338,6 +6346,14 @@ class Task(Base):
     # состава участников: «отправили и ждём» — это решение человека, а не факт
     # наличия чужого адреса в карточке.
     waiting_for: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Когда исполнитель впервые отозвался (двинул стадию или написал реплику) —
+    # по этой отметке считается время реакции и эскалация.
+    reacted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    # Когда последний раз напоминали о сроке. Без отметки напоминание уходило бы
+    # каждый тик планировщика, и его перестали бы читать на второй день.
+    reminded_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True)
     updated_at: Mapped[datetime] = mapped_column(
@@ -6511,6 +6527,93 @@ class TaskParticipant(Base):
     channel_ref: Mapped[str | None] = mapped_column(String(300), nullable=True)
     added_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+
+class TaskTemplate(Base):
+    """Заготовка задачи: что и как обычно ставят.
+
+    Отличается от типа: тип — правило движения (маршрут, срок, срочность),
+    шаблон — содержание («Закрыть месяц по объекту» с готовым чек-листом).
+    Их часто путают, поэтому шаблон ссылается на тип, а не заменяет его.
+    """
+    __tablename__ = "task_templates"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    type_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("task_types.id", ondelete="SET NULL"), nullable=True)
+    title: Mapped[str] = mapped_column(String(300), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # ["пункт", …] — чек-лист заготовки, разворачивается при постановке.
+    checklist: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    assignee_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    object_id: Mapped[str | None] = mapped_column(
+        String(40), ForeignKey("service_locations.id", ondelete="SET NULL"), nullable=True)
+    priority: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    due_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+
+class TaskRecurrence(Base):
+    """Расписание повторяющейся задачи: каждый день, неделю или месяц.
+
+    Порождает новую задачу по шаблону — не воскрешает старую. Продлевать одну и
+    ту же задачу значило бы терять историю: «делали ли в прошлом месяце» ответа
+    бы не имело.
+    """
+    __tablename__ = "task_recurrences"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    template_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("task_templates.id", ondelete="CASCADE"),
+        nullable=False)
+    # {"mode": "daily|weekly|monthly", "at": "09:00", "weekday": 0, "day": 1,
+    #  "tz": "Europe/Moscow"} — часовой пояс обязателен по смыслу: сервер живёт
+    # в UTC, а «в понедельник утром» человек понимает по своему времени.
+    rule: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    next_run_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True)
+    last_run_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+
+class TaskView(Base):
+    """Сохранённый отбор реестра: «Мои просрочки», «Работа по объекту 208».
+
+    `user_id = NULL` — представление компании, видят все; иначе личное. Общими
+    распоряжается администратор: иначе список представлений компании зарастёт
+    чужими черновиками.
+    """
+    __tablename__ = "task_views"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    # Тот же набор параметров, что в адресе реестра: {"scope","assignee",…}.
+    query: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now())
 

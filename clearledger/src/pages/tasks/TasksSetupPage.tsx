@@ -25,12 +25,15 @@ import type { RouteStage, TaskType } from '@/services/tasksService'
 import { listSpaceConnectors } from '@/services/spaceConnectorsService'
 import { PRIORITY_LABEL } from '@/components/tasks/taskWords'
 import { tasksRouteOf, useTasksView } from './TasksLayout'
+import { RecurrencesSection, TemplatesSection } from './TasksRegulation'
 
 export function TasksSetupPage() {
   const { company } = useCompany()
   const view = useTasksView(tasksRouteOf(useLocation().pathname))
   if (view === 'labels') return <LabelsSection companyId={company.id} />
   if (view === 'external') return <ExternalSection companyId={company.id} />
+  if (view === 'templates') return <TemplatesSection companyId={company.id} />
+  if (view === 'recurrences') return <RecurrencesSection companyId={company.id} />
   return <TypesSection companyId={company.id} />
 }
 
@@ -230,12 +233,20 @@ function TypesSection({ companyId }: { companyId: string }) {
 function TypeEditor({ companyId, type, onSaved }: {
   companyId: string; type: TaskType | null; onSaved: () => void
 }) {
+  const peopleQ = useQuery({
+    queryKey: ['task-people', companyId],
+    queryFn: () => tasksService.listTaskPeople(companyId),
+    staleTime: 5 * 60 * 1000,
+  })
   const [code, setCode] = useState(type?.code ?? '')
   const [name, setName] = useState(type?.name ?? '')
   const [description, setDescription] = useState(type?.description ?? '')
   const [priority, setPriority] = useState(type?.default_priority ?? 'medium')
   const [dueDays, setDueDays] = useState(type?.due_days != null ? String(type.due_days) : '')
   const [isActive, setIsActive] = useState(type?.is_active ?? true)
+  const [reactionHours, setReactionHours] = useState(
+    type?.reaction_hours != null ? String(type.reaction_hours) : '')
+  const [escalateToId, setEscalateToId] = useState(type?.escalate_to_id ?? '')
   const [route, setRoute] = useState<RouteStage[]>(
     type?.route ?? [{ code: 'new', name: 'Постановка' }])
 
@@ -245,6 +256,8 @@ function TypeEditor({ companyId, type, onSaved }: {
       description: description.trim() || undefined, route,
       defaultPriority: priority, dueDays: dueDays === '' ? null : Number(dueDays),
       isActive, sortOrder: type?.sort_order ?? 100,
+      reactionHours: reactionHours === '' ? null : Number(reactionHours),
+      escalateToId: escalateToId || null,
     }),
     onSuccess: () => { toast.success('Тип сохранён'); onSaved() },
     onError: (e) => toast.error((e as Error).message),
@@ -300,6 +313,31 @@ function TypeEditor({ companyId, type, onSaved }: {
               <SelectContent>
                 <SelectItem value="on">Действует</SelectItem>
                 <SelectItem value="off">Выключен</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1.5">
+            <Label>Время реакции, часов</Label>
+            <Input type="number" min={1} max={720} value={reactionHours}
+              onChange={(e) => setReactionHours(e.target.value)} placeholder="не следим" />
+            <p className="text-[11px] text-muted-foreground">
+              Сколько даётся на первый отклик исполнителя. Не откликнулся — уйдёт
+              эскалация, и в ленте останется след.
+            </p>
+          </div>
+          <div className="space-y-1.5">
+            <Label>Кому эскалировать</Label>
+            <Select value={escalateToId || 'author'}
+              onValueChange={(v) => setEscalateToId(v === 'author' ? '' : v)}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="author">Автору задачи</SelectItem>
+                {(peopleQ.data?.people ?? []).map((p) => (
+                  <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>

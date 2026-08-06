@@ -12,7 +12,8 @@ import { useMemo, useState } from 'react'
 import { useLocation, useSearchParams } from 'react-router-dom'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  ArrowDown, ArrowUp, ChevronsUpDown, ListChecks, Loader2, Plus, RefreshCw, Search, X,
+  ArrowDown, ArrowUp, BookmarkPlus, ChevronsUpDown, Download, ListChecks, Loader2,
+  Plus, RefreshCw, Search, X,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -34,6 +35,7 @@ import {
 } from '@/components/tasks/taskWords'
 import { TASKS_VIEWS, tasksRouteOf, useTasksView } from './TasksLayout'
 import { TasksBoardPage } from './TasksBoardPage'
+import { ViewsSection } from './TasksRegulation'
 
 const nf = new Intl.NumberFormat('ru-RU')
 const PAGE = 100
@@ -124,6 +126,26 @@ export function TasksWorkPage() {
           <p className="mt-0.5 text-xs text-muted-foreground">{meta?.hint}</p>
         </div>
         <div className="flex items-center gap-2">
+          {full && (
+            <>
+              <SaveViewButton companyId={company.id} query={{
+                view: 'registry',
+                ...(assigneeId && { assignee: assigneeId }),
+                ...(authorId && { author: authorId }),
+                ...(typeId && { type: typeId }),
+                ...(objectId && { object: objectId }),
+                ...(priority && { priority }),
+                ...(labelId && { label: labelId }),
+                ...(q && { q }),
+                ...(sort !== 'created' && { sort }),
+              }} />
+              <Button variant="outline" size="sm" className="h-8"
+                disabled={tasks.length === 0}
+                onClick={() => exportTasks(tasks, meta?.label ?? 'Задачи')}>
+                <Download className="mr-1.5 h-3.5 w-3.5" />Excel
+              </Button>
+            </>
+          )}
           <Button variant="outline" size="sm" className="h-8"
             onClick={refresh} disabled={listQ.isFetching}>
             <RefreshCw className={cn('mr-1.5 h-3.5 w-3.5', listQ.isFetching && 'animate-spin')} />
@@ -494,6 +516,71 @@ function EmptyState({ view, hasFilter, onReset }: {
   )
 }
 
+/* ── Сохранение отбора и выгрузка ────────────────────────────────────── */
+
+function SaveViewButton({ companyId, query }: {
+  companyId: string; query: Record<string, string>
+}) {
+  const qc = useQueryClient()
+  const [name, setName] = useState('')
+  const [open, setOpen] = useState(false)
+  const save = useMutation({
+    mutationFn: () => tasksService.createTaskView({ companyId, name: name.trim(), query }),
+    onSuccess: () => {
+      toast.success('Отбор сохранён — он в пункте «Представления»')
+      setOpen(false); setName('')
+      qc.invalidateQueries({ queryKey: ['task-views'] })
+    },
+    onError: (e) => toast.error((e as Error).message),
+  })
+  if (!open) {
+    return (
+      <Button variant="outline" size="sm" className="h-8" onClick={() => setOpen(true)}>
+        <BookmarkPlus className="mr-1.5 h-3.5 w-3.5" />Сохранить отбор
+      </Button>
+    )
+  }
+  return (
+    <span className="flex items-center gap-1">
+      <Input value={name} onChange={(e) => setName(e.target.value)} autoFocus
+        placeholder="Название отбора" className="h-8 w-[180px] text-xs" maxLength={120}
+        onKeyDown={(e) => { if (e.key === 'Enter' && name.trim()) save.mutate() }} />
+      <Button size="sm" className="h-8" disabled={!name.trim() || save.isPending}
+        onClick={() => save.mutate()}>Сохранить</Button>
+      <Button variant="ghost" size="sm" className="h-8" onClick={() => setOpen(false)}>
+        <X className="h-3.5 w-3.5" />
+      </Button>
+    </span>
+  )
+}
+
+/** Выгрузка видимой страницы. Библиотека тянется лениво — в основной чанк
+ *  четыреста килобайт ради кнопки, которую жмут раз в месяц, не кладём. */
+async function exportTasks(tasks: SpaceTask[], sheetName: string) {
+  const { loadXlsx } = await import('@/utils/xlsxLoader')
+  const XLSX = await loadXlsx()
+  const rows = tasks.map((t) => ({
+    '№': t.number,
+    'Задача': t.title,
+    'Тип': t.type ?? 'поручение',
+    'Стадия': t.stage ?? '',
+    'Состояние': STATUS_LABEL[t.status] ?? t.status,
+    'Срочность': PRIORITY_LABEL[t.priority] ?? t.priority,
+    'Исполнитель': t.assignee ?? '',
+    'Автор': t.author ?? '',
+    'Объект': t.object ?? '',
+    'Срок': t.due_at ? new Date(t.due_at).toLocaleDateString('ru-RU') : '',
+    'Просрочена': t.overdue ? 'да' : '',
+    'У кого мяч': t.waiting_for === 'external' ? 'внешняя сторона' : 'у нас',
+    'Чек-лист': t.checklist.total ? `${t.checklist.done} из ${t.checklist.total}` : '',
+    'Метки': t.labels.map((l) => l.name).join(', '),
+  }))
+  const sheet = XLSX.utils.json_to_sheet(rows)
+  const book = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(book, sheet, sheetName.slice(0, 31))
+  XLSX.writeFile(book, `Задачи — ${sheetName}.xlsx`)
+}
+
 /* ── Мелочи ──────────────────────────────────────────────────────────── */
 
 function Pick({ value, onChange, items, placeholder, allLabel, width }: {
@@ -518,8 +605,11 @@ function Pick({ value, onChange, items, placeholder, allLabel, width }: {
  *  своя раскладка. Переключатель здесь, а не в маршруте: пункт раздела живёт в
  *  `?view=`, и отдельный путь под доску завёл бы второе правило навигации. */
 export function TasksCompanyPage() {
+  const { company } = useCompany()
   const view = useTasksView(tasksRouteOf(useLocation().pathname))
-  return view === 'board' ? <TasksBoardPage /> : <TasksWorkPage />
+  if (view === 'board') return <TasksBoardPage />
+  if (view === 'views') return <ViewsSection companyId={company.id} />
+  return <TasksWorkPage />
 }
 
 export default TasksWorkPage

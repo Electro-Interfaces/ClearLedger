@@ -1442,6 +1442,13 @@ async def create_all() -> None:
             # пространстве нет вовсе.
             "ALTER TABLE task_events ADD COLUMN IF NOT EXISTS actor_name VARCHAR(200)",
             "CREATE INDEX IF NOT EXISTS idx_tasks_waiting ON tasks(company_id, waiting_for)",
+            # Регламент: время реакции и кому эскалировать — свойство типа.
+            "ALTER TABLE task_types ADD COLUMN IF NOT EXISTS reaction_hours INTEGER",
+            "ALTER TABLE task_types ADD COLUMN IF NOT EXISTS escalate_to_id UUID "
+            "REFERENCES users(id) ON DELETE SET NULL",
+            # Отклик исполнителя и отметка о последнем напоминании.
+            "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS reacted_at TIMESTAMPTZ",
+            "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS reminded_at TIMESTAMPTZ",
         ):
             await conn.execute(_sa.text(stmt))
 

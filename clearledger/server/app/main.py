@@ -182,8 +182,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception as e:  # noqa: BLE001
         logger.warning(f"Дайджест «Пульса» не запущен: {e}")
 
+    # Регламент «Задач»: повторяющиеся работы, напоминания о сроке и эскалация.
+    # Без него расписание в карточке — тоже просто запись в JSON, а «нет отклика»
+    # обнаруживается уже после провала срока.
+    tasks_task: asyncio.Task | None = None
+    try:
+        from app.services.task_scheduler import run_forever as _tasks_regl
+        tasks_task = asyncio.create_task(_tasks_regl())
+    except Exception as e:  # noqa: BLE001 — регламент не критичен для API
+        logger.warning(f"Регламент задач не запущен: {e}")
+
     logger.info("TradeLedger Server запущен")
     yield
+    if tasks_task is not None:
+        tasks_task.cancel()
     if digest_task is not None:
         digest_task.cancel()
     if scheduler_task is not None:

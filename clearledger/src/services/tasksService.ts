@@ -20,6 +20,10 @@ export interface TaskType {
   due_days: number | null
   is_active: boolean
   sort_order: number
+  /** Часов на первый отклик исполнителя; null — за реакцией не следим. */
+  reaction_hours: number | null
+  /** Кому сообщить, если отклика нет; null — автору задачи. */
+  escalate_to_id: string | null
 }
 
 export interface SpaceTask {
@@ -249,6 +253,87 @@ export async function removeWatcher(taskId: string, userId: string, companyId: s
   return del(`/api/tasks/${taskId}/watchers/${userId}?company_id=${encodeURIComponent(companyId)}`)
 }
 
+/* ── Регламент: представления, шаблоны, расписания ───────────────────── */
+
+/** Сохранённый отбор реестра. `shared` — общее представление компании. */
+export interface TaskView {
+  id: string; name: string; query: Record<string, string>; shared: boolean
+  position?: number
+}
+
+export async function listTaskViews(companyId: string) {
+  return get<{ views: TaskView[] }>('/api/tasks/views', { company_id: companyId })
+}
+
+export async function createTaskView(data: {
+  companyId: string; name: string; query: Record<string, string>; shared?: boolean
+}) {
+  return post<TaskView>('/api/tasks/views', {
+    company_id: data.companyId, name: data.name, query: data.query,
+    shared: data.shared ?? false,
+  })
+}
+
+export async function deleteTaskView(id: string, companyId: string) {
+  return del(`/api/tasks/views/${id}?company_id=${encodeURIComponent(companyId)}`)
+}
+
+export interface TaskTemplate {
+  id: string; name: string; title: string; description: string | null
+  type_id: string | null; assignee_id: string | null; object_id: string | null
+  priority: string | null; due_days: number | null; checklist: string[]
+}
+
+export async function listTaskTemplates(companyId: string) {
+  return get<{ templates: TaskTemplate[] }>('/api/tasks/templates', { company_id: companyId })
+}
+
+export async function createTaskTemplate(data: {
+  companyId: string; name: string; title: string; description?: string
+  typeId?: string; assigneeId?: string; priority?: string; dueDays?: number | null
+  checklist: string[]
+}) {
+  return post<TaskTemplate>('/api/tasks/templates', {
+    company_id: data.companyId, name: data.name, title: data.title,
+    description: data.description || undefined, type_id: data.typeId || undefined,
+    assignee_id: data.assigneeId || undefined, priority: data.priority || undefined,
+    due_days: data.dueDays ?? undefined, checklist: data.checklist,
+  })
+}
+
+export async function deleteTaskTemplate(id: string, companyId: string) {
+  return del(`/api/tasks/templates/${id}?company_id=${encodeURIComponent(companyId)}`)
+}
+
+/** Поставить задачу по шаблону прямо сейчас. */
+export async function useTaskTemplate(id: string, companyId: string) {
+  return post<SpaceTask>(
+    `/api/tasks/templates/${id}/use?company_id=${encodeURIComponent(companyId)}`, {})
+}
+
+export interface TaskRecurrence {
+  id: string; template_id: string; template: string
+  rule: { mode?: string; at?: string; weekday?: number; day?: number; tz?: string }
+  enabled: boolean; next_run_at: string | null; last_run_at: string | null
+}
+
+export async function listTaskRecurrences(companyId: string) {
+  return get<{ recurrences: TaskRecurrence[] }>('/api/tasks/recurrences',
+    { company_id: companyId })
+}
+
+export async function createTaskRecurrence(data: {
+  companyId: string; templateId: string; rule: Record<string, unknown>
+}) {
+  return post<TaskRecurrence>('/api/tasks/recurrences', {
+    company_id: data.companyId, template_id: data.templateId, rule: data.rule,
+  })
+}
+
+export async function deleteTaskRecurrence(id: string, companyId: string) {
+  return del(`/api/tasks/recurrences/${id}?company_id=${encodeURIComponent(companyId)}`)
+}
+
 /** Зеркало работы во внешней системе: у нас наша задача, у них своя. */
 export interface TaskExternalRef {
   id: string; connector_key: string; connector_label: string | null
@@ -331,12 +416,15 @@ export async function saveTaskType(data: {
   companyId: string; id?: string; code: string; name: string
   description?: string; route: RouteStage[]; defaultPriority: string
   dueDays?: number | null; isActive?: boolean; sortOrder?: number
+  reactionHours?: number | null; escalateToId?: string | null
 }) {
   const body = {
     company_id: data.companyId, code: data.code, name: data.name,
     description: data.description || undefined, route: data.route,
     default_priority: data.defaultPriority, due_days: data.dueDays ?? null,
     is_active: data.isActive ?? true, sort_order: data.sortOrder ?? 100,
+    reaction_hours: data.reactionHours ?? null,
+    escalate_to_id: data.escalateToId || null,
   }
   return data.id
     ? put<TaskType>(`/api/tasks/types/${data.id}`, body)

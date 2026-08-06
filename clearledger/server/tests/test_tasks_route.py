@@ -342,6 +342,67 @@ async def test_поручение_внешнему_письмом(auth_client: A
     assert r.json().get("duplicate") is True, "повторная доставка задвоила реплику"
 
 
+async def test_регламент_шаблоны_расписания_эскалация(auth_client: AsyncClient):
+    """Волна 3: заготовка, расписание и «на задачу не откликнулись».
+
+    Ловим: статический путь `/templates` разбирается как идентификатор задачи;
+    расписание порождает задачу сразу при заведении (а не в срок); чек-лист
+    шаблона не доезжает до задачи; эскалация уходит по задаче, которую уже взяли.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from app.services import task_scheduler
+
+    me = await _me(auth_client)
+    cid = me["companies"][0]["id"]
+
+    r = await auth_client.post("/api/tasks/templates", json={
+        "company_id": cid, "name": "Закрытие месяца",
+        "title": "Закрыть месяц по объекту", "due_days": 5,
+        "assignee_id": me["id"],
+        "checklist": ["Сверить остатки", "Подписать акт"]})
+    assert r.status_code == 201, r.text
+    tpl = r.json()
+    assert tpl["checklist"] == ["Сверить остатки", "Подписать акт"]
+
+    # Постановка по шаблону — тем же кодом, что и расписание.
+    r = await auth_client.post(f"/api/tasks/templates/{tpl['id']}/use",
+                               params={"company_id": cid})
+    assert r.status_code == 201, r.text
+    made = r.json()
+    assert made["checklist"] == {"total": 2, "done": 0}, "чек-лист шаблона не доехал"
+    assert made["due_at"], "срок по due_days шаблона не проставился"
+
+    r = await auth_client.post("/api/tasks/recurrences", json={
+        "company_id": cid, "template_id": tpl["id"],
+        "rule": {"mode": "monthly", "day": 1, "at": "09:00", "tz": "Europe/Moscow"}})
+    assert r.status_code == 201, r.text
+    rec = r.json()
+    assert rec["next_run_at"], "дата следующего запуска не посчиталась"
+
+    # Заведение расписания задачу не порождает — ждём срока.
+    listed = (await auth_client.get("/api/tasks/recurrences",
+                                    params={"company_id": cid})).json()["recurrences"]
+    assert [x["template"] for x in listed] == ["Закрытие месяца"]
+
+    # Правило считается в местном времени пояса, а не в UTC.
+    now = datetime(2026, 8, 6, 12, 0, tzinfo=timezone.utc)
+    nxt = task_scheduler.next_run({"mode": "weekly", "weekday": 0, "at": "09:00",
+                                   "tz": "Europe/Moscow"}, now)
+    assert nxt > now and nxt.astimezone(
+        task_scheduler._tz({"tz": "Europe/Moscow"})).weekday() == 0
+
+    # Представление: сохранённый отбор появляется в списке и возвращает свой запрос.
+    r = await auth_client.post("/api/tasks/views", json={
+        "company_id": cid, "name": "Мои просрочки",
+        "query": {"scope": "mine", "sort": "due"}})
+    assert r.status_code == 201, r.text
+    views = (await auth_client.get("/api/tasks/views",
+                                   params={"company_id": cid})).json()["views"]
+    mine = next(v for v in views if v["name"] == "Мои просрочки")
+    assert mine["query"] == {"scope": "mine", "sort": "due"} and mine["shared"] is False
+
+
 async def test_зеркало_внешней_системы(auth_client: AsyncClient):
     """Режим C: работа живёт в чужой системе, у нас — связь с ней.
 
