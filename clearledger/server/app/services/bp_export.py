@@ -391,6 +391,24 @@ class BpPackageEmitter:
         skipped: list[dict] = []
         seen: set[tuple[str, str]] = set()
         code2guid = {str((ref.extra or {}).get("code") or ""): uid for uid, ref in whs.items()}
+
+        # Склады перемещения по номеру документа — из зеркала ЦБ.
+        #
+        # Перемещения, приехавшие выгрузкой ЦБ, приходят без мест: в нормализованном
+        # документе «МестоОтправитель» и «МестоПолучатель» пусты, хотя в самом
+        # зеркале склады есть (`warehouse_code` → `warehouse_to_code`, например
+        # 20800002 «Склад» → 208 «Торговый зал»). Без них перемещение не разложить,
+        # и раньше оно откладывалось. Достаём оттуда, где данные лежат.
+        mv_places = {
+            str(row["number"] or ""): (str(row["warehouse_code"] or ""),
+                                       str(row["warehouse_to_code"] or ""))
+            for row in (await self.session.execute(text("""
+                SELECT number, warehouse_code, warehouse_to_code
+                FROM core.cb_movement_doc
+                WHERE company_id = :company_id AND kind = 'transfer' AND NOT deleted
+            """), {"company_id": self.company_id})).mappings().all()
+            if row["number"]
+        }
         for entry in related:
             kind = str(entry.doc_type_id or "")
             if kind in {"recipe", "retail_sale_sidegoods"}:
@@ -477,8 +495,16 @@ class BpPackageEmitter:
                 direction = _TRANSFER_DIRECTION.get(
                     str(doc.get("Направление") or "").strip().lower(),
                     str(doc.get("Направление") or ""))
-                from_uuid = code2guid.get(str(doc.get("МестоОтправитель") or ""), "")
-                to_uuid = code2guid.get(str(doc.get("МестоПолучатель") or ""), "")
+                from_code = str(doc.get("МестоОтправитель") or "")
+                to_code = str(doc.get("МестоПолучатель") or "")
+                if not from_code or not to_code:
+                    # Документ ЦБ мест не несёт — берём их из зеркала по номеру.
+                    зеркало = mv_places.get(str(doc.get("Номер") or ""))
+                    if зеркало:
+                        from_code = from_code or зеркало[0]
+                        to_code = to_code or зеркало[1]
+                from_uuid = code2guid.get(from_code, "")
+                to_uuid = code2guid.get(to_code, "")
                 if direction == "out":
                     from_uuid = from_uuid or wh_uuid
                     to_uuid = to_uuid or station_wh.get(int(doc.get("КодАЗСПолучателя") or 0), "")
