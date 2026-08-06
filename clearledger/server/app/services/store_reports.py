@@ -663,6 +663,109 @@ async def shifts(db: AsyncSession, cid, date_from, date_to,
             "by_station": _по_станциям(строки, "revenue")}
 
 
+async def visits(db: AsyncSession, cid, date_from, date_to,
+                 stations: list[int] | None = None) -> dict:
+    """Посещения станций и конверсия магазина.
+
+    Посетитель — это чек. Человек, заправившийся и уехавший, магазин не посетил
+    как покупатель, но станцию посетил: он прошёл мимо витрины, и он в
+    знаменателе. Без этого выручку магазина не с чем сравнивать — сорок тысяч
+    за смену это много или мало, зависит от того, прошло мимо кассы четыреста
+    человек или девяносто.
+
+    Считается из двух контуров, потому что они и ведутся раздельно: заправки
+    лежат в реестре топлива, покупки магазина — в чеках. Смешанный чек (человек
+    заправился и взял кофе) в топливном контуре уже посчитан, поэтому к
+    посещениям добавляются только чеки БЕЗ топлива — иначе один визит
+    удвоился бы.
+    """
+    d1, d2 = _период(date_from, date_to)
+    p = {"cid": cid, "d1": d1, "d2": d2}
+    ф_т = " AND station_code = ANY(:st)" if stations else ""
+    ф_ч = " AND station_id = ANY(:st)" if stations else ""
+    if stations:
+        p["st"] = stations
+
+    топливо = {(r["station"], r["shift"]): dict(r) for r in (await db.execute(text(f"""
+        SELECT station_code AS station, shift_number AS shift,
+               count(*) AS ops, min(dt) AS started, max(dt) AS ended,
+               coalesce(sum(amount), 0) AS fuel_amount
+        FROM fuel_transactions
+        WHERE company_id = :cid{ф_т} AND dt BETWEEN :d1 AND :d2
+        GROUP BY 1, 2
+    """), p)).mappings().all()}
+
+    чеки = {(r["station"], r["shift"]): dict(r) for r in (await db.execute(text(f"""
+        SELECT station_id AS station, shift_number AS shift,
+               count(*) AS cheques,
+               count(*) FILTER (WHERE had_fuel) AS mixed,
+               count(*) FILTER (WHERE NOT had_fuel) AS shop_only,
+               coalesce(sum(total), 0) AS shop_amount,
+               coalesce(sum(positions), 0) AS positions
+        FROM store_cheques
+        WHERE company_id = :cid{ф_ч} AND at BETWEEN :d1 AND :d2
+        GROUP BY 1, 2
+    """), p)).mappings().all()}
+
+    строки = []
+    for ключ in sorted(set(топливо) | set(чеки), key=lambda k: (k[0], -(k[1] or 0))):
+        станция, смена = ключ
+        т = топливо.get(ключ, {})
+        ч = чеки.get(ключ, {})
+        заправок = int(т.get("ops") or 0)
+        чеков_магазина = int(ч.get("cheques") or 0)
+        только_магазин = int(ч.get("shop_only") or 0)
+        смешанных = int(ч.get("mixed") or 0)
+        # Смешанный чек — доказательство заправки: человек взял и топливо, и
+        # товар. Если топливный контур отстал (реализации приезжают позже
+        # чеков), заправок в реестре может быть меньше — тогда берём то, что
+        # доказано чеками, иначе конверсия уезжает за сто процентов.
+        заправок_всего = max(заправок, смешанных)
+        посещений = заправок_всего + только_магазин
+        выручка = float(ч.get("shop_amount") or 0)
+        строки.append({
+            "station_id": станция, "shift": смена,
+            "shift_date": т.get("started") or None,
+            "visits": посещений,
+            "fuel_ops": заправок,
+            "shop_cheques": чеков_магазина,
+            "mixed": смешанных,
+            "fuel_only": max(заправок_всего - смешанных, 0),
+            # Пустой топливный контур при живых чеках — не ноль заправок, а
+            # «данные ещё не приехали». Молчать об этом нельзя: конверсия в
+            # такой смене завышена.
+            "note": "" if заправок else ("реализации топлива ещё не пришли"
+                                         if чеков_магазина else ""),
+            "conversion": round(чеков_магазина / посещений * 100, 1) if посещений else 0.0,
+            "amount": round(выручка, 2),
+            "per_visit": round(выручка / посещений, 2) if посещений else 0.0,
+            "avg_cheque": round(выручка / чеков_магазина, 2) if чеков_магазина else 0.0,
+        })
+
+    всего_визитов = sum(s["visits"] for s in строки)
+    всего_чеков = sum(s["shop_cheques"] for s in строки)
+    выручка = sum(s["amount"] for s in строки)
+    # Свод по станциям считается по своим итогам, а не усреднением средних:
+    # смена с тремя посетителями иначе весила бы столько же, сколько смена с
+    # четырьмя сотнями.
+    по_станциям: dict[int, dict] = {}
+    for s in строки:
+        у = по_станциям.setdefault(s["station_id"], {"station_id": s["station_id"],
+                                                     "docs": 0, "amount": 0.0})
+        у["docs"] += s["visits"]
+        у["amount"] += s["amount"]
+    for у in по_станциям.values():
+        у["amount"] = round(у["amount"], 2)
+    return {
+        "rows": строки, "total": len(строки),
+        "visits": всего_визитов,
+        "conversion": round(всего_чеков / всего_визитов * 100, 1) if всего_визитов else 0.0,
+        "revenue": round(выручка, 2),
+        "per_visit": round(выручка / всего_визитов, 2) if всего_визитов else 0.0,
+        "by_station": sorted(по_станциям.values(), key=lambda x: x["station_id"]),
+    }
+
+
 async def mrc(db: AsyncSession, cid, date_from, date_to,
               stations: list[int] | None = None) -> dict:
     """Контроль МРЦ табака: где розничная цена выше максимальной.
@@ -840,6 +943,19 @@ REPORTS = {
         "fields": ["station_id", "name", "qty", "amount", "docs"],
         "group": "torg",
     },
+    "visits": {
+        "title": "Посещения и конверсия",
+        "about": "Сколько человек побывало на станции за смену и какая часть из них купила в "
+                 "магазине. Посетитель — это чек: заправился и уехал — станцию посетил, "
+                 "магазин нет. Выручку магазина не с чем сравнивать без этой цифры.",
+        "columns": ["АЗС", "Смена", "Дата", "Посещений", "Заправок", "Чеков магазина",
+                    "И то, и другое", "Только заправка", "Конверсия, %", "Выручка магазина",
+                    "На посетителя", "Средний чек", "Замечание"],
+        "fields": ["station_id", "shift", "shift_date", "visits", "fuel_ops", "shop_cheques",
+                   "mixed", "fuel_only", "conversion", "amount", "per_visit", "avg_cheque",
+                   "note"],
+        "group": "torg",
+    },
     "shifts": {
         "title": "Смены",
         "about": "Выручка сопутки по сменам каждой АЗС. Смена — единица ответственности: за "
@@ -906,6 +1022,7 @@ BUILDERS = {
     "inventories": inventories,
     "production": production,
     "shifts": shifts,
+    "visits": visits,
     "mrc": mrc,
     "suppliers": suppliers,
 }
