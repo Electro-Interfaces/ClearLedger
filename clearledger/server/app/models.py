@@ -6362,3 +6362,130 @@ class TaskEvent(Base):
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now())
+
+
+class TaskLink(Base):
+    """Связь двух задач: подзадача, блокировка, «связана», дубль.
+
+    Одна таблица на все виды связи, обратную сторону не дублируем — читаем в обе
+    стороны. Пара таблиц (подзадачи отдельно, связи отдельно) дала бы два способа
+    спросить «что мешает этой задаче» и два места, где связь можно забыть удалить.
+    """
+    __tablename__ = "task_links"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    task_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    related_task_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    # subtask (task_id — родитель) | blocks (task_id мешает related) | relates | duplicates
+    kind: Mapped[str] = mapped_column(String(20), nullable=False, default="relates")
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("task_id", "related_task_id", "kind", name="uq_task_links"),
+    )
+
+
+class TaskChecklistItem(Base):
+    """Пункт чек-листа задачи: что именно осталось сделать внутри одной работы."""
+    __tablename__ = "task_checklist_items"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    task_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    text: Mapped[str] = mapped_column(String(500), nullable=False)
+    done: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    done_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    done_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+
+class TaskAttachment(Base):
+    """Файл при задаче или при комментарии.
+
+    Сам файл лежит там же, где остальные файлы Ядра (`source_files` + `UPLOAD_DIR`),
+    здесь только привязка: имя, размер и тип уже описаны один раз в `SourceFile`,
+    второй копии этих полей не заводим.
+    """
+    __tablename__ = "task_attachments"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    task_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    # Заполнен, если файл приложен к реплике, а не к задаче целиком.
+    event_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("task_events.id", ondelete="SET NULL"), nullable=True)
+    file_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("source_files.id", ondelete="CASCADE"), nullable=False)
+    uploaded_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+
+class TaskWatcher(Base):
+    """Кто следит за задачей помимо автора и исполнителя.
+
+    `reason` отвечает на вопрос «почему я это вижу»: подписался сам, упомянули
+    в реплике или поставил задачу. Без него человек не понимает, за что ему
+    приходят оповещения, и отписывается от всего сразу.
+    """
+    __tablename__ = "task_watchers"
+
+    task_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="CASCADE"), primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    # manual | mention | author
+    reason: Mapped[str] = mapped_column(String(20), nullable=False, default="manual")
+    added_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+
+class TaskLabel(Base):
+    """Метка компании: свободный ярлык поверх типа и стадии."""
+    __tablename__ = "task_labels"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(60), nullable=False)
+    # Имя тона из альфа-шкалы подачи (amber, sky, …), а не hex: цвет обязан
+    # работать в обеих темах, а произвольный hex этого не гарантирует.
+    color: Mapped[str] = mapped_column(String(20), nullable=False, default="slate")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("company_id", "name", name="uq_task_labels_name"),
+    )
+
+
+class TaskLabelLink(Base):
+    """Метка на задаче."""
+    __tablename__ = "task_label_links"
+
+    task_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="CASCADE"), primary_key=True)
+    label_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("task_labels.id", ondelete="CASCADE"), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())

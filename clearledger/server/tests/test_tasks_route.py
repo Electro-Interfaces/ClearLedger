@@ -157,3 +157,111 @@ async def test_обзор_видит_просрочку_и_разрезы(auth_c
 
     lenta = [(e["kind"], e["task_id"]) for e in s["activity"]]
     assert ("created", nichey) in lenta and ("status", zakryt) in lenta
+
+
+async def test_карточка_собирает_работу_целиком(auth_client: AsyncClient):
+    """Чек-лист, подзадачи, связи и метки — то, ради чего трекер и заводят.
+
+    Ловим: прогресс чек-листа не доезжает до строки списка; связь видна только из
+    той карточки, где её завели; родитель закрывается молча при живых подзадачах;
+    метка не фильтрует.
+    """
+    me = await _me(auth_client)
+    cid = me["companies"][0]["id"]
+
+    async def new(title: str, **extra) -> dict:
+        r = await auth_client.post("/api/tasks", json={
+            "company_id": cid, "title": title, **extra})
+        assert r.status_code == 201, r.text
+        return r.json()
+
+    parent = await new("Смонтировать ЭЗС на площадке", assignee_id=me["id"])
+    kid = await new("Согласовать подключение к сети")
+
+    # Чек-лист: два пункта, один отмечен — в списке это видно как 1 из 2.
+    for text in ("Заказать оборудование", "Вызвать бригаду"):
+        r = await auth_client.post(f"/api/tasks/{parent['id']}/checklist",
+                                   json={"company_id": cid, "text": text})
+        assert r.status_code == 201, r.text
+    card = (await auth_client.get(f"/api/tasks/{parent['id']}",
+                                  params={"company_id": cid})).json()
+    assert [c["text"] for c in card["checklist"]] == [
+        "Заказать оборудование", "Вызвать бригаду"], "порядок пунктов не по position"
+    r = await auth_client.patch(
+        f"/api/tasks/{parent['id']}/checklist/{card['checklist'][0]['id']}",
+        json={"company_id": cid, "done": True})
+    assert r.status_code == 200, r.text
+
+    # Подзадача — та же связь вида subtask, где task_id родитель.
+    r = await auth_client.post(f"/api/tasks/{parent['id']}/links", json={
+        "company_id": cid, "related_task_id": kid["id"], "kind": "subtask"})
+    assert r.status_code == 201, r.text
+    # Круг из подзадач не заводится: обход дерева стал бы бесконечным.
+    r = await auth_client.post(f"/api/tasks/{kid['id']}/links", json={
+        "company_id": cid, "related_task_id": parent["id"], "kind": "subtask"})
+    assert r.status_code == 400, "подзадача замкнулась в круг"
+
+    # Связь читается с обеих сторон, и с обратной называется иначе.
+    kid_card = (await auth_client.get(f"/api/tasks/{kid['id']}",
+                                      params={"company_id": cid})).json()
+    assert [(l["kind"], l["number"]) for l in kid_card["links"]] == [
+        ("parent", parent["number"])], kid_card["links"]
+
+    # Метка: завести, повесить одним действием, отобрать по ней.
+    lab = (await auth_client.post("/api/tasks/labels", json={
+        "company_id": cid, "name": "стройка", "color": "amber"})).json()
+    r = await auth_client.post(f"/api/tasks/{parent['id']}/action", json={
+        "company_id": cid, "add_label_id": lab["id"]})
+    assert r.status_code == 200, r.text
+    assert [x["name"] for x in r.json()["labels"]] == ["стройка"]
+    assert r.json()["checklist"] == {"total": 2, "done": 1}, "прогресс не доехал до строки"
+    by_label = (await auth_client.get("/api/tasks", params={
+        "company_id": cid, "scope": "all", "label_id": lab["id"]})).json()["tasks"]
+    assert [t["id"] for t in by_label] == [parent["id"]]
+
+    # Закрытие родителя при живой подзадаче проходит, но человека предупреждают.
+    r = await auth_client.post(f"/api/tasks/{parent['id']}/action", json={
+        "company_id": cid, "status": "done"})
+    assert r.status_code == 200, r.text
+    assert "подзадач" in (r.json().get("warning") or ""), "закрылось молча"
+
+
+async def test_рабочее_место_отделяет_моё_от_поручённого(auth_client: AsyncClient):
+    """«На мне» — что я делаю, «Я поставил» — где мяч у других. Плюс поиск по
+    номеру и упоминание, которое подписывает человека на задачу."""
+    me = await _me(auth_client)
+    cid = me["companies"][0]["id"]
+
+    mine = (await auth_client.post("/api/tasks", json={
+        "company_id": cid, "title": "Эту делаю я", "assignee_id": me["id"]})).json()
+    handed = (await auth_client.post("/api/tasks", json={
+        "company_id": cid, "title": "Эту я поручил и жду"})).json()
+
+    ids = lambda rows: [t["id"] for t in rows]
+    on_me = (await auth_client.get("/api/tasks", params={
+        "company_id": cid, "scope": "mine"})).json()
+    assert mine["id"] in ids(on_me["tasks"])
+    assert handed["id"] not in ids(on_me["tasks"]), "чужая работа попала в «на мне»"
+
+    assigned = (await auth_client.get("/api/tasks", params={
+        "company_id": cid, "scope": "assigned"})).json()
+    assert handed["id"] in ids(assigned["tasks"])
+    assert mine["id"] not in ids(assigned["tasks"]), "своя работа попала в «я поставил»"
+
+    # Поиск по номеру: человек называет «№123», а не ищет слова из заголовка.
+    found = (await auth_client.get("/api/tasks", params={
+        "company_id": cid, "scope": "all", "q": f"№{handed['number']}"})).json()
+    assert ids(found["tasks"]) == [handed["id"]], found["total"]
+
+    # Упоминание в реплике подписывает человека на задачу.
+    name = (me.get("name") or me["email"]).split()[0]
+    r = await auth_client.post(f"/api/tasks/{handed['id']}/action", json={
+        "company_id": cid, "note": f"@{name} посмотри, пожалуйста"})
+    assert r.status_code == 200, r.text
+    card = (await auth_client.get(f"/api/tasks/{handed['id']}",
+                                  params={"company_id": cid})).json()
+    assert [w["reason"] for w in card["watchers"]] == ["mention"], card["watchers"]
+
+    watching = (await auth_client.get("/api/tasks", params={
+        "company_id": cid, "scope": "watching"})).json()
+    assert handed["id"] in ids(watching["tasks"])

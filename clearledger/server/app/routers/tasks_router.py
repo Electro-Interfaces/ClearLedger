@@ -12,23 +12,36 @@
 переадресация, завершение и реплика различаются только тем, какие поля
 пришли. Одна точка = одна проверка прав и один способ записать след.
 """
+import hashlib
+import os
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import or_, select
+from sqlalchemy import case, delete as sa_delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import assert_company_product, get_current_user
 from app.database import get_db
-from app.models import ServiceLocation, Task, TaskEvent, TaskType, User, UserCompany
+from app.models import (
+    ServiceLocation, SourceFile, Task, TaskAttachment, TaskChecklistItem, TaskEvent,
+    TaskLabel, TaskLabelLink, TaskLink, TaskType, TaskWatcher, User, UserCompany,
+)
 
 router = APIRouter(prefix="/tasks", tags=["Задачи"])
 
 _LIST_LIMIT = 500
 _PRIORITY = "^(low|medium|high|critical)$"
+# Виды связи. `subtask`: task_id — родитель, related_task_id — подзадача.
+_LINK_KINDS = ("subtask", "blocks", "relates", "duplicates")
+# Порядок срочности для сортировки: в базе это строка, а человек ждёт «сначала
+# критичные». Сортировать по алфавиту (critical, high, low, medium) — бессмыслица.
+_PRIORITY_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3}
 
 # Маршрут задачи без типа — обычное поручение. Держим в коде, а не в справочнике:
 # иначе продукт не работает до заведения первого типа, а первое, что делает человек
@@ -90,9 +103,11 @@ def _type_out(t: TaskType) -> dict[str, Any]:
     }
 
 
-def _task_out(t: Task, route: list[dict], names: dict[str, str | None]) -> dict[str, Any]:
+def _task_out(t: Task, route: list[dict], names: dict[str, str | None],
+              extra: dict[str, Any] | None = None) -> dict[str, Any]:
     now = datetime.now(timezone.utc)
     return {
+        **(extra or {}),
         "id": str(t.id),
         "number": t.number,
         "title": t.title,
@@ -138,40 +153,238 @@ async def _names(db: AsyncSession, tasks: list[Task]) -> dict[uuid.UUID, dict[st
     } for t in tasks}
 
 
+async def _extras(db: AsyncSession, tasks: list[Task]) -> dict[uuid.UUID, dict[str, Any]]:
+    """Метки, прогресс чек-листа и число подзадач — пачкой на весь список.
+
+    Это то, что видно прямо в строке списка: по галочкам «3 из 5» человек понимает,
+    жива работа или стоит, не открывая карточку. Три запроса на страницу вместо
+    трёх на строку.
+    """
+    if not tasks:
+        return {}
+    ids = [t.id for t in tasks]
+    labels: dict[uuid.UUID, list[dict]] = {i: [] for i in ids}
+    for tid, lid, name, color in (await db.execute(
+        select(TaskLabelLink.task_id, TaskLabel.id, TaskLabel.name, TaskLabel.color)
+        .join(TaskLabel, TaskLabel.id == TaskLabelLink.label_id)
+        .where(TaskLabelLink.task_id.in_(ids)).order_by(TaskLabel.name))).all():
+        labels[tid].append({"id": str(lid), "name": name, "color": color})
+
+    check: dict[uuid.UUID, dict[str, int]] = {}
+    for tid, total, done in (await db.execute(
+        select(TaskChecklistItem.task_id, func.count(),
+               func.count().filter(TaskChecklistItem.done.is_(True)))
+        .where(TaskChecklistItem.task_id.in_(ids))
+        .group_by(TaskChecklistItem.task_id))).all():
+        check[tid] = {"total": total, "done": done}
+
+    kids: dict[uuid.UUID, dict[str, int]] = {}
+    for tid, total, open_cnt in (await db.execute(
+        select(TaskLink.task_id, func.count(),
+               func.count().filter(Task.status == "open"))
+        .join(Task, Task.id == TaskLink.related_task_id)
+        .where(TaskLink.task_id.in_(ids), TaskLink.kind == "subtask")
+        .group_by(TaskLink.task_id))).all():
+        kids[tid] = {"total": total, "open": open_cnt}
+
+    return {t.id: {
+        "labels": labels.get(t.id, []),
+        "checklist": check.get(t.id, {"total": 0, "done": 0}),
+        "subtasks": kids.get(t.id, {"total": 0, "open": 0}),
+    } for t in tasks}
+
+
+async def _task_or_404(db: AsyncSession, cid: uuid.UUID, task_id: str) -> Task:
+    t = await db.get(Task, _uuid_or_400(task_id, "task_id"))
+    if t is None or t.company_id != cid:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Задача не найдена")
+    return t
+
+
+async def _assert_actor(db: AsyncSession, cid: uuid.UUID, user: User, t: Task) -> None:
+    """Право менять задачу: исполнитель, автор или администратор пространства.
+
+    Работу двигает тот, у кого она в руках, — согласование каждого шага у
+    постановщика убило бы смысл маршрута.
+    """
+    if user.is_superadmin or user.id in (t.assignee_id, t.author_id):
+        return
+    m = await db.get(UserCompany, (user.id, cid))
+    if m is None or m.role != "admin":
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Задача не ваша")
+
+
+# Обратная сторона связи называется иначе: если А — родитель Б, то у Б это
+# «родитель», а не «подзадача». Одна запись, два прочтения — вторую строку в
+# таблицу не пишем, иначе связь придётся удалять в двух местах.
+_LINK_MIRROR = {"subtask": "parent", "blocks": "blocked_by",
+                "relates": "relates", "duplicates": "duplicated_by"}
+
+
+async def _links_out(db: AsyncSession, t: Task) -> list[dict[str, Any]]:
+    """Связи задачи в обе стороны — одним списком, как их видит человек."""
+    out: list[dict[str, Any]] = []
+    forward = (await db.execute(
+        select(TaskLink, Task).join(Task, Task.id == TaskLink.related_task_id)
+        .where(TaskLink.task_id == t.id))).all()
+    backward = (await db.execute(
+        select(TaskLink, Task).join(Task, Task.id == TaskLink.task_id)
+        .where(TaskLink.related_task_id == t.id))).all()
+    for link, other in forward:
+        out.append({"id": str(link.id), "kind": link.kind, "task_id": str(other.id),
+                    "number": other.number, "title": other.title, "status": other.status})
+    for link, other in backward:
+        out.append({"id": str(link.id), "kind": _LINK_MIRROR.get(link.kind, link.kind),
+                    "task_id": str(other.id), "number": other.number,
+                    "title": other.title, "status": other.status})
+    return sorted(out, key=lambda r: (r["kind"], r["number"]))
+
+
+_MENTION = re.compile(r"@([\w.-]{2,60})", re.UNICODE)
+
+
+async def _watch_mentions(db: AsyncSession, cid: uuid.UUID, task: Task,
+                          note: str | None, actor: User) -> list[str]:
+    """Упомянутые в реплике `@имя` попадают в наблюдатели.
+
+    Имя ищем по началу слова: люди пишут «@Петров», а в реестре «Петров Иван».
+    Не нашли — молча пропускаем: упоминание не обязано быть ссылкой, человек мог
+    просто написать адрес почты.
+    """
+    if not note:
+        return []
+    handles = {h.lower() for h in _MENTION.findall(note)}
+    if not handles:
+        return []
+    people = (await db.execute(
+        select(User.id, User.name, User.email).join(
+            UserCompany, UserCompany.user_id == User.id)
+        .where(UserCompany.company_id == cid))).all()
+    added: list[str] = []
+    for uid, name, email in people:
+        hay = f"{name or ''} {email or ''}".lower()
+        if not any(hay.startswith(h) or f" {h}" in hay or (email or "").lower().startswith(h)
+                   for h in handles):
+            continue
+        if await db.get(TaskWatcher, (task.id, uid)) is not None:
+            continue
+        db.add(TaskWatcher(task_id=task.id, user_id=uid, reason="mention", added_by=actor.id))
+        added.append(name or str(uid))
+    return added
+
+
 @router.get("")
 async def list_tasks(
     company_id: str = Query(...),
-    scope: str = Query("open", pattern="^(open|mine|overdue|closed|all)$"),
+    scope: str = Query("open", pattern="^(open|mine|assigned|watching|overdue|today|closed|all)$"),
     object_id: str | None = Query(None),
     type_id: str | None = Query(None),
     assignee_id: str | None = Query(None),
+    author_id: str | None = Query(None),
+    stage: str | None = Query(None),
+    priority: str | None = Query(None, pattern=_PRIORITY),
+    label_id: str | None = Query(None),
+    q: str | None = Query(None, max_length=200),
+    due_from: datetime | None = Query(None),
+    due_to: datetime | None = Query(None),
+    sort: str = Query("created", pattern="^-?(created|updated|due|priority|number)$"),
+    limit: int = Query(100, ge=1, le=_LIST_LIMIT),
+    offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Задачи пространства. scope: open — активные, mine — где я исполнитель или
-    автор, overdue — активные с прошедшим сроком, closed — завершённые, all — всё."""
+    """Задачи пространства.
+
+    scope — крупный разрез рабочего места: mine — что на мне (я исполнитель),
+    assigned — что я поручил другим, watching — где я наблюдатель, today — что
+    горит сегодня (просрочено, срок сегодня-завтра), open/closed/all/overdue —
+    состояние. Остальное — фильтры реестра; они складываются со scope.
+    """
     cid = await assert_company_product(company_id, current_user, db, "plan")
-    q = select(Task).where(Task.company_id == cid)
+    now = datetime.now(timezone.utc)
+    sel = select(Task).where(Task.company_id == cid)
+
     if scope == "open":
-        q = q.where(Task.status == "open")
+        sel = sel.where(Task.status == "open")
     elif scope == "closed":
-        q = q.where(Task.status != "open")
+        sel = sel.where(Task.status != "open")
     elif scope == "mine":
-        q = q.where(or_(Task.assignee_id == current_user.id, Task.author_id == current_user.id))
+        # «На мне» — именно исполнение. Автор своей задачи её не делает: смешав
+        # их, экран исполнителя показывал бы чужую работу и терял смысл счётчика.
+        sel = sel.where(Task.status == "open", Task.assignee_id == current_user.id)
+    elif scope == "assigned":
+        sel = sel.where(Task.status == "open", Task.author_id == current_user.id,
+                        or_(Task.assignee_id.is_(None), Task.assignee_id != current_user.id))
+    elif scope == "watching":
+        sel = sel.where(Task.id.in_(
+            select(TaskWatcher.task_id).where(TaskWatcher.user_id == current_user.id)))
     elif scope == "overdue":
         # Тот же смысл, что у флага `overdue` в выдаче: срок прошёл у ЖИВОЙ задачи.
-        q = q.where(Task.status == "open", Task.due_at < datetime.now(timezone.utc))
+        sel = sel.where(Task.status == "open", Task.due_at < now)
+    elif scope == "today":
+        # Что горит: просрочено или срок в ближайшие сутки. Без срока — не горит,
+        # такая задача попадает в «На мне», а не в «Сегодня».
+        sel = sel.where(Task.status == "open", Task.due_at.is_not(None),
+                        Task.due_at < now + timedelta(days=1))
+
     if object_id:
-        q = q.where(Task.object_id == object_id)
+        sel = sel.where(Task.object_id == object_id)
     if assignee_id:
-        q = q.where(Task.assignee_id == _uuid_or_400(assignee_id, "assignee_id"))
+        sel = sel.where(Task.assignee_id == _uuid_or_400(assignee_id, "assignee_id"))
+    if author_id:
+        sel = sel.where(Task.author_id == _uuid_or_400(author_id, "author_id"))
     if type_id:
-        q = q.where(Task.type_id == _uuid_or_400(type_id, "type_id"))
-    tasks = list((await db.execute(
-        q.order_by(Task.created_at.desc()).limit(_LIST_LIMIT))).scalars())
+        sel = sel.where(Task.type_id == _uuid_or_400(type_id, "type_id"))
+    if stage:
+        sel = sel.where(Task.stage_code == stage)
+    if priority:
+        sel = sel.where(Task.priority == priority)
+    if label_id:
+        sel = sel.where(Task.id.in_(select(TaskLabelLink.task_id).where(
+            TaskLabelLink.label_id == _uuid_or_400(label_id, "label_id"))))
+    if due_from:
+        sel = sel.where(Task.due_at >= due_from)
+    if due_to:
+        sel = sel.where(Task.due_at <= due_to)
+    if q and (text := q.strip()):
+        # Номер ищем как номер: «123» и «№123» должны открывать задачу, а не
+        # искать «123» в тексте — цифру в заголовке пишут редко, а номер называют
+        # постоянно. Текст ищем и в репликах: половина ответов «где это обсуждали».
+        digits = text.lstrip("№#").strip()
+        like = f"%{text}%"
+        conds = [Task.title.ilike(like), Task.description.ilike(like),
+                 Task.id.in_(select(TaskEvent.task_id).where(TaskEvent.note.ilike(like)))]
+        if digits.isdigit():
+            conds.append(Task.number == int(digits))
+        sel = sel.where(or_(*conds))
+
+    total = (await db.execute(
+        select(func.count()).select_from(sel.subquery()))).scalar_one()
+
+    desc = sort.startswith("-")
+    key = sort.lstrip("-")
+    col = {"created": Task.created_at, "updated": Task.updated_at, "due": Task.due_at,
+           "number": Task.number}.get(key)
+    if key == "priority":
+        order = case(_PRIORITY_RANK, value=Task.priority, else_=9)
+        sel = sel.order_by(order.desc() if desc else order.asc(), Task.created_at.desc())
+    else:
+        col = col or Task.created_at
+        # Срок по возрастанию: сначала ближайшие. Задачи без срока не должны
+        # занимать голову списка, поэтому NULL уезжают в конец в обоих порядках.
+        sel = sel.order_by(col.desc().nullslast() if desc or key == "created"
+                           else col.asc().nullslast())
+
+    tasks = list((await db.execute(sel.limit(limit).offset(offset))).scalars())
     names = await _names(db, tasks)
-    return {"tasks": [_task_out(t, names[t.id]["route"], names[t.id]) for t in tasks],
-            "total": len(tasks)}
+    extras = await _extras(db, tasks)
+    return {
+        "tasks": [_task_out(t, names[t.id]["route"], names[t.id], extras[t.id])
+                  for t in tasks],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
 
 
 @router.get("/people")
@@ -453,6 +666,90 @@ async def tasks_summary(
     }
 
 
+# ── Метки компании ───────────────────────────────────────────────────────
+# ВНИМАНИЕ: `/labels` и `/attachments/…` объявлены ДО `/{task_id}` — иначе FastAPI
+# разберёт «labels» как идентификатор задачи (та же грабля, что у `/summary`).
+
+
+@router.get("/labels")
+async def list_labels(
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cid = await assert_company_product(company_id, current_user, db, "plan")
+    rows = (await db.execute(select(TaskLabel).where(TaskLabel.company_id == cid)
+                             .order_by(TaskLabel.name))).scalars().all()
+    return {"labels": [{"id": str(r.id), "name": r.name, "color": r.color} for r in rows]}
+
+
+class LabelIn(BaseModel):
+    company_id: str
+    name: str = Field(min_length=1, max_length=60)
+    color: str = Field("slate", pattern="^[a-z]{3,20}$")
+
+
+@router.post("/labels", status_code=status.HTTP_201_CREATED)
+async def create_label(
+    payload: LabelIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Завести метку. Метку заводит любой участник: ярлык — рабочий инструмент,
+    а не элемент регламента, и поход к администратору за ним никто не сделает."""
+    cid = await assert_company_product(payload.company_id, current_user, db, "plan")
+    name = payload.name.strip()
+    exists = (await db.execute(select(TaskLabel).where(
+        TaskLabel.company_id == cid, TaskLabel.name == name))).scalar_one_or_none()
+    if exists is not None:
+        return {"id": str(exists.id), "name": exists.name, "color": exists.color}
+    lab = TaskLabel(company_id=cid, name=name, color=payload.color)
+    db.add(lab)
+    await db.commit()
+    await db.refresh(lab)
+    return {"id": str(lab.id), "name": lab.name, "color": lab.color}
+
+
+@router.delete("/labels/{label_id}")
+async def delete_label(
+    label_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cid = await assert_company_product(company_id, current_user, db, "plan")
+    await _assert_admin(db, cid, current_user)
+    lab = await db.get(TaskLabel, _uuid_or_400(label_id, "label_id"))
+    if lab is None or lab.company_id != cid:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Метка не найдена")
+    await db.delete(lab)
+    await db.commit()
+    return {"deleted": label_id}
+
+
+@router.get("/attachments/{attachment_id}")
+async def download_attachment(
+    attachment_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Отдать файл вложения. Проверяем не сам файл, а задачу, к которой он привязан:
+    доступ к файлу — это доступ к работе, в которой он лежит."""
+    cid = await assert_company_product(company_id, current_user, db, "plan")
+    att = await db.get(TaskAttachment, _uuid_or_400(attachment_id, "attachment_id"))
+    if att is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Вложение не найдено")
+    task = await db.get(Task, att.task_id)
+    if task is None or task.company_id != cid:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Вложение не найдено")
+    sf = await db.get(SourceFile, att.file_id)
+    if sf is None or not Path(sf.storage_path).exists():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Файл потерян в хранилище")
+    return FileResponse(sf.storage_path, media_type=sf.mime_type or "application/octet-stream",
+                        filename=sf.file_name)
+
+
 @router.get("/{task_id}")
 async def task_details(
     task_id: str,
@@ -460,25 +757,49 @@ async def task_details(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Карточка задачи: поля, маршрут и след — кто что сделал и почему стоит."""
+    """Карточка задачи: поля, маршрут, лента и всё, что к работе прицеплено."""
     cid = await assert_company_product(company_id, current_user, db, "plan")
-    t = await db.get(Task, _uuid_or_400(task_id, "task_id"))
-    if t is None or t.company_id != cid:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Задача не найдена")
+    t = await _task_or_404(db, cid, task_id)
     names = await _names(db, [t])
+    extras = await _extras(db, [t])
     events = (await db.execute(
         select(TaskEvent).where(TaskEvent.task_id == t.id)
         .order_by(TaskEvent.created_at))).scalars().all()
     actors = {r.id: r.name for r in (await db.execute(select(User).where(
         User.id.in_({e.user_id for e in events if e.user_id})))).scalars()} if events else {}
+
+    checklist = (await db.execute(
+        select(TaskChecklistItem).where(TaskChecklistItem.task_id == t.id)
+        .order_by(TaskChecklistItem.position, TaskChecklistItem.created_at))).scalars().all()
+    watchers = (await db.execute(
+        select(TaskWatcher, User.name).join(User, User.id == TaskWatcher.user_id)
+        .where(TaskWatcher.task_id == t.id).order_by(User.name))).all()
+    attachments = (await db.execute(
+        select(TaskAttachment, SourceFile)
+        .join(SourceFile, SourceFile.id == TaskAttachment.file_id)
+        .where(TaskAttachment.task_id == t.id)
+        .order_by(TaskAttachment.created_at))).all()
+
     return {
-        **_task_out(t, names[t.id]["route"], names[t.id]),
+        **_task_out(t, names[t.id]["route"], names[t.id], extras[t.id]),
         "description": t.description,
         "events": [{
             "id": str(e.id), "kind": e.kind, "user": actors.get(e.user_id),
             "from": e.from_value, "to": e.to_value, "note": e.note,
             "created_at": e.created_at.isoformat() if e.created_at else None,
         } for e in events],
+        "checklist": [{
+            "id": str(c.id), "text": c.text, "done": c.done, "position": c.position,
+            "done_at": c.done_at.isoformat() if c.done_at else None,
+        } for c in checklist],
+        "watchers": [{"user_id": str(w.user_id), "name": n, "reason": w.reason}
+                     for w, n in watchers],
+        "attachments": [{
+            "id": str(a.id), "event_id": str(a.event_id) if a.event_id else None,
+            "file_name": sf.file_name, "mime_type": sf.mime_type, "size": sf.size,
+            "created_at": a.created_at.isoformat() if a.created_at else None,
+        } for a, sf in attachments],
+        "links": await _links_out(db, t),
     }
 
 
@@ -490,6 +811,11 @@ class TaskAction(BaseModel):
     priority: str | None = Field(None, pattern=_PRIORITY)
     due_at: datetime | None = None
     note: str | None = Field(None, max_length=2000)   # реплика в след задачи
+    title: str | None = Field(None, min_length=3, max_length=300)
+    description: str | None = Field(None, max_length=8000)
+    object_id: str | None = None
+    add_label_id: str | None = None
+    remove_label_id: str | None = None
 
 
 @router.post("/{task_id}/action")
@@ -506,13 +832,8 @@ async def task_action(
     убило бы смысл маршрута.
     """
     cid = await assert_company_product(payload.company_id, current_user, db, "plan")
-    t = await db.get(Task, _uuid_or_400(task_id, "task_id"))
-    if t is None or t.company_id != cid:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Задача не найдена")
-    m = await db.get(UserCompany, (current_user.id, cid))
-    if not (current_user.is_superadmin or (m is not None and m.role == "admin")
-            or current_user.id in (t.assignee_id, t.author_id)):
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Задача не ваша")
+    t = await _task_or_404(db, cid, task_id)
+    await _assert_actor(db, cid, current_user, t)
 
     ttype = await db.get(TaskType, t.type_id) if t.type_id else None
     route = _route_of(ttype)
@@ -552,6 +873,24 @@ async def task_action(
         t.priority = payload.priority
     if payload.due_at is not None:
         t.due_at = payload.due_at
+    if payload.title is not None:
+        t.title = payload.title.strip()
+    if payload.description is not None:
+        t.description = payload.description or None
+    if payload.object_id is not None:
+        t.object_id = payload.object_id or None
+
+    if payload.add_label_id:
+        lid = _uuid_or_400(payload.add_label_id, "add_label_id")
+        lab = await db.get(TaskLabel, lid)
+        if lab is None or lab.company_id != cid:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Метка не найдена")
+        if await db.get(TaskLabelLink, (t.id, lid)) is None:
+            db.add(TaskLabelLink(task_id=t.id, label_id=lid))
+    if payload.remove_label_id:
+        await db.execute(sa_delete(TaskLabelLink).where(
+            TaskLabelLink.task_id == t.id,
+            TaskLabelLink.label_id == _uuid_or_400(payload.remove_label_id, "remove_label_id")))
 
     # Реплика без других изменений — комментарий; вместе с ними она уже записана
     # примечанием к событию и второй раз в ленту не идёт. Считаем по факту записи,
@@ -560,8 +899,344 @@ async def task_action(
     if payload.note and not logged:
         db.add(TaskEvent(task_id=t.id, kind="comment", user_id=current_user.id,
                          note=payload.note))
+    mentioned = await _watch_mentions(db, cid, t, payload.note, current_user)
 
     await db.commit()
     await db.refresh(t)
     names = await _names(db, [t])
-    return _task_out(t, route, names[t.id])
+    extras = await _extras(db, [t])
+    out = _task_out(t, route, names[t.id], extras[t.id])
+    # Закрыть родителя с живыми подзадачами можно, но человек должен об этом
+    # узнать: запрет здесь мешал бы работать (подзадачу могли завести «на потом»),
+    # а молчание превращало бы дерево в свалку незакрытых хвостов.
+    if payload.status in ("done", "cancelled") and out["subtasks"]["open"]:
+        out["warning"] = f"У задачи осталось открытых подзадач: {out['subtasks']['open']}"
+    if mentioned:
+        out["mentioned"] = mentioned
+    return out
+
+
+class BulkAction(BaseModel):
+    company_id: str
+    task_ids: list[str] = Field(min_length=1, max_length=200)
+    assignee_id: str | None = None
+    status: str | None = Field(None, pattern="^(open|done|cancelled)$")
+    priority: str | None = Field(None, pattern=_PRIORITY)
+    due_at: datetime | None = None
+    stage_code: str | None = None
+    note: str | None = Field(None, max_length=2000)
+
+
+@router.post("/bulk")
+async def bulk_action(
+    payload: BulkAction,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """То же действие над несколькими задачами.
+
+    Контракт тот же, что у `/action`, и след пишется каждой задаче отдельно: массовая
+    правка не должна выглядеть в ленте иначе, чем ручная. Задачи, на которые нет
+    права, пропускаются с перечислением — падать целиком из-за одной чужой строки
+    значит заставить человека вычислять её вручную.
+    """
+    cid = await assert_company_product(payload.company_id, current_user, db, "plan")
+    done, skipped = 0, []
+    for raw in payload.task_ids:
+        t = await db.get(Task, _uuid_or_400(raw, "task_id"))
+        if t is None or t.company_id != cid:
+            skipped.append(raw)
+            continue
+        try:
+            await _assert_actor(db, cid, current_user, t)
+        except HTTPException:
+            skipped.append(f"№{t.number}")
+            continue
+        route = _route_of(await db.get(TaskType, t.type_id) if t.type_id else None)
+        if payload.stage_code and payload.stage_code in [s["code"] for s in route] \
+                and payload.stage_code != t.stage_code:
+            db.add(TaskEvent(task_id=t.id, kind="stage", user_id=current_user.id,
+                             from_value=_stage_name(route, t.stage_code),
+                             to_value=_stage_name(route, payload.stage_code),
+                             note=payload.note))
+            t.stage_code = payload.stage_code
+        if payload.assignee_id is not None:
+            new_id = _uuid_or_400(payload.assignee_id, "assignee_id") if payload.assignee_id else None
+            if new_id is not None and await db.get(UserCompany, (new_id, cid)) is None:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                    "Исполнитель не состоит в пространстве")
+            if new_id != t.assignee_id:
+                was = (await db.get(User, t.assignee_id)).name if t.assignee_id else None
+                now_name = (await db.get(User, new_id)).name if new_id else None
+                db.add(TaskEvent(task_id=t.id, kind="assign", user_id=current_user.id,
+                                 from_value=was, to_value=now_name, note=payload.note))
+                t.assignee_id = new_id
+        if payload.status is not None and payload.status != t.status:
+            db.add(TaskEvent(task_id=t.id, kind="status", user_id=current_user.id,
+                             from_value=t.status, to_value=payload.status, note=payload.note))
+            t.status = payload.status
+            t.closed_at = None if payload.status == "open" else datetime.now(timezone.utc)
+        if payload.priority is not None:
+            t.priority = payload.priority
+        if payload.due_at is not None:
+            t.due_at = payload.due_at
+        done += 1
+    await db.commit()
+    return {"changed": done, "skipped": skipped}
+
+
+# ── Чек-лист ─────────────────────────────────────────────────────────────
+
+
+class ChecklistIn(BaseModel):
+    company_id: str
+    text: str = Field(min_length=1, max_length=500)
+
+
+@router.post("/{task_id}/checklist", status_code=status.HTTP_201_CREATED)
+async def add_checklist_item(
+    task_id: str,
+    payload: ChecklistIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cid = await assert_company_product(payload.company_id, current_user, db, "plan")
+    t = await _task_or_404(db, cid, task_id)
+    await _assert_actor(db, cid, current_user, t)
+    last = (await db.execute(select(func.coalesce(func.max(TaskChecklistItem.position), 0))
+                             .where(TaskChecklistItem.task_id == t.id))).scalar_one()
+    item = TaskChecklistItem(task_id=t.id, text=payload.text.strip(), position=last + 10)
+    db.add(item)
+    await db.commit()
+    await db.refresh(item)
+    return {"id": str(item.id), "text": item.text, "done": item.done, "position": item.position}
+
+
+class ChecklistPatch(BaseModel):
+    company_id: str
+    done: bool | None = None
+    text: str | None = Field(None, min_length=1, max_length=500)
+
+
+@router.patch("/{task_id}/checklist/{item_id}")
+async def update_checklist_item(
+    task_id: str,
+    item_id: str,
+    payload: ChecklistPatch,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Отметить пункт или переписать его. Отметка не пишется в ленту событий:
+    ход по чек-листу — это работа внутри одного шага, а не движение задачи, и
+    двадцать записей «отметил пункт» утопили бы след."""
+    cid = await assert_company_product(payload.company_id, current_user, db, "plan")
+    t = await _task_or_404(db, cid, task_id)
+    await _assert_actor(db, cid, current_user, t)
+    item = await db.get(TaskChecklistItem, _uuid_or_400(item_id, "item_id"))
+    if item is None or item.task_id != t.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Пункт не найден")
+    if payload.text is not None:
+        item.text = payload.text.strip()
+    if payload.done is not None and payload.done != item.done:
+        item.done = payload.done
+        item.done_by = current_user.id if payload.done else None
+        item.done_at = datetime.now(timezone.utc) if payload.done else None
+    await db.commit()
+    return {"id": str(item.id), "text": item.text, "done": item.done}
+
+
+@router.delete("/{task_id}/checklist/{item_id}")
+async def delete_checklist_item(
+    task_id: str,
+    item_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cid = await assert_company_product(company_id, current_user, db, "plan")
+    t = await _task_or_404(db, cid, task_id)
+    await _assert_actor(db, cid, current_user, t)
+    item = await db.get(TaskChecklistItem, _uuid_or_400(item_id, "item_id"))
+    if item is None or item.task_id != t.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Пункт не найден")
+    await db.delete(item)
+    await db.commit()
+    return {"deleted": item_id}
+
+
+# ── Связи и подзадачи ────────────────────────────────────────────────────
+
+
+class LinkIn(BaseModel):
+    company_id: str
+    related_task_id: str
+    kind: str = Field("relates", pattern="^(subtask|blocks|relates|duplicates)$")
+
+
+@router.post("/{task_id}/links", status_code=status.HTTP_201_CREATED)
+async def add_link(
+    task_id: str,
+    payload: LinkIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Связать две задачи. Подзадача — та же связь вида `subtask`, где `task_id`
+    родитель: отдельного дерева не заводим."""
+    cid = await assert_company_product(payload.company_id, current_user, db, "plan")
+    t = await _task_or_404(db, cid, task_id)
+    await _assert_actor(db, cid, current_user, t)
+    other = await _task_or_404(db, cid, payload.related_task_id)
+    if other.id == t.id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Задачу нельзя связать с собой")
+    # Круг из подзадач сделал бы дерево бесконечным при обходе; для остальных
+    # видов связь в обе стороны законна («связана» симметрична по смыслу).
+    if payload.kind == "subtask" and (await db.execute(select(TaskLink).where(
+            TaskLink.task_id == other.id, TaskLink.related_task_id == t.id,
+            TaskLink.kind == "subtask"))).scalar_one_or_none() is not None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Эта задача уже родитель для выбранной")
+    exists = (await db.execute(select(TaskLink).where(
+        TaskLink.task_id == t.id, TaskLink.related_task_id == other.id,
+        TaskLink.kind == payload.kind))).scalar_one_or_none()
+    if exists is not None:
+        return {"id": str(exists.id), "kind": exists.kind}
+    link = TaskLink(task_id=t.id, related_task_id=other.id, kind=payload.kind,
+                    created_by=current_user.id)
+    db.add(link)
+    await db.commit()
+    await db.refresh(link)
+    return {"id": str(link.id), "kind": link.kind, "task_id": str(other.id),
+            "number": other.number, "title": other.title, "status": other.status}
+
+
+@router.delete("/{task_id}/links/{link_id}")
+async def delete_link(
+    task_id: str,
+    link_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cid = await assert_company_product(company_id, current_user, db, "plan")
+    t = await _task_or_404(db, cid, task_id)
+    await _assert_actor(db, cid, current_user, t)
+    link = await db.get(TaskLink, _uuid_or_400(link_id, "link_id"))
+    # Связь снимается с любой из двух сторон: человек видит её в обеих карточках
+    # и не обязан помнить, из которой её заводили.
+    if link is None or t.id not in (link.task_id, link.related_task_id):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Связь не найдена")
+    await db.delete(link)
+    await db.commit()
+    return {"deleted": link_id}
+
+
+# ── Наблюдатели ──────────────────────────────────────────────────────────
+
+
+class WatcherIn(BaseModel):
+    company_id: str
+    user_id: str | None = None      # пусто — подписать себя
+
+
+@router.post("/{task_id}/watchers", status_code=status.HTTP_201_CREATED)
+async def add_watcher(
+    task_id: str,
+    payload: WatcherIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Подписаться на задачу или добавить наблюдателя. Подписать себя может любой,
+    кто видит задачу: следить за чужой работой — не привилегия."""
+    cid = await assert_company_product(payload.company_id, current_user, db, "plan")
+    t = await _task_or_404(db, cid, task_id)
+    uid = _uuid_or_400(payload.user_id, "user_id") if payload.user_id else current_user.id
+    if uid != current_user.id:
+        await _assert_actor(db, cid, current_user, t)
+        if await db.get(UserCompany, (uid, cid)) is None:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Человек не состоит в пространстве")
+    if await db.get(TaskWatcher, (t.id, uid)) is None:
+        db.add(TaskWatcher(task_id=t.id, user_id=uid,
+                           reason="manual", added_by=current_user.id))
+        await db.commit()
+    return {"task_id": str(t.id), "user_id": str(uid)}
+
+
+@router.delete("/{task_id}/watchers/{user_id}")
+async def delete_watcher(
+    task_id: str,
+    user_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cid = await assert_company_product(company_id, current_user, db, "plan")
+    t = await _task_or_404(db, cid, task_id)
+    uid = _uuid_or_400(user_id, "user_id")
+    if uid != current_user.id:
+        await _assert_actor(db, cid, current_user, t)
+    w = await db.get(TaskWatcher, (t.id, uid))
+    if w is not None:
+        await db.delete(w)
+        await db.commit()
+    return {"deleted": user_id}
+
+
+# ── Вложения ─────────────────────────────────────────────────────────────
+
+
+@router.post("/{task_id}/attachments", status_code=status.HTTP_201_CREATED)
+async def upload_attachment(
+    task_id: str,
+    company_id: str = Query(...),
+    event_id: str | None = Query(None),
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Приложить файл к задаче или к реплике. Хранение общее с остальными файлами
+    Ядра: запись в `source_files`, сам файл в `UPLOAD_DIR` (как у документов проекта)."""
+    cid = await assert_company_product(company_id, current_user, db, "plan")
+    t = await _task_or_404(db, cid, task_id)
+    await _assert_actor(db, cid, current_user, t)
+    content = await file.read()
+    if not content:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Пустой файл")
+
+    file_id = uuid.uuid4()
+    upload_dir = Path(os.environ.get("UPLOAD_DIR", "/app/uploads"))
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    path = upload_dir / f"{file_id}{Path(file.filename or 'file').suffix}"
+    with open(path, "wb") as fh:
+        fh.write(content)
+    db.add(SourceFile(
+        id=file_id, company_id=cid, file_name=file.filename or "файл",
+        mime_type=file.content_type or "application/octet-stream", size=len(content),
+        storage_path=str(path), fingerprint=hashlib.sha256(content).hexdigest()))
+    att = TaskAttachment(
+        task_id=t.id, file_id=file_id, uploaded_by=current_user.id,
+        event_id=_uuid_or_400(event_id, "event_id") if event_id else None)
+    db.add(att)
+    await db.commit()
+    await db.refresh(att)
+    return {"id": str(att.id), "file_name": file.filename, "size": len(content)}
+
+
+@router.delete("/{task_id}/attachments/{attachment_id}")
+async def delete_attachment(
+    task_id: str,
+    attachment_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Отцепить файл от задачи. Сам файл в хранилище остаётся: на него может
+    ссылаться другая запись, а чистка хранилища — отдельная работа."""
+    cid = await assert_company_product(company_id, current_user, db, "plan")
+    t = await _task_or_404(db, cid, task_id)
+    await _assert_actor(db, cid, current_user, t)
+    att = await db.get(TaskAttachment, _uuid_or_400(attachment_id, "attachment_id"))
+    if att is None or att.task_id != t.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Вложение не найдено")
+    await db.delete(att)
+    await db.commit()
+    return {"deleted": attachment_id}
