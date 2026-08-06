@@ -24,6 +24,7 @@ export const TASKS_VIEWS: Record<string, TasksView[]> = {
     { key: 'today', label: 'Сегодня', hint: 'что горит: просрочено и срок на носу' },
     { key: 'mine', label: 'На мне', hint: 'вся работа, которую делаю я' },
     { key: 'assigned', label: 'Я поставил', hint: 'что поручил другим и где сейчас мяч' },
+    { key: 'waiting', label: 'Ждём внешних', hint: 'отдано подрядчику: мяч у внешней стороны' },
     { key: 'watching', label: 'Наблюдаю', hint: 'задачи, за которыми слежу со стороны' },
     { key: 'closed', label: 'Закрытые мои', hint: 'что уже сделано' },
   ],

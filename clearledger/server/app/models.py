@@ -6333,6 +6333,11 @@ class Task(Base):
     object_id: Mapped[str | None] = mapped_column(
         String(40), ForeignKey("service_locations.id", ondelete="SET NULL"), nullable=True)
     due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # У кого мяч: us — ждём себя, external — ждём внешнюю сторону. NULL = у нас,
+    # как и было до появления внешних участников. Отдельное поле, а не вывод из
+    # состава участников: «отправили и ждём» — это решение человека, а не факт
+    # наличия чужого адреса в карточке.
+    waiting_for: Mapped[str | None] = mapped_column(String(20), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True)
     updated_at: Mapped[datetime] = mapped_column(
@@ -6353,10 +6358,14 @@ class TaskEvent(Base):
     task_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="CASCADE"),
         nullable=False, index=True)
-    # created | stage | assign | status | comment
+    # created | stage | assign | status | comment | mail | external_stage | delegate
     kind: Mapped[str] = mapped_column(String(20), nullable=False)
     user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    # Имя автора без учётки: письмо мог прислать человек, которого в пространстве
+    # нет вовсе, и подписывать его событие «система» — терять единственный ответ
+    # на вопрос «кто это сказал».
+    actor_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
     from_value: Mapped[str | None] = mapped_column(String(200), nullable=True)
     to_value: Mapped[str | None] = mapped_column(String(200), nullable=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -6477,6 +6486,33 @@ class TaskLabel(Base):
     __table_args__ = (
         UniqueConstraint("company_id", "name", name="uq_task_labels_name"),
     )
+
+
+class TaskParticipant(Base):
+    """Кто участвует в задаче и каким способом до него доходит слово.
+
+    Внешний человек участвует одним из трёх способов (docs/TASKS.md §9): работает
+    прямо в пространстве, разговаривает каналом (почта) или сидит во внешней
+    системе за коннектором. Способ хранится здесь, чтобы карточка могла честно
+    показать, куда именно уходит текст, — «просто участник» без канала оставлял бы
+    автора в догадках.
+    """
+    __tablename__ = "task_participants"
+
+    task_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="CASCADE"), primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    # assignee | external | observer
+    role: Mapped[str] = mapped_column(String(20), nullable=False, default="external")
+    # space | mail | connector — где человек на самом деле работает.
+    channel: Mapped[str] = mapped_column(String(20), nullable=False, default="space")
+    # Адрес в канале: почтовый ящик, идентификатор в чужой системе.
+    channel_ref: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    added_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
 
 
 class TaskLabelLink(Base):

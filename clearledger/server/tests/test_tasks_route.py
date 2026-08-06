@@ -265,3 +265,78 @@ async def test_рабочее_место_отделяет_моё_от_поруч
     watching = (await auth_client.get("/api/tasks", params={
         "company_id": cid, "scope": "watching"})).json()
     assert handed["id"] in ids(watching["tasks"])
+
+
+async def test_поручение_внешнему_письмом(auth_client: AsyncClient, monkeypatch):
+    """Режим B: подрядчик не заходит в пространство, разговариваем почтой.
+
+    Ловим: делегирование не переводит мяч наружу (и задача продолжает висеть
+    «на мне»); ответ с чужого адреса принимается; повторная доставка того же
+    письма плодит дубли в ленте; ответ не возвращает мяч нам.
+    """
+    from app.config import settings
+    # Канал включаем на время проверки: без ящика ручка честно отвечает 409, и
+    # это тоже часть договора — молча глотать поручения она не должна.
+    monkeypatch.setattr(settings, "chat_mail_inbox", "space@dataworker.ru", raising=False)
+    monkeypatch.setattr(settings, "smtp_host", "localhost", raising=False)
+
+    me = await _me(auth_client)
+    cid = me["companies"][0]["id"]
+    task = (await auth_client.post("/api/tasks", json={
+        "company_id": cid, "title": "Заменить шлагбаум на въезде",
+        "assignee_id": me["id"]})).json()
+
+    r = await auth_client.post(f"/api/tasks/{task['id']}/delegate", json={
+        "company_id": cid, "email": "podryad@example.org", "name": "Пётр Подрядов",
+        "note": "Смета согласована, приступайте"})
+    assert r.status_code == 201, r.text
+    assert r.json()["reply_address"] == f"space+t{task['number']}@dataworker.ru"
+
+    card = (await auth_client.get(f"/api/tasks/{task['id']}",
+                                  params={"company_id": cid})).json()
+    assert card["waiting_for"] == "external", "мяч не ушёл внешней стороне"
+    assert [(p["channel"], p["role"]) for p in card["participants"]] == [("mail", "external")]
+    assert card["events"][-1]["kind"] == "delegate"
+
+    # Пока ждём подрядчика, работа не висит «на мне».
+    on_me = (await auth_client.get("/api/tasks", params={
+        "company_id": cid, "scope": "mine"})).json()["tasks"]
+    assert task["id"] not in [t["id"] for t in on_me]
+    waiting = (await auth_client.get("/api/tasks", params={
+        "company_id": cid, "scope": "waiting"})).json()["tasks"]
+    assert task["id"] in [t["id"] for t in waiting]
+
+    # Ответ письмом приносит поллер Поддержки — он ходит ключом пространства,
+    # а не токеном человека: своего поллера у задач нет и не будет.
+    import uuid as _uuid
+
+    from app.database import async_session_factory
+    from app.models import Company
+
+    async with async_session_factory() as db:
+        company = await db.get(Company, _uuid.UUID(cid))
+        company.cloud_api_key = "test-space-key"
+        await db.commit()
+    head = {"X-Cloud-API-Key": "test-space-key"}
+
+    inbound = {"fromAddress": "podryad@example.org", "fromName": "Пётр Подрядов",
+               "text": "Шлагбаум привезли, ставим завтра", "messageId": "<m-1@example.org>",
+               "emailMessageId": "arch-42"}
+    # Чужой адрес не пишет: адрес задачи может утечь пересылкой письма.
+    r = await auth_client.post(f"/api/tasks/{task['number']}/inbound-email",
+                               json={**inbound, "fromAddress": "kto-to@example.net"},
+                               headers=head)
+    assert r.status_code == 403, "посторонний написал в задачу"
+
+    r = await auth_client.post(f"/api/tasks/{task['number']}/inbound-email",
+                               json=inbound, headers=head)
+    assert r.status_code == 201, r.text
+    card = (await auth_client.get(f"/api/tasks/{task['id']}",
+                                  params={"company_id": cid})).json()
+    mail_events = [e for e in card["events"] if e["kind"] == "mail"]
+    assert [e["user"] for e in mail_events] == ["Пётр Подрядов"]
+    assert card["waiting_for"] == "us", "ответ не вернул мяч нам"
+
+    r = await auth_client.post(f"/api/tasks/{task['number']}/inbound-email",
+                               json=inbound, headers=head)
+    assert r.json().get("duplicate") is True, "повторная доставка задвоила реплику"

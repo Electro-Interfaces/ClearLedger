@@ -11,7 +11,8 @@
 import { useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  ArrowRight, CheckCircle2, Eye, EyeOff, Link2, Loader2, Paperclip, Plus, Trash2, X,
+  ArrowRight, CheckCircle2, Eye, EyeOff, Link2, Loader2, Mail, Paperclip, Plus,
+  Send, Trash2, X,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
@@ -29,7 +30,8 @@ import * as tasksService from '@/services/tasksService'
 import type { LinkKind, TaskDetails } from '@/services/tasksService'
 import { listSpaceObjects } from '@/services/spaceObjectsService'
 import {
-  LINK_LABEL, PRIORITY_LABEL, PRIORITY_TONE, STATUS_LABEL, dt, dtT, eventText, fileSize,
+  LINK_LABEL, PRIORITY_LABEL, PRIORITY_TONE, STATUS_LABEL, WAITING_LABEL,
+  dt, dtT, eventText, fileSize,
 } from './taskWords'
 
 export function TaskCard({ id, companyId, onChanged, onOpenOther }: {
@@ -163,6 +165,8 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther }: {
         <Links task={t} companyId={companyId} live={live}
           onChanged={reload} onOpenOther={onOpenOther} />
 
+        <External task={t} companyId={companyId} live={live} onChanged={reload} />
+
         <Section title="Файлы">
           <input ref={fileRef} type="file" className="hidden"
             onChange={(e) => {
@@ -213,13 +217,30 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther }: {
           <div className="space-y-2">
             {events.map((e) => (
               <div key={e.id}
-                className="rounded-md border border-border/70 bg-card/60 px-3 py-1.5 text-xs">
+                className={cn('rounded-md border px-3 py-1.5 text-xs',
+                  // Реплика из письма помечена: автор должен понимать, что человек
+                  // писал не отсюда и мог не видеть остального контекста.
+                  e.kind === 'mail'
+                    ? 'border-sky-500/40 bg-sky-500/5'
+                    : 'border-border/70 bg-card/60')}>
                 <div className="flex flex-wrap items-baseline gap-1.5">
                   <span className="font-medium">{e.user ?? 'система'}</span>
                   <span className="text-muted-foreground">{eventText(e)}</span>
+                  {e.kind === 'mail' && (
+                    <span className="inline-flex items-center gap-0.5 rounded border border-sky-500/40 px-1 text-[10px] text-sky-700 dark:text-sky-300">
+                      <Mail className="h-2.5 w-2.5" />письмом
+                    </span>
+                  )}
                   <span className="ml-auto text-[11px] text-muted-foreground">{dtT(e.created_at)}</span>
                 </div>
                 {e.note && <div className="mt-0.5 whitespace-pre-wrap text-foreground/90">{e.note}</div>}
+                {e.kind === 'mail' && e.to && (
+                  // Первоисточник остаётся в архиве Поддержки: из ленты должна быть
+                  // возможность дойти до оригинала, а не только до вычищенного текста.
+                  <div className="mt-0.5 text-[10px] text-muted-foreground">
+                    оригинал письма в архиве Поддержки: {e.to}
+                  </div>
+                )}
               </div>
             ))}
             {events.length === 0 && (
@@ -626,6 +647,117 @@ function Links({ task, companyId, live, onChanged, onOpenOther }: {
           <p className="text-xs text-muted-foreground">Связей нет.</p>
         )}
       </div>
+    </Section>
+  )
+}
+
+/* ── Внешние участники: разговор каналом ─────────────────────────────── */
+
+function External({ task, companyId, live, onChanged }: {
+  task: TaskDetails; companyId: string; live: boolean; onChanged: () => void
+}) {
+  const [adding, setAdding] = useState(false)
+  const [email, setEmail] = useState('')
+  const [name, setName] = useState('')
+  const [note, setNote] = useState('')
+
+  const delegate = useMutation({
+    mutationFn: () => tasksService.delegateByMail(task.id, {
+      companyId, email: email.trim(), name: name.trim() || undefined,
+      note: note.trim() || undefined,
+    }),
+    onSuccess: (r) => {
+      toast.success(`Поручение ушло на ${r.email}`)
+      setAdding(false); setEmail(''); setName(''); setNote('')
+      onChanged()
+    },
+    onError: (e) => toast.error((e as Error).message),
+  })
+  const drop = useMutation({
+    mutationFn: (userId: string) =>
+      tasksService.removeParticipant(task.id, userId, companyId),
+    onSuccess: onChanged,
+    onError: (e) => toast.error((e as Error).message),
+  })
+
+  return (
+    <Section title="Внешние участники" action={live && (
+      <button type="button" onClick={() => setAdding((v) => !v)}
+        className="text-[11px] text-muted-foreground hover:text-foreground">
+        {adding ? 'отмена' : 'поручить наружу'}
+      </button>
+    )}>
+      {task.waiting_for === 'external' && (
+        // Состояние «мяч у внешней стороны» видимое: задача не брошена, но и не
+        // висит «на мне» — иначе список «что делать» полон тем, чего сделать нельзя.
+        <div className="mb-2 rounded-md border border-amber-500/40 bg-amber-500/5 px-2.5 py-1.5 text-xs">
+          <Send className="mr-1 inline h-3 w-3 text-amber-600 dark:text-amber-400" />
+          {WAITING_LABEL.external} — задача ждёт ответа и не показывается в «На мне».
+        </div>
+      )}
+
+      {adding && (
+        <div className="mb-2 space-y-2 rounded-md border border-dashed p-2">
+          <div className="grid gap-2 sm:grid-cols-2">
+            <Input value={email} onChange={(e) => setEmail(e.target.value)}
+              placeholder="Почта подрядчика" className="h-7 text-xs" type="email" />
+            <Input value={name} onChange={(e) => setName(e.target.value)}
+              placeholder="Как его зовут" className="h-7 text-xs" maxLength={120} />
+          </div>
+          <Textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2}
+            maxLength={2000} className="text-xs"
+            placeholder="Что нужно сделать — уйдёт в письмо" />
+          <div className="flex items-center gap-2">
+            <Button size="sm" className="h-7"
+              disabled={!email.includes('@') || delegate.isPending}
+              onClick={() => delegate.mutate()}>
+              {delegate.isPending
+                ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
+                : <Send className="mr-1.5 h-3 w-3" />}
+              Отправить письмом
+            </Button>
+            <span className="text-[11px] text-muted-foreground">
+              Ответ вернётся сюда репликой с пометкой «письмом».
+            </span>
+          </div>
+        </div>
+      )}
+
+      <div className="space-y-1">
+        {task.participants.map((p) => (
+          <div key={p.user_id} className="flex items-center gap-2 text-xs">
+            <Mail className="h-3 w-3 shrink-0 text-muted-foreground" />
+            <span className="font-medium">{p.name}</span>
+            <span className="truncate text-muted-foreground">{p.channel_ref ?? p.email}</span>
+            <span className="shrink-0 rounded border border-border/60 px-1 py-px text-[10px] text-muted-foreground">
+              {p.channel === 'mail' ? 'письмом' : p.channel === 'connector' ? 'коннектор' : 'в пространстве'}
+            </span>
+            {live && (
+              <Button variant="ghost" size="sm" className="ml-auto h-6 px-1.5"
+                aria-label={`Убрать ${p.name}`} onClick={() => drop.mutate(p.user_id)}>
+                <Trash2 className="h-3 w-3" />
+              </Button>
+            )}
+          </div>
+        ))}
+        {task.participants.length === 0 && !adding && (
+          <p className="text-xs text-muted-foreground">
+            Внешних участников нет. Подрядчику можно поручить письмом — заходить в
+            пространство ему для этого не нужно.
+          </p>
+        )}
+      </div>
+      {task.reply_address && task.participants.length > 0 && (
+        <p className="mt-1.5 text-[11px] text-muted-foreground">
+          Адрес ответа: {task.reply_address}
+        </p>
+      )}
+      {!task.reply_address && adding && (
+        // Канал, который не настроен, обязан честно говорить о себе.
+        <p className="mt-1.5 text-[11px] text-amber-600 dark:text-amber-400">
+          В пространстве не настроен ящик приёма — письмо отправить некуда.
+        </p>
+      )}
     </Section>
   )
 }

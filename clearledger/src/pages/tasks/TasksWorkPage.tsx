@@ -30,7 +30,7 @@ import type { SpaceTask, TaskScope } from '@/services/tasksService'
 import { listSpaceObjects } from '@/services/spaceObjectsService'
 import { TaskCard } from '@/components/tasks/TaskCard'
 import {
-  PRIORITY_LABEL, PRIORITY_TONE, STATUS_LABEL, dt, dtT,
+  PRIORITY_LABEL, PRIORITY_TONE, STATUS_LABEL, WAITING_LABEL, dt, dtT,
 } from '@/components/tasks/taskWords'
 import { TASKS_VIEWS, tasksRouteOf, useTasksView } from './TasksLayout'
 import { TasksBoardPage } from './TasksBoardPage'
@@ -40,8 +40,8 @@ const PAGE = 100
 
 /** Что показывает пункт: разрез работы и нужны ли ему фильтры реестра. */
 const VIEW_SCOPE: Record<string, TaskScope> = {
-  today: 'today', mine: 'mine', assigned: 'assigned', watching: 'watching',
-  closed: 'closed', registry: 'all', objects: 'all',
+  today: 'today', mine: 'mine', assigned: 'assigned', waiting: 'waiting',
+  watching: 'watching', closed: 'closed', registry: 'all', objects: 'all',
 }
 
 export function TasksWorkPage() {
@@ -370,6 +370,11 @@ function TasksTable({ tasks, sort, onSort, picked, onPick, groupByObject, onOpen
                       {t.subtasks.total > 0 && (
                         <span>· подзадач {t.subtasks.open} из {t.subtasks.total} открыто</span>
                       )}
+                      {t.waiting_for === 'external' && (
+                        <span className="rounded border border-amber-500/40 bg-amber-500/5 px-1 py-px text-amber-700 dark:text-amber-400">
+                          {WAITING_LABEL.external}
+                        </span>
+                      )}
                       {t.labels.map((l) => (
                         <span key={l.id}
                           className="rounded border border-border/60 bg-muted/40 px-1 py-px">
@@ -476,6 +481,7 @@ function EmptyState({ view, hasFilter, onReset }: {
     today: 'Ничего не горит: просроченных задач и сроков на сегодня нет.',
     mine: 'На вас сейчас нет открытых задач.',
     assigned: 'Вы никому ничего не поручили. Поставьте задачу строкой выше и назначьте исполнителя в карточке.',
+    waiting: 'Наружу ничего не отдано. Поручить подрядчику письмом можно из карточки — заходить в пространство ему не нужно.',
     watching: 'Вы ни за чем не наблюдаете. Наблюдателем становятся из карточки задачи или когда вас упомянут через @.',
     closed: 'Завершённых задач пока нет.',
     registry: 'В компании ещё нет ни одной задачи. Поставьте первую строкой выше.',

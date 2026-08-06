@@ -40,6 +40,8 @@ export interface SpaceTask {
   object_id: string | null
   due_at: string | null
   overdue: boolean
+  /** У кого мяч: `external` — ждём внешнюю сторону, `us`/null — у нас. */
+  waiting_for: 'us' | 'external' | null
   created_at: string | null
   updated_at: string | null
   closed_at: string | null
@@ -70,6 +72,11 @@ export interface TaskLink {
   number: number; title: string; status: string
 }
 export interface TaskWatcher { user_id: string; name: string; reason: string }
+/** Внешний участник: каким каналом до него доходит слово. */
+export interface TaskParticipant {
+  user_id: string; name: string; email: string | null
+  role: string; channel: 'space' | 'mail' | 'connector'; channel_ref: string | null
+}
 export interface TaskAttachment {
   id: string; event_id: string | null; file_name: string
   mime_type: string; size: number; created_at: string | null
@@ -83,6 +90,9 @@ export interface TaskDetails extends SpaceTask {
   watchers: TaskWatcher[]
   attachments: TaskAttachment[]
   links: TaskLink[]
+  participants: TaskParticipant[]
+  /** Адрес, по которому внешний отвечает письмом. null — канал не настроен. */
+  reply_address: string | null
 }
 
 /** Ответ действия: сервер может предупредить, не отказав (открытые подзадачи). */
@@ -91,8 +101,8 @@ export interface TaskActionResult extends SpaceTask {
   mentioned?: string[]
 }
 
-export type TaskScope =
-  'open' | 'mine' | 'assigned' | 'watching' | 'overdue' | 'today' | 'closed' | 'all'
+export type TaskScope = 'open' | 'mine' | 'assigned' | 'watching' | 'overdue'
+  | 'today' | 'waiting' | 'closed' | 'all'
 
 export interface TaskFilters {
   objectId?: string; typeId?: string; assigneeId?: string; authorId?: string
@@ -236,6 +246,22 @@ export async function addWatcher(taskId: string, companyId: string, userId?: str
 
 export async function removeWatcher(taskId: string, userId: string, companyId: string) {
   return del(`/api/tasks/${taskId}/watchers/${userId}?company_id=${encodeURIComponent(companyId)}`)
+}
+
+/** Поручить тому, кто в пространство не заходит: письмо + ответ в ленту. */
+export async function delegateByMail(taskId: string, data: {
+  companyId: string; email: string; name?: string; note?: string
+}) {
+  return post<{ ok: boolean; user_id: string; email: string; reply_address: string | null }>(
+    `/api/tasks/${taskId}/delegate`, {
+      company_id: data.companyId, email: data.email,
+      name: data.name || undefined, note: data.note || undefined,
+    })
+}
+
+export async function removeParticipant(taskId: string, userId: string, companyId: string) {
+  return del<{ deleted: string; participants_left: number }>(
+    `/api/tasks/${taskId}/participants/${userId}?company_id=${encodeURIComponent(companyId)}`)
 }
 
 export async function listTaskLabels(companyId: string) {

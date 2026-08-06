@@ -48,6 +48,14 @@ export function eventText(e: { kind: string; from: string | null; to: string | n
     case 'assign': return e.to ? `исполнитель: ${e.from ?? '—'} → ${e.to}` : 'снял исполнителя'
     case 'status':
       return `статус: ${STATUS_LABEL[e.from ?? ''] ?? e.from} → ${STATUS_LABEL[e.to ?? ''] ?? e.to}`
+    case 'delegate': return `поручил внешнему участнику: ${e.to ?? '—'}`
+    case 'mail': return 'ответил письмом'
+    case 'external_stage': return `этап внешней системы: ${e.to ?? '—'}`
     default: return 'написал'
   }
+}
+
+/** Где сейчас мяч — словами, одинаковыми с «Заявками». */
+export const WAITING_LABEL: Record<string, string> = {
+  external: 'ждём внешнюю сторону', us: 'мяч у нас',
 }

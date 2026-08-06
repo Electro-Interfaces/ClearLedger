@@ -26,12 +26,14 @@ from pydantic import BaseModel, Field
 from sqlalchemy import case, delete as sa_delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import assert_company_product, get_current_user
+from app.auth import assert_company_product, get_company_by_api_key, get_current_user
 from app.database import get_db
 from app.models import (
-    ServiceLocation, SourceFile, Task, TaskAttachment, TaskChecklistItem, TaskEvent,
-    TaskLabel, TaskLabelLink, TaskLink, TaskType, TaskWatcher, User, UserCompany,
+    Company, ServiceLocation, SourceFile, Task, TaskAttachment, TaskChecklistItem,
+    TaskEvent, TaskLabel, TaskLabelLink, TaskLink, TaskParticipant, TaskType,
+    TaskWatcher, User, UserCompany,
 )
+from app.services import task_mail
 
 router = APIRouter(prefix="/tasks", tags=["Задачи"])
 
@@ -124,6 +126,7 @@ def _task_out(t: Task, route: list[dict], names: dict[str, str | None],
         "object": names.get("object"),
         "object_id": t.object_id,
         "due_at": t.due_at.isoformat() if t.due_at else None,
+        "waiting_for": t.waiting_for,
         # Просрочка — свойство живой задачи: у закрытой срок уже не сигнал.
         "overdue": bool(t.due_at and t.status == "open" and t.due_at < now),
         "created_at": t.created_at.isoformat() if t.created_at else None,
@@ -244,7 +247,7 @@ _MENTION = re.compile(r"@([\w.-]{2,60})", re.UNICODE)
 
 
 async def _watch_mentions(db: AsyncSession, cid: uuid.UUID, task: Task,
-                          note: str | None, actor: User) -> list[str]:
+                          note: str | None, actor: User) -> list[tuple[str, str | None]]:
     """Упомянутые в реплике `@имя` попадают в наблюдатели.
 
     Имя ищем по началу слова: люди пишут «@Петров», а в реестре «Петров Иван».
@@ -260,7 +263,7 @@ async def _watch_mentions(db: AsyncSession, cid: uuid.UUID, task: Task,
         select(User.id, User.name, User.email).join(
             UserCompany, UserCompany.user_id == User.id)
         .where(UserCompany.company_id == cid))).all()
-    added: list[str] = []
+    added: list[tuple[str, str | None]] = []
     for uid, name, email in people:
         hay = f"{name or ''} {email or ''}".lower()
         if not any(hay.startswith(h) or f" {h}" in hay or (email or "").lower().startswith(h)
@@ -269,14 +272,14 @@ async def _watch_mentions(db: AsyncSession, cid: uuid.UUID, task: Task,
         if await db.get(TaskWatcher, (task.id, uid)) is not None:
             continue
         db.add(TaskWatcher(task_id=task.id, user_id=uid, reason="mention", added_by=actor.id))
-        added.append(name or str(uid))
+        added.append((name or str(uid), email))
     return added
 
 
 @router.get("")
 async def list_tasks(
     company_id: str = Query(...),
-    scope: str = Query("open", pattern="^(open|mine|assigned|watching|overdue|today|closed|all)$"),
+    scope: str = Query("open", pattern="^(open|mine|assigned|watching|overdue|today|waiting|closed|all)$"),
     object_id: str | None = Query(None),
     type_id: str | None = Query(None),
     assignee_id: str | None = Query(None),
@@ -311,7 +314,12 @@ async def list_tasks(
     elif scope == "mine":
         # «На мне» — именно исполнение. Автор своей задачи её не делает: смешав
         # их, экран исполнителя показывал бы чужую работу и терял смысл счётчика.
-        sel = sel.where(Task.status == "open", Task.assignee_id == current_user.id)
+        # Отданное наружу тоже уходит: пока ждём подрядчика, работа не на мне —
+        # иначе список «что делать» наполняется тем, что делать сейчас нельзя.
+        sel = sel.where(Task.status == "open", Task.assignee_id == current_user.id,
+                        or_(Task.waiting_for.is_(None), Task.waiting_for != "external"))
+    elif scope == "waiting":
+        sel = sel.where(Task.status == "open", Task.waiting_for == "external")
     elif scope == "assigned":
         sel = sel.where(Task.status == "open", Task.author_id == current_user.id,
                         or_(Task.assignee_id.is_(None), Task.assignee_id != current_user.id))
@@ -566,13 +574,21 @@ async def create_task(
     await db.flush()
     db.add(TaskEvent(task_id=t.id, kind="created", user_id=current_user.id,
                      to_value=_stage_name(route, t.stage_code)))
-    if assignee is not None:
+    person = await db.get(User, assignee) if assignee is not None else None
+    if person is not None:
         db.add(TaskEvent(task_id=t.id, kind="assign", user_id=current_user.id,
-                         to_value=(await db.get(User, assignee)).name))
+                         to_value=person.name))
     await db.commit()
     await db.refresh(t)
+    # Поручение письмом: человек узнаёт о задаче, не заходя в систему. Себе не
+    # пишем — тот, кто поставил задачу на себя, о ней уже знает.
+    if person is not None and person.id != current_user.id and person.email:
+        task_mail.send_notice_async(
+            [person.email], f"Вам поручена задача №{t.number}: {t.title}",
+            _errand_text(t, current_user, None))
     names = await _names(db, [t])
-    return _task_out(t, route, names[t.id])
+    extras = await _extras(db, [t])
+    return _task_out(t, route, names[t.id], extras[t.id])
 
 
 # ВНИМАНИЕ: `/summary` объявлен ДО `/{task_id}` — иначе FastAPI разберёт «summary»
@@ -779,15 +795,28 @@ async def task_details(
         .join(SourceFile, SourceFile.id == TaskAttachment.file_id)
         .where(TaskAttachment.task_id == t.id)
         .order_by(TaskAttachment.created_at))).all()
+    participants = (await db.execute(
+        select(TaskParticipant, User.name, User.email)
+        .join(User, User.id == TaskParticipant.user_id)
+        .where(TaskParticipant.task_id == t.id)
+        .order_by(TaskParticipant.created_at))).all()
 
     return {
         **_task_out(t, names[t.id]["route"], names[t.id], extras[t.id]),
         "description": t.description,
         "events": [{
-            "id": str(e.id), "kind": e.kind, "user": actors.get(e.user_id),
+            "id": str(e.id), "kind": e.kind,
+            # Имя из письма важнее имени учётки: подпись под репликой должна
+            # совпадать с тем, как человек представился в почте.
+            "user": e.actor_name or actors.get(e.user_id),
             "from": e.from_value, "to": e.to_value, "note": e.note,
             "created_at": e.created_at.isoformat() if e.created_at else None,
         } for e in events],
+        "participants": [{
+            "user_id": str(p.user_id), "name": n, "email": mail,
+            "role": p.role, "channel": p.channel, "channel_ref": p.channel_ref,
+        } for p, n, mail in participants],
+        "reply_address": task_mail.reply_address(t.number) if task_mail.enabled() else None,
         # Пункты — отдельным именем: `checklist` уже занят прогрессом «3 из 5»,
         # который едет и в строку списка. Одно имя под два разных типа заставило
         # бы фронт гадать, что пришло.
@@ -853,13 +882,18 @@ async def task_action(
             t.stage_code = payload.stage_code
             logged = True
 
+    new_assignee_email: str | None = None
     if payload.assignee_id is not None:
         new_id = _uuid_or_400(payload.assignee_id, "assignee_id") if payload.assignee_id else None
         if new_id is not None and await db.get(UserCompany, (new_id, cid)) is None:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Исполнитель не состоит в пространстве")
         if new_id != t.assignee_id:
             was = (await db.get(User, t.assignee_id)).name if t.assignee_id else None
-            now_name = (await db.get(User, new_id)).name if new_id else None
+            new_person = await db.get(User, new_id) if new_id else None
+            now_name = new_person.name if new_person else None
+            # Себе письмо не шлём: человек только что нажал кнопку и всё видит.
+            if new_person is not None and new_person.id != current_user.id:
+                new_assignee_email = new_person.email
             db.add(TaskEvent(task_id=t.id, kind="assign", user_id=current_user.id,
                              from_value=was, to_value=now_name, note=payload.note))
             t.assignee_id = new_id
@@ -915,8 +949,29 @@ async def task_action(
     if payload.status in ("done", "cancelled") and out["subtasks"]["open"]:
         out["warning"] = f"У задачи осталось открытых подзадач: {out['subtasks']['open']}"
     if mentioned:
-        out["mentioned"] = mentioned
+        out["mentioned"] = [n for n, _ in mentioned]
+        task_mail.send_notice_async(
+            [e for _, e in mentioned if e],
+            f"Вас упомянули в задаче №{t.number}: {t.title}",
+            f"{current_user.name or 'Коллега'} написал:\n\n{payload.note or ''}")
+    if new_assignee_email:
+        task_mail.send_notice_async(
+            [new_assignee_email], f"Вам поручена задача №{t.number}: {t.title}",
+            _errand_text(t, current_user, payload.note))
     return out
+
+
+def _errand_text(t: Task, author: User, note: str | None) -> str:
+    """Письмо «вам поручено»: что, к какому сроку и от кого."""
+    lines = [f"Задача №{t.number}: {t.title}",
+             f"Поручил: {author.name or 'коллега'}"]
+    if t.due_at:
+        lines.append(f"Срок: {t.due_at.strftime('%d.%m.%Y')}")
+    if note:
+        lines += ["", note]
+    if t.description:
+        lines += ["", t.description]
+    return "\n".join(lines)
 
 
 class BulkAction(BaseModel):
@@ -1243,3 +1298,179 @@ async def delete_attachment(
     await db.delete(att)
     await db.commit()
     return {"deleted": attachment_id}
+
+
+# ── Внешние участники: разговор почтой ───────────────────────────────────
+
+
+class DelegateIn(BaseModel):
+    company_id: str
+    email: str = Field(min_length=5, max_length=200)
+    name: str | None = Field(None, max_length=120)
+    note: str | None = Field(None, max_length=2000)
+    organization_id: str | None = None
+
+
+@router.post("/{task_id}/delegate", status_code=status.HTTP_201_CREATED)
+async def delegate_task(
+    task_id: str,
+    payload: DelegateIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Поручить задачу тому, кто в пространство не заходит.
+
+    Человек получает письмо с адресом ответа `ящик+t<номер>@домен`; его ответ
+    вернётся в ленту репликой с пометкой «письмом». В пространстве он заводится
+    почтовой учёткой (`users.mail_only`) — войти ею нельзя, она нужна лишь чтобы
+    у его реплик был автор, а у задачи — состав.
+
+    Мяч переходит внешней стороне: задача не брошена, но и не висит «на мне».
+    """
+    cid = await assert_company_product(payload.company_id, current_user, db, "plan")
+    t = await _task_or_404(db, cid, task_id)
+    await _assert_actor(db, cid, current_user, t)
+    email = payload.email.strip().lower()
+    if "@" not in email or " " in email:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Нужен адрес электронной почты")
+    if not task_mail.enabled():
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "В пространстве не настроен ящик приёма — писать по почте некуда")
+
+    person = (await db.execute(select(User).where(
+        func.lower(User.email) == email))).scalar_one_or_none()
+    if person is None:
+        person = User(
+            email=email, name=(payload.name or "").strip() or email.split("@")[0],
+            # Пароля нет: строка-заглушка не является валидным bcrypt-хешем,
+            # поэтому проверка пароля всегда отвергнет вход.
+            password_hash="!", role="user", company_id=cid, mail_only=True)
+        db.add(person)
+        await db.flush()
+        org_id = None
+        if payload.organization_id:
+            try:
+                org_id = uuid.UUID(payload.organization_id)
+            except (ValueError, TypeError):
+                org_id = None
+        # `party_type="partner"` — та же разметка «свой / внешний», что в чатах:
+        # человек обязан выглядеть внешним везде, где он показан.
+        db.add(UserCompany(user_id=person.id, company_id=cid, role="user",
+                           party_type="partner", organization_id=org_id))
+    elif not person.mail_only and await db.get(UserCompany, (person.id, cid)) is None:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Такой адрес уже занят учётной записью другого пространства")
+
+    if await db.get(TaskParticipant, (t.id, person.id)) is None:
+        db.add(TaskParticipant(task_id=t.id, user_id=person.id, role="external",
+                               channel="mail", channel_ref=email, added_by=current_user.id))
+    t.waiting_for = "external"
+    db.add(TaskEvent(task_id=t.id, kind="delegate", user_id=current_user.id,
+                     to_value=person.name or email, note=payload.note))
+    await db.commit()
+
+    task_mail.send_delegation_async(
+        email=email, number=t.number, title=t.title,
+        author=current_user.name or "коллега", note=payload.note,
+        description=t.description,
+        due=t.due_at.strftime("%d.%m.%Y") if t.due_at else None)
+    return {"ok": True, "user_id": str(person.id), "email": email,
+            "reply_address": task_mail.reply_address(t.number)}
+
+
+@router.delete("/{task_id}/participants/{user_id}")
+async def remove_participant(
+    task_id: str,
+    user_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Убрать внешнего участника. Мяч возвращается нам: ждать больше некого."""
+    cid = await assert_company_product(company_id, current_user, db, "plan")
+    t = await _task_or_404(db, cid, task_id)
+    await _assert_actor(db, cid, current_user, t)
+    uid = _uuid_or_400(user_id, "user_id")
+    p = await db.get(TaskParticipant, (t.id, uid))
+    if p is not None:
+        await db.delete(p)
+        await db.flush()
+    left = (await db.execute(select(func.count()).select_from(TaskParticipant)
+                             .where(TaskParticipant.task_id == t.id))).scalar_one()
+    # Ждать больше некого — мяч возвращается нам.
+    if not left and t.waiting_for == "external":
+        t.waiting_for = None
+    await db.commit()
+    return {"deleted": user_id, "participants_left": left}
+
+
+class InboundEmailIn(BaseModel):
+    """Тело от почтового поллера Поддержки — camelCase, как у чатов."""
+    fromAddress: str
+    fromName: str | None = None
+    text: str
+    # Message-ID письма: ключ идемпотентности, повторная доставка дубля не создаёт.
+    messageId: str | None = None
+    # Ссылка на письмо-первоисточник в архиве Поддержки: из ленты должна быть
+    # возможность дойти до оригинала, а не только до вычищенного текста.
+    emailMessageId: str | None = None
+
+
+@router.post("/{task_id}/inbound-email", status_code=status.HTTP_201_CREATED)
+async def inbound_email(
+    task_id: str,
+    body: InboundEmailIn,
+    company: Company = Depends(get_company_by_api_key),
+    db: AsyncSession = Depends(get_db),
+):
+    """Ответ внешнего участника письмом → реплика в ленте задачи.
+
+    `task_id` здесь — НОМЕР задачи: он приходит из плюс-адреса `+t<номер>`,
+    который человек видит в письме. Пишет только тот, кого в эту задачу
+    приглашали: адрес может утечь пересылкой письма, и по нему не должен
+    получать слово посторонний.
+    """
+    if not task_id.isdigit():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Ожидается номер задачи")
+    t = (await db.execute(select(Task).where(
+        Task.number == int(task_id), Task.company_id == company.id))).scalar_one_or_none()
+    if t is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Задача не найдена")
+
+    email = (body.fromAddress or "").strip().lower()
+    author = (await db.execute(
+        select(User).join(TaskParticipant, TaskParticipant.user_id == User.id)
+        .where(TaskParticipant.task_id == t.id, func.lower(User.email) == email)
+    )).scalar_one_or_none()
+    if author is None:
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            f"Отправитель {email or '(без адреса)'} не участник этой задачи")
+
+    key = (body.messageId or "").strip() or None
+    if key:
+        dup = (await db.execute(select(TaskEvent.id).where(
+            TaskEvent.task_id == t.id, TaskEvent.from_value == key))).scalar_one_or_none()
+        if dup is not None:
+            return {"ok": True, "eventId": str(dup), "duplicate": True}
+
+    text = (body.text or "").strip() or "(письмо без текста)"
+    ev = TaskEvent(
+        task_id=t.id, kind="mail", user_id=author.id,
+        actor_name=body.fromName or author.name or email,
+        # `from_value` — ключ идемпотентности, `to_value` — путь к оригиналу письма
+        # в архиве Поддержки: из ленты видно, чем реплика подтверждена.
+        from_value=key, to_value=(body.emailMessageId or None), note=text)
+    db.add(ev)
+    # Ответ пришёл — мяч снова у нас.
+    t.waiting_for = "us"
+    await db.commit()
+
+    # Свои узнают об ответе письмом: внешний участник пишет редко, и ждать его
+    # ответа, поглядывая в карточку, никто не станет.
+    people = (await db.execute(select(User.email).where(
+        User.id.in_([i for i in (t.assignee_id, t.author_id) if i]),
+        User.mail_only.is_(False)))).scalars().all()
+    task_mail.send_notice_async(
+        list(people), f"Ответ по задаче №{t.number}: {t.title}",
+        f"{ev.actor_name} ответил письмом:\n\n{text}")
+    return {"ok": True, "eventId": str(ev.id)}
