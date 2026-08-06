@@ -37,6 +37,12 @@ export interface StoreOverviewData {
     by_category: StoreCategory[]
   }
   operational: { shifts_count: number; stations_count: number }
+  /** Поток людей: заправка — тоже визит, даже если человек ничего не купил. */
+  visits?: {
+    visits: number; fuel_ops: number; shop_cheques: number; mixed: number
+    fuel_only: number; conversion: number; revenue: number
+    per_visit: number; avg_cheque: number
+  }
   charts: { daily: { date: string; revenue: number; soputka: number; obshepit: number }[] }
   by_station: { station: string; revenue: number; positions: number; shifts: number }[]
   trends?: Record<string, StoreTrend>

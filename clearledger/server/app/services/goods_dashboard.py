@@ -308,6 +308,11 @@ class GoodsDashboardService:
             "by_station": self._by_station(metas),
         }
         result["operational"]["stations_count"] = len(result["by_station"])
+        # Поток людей рядом с выручкой: без него «238 682 ₽ за период» не
+        # говорит, плохо продавали или мало кто заезжал. Заправка — тоже визит:
+        # человек прошёл мимо витрины и ничего не взял, и это ровно тот
+        # потенциал, ради которого магазин на станции и держат.
+        result["visits"] = await self._visits(date_from, date_to, stations)
         if compare:
             days = (date_to - date_from).days + 1
             cmp_to = date_from - timedelta(days=1)
@@ -315,6 +320,55 @@ class GoodsDashboardService:
             c_metas = self._select(rows, cmp_from, cmp_to, stations)
             result["trends"] = self._trends(kpis, self._kpis(c_metas))
         return result
+
+    async def _visits(self, date_from: date, date_to: date,
+                      stations: list[str] | None) -> dict:
+        """Посещения станций за период и конверсия магазина.
+
+        Считается из двух контуров, потому что они и ведутся раздельно:
+        заправки — в реестре топлива, покупки — в чеках станции. Смешанный чек
+        в топливном контуре уже посчитан, поэтому к посещениям добавляются
+        только чеки БЕЗ топлива, иначе один визит удвоился бы.
+        """
+        p: dict = {"cid": self.company_id, "d1": date_from, "d2": date_to}
+        коды = [int(s) for s in (stations or []) if str(s).isdigit()]
+        ф_т = " AND station_code = ANY(:st)" if коды else ""
+        ф_ч = " AND station_id = ANY(:st)" if коды else ""
+        if коды:
+            p["st"] = коды
+
+        заправок = (await self.session.execute(text(f"""
+            SELECT count(*) FROM fuel_transactions
+            WHERE company_id = :cid{ф_т} AND dt::date BETWEEN :d1 AND :d2
+        """), p)).scalar() or 0
+        ч = (await self.session.execute(text(f"""
+            SELECT count(*) AS cheques,
+                   count(*) FILTER (WHERE had_fuel) AS mixed,
+                   count(*) FILTER (WHERE NOT had_fuel) AS shop_only,
+                   coalesce(sum(total), 0) AS amount
+            FROM store_cheques
+            WHERE company_id = :cid{ф_ч} AND at::date BETWEEN :d1 AND :d2
+        """), p)).mappings().first() or {}
+
+        чеков = int(ч.get("cheques") or 0)
+        смешанных = int(ч.get("mixed") or 0)
+        # Смешанный чек — доказательство заправки. Если топливный контур отстал
+        # (реализации приезжают позже чеков), заправок в реестре меньше, чем
+        # было на самом деле, и без этой поправки конверсия уходит за 100 %.
+        заправок = max(int(заправок), смешанных)
+        посещений = заправок + int(ч.get("shop_only") or 0)
+        выручка = float(ч.get("amount") or 0)
+        return {
+            "visits": посещений,
+            "fuel_ops": заправок,
+            "shop_cheques": чеков,
+            "mixed": смешанных,
+            "fuel_only": max(заправок - смешанных, 0),
+            "conversion": round(чеков / посещений * 100, 1) if посещений else 0.0,
+            "revenue": round(выручка, 2),
+            "per_visit": round(выручка / посещений, 2) if посещений else 0.0,
+            "avg_cheque": round(выручка / чеков, 2) if чеков else 0.0,
+        }
 
     # ── SKU-аналитика: реестр товаров с маржой + ABC (Ассортимент/Цены/Номенклатура) ──
 

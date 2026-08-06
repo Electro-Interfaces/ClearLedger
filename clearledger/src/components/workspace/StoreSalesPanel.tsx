@@ -18,7 +18,7 @@ import { rowDrill } from './rowDrill'
 import { SkuDetailModal } from './SkuDetailModal'
 import { ShiftDetailModal } from './ShiftDetailModal'
 import {
-  getStoreSales, type SalesGroupBy, type SalesCategory, type SalesMarked,
+  getStoreSales, getStoreOverview, type SalesGroupBy, type SalesCategory, type SalesMarked,
 } from '@/services/storeService'
 import { fmtMoney, fmtMoneyShort } from '@/services/analyticsService'
 import { rechartsTooltipTheme } from '@/components/ui/chart-utils'
@@ -71,6 +71,14 @@ export function StoreSalesPanel({ companyId, dateFrom, dateTo, stations }: { com
     queryKey: ['store-sales', companyId, dateFrom, dateTo, groupBy, category, marked, q, stations],
     queryFn: () => getStoreSales(dateFrom, dateTo, { groupBy, category, marked, q, stations }),
   })
+  // Поток людей за тот же период: выручка сама по себе не говорит, плохо
+  // продавали или мало кто заезжал. Отдельным запросом — обзор считает его
+  // вместе со своими KPI, а здесь нужен только он.
+  const { data: обзор } = useQuery({
+    queryKey: ['store-visits', companyId, dateFrom, dateTo, stations],
+    queryFn: () => getStoreOverview(dateFrom, dateTo, { stations }),
+  })
+  const поток = обзор?.visits
 
   const isPayment = groupBy === 'payment'
   const showSkuCol = groupBy !== 'sku' && !isPayment
@@ -117,6 +125,21 @@ export function StoreSalesPanel({ companyId, dateFrom, dateTo, stations }: { com
             <Kpi label="SKU" value={nf(data.summary.sku_count)} />
             <Kpi label="Групп" value={nf(data.summary.groups_count)} />
           </div>
+
+          {поток && поток.visits > 0 && (
+            <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
+              <Kpi label="Посещений" value={nf(поток.visits)}
+                sub={`${nf(поток.fuel_ops)} заправок · ${nf(поток.shop_cheques)} чеков магазина`} />
+              <Kpi label="Конверсия магазина" value={`${поток.conversion.toFixed(1)}%`}
+                sub={поток.conversion > 0
+                  ? `покупает каждый ${Math.round(100 / поток.conversion)}-й`
+                  : 'магазин не продаёт'} />
+              <Kpi label="На посетителя" value={fmtMoney(поток.per_visit)}
+                sub={`средний чек ${fmtMoney(поток.avg_cheque)}`} />
+              <Kpi label="Уехали без покупки" value={nf(поток.fuel_only)}
+                sub="потенциал сопутки" />
+            </div>
+          )}
 
           {groupBy === 'day' && (
             <div className="rounded-lg border border-border/50 bg-card/40 p-4">

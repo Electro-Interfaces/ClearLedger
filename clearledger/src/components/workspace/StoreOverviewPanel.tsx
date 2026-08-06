@@ -87,6 +87,25 @@ export function StoreOverviewPanel({ companyId, dateFrom, dateTo, stations }: {
           {/* Движение и потери (учёт документов движения в разделе) */}
           <StoreMovementSummary companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />
 
+          {/* Поток людей. Стоит выше денег намеренно: выручка отвечает «сколько
+              заработали», а посещения — «из чего было зарабатывать». Заправился и
+              уехал — это не потеря смены, это потенциал сопутки. */}
+          {data.visits && data.visits.visits > 0 && (
+            <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
+              <Kpi label="Посещений" value={nf0(data.visits.visits)}
+                sub={`${nf0(data.visits.fuel_ops)} заправок · ${nf0(data.visits.shop_cheques)} чеков магазина`} />
+              <Kpi label="Конверсия магазина"
+                value={`${data.visits.conversion.toFixed(1)}%`}
+                sub={data.visits.conversion > 0
+                  ? `покупает каждый ${Math.round(100 / data.visits.conversion)}-й`
+                  : 'магазин не продаёт'} />
+              <Kpi label="Магазин на посетителя" value={fmtMoney(data.visits.per_visit)}
+                sub={`средний чек ${fmtMoney(data.visits.avg_cheque)}`} />
+              <Kpi label="Уехали без покупки" value={nf0(data.visits.fuel_only)}
+                sub="заправились и не зашли" />
+            </div>
+          )}
+
           {/* KPI-полоса */}
           <div className="grid gap-2.5 sm:grid-cols-3 lg:grid-cols-6">
             <Kpi label="Выручка" value={fmtMoney(f.total_revenue)} delta={t?.revenue?.percent} sub="с НДС" />
