@@ -55,7 +55,11 @@ const RISK_TARGET: Record<string, { tab: string; hint: string }> = {
   no_history: { tab: 'pr_project', hint: 'реестр проектов' },
 }
 
-export function ProjectsPortfolioPanel({ companyId }: { companyId: string }) {
+export function ProjectsPortfolioPanel({ companyId, embedded }: {
+  companyId: string
+  /** Витрина внутри чужого экрана («Пульс»): заголовок и внешний отступ уже есть там. */
+  embedded?: boolean
+}) {
   const [, setParams] = useSearchParams()
   /** Уйти в другой реестр с фильтром: `mode`, `sub`, `risk`/`stage` — одной правкой URL.
    *  Раздел (`mode`) обязателен: обзор живёт в «Аналитике», а ведут работу в
@@ -108,10 +112,10 @@ export function ProjectsPortfolioPanel({ companyId }: { companyId: string }) {
   }
 
   return (
-    <div className="p-4 space-y-4">
+    <div className={embedded ? 'space-y-4' : 'p-4 space-y-4'}>
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
-          <h2 className="text-base font-semibold">Обзор</h2>
+          {!embedded && <h2 className="text-base font-semibold">Обзор</h2>}
           <p className="text-sm text-muted-foreground">
             {nf0.format(d.active)} в работе · {nf0.format(d.live)} в эксплуатации ·
             {' '}{nf0.format(d.archived)} отклонено. Срок ввода определяет присоединение, а не стройка.

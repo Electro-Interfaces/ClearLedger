@@ -20,6 +20,7 @@ import {
   type ParkPlanImportReport, type ProjectRow, type SiteStage,
 } from '@/services/sitesService'
 import { SiteCardDialog } from './SiteCardDialog'
+import { NextStepsPlanPanel } from './NextStepsPlanPanel'
 import { useOpenProject } from './useOpenProject'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
@@ -38,6 +39,7 @@ function placeOf(p: ProjectRow): string {
 }
 
 export function ParkWorkPlanPanel({ companyId }: { companyId: string }) {
+  const [view, setView] = useState<'steps' | 'park'>('steps')
   const [detailId, setDetailId] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [onlyOpen, setOnlyOpen] = useState(true)
@@ -108,6 +110,21 @@ export function ParkWorkPlanPanel({ companyId }: { companyId: string }) {
 
   return (
     <div className="p-4 space-y-3">
+      {/* Два разреза одной работы: «что делаю на неделе» (по датам, вся стройка) и
+          «что делаем с парком» (переносы и демонтажи по регионам). Разделены табами,
+          а не пунктами меню: вопрос один — план работы (замечание 06.08.2026). */}
+      <div className="inline-flex rounded-md border border-border p-0.5 gap-0.5">
+        {([['steps', 'Ближайшие шаги'], ['park', 'Работы по парку']] as const).map(([k, label]) => (
+          <button key={k} type="button" onClick={() => setView(k)}
+            className={`px-2.5 py-1 text-sm rounded-[5px] transition-colors ${
+              view === k ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {view === 'steps' ? <NextStepsPlanPanel companyId={companyId} /> : (
+      <>
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div data-zone="План работ по парку">
           <h2 className="text-base font-semibold">План работ по парку</h2>
@@ -240,6 +257,9 @@ export function ParkWorkPlanPanel({ companyId }: { companyId: string }) {
           </CardContent>
         </Card>
       ))}
+
+      </>
+      )}
 
       {detailId && <SiteCardDialog companyId={companyId} id={detailId} onClose={() => setDetailId(null)} />}
     </div>

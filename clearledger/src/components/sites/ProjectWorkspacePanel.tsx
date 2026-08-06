@@ -16,8 +16,9 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Loader2, ArrowLeft, MapPin, User as UserIcon, CalendarClock } from 'lucide-react'
 import {
-  getSite, STAGE_META, PHASE_META, FUNNEL_STAGES, type SiteDetail,
+  getSite, patchSite, STAGE_META, PHASE_META, FUNNEL_STAGES, type SiteDetail,
 } from '@/services/sitesService'
+import { toast } from 'sonner'
 import { PROJECT_TABS, ProjectTabContent, type ProjectTabKey } from './ProjectTabs'
 import { ProjectPhaseStrip } from './ProjectPhaseStrip'
 import { ProjectsListPanel } from './ProjectsListPanel'
@@ -149,7 +150,18 @@ function ProjectWorkspace({ companyId, id, tab, onTab, onBack }: {
           ? 'Работа на действующем объекте: место известно, подбор площадки не нужен.'
           : 'Подбор места — первый этап этого же проекта, дальше земля, реализация и ввод.'} />
 
-      <NextStepBar site={s} onGoTab={onTab} />
+      <NextStepBar site={s} onGoTab={onTab} onPlanStep={async (label) => {
+        // Пишем сразу, а не «переносим на вкладку и ждём»: смысл кнопки в том,
+        // чтобы шаг оказался в плане одним нажатием. Срок ставит человек — дата
+        // без обсуждения была бы выдумкой системы.
+        try {
+          await patchSite(companyId, id, { next_action: label })
+          toast.success('Шаг записан в план — поставьте срок на вкладке «Работа»')
+          await refresh(); onTab('work')
+        } catch (e) {
+          toast.error(e instanceof Error ? e.message : 'Не удалось записать шаг')
+        }
+      }} />
 
       {/* Вкладки. Точка отмечает те, где на этой стадии есть незакрытая работа:
           девять одинаковых кнопок не подсказывают, с какой начинать.
@@ -198,8 +210,10 @@ const GATE_TAB: Record<string, ProjectTabKey> = {
  * с какой начинать: чек-лист лежал на вкладке «Работа», а держащий пункт
  * закрывался на «Документах».
  */
-function NextStepBar({ site, onGoTab }: {
+function NextStepBar({ site, onGoTab, onPlanStep }: {
   site: SiteDetail; onGoTab: (k: ProjectTabKey) => void
+  /** Положить шаг регламента в план работы (поле «Следующий шаг» вкладки «Работа»). */
+  onPlanStep?: (label: string) => void
 }) {
   const gate = site.gate
   if (!gate) return null
@@ -239,6 +253,15 @@ function NextStepBar({ site, onGoTab }: {
             <button type="button" onClick={() => onGoTab('passport')}
               className="rounded border border-border px-1.5 py-0.5 text-xs hover:border-primary/60 hover:text-foreground">
               Открыть паспорт
+            </button>
+          )}
+          {/* Мост «регламент → план»: ближайший шаг известен, а в план он попадал
+              только перепечаткой руками. Кнопка кладёт его в «Следующий шаг»
+              карточки, откуда его берёт план работы по датам. */}
+          {!site.nextAction && (
+            <button type="button" onClick={() => onPlanStep?.(lead.label)}
+              className="rounded border border-border px-1.5 py-0.5 text-xs hover:border-primary/60 hover:text-foreground">
+              Запланировать
             </button>
           )}
         </div>

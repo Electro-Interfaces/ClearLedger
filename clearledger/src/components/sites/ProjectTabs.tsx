@@ -25,15 +25,17 @@ import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import {
   Loader2, ExternalLink, Check, Circle, Save, MessageSquarePlus, AlertTriangle,
-  Upload, Trash2, Lock, Link as LinkIcon, Plus,
+  Upload, Trash2, Lock, Link as LinkIcon, Plus, Undo2,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import * as chatApi from '@/services/chatService'
+import { useSupportContext } from '@/contexts/SupportContext'
 import {
   getSiteEvents, getSiteMembers, getSiteEconomics, getProjectContext, getSiteDocs,
   patchSite, moveSiteStage, markSiteGate, addSiteEvent, uploadSiteDoc, deleteSiteDoc,
   saveTechConnection, saveCost, deleteCost, saveEquipment, deleteEquipment,
   linkContract, linkLocation, getProjectKinds, getLocationWorks, startSuccessor,
-  getProjectCase, openProjectCase, applyProjectStep,
+  getProjectCase, openProjectCase, applyProjectStep, undoProjectStep,
   getSiteParticipants, addSiteParticipant, removeSiteParticipant,
   STAGE_META, FUNNEL_STAGES, QUADRANT_META,
   type SiteDetail, type SiteStage, type ProjectContext, type CaseAction,
@@ -165,6 +167,18 @@ function RoutePanel({ site, companyId, onDone }: {
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : 'Шаг не выполнен'),
   })
+  // Отмена последнего шага — «нажал не ту кнопку». Правила держит Координатор
+  // (свой шаг, сутки), поэтому здесь только кнопка и честный текст отказа: он
+  // объясняет, чей это был шаг и что делать, если срок вышел.
+  const mUndo = useMutation({
+    mutationFn: () => undoProjectStep(companyId, site.id),
+    onSuccess: async (r) => {
+      const u = (r as { undone?: { toName: string; fromName: string } }).undone
+      toast.success(u ? `Шаг «${u.toName}» отменён — проект снова на «${u.fromName}»` : 'Шаг отменён')
+      await q.refetch(); await onDone()
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : 'Не удалось отменить шаг'),
+  })
 
   const defs = useMemo(
     () => Object.fromEntries((state?.fields ?? []).map((f) => [f.code, f])),
@@ -236,11 +250,27 @@ function RoutePanel({ site, companyId, onDone }: {
     <section className="rounded-lg border border-border">
       <div data-zone="Ход проекта по маршруту регламента" className="px-3 py-2 text-sm font-semibold border-b bg-muted/40 flex items-center justify-between gap-2">
         <span>Ход по маршруту · {state.stage?.name ?? '—'}</span>
-        {/* «Кейс» — слово Координатора. Человек ведёт проект и номер кейса не
-            встретит больше нигде; ему важно, сколько проект стоит на этапе. */}
-        <span className="text-xs font-normal text-muted-foreground">
-          {state.daysInStage != null && `на этапе ${state.daysInStage} дн.`}
-        </span>
+        <div className="flex items-center gap-2">
+          {/* «Кейс» — слово Координатора. Человек ведёт проект и номер кейса не
+              встретит больше нигде; ему важно, сколько проект стоит на этапе. */}
+          <span className="text-xs font-normal text-muted-foreground">
+            {state.daysInStage != null && `на этапе ${state.daysInStage} дн.`}
+          </span>
+          {/* Отмена последнего шага. Кнопка тихая и стоит в шапке, а не среди
+              действий маршрута: это исправление опечатки, а не ход по регламенту.
+              Показываем всегда, когда проект уже ходил, — кому нельзя, тому
+              Координатор ответит, чей это был шаг и почему поздно. */}
+          {(state.stages ?? []).some((st) => st.visited_at) && (
+            <Button size="sm" variant="ghost" className="h-7 px-2 text-xs font-normal"
+              disabled={mUndo.isPending} onClick={() => mUndo.mutate()}
+              title="Вернуть проект на предыдущую стадию: доступно автору шага в течение суток. Вехи и отправленные уведомления не отменяются">
+              {mUndo.isPending
+                ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />
+                : <Undo2 className="h-3.5 w-3.5 mr-1" />}
+              Отменить шаг
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Полоса стадий: где были, где стоим, что впереди. Пройденное — по журналу
@@ -590,13 +620,22 @@ export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; company
   const [mayOverride, setMayOverride] = useState(false)
   // Обычный ход — вперёд по цепочке; всё остальное открывается по запросу.
   const [otherStage, setOtherStage] = useState(false)
+  // Пометка дубля: номер оригинала собирается в причину архивации.
+  const [dupOpen, setDupOpen] = useState(false)
+  const [dupNo, setDupNo] = useState('')
   const nextStage = FUNNEL_STAGES[FUNNEL_STAGES.indexOf(site.stage as never) + 1]
 
   // Стадию передаём аргументом: кнопка «Перевести в …» не может ждать, пока
   // setStage доедет до следующего рендера, иначе уйдёт предыдущее значение.
   const mMove = useMutation({
-    mutationFn: (to?: SiteStage) =>
-      moveSiteStage(companyId, site.id, to ?? stage, reason || undefined, override),
+    // Причину, как и стадию, можно передать аргументом: `setReason` доедет только
+    // к следующему рендеру, и кнопка «Пометить дублем» отправила бы пустую причину
+    // — ровно та же грабля, из-за которой аргументом передаётся стадия.
+    mutationFn: (p?: SiteStage | { to: SiteStage; reason: string }) => {
+      const to = typeof p === 'string' ? p : p?.to
+      const why = p && typeof p === 'object' ? p.reason : reason
+      return moveSiteStage(companyId, site.id, to ?? stage, why || undefined, override)
+    },
     onSuccess: async (r) => {
       setMayOverride(!!r.mayOverride)
       if (!r.moved && r.blocked) {
@@ -758,6 +797,39 @@ export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; company
                 className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">
                 вернуться к обычному ходу
               </button>
+            )}
+          </div>
+        )}
+        {/* Задвоенный проект. Удаления у проекта нет и не будет: у него уже есть
+            история согласований, гейт и переписка — стереть их значит потерять то,
+            ради чего проект и ведут. Дубль уходит из воронки как отказ, но с
+            причиной, по которой видно, где оригинал (замечание отдела развития
+            06.08.2026). */}
+        {site.stage !== 'archive' && (
+          <div className="flex flex-wrap items-center gap-2 pt-1">
+            {!dupOpen ? (
+              <button type="button" onClick={() => setDupOpen(true)}
+                className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">
+                Это дубль другого проекта
+              </button>
+            ) : (
+              <>
+                <span className="text-xs text-muted-foreground">Дубль проекта</span>
+                <Input value={dupNo} onChange={(e) => setDupNo(e.target.value)}
+                  placeholder="ЭЗС-2026-0000" className="h-8 w-[190px] text-sm" />
+                <Button size="sm" variant="destructive" className="h-8 text-sm"
+                  disabled={!dupNo.trim() || mMove.isPending}
+                  onClick={() => mMove.mutate({ to: 'archive', reason: `Дубль проекта ${dupNo.trim()}` })}>
+                  Пометить дублем
+                </Button>
+                <button type="button" onClick={() => { setDupOpen(false); setDupNo('') }}
+                  className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">
+                  отмена
+                </button>
+                <span className="text-xs text-muted-foreground">
+                  Проект уйдёт из воронки с причиной; номер и история останутся.
+                </span>
+              </>
             )}
           </div>
         )}
@@ -959,6 +1031,10 @@ const API_FIELD: Record<string, string> = {
 // Булево поле в паспорте: сервер принимает «да»/«нет», хранит true/false.
 const BOOL_LABEL = (v: unknown) => (v === true ? 'да' : v === false ? 'нет' : '')
 
+/** Адрес почты в свободном тексте контакта: «Иванов И.И., +7…, ivanov@site.ru». */
+const emailIn = (text: string): string | null =>
+  text.match(/[\w.+-]+@[\w-]+\.[\w.-]+/)?.[0] ?? null
+
 export function PassportTab({ site, companyId, onDone }: { site: SiteDetail; companyId: string; onDone: () => Promise<void> }) {
   const [draft, setDraft] = useState<Record<string, string>>({})
   const [showRaw, setShowRaw] = useState(false)
@@ -974,6 +1050,25 @@ export function PassportTab({ site, companyId, onDone }: { site: SiteDetail; com
       await onDone()
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : 'Не удалось сохранить'),
+  })
+
+  // Написать собственнику: комната проекта заводится один раз, дальше переписка
+  // живёт в ней. Внешний участник отвечает письмом — ответ приходит сюда же.
+  const { openInteraction } = useSupportContext()
+  const mMail = useMutation({
+    mutationFn: async (email: string) => {
+      const rooms = await chatApi.getRooms(false, null, site.locationId ?? undefined)
+      const title = `Проект ${site.projectNo ?? site.title ?? ''}`.trim()
+      const room = rooms.find((r) => r.name === title)
+        ?? await chatApi.createRoom('group', [], title, 'projects', site.locationId ?? null)
+      await chatApi.addMailParticipant(room.id, email)
+      return room.id
+    },
+    onSuccess: (roomId) => {
+      toast.success('Собеседник добавлен — пишите, ему уйдёт письмо')
+      openInteraction('chat', `room:${roomId}`)
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : 'Не удалось открыть переписку'),
   })
 
   const val = (k: string) => {
@@ -1034,8 +1129,24 @@ export function PassportTab({ site, companyId, onDone }: { site: SiteDetail; com
                     )}
                   </Label>
                   {f.type === 'area' ? (
-                    <Textarea rows={2} className="text-sm min-h-[46px]" value={val(key)}
-                      onChange={(e) => setDraft((d) => ({ ...d, [key]: e.target.value }))} />
+                    <>
+                      <Textarea rows={2} className="text-sm min-h-[46px]" value={val(key)}
+                        onChange={(e) => setDraft((d) => ({ ...d, [key]: e.target.value }))} />
+                      {/* Переписка с контрагентом идёт из карточки, а не из почтового
+                          клиента: в контакте собственника обычно записан адрес, и по
+                          нему заводится чат проекта с внешним участником — он отвечает
+                          письмом, ответ приходит в тот же чат (замечание 06.08.2026). */}
+                      {key === 'ownerContact' && emailIn(val(key)) && (
+                        <button type="button" disabled={mMail.isPending}
+                          onClick={() => mMail.mutate(emailIn(val(key))!)}
+                          className="mt-1 rounded border border-border px-1.5 py-0.5 text-xs text-muted-foreground hover:border-primary/60 hover:text-foreground">
+                          {mMail.isPending
+                            ? <Loader2 className="mr-1 inline h-3 w-3 animate-spin" />
+                            : <MessageSquarePlus className="mr-1 inline h-3 w-3" />}
+                          Написать: {emailIn(val(key))}
+                        </button>
+                      )}
+                    </>
                   ) : f.type === 'select' || f.type === 'bool' ? (
                     <Select value={val(key) || '__none__'}
                       onValueChange={(v) => setDraft((d) => ({ ...d, [key]: v === '__none__' ? '' : v }))}>
@@ -1292,6 +1403,25 @@ export function EquipmentTab({ site, companyId, onDone }: {
           {eq.allSupplied ? 'всё поставлено' : 'не всё поставлено'}
         </span>
       </div>
+
+      {/* Две ЭЗС на одной площадке — это ДВЕ станции, а не «объект помощнее»
+          (замечание отдела развития 06.08.2026; канон объектов: площадка → точка
+          обслуживания → станция → коннектор). Точка одна: адрес, договор и выручка
+          общие. Учёт ведётся по каждой станции — свой инвентарный номер,
+          амортизация, ремонты и перемещение. Поэтому здесь нужна позиция на
+          каждую ЭЗС, а не одна строка с количеством: количество не получит ни
+          серийного номера, ни движения. */}
+      {(site.plannedEzsCount ?? 0) > 1 && (
+        <div className="rounded-md border border-amber-400/40 bg-amber-400/5 px-3 py-2 text-xs">
+          На площадке планируется <b>{site.plannedEzsCount} ЭЗС</b> — каждая встаёт на учёт
+          отдельной станцией: свой инвентарный номер, амортизация и ремонты; адрес,
+          договор и выручка при этом общие для точки.
+          {eq.items.length < (site.plannedEzsCount ?? 0) && (
+            <> Сейчас заведено позиций: {eq.items.length}. Заведите строку на каждую станцию —
+            одна строка с количеством {site.plannedEzsCount} серийные номера не разнесёт.</>
+          )}
+        </div>
+      )}
 
       {/* px-2 на каждой ячейке: без него «Кол-во» и «Поставщик» читаются как
           «Кол-воПоставщик» — колонки стоят впритык, разделителя нет. */}

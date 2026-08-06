@@ -389,6 +389,17 @@ export async function applyProjectStep(
     { linkId, payload, branchCaseId })
 }
 
+/**
+ * Отменить последний шаг маршрута — «нажали не ту кнопку».
+ *
+ * Не то же, что возврат по регламенту (доработка, возврат из паузы): те ходы —
+ * рёбра графа. Отмена доступна автору шага в течение суток, админу — всегда;
+ * вехи и отправленные уведомления она не снимает.
+ */
+export async function undoProjectStep(companyId: string, id: string): Promise<CaseState> {
+  return post(`/api/sites/${id}/case/undo?company_id=${companyId}`, {})
+}
+
 /** Состав проекта и словарь ролей регламента для формы назначения. */
 export async function getSiteParticipants(companyId: string, id: string): Promise<{
   roles: { code: string; label: string }[]

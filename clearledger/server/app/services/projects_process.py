@@ -276,6 +276,23 @@ def _reflect_step_fields(site: EzsSite, payload: dict[str, Any] | None) -> list[
     return written
 
 
+async def undo_step(db: AsyncSession, company_id, site: EzsSite,
+                    user: User | None = None) -> dict[str, Any]:
+    """Отменить последний шаг маршрута — «нажал не ту кнопку».
+
+    Правила отмены держит Координатор (свой последний шаг, сутки): движок хода —
+    его, и второй набор правил в Ядре разошёлся бы с ним на первой же правке.
+    Наше дело — вернуть воронку следом, тем же `_reflect_outcome`: отменённый
+    отказ обязан снять проект с архива, иначе карточка снова разойдётся с ходом.
+    """
+    state = await _call(db, company_id, "POST", f"/api/v1/eco/projects/{site.id}/case/undo",
+                        json={"actorEmail": getattr(user, "email", None)})
+    funnel = await _reflect_outcome(db, site, state, payload=state.get("values") or {}, user=user)
+    if funnel:
+        state["funnel"] = funnel
+    return state
+
+
 async def apply_step(db: AsyncSession, company_id, site: EzsSite, link_id: str,
                      payload: dict[str, Any] | None = None,
                      user: User | None = None,

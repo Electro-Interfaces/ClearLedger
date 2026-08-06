@@ -836,6 +836,25 @@ async def apply_project_step(
     return res
 
 
+@router.post("/{site_id}/case/undo")
+async def undo_project_step(
+    site_id: uuid.UUID, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Отменить последний шаг маршрута (нажали не ту кнопку).
+
+    Правила — на стороне Координатора: свой последний шаг и не позже суток.
+    """
+    cid = await assert_company_member(company_id, user, db)
+    site = await _owned(db, cid, site_id)
+    try:
+        res = await projects_process.undo_step(db, cid, site, user)
+    except ProjectionError as e:
+        raise HTTPException(400, str(e)) from e
+    await db.commit()
+    return res
+
+
 @router.get("/{site_id}/participants")
 async def project_participants(
     site_id: uuid.UUID, company_id: str = Query(...),
