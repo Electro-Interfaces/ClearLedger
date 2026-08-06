@@ -28,7 +28,7 @@ import {
   LayoutDashboard, TrendingUp, Package, Tag, UtensilsCrossed,
   Boxes, Barcode, FolderTree, ChefHat, Truck,
   PackagePlus, Warehouse, ArrowLeftRight, ClipboardList, Trash2, Undo2, RefreshCw,
-  QrCode, ScanLine, PackageMinus, ShieldAlert, ShieldCheck, Plug, CalendarClock, CopyCheck, ShoppingCart, Database, Receipt,
+  QrCode, ScanLine, PackageMinus, ShieldAlert, ShieldCheck, Plug, CalendarClock, CopyCheck, ShoppingCart, Database, Receipt, FileSpreadsheet,
   RadioTower, HeartPulse,
 } from 'lucide-react'
 
@@ -46,7 +46,7 @@ export type StoreStatus = 'ready' | 'wip' | 'planned'
  * `store` остаётся кодом первого раздела: по нему идут старые ссылки, подписи режимов и
  * ключ доступа. Раздел задаётся полем `section` записи — второго источника правды нет.
  */
-export type StoreMode = 'store' | 'store_catering' | 'store_stock' | 'store_catalog' | 'store_marking' | 'store_network'
+export type StoreMode = 'store' | 'store_catering' | 'store_stock' | 'store_catalog' | 'store_marking' | 'store_network' | 'store_reports'
 
 export const STORE_SECTIONS: {
   mode: StoreMode; label: string; icon: ComponentType<{ className?: string }>
@@ -59,6 +59,10 @@ export const STORE_SECTIONS: {
   // Станции — свой раздел: здесь смотрят парк АЗС и заходят работать на конкретную
   // станцию. Закрытие периода тут не при чём — оно в «Бухгалтерском».
   { mode: 'store_network', label: 'Станции', icon: RadioTower },
+  // Отчёты — сквозной раздел: те же вопросы, что задаёт рабочее место станции,
+  // но по всей сети. Отдельный раздел, а не хвост «Торговли»: их читают
+  // бухгалтер и руководитель, а не товаровед у полки.
+  { mode: 'store_reports', label: 'Отчёты', icon: FileSpreadsheet },
 ]
 
 export const STORE_MODES: string[] = STORE_SECTIONS.map((s) => s.mode)
@@ -355,6 +359,21 @@ export const STORE_VIEWS: StoreView[] = [
       { name: 'Роллап операций', desc: 'Приходы (ПТУ), инвентаризации, списания за дату смены — связка по (станция, дата), т.к. документы ЦБ не несут GUID смены.' },
       { name: 'Смена-детализация', desc: 'Клик по смене → модалка: строки продаж по SKU, касса (оплаты), возвраты + документы приходов/инвентаризаций/списаний дня.', source: 'goods_dashboard.shift_detail · /api/store/shift' },
       { name: 'Топология АЗС (планируется)', desc: 'Признак магазин/общепит по станции — не таскать в аналитику станции без товароучёта.', source: 'planned' },
+    ],
+  },
+  /* ───────────────────── ОТЧЁТЫ — те же вопросы, но по сети ───────────────────── */
+  {
+    key: 'reports', label: 'Отчёты сети', section: 'store_reports', icon: FileSpreadsheet,
+    title: 'Отчёты',
+    subtitle: 'Те же отчёты, что считает рабочее место станции, но по всей сети: с разрезом по АЗС, сводом и выгрузкой в Excel. Станция отвечает «что на моей полке», сеть — «что по всем точкам и чем одна отличается от другой».',
+    status: 'ready',
+    blocks: [
+      { name: 'Единый журнал документов', desc: 'Всё, чем двигался товар: приёмки, списания, перемещения, инвентаризации, возвраты, производство. Источник колонкой — станция и 1С ведут свои номера.', source: '/api/store/reports/documents' },
+      { name: 'Расхождения приёмки', desc: 'Где факт разошёлся с накладной: недовоз и перевоз в штуках и деньгах. Предмет разговора с поставщиком (ТОРГ-2), а не ошибка приёмщика.', source: '/api/store/reports/purchase-diff' },
+      { name: 'Книга покупок (НДС)', desc: 'По каким поставкам можно заявить вычет; приёмка без входящего документа показана отдельно — это сумма, которую не зачтут.', source: '/api/store/reports/vat-book' },
+      { name: 'Оборотно-сальдовая', desc: 'Остаток на начало, приход, расход, остаток на конец и необъяснённая разница — предмет инвентаризации, а не строка «прочее».', source: '/api/store/reports/turnover' },
+      { name: 'ABC по выручке', desc: 'Что даёт основную выручку сети: A — первые 80 % денег, B — до 95 %, C — хвост. Считается по чекам, то есть по факту продажи.', source: '/api/store/reports/abc' },
+      { name: 'Выгрузка', desc: 'CSV с BOM и точкой с запятой — тот же формат, что отдаёт станция: Excel открывает двойным кликом, офис и АЗС смотрят на одно.' },
     ],
   },
   /* ───────────────────── КАТАЛОГ — товар как карточка ───────────────────── */

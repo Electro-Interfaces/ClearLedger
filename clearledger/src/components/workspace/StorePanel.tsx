@@ -44,6 +44,7 @@ import { StoreAgentVersionsPanel } from './StoreAgentVersionsPanel'
 import { StoreStoragePanel } from './StoreStoragePanel'
 import { StoreMarkCodesPanel } from './StoreMarkCodesPanel'
 import { StoreChequesPanel } from './StoreChequesPanel'
+import { StoreReportsPanel } from './StoreReportsPanel'
 import { StoreMarkingIntegrationsPanel } from './StoreMarkingIntegrationsPanel'
 import { StoreParityPanel } from './StoreParityPanel'
 import { StoreStationDraftsPanel } from './StoreStationDraftsPanel'
@@ -322,6 +323,13 @@ export function StorePanel() {
     return (
       <div className="h-full overflow-y-auto">
         <StoreStationsPanel dateFrom={period.from} dateTo={period.to} />
+      </div>
+    )
+  }
+  if (sub === 'reports') {
+    return (
+      <div className="h-full overflow-y-auto">
+        <StoreReportsPanel dateFrom={period.from} dateTo={period.to} />
       </div>
     )
   }

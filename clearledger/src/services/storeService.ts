@@ -1042,6 +1042,48 @@ export const getStoreStationDocs = (opts: {
   limit: opts.limit ?? undefined,
 })
 
+/** Витрина отчётов сети и данные конкретного отчёта. */
+export interface StoreReportInfo {
+  key: string; title: string; about: string; columns: string[]
+}
+
+export interface StoreReportData {
+  kind: string; title: string; about: string
+  columns: string[]; fields: string[]
+  rows: Record<string, unknown>[]
+  total: number
+  by_station?: { station_id: number; docs: number; amount: number }[]
+  by_kind?: { label: string; docs: number; amount: number }[]
+  by_class?: Record<string, number>
+  shortfall?: number; surplus?: number
+  vat_deductible?: number; vat_unconfirmed?: number
+  unexplained_total?: number
+}
+
+export const getStoreNetworkReports = () =>
+  get<{ reports: StoreReportInfo[] }>('/api/store/reports')
+
+const отчётПараметры = (opts: { dateFrom?: string; dateTo?: string; stations?: number[] }) => {
+  const q = new URLSearchParams()
+  if (opts.dateFrom) q.set('date_from', opts.dateFrom)
+  if (opts.dateTo) q.set('date_to', opts.dateTo)
+  if (opts.stations?.length) q.set('stations', opts.stations.join(','))
+  return q
+}
+
+export const getStoreNetworkReport = (kind: string, opts: {
+  dateFrom?: string; dateTo?: string; stations?: number[]
+}) => get<StoreReportData>(`/api/store/reports/${kind}?${отчётПараметры(opts).toString()}`)
+
+/** Адрес выгрузки: CSV с BOM и точкой с запятой — Excel открывает двойным кликом. */
+export const storeNetworkReportCsvUrl = (kind: string, opts: {
+  dateFrom?: string; dateTo?: string; stations?: number[]
+}) => {
+  const q = отчётПараметры(opts)
+  q.set('format', 'csv')
+  return `/api/store/reports/${kind}?${q.toString()}`
+}
+
 /** Фискальный чек: продажа на уровне покупки, а не смены. */
 export interface StoreCheque {
   id: string

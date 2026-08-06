@@ -28,7 +28,7 @@ from app.models import (
     User, UserCompany,
 )
 from app.routers import edge_router
-from app.services import edge_nsi, edge_projection, edge_service
+from app.services import edge_nsi, edge_projection, edge_service, store_reports
 from app.services import recipe_versions
 from app.services.export_audit import log_export
 from app.services.edo_upd import parse_upd
@@ -1052,6 +1052,65 @@ async def store_reproject(
             await db.rollback()
             итог["errors"].append(f"{с['packet_uuid'][:8]} ({с['kind']}): {str(exc)[:200]}")
     return итог
+
+
+@router.get("/reports")
+async def store_reports_list(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Витрина отчётов сети: что есть и о чём каждый.
+
+    На станции такой раздел уже работает в рабочем месте агента. Здесь те же
+    вопросы, заданные сети: не «что на моей полке», а «что по всем АЗС и чем
+    одна отличается от другой».
+    """
+    await scope_company_id(user, db)
+    return {"reports": [{"key": k, **{f: v for f, v in r.items() if f != "fields"}}
+                        for k, r in store_reports.REPORTS.items()]}
+
+
+@router.get("/reports/{kind}")
+async def store_report(
+    kind: str,
+    date_from: str | None = Query(None),
+    date_to: str | None = Query(None),
+    stations: str | None = Query(None, description="коды АЗС через запятую; пусто — вся сеть"),
+    format: str = Query("json", description="json | csv"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Отчёт сети по видам. CSV открывается Excel двойным кликом."""
+    cid: uuid.UUID = await scope_company_id(user, db)
+    схема = store_reports.REPORTS.get(kind)
+    строитель = store_reports.BUILDERS.get(kind)
+    if схема is None or строитель is None:
+        raise HTTPException(404, f"Неизвестный отчёт: {kind}")
+
+    коды = [int(s) for s in (stations or "").replace(" ", "").split(",") if s.isdigit()]
+    данные = await строитель(db, cid, date_from, date_to, коды or None)
+
+    if format != "csv":
+        return {"kind": kind, "title": схема["title"], "about": схема["about"],
+                "columns": схема["columns"], "fields": схема["fields"],
+                "stations": коды, "date_from": date_from, "date_to": date_to,
+                **данные}
+
+    from fastapi.responses import Response as FileResponse
+    строки = []
+    for r in данные["rows"]:
+        строки.append([
+            ", ".join(str(x) for x in r[f]) if isinstance(r.get(f), list)
+            else ("да" if r.get(f) is True else "нет" if r.get(f) is False
+                  else str(r[f])[:19] if f.endswith("date") or f == "doc_date"
+                  else r.get(f))
+            for f in схема["fields"]
+        ])
+    тело = store_reports.csv_bytes(схема["columns"], строки)
+    имя = f"{kind}-{date_from or 'все'}_{date_to or 'все'}.csv"
+    return FileResponse(content=тело, media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": 'attachment; filename="report.csv"',
+                                 "X-Report-Name": имя})
 
 
 @router.get("/storage")
