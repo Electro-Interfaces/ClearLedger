@@ -32,7 +32,19 @@ def _retail_doc(payload: dict) -> dict | None:
     return None
 
 
-def _by_item(doc: dict) -> dict[str, list[float]]:
+def _canon(uid, aliases: dict[str, str] | None) -> str:
+    """Привести карточку к канонической: касса и 1С знают её под разными UUID.
+
+    На 208 живут пары вроде «Американо 200 мл» и «Американо 200 мл.» — один
+    товар, две карточки, потому что справочники расходились годами. Сверка,
+    не знающая об этом, каждый день показывает расхождение там, где продан
+    один и тот же кофе.
+    """
+    u = str(uid or "")
+    return (aliases or {}).get(u, u)
+
+
+def _by_item(doc: dict, aliases: dict[str, str] | None = None) -> dict[str, list[float]]:
     """Свернуть строки документа по номенклатуре: количество, сумма, НДС.
 
     Детализация строк у источников разная по построению (агент знает код НС,
@@ -40,12 +52,12 @@ def _by_item(doc: dict) -> dict[str, list[float]]:
     """
     agg: dict[str, list[float]] = defaultdict(lambda: [0.0, 0.0, 0.0])
     for row in doc.get("Товары") or []:
-        v = agg[row.get("Номенклатура")]
+        v = agg[_canon(row.get("Номенклатура"), aliases)]
         v[0] += float(row.get("Количество") or 0)
         v[1] += float(row.get("Сумма") or 0)
         v[2] += float(row.get("СуммаНДС") or 0)
     for row in doc.get("ВозвращенныеТовары") or []:
-        v = agg[row.get("Номенклатура")]
+        v = agg[_canon(row.get("Номенклатура"), aliases)]
         v[0] -= float(row.get("Количество") or 0)
         v[1] -= float(row.get("Сумма") or 0)
         v[2] -= float(row.get("СуммаНДС") or 0)
@@ -75,7 +87,7 @@ def _stale_cb_items(doc: dict) -> set[str]:
             if r.get("СтавкаНДС") in STALE_CB_VAT}
 
 
-def compare(agent: dict, cb: dict) -> dict:
+def compare(agent: dict, cb: dict, aliases: dict[str, str] | None = None) -> dict:
     """Сравнить два пакета одной смены. Возвращает расхождения по существу.
 
     Набор ключей результата постоянен: вызывающий читает `agent`/`cb` всегда,
@@ -100,7 +112,7 @@ def compare(agent: dict, cb: dict) -> dict:
     c_vat = float(c_doc.get("СуммаНДС") or 0)
     vat_note = ""
 
-    a_items, c_items = _by_item(a_doc), _by_item(c_doc)
+    a_items, c_items = _by_item(a_doc, aliases), _by_item(c_doc, aliases)
     only_agent = sorted(set(a_items) - set(c_items))
     only_cb = sorted(set(c_items) - set(a_items))
     if only_agent:
@@ -112,8 +124,8 @@ def compare(agent: dict, cb: dict) -> dict:
     # нефтесервера погашен и отдан другому товару, карточки в кассе уже нет.
     # Расхождение НДС по ним объяснимо и дефектом сборки не является — иначе
     # пара выведенных карточек навсегда закрывает критерий перехода.
-    unknown_vat = set(a_doc.get("СтавкаНеизвестна") or [])
-    stale_cb = _stale_cb_items(c_doc)
+    unknown_vat = {_canon(u, aliases) for u in (a_doc.get("СтавкаНеизвестна") or [])}
+    stale_cb = {_canon(u, aliases) for u in _stale_cb_items(c_doc)}
 
     qty_diff = sum_diff = vat_diff = explained_vat = stale_vat = 0
     worst = None
@@ -169,7 +181,15 @@ def compare(agent: dict, cb: dict) -> dict:
 
 async def reconcile(db: AsyncSession, company_id, station_id: int | None = None,
                     limit: int = 60) -> dict:
-    """Отчёт теневой сверки по всем сменам, где есть оба пакета."""
+    """Отчёт теневой сверки по всем сменам, где есть оба пакета.
+
+    Дубли карточек приводятся к канонической: пара «Американо 200 мл» и
+    «Американо 200 мл.» — один товар в двух справочниках, и считать это
+    расхождением каждый день бессмысленно.
+    """
+    aliases = {str(a): str(c) for a, c in (await db.execute(text("""
+        SELECT alias_uuid, canonical_uuid FROM store_item_aliases WHERE company_id = :cid
+    """), {"cid": company_id})).all()}
     # Только смены. Раньше фильтра не было, и в пары попадали часовые снимки
     # остатков и документы станции: у них свой заголовок «Смена» с внутренним
     # номером 0 и временем закрытия «сейчас», поэтому они всплывали наверх
@@ -225,7 +245,7 @@ async def reconcile(db: AsyncSession, company_id, station_id: int | None = None,
                        detail="нет пакета ЦБ" if agent_p else "нет пакета агента")
             shifts.append(row)
             continue
-        res = compare(agent_p.payload, cb_p.payload)
+        res = compare(agent_p.payload, cb_p.payload, aliases)
         if not res.get("no_data"):
             matched += res["ok"]
             mismatched += not res["ok"]

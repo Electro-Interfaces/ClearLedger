@@ -246,6 +246,10 @@ async def store_exchange(
     ingest = [dict(r) for r in (await db.execute(text(f"""
         SELECT p.kind, count(*) AS packets,
                count(*) FILTER (WHERE de.n > 0) AS projected,
+               -- Пакет без документов породить их не может: пустую смену ЦБ
+               -- нельзя записывать в «не разобрано», это не дефект разбора.
+               count(*) FILTER (
+                   WHERE coalesce(jsonb_array_length(p.payload->'Документы'), 0) = 0) AS empty,
                coalesce(sum(de.n), 0) AS entries
         FROM edge_packets p
         LEFT JOIN LATERAL (
@@ -266,8 +270,12 @@ async def store_exchange(
         i["label"] = PACKET_KIND_LABEL.get(i["kind"], i["kind"])
         # Снимки, черновики НСИ и рецептуры документов учёта не порождают —
         # у них своя дорога, и «не разобрано» для них не дефект.
-        i["projects_docs"] = i["kind"] not in ("stock", "station-nsi", "station-recipes")
-        i["unprojected"] = int(i["packets"]) - int(i["projected"])
+        # Служебные виды документов учёта не порождают: снимок остатков,
+        # черновики НСИ, рецептуры и чеки живут своими таблицами.
+        i["projects_docs"] = i["kind"] not in (
+            "stock", "station-nsi", "station-recipes", "cheques")
+        i["unprojected"] = max(0, int(i["packets"]) - int(i["projected"])
+                               - int(i["empty"] or 0))
 
     # Доступность канала по станциям: минуты со следом телеметрии против минут
     # с момента, как станция впервые вышла на связь.
@@ -2372,6 +2380,41 @@ async def store_downlink_cancel(
     row.cancelled_by = user.id
     await db.commit()
     return {"ok": True, "state": _downlink_state(row)}
+
+
+class SameItemIn(BaseModel):
+    """Две карточки — один товар: кассовая и та, что ведёт 1С."""
+    alias_uuid: str
+    canonical_uuid: str
+    reason: str = "сверка: один товар в двух справочниках"
+
+
+@router.post("/reconcile/same-item")
+async def store_reconcile_same_item(
+    body: SameItemIn,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Объявить, что касса и 1С зовут один товар разными карточками.
+
+    Это не слияние справочника: обе карточки остаются живыми, потому что 1С
+    ведёт свою и переименовать её мы не можем. Пара нужна сверке — иначе
+    «Американо 200 мл» против «Американо 200 мл.» каждый день выглядит как
+    расхождение, и критерий чистых дней не наберётся никогда.
+    """
+    cid: uuid.UUID = await scope_company_id(user, db)
+    if body.alias_uuid == body.canonical_uuid:
+        raise HTTPException(400, "Это одна и та же карточка")
+    есть = (await db.execute(select(StoreItemAlias.id).where(
+        StoreItemAlias.company_id == cid,
+        StoreItemAlias.alias_uuid == body.alias_uuid))).scalar_one_or_none()
+    if есть is not None:
+        return {"ok": True, "already": True}
+    db.add(StoreItemAlias(company_id=cid, alias_uuid=body.alias_uuid,
+                          canonical_uuid=body.canonical_uuid,
+                          reason=body.reason[:200], created_by=user.id))
+    await db.commit()
+    return {"ok": True}
 
 
 @router.get("/station-health")
