@@ -552,6 +552,14 @@ class BpPackageEmitter:
                     "Количество": float(ingredient.get("Количество") or 0),
                     "Единица": ingredient.get("Единица") or (nom[ingredient_uuid].unit if nom.get(ingredient_uuid) else ""),
                 })
+            if not output_ingredients:
+                # Состава нет ни в мастере, ни в строке продажи — блюдо старого
+                # меню, техкарту которого мы не собирали. Пустую ТТК приёмник всё
+                # равно отбрасывает («пустой массив Ингредиенты» → откат), так что
+                # класть её в пакет незачем: она только создаёт видимость, будто
+                # себестоимость соберётся. Пропуск заметит сверка — проверка «все
+                # блюда смены имеют ТТК» назовёт блюдо поимённо.
+                continue
             recipes.append({
                 "Тип": "recipe",
                 "ИсточникUUID": str(source_recipe.get("ИсточникUUID") or _stable_uuid(f"edge-recipe/{dish_uuid}")),

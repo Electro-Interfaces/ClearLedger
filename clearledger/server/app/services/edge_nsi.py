@@ -29,6 +29,11 @@ from datetime import datetime, timezone
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+# Ставка в снимке приходит процентом (так её хранит касса), в контракте БП —
+# именем. Ноль это «Без НДС», законная ставка, а не отсутствие данных.
+_VAT_BY_PERCENT = {22: "НДС22", 20: "НДС20", 18: "НДС18", 10: "НДС10",
+                   7: "НДС7", 5: "НДС5", 0: "БезНДС"}
+
 log = logging.getLogger(__name__)
 
 
@@ -139,6 +144,26 @@ async def sync_from_snapshot(db: AsyncSession, station_id: int, payload: dict) -
             WHERE i.external_uuid = CAST(:u AS uuid)
         """), {"u": uuid, "s": station_id, "p": price})
         stats["prices_changed"] += 1
+
+    # ── Ставки НДС ───────────────────────────────────────────────────────
+    # Ставка приезжает в кассу из 1С той же выгрузкой ассортимента, что и цена,
+    # то есть касса знает её свежее нашего справочника. Мастер обновлялся один
+    # раз и отставал: «Вода дистиллированная» держала НДС18/118 из позапрошлой
+    # эпохи, а сок J7 — 22% вместо положенных ему 10%, и мы завышали налог в
+    # выгрузке. Цену по снимку мы уже обновляем — ставка ровно такой же факт.
+    for uuid, rate in {
+        str(r.get("Номенклатура") or ""): _VAT_BY_PERCENT.get(int(r.get("СтавкаНДСПроцент")))
+        for r in cash_rows + book_rows
+        if len(str(r.get("Номенклатура") or "")) == 36
+        and isinstance(r.get("СтавкаНДСПроцент"), (int, float))
+    }.items():
+        if not rate:
+            continue
+        res = await db.execute(text("""
+            UPDATE edge.item SET vat_rate = :v, updated_at = now()
+            WHERE external_uuid = CAST(:u AS uuid) AND vat_rate <> :v
+        """), {"u": uuid, "v": rate})
+        stats["vat_changed"] = stats.get("vat_changed", 0) + (res.rowcount or 0)
 
     # ── Коды нефтесервера ────────────────────────────────────────────────
     # Код уникален «в моменте», а не навсегда: снимок — истина последней
