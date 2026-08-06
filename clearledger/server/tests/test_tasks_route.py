@@ -484,6 +484,19 @@ async def test_зеркало_внешней_системы(auth_client: AsyncCl
     assert body["ok"] is False and body["reason"], body
     assert body["external_status"] is None, "статус выдуман на пустом ответе"
 
+    # Длительность текущего этапа — то, ради чего чужие этапы вообще вливаются
+    # в нашу ленту: «работа стоит или движется».
+    from datetime import datetime, timedelta, timezone
+
+    from app.routers.tasks_router import _human_span, _stage_note
+
+    assert _human_span(86400 * 12 + 3600 * 11) == "12 дн 11 ч"
+    assert _human_span(30) == "меньше минуты"
+    began = (datetime.now(timezone.utc) - timedelta(days=12, hours=11)).isoformat()
+    assert "идёт уже 12 дн" in _stage_note({"name": "Диагностика", "date_from": began})
+    # У пройденного этапа длительности нет — он уже не отвечает на этот вопрос.
+    assert _stage_note({"date_from": began, "date_till": began, "note": "принято"}) == "принято"
+
     r = await auth_client.delete(f"/api/tasks/{task['id']}/external/{ref['id']}",
                                  params={"company_id": cid})
     assert r.status_code == 200, r.text

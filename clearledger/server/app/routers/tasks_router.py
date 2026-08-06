@@ -1791,7 +1791,8 @@ async def sync_external(
             continue
         db.add(TaskEvent(task_id=t.id, kind="external_stage",
                          actor_name=ref.connector_label or ref.connector_key,
-                         from_value=key, to_value=st.get("name"), note=st.get("note")))
+                         from_value=key, to_value=st.get("name"),
+                         note=_stage_note(st)))
         added += 1
     if ref.mirror_close and result.get("closed") and t.status == "open":
         db.add(TaskEvent(task_id=t.id, kind="status", user_id=current_user.id,
@@ -1801,6 +1802,41 @@ async def sync_external(
     await db.commit()
     await db.refresh(ref)
     return {"ok": True, "stages_added": added, **_ref_out(ref)}
+
+
+def _human_span(seconds: float) -> str:
+    """«12 дн 11 ч», «3 ч 20 мин» — столько работа идёт у подрядчика."""
+    minutes = int(seconds // 60)
+    if minutes < 1:
+        return "меньше минуты"
+    if minutes < 60:
+        return f"{minutes} мин"
+    hours, minutes = divmod(minutes, 60)
+    if hours < 24:
+        return f"{hours} ч" + (f" {minutes} мин" if minutes else "")
+    days, hours = divmod(hours, 24)
+    return f"{days} дн" + (f" {hours} ч" if hours else "")
+
+
+def _stage_note(st: dict) -> str | None:
+    """Пометка к этапу внешней системы.
+
+    У текущего этапа (нет `date_till`) считаем, сколько он уже идёт: «идёт уже
+    12 дн 11 ч» — это и есть ответ на вопрос «работа стоит или движется», ради
+    которого чужие этапы вообще вливаются в нашу ленту.
+    """
+    note = st.get("note")
+    start = st.get("date_from")
+    if st.get("date_till") or not start:
+        return note
+    try:
+        began = datetime.fromisoformat(str(start).replace("Z", "+00:00"))
+    except ValueError:
+        return note
+    if began.tzinfo is None:
+        began = began.replace(tzinfo=timezone.utc)
+    span = _human_span((datetime.now(timezone.utc) - began).total_seconds())
+    return f"{note} · идёт уже {span}" if note else f"идёт уже {span}"
 
 
 def _ref_out(r: TaskExternalRef) -> dict[str, Any]:
