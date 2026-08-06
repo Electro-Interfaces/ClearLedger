@@ -16,7 +16,7 @@ import os
 
 from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import check_module_access, get_current_user
@@ -898,6 +898,103 @@ class StorageCleanupIn(BaseModel):
     thin_after_days: int = 14
     heartbeat_days: int = 90
     dry_run: bool = True
+
+
+class ReprojectIn(BaseModel):
+    """Что достраивать и правда ли выполнять."""
+    date_from: str | None = None
+    date_to: str | None = None
+    station_id: int | None = None
+    limit: int = 500
+    dry_run: bool = True
+
+
+@router.post("/storage/reproject")
+async def store_reproject(
+    body: ReprojectIn,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Построить документы Ledger по пакетам, которые их не получили.
+
+    Приём и разбор — разные события: пакет ложится сырьём (L1), документы
+    рождает проекция (L2). Пакеты, залитые до появления разбора — исторический
+    бэкфилл, — остались сырьём: смены есть, а продаж в учёте нет.
+
+    Операция идемпотентна по построению: проекция ищет свои документы по
+    происхождению и переписывает их, а не плодит вторые. Поэтому повтор
+    безопасен, а «достроить» никогда не значит «задвоить».
+
+    По умолчанию это предпросмотр: сначала показать, сколько пакетов будет
+    разобрано, и лишь потом трогать учёт.
+    """
+    cid: uuid.UUID = await scope_company_id(user, db)
+    if not user.is_superadmin:
+        m = (await db.execute(select(UserCompany).where(
+            UserCompany.user_id == user.id, UserCompany.company_id == cid))).scalar_one_or_none()
+        if m is None or m.role != "admin":
+            raise HTTPException(403, "Достройку учёта выполняет администратор компании")
+
+    p: dict = {"cid": cid, "lim": max(1, min(body.limit, 5000))}
+    условия = ["p.company_id = :cid",
+               "p.kind IN ('shift', 'purchase', 'writeoff', 'inventory', 'transfer',"
+               " 'return_sale', 'production')"]
+    if body.station_id is not None:
+        условия.append("p.station_id = :st")
+        p["st"] = body.station_id
+    if body.date_from:
+        условия.append("p.received_at >= :d1")
+        p["d1"] = date.fromisoformat(body.date_from)
+    if body.date_to:
+        условия.append("p.received_at < (CAST(:d2 AS date) + 1)")
+        p["d2"] = date.fromisoformat(body.date_to)
+
+    сироты = [dict(r) for r in (await db.execute(text(f"""
+        SELECT p.packet_uuid, p.station_id, p.kind, p.received_at
+        FROM edge_packets p
+        LEFT JOIN LATERAL (
+            SELECT 1 FROM data_entries d
+            WHERE d.company_id = p.company_id AND d.source = 'edge'
+              AND d.metadata->'Edge'->>'packet_uuid' = p.packet_uuid
+            LIMIT 1
+        ) есть ON true
+        WHERE {' AND '.join(условия)} AND есть IS NULL
+        ORDER BY p.received_at
+        LIMIT :lim
+    """), p)).mappings().all()]
+
+    итог = {"dry_run": body.dry_run, "packets": len(сироты),
+            "by_kind": {}, "projected": 0, "receipts": 0, "errors": []}
+    for с in сироты:
+        итог["by_kind"][с["kind"]] = итог["by_kind"].get(с["kind"], 0) + 1
+    if body.dry_run:
+        return итог
+
+    for с in сироты:
+        пакет = (await db.execute(select(EdgePacket).where(
+            EdgePacket.company_id == cid,
+            EdgePacket.packet_uuid == с["packet_uuid"]))).scalar_one_or_none()
+        if пакет is None:
+            continue
+        try:
+            результат = await edge_projection.project_packet(
+                db, cid, пакет.packet_uuid, пакет.station_id, пакет.payload)
+            итог["projected"] += int(результат.get("created", 0)) + int(результат.get("updated", 0))
+            # Приёмка станции — не только строка учёта, но и документ с
+            # поставщиком и подписантом: разворачиваем тем же путём, каким её
+            # принимает живой пакет.
+            docs = (пакет.payload or {}).get("Документы") or []
+            было = (await db.execute(select(func.count()).select_from(StoreReceipt)
+                                     .where(StoreReceipt.company_id == cid))).scalar() or 0
+            await edge_router._ingest_receipts(db, cid, пакет.station_id, пакет.payload, docs)
+            стало = (await db.execute(select(func.count()).select_from(StoreReceipt)
+                                      .where(StoreReceipt.company_id == cid))).scalar() or 0
+            итог["receipts"] += max(0, стало - было)
+            await db.commit()
+        except Exception as exc:  # noqa: BLE001
+            await db.rollback()
+            итог["errors"].append(f"{с['packet_uuid'][:8]} ({с['kind']}): {str(exc)[:200]}")
+    return итог
 
 
 @router.get("/storage")
