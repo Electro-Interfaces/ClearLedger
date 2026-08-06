@@ -1432,6 +1432,19 @@ async def create_all() -> None:
         ):
             await conn.execute(_sa.text(stmt))
 
+        # «Задачи»: внешние участники (docs/TASKS.md §9). `create_all` заводит
+        # только НОВЫЕ таблицы — колонку в существующую он не добавит, поэтому
+        # обе идут сюда, иначе на живом стенде INSERT падает «column does not exist».
+        for stmt in (
+            # У кого мяч: ждём себя или внешнюю сторону.
+            "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS waiting_for VARCHAR(20)",
+            # Имя автора без учётки: письмо мог прислать человек, которого в
+            # пространстве нет вовсе.
+            "ALTER TABLE task_events ADD COLUMN IF NOT EXISTS actor_name VARCHAR(200)",
+            "CREATE INDEX IF NOT EXISTS idx_tasks_waiting ON tasks(company_id, waiting_for)",
+        ):
+            await conn.execute(_sa.text(stmt))
+
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Dependency — асинхронная сессия БД."""
