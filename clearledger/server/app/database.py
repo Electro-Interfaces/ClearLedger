@@ -53,6 +53,12 @@ async def create_all() -> None:
                 "ALTER TABLE onec_connections ADD COLUMN IF NOT EXISTS mode VARCHAR(10) NOT NULL DEFAULT 'odata'"
             )
         )
+        # v2.x: PIN станции для офлайн-входа на рабочем месте АЗС (edge-агент).
+        await conn.execute(
+            __import__("sqlalchemy").text(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS station_pin_hash VARCHAR(255)"
+            )
+        )
         # v0.8: реквизиты входящего документа (ТТН №+дата) и ВидОперации
         # для сверки ТТН-файл ↔ ПТУ и интерпретации проводок ОРП.
         # + period_status и discrepancy_* (см. docs/sverka-spec.md §7a):

@@ -50,14 +50,16 @@ def _int_or_none(v: Any) -> int | None:
 
 
 def _density(v: Any) -> float | None:
-    d = _int_or_none(v)
-    if d is None:
-        try:
-            return round(float(v), 4)
-        except (TypeError, ValueError):
-            return None
-    # STS отдаёт плотность целым (830 = 0.830 г/см³) либо дробным
-    return round(d / 1000.0, 4) if d > 10 else round(float(d), 4)
+    # STS отдаёт плотность целым (830 = 0.830 г/см³) либо дробным (0.8235).
+    # ⚠ Через int() дробную сюда пропускать нельзя: int(0.8235) = 0, и плотность
+    #   молча становилась нулём (551 резервуар-смена июля–августа 2026).
+    try:
+        d = float(v)
+    except (TypeError, ValueError):
+        return None
+    if d <= 0:
+        return None
+    return round(d / 1000.0, 4) if d > 10 else round(d, 4)
 
 
 def _report_totals(report: dict) -> tuple[float, float, int]:

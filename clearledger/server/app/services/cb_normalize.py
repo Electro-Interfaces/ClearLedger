@@ -10,14 +10,15 @@
 
 Выход — список черновиков DataEntry (документная грана L2, решение 13.06):
   layer='clean', status='verified', category_id ∈ {retail|purchase|food},
-  doc_type_id=kind, source='oneC', source_id=натуральный ключ (идемпотентность),
-  meta=структура смены+документа. recipe — НЕ свой DataEntry: разворачивает
-  блюда retail в ингредиенты (модель B, §project_obshepit_model).
+  doc_type_id=kind, source=канал источника, source_id=натуральный ключ,
+  meta=структура смены+документа. recipe сохраняется отдельным DataEntry в
+  контексте смены и разворачивает блюда retail в ингредиенты.
 
 Чистый Python (без БД): персистенцию делает оркестратор канала. Read-only.
 """
 from __future__ import annotations
 
+import hashlib
 from typing import Any
 
 # kind → (category_id для DataEntry)
@@ -26,6 +27,12 @@ _CATEGORY = {
     "purchase": "purchase",
     "production_release": "food",
     "return_purchase": "purchase",
+    "return_sale": "retail",
+    "inventory": "inventory",
+    "gain": "inventory",
+    "writeoff": "inventory",
+    "transfer": "inventory",
+    "ingredients_writeoff": "food",
 }
 
 
@@ -78,6 +85,11 @@ def _build_sections(doc: dict, recipes: dict[str, list[dict]]) -> tuple[dict, bo
         if is_dish:
             has_dish = True
             ln = dict(ln)
+            # ГИГ учитывает общепит по модели «выпуск по ТТК → продажа как
+            # сопутствующего товара». Льготный входной НДС ингредиента не
+            # переносится на готовое блюдо: его продажа всегда по 22%.
+            ln["СтавкаНДС"] = "НДС22"
+            ln["СуммаНДС"] = round(float(ln.get("Сумма") or 0) * 22 / 122, 2)
             ing = _expand_dish(ln, recipes)
             if ing:
                 ln["Ингредиенты"] = ing
@@ -96,7 +108,7 @@ def _build_sections(doc: dict, recipes: dict[str, list[dict]]) -> tuple[dict, bo
         }
     if obshepit:
         sections["продажа_общепит"] = {
-            "действие": "розн_продажа_блюда_разворот_ТТК",  # Дт 90.02.1 Кт 41.02 (ингредиенты)
+            "действие": "розн_продажа_готового_блюда_НДС22",
             "строки": obshepit, "сумма": _sum(obshepit), "сумма_ндс": _sum(obshepit, "СуммаНДС"),
         }
     if vozvraty:
@@ -106,7 +118,11 @@ def _build_sections(doc: dict, recipes: dict[str, list[dict]]) -> tuple[dict, bo
     return sections, has_dish
 
 
-def normalize_shift_package(package: dict) -> dict:
+def normalize_shift_package(
+    package: dict,
+    source: str = "oneC",
+    source_label: str = "ЦБ ЭЛСИ.АЗК",
+) -> dict:
     """Пакет смены ЦБ → черновики DataEntry (L2 CLEAN).
 
     Возврат: {shift_key, station, entries:[DataEntry-draft], skipped:[...]}.
@@ -117,11 +133,15 @@ def normalize_shift_package(package: dict) -> dict:
     station = str(shift.get("КодАЗС", "")).strip()
     recipes = _recipe_index(docs)
 
+    retail_uuid = next((str(d.get("ИсточникUUID")) for d in docs
+                        if (d.get("Тип") or d.get("kind")) == "retail_sale_sidegoods"
+                        and d.get("ИсточникUUID")), "")
     shift_meta = {
         # П1-фикс: переносим GUID смены (ОРП Ссылка) из пакета — уникальный ключ смены.
-        "Смена": shift.get("Смена"),
+        "Смена": shift.get("Смена") or retail_uuid or package.get("ИдентификаторПакета"),
         "КодАЗС": station,
         "НомерСмены": shift.get("НомерСмены"),
+        "НомерСменыВнутр": shift.get("НомерСменыВнутр"),
         "ОСЭНомер": shift.get("ОСЭНомер"),
         "Открытие": shift.get("Открытие"),
         "Закрытие": shift.get("Закрытие"),
@@ -137,15 +157,20 @@ def normalize_shift_package(package: dict) -> dict:
     for d in docs:
         kind = d.get("Тип") or d.get("kind")
         if kind == "recipe":
-            # OB-1/персист: recipe используется для разворота блюд (выше, _recipe_index),
-            # НО также персистится как DataEntry(doc_type_id='recipe') — раньше терялся,
-            # и эмиттер БП зависел от ручного pull_cb_recipes_dev.py. Ключ по БлюдоUUID
-            # (period-independent) → один ТТК на блюдо, идемпотентный upsert между сменами.
+            # ТТК сохраняется в контексте конкретной смены. Одна глобальная
+            # запись на блюдо уничтожала историю: повторный экспорт старой
+            # смены мог получить уже новый состав.
             blyudo = str(d.get("БлюдоUUID") or d.get("Блюдо") or "").strip()
             if not blyudo:
                 continue
             rec_doc = dict(d)
             rec_doc.setdefault("БлюдоUUID", blyudo)
+            version_identity = "|".join((
+                str(d.get("ВерсияНабораТТК") or ""),
+                str(d.get("ВерсияТТК") or ""),
+                str(d.get("ИсточникUUID") or ""),
+            ))
+            version_token = hashlib.sha256(version_identity.encode("utf-8")).hexdigest()[:16]
             entries.append({
                 "title": f"ТТК блюда · {blyudo[:8]}",
                 # category_id='retail' — как pull_cb_recipes_dev.py (30 существующих
@@ -153,12 +178,12 @@ def normalize_shift_package(package: dict) -> dict:
                 "category_id": "retail",
                 "subcategory_id": "recipe",
                 "doc_type_id": "recipe",
-                "source": "oneC",
-                "source_label": "ЦБ ЭЛСИ.АЗК",
-                "source_id": f"recipe:{blyudo}",
+                "source": source,
+                "source_label": source_label,
+                "source_id": f"{skey}:recipe:{blyudo}:{version_token}",
                 "layer": "clean",
                 "status": "verified",
-                "meta": {"kind": "recipe", "Документ": rec_doc},
+                "meta": {"Смена": shift_meta, "kind": "recipe", "Документ": rec_doc},
             })
             continue
         category = _CATEGORY.get(kind)
@@ -189,8 +214,8 @@ def normalize_shift_package(package: dict) -> dict:
             "category_id": category,
             "subcategory_id": kind,
             "doc_type_id": kind,
-            "source": "oneC",
-            "source_label": "ЦБ ЭЛСИ.АЗК",
+            "source": source,
+            "source_label": source_label,
             # натуральный ключ для идемпотентности (смена + kind + источник)
             "source_id": f"{skey}:{kind}:{src_uuid}",
             "layer": "clean",

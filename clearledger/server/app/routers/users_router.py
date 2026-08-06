@@ -6,6 +6,7 @@
 через эти эндпоинты НЕ выдаётся (только через CLI grant_company_access.py).
 """
 import hashlib
+import logging
 import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -29,10 +30,14 @@ from app.schemas import (
     MemberContractsUpdate,
     MemberModulesUpdate,
     MemberScopeUpdate,
+    StationPinUpdate,
     UserAdminResponse,
     UserAdminUpdate,
     UserCreate,
 )
+from app.services.station_roster import enqueue_station_roster, refresh_company_rosters
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/users", tags=["Пользователи"])
 
@@ -377,8 +382,72 @@ async def set_member_scope(
     await log_audit(db, actor=current_user, company_id=cid, action="member.scope",
                     target=(target.email if target else user_id),
                     details={"objects": len(ids) if ids else "вся сеть"})
+    # Смена скоупа меняет состав ростеров станций: кто теперь видит станцию —
+    # тот и должен уметь войти на её рабочем месте. Ростер вторичен: сбой его
+    # доставки не должен ронять запись скоупа.
+    try:
+        await refresh_company_rosters(db, cid)
+    except Exception:
+        logger.exception("ростер станций не переспущен после смены скоупа")
     await db.commit()
     return await _resp(target, db, scope_cid=cid)
+
+
+@router.put("/{user_id}/station-pin", response_model=UserAdminResponse)
+async def set_station_pin(
+    user_id: str,
+    payload: StationPinUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """PIN станции участника: короткий код входа на рабочем месте АЗС (edge).
+
+    Пустой pin снимает PIN. После изменения ростеры станций компании
+    переспускаются, чтобы новый bcrypt-хеш доехал до касс.
+    """
+    try:
+        uid = uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID")
+    cid = await require_company_admin(payload.company_id, current_user, db)
+    if await db.get(UserCompany, (uid, cid)) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Пользователь не член компании")
+    target = await db.get(User, uid)
+    if target is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Пользователь не найден")
+    pin = (payload.pin or "").strip()
+    if pin:
+        if not pin.isdigit() or not (4 <= len(pin) <= 8):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "PIN — от 4 до 8 цифр")
+        target.station_pin_hash = hash_password(pin)
+    else:
+        target.station_pin_hash = None
+    await log_audit(db, actor=current_user, company_id=cid, action="member.station_pin",
+                    target=target.email, details={"pin": "задан" if pin else "снят"})
+    try:
+        await refresh_company_rosters(db, cid)
+    except Exception:
+        logger.exception("ростер станций не переспущен после смены PIN")
+    await db.commit()
+    return await _resp(target, db, scope_cid=cid)
+
+
+@router.post("/station/{station_id}/roster/push")
+async def push_station_roster(
+    station_id: int,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Принудительно переспустить ростер профилей на станцию (админ компании).
+
+    Обычно ростер обновляется сам при смене PIN или скоупа; эта ручка — для
+    первичной заливки на станцию и ручной пересинхронизации.
+    """
+    cid = await require_company_admin(company_id, current_user, db)
+    n = await enqueue_station_roster(db, cid, station_id)
+    await db.commit()
+    return {"station_id": station_id, "profiles": n}
 
 
 @router.put("/{user_id}/contracts", response_model=UserAdminResponse)

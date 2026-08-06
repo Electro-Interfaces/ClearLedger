@@ -37,7 +37,7 @@ import {
 import { formatPeriod, formatBucket } from '@/lib/formatDate'
 import { useFilters } from '@/contexts/FilterContext'
 import { rechartsTooltipTheme } from '@/components/ui/chart-utils'
-import { TrendSpark } from '@/components/ui/trend-spark'
+import { MetricTile } from '@/components/ui/metric-tile'
 import { useChartAxis } from '@/lib/chartAxis'
 
 /** Сужение по сети из контура (регион/станции) для запросов обзора. */
@@ -98,15 +98,9 @@ const KPI_HINTS: Record<string, string> = {
 }
 
 /** Простая плитка (label · value · hint) — счётчики сети и ключевые KPI.
- * Порядок детей label/value/hint — контракт экспорта (data-kpi). */
+ * Вёрстка — общая плитка пространства; здесь остался только привычный вызовам вид. */
 function CountCard({ label, value, hint }: { label: string; value: string; hint?: string }) {
-  return (
-    <div data-kpi className="rounded-xl border bg-card/50 p-3.5 shadow-sm">
-      <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</div>
-      <div className="mt-1 text-2xl font-semibold tabular-nums leading-tight">{value}</div>
-      {hint && <div className="mt-0.5 text-xs text-muted-foreground">{hint}</div>}
-    </div>
-  )
+  return <MetricTile label={label} value={value} hint={hint} />
 }
 
 /** Карточка простаивающих ЭЗС + раскрытие списка.
@@ -549,27 +543,12 @@ function RegionExtremes({ regions }: { regions: OverviewNetwork['regions'] }) {
   )
 }
 
-/** KPI-плитка с Δ% к прошлому периоду (абс. в углу) + мини-спарклайн.
- * Контракт экспорта сохранён: первые три ребёнка — label/value/hint;
- * Δ-бейдж и спарклайн идут ПОСЛЕ (экспорт читает детей по индексу 0..2). */
+/** KPI-плитка с Δ% к прошлому периоду (абс. в углу) + мини-спарклайн. */
 function KpiCard({ k, hint, baseline }: { k: OverviewKpi; hint?: string; baseline?: string }) {
-  const showDelta = k.delta_pct != null && Math.abs(k.delta_pct) <= 500  // абсурдные % (пустая база) прячем
-  const up = (k.delta_pct ?? 0) >= 0
   return (
-    <div data-kpi className="relative rounded-xl border bg-card/50 p-3.5 shadow-sm">
-      <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{k.label}</div>
-      <div className="mt-1 text-2xl font-semibold tabular-nums leading-tight">{kpiDisplay(k)}</div>
-      <div className="mt-0.5 text-xs text-muted-foreground">{hint ?? ''}</div>
-      {showDelta && (
-        // База сравнения — на самом проценте: она относится только к нему, а не
-        // ко всей строке карточек (у части KPI своего Δ нет вовсе).
-        <span title={baseline && `Изменение к предыдущему периоду: ${baseline}`}
-          className={`absolute right-3 top-3 text-[11px] font-medium tabular-nums ${up ? 'text-emerald-600/90 dark:text-emerald-400/90' : 'text-red-600/90 dark:text-red-400/90'}`}>
-          {up ? '▲' : '▼'}{Math.abs(k.delta_pct!).toFixed(1)}%
-        </span>
-      )}
-      {k.spark && <TrendSpark values={k.spark} tone="muted" full />}
-    </div>
+    <MetricTile label={k.label} value={kpiDisplay(k)} hint={hint ?? ''}
+      delta={k.delta_pct} spark={k.spark ?? undefined}
+      deltaTitle={baseline && `Изменение к предыдущему периоду: ${baseline}`} />
   )
 }
 
@@ -882,8 +861,14 @@ function SectionTitle({ children, hint, info }: { children: ReactNode; hint?: st
 }
 
 // ─── главная витрина ─────────────────────────────────────────────────
-export function OverviewDashboardPanel({ companyId, dateFrom, dateTo }: {
+export function OverviewDashboardPanel({ companyId, dateFrom, dateTo, embedded }: {
   companyId: string; dateFrom: string; dateTo: string
+  /**
+   * Витрина открыта внутри чужого экрана («Пульс» → «Бизнес» → «Продажи»):
+   * заголовок там уже стоит от принимающего продукта, а внешний отступ даёт его
+   * раскладка. Без этого на экране было два заголовка подряд и тройной отступ.
+   */
+  embedded?: boolean
 }) {
   const ref = useRef<HTMLDivElement>(null)
   // Вид-срез: период — только из контура рабочей области.
@@ -914,11 +899,16 @@ export function OverviewDashboardPanel({ companyId, dateFrom, dateTo }: {
     : undefined
 
   return (
-    <div className="p-4">
-      <div className="mb-4 flex flex-wrap items-start justify-between gap-3" data-export-ignore>
+    <div className={embedded ? undefined : 'p-4'}>
+      <div className={`mb-4 flex flex-wrap items-start gap-3 ${embedded ? 'justify-end' : 'justify-between'}`}
+        data-export-ignore>
         {/* Счётчики сети (ЭЗС, порты, сессии) не дублируем: они ниже карточками.
             База сравнения — в подсказке Δ% на карточках KPI. */}
-        <h2 className="flex items-center gap-2 text-base font-semibold"><Zap className="h-4 w-4 text-blue-600 dark:text-blue-400" />Обзор сети ЭЗС</h2>
+        {!embedded && (
+          <h2 className="flex items-center gap-2 text-base font-semibold"><Zap className="h-4 w-4 text-blue-600 dark:text-blue-400" />Обзор сети ЭЗС</h2>
+        )}
+        {/* Выгрузка остаётся и во встроенном виде: она относится к витрине, а не
+            к экрану, и «Пульсу» её нечем заменить. */}
         <ExportButton title="Обзор сети ЭЗС" subtitle={`Период: ${period.from} — ${period.to}`} getEl={() => ref.current} />
       </div>
 

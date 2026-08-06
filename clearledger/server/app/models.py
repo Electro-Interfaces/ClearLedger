@@ -79,6 +79,11 @@ class User(Base):
     )
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    # PIN станции: bcrypt-хеш короткого кода для входа на рабочем месте АЗС (edge).
+    # Отдельно от password_hash: PIN едет вниз в ростере станции и разблокирует
+    # профиль локально, а пароль экосистемы наружу не выходит. NULL — PIN не
+    # задан, быстрый вход на станции недоступен (остаётся вход по паролю).
+    station_pin_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[str] = mapped_column(String(50), nullable=False, default="user")
     # Суперадмин видит и переключает ВСЕ компании без записей в user_companies.

@@ -103,7 +103,7 @@ export function TankShiftDialog({ row, tol, onClose }: {
   const docsSum = docs.reduce((a, d) => a + d.volume, 0)
   const docsMatch = docs.length > 0 && Math.abs(docsSum - row.receipts) <= Math.max(1, row.receipts * 0.02)
 
-  const hasMass = row.mass_start != null || row.mass_end != null || row.fact_mass != null
+  const hasMass = row.fact_mass != null || row.mass_sales != null
 
   return (
     // Немодально: смены разбирают подряд, и таблица под панелью обязана оставаться
@@ -237,17 +237,39 @@ export function TankShiftDialog({ row, tol, onClose }: {
             </Block>
           )}
 
-          {/* 5. Масса — объём меняется с температурой, масса нет. */}
+          {/* 5. Масса — объём меняется с температурой, масса нет. Считаем по цепочке
+              ЗАМЕРОВ: книжная масса STS тянется от давнего старта и на части станций
+              даёт нефизичную плотность, замер же согласован сам с собой. */}
           {hasMass && (
-            <Block title="Масса, кг">
-              <Line label="На начало" value={KG(row.mass_start)} />
+            <Block title="Масса, кг"
+                   badge={row.mass_gap_delta != null
+                     ? <Verdict ok={Math.abs(row.mass_gap_delta) < 5}
+                                text={Math.abs(row.mass_gap_delta) < 5 ? 'масса сходится' : 'убыль по массе'} />
+                     : undefined}>
+              <Line label="Замер на начало" hint="конец предыдущей смены" value={KG(row.fact_mass_start)} />
               <Line label="+ Приход" value={KG(row.mass_received)} />
               <Line label="− Отпуск" value={KG(row.mass_sales)} />
-              <Line label="Книга на конец" value={KG(row.mass_end)} strong />
-              <Line label="Факт (замер)" value={KG(row.fact_mass)} strong />
+              <Line label="Должно быть" value={KG(row.fact_mass_start == null ? null
+                : row.fact_mass_start + (row.mass_received ?? 0) - (row.mass_sales ?? 0))} />
+              <Line label="Замер на конец" value={KG(row.fact_mass)} strong />
+              {row.mass_gap_delta != null && (
+                <Line label="Набежало за смену" strong
+                      value={Math.abs(row.mass_gap_delta) < 0.05 ? 'сходится'
+                        : `${nf1.format(Math.abs(row.mass_gap_delta))} кг ${row.mass_gap_delta > 0 ? 'недостача' : 'излишек'}`}
+                      tone={gapTone(row.mass_gap_delta, 5)} />
+              )}
+              {row.thermal_l != null && Math.abs(row.thermal_l) >= 0.5 && (
+                <Line label="из них температура" value={`${nf1.format(row.thermal_l)} л`}
+                      hint={row.temp_beg != null && row.temp_end != null
+                        ? `${nf1.format(row.temp_beg)} → ${nf1.format(row.temp_end)} °C` : undefined} />
+              )}
               <p className="mt-1.5 text-[11px] text-muted-foreground/80">
-                Объём меняется с температурой, масса — нет. Если расхождение видно в литрах,
-                но не в килограммах, дело в температуре, а не в потере топлива.
+                {row.fact_density != null
+                  ? <>Объём меняется с температурой, масса — нет. Разница между расхождением
+                      в литрах и в килограммах (по плотности замера {nf3.format(row.fact_density)}) —
+                      это тепло, остальное — настоящая убыль.</>
+                  : <>Замер массы недостоверен: масса и объём дают невозможную плотность.
+                      Расхождение по этому резервуару считается только в литрах.</>}
               </p>
             </Block>
           )}

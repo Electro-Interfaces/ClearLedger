@@ -71,6 +71,14 @@ FACT_SANITY_RATIO = 1.15
 # Точное совпадение до литра физически невероятно: резервуар не заполняют под
 # горловину — оставляют место на температурное расширение.
 FACT_AT_LIMIT_L = 0.5
+# Плотность светлых нефтепродуктов: бензины ~0,72–0,78, ДТ ~0,80–0,86 кг/л.
+# Выход за эти рамки — не топливо, а сбой прибора или битая цепочка масс.
+MIN_FUEL_DENSITY = 0.60
+MAX_FUEL_DENSITY = 0.95
+# Столько одинаковых замеров подряд при живом отпуске — прибор не измеряет.
+# Три смены выбраны так, чтобы не ловить выходные простои (замер и правда не
+# меняется, но и отпуска нет — такие в замечание не попадают).
+FROZEN_FACT_SHIFTS = 3
 
 
 def _ru(v: float, digits: int = 1) -> str:
@@ -379,6 +387,20 @@ async def build_tank_ledger(
                 return None
             return f
 
+        def _fact_density(t: Any) -> float | None:
+            """Плотность ЗАМЕРА (кг/л) или None, если прибор отдал невозможную массу.
+
+            Своя проверка, а не поле `density`: масса и объём замера приходят из
+            одной секции `rest`, и их отношение сразу показывает, годится ли масса.
+            На 209 рез.4 и 210 рез.3 оно даёт 1,5 — такой массой считать нельзя.
+            """
+            v = _sane_fact(getattr(t, "fact_volume", None))
+            m = _n(getattr(t, "fact_mass", None)) or None
+            if v is None or m is None:
+                return None
+            d = m / v
+            return round(d, 4) if MIN_FUEL_DENSITY <= d <= MAX_FUEL_DENSITY else None
+
         for tank, shift, _station in chain:
             book_start = _f(tank.volume_start)
             book_end = _f(tank.volume_end)
@@ -413,6 +435,20 @@ async def build_tank_ledger(
                               if fact_start is not None else None)
             fact_gap_delta = (round(fact_gap - fact_gap_start, 2)
                               if fact_gap is not None and fact_gap_start is not None else None)
+            # То же самое в КИЛОГРАММАХ — и тоже по цепочке замеров, а не по книге.
+            # Книжная масса STS (doc_beg/doc_end.amount) тянется от давнего старта и
+            # на половине станций даёт нефизичную плотность (1,3 у бензина), а
+            # rest/release/receipt.amount согласованы с плотностью замера. Объём
+            # «дышит» с температурой, масса нет: разница литровой и массовой невязки
+            # и есть тепло, остаток — настоящая убыль. Знак как везде: + недостача.
+            d_fact = _fact_density(tank)
+            mass_gap_delta = thermal_l = None
+            if (d_fact is not None and prev is not None and _fact_density(prev) is not None
+                    and fact_gap_delta is not None):
+                mass_gap_delta = round(
+                    _f(prev.fact_mass) + _f(tank.mass_received) - _f(tank.mass_sales)
+                    - _f(tank.fact_mass), 2)
+                thermal_l = round(fact_gap_delta - mass_gap_delta / d_fact, 1)
             fuel_changed = prev is not None and _fuel_key(prev) != _fuel_key(tank)
 
             sum_receipts += receipts
@@ -559,6 +595,10 @@ async def build_tank_ledger(
                 "mass_start": _n(tank.mass_start), "mass_end": _n(tank.mass_end),
                 "mass_received": _n(tank.mass_received), "mass_sales": _n(tank.mass_sales),
                 "fact_mass": _n(tank.fact_mass),
+                "fact_mass_start": _n(prev.fact_mass) if prev is not None else None,
+                "fact_density": d_fact,
+                "mass_gap_delta": mass_gap_delta,
+                "thermal_l": thermal_l,
                 "density_beg": _n(tank.density_beg), "density_end": _n(tank.density),
                 "temp_beg": _n(tank.temp_beg), "temp_end": _n(tank.temp_end),
                 "level_end": _n(tank.level_end),
@@ -607,6 +647,37 @@ async def build_tank_ledger(
                             iss["kind"], iss["reason"] = "reversal", text
                             rw["continuity_kind"], rw["continuity_reason"] = "reversal", text
                     break
+
+        # Залипший уровнемер: замер не меняется сменами подряд, а топливо через
+        # резервуар идёт. Расхождение книга↔факт по такому резервуару равно
+        # накопленному отпуску и никакой недостачи не означает — реального остатка
+        # не знает никто (АЗС 207 рез.4: замер стоит с 30.04.2026, за это время
+        # отпущено 23,5 тыс. л). Лечится метроштоком и поверкой прибора.
+        frozen_n, frozen_sales = 0, 0.0
+        _last_fact = _n(chain[-1][0].fact_volume) or None
+        if _last_fact is not None:
+            for _t, _s, _ in reversed(chain):
+                if (_n(_t.fact_volume) or None) != _last_fact:
+                    break
+                frozen_n += 1
+                frozen_sales += _f(_t.sales)
+        if frozen_n >= FROZEN_FACT_SHIFTS and frozen_sales > 0:
+            _from = chain[len(chain) - frozen_n][1]
+            issues.append({
+                "kind": "fact_frozen", "type": "fact_frozen",
+                "station_code": station_code, "station_name": station_name,
+                "tank_number": tank_no, "fuel_name": (chain[-1][0].fuel_type or "—").strip(),
+                "shift_number": int(chain[-1][1].shift_number),
+                "date": (chain[-1][1].opened_at.date().isoformat()
+                         if chain[-1][1].opened_at else None),
+                "gap_liters": None,
+                "fact_raw": round(_last_fact, 1),
+                "reason": (f"замер стоит на {_ru(_last_fact, 0)} л {frozen_n} смен подряд, "
+                           f"за это время отпущено {_ru(frozen_sales, 0)} л — уровнемер не "
+                           "измеряет, расхождение по резервуару считать нельзя"),
+                "detail": (f"с {_from.opened_at.date().isoformat() if _from.opened_at else '—'}: "
+                           f"нужен ручной замер и поверка прибора"),
+            })
 
         last = chain[-1][0]
         book_start_period = _f(first.volume_start)

@@ -267,6 +267,38 @@ async def assert_company_module(
     return cid
 
 
+async def assert_company_product(
+    company_ref: str, user: User, db: AsyncSession, product_code: str
+) -> uuid.UUID:
+    """assert_company_member + право на ПРОДУКТ пространства (`pulse`, `projects`…).
+
+    Отличие от assert_company_module: там ручка гейтится модулем Учёта и ключ
+    `ledger` открывает её целиком. Продукт — самостоятельное рабочее место, и
+    доступ к Учёту прав на него не даёт. Полный доступ по-прежнему у суперадмина,
+    admin-члена и роли без ограничения набора.
+
+    Нужно там, где данные продукта шире его экрана: «Пульс» отдаёт выручку сети,
+    нарушения SLA и поимённую активность людей, а в пространстве есть внешние
+    участники — членства в компании для такого среза мало.
+    """
+    cid = await assert_company_member(company_ref, user, db)  # membership + 403
+    if user.is_superadmin:
+        return cid
+    m = await db.get(UserCompany, (user.id, cid))
+    if m is None or m.role == "admin":
+        return cid
+    mods = await resolve_member_modules(m, db)
+    if mods is None:  # роль «Полный доступ»
+        return cid
+    # Ключ продукта целиком (`pulse`) или любой его пункт (`pulse:team`).
+    if product_code in mods or any(k.startswith(product_code + ":") for k in mods):
+        return cid
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Нет доступа к продукту",
+    )
+
+
 def CompanyModuleScope(module_key: str, query_param: str = "company_id"):
     """Как CompanyScope, но дополнительно требует доступ к модулю module_key (RBAC)."""
 

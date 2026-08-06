@@ -150,6 +150,16 @@ class MemberScopeUpdate(BaseModel):
     object_scope: list[str] | None = None
 
 
+class StationPinUpdate(BaseModel):
+    """PIN станции участника — короткий код входа на рабочем месте АЗС (edge).
+
+    Пустой pin снимает PIN: быстрый вход на станции отключается, остаётся вход
+    по паролю экосистемы. PIN хранится bcrypt-хешем и едет вниз в ростере станции.
+    """
+    company_id: str
+    pin: str | None = None
+
+
 class MemberContractsUpdate(BaseModel):
     """Основание допуска: договоры, по которым участник работает в пространстве.
 

@@ -27,7 +27,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import FuelShift, FuelStation, FuelTank, FuelTankInventory, FuelTankSpec
 # Порог достоверности замера — общий с книгой резервуара: два разных порога дали
 # бы ведомость, расходящуюся с экраном, по которому её сверяют.
-from app.services.tank_ledger import FACT_AT_LIMIT_L, FACT_SANITY_RATIO
+from app.services.tank_ledger import (
+    FACT_AT_LIMIT_L, FACT_SANITY_RATIO, MAX_FUEL_DENSITY, MIN_FUEL_DENSITY,
+)
 
 
 def _f(v: Any) -> float:
@@ -144,9 +146,16 @@ async def build_draft(
             })
             continue
         adj_v = round(fact_v - book_v, 2)
-        book_m = _n(tank.mass_end)
+        # Масса — через плотность ЗАМЕРА, а не книжная масса STS: та тянется от
+        # давнего старта и на части станций даёт нефизичную плотность (1,3 у бензина),
+        # из-за чего корректировка в кг не соответствовала литрам. В акт идут обе
+        # величины, и нормы естественной убыли считаются от массы — врать нельзя.
         fact_m = _n(tank.fact_mass)
-        adj_m = round(fact_m - book_m, 3) if (book_m is not None and fact_m is not None) else None
+        dens = (fact_m / fact_v) if (fact_m and fact_v > 0) else None
+        if dens is not None and not (MIN_FUEL_DENSITY <= dens <= MAX_FUEL_DENSITY):
+            dens = None       # прибор отдал невозможную массу — считаем только литры
+        book_m = round(book_v * dens, 1) if dens else None
+        adj_m = round(adj_v * dens, 3) if dens else None
         prev = existing.get((str(station.id), int(tank_no)))
         # Что закрыла последняя прошлая ведомость и сколько набежало после неё.
         # `adjustment_open` — то, что подлежит оформлению сейчас; `adjustment_volume`
@@ -175,6 +184,10 @@ async def build_draft(
             "book_mass": round(book_m, 1) if book_m is not None else None,
             "fact_mass": round(fact_m, 1) if fact_m is not None else None,
             "adjustment_mass": round(adj_m, 1) if adj_m is not None else None,
+            # Плотность и температура замера — обязательные графы акта: без них
+            # объём в литрах не сопоставим ни с накладной, ни со следующим замером.
+            "density": round(dens, 4) if dens else None,
+            "temp_end": _n(tank.temp_end),
             "kind": "излишек" if adj_v > 0.05 else "недостача" if adj_v < -0.05 else "сходится",
             "already_confirmed": bool(prev and prev.status == "confirmed"),
             # Прошлая ведомость по этому резервуару: когда, на сколько и какое

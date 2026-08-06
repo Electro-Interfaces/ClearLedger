@@ -658,6 +658,14 @@ export interface TankLedgerRow {
   mass_received: number | null
   mass_sales: number | null
   fact_mass: number | null
+  /** Замер массы на начало = замер конца предыдущей смены. */
+  fact_mass_start?: number | null
+  /** Плотность ЗАМЕРА (масса ÷ объём); null — прибор отдал невозможную массу. */
+  fact_density?: number | null
+  /** Набежало за смену в кг по цепочке замеров (+ недостача). */
+  mass_gap_delta?: number | null
+  /** Часть литрового расхождения, объяснённая температурой (литры). */
+  thermal_l?: number | null
   density_beg: number | null
   density_end: number | null
   temp_beg: number | null
@@ -709,7 +717,7 @@ export interface TankLedgerTank {
 }
 
 export interface TankLedgerIssue {
-  type: 'arithmetic' | 'continuity' | 'fuel_change' | 'fact_suspect'
+  type: 'arithmetic' | 'continuity' | 'fuel_change' | 'fact_suspect' | 'fact_frozen'
   station_code: number
   station_name: string
   tank_number: number

@@ -312,7 +312,10 @@ function IssueCard({ issue, onOpenAll, onOpenStation }: {
 }
 
 /* ═════════════════ «Обзор» — общая ситуация + светофор проблем ═════════════════ */
-export function OpsOverviewVitrine() {
+export function OpsOverviewVitrine({ embedded }: {
+  /** Витрина внутри чужого экрана («Пульс»): свой h1 и внешний отступ там лишние. */
+  embedded?: boolean
+} = {}) {
   const { companyId } = useCompany()
   const rootRef = useRef<HTMLDivElement>(null)
   const [region, setRegion] = useState<string | undefined>(undefined)
@@ -334,11 +337,13 @@ export function OpsOverviewVitrine() {
   const red = d.issues.filter((i) => i.severity === 'red')
   const amber = d.issues.filter((i) => i.severity === 'amber')
   return (
-    <div ref={rootRef} className="space-y-5 px-6 py-6">
+    <div ref={rootRef} className={embedded ? 'space-y-5' : 'space-y-5 px-6 py-6'}>
       <div className="flex flex-wrap items-start gap-3">
         <div className="flex-1">
           <div className="flex items-center gap-2">
-            <h1 className="text-xl font-semibold">Управленческий обзор ЭЗС</h1>
+            {/* Второй h1 на странице «Пульса» ломал и заголовочную структуру, и
+                визуальную иерархию: заголовок экрана там уже стоит. */}
+            {!embedded && <h1 className="text-xl font-semibold">Управленческий обзор ЭЗС</h1>}
             <Badge className="bg-emerald-500/15 text-[10px] text-emerald-600 dark:text-emerald-400">реальные данные</Badge>
             <ExportButton title="Управленческий обзор ЭЗС" subtitle={region} getEl={() => rootRef.current} />
           </div>

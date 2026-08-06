@@ -6,11 +6,11 @@
  * Приёмник НЕ меняется. Контракт: русские ключи, дискриминатор Тип, 8 типов
  * (recipe→purchase→retail→production→…→transfer), НСИ-инвариант, ХешПакета.
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { Download, FolderUp, FileJson, CheckCircle2, AlertTriangle } from 'lucide-react'
 import {
-  getStoreShifts, getBpPackage, emitBpPackage,
+  getStoreShifts, getBpPackage, getBpPackageVerify, emitBpPackage,
   type ShiftComposite, type BpPackage,
 } from '@/services/storeService'
 import { fmtMoney } from '@/services/analyticsService'
@@ -45,7 +45,8 @@ function downloadJson(pkg: BpPackage, sh: ShiftComposite) {
 }
 
 export function BpExportPanel({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom: string; dateTo: string }) {
-  const [key, setKey] = useState<string | null>(null)
+  const [selection, setSelection] = useState<{ companyId: string; key: string } | null>(null)
+  const key = selection?.companyId === companyId ? selection.key : null
   // GAP-2: companyId в ключах — иначе после переключения компании панель до 5 мин
   // показывает смены/пакет ПРЕЖНЕЙ компании из кеша React Query.
   const shiftsQ = useQuery({
@@ -57,10 +58,12 @@ export function BpExportPanel({ companyId, dateFrom, dateTo }: { companyId: stri
     queryFn: () => getBpPackage(key!),
     enabled: !!key,
   })
+  const verifyQ = useQuery({
+    queryKey: ['bp-package-verify', companyId, key],
+    queryFn: () => getBpPackageVerify(key!),
+    enabled: !!key,
+  })
   const emitMut = useMutation({ mutationFn: () => emitBpPackage(key!) })
-  // Сбросить выбранную смену при смене компании (ключ смены чужой компании не валиден).
-  useEffect(() => { setKey(null) }, [companyId])
-
   const shift = shiftsQ.data?.shifts.find((s) => s.shift_key === key) ?? null
   const pkg = pkgQ.data ?? null
 
@@ -75,9 +78,9 @@ export function BpExportPanel({ companyId, dateFrom, dateTo }: { companyId: stri
     const nsiCount: Record<string, number> = {}
     for (const n of pkg.НСИ) nsiCount[n.Тип] = (nsiCount[n.Тип] ?? 0) + 1
     const total = Object.values(docSum).reduce((a, b) => a + b, 0)
-    const ready = pkg.Документы.length > 0 && pkg.НСИ.length > 0 && !!pkg.ХешПакета
+    const ready = verifyQ.data?.ok === true
     return { docCount, docSum, nsiCount, total, ready }
-  }, [pkg])
+  }, [pkg, verifyQ.data?.ok])
 
   return (
     <div className="p-6 space-y-4">
@@ -107,7 +110,7 @@ export function BpExportPanel({ companyId, dateFrom, dateTo }: { companyId: stri
                 {shiftsQ.data?.shifts.map((sh) => (
                   <tr
                     key={sh.shift_key}
-                    onClick={() => setKey(sh.shift_key)}
+                    onClick={() => setSelection({ companyId, key: sh.shift_key })}
                     className={`border-t border-border/30 cursor-pointer ${key === sh.shift_key ? 'bg-accent/40' : 'hover:bg-accent/20'}`}
                   >
                     <td className="px-3 py-1.5 whitespace-nowrap">{sh.date}</td>
@@ -154,10 +157,10 @@ export function BpExportPanel({ companyId, dateFrom, dateTo }: { companyId: stri
 
               {/* Действия */}
               <div className="flex flex-wrap items-center gap-2">
-                <Button size="sm" onClick={() => downloadJson(pkg, shift)}>
+                <Button size="sm" onClick={() => downloadJson(pkg, shift)} disabled={!analysis.ready}>
                   <Download className="h-4 w-4 mr-1.5" /> Скачать JSON
                 </Button>
-                <Button size="sm" variant="outline" onClick={() => emitMut.mutate()} disabled={emitMut.isPending}>
+                <Button size="sm" variant="outline" onClick={() => emitMut.mutate()} disabled={!analysis.ready || emitMut.isPending}>
                   <FolderUp className="h-4 w-4 mr-1.5" />
                   {emitMut.isPending ? 'Выгрузка…' : 'Выгрузить в каталог'}
                 </Button>
@@ -168,6 +171,21 @@ export function BpExportPanel({ companyId, dateFrom, dateTo }: { companyId: stri
                 )}
                 {emitMut.isError && <span className="text-xs text-red-400/90">Ошибка выгрузки: {(emitMut.error as Error)?.message || 'неизвестно'}</span>}
               </div>
+
+              {verifyQ.isLoading && <p className="text-xs text-muted-foreground">Проверяем пакет перед выгрузкой…</p>}
+              {verifyQ.isError && (
+                <p className="text-xs text-red-400/90">Проверка пакета не выполнена: {(verifyQ.error as Error)?.message || 'неизвестно'}</p>
+              )}
+              {verifyQ.data && !verifyQ.data.ok && (
+                <div className="rounded-lg border border-amber-400/40 bg-amber-400/5 p-3 text-xs">
+                  <div className="font-medium text-amber-300">Выгрузка заблокирована проверкой</div>
+                  <ul className="mt-1.5 list-disc pl-4 text-muted-foreground space-y-1">
+                    {verifyQ.data.checks.filter((check) => !check.ok).map((check) => (
+                      <li key={check.Проверка}>{check.Проверка}{check.Детали ? ` — ${check.Детали}` : ''}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
 
               {/* Состав документов */}
               <div className="overflow-x-auto rounded-lg border border-border/50">

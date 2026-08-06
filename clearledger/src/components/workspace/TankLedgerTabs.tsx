@@ -68,6 +68,8 @@ const BREAK_KINDS: Record<string, { label: string; tone: string; hard: boolean }
   unexplained:   { label: 'требует разбора',     tone: 'text-amber-600 dark:text-amber-400', hard: true },
   // Не разрыв стыка, а поломка прибора: показание больше вместимости резервуара.
   fact_suspect:  { label: 'прибор неисправен',   tone: 'text-red-600 dark:text-red-400',     hard: true },
+  // Прибор жив, но отдаёт одно и то же: расхождение по резервуару = накопленному отпуску.
+  fact_frozen:   { label: 'замер не меняется',   tone: 'text-red-600 dark:text-red-400',     hard: true },
 }
 
 /** Есть ли в смене «жёсткое» замечание — сломанный счёт (не погрешность замера). */
@@ -155,7 +157,8 @@ async function exportLedgerXlsx(data: TankLedgerResponse, dateFrom: string, date
   // Лист 3 — замечания.
   const issues = data.issues.map((i) => ({
     'Тип': i.type === 'arithmetic' ? 'арифметика отчёта' : i.type === 'fuel_change' ? 'смена топлива'
-      : i.type === 'fact_suspect' ? 'замер (прибор)' : 'стык смен',
+      : i.type === 'fact_suspect' ? 'замер (прибор)'
+      : i.type === 'fact_frozen' ? 'замер не меняется' : 'стык смен',
     'Причина': i.kind ? (BREAK_KINDS[i.kind]?.label ?? i.kind) : '',
     'АЗС': i.station_name,
     'Резервуар': i.tank_number,
@@ -656,6 +659,7 @@ export function TankLedgerTabs({ companyId, dateFrom, dateTo, stationCodes, fuel
                 <SelectItem value="continuity">Стык смен</SelectItem>
                 <SelectItem value="arithmetic">Арифметика отчёта</SelectItem>
                 <SelectItem value="fact_suspect">Прибор неисправен</SelectItem>
+                <SelectItem value="fact_frozen">Замер не меняется</SelectItem>
                 <SelectItem value="fuel_change">Смена топлива</SelectItem>
               </SelectContent>
             </Select>
@@ -704,11 +708,11 @@ export function TankLedgerTabs({ companyId, dateFrom, dateTo, stationCodes, fuel
                   >
                     <Td>
                       <Badge variant="outline" className={
-                        issue.type === 'fact_suspect' ? 'border-red-500/60 text-red-400'
+                        issue.type === 'fact_suspect' || issue.type === 'fact_frozen' ? 'border-red-500/60 text-red-400'
                           : issue.type === 'arithmetic' ? 'border-red-400/50 text-red-300/80'
                           : issue.type === 'fuel_change' ? 'border-blue-400/50 text-blue-300/80'
                             : 'border-amber-400/50 text-amber-300/80'}>
-                        {issue.type === 'fact_suspect' ? 'замер'
+                        {issue.type === 'fact_suspect' || issue.type === 'fact_frozen' ? 'замер'
                           : issue.type === 'arithmetic' ? 'арифметика'
                           : issue.type === 'fuel_change' ? 'смена топлива' : 'стык смен'}
                       </Badge>

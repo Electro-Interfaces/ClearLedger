@@ -10,7 +10,7 @@ import { useSearchParams } from 'react-router-dom'
 import { keepPreviousData, useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowUpRight, CalendarClock, ClipboardList, BarChart3, Loader2, MessageCircle,
-  Plus, RefreshCw,
+  Plus, RefreshCw, X,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
@@ -26,6 +26,8 @@ import {
 } from '@/components/ui/select'
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { MetricTile } from '@/components/ui/metric-tile'
+import { QueryError } from '@/components/common/QueryError'
 import { cn } from '@/lib/utils'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useSupportContext } from '@/contexts/SupportContext'
@@ -98,6 +100,19 @@ function WorkSection({ companyId }: { companyId: string }) {
     if (v) n.set('object', v); else n.delete('object')
     return n
   }, { replace: true })
+  // Разрезы, которыми в «Заявки» приходят из других экранов: карточка человека
+  // «Пульса» и его правила. Цифра, ведущая на весь реестр, ничего не отвечает —
+  // список должен открываться уже суженным ровно до того, что было в подписи.
+  const assignee = params.get('assignee') ?? ''
+  const slaOnly = params.get('sla') === 'breached'
+  const src = params.get('src')            // own — свои, external — зеркала чужих систем
+  const externalOnly = src === 'external'
+  const ownOnly = src === 'own'
+  const dropParam = (key: string) => setParams((p) => {
+    const n = new URLSearchParams(p)
+    n.delete(key)
+    return n
+  }, { replace: true })
   const objectsQ = useQuery({
     queryKey: ['space-objects', companyId],
     queryFn: () => listSpaceObjects(companyId),
@@ -108,8 +123,20 @@ function WorkSection({ companyId }: { companyId: string }) {
     queryFn: () => ticketsService.listTickets(companyId, scope, objectId || undefined),
     placeholderData: keepPreviousData,
   })
-  const tickets = q.data?.tickets ?? []
+  const tickets = (q.data?.tickets ?? []).filter((t) =>
+    (!assignee || t.assignee === assignee)
+    && (!slaOnly || t.sla_breached)
+    && (!externalOnly || !!t.external_system)
+    && (!ownOnly || !t.external_system))
   const [openTicket, setOpenTicket] = useState<SpaceTicket | null>(null)
+  // Пришедшее из URL ограничение видно и снимается поштучно — иначе человек
+  // смотрит на урезанный список и не понимает, почему заявок так мало.
+  const chips: { key: string; label: string }[] = [
+    assignee && { key: 'assignee', label: `Исполнитель: ${assignee}` },
+    slaOnly && { key: 'sla', label: 'Только с нарушенным SLA' },
+    externalOnly && { key: 'src', label: 'Только зеркала внешних систем' },
+    ownOnly && { key: 'src', label: 'Только свои заявки' },
+  ].filter(Boolean) as { key: string; label: string }[]
 
   return (
     <div className="space-y-3">
@@ -133,6 +160,16 @@ function WorkSection({ companyId }: { companyId: string }) {
           </SelectContent>
         </Select>
         <span className="text-[11px] text-muted-foreground">заявок: {nf.format(tickets.length)}</span>
+        {chips.map((c) => (
+          <Badge key={c.key} variant="outline" className="gap-1 py-0.5 pl-2 pr-1 font-normal">
+            <span className="max-w-[200px] truncate">{c.label}</span>
+            <button type="button" onClick={() => dropParam(c.key)}
+              aria-label={`Убрать ограничение: ${c.label}`}
+              className="-mr-0.5 rounded-sm p-0.5 hover:bg-accent/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
+              <X className="h-3 w-3" />
+            </button>
+          </Badge>
+        ))}
         <span className="ml-auto flex items-center gap-2">
           <Button variant="outline" size="sm" className="h-8" onClick={() => q.refetch()} disabled={q.isFetching}>
             <RefreshCw className={cn('mr-1.5 h-3.5 w-3.5', q.isFetching && 'animate-spin')} />Обновить
@@ -504,12 +541,9 @@ export function AnalyticsSection({ companyId }: { companyId: string }) {
       <Loader2 className="h-4 w-4 animate-spin" />Считаем срез…</div>
   }
   const s = q.data
-  if (!s) {
-    return <div className="rounded-lg border p-6 text-center text-sm">
-      <p className="text-destructive">Не удалось загрузить срез</p>
-      <Button variant="outline" size="sm" className="mt-2 h-8" onClick={() => q.refetch()}>Повторить</Button>
-    </div>
-  }
+  // Подача отказа — общая для пространства: своя коробка была без `bg-card` и на
+  // фоне страницы читалась дырой, а не сообщением.
+  if (!s) return <QueryError message="Не удалось загрузить срез" onRetry={() => void q.refetch()} />
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
@@ -543,16 +577,11 @@ export function AnalyticsSection({ companyId }: { companyId: string }) {
   )
 }
 
+/** Плитка среза — общая плитка пространства: витрину «Заявок» показывает и «Пульс». */
 function Stat({ label, value, hint, tone }: {
   label: string; value: string; hint?: string; tone?: string
 }) {
-  return (
-    <div className="rounded-lg border bg-card p-3">
-      <div className="text-[11px] text-muted-foreground">{label}</div>
-      <div className={cn('mt-0.5 text-lg font-semibold tabular-nums', tone)}>{value}</div>
-      {hint && <div className="mt-0.5 text-[10px] text-muted-foreground">{hint}</div>}
-    </div>
-  )
+  return <MetricTile label={label} value={value} hint={hint} valueClass={tone} />
 }
 
 function Breakdown({ title, hint, rows }: {
