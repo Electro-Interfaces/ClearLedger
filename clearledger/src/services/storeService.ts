@@ -612,6 +612,8 @@ export interface ShiftComposite {
   number: string | null
   open: string | null
   close: string | null
+  /** Кто стоял за кассой. У смен из ЦБ пусто — оператора там нет. */
+  operator?: string | null
   revenue: number
   soputka: number
   obshepit: number

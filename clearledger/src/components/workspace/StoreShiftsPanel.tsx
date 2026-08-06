@@ -291,6 +291,10 @@ export function StoreShiftsPanel({ companyId, dateFrom, dateTo, stations }: { co
               <Th поле="date" текст="Дата" align="left" sort={sort} setSort={setSort} />
               <Th текст="АЗС" align="left" sort={sort} setSort={setSort} />
               <Th текст="№ смены" align="left" sort={sort} setSort={setSort} />
+              {/* Оператор — реквизит смены, а не украшение: при разборе
+                  расхождения это первый вопрос. Приходит от агента станции;
+                  у смен, полученных из ЦБ, его нет вовсе. */}
+              <Th текст="Оператор" align="left" sort={sort} setSort={setSort} />
               <Th поле="revenue" текст="Выручка" sort={sort} setSort={setSort} />
               <Th текст="Сопутка" sort={sort} setSort={setSort} />
               <Th текст="Общепит" sort={sort} setSort={setSort} />
@@ -310,6 +314,10 @@ export function StoreShiftsPanel({ companyId, dateFrom, dateTo, stations }: { co
                 <td className="whitespace-nowrap px-3 py-1.5">{sh.date}</td>
                 <td className="px-3 py-1.5 text-muted-foreground">{sh.station}</td>
                 <td className="px-3 py-1.5 tabular-nums text-muted-foreground">{sh.number ?? '—'}</td>
+                <td className="max-w-[160px] truncate px-3 py-1.5 text-muted-foreground"
+                  title={sh.operator ?? 'оператор не передан источником'}>
+                  {sh.operator ?? '—'}
+                </td>
                 <td className="px-3 py-1.5 text-right font-medium tabular-nums">{money(sh.revenue)}</td>
                 <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{money(sh.soputka)}</td>
                 <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{money(sh.obshepit)}</td>

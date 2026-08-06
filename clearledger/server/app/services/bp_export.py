@@ -226,7 +226,11 @@ class BpPackageEmitter:
             if item_uuid:
                 nsi_nom.add(item_uuid)
             card = nom.get(item_uuid)
-            result["НомерСтроки"] = result.get("НомерСтроки") or number
+            # Нумеруем заново, а не сохраняем исходный номер. Строки документа
+            # собираются из двух секций (сопутка, потом общепит), поэтому родные
+            # номера идут вперемешку и с дырами: 2, 3, 4, 9… В табличной части
+            # 1С нумерация обязана быть сплошной от единицы.
+            result["НомерСтроки"] = number
             result["Единица"] = result.get("Единица") or (card.unit if card else "")
             if with_vat:
                 result["СтавкаНДС"] = _nds(result.get("СтавкаНДС")) or _nds(card.vat if card else "")

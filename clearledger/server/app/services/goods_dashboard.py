@@ -2758,6 +2758,9 @@ class GoodsDashboardService:
                 "date": day, "station": station,
                 "number": smena.get("НомерСмены") or smena.get("Номер"),
                 "open": smena.get("Открытие"), "close": smena.get("Закрытие"),
+                # Оператор смены — из пакета станции; у документов ЦБ его нет,
+                # поэтому поле пустое, а не выдуманное.
+                "operator": smena.get("Оператор") or None,
                 "revenue": round(sop_rev + obsh_rev, 2),
                 "soputka": round(sop_rev, 2), "obshepit": round(obsh_rev, 2),
                 "positions": len(sop.get("строки") or []) + len(obsh.get("строки") or []),
@@ -2832,8 +2835,13 @@ class GoodsDashboardService:
             key=lambda x: -x["revenue"],
         )
 
+        # Вид оплаты называется по-разному у двух источников: ЦБ пишет
+        # «ФормаОплаты», агент станции — «ВидОплаты» (так это поле зовётся в
+        # контракте БП). Читаем оба, иначе у собственных смен станции вместо
+        # «Наличные» и «Карты МПС» стоял прочерк.
         payments = [
-            {"form": str(o.get("ФормаОплатыКанон") or o.get("ФормаОплаты") or "—"),
+            {"form": str(o.get("ФормаОплатыКанон") or o.get("ФормаОплаты")
+                         or o.get("ВидОплаты") or "—"),
              "amount": round(float(o.get("Сумма") or 0), 2)}
             for o in ((sec.get("оплаты") or {}).get("строки") or [])
         ]
@@ -2900,6 +2908,12 @@ class GoodsDashboardService:
                 "shift_key": shift_key, "date": day, "station": station,
                 "number": smena.get("НомерСмены") or smena.get("Номер"),
                 "open": smena.get("Открытие"), "close": smena.get("Закрытие"),
+                # Кто стоял за кассой и на какой кассе — реквизиты смены, а не
+                # украшение: при разборе расхождения первый вопрос бухгалтера
+                # именно этот. Агент их присылает, ЦБ оператора не отдавал вовсе.
+                "operator": smena.get("Оператор") or None,
+                "register": smena.get("Касса") or None,
+                "internal_no": smena.get("НомерСменыВнутр") or None,
                 "revenue": round(sop_rev + obsh_rev, 2),
                 "soputka": round(sop_rev, 2), "obshepit": round(obsh_rev, 2),
                 "positions": len(sales),
