@@ -12,8 +12,8 @@ import { useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  ArrowLeft, ArrowRight, CheckCircle2, Clock, Eye, EyeOff, Link2, Loader2, Lock,
-  Mail, MessagesSquare, Paperclip, Pin, Plus, RefreshCw, Send, Trash2, X,
+  ArrowLeft, ArrowRight, CheckCircle2, ChevronRight, Clock, Eye, EyeOff, Link2,
+  Loader2, Lock, Mail, MessagesSquare, Paperclip, Pin, Plus, RefreshCw, Send, Trash2,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
@@ -138,89 +138,89 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
 
       <div className="flex min-h-0 flex-1">
       <div className="min-w-0 flex-1 overflow-y-auto px-5 py-4 text-sm">
-        {/* Обсуждение отдельно от ленты: лента — след работы (кто двинул, чем
-            подтвердил), а короткие «когда сможешь?» её только засоряют. Кнопка
-            открывает скрытую группу задачи — как у заявок. */}
-        <div className="flex flex-wrap items-center gap-2">
+        {/* Маршрут первым: «где сейчас работа» — главный вопрос к карточке.
+            Одинаковые пилюли одного размера, активная залита. Раньше здесь были
+            три разные рамки, и полоса читалась как набор случайных плашек. */}
+        <div className="flex flex-wrap items-center gap-1">
+          {t.route.map((s, i) => (
+            <span key={s.code} className="flex items-center gap-1">
+              {i > 0 && <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/40" />}
+              <button type="button" disabled={!live || act.isPending}
+                onClick={() => act.mutate({
+                  companyId, stageCode: s.code, note: note || undefined,
+                })}
+                className={cn('h-7 rounded-full px-3 text-xs transition-colors',
+                  s.code === t.stage_code
+                    ? 'bg-primary font-medium text-primary-foreground'
+                    : 'bg-muted text-muted-foreground hover:bg-muted/70 hover:text-foreground',
+                  !live && 'cursor-default opacity-60')}>
+                {s.name}
+              </button>
+            </span>
+          ))}
+        </div>
+
+        {/* Действия одной линейкой: все кнопки одной высоты и двух видов —
+            главное действие залито, остальные одинаковые. Разрушительное
+            («Отменить задачу») отодвинуто вправо и приглушено: рядом с
+            «Выполнена» ему не место. */}
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          {live && next && (
+            <Button size="sm" className="h-8" disabled={act.isPending}
+              onClick={() => act.mutate({
+                companyId, stageCode: next.code, note: note || undefined,
+              })}>
+              <ArrowRight className="mr-1.5 h-3.5 w-3.5" />{next.name}
+            </Button>
+          )}
+          {live && (
+            <Button size="sm" variant="outline" className="h-8" disabled={act.isPending}
+              onClick={() => act.mutate({ companyId, status: 'done', note: note || undefined })}>
+              <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />Выполнена
+            </Button>
+          )}
           <Button size="sm" variant="outline" className="h-8" disabled={discuss.isPending}
             onClick={() => discuss.mutate()}>
             {discuss.isPending
               ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
               : <MessagesSquare className="mr-1.5 h-3.5 w-3.5" />}
-            Обсудить в чате
+            Обсудить
           </Button>
-          {origin && (
-            <button type="button" onClick={() => navigate(`/messages?room=${origin}`)}
-              className="text-[11px] text-muted-foreground hover:text-foreground hover:underline">
-              задача из обсуждения — открыть разговор
-            </button>
-          )}
-        </div>
-
-        {live && (
-          <div className="flex flex-wrap items-center gap-2">
-            {next && (
-              <Button size="sm" className="h-8" disabled={act.isPending}
-                onClick={() => act.mutate({
-                  companyId, stageCode: next.code, note: note || undefined,
-                })}>
-                <ArrowRight className="mr-1.5 h-3.5 w-3.5" />Дальше: {next.name}
-              </Button>
-            )}
-            <Button size="sm" variant="outline" className="h-8" disabled={act.isPending}
-              onClick={() => act.mutate({ companyId, status: 'done', note: note || undefined })}>
-              <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />Выполнена
-            </Button>
-            <Button size="sm" variant="ghost" className="h-8 text-muted-foreground"
+          {live && (
+            <Button size="sm" variant="ghost"
+              className="ml-auto h-8 text-muted-foreground hover:text-foreground"
               disabled={act.isPending}
               onClick={() => act.mutate({ companyId, status: 'cancelled', note: note || undefined })}>
-              <X className="mr-1.5 h-3.5 w-3.5" />Отменить
+              Отменить задачу
             </Button>
-          </div>
+          )}
+        </div>
+        {origin && (
+          <button type="button" onClick={() => navigate(`/messages?room=${origin}`)}
+            className="mt-2 text-[11px] text-muted-foreground hover:text-foreground hover:underline">
+            задача из обсуждения — открыть разговор
+          </button>
         )}
 
-                {/* Маршрут: где задача сейчас и что дальше. Полоса, а не выпадающий
-            список — человек должен видеть весь путь, а не текущий шаг. */}
-        <Section title="Маршрут">
-          <div className="flex flex-wrap items-center gap-1">
-            {t.route.map((s, i) => (
-              <span key={s.code} className="flex items-center gap-1">
-                {i > 0 && <ArrowRight className="h-3 w-3 text-muted-foreground" />}
-                <button type="button" disabled={!live || act.isPending}
-                  onClick={() => act.mutate({
-                    companyId, stageCode: s.code, note: note || undefined,
-                  })}
-                  className={cn('rounded-md border px-2 py-0.5 text-[11px] transition-colors',
-                    s.code === t.stage_code
-                      ? 'border-primary bg-primary/10 font-medium text-foreground'
-                      : 'text-muted-foreground hover:bg-muted/60',
-                    !live && 'cursor-default opacity-60')}>
-                  {s.name}
-                </button>
-              </span>
-            ))}
-          </div>
-        </Section>
-
-        <Tabs defaultValue="work" className="mt-4">
+        <Tabs defaultValue="work" className="mt-6">
           {/* Вкладки вместо одной длинной колонки: у задачи с полусотней ходов
               история — отдельная работа, и ради неё не нужно прокручивать
               чек-лист и файлы. */}
-          <TabsList variant="line" className="h-9 w-auto justify-start gap-1">
-            <TabsTrigger value="work">Работа</TabsTrigger>
+          <TabsList variant="line" className="h-9 w-full justify-start gap-5 border-b border-border/60">
+            <TabsTrigger value="work" className="flex-none px-0 text-[13px]">Работа</TabsTrigger>
             {/* На узком экране свойства живут вкладкой, на широком — колонкой
                 справа: там они нужны постоянно, а не по клику. */}
-            <TabsTrigger value="attrs" className="xl:hidden">Свойства</TabsTrigger>
-            <TabsTrigger value="links">
+            <TabsTrigger value="attrs" className="flex-none px-0 text-[13px] xl:hidden">Свойства</TabsTrigger>
+            <TabsTrigger value="links" className="flex-none px-0 text-[13px]">
               Связи{t.subtasks.total ? ` · ${t.subtasks.total}` : ''}
             </TabsTrigger>
-            <TabsTrigger value="time">
+            <TabsTrigger value="time" className="flex-none px-0 text-[13px]">
               Время{t.time.spent ? ` · ${t.time.spent_text}` : ''}
             </TabsTrigger>
-            <TabsTrigger value="files">
+            <TabsTrigger value="files" className="flex-none px-0 text-[13px]">
               Файлы{t.attachments.length ? ` · ${t.attachments.length}` : ''}
             </TabsTrigger>
-            <TabsTrigger value="feed">История · {t.events.length}</TabsTrigger>
+            <TabsTrigger value="feed" className="flex-none px-0 text-[13px]">История · {t.events.length}</TabsTrigger>
           </TabsList>
 
           <TabsContent value="work" className="space-y-5 pt-4">
