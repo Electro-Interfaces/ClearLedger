@@ -508,6 +508,8 @@ export interface SiteEconomics {
   good?: SiteScenario
   assumptions: string[]
   benchmarkSource?: 'region' | 'network'
+  /** Откуда взята каждая цифра — подписью под ней в карточке. */
+  sources?: { tariff?: string; inputPrice?: string; rent?: string }
 }
 
 export async function getSitesMatrix(

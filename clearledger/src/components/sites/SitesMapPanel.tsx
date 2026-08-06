@@ -117,8 +117,12 @@ export function SitesMapPanel({ companyId }: { companyId: string }) {
                     : QUADRANT_COLOR[p.quadrant]
                   return (
                     <Fragment key={p.id}>
+                      {/* Круг делёжа трафика — подсказка, а не объект: клики он пропускает
+                          насквозь. Иначе заливка радиуса накрывала соседние станции сети, и
+                          нажать на них, чтобы прочитать карточку, было нельзя (замечание
+                          отдела развития от 06.08.2026). */}
                       {p.cannibalization && (
-                        <Circle center={[p.lat, p.lon]} radius={cannibalKm * 1000}
+                        <Circle center={[p.lat, p.lon]} radius={cannibalKm * 1000} interactive={false}
                           pathOptions={{ color: '#f59e0b', weight: 1, fillOpacity: 0.06 }} />
                       )}
                       <CircleMarker center={[p.lat, p.lon]} radius={6}

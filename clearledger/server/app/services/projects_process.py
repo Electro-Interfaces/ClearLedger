@@ -158,19 +158,53 @@ async def case_state(db: AsyncSession, company_id, site: EzsSite,
             text="Поля проекта досверены с маршрутом",
             changes=[make_change(field, before[field], getattr(site, field)) for field in written],
         )
-    funnel = await _reflect_commissioning(db, site, state, user=user)
+    funnel = await _reflect_outcome(db, site, state, payload=state.get("values") or {}, user=user)
     if funnel:
         state["funnel"] = funnel
     return state
 
 
-async def _reflect_commissioning(db: AsyncSession, site: EzsSite, state: dict[str, Any],
-                                 user: User | None = None) -> dict[str, Any] | None:
-    """Отразить ввод в эксплуатацию в воронке проекта, если маршрут до него дошёл.
+async def _reflect_outcome(db: AsyncSession, site: EzsSite, state: dict[str, Any],
+                           payload: dict[str, Any] | None = None,
+                           user: User | None = None) -> dict[str, Any] | None:
+    """Отразить в воронке проекта исход маршрута: отказ, пауза или возврат в работу.
 
-    Возвращает None, когда отражать нечего, иначе — что вышло с воронкой.
+    Маршрут и воронка — две записи об одном проекте, и расходиться им нельзя.
+    Отражался только ввод в эксплуатацию, поэтому отклонённый на маршруте проект
+    оставался в воронке «Переговоры»: в шапке карточки висели рабочие бейджи, а
+    ход показывал «Отказ, действий больше нет» (замечание отдела развития
+    06.08.2026). Причина отказа при этом жила в кейсе Координатора и в карточку
+    не доезжала — теперь она пишется в «Причину архивации» и в историю проекта.
     """
     stage_code = (state.get("stage") or {}).get("code")
+    from app.services import ezs_site_work
+
+    if stage_code == "ezs_rejected" and site.stage != "archive":
+        reason = str((payload or {}).get("cancel_reason") or "").strip()
+        moved = await ezs_site_work.set_stage(
+            db, site, "archive", user=user, source="system",
+            reason=reason or "Отказ по маршруту проекта (Координатор)")
+        return {"moved": moved.get("moved", False), "blocking": [], "message": moved.get("message")}
+
+    if stage_code == "ezs_hold" and site.stage != "on_hold":
+        reason = str((payload or {}).get("hold_reason") or "").strip()
+        moved = await ezs_site_work.set_stage(
+            db, site, "on_hold", user=user, source="system",
+            reason=reason or "Пауза по маршруту проекта (Координатор)")
+        return {"moved": moved.get("moved", False), "blocking": [], "message": moved.get("message")}
+
+    # Возврат в работу: маршрут снова на рабочей стадии, а проект лежит вне воронки.
+    # Возвращаем туда, откуда ушёл; не помним — в начало, дальше человек сам.
+    if (stage_code and stage_code not in COMMISSIONED_STAGES
+            and stage_code not in ("ezs_rejected", "ezs_hold")
+            and site.stage in ("archive", "on_hold")):
+        from app.services import ezs_sites
+        back = site.prev_stage if site.prev_stage in ezs_sites.STAGE_ORDER else "lead"
+        moved = await ezs_site_work.set_stage(
+            db, site, back, user=user, source="system",
+            reason="Возврат в работу по маршруту проекта (Координатор)")
+        return {"moved": moved.get("moved", False), "blocking": [], "message": moved.get("message")}
+
     if stage_code not in COMMISSIONED_STAGES or site.stage == "live":
         return None
     from app.services import ezs_site_work, ezs_sites
@@ -276,7 +310,7 @@ async def apply_step(db: AsyncSession, company_id, site: EzsSite, link_id: str,
                 changes=[make_change(field, before[field], getattr(site, field)) for field in written],
             )
 
-    funnel = await _reflect_commissioning(db, site, state, user=user)
+    funnel = await _reflect_outcome(db, site, state, payload=payload, user=user)
     if funnel:
         state["funnel"] = funnel
     return state

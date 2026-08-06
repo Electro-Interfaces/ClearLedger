@@ -666,7 +666,8 @@ export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; company
             const source = it.doc ? 'вкладка «Документы»'
               : it.equipment ? 'вкладка «Оборудование»'
               : it.manual ? null
-              : byFields.length ? `графа${byFields.length > 1 ? 'ми' : 'й'} «${byFields.join('», «')}» в паспорте`
+              // Падеж целиком, а не хвост: склейка «графа» + «й» давала «графай».
+              : byFields.length ? `граф${byFields.length > 1 ? 'ами' : 'ой'} «${byFields.join('», «')}» в паспорте`
               : 'заполняется в паспорте'
             return (
               <Row key={it.key} type={it.manual ? 'button' : undefined}
@@ -2032,10 +2033,10 @@ export function EconomicsTab({ site, companyId }: { site: SiteDetail; companyId:
           </div>
           <div className="p-3 space-y-3">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-              <Metric label="Тариф (факт)" value={`${e.tariff} ₽/кВт·ч`} />
-              <Metric label="Входная цена" value={`${e.inputPrice} ₽/кВт·ч`} />
+              <Metric label="Тариф (факт)" value={`${e.tariff} ₽/кВт·ч`} source={e.sources?.tariff} />
+              <Metric label="Входная цена" value={`${e.inputPrice} ₽/кВт·ч`} source={e.sources?.inputPrice} />
               <Metric label="Маржа с кВт·ч" value={`${e.marginPerKwh} ₽`} />
-              <Metric label="Аренда" value={`${nf0.format(e.rentMonth ?? 0)} ₽/мес`} />
+              <Metric label="Аренда" value={`${nf0.format(e.rentMonth ?? 0)} ₽/мес`} source={e.sources?.rent} />
             </div>
 
             <table className="w-full text-sm">
@@ -2080,11 +2081,16 @@ export function EconomicsTab({ site, companyId }: { site: SiteDetail; companyId:
   )
 }
 
-function Metric({ label, value, warn }: { label: string; value: string; warn?: boolean }) {
+function Metric({ label, value, warn, source }: {
+  label: string; value: string; warn?: boolean
+  /** Откуда цифра: без этого «в экономике не то, что в паспорте» читается как ошибка. */
+  source?: string
+}) {
   return (
     <div>
       <div className="text-xs uppercase tracking-wide text-muted-foreground">{label}</div>
       <div className={`text-sm font-semibold ${warn ? 'text-amber-600 dark:text-amber-400' : ''}`}>{value}</div>
+      {source && <div className="text-[11px] leading-tight text-muted-foreground">{source}</div>}
     </div>
   )
 }

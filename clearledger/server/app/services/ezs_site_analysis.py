@@ -340,6 +340,18 @@ def economics(site: EzsSite, bench: dict[str, Any],
         "inputPrice": input_price,
         "marginPerKwh": round(margin_kwh, 2),
         "rentMonth": round(rent),
+        # Откуда взята каждая цифра — подписью под ней. Иначе «в экономике не то,
+        # что в паспорте» выглядит ошибкой системы: фактический тариф сети ниже
+        # прайса из-за скидок, а входная цена без графы — оценка, а не факт.
+        "sources": {
+            "tariff": ("средний по региону" if (reg or {}).get("tariff") else "средний по сети")
+                      + " — по фактическим сессиям, не прайс",
+            "inputPrice": ("графа «Входная стоимость» в паспорте"
+                           if _input_price(site) is not None else "оценка: 45% тарифа"),
+            "rent": ("графа «Ставка аренды» (право на землю)" if _num(site.rent_rate)
+                     else "графа «Аренда, ₽/мес» (экономика)" if _num(site.rent_cost_month)
+                     else "не указана"),
+        },
         "capex": round(capex) if capex else None,
         "base": scenarios["base"],
         "good": scenarios["good"],
@@ -355,7 +367,16 @@ def economics(site: EzsSite, bench: dict[str, Any],
 
 
 def _input_price(site: EzsSite) -> float | None:
-    """Входная цена ₽/кВт·ч — колонка файла «Входная стоимость» лежит в raw."""
+    """Входная цена ₽/кВт·ч: сначала графа карточки, потом исходная строка файла.
+
+    Читалась только `raw` — то, что приехало из банка ЗУ. Графу «Входная стоимость»
+    в паспорте человек заполнял руками, расчёт её не видел и подставлял 45% тарифа:
+    экономика расходилась с паспортом на глазах у того, кто только что ввёл цифру
+    (замечание отдела развития 06.08.2026).
+    """
+    own = _num(site.input_price_kwth)
+    if own and 0 < own < 100:
+        return round(own, 2)
     raw = site.raw or {}
     for k, v in raw.items():
         if "входная стоимость" in str(k).lower():
