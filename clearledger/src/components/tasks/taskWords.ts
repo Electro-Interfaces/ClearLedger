@@ -48,6 +48,7 @@ export function eventText(e: { kind: string; from: string | null; to: string | n
     case 'assign': return e.to ? `исполнитель: ${e.from ?? '—'} → ${e.to}` : 'снял исполнителя'
     case 'status':
       return `статус: ${STATUS_LABEL[e.from ?? ''] ?? e.from} → ${STATUS_LABEL[e.to ?? ''] ?? e.to}`
+    case 'field': return `${e.from ?? 'поле'} → ${e.to ?? '—'}`
     case 'delegate': return `поручил внешнему участнику: ${e.to ?? '—'}`
     case 'mail': return 'ответил письмом'
     case 'external_stage': return `этап внешней системы: ${e.to ?? '—'}`

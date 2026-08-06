@@ -1185,15 +1185,35 @@ async def task_action(
         logged = True
         t.closed_at = None if payload.status == "open" else datetime.now(timezone.utc)
 
-    if payload.priority is not None:
+    # Правка поля — тоже событие. Молча сдвинутый срок или снятая срочность
+    # рушат доверие к следу: работа «сама» перестала гореть, и объяснить это
+    # некому. В YouTrack и Jira любое изменение поля попадает в историю.
+    def field_changed(name: str, was: Any, now: Any) -> None:
+        nonlocal logged
+        db.add(TaskEvent(task_id=t.id, kind="field", user_id=current_user.id,
+                         from_value=f"{name}: {was if was not in (None, '') else '—'}"[:200],
+                         to_value=str(now if now not in (None, "") else "—")[:200],
+                         note=payload.note))
+        logged = True
+
+    if payload.priority is not None and payload.priority != t.priority:
+        field_changed("срочность", t.priority, payload.priority)
         t.priority = payload.priority
-    if payload.due_at is not None:
+    if payload.due_at is not None and payload.due_at != t.due_at:
+        field_changed("срок",
+                      t.due_at.strftime("%d.%m.%Y") if t.due_at else None,
+                      payload.due_at.strftime("%d.%m.%Y"))
         t.due_at = payload.due_at
-    if payload.title is not None:
+    if payload.title is not None and payload.title.strip() != t.title:
+        field_changed("заголовок", t.title, payload.title.strip())
         t.title = payload.title.strip()
-    if payload.description is not None:
+    if payload.description is not None and (payload.description or None) != t.description:
+        # Текст описания в след не тащим — он бывает на восемь тысяч знаков;
+        # важен факт правки и автор, сам текст виден в карточке.
+        field_changed("описание", "правка", "правка")
         t.description = payload.description or None
-    if payload.object_id is not None:
+    if payload.object_id is not None and (payload.object_id or None) != t.object_id:
+        field_changed("объект", t.object_id, payload.object_id or None)
         t.object_id = payload.object_id or None
 
     if payload.add_label_id:
