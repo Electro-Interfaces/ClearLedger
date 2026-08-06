@@ -26,7 +26,7 @@ import { QueryError } from '@/components/common/QueryError'
 import { cn } from '@/lib/utils'
 import { useCompany } from '@/contexts/CompanyContext'
 import * as tasksService from '@/services/tasksService'
-import type { SpaceTask, TaskScope } from '@/services/tasksService'
+import type { ListedTask, TaskScope } from '@/services/tasksService'
 import { listSpaceObjects } from '@/services/spaceObjectsService'
 import { TaskCard } from '@/components/tasks/TaskCard'
 import { NewTaskDialog } from '@/components/tasks/NewTaskDialog'
@@ -328,7 +328,7 @@ const COLUMNS: { key: string; label: string; sort?: string }[] = [
 ]
 
 function TasksTable({ tasks, sort, onSort, picked, onPick, groupByObject, onOpen }: {
-  tasks: SpaceTask[]; sort: string; onSort: (s: string) => void
+  tasks: ListedTask[]; sort: string; onSort: (s: string) => void
   picked: Set<string>; onPick: (s: Set<string>) => void
   groupByObject: boolean; onOpen: (id: string) => void
 }) {
@@ -336,7 +336,7 @@ function TasksTable({ tasks, sort, onSort, picked, onPick, groupByObject, onOpen
   // не размножается, но заголовок группы отвечает на вопрос «что на этой точке».
   const groups = useMemo(() => {
     if (!groupByObject) return [{ name: '', tasks }]
-    const acc = new Map<string, SpaceTask[]>()
+    const acc = new Map<string, ListedTask[]>()
     for (const t of tasks) {
       const k = t.object ?? 'Без объекта'
       acc.set(k, [...(acc.get(k) ?? []), t])
@@ -747,7 +747,7 @@ function SaveViewButton({ companyId, query }: {
 
 /** Выгрузка видимой страницы. Библиотека тянется лениво — в основной чанк
  *  четыреста килобайт ради кнопки, которую жмут раз в месяц, не кладём. */
-async function exportTasks(tasks: SpaceTask[], sheetName: string) {
+async function exportTasks(tasks: ListedTask[], sheetName: string) {
   const { loadXlsx } = await import('@/utils/xlsxLoader')
   const XLSX = await loadXlsx()
   const rows = tasks.map((t) => ({

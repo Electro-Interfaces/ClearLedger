@@ -20,7 +20,6 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -29,14 +28,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { QueryError } from '@/components/common/QueryError'
 import { cn } from '@/lib/utils'
 import * as tasksService from '@/services/tasksService'
-import type { LinkKind, TaskDetails } from '@/services/tasksService'
+import type { LinkKind, LoadedTask } from '@/services/tasksService'
 import { listSpaceObjects } from '@/services/spaceObjectsService'
 import { listSpaceConnectors } from '@/services/spaceConnectorsService'
 import { ensureTaskRoom } from '@/services/chatService'
 import { RichText } from './RichText'
 import { SearchPicker } from './SearchPicker'
 import {
-  LINK_LABEL, PRIORITY_LABEL, PRIORITY_TONE, STATUS_LABEL, WAITING_LABEL,
+  LINK_LABEL, PRIORITY_LABEL, STATUS_LABEL, WAITING_LABEL,
   dt, dtT, eventText, fileSize,
 } from './taskWords'
 
@@ -207,7 +206,7 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
           {/* Вкладки вместо одной длинной колонки: у задачи с полусотней ходов
               история — отдельная работа, и ради неё не нужно прокручивать
               чек-лист и файлы. */}
-          <TabsList variant="line" className="h-9 w-full justify-start">
+          <TabsList variant="line" className="h-9 w-auto justify-start gap-1">
             <TabsTrigger value="work">Работа</TabsTrigger>
             {/* На узком экране свойства живут вкладкой, на широком — колонкой
                 справа: там они нужны постоянно, а не по клику. */}
@@ -358,7 +357,7 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
       </div>
 
       {live && (
-        <div className="border-t px-5 py-3">
+        <div className="border-t bg-muted/20 px-5 py-3">
           <div className="flex items-end gap-2">
             <Textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2}
               maxLength={2000} className="text-sm"
@@ -385,7 +384,7 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
 /* ── Шапка: номер, тип, заголовок правится на месте ──────────────────── */
 
 function Header({ task, onRename, onBack }: {
-  task: TaskDetails; companyId: string; onRename: (title: string) => void
+  task: LoadedTask; companyId: string; onRename: (title: string) => void
   onBack?: () => void
 }) {
   const [editing, setEditing] = useState(false)
@@ -437,7 +436,7 @@ function Header({ task, onRename, onBack }: {
 /* ── Описание ────────────────────────────────────────────────────────── */
 
 function Description({ task, disabled, onSave }: {
-  task: TaskDetails; disabled: boolean; onSave: (text: string) => void
+  task: LoadedTask; disabled: boolean; onSave: (text: string) => void
 }) {
   const [editing, setEditing] = useState(false)
   const [text, setText] = useState(task.description ?? '')
@@ -461,9 +460,17 @@ function Description({ task, disabled, onSave }: {
       <button type="button" onClick={() => { setText(task.description ?? ''); setEditing(true) }}
         className="text-[11px] text-muted-foreground hover:text-foreground">изменить</button>
     )}>
-      {task.description
-        ? <RichText text={task.description} className="text-sm text-foreground/90" />
-        : <p className="text-xs text-muted-foreground">Описания нет.</p>}
+      {task.description ? (
+        <RichText text={task.description} className="text-sm text-foreground/90" />
+      ) : disabled ? (
+        <p className="text-xs text-muted-foreground">Описания нет.</p>
+      ) : (
+        // Пустое место должно звать, а не сообщать о пустоте.
+        <button type="button" onClick={() => { setText(''); setEditing(true) }}
+          className="w-full rounded-lg border border-dashed px-3 py-4 text-left text-xs text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground">
+          Добавить описание: что именно, где, к какому результату. Скриншот — Ctrl+V.
+        </button>
+      )}
     </Section>
   )
 }
@@ -471,7 +478,7 @@ function Description({ task, disabled, onSave }: {
 /* ── Чек-лист ────────────────────────────────────────────────────────── */
 
 function Checklist({ task, companyId, live, onChanged }: {
-  task: TaskDetails; companyId: string; live: boolean; onChanged: () => void
+  task: LoadedTask; companyId: string; live: boolean; onChanged: () => void
 }) {
   const [text, setText] = useState('')
   const add = useMutation({
@@ -510,7 +517,11 @@ function Checklist({ task, companyId, live, onChanged }: {
             )}
           </div>
         ))}
-        {items.length === 0 && <p className="text-xs text-muted-foreground">Пунктов нет.</p>}
+        {items.length === 0 && (
+          <p className="text-xs text-muted-foreground">
+            {live ? 'Разбейте работу на шаги — прогресс будет виден в списке.' : 'Пунктов нет.'}
+          </p>
+        )}
       </div>
       {live && (
         <div className="mt-2 flex gap-2">
@@ -532,7 +543,7 @@ function Checklist({ task, companyId, live, onChanged }: {
 /* ── Атрибуты ────────────────────────────────────────────────────────── */
 
 function Attributes({ task, companyId, live, people, labels, pending, onAct, onChanged }: {
-  task: TaskDetails; companyId: string; live: boolean
+  task: LoadedTask; companyId: string; live: boolean
   people: { id: string; name: string }[]
   labels: { id: string; name: string }[]
   pending: boolean
@@ -562,18 +573,16 @@ function Attributes({ task, companyId, live, people, labels, pending, onAct, onC
   const own = new Set(task.labels.map((l) => l.id))
 
   return (
-    <Section title="Атрибуты">
-      <div className="grid gap-3 sm:grid-cols-2">
-        <div className="space-y-1.5">
-          <Label className="text-xs">Исполнитель</Label>
+    <Section title="">
+      <div className="space-y-3">
+        <Field label="Исполнитель">
           <SearchPicker items={people.map((p) => ({ id: p.id, name: p.name }))}
             value={task.assignee_id ?? ''} disabled={!live || pending}
             onChange={(v) => onAct({ companyId, assigneeId: v || null })}
             placeholder="Не назначен" emptyLabel="Не назначен"
             searchPlaceholder="Фамилия или имя…" />
-        </div>
-        <div className="space-y-1.5">
-          <Label className="text-xs">Срочность</Label>
+        </Field>
+        <Field label="Срочность">
           <Select value={task.priority} disabled={!live || pending}
             onValueChange={(v) => onAct({ companyId, priority: v })}>
             <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
@@ -583,44 +592,31 @@ function Attributes({ task, companyId, live, people, labels, pending, onAct, onC
               ))}
             </SelectContent>
           </Select>
-        </div>
-        <div className="space-y-1.5">
-          <Label className="text-xs">Срок</Label>
+        </Field>
+        <Field label="Срок"
+          hint={task.overdue ? ('просрочена · ' + dt(task.due_at)) : undefined}
+          tone={task.overdue ? 'text-red-600 dark:text-red-400' : undefined}>
           <Input type="date" disabled={!live || pending} className="h-8 text-xs"
             defaultValue={task.due_at ? task.due_at.slice(0, 10) : ''}
             onChange={(e) => e.target.value && onAct({
               companyId, dueAt: new Date(`${e.target.value}T00:00`).toISOString(),
             })} />
-          {task.overdue && (
-            <p className="text-[11px] font-medium text-red-600 dark:text-red-400">
-              просрочена · {dt(task.due_at)}
-            </p>
-          )}
-        </div>
-        <div className="space-y-1.5">
-          <Label className="text-xs">Объект</Label>
+        </Field>
+        <Field label="Объект">
           <SearchPicker items={(objectsQ.data ?? []).map((o) => ({
             id: o.id, name: o.name, hint: o.address }))}
             value={task.object_id ?? ''} disabled={!live || pending}
             onChange={(v) => onAct({ companyId, objectId: v || null })}
             placeholder="Без объекта" emptyLabel="Без объекта"
             searchPlaceholder="Номер, название или адрес…"
-            loading={objectsQ.isLoading} width="w-[340px]" />
-        </div>
+            loading={objectsQ.isLoading} width="w-[320px]" />
+        </Field>
       </div>
-
-      <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
-        <Fact label="Автор" value={task.author ?? '—'} />
-        <Fact label="Поставлена" value={dtT(task.created_at)} />
-        <Fact label="Срочность" value={PRIORITY_LABEL[task.priority] ?? task.priority}
-          tone={PRIORITY_TONE[task.priority]} />
-        <Fact label="Обновлена" value={dtT(task.updated_at)} />
-      </dl>
 
       {labels.length > 0 && (
         <div className="mt-3">
-          <Label className="text-xs">Метки</Label>
-          <div className="mt-1 flex flex-wrap gap-1">
+          <FieldLabel>Метки</FieldLabel>
+          <div className="mt-1.5 flex flex-wrap gap-1">
             {labels.map((l) => (
               <button key={l.id} type="button" disabled={!live || label.isPending}
                 onClick={() => label.mutate({ id: l.id, on: !own.has(l.id) })}
@@ -636,7 +632,7 @@ function Attributes({ task, companyId, live, people, labels, pending, onAct, onC
       )}
 
       <div className="mt-3">
-        <Label className="text-xs">Кто видит задачу</Label>
+        <FieldLabel>Кто видит задачу</FieldLabel>
         <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
           <Select value={task.visibility} disabled={!live || pending}
             onValueChange={(v) => onAct({ companyId, visibility: v as 'company' | 'private' })}>
@@ -656,7 +652,7 @@ function Attributes({ task, companyId, live, people, labels, pending, onAct, onC
       </div>
 
       <div className="mt-3">
-        <Label className="text-xs">Наблюдатели</Label>
+        <FieldLabel>Наблюдатели</FieldLabel>
         <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs">
           {task.watchers.map((w) => (
             <span key={w.user_id}
@@ -690,14 +686,48 @@ function Attributes({ task, companyId, live, people, labels, pending, onAct, onC
           )}
         </div>
       </div>
+      <dl className="mt-5 space-y-1.5 border-t pt-3 text-[11px] text-muted-foreground">
+        <div className="flex justify-between gap-2">
+          <dt>Автор</dt>
+          <dd className="text-right text-foreground/80">{task.author ?? '—'}</dd>
+        </div>
+        <div className="flex justify-between gap-2">
+          <dt>Поставлена</dt><dd className="text-right">{dtT(task.created_at)}</dd>
+        </div>
+        <div className="flex justify-between gap-2">
+          <dt>Обновлена</dt><dd className="text-right">{dtT(task.updated_at)}</dd>
+        </div>
+      </dl>
     </Section>
+  )
+}
+
+/** Поле правой колонки: подпись, значение, при нужде — предупреждение снизу. */
+function Field({ label, hint, tone, children }: {
+  label: string; hint?: string; tone?: string; children: React.ReactNode
+}) {
+  return (
+    <div>
+      <FieldLabel>{label}</FieldLabel>
+      <div className="mt-1.5">{children}</div>
+      {hint && <p className={cn('mt-1 text-[11px] font-medium', tone)}>{hint}</p>}
+    </div>
+  )
+}
+
+/** Подпись поля: один кегль и один регистр на всю колонку. */
+function FieldLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="text-[11px] uppercase tracking-wide text-muted-foreground/70">
+      {children}
+    </span>
   )
 }
 
 /* ── Связи и подзадачи ───────────────────────────────────────────────── */
 
 function Links({ task, companyId, live, onChanged, onOpenOther }: {
-  task: TaskDetails; companyId: string; live: boolean
+  task: LoadedTask; companyId: string; live: boolean
   onChanged: () => void; onOpenOther?: (id: string) => void
 }) {
   const [adding, setAdding] = useState(false)
@@ -826,7 +856,7 @@ function Links({ task, companyId, live, onChanged, onOpenOther }: {
 /* ── Время: план и факт ──────────────────────────────────────────────── */
 
 function TimePanel({ task, companyId, live, onChanged, onEstimate }: {
-  task: TaskDetails; companyId: string; live: boolean
+  task: LoadedTask; companyId: string; live: boolean
   onChanged: () => void; onEstimate: (v: string) => void
 }) {
   const [dur, setDur] = useState('')
@@ -932,7 +962,7 @@ function TimePanel({ task, companyId, live, onChanged, onEstimate }: {
 /* ── Внешние участники: разговор каналом ─────────────────────────────── */
 
 function External({ task, companyId, live, onChanged }: {
-  task: TaskDetails; companyId: string; live: boolean; onChanged: () => void
+  task: LoadedTask; companyId: string; live: boolean; onChanged: () => void
 }) {
   const [adding, setAdding] = useState(false)
   const [email, setEmail] = useState('')
@@ -1044,7 +1074,7 @@ function External({ task, companyId, live, onChanged }: {
 
 /** Работа во внешней системе: зеркало, а не копия. */
 function ExternalSystem({ task, companyId, live, onChanged }: {
-  task: TaskDetails; companyId: string; live: boolean; onChanged: () => void
+  task: LoadedTask; companyId: string; live: boolean; onChanged: () => void
 }) {
   const [adding, setAdding] = useState(false)
   const [key, setKey] = useState('')
@@ -1198,13 +1228,5 @@ function Section({ title, action, children }: {
   )
 }
 
-function Fact({ label, value, tone }: { label: string; value: string; tone?: string }) {
-  return (
-    <div>
-      <dt className="text-muted-foreground">{label}</dt>
-      <dd className={cn('mt-0.5 text-foreground', tone)}>{value}</dd>
-    </div>
-  )
-}
 
 export default TaskCard

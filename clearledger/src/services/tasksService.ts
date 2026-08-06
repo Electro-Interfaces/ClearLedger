@@ -54,17 +54,23 @@ export interface SpaceTask {
   due_at: string | null
   overdue: boolean
   /** У кого мяч: `external` — ждём внешнюю сторону, `us`/null — у нас. */
-  waiting_for: 'us' | 'external' | null
-  /** Кто видит: company — вся компания, private — только причастные. */
-  visibility: 'company' | 'private'
+  waiting_for?: 'us' | 'external' | null
   created_at: string | null
   updated_at: string | null
   closed_at: string | null
-  labels: TaskLabel[]
-  checklist: TaskProgress
-  subtasks: TaskSubtasks
-  time: TaskTime
+  labels?: TaskLabel[]
+  checklist?: TaskProgress
+  subtasks?: TaskSubtasks
+  time?: TaskTime
+  visibility?: 'company' | 'private'
 }
+
+/** Значения по умолчанию для полей, которых может не быть у старого бэкенда. */
+export const NO_TIME: TaskTime = {
+  estimate: null, spent: 0, estimate_text: '—', spent_text: '—',
+}
+export const NO_PROGRESS: TaskProgress = { total: 0, done: 0 }
+export const NO_SUBTASKS: TaskSubtasks = { total: 0, open: 0 }
 
 export interface TaskEvent {
   id: string
@@ -103,15 +109,33 @@ export interface TaskDetails extends SpaceTask {
   description: string | null
   events: TaskEvent[]
   /** Пункты чек-листа. Прогресс «3 из 5» приходит отдельно, полем `checklist`. */
-  checklist_items: ChecklistItem[]
-  watchers: TaskWatcher[]
-  attachments: TaskAttachment[]
-  links: TaskLink[]
-  participants: TaskParticipant[]
+  checklist_items?: ChecklistItem[]
+  watchers?: TaskWatcher[]
+  attachments?: TaskAttachment[]
+  links?: TaskLink[]
+  participants?: TaskParticipant[]
   /** Адрес, по которому внешний отвечает письмом. null — канал не настроен. */
   reply_address: string | null
-  external: TaskExternalRef[]
-  work_items: TaskWorkItem[]
+  external?: TaskExternalRef[]
+  work_items?: TaskWorkItem[]
+}
+
+/** Строка списка после нормализации: `fillTask` уже проставил дефолты. */
+export type ListedTask = Omit<SpaceTask, 'labels' | 'checklist' | 'subtasks' | 'time'> & {
+  labels: TaskLabel[]; checklist: TaskProgress; subtasks: TaskSubtasks; time: TaskTime
+}
+
+/** Карточка после нормализации: все поля на месте, экранам не нужны проверки.
+ *  Именно её отдаёт `taskDetails`. */
+export type LoadedTask = Omit<TaskDetails,
+  'labels' | 'checklist' | 'subtasks' | 'time' | 'events' | 'checklist_items'
+  | 'watchers' | 'attachments' | 'links' | 'participants' | 'external'
+  | 'work_items' | 'visibility' | 'waiting_for'> & {
+  labels: TaskLabel[]; checklist: TaskProgress; subtasks: TaskSubtasks; time: TaskTime
+  events: TaskEvent[]; checklist_items: ChecklistItem[]; watchers: TaskWatcher[]
+  attachments: TaskAttachment[]; links: TaskLink[]; participants: TaskParticipant[]
+  external: TaskExternalRef[]; work_items: TaskWorkItem[]
+  visibility: 'company' | 'private'; waiting_for: 'us' | 'external' | null
 }
 
 /** Ответ действия: сервер может предупредить, не отказав (открытые подзадачи). */
@@ -130,6 +154,19 @@ export interface TaskFilters {
   sort?: string; limit?: number; offset?: number
 }
 
+/** Достроить строку задачи дефолтами: старый бэкенд может не отдать новых полей,
+ *  и ни один экран не должен из-за этого падать. */
+export function fillTask<T extends SpaceTask>(t: T): T & Required<
+  Pick<SpaceTask, 'labels' | 'checklist' | 'subtasks' | 'time'>> {
+  return {
+    ...t,
+    labels: t.labels ?? [],
+    checklist: t.checklist ?? NO_PROGRESS,
+    subtasks: t.subtasks ?? NO_SUBTASKS,
+    time: t.time ?? NO_TIME,
+  }
+}
+
 export async function listTasks(companyId: string, scope: TaskScope, opts?: TaskFilters) {
   return get<{ tasks: SpaceTask[]; total: number; limit: number; offset: number }>(
     '/api/tasks', {
@@ -141,7 +178,7 @@ export async function listTasks(companyId: string, scope: TaskScope, opts?: Task
       due_from: opts?.dueFrom || undefined, due_to: opts?.dueTo || undefined,
       sort: opts?.sort || undefined,
       limit: opts?.limit ?? undefined, offset: opts?.offset || undefined,
-    })
+    }).then((r) => ({ ...r, tasks: (r.tasks ?? []).map(fillTask) }))
 }
 
 /** Разрез работы: сколько в работе и просрочено, кто чем занят, что происходило. */
@@ -169,6 +206,19 @@ export async function tasksSummary(companyId: string, days: number) {
 
 export async function taskDetails(id: string, companyId: string) {
   return get<TaskDetails>(`/api/tasks/${id}`, { company_id: companyId })
+    .then((t) => ({
+      ...fillTask(t),
+      events: t.events ?? [],
+      checklist_items: t.checklist_items ?? [],
+      watchers: t.watchers ?? [],
+      attachments: t.attachments ?? [],
+      links: t.links ?? [],
+      participants: t.participants ?? [],
+      external: t.external ?? [],
+      work_items: t.work_items ?? [],
+      visibility: t.visibility ?? 'company',
+      waiting_for: t.waiting_for ?? null,
+    }))
 }
 
 /** Кому можно поручить: члены пространства (доступно любому исполнителю). */

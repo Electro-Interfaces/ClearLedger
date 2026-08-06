@@ -24,7 +24,7 @@ import { QueryError } from '@/components/common/QueryError'
 import { cn } from '@/lib/utils'
 import { useCompany } from '@/contexts/CompanyContext'
 import * as tasksService from '@/services/tasksService'
-import type { RouteStage, SpaceTask } from '@/services/tasksService'
+import type { ListedTask, RouteStage } from '@/services/tasksService'
 import { TaskCard } from '@/components/tasks/TaskCard'
 import { PRIORITY_TONE, PRIORITY_LABEL, dt } from '@/components/tasks/taskWords'
 
@@ -173,7 +173,7 @@ export function TasksBoardPage() {
 }
 
 function BoardCard({ task, nextStage, dragging, onOpen, onDragStart, onDragEnd, onNext }: {
-  task: SpaceTask; nextStage?: RouteStage; dragging?: boolean
+  task: ListedTask; nextStage?: RouteStage; dragging?: boolean
   onOpen: () => void; onDragStart: () => void; onDragEnd: () => void; onNext: () => void
 }) {
   return (
