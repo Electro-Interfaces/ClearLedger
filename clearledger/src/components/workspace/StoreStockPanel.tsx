@@ -266,13 +266,13 @@ export function StoreStockPanel({ companyId, dateFrom, dateTo }: { companyId: st
           </tbody>
         </table>
         <ShowMore {...показ} onMore={показ.more} onAll={показ.all} unit="позиций" />
-      )}
         {items.length === 0 && (
           <div className="px-3 py-6 text-sm text-muted-foreground text-center">
             Нет позиций. Проверьте стартовый остаток и время последнего снимка агента.
           </div>
         )}
       </div>
+      )}
       {openSku && (
         <SkuDetailModal guid={openSku} dateFrom={dateFrom ?? ''} dateTo={dateTo ?? ''}
           onClose={() => setOpenSku(null)} />
