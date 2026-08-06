@@ -9,7 +9,8 @@ import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  ArrowRight, CheckCircle2, ListChecks, Loader2, Plus, RefreshCw, Route, Trash2, X,
+  ArrowRight, BarChart3, CheckCircle2, ListChecks, Loader2, Plus, RefreshCw, Route,
+  Trash2, X,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
@@ -31,6 +32,7 @@ import { useCompany } from '@/contexts/CompanyContext'
 import * as tasksService from '@/services/tasksService'
 import type { RouteStage, TaskScope, TaskType } from '@/services/tasksService'
 import { listSpaceObjects } from '@/services/spaceObjectsService'
+import { TasksOverviewSection } from '@/components/tasks/TasksOverviewSection'
 
 const nf = new Intl.NumberFormat('ru-RU')
 const dt = (s: string | null) => (s ? new Date(s).toLocaleDateString('ru-RU') : '—')
@@ -50,9 +52,20 @@ const STATUS_LABEL: Record<string, string> = {
   open: 'в работе', done: 'выполнена', cancelled: 'отменена',
 }
 
+type Section = 'overview' | 'work' | 'types'
+
 export function TasksAppPage() {
   const { company } = useCompany()
-  const [section, setSection] = useState<'work' | 'types'>('work')
+  // Раздел, период и фильтры живут в адресе, а не в состоянии: на экран «просрочки
+  // у Петрова» можно дать ссылку, а обзор проваливается в список сменой параметров.
+  const [params, setParams] = useSearchParams()
+  const section = (params.get('view') ?? 'overview') as Section
+  const days = Number(params.get('days')) || 30
+  const patch = (kv: Record<string, string | undefined>) => setParams((p) => {
+    const n = new URLSearchParams(p)
+    for (const [k, v] of Object.entries(kv)) { if (v) n.set(k, v); else n.delete(k) }
+    return n
+  }, { replace: true })
 
   return (
     <div className="space-y-4 p-4">
@@ -64,16 +77,24 @@ export function TasksAppPage() {
             задача идёт по стадиям и в любой момент может уйти другому исполнителю.
           </p>
         </div>
-        <Tabs value={section} onValueChange={(v) => setSection(v as 'work' | 'types')}>
+        <Tabs value={section} onValueChange={(v) => patch({ view: v })}>
           <TabsList variant="line" className="h-9">
+            <TabsTrigger value="overview"><BarChart3 className="mr-1.5 h-3.5 w-3.5" />Обзор</TabsTrigger>
             <TabsTrigger value="work"><ListChecks className="mr-1.5 h-3.5 w-3.5" />Работа</TabsTrigger>
             <TabsTrigger value="types"><Route className="mr-1.5 h-3.5 w-3.5" />Типы</TabsTrigger>
           </TabsList>
         </Tabs>
       </div>
 
-      {section === 'work' ? <WorkSection companyId={company.id} />
-        : <TypesSection companyId={company.id} />}
+      {section === 'overview' ? (
+        <TasksOverviewSection companyId={company.id} days={days}
+          onDays={(d) => patch({ days: String(d) })}
+          onDrill={(f) => patch({
+            view: 'work', scope: f.scope, assignee: f.assignee,
+            type: f.type, object: f.object, task: undefined,
+          })} />
+      ) : section === 'types' ? <TypesSection companyId={company.id} />
+        : <WorkSection companyId={company.id} />}
     </div>
   )
 }
@@ -81,24 +102,21 @@ export function TasksAppPage() {
 /* ── Раздел «Работа» ─────────────────────────────────────────────────── */
 
 function WorkSection({ companyId }: { companyId: string }) {
-  const [scope, setScope] = useState<TaskScope>('open')
-  // Фильтр по объекту живёт в URL: карточка объекта ссылается на /tasks?object=<id>.
+  // Весь отбор — в адресе: карточка объекта ссылается на /tasks?object=<id>, обзор
+  // проваливается сюда с ?assignee=/?scope=, а открытая карточка (?task=<id>)
+  // приходит из быстрой панели в шапке. Одно состояние, на которое можно сослаться.
   const [params, setParams] = useSearchParams()
+  const set = (k: string, v: string | null) => setParams((p) => {
+    const n = new URLSearchParams(p)
+    if (v) n.set(k, v); else n.delete(k)
+    return n
+  }, { replace: true })
+  const scope = (params.get('scope') ?? 'open') as TaskScope
   const objectId = params.get('object') ?? ''
-  const setObjectId = (v: string) => setParams((p) => {
-    const n = new URLSearchParams(p)
-    if (v) n.set('object', v); else n.delete('object')
-    return n
-  }, { replace: true })
-  // Открытая карточка — тоже в адресе: на задачу можно дать ссылку, и по ней же
-  // приходят из быстрой панели в шапке (`/tasks?task=<id>`).
+  const typeId = params.get('type') ?? ''
+  const assigneeId = params.get('assignee') ?? ''
   const openId = params.get('task')
-  const setOpenId = (v: string | null) => setParams((p) => {
-    const n = new URLSearchParams(p)
-    if (v) n.set('task', v); else n.delete('task')
-    return n
-  }, { replace: true })
-  const [typeId, setTypeId] = useState('')
+  const setOpenId = (v: string | null) => set('task', v)
 
   const objectsQ = useQuery({
     queryKey: ['space-objects', companyId],
@@ -110,10 +128,19 @@ function WorkSection({ companyId }: { companyId: string }) {
     queryFn: () => tasksService.listTaskTypes(companyId),
     staleTime: 5 * 60 * 1000,
   })
+  const peopleQ = useQuery({
+    queryKey: ['task-people', companyId],
+    queryFn: () => tasksService.listTaskPeople(companyId),
+    staleTime: 5 * 60 * 1000,
+  })
+  // Порядок ключа: scope · объект · тип · исполнитель. Тот же ключ у быстрой панели
+  // в шапке и у счётчика просрочек — иначе они грузили бы те же строки второй раз.
   const q = useQuery({
-    queryKey: ['tasks', companyId, scope, objectId, typeId],
-    queryFn: () => tasksService.listTasks(companyId, scope,
-      { objectId: objectId || undefined, typeId: typeId || undefined }),
+    queryKey: ['tasks', companyId, scope, objectId, typeId, assigneeId],
+    queryFn: () => tasksService.listTasks(companyId, scope, {
+      objectId: objectId || undefined, typeId: typeId || undefined,
+      assigneeId: assigneeId || undefined,
+    }),
     placeholderData: keepPreviousData,
   })
   const tasks = q.data?.tasks ?? []
@@ -121,16 +148,26 @@ function WorkSection({ companyId }: { companyId: string }) {
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
-        <Select value={scope} onValueChange={(v) => setScope(v as TaskScope)}>
+        <Select value={scope} onValueChange={(v) => set('scope', v)}>
           <SelectTrigger className="h-8 w-[180px] text-xs"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="open">Активные</SelectItem>
             <SelectItem value="mine">Мои</SelectItem>
+            <SelectItem value="overdue">Просроченные</SelectItem>
             <SelectItem value="closed">Завершённые</SelectItem>
             <SelectItem value="all">Все</SelectItem>
           </SelectContent>
         </Select>
-        <Select value={typeId || 'all'} onValueChange={(v) => setTypeId(v === 'all' ? '' : v)}>
+        <Select value={assigneeId || 'all'} onValueChange={(v) => set('assignee', v === 'all' ? null : v)}>
+          <SelectTrigger className="h-8 w-[180px] text-xs"><SelectValue placeholder="Исполнитель" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Любой исполнитель</SelectItem>
+            {(peopleQ.data?.people ?? []).map((p) => (
+              <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={typeId || 'all'} onValueChange={(v) => set('type', v === 'all' ? null : v)}>
           <SelectTrigger className="h-8 w-[180px] text-xs"><SelectValue placeholder="Тип" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Все типы</SelectItem>
@@ -139,7 +176,7 @@ function WorkSection({ companyId }: { companyId: string }) {
             ))}
           </SelectContent>
         </Select>
-        <Select value={objectId || 'all'} onValueChange={(v) => setObjectId(v === 'all' ? '' : v)}>
+        <Select value={objectId || 'all'} onValueChange={(v) => set('object', v === 'all' ? null : v)}>
           <SelectTrigger className="h-8 w-[200px] text-xs"><SelectValue placeholder="Объект" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Все объекты</SelectItem>
@@ -420,14 +457,6 @@ function CreateTaskDialog({ companyId, types, onCreated }: {
   const [open, setOpen] = useState(false)
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
-  // Открытая карточка — тоже в адресе: на задачу можно дать ссылку, и по ней же
-  // приходят из быстрой панели в шапке (`/tasks?task=<id>`).
-  const openId = params.get('task')
-  const setOpenId = (v: string | null) => setParams((p) => {
-    const n = new URLSearchParams(p)
-    if (v) n.set('task', v); else n.delete('task')
-    return n
-  }, { replace: true })
   const [typeId, setTypeId] = useState('')
   const [assigneeId, setAssigneeId] = useState('')
   const [objectId, setObjectId] = useState('')

@@ -90,7 +90,7 @@ export function SupportProvider({ children }: { children: ReactNode }) {
   const { companyId } = useCompany()
   const tasksOn = useTasksApp()
   const { data: myTasks } = useQuery({
-    queryKey: ['tasks', companyId, 'mine', '', ''],
+    queryKey: ['tasks', companyId, 'mine', '', '', ''],
     queryFn: () => listTasks(companyId, 'mine'),
     enabled: isApiEnabled() && !!getToken() && !!companyId && tasksOn,
     refetchInterval: 300000,

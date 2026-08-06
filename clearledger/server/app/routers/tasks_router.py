@@ -141,14 +141,15 @@ async def _names(db: AsyncSession, tasks: list[Task]) -> dict[uuid.UUID, dict[st
 @router.get("")
 async def list_tasks(
     company_id: str = Query(...),
-    scope: str = Query("open", pattern="^(open|mine|closed|all)$"),
+    scope: str = Query("open", pattern="^(open|mine|overdue|closed|all)$"),
     object_id: str | None = Query(None),
     type_id: str | None = Query(None),
+    assignee_id: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Задачи пространства. scope: open — активные, mine — где я исполнитель или
-    автор, closed — завершённые, all — всё."""
+    автор, overdue — активные с прошедшим сроком, closed — завершённые, all — всё."""
     cid = await assert_company_product(company_id, current_user, db, "plan")
     q = select(Task).where(Task.company_id == cid)
     if scope == "open":
@@ -157,8 +158,13 @@ async def list_tasks(
         q = q.where(Task.status != "open")
     elif scope == "mine":
         q = q.where(or_(Task.assignee_id == current_user.id, Task.author_id == current_user.id))
+    elif scope == "overdue":
+        # Тот же смысл, что у флага `overdue` в выдаче: срок прошёл у ЖИВОЙ задачи.
+        q = q.where(Task.status == "open", Task.due_at < datetime.now(timezone.utc))
     if object_id:
         q = q.where(Task.object_id == object_id)
+    if assignee_id:
+        q = q.where(Task.assignee_id == _uuid_or_400(assignee_id, "assignee_id"))
     if type_id:
         q = q.where(Task.type_id == _uuid_or_400(type_id, "type_id"))
     tasks = list((await db.execute(
@@ -354,6 +360,97 @@ async def create_task(
     await db.refresh(t)
     names = await _names(db, [t])
     return _task_out(t, route, names[t.id])
+
+
+# ВНИМАНИЕ: `/summary` объявлен ДО `/{task_id}` — иначе FastAPI разберёт «summary»
+# как идентификатор задачи и ручка ответит 400 «Невалидный task_id».
+@router.get("/summary")
+async def tasks_summary(
+    company_id: str = Query(...),
+    days: int = Query(30, ge=1, le=365),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Обзор работы: сколько в работе и просрочено, кто чем занят, что происходило.
+
+    Это ответ на вопрос руководителя, а не второй список задач: разрезы по людям,
+    типам и объектам плюс лента следа — кто что сделал за период.
+
+    Считаем в Python по выборке, а не SQL-агрегатами: разрезов четыре, и каждый
+    отдельным `group_by` — четыре похода в базу вместо одного. Потолок понятный —
+    задач в пространстве сотни; на десятках тысяч разрезы уедут в SQL.
+    """
+    cid = await assert_company_product(company_id, current_user, db, "plan")
+    now = datetime.now(timezone.utc)
+    since = now - timedelta(days=days)
+    # Живые задачи целиком плюс закрытые за период: закрытые год назад в обзоре
+    # не нужны, а «в работе» нужны все — просрочка не обязана попадать в окно.
+    tasks = list((await db.execute(select(Task).where(
+        Task.company_id == cid,
+        or_(Task.status == "open", Task.closed_at >= since),
+    ))).scalars())
+    names = await _names(db, tasks)
+
+    open_t = [t for t in tasks if t.status == "open"]
+    closed_t = [t for t in tasks if t.status != "open" and t.closed_at]
+    overdue = [t for t in open_t if t.due_at and t.due_at < now]
+    created_period = [t for t in tasks if t.created_at and t.created_at >= since]
+    # Среднее время прохождения — по закрытым за период: столько работа реально идёт
+    # от постановки до завершения. Медиану не берём — на десятке задач она врёт сильнее.
+    durations = [(t.closed_at - t.created_at).total_seconds() / 86400
+                 for t in closed_t if t.created_at]
+    avg_days = round(sum(durations) / len(durations), 1) if durations else None
+
+    def cut(key) -> list[dict]:
+        """Разрез: сколько в работе, просрочено и закрыто за период.
+
+        `key` отдаёт пару (id, имя): по id из разреза проваливаются в список
+        (`/tasks?assignee=…`), поэтому одного имени тут мало."""
+        acc: dict[str, dict] = {}
+        for t in tasks:
+            k, label = key(t)
+            row = acc.setdefault(k or "—", {
+                "id": k, "name": label or "—", "open": 0, "overdue": 0, "done": 0})
+            if t.status == "open":
+                row["open"] += 1
+                if t.due_at and t.due_at < now:
+                    row["overdue"] += 1
+            else:
+                row["done"] += 1
+        return sorted(acc.values(), key=lambda r: (-r["open"], -r["done"], r["name"]))
+
+    events = (await db.execute(
+        select(TaskEvent, Task.number, Task.title)
+        .join(Task, Task.id == TaskEvent.task_id)
+        .where(Task.company_id == cid, TaskEvent.created_at >= since)
+        .order_by(TaskEvent.created_at.desc()).limit(60))).all()
+    actors = {r.id: r.name for r in (await db.execute(select(User).where(
+        User.id.in_({e.user_id for e, _, _ in events if e.user_id})))).scalars()} if events else {}
+
+    return {
+        "days": days,
+        "totals": {
+            "open": len(open_t),
+            "overdue": len(overdue),
+            "mine": sum(1 for t in open_t if current_user.id in (t.assignee_id, t.author_id)),
+            "unassigned": sum(1 for t in open_t if t.assignee_id is None),
+            "created": len(created_period),
+            "done": len(closed_t),
+            "avg_days": avg_days,
+        },
+        "by_assignee": cut(lambda t: (
+            str(t.assignee_id) if t.assignee_id else None, names[t.id]["assignee"])),
+        "by_type": cut(lambda t: (
+            str(t.type_id) if t.type_id else None, names[t.id]["type"] or "без типа")),
+        "by_object": [r for r in cut(lambda t: (t.object_id, names[t.id]["object"]))
+                      if r["id"]],
+        "activity": [{
+            "id": str(e.id), "kind": e.kind, "user": actors.get(e.user_id),
+            "task_id": str(e.task_id), "number": num, "title": title,
+            "from": e.from_value, "to": e.to_value, "note": e.note,
+            "created_at": e.created_at.isoformat() if e.created_at else None,
+        } for e, num, title in events],
+    }
 
 
 @router.get("/{task_id}")

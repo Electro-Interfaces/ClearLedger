@@ -56,15 +56,39 @@ export interface TaskDetails extends SpaceTask {
   events: TaskEvent[]
 }
 
-export type TaskScope = 'open' | 'mine' | 'closed' | 'all'
+export type TaskScope = 'open' | 'mine' | 'overdue' | 'closed' | 'all'
 
 export async function listTasks(companyId: string, scope: TaskScope, opts?: {
-  objectId?: string; typeId?: string
+  objectId?: string; typeId?: string; assigneeId?: string
 }) {
   return get<{ tasks: SpaceTask[]; total: number }>('/api/tasks', {
     company_id: companyId, scope,
     object_id: opts?.objectId || undefined, type_id: opts?.typeId || undefined,
+    assignee_id: opts?.assigneeId || undefined,
   })
+}
+
+/** Разрез работы: сколько в работе и просрочено, кто чем занят, что происходило. */
+/** Строка разреза. `id` пустой у «без исполнителя» / «без объекта» — по такой
+ *  строке провалиться некуда, кнопка просто не ведёт в список. */
+export interface TasksCut { id: string | null; name: string; open: number; overdue: number; done: number }
+export interface TaskActivity extends TaskEvent {
+  task_id: string; number: number; title: string
+}
+export interface TasksSummary {
+  days: number
+  totals: {
+    open: number; overdue: number; mine: number; unassigned: number
+    created: number; done: number; avg_days: number | null
+  }
+  by_assignee: TasksCut[]
+  by_type: TasksCut[]
+  by_object: TasksCut[]
+  activity: TaskActivity[]
+}
+
+export async function tasksSummary(companyId: string, days: number) {
+  return get<TasksSummary>('/api/tasks/summary', { company_id: companyId, days })
 }
 
 export async function taskDetails(id: string, companyId: string) {

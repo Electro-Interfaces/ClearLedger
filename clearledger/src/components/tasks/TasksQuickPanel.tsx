@@ -33,7 +33,7 @@ export function TasksQuickPanel() {
   // typeId]`) и у счётчика на кнопке: открыв «Задачи» следом, человек видит готовый
   // список, а не второй запрос за теми же строками.
   const { data, isLoading } = useQuery({
-    queryKey: ['tasks', companyId, 'mine', '', ''],
+    queryKey: ['tasks', companyId, 'mine', '', '', ''],
     queryFn: () => tasksService.listTasks(companyId, 'mine'),
     enabled: !!companyId,
   })
