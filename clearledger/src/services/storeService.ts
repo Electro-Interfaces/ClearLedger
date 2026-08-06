@@ -1045,7 +1045,12 @@ export const getStoreStationDocs = (opts: {
 /** Витрина отчётов сети и данные конкретного отчёта. */
 export interface StoreReportInfo {
   key: string; title: string; about: string; columns: string[]
+  /** Раздел каталога: тот же, что в меню (torg, priem, sklad, mark, close, skvoz). */
+  group: string
 }
+
+/** Раздел каталога отчётов — порядок задаёт сервер, второго списка нет. */
+export interface StoreReportGroup { key: string; label: string; hint: string }
 
 export interface StoreReportData {
   kind: string; title: string; about: string
@@ -1058,10 +1063,14 @@ export interface StoreReportData {
   shortfall?: number; surplus?: number
   vat_deductible?: number; vat_unconfirmed?: number
   unexplained_total?: number
+  revenue?: number
+  stock_amount?: number; cost_amount?: number
+  amount?: number
+  violations?: number
 }
 
 export const getStoreNetworkReports = () =>
-  get<{ reports: StoreReportInfo[] }>('/api/store/reports')
+  get<{ groups: StoreReportGroup[]; reports: StoreReportInfo[] }>('/api/store/reports')
 
 const отчётПараметры = (opts: { dateFrom?: string; dateTo?: string; stations?: number[] }) => {
   const q = new URLSearchParams()

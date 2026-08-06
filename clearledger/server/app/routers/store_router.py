@@ -1066,7 +1066,10 @@ async def store_network_reports(
     одна отличается от другой».
     """
     await scope_company_id(user, db)
-    return {"reports": [{"key": k, **{f: v for f, v in r.items() if f != "fields"}}
+    # Разделы отдаются вместе с витриной: каталог отчётов повторяет меню, и
+    # порядок разделов задаёт сервер — иначе фронт заведёт свой второй список.
+    return {"groups": store_reports.GROUPS,
+            "reports": [{"key": k, **{f: v for f, v in r.items() if f != "fields"}}
                         for k, r in store_reports.REPORTS.items()]}
 
 
