@@ -11,6 +11,12 @@ from app.models import DataEntry, EdgePacket
 from app.services.cb_normalize import _build_sections, normalize_shift_package
 
 
+async def load_ingredients(db: AsyncSession) -> set[str]:
+    """UUID позиций, входящих хоть в одну ТТК сети — сырьё кухни."""
+    rows = await db.execute(text("SELECT DISTINCT item_uuid::text FROM edge.recipe_line"))
+    return {r for r in rows.scalars() if r}
+
+
 def enrich_retail_meta(meta: dict, recipes: dict[str, list[dict]], dish_ids: set[str]) -> dict:
     """Повторно разбить продажу после прихода ТТК/признака блюда из мастер-НСИ."""
     result = copy.deepcopy(meta)
@@ -143,6 +149,7 @@ async def project_packet(
         payload,
         source="edge",
         source_label="Ledger Edge · агент станции",
+        ingredients=await load_ingredients(db),
     )
     expected_ids: set[str] = set()
     created = updated = removed = 0

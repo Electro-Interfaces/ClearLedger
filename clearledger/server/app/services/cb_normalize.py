@@ -67,6 +67,38 @@ def _expand_dish(line: dict, recipes: dict[str, list[dict]]) -> list[dict]:
     return out
 
 
+# Общепит ГИГ продаётся как сопутка: блюдо собирается из ингредиентов в момент
+# продажи, счёт у товара и у сырья один (41.02). Поэтому контур — не счёт и не
+# склад, а МЕТКА СТРОКИ: одна и та же карточка (бекон, молоко, стакан) бывает и
+# товаром на полке, и сырьём кухни. Различает её накладная, а не справочник.
+_ОБЩЕПИТ, _СОПУТКА = "Общепит", "Сопутка"
+_МЕСТО_КАФЕ = {"cafe", "кафе", "общепит", "кухня"}
+
+# kind → контур, известный без разбора строк
+_KIND_CONTOUR = {"production_release": _ОБЩЕПИТ, "ingredients_writeoff": _ОБЩЕПИТ}
+
+
+def _mark_contour(rows: list[dict], header: dict, ingredients: set[str],
+                  forced: str = "") -> None:
+    """Проставить строкам КлассSKU — тем же словарём, что у продаж.
+
+    Приоритет: явное МестоОприходования (человек на станции знает, куда приехал
+    товар) → позиция входит в чью-то ТТК → сопутка.
+    """
+    место_док = str(header.get("МестоОприходования") or "").strip().lower()
+    for row in rows:
+        if str(row.get("КлассSKU") or "").strip():
+            continue                      # уже размечено источником — не спорим
+        место = str(row.get("МестоОприходования") or "").strip().lower() or место_док
+        if forced:
+            row["КлассSKU"] = forced
+        elif место:
+            row["КлассSKU"] = _ОБЩЕПИТ if место in _МЕСТО_КАФЕ else _СОПУТКА
+        else:
+            row["КлассSKU"] = (_ОБЩЕПИТ if str(row.get("Номенклатура") or "") in ingredients
+                               else _СОПУТКА)
+
+
 def _sum(rows: list[dict], field: str = "Сумма") -> float:
     return round(sum(float(r.get(field, 0) or 0) for r in rows), 2)
 
@@ -122,8 +154,13 @@ def normalize_shift_package(
     package: dict,
     source: str = "oneC",
     source_label: str = "ЦБ ЭЛСИ.АЗК",
+    ingredients: set[str] | None = None,
 ) -> dict:
     """Пакет смены ЦБ → черновики DataEntry (L2 CLEAN).
+
+    ingredients — UUID позиций, входящих в ТТК сети (из мастера). Нужны, чтобы
+    разметить контур в приходах и списаниях: ТТК смены знают только те блюда,
+    что продавались, а сырьё приезжает и в смены без общепита.
 
     Возврат: {shift_key, station, entries:[DataEntry-draft], skipped:[...]}.
     """
@@ -132,6 +169,10 @@ def normalize_shift_package(
     skey = _shift_key(shift)
     station = str(shift.get("КодАЗС", "")).strip()
     recipes = _recipe_index(docs)
+    сырьё = set(ingredients or ())
+    for состав in recipes.values():
+        сырьё |= {str(i.get("НоменклатураUUID") or i.get("Номенклатура") or "")
+                  for i in состав}
 
     retail_uuid = next((str(d.get("ИсточникUUID")) for d in docs
                         if (d.get("Тип") or d.get("kind")) == "retail_sale_sidegoods"
@@ -206,7 +247,13 @@ def normalize_shift_package(
             meta["Секции"] = sections
             meta["СодержитБлюда"] = has_dish
         else:
-            # одно-действийные документы (purchase/production_release/…) — без секций
+            # одно-действийные документы (purchase/production_release/…) — без секций,
+            # но с разметкой контура: приход сырья кухни и приход товара на полку
+            # идут одной накладной и различимы только меткой строки.
+            for тч in ("Товары", "ВыпускБлюд", "ВозвращенныеТовары"):
+                if isinstance(doc_meta.get(тч), list):
+                    _mark_contour(doc_meta[тч], doc_meta, сырьё,
+                                  forced=_KIND_CONTOUR.get(kind, ""))
             meta["Документ"] = doc_meta
 
         entries.append({
@@ -253,4 +300,38 @@ def _selftest() -> dict:
 
 if __name__ == "__main__":
     import json
+    _selftest_contour()
     print(json.dumps(_selftest(), ensure_ascii=False, indent=2))
+
+
+def _selftest_contour() -> None:
+    """Контур строки: явное место → ТТК → сопутка. Одна карточка бывает и тем, и другим."""
+    сырьё = {"uuid-milk"}
+    строки = [
+        {"Номенклатура": "uuid-milk"},                                  # ингредиент → кухня
+        {"Номенклатура": "uuid-chips"},                                 # обычный товар
+        {"Номенклатура": "uuid-milk", "МестоОприходования": "Магазин"},  # молоко на полку
+        {"Номенклатура": "uuid-bacon", "МестоОприходования": "cafe"},    # бекон на кухню
+        {"Номенклатура": "uuid-chips", "КлассSKU": "Общепит"},           # разметка источника
+    ]
+    _mark_contour(строки, {}, сырьё)
+    assert [s["КлассSKU"] for s in строки] == [
+        _ОБЩЕПИТ, _СОПУТКА, _СОПУТКА, _ОБЩЕПИТ, _ОБЩЕПИТ], строки
+
+    # МестоОприходования из шапки накрывает все строки без своего
+    шапка = [{"Номенклатура": "uuid-chips"}, {"Номенклатура": "uuid-x", "МестоОприходования": "Магазин"}]
+    _mark_contour(шапка, {"МестоОприходования": "Кафе"}, set())
+    assert [s["КлассSKU"] for s in шапка] == [_ОБЩЕПИТ, _СОПУТКА], шапка
+
+    # выпуск блюд — общепит всегда, независимо от состава
+    выпуск = [{"Номенклатура": "uuid-chips"}]
+    _mark_contour(выпуск, {}, set(), forced=_KIND_CONTOUR["production_release"])
+    assert выпуск[0]["КлассSKU"] == _ОБЩЕПИТ
+
+    # приход в пакете размечается сквозь normalize_shift_package
+    pkg = {"Смена": {"КодАЗС": "208", "НомерСмены": "1"}, "Документы": [
+        {"Тип": "purchase", "ИсточникUUID": "u1", "Товары": [
+            {"Номенклатура": "uuid-milk", "Количество": 1},
+            {"Номенклатура": "uuid-chips", "Количество": 2}]}]}
+    строки = normalize_shift_package(pkg, ingredients={"uuid-milk"})["entries"][0]["meta"]["Документ"]["Товары"]
+    assert [s["КлассSKU"] for s in строки] == [_ОБЩЕПИТ, _СОПУТКА], строки

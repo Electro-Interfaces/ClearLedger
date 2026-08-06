@@ -1429,6 +1429,29 @@ async def create_all() -> None:
         ):
             await conn.execute(_sa.text(stmt))
 
+        # v2.40: натуральный ключ документа L2 — DB-страховка от задвоения.
+        #
+        # Агент шлёт смену несколькими пакетами подряд; их приём идёт в
+        # параллельных транзакциях, и поиск «а нет ли уже такой записи» не видит
+        # чужую незакоммиченную. Три пакета смены 08.06 дали по три копии каждой
+        # ТТК. Индекс превращает тихий дубль в конфликт, который ретрай агента
+        # залечивает сам. Частичный: у топливной линии (source='api') ключа нет.
+        for stmt in (
+            # осиротевшие копии: оставляем самую свежую запись ключа.
+            # Ранжируем по (updated_at, id) с NULLS LAST — у части строк времени
+            # нет, а обычное сравнение с NULL не удалило бы ничего и индекс не встал.
+            "DELETE FROM data_entries WHERE id IN ("
+            "  SELECT id FROM (SELECT id, row_number() OVER ("
+            "      PARTITION BY company_id, source, source_id"
+            "      ORDER BY updated_at DESC NULLS LAST, id DESC) rn"
+            "    FROM data_entries WHERE COALESCE(source_id, '') <> '') t"
+            "  WHERE rn > 1)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_data_entries_source_key "
+            "ON data_entries (company_id, source, source_id) "
+            "WHERE COALESCE(source_id, '') <> ''",
+        ):
+            await conn.execute(_sa.text(stmt))
+
         # «Пульс»: карточку можно не только принять на сегодня, но и отложить —
         # «вернуться через три дня». Без срока «Принято» означало «я видел», и
         # решение руководителя нигде не оставляло следа до самого провала.

@@ -20,6 +20,7 @@ from app.models import DataEntry
 from app.selfcheck_catalog import list_selfchecks
 from app.services import mapping
 from app.services.cb_normalize import normalize_shift_package
+from app.services.edge_projection import load_ingredients
 from app.services.reconcile import selfcheck
 
 
@@ -48,12 +49,13 @@ async def ingest_packages(
     shifts = 0
     skipped: list[str] = []
     paymap = await mapping.load_kind_map(db, company_id, "paytype", channel_id)
+    ingredients = await load_ingredients(db)
     sc_rules = list_selfchecks()
     sc_violations: list[dict] = []
     sc_checked = 0
 
     for pkg in packages:
-        res = normalize_shift_package(pkg)
+        res = normalize_shift_package(pkg, ingredients=ingredients)
         shifts += 1
         skipped.extend(res.get("skipped", []))
         for _e in res["entries"]:
