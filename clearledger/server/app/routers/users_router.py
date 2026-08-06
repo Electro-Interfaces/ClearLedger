@@ -142,6 +142,7 @@ async def _resp(
         department_id=department_id, department_name=department_name,
         party_type=party_type, organization_id=org_id, organization_name=org_name,
         is_superadmin=u.is_superadmin, last_seen_at=u.last_seen_at, companies=memberships,
+        has_station_pin=bool(u.station_pin_hash),
     )
 
 

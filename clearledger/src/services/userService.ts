@@ -37,6 +37,7 @@ export interface AdminUser {
   is_superadmin: boolean
   last_seen_at?: string | null // последний вход/активность — для состава и карточки
   companies: MembershipRef[]
+  has_station_pin?: boolean // задан ли PIN станции (вход на рабочем месте АЗС)
 }
 
 export async function listUsers(companyId: string): Promise<AdminUser[]> {
@@ -136,6 +137,16 @@ export async function setMemberScope(
 ): Promise<AdminUser> {
   return put<AdminUser>(`/api/users/${id}/scope`, {
     company_id: companyId, object_scope: objectScope,
+  })
+}
+
+/** PIN станции члена: короткий код входа на рабочем месте АЗС (edge-агент).
+ *  Пустой pin снимает PIN — быстрый вход отключается, остаётся вход по паролю. */
+export async function setStationPin(
+  id: string, companyId: string, pin: string,
+): Promise<AdminUser> {
+  return put<AdminUser>(`/api/users/${id}/station-pin`, {
+    company_id: companyId, pin,
   })
 }
 

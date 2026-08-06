@@ -211,6 +211,7 @@ class UserAdminResponse(BaseModel):
     is_superadmin: bool
     last_seen_at: datetime | None = None   # последний вход/активность — для состава и карточки
     companies: list[CompanyMembership] = []
+    has_station_pin: bool = False          # задан ли PIN станции (для входа на рабочем месте АЗС)
 
 
 class GrantCompanyBody(BaseModel):

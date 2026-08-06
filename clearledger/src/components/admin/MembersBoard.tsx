@@ -49,6 +49,7 @@ import { ACTION_LABEL } from './AuditLog'
 import { copyText } from './InviteLinkPanel'
 import * as departmentsService from '@/services/departmentsService'
 import { ObjectScopeDialog } from './ObjectScopeDialog'
+import { StationPinDialog } from './StationPinDialog'
 import { PartyBadge } from '@/components/chat/PartyBadge'
 
 /** «31.07, 14:02» — компактная отметка последнего входа для строки состава. */
@@ -1017,6 +1018,10 @@ function MemberCard({
             <div className="flex items-center gap-2">
               <span className="text-xs text-muted-foreground">Объекты:</span>
               <ObjectScopeDialog member={u} companyId={companyId} onSaved={onSaved} />
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground">Станция:</span>
+              <StationPinDialog member={u} companyId={companyId} onSaved={onSaved} />
             </div>
           </section>
         )}

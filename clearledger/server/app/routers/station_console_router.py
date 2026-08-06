@@ -152,11 +152,15 @@ if (!token) {{
 def _переписать(html: str, prefix: str) -> str:
     """Адреса станции — под префикс прокси.
 
-    Правится ровно то, что ведёт на корень: href/action/src и fetch в скриптах
-    рабочего места. Схемы (http://, //, mailto:) и якоря не трогаем.
+    Правится ровно то, что ведёт на корень: href/action/src, fetch и JS-навигация
+    location='/…' (клик по строке документа: списки открывают карточку именно ей,
+    и без правки клик по УПД уходил на корень пространства — 404). Схемы (http://,
+    //, mailto:) и якоря не трогаем.
     """
     html = re.sub(r'(href|action|src)="/(?!/)', rf'\1="{prefix}/', html)
     html = html.replace('fetch("/', f'fetch("{prefix}/')
+    # location='/…' и location="/…" (навигация по клику на строку) — под префикс.
+    html = re.sub(r"location\s*=\s*(['\"])/(?!/)", rf"location=\1{prefix}/", html)
     return html
 
 
