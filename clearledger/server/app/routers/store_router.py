@@ -28,7 +28,7 @@ from app.models import (
     User, UserCompany,
 )
 from app.routers import edge_router
-from app.services import edge_nsi, edge_projection, edge_service, store_reports
+from app.services import edge_nsi, edge_projection, edge_service, store_costs, store_reports
 from app.services import recipe_versions
 from app.services.export_audit import log_export
 from app.services.edo_upd import parse_upd
@@ -630,6 +630,20 @@ class NsiBarcodeIn(BaseModel):
     code: str
 
 
+def _оценка_себестоимости(оценки: dict, uuid: str) -> dict:
+    """Поля себестоимости для карточки, едущей вниз.
+
+    Пусто, когда закупок по карточке не было: станция отличает «оценки нет» от
+    «оценка ноль», и затирать чужую цифру пустотой нельзя.
+    """
+    о = оценки.get(uuid)
+    if not о:
+        return {}
+    return {"cost_hint": float(о["cost"]),
+            "cost_hint_at": о["at"].isoformat() if hasattr(о["at"], "isoformat") else str(о["at"]),
+            "cost_hint_src": о["source"]}
+
+
 async def _queue_nsi_delta(db: AsyncSession, cid, item_id: int, station_id: int | None = None) -> int:
     """Положить карточку в очередь заданий станции.
 
@@ -680,7 +694,10 @@ async def _queue_nsi_delta(db: AsyncSession, cid, item_id: int, station_id: int 
                      "marked": bool(card["marked"]), "mark_group": card["mark_group"],
                      "adult_only": bool(card["adult_only"]),
                      "mrc": float(card["mrc"]) if card["mrc"] is not None else None,
-                     "brand": card["brand"], "photo_url": card["photo_url"]},
+                     "brand": card["brand"], "photo_url": card["photo_url"],
+                     **_оценка_себестоимости(
+                         await store_costs.ориентиры(db, cid, [st]),
+                         str(card["external_uuid"]))},
             note="НСИ: %s" % card["name"][:60],
         ))
     return len(targets)
@@ -2760,6 +2777,12 @@ async def nsi_push(
         ORDER BY i.name
     """), {"s": station_id})).mappings().all()
 
+    # Себестоимость станция знает только по своим приходам, а начинала она со
+    # снимка остатков 1С — там закупочной цены нет. Ориентир по последней
+    # закупке едет вместе с карточкой: без него рабочее место честно, но
+    # бесполезно показывает «стоимость запаса 0,00» при полных полках.
+    оценки = await store_costs.ориентиры(db, cid, [station_id])
+
     items = [{"uuid": str(r["external_uuid"]), "name": r["name"], "unit": r["unit"],
               "vat_rate": r["vat_rate"], "deleted": bool(r["deleted"]),
               "price": float(r["price"]) if r["price"] is not None else None,
@@ -2769,7 +2792,8 @@ async def nsi_push(
               "adult_only": bool(r["adult_only"]),
               "mrc": float(r["mrc"]) if r["mrc"] is not None else None,
               "brand": r["brand"], "photo_url": r["photo_url"],
-              "barcodes": list(r["codes"] or [])} for r in rows]
+              "barcodes": list(r["codes"] or []),
+              **_оценка_себестоимости(оценки, str(r["external_uuid"]))} for r in rows]
     if not items:
         raise HTTPException(404, "Для станции нет ни одной связанной карточки")
 

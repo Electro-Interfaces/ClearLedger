@@ -26,6 +26,8 @@ from datetime import date, datetime, time, timezone
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services import store_costs
+
 
 def csv_bytes(header: list[str], rows: list[list]) -> bytes:
     """Собрать CSV, который Excel откроет двойным кликом.
@@ -450,28 +452,42 @@ async def stock(db: AsyncSession, cid, date_from, date_to,
         p["st"] = stations
     rows = (await db.execute(text(f"""
         SELECT DISTINCT ON (station_id, place, item_uuid)
-               station_id, place, place_name, name, barcode, quantity,
+               station_id, place, place_name, name, barcode, quantity, item_uuid,
                retail_price, cost_unit, snapshot_at
         FROM store_stock_balances
         WHERE company_id = :cid{ф}
         ORDER BY station_id, place, item_uuid, snapshot_at DESC
     """), p)).mappings().all()
+    # Станция знает себестоимость только по тому, что приняла сама. Остальное
+    # оценивается по последней закупке — с пометкой, откуда взялась цена: без
+    # этого «стоимость запаса» превращается в число без происхождения.
+    оценки = await store_costs.ориентиры(db, cid, stations)
     строки = []
     for r in rows:
         кол = float(r["quantity"] or 0)
         цена = float(r["retail_price"] or 0)
         себе = float(r["cost_unit"] or 0)
+        источник = "приход станции" if себе > 0 else ""
+        if себе <= 0:
+            о = оценки.get(str(r["item_uuid"] or ""))
+            if о:
+                себе, источник = о["cost"], о["source"]
         строки.append({
             "station_id": r["station_id"], "place": r["place_name"] or r["place"],
             "name": r["name"], "barcode": r["barcode"],
             "quantity": round(кол, 3), "price": цена,
-            "amount": round(кол * цена, 2), "cost_amount": round(кол * себе, 2),
+            "amount": round(кол * цена, 2), "cost": round(себе, 2),
+            "cost_amount": round(кол * себе, 2), "cost_source": источник or "нет данных",
             "snapshot_at": r["snapshot_at"],
         })
     строки.sort(key=lambda x: (x["station_id"], -x["amount"]))
+    с_ценой = [s for s in строки if s["cost_amount"] > 0]
     return {"rows": строки, "total": len(строки),
             "stock_amount": round(sum(s["amount"] for s in строки), 2),
             "cost_amount": round(sum(s["cost_amount"] for s in строки), 2),
+            # Покрытие себестоимостью — предмет отдельного разговора: пока часть
+            # ассортимента живёт со снимка 1С, оценка есть не у всего.
+            "cost_known": len(с_ценой),
             "by_station": _по_станциям(строки)}
 
 
@@ -772,11 +788,13 @@ REPORTS = {
         "title": "Ведомость остатков",
         "about": "Что и сколько лежит на каждой АЗС, где и почём. Берётся последний снимок "
                  "станции: снимки приходят пакетами и по датам не выровнены, поэтому момент "
-                 "снимка стоит колонкой.",
+                 "снимка стоит колонкой. Себестоимость — факт прихода станции, а где его нет "
+                 "(товар со старта, из снимка 1С) — цена последней закупки; источник указан "
+                 "колонкой, оценку и факт смешивать нельзя.",
         "columns": ["АЗС", "Место", "Товар", "Штрихкод", "Количество", "Цена", "Сумма",
-                    "В себестоимости", "Снимок"],
+                    "Себестоимость", "В себестоимости", "Источник цены", "Снимок"],
         "fields": ["station_id", "place", "name", "barcode", "quantity", "price", "amount",
-                   "cost_amount", "snapshot_at"],
+                   "cost", "cost_amount", "cost_source", "snapshot_at"],
         "group": "sklad",
     },
     "writeoffs": {
