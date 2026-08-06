@@ -2118,6 +2118,25 @@ export function ChatPanel({ compact, scopeProduct }: {
   // если понадобится продолжать с телефона.
   const msgTextRef = useRef('')
   useEffect(() => { msgTextRef.current = messageText }, [messageText])
+  // Поле ввода растёт под текст, как в привычных мессенджерах: одна строка в покое,
+  // дальше по строке за строку до потолка, потом свой скролл. До этого стояло
+  // `rows={1}` без пересчёта: длинное сообщение уезжало за границу одной строки, и
+  // перед отправкой человек не видел, что именно написал.
+  //
+  // Потолок в ПИКСЕЛЯХ, а не в строках: в узкой панели строк помещается больше, и
+  // счёт по строкам съел бы ленту. `auto` перед замером обязателен — иначе
+  // scrollHeight не умеет уменьшаться при удалении текста, и поле остаётся раздутым.
+  const inputRef = useRef<HTMLTextAreaElement | null>(null)
+  useLayoutEffect(() => {
+    const el = inputRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    // Рамку добавляем отдельно: при `box-sizing: border-box` высота считается вместе
+    // с ней, а `scrollHeight` её не включает — поле выходило на 2 px ниже текста и
+    // показывало полосу прокрутки там, где всё помещалось.
+    const border = el.offsetHeight - el.clientHeight
+    el.style.height = `${Math.min(el.scrollHeight + border, compact ? 132 : 200)}px`
+  }, [messageText, compact])
   const prevRoomRef = useRef<string | null>(null)
   useEffect(() => {
     const prev = prevRoomRef.current
@@ -2906,11 +2925,14 @@ export function ChatPanel({ compact, scopeProduct }: {
                   </PopoverContent>
                 </Popover>
                 <VoiceSoon />
-                <textarea value={messageText} onChange={(e) => handleTextChange(e.target.value)}
+                {/* Высоту ведёт эффект авороста выше; `rows={1}` — только стартовое
+                    состояние. Размер текста тот же, что в пузырях ленты (13/1.45):
+                    набранное выглядит ровно так, как встанет в переписку. */}
+                <textarea ref={inputRef} value={messageText} onChange={(e) => handleTextChange(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() } }}
                   onPaste={handlePaste}
                   placeholder="Сообщение… (Ctrl+V — вставить скриншот)" rows={1}
-                  className="max-h-[80px] min-h-[32px] flex-1 resize-none rounded-2xl border border-border bg-muted/40 px-3 py-1.5 text-xs outline-none focus:ring-1 focus:ring-primary" />
+                  className="min-h-[32px] flex-1 resize-none overflow-y-auto rounded-2xl border border-border bg-muted/40 px-3 py-1.5 text-[13px] leading-[1.45] outline-none focus:ring-1 focus:ring-primary" />
                 <button onClick={handleSend} disabled={(!messageText.trim() && !pendingFiles.length) || sendMutation.isPending || uploading}
                   className="inline-flex size-8 max-md:size-10 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50" title="Отправить">
                   {uploading || sendMutation.isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}
