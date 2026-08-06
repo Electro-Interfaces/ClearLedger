@@ -1055,7 +1055,7 @@ async def store_reproject(
 
 
 @router.get("/reports")
-async def store_reports_list(
+async def store_network_reports(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -1071,7 +1071,7 @@ async def store_reports_list(
 
 
 @router.get("/reports/{kind}")
-async def store_report(
+async def store_network_report(
     kind: str,
     date_from: str | None = Query(None),
     date_to: str | None = Query(None),
