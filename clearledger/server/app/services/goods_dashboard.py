@@ -120,6 +120,10 @@ class GoodsDashboardService:
                 DataEntry.company_id == self.company_id,
                 DataEntry.layer == "clean",
                 DataEntry.doc_type_id == "retail_sale_sidegoods",
+                # Вытесненные документы — та же смена из второго источника
+                # (выгрузка ЦБ против пакета станции). В витринах их быть не
+                # должно: иначе выручка считается дважды.
+                DataEntry.status != "superseded",
             ))).scalars().all()
             self._sales_cache = _prefer_edge_sales(rows)
         return self._sales_cache
@@ -2730,6 +2734,7 @@ class GoodsDashboardService:
         # (первой по (станция, дата)); остальные смены дня получают нули.
         metas = sorted(metas, key=lambda m: (
             _day(m.get("Смена") or {}), str((m.get("Смена") or {}).get("Открытие") or "")))
+
         day_assigned: set[str] = set()
         shifts = []
         for m in metas:

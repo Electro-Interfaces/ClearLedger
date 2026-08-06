@@ -38,6 +38,16 @@ _NDS_MAP = {
 # Ставки, которые сопоставляет приёмник (TL_МаппингЦБ.СопоставитьСтавкуНДС). Всё, что
 # вне списка, роняет документ в поступлениях и возвратах поставщику.
 _BP_VAT_NAMES = frozenset(_NDS_MAP.values())
+
+# Направление перемещения приходит в двух видах: агент шлёт коды, выгрузка ЦБ —
+# слова. Приводим к кодам, иначе документы ЦБ не опознаются и склад не
+# подставляется — а без склада перемещение не разложить.
+_TRANSFER_DIRECTION = {
+    "исходящее": "out", "out": "out",
+    "входящее": "in", "in": "in",
+    "внутреннее": "internal", "internal": "internal",
+}
+
 _DOC_ORDER = {
     "recipe": 0, "purchase": 1, "production_release": 2,
     "retail_sale_sidegoods": 3, "return_purchase": 4, "inventory": 5,
@@ -145,13 +155,21 @@ class BpPackageEmitter:
             deleted=row["deleted"], barcodes=list(row["barcodes"] or []),
         ) for row in rows}
 
-    async def _edge_partners(self) -> dict[str, dict]:
+    async def _edge_partners(self) -> tuple[dict[str, dict], dict[str, dict]]:
+        """Контрагенты станции по имени и по идентификатору.
+
+        Второй индекс нужен документам, где контрагент уже пришёл готовым UUID:
+        по имени его не найти, а карточку в НСИ пакета положить обязательно —
+        иначе приёмник откатит документ, не сумев опознать контрагента.
+        """
         rows = (await self.session.execute(text("""
             SELECT id, name, name_full, inn, kpp, role, archived
             FROM edge.partner
             WHERE company_id = :company_id
         """), {"company_id": self.company_id})).mappings().all()
-        return {str(row["name"] or "").strip().casefold(): dict(row) for row in rows}
+        by_name = {str(row["name"] or "").strip().casefold(): dict(row) for row in rows}
+        by_id = {str(row["id"]).lower(): dict(row) for row in rows}
+        return by_name, by_id
 
     async def _build_edge_shift_package(self, target: DataEntry, shift_key: str) -> dict:
         meta = target.meta or {}
@@ -159,7 +177,7 @@ class BpPackageEmitter:
         nom = await self._edge_nom_map()
         orgs = await self._refs("organization")
         whs = await self._refs("warehouse")
-        partners = await self._edge_partners()
+        partners, partners_by_id = await self._edge_partners()
         company_name = (await self.session.execute(text(
             "SELECT name FROM companies WHERE id = :company_id"
         ), {"company_id": self.company_id})).scalar_one_or_none() or ""
@@ -223,9 +241,25 @@ class BpPackageEmitter:
                 return ""
             try:
                 _uuid.UUID(name)
-                return name
             except ValueError:
                 pass
+            else:
+                # Готовый UUID раньше возвращался как есть, без карточки в НСИ. Но
+                # приёмник ищет контрагента по соответствию, потом по ИНН, потом
+                # пытается создать — и на всех трёх путях у него пусто, потому что
+                # ни имени, ни ИНН мы не передали. Документ откатывался целиком:
+                # так не принимались приходы 47 смен. Карточку кладём всегда,
+                # реквизиты берём из мастера станций по этому же UUID.
+                row = partners_by_id.get(name.lower())
+                partner_nsi[name] = {
+                    "name": (row or {}).get("name") or "Поставщик (реквизиты не переданы)",
+                    "full_name": (row or {}).get("name_full") or (row or {}).get("name")
+                                 or "Поставщик (реквизиты не переданы)",
+                    "inn": (row or {}).get("inn") or "",
+                    "kpp": (row or {}).get("kpp") or "",
+                    "archived": bool((row or {}).get("archived")),
+                }
+                return name
             row = partners.get(name.casefold())
             uid = _stable_uuid(f"edge-partner/{self.company_id}/{row['id'] if row else name.casefold()}")
             partner_nsi[uid] = {
@@ -348,6 +382,9 @@ class BpPackageEmitter:
         gains: list[dict] = []
         writeoffs: list[dict] = []
         transfers: list[dict] = []
+        # Документы, которые не удалось разложить: пакет собирается без них, а
+        # человек узнаёт о них из сверки. Молча терять нельзя — это факты смены.
+        skipped: list[dict] = []
         seen: set[tuple[str, str]] = set()
         code2guid = {str((ref.extra or {}).get("code") or ""): uid for uid, ref in whs.items()}
         for entry in related:
@@ -430,7 +467,12 @@ class BpPackageEmitter:
             elif kind == "writeoff":
                 writeoffs.append(doc)
             elif kind == "transfer":
-                direction = str(doc.get("Направление") or "")
+                # Направление приходит в двух видах: агент шлёт коды (out/in/
+                # internal), выгрузка ЦБ — слова. Читаем оба, иначе документы ЦБ
+                # не опознаются и склад не подставляется.
+                direction = _TRANSFER_DIRECTION.get(
+                    str(doc.get("Направление") or "").strip().lower(),
+                    str(doc.get("Направление") or ""))
                 from_uuid = code2guid.get(str(doc.get("МестоОтправитель") or ""), "")
                 to_uuid = code2guid.get(str(doc.get("МестоПолучатель") or ""), "")
                 if direction == "out":
@@ -441,7 +483,17 @@ class BpPackageEmitter:
                 doc["СкладОтправитель"] = from_uuid
                 doc["СкладПолучатель"] = to_uuid
                 if not from_uuid or not to_uuid:
-                    raise ValueError(f"Перемещение {doc.get('Номер') or source_uuid}: не определены оба склада БП")
+                    # Раньше здесь падала сборка ВСЕГО пакета, и смена целиком
+                    # оставалась невыгруженной из-за одного перемещения, второй
+                    # склад которого нам неизвестен (документы ЦБ его не несут).
+                    # Одна нерасшифрованная строка не повод терять смену: документ
+                    # откладываем, а сверка про него скажет вслух.
+                    skipped.append({
+                        "Тип": "transfer",
+                        "Номер": str(doc.get("Номер") or source_uuid),
+                        "Причина": "не определён склад отправителя или получателя",
+                    })
+                    continue
                 nsi_wh.update({from_uuid, to_uuid})
                 transfers.append(doc)
 
@@ -545,6 +597,10 @@ class BpPackageEmitter:
             "Источник": "Ledger Edge → Ledger",
             "Смена": shift, "Документы": documents, "НСИ": nsi, "ХешПакета": "",
         }
+        if skipped:
+            # Служебное поле: приёмник его игнорирует (не «Документы»), а сверка и
+            # экран показывают, чего в пакете нет и почему.
+            packet["НеРазложено"] = skipped
         packet["ХешПакета"] = packet_hash(packet)
         return packet
 
@@ -553,7 +609,11 @@ class BpPackageEmitter:
         # найти retail-запись смены
         rows = (await self.session.execute(select(DataEntry).where(
             DataEntry.company_id == self.company_id, DataEntry.source.in_(("edge", "oneC")),
-            DataEntry.doc_type_id == "retail_sale_sidegoods"))).scalars().all()
+            DataEntry.doc_type_id == "retail_sale_sidegoods",
+            # Вытесненный документ описывает смену, которую уже описывает другой:
+            # выгрузить оба значило бы отдать в бухгалтерию двойную выручку —
+            # приёмник ищет соответствие только по ИсточникUUID и не склеит их.
+            DataEntry.status != "superseded"))).scalars().all()
         target = None
         for r in sorted(rows, key=lambda row: row.source != "edge"):
             sm = (r.meta or {}).get("Смена") or {}
@@ -1040,12 +1100,14 @@ class BpPackageEmitter:
                 nsi_nom.add(du)  # блюдо → в НСИ
                 recipes.append({
                     "Тип": "recipe",
-                    # Ключ обязателен: приёмник отбрасывает ТТК без него. Если в ЦБ
-                    # ключа не оказалось вовсе, ставим детерминированный `inline:<блюдо>` —
-                    # он стабилен между выгрузками, поэтому идемпотентность приёмника
-                    # сохраняется, а спецификация создаётся.
+                    # Ключ обязателен: приёмник отбрасывает ТТК без него. Когда в ЦБ
+                    # ключа нет, считаем свой — но именно UUID, а не строку с
+                    # префиксом. Измерение `ИсточникUUID` регистра соответствий в 1С
+                    # это Строка(36): `inline:<uuid>` даёт 43 символа, платформа
+                    # молча усекает, и обратный поиск по ключу промахивается всегда.
+                    # UUID5 от блюда стабилен между выгрузками и в 36 символов влезает.
                     "ИсточникUUID": (str(rd.get("ИсточникUUID") or "").strip() if rd else "")
-                                    or f"inline:{du}",
+                                    or _stable_uuid(f"recipe/{self.company_id}/{du}"),
                     "БлюдоUUID": du,
                     "БлюдоНаименование": str((rd.get("БлюдоНаименование") if rd else None)
                                              or (nom[du].name if nom.get(du) else "")),
@@ -1263,6 +1325,15 @@ class BpPackageEmitter:
             not missing, f"без рецепта: {len(missing)}" + (f" {list(missing)[:3]}" if missing else ""))
         add("У каждой ТТК есть ключ ИсточникUUID",
             not keyless, f"без ключа: {len(keyless)} {keyless[:3]}")
+
+        # Отложенные документы: пакет собрался, но часть фактов смены в него не
+        # попала. Раньше такое роняло сборку целиком и смена просто не
+        # выгружалась; теперь она выгружается, и умолчать об этом нельзя.
+        не_разложено = pkt.get("НеРазложено") or []
+        add("Все документы смены разложены в пакет",
+            not не_разложено,
+            "; ".join(f"{d.get('Тип')} №{d.get('Номер')}: {d.get('Причина')}"
+                      for d in не_разложено[:3]))
         released_dishes = {line.get("Номенклатура") for d in docs
                            if d.get("Тип") == "production_release"
                            for line in (d.get("ВыпускБлюд") or []) if line.get("Номенклатура")}

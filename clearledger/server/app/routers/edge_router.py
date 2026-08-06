@@ -27,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import get_company_by_api_key
 from app.database import get_db
 from app.models import (
-    Company, EdgeAgent, EdgeDownlink, EdgeHeartbeat, EdgePacket, StoreReceipt,
+    Company, DataEntry, EdgeAgent, EdgeDownlink, EdgeHeartbeat, EdgePacket, StoreReceipt,
 )
 
 log = logging.getLogger(__name__)
@@ -514,10 +514,21 @@ async def receive_packet(
             if packet_kind == "transfer":
                 routed = await _route_transfer_packet(
                     db, company.id, int(station_id), existing.payload)
-            # Старые пакеты могли быть приняты ещё в теневом режиме. Повторная
-            # доставка безопасно достраивает L2 и лишь затем получает штатный 409.
-            await edge_projection.project_packet(
-                db, company.id, str(packet_uuid), int(station_id), existing.payload)
+            # Старые пакеты могли быть приняты ещё в теневом режиме, поэтому повтор
+            # достраивает L2. Но достраивает ТОЛЬКО недостающее: раньше здесь шла
+            # безусловная перепроекция сохранённого payload, и повторная доставка
+            # старого пакета затирала документ, уже обновлённый более свежим
+            # (инвентаризация теряла 55 строк и 81 053 ₽, откатываясь к нулю).
+            уже_есть = (await db.execute(
+                select(func.count(DataEntry.id)).where(
+                    DataEntry.company_id == company.id,
+                    DataEntry.source == "edge",
+                    DataEntry.meta["Edge"]["packet_uuid"].astext == str(packet_uuid),
+                )
+            )).scalar_one()
+            if not уже_есть:
+                await edge_projection.project_packet(
+                    db, company.id, str(packet_uuid), int(station_id), existing.payload)
             await db.commit()
             raise HTTPException(status.HTTP_409_CONFLICT, "Пакет уже принят ранее")
         existing.payload = payload

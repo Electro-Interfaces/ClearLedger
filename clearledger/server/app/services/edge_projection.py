@@ -38,6 +38,34 @@ def enrich_retail_meta(meta: dict, recipes: dict[str, list[dict]], dish_ids: set
     return result
 
 
+def _station_shift(meta: dict) -> tuple[str, str]:
+    """Станция и ВНУТРЕННИЙ номер смены — единственный надёжный ключ факта.
+
+    Номер смены (`2082083007202601`) собирается из даты открытия и уникальным не
+    является: смена, начавшаяся 30 июля в 23:59, получает тот же номер, что и
+    начавшаяся в 00:05 того же дня. Внутренний номер кассы — сквозной счётчик,
+    он различает их точно.
+    """
+    shift = (meta or {}).get("Смена") or {}
+    return (str(shift.get("КодАЗС") or ""), str(shift.get("НомерСменыВнутр") or ""))
+
+
+# Пакеты одной и той же смены приезжают из двух источников: от агента станции и
+# из выгрузки ЦБ (её заливали утилитой в тот же приёмник). Документы у них разные
+# по `ИсточникUUID` — 1С отдаёт свой, агент считает детерминированный, — поэтому
+# идемпотентность по ключу их не склеивает, и в L2 копилось по два документа на
+# смену: 58 смен и 2,18 млн ₽ выручки, посчитанной дважды.
+#
+# Побеждает станция: она видит кассу напрямую, а ЦБ получает те же данные по РИБ
+# с задержкой. Вытесненный документ не удаляется — помечается, чтобы история
+# осталась, а выгрузка и витрины его не брали.
+STATION_SOURCE = "Edge Agent"
+
+
+def _from_station(payload: dict) -> bool:
+    return str((payload or {}).get("Источник") or "").startswith(STATION_SOURCE)
+
+
 def _shift_identity(meta: dict) -> str:
     shift = (meta or {}).get("Смена") or {}
     station = str(shift.get("КодАЗС") or "")
@@ -123,6 +151,10 @@ async def project_packet(
         "packet_hash": str(payload.get("ХешПакета") or ""),
         "exported_at": payload.get("ВремяВыгрузки"),
         "station_id": station_id,
+        # Кто прислал факт: станция или выгрузка ЦБ. По этому признаку решается,
+        # чей документ останется, когда одну смену описывают оба.
+        "from_station": _from_station(payload),
+        "source": str(payload.get("Источник") or ""),
     }
 
     for draft in normalized["entries"]:
@@ -171,6 +203,7 @@ async def project_packet(
             removed += 1
 
     await db.flush()
+    superseded = await _supersede_rivals(db, company_id, expected_ids, _from_station(payload))
     dishes_updated = 0
     if refresh_dishes:
         dishes_updated = await refresh_retail_dishes(db, company_id, station_id)
@@ -178,9 +211,56 @@ async def project_packet(
         "created": created,
         "updated": updated,
         "removed": removed,
+        "superseded": superseded,
         "dishes_updated": dishes_updated,
         "skipped_kinds": normalized.get("skipped", []),
     }
+
+
+async def _supersede_rivals(
+    db: AsyncSession,
+    company_id: uuid.UUID,
+    touched_ids: set[str],
+    from_station: bool,
+) -> int:
+    """Оставить по одному документу на смену: станционный вытесняет ЦБ-шный.
+
+    Сравниваем по (станция, внутренний номер смены) — единственному ключу, под
+    которым один и тот же факт приходит из обоих источников. Помечаем, а не
+    удаляем: пакет ЦБ остаётся в истории и виден при разборе, просто выпадает
+    из витрин и выгрузки.
+    """
+    if not touched_ids:
+        return 0
+    rows = (await db.execute(select(DataEntry).where(
+        DataEntry.company_id == company_id,
+        DataEntry.source == "edge",
+        DataEntry.doc_type_id == "retail_sale_sidegoods",
+    ))).scalars().all()
+
+    groups: dict[tuple[str, str], list[DataEntry]] = {}
+    for row in rows:
+        key = _station_shift(row.meta or {})
+        if all(key):
+            groups.setdefault(key, []).append(row)
+
+    count = 0
+    for group in groups.values():
+        if len(group) < 2:
+            continue
+        # Победитель — документ станции; если станционного нет, оставляем тот,
+        # что пришёл первым, чтобы выбор не прыгал между пересборками.
+        def станционный(row: DataEntry) -> bool:
+            return bool(((row.meta or {}).get("Edge") or {}).get("from_station"))
+        group.sort(key=lambda r: (not станционный(r), r.created_at, str(r.id)))
+        for loser in group[1:]:
+            if loser.status == "superseded":
+                continue
+            loser.status = "superseded"
+            count += 1
+    if count:
+        await db.flush()
+    return count
 
 
 async def reproject_packets(
@@ -191,7 +271,12 @@ async def reproject_packets(
     query = select(EdgePacket).where(EdgePacket.company_id == company_id)
     if station_id is not None:
         query = query.where(EdgePacket.station_id == station_id)
-    packets = (await db.execute(query.order_by(EdgePacket.received_at))).scalars().all()
+    # Порядок обязан быть полным: при равном `received_at` (перевыгрузка приходит
+    # пачкой в одну секунду) сортировка только по времени оставляет очередь на
+    # усмотрение планировщика, и победителем становится случайный пакет. Так в L2
+    # оседала устаревшая версия — инвентаризация с нулём строк вместо 55.
+    packets = (await db.execute(
+        query.order_by(EdgePacket.received_at, EdgePacket.id))).scalars().all()
     totals = {"packets": 0, "created": 0, "updated": 0, "removed": 0, "dishes_updated": 0}
     skipped: set[str] = set()
     for packet in packets:
