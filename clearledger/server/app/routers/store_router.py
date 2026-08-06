@@ -249,9 +249,15 @@ async def store_exchange(
                coalesce(sum(de.n), 0) AS entries
         FROM edge_packets p
         LEFT JOIN LATERAL (
+            -- Ищем документы этой СМЕНЫ, а не этого пакета: перевыгрузка даёт
+            -- второй пакет с теми же документами, и привязка к packet_uuid
+            -- показывала «не разобрано» там, где учёт на месте.
             SELECT count(*) AS n FROM data_entries d
             WHERE d.company_id = p.company_id AND d.source = 'edge'
-              AND d.metadata->'Edge'->>'packet_uuid' = p.packet_uuid
+              AND (d.metadata->'Edge'->>'packet_uuid' = p.packet_uuid
+                   OR (p.shift_internal_no IS NOT NULL
+                       AND d.metadata->'Смена'->>'НомерСменыВнутр' = p.shift_internal_no::text
+                       AND d.metadata->'Смена'->>'КодАЗС' = p.station_id::text))
         ) de ON true
         WHERE p.company_id = :cid AND {period}
         GROUP BY p.kind ORDER BY count(*) DESC
@@ -907,6 +913,11 @@ class ReprojectIn(BaseModel):
     station_id: int | None = None
     limit: int = 500
     dry_run: bool = True
+    # Приёмка живёт двумя жизнями: строкой учёта (L2) и документом с
+    # поставщиком и подписантом. Второй разворачивается отдельно, потому что
+    # пакет мог получить документы учёта и всё равно не отдать приёмку —
+    # ровно так и вышло с бэкфиллом.
+    receipts_only: bool = False
 
 
 @router.post("/storage/reproject")
@@ -948,6 +959,44 @@ async def store_reproject(
     if body.date_to:
         условия.append("p.received_at < (CAST(:d2 AS date) + 1)")
         p["d2"] = date.fromisoformat(body.date_to)
+
+    if body.receipts_only:
+        условия.append("""EXISTS (
+            SELECT 1 FROM jsonb_array_elements(coalesce(p.payload->'Документы','[]'::jsonb)) d
+            WHERE d->>'Тип' = 'purchase')""")
+        сироты = [dict(r) for r in (await db.execute(text(f"""
+            SELECT p.packet_uuid, p.station_id, p.kind, p.received_at
+            FROM edge_packets p
+            WHERE {' AND '.join(условия)}
+            ORDER BY p.received_at
+            LIMIT :lim
+        """), p)).mappings().all()]
+        итог = {"dry_run": body.dry_run, "packets": len(сироты),
+                "by_kind": {}, "projected": 0, "receipts": 0, "errors": []}
+        for с in сироты:
+            итог["by_kind"][с["kind"]] = итог["by_kind"].get(с["kind"], 0) + 1
+        if body.dry_run:
+            return итог
+        for с in сироты:
+            пакет = (await db.execute(select(EdgePacket).where(
+                EdgePacket.company_id == cid,
+                EdgePacket.packet_uuid == с["packet_uuid"]))).scalar_one_or_none()
+            if пакет is None:
+                continue
+            try:
+                было = (await db.execute(select(func.count()).select_from(StoreReceipt)
+                                         .where(StoreReceipt.company_id == cid))).scalar() or 0
+                await edge_router._ingest_receipts(
+                    db, cid, пакет.station_id, пакет.payload,
+                    (пакет.payload or {}).get("Документы") or [])
+                await db.commit()
+                стало = (await db.execute(select(func.count()).select_from(StoreReceipt)
+                                          .where(StoreReceipt.company_id == cid))).scalar() or 0
+                итог["receipts"] += max(0, стало - было)
+            except Exception as exc:  # noqa: BLE001
+                await db.rollback()
+                итог["errors"].append(f"{с['packet_uuid'][:8]}: {str(exc)[:200]}")
+        return итог
 
     сироты = [dict(r) for r in (await db.execute(text(f"""
         SELECT p.packet_uuid, p.station_id, p.kind, p.received_at
