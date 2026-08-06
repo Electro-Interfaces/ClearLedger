@@ -3,13 +3,13 @@
  * загрузки/ошибки/пустоты. Один модуль на все четыре раздела — раньше форматтеры
  * и плитки жили в двух файлах двумя расходящимися копиями.
  *
- * Плитка построена на общем `Kpi` пространства (components/workspace/analytics),
- * а не на своих div'ах: у «Пульса» нет причин выглядеть иначе, чем «Продажи».
+ * Плитка и состояние ошибки — общие компоненты пространства (`MetricTile`,
+ * `QueryError`): у «Пульса» нет причин выглядеть иначе, чем «Продажи». Своя
+ * копия плитки тут уже была — и разошлась с оригиналом видом дельты и числа.
  */
-import { Loader2, TrendingDown, TrendingUp } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
-import { cn } from '@/lib/utils'
+import { Download, Loader2 } from 'lucide-react'
+import { MetricTile } from '@/components/ui/metric-tile'
+import { QueryError } from '@/components/common/QueryError'
 import type { PulseKpi } from './pulseService'
 
 const nf = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
@@ -34,58 +34,93 @@ export function plural(n: number, one: string, few: string, many: string): strin
 }
 
 /**
- * Плитка показателя. Канон пространства: `Card` с `bg-card`, подпись
- * `uppercase tracking-wider`, значение `text-lg font-semibold tabular-nums`
- * (`components/workspace/analytics/Kpi.tsx`).
+ * Пояснения к плиткам, где цифра без определения читается неоднозначно.
+ * Ключ — `key` показателя с сервера: формулировка одна на пространство, а не
+ * пересказ в каждом экране (та же роль, что у `HINTS` в аналитике ЭЗС).
+ */
+const PULSE_HINTS: Record<string, string> = {
+  silent: 'Станции без единой сессии за последние сутки ДАННЫХ (а не суток по календарю): '
+    + 'отсчёт идёт от даты последней загрузки. Молчащая станция — либо простой, либо '
+    + 'не доехала выгрузка.',
+  own_open: 'Активные заявки нашей стороны — без зеркал внешних систем. '
+    + '«SLA нарушен» считается по сроку из карточки заявки.',
+  ext_open: 'Заявки внешней сервисной системы (HubEx), зеркала которых видит пространство. '
+    + 'Разбирает их подрядчик; нам важен размер хвоста.',
+  people: 'Люди с активной сессией в пространстве прямо сейчас. «За сегодня» — сколько '
+    + 'заходило с начала суток, из общего числа участников.',
+  funnel: 'Проекты во всех рабочих стадиях, кроме введённых и отклонённых. '
+    + '«Введено за 30 дн» — сколько дошло до эксплуатации за месяц.',
+  // Продажи
+  visit_ok: 'Считается по ПРИЕЗДАМ, а не по сессиям: клиент, зарядившийся с третьей '
+    + 'попытки, уехал довольным — это один успешный приезд, а не две ошибки и успех.',
+  check: 'Выручка, делённая на число сессий. Стабильный чек при падающей выручке '
+    + 'означает, что дело не в цене, а в количестве заправок или работающих точек.',
+  live: 'Станции, давшие хотя бы одну сессию за неделю данных. «Выпало» — те, что '
+    + 'работали неделей раньше и молчат всю эту.',
+  // Эксплуатация
+  expected: 'Сколько должны по договорам за период. Это ОЖИДАНИЕ, а не расход: '
+    + 'расходом сумма становится, когда контрагент прислал акт или счёт.',
+  no_doc: 'Начисления, по которым документа ещё нет. Закрывать период по ожиданиям '
+    + 'нельзя — сумма может измениться.',
+  overdue: 'Срок подачи документа прошёл, а документа нет. Чем дольше висит, тем '
+    + 'больше шанс, что расход всплывёт уже в закрытом периоде.',
+  contracts: 'Договоры, срок которых вышел, а закрытия нет: платим по бумаге, '
+    + 'которой формально уже не существует.',
+  // Проекты
+  stuck: 'Проекты, не менявшие стадию дольше порога. Правки полей карточки '
+    + 'движением не считаются — иначе «активность» скрывает стоящий портфель.',
+  no_owner: 'У проекта не назначен ведущий: спросить о нём некого, и в отчёте он '
+    + 'появится только по факту провала.',
+  // Где болит
+  pain: 'Точки, где сошлось несколько независимых признаков сразу. Одна проблема — '
+    + 'работа профильного приложения; несколько на одной точке — вопрос руководителя.',
+  idle: 'Точка не дала ни одной сессии за месяц, а начисления по ней идут: '
+    + 'аренда и энергия платятся за то, что не продаёт.',
+  at_risk: 'Расходы таких точек плюс выручка, которую они перестали приносить. '
+    + 'Оценка сверху: часть точек может быть на плановом отключении.',
+}
+
+/**
+ * Плитка показателя «Пульса» — общая плитка пространства (`MetricTile`) с двумя
+ * своими вещами: `state` красит рамку, когда показатель просит внимания или
+ * посчитан по устаревшим данным, а `onOpen` делает плитку входом в разрез
+ * (лестница погружения, PULSE.md §2). Полярность задаёт сервер: рост выручки —
+ * хорошо, рост потока заявок — нет, и зелёный плюс на таком показателе врал.
  *
- * Отличия «Пульса» от базового `Kpi` — ровно два, и оба по делу:
- *  * `state` красит рамку, когда показатель просит внимания или устарел;
- *  * `onClick` делает плитку входом в разрез (лестница погружения, PULSE.md §2).
+ * «Устарело» подписано словами: пунктирная рамка сама по себе ничего не
+ * сообщает — канон требует, чтобы уровень нёс не только вид.
  */
 export function KpiTile({ k, onOpen }: { k: PulseKpi; onOpen?: () => void }) {
-  // Полярность задаёт сервер: рост выручки — хорошо, рост потока заявок — нет.
-  // Раньше зелёным красился любой плюс, и «заявок поступило +30%» выглядело победой.
-  const good = k.delta_pct == null ? null
-    : (k.higher_is_better === false ? k.delta_pct < 0 : k.delta_pct >= 0)
-  const showDelta = k.delta_pct != null && Math.abs(k.delta_pct) <= 500
-  const Arrow = (k.delta_pct ?? 0) >= 0 ? TrendingUp : TrendingDown
-
-  const body = (
-    <CardContent className="p-3 text-left">
-      <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{k.title}</div>
-      {/* Значение и дельта в одной строке; при нехватке места ужимается дельта,
-          а не число — оно и есть ответ. overflow-hidden: длинные значения
-          («271,8 тыс. кВт·ч») вылезали за рамку плитки на телефоне. */}
-      <div className="mt-0.5 flex items-baseline gap-x-1.5 overflow-hidden">
-        <span className="truncate text-lg font-semibold tabular-nums">
-          {fmtNum(k.value, k.unit)}
-        </span>
-        {showDelta && (
-          <span className={cn('flex shrink-0 items-center gap-0.5 text-[11px] font-medium tabular-nums',
-            good ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400')}>
-            <Arrow className="h-3 w-3" />{Math.abs(k.delta_pct!).toFixed(1)}%
-          </span>
-        )}
-      </div>
-      {k.note && <div className="mt-0.5 text-[11px] text-muted-foreground">{k.note}</div>}
-    </CardContent>
-  )
-
-  const cls = cn('py-0 transition-colors',
-    k.state === 'warn' && 'border-amber-500/40 bg-amber-500/5',
-    // Устаревшие данные — рамкой и подписью, а не прозрачностью: гашение
-    // приглушённого текста уводило подпись ниже порога контраста.
-    k.state === 'stale' && 'border-dashed',
-    onOpen && 'cursor-pointer hover:border-primary/50 hover:bg-accent/40')
-
-  if (!onOpen) return <Card className={cls}>{body}</Card>
-  // Кликабельная плитка — настоящая кнопка: клавиатура и скринридер получают её
-  // бесплатно, в отличие от div с onClick.
+  const note = k.state === 'stale'
+    ? [k.note, 'данные устарели'].filter(Boolean).join(' · ')
+    : k.note
   return (
-    <button type="button" onClick={onOpen}
-      className="rounded-xl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-      <Card className={cls}>{body}</Card>
-    </button>
+    <MetricTile
+      label={k.title}
+      value={fmtNum(k.value, k.unit)}
+      hint={note}
+      delta={k.delta_pct}
+      spark={k.spark}
+      higherIsBetter={k.higher_is_better}
+      state={k.state === 'warn' ? 'warn' : k.state === 'stale' ? 'stale' : undefined}
+      onClick={onOpen}
+      info={PULSE_HINTS[k.key]}
+    />
+  )
+}
+
+/**
+ * Выгрузка разреза в CSV. Общий `ExportButton` пространства собирает файл из
+ * разметки (плитки и таблицы), а «Пульс» свёрстан карточками — он отдал бы
+ * почти пустой файл. Поэтому ссылка на серверную ручку: те же цифры, что на
+ * экране, но из тех же запросов.
+ */
+export function PulseExport({ view, companyId }: { view: string; companyId: string }) {
+  return (
+    <a href={`/api/pulse/export?view=${view}&company_id=${encodeURIComponent(companyId)}`}
+      className="inline-flex min-h-9 items-center gap-1 text-xs text-primary hover:underline sm:min-h-0">
+      <Download className="h-3.5 w-3.5" />Выгрузить в CSV
+    </a>
   )
 }
 
@@ -97,12 +132,11 @@ export function PulseLoading({ what }: { what: string }) {
   )
 }
 
-/** Отказ ручки — с объяснением и кнопкой: пустой экран у руководителя недопустим. */
+/**
+ * Отказ ручки — с объяснением и кнопкой: пустой экран у руководителя недопустим.
+ * Подача общая для пространства (`common/QueryError`), а не своя коробка: та была
+ * без `bg-card` и на фоне страницы читалась дырой, а не сообщением.
+ */
 export function PulseError({ what, onRetry }: { what: string; onRetry: () => void }) {
-  return (
-    <div className="rounded-lg border p-6 text-center text-sm">
-      <p className="text-destructive">Не удалось загрузить {what}</p>
-      <Button variant="outline" size="sm" className="mt-2 h-8" onClick={onRetry}>Повторить</Button>
-    </div>
-  )
+  return <QueryError message={`Не удалось загрузить ${what}`} onRetry={onRetry} />
 }

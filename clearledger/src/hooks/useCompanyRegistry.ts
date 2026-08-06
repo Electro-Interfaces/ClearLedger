@@ -56,8 +56,13 @@ export function useAppEnabled(companyId: string, code: string): boolean | null {
     staleTime: 5 * 60_000,
     retry: false,
   })
-  if (!q.data) return null
-  return q.data.find((a) => a.code === code)?.enabled ?? false
+  if (!q.data || q.data.length === 0) return null
+  const rec = q.data.find((a) => a.code === code)
+  // Продукта нет в ответе — реестр про него не знает, а не «выключил». Разница
+  // важна: раньше любой продукт, которого нет в выдаче (новый, ещё не заведённый
+  // в каталоге стека), мгновенно становился недоступным, и прямой переход на него
+  // выбрасывал на рабочий стол без объяснения. Запрет — только явный `enabled=false`.
+  return rec ? rec.enabled : null
 }
 
 /**

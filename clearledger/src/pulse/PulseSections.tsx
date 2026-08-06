@@ -12,7 +12,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import {
   ArrowDownRight, ArrowUpRight, Building2, CalendarDays, ChevronRight, ClipboardList,
-  Gauge, HardHat, LifeBuoy, MessageCircle, TrendingUp, Users,
+  Gauge, HardHat, LifeBuoy, MapPin, MessageCircle, PhoneCall, TrendingUp, Users,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -23,30 +23,40 @@ import {
 import { cn } from '@/lib/utils'
 import { useCompany } from '@/contexts/CompanyContext'
 import { STAGE_META, type SiteStage } from '@/services/sitesService'
-// Витрины продуктов — as is: «Пульс» показывает чужой экран, а не свою копию.
-import { OverviewDashboardPanel } from '@/components/workspace/OverviewDashboardPanel'
-import { ProjectsPortfolioPanel } from '@/components/sites/ProjectsPortfolioPanel'
-import { OpsOverviewVitrine } from '@/components/balance/OpsCockpit'
+// Витрины продуктов — as is там, где чужой экран отвечает на тот же вопрос.
 import { AnalyticsSection as TicketsAnalyticsSection } from '@/pages/TicketsAppPage'
-import { useFilters } from '@/contexts/FilterContext'
 import {
   getPulseBusiness, getPulsePerson, getPulseTeam, getPulseWeek, type PulsePerson,
 } from './pulseService'
-import { KpiTile, PulseError, PulseLoading, fmtNum, fmtDate, plural } from './parts'
+import { ContactCenterView } from './ContactCenter'
+import { SalesView } from './SalesView'
+import { ProjectsView } from './ProjectsView'
+import { OperationsView } from './OperationsView'
+import { ObjectsView } from './ObjectsView'
+import { AccessView } from './AccessView'
+import { CommsView } from './CommsView'
+import { KpiTile, PulseError, PulseExport, PulseLoading, fmtNum, fmtDate, plural } from './parts'
 import { usePulseView } from './PulseLayout'
 
 /** Имя стадии — из общего словаря продукта; чужой код показываем как есть. */
 const stageLabel = (code: string) => STAGE_META[code as SiteStage]?.label ?? code
 
-function Title({ icon: Icon, title, hint }: {
+function Title({ icon: Icon, title, hint, aside }: {
   icon: typeof Users; title: string; hint: string
+  /** Справа от заголовка: рамка времени, за которую показаны цифры. */
+  aside?: React.ReactNode
 }) {
   return (
-    <div>
-      <h1 className="flex items-center gap-2 text-lg font-semibold">
-        <Icon className="h-5 w-5 text-primary" />{title}
-      </h1>
-      <p className="mt-0.5 text-xs text-muted-foreground">{hint}</p>
+    <div className="flex items-start justify-between gap-3">
+      <div>
+        <h1 className="flex items-center gap-2 text-lg font-semibold">
+          <Icon className="h-5 w-5 text-primary" />{title}
+        </h1>
+        <p className="mt-0.5 text-xs text-muted-foreground">{hint}</p>
+      </div>
+      {/* Подпись про рамку времени — контекст, а не сообщение: на телефоне она
+          съедала половину строки у заголовка, поэтому там её нет. */}
+      {aside && <div className="hidden shrink-0 text-[11px] text-muted-foreground sm:block">{aside}</div>}
     </div>
   )
 }
@@ -64,57 +74,95 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 export function PulseBusinessPage() {
   const { company } = useCompany()
   const view = usePulseView('/pulse/business')
-  // Период берём общий, из контура пространства: у руководителя та же рамка
-  // времени, что у коммерсанта, — иначе цифры «Пульса» и «Продаж» разойдутся.
-  const { period } = useFilters()
   const q = useQuery({
     queryKey: ['pulse-business', company.id],
     queryFn: () => getPulseBusiness(company.id),
     refetchInterval: 5 * 60_000,
+    // Своя сводка нужна только на «Коротко» — остальные четыре пункта показывают
+    // витрины продуктов. Раньше запрос уходил на всех пяти и на четырёх падал молча.
+    enabled: view === 'summary',
   })
   const d = q.data
   const maxTrend = Math.max(1, ...(d?.trend ?? []).map((t) => t.revenue))
   const maxFunnel = Math.max(1, ...(d?.funnel ?? []).map((f) => f.count))
   // Заголовок экрана = имя пункта (SPACE.md §4): человек видит, где он.
   const meta = {
-    sales: { title: 'Продажи', hint: 'Обзор сети — та же витрина, что в приложении «Продажи»' },
-    projects: { title: 'Проекты', hint: 'Портфель стройки — витрина приложения «Проекты»' },
-    ops: { title: 'Эксплуатация', hint: 'Состояние сети и баланс — витрина «Эксплуатации»' },
+    sales: { title: 'Продажи', hint: 'Деньги сети: столько же ли продаём, вся ли сеть в работе, доезжает ли клиент' },
+    projects: { title: 'Проекты', hint: 'Что строим: движется ли портфель, где застрял и у кого на руках' },
+    ops: { title: 'Эксплуатация', hint: 'Хозяйство: во сколько обходится период, чем подтверждён, кому должны' },
     support: { title: 'Поддержка', hint: 'Сервисный контур: сколько и где стоит работа' },
+    contacts: { title: 'Обращения', hint: 'Разговор с потребителем: дозвонились ли, быстро ли ответили, нет ли хвостов' },
+    objects: { title: 'Где болит', hint: 'Точки сети, где сошлось несколько проблем сразу — выручка, расходы, документы' },
     summary: { title: 'Коротко', hint: 'Выжимка для куратора: цифры сети, воронка и вехи' },
   }[view] ?? { title: 'Бизнес', hint: 'В каком состоянии дело' }
 
-  // Витрины продуктов открываются КАК ЕСТЬ: свою копию «Пульс» не рисует.
+  // Чужие витрины открываются КАК ЕСТЬ (`embedded`: без своей шапки и своего
+  // внешнего отступа — заголовок экрана здесь один, «Пульса»). Свой разрез
+  // пишется только там, где у руководителя ДРУГИЕ вопросы, чем у продукта.
   if (view === 'sales') {
     return (
       <div className="space-y-4">
-        <Title icon={TrendingUp} title={meta.title} hint={meta.hint} />
-        <OverviewDashboardPanel companyId={company.id}
-          dateFrom={period.from} dateTo={period.to} />
+        {/* Свой разрез, а не витрина «Продаж»: та отвечает коммерсанту, этот —
+            руководителю (столько же ли продаём, вся ли сеть в работе, доезжает
+            ли клиент). Витрина открывается ссылкой внизу экрана. */}
+        <Title icon={TrendingUp} title={meta.title} hint={meta.hint}
+          aside="неделя данных против предыдущей" />
+        <SalesView />
       </div>
     )
   }
   if (view === 'projects') {
     return (
       <div className="space-y-4">
-        <Title icon={HardHat} title={meta.title} hint={meta.hint} />
-        <ProjectsPortfolioPanel companyId={company.id} />
+        {/* Свой разрез, а не витрина «Проектов»: та отвечает тому, кто ведёт
+            дела, этот — руководителю (движется ли портфель, где стоит, чей). */}
+        <Title icon={HardHat} title={meta.title} hint={meta.hint}
+          aside="портфель без архива" />
+        <ProjectsView />
       </div>
     )
   }
   if (view === 'ops') {
     return (
       <div className="space-y-4">
-        <Title icon={Gauge} title={meta.title} hint={meta.hint} />
-        <OpsOverviewVitrine />
+        {/* Свой разрез, а не кокпит «Эксплуатации»: тот ведёт хозяйство до
+            последней строки, этот отвечает руководителю — сколько стоит период,
+            чем подтверждён и что тянется с прошлых месяцев. */}
+        <Title icon={Gauge} title={meta.title} hint={meta.hint}
+          aside="ожидание против подтверждённого" />
+        <OperationsView />
       </div>
     )
   }
   if (view === 'support') {
     return (
       <div className="space-y-4">
+        {/* Периода тут нет намеренно: срез заявок считается по своим окнам
+            (неделя/месяц), и общая рамка времени к нему не применяется. */}
         <Title icon={LifeBuoy} title={meta.title} hint={meta.hint} />
         <TicketsAnalyticsSection companyId={company.id} />
+      </div>
+    )
+  }
+  if (view === 'objects') {
+    return (
+      <div className="space-y-4">
+        {/* Ось объекта: то, что в приложениях разложено по контурам, здесь
+            сведено по одному ключу — иначе каждый видит свою половину. */}
+        <Title icon={MapPin} title={meta.title} hint={meta.hint}
+          aside="признаки за неделю и два месяца" />
+        <ObjectsView />
+      </div>
+    )
+  }
+  if (view === 'contacts') {
+    return (
+      <div className="space-y-4">
+        {/* Окна контакт-центра свои — семь дней против предыдущих семи от
+            текущего момента: телефония приезжает синхронизацией, а не файлами. */}
+        <Title icon={PhoneCall} title={meta.title} hint={meta.hint}
+          aside="неделя против предыдущей" />
+        <ContactCenterView />
       </div>
     )
   }
@@ -215,12 +263,12 @@ export function PulseBusinessPage() {
               <Card className="py-0">
                 <CardContent className="space-y-1.5 p-3">
                   {d.events.map((e, i) => (
-                    <div key={i} className="flex gap-2 text-xs">
+                    <div key={i} className="flex min-w-0 gap-2 text-xs">
                       <span className="shrink-0 tabular-nums text-muted-foreground">
                         {fmtDate(e.at)}
                       </span>
                       {/* title: строка обрезается, а прочитать её целиком надо. */}
-                      <span className="truncate" title={e.text}>{e.text}</span>
+                      <span className="min-w-0 truncate" title={e.text}>{e.text}</span>
                     </div>
                   ))}
                 </CardContent>
@@ -248,8 +296,12 @@ export function PulseTeamPage() {
     queryKey: ['pulse-team', company.id],
     queryFn: () => getPulseTeam(company.id),
     refetchInterval: 2 * 60_000,
+    // «Доступ» и «Переписка» живут на своих срезах — состав команды им не нужен.
+    enabled: view !== 'access' && view !== 'comms',
   })
   const d = q.data
+  // Свои пункты раздела (люди/подразделения) против пунктов со своим срезом.
+  const own = view !== 'access' && view !== 'comms'
 
   const seen = (p: PulsePerson) => {
     if (!p.last_seen) return 'ни разу не заходил'
@@ -268,13 +320,22 @@ export function PulseTeamPage() {
 
   const meta = view === 'departments'
     ? { title: 'Подразделения', hint: 'Штатная структура: кто кому подчиняется и куда эскалировать' }
-    : { title: 'Люди', hint: 'У кого затор: нагрузка по заявкам и кто давно не заходил' }
+    : view === 'access'
+      ? { title: 'Доступ', hint: 'Кто имеет права, чьи учётки спят и что меняли в допуске' }
+      : view === 'comms'
+        ? { title: 'Переписка', hint: 'Живёт ли общение: кто пишет из своих, чем пишут клиенты, почта' }
+      : { title: 'Люди', hint: 'У кого затор: нагрузка по заявкам и кто давно не заходил' }
 
   return (
     <div className="space-y-5">
       <Title icon={Users} title={meta.title} hint={meta.hint} />
-      {q.isLoading && <PulseLoading what="команды" />}
-      {q.isError && <PulseError what="состав команды" onRetry={() => q.refetch()} />}
+      {/* «Доступ» и «Переписка» грузят свои срезы — состав команды им не нужен. */}
+      {view === 'access' && <AccessView />}
+      {view === 'comms' && <CommsView />}
+      {own && q.isLoading && <PulseLoading what="команды" />}
+      {own && q.isError && (
+        <PulseError what="состав команды" onRetry={() => q.refetch()} />
+      )}
 
       {d && view === 'people' && (
         <>
@@ -362,6 +423,9 @@ export function PulseWeekPage() {
 
       {d && view === 'totals' && (
         <>
+          <div className="flex justify-end">
+            <PulseExport view="week" companyId={company.id} />
+          </div>
           <Card className="py-0">
             <CardContent className="divide-y p-0">
               {d.rows.map((r) => {
@@ -401,11 +465,11 @@ export function PulseWeekPage() {
               <Card className="py-0">
                 <CardContent className="space-y-1.5 p-3">
                   {d.highlights.map((h, i) => (
-                    <div key={i} className="flex gap-2 text-xs">
+                    <div key={i} className="flex min-w-0 gap-2 text-xs">
                       <span className="shrink-0 tabular-nums text-muted-foreground">
                         {fmtDate(h.at)}
                       </span>
-                      <span className="truncate" title={h.text}>{h.text}</span>
+                      <span className="min-w-0 truncate" title={h.text}>{h.text}</span>
                     </div>
                   ))}
                 </CardContent>
@@ -563,8 +627,10 @@ function PersonCard({ companyId, person, seen, onClose }: {
 
       {d?.found && (
         <div className="space-y-4">
-          {/* Характеристики: то, что отвечает «кто это» без листания. */}
-          <div className="grid grid-cols-2 gap-x-6 gap-y-2 rounded-lg border p-3 text-xs md:grid-cols-3">
+          {/* Характеристики: то, что отвечает «кто это» без листания. Блок на
+              `bg-card`, как все панели пространства: голая рамка на фоне диалога
+              читалась вырезом, а не карточкой. */}
+          <div className="grid grid-cols-2 gap-x-6 gap-y-2 rounded-lg border bg-card p-3 text-xs md:grid-cols-3">
             <Field label="Почта" value={d.email} />
             <Field label="Подразделение" value={d.department ?? 'не назначено'} />
             <Field label="Руководитель"
@@ -588,14 +654,18 @@ function PersonCard({ companyId, person, seen, onClose }: {
             <Block title={`Заявки в работе · ${d.tickets.length}`}>
               {d.tickets.slice(0, 10).map((t, i) => (
                 <div key={i} className="flex items-center gap-2 text-xs">
+                  {/* Нарушенный SLA — словом, а не точкой: цвет 6 px читал только
+                      тот, кто знал, что он значит (канон: уровень несёт не только вид). */}
                   {t.breached && (
-                    <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500"
-                      title="SLA нарушен" />
+                    <Badge variant="outline"
+                      className="shrink-0 border-amber-500/40 bg-amber-500/5 px-1.5 py-0 text-[10px] font-normal text-amber-600 dark:text-amber-400">
+                      SLA
+                    </Badge>
                   )}
                   <span className="shrink-0 tabular-nums text-muted-foreground">
                     {t.number ?? '—'}
                   </span>
-                  <span className="truncate" title={t.title}>{t.title}</span>
+                  <span className="min-w-0 truncate" title={t.title}>{t.title}</span>
                   {t.object && (
                     <span className="shrink-0 text-muted-foreground">· {t.object}</span>
                   )}
@@ -638,7 +708,7 @@ function PersonCard({ companyId, person, seen, onClose }: {
                   <span className="shrink-0 tabular-nums text-muted-foreground">
                     {fmtDate(a.at)}
                   </span>
-                  <span className="truncate">{a.action}</span>
+                  <span className="min-w-0 truncate">{a.action}</span>
                 </div>
               ))}
             </Block>
@@ -649,8 +719,10 @@ function PersonCard({ companyId, person, seen, onClose }: {
             <Button size="sm" className="h-8" onClick={() => go('/messages')}>
               <MessageCircle className="mr-1 h-3.5 w-3.5" />Написать
             </Button>
+            {/* Реестр открывается уже суженным до этого человека: кнопка обещает
+                «его заявки», а вела на весь список пространства. */}
             <Button size="sm" variant="outline" className="h-8"
-              onClick={() => go('/tickets')}>
+              onClick={() => go(`/tickets?assignee=${encodeURIComponent(person.name)}`)}>
               <ClipboardList className="mr-1 h-3.5 w-3.5" />Его заявки
             </Button>
             <Button size="sm" variant="outline" className="h-8"

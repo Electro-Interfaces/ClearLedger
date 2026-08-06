@@ -8,25 +8,29 @@
  * Подача — канон пространства: `Card`, `Badge`, альфа-шкала статусных цветов,
  * общая плитка показателя (`parts.tsx`). Своих примитивов «Пульс» не заводит.
  */
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  Activity, AlertTriangle, ArrowUpRight, CheckCheck, ClipboardList,
-  MessageCircle, MoreHorizontal, ShieldCheck,
+  Activity, AlertTriangle, ArrowUpRight, CalendarClock, CheckCheck, ClipboardList, Database,
+  Eye, MessageCircle, MoreHorizontal, ShieldCheck, SlidersHorizontal,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator,
+  DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
 import { useCompany } from '@/contexts/CompanyContext'
 import {
   ackCard, getPulseAccepted, getPulseDay, type PulseCard, type PulseKpi,
 } from './pulseService'
-import { KpiTile, PulseError, PulseLoading, fmtNum, plural } from './parts'
+import { KpiTile, PulseError, PulseLoading, fmtDate, fmtNum, plural } from './parts'
+import { SourcesView } from './SourcesView'
+import { VisibilityView } from './VisibilityView'
+import { TargetsView } from './TargetsView'
 import { usePulseView } from './PulseLayout'
 
 /** Дата данных словами: под цифрами видно, чему можно верить (правило №0). */
@@ -40,22 +44,98 @@ function asOfLabel(asOf: string | null, staleDays: number | null): string {
 export function PulseAppPage() {
   const view = usePulseView('/pulse')
   if (view === 'accepted') return <AcceptedView />
+  if (view === 'sources') return <SourcesPage />
+  if (view === 'targets') return <TargetsPage />
+  if (view === 'visibility') return <VisibilityPage />
   return <TodayView />
+}
+
+/** Кто что видит — отбор картины для роли (в первую очередь для куратора). */
+function VisibilityPage() {
+  return (
+    <div className="space-y-5">
+      <div>
+        <h1 className="flex items-center gap-2 text-lg font-semibold">
+          <Eye className="h-5 w-5 text-primary" />Кто что видит
+        </h1>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          Что из картины открыто куратору и другим ролям пространства
+        </p>
+      </div>
+      <VisibilityView />
+    </div>
+  )
+}
+
+/** Источники — вопрос, который стоит перед всеми остальными разделами. */
+function SourcesPage() {
+  return (
+    <div className="space-y-5">
+      <div>
+        <h1 className="flex items-center gap-2 text-lg font-semibold">
+          <Database className="h-5 w-5 text-primary" />Источники
+        </h1>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          Чему сегодня можно верить: когда какие данные приходили в последний раз
+        </p>
+      </div>
+      <SourcesView />
+    </div>
+  )
+}
+
+/** Пороги эскалаций — заголовок экрана равен имени пункта (канон SPACE.md §4). */
+function TargetsPage() {
+  return (
+    <div className="space-y-5">
+      <div>
+        <h1 className="flex items-center gap-2 text-lg font-semibold">
+          <SlidersHorizontal className="h-5 w-5 text-primary" />Пороги
+        </h1>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          С какого места считать, что пора вмешаться
+        </p>
+      </div>
+      <TargetsView />
+    </div>
+  )
 }
 
 /* ── Пункт «Экран дня» ────────────────────────────────────────────────── */
 
 function TodayView() {
   const { company } = useCompany()
+  // Режим просмотра живёт в URL: ссылку на «как видит куратор» можно передать,
+  // а обновление страницы из режима не выбрасывает.
+  const [params, setParams] = useSearchParams()
+  const asRole = params.get('as')
   const q = useQuery({
-    queryKey: ['pulse-day', company.id],
-    queryFn: () => getPulseDay(company.id),
+    queryKey: ['pulse-day', company.id, asRole],
+    queryFn: () => getPulseDay(company.id, asRole),
     // Обновление раз в полторы минуты — realtime «Пульсу» не нужен (PULSE.md §6).
     refetchInterval: 90_000,
   })
 
   return (
     <div className="space-y-5">
+      {/* Полоса режима с явным выходом: без неё легко забыть, что смотришь
+          чужими глазами, и решить, что часть карточек пропала. */}
+      {asRole && (
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-primary/40 bg-primary/5 px-3 py-2">
+          <span className="flex items-center gap-2 text-xs">
+            <Eye className="h-4 w-4 shrink-0 text-primary" />
+            Смотрю глазами роли — видно только то, что ей открыто
+          </span>
+          <Button size="sm" variant="outline" className="h-9 shrink-0 sm:h-8"
+            onClick={() => setParams((p) => {
+              const n = new URLSearchParams(p)
+              n.delete('as')
+              return n
+            }, { replace: true })}>
+            Вернуться к своей картине
+          </Button>
+        </div>
+      )}
       <div className="flex items-start justify-between gap-3">
         <div>
           <h1 className="flex items-center gap-2 text-lg font-semibold">
@@ -114,11 +194,18 @@ function TodayView() {
 function CardsBlock({ cards, companyId }: { cards: PulseCard[]; companyId: string }) {
   const navigate = useNavigate()
   const qc = useQueryClient()
+  // «Принято» — это «я видел сегодня». «Отложить» — обязательство вернуться:
+  // карточка уходит с экрана на срок, но остаётся в «Принятом» с датой возврата,
+  // и по её наступлении живое условие вернёт её само, если ничего не изменилось.
   const ack = useMutation({
-    mutationFn: (key: string) => ackCard(companyId, key),
-    onSuccess: () => {
+    mutationFn: ({ key, days }: { key: string; days?: number }) =>
+      ackCard(companyId, key, days),
+    onSuccess: (_r, v) => {
       qc.invalidateQueries({ queryKey: ['pulse-day', companyId] })
-      toast.success('Принято — карточка снята до конца дня')
+      qc.invalidateQueries({ queryKey: ['pulse-accepted', companyId] })
+      toast.success(v.days
+        ? `Отложено — вернём через ${v.days} ${plural(v.days, 'день', 'дня', 'дней')}`
+        : 'Принято — карточка снята до конца дня')
     },
     onError: () => toast.error('Не удалось снять карточку — попробуйте ещё раз'),
   })
@@ -180,7 +267,7 @@ function CardsBlock({ cards, companyId }: { cards: PulseCard[]; companyId: strin
                 {/* На телефоне цели крупнее: 32 px против 28 — промах по «Принято»
                     стоит дорого, карточка уходит с экрана до конца дня. */}
                 <Button size="sm" variant="outline" className="h-9 sm:h-8"
-                  disabled={ack.isPending} onClick={() => ack.mutate(c.key)}>
+                  disabled={ack.isPending} onClick={() => ack.mutate({ key: c.key })}>
                   <CheckCheck className="mr-1 h-3.5 w-3.5" />Принято
                 </Button>
                 <DropdownMenu>
@@ -191,6 +278,13 @@ function CardsBlock({ cards, companyId }: { cards: PulseCard[]; companyId: strin
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={() => ack.mutate({ key: c.key, days: 3 })}>
+                      <CalendarClock className="mr-2 h-3.5 w-3.5" />Вернуться через 3 дня
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => ack.mutate({ key: c.key, days: 7 })}>
+                      <CalendarClock className="mr-2 h-3.5 w-3.5" />Вернуться через неделю
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
                     <DropdownMenuItem onClick={() => navigate('/messages')}>
                       <MessageCircle className="mr-2 h-3.5 w-3.5" />Обсудить в чате
                     </DropdownMenuItem>
@@ -278,9 +372,18 @@ function AcceptedView() {
                         {i.who ?? 'кто-то из руководства'}
                         {i.at && ` · ${new Date(i.at).toLocaleString('ru-RU',
                           { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}`}
+                        {/* Отложенное — не «снято», а «обещали вернуться»:
+                            дата возврата видна прямо в строке. */}
+                        {i.snooze_until && (
+                          <span className="text-amber-600 dark:text-amber-400">
+                            {' · '}вернуть {fmtDate(i.snooze_until)}
+                          </span>
+                        )}
                       </div>
                     </div>
-                    <CheckCheck className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                    {i.snooze_until
+                      ? <CalendarClock className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                      : <CheckCheck className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />}
                   </div>
                 ))}
               </CardContent>

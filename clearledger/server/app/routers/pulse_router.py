@@ -12,19 +12,26 @@
 """
 from __future__ import annotations
 
+import csv
+import io
+import json
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel
 from sqlalchemy import text
+from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import log_audit
-from app.auth import assert_company_member, get_current_user
+from app.auth import assert_company_product, get_current_user, resolve_member_modules
 from app.database import get_db
-from app.models import PulseAck, User
+from app.models import PulseAck, User, UserCompany
+# Словарь стадий — общий с «Проектами»: «Проработка» не должна стать «dd»
+# только потому, что экран другой.
+from app.services.ezs_changes import STAGE_LABELS
 
 router = APIRouter(prefix="/pulse", tags=["Пульс"])
 
@@ -36,9 +43,398 @@ EXT_BACKLOG = 1000      # хвост зеркал внешней FSM старш�
 SILENT_SHARE = 0.6      # доля молчащих станций парка — карточка
 SILENT_HOURS = 48       # «молчит» = нет сессий столько часов ДАННЫХ (от as_of)
 
+# Контакт-центр. Окна тут считаются от now(), а не от as_of: телефония приезжает
+# синхронизацией каждые 5 минут, и «вчера» здесь означает настоящее вчера.
+CC_MISSED_FACTOR = 1.5  # доля пропущенных выше цели во столько раз — карточка
+CC_WRAPUP_STUCK = 10    # столько разговоров зависло в разборе с просроченным ответом
+CC_REPEAT_TIMES = 3     # клиент обращался столько раз за неделю — он не решил вопрос
+CC_REPEAT_PEOPLE = 3    # столько таких клиентов — карточка
+# Цель по умолчанию, если в контакт-центре не задали свою (`cc_kpi_targets`).
+CC_DEFAULT_TARGETS = {"missed_share": 5.0, "first_response_sec": 120.0,
+                      "in_sla_share": 95.0, "handle_sec": 900.0}
+
+# Продажи. Окна — от as_of (последняя загруженная сессия), а не от now(): данные
+# сети приезжают файлами с отставанием, и «неделя» здесь означает неделю ДАННЫХ.
+SALES_DROP = 20.0       # выручка недели упала на столько % — карточка
+SALES_OUT_SHARE = 0.05  # столько парка выпало из работы за неделю — карточка
+SALES_OUT_MIN = 10      # и не меньше стольких станций: у мелкой сети % обманчив
+SALES_VISIT_OK = 85.0   # успех визитов ниже — клиенты уезжают, не зарядившись
+
+# Проекты (стройка сети). Портфель живёт месяцами, поэтому пороги — про
+# застревание и бесхозность, а не про недельные колебания.
+PR_STUCK_DAYS = 90      # стоит в одной стадии дольше — застрял
+PR_STUCK_SHARE = 0.10   # столько портфеля застряло — карточка
+PR_STUCK_MIN = 20       # и не меньше стольких проектов
+PR_OWNER_SHARE = 0.30   # столько портфеля без ответственного — карточка
+PR_OWNER_MIN = 20
+PR_MOVES_WEEKS = 3      # столько недель без единой смены стадии — портфель встал
+
+# Эксплуатация: хозяйство вокруг сети — энергия, аренда, услуги подрядчиков.
+# Мера здесь не «неделя», а ПЕРИОД: месяц закрывается документами от контрагентов.
+OPS_DOCS_OVERDUE = 20   # столько начислений без документа после срока — карточка
+OPS_OPEN_MONTHS = 2     # период не закрыт дольше стольких месяцев — карточка
+OPS_COST_JUMP = 15.0    # ожидание месяца выросло на столько % — карточка
+
+# Объект как ось. Единственное место в пространстве, где точка видна сразу во
+# всех контурах: выручка, расходы, подтверждение документов. Признаки считаются
+# по одному объекту, и в список попадает тот, у кого их сошлось несколько.
+OBJ_SILENT_DAYS = 30    # нет сессий столько дней ДАННЫХ — точка не продаёт
+OBJ_DROP_PCT = 50.0     # выручка недели упала на столько % — провал точки
+OBJ_PAIN_MIN = 2        # столько признаков сразу — «болит»
+OBJ_IDLE_COST_MIN = 10  # столько платных точек без выручки — карточка
+# Признаки словами: в выгрузке те же подписи, что на экране, иначе файл
+# приходится расшифровывать по коду.
+OBJ_FLAG_LABELS = {
+    "idle_cost": "платим, не продаёт", "revenue_drop": "выручка провалилась",
+    "docs_late": "документы просрочены", "silent": "молчит",
+}
+
+
+# Критичные действия журнала: те, что меняют состав людей и их права. Правки
+# данных сюда не входят — это работа, а не риск.
+ACCESS_ACTIONS = ("user.create", "user.remove", "member.access", "member.scope",
+                  "member.party", "role.create", "role.update", "invite.create")
+
+
+async def _access_snapshot(db: AsyncSession, cid: str) -> dict[str, Any]:
+    """Люди и доступ: то, что касается руководителя лично.
+
+    Не «кто во сколько пришёл», а риск: у кого остались права, которыми не
+    пользуются, кого позвали и он не дошёл, и что за месяц меняли в допуске.
+    """
+    m = (await db.execute(text("""
+        select
+          count(*) as members,
+          count(*) filter (where uc.role = 'admin') as admins,
+          count(*) filter (where uc.party_type = 'partner') as partners,
+          count(*) filter (where u.last_seen_at is null
+                or u.last_seen_at < now() - interval '30 days') as dormant,
+          count(*) filter (where uc.role = 'admin'
+                and (u.last_seen_at is null
+                     or u.last_seen_at < now() - interval '30 days')) as dormant_admins
+        from user_companies uc join users u on u.id = uc.user_id
+        where uc.company_id = :cid
+    """), {"cid": cid})).one()
+
+    inv = (await db.execute(text("""
+        select count(*) filter (where accepted_at is null and status <> 'revoked') as pending,
+               count(*) filter (where accepted_at is null and status <> 'revoked'
+                     and created_at < now() - interval '7 days') as stale
+        from invitations where company_id = :cid
+    """), {"cid": cid})).one()
+
+    failed = (await db.execute(text("""
+        select count(*) from audit_events
+        where company_id = :cid and action = 'auth.login_failed'
+          and timestamp >= now() - interval '7 days'
+    """), {"cid": cid})).scalar_one()
+
+    dormant_list = [{"name": r.name, "email": r.email, "role": r.role,
+                     "party": r.party_type,
+                     "last_seen": r.last_seen_at.isoformat() if r.last_seen_at else None}
+                    for r in (await db.execute(text("""
+        select u.name, u.email, uc.role, uc.party_type, u.last_seen_at
+        from user_companies uc join users u on u.id = uc.user_id
+        where uc.company_id = :cid
+          and (u.last_seen_at is null or u.last_seen_at < now() - interval '30 days')
+        order by u.last_seen_at asc nulls first limit 12
+    """), {"cid": cid})).all()]
+
+    # Список действий подставляем как literal-набор: expanding-параметр здесь
+    # лишняя церемония, а значения — наша же константа, не пользовательский ввод.
+    acts = ", ".join(f"'{a}'" for a in ACCESS_ACTIONS)
+    events = [{"at": r.timestamp.isoformat() if r.timestamp else None,
+               "action": r.action, "who": r.user_name, "details": r.details}
+              for r in (await db.execute(text(f"""
+        select timestamp, action, user_name, details from audit_events
+        where company_id = :cid and action in ({acts})
+          and timestamp >= now() - interval '30 days'
+        order by timestamp desc limit 12
+    """), {"cid": cid})).all()]
+
+    return {"members": m.members, "admins": m.admins, "partners": m.partners,
+            "dormant": m.dormant, "dormant_admins": m.dormant_admins,
+            "invites_pending": inv.pending, "invites_stale": inv.stale,
+            "login_failed_7d": failed,
+            "dormant_list": dormant_list, "events": events}
+
+
+# ── Что из «Пульса» кому видно ────────────────────────────────────────────
+#
+# Пороги отвечают на вопрос «когда реагировать», видимость — «кому это вообще
+# показывать». Куратор — руководитель верхнего уровня: ему нужна картина, а не
+# весь разбор, и решает, что именно входит в эту картину, директор, а не код.
+#
+# Ключи те же, что в реестре приложений (`app_registry._PULSE_MODULES`), поэтому
+# отбор виден и в конструкторе роли «Управления» — вторая система прав здесь не
+# заводится.
+PULSE_ITEMS: list[tuple[str, str, str]] = [
+    ("today", "Экран дня", "Экран дня"),
+    ("accepted", "Принятое сегодня", "Экран дня"),
+    ("sources", "Источники данных", "Экран дня"),
+    ("targets", "Пороги эскалаций", "Экран дня"),
+    ("business.sales", "Продажи", "Бизнес"),
+    ("business.projects", "Проекты", "Бизнес"),
+    ("business.ops", "Эксплуатация", "Бизнес"),
+    ("business.contacts", "Обращения", "Бизнес"),
+    ("business.objects", "Где болит", "Бизнес"),
+    ("business.support", "Поддержка", "Бизнес"),
+    ("business.summary", "Коротко", "Бизнес"),
+    ("team.people", "Люди", "Команда"),
+    ("team.departments", "Подразделения", "Команда"),
+    ("team.access", "Доступ", "Команда"),
+    ("team.comms", "Переписка", "Команда"),
+    ("week.totals", "Итоги недели", "Неделя"),
+    ("week.moves", "Движения", "Неделя"),
+]
+PULSE_ITEM_KEYS = {k for k, _, _ in PULSE_ITEMS}
+
+# Тема карточки и плитки: к какому пункту относится сообщение. Без этого отбор
+# работал бы только на уровне меню, а экран дня показывал бы куратору всё
+# подряд — включая то, что для него закрыто.
+CARD_SCOPE = {
+    # `data_stale` темы намеренно НЕ имеет: это метка доверия к цифрам, а не
+    # отдельный разрез. Кто видит цифры — должен знать, что им нельзя верить,
+    # включая куратора, которому закрыты «Источники».
+    "src_stale": "sources",
+    "own_sla": "business.support", "ext_backlog": "business.support",
+    "own_reopen": "business.support",
+    "silent_surge": "business.sales", "sales_drop": "business.sales",
+    "sales_out": "business.sales", "sales_visit": "business.sales",
+    "cc_missed": "business.contacts", "cc_wrapup": "business.contacts",
+    "cc_repeat": "business.contacts", "cc_escalation": "business.contacts",
+    "pr_stuck": "business.projects", "pr_no_owner": "business.projects",
+    "pr_frozen": "business.projects", "pr_overdue": "business.projects",
+    "ops_docs": "business.ops", "ops_open": "business.ops",
+    "ops_jump": "business.ops", "ops_contracts": "business.ops",
+    "obj_idle_cost": "business.objects",
+    "access_admins": "team.access", "access_invites": "team.access",
+}
+KPI_SCOPE = {
+    "revenue": "business.sales", "sessions": "business.sales",
+    "silent": "business.sales", "cc_missed": "business.contacts",
+    "own_open": "business.support", "ext_open": "business.support",
+    "funnel": "business.projects", "people": "team.people",
+}
+
+
+async def _may_configure(db: AsyncSession, cid: str, user: User) -> bool:
+    """Кто вправе настраивать отбор и смотреть чужими глазами: полный доступ."""
+    if user.is_superadmin:
+        return True
+    m = await db.get(UserCompany, (user.id, uuid.UUID(cid)))
+    if m is None:
+        return False
+    return m.role == "admin" or await resolve_member_modules(m, db) is None
+
+
+async def _role_items(db: AsyncSession, cid: str, role_id: str) -> set[str] | None:
+    """Набор пунктов роли — для режима «смотреть глазами».
+
+    None — у роли полный доступ: смотреть её глазами не имеет смысла, картина
+    та же самая.
+    """
+    row = (await db.execute(text(
+        "select modules from company_roles where id = :rid and company_id = :cid"
+    ), {"rid": role_id, "cid": cid})).first()
+    if row is None or row.modules is None or "pulse" in row.modules:
+        return None
+    return {k.split(":", 1)[1] for k in row.modules if k.startswith("pulse:")} & PULSE_ITEM_KEYS
+
+
+async def _visible_items(db: AsyncSession, cid: str, user: User,
+                         as_role: str | None = None) -> set[str] | None:
+    """Что этому человеку показывать. None — ограничений нет (полный доступ).
+
+    Набор прав уже несёт ответ: ключ `pulse` целиком или отдельные `pulse:...`.
+    Отдельного хранилища видимости не заводим — иначе право и видимость
+    разъехались бы, и «убрал из картины» перестало бы значить «закрыл доступ».
+    """
+    # Режим «глазами роли»: доступен только тому, кто и так видит всё и настраивает
+    # отбор. Иначе им можно было бы РАСШИРИТЬ себе картину, а не сузить.
+    if as_role and await _may_configure(db, cid, user):
+        return await _role_items(db, cid, as_role)
+    if user.is_superadmin:
+        return None
+    m = await db.get(UserCompany, (user.id, uuid.UUID(cid)))
+    if m is None or m.role == "admin":
+        return None
+    mods = await resolve_member_modules(m, db)
+    if mods is None or "pulse" in mods:
+        return None
+    picked = {k.split(":", 1)[1] for k in mods if k.startswith("pulse:")}
+    return picked & PULSE_ITEM_KEYS
+
+
+
+# ── Профиль пространства решает, ЧЕМ мерить ───────────────────────────────
+#
+# «Пульс» родился на пилоте ЭЗС и всё считал по `charge_sessions`. На топливном
+# профиле это давало ложь в самом громком месте: у ГИГ 376 744 заправки и свежие
+# данные, а экран дня писал «Данных о сессиях нет» тревогой — просто смотрел не в
+# ту таблицу. Мера продаж выбирается профилем компании, а не зашита в код.
+PROFILE_SALES = {
+    # профиль: (таблица, поле времени, поле выручки, поле объёма, подпись объёма,
+    #           поле точки, слово для «сессии»)
+    # `dt` у заправок — с часовым поясом, `started_at` у сессий — без. Окна
+    # считаются вычитанием из `as_of`, и смешивать эти два типа нельзя: asyncpg
+    # отвечает «can't subtract offset-naive and offset-aware datetimes».
+    # Приводим время топлива к timestamp — дальше вся арифметика одинаковая.
+    "fuel": ("fuel_transactions", "dt::timestamp", "amount", "liters", "Отпущено, л",
+             "station_code::text", "Заправок"),
+    "energy": ("charge_sessions", "started_at", "amount", "energy_kwh", "Отпущено, кВт·ч",
+               "location_id", "Зарядных сессий"),
+}
+DEFAULT_PROFILE = "energy"
+
+# Молчание источника — сигнал только там, где поток регулярный: на паре записей
+# «не приходят данные» означает, что контур ещё заводят, а не что он сломался.
+SOURCE_MIN_ROWS = 10
+
+
+async def _profile(db: AsyncSession, cid: str) -> str:
+    """Отраслевой профиль компании: от него зависит, что считать продажами."""
+    pid = (await db.execute(text(
+        "select profile_id from companies where id = :cid"), {"cid": cid})).scalar_one_or_none()
+    return pid if pid in PROFILE_SALES else DEFAULT_PROFILE
+
+
+# ── Источники данных: чему сегодня можно верить ───────────────────────────
+#
+# Реестр приёмников, а не реестр коннекторов: коннектор может числиться
+# «активным», а данные не приезжать неделю. Правда — в самих таблицах, поэтому
+# каждый источник описан запросом «когда последняя запись» и окном, после
+# которого молчание становится подозрительным.
+#
+# `window` — сколько дней тишины ещё нормально. У телефонии это часы, у
+# начислений — месяц: они и приходят раз в месяц.
+def _data_sources(profile: str) -> list[dict[str, Any]]:
+    """Приёмники этого профиля: у топлива продажи едут заправками, у ЭЗС — сессиями."""
+    table, ts, _amt, _vol, _lbl, _loc, _word = PROFILE_SALES[profile]
+    sales_label = "Операции АЗС" if profile == "fuel" else "Сессии сети"
+    return [
+        {"key": "sessions", "label": sales_label, "feeds": "«Продажи», «Где болит»",
+         "window": 7,
+         "sql": f"select max({ts}) as at, count(*) as n from {table} where company_id = :cid"},
+        {"key": "telephony", "label": "Телефония", "feeds": "«Обращения»",
+         "window": 2,
+         "sql": "select max(started_at) as at, count(*) as n from call_records"},
+        {"key": "tickets", "label": "Заявки", "feeds": "«Поддержка», экран дня",
+         "window": 3,
+         "sql": "select max(created_at) as at, count(*) as n from tickets"},
+        {"key": "charges", "label": "Начисления по договорам", "feeds": "«Эксплуатация»",
+         "window": 35,
+         "sql": "select max(updated_at) as at, count(*) as n from ops_period_charges where company_id = :cid"},
+        {"key": "projects", "label": "Проекты", "feeds": "«Проекты»",
+         "window": 14,
+         "sql": "select max(created_at) as at, count(*) as n from ezs_site_events where company_id = :cid"},
+    ]
+
+
+async def _sources_snapshot(db: AsyncSession, cid: str) -> list[dict[str, Any]]:
+    """По каждому источнику: когда пришли данные и не пора ли беспокоиться.
+
+    Различие, без которого экран врал на каждом непилотном стеке: источник, в
+    котором НИКОГДА не было записей, — это не «молчит», а «контур в этом
+    пространстве не ведётся». У ГИГ нет телефонии, начислений по договорам и
+    проектов ЭЗС, и тревога по ним сообщала бы о поломке там, где просто другой
+    набор продуктов.
+    """
+    profile = await _profile(db, cid)
+    out: list[dict[str, Any]] = []
+    for src in _data_sources(profile):
+        try:
+            params = {"cid": cid} if ":cid" in src["sql"] else {}
+            r = (await db.execute(text(src["sql"]), params)).one()
+        except ProgrammingError:
+            await db.rollback()
+            continue          # таблицы в этом стеке нет — источника тоже
+        at = r.at
+        days = (datetime.now(timezone.utc) - at.replace(tzinfo=timezone.utc)).days \
+            if at is not None else None
+        used = bool(r.n)
+        out.append({
+            "key": src["key"], "label": src["label"], "feeds": src["feeds"],
+            "window": src["window"], "count": r.n,
+            "last_at": at.isoformat() if at is not None else None,
+            "days": days,
+            # Контур используется в пространстве? Если нет — он не «молчит».
+            "used": used,
+            # Поток должен быть регулярным, чтобы молчание что-то значило: у ГИГ
+            # две заявки за всё время, и «не приходят 5 дней» — не сигнал, а
+            # свойство контура, который только начали вести.
+            "stale": r.n >= SOURCE_MIN_ROWS and (days is None or days > src["window"]),
+        })
+    return out
+
+
+# ── Пороги эскалаций: реестр, а не константы в тексте правил ───────────────
+#
+# Порог — это мнение о норме, и оно принадлежит компании, а не коду. Здесь
+# только дефолты: фактическое значение приходит из `pulse_targets`, где его
+# правит руководитель в «Управлении» (PULSE.md §3, волна В3). Ключ добавляется
+# одной строкой — экран настройки рисуется по этому же реестру.
+THRESHOLDS: dict[str, dict[str, Any]] = {
+    "sales_drop_pct": {"default": SALES_DROP, "unit": "%", "section": "Продажи",
+        "label": "Падение выручки за неделю",
+        "hint": "На сколько процентов недельная выручка должна просесть, чтобы это стало карточкой."},
+    "sales_visit_ok_pct": {"default": SALES_VISIT_OK, "unit": "%", "section": "Продажи",
+        "label": "Норма успешных приездов",
+        "hint": "Ниже этой доли приездов с зарядом клиенты уезжают ни с чем — эскалация."},
+    "pr_stuck_days": {"default": float(PR_STUCK_DAYS), "unit": "дн", "section": "Проекты",
+        "label": "Проект стоит в стадии",
+        "hint": "Сколько дней без смены стадии считать застреванием."},
+    "pr_owner_share": {"default": PR_OWNER_SHARE * 100, "unit": "%", "section": "Проекты",
+        "label": "Доля проектов без ведущего",
+        "hint": "Какая часть портфеля без ответственного — уже повод сказать."},
+    "ops_docs_overdue": {"default": float(OPS_DOCS_OVERDUE), "unit": "шт", "section": "Эксплуатация",
+        "label": "Начислений без документа",
+        "hint": "Сколько просроченных подтверждений собрать, прежде чем поднимать тревогу."},
+    "ops_cost_jump_pct": {"default": OPS_COST_JUMP, "unit": "%", "section": "Эксплуатация",
+        "label": "Рост стоимости месяца",
+        "hint": "На сколько процентов ожидания месяца должны вырасти, чтобы спросить «почему»."},
+    "obj_silent_days": {"default": float(OBJ_SILENT_DAYS), "unit": "дн", "section": "Где болит",
+        "label": "Точка молчит",
+        "hint": "Сколько дней без сессий считать «точка не продаёт»."},
+    "obj_idle_min": {"default": float(OBJ_IDLE_COST_MIN), "unit": "шт", "section": "Где болит",
+        "label": "Платных точек без выручки",
+        "hint": "Сколько таких точек накопить, прежде чем выносить на экран дня."},
+    "cc_wrapup_stuck": {"default": float(CC_WRAPUP_STUCK), "unit": "шт", "section": "Обращения",
+        "label": "Разговоров брошено в разборе",
+        "hint": "Сколько незакрытых обращений с просроченным ответом — уже система."},
+    "digest_hour": {"default": 9.0, "unit": "ч", "section": "Доставка",
+        "label": "Час утреннего письма",
+        "hint": "Во сколько по Москве отправлять карточки экрана дня тем, у кого есть доступ. −1 — не отправлять."},
+    "cc_missed_factor": {"default": CC_MISSED_FACTOR, "unit": "×", "section": "Обращения",
+        "label": "Запас к цели по пропущенным",
+        "hint": "Во сколько раз доля пропущенных должна превысить цель контакт-центра."},
+}
+
+DEFAULT_THRESHOLDS: dict[str, float] = {k: float(v["default"]) for k, v in THRESHOLDS.items()}
+
+
+async def _thresholds(db: AsyncSession, cid: str) -> dict[str, float]:
+    """Пороги компании поверх дефолтов. Нет таблицы или значения — берём своё."""
+    th = dict(DEFAULT_THRESHOLDS)
+    try:
+        rows = (await db.execute(text(
+            "select key, value from pulse_targets where company_id = :cid"
+        ), {"cid": cid})).all()
+    except ProgrammingError:
+        await db.rollback()
+        return th
+    for r in rows:
+        if r.key in th and r.value is not None:
+            th[r.key] = float(r.value)
+    return th
+
 
 # Колпак экрана дня: больше семи карточек читаются как лента, а лента — это то,
 # от чего «Пульс» уходит. Лишнее отсекается по уровню (PULSE.md §7).
+# Excel делит строки только по CRLF; собираем его из кодов, чтобы литерал
+# не разъезжался при переносе файла между окончаниями строк.
+CRLF = chr(13) + chr(10)
+
 MAX_CARDS = 7
 
 # Имена правил для журнала «Принятое»: ключ в базе технический, человеку нужен текст.
@@ -48,7 +444,36 @@ CARD_TITLES = {
     "ext_backlog": "Хвост внешней сервисной системы",
     "silent_surge": "Молчит большая часть сети",
     "own_reopen": "Заявки открываются повторно",
+    "cc_missed": "До нас не дозваниваются",
+    "cc_wrapup": "Разговоры не закрыты",
+    "cc_repeat": "Клиенты звонят повторно",
+    "cc_escalation": "Оператор поднял эскалацию",
+    "sales_drop": "Выручка сети просела",
+    "sales_out": "Станции выпали из работы",
+    "sales_visit": "Клиенты уезжают без заряда",
+    "pr_stuck": "Проекты стоят на месте",
+    "pr_no_owner": "Проекты без ответственного",
+    "pr_frozen": "Портфель не двигается",
+    "pr_overdue": "Просрочены обещанные действия",
+    "src_stale": "Источники молчат",
+    "access_admins": "У спящих учёток остались права админа",
+    "access_invites": "Приглашения повисли",
+    "obj_idle_cost": "Платим за точки, которые не продают",
+    "ops_docs": "Расходы не подтверждены документами",
+    "ops_contracts": "Договоры с истёкшим сроком",
+    "ops_open": "Периоды не закрыты",
+    "ops_jump": "Хозяйство подорожало",
 }
+
+
+def money(v: float | int | None) -> str:
+    """«3 210 978» — разделитель разрядов пробелом.
+
+    Раньше формат делался как `f"{v:,.0f}".replace(",", " ")` прямо в тексте
+    карточки, и `replace` съедал ВСЕ запятые предложения: «ждут акта или счёта,
+    срок подачи прошёл» превращалось в «счёта  срок подачи прошёл».
+    """
+    return f"{0 if v is None else v:,.0f}".replace(",", " ")
 
 
 def plural(n: int, one: str, few: str, many: str) -> str:
@@ -63,20 +488,38 @@ def build_cards(
     *, as_of: datetime | None, stale_days: int | None,
     own_sla_stale: int, own_reopen: int, ext_old: int,
     silent: int, park: int, acked: set[str],
+    cc: dict[str, Any] | None = None, sales: dict[str, Any] | None = None,
+    projects: dict[str, Any] | None = None, ops: dict[str, Any] | None = None,
+    objects: dict[str, Any] | None = None, th: dict[str, float] | None = None,
+    sources: list[dict[str, Any]] | None = None, access: dict[str, Any] | None = None,
+    visible: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Правила экрана дня — чистая функция над уже посчитанными цифрами.
 
     Отделена от запросов сознательно: правила — сердце «Пульса», и проверять их
     надо без базы (`tests/test_pulse_rules.py`). Каждая карточка — сводка или
     аномалия, ни одна не заводится на отдельную запись.
+
+    `cc` — срез контакт-центра (см. `_cc_snapshot`); None или пустой словарь =
+    телефонии в пространстве нет, и правила по ней молчат.
     """
     out: list[dict[str, Any]] = []
+    # Пороги: значения компании поверх дефолтов реестра. Правила ниже читают
+    # только `t[...]`, чтобы «норму» нельзя было зашить мимо настройки.
+    t = {**DEFAULT_THRESHOLDS, **(th or {})}
 
     def card(key: str, title: str, insight: str, *, count: int | None = None,
              level: str = "warn", link: str | None = None) -> None:
-        if key not in acked:
-            out.append({"key": key, "title": title, "insight": insight,
-                        "count": count, "level": level, "link": link})
+        if key in acked:
+            return
+        # Отбор картины (см. `_visible_items`) применяется ЗДЕСЬ, до колпака:
+        # иначе семь мест забирали бы темы, закрытые этому человеку, и куратор
+        # видел бы пустой экран при живых сообщениях по своим разрезам.
+        scope = CARD_SCOPE.get(key)
+        if visible is not None and scope is not None and scope not in visible:
+            return
+        out.append({"key": key, "title": title, "insight": insight,
+                    "count": count, "level": level, "link": link})
 
     # №0 — свежесть данных: без неё остальные цифры обсуждать нельзя.
     if stale_days is None:
@@ -96,7 +539,7 @@ def build_cards(
         card("own_sla", "Свои заявки встали",
              f"{own_sla_stale} {w} с нарушенным SLA {v} дольше "
              f"{OWN_SLA_DAYS} дней — работа стоит на нашей стороне.",
-             count=own_sla_stale, link="/tickets")
+             count=own_sla_stale, link="/tickets?sla=breached")
 
     if ext_old > EXT_BACKLOG:
         card("ext_backlog", "Хвост внешней сервисной системы",
@@ -104,7 +547,7 @@ def build_cards(
              f"старше месяца. Это зеркала чужой системы: "
              f"разбирать не нам, но хвост такого размера — повод для разговора "
              f"с подрядчиком.",
-             count=ext_old, link="/tickets")
+             count=ext_old, link="/tickets?src=external")
 
     if park and silent / park > SILENT_SHARE:
         card("silent_surge", "Молчит большая часть сети",
@@ -117,7 +560,215 @@ def build_cards(
              f"{own_reopen} {plural(own_reopen, 'своя заявка', 'своих заявки', 'своих заявок')} "
              f"{plural(own_reopen, 'переоткрыта', 'переоткрыты', 'переоткрыты')} второй раз — "
              f"решение не держится, стоит посмотреть, что там происходит.",
-             count=own_reopen, link="/tickets")
+             count=own_reopen, link="/tickets?src=own")
+
+    # ── Контакт-центр: разговор с потребителем ──────────────────────────────
+    # Правила отвечают на «дозвонились ли», «не бросили ли хвост» и «не ходит ли
+    # клиент по кругу». Как считается доступность и скорость — не наше мнение, а
+    # цели самого контакт-центра (`cc_kpi_targets`), иначе «Пульс» ругался бы на
+    # цифры, которые операторы своей нормой не считают.
+    cc = cc or {}
+    calls = int(cc.get("calls") or 0)
+    missed = int(cc.get("missed") or 0)
+    share = cc.get("missed_share")
+    share_prev = cc.get("missed_share_prev")
+    target = float(cc.get("target_missed") or CC_DEFAULT_TARGETS["missed_share"])
+    # Порог с запасом: цель 5% не повод будить директора на 6%. Плюс требование
+    # «не лучше прошлой недели» — разовый плохой день сам себя не эскалирует.
+    if calls and share is not None and share > target * t["cc_missed_factor"] \
+            and (share_prev is None or share >= share_prev):
+        trend = (f"неделей раньше было {share_prev:.0f}%"
+                 if share_prev is not None else "сравнить не с чем")
+        card("cc_missed", "До нас не дозваниваются",
+             f"{missed} из {calls} звонков за неделю остались без ответа "
+             f"({share:.0f}% при цели {target:.0f}%), {trend}.",
+             count=missed, level="alert" if share > target * 3 else "warn",
+             link="/pulse/business?view=contacts")
+
+    stuck = int(cc.get("wrapup_stuck") or 0)
+    if stuck >= t["cc_wrapup_stuck"]:
+        card("cc_wrapup", "Разговоры не закрыты",
+             f"{stuck} {plural(stuck, 'обращение висит', 'обращения висят', 'обращений висят')} "
+             f"в разборе с просроченным ответом: разговор состоялся, а итог не оформлен.",
+             count=stuck, link="/pulse/business?view=contacts")
+
+    repeat = int(cc.get("repeat_people") or 0)
+    if repeat >= CC_REPEAT_PEOPLE:
+        card("cc_repeat", "Клиенты звонят повторно",
+             f"{repeat} {plural(repeat, 'человек обращался', 'человека обращались', 'человек обращались')} "
+             f"{CC_REPEAT_TIMES}+ раза за неделю — с первого раза вопрос не закрыли.",
+             count=repeat, link="/pulse/business?view=contacts")
+
+    # Эскалация оператора — единственное правило «Пульса», заведённое человеком,
+    # а не порогом: оператор сам позвал старшего. Такое молчанием не отсеивается.
+    esc = int(cc.get("escalations") or 0)
+    if esc:
+        card("cc_escalation", "Оператор поднял эскалацию",
+             f"{esc} {plural(esc, 'обращение передано', 'обращения переданы', 'обращений переданы')} "
+             f"выше по линии и ещё не разобрано.",
+             count=esc, level="alert", link="/pulse/business?view=contacts")
+
+    # ── Продажи: деньги сети ────────────────────────────────────────────────
+    # Три вопроса: столько же ли продаём, вся ли сеть в работе и доезжает ли
+    # клиент до заряда. Проценты считаются от НЕДЕЛИ ДАННЫХ: файл приезжает с
+    # отставанием, и «за последние 7 дней» от now() резало бы живую неделю.
+    sales = sales or {}
+    rev, rev_prev = sales.get("revenue"), sales.get("revenue_prev")
+    if rev is not None and rev_prev:
+        drop = (rev_prev - rev) / rev_prev * 100
+        if drop >= t["sales_drop_pct"]:
+            # Причина падения важнее самого факта: меньше чеков или дешевле чек —
+            # это два разных разговора, и первый ответ виден прямо в карточке.
+            why = ("станций в работе стало меньше"
+                   if (sales.get("live_prev") or 0) - (sales.get("live") or 0) >= 5
+                   else "сессий стало меньше"
+                   if (sales.get("sessions_prev") or 0) > (sales.get("sessions") or 0)
+                   else "упал средний чек")
+            card("sales_drop", "Выручка сети просела",
+                 f"За неделю данных {money(rev)} ₽ против {money(rev_prev)} ₽ неделей "
+                 f"раньше — минус {drop:.0f}%: {why}.",
+                 count=int(rev_prev - rev),
+                 level="alert" if drop >= t["sales_drop_pct"] * 2 else "warn", link="/pulse/business")
+
+    out_n = int(sales.get("stations_out") or 0)
+    if park and out_n >= SALES_OUT_MIN and out_n / park >= SALES_OUT_SHARE:
+        lost = sales.get("stations_out_revenue") or 0
+        card("sales_out", "Станции выпали из работы",
+             f"{out_n} {plural(out_n, 'станция давала', 'станции давали', 'станций давали')} "
+             f"сессии неделю назад и молчат всю эту — это {money(lost)} ₽ "
+             f"недельной выручки.",
+             count=out_n, link="/pulse/business")
+
+    visit_ok = sales.get("visit_ok_share")
+    if visit_ok is not None and visit_ok < t["sales_visit_ok_pct"]:
+        card("sales_visit", "Клиенты уезжают без заряда",
+             f"Зарядкой заканчивается {visit_ok:.0f}% приездов: каждый "
+             f"{max(2, round(100 / max(1, 100 - visit_ok)))}-й клиент уехал ни с чем.",
+             count=int(round(100 - visit_ok)), link="/pulse/business")
+
+    # ── Проекты: что компания строит ────────────────────────────────────────
+    # Портфель меряется не неделями, а тем, движется ли он вообще и есть ли у
+    # каждого дела хозяин. Правки полей карточки движением не считаются: на
+    # пилоте их 1156 за неделю против 5 смен стадии — «активность» без движения.
+    projects = projects or {}
+    active = int(projects.get("active") or 0)
+    stuck = int(projects.get("stuck") or 0)
+    if active and stuck >= PR_STUCK_MIN and stuck / active >= PR_STUCK_SHARE:
+        worst = projects.get("stuck_stage")
+        where = f", хуже всего на стадии «{worst}»" if worst else ""
+        card("pr_stuck", "Проекты стоят на месте",
+             f"{stuck} из {active} проектов портфеля не меняли стадию дольше "
+             f"{t['pr_stuck_days']:.0f} дней{where}. Это не работа в процессе, это очередь.",
+             count=stuck, link="/pulse/business?view=projects")
+
+    no_owner = int(projects.get("no_owner") or 0)
+    if active and no_owner >= PR_OWNER_MIN and no_owner / active >= t["pr_owner_share"] / 100:
+        card("pr_no_owner", "Проекты без ответственного",
+             f"У {no_owner} из {active} проектов не назначен ведущий — спросить "
+             f"о них некого, и в отчёте они появятся только по факту провала.",
+             count=no_owner, link="/pulse/business?view=projects")
+
+    # Ноль движений за три недели — это не «спокойный период», это остановка.
+    moves = projects.get("moves_3w")
+    if active and moves == 0:
+        card("pr_frozen", "Портфель не двигается",
+             f"За {PR_MOVES_WEEKS} недели ни один проект не сменил стадию, "
+             f"хотя в работе {active}.",
+             count=active, level="alert", link="/pulse/business?view=projects")
+
+    overdue = int(projects.get("overdue") or 0)
+    if overdue:
+        card("pr_overdue", "Просрочены обещанные действия",
+             f"{overdue} {plural(overdue, 'проект перешагнул', 'проекта перешагнули', 'проектов перешагнули')} "
+             f"срок следующего шага, записанный в карточке.",
+             count=overdue, link="/pulse/business?view=projects")
+
+    # ── Доступ: то, что касается руководителя лично ─────────────────────────
+    # Права переживают людей: человек ушёл из проекта, а админский доступ у него
+    # остался. Правило говорит только о том, что требует решения, — спящие
+    # админы и приглашения, до которых никто не дошёл.
+    access = access or {}
+    dormant_admins = int(access.get("dormant_admins") or 0)
+    invites_stale = int(access.get("invites_stale") or 0)
+    if dormant_admins:
+        card("access_admins", "У спящих учёток остались права админа",
+             f"{dormant_admins} {plural(dormant_admins, 'человек с полным доступом не заходил', 'человека с полным доступом не заходили', 'человек с полным доступом не заходили')} "
+             f"больше месяца. Права переживают людей — это вход, о котором никто не помнит.",
+             count=dormant_admins, link="/pulse/team?view=access")
+    if invites_stale:
+        card("access_invites", "Приглашения повисли",
+             f"{invites_stale} {plural(invites_stale, 'человек приглашён', 'человека приглашены', 'человек приглашены')} "
+             f"больше недели назад и до сих пор не вошёл. Либо письмо не дошло, либо человек не понял, что делать.",
+             count=invites_stale, link="/pulse/team?view=access")
+
+    # ── Источники: чему сегодня можно верить ────────────────────────────────
+    # Правило №0 следит за сессиями сети, но их пять, и молчащий канал заявок
+    # так же обесценивает экран. Одна карточка на все источники: перечислением,
+    # а не пятью строчками — это состояние обвязки, а не пять разных проблем.
+    stale_src = [x for x in (sources or []) if x.get("stale") and x["key"] != "sessions"]
+    if stale_src:
+        names = ", ".join(f"{x['label']} ({x['days']} дн)" if x["days"] is not None
+                          else f"{x['label']} (данных нет)" for x in stale_src[:4])
+        card("src_stale", "Источники молчат",
+             f"Данные не приходят: {names}. Цифры разделов, которые они кормят, "
+             f"остались на прошлом обмене.",
+             count=len(stale_src), level="alert" if len(stale_src) > 1 else "warn",
+             link="/pulse?view=sources")
+
+    # ── Объект как ось: точка сразу во всех контурах ────────────────────────
+    # Самый дорогой сигнал пространства и единственный, которого нет ни в одном
+    # приложении по отдельности: за точку платим аренду и энергию, а выручки с
+    # неё нет. «Продажи» видят молчание, «Эксплуатация» видит расход — вместе
+    # это видит только «Пульс».
+    objects = objects or {}
+    idle = int(objects.get("idle_cost_count") or 0)
+    if idle >= t["obj_idle_min"]:
+        cost = objects.get("idle_cost_amount") or 0
+        card("obj_idle_cost", "Платим за точки, которые не продают",
+             f"{idle} {plural(idle, 'точка', 'точки', 'точек')} без единой сессии "
+             f"за {t['obj_silent_days']:.0f} дней, а начисления по ним идут: "
+             f"{money(cost)} ₽ за два месяца.",
+             count=idle, level="alert", link="/pulse/business?view=objects")
+
+    # ── Эксплуатация: хозяйство вокруг сети ─────────────────────────────────
+    # Здесь мера — не неделя, а период: месяц закрывается документами от
+    # контрагентов. Руководителю важны три вещи — подтверждены ли расходы,
+    # не висят ли старые месяцы и не подорожало ли хозяйство разом.
+    ops = ops or {}
+    docs_late = int(ops.get("docs_overdue") or 0)
+    if docs_late >= t["ops_docs_overdue"]:
+        amount = ops.get("docs_overdue_amount") or 0
+        oldest = ops.get("docs_overdue_oldest")
+        since = f" Самый старый срок — {oldest}." if oldest else ""
+        card("ops_docs", "Расходы не подтверждены документами",
+             f"{docs_late} начислений на {money(amount)} ₽ ждут акта или счёта, "
+             f"срок подачи уже прошёл.{since} Пока документа нет, это не расход, "
+             f"а обещание.",
+             count=docs_late, level="alert", link="/pulse/business?view=ops")
+
+    open_old = int(ops.get("open_periods") or 0)
+    if open_old:
+        card("ops_open", "Периоды не закрыты",
+             f"{open_old} {plural(open_old, 'период', 'периода', 'периодов')} старше "
+             f"{OPS_OPEN_MONTHS} месяцев "
+             f"{plural(open_old, 'остаётся открытым', 'остаются открытыми', 'остаются открытыми')}: "
+             f"цифры прошлых месяцев ещё могут измениться.",
+             count=open_old, link="/pulse/business?view=ops")
+
+    expired = int(ops.get("contracts_expired") or 0)
+    if expired:
+        card("ops_contracts", "Договоры с истёкшим сроком",
+             f"{expired} {plural(expired, 'договор действует', 'договора действуют', 'договоров действуют')} "
+             f"за пределами своего срока и не закрыт: платим по бумаге, которой формально уже нет.",
+             count=expired, link="/pulse/business?view=ops")
+
+    jump = ops.get("cost_jump_pct")
+    if jump is not None and jump >= t["ops_cost_jump_pct"]:
+        card("ops_jump", "Хозяйство подорожало",
+             f"Ожидания месяца выросли на {jump:.0f}% против прошлого "
+             f"({money(ops.get('expected'))} ₽ против {money(ops.get('expected_prev'))} ₽) — "
+             f"стоит посмотреть, у кого именно.",
+             count=int(round(jump)), link="/pulse/business?view=ops")
 
     # Колпак: сначала тревожные, потом предупреждения; хвост отсекаем.
     out.sort(key=lambda c: 0 if c["level"] == "alert" else 1)
@@ -146,18 +797,471 @@ def _dpct(cur: float, prev: float) -> float | None:
     return round((cur - prev) / prev * 100, 1)
 
 
+async def _cc_targets(db: AsyncSession) -> dict[str, float]:
+    """Цели контакт-центра из его же настроек; чего не задали — берём по умолчанию.
+
+    `distinct on (metric)`: наборов целей в базе может быть несколько (компания и
+    заводская заготовка), и без выбора «самой свежей» одна метрика приезжала
+    дважды с разными числами.
+    """
+    targets = dict(CC_DEFAULT_TARGETS)
+    if not (await db.execute(text("select to_regclass('public.cc_kpi_targets')"))).scalar():
+        return targets
+    try:
+        rows = (await db.execute(text("""
+            select distinct on (metric) metric, target
+            from cc_kpi_targets order by metric, updated_at desc nulls last
+        """))).all()
+    except ProgrammingError:
+        # Таблица видна в каталоге, но SELECT не выдан: у контура Поддержки свой
+        # владелец, и гранты на новые таблицы появляются не сразу. Это не повод
+        # ронять экран — работаем на целях по умолчанию.
+        await db.rollback()
+        return targets
+    for r in rows:
+        if r.target is not None:
+            targets[r.metric] = float(r.target)
+    return targets
+
+
+async def _sales_snapshot(db: AsyncSession, cid: str, as_of: datetime | None,
+                          profile: str = DEFAULT_PROFILE) -> dict[str, Any]:
+    """Срез продаж: неделя ДАННЫХ против предыдущей.
+
+    Окна от `as_of`, а не от now(): выгрузка приезжает файлом с отставанием в
+    несколько дней, и «последние 7 дней» по календарю отрезали бы половину живой
+    недели — цифра падала бы каждый раз, когда файл задержался.
+    """
+    if as_of is None:
+        return {}
+    TBL, TS, AMT, VOL, VOL_LABEL, LOC, SESS_WORD = PROFILE_SALES[profile]
+    # Визит (клиент приехал и уехал заряженным) — понятие ЭЗС: у заправки его нет,
+    # там каждая операция самостоятельна. На топливе показатель просто не считается.
+    VISIT_KEY = "visit_key" if profile == "energy" else "null::text"
+    VISIT_OK = "visit_charged" if profile == "energy" else "false"
+    p = {"cid": cid, "as_of": as_of}
+    m = (await db.execute(text(f"""
+        select
+          count(*) filter (where w = 0) as sessions,
+          count(*) filter (where w = 1) as sessions_prev,
+          coalesce(sum({AMT}) filter (where w = 0), 0) as revenue,
+          coalesce(sum({AMT}) filter (where w = 1), 0) as revenue_prev,
+          coalesce(sum({VOL}) filter (where w = 0), 0) as kwh,
+          coalesce(sum({VOL}) filter (where w = 1), 0) as kwh_prev,
+          count(distinct loc) filter (where w = 0) as live,
+          count(distinct loc) filter (where w = 1) as live_prev,
+          count(distinct visit_key) filter (where w = 0) as visits,
+          count(distinct visit_key) filter (where w = 1) as visits_prev,
+          count(distinct visit_key) filter (where w = 0 and visit_charged) as visits_ok,
+          count(distinct visit_key) filter (where w = 1 and visit_charged) as visits_ok_prev
+        from (
+          select {AMT}, {VOL}, {LOC} as loc, {VISIT_KEY} as visit_key,
+                 {VISIT_OK} as visit_charged,
+                 case when {TS} > CAST(:as_of AS timestamp) - interval '7 days'
+                      then 0 else 1 end as w
+          from {TBL}
+          where company_id = :cid
+            and {TS} > CAST(:as_of AS timestamp) - interval '14 days'
+        ) x
+    """), p)).one()
+
+    # Выпавшие из работы: станция давала сессии неделю назад и молчит всю эту.
+    # Это не то же самое, что «молчит 48 часов»: там разовая пауза, здесь неделя.
+    out = (await db.execute(text(f"""
+        with cur as (
+          select distinct {LOC} as loc from {TBL}
+          where company_id = :cid and {TS} > CAST(:as_of AS timestamp) - interval '7 days'
+        ), prev as (
+          select {LOC} as loc, coalesce(sum({AMT}), 0) as rev from {TBL}
+          where company_id = :cid
+            and {TS} <= CAST(:as_of AS timestamp) - interval '7 days'
+            and {TS} > CAST(:as_of AS timestamp) - interval '14 days'
+          group by 1
+        )
+        select count(*) as n, coalesce(sum(rev), 0) as rev
+        from prev where loc not in (select loc from cur)
+    """), p)).one()
+
+    def share(ok: int, total: int) -> float | None:
+        return round(100.0 * ok / total, 1) if total else None
+
+    return {
+        "sessions": m.sessions, "sessions_prev": m.sessions_prev,
+        "revenue": float(m.revenue), "revenue_prev": float(m.revenue_prev),
+        "kwh": float(m.kwh), "kwh_prev": float(m.kwh_prev),
+        "live": m.live, "live_prev": m.live_prev,
+        "avg_check": round(float(m.revenue) / m.sessions, 1) if m.sessions else None,
+        "avg_check_prev": round(float(m.revenue_prev) / m.sessions_prev, 1) if m.sessions_prev else None,
+        "visits": m.visits, "visits_prev": m.visits_prev,
+        "visit_ok_share": share(m.visits_ok, m.visits),
+        "visit_ok_share_prev": share(m.visits_ok_prev, m.visits_prev),
+        "stations_out": out.n, "stations_out_revenue": float(out.rev),
+    }
+
+
+
+# Объект сразу во всех контурах: выручка (сессии), расход (начисления по
+# договорам) и подтверждение (документы). Ключ один — `service_locations.id`,
+# на него ссылаются и сессии, и начисления. Заявки Поддержки живут в своём
+# реестре (`public.service_objects`), и общего ключа с Ядром у них сейчас нет —
+# поэтому в эту ось они не входят: сшивка по имени дала бы ложные пары.
+_OBJECTS_SQL_TPL = """
+with a as (
+  select max({TS}) as t from {TBL} where company_id = :cid
+), sess as (
+  select cs.{LOC} as location_id,
+         max(cs.{TS}) as last_at,
+         coalesce(sum(cs.{AMT}) filter (
+           where cs.{TS} > a.t - interval '7 days'), 0) as rev,
+         coalesce(sum(cs.{AMT}) filter (
+           where cs.{TS} <= a.t - interval '7 days'
+             and cs.{TS} > a.t - interval '14 days'), 0) as rev_prev
+  from {TBL} cs, a
+  where cs.company_id = :cid
+  group by cs.{LOC}
+), cost as (
+  select ch.location_id,
+         coalesce(sum(ch.expected_gross), 0) as cost,
+         count(*) filter (where ch.doc_id is null
+              and ch.doc_due_on ~ '^\\d{4}-\\d{2}-\\d{2}$'
+              and ch.doc_due_on::date < current_date) as late_docs
+  from ops_period_charges ch
+  where ch.company_id = :cid
+    and ch.period >= to_char(current_date - interval '2 month', 'YYYY-MM-01')
+  group by ch.location_id
+)
+select sl.id, sl.name, coalesce(sl.code, '') as code,
+       coalesce(c.cost, 0) as cost, coalesce(c.late_docs, 0) as late_docs,
+       coalesce(s.rev, 0) as rev, coalesce(s.rev_prev, 0) as rev_prev,
+       s.last_at,
+       -- Признак 1: платим, а точка не продаёт (самый дорогой случай).
+       (coalesce(c.cost, 0) > 0 and (s.last_at is null
+          or s.last_at < (select t from a) - make_interval(days => :silent))) as idle_cost,
+       -- Признак 2: выручка недели провалилась к предыдущей.
+       (coalesce(s.rev_prev, 0) > 5000
+          and coalesce(s.rev, 0) < coalesce(s.rev_prev, 0) * :drop_ratio) as revenue_drop,
+       -- Признак 3: расходы точки не подтверждены после срока.
+       (coalesce(c.late_docs, 0) > 0) as docs_late,
+       -- Признак 4: точка молчит, хотя раньше работала.
+       (s.last_at is not null
+          and s.last_at < (select t from a) - interval '7 days') as silent
+from service_locations sl
+left join sess s on s.location_id = {OBJ_KEY}
+left join cost c on c.location_id = sl.id
+where sl.company_id = :cid and (s.location_id is not null or c.location_id is not null)
+"""
+
+
+async def _objects_snapshot(db: AsyncSession, cid: str) -> dict[str, Any]:
+    """Точки, где сошлось несколько признаков сразу.
+
+    Балл не «рейтинг проблемности», а счётчик независимых сигналов: одна
+    просроченная бумага — работа бухгалтерии, а вот молчание плюс расход плюс
+    неподтверждённые документы на одной точке — это уже вопрос к руководителю.
+    """
+    profile = await _profile(db, cid)
+    TBL, TS, AMT, VOL, VOL_LABEL, LOC, SESS_WORD = PROFILE_SALES[profile]
+    # Подстановка через replace, а не format: в шаблоне есть регулярное
+    # выражение с фигурными скобками (`\d{4}-\d{2}-\d{2}`), и format принял бы
+    # их за поля подстановки.
+    sql = _OBJECTS_SQL_TPL
+    obj_key = "sl.id" if profile == "energy" else "sl.code"
+    for name, value in (("{TBL}", TBL), ("{TS}", TS), ("{AMT}", AMT), ("{LOC}", LOC),
+                        ("{OBJ_KEY}", obj_key)):
+        sql = sql.replace(name, value)
+    rows = (await db.execute(text(sql), {
+        "cid": cid, "silent": OBJ_SILENT_DAYS, "drop_ratio": 1 - OBJ_DROP_PCT / 100,
+    })).all()
+    if not rows:
+        return {}
+
+    pain = []
+    idle_n = idle_amount = 0.0
+    for r in rows:
+        flags = [f for f, on in (
+            ("idle_cost", r.idle_cost), ("revenue_drop", r.revenue_drop),
+            ("docs_late", r.docs_late), ("silent", r.silent)) if on]
+        if r.idle_cost:
+            idle_n += 1
+            idle_amount += float(r.cost or 0)
+        if len(flags) >= OBJ_PAIN_MIN:
+            # Цена вопроса = что платим за точку плюс сколько выручки потеряли.
+            at_risk = float(r.cost or 0) + max(0.0, float(r.rev_prev or 0) - float(r.rev or 0))
+            pain.append({
+                "id": r.id, "name": r.name or r.code or r.id, "code": r.code,
+                "flags": flags, "cost": float(r.cost or 0),
+                "revenue": float(r.rev or 0), "revenue_prev": float(r.rev_prev or 0),
+                "late_docs": r.late_docs,
+                "last_session": r.last_at.isoformat() if r.last_at else None,
+                "at_risk": at_risk,
+            })
+    pain.sort(key=lambda p: (-len(p["flags"]), -p["at_risk"]))
+    return {
+        "total": len(rows), "pain": pain, "pain_count": len(pain),
+        "idle_cost_count": int(idle_n), "idle_cost_amount": idle_amount,
+        "at_risk_total": sum(p["at_risk"] for p in pain),
+    }
+
+
+async def _ops_snapshot(db: AsyncSession, cid: str) -> dict[str, Any]:
+    """Срез хозяйства: сколько ждём в этом периоде и что не подтверждено.
+
+    Период здесь — календарный месяц (`ops_period_charges.period` хранится
+    строкой «YYYY-MM-01»). Ожидание — то, что мы ДОЛЖНЫ по договорам; факт
+    появляется, когда контрагент прислал акт или счёт (`doc_id`). Пока документа
+    нет, это не расход, а обещание — на этом и построены правила.
+    """
+    cur = (await db.execute(text(
+        "select to_char(current_date, 'YYYY-MM-01')"
+    ))).scalar_one()
+    prev = (await db.execute(text(
+        "select to_char(current_date - interval '1 month', 'YYYY-MM-01')"
+    ))).scalar_one()
+
+    m = (await db.execute(text("""
+        select
+          count(*) filter (where period = :cur) as charges,
+          coalesce(sum(expected_gross) filter (where period = :cur), 0) as expected,
+          coalesce(sum(expected_gross) filter (where period = :prev), 0) as expected_prev,
+          count(*) filter (where period = :cur and doc_id is null) as no_doc,
+          coalesce(sum(expected_gross) filter (where period = :cur and doc_id is null), 0) as no_doc_amount
+        from ops_period_charges where company_id = :cid
+    """), {"cid": cid, "cur": cur, "prev": prev})).one()
+
+    # Просрочка подтверждения: срок подачи документа прошёл, а документа нет.
+    # Даты в этой таблице строковые — каст только по формату ISO.
+    d = "^\\d{4}-\\d{2}-\\d{2}$"
+    late = (await db.execute(text(f"""
+        select count(*) as n, coalesce(sum(expected_gross), 0) as amount,
+               min(doc_due_on) as oldest
+        from ops_period_charges
+        where company_id = :cid and doc_id is null and doc_due_on ~ '{d}'
+          and doc_due_on::date < current_date
+    """), {"cid": cid})).one()
+
+    by_item = {r.cost_item: {"expected": float(r.expected or 0), "count": r.n,
+                             "prev": float(r.prev or 0)}
+               for r in (await db.execute(text("""
+        select cost_item, count(*) filter (where period = :cur) as n,
+               sum(expected_gross) filter (where period = :cur) as expected,
+               sum(expected_gross) filter (where period = :prev) as prev
+        from ops_period_charges
+        where company_id = :cid and period in (:cur, :prev)
+        group by cost_item order by expected desc nulls last
+    """), {"cid": cid, "cur": cur, "prev": prev})).all()}
+
+    # Открытые периоды старше порога: закрытый месяц не переписывается, а
+    # открытый — ещё может, и цифры прошлого квартала гуляют.
+    open_old = (await db.execute(text("""
+        select count(*) from ops_period_close
+        where company_id = :cid and status <> 'closed'
+          and period::date < date_trunc('month', current_date)
+                             - make_interval(months => :months)
+    """), {"cid": cid, "months": OPS_OPEN_MONTHS})).scalar_one()
+
+    # Договор — основание расхода: без действующего договора начисление нечем
+    # подтвердить, а истёкший срок означает, что платим по бумаге, которой уже
+    # нет. Даты здесь строковые, поэтому каст только по формату ISO.
+    d_iso = r"^\d{4}-\d{2}-\d{2}$"
+    ctr = (await db.execute(text(f"""
+        select count(*) as total,
+               count(nullif(valid_until, '')) as with_term,
+               count(*) filter (where valid_until ~ '{d_iso}'
+                    and valid_until::date < current_date
+                    and not coalesce(is_closed, false)) as expired,
+               count(*) filter (where valid_until ~ '{d_iso}'
+                    and valid_until::date between current_date and current_date + 60
+                    and not coalesce(is_closed, false)) as ending
+        from contracts where company_id = :cid
+    """), {"cid": cid})).one()
+
+    exp, exp_prev = float(m.expected), float(m.expected_prev)
+    return {
+        "period": cur, "period_prev": prev,
+        "contracts_total": ctr.total, "contracts_with_term": ctr.with_term,
+        "contracts_expired": ctr.expired, "contracts_ending": ctr.ending,
+        "charges": m.charges, "expected": exp, "expected_prev": exp_prev,
+        "no_doc": m.no_doc, "no_doc_amount": float(m.no_doc_amount),
+        "docs_overdue": late.n, "docs_overdue_amount": float(late.amount),
+        "docs_overdue_oldest": late.oldest,
+        "open_periods": open_old,
+        "cost_jump_pct": round((exp - exp_prev) / exp_prev * 100, 1) if exp_prev else None,
+        "by_item": by_item,
+    }
+
+
+async def _projects_snapshot(db: AsyncSession, cid: str) -> dict[str, Any]:
+    """Срез портфеля: движется ли стройка и есть ли у дел хозяин.
+
+    Даты в `ezs_projects` хранятся строками (`stage_since`, `next_action_due`) —
+    каст обязателен, иначе «operator does not exist: character varying >= date».
+    Пустая строка и мусор в дате не должны ронять экран, поэтому сравнение идёт
+    через `nullif(...)` и регулярное выражение на формат.
+    """
+    d = "^\\d{4}-\\d{2}-\\d{2}$"      # только ISO-дата; всё остальное игнорируем
+    m = (await db.execute(text(f"""
+        select count(*) as active,
+               count(*) filter (where owner_user_id is null) as no_owner,
+               count(*) filter (where stage_since ~ '{d}'
+                    and current_date - stage_since::date > :days) as stuck,
+               count(*) filter (where next_action_due ~ '{d}'
+                    and next_action_due::date < current_date) as overdue
+        from ezs_projects
+        where company_id = :cid and stage <> 'archive'
+    """), {"cid": cid, "days": PR_STUCK_DAYS})).one()
+
+    # Стадия, где застряло больше всего: карточке нужно не только «сколько», но
+    # и «где» — иначе руководитель идёт искать сам.
+    stuck_stage = (await db.execute(text(f"""
+        select stage from ezs_projects
+        where company_id = :cid and stage <> 'archive' and stage_since ~ '{d}'
+          and current_date - stage_since::date > :days
+        group by stage order by count(*) desc limit 1
+    """), {"cid": cid, "days": PR_STUCK_DAYS})).scalar_one_or_none()
+
+    # Движение = смена стадии или пройденный гейт. Правки полей (`edit`) — шум:
+    # на пилоте их 1156 за неделю при 5 реальных переходах.
+    moves = (await db.execute(text("""
+        select count(*) filter (where kind = 'stage'
+                 and created_at >= now() - interval '7 days') as w1,
+               count(*) filter (where kind = 'stage'
+                 and created_at >= now() - interval '14 days'
+                 and created_at < now() - interval '7 days') as w2,
+               count(*) filter (where kind = 'stage'
+                 and created_at >= now() - make_interval(weeks => :weeks)) as w3,
+               count(*) filter (where kind = 'gate'
+                 and created_at >= now() - interval '7 days') as gates
+        from ezs_site_events where company_id = :cid
+    """), {"cid": cid, "weeks": PR_MOVES_WEEKS})).one()
+
+    return {
+        "active": m.active, "no_owner": m.no_owner, "stuck": m.stuck,
+        "overdue": m.overdue, "stuck_stage": STAGE_LABELS.get(stuck_stage, stuck_stage),
+        "moves": moves.w1, "moves_prev": moves.w2, "moves_3w": moves.w3,
+        "gates": moves.gates,
+    }
+
+
+async def _cc_snapshot(db: AsyncSession) -> dict[str, Any]:
+    """Обёртка: любой отказ контура Поддержки гасит только раздел, а не экран."""
+    try:
+        return await _cc_measure(db)
+    except ProgrammingError:
+        await db.rollback()
+        return {}
+
+
+async def _cc_measure(db: AsyncSession) -> dict[str, Any]:
+    """Срез контакт-центра за 7 дней против предыдущих семи.
+
+    Пусто, если телефонии в пространстве нет ИЛИ если таблицы контура Поддержки
+    приложению не отданы: у стека без контакт-центра таблиц
+    `call_records`/`inbox_threads` не существует, а на новых таблицах может не
+    оказаться гранта — и то, и другое уронило бы весь экран дня, а он обязан
+    открываться всегда.
+
+    company_id тут не фильтруется — по той же причине, что и в витрине заявок
+    (пространство однокомпанийное, предусловие мультикомпанийности чинится в
+    одном месте, PULSE.md §7).
+    """
+    has = (await db.execute(text(
+        "select to_regclass('public.call_records') is not null"
+        "   and to_regclass('public.inbox_threads') is not null"
+    ))).scalar()
+    if not has:
+        return {}
+
+    targets = await _cc_targets(db)
+    frt_target = targets["first_response_sec"]
+
+    c = (await db.execute(text("""
+        select count(*) filter (where w = 0) as calls,
+               count(*) filter (where w = 0 and missed) as missed,
+               count(*) filter (where w = 1) as calls_prev,
+               count(*) filter (where w = 1 and missed) as missed_prev,
+               avg(wait_sec) filter (where w = 0) as wait,
+               avg(wait_sec) filter (where w = 1) as wait_prev
+        from (
+          select missed, wait_sec,
+                 case when started_at >= now() - interval '7 days' then 0 else 1 end as w
+          from call_records
+          where direction = 'inbound' and started_at >= now() - interval '14 days'
+        ) x
+    """))).one()
+
+    t = (await db.execute(text("""
+        select avg(frt) filter (where w = 0) as frt,
+               avg(frt) filter (where w = 1) as frt_prev,
+               count(*) filter (where w = 0 and frt is not null) as answered,
+               count(*) filter (where w = 1 and frt is not null) as answered_prev,
+               count(*) filter (where w = 0 and frt is not null and frt <= :frt_target) as in_sla,
+               count(*) filter (where w = 1 and frt is not null and frt <= :frt_target) as in_sla_prev
+        from (
+          select extract(epoch from (first_response_at - created_at)) as frt,
+                 case when created_at >= now() - interval '7 days' then 0 else 1 end as w
+          from inbox_threads
+          where created_at >= now() - interval '14 days'
+        ) x
+    """), {"frt_target": frt_target})).one()
+
+    # Разговор состоялся, а итог не оформлен: тред остался в разборе, и срок
+    # ответа уже вышел. Это не «медленно», это брошено.
+    stuck = (await db.execute(text("""
+        select count(*) from inbox_threads
+        where closed_at is null and response_due_at < now()
+    """))).scalar_one()
+
+    repeat = (await db.execute(text("""
+        select count(*) from (
+          select contact_id from inbox_threads
+          where contact_id is not null and created_at >= now() - interval '7 days'
+          group by contact_id having count(*) >= :times
+        ) x
+    """), {"times": CC_REPEAT_TIMES})).scalar_one()
+
+    esc = 0
+    if (await db.execute(text("select to_regclass('public.cc_escalations')"))).scalar():
+        esc = (await db.execute(text(
+            "select count(*) from cc_escalations where resolved_at is null"
+        ))).scalar_one()
+
+    def share(missed: int | None, total: int | None) -> float | None:
+        return round(100.0 * missed / total, 1) if total else None
+
+    return {
+        "calls": c.calls, "calls_prev": c.calls_prev,
+        "missed": c.missed, "missed_prev": c.missed_prev,
+        "missed_share": share(c.missed, c.calls),
+        "missed_share_prev": share(c.missed_prev, c.calls_prev),
+        "wait": round(float(c.wait), 1) if c.wait is not None else None,
+        "wait_prev": round(float(c.wait_prev), 1) if c.wait_prev is not None else None,
+        "frt": round(float(t.frt), 1) if t.frt is not None else None,
+        "frt_prev": round(float(t.frt_prev), 1) if t.frt_prev is not None else None,
+        "in_sla_share": share(t.in_sla, t.answered),
+        "in_sla_share_prev": share(t.in_sla_prev, t.answered_prev),
+        "answered": t.answered,
+        "wrapup_stuck": stuck, "repeat_people": repeat, "escalations": esc,
+        "target_missed": targets["missed_share"],
+        "target_frt": frt_target,
+        "target_in_sla": targets["in_sla_share"],
+    }
+
+
 @router.get("/day")
 async def pulse_day(
     company_id: str = Query(...),
+    as_role: str | None = Query(None, description="смотреть глазами этой роли"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Экран дня: строка KPI по направлениям + карточки-эскалации (сводки)."""
-    await assert_company_member(company_id, current_user, db)
-    return await pulse_day_data(db, str(company_id))
+    await assert_company_product(company_id, current_user, db, "pulse")
+    visible = await _visible_items(db, str(company_id), current_user, as_role)
+    return await pulse_day_data(db, str(company_id), visible)
 
 
-async def pulse_day_data(db: AsyncSession, company_id: str) -> dict[str, Any]:
+async def pulse_day_data(db: AsyncSession, company_id: str,
+                         visible: set[str] | None = None) -> dict[str, Any]:
     """Данные экрана дня без проверки доступа — её делает вызывающий.
 
     Отдельной функцией, потому что плитку «Пульса» на рабочем столе считает тот же
@@ -165,10 +1269,15 @@ async def pulse_day_data(db: AsyncSession, company_id: str) -> dict[str, Any]:
     и плитка начала бы врать про то, что внутри.
     """
     cid = str(company_id)
+    # Чем мерить продажи, решает профиль: у топливного пространства это заправки,
+    # у ЭЗС — зарядные сессии. Раньше таблица была зашита, и на профиле fuel экран
+    # дня тревожно писал «Данных о сессиях нет» при 376 744 живых заправках.
+    profile = await _profile(db, cid)
+    TBL, TS, AMT, VOL, VOL_LABEL, LOC, SESS_WORD = PROFILE_SALES[profile]
 
     # ── Свежесть: правило №0. as_of — дата данных, под ним живут все окна ──
     as_of = (await db.execute(text(
-        "select max(started_at) from charge_sessions where company_id = :cid"
+        f"select max({TS}) from {TBL} where company_id = :cid"
     ), {"cid": cid})).scalar_one_or_none()
     stale_days: int | None = None
     if as_of is not None:
@@ -176,14 +1285,14 @@ async def pulse_day_data(db: AsyncSession, company_id: str) -> dict[str, Any]:
         stale_days = (datetime.now(timezone.utc) - as_of_utc).days
 
     # ── Сеть и продажи: 7 дней данных против предыдущих 7 ──
-    s = (await db.execute(text("""
-        select count(*) filter (where started_at > CAST(:as_of AS timestamp) - interval '7 days') as s7,
-               coalesce(sum(amount) filter (where started_at > CAST(:as_of AS timestamp) - interval '7 days'), 0) as r7,
-               count(*) filter (where started_at <= CAST(:as_of AS timestamp) - interval '7 days'
-                                and started_at > CAST(:as_of AS timestamp) - interval '14 days') as s7p,
-               coalesce(sum(amount) filter (where started_at <= CAST(:as_of AS timestamp) - interval '7 days'
-                                and started_at > CAST(:as_of AS timestamp) - interval '14 days'), 0) as r7p
-        from charge_sessions where company_id = :cid
+    s = (await db.execute(text(f"""
+        select count(*) filter (where {TS} > CAST(:as_of AS timestamp) - interval '7 days') as s7,
+               coalesce(sum({AMT}) filter (where {TS} > CAST(:as_of AS timestamp) - interval '7 days'), 0) as r7,
+               count(*) filter (where {TS} <= CAST(:as_of AS timestamp) - interval '7 days'
+                                and {TS} > CAST(:as_of AS timestamp) - interval '14 days') as s7p,
+               coalesce(sum({AMT}) filter (where {TS} <= CAST(:as_of AS timestamp) - interval '7 days'
+                                and {TS} > CAST(:as_of AS timestamp) - interval '14 days'), 0) as r7p
+        from {TBL} where company_id = :cid
     """), {"cid": cid, "as_of": as_of})).one() if as_of else None
 
     # Молчащие — по парку станций, когда-либо дававших сессии (как в
@@ -191,9 +1300,9 @@ async def pulse_day_data(db: AsyncSession, company_id: str) -> dict[str, Any]:
     # неподключённые станции — другая история, не эскалация оборудования).
     silent = (await db.execute(text(f"""
         with ever as (
-            select location_id, max(started_at) as last_at
-              from charge_sessions
-             where company_id = :cid and location_id is not null
+            select {LOC} as loc, max({TS}) as last_at
+              from {TBL}
+             where company_id = :cid and {LOC} is not null
              group by 1
         )
         select count(*) as park,
@@ -253,7 +1362,7 @@ async def pulse_day_data(db: AsyncSession, company_id: str) -> dict[str, Any]:
         kpi.append(_kpi("revenue", "Выручка за 7 дн, ₽", float(s.r7),
                         delta_pct=_dpct(float(s.r7), float(s.r7p)), state=data_state,
                         link="/pulse/business"))
-        kpi.append(_kpi("sessions", "Сессии за 7 дн", s.s7,
+        kpi.append(_kpi("sessions", f"{SESS_WORD} за 7 дн", s.s7,
                         delta_pct=_dpct(s.s7, s.s7p), state=data_state,
                         link="/pulse/business"))
     if silent is not None and silent.park:
@@ -264,31 +1373,67 @@ async def pulse_day_data(db: AsyncSession, company_id: str) -> dict[str, Any]:
                         note=f"из {silent.park} за {SILENT_HOURS} ч данных",
                         state="warn" if share > 0.3 else data_state,
                         link="/sales", higher_is_better=False))
-    kpi.append(_kpi("own_open", "Свои заявки", t.own_open,
-                    note=f"SLA нарушен: {t.own_sla}",
-                    state="warn" if t.own_sla_stale else None,
-                    link="/tickets", higher_is_better=False))
-    kpi.append(_kpi("ext_open", "Внешняя FSM", t.ext_open,
-                    note=f"старше месяца: {t.ext_old}",
-                    link="/tickets", higher_is_better=False))
+    # Пустой контур не показываем: ноль по продукту, которого в пространстве нет,
+    # читается как «всё встало», а не как «мы этим не пользуемся».
+    if t.own_open or t.ext_open:
+        kpi.append(_kpi("own_open", "Свои заявки", t.own_open,
+                        note=f"SLA нарушен: {t.own_sla}",
+                        state="warn" if t.own_sla_stale else None,
+                        link="/tickets?src=own", higher_is_better=False))
+    if t.ext_open:
+        kpi.append(_kpi("ext_open", "Заявки подрядчика", t.ext_open,
+                        note=f"старше месяца: {t.ext_old}",
+                        link="/tickets?src=external", higher_is_better=False))
     active_projects = sum(r.n for r in funnel)
-    kpi.append(_kpi("funnel", "Проекты в работе", active_projects,
-                    note=f"введено за 30 дн: {commissioned_30d}",
-                    link="/pulse/business"))
+    if active_projects:
+        kpi.append(_kpi("funnel", "Проекты в работе", active_projects,
+                        note=f"введено за 30 дн: {commissioned_30d}",
+                        link="/pulse/business?view=projects"))
     kpi.append(_kpi("people", "Сейчас в системе", p.online,
                     note=f"за сегодня: {p.today} из {p.total}",
                     link="/pulse/team"))
 
+    sales = await _sales_snapshot(db, cid, as_of, profile)
+    projects = await _projects_snapshot(db, cid)
+    ops = await _ops_snapshot(db, cid)
+    objects = await _objects_snapshot(db, cid)
+    th = await _thresholds(db, cid)
+    sources = await _sources_snapshot(db, cid)
+    access = await _access_snapshot(db, cid)
+
+    # ── Разговор с потребителем: одна плитка, подробности — в «Обращениях» ──
+    cc = await _cc_snapshot(db)
+    if cc.get("calls"):
+        cc_share = cc["missed_share"]
+        kpi.append(_kpi(
+            "cc_missed", "Пропущено звонков", cc["missed"],
+            delta_pct=_dpct(cc["missed"], cc["missed_prev"]),
+            note=f"из {cc['calls']} за неделю · цель ≤ {cc['target_missed']:.0f}%",
+            state="warn" if cc_share is not None and cc_share > cc["target_missed"] else None,
+            link="/pulse/business?view=contacts", higher_is_better=False))
+
     # ── Карточки-эскалации: аномалия или сводка, не запись (PULSE.md §7) ──
-    acked = {r.card_key for r in (await db.execute(text(
-        "select card_key from pulse_acks where company_id = :cid and acked_on = current_date"
-    ), {"cid": cid})).all()}
+    # Карточка не показывается, если её приняли сегодня ИЛИ отложили на срок,
+    # который ещё не наступил. Отложенное живёт в «Принятом» со своей датой.
+    acked = {r.card_key for r in (await db.execute(text("""
+        select card_key from pulse_acks
+        where company_id = :cid
+          and (acked_on = current_date
+               or (snooze_until is not null and snooze_until >= current_date))
+    """), {"cid": cid})).all()}
     cards = build_cards(
         as_of=as_of, stale_days=stale_days,
         own_sla_stale=t.own_sla_stale, own_reopen=t.own_reopen, ext_old=t.ext_old,
         silent=(silent.silent if silent else 0), park=(silent.park if silent else 0),
-        acked=acked,
+        acked=acked, cc=cc, sales=sales, projects=projects, ops=ops, objects=objects,
+        th=th, sources=sources, access=access, visible=visible,
     )
+
+    # Карточки отобраны внутри правил (до колпака), здесь остаются плитки:
+    # цифра закрытого разреза — та же информация, только числом.
+    if visible is not None:
+        kpi = [k for k in kpi if KPI_SCOPE.get(k["key"]) is None
+               or KPI_SCOPE[k["key"]] in visible]
 
     return {
         "as_of": as_of.isoformat() if as_of else None,
@@ -310,46 +1455,48 @@ async def pulse_business(
     Ни фамилий, ни заявок (PULSE.md §3): куратора интересует, в каком состоянии
     дело и как оно движется, а операциями занят директор.
     """
-    await assert_company_member(company_id, current_user, db)
+    await assert_company_product(company_id, current_user, db, "pulse")
     cid = str(company_id)
 
+    profile = await _profile(db, cid)
+    TBL, TS, AMT, VOL, VOL_LABEL, LOC, SESS_WORD = PROFILE_SALES[profile]
     as_of = (await db.execute(text(
-        "select max(started_at) from charge_sessions where company_id = :cid"
+        f"select max({TS}) from {TBL} where company_id = :cid"
     ), {"cid": cid})).scalar_one_or_none()
 
     net: list[dict[str, Any]] = []
     trend: list[dict[str, Any]] = []
     if as_of is not None:
-        m = (await db.execute(text("""
-            select count(*) filter (where started_at > CAST(:as_of AS timestamp) - interval '30 days') as s30,
-                   coalesce(sum(amount) filter (where started_at > CAST(:as_of AS timestamp) - interval '30 days'), 0) as r30,
-                   coalesce(sum(energy_kwh) filter (where started_at > CAST(:as_of AS timestamp) - interval '30 days'), 0) as e30,
-                   count(*) filter (where started_at <= CAST(:as_of AS timestamp) - interval '30 days'
-                                    and started_at > CAST(:as_of AS timestamp) - interval '60 days') as s30p,
-                   coalesce(sum(amount) filter (where started_at <= CAST(:as_of AS timestamp) - interval '30 days'
-                                    and started_at > CAST(:as_of AS timestamp) - interval '60 days'), 0) as r30p,
-                   coalesce(sum(energy_kwh) filter (where started_at <= CAST(:as_of AS timestamp) - interval '30 days'
-                                    and started_at > CAST(:as_of AS timestamp) - interval '60 days'), 0) as e30p,
-                   count(distinct location_id) filter (where started_at > CAST(:as_of AS timestamp) - interval '30 days') as live
-            from charge_sessions where company_id = :cid
+        m = (await db.execute(text(f"""
+            select count(*) filter (where {TS} > CAST(:as_of AS timestamp) - interval '30 days') as s30,
+                   coalesce(sum({AMT}) filter (where {TS} > CAST(:as_of AS timestamp) - interval '30 days'), 0) as r30,
+                   coalesce(sum({VOL}) filter (where {TS} > CAST(:as_of AS timestamp) - interval '30 days'), 0) as e30,
+                   count(*) filter (where {TS} <= CAST(:as_of AS timestamp) - interval '30 days'
+                                    and {TS} > CAST(:as_of AS timestamp) - interval '60 days') as s30p,
+                   coalesce(sum({AMT}) filter (where {TS} <= CAST(:as_of AS timestamp) - interval '30 days'
+                                    and {TS} > CAST(:as_of AS timestamp) - interval '60 days'), 0) as r30p,
+                   coalesce(sum({VOL}) filter (where {TS} <= CAST(:as_of AS timestamp) - interval '30 days'
+                                    and {TS} > CAST(:as_of AS timestamp) - interval '60 days'), 0) as e30p,
+                   count(distinct {LOC}) filter (where {TS} > CAST(:as_of AS timestamp) - interval '30 days') as live
+            from {TBL} where company_id = :cid
         """), {"cid": cid, "as_of": as_of})).one()
         # Единица измерения — в заголовке, а не рядом с числом: «271,8 тыс. кВт·ч»
         # не помещалось в плитку на телефоне и вылезало за рамку.
         net = [
             _kpi("revenue", "Выручка, ₽", float(m.r30),
                  delta_pct=_dpct(float(m.r30), float(m.r30p))),
-            _kpi("energy", "Отпущено, кВт·ч", float(m.e30),
+            _kpi("energy", VOL_LABEL, float(m.e30),
                  delta_pct=_dpct(float(m.e30), float(m.e30p))),
-            _kpi("sessions", "Зарядных сессий", m.s30, delta_pct=_dpct(m.s30, m.s30p)),
-            _kpi("live", "Работающих станций", m.live, note="давали сессии за 30 дней"),
+            _kpi("sessions", SESS_WORD, m.s30, delta_pct=_dpct(m.s30, m.s30p)),
+            _kpi("live", "Работающих точек", m.live, note="давали операции за 30 дней"),
         ]
         # Помесячно за полгода — форма кривой важнее точных чисел.
         trend = [{"month": r.m.strftime("%m.%Y"), "revenue": float(r.rev), "sessions": r.n}
-                 for r in (await db.execute(text("""
-            select date_trunc('month', started_at) as m, count(*) as n,
-                   coalesce(sum(amount), 0) as rev
-            from charge_sessions
-            where company_id = :cid and started_at > CAST(:as_of AS timestamp) - interval '6 months'
+                 for r in (await db.execute(text(f"""
+            select date_trunc('month', {TS}) as m, count(*) as n,
+                   coalesce(sum({AMT}), 0) as rev
+            from {TBL}
+            where company_id = :cid and {TS} > CAST(:as_of AS timestamp) - interval '6 months'
             group by 1 order by 1
         """), {"cid": cid, "as_of": as_of})).all()]
 
@@ -393,6 +1540,868 @@ async def pulse_business(
     }
 
 
+class TargetsIn(BaseModel):
+    company_id: str
+    # Только известные ключи реестра; пустое значение — вернуть дефолт.
+    values: dict[str, float | None]
+
+
+@router.get("/export")
+async def pulse_export(
+    view: str = Query(..., pattern="^(week|objects|operations)$"),
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Response:
+    """Выгрузка разреза в CSV.
+
+    Общий `ExportButton` пространства собирает выгрузку из DOM (плитки и
+    таблицы), а разделы «Пульса» свёрстаны карточками — он отдал бы почти пустой
+    файл. Поэтому выгрузка серверная: те же цифры, что на экране, но из тех же
+    запросов, а не из разметки.
+
+    CSV с точкой с запятой и BOM — иначе Excel открывает кириллицу кракозябрами
+    и не делит строку на колонки.
+    """
+    cid = str(await assert_company_product(company_id, current_user, db, "pulse"))
+    rows: list[list[Any]] = []
+    if view == "week":
+        d = await pulse_week_data(db, cid)
+        rows = [["Показатель", "За неделю", "Предыдущая", "Единица"]]
+        rows += [[r["label"], r["value"], r["prev"] if r["prev"] is not None else "",
+                  r["unit"] or ""] for r in d["rows"]]
+        name = "pulse-week"
+    elif view == "objects":
+        o = await _objects_snapshot(db, cid)
+        rows = [["Точка", "Код", "Признаки", "Под вопросом, ₽", "Выручка недели, ₽",
+                 "Было неделей раньше, ₽", "Начислено за 2 мес, ₽", "Без документа",
+                 "Последняя сессия"]]
+        rows += [[p["name"], p["code"],
+                  " · ".join(OBJ_FLAG_LABELS.get(f, f) for f in p["flags"]),
+                  round(p["at_risk"]),
+                  round(p["revenue"]), round(p["revenue_prev"]), round(p["cost"]),
+                  p["late_docs"], (p["last_session"] or "")[:10]]
+                 for p in o.get("pain", [])]
+        name = "pulse-objects"
+    else:
+        ops = await _ops_snapshot(db, cid)
+        rows = [["Период", "Начислений", "Ожидание, ₽", "Без документа",
+                 "Просрочено подтверждений"]]
+        rows.append([ops["period"][:7], ops["charges"], round(ops["expected"]),
+                     ops["no_doc"], ops["docs_overdue"]])
+        name = "pulse-operations"
+
+    buf = io.StringIO()
+    csv.writer(buf, delimiter=";", lineterminator=CRLF).writerows(rows)
+    body = "\ufeff" + buf.getvalue()
+    return Response(
+        content=body.encode("utf-8"),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition":
+                 f'attachment; filename="{name}-{date.today():%Y%m%d}.csv"'},
+    )
+
+
+@router.get("/access")
+async def pulse_access(
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Люди и доступ: кто есть, кто спит и что меняли в правах.
+
+    Не слежка за присутствием (PULSE.md §3), а риск: доступ переживает людей, и
+    единственный, кому это видно целиком, — руководитель пространства.
+    """
+    await assert_company_product(company_id, current_user, db, "pulse")
+    a = await _access_snapshot(db, str(company_id))
+    kpi = [
+        _kpi("members", "Людей в пространстве", a["members"]),
+        _kpi("admins", "С полным доступом", a["admins"],
+             note="могут менять состав и права"),
+        _kpi("partners", "Внешних участников", a["partners"],
+             note="не сотрудники компании", higher_is_better=False),
+        _kpi("dormant", "Не заходили месяц", a["dormant"],
+             note=(f"из них с правами админа: {a['dormant_admins']}"
+                   if a["dormant_admins"] else None),
+             state="warn" if a["dormant_admins"] else None, higher_is_better=False),
+        _kpi("invites", "Приглашения без ответа", a["invites_pending"],
+             note=(f"висят больше недели: {a['invites_stale']}" if a["invites_stale"] else None),
+             state="warn" if a["invites_stale"] else None, higher_is_better=False),
+        _kpi("failed", "Неудачных входов", a["login_failed_7d"],
+             note="за неделю", higher_is_better=False),
+    ]
+    return {"kpi": kpi, "dormant": a["dormant_list"], "events": a["events"]}
+
+
+@router.get("/sources")
+async def pulse_sources(
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Источники: когда каждый в последний раз приносил данные и что он кормит.
+
+    Отвечает на вопрос, который стоит перед всеми остальными разделами: каким
+    цифрам сегодня можно верить. Реестр коннекторов для этого не годится —
+    коннектор бывает «активным» при том, что данные не приезжали неделю.
+    """
+    await assert_company_product(company_id, current_user, db, "pulse")
+    items = await _sources_snapshot(db, str(company_id))
+    # Каналы обмена — как их видит Учёт: имя, расписание, последний обмен.
+    channels = [{"name": r.name, "status": r.status, "docs": r.docs_loaded or 0,
+                 "last_sync": r.last_sync_at.isoformat() if r.last_sync_at else None}
+                for r in (await db.execute(text("""
+        select name, status, docs_loaded, last_sync_at from channels
+        where company_id = :cid order by last_sync_at desc nulls last limit 12
+    """), {"cid": str(company_id)})).all()]
+    return {"items": items, "channels": channels,
+            "stale": sum(1 for i in items if i["stale"])}
+
+
+class VisibilityIn(BaseModel):
+    company_id: str
+    role_id: str
+    # Ключи пунктов «Пульса», которые остаются видимыми этой роли.
+    items: list[str]
+
+
+@router.get("/comms")
+async def pulse_comms(
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """«Переписка» — живёт ли общение: сотрудники в чатах, клиенты в обращениях.
+
+    Директору нужен не пересказ чужих лент, а три ответа: пишут ли вообще, кто
+    именно из своих, и не осталось ли клиента без ответа. Содержимого сообщений
+    здесь нет и не будет — это разрез активности, а не чтение чужой переписки.
+    """
+    cid = str(await assert_company_product(company_id, current_user, db, "pulse"))
+    p = {"cid": cid}
+
+    # Чаты пространства: свои между собой. Комнаты приложений (`app:*`) заводятся
+    # автоматически, поэтому «комнат много, сообщений ноль» — нормальное начало.
+    chat = (await db.execute(text("""
+        select count(*) filter (where m.created_at >= now() - interval '7 days') as w1,
+               count(*) filter (where m.created_at >= now() - interval '14 days'
+                                 and m.created_at < now() - interval '7 days') as w2,
+               count(distinct coalesce(m.user_id::text, m.user_name))
+                 filter (where m.created_at >= now() - interval '7 days') as people,
+               max(m.created_at) as last_at
+        from chat_messages m join chat_rooms r on r.id = m.room_id
+        where r.company_id = :cid and m.deleted_at is null
+    """), p)).one()
+    rooms = (await db.execute(text("""
+        select count(*) as total,
+               count(*) filter (where exists (
+                   select 1 from chat_messages m
+                   where m.room_id = r.id and m.deleted_at is null
+                     and m.created_at >= now() - interval '30 days')) as alive
+        from chat_rooms r where r.company_id = :cid
+    """), p)).one()
+
+    # Кто пишет: активность своих по именам. Молчание тоже ответ — в списке
+    # видно, что переписку держат двое из шестнадцати.
+    authors = [{"name": r.nm, "messages": r.n, "rooms": r.rooms,
+                "last": r.last_at.isoformat() if r.last_at else None}
+               for r in (await db.execute(text("""
+        select coalesce(u.name, m.user_name, '—') as nm, count(*) as n,
+               count(distinct m.room_id) as rooms, max(m.created_at) as last_at
+        from chat_messages m
+        join chat_rooms r on r.id = m.room_id
+        left join users u on u.id = m.user_id
+        where r.company_id = :cid and m.deleted_at is null
+          and m.created_at >= now() - interval '30 days'
+        group by 1 order by n desc limit 10
+    """), p)).all()]
+
+    # Клиенты: обращения контура Поддержки. Канал показываем как есть — на пилоте
+    # это телефония, на других стеках добавятся почта и мессенджеры.
+    channels: list[dict[str, Any]] = []
+    unanswered = 0
+    try:
+        channels = [{"channel": r.ch, "threads": r.n, "week": r.w1, "prev": r.w2}
+                    for r in (await db.execute(text("""
+            select channel as ch, count(*) as n,
+                   count(*) filter (where created_at >= now() - interval '7 days') as w1,
+                   count(*) filter (where created_at >= now() - interval '14 days'
+                                     and created_at < now() - interval '7 days') as w2
+            from inbox_threads group by channel order by n desc limit 8
+        """))).all()]
+        unanswered = (await db.execute(text("""
+            select count(*) from inbox_threads
+            where first_response_at is null and closed_at is null
+              and created_at >= now() - interval '30 days'
+        """))).scalar_one()
+    except ProgrammingError:
+        await db.rollback()
+
+    # Почта пространства: свой ящик стека. Четыре письма — это «контур заведён»,
+    # а не «почтой пользуются»; экран говорит об этом прямо.
+    mail = {"inbound": 0, "outbound": 0, "last": None}
+    try:
+        # company_id тут не фильтруется — по той же причине, что и в витрине
+        # заявок: пространство однокомпанийное, а идентификаторы контуров разные.
+        r = (await db.execute(text("""
+            select count(*) filter (where direction = 'inbound') as inb,
+                   count(*) filter (where direction = 'outbound') as outb,
+                   max(coalesce(sent_at, received_at)) as last_at
+            from email_messages
+        """))).one()
+        mail = {"inbound": r.inb, "outbound": r.outb,
+                "last": r.last_at.isoformat() if r.last_at else None}
+    except ProgrammingError:
+        await db.rollback()
+
+    # Переписка по заявкам — тоже общение с людьми, только вокруг работы.
+    tickets_msgs = 0
+    try:
+        tickets_msgs = (await db.execute(text("""
+            select count(*) from ticket_messages where created_at >= now() - interval '7 days'
+        """))).scalar_one()
+    except ProgrammingError:
+        await db.rollback()
+
+    kpi = [
+        _kpi("chat", "Сообщений в чатах", chat.w1,
+             delta_pct=_dpct(chat.w1, chat.w2), note="за неделю"),
+        _kpi("people", "Пишут сотрудников", chat.people,
+             note=f"комнат живых: {rooms.alive} из {rooms.total}"),
+        _kpi("mail", "Писем в ящике", mail["inbound"] + mail["outbound"],
+             note=(f"входящих {mail['inbound']} · исходящих {mail['outbound']}")),
+        _kpi("threads", "Обращений за неделю", sum(c["week"] for c in channels),
+             delta_pct=_dpct(sum(c["week"] for c in channels),
+                             sum(c["prev"] for c in channels)) if channels else None,
+             note="каналы контакт-центра"),
+        _kpi("unanswered", "Без ответа", unanswered,
+             note="обращения за месяц, где мы не ответили",
+             state="warn" if unanswered else None, higher_is_better=False),
+        _kpi("ticket_msgs", "Сообщений по заявкам", tickets_msgs, note="за неделю"),
+    ]
+    return {"kpi": kpi, "authors": authors, "channels": channels,
+            "rooms_total": rooms.total, "rooms_alive": rooms.alive,
+            "chat_last": chat.last_at.isoformat() if chat.last_at else None,
+            "mail": mail}
+
+
+@router.get("/visibility")
+async def pulse_visibility(
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Состав «Пульса» и то, что из него видит каждая роль пространства.
+
+    Экран отбора: директор идёт по своей же картине и отмечает, что показывать
+    куратору. Права пишутся в ту же роль, что и везде, — «Пульс» не заводит
+    собственную систему доступа.
+    """
+    cid = str(await assert_company_product(company_id, current_user, db, "pulse"))
+    roles = [{
+        "id": str(r.id), "name": r.name,
+        # modules = NULL у роли «Полный доступ»: отбирать там нечего.
+        "full": r.modules is None,
+        "items": sorted({k.split(":", 1)[1] for k in (r.modules or [])
+                         if k.startswith("pulse:")} & PULSE_ITEM_KEYS),
+        "has_all": "pulse" in (r.modules or []),
+        "people": 0,
+    } for r in (await db.execute(text(
+        "select id, name, modules from company_roles where company_id = :cid order by name"
+    ), {"cid": cid})).mappings().all()]
+    counts = {str(r.role_id): r.n for r in (await db.execute(text(
+        "select role_id, count(*) as n from user_companies"
+        " where company_id = :cid and role_id is not null group by role_id"
+    ), {"cid": cid})).all()}
+    for r in roles:
+        r["people"] = counts.get(r["id"], 0)
+    return {"items": [{"key": k, "label": lbl, "section": sec}
+                      for k, lbl, sec in PULSE_ITEMS], "roles": roles}
+
+
+@router.put("/visibility")
+async def pulse_visibility_save(
+    body: VisibilityIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Сохранить отбор для роли: что из «Пульса» ей видно.
+
+    Ключи продукта в наборе роли заменяются целиком — иначе снятая галочка не
+    убирала бы доступ, а только добавляла новые.
+    """
+    cid = str(await assert_company_product(body.company_id, current_user, db, "pulse"))
+    picked = [i for i in body.items if i in PULSE_ITEM_KEYS]
+    row = (await db.execute(text(
+        "select modules from company_roles where id = :rid and company_id = :cid"
+    ), {"rid": body.role_id, "cid": cid})).first()
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Роль не найдена")
+    if row.modules is None:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "У роли полный доступ — отбирать нечего")
+    rest = [k for k in row.modules if k != "pulse" and not k.startswith("pulse:")]
+    mods = rest + [f"pulse:{i}" for i in picked]
+    await db.execute(text(
+        "update company_roles set modules = cast(:mods as jsonb) where id = :rid"
+    ), {"mods": json.dumps(mods, ensure_ascii=False), "rid": body.role_id})
+    await log_audit(db, actor=current_user, company_id=uuid.UUID(cid),
+                    action="pulse.visibility", target=body.role_id,
+                    details={"items": len(picked)})
+    await db.commit()
+    return {"ok": True, "items": picked}
+
+
+@router.get("/targets")
+async def pulse_targets(
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Пороги эскалаций: что настроено и что предлагается по умолчанию."""
+    await assert_company_product(company_id, current_user, db, "pulse")
+    th = await _thresholds(db, str(company_id))
+    return {"items": [{
+        "key": k, "value": th[k], "default": float(v["default"]),
+        "is_custom": abs(th[k] - float(v["default"])) > 1e-9,
+        "label": v["label"], "hint": v["hint"], "unit": v["unit"], "section": v["section"],
+    } for k, v in THRESHOLDS.items()]}
+
+
+@router.put("/targets")
+async def pulse_targets_save(
+    body: TargetsIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Сохранить пороги компании. Ключи вне реестра игнорируются молча — это
+    защита от подсунутого поля, а не от опечатки: реестр рисует сам экран."""
+    cid = await assert_company_product(body.company_id, current_user, db, "pulse")
+    changed: list[str] = []
+    for key, value in body.values.items():
+        if key not in THRESHOLDS:
+            continue
+        if value is None:                      # «вернуть как было» — удаляем строку
+            await db.execute(text(
+                "delete from pulse_targets where company_id = :cid and key = :k"
+            ), {"cid": str(cid), "k": key})
+        else:
+            await db.execute(text("""
+                insert into pulse_targets (company_id, key, value, updated_by, updated_at)
+                values (:cid, :k, :v, :uid, now())
+                on conflict (company_id, key)
+                do update set value = excluded.value, updated_by = excluded.updated_by,
+                              updated_at = now()
+            """), {"cid": str(cid), "k": key, "v": float(value), "uid": current_user.id})
+        changed.append(key)
+    if changed:
+        await log_audit(db, actor=current_user, company_id=cid,
+                        action="pulse.targets", target=", ".join(changed))
+        await db.commit()
+    return {"ok": True, "changed": changed}
+
+
+@router.get("/objects")
+async def pulse_objects(
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """«Где болит» — точка сети сразу во всех контурах.
+
+    Ни одно приложение этого не показывает: «Продажи» видят молчание станции,
+    «Эксплуатация» — расходы по ней, и каждый считает, что у соседа всё в
+    порядке. Здесь они сведены по одному ключу, и в список попадает точка, у
+    которой сошлось несколько независимых признаков сразу.
+    """
+    await assert_company_product(company_id, current_user, db, "pulse")
+    s = await _objects_snapshot(db, str(company_id))
+    if not s:
+        return {"available": False, "kpi": [], "pain": []}
+
+    kpi = [
+        _kpi("pain", "Точек с проблемами", s["pain_count"],
+             note=f"из {s['total']} с движением", state="warn" if s["pain_count"] else None,
+             higher_is_better=False),
+        _kpi("idle", "Платим, но не продают", s["idle_cost_count"],
+             note=f"{money(s['idle_cost_amount'])} ₽ за два месяца",
+             state="warn" if s["idle_cost_count"] >= OBJ_IDLE_COST_MIN else None,
+             higher_is_better=False),
+        _kpi("at_risk", "Под вопросом, ₽", round(s["at_risk_total"]),
+             note="расходы точек плюс потерянная выручка", higher_is_better=False),
+    ]
+    return {"available": True, "kpi": kpi, "pain": s["pain"][:25],
+            "pain_count": s["pain_count"], "total": s["total"]}
+
+
+@router.get("/operations")
+async def pulse_operations(
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """«Эксплуатация» — хозяйство вокруг сети глазами руководителя.
+
+    Приложение «Эксплуатация» показывает хозяйство до последней строки: договоры,
+    условия, счётчики, начисления по каждой точке. Руководителю нужен другой
+    разрез: во сколько обходится незакрытый период, чем он подтверждён, кому мы
+    должны и что тянется с прошлых месяцев.
+
+    Ключевое различие, вокруг которого всё построено: ОЖИДАНИЕ (сколько должны по
+    договору) и ФАКТ (документ от контрагента) — разные вещи. Пока акта нет, это
+    не расход, а обещание, и закрывать месяц по ожиданиям нельзя.
+    """
+    await assert_company_product(company_id, current_user, db, "pulse")
+    cid = str(company_id)
+    s = await _ops_snapshot(db, cid)
+    if not s.get("charges") and not s.get("docs_overdue"):
+        return {"available": False, "kpi": [], "items": [], "counterparties": [],
+                "periods": [], "period": s.get("period")}
+
+    labels = {r.code: r.label for r in (await db.execute(text(
+        "select code, label from ops_cost_items"
+    ))).all()}
+
+    items = [{"code": code, "label": labels.get(code, code), "count": v["count"],
+              "expected": v["expected"], "previous": v["prev"]}
+             for code, v in s["by_item"].items()]
+
+    counterparties = [{"name": r.nm, "count": r.n, "expected": float(r.exp or 0)}
+                      for r in (await db.execute(text("""
+        select coalesce(c.name, ch.counterparty_id, '(без контрагента)') as nm,
+               count(*) as n, sum(ch.expected_gross) as exp
+        from ops_period_charges ch
+        left join counterparties c on c.id::text = ch.counterparty_id
+        where ch.company_id = :cid and ch.period = :cur
+        group by 1 order by exp desc nulls last limit 8
+    """), {"cid": cid, "cur": s["period"]})).all()]
+
+    # Реестр периодов — то самое «ждали ↔ собрали ↔ чем подтверждено», только
+    # свёрнутое до строки на месяц: руководителю нужно увидеть хвосты, а не вести их.
+    d = "^\\d{4}-\\d{2}-\\d{2}$"
+    periods = [{"period": r.period, "charges": r.n, "expected": float(r.exp or 0),
+                "with_doc": r.with_doc, "overdue": r.overdue,
+                "status": r.status or "open"}
+               for r in (await db.execute(text(f"""
+        select ch.period, count(*) as n, sum(ch.expected_gross) as exp,
+               count(*) filter (where ch.doc_id is not null) as with_doc,
+               count(*) filter (where ch.doc_id is null and ch.doc_due_on ~ '{d}'
+                                 and ch.doc_due_on::date < current_date) as overdue,
+               max(pc.status) as status
+        from ops_period_charges ch
+        left join ops_period_close pc
+               on pc.company_id = ch.company_id and pc.period::text = ch.period
+        where ch.company_id = :cid and ch.period <= :cur
+        group by ch.period order by ch.period desc limit 8
+    """), {"cid": cid, "cur": s["period"]})).all()]
+
+    top = sorted(items, key=lambda i: i["expected"], reverse=True)[:2]
+    kpi = [
+        _kpi("expected", "Ждём за месяц, ₽", round(s["expected"]),
+             delta_pct=_dpct(s["expected"], s["expected_prev"]),
+             note=f"период {s['period'][:7]}", higher_is_better=False),
+        *[_kpi(f"item_{i['code']}", f"{i['label']}, ₽", round(i["expected"]),
+               delta_pct=_dpct(i["expected"], i["previous"]),
+               note=f"{i['count']} начислений", higher_is_better=False)
+          for i in top],
+        _kpi("charges", "Начислений в периоде", s["charges"],
+             note="по договорам и условиям"),
+        # Подтверждение — главное, чего не хватает пилоту: ожидания посчитаны,
+        # а актов нет ни одного.
+        _kpi("no_doc", "Без документа", s["no_doc"],
+             note=f"на {money(s['no_doc_amount'])} ₽",
+             state="warn" if s["no_doc"] else None, higher_is_better=False),
+        _kpi("contracts", "Договоров с истёкшим сроком", s["contracts_expired"],
+             note=(f"истекают за 60 дней: {s['contracts_ending']}"
+                   if s["contracts_ending"] else f"всего договоров: {s['contracts_total']}"),
+             state="warn" if s["contracts_expired"] else None, higher_is_better=False),
+        _kpi("overdue", "Просрочено подтверждений", s["docs_overdue"],
+             note=(f"с {s['docs_overdue_oldest']}" if s["docs_overdue_oldest"] else None),
+             state="warn" if s["docs_overdue"] >= OPS_DOCS_OVERDUE else None,
+             higher_is_better=False),
+    ]
+
+    # Договоры, у которых срок вышел или выйдет: имя контрагента важнее номера —
+    # с ним идут разговаривать.
+    contracts = [{"number": r.number, "counterparty": r.nm, "type": r.type_code,
+                  "valid_until": r.valid_until, "expired": r.expired}
+                 for r in (await db.execute(text(f"""
+        select c.number, coalesce(cp.name, c.counterparty_id, '—') as nm,
+               coalesce(c.type_code, c.type, '—') as type_code, c.valid_until,
+               (c.valid_until::date < current_date) as expired
+        from contracts c
+        left join counterparties cp on cp.id::text = c.counterparty_id
+        where c.company_id = :cid and not coalesce(c.is_closed, false)
+          and c.valid_until ~ '{d}'
+          and c.valid_until::date < current_date + 60
+        order by c.valid_until desc limit 12
+    """), {"cid": cid})).all()]
+
+    return {"available": True, "period": s["period"], "kpi": kpi, "items": items,
+            "counterparties": counterparties, "periods": periods,
+            "open_periods": s["open_periods"], "contracts": contracts,
+            "contracts_expired": s["contracts_expired"],
+            "contracts_ending": s["contracts_ending"],
+            "docs_overdue_amount": s["docs_overdue_amount"]}
+
+
+@router.get("/projects")
+async def pulse_projects(
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """«Проекты» — что компания строит, глазами руководителя.
+
+    Витрина приложения «Проекты» отвечает тому, кто ведёт дела («какие карточки
+    у меня в работе»). Здесь три других вопроса: движется ли портфель вообще,
+    где он застрял и у кого это на руках. Плюс поимённо — проекты-долгожители,
+    потому что «46 застряло» задачей не становится, а «Магадан, Пролетарская 66,
+    175 дней в проработке, ведущего нет» — становится.
+    """
+    await assert_company_product(company_id, current_user, db, "pulse")
+    cid = str(company_id)
+    s = await _projects_snapshot(db, cid)
+    if not s.get("active"):
+        return {"available": False, "kpi": [], "stages": [], "longest": [],
+                "moves": [], "owners": []}
+
+    d = "^\\d{4}-\\d{2}-\\d{2}$"
+    stages = [{"stage": r.stage, "label": STAGE_LABELS.get(r.stage, r.stage),
+               "count": r.n, "avg_days": int(r.avg_days) if r.avg_days is not None else None,
+               "stuck": r.stuck}
+              for r in (await db.execute(text(f"""
+        select stage, count(*) as n,
+               avg(current_date - stage_since::date) filter (where stage_since ~ '{d}') as avg_days,
+               count(*) filter (where stage_since ~ '{d}'
+                    and current_date - stage_since::date > :days) as stuck
+        from ezs_projects where company_id = :cid and stage <> 'archive'
+        group by stage order by n desc
+    """), {"cid": cid, "days": PR_STUCK_DAYS})).all()]
+
+    # Имя проекта: своё название, иначе адрес площадки — карточки пилота
+    # приехали импортом без заголовков, и список «(без имени) × 8» бесполезен.
+    longest = [{"title": r.nm, "stage": STAGE_LABELS.get(r.stage, r.stage),
+                "days": r.days, "region": r.region, "owner": r.owner,
+                "next_action": r.next_action}
+               for r in (await db.execute(text(f"""
+        select coalesce(nullif(p.title,''), nullif(s.full_address,''),
+                        nullif(concat_ws(', ', s.city, s.address), ''),
+                        p.location_id, '(без имени)') as nm,
+               p.stage, current_date - p.stage_since::date as days,
+               coalesce(s.region, '—') as region,
+               coalesce(u.name, '') as owner,
+               coalesce(nullif(p.next_action, ''), '') as next_action
+        from ezs_projects p
+        left join ezs_sites s on s.id = p.site_id
+        left join users u on u.id = p.owner_user_id
+        where p.company_id = :cid and p.stage <> 'archive' and p.stage_since ~ '{d}'
+        order by days desc limit 8
+    """), {"cid": cid})).all()]
+
+    owners = [{"name": r.owner or "(без ответственного)", "count": r.n}
+              for r in (await db.execute(text("""
+        select coalesce(u.name, '') as owner, count(*) as n
+        from ezs_projects p left join users u on u.id = p.owner_user_id
+        where p.company_id = :cid and p.stage <> 'archive'
+        group by 1 order by n desc limit 8
+    """), {"cid": cid})).all()]
+
+    # Что сдвинулось: только переходы, гейты и документы. Правки полей карточки
+    # («Площадь», «Адрес») — работа исполнителя, а не движение портфеля.
+    moves = [{"at": r.at.isoformat() if r.at else None, "kind": r.kind, "text": r.txt}
+             for r in (await db.execute(text("""
+        select created_at as at, kind,
+               coalesce(nullif("text",''), 'стадия: ' || coalesce(to_stage,'—')) as txt
+        from ezs_site_events
+        where company_id = :cid and kind in ('stage','gate','doc')
+          and created_at >= now() - interval '7 days'
+        order by created_at desc limit 12
+    """), {"cid": cid})).all()]
+
+    kpi = [
+        _kpi("active", "Проектов в работе", s["active"], note="без архива"),
+        _kpi("moves", "Сменили стадию", s["moves"],
+             delta_pct=_dpct(s["moves"], s["moves_prev"]), note="за неделю"),
+        _kpi("gates", "Гейтов пройдено", s["gates"], note="за неделю"),
+        _kpi("stuck", f"Стоят > {PR_STUCK_DAYS} дней", s["stuck"],
+             note=(f"хуже всего: {s['stuck_stage']}" if s["stuck_stage"] else None),
+             state="warn" if s["stuck"] >= PR_STUCK_MIN else None,
+             higher_is_better=False),
+        _kpi("no_owner", "Без ответственного", s["no_owner"],
+             note=f"из {s['active']} в работе",
+             state="warn" if s["active"] and s["no_owner"] / s["active"] >= PR_OWNER_SHARE else None,
+             higher_is_better=False),
+        _kpi("overdue", "Просрочен следующий шаг", s["overdue"],
+             note="по сроку из карточки",
+             state="warn" if s["overdue"] else None, higher_is_better=False),
+    ]
+
+    return {"available": True, "kpi": kpi, "stages": stages, "longest": longest,
+            "moves": moves, "owners": owners}
+
+
+@router.get("/sales")
+async def pulse_sales(
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """«Продажи» — деньги сети глазами руководителя.
+
+    Не копия витрины приложения «Продажи»: разрезов по коннекторам, часам и
+    тарифам здесь нет — за ними идут туда. Здесь три вопроса: продаём ли столько
+    же, вся ли сеть в работе и доезжает ли клиент до заряда. И один ответ,
+    которого нет больше нигде: ЧТО именно двигает недельную цифру — конкретные
+    станции и регионы, а не «выручка упала на 10%».
+    """
+    await assert_company_product(company_id, current_user, db, "pulse")
+    cid = str(company_id)
+
+    profile = await _profile(db, cid)
+    TBL, TS, AMT, VOL, VOL_LABEL, LOC, SESS_WORD = PROFILE_SALES[profile]
+    # У заправки нет ни «имени станции», ни региона в самой операции: имя — это
+    # её код, а разрез по регионам показывать нечем.
+    NAME = "station_name" if profile == "energy" else "station_code"
+    HAS_REGION = profile == "energy"
+    as_of = (await db.execute(text(
+        f"select max({TS}) from {TBL} where company_id = :cid"
+    ), {"cid": cid})).scalar_one_or_none()
+    s = await _sales_snapshot(db, cid, as_of, profile)
+    if not s:
+        return {"available": False, "kpi": [], "movers": [], "regions": [],
+                "out_stations": [], "as_of": None}
+
+    p = {"cid": cid, "as_of": as_of}
+    weeks = (await db.execute(text(f"""
+        select date_trunc('week', {TS}) as w,
+               coalesce(sum({AMT}), 0) as revenue, count(*) as sessions,
+               coalesce(sum({VOL}), 0) as kwh,
+               count(distinct {LOC}) as live
+        from {TBL}
+        where company_id = :cid and {TS} > CAST(:as_of AS timestamp) - interval '8 weeks'
+        group by 1 order by 1
+    """), p)).all()
+
+    # Что двигает цифру: станции с наибольшим сдвигом выручки в обе стороны.
+    # Отсечка по прошлой неделе — чтобы список не заполнили точки, у которых
+    # «выручка выросла втрое» с двухсот рублей.
+    movers = [{"station": r.nm, "location_id": r.loc, "current": float(r.cur),
+               "previous": float(r.prev), "delta": float(r.cur) - float(r.prev)}
+              for r in (await db.execute(text(f"""
+        select {LOC} as loc, max({NAME}) as nm,
+               coalesce(sum({AMT}) filter (where {TS} > CAST(:as_of AS timestamp) - interval '7 days'), 0) as cur,
+               coalesce(sum({AMT}) filter (where {TS} <= CAST(:as_of AS timestamp) - interval '7 days'), 0) as prev
+        from {TBL}
+        where company_id = :cid and {TS} > CAST(:as_of AS timestamp) - interval '14 days'
+        group by {LOC}
+        having coalesce(sum({AMT}) filter (where {TS} <= CAST(:as_of AS timestamp) - interval '7 days'), 0) > 5000
+            or coalesce(sum({AMT}) filter (where {TS} > CAST(:as_of AS timestamp) - interval '7 days'), 0) > 5000
+        order by abs(
+          coalesce(sum({AMT}) filter (where {TS} > CAST(:as_of AS timestamp) - interval '7 days'), 0)
+          - coalesce(sum({AMT}) filter (where {TS} <= CAST(:as_of AS timestamp) - interval '7 days'), 0)
+        ) desc limit 8
+    """), p)).all()]
+
+    # Регион приносит сам источник: в зарядной сессии он есть, в операции АЗС —
+    # нет. Раздел не выдумывает разрез, которого в данных не существует.
+    regions = [] if not HAS_REGION else [
+        {"region": r.region, "current": float(r.cur), "previous": float(r.prev),
+         "stations": r.n}
+        for r in (await db.execute(text(f"""
+        select coalesce(nullif(region, ''), 'без региона') as region,
+               count(distinct {LOC}) as n,
+               coalesce(sum({AMT}) filter (where {TS} > CAST(:as_of AS timestamp) - interval '7 days'), 0) as cur,
+               coalesce(sum({AMT}) filter (where {TS} <= CAST(:as_of AS timestamp) - interval '7 days'), 0) as prev
+        from {TBL}
+        where company_id = :cid and {TS} > CAST(:as_of AS timestamp) - interval '14 days'
+        group by 1 order by cur desc limit 10
+    """), p)).all()]
+
+    # Выпавшие — поимённо: «38 станций молчат» без имён не превращается в задачу.
+    out_stations = [{"station": r.nm, "location_id": r.loc, "lost": float(r.rev),
+                     "last_seen": r.last.isoformat() if r.last else None}
+                    for r in (await db.execute(text(f"""
+        with cur as (
+          select distinct {LOC} as loc from {TBL}
+          where company_id = :cid and {TS} > CAST(:as_of AS timestamp) - interval '7 days'
+        )
+        select {LOC} as loc, max({NAME}) as nm,
+               coalesce(sum({AMT}), 0) as rev, max({TS}) as last
+        from {TBL}
+        where company_id = :cid
+          and {TS} <= CAST(:as_of AS timestamp) - interval '7 days'
+          and {TS} > CAST(:as_of AS timestamp) - interval '14 days'
+          and {LOC} not in (select loc from cur)
+        group by {LOC} order by rev desc limit 12
+    """), p)).all()]
+
+    kpi = [
+        {**_kpi("revenue", "Выручка, ₽", round(s["revenue"]),
+                delta_pct=_dpct(s["revenue"], s["revenue_prev"]),
+                note="за неделю данных"),
+         "spark": [float(w.revenue) for w in weeks]},
+        {**_kpi("sessions", SESS_WORD, s["sessions"],
+                delta_pct=_dpct(s["sessions"], s["sessions_prev"])),
+         "spark": [float(w.sessions) for w in weeks]},
+        {**_kpi("kwh", VOL_LABEL, round(s["kwh"]),
+                delta_pct=_dpct(s["kwh"], s["kwh_prev"])),
+         "spark": [float(w.kwh) for w in weeks]},
+        _kpi("check", "Средний чек, ₽", s["avg_check"],
+             delta_pct=_dpct(s["avg_check"] or 0, s["avg_check_prev"] or 0),
+             note="на сессию"),
+        # Успех приездов, а не сессий: клиент, зарядившийся с третьей попытки,
+        # уехал довольным — это один успешный визит, а не две ошибки и успех.
+        {**_kpi("visit_ok", "Уехали с зарядом, %", s["visit_ok_share"],
+                delta_pct=_dpct(s["visit_ok_share"] or 0, s["visit_ok_share_prev"] or 0),
+                note=f"из {s['visits']} приездов · норма ≥ {SALES_VISIT_OK:.0f}%",
+                state=("warn" if s["visit_ok_share"] is not None
+                       and s["visit_ok_share"] < SALES_VISIT_OK else None)),
+         "spark": []},
+        {**_kpi("live", "Станций в работе", s["live"],
+                delta_pct=_dpct(s["live"], s["live_prev"]),
+                note=(f"выпало за неделю: {s['stations_out']}"
+                      if s["stations_out"] else "выпавших нет"),
+                state="warn" if s["stations_out"] >= SALES_OUT_MIN else None),
+         "spark": [float(w.live) for w in weeks]},
+    ]
+
+    return {
+        "available": True,
+        "as_of": as_of.isoformat() if as_of else None,
+        "kpi": kpi, "movers": movers, "regions": regions,
+        "out_stations": out_stations,
+        "stations_out": s["stations_out"], "stations_out_revenue": s["stations_out_revenue"],
+    }
+
+
+@router.get("/contact-center")
+async def pulse_contact_center(
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """«Обращения» — разговор с потребителем глазами руководителя.
+
+    Не копия рабочего места контакт-центра: ленты, карточек контактов и записей
+    разговоров здесь нет — за ними идут в само приложение. Здесь четыре ответа:
+    дозвонились ли до нас, быстро ли ответили, не брошены ли хвосты и не ходит
+    ли клиент по кругу. Плюс два разреза, которых нет больше нигде: КОГДА не
+    отвечают (профиль по часам) и КТО тянет нагрузку.
+
+    Оценка «хорошо/плохо» берётся из целей самого контакт-центра
+    (`cc_kpi_targets`), а не назначается «Пульсом».
+    """
+    await assert_company_product(company_id, current_user, db, "pulse")
+
+    cc = await _cc_snapshot(db)
+    if not cc:
+        return {"available": False, "kpi": [], "hours": [], "operators": [],
+                "as_of": None, "targets": {}}
+
+    # Восемь недель ряда под цифрой: одна неделя против другой отвечает «стало
+    # хуже?», а форма кривой — «это тенденция или разовый провал?».
+    weeks = (await db.execute(text("""
+        select date_trunc('week', started_at) as w,
+               count(*) as calls,
+               count(*) filter (where missed) as missed,
+               avg(wait_sec) as wait
+        from call_records
+        where direction = 'inbound' and started_at >= now() - interval '8 weeks'
+        group by 1 order by 1
+    """))).all()
+    tweeks = (await db.execute(text("""
+        select date_trunc('week', created_at) as w,
+               avg(extract(epoch from (first_response_at - created_at))) as frt,
+               count(*) filter (where first_response_at is not null) as answered,
+               count(*) filter (where first_response_at is not null
+                 and extract(epoch from (first_response_at - created_at)) <= :t) as in_sla
+        from inbox_threads
+        where created_at >= now() - interval '8 weeks'
+        group by 1 order by 1
+    """), {"t": cc["target_frt"]})).all()
+
+    spark_calls = [float(r.calls) for r in weeks]
+    spark_missed = [round(100.0 * r.missed / r.calls, 1) if r.calls else None for r in weeks]
+    spark_wait = [round(float(r.wait), 1) if r.wait is not None else None for r in weeks]
+    spark_frt = [round(float(r.frt), 1) if r.frt is not None else None for r in tweeks]
+    spark_sla = [round(100.0 * r.in_sla / r.answered, 1) if r.answered else None
+                 for r in tweeks]
+
+    def _pct_state(value: float | None, target: float, higher: bool) -> str | None:
+        """Цвет плитки — по цели контакт-центра, а не по абстрактному «много»."""
+        if value is None:
+            return None
+        return "warn" if (value < target if higher else value > target) else None
+
+    kpi = [
+        # Объём обращений — контекст, а не оценка: и рост, и падение потока сами
+        # по себе не победа и не провал, поэтому дельта здесь нейтральная.
+        {**_kpi("calls", "Звонков за неделю", cc["calls"],
+                delta_pct=_dpct(cc["calls"], cc["calls_prev"]),
+                note="входящие", link=None), "higher_is_better": None,
+         "spark": spark_calls},
+        {**_kpi("missed_share", "Пропущено, %", cc["missed_share"],
+                delta_pct=_dpct(cc["missed_share"] or 0, cc["missed_share_prev"] or 0),
+                note=f"{cc['missed']} звонков · цель ≤ {cc['target_missed']:.0f}%",
+                state=_pct_state(cc["missed_share"], cc["target_missed"], higher=False),
+                higher_is_better=False), "spark": spark_missed},
+        {**_kpi("wait", "Ждут ответа, с", cc["wait"],
+                delta_pct=_dpct(cc["wait"] or 0, cc["wait_prev"] or 0),
+                note="среднее до снятия трубки", higher_is_better=False),
+         "spark": spark_wait},
+        {**_kpi("frt", "Первый ответ, с", cc["frt"],
+                delta_pct=_dpct(cc["frt"] or 0, cc["frt_prev"] or 0),
+                note=f"цель ≤ {cc['target_frt']:.0f} с",
+                state=_pct_state(cc["frt"], cc["target_frt"], higher=False),
+                higher_is_better=False), "spark": spark_frt},
+        {**_kpi("in_sla", "В цели по SLA, %", cc["in_sla_share"],
+                delta_pct=_dpct(cc["in_sla_share"] or 0, cc["in_sla_share_prev"] or 0),
+                note=f"из {cc['answered']} отвеченных · цель ≥ {cc['target_in_sla']:.0f}%",
+                state=_pct_state(cc["in_sla_share"], cc["target_in_sla"], higher=True)),
+         "spark": spark_sla},
+        _kpi("repeat", "Звонят повторно", cc["repeat_people"],
+             note=f"{CC_REPEAT_TIMES}+ обращения за неделю", higher_is_better=False),
+    ]
+
+    # Когда именно не отвечают: ночь, обед и утренний пик — разные разговоры с
+    # подрядчиком, и по суточной доле их не различить.
+    hours = [{"hour": int(r.h), "calls": r.n, "missed": r.missed}
+             for r in (await db.execute(text("""
+        select extract(hour from started_at at time zone 'Europe/Moscow') as h,
+               count(*) as n, count(*) filter (where missed) as missed
+        from call_records
+        where direction = 'inbound' and started_at >= now() - interval '7 days'
+        group by 1 order by 1
+    """))).all()]
+
+    # Кто тянет: перекос нагрузки виден только по именам. Пропущенные висят без
+    # оператора — их в этот список не берём, для них есть своя плитка.
+    operators = [{"name": r.op, "calls": r.n,
+                  "wait": round(float(r.wait), 1) if r.wait is not None else None,
+                  "talk": round(float(r.talk), 1) if r.talk is not None else None}
+                 for r in (await db.execute(text("""
+        select coalesce(nullif(operator, ''), '—') as op, count(*) as n,
+               avg(wait_sec) as wait, avg(duration_sec) as talk
+        from call_records
+        where started_at >= now() - interval '7 days' and not missed
+          and coalesce(nullif(operator, ''), '') <> ''
+        group by 1 order by 2 desc limit 10
+    """))).all()]
+
+    as_of = (await db.execute(text("select max(started_at) from call_records"))).scalar()
+
+    return {
+        "available": True,
+        "as_of": as_of.isoformat() if as_of else None,
+        "kpi": kpi, "hours": hours, "operators": operators,
+        "stuck": cc["wrapup_stuck"], "escalations": cc["escalations"],
+        "targets": {"missed_share": cc["target_missed"], "first_response_sec": cc["target_frt"],
+                    "in_sla_share": cc["target_in_sla"]},
+    }
+
+
 @router.get("/team")
 async def pulse_team(
     company_id: str = Query(...),
@@ -405,7 +2414,7 @@ async def pulse_team(
     помочь и у кого работа стоит. Заявки Поддержки соединяются с людьми Ядра по
     email — той же связкой, что и разрез по подразделениям в «Заявках».
     """
-    await assert_company_member(company_id, current_user, db)
+    await assert_company_product(company_id, current_user, db, "pulse")
     cid = str(company_id)
 
     # Человек виден СРАЗУ во всех приложениях пространства (постановка МАГа
@@ -508,7 +2517,7 @@ async def pulse_person(
     Открывается из «Команды» разворотом строки — руководителю нужен не только
     счётчик, но и ответ «что именно у него в работе и куда он ходит».
     """
-    await assert_company_member(company_id, current_user, db)
+    await assert_company_product(company_id, current_user, db, "pulse")
     cid, uid = str(company_id), str(user_id)
 
     who = (await db.execute(text("""
@@ -593,31 +2602,37 @@ async def pulse_week(
 ) -> dict[str, Any]:
     """«Неделя» — как прошла неделя: цифры против прошлой и что сдвинулось.
 
-    Пока считается на запрос; снимок с доставкой push/почта/чат — волна В2
-    (PULSE.md §3), поэтому формат ответа сразу такой, каким его будет удобно
-    складывать в снимок.
+    Доставка утренним письмом живёт отдельно (`services/pulse_digest.py`) и
+    считает тот же экран дня, поэтому здесь только запрос-ответ.
     """
-    await assert_company_member(company_id, current_user, db)
+    await assert_company_product(company_id, current_user, db, "pulse")
+    return await pulse_week_data(db, str(company_id))
+
+
+async def pulse_week_data(db: AsyncSession, company_id: str) -> dict[str, Any]:
+    """Данные «Недели» без проверки доступа — её делает вызывающий (и выгрузка)."""
     cid = str(company_id)
 
+    profile = await _profile(db, cid)
+    TBL, TS, AMT, VOL, VOL_LABEL, LOC, SESS_WORD = PROFILE_SALES[profile]
     as_of = (await db.execute(text(
-        "select max(started_at) from charge_sessions where company_id = :cid"
+        f"select max({TS}) from {TBL} where company_id = :cid"
     ), {"cid": cid})).scalar_one_or_none()
 
     rows: list[dict[str, Any]] = []
     if as_of is not None:
-        w = (await db.execute(text("""
-            select count(*) filter (where started_at > CAST(:as_of AS timestamp) - interval '7 days') as s,
-                   coalesce(sum(amount) filter (where started_at > CAST(:as_of AS timestamp) - interval '7 days'), 0) as r,
-                   count(*) filter (where started_at <= CAST(:as_of AS timestamp) - interval '7 days'
-                                    and started_at > CAST(:as_of AS timestamp) - interval '14 days') as sp,
-                   coalesce(sum(amount) filter (where started_at <= CAST(:as_of AS timestamp) - interval '7 days'
-                                    and started_at > CAST(:as_of AS timestamp) - interval '14 days'), 0) as rp
-            from charge_sessions where company_id = :cid
+        w = (await db.execute(text(f"""
+            select count(*) filter (where {TS} > CAST(:as_of AS timestamp) - interval '7 days') as s,
+                   coalesce(sum({AMT}) filter (where {TS} > CAST(:as_of AS timestamp) - interval '7 days'), 0) as r,
+                   count(*) filter (where {TS} <= CAST(:as_of AS timestamp) - interval '7 days'
+                                    and {TS} > CAST(:as_of AS timestamp) - interval '14 days') as sp,
+                   coalesce(sum({AMT}) filter (where {TS} <= CAST(:as_of AS timestamp) - interval '7 days'
+                                    and {TS} > CAST(:as_of AS timestamp) - interval '14 days'), 0) as rp
+            from {TBL} where company_id = :cid
         """), {"cid": cid, "as_of": as_of})).one()
         rows.append({"label": "Выручка", "value": float(w.r), "prev": float(w.rp),
                      "unit": "₽", "higher_is_better": True})
-        rows.append({"label": "Зарядных сессий", "value": w.s, "prev": w.sp,
+        rows.append({"label": SESS_WORD, "value": w.s, "prev": w.sp,
                      "unit": None, "higher_is_better": True})
 
     t = (await db.execute(text("""
@@ -635,6 +2650,21 @@ async def pulse_week(
                  "unit": None, "higher_is_better": False})
     rows.append({"label": "Заявок закрыто", "value": t.closed, "prev": t.closed_prev,
                  "unit": None, "higher_is_better": True})
+
+    # Разговор с потребителем — тремя строками: сколько звонили, скольких не
+    # услышали, как быстро отвечали. Подробности — в «Обращениях».
+    cc = await _cc_snapshot(db)
+    if cc.get("calls"):
+        rows.append({"label": "Звонков принято", "value": cc["calls"] - cc["missed"],
+                     "prev": (cc["calls_prev"] - cc["missed_prev"]) or None,
+                     "unit": None, "higher_is_better": True})
+        rows.append({"label": "Звонков пропущено", "value": cc["missed"],
+                     "prev": cc["missed_prev"] or None,
+                     "unit": None, "higher_is_better": False})
+        if cc["frt"] is not None:
+            rows.append({"label": "Первый ответ", "value": round(cc["frt"]),
+                         "prev": round(cc["frt_prev"]) if cc["frt_prev"] is not None else None,
+                         "unit": "с", "higher_is_better": False})
 
     # Движение проектов — смены стадий и гейты, а не правки полей карточки.
     moved = (await db.execute(text("""
@@ -671,12 +2701,14 @@ async def pulse_accepted(
     Директор должен видеть не только «что горит», но и «что мы сегодня уже
     посмотрели»: иначе снятая карточка выглядит как пропавшая.
     """
-    await assert_company_member(company_id, current_user, db)
+    await assert_company_product(company_id, current_user, db, "pulse")
     rows = (await db.execute(text("""
-        select a.card_key, a.acked_on, a.acked_at, u.name as who
+        select a.card_key, a.acked_on, a.acked_at, a.snooze_until, a.note, u.name as who
         from pulse_acks a
         left join users u on u.id = a.user_id
-        where a.company_id = :cid and a.acked_on >= current_date - 7
+        where a.company_id = :cid
+          and (a.acked_on >= current_date - 7
+               or (a.snooze_until is not null and a.snooze_until >= current_date))
         order by a.acked_at desc
     """), {"cid": str(company_id)})).all()
     return {"items": [{
@@ -685,6 +2717,8 @@ async def pulse_accepted(
         "on": r.acked_on.isoformat(),
         "at": r.acked_at.isoformat() if r.acked_at else None,
         "who": r.who,
+        "note": r.note,
+        "snooze_until": r.snooze_until.isoformat() if r.snooze_until else None,
         "today": r.acked_on == date.today(),
     } for r in rows]}
 
@@ -692,6 +2726,9 @@ async def pulse_accepted(
 class AckIn(BaseModel):
     company_id: str
     card_key: str
+    # Сколько дней не показывать. 0/None — «принято на сегодня», как раньше.
+    snooze_days: int | None = None
+    note: str | None = None
 
 
 @router.post("/ack")
@@ -700,17 +2737,34 @@ async def ack_card(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
-    """«Принято»: снять карточку с экрана дня до конца суток — со следом в журнале."""
-    await assert_company_member(body.company_id, current_user, db)
+    """Снять карточку: на сегодня («принято») или на срок («вернуться через N дней»).
+
+    Отложенное — обязательство руководителя, а не забывание: оно остаётся
+    видимым в «Принятом» с датой возврата, и по её наступлении живое условие
+    вернёт карточку само, если проблема не решилась.
+    """
+    await assert_company_product(body.company_id, current_user, db, "pulse")
     cid = uuid.UUID(body.company_id)
-    exists = (await db.execute(text("""
+    days = max(0, min(int(body.snooze_days or 0), 30))   # месяц — потолок
+    until = date.today() + timedelta(days=days) if days else None
+    row = (await db.execute(text("""
         select 1 from pulse_acks
         where company_id = :cid and card_key = :key and acked_on = current_date
     """), {"cid": str(cid), "key": body.card_key})).first()
-    if not exists:
+    if row:
+        # Повторное нажатие в тот же день — обновляем срок, а не плодим записи.
+        await db.execute(text("""
+            update pulse_acks set snooze_until = :until, note = :note, user_id = :uid
+            where company_id = :cid and card_key = :key and acked_on = current_date
+        """), {"cid": str(cid), "key": body.card_key, "until": until,
+               "note": body.note, "uid": current_user.id})
+    else:
         db.add(PulseAck(company_id=cid, card_key=body.card_key,
-                        acked_on=date.today(), user_id=current_user.id))
-        await log_audit(db, actor=current_user, company_id=cid,
-                        action="pulse.ack", target=body.card_key)
-        await db.commit()
-    return {"ok": True}
+                        acked_on=date.today(), user_id=current_user.id,
+                        snooze_until=until, note=body.note))
+    await log_audit(db, actor=current_user, company_id=cid,
+                    action="pulse.snooze" if days else "pulse.ack",
+                    target=body.card_key,
+                    details={"days": days} if days else None)
+    await db.commit()
+    return {"ok": True, "snooze_until": until.isoformat() if until else None}
