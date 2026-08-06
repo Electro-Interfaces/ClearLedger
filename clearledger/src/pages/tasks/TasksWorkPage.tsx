@@ -37,6 +37,7 @@ import {
 import { TASKS_VIEWS, tasksRouteOf, useTasksView } from './TasksLayout'
 import { TasksBoardPage } from './TasksBoardPage'
 import { ViewsSection } from './TasksRegulation'
+import { TasksDueBoard } from './TasksDueBoard'
 
 const nf = new Intl.NumberFormat('ru-RU')
 const PAGE = 100
@@ -79,6 +80,10 @@ export function TasksWorkPage() {
   const sort = params.get('sort') ?? (view === 'today' ? 'due' : 'created')
   const page = Math.max(0, Number(params.get('page')) || 0)
   const openId = params.get('task')
+  // Личные разделы умеют показываться доской по срокам: вопрос к своей работе
+  // не «на каком шаге», а «что сегодня, что на неделе».
+  const asBoard = params.get('as') === 'board'
+  const canBoard = ['mine', 'assigned', 'today', 'waiting'].includes(view)
   const [picked, setPicked] = useState<Set<string>>(new Set())
 
   const objectsQ = useQuery({
@@ -166,6 +171,20 @@ export function TasksWorkPage() {
                 <Download className="mr-1.5 h-3.5 w-3.5" />Excel
               </Button>
             </>
+          )}
+          {canBoard && (
+            <div className="flex h-8 items-center rounded-md border p-0.5">
+              {([['list', 'Список'], ['board', 'Доска']] as const).map(([k, label]) => (
+                <button key={k} type="button"
+                  onClick={() => set({ as: k === 'board' ? 'board' : null })}
+                  className={cn('h-7 rounded px-2.5 text-xs transition-colors',
+                    (k === 'board') === asBoard
+                      ? 'bg-primary/10 font-medium text-primary'
+                      : 'text-muted-foreground hover:text-foreground')}>
+                  {label}
+                </button>
+              ))}
+            </div>
           )}
           <Button variant="outline" size="sm" className="h-8"
             onClick={refresh} disabled={listQ.isFetching}>
@@ -255,9 +274,14 @@ export function TasksWorkPage() {
             object: null, priority: null, label: null,
           })} />
       ) : (
-        <TasksTable tasks={tasks} sort={sort} onSort={(s) => set({ sort: s })}
-          picked={picked} onPick={setPicked} groupByObject={view === 'objects'}
-          onOpen={(id) => set({ task: id })} />
+        asBoard && canBoard ? (
+          <TasksDueBoard tasks={tasks} companyId={company.id}
+            onOpen={(id) => set({ task: id })} onChanged={refresh} />
+        ) : (
+          <TasksTable tasks={tasks} sort={sort} onSort={(s) => set({ sort: s })}
+            picked={picked} onPick={setPicked} groupByObject={view === 'objects'}
+            onOpen={(id) => set({ task: id })} />
+        )
       )}
 
       {total > PAGE && (

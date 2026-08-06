@@ -82,8 +82,8 @@ export function TaskChat({ taskId, taskNumber, selfName }: {
   const people = roomQ.data?.participants ?? []
 
   return (
-    <div className="flex h-[520px] flex-col rounded-lg border">
-      <div className="flex items-center gap-2 border-b px-3 py-2 text-xs text-muted-foreground">
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex shrink-0 items-center gap-2 pb-2 text-xs text-muted-foreground">
         <Users className="h-3.5 w-3.5" />
         <span>Обсуждение задачи №{taskNumber}</span>
         {people.length > 0 && (
@@ -94,7 +94,7 @@ export function TaskChat({ taskId, taskNumber, selfName }: {
         <span className="ml-auto">видно только причастным</span>
       </div>
 
-      <div className="flex-1 space-y-2 overflow-y-auto p-3">
+      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto rounded-lg border bg-muted/20 p-3">
         {msgQ.isLoading ? (
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <Loader2 className="h-3.5 w-3.5 animate-spin" />Загрузка…
@@ -128,7 +128,7 @@ export function TaskChat({ taskId, taskNumber, selfName }: {
         <div ref={bottomRef} />
       </div>
 
-      <div className="flex items-end gap-2 border-t p-2">
+      <div className="flex shrink-0 items-end gap-2 pt-2">
         <Textarea value={text} onChange={(e) => setText(e.target.value)} rows={1}
           maxLength={2000} className="min-h-9 resize-none text-sm"
           placeholder="Написать участникам задачи. Enter — отправить"

@@ -131,7 +131,8 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
         onRename={(title) => act.mutate({ companyId, title })} />
 
       <div className="flex min-h-0 flex-1">
-      <div className="min-w-0 flex-1 overflow-y-auto px-5 py-4 text-sm">
+      <div className={cn('flex min-w-0 flex-1 flex-col px-5 py-4 text-sm',
+        tab === 'chat' ? 'overflow-hidden' : 'overflow-y-auto')}>
         {/* Маршрут первым: «где сейчас работа» — главный вопрос к карточке.
             Одинаковые пилюли одного размера, активная залита. Раньше здесь были
             три разные рамки, и полоса читалась как набор случайных плашек. */}
@@ -193,7 +194,8 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
           </button>
         )}
 
-        <Tabs value={tab} onValueChange={setTab} className="mt-6">
+        <Tabs value={tab} onValueChange={setTab}
+          className={cn('mt-6', tab === 'chat' && 'flex min-h-0 flex-1 flex-col')}>
           {/* Вкладки вместо одной длинной колонки: у задачи с полусотней ходов
               история — отдельная работа, и ради неё не нужно прокручивать
               чек-лист и файлы. */}
@@ -228,7 +230,7 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
           people={peopleQ.data?.people ?? []} labels={labelsQ.data?.labels ?? []}
           pending={act.isPending} onAct={(d) => act.mutate(d)} onChanged={reload} />
           </TabsContent>
-          <TabsContent value="chat" className="pt-4">
+          <TabsContent value="chat" className="pt-4 data-[state=active]:flex data-[state=active]:min-h-0 data-[state=active]:flex-1">
             <TaskChat taskId={t.id} taskNumber={t.number} selfName={t.assignee} />
           </TabsContent>
           <TabsContent value="links" className="space-y-5 pt-4">
@@ -353,7 +355,7 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
       </aside>
       </div>
 
-      {live && (
+      {live && tab !== 'chat' && (
         <div className="border-t bg-muted/20 px-5 py-3">
           <div className="flex items-end gap-2">
             <Textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2}
