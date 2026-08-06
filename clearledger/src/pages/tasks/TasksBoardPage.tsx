@@ -112,7 +112,7 @@ export function TasksBoardPage() {
       ) : listQ.isError ? (
         <QueryError message="Не удалось загрузить доску" onRetry={() => void listQ.refetch()} />
       ) : (
-        <div className="flex min-h-0 flex-1 gap-3 overflow-x-auto pb-2">
+        <div className="flex min-h-0 flex-1 gap-3 overflow-x-auto pb-3">
           {route.map((s) => {
             const column = tasks.filter((t) => t.stage_code === s.code)
             const nextStage = route[route.findIndex((x) => x.code === s.code) + 1]
@@ -122,23 +122,34 @@ export function TasksBoardPage() {
                 onDragOver={(e) => { e.preventDefault(); setOver(s.code) }}
                 onDragLeave={() => setOver((c) => (c === s.code ? null : c))}
                 onDrop={() => drop(s.code)}
-                className={cn('flex w-[280px] shrink-0 flex-col rounded-lg border bg-card/40',
-                  over === s.code && 'border-primary bg-primary/5')}>
-                <div className="flex items-center justify-between border-b px-3 py-2">
-                  <span className="text-xs font-medium">{s.name}</span>
-                  <span className="text-[11px] text-muted-foreground">{column.length}</span>
+                className={cn('flex w-[300px] shrink-0 flex-col rounded-xl border bg-muted/30 transition-colors',
+                  // Цель перетаскивания обязана откликаться: без отклика человек
+                  // не знает, засчитается ли бросок.
+                  over === s.code && dragged && 'border-primary bg-primary/5 ring-1 ring-primary/30')}>
+                <div className="flex items-center justify-between px-3 py-2.5">
+                  <span className="text-[13px] font-medium">{s.name}</span>
+                  <span className={cn('rounded-full px-1.5 py-0.5 text-[11px] tabular-nums',
+                    column.length
+                      ? 'bg-background text-muted-foreground'
+                      : 'text-muted-foreground/50')}>
+                    {column.length}
+                  </span>
                 </div>
-                <div className="flex-1 space-y-2 overflow-y-auto p-2">
+                <div className="flex-1 space-y-2 overflow-y-auto px-2 pb-2">
                   {column.map((t) => (
                     <BoardCard key={t.id} task={t} nextStage={nextStage}
+                      dragging={dragged === t.id}
                       onOpen={() => set({ task: t.id })}
                       onDragStart={() => setDragged(t.id)}
+                      onDragEnd={() => { setDragged(null); setOver(null) }}
                       onNext={() => nextStage && move.mutate({ id: t.id, stageCode: nextStage.code })} />
                   ))}
                   {column.length === 0 && (
-                    <p className="px-1 py-4 text-center text-[11px] text-muted-foreground">
-                      пусто
-                    </p>
+                    // Пустая колонка не схлопывается — в неё нужно уметь бросить.
+                    <div className={cn('rounded-lg border border-dashed py-8 text-center text-[11px] text-muted-foreground/70 transition-colors',
+                      over === s.code && dragged && 'border-primary/60 text-primary')}>
+                      {dragged ? 'бросьте сюда' : 'пусто'}
+                    </div>
                   )}
                 </div>
               </div>
@@ -161,17 +172,26 @@ export function TasksBoardPage() {
   )
 }
 
-function BoardCard({ task, nextStage, onOpen, onDragStart, onNext }: {
-  task: SpaceTask; nextStage?: RouteStage
-  onOpen: () => void; onDragStart: () => void; onNext: () => void
+function BoardCard({ task, nextStage, dragging, onOpen, onDragStart, onDragEnd, onNext }: {
+  task: SpaceTask; nextStage?: RouteStage; dragging?: boolean
+  onOpen: () => void; onDragStart: () => void; onDragEnd: () => void; onNext: () => void
 }) {
   return (
-    <div draggable onDragStart={onDragStart} onClick={onOpen}
-      className={cn('cursor-pointer rounded-md border bg-card px-2.5 py-2 text-xs shadow-sm transition-colors hover:border-primary/40',
+    <div draggable onDragStart={onDragStart} onDragEnd={onDragEnd} onClick={onOpen}
+      className={cn('group cursor-grab rounded-lg border bg-card px-2.5 py-2 text-xs shadow-sm transition-all active:cursor-grabbing',
+        'hover:-translate-y-px hover:border-primary/40 hover:shadow-md',
+        // Взятая карточка гаснет: видно, что именно едет.
+        dragging && 'opacity-40 shadow-none',
         task.overdue && 'border-red-500/40 bg-red-500/5')}>
       <div className="flex items-start gap-1.5">
-        <span className="shrink-0 font-medium text-muted-foreground">№{task.number}</span>
-        <span className="flex-1 font-medium text-foreground">{task.title}</span>
+        {(task.priority === 'high' || task.priority === 'critical') && (
+          <span aria-hidden className={cn('mt-1 h-1.5 w-1.5 shrink-0 rounded-full',
+            task.priority === 'critical' ? 'bg-red-500' : 'bg-amber-500')} />
+        )}
+        <span className="flex-1 font-medium leading-snug text-foreground">{task.title}</span>
+        <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground/70">
+          №{task.number}
+        </span>
       </div>
       <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
         <span>{task.assignee ?? 'не назначен'}</span>
@@ -190,7 +210,7 @@ function BoardCard({ task, nextStage, onOpen, onDragStart, onNext }: {
       {nextStage && (
         <button type="button" title={`Дальше: ${nextStage.name}`}
           onClick={(e) => { e.stopPropagation(); onNext() }}
-          className="mt-1.5 inline-flex items-center gap-1 rounded px-1 py-0.5 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground">
+          className="mt-1.5 inline-flex items-center gap-1 rounded px-1 py-0.5 text-[11px] text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100 sm:opacity-0 max-sm:opacity-100">
           <ArrowRight className="h-3 w-3" />{nextStage.name}
         </button>
       )}

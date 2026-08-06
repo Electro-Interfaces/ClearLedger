@@ -9,11 +9,11 @@
  * обзор проваливается сюда сменой параметров.
  */
 import { useMemo, useState } from 'react'
-import { useLocation, useSearchParams } from 'react-router-dom'
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  ArrowDown, ArrowUp, BookmarkPlus, ChevronsUpDown, Download, ListChecks, Loader2, Terminal,
-  Plus, RefreshCw, Search, X,
+  ArrowDown, ArrowUp, BookmarkPlus, CheckCircle2, ChevronsUpDown, Clock, Download,
+  GitBranch, ListChecks, Loader2, Plus, RefreshCw, Search, Terminal, X,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -33,7 +33,7 @@ import { TaskCard } from '@/components/tasks/TaskCard'
 import { NewTaskDialog } from '@/components/tasks/NewTaskDialog'
 import { SearchPicker } from '@/components/tasks/SearchPicker'
 import {
-  PRIORITY_LABEL, PRIORITY_TONE, STATUS_LABEL, WAITING_LABEL, dt, dtT,
+  PRIORITY_LABEL, PRIORITY_TONE, STATUS_LABEL, dt, dtT,
 } from '@/components/tasks/taskWords'
 import { TASKS_VIEWS, tasksRouteOf, useTasksView } from './TasksLayout'
 import { TasksBoardPage } from './TasksBoardPage'
@@ -50,6 +50,7 @@ const VIEW_SCOPE: Record<string, TaskScope> = {
 
 export function TasksWorkPage() {
   const { company } = useCompany()
+  const navigate = useNavigate()
   const { pathname } = useLocation()
   const route = tasksRouteOf(pathname)
   const view = useTasksView(route)
@@ -112,6 +113,12 @@ export function TasksWorkPage() {
     queryKey: ['tasks', company.id, scope, filters],
     queryFn: () => tasksService.listTasks(company.id, scope, filters),
     placeholderData: keepPreviousData,
+  })
+  // Один дешёвый запрос на весь продукт: спрашиваем только счётчик.
+  const anyQ = useQuery({
+    queryKey: ['tasks-any', company.id],
+    queryFn: () => tasksService.listTasks(company.id, 'all', { limit: 1 }),
+    staleTime: 5 * 60 * 1000,
   })
   const tasks = listQ.data?.tasks ?? []
   const total = listQ.data?.total ?? 0
@@ -229,6 +236,8 @@ export function TasksWorkPage() {
           onRetry={() => void listQ.refetch()} />
       ) : tasks.length === 0 ? (
         <EmptyState view={view} hasFilter={hasFilter}
+          companyTotal={anyQ.data?.total ?? 1}
+          onGo={(path) => navigate(path)}
           onReset={() => set({
             q: null, assignee: null, author: null, type: null,
             object: null, priority: null, label: null,
@@ -390,51 +399,89 @@ function TasksTable({ tasks, sort, onSort, picked, onPick, groupByObject, onOpen
                       checked={picked.has(t.id)} onCheckedChange={() => toggle(t.id)} />
                   </td>
                   <td className="whitespace-nowrap p-2.5 align-top font-medium">№{t.number}</td>
+                  {/* Строка несла восемь подписей одним кеглем — статус, срочность,
+                      автор, чек-лист, подзадачи, время, метки, «ждём внешних», — и
+                      читать её было нечем. Убраны дубли колонок (статус, автор), а
+                      остальное разведено по весу: слева то, что требует внимания,
+                      справа — тихая справка. */}
                   <td className="p-2.5 align-top">
-                    <div className="font-medium text-foreground">{t.title}</div>
-                    <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
-                      <span>{STATUS_LABEL[t.status] ?? t.status}</span>
+                    <div className="flex items-start gap-1.5">
                       {(t.priority === 'high' || t.priority === 'critical') && (
-                        <span className={PRIORITY_TONE[t.priority]}>{PRIORITY_LABEL[t.priority]}</span>
+                        // Срочность — засечкой у самого заголовка: цветное слово в
+                        // ряду других слов терялось.
+                        <span aria-hidden
+                          className={cn('mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full',
+                            t.priority === 'critical' ? 'bg-red-500' : 'bg-amber-500')} />
                       )}
-                      <span>· автор {t.author ?? '—'}</span>
-                      {t.checklist.total > 0 && (
-                        <span className="inline-flex items-center gap-0.5">
-                          <ListChecks className="h-3 w-3" />
-                          {t.checklist.done} из {t.checklist.total}
-                        </span>
-                      )}
-                      {t.subtasks.total > 0 && (
-                        <span>· подзадач {t.subtasks.open} из {t.subtasks.total} открыто</span>
-                      )}
-                      {(t.time.spent > 0 || t.time.estimate != null) && (
-                        <span className={cn(t.time.estimate != null
-                          && t.time.spent > t.time.estimate
-                          && 'text-amber-600 dark:text-amber-400')}>
-                          · {t.time.spent_text}
-                          {t.time.estimate != null && ` из ${t.time.estimate_text}`}
-                        </span>
-                      )}
+                      <span className="font-medium text-foreground">{t.title}</span>
                       {t.waiting_for === 'external' && (
-                        <span className="rounded border border-amber-500/40 bg-amber-500/5 px-1 py-px text-amber-700 dark:text-amber-400">
-                          {WAITING_LABEL.external}
+                        <span className="mt-px shrink-0 rounded border border-amber-500/40 bg-amber-500/5 px-1 py-px text-[10px] text-amber-700 dark:text-amber-400">
+                          ждём внешних
                         </span>
                       )}
-                      {t.labels.map((l) => (
-                        <span key={l.id}
-                          className="rounded border border-border/60 bg-muted/40 px-1 py-px">
-                          {l.name}
-                        </span>
-                      ))}
                     </div>
+                    {(t.checklist.total > 0 || t.subtasks.total > 0 || t.time.spent > 0
+                      || t.labels.length > 0
+                      || t.priority === 'high' || t.priority === 'critical') && (
+                      <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px] text-muted-foreground">
+                        {(t.priority === 'high' || t.priority === 'critical') && (
+                          <span className={PRIORITY_TONE[t.priority]}>
+                            {PRIORITY_LABEL[t.priority]}
+                          </span>
+                        )}
+                        {t.checklist.total > 0 && (
+                          <span className="inline-flex items-center gap-1">
+                            <ListChecks className="h-3 w-3" />
+                            {t.checklist.done}/{t.checklist.total}
+                          </span>
+                        )}
+                        {t.subtasks.total > 0 && (
+                          <span className="inline-flex items-center gap-1">
+                            <GitBranch className="h-3 w-3" />
+                            {t.subtasks.total - t.subtasks.open}/{t.subtasks.total}
+                          </span>
+                        )}
+                        {t.time.spent > 0 && (
+                          <span className={cn('inline-flex items-center gap-1',
+                            t.time.estimate != null && t.time.spent > t.time.estimate
+                              && 'text-amber-600 dark:text-amber-400')}>
+                            <Clock className="h-3 w-3" />
+                            {t.time.spent_text}
+                            {t.time.estimate != null && ` / ${t.time.estimate_text}`}
+                          </span>
+                        )}
+                        {/* Две метки и счётчик: полный список меток съедал строку. */}
+                        {t.labels.slice(0, 2).map((l) => (
+                          <span key={l.id}
+                            className="rounded border border-border/60 bg-muted/40 px-1 py-px">
+                            {l.name}
+                          </span>
+                        ))}
+                        {t.labels.length > 2 && (
+                          <span title={t.labels.map((l) => l.name).join(', ')}>
+                            +{t.labels.length - 2}
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </td>
                   <td className="p-2.5 align-top">
                     {t.type ?? <span className="text-muted-foreground">поручение</span>}
                   </td>
                   <td className="p-2.5 align-top">
-                    {t.status === 'open' && t.stage
-                      ? <span className="whitespace-nowrap rounded-md border px-1.5 py-0.5 text-[11px]">{t.stage}</span>
-                      : <span className="text-muted-foreground">—</span>}
+                    {t.status === 'open' && t.stage ? (
+                      <span className="whitespace-nowrap rounded-md border px-1.5 py-0.5 text-[11px]">
+                        {t.stage}
+                      </span>
+                    ) : (
+                      // Закрытая задача: состояние важнее несуществующей стадии.
+                      <span className={cn('whitespace-nowrap text-[11px]',
+                        t.status === 'done'
+                          ? 'text-emerald-600 dark:text-emerald-400'
+                          : 'text-muted-foreground')}>
+                        {STATUS_LABEL[t.status] ?? t.status}
+                      </span>
+                    )}
                   </td>
                   <td className="p-2.5 align-top">
                     {t.assignee ?? <span className="text-muted-foreground">не назначен</span>}
@@ -554,30 +601,106 @@ function CommandLine({ companyId, ids, onDone }: {
 
 /* ── Пустые состояния: экран обязан предлагать действие ──────────────── */
 
-function EmptyState({ view, hasFilter, onReset }: {
+/**
+ * Пустой экран — это не «нет данных», а развилка: человек либо пришёл первым
+ * и не знает, с чего начать, либо всё сделано и он ищет, куда посмотреть
+ * дальше. Ответ на эти два вопроса разный, поэтому и экран разный.
+ */
+function EmptyState({ view, hasFilter, onReset, companyTotal, onGo }: {
   view: string; hasFilter: boolean; onReset: () => void
+  /** Сколько задач в компании вообще — отличает первый запуск от «всё сделано». */
+  companyTotal: number
+  onGo: (path: string) => void
 }) {
   if (hasFilter) {
     return (
-      <div className="rounded-lg border p-8 text-center text-sm text-muted-foreground">
-        Под этот отбор задач нет.
-        <Button variant="link" size="sm" onClick={onReset}>Сбросить отбор</Button>
+      <div className="rounded-lg border border-dashed p-10 text-center">
+        <p className="text-sm text-muted-foreground">Под этот отбор задач нет.</p>
+        <Button variant="outline" size="sm" className="mt-3" onClick={onReset}>
+          Сбросить отбор
+        </Button>
       </div>
     )
   }
-  const text: Record<string, string> = {
-    today: 'Ничего не горит: просроченных задач и сроков на сегодня нет.',
-    mine: 'На вас сейчас нет открытых задач.',
-    assigned: 'Вы никому ничего не поручили. Поставьте задачу строкой выше и назначьте исполнителя в карточке.',
-    waiting: 'Наружу ничего не отдано. Поручить подрядчику письмом можно из карточки — заходить в пространство ему не нужно.',
-    watching: 'Вы ни за чем не наблюдаете. Наблюдателем становятся из карточки задачи или когда вас упомянут через @.',
-    closed: 'Завершённых задач пока нет.',
-    registry: 'В компании ещё нет ни одной задачи. Поставьте первую строкой выше.',
-    objects: 'Задач, привязанных к объектам, пока нет.',
+
+  // Первый запуск: в компании нет ни одной задачи. Здесь нельзя отвечать
+  // «задач нет» — это правда, но бесполезная: человеку надо показать, с чего
+  // продукт начинается.
+  if (companyTotal === 0) {
+    return (
+      <div className="rounded-lg border border-dashed p-10 text-center">
+        <ListChecks className="mx-auto h-7 w-7 text-muted-foreground/60" />
+        <h2 className="mt-3 text-base font-medium">Здесь будет работа компании</h2>
+        <p className="mx-auto mt-1.5 max-w-md text-sm text-muted-foreground">
+          Поставьте первую задачу строкой выше — одного заголовка достаточно,
+          остальное допишете в карточке. Кому и к какому сроку — в форме
+          «Поставить подробно».
+        </p>
+        <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+          <Button variant="outline" size="sm"
+            onClick={() => onGo('/tasks/setup?view=types')}>
+            Завести типы и маршруты
+          </Button>
+          <Button variant="ghost" size="sm" className="text-muted-foreground"
+            onClick={() => onGo('/tasks/setup?view=recurrences')}>
+            Настроить повторяющиеся
+          </Button>
+        </div>
+      </div>
+    )
   }
+
+  // Работа в компании есть, а на этом экране пусто — значит человек всё сделал
+  // или смотрит не туда. Даём и похвалу, и следующий шаг.
+  const done: Record<string, { title: string; hint: string; go?: [string, string] }> = {
+    today: {
+      title: 'Сегодня ничего не горит',
+      hint: 'Просроченных задач нет, сроков на сегодня и завтра тоже.',
+      go: ['Посмотреть всё, что на мне', '/tasks?view=mine'],
+    },
+    mine: {
+      title: 'На вас нет открытых задач',
+      hint: 'Работа появится здесь, когда вам её поручат — или поставьте себе сами.',
+      go: ['Что я поручил другим', '/tasks?view=assigned'],
+    },
+    assigned: {
+      title: 'Вы никому ничего не поручили',
+      hint: 'Поставьте задачу и назначьте исполнителя — здесь будет видно, у кого мяч.',
+    },
+    waiting: {
+      title: 'Наружу ничего не отдано',
+      hint: 'Подрядчику можно поручить письмом прямо из карточки — заходить в пространство ему не нужно.',
+    },
+    watching: {
+      title: 'Вы ни за чем не наблюдаете',
+      hint: 'Наблюдателем становятся из карточки задачи или когда вас упомянут через @.',
+    },
+    closed: {
+      title: 'Завершённых задач пока нет',
+      hint: 'Здесь будет видно, что сделано за период.',
+    },
+    registry: {
+      title: 'Под этот разрез задач нет',
+      hint: 'Попробуйте другой отбор или посмотрите доску.',
+      go: ['Открыть доску', '/tasks/company?view=board'],
+    },
+    objects: {
+      title: 'К объектам работа не привязана',
+      hint: 'Объект указывают в форме постановки или в карточке — тогда задача попадёт в этот разрез.',
+    },
+  }
+  const cur = done[view] ?? { title: 'Задач нет', hint: '' }
   return (
-    <div className="rounded-lg border p-8 text-center text-sm text-muted-foreground">
-      {text[view] ?? 'Задач нет.'}
+    <div className="rounded-lg border border-dashed p-10 text-center">
+      <CheckCircle2 className="mx-auto h-7 w-7 text-emerald-500/60" />
+      <h2 className="mt-3 text-base font-medium">{cur.title}</h2>
+      {cur.hint && (
+        <p className="mx-auto mt-1.5 max-w-md text-sm text-muted-foreground">{cur.hint}</p>
+      )}
+      {cur.go && (
+        <Button variant="outline" size="sm" className="mt-4"
+          onClick={() => onGo(cur.go![1])}>{cur.go[0]}</Button>
+      )}
     </div>
   )
 }
