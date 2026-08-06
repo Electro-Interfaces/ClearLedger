@@ -93,6 +93,7 @@ export interface TaskDetails extends SpaceTask {
   participants: TaskParticipant[]
   /** Адрес, по которому внешний отвечает письмом. null — канал не настроен. */
   reply_address: string | null
+  external: TaskExternalRef[]
 }
 
 /** Ответ действия: сервер может предупредить, не отказав (открытые подзадачи). */
@@ -246,6 +247,40 @@ export async function addWatcher(taskId: string, companyId: string, userId?: str
 
 export async function removeWatcher(taskId: string, userId: string, companyId: string) {
   return del(`/api/tasks/${taskId}/watchers/${userId}?company_id=${encodeURIComponent(companyId)}`)
+}
+
+/** Зеркало работы во внешней системе: у нас наша задача, у них своя. */
+export interface TaskExternalRef {
+  id: string; connector_key: string; connector_label: string | null
+  external_id: string | null; external_number: string | null
+  external_status: string | null; external_url: string | null
+  direction: string; mirror_close: boolean; last_sync_at: string | null
+}
+
+export async function linkExternal(taskId: string, data: {
+  companyId: string; connectorKey: string; connectorLabel?: string
+  externalNumber?: string; externalId?: string; externalUrl?: string
+  mirrorClose?: boolean; note?: string
+}) {
+  return post<TaskExternalRef>(`/api/tasks/${taskId}/external`, {
+    company_id: data.companyId, connector_key: data.connectorKey,
+    connector_label: data.connectorLabel || undefined,
+    external_number: data.externalNumber || undefined,
+    external_id: data.externalId || undefined,
+    external_url: data.externalUrl || undefined,
+    mirror_close: data.mirrorClose ?? false, note: data.note || undefined,
+  })
+}
+
+/** Ответ синхронизации: `ok:false` — приложение состояния не отдало, и это
+ *  надо показать словами, а не молча оставить старую отметку. */
+export async function syncExternal(taskId: string, refId: string, companyId: string) {
+  return post<TaskExternalRef & { ok: boolean; reason?: string; stages_added?: number }>(
+    `/api/tasks/${taskId}/external/${refId}/sync?company_id=${encodeURIComponent(companyId)}`, {})
+}
+
+export async function unlinkExternal(taskId: string, refId: string, companyId: string) {
+  return del(`/api/tasks/${taskId}/external/${refId}?company_id=${encodeURIComponent(companyId)}`)
 }
 
 /** Поручить тому, кто в пространство не заходит: письмо + ответ в ленту. */

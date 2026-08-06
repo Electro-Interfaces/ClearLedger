@@ -299,3 +299,62 @@ async def list_connectors(db: AsyncSession, company_id: uuid.UUID) -> dict[str, 
             problems.append({"app": app_row.code, "app_name": app_row.name, "error": err})
 
     return {"connectors": items, "problems": problems}
+
+
+async def fetch_external_work(
+    db: AsyncSession, company_id: uuid.UUID, connector_key: str, external_ref: str | None,
+) -> dict[str, Any]:
+    """Состояние чужой работы у приложения-владельца коннектора.
+
+    Ключ строки витрины — «<приложение>:<коннектор>», поэтому владелец известен из
+    самого ключа: второго справочника «кто чей коннектор» здесь не появляется.
+
+    Приложение может такой ручки не отдавать — тогда возвращаем причину, а НЕ
+    выдуманный статус. Неверная отметка о чужой работе хуже отсутствующей: по ней
+    принимают решения («у них уже сделано»), которых никто не проверял.
+    """
+    app_code = (connector_key or "").split(":", 1)[0]
+    if not app_code or not external_ref:
+        return {"ok": False, "reason": "не указан коннектор или номер работы"}
+    if app_code in ("ledger", "core"):
+        return {"ok": False, "reason": "это канал самого пространства, чужой работы за ним нет"}
+
+    row = (await db.execute(
+        select(App, AppCompanyLink)
+        .join(AppCompanyLink, AppCompanyLink.app_id == App.id)
+        .where(AppCompanyLink.company_id == company_id, App.code == app_code)
+    )).first()
+    if row is None:
+        return {"ok": False, "reason": f"приложение «{app_code}» компании не подключено"}
+    app_row, link = row
+
+    token = sso.sign_service_token(aud=app_code, scope="projection")
+    if not token:
+        return {"ok": False, "reason": "единый вход не настроен (нет ключа подписи)"}
+
+    conn_id = connector_key.split(":", 1)[1] if ":" in connector_key else ""
+    url = (f"{_internal_base_url(app_row, app_code)}"
+           f"/api/v1/eco/connectors/{conn_id}/work/{external_ref}")
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+            resp = await client.get(url, params={"companyId": link.external_company_id},
+                                    headers={"Authorization": f"Bearer {token}"})
+    except httpx.HTTPError as e:
+        return {"ok": False, "reason": f"приложение недоступно: {e}"}
+
+    if resp.status_code == 404:
+        # Штатный случай на сегодня: ручки ещё нет. Говорим как есть — человек
+        # ведёт номер и статус руками, пока владелец коннектора её не отдаст.
+        return {"ok": False, "reason": "приложение не отдаёт состояние чужой работы "
+                                       "(ручки нет — состояние ведётся вручную)"}
+    if resp.status_code >= 400:
+        return {"ok": False, "reason": f"приложение вернуло HTTP {resp.status_code}"}
+
+    data = resp.json() or {}
+    return {
+        "ok": True,
+        "status": data.get("status"),
+        "url": data.get("url"),
+        "closed": bool(data.get("closed")),
+        "stages": data.get("stages") or [],
+    }

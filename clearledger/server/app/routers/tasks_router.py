@@ -30,10 +30,10 @@ from app.auth import assert_company_product, get_company_by_api_key, get_current
 from app.database import get_db
 from app.models import (
     Company, ServiceLocation, SourceFile, Task, TaskAttachment, TaskChecklistItem,
-    TaskEvent, TaskLabel, TaskLabelLink, TaskLink, TaskParticipant, TaskType,
-    TaskWatcher, User, UserCompany,
+    TaskEvent, TaskExternalRef, TaskLabel, TaskLabelLink, TaskLink, TaskParticipant,
+    TaskType, TaskWatcher, User, UserCompany,
 )
-from app.services import task_mail
+from app.services import space_connectors, task_mail
 
 router = APIRouter(prefix="/tasks", tags=["Задачи"])
 
@@ -795,6 +795,9 @@ async def task_details(
         .join(SourceFile, SourceFile.id == TaskAttachment.file_id)
         .where(TaskAttachment.task_id == t.id)
         .order_by(TaskAttachment.created_at))).all()
+    externals = (await db.execute(
+        select(TaskExternalRef).where(TaskExternalRef.task_id == t.id)
+        .order_by(TaskExternalRef.created_at))).scalars().all()
     participants = (await db.execute(
         select(TaskParticipant, User.name, User.email)
         .join(User, User.id == TaskParticipant.user_id)
@@ -817,6 +820,7 @@ async def task_details(
             "role": p.role, "channel": p.channel, "channel_ref": p.channel_ref,
         } for p, n, mail in participants],
         "reply_address": task_mail.reply_address(t.number) if task_mail.enabled() else None,
+        "external": [_ref_out(r) for r in externals],
         # Пункты — отдельным именем: `checklist` уже занят прогрессом «3 из 5»,
         # который едет и в строку списка. Одно имя под два разных типа заставило
         # бы фронт гадать, что пришло.
@@ -1402,6 +1406,148 @@ async def remove_participant(
         t.waiting_for = None
     await db.commit()
     return {"deleted": user_id, "participants_left": left}
+
+
+class ExternalRefIn(BaseModel):
+    company_id: str
+    connector_key: str = Field(min_length=1, max_length=120)
+    connector_label: str | None = Field(None, max_length=200)
+    external_number: str | None = Field(None, max_length=120)
+    external_id: str | None = Field(None, max_length=200)
+    external_url: str | None = Field(None, max_length=2000)
+    mirror_close: bool = False
+    note: str | None = Field(None, max_length=2000)
+
+
+@router.post("/{task_id}/external", status_code=status.HTTP_201_CREATED)
+async def link_external(
+    task_id: str,
+    payload: ExternalRefIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Связать задачу с работой во внешней системе.
+
+    Зеркало, а не копия: у нас наша задача, у них своя. Мяч переходит внешней
+    стороне — задача не брошена, но и не висит «на мне».
+
+    Работу в чужой системе заводит её владелец (коннектор живёт в приложении,
+    реестра в Ядре нет), поэтому здесь мы фиксируем связь с уже существующей у
+    них работой. Автосоздание появится, когда приложение-владелец отдаст ручку.
+    """
+    cid = await assert_company_product(payload.company_id, current_user, db, "plan")
+    t = await _task_or_404(db, cid, task_id)
+    await _assert_actor(db, cid, current_user, t)
+
+    ref = (await db.execute(select(TaskExternalRef).where(
+        TaskExternalRef.task_id == t.id,
+        TaskExternalRef.connector_key == payload.connector_key))).scalar_one_or_none()
+    if ref is None:
+        ref = TaskExternalRef(task_id=t.id, connector_key=payload.connector_key,
+                              created_by=current_user.id)
+        db.add(ref)
+    ref.connector_label = payload.connector_label
+    ref.external_number = payload.external_number
+    ref.external_id = payload.external_id
+    ref.external_url = payload.external_url
+    ref.mirror_close = payload.mirror_close
+    t.waiting_for = "external"
+    db.add(TaskEvent(task_id=t.id, kind="delegate", user_id=current_user.id,
+                     from_value=payload.connector_key,
+                     to_value=payload.connector_label or payload.connector_key,
+                     note=payload.note))
+    await db.commit()
+    await db.refresh(ref)
+    return _ref_out(ref)
+
+
+@router.delete("/{task_id}/external/{ref_id}")
+async def unlink_external(
+    task_id: str,
+    ref_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cid = await assert_company_product(company_id, current_user, db, "plan")
+    t = await _task_or_404(db, cid, task_id)
+    await _assert_actor(db, cid, current_user, t)
+    ref = await db.get(TaskExternalRef, _uuid_or_400(ref_id, "ref_id"))
+    if ref is None or ref.task_id != t.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Связь не найдена")
+    await db.delete(ref)
+    await db.flush()
+    left = (await db.execute(select(func.count()).select_from(TaskExternalRef)
+                             .where(TaskExternalRef.task_id == t.id))).scalar_one()
+    parts = (await db.execute(select(func.count()).select_from(TaskParticipant)
+                              .where(TaskParticipant.task_id == t.id))).scalar_one()
+    if not left and not parts and t.waiting_for == "external":
+        t.waiting_for = None
+    await db.commit()
+    return {"deleted": ref_id}
+
+
+@router.post("/{task_id}/external/{ref_id}/sync")
+async def sync_external(
+    task_id: str,
+    ref_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Подтянуть состояние работы у внешней стороны.
+
+    Спрашиваем приложение-владельца тем же служебным каналом, что и витрина
+    подключений. Если оно такой ручки не отдаёт — говорим об этом прямо, а не
+    показываем выдуманный статус: неверная отметка о чужой работе хуже её
+    отсутствия.
+    """
+    cid = await assert_company_product(company_id, current_user, db, "plan")
+    t = await _task_or_404(db, cid, task_id)
+    ref = await db.get(TaskExternalRef, _uuid_or_400(ref_id, "ref_id"))
+    if ref is None or ref.task_id != t.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Связь не найдена")
+
+    result = await space_connectors.fetch_external_work(db, cid, ref.connector_key,
+                                                        ref.external_id or ref.external_number)
+    if not result.get("ok"):
+        return {"ok": False, "reason": result.get("reason"), **_ref_out(ref)}
+
+    ref.external_status = result.get("status") or ref.external_status
+    ref.external_url = result.get("url") or ref.external_url
+    ref.last_sync_at = datetime.now(timezone.utc)
+    # Этапы чужой системы вливаются в НАШУ ленту отдельным видом события: человек
+    # видит один поток, а не два окна. Уже записанные не повторяем.
+    seen = {e for (e,) in (await db.execute(select(TaskEvent.from_value).where(
+        TaskEvent.task_id == t.id, TaskEvent.kind == "external_stage"))).all()}
+    added = 0
+    for st in result.get("stages") or []:
+        key = str(st.get("id") or st.get("name") or "")
+        if not key or key in seen:
+            continue
+        db.add(TaskEvent(task_id=t.id, kind="external_stage",
+                         actor_name=ref.connector_label or ref.connector_key,
+                         from_value=key, to_value=st.get("name"), note=st.get("note")))
+        added += 1
+    if ref.mirror_close and result.get("closed") and t.status == "open":
+        db.add(TaskEvent(task_id=t.id, kind="status", user_id=current_user.id,
+                         from_value=t.status, to_value="done",
+                         note="закрыто по зеркалу внешней системы"))
+        t.status, t.closed_at = "done", datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(ref)
+    return {"ok": True, "stages_added": added, **_ref_out(ref)}
+
+
+def _ref_out(r: TaskExternalRef) -> dict[str, Any]:
+    return {
+        "id": str(r.id), "connector_key": r.connector_key,
+        "connector_label": r.connector_label, "external_id": r.external_id,
+        "external_number": r.external_number, "external_status": r.external_status,
+        "external_url": r.external_url, "direction": r.direction,
+        "mirror_close": r.mirror_close,
+        "last_sync_at": r.last_sync_at.isoformat() if r.last_sync_at else None,
+    }
 
 
 class InboundEmailIn(BaseModel):

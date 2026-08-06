@@ -340,3 +340,49 @@ async def test_поручение_внешнему_письмом(auth_client: A
     r = await auth_client.post(f"/api/tasks/{task['number']}/inbound-email",
                                json=inbound, headers=head)
     assert r.json().get("duplicate") is True, "повторная доставка задвоила реплику"
+
+
+async def test_зеркало_внешней_системы(auth_client: AsyncClient):
+    """Режим C: работа живёт в чужой системе, у нас — связь с ней.
+
+    Ловим: зеркало подменяет наш статус (вторая правда); синхронизация выдумывает
+    состояние, когда приложение его не отдаёт; снятие связи оставляет задачу
+    вечно «у внешней стороны».
+    """
+    me = await _me(auth_client)
+    cid = me["companies"][0]["id"]
+    task = (await auth_client.post("/api/tasks", json={
+        "company_id": cid, "title": "Ремонт по гарантии подрядчика",
+        "assignee_id": me["id"]})).json()
+
+    r = await auth_client.post(f"/api/tasks/{task['id']}/external", json={
+        "company_id": cid, "connector_key": "support:hubex",
+        "connector_label": "HubEx FSM", "external_number": "W-11235",
+        "external_url": "https://hubex.example/work/11235",
+        "note": "Заявка заведена у подрядчика"})
+    assert r.status_code == 201, r.text
+    ref = r.json()
+
+    card = (await auth_client.get(f"/api/tasks/{task['id']}",
+                                  params={"company_id": cid})).json()
+    assert card["waiting_for"] == "external"
+    assert [e["external_number"] for e in card["external"]] == ["W-11235"]
+    # Наш статус остался нашим: зеркало не подменяет состояние задачи.
+    assert card["status"] == "open"
+
+    # Приложение состояние чужой работы не отдаёт — ручка обязана сказать это
+    # прямо, а не показать выдуманный статус.
+    r = await auth_client.post(
+        f"/api/tasks/{task['id']}/external/{ref['id']}/sync",
+        params={"company_id": cid})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["ok"] is False and body["reason"], body
+    assert body["external_status"] is None, "статус выдуман на пустом ответе"
+
+    r = await auth_client.delete(f"/api/tasks/{task['id']}/external/{ref['id']}",
+                                 params={"company_id": cid})
+    assert r.status_code == 200, r.text
+    card = (await auth_client.get(f"/api/tasks/{task['id']}",
+                                  params={"company_id": cid})).json()
+    assert card["waiting_for"] is None, "ждать некого, а мяч всё ещё снаружи"

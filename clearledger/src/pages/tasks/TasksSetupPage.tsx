@@ -22,15 +22,109 @@ import { cn } from '@/lib/utils'
 import { useCompany } from '@/contexts/CompanyContext'
 import * as tasksService from '@/services/tasksService'
 import type { RouteStage, TaskType } from '@/services/tasksService'
+import { listSpaceConnectors } from '@/services/spaceConnectorsService'
 import { PRIORITY_LABEL } from '@/components/tasks/taskWords'
 import { tasksRouteOf, useTasksView } from './TasksLayout'
 
 export function TasksSetupPage() {
   const { company } = useCompany()
   const view = useTasksView(tasksRouteOf(useLocation().pathname))
-  return view === 'labels'
-    ? <LabelsSection companyId={company.id} />
-    : <TypesSection companyId={company.id} />
+  if (view === 'labels') return <LabelsSection companyId={company.id} />
+  if (view === 'external') return <ExternalSection companyId={company.id} />
+  return <TypesSection companyId={company.id} />
+}
+
+/* ── Внешние подключения ─────────────────────────────────────────────── */
+
+function ExternalSection({ companyId }: { companyId: string }) {
+  const q = useQuery({
+    queryKey: ['space-connectors', companyId],
+    queryFn: () => listSpaceConnectors(companyId),
+  })
+  // Делегировать можно только туда, где живёт чужая работа: файловый канал Учёта
+  // и платформенные сервисы — источники данных, а не внешние исполнители.
+  const rows = (q.data?.connectors ?? []).filter(
+    (c) => c.app !== 'ledger' && c.app !== 'core')
+
+  return (
+    <div className="space-y-3 p-4">
+      <div>
+        <h1 className="text-lg font-semibold">Внешние подключения</h1>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          Куда из задачи можно делегировать работу. Подключения заводит и настраивает
+          приложение-владелец — здесь витрина: своего реестра коннекторов у «Задач» нет.
+        </p>
+      </div>
+
+      {q.isLoading ? (
+        <div className="flex items-center gap-2 p-8 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" />Спрашиваем приложения…
+        </div>
+      ) : q.isError ? (
+        <QueryError message="Не удалось собрать подключения" onRetry={() => void q.refetch()} />
+      ) : rows.length === 0 ? (
+        <div className="rounded-lg border p-8 text-center text-sm text-muted-foreground">
+          У компании нет живых подключений к внешним системам. Пока их не заведут в
+          приложении-владельце, работу наружу отдают письмом — прямо из карточки задачи.
+        </div>
+      ) : (
+        <div className="overflow-x-auto rounded-lg border">
+          <table className="w-full min-w-[760px] text-xs">
+            <thead className="bg-muted/40 text-muted-foreground">
+              <tr><Th>Подключение</Th><Th>Владелец</Th><Th>Что приносит</Th>
+                <Th>Состояние</Th><Th>Последняя сверка</Th></tr>
+            </thead>
+            <tbody>
+              {rows.map((c) => (
+                <tr key={c.key} className="border-t">
+                  <Td>
+                    <div className="font-medium text-foreground">{c.label}</div>
+                    <div className="mt-0.5 text-[11px] text-muted-foreground">{c.kind}</div>
+                  </Td>
+                  <Td>{c.app_name}</Td>
+                  <Td className="text-muted-foreground">{c.brings || '—'}</Td>
+                  <Td>
+                    <span className={cn('rounded border px-1.5 py-0.5 text-[11px]',
+                      c.enabled
+                        ? 'border-emerald-500/40 bg-emerald-500/5 text-emerald-700 dark:text-emerald-400'
+                        : 'border-border text-muted-foreground')}>
+                      {c.enabled ? 'работает' : 'выключено'}
+                    </span>
+                    {c.last_error && (
+                      <div className="mt-0.5 text-[11px] text-red-600 dark:text-red-400">
+                        {c.last_error}
+                      </div>
+                    )}
+                  </Td>
+                  <Td className="text-muted-foreground">
+                    {c.last_sync_at ? new Date(c.last_sync_at).toLocaleString('ru-RU') : '—'}
+                  </Td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {(q.data?.problems ?? []).length > 0 && (
+        // Приложение, которое не ответило, называем: список честнее молчания.
+        <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-xs">
+          <div className="font-medium">Не ответили</div>
+          {q.data!.problems.map((p) => (
+            <div key={p.app} className="mt-0.5 text-muted-foreground">
+              {p.app_name}: {p.error}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <p className="text-[11px] text-muted-foreground">
+        Работу в чужой системе заводит её владелец. В карточке задачи остаётся связь с
+        ней — номер, ссылка и состояние; вторую правду о чужой работе мы не держим.
+        Автосоздание работы появится, когда приложение-владелец отдаст для этого ручку.
+      </p>
+    </div>
+  )
 }
 
 /* ── Типы и маршруты ─────────────────────────────────────────────────── */

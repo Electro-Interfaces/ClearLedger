@@ -6515,6 +6515,44 @@ class TaskParticipant(Base):
         DateTime(timezone=True), server_default=func.now())
 
 
+class TaskExternalRef(Base):
+    """Зеркало работы во внешней системе — не копия.
+
+    У нас своя задача, у них своя; здесь только связь между ними: чей коннектор,
+    какой у работы номер и адрес, в каком она у них состоянии и когда мы это
+    видели. Вторую правду о чужой работе не заводим — состояние приходит
+    синхронизацией и живёт как отметка, а не как наш статус.
+
+    Владелец коннектора — приложение (Координатор), поэтому здесь его
+    идентификатор строкой: реестра коннекторов в Ядре нет и заводить его нельзя.
+    """
+    __tablename__ = "task_external_refs"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    task_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    # Ключ строки витрины подключений: «<приложение>:<id коннектора>».
+    connector_key: Mapped[str] = mapped_column(String(120), nullable=False)
+    connector_label: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    external_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    external_number: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    external_status: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    external_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # out — мы отдали работу наружу; in — их система завела работу у нас.
+    direction: Mapped[str] = mapped_column(String(10), nullable=False, default="out")
+    # Зеркалить ли их закрытие в наш статус. По умолчанию выключено: наше
+    # состояние меняет наш человек, а не чужая система.
+    mirror_close: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    last_sync_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+
 class TaskLabelLink(Base):
     """Метка на задаче."""
     __tablename__ = "task_label_links"

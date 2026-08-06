@@ -12,7 +12,7 @@ import { useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowRight, CheckCircle2, Eye, EyeOff, Link2, Loader2, Mail, Paperclip, Plus,
-  Send, Trash2, X,
+  RefreshCw, Send, Trash2, X,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
@@ -29,6 +29,7 @@ import { cn } from '@/lib/utils'
 import * as tasksService from '@/services/tasksService'
 import type { LinkKind, TaskDetails } from '@/services/tasksService'
 import { listSpaceObjects } from '@/services/spaceObjectsService'
+import { listSpaceConnectors } from '@/services/spaceConnectorsService'
 import {
   LINK_LABEL, PRIORITY_LABEL, PRIORITY_TONE, STATUS_LABEL, WAITING_LABEL,
   dt, dtT, eventText, fileSize,
@@ -758,7 +759,149 @@ function External({ task, companyId, live, onChanged }: {
           В пространстве не настроен ящик приёма — письмо отправить некуда.
         </p>
       )}
+
+      <ExternalSystem task={task} companyId={companyId} live={live} onChanged={onChanged} />
     </Section>
+  )
+}
+
+/** Работа во внешней системе: зеркало, а не копия. */
+function ExternalSystem({ task, companyId, live, onChanged }: {
+  task: TaskDetails; companyId: string; live: boolean; onChanged: () => void
+}) {
+  const [adding, setAdding] = useState(false)
+  const [key, setKey] = useState('')
+  const [number, setNumber] = useState('')
+  const [url, setUrl] = useState('')
+
+  const connectorsQ = useQuery({
+    queryKey: ['space-connectors', companyId],
+    queryFn: () => listSpaceConnectors(companyId),
+    enabled: adding, staleTime: 60 * 1000,
+  })
+  // Делегировать можно только туда, где живёт чужая работа: файловый канал
+  // Учёта и платформенные сервисы — не внешние исполнители.
+  const usable = (connectorsQ.data?.connectors ?? []).filter(
+    (c) => c.app !== 'ledger' && c.app !== 'core' && c.enabled)
+
+  const link = useMutation({
+    mutationFn: () => tasksService.linkExternal(task.id, {
+      companyId, connectorKey: key, externalNumber: number.trim() || undefined,
+      externalUrl: url.trim() || undefined,
+      connectorLabel: usable.find((c) => c.key === key)?.label,
+    }),
+    onSuccess: () => {
+      toast.success('Работа связана с внешней системой')
+      setAdding(false); setKey(''); setNumber(''); setUrl('')
+      onChanged()
+    },
+    onError: (e) => toast.error((e as Error).message),
+  })
+  const sync = useMutation({
+    mutationFn: (refId: string) => tasksService.syncExternal(task.id, refId, companyId),
+    onSuccess: (r) => {
+      // Приложение может не отдавать состояние — говорим прямо, а не молчим.
+      if (!r.ok) toast.warning(r.reason ?? 'Состояние получить не удалось')
+      else toast.success(r.stages_added
+        ? `Обновлено, новых этапов: ${r.stages_added}` : 'Состояние обновлено')
+      onChanged()
+    },
+    onError: (e) => toast.error((e as Error).message),
+  })
+  const drop = useMutation({
+    mutationFn: (refId: string) => tasksService.unlinkExternal(task.id, refId, companyId),
+    onSuccess: onChanged,
+  })
+
+  return (
+    <div className="mt-3">
+      <div className="mb-1.5 flex items-center justify-between">
+        <span className="text-xs text-muted-foreground">Внешняя система</span>
+        {live && (
+          <button type="button" onClick={() => setAdding((v) => !v)}
+            className="text-[11px] text-muted-foreground hover:text-foreground">
+            {adding ? 'отмена' : 'связать с работой'}
+          </button>
+        )}
+      </div>
+
+      {adding && (
+        <div className="mb-2 space-y-2 rounded-md border border-dashed p-2">
+          <Select value={key} onValueChange={setKey}>
+            <SelectTrigger className="h-7 text-xs">
+              <SelectValue placeholder={connectorsQ.isLoading
+                ? 'Загрузка подключений…' : 'Куда делегируем'} />
+            </SelectTrigger>
+            <SelectContent>
+              {usable.map((c) => (
+                <SelectItem key={c.key} value={c.key}>
+                  {c.label} · {c.app_name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {!connectorsQ.isLoading && usable.length === 0 && (
+            <p className="text-[11px] text-amber-600 dark:text-amber-400">
+              У компании нет живых подключений к внешним системам. Их заводят в
+              приложении-владельце, а не здесь.
+            </p>
+          )}
+          <div className="grid gap-2 sm:grid-cols-2">
+            <Input value={number} onChange={(e) => setNumber(e.target.value)}
+              placeholder="Их номер работы" className="h-7 text-xs" />
+            <Input value={url} onChange={(e) => setUrl(e.target.value)}
+              placeholder="Ссылка на их карточку" className="h-7 text-xs" />
+          </div>
+          <Button size="sm" className="h-7" disabled={!key || link.isPending}
+            onClick={() => link.mutate()}>
+            {link.isPending && <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />}
+            Связать
+          </Button>
+        </div>
+      )}
+
+      <div className="space-y-1">
+        {task.external.map((r) => (
+          <div key={r.id} className="flex flex-wrap items-center gap-2 text-xs">
+            <Link2 className="h-3 w-3 shrink-0 text-muted-foreground" />
+            <span className="font-medium">{r.connector_label ?? r.connector_key}</span>
+            {r.external_number && (
+              r.external_url
+                ? <a href={r.external_url} target="_blank" rel="noreferrer"
+                  className="text-primary hover:underline">{r.external_number}</a>
+                : <span>{r.external_number}</span>
+            )}
+            <span className="text-muted-foreground">
+              {r.external_status ?? 'состояние не получено'}
+            </span>
+            {r.last_sync_at && (
+              <span className="text-[10px] text-muted-foreground">
+                сверено {dtT(r.last_sync_at)}
+              </span>
+            )}
+            {live && (
+              <span className="ml-auto flex items-center gap-1">
+                <Button variant="ghost" size="sm" className="h-6 px-1.5"
+                  aria-label="Сверить состояние" disabled={sync.isPending}
+                  onClick={() => sync.mutate(r.id)}>
+                  <RefreshCw className={cn('h-3 w-3', sync.isPending && 'animate-spin')} />
+                </Button>
+                <Button variant="ghost" size="sm" className="h-6 px-1.5"
+                  aria-label="Снять связь" onClick={() => drop.mutate(r.id)}>
+                  <Trash2 className="h-3 w-3" />
+                </Button>
+              </span>
+            )}
+          </div>
+        ))}
+        {task.external.length === 0 && !adding && (
+          <p className="text-xs text-muted-foreground">
+            Во внешние системы не делегировано. Работу заводит их владелец, здесь
+            остаётся связь с ней — второй правды о чужой работе не держим.
+          </p>
+        )}
+      </div>
+    </div>
   )
 }
 

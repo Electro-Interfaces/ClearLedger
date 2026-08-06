@@ -36,6 +36,7 @@ export const TASKS_VIEWS: Record<string, TasksView[]> = {
   '/tasks/setup': [
     { key: 'types', label: 'Типы и маршруты', hint: 'чем один вид работы отличается от другого' },
     { key: 'labels', label: 'Метки', hint: 'свободные ярлыки поверх типа и стадии' },
+    { key: 'external', label: 'Внешние подключения', hint: 'куда можно делегировать работу' },
   ],
 }
 
