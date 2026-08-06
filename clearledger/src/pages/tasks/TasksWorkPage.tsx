@@ -12,7 +12,7 @@ import { useMemo, useState } from 'react'
 import { useLocation, useSearchParams } from 'react-router-dom'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  ArrowDown, ArrowUp, BookmarkPlus, ChevronsUpDown, Download, ListChecks, Loader2,
+  ArrowDown, ArrowUp, BookmarkPlus, ChevronsUpDown, Download, ListChecks, Loader2, Terminal,
   Plus, RefreshCw, Search, X,
 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -496,7 +496,50 @@ function BulkBar({ companyId, ids, people, onDone, onCancel }: {
       <Button size="sm" variant="ghost" className="h-8 text-muted-foreground" onClick={onCancel}>
         Снять отметки
       </Button>
+      <CommandLine companyId={companyId} ids={ids} onDone={onDone} />
     </div>
+  )
+}
+
+/**
+ * Команда одной строкой — как в YouTrack: «на меня срочная срок завтра».
+ *
+ * Быстрее выпадающих списков там, где надо изменить сразу несколько свойств у
+ * пачки задач. Неузнанные слова сервер возвращает списком, и мы их показываем:
+ * молчание здесь опаснее отказа — человек уверен, что срок поставлен.
+ */
+function CommandLine({ companyId, ids, onDone }: {
+  companyId: string; ids: string[]; onDone: () => void
+}) {
+  const qc = useQueryClient()
+  const [text, setText] = useState('')
+  const run = useMutation({
+    mutationFn: () => tasksService.applyCommand({
+      companyId, taskIds: ids, command: text.trim(),
+    }),
+    onSuccess: (r) => {
+      if (r.unknown.length) toast.warning(`Не понял: ${r.unknown.join(', ')}`)
+      if (r.skipped.length) toast.warning(`Пропущено: ${r.skipped.join('; ')}`)
+      if (r.changed) toast.success(`Изменено задач: ${r.changed}`)
+      setText('')
+      qc.invalidateQueries({ queryKey: ['tasks'] })
+      onDone()
+    },
+    onError: (e) => toast.error((e as Error).message),
+  })
+  return (
+    <span className="flex min-w-[280px] flex-1 items-center gap-1">
+      <Terminal className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+      <Input value={text} onChange={(e) => setText(e.target.value)}
+        placeholder="Команда: на меня срочная срок завтра"
+        title="Примеры: «на меня», «срочная», «стадия Диагностика», «срок через 3 дня», «метка стройка», «время 2ч», «выполнена»"
+        className="h-8 flex-1 text-xs"
+        onKeyDown={(e) => { if (e.key === 'Enter' && text.trim()) run.mutate() }} />
+      <Button size="sm" variant="outline" className="h-8"
+        disabled={!text.trim() || run.isPending} onClick={() => run.mutate()}>
+        {run.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Применить'}
+      </Button>
+    </span>
   )
 }
 

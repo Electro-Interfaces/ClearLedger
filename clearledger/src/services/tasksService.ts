@@ -55,6 +55,8 @@ export interface SpaceTask {
   overdue: boolean
   /** У кого мяч: `external` — ждём внешнюю сторону, `us`/null — у нас. */
   waiting_for: 'us' | 'external' | null
+  /** Кто видит: company — вся компания, private — только причастные. */
+  visibility: 'company' | 'private'
   created_at: string | null
   updated_at: string | null
   closed_at: string | null
@@ -66,11 +68,12 @@ export interface SpaceTask {
 
 export interface TaskEvent {
   id: string
-  kind: string             // created | stage | assign | status | comment
+  kind: string             // created | stage | assign | status | comment | field | work | mail
   user: string | null
   from: string | null
   to: string | null
   note: string | null
+  pinned?: boolean
   created_at: string | null
 }
 
@@ -199,6 +202,7 @@ export async function taskAction(id: string, data: {
   status?: string; priority?: string; dueAt?: string; note?: string
   title?: string; description?: string; objectId?: string | null
   addLabelId?: string; removeLabelId?: string; estimate?: string
+  visibility?: 'company' | 'private'
 }) {
   return post<TaskActionResult>(`/api/tasks/${id}/action`, {
     company_id: data.companyId,
@@ -210,7 +214,7 @@ export async function taskAction(id: string, data: {
     title: data.title, description: data.description,
     object_id: data.objectId === null ? '' : data.objectId,
     add_label_id: data.addLabelId, remove_label_id: data.removeLabelId,
-    estimate: data.estimate,
+    estimate: data.estimate, visibility: data.visibility,
   })
 }
 
@@ -344,6 +348,24 @@ export async function createTaskRecurrence(data: {
 
 export async function deleteTaskRecurrence(id: string, companyId: string) {
   return del(`/api/tasks/recurrences/${id}?company_id=${encodeURIComponent(companyId)}`)
+}
+
+/** Команда одной строкой к одной или нескольким задачам: «на меня срочная срок завтра». */
+export async function applyCommand(data: {
+  companyId: string; taskIds: string[]; command: string
+}) {
+  return post<{
+    changed: number; skipped: string[]; unknown: string[]
+    applied: Record<string, unknown>
+  }>('/api/tasks/command', {
+    company_id: data.companyId, task_ids: data.taskIds, command: data.command,
+  })
+}
+
+/** Закрепить или открепить реплику ленты (переключатель). */
+export async function pinEvent(taskId: string, eventId: string, companyId: string) {
+  return post<{ id: string; pinned: boolean }>(
+    `/api/tasks/${taskId}/events/${eventId}/pin?company_id=${encodeURIComponent(companyId)}`, {})
 }
 
 /** Записать время по задаче. Длительность строкой — «2ч 30м», «1,5ч», «90м». */

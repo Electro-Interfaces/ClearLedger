@@ -6362,6 +6362,11 @@ class Task(Base):
     # Оценка трудоёмкости в минутах (как `estimation` в YouTrack). План живёт в
     # задаче, факт — в записях о работе: их сравнение и есть весь смысл учёта.
     estimate_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Кто видит задачу: company — вся компания (обычный случай), private —
+    # только причастные (автор, исполнитель, наблюдатели, участники) и админ
+    # пространства. Кадровые и денежные поручения не должны читаться всеми, а
+    # заводить под них отдельный продукт — лишнее.
+    visibility: Mapped[str] = mapped_column(String(20), nullable=False, default="company")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True)
     updated_at: Mapped[datetime] = mapped_column(
@@ -6390,6 +6395,9 @@ class TaskEvent(Base):
     # нет вовсе, и подписывать его событие «система» — терять единственный ответ
     # на вопрос «кто это сказал».
     actor_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # Закреплённая реплика: договорённость, к которой возвращаются, не должна
+    # тонуть в ленте из тридцати событий.
+    pinned: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     from_value: Mapped[str | None] = mapped_column(String(200), nullable=True)
     to_value: Mapped[str | None] = mapped_column(String(200), nullable=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -267,6 +267,95 @@ async def test_рабочее_место_отделяет_моё_от_поруч
     assert handed["id"] in ids(watching["tasks"])
 
 
+async def test_команда_одной_строкой(auth_client: AsyncClient):
+    """Команды как в YouTrack: одна строка делает то, на что уходит пять кликов.
+
+    Ловим: неузнанные слова молча съедаются (человек уверен, что срок поставлен,
+    а его нет); свободный хвост теряется вместо реплики.
+    """
+    me = await _me(auth_client)
+    cid = me["companies"][0]["id"]
+    a = (await auth_client.post("/api/tasks", json={
+        "company_id": cid, "title": "Команда — первая"})).json()
+    b = (await auth_client.post("/api/tasks", json={
+        "company_id": cid, "title": "Команда — вторая"})).json()
+
+    r = await auth_client.post("/api/tasks/command", json={
+        "company_id": cid, "task_ids": [a["id"], b["id"]],
+        "command": "на меня срочная срок завтра посмотрю с утра"})
+    assert r.status_code == 200, r.text
+    res = r.json()
+    assert res["changed"] == 2, res
+
+    card = (await auth_client.get(f"/api/tasks/{a['id']}",
+                                  params={"company_id": cid})).json()
+    assert card["assignee_id"] == me["id"]
+    assert card["priority"] == "high"
+    assert card["due_at"], "срок не поставился"
+    # Свободный хвост становится репликой, а не теряется.
+    assert any("посмотрю с утра" in (e["note"] or "") for e in card["events"])
+
+    # Неузнанное возвращается списком, а не проглатывается.
+    r = await auth_client.post("/api/tasks/command", json={
+        "company_id": cid, "task_ids": [a["id"]], "command": "метка несуществующая"})
+    assert r.status_code in (200, 400)
+    if r.status_code == 200:
+        assert r.json()["unknown"], "неизвестная метка проглочена молча"
+
+    # Закрепление реплики — переключатель.
+    ev = next(e for e in card["events"] if e["kind"] in ("comment", "assign"))
+    r = await auth_client.post(f"/api/tasks/{a['id']}/events/{ev['id']}/pin",
+                               params={"company_id": cid})
+    assert r.status_code == 200 and r.json()["pinned"] is True
+    r = await auth_client.post(f"/api/tasks/{a['id']}/events/{ev['id']}/pin",
+                               params={"company_id": cid})
+    assert r.json()["pinned"] is False
+
+
+async def test_приватная_задача_не_видна_посторонним(auth_client: AsyncClient):
+    """Видимость (`visibility` в YouTrack): кадровое поручение читают не все.
+
+    Ловим главное: закрытая задача утекает не «по ссылке», а списком и поиском —
+    заголовка достаточно, чтобы понять, о чём речь.
+    """
+    import uuid as _uuid
+
+    from app.database import async_session_factory
+    from app.models import Task, User, UserCompany
+    from sqlalchemy import select
+
+    me = await _me(auth_client)
+    cid = me["companies"][0]["id"]
+    t = (await auth_client.post("/api/tasks", json={
+        "company_id": cid, "title": "Пересмотр оклада"})).json()
+    r = await auth_client.post(f"/api/tasks/{t['id']}/action", json={
+        "company_id": cid, "visibility": "private"})
+    assert r.status_code == 200 and r.json()["visibility"] == "private"
+    # Смена круга — событие: тихое действие с большими последствиями.
+    card = (await auth_client.get(f"/api/tasks/{t['id']}",
+                                  params={"company_id": cid})).json()
+    assert any(e["kind"] == "field" and "видимость" in (e["from"] or "")
+               for e in card["events"])
+
+    # Посторонний (не админ, не причастен) её не видит ни списком, ни поиском.
+    async with async_session_factory() as db:
+        row = (await db.execute(
+            select(User).join(UserCompany, UserCompany.user_id == User.id)
+            .where(UserCompany.company_id == _uuid.UUID(cid),
+                   UserCompany.role != "admin", User.is_superadmin.is_(False),
+                   User.mail_only.is_(False)).limit(1))).scalar_one_or_none()
+        if row is None:
+            return  # в пилоте все админы — проверять не на ком
+        from app.routers.tasks_router import list_tasks
+        args = dict(object_id=None, type_id=None, assignee_id=None, author_id=None,
+                    stage=None, priority=None, label_id=None, due_from=None, due_to=None,
+                    sort="created", limit=100, offset=0, db=db, current_user=row)
+        seen = await list_tasks(company_id=cid, scope="all", q=None, **args)
+        assert t["id"] not in [x["id"] for x in seen["tasks"]], "приватная утекла списком"
+        found = await list_tasks(company_id=cid, scope="all", q="оклад", **args)
+        assert t["id"] not in [x["id"] for x in found["tasks"]], "приватная нашлась поиском"
+
+
 async def test_учёт_времени_план_и_факт(auth_client: AsyncClient):
     """Оценка и записи о работе — как `estimation` и work items в YouTrack.
 

@@ -23,7 +23,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import case, delete as sa_delete, func, or_, select
+from sqlalchemy import case, delete as sa_delete, func, or_, select, true as sa_true
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import assert_company_product, get_company_by_api_key, get_current_user
@@ -130,6 +130,7 @@ def _task_out(t: Task, route: list[dict], names: dict[str, str | None],
         "object_id": t.object_id,
         "due_at": t.due_at.isoformat() if t.due_at else None,
         "waiting_for": t.waiting_for,
+        "visibility": t.visibility,
         # Просрочка — свойство живой задачи: у закрытой срок уже не сигнал.
         "overdue": bool(t.due_at and t.status == "open" and t.due_at < now),
         "created_at": t.created_at.isoformat() if t.created_at else None,
@@ -211,6 +212,32 @@ async def _extras(db: AsyncSession, tasks: list[Task]) -> dict[uuid.UUID, dict[s
             "spent_text": human_duration(spent.get(t.id, 0)),
         },
     } for t in tasks}
+
+
+def _visible_to(user: User, is_admin: bool):
+    """Условие видимости для выборок: приватную задачу видят только причастные.
+
+    Собрано одним местом намеренно: стоит забыть его в поиске или в обзоре — и
+    закрытая задача утечёт хотя бы заголовком, а это ровно то, ради чего её
+    закрывали.
+    """
+    if is_admin:
+        return sa_true()
+    return or_(
+        Task.visibility != "private",
+        Task.author_id == user.id,
+        Task.assignee_id == user.id,
+        Task.id.in_(select(TaskWatcher.task_id).where(TaskWatcher.user_id == user.id)),
+        Task.id.in_(select(TaskParticipant.task_id).where(
+            TaskParticipant.user_id == user.id)),
+    )
+
+
+async def _is_admin(db: AsyncSession, cid: uuid.UUID, user: User) -> bool:
+    if user.is_superadmin:
+        return True
+    m = await db.get(UserCompany, (user.id, cid))
+    return m is not None and m.role == "admin"
 
 
 async def _task_or_404(db: AsyncSession, cid: uuid.UUID, task_id: str) -> Task:
@@ -321,7 +348,8 @@ async def list_tasks(
     """
     cid = await assert_company_product(company_id, current_user, db, "plan")
     now = datetime.now(timezone.utc)
-    sel = select(Task).where(Task.company_id == cid)
+    sel = select(Task).where(Task.company_id == cid,
+                             _visible_to(current_user, await _is_admin(db, cid, current_user)))
 
     if scope == "open":
         sel = sel.where(Task.status == "open")
@@ -640,6 +668,7 @@ async def tasks_summary(
     # не нужны, а «в работе» нужны все — просрочка не обязана попадать в окно.
     tasks = list((await db.execute(select(Task).where(
         Task.company_id == cid,
+        _visible_to(current_user, await _is_admin(db, cid, current_user)),
         or_(Task.status == "open", Task.closed_at >= since),
     ))).scalars())
     names = await _names(db, tasks)
@@ -1048,6 +1077,14 @@ async def task_details(
     """Карточка задачи: поля, маршрут, лента и всё, что к работе прицеплено."""
     cid = await assert_company_product(company_id, current_user, db, "plan")
     t = await _task_or_404(db, cid, task_id)
+    # Ссылку на закрытую задачу могут переслать — проверяем причастность, а не
+    # только знание идентификатора.
+    if t.visibility == "private" and not await _is_admin(db, cid, current_user):
+        allowed = current_user.id in (t.author_id, t.assignee_id) or bool(
+            await db.get(TaskWatcher, (t.id, current_user.id))
+            or await db.get(TaskParticipant, (t.id, current_user.id)))
+        if not allowed:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Задача не найдена")
     names = await _names(db, [t])
     extras = await _extras(db, [t])
     events = (await db.execute(
@@ -1090,6 +1127,7 @@ async def task_details(
             # совпадать с тем, как человек представился в почте.
             "user": e.actor_name or actors.get(e.user_id),
             "from": e.from_value, "to": e.to_value, "note": e.note,
+            "pinned": e.pinned,
             "created_at": e.created_at.isoformat() if e.created_at else None,
         } for e in events],
         "participants": [{
@@ -1135,6 +1173,7 @@ class TaskAction(BaseModel):
     add_label_id: str | None = None
     remove_label_id: str | None = None
     estimate: str | None = Field(None, max_length=40)   # «4ч», «30м»; "" — снять
+    visibility: str | None = Field(None, pattern="^(company|private)$")
 
 
 @router.post("/{task_id}/action")
@@ -1240,6 +1279,13 @@ async def task_action(
     if payload.object_id is not None and (payload.object_id or None) != t.object_id:
         field_changed("объект", t.object_id, payload.object_id or None)
         t.object_id = payload.object_id or None
+    if payload.visibility is not None and payload.visibility != t.visibility:
+        # Смена круга видимости — событие: «кто закрыл задачу от компании» должно
+        # быть видно, иначе это тихое действие с большими последствиями.
+        field_changed("видимость",
+                      "вся компания" if t.visibility == "company" else "ограниченный круг",
+                      "вся компания" if payload.visibility == "company" else "ограниченный круг")
+        t.visibility = payload.visibility
     if payload.estimate is not None:
         est = parse_duration(payload.estimate) if payload.estimate.strip() else None
         if payload.estimate.strip() and est is None:
@@ -1636,6 +1682,202 @@ async def delete_attachment(
     await db.delete(att)
     await db.commit()
     return {"deleted": attachment_id}
+
+
+@router.post("/{task_id}/events/{event_id}/pin")
+async def pin_event(
+    task_id: str,
+    event_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Закрепить или открепить реплику ленты.
+
+    Договорённость, к которой возвращаются («решили ставить в субботу»), не
+    должна тонуть в тридцати событиях. Закрепление — переключатель: повторное
+    нажатие снимает.
+    """
+    cid = await assert_company_product(company_id, current_user, db, "plan")
+    t = await _task_or_404(db, cid, task_id)
+    await _assert_actor(db, cid, current_user, t)
+    ev = await db.get(TaskEvent, _uuid_or_400(event_id, "event_id"))
+    if ev is None or ev.task_id != t.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Событие не найдено")
+    ev.pinned = not ev.pinned
+    await db.commit()
+    return {"id": str(ev.id), "pinned": ev.pinned}
+
+
+# ── Команды одной строкой ────────────────────────────────────────────────
+#
+# Как в YouTrack: «на меня срочная», «стадия диагностика», «срок завтра»,
+# «метка стройка», «время 2ч». Смысл не в экзотике, а в скорости — руки не
+# уходят с клавиатуры, и одну строку можно применить сразу к нескольким
+# задачам. Разбор живёт на сервере: клиентов у ручки уже двое, и два парсера
+# начали бы понимать команды по-разному.
+
+_CMD_PRIORITY = {
+    "низкая": "low", "низкий": "low", "low": "low",
+    "обычная": "medium", "обычный": "medium", "средняя": "medium", "medium": "medium",
+    "срочная": "high", "срочный": "high", "высокая": "high", "high": "high",
+    "критичная": "critical", "критичный": "critical", "critical": "critical",
+}
+_CMD_STATUS = {
+    "выполнена": "done", "выполнено": "done", "готово": "done", "done": "done",
+    "отменена": "cancelled", "отменить": "cancelled", "отмена": "cancelled",
+    "открыть": "open", "вернуть": "open", "open": "open",
+}
+
+
+def _cmd_due(word: str) -> datetime | None:
+    """«сегодня», «завтра», «через 3 дня», «12.09.2026» → срок."""
+    now = datetime.now(timezone.utc)
+    w = word.strip().lower()
+    if w in ("сегодня", "today"):
+        return now
+    if w in ("завтра", "tomorrow"):
+        return now + timedelta(days=1)
+    if w in ("послезавтра",):
+        return now + timedelta(days=2)
+    m = re.match(r"^(?:через\s+)?(\d+)\s*(?:дн|день|дня|дней|d)$", w)
+    if m:
+        return now + timedelta(days=int(m.group(1)))
+    for fmt in ("%d.%m.%Y", "%d.%m.%y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(w, fmt).replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+    return None
+
+
+class CommandIn(BaseModel):
+    company_id: str
+    task_ids: list[str] = Field(min_length=1, max_length=200)
+    command: str = Field(min_length=1, max_length=300)
+
+
+@router.post("/command")
+async def apply_command(
+    payload: CommandIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Применить команду к задачам одной строкой.
+
+    Разбираем во что можем, а неузнанное возвращаем списком — молча проглотить
+    половину команды хуже, чем сказать «этого я не понял»: человек уверен, что
+    срок поставлен, а он нет.
+    """
+    cid = await assert_company_product(payload.company_id, current_user, db, "plan")
+    words = payload.command.split()
+    action: dict[str, Any] = {}
+    unknown: list[str] = []
+    note_parts: list[str] = []
+    labels: list[str] = []
+    work: str | None = None
+
+    people = {(n or "").lower(): u for u, n in (await db.execute(
+        select(User.id, User.name).join(UserCompany, UserCompany.user_id == User.id)
+        .where(UserCompany.company_id == cid))).all()}
+    label_rows = {(n or "").lower(): i for i, n in (await db.execute(
+        select(TaskLabel.id, TaskLabel.name).where(TaskLabel.company_id == cid))).all()}
+    types = (await db.execute(select(TaskType).where(TaskType.company_id == cid))).scalars().all()
+    stages = {s.get("name", "").lower(): s.get("code")
+              for ty in types for s in (ty.route or []) if s.get("name")}
+    stages.update({s["name"].lower(): s["code"] for s in DEFAULT_ROUTE})
+
+    i = 0
+    while i < len(words):
+        w = words[i].lower()
+        nxt = words[i + 1] if i + 1 < len(words) else ""
+        if w in ("на", "for") and nxt.lower() in ("меня", "me"):
+            action["assignee_id"] = str(current_user.id)
+            i += 2
+            continue
+        if w in ("срочность", "priority") and nxt.lower() in _CMD_PRIORITY:
+            action["priority"] = _CMD_PRIORITY[nxt.lower()]
+            i += 2
+            continue
+        if w in _CMD_PRIORITY:            # «срочная» без слова «срочность»
+            action["priority"] = _CMD_PRIORITY[w]
+            i += 1
+            continue
+        if w in _CMD_STATUS:
+            action["status"] = _CMD_STATUS[w]
+            i += 1
+            continue
+        if w in ("стадия", "state", "stage") and nxt:
+            code = stages.get(nxt.lower())
+            if code:
+                action["stage_code"] = code
+                i += 2
+                continue
+        if w in ("срок", "due") and nxt:
+            # Срок бывает из двух слов: «через 3 дня».
+            for take in (3, 2, 1):
+                phrase = " ".join(words[i + 1:i + 1 + take])
+                if phrase and (due := _cmd_due(phrase)) is not None:
+                    action["due_at"] = due.isoformat()
+                    i += 1 + take
+                    break
+            else:
+                unknown.append(f"{w} {nxt}")
+                i += 2
+            continue
+        if w in ("метка", "тег", "tag") and nxt:
+            lid = label_rows.get(nxt.lower())
+            (labels.append(str(lid)) if lid else unknown.append(f"метка {nxt}"))
+            i += 2
+            continue
+        if w in ("время", "time") and nxt:
+            work = nxt
+            i += 2
+            continue
+        if w in ("кому", "исполнитель", "assign") and nxt:
+            # Фамилии хватает: «assign Петров» — люди так и говорят.
+            match = next((uid for name, uid in people.items()
+                          if name.startswith(nxt.lower())), None)
+            (action.update({"assignee_id": str(match)}) if match
+             else unknown.append(f"исполнитель {nxt}"))
+            i += 2
+            continue
+        note_parts.append(words[i])
+        i += 1
+
+    # Свободный хвост — реплика: «на меня срочная посмотрю завтра» пишет и то,
+    # и другое, как в YouTrack.
+    if note_parts:
+        action["note"] = " ".join(note_parts)
+    if not action and not labels and not work:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Не понял команду. Например: «на меня срочная срок завтра»")
+
+    done, skipped = 0, []
+    for raw in payload.task_ids:
+        t = await db.get(Task, _uuid_or_400(raw, "task_id"))
+        if t is None or t.company_id != cid:
+            skipped.append(raw)
+            continue
+        try:
+            await task_action(str(t.id), TaskAction(
+                company_id=str(cid), **{k: v for k, v in action.items()}), db, current_user)
+        except HTTPException as e:
+            skipped.append(f"№{t.number}: {e.detail}")
+            continue
+        for lid in labels:
+            await task_action(str(t.id), TaskAction(
+                company_id=str(cid), add_label_id=lid), db, current_user)
+        if work:
+            try:
+                await add_work_item(str(t.id), WorkItemIn(
+                    company_id=str(cid), duration=work), db, current_user)
+            except HTTPException as e:
+                skipped.append(f"№{t.number}: время — {e.detail}")
+        done += 1
+
+    return {"changed": done, "skipped": skipped, "unknown": unknown,
+            "applied": {k: v for k, v in action.items() if k != "company_id"}}
 
 
 # ── Учёт времени: план и факт ────────────────────────────────────────────

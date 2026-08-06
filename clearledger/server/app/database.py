@@ -1451,6 +1451,12 @@ async def create_all() -> None:
             "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS reminded_at TIMESTAMPTZ",
             # Учёт времени: план в задаче, факт — в task_work_items.
             "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS estimate_minutes INTEGER",
+            # Видимость: company (по умолчанию) или private — только причастные.
+            "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS visibility VARCHAR(20) "
+            "NOT NULL DEFAULT 'company'",
+            # Закреплённая реплика ленты: главное решение наверх.
+            "ALTER TABLE task_events ADD COLUMN IF NOT EXISTS pinned BOOLEAN "
+            "NOT NULL DEFAULT false",
             # Чат задачи — скрытая группа обсуждения, как у заявки.
             "ALTER TABLE chat_rooms ADD COLUMN IF NOT EXISTS scope_task_id UUID "
             "REFERENCES tasks(id) ON DELETE CASCADE",

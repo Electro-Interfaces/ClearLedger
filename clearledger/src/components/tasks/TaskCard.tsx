@@ -12,8 +12,8 @@ import { useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  ArrowRight, CheckCircle2, Clock, Eye, EyeOff, Link2, Loader2, Mail, MessagesSquare,
-  Paperclip, Plus, RefreshCw, Send, Trash2, X,
+  ArrowRight, CheckCircle2, Clock, Eye, EyeOff, Link2, Loader2, Lock, Mail,
+  MessagesSquare, Paperclip, Pin, Plus, RefreshCw, Send, Trash2, X,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
@@ -32,6 +32,7 @@ import type { LinkKind, TaskDetails } from '@/services/tasksService'
 import { listSpaceObjects } from '@/services/spaceObjectsService'
 import { listSpaceConnectors } from '@/services/spaceConnectorsService'
 import { ensureTaskRoom } from '@/services/chatService'
+import { RichText } from './RichText'
 import {
   LINK_LABEL, PRIORITY_LABEL, PRIORITY_TONE, STATUS_LABEL, WAITING_LABEL,
   dt, dtT, eventText, fileSize,
@@ -86,6 +87,11 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther }: {
     onSuccess: (room) => navigate(`/messages?room=${room.id}`),
     onError: (e) => toast.error((e as Error).message),
   })
+  const pin = useMutation({
+    mutationFn: (eventId: string) => tasksService.pinEvent(id, eventId, companyId),
+    onSuccess: reload,
+    onError: (e) => toast.error((e as Error).message),
+  })
   const upload = useMutation({
     mutationFn: (file: File) => tasksService.uploadTaskFile(id, companyId, file),
     onSuccess: () => { toast.success('Файл приложен'); reload() },
@@ -113,7 +119,10 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther }: {
   const live = t.status === 'open'
   const stageIndex = t.route.findIndex((s) => s.code === t.stage_code)
   const next = stageIndex >= 0 ? t.route[stageIndex + 1] : t.route[0]
-  const events = onlyComments ? t.events.filter((e) => e.kind === 'comment') : t.events
+  const shown = onlyComments ? t.events.filter((e) => e.kind === 'comment') : t.events
+  // Закреплённое — наверх: договорённость, к которой возвращаются, не должна
+  // тонуть в ленте из тридцати событий.
+  const events = [...shown].sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned))
 
   return (
     <div className="flex h-full flex-col">
@@ -267,8 +276,16 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther }: {
                     </span>
                   )}
                   <span className="ml-auto text-[11px] text-muted-foreground">{dtT(e.created_at)}</span>
+                  {live && (
+                    <button type="button" title={e.pinned ? 'Открепить' : 'Закрепить'}
+                      onClick={() => pin.mutate(e.id)}
+                      className={cn('shrink-0',
+                        e.pinned ? 'text-primary' : 'text-muted-foreground/50 hover:text-foreground')}>
+                      <Pin className="h-3 w-3" />
+                    </button>
+                  )}
                 </div>
-                {e.note && <div className="mt-0.5 whitespace-pre-wrap text-foreground/90">{e.note}</div>}
+                {e.note && <RichText text={e.note} className="mt-0.5 text-foreground/90" />}
                 {e.kind === 'mail' && e.to && (
                   // Первоисточник остаётся в архиве Поддержки: из ленты должна быть
                   // возможность дойти до оригинала, а не только до вычищенного текста.
@@ -383,7 +400,7 @@ function Description({ task, disabled, onSave }: {
         className="text-[11px] text-muted-foreground hover:text-foreground">изменить</button>
     )}>
       {task.description
-        ? <p className="whitespace-pre-wrap text-sm text-foreground/90">{task.description}</p>
+        ? <RichText text={task.description} className="text-sm text-foreground/90" />
         : <p className="text-xs text-muted-foreground">Описания нет.</p>}
     </Section>
   )
@@ -561,6 +578,26 @@ function Attributes({ task, companyId, live, people, labels, pending, onAct, onC
           </div>
         </div>
       )}
+
+      <div className="mt-3">
+        <Label className="text-xs">Кто видит задачу</Label>
+        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
+          <Select value={task.visibility} disabled={!live || pending}
+            onValueChange={(v) => onAct({ companyId, visibility: v as 'company' | 'private' })}>
+            <SelectTrigger className="h-7 w-[200px] text-xs"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="company">Вся компания</SelectItem>
+              <SelectItem value="private">Только причастные</SelectItem>
+            </SelectContent>
+          </Select>
+          {task.visibility === 'private' && (
+            <span className="inline-flex items-center gap-1 rounded border border-amber-500/40 bg-amber-500/5 px-1.5 py-0.5 text-[11px] text-amber-700 dark:text-amber-400">
+              <Lock className="h-3 w-3" />
+              видят автор, исполнитель, наблюдатели и администратор
+            </span>
+          )}
+        </div>
+      </div>
 
       <div className="mt-3">
         <Label className="text-xs">Наблюдатели</Label>
