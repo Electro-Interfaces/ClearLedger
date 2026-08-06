@@ -31,9 +31,9 @@ import * as tasksService from '@/services/tasksService'
 import type { LinkKind, LoadedTask } from '@/services/tasksService'
 import { listSpaceObjects } from '@/services/spaceObjectsService'
 import { listSpaceConnectors } from '@/services/spaceConnectorsService'
-import { ensureTaskRoom } from '@/services/chatService'
 import { RichText } from './RichText'
 import { SearchPicker } from './SearchPicker'
+import { TaskChat } from './TaskChat'
 import {
   LINK_LABEL, PRIORITY_LABEL, STATUS_LABEL, WAITING_LABEL,
   dt, dtT, eventText, fileSize,
@@ -49,6 +49,7 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
   const navigate = useNavigate()
   const [note, setNote] = useState('')
   const [feedKind, setFeedKind] = useState<'all' | 'talk' | 'move' | 'meta'>('all')
+  const [tab, setTab] = useState('work')
   const fileRef = useRef<HTMLInputElement>(null)
 
   const q = useQuery({
@@ -81,13 +82,6 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
       if (r.mentioned?.length) toast.info(`В наблюдатели добавлены: ${r.mentioned.join(', ')}`)
       reload()
     },
-    onError: (e) => toast.error((e as Error).message),
-  })
-  // Комната задачи создаётся при первом обращении: заводить её каждой задаче
-  // заранее — плодить пустые чаты, которые никто не откроет.
-  const discuss = useMutation({
-    mutationFn: () => ensureTaskRoom(id),
-    onSuccess: (room) => navigate(`/messages?room=${room.id}`),
     onError: (e) => toast.error((e as Error).message),
   })
   const pin = useMutation({
@@ -179,12 +173,9 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
               <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />Выполнена
             </Button>
           )}
-          <Button size="sm" variant="outline" className="h-8" disabled={discuss.isPending}
-            onClick={() => discuss.mutate()}>
-            {discuss.isPending
-              ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-              : <MessagesSquare className="mr-1.5 h-3.5 w-3.5" />}
-            Обсудить
+          <Button size="sm" variant="outline" className="h-8"
+            onClick={() => setTab('chat')}>
+            <MessagesSquare className="mr-1.5 h-3.5 w-3.5" />Обсудить
           </Button>
           {live && (
             <Button size="sm" variant="ghost"
@@ -202,7 +193,7 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
           </button>
         )}
 
-        <Tabs defaultValue="work" className="mt-6">
+        <Tabs value={tab} onValueChange={setTab} className="mt-6">
           {/* Вкладки вместо одной длинной колонки: у задачи с полусотней ходов
               история — отдельная работа, и ради неё не нужно прокручивать
               чек-лист и файлы. */}
@@ -211,6 +202,9 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
             {/* На узком экране свойства живут вкладкой, на широком — колонкой
                 справа: там они нужны постоянно, а не по клику. */}
             <TabsTrigger value="attrs" className="flex-none px-0 text-[13px] xl:hidden">Свойства</TabsTrigger>
+            <TabsTrigger value="chat" className="flex-none px-0 text-[13px]">
+              Обсуждение
+            </TabsTrigger>
             <TabsTrigger value="links" className="flex-none px-0 text-[13px]">
               Связи{t.subtasks.total ? ` · ${t.subtasks.total}` : ''}
             </TabsTrigger>
@@ -233,6 +227,9 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
         <Attributes task={t} companyId={companyId} live={live}
           people={peopleQ.data?.people ?? []} labels={labelsQ.data?.labels ?? []}
           pending={act.isPending} onAct={(d) => act.mutate(d)} onChanged={reload} />
+          </TabsContent>
+          <TabsContent value="chat" className="pt-4">
+            <TaskChat taskId={t.id} taskNumber={t.number} selfName={t.assignee} />
           </TabsContent>
           <TabsContent value="links" className="space-y-5 pt-4">
         <Links task={t} companyId={companyId} live={live}
