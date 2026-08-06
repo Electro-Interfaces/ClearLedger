@@ -10,7 +10,7 @@ import httpx
 import json
 import math
 import uuid
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timedelta, timezone
 
 import os
 
@@ -1069,6 +1069,91 @@ async def store_reproject(
             await db.rollback()
             итог["errors"].append(f"{с['packet_uuid'][:8]} ({с['kind']}): {str(exc)[:200]}")
     return итог
+
+
+# ── Сводная: тот же конструктор разрезов, что в «Топливе» ───────────────────
+#
+# Экран собирает разрез сам: уровни переставляются мышью, дерево и подытоги
+# считает браузер. Сервер отдаёт только листья — агрегаты по НАБОРУ измерений,
+# поэтому перестановка уровней в сеть не идёт: «АЗС → место» и «место → АЗС» —
+# один и тот же запрос.
+#
+# Источники разведены намеренно: у остатков метрики в штуках и рублях запаса, у
+# чеков — сумма покупки и средний чек. Смешать их в одну сводную значит получить
+# итог, который не сойдётся ни с одним экраном.
+_PIVOT_SOURCES = {"store_stock": StoreStockBalance, "store_cheques": StoreCheque}
+
+
+@router.get("/pivot/dims")
+async def store_pivot_dims(
+    source: str = Query("store_stock", description="store_stock | store_cheques"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Справочник измерений и метрик источника — тот же, что режет SQL."""
+    await scope_company_id(user, db)
+    from app.services.pivot_dims import dims_catalog, metrics_catalog
+    if source not in _PIVOT_SOURCES:
+        raise HTTPException(400, f"Неизвестный источник сводной: {source}")
+    return {"dims": dims_catalog(source), "metrics": metrics_catalog(source)}
+
+
+@router.get("/pivot")
+async def store_pivot(
+    source: str = Query("store_stock"),
+    dims: str = Query(..., description="ключи измерений через запятую, например station,place"),
+    date_from: str | None = Query(None),
+    date_to: str | None = Query(None),
+    stations: str | None = Query(None, description="коды АЗС через запятую"),
+    limit: int = Query(20000, le=50000),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Листья сводной магазина: GROUP BY по выбранным измерениям."""
+    from app.services.pivot_dims import (
+        dim_label, dim_select, metric_selects, metrics_catalog, parse_dims,
+    )
+
+    cid: uuid.UUID = await scope_company_id(user, db)
+    модель = _PIVOT_SOURCES.get(source)
+    if модель is None:
+        raise HTTPException(400, f"Неизвестный источник сводной: {source}")
+    try:
+        keys = parse_dims(dims, source)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    conds = [модель.company_id == cid]
+    коды = [int(s) for s in (stations or "").replace(" ", "").split(",") if s.isdigit()]
+    if коды:
+        conds.append(модель.station_id.in_(коды))
+    # Период есть только у чеков: остаток — это срез на момент снимка, и
+    # фильтровать его датами значило бы показывать пустоту за прошлый месяц.
+    if source == "store_cheques":
+        if date_from:
+            conds.append(модель.at >= date.fromisoformat(date_from))
+        if date_to:
+            conds.append(модель.at < date.fromisoformat(date_to) + timedelta(days=1))
+
+    cols = [dim_select(k, source).label(f"d{i}") for i, k in enumerate(keys)]
+    metrics = metric_selects(source)
+    mcols = [expr.label(f"m{i}") for i, (_, expr, _) in enumerate(metrics)]
+    res = (await db.execute(select(*cols, *mcols).where(*conds)
+                            .group_by(*cols).limit(limit + 1))).all()
+    truncated = len(res) > limit
+    rows = res[:limit]
+
+    return {
+        "dims": keys,
+        "labels": [dim_label(k, source) for k in keys],
+        "metrics": metrics_catalog(source),
+        "stationNames": {},
+        "rows": [{
+            "keys": [r[i] for i in range(len(keys))],
+            "m": {k: round(float(r[len(keys) + j]), d) for j, (k, _, d) in enumerate(metrics)},
+        } for r in rows],
+        "truncated": truncated,
+    }
 
 
 @router.get("/reports")

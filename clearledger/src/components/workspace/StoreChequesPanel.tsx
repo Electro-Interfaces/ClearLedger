@@ -12,7 +12,10 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Search, X, Receipt, RotateCcw } from 'lucide-react'
-import { getStoreCheques, type StoreCheque } from '@/services/storeService'
+import {
+  getStoreCheques, getStorePivot, getStorePivotCatalog, type StoreCheque,
+} from '@/services/storeService'
+import { PivotView } from './PivotView'
 import { fmtMoney } from '@/services/analyticsService'
 import { useCompany } from '@/contexts/CompanyContext'
 
@@ -45,6 +48,9 @@ export function StoreChequesPanel({ companyId, dateFrom, dateTo }: {
   // Потолок выборки — состояние, а не константа: «показано 1000 из 4000» без
   // способа увидеть остальное это не отчёт, а отговорка.
   const [лимит, задатьЛимит] = useState(1000)
+  // Список и сводная — две подачи одного отбора: «сколько за смену наличными»
+  // и «какой чек спорный» это разные вопросы к одним данным.
+  const [подача, задатьПодачу] = useState<'list' | 'pivot'>('list')
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['store-cheques', companyId ?? company.id, dateFrom, dateTo, запрос, возвраты, лимит],
@@ -66,6 +72,15 @@ export function StoreChequesPanel({ companyId, dateFrom, dateTo }: {
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
+        <div className="inline-flex rounded-md bg-muted p-[3px]">
+          {(['list', 'pivot'] as const).map((v) => (
+            <button key={v} type="button" onClick={() => задатьПодачу(v)}
+              className={`rounded-[5px] px-2.5 py-1 text-xs font-medium transition-colors ${
+                подача === v ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
+              {v === 'list' ? 'Список' : 'Сводная'}
+            </button>
+          ))}
+        </div>
         <div className="relative min-w-[240px] flex-1">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
           <input value={запрос} onChange={(e) => задатьЗапрос(e.target.value)}
@@ -117,6 +132,20 @@ export function StoreChequesPanel({ companyId, dateFrom, dateTo }: {
             </div>
           </div>
         </div>
+      ) : подача === 'pivot' ? (
+        <PivotView
+          source="store_cheques"
+          storageKey="store-cheques-pivot"
+          defaultDims={['station', 'day']}
+          fetchCatalog={getStorePivotCatalog}
+          fetchLeaves={(dims) => getStorePivot({
+            source: 'store_cheques', dims, dateFrom, dateTo,
+          })}
+          queryKey={[dateFrom, dateTo]}
+          dateFrom={dateFrom}
+          dateTo={dateTo}
+          hint="Средний чек считается делением суммы на число чеков в узле — подытоги сходятся с карточками выше."
+        />
       ) : (
         <div className="overflow-x-auto rounded-lg border border-border/50">
           <table className="w-full text-xs">

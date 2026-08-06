@@ -1095,6 +1095,25 @@ export const storeNetworkReportCsvUrl = (kind: string, opts: {
   return `/api/store/reports/${kind}?${q.toString()}`
 }
 
+
+/** Сводная «Магазина» — тот же конструктор разрезов, что в «Топливе».
+ *
+ * Сервер отдаёт листья (агрегаты по набору измерений), дерево и подытоги
+ * собирает браузер. Поэтому перестановка уровней мышью в сеть не идёт. */
+export const getStorePivotCatalog = (source: string) =>
+  get<{ dims: { key: string; label: string }[]; metrics: { key: string; label: string; digits: number }[] }>(
+    '/api/store/pivot/dims', { source })
+
+export const getStorePivot = (p: {
+  source: string; dims: string[]; dateFrom?: string; dateTo?: string; stations?: number[]
+}) => get<import('@/services/fuel/fuelMappingService').PivotResp>('/api/store/pivot', {
+  source: p.source,
+  dims: p.dims.join(','),
+  date_from: p.dateFrom,
+  date_to: p.dateTo,
+  stations: p.stations?.length ? p.stations.join(',') : undefined,
+})
+
 /** Фискальный чек: продажа на уровне покупки, а не смены. */
 export interface StoreCheque {
   id: string

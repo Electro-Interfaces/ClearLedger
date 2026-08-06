@@ -10,7 +10,10 @@ import { rowDrill } from './rowDrill'
 import { SkuDetailModal } from './SkuDetailModal'
 import { useQuery } from '@tanstack/react-query'
 import { ShowMore, useVisible } from '@/components/common/ShowMore'
-import { getStoreStock, type StoreStockItem } from '@/services/storeService'
+import { PivotView } from './PivotView'
+import {
+  getStoreStock, getStorePivot, getStorePivotCatalog, type StoreStockItem,
+} from '@/services/storeService'
 import { fmtMoney } from '@/services/analyticsService'
 import { ChzBadge } from '@/components/common/ChzBadge'
 import { SnapshotBadge } from '@/components/common/SnapshotBadge'
@@ -26,6 +29,9 @@ export function StoreStockPanel({ companyId, dateFrom, dateTo }: { companyId: st
   const [q, setQ] = useState('')
   const [marked, setMarked] = useState<MarkedFilter>('all')
   const [onlyNegative, setOnlyNegative] = useState(false)
+  // Список и сводная — две подачи одного отбора, как в «Топливе»: там разрез
+  // собирают мышью, и здесь он собирается тем же конструктором, а не своим.
+  const [подача, задатьПодачу] = useState<'list' | 'pivot'>('list')
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['store-stock', companyId, warehouse ?? ''],
@@ -107,6 +113,15 @@ export function StoreStockPanel({ companyId, dateFrom, dateTo }: { companyId: st
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          <div className="inline-flex rounded-md bg-muted p-[3px]">
+            {(['list', 'pivot'] as const).map((v) => (
+              <button key={v} type="button" onClick={() => задатьПодачу(v)}
+                className={`rounded-[5px] px-2.5 py-1 text-xs font-medium transition-colors ${
+                  подача === v ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
+                {v === 'list' ? 'Список' : 'Сводная'}
+              </button>
+            ))}
+          </div>
           <select
             value={warehouse ?? data.warehouse ?? ''}
             onChange={(e) => setWarehouse(e.target.value || undefined)}
@@ -180,6 +195,23 @@ export function StoreStockPanel({ companyId, dateFrom, dateTo }: { companyId: st
         упаковка) и товар, чьи накладные заводятся вне контура. Это не долг по приёмке.
       </p>
 
+      {подача === 'pivot' ? (
+        <PivotView
+          source="store_stock"
+          storageKey="store-stock-pivot"
+          defaultDims={['station', 'place']}
+          fetchCatalog={getStorePivotCatalog}
+          fetchLeaves={(dims) => getStorePivot({
+            source: 'store_stock', dims,
+            stations: curWh?.station_id ? [curWh.station_id] : undefined,
+          })}
+          queryKey={[warehouse ?? '', marked, onlyNegative]}
+          dateFrom={dateFrom ?? ''}
+          dateTo={dateTo ?? ''}
+          scopeLabel={curWh ? `АЗС ${curWh.station_id}` : 'вся сеть'}
+          hint="Остаток — срез на момент снимка станции, а не за период: датами он не фильтруется."
+        />
+      ) : (
       <div className="overflow-x-auto rounded-lg border border-border/50">
         <table className="w-full text-xs">
           <thead className="bg-muted/30 text-muted-foreground">
@@ -234,6 +266,7 @@ export function StoreStockPanel({ companyId, dateFrom, dateTo }: { companyId: st
           </tbody>
         </table>
         <ShowMore {...показ} onMore={показ.more} onAll={показ.all} unit="позиций" />
+      )}
         {items.length === 0 && (
           <div className="px-3 py-6 text-sm text-muted-foreground text-center">
             Нет позиций. Проверьте стартовый остаток и время последнего снимка агента.

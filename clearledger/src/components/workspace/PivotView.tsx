@@ -49,16 +49,20 @@ function readStored<T>(key: string, fallback: T): T {
 }
 
 export function PivotView({
-  source, storageKey, defaultDims, fetchLeaves, queryKey,
+  source, storageKey, defaultDims, fetchLeaves, fetchCatalog, queryKey,
   dateFrom, dateTo, scopeLabel, hint,
 }: {
-  /** Источник в реестре сервера: `transactions` | `receipts`. */
+  /** Источник в реестре сервера: `transactions` | `receipts` | `store_*`. */
   source: string
   /** Своя память разреза на каждый экран: у приёмки и продаж разрезы разные. */
   storageKey: string
   defaultDims: string[]
   /** Загрузка листьев по набору измерений (фильтры экран подставляет сам). */
   fetchLeaves: (dims: string[]) => Promise<PivotResp>
+  /** Справочник измерений источника. По умолчанию — реестр топлива: там
+      сводная появилась первой. «Магазин» держит свой реестр и передаёт его
+      сюда, иначе один экран знал бы про измерения другого. */
+  fetchCatalog?: (source: string) => Promise<{ dims: { key: string; label: string }[]; metrics: PivotMetricDef[] }>
   /** Часть ключа кэша, зависящая от фильтров экрана. */
   queryKey: unknown
   dateFrom: string
@@ -80,7 +84,7 @@ export function PivotView({
 
   const catalog = useQuery({
     queryKey: ['pivot-catalog', source],
-    queryFn: () => getPivotCatalog(source),
+    queryFn: () => (fetchCatalog ?? getPivotCatalog)(source),
     staleTime: 60 * 60_000,
   })
   const labelOf = useMemo(() => {

@@ -14,11 +14,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import cast, func
+from sqlalchemy import case, cast, func
 from sqlalchemy.types import String
 
 from app.models import FuelReceipt as R
 from app.models import FuelTransaction as T
+from app.models import StoreCheque as CQ
+from app.models import StoreStockBalance as SB
 
 MAX_DIMS = 5
 
@@ -73,9 +75,56 @@ _RC_METRICS: dict[str, dict[str, Any]] = {
     # читать разрез, вернём её, когда поставщик начнёт отдавать суммы.
 }
 
+# ─── Источник «остатки магазина» (снимки станций) ────────────────────────────
+# Товароучёт сопутки живёт теми же вопросами, что и топливо: где лежит, чего
+# сколько, почём. Поэтому сводная у него не своя, а та же — с этими картами.
+_ST_DIMS: dict[str, dict[str, Any]] = {
+    "station": {"label": "АЗС", "expr": SB.station_id},
+    "place": {"label": "Место хранения", "expr": func.coalesce(SB.place_name, SB.place)},
+    "item": {"label": "Товар", "expr": SB.name},
+    "barcode": {"label": "Штрихкод", "expr": SB.barcode},
+    "cost_known": {"label": "Себестоимость известна",
+                   "expr": case((func.coalesce(SB.cost_unit, 0) > 0, "да"), else_="нет")},
+    "day": {"label": "День снимка", "expr": func.to_char(SB.snapshot_at, "YYYY-MM-DD")},
+}
+
+_ST_METRICS: dict[str, dict[str, Any]] = {
+    "rows": {"label": "Позиций", "expr": func.count(), "digits": 0},
+    "qty": {"label": "Количество", "expr": func.coalesce(func.sum(SB.quantity), 0), "digits": 3},
+    "retail": {"label": "Сумма в рознице, ₽",
+               "expr": func.coalesce(func.sum(SB.quantity * func.coalesce(SB.retail_price, 0)), 0),
+               "digits": 2},
+    "cost": {"label": "Сумма в себестоимости, ₽",
+             "expr": func.coalesce(func.sum(SB.quantity * func.coalesce(SB.cost_unit, 0)), 0),
+             "digits": 2},
+}
+
+# ─── Источник «чеки магазина» ────────────────────────────────────────────────
+# Продажа на уровне покупки: чек — то, что человек унёс с собой за один подход
+# к кассе. Средний чек и разбивка по оплате считаются только здесь.
+_CQ_DIMS: dict[str, dict[str, Any]] = {
+    "station": {"label": "АЗС", "expr": CQ.station_id},
+    "shift": {"label": "Смена", "expr": CQ.shift_number},
+    "payment": {"label": "Способ оплаты", "expr": func.coalesce(CQ.pay_name, "—")},
+    "with_fuel": {"label": "С топливом", "expr": case((CQ.had_fuel, "да"), else_="нет")},
+    "kind": {"label": "Вид чека", "expr": case((CQ.is_return, "возврат"), else_="продажа")},
+    "day": {"label": "День", "expr": func.to_char(CQ.at, "YYYY-MM-DD")},
+    "month": {"label": "Месяц", "expr": func.to_char(CQ.at, "YYYY-MM")},
+    "weekday": {"label": "День недели", "expr": func.to_char(CQ.at, "ID")},
+    "hour": {"label": "Час", "expr": func.to_char(CQ.at, "HH24")},
+}
+
+_CQ_METRICS: dict[str, dict[str, Any]] = {
+    "cheques": {"label": "Чеков", "expr": func.count(), "digits": 0},
+    "positions": {"label": "Позиций", "expr": func.coalesce(func.sum(CQ.positions), 0), "digits": 0},
+    "amount": {"label": "Сумма, ₽", "expr": func.coalesce(func.sum(CQ.total), 0), "digits": 2},
+}
+
 SOURCES: dict[str, dict[str, Any]] = {
     "transactions": {"dims": _TX_DIMS, "metrics": _TX_METRICS, "default_metric": "amount"},
     "receipts": {"dims": _RC_DIMS, "metrics": _RC_METRICS, "default_metric": "doc_mass"},
+    "store_stock": {"dims": _ST_DIMS, "metrics": _ST_METRICS, "default_metric": "retail"},
+    "store_cheques": {"dims": _CQ_DIMS, "metrics": _CQ_METRICS, "default_metric": "amount"},
 }
 
 
