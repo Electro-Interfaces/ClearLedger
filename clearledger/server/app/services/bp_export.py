@@ -537,10 +537,33 @@ class BpPackageEmitter:
             dish_uuid = str(doc.get("БлюдоUUID") or "")
             if dish_uuid:
                 recipe_by_dish[dish_uuid] = doc
+        # Запасной источник состава — мастер-НСИ.
+        #
+        # ТТК берётся из контекста смены: карта, действовавшая тогда, а не сегодня.
+        # Но у смен до 4 августа такого документа нет вовсе — агент начал слать
+        # техкарты позже, — и блюдо уходило в бухгалтерию товаром без
+        # себестоимости, хотя состав у нас есть в справочнике. Берём его, когда
+        # своего нет: приблизительная карта лучше отсутствующей, а признак
+        # источника («ВидРецептуры») говорит, откуда она взята.
+        master_recipes: dict[str, list[dict]] = {}
+        if dishes:
+            for row in (await self.session.execute(text("""
+                SELECT r.dish_uuid::text AS dish, l.item_uuid::text AS item, l.qty, l.unit
+                FROM edge.recipe r JOIN edge.recipe_line l ON l.recipe_id = r.id
+                WHERE r.dish_uuid = ANY(CAST(:dishes AS uuid[]))
+            """), {"dishes": list(dishes)})).mappings().all():
+                master_recipes.setdefault(row["dish"], []).append({
+                    "НоменклатураUUID": row["item"],
+                    "Количество": float(row["qty"] or 0),
+                    "Единица": row["unit"] or "",
+                })
+
         recipes = []
         for dish_uuid in sorted(dishes):
             source_recipe = recipe_by_dish.get(dish_uuid) or {}
-            ingredients = source_recipe.get("Ингредиенты") or inline_recipes.get(dish_uuid) or []
+            ingredients = (source_recipe.get("Ингредиенты")
+                           or inline_recipes.get(dish_uuid)
+                           or master_recipes.get(dish_uuid) or [])
             output_ingredients = []
             for ingredient in ingredients:
                 ingredient_uuid = str(ingredient.get("НоменклатураUUID") or ingredient.get("Номенклатура") or "")
