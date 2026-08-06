@@ -287,7 +287,17 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther }: {
           <div className="flex items-end gap-2">
             <Textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2}
               maxLength={2000} className="text-sm"
-              placeholder="Написать в ленту. @имя — добавит человека в наблюдатели. Уйдёт вместе с действием." />
+              placeholder="Написать в ленту. @имя — добавит человека в наблюдатели. Скриншот — Ctrl+V. Уйдёт вместе с действием."
+              // Скриншот вставляется прямо в поле реплики: пока человек
+              // объясняет, что не так, картинка уже прикладывается к задаче.
+              onPaste={(e) => {
+                const imgs = Array.from(e.clipboardData.files).filter(
+                  (f) => f.type.startsWith('image/'))
+                if (imgs.length) {
+                  e.preventDefault()
+                  imgs.forEach((f) => upload.mutate(f))
+                }
+              }} />
             <Button size="sm" className="h-8" disabled={!note.trim() || act.isPending}
               onClick={() => act.mutate({ companyId, note: note.trim() })}>Записать</Button>
           </div>

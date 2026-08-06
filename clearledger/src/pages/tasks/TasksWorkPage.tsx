@@ -30,6 +30,7 @@ import * as tasksService from '@/services/tasksService'
 import type { SpaceTask, TaskScope } from '@/services/tasksService'
 import { listSpaceObjects } from '@/services/spaceObjectsService'
 import { TaskCard } from '@/components/tasks/TaskCard'
+import { NewTaskDialog } from '@/components/tasks/NewTaskDialog'
 import {
   PRIORITY_LABEL, PRIORITY_TONE, STATUS_LABEL, WAITING_LABEL, dt, dtT,
 } from '@/components/tasks/taskWords'
@@ -154,9 +155,14 @@ export function TasksWorkPage() {
         </div>
       </div>
 
-      {/* Быстрая постановка: заголовок и Enter. Остальное — потом, в карточке. */}
+      {/* Две постановки рядом: строкой — поймать мысль на ходу, формой — задать
+          исполнителя, срок, описание и приложить скриншот сразу. */}
       {view !== 'closed' && view !== 'watching' && (
-        <QuickCreate companyId={company.id} onCreated={refresh} />
+        <div className="flex items-center gap-2">
+          <QuickCreate companyId={company.id} onCreated={refresh} />
+          <NewTaskDialog companyId={company.id} defaultObjectId={objectId || undefined}
+            onCreated={(id) => { refresh(); set({ task: id }) }} />
+        </div>
       )}
 
       {full && (
@@ -270,7 +276,7 @@ function QuickCreate({ companyId, onCreated }: { companyId: string; onCreated: (
     onError: (e) => toast.error((e as Error).message),
   })
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex flex-1 items-center gap-2">
       <Input value={title} onChange={(e) => setTitle(e.target.value)}
         placeholder="Что сделать? Enter — поставить, подробности допишете в карточке"
         maxLength={300} className="h-9"
