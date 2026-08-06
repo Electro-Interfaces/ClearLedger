@@ -1,7 +1,7 @@
 /**
  * SupportContext — управление вспомогательной областью «Взаимодействие».
  *
- * Двухрежимная подача одних и тех же разделов (Чат / Заявки / Инфо):
+ * Двухрежимная подача одних и тех же разделов (Чат / Задачи / Поддержка / Инфо):
  *  • mode='modal' — вызов из ВЕРХНЕГО хедера: окно поверх всего.
  *  • mode='dock'  — вызов ТАПОМ в правой области / контекстно из функции:
  *                   живёт вкладкой в правом доке, без модалки.
@@ -12,8 +12,11 @@ import { createContext, useContext, useState, useCallback, useEffect, type React
 import { useQuery } from '@tanstack/react-query'
 import { getToken, isApiEnabled } from '@/services/apiClient'
 import { getRooms } from '@/services/chatService'
+import { listTasks } from '@/services/tasksService'
+import { useCompany } from '@/contexts/CompanyContext'
+import { useTasksApp } from '@/hooks/useTasksApp'
 
-export type InteractionSection = 'chat' | 'tickets' | 'help'
+export type InteractionSection = 'chat' | 'tasks' | 'tickets' | 'help'
 export type InteractionMode = 'modal' | 'dock'
 
 interface InteractionState {
@@ -34,7 +37,7 @@ interface SupportContextValue {
   /** Переключить подачу текущего раздела (окно ↔ док). */
   setInteractionMode: (mode: InteractionMode) => void
   closeInteraction: () => void
-  unreadCounts: { chat: number; tickets: number }
+  unreadCounts: { chat: number; tasks: number; tickets: number }
 }
 
 const SupportContext = createContext<SupportContextValue | undefined>(undefined)
@@ -80,7 +83,21 @@ export function SupportProvider({ children }: { children: ReactNode }) {
   // «Без звука» не красит общий счётчик: замьюченный чат человек откроет сам.
   const chatUnread = (rooms || []).reduce((a, r) => a + (
     r.mutedUntil && Date.parse(r.mutedUntil) > Date.now() ? 0 : (r.unreadCount || 0)), 0)
-  const unreadCounts = { chat: chatUnread, tickets: 0 }
+
+  // Задачи: на кнопке — только ПРОСРОЧЕННЫЕ. «Сколько всего на мне» в шапке ничего
+  // не решает и горит у всех постоянно; красная цифра должна значить «уже опоздали».
+  // Ключ и запрос те же, что у быстрой панели, — один кеш на кнопку и на её окно.
+  const { companyId } = useCompany()
+  const tasksOn = useTasksApp()
+  const { data: myTasks } = useQuery({
+    queryKey: ['tasks', companyId, 'mine', '', ''],
+    queryFn: () => listTasks(companyId, 'mine'),
+    enabled: isApiEnabled() && !!getToken() && !!companyId && tasksOn,
+    refetchInterval: 300000,
+  })
+  const tasksOverdue = (myTasks?.tasks || []).filter((t) => t.status === 'open' && t.overdue).length
+
+  const unreadCounts = { chat: chatUnread, tasks: tasksOverdue, tickets: 0 }
 
   return (
     <SupportContext.Provider

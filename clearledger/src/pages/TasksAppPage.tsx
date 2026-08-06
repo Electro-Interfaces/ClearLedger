@@ -29,7 +29,7 @@ import { QueryError } from '@/components/common/QueryError'
 import { cn } from '@/lib/utils'
 import { useCompany } from '@/contexts/CompanyContext'
 import * as tasksService from '@/services/tasksService'
-import type { RouteStage, SpaceTask, TaskScope, TaskType } from '@/services/tasksService'
+import type { RouteStage, TaskScope, TaskType } from '@/services/tasksService'
 import { listSpaceObjects } from '@/services/spaceObjectsService'
 
 const nf = new Intl.NumberFormat('ru-RU')
@@ -90,6 +90,14 @@ function WorkSection({ companyId }: { companyId: string }) {
     if (v) n.set('object', v); else n.delete('object')
     return n
   }, { replace: true })
+  // Открытая карточка — тоже в адресе: на задачу можно дать ссылку, и по ней же
+  // приходят из быстрой панели в шапке (`/tasks?task=<id>`).
+  const openId = params.get('task')
+  const setOpenId = (v: string | null) => setParams((p) => {
+    const n = new URLSearchParams(p)
+    if (v) n.set('task', v); else n.delete('task')
+    return n
+  }, { replace: true })
   const [typeId, setTypeId] = useState('')
 
   const objectsQ = useQuery({
@@ -109,7 +117,6 @@ function WorkSection({ companyId }: { companyId: string }) {
     placeholderData: keepPreviousData,
   })
   const tasks = q.data?.tasks ?? []
-  const [openTask, setOpenTask] = useState<SpaceTask | null>(null)
 
   return (
     <div className="space-y-3">
@@ -175,9 +182,9 @@ function WorkSection({ companyId }: { companyId: string }) {
             <tbody>
               {tasks.map((t) => (
                 <tr key={t.id} tabIndex={0} aria-haspopup="dialog"
-                  onClick={() => setOpenTask(t)}
+                  onClick={() => setOpenId(t.id)}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpenTask(t) }
+                    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpenId(t.id) }
                   }}
                   className="cursor-pointer border-t transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
                   <Td className="whitespace-nowrap font-medium">№{t.number}</Td>
@@ -213,12 +220,12 @@ function WorkSection({ companyId }: { companyId: string }) {
         Строка открывает карточку: там маршрут, переадресация и след — кто что сделал.
       </p>
 
-      <Sheet open={!!openTask} onOpenChange={(v) => { if (!v) setOpenTask(null) }}>
+      <Sheet open={!!openId} onOpenChange={(v) => { if (!v) setOpenId(null) }}>
         <SheetContent side="right" className="w-full p-0 sm:max-w-lg">
           <SheetTitle className="sr-only">Карточка задачи</SheetTitle>
           <SheetDescription className="sr-only">Маршрут, исполнитель и след</SheetDescription>
-          {openTask && (
-            <TaskCard id={openTask.id} companyId={companyId}
+          {openId && (
+            <TaskCard id={openId} companyId={companyId}
               onChanged={() => q.refetch()} />
           )}
         </SheetContent>
@@ -413,6 +420,14 @@ function CreateTaskDialog({ companyId, types, onCreated }: {
   const [open, setOpen] = useState(false)
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
+  // Открытая карточка — тоже в адресе: на задачу можно дать ссылку, и по ней же
+  // приходят из быстрой панели в шапке (`/tasks?task=<id>`).
+  const openId = params.get('task')
+  const setOpenId = (v: string | null) => setParams((p) => {
+    const n = new URLSearchParams(p)
+    if (v) n.set('task', v); else n.delete('task')
+    return n
+  }, { replace: true })
   const [typeId, setTypeId] = useState('')
   const [assigneeId, setAssigneeId] = useState('')
   const [objectId, setObjectId] = useState('')

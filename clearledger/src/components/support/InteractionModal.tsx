@@ -12,17 +12,18 @@ import { useSupportContext } from '@/contexts/SupportContext'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { ChatPanel } from '@/components/chat/ChatPanel'
 import { TicketsPanel } from './InteractionPanels'
+import { TasksQuickPanel } from '@/components/tasks/TasksQuickPanel'
 import { InfoCenter } from '@/components/info/InfoCenter'
 import { useCompany } from '@/contexts/CompanyContext'
 
 // Ключ секции остался `tickets` (он в localStorage у людей), а подпись — «Поддержка»:
 // это разговор с поставщиком программы, а не заявки компании и не «Задачи».
-const TITLES: Record<string, string> = { chat: 'Чат', tickets: 'Поддержка', help: 'Инфо' }
+const TITLES: Record<string, string> = { chat: 'Чат', tasks: 'Задачи', tickets: 'Поддержка', help: 'Инфо' }
 
 export function InteractionModal() {
   const { interactionSection: section, interactionMode: mode, setInteractionMode, closeInteraction } = useSupportContext()
   const isOpen = !!section && mode === 'modal'
-  const isPanel = section === 'chat' || section === 'tickets'
+  const isPanel = section === 'chat' || section === 'tasks' || section === 'tickets'
 
   const DockButton = (
     <button
@@ -63,6 +64,7 @@ export function InteractionModal() {
           </DialogHeader>
           <div className="flex-1 min-h-0 overflow-hidden">
             {section === 'chat' && <ChatPanel />}
+            {section === 'tasks' && <TasksQuickPanel />}
             {section === 'tickets' && <TicketsPanel />}
           </div>
         </DialogContent>

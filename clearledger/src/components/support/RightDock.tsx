@@ -13,7 +13,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useLocation } from 'react-router-dom'
-import { MessageCircle, LifeBuoy, HelpCircle, X, Maximize2 } from 'lucide-react'
+import { MessageCircle, LifeBuoy, ListChecks, HelpCircle, X, Maximize2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useMaxWidth } from '@/hooks/use-mobile'
 import { useSupportContext, type InteractionSection } from '@/contexts/SupportContext'
@@ -22,11 +22,15 @@ import { useOptionalWorkspace } from '@/contexts/WorkspaceContext'
 import { productForMode } from '@/config/productAccess'
 import { productForPath } from '@/config/spaceProducts'
 import { TicketsPanel } from './InteractionPanels'
+import { TasksQuickPanel } from '@/components/tasks/TasksQuickPanel'
 import { InfoContextPanel } from '@/components/info/InfoContextPanel'
 import { useCompany } from '@/contexts/CompanyContext'
+import { useTasksApp } from '@/hooks/useTasksApp'
 
-const TABS: { key: InteractionSection; label: string; icon: typeof MessageCircle }[] = [
+type Tab = { key: InteractionSection; label: string; icon: typeof MessageCircle }
+const TABS: Tab[] = [
   { key: 'chat', label: 'Чат', icon: MessageCircle },
+  { key: 'tasks', label: 'Задачи', icon: ListChecks },
   { key: 'tickets', label: 'Поддержка', icon: LifeBuoy },
   { key: 'help', label: 'Инфо', icon: HelpCircle },
 ]
@@ -71,7 +75,13 @@ export function RightDock() {
   }, [width])
 
   const badgeOf = (key: InteractionSection) =>
-    key === 'chat' ? unreadCounts.chat : key === 'tickets' ? unreadCounts.tickets : 0
+    key === 'chat' ? unreadCounts.chat
+      : key === 'tasks' ? unreadCounts.tasks
+        : key === 'tickets' ? unreadCounts.tickets : 0
+
+  // «Задачи» в рейле — по тому же праву, что и маршрут: иначе вкладка вела бы в 403.
+  const tasksOn = useTasksApp()
+  const tabs = tasksOn ? TABS : TABS.filter((t) => t.key !== 'tasks')
 
   const dockOpen = !!section && mode === 'dock'
 
@@ -80,7 +90,7 @@ export function RightDock() {
     if (!dockOpen) return null
     return createPortal(
       <div className="fixed inset-0 z-50 flex flex-col bg-card mobile-safe-top mobile-safe-bottom">
-        <DockHead tabs={TABS} section={section} badgeOf={badgeOf} isMobile
+        <DockHead tabs={tabs} section={section} badgeOf={badgeOf} isMobile
           onTab={openInteraction} onPop={() => setInteractionMode('modal')} onClose={closeInteraction} />
         <DockBody section={section} />
       </div>,
@@ -98,14 +108,14 @@ export function RightDock() {
         <div className="relative flex h-full shrink-0 flex-col border-l border-border/50 bg-card" style={{ width }}>
           <div onMouseDown={onDragStart}
             className="absolute left-0 top-0 z-10 h-full w-1 -translate-x-1/2 cursor-col-resize bg-transparent transition-colors hover:bg-primary/40" />
-          <DockHead tabs={TABS} section={section} badgeOf={badgeOf}
+          <DockHead tabs={tabs} section={section} badgeOf={badgeOf}
             onTab={openInteraction} onPop={() => setInteractionMode('modal')} onClose={closeInteraction} />
           <DockBody section={section} />
         </div>
       )}
 
       <div data-zone="Взаимодействие: чат, заявки, инфо" data-zone-side className="flex h-full w-12 shrink-0 flex-col items-center gap-1 border-l border-border/50 bg-card py-2">
-        {!dockOpen && TABS.map((t) => {
+        {!dockOpen && tabs.map((t) => {
           const active = section === t.key   // подсвечиваем, если открыт модалкой
           const badge = badgeOf(t.key)
           return (
@@ -126,7 +136,7 @@ export function RightDock() {
 }
 
 function DockHead({ tabs, section, badgeOf, isMobile, onTab, onPop, onClose }: {
-  tabs: typeof TABS
+  tabs: Tab[]
   section: InteractionSection
   badgeOf: (k: InteractionSection) => number
   isMobile?: boolean
@@ -192,6 +202,7 @@ function DockBody({ section }: { section: InteractionSection }) {
   return (
     <div className="min-h-0 flex-1 overflow-hidden">
       {section === 'chat' && <ChatPanel compact scopeProduct={product} />}
+      {section === 'tasks' && <TasksQuickPanel />}
       {section === 'tickets' && <TicketsPanel />}
       {/* «Инфо» — знание пространства под открытую рабочую область, а не статичный
           текст про один продукт (docs/INFO.md). */}
