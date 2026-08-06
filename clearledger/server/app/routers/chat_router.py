@@ -19,7 +19,9 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import log_audit
-from app.auth import decode_token, get_company_by_api_key, get_current_user
+from app.auth import (
+    assert_company_product, decode_token, get_company_by_api_key, get_current_user,
+)
 from app.config import get_settings
 from app.database import async_session_factory, get_db
 from app.deps import capture_company_header, scope_company_id
@@ -2096,6 +2098,149 @@ async def ticket_from_message(
     await db.commit()
     await manager.broadcast(f"chat:{room.id}", {"type": "chat:message", **payload.model_dump()})
     return {"ok": True, "ticketId": str(t_id) if t_id else None, "ticketNumber": t_num or None}
+
+
+class TaskFromMessageBody(BaseModel):
+    title: str | None = None
+    assigneeId: str | None = None
+    typeId: str | None = None
+    dueAt: datetime | None = None
+
+
+@router.post("/messages/{message_id}/task")
+async def task_from_message(
+    message_id: str, body: TaskFromMessageBody,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Задача из сообщения: обсудили — записали, что надо сделать.
+
+    Отличие от заявки: заявка уходит в контур Поддержки через эко-канал, а задача
+    живёт в этой же схеме, поэтому создаётся напрямую. След остаётся с обеих
+    сторон: в чате — системное сообщение со ссылкой, в ленте задачи — событие
+    «из обсуждения» с адресом комнаты, чтобы можно было вернуться к разговору.
+    """
+    from app.models import Task, TaskEvent, TaskType
+
+    try:
+        mid = uuid.UUID(message_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID")
+    msg = await db.get(ChatMessage, mid)
+    if msg is None or msg.deleted_at is not None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Сообщение не найдено")
+    room = await _assert_participant(msg.room_id, current_user, db)
+    await assert_company_product(str(room.company_id), current_user, db, "plan")
+
+    src = (msg.content or msg.file_name or "").strip()
+    title = (body.title or "").strip() or src[:300] or "Задача из обсуждения"
+    ttype = None
+    if body.typeId:
+        try:
+            ttype = await db.get(TaskType, uuid.UUID(body.typeId))
+        except (ValueError, TypeError):
+            ttype = None
+        if ttype is not None and ttype.company_id != room.company_id:
+            ttype = None
+    route = (ttype.route if ttype and ttype.route else None) or [
+        {"code": "new", "name": "Постановка"}]
+
+    assignee = None
+    if body.assigneeId:
+        try:
+            assignee = uuid.UUID(body.assigneeId)
+        except (ValueError, TypeError):
+            assignee = None
+        if assignee is not None and await db.get(UserCompany, (assignee, room.company_id)) is None:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "Исполнитель не состоит в пространстве")
+    due = body.dueAt
+    if due is None and ttype is not None and ttype.due_days is not None:
+        due = _now() + timedelta(days=ttype.due_days)
+
+    task = Task(
+        company_id=room.company_id, type_id=ttype.id if ttype else None,
+        title=title,
+        description=f"{msg.user_name or 'Участник'}: {src}\n\n"
+                    f"(из обсуждения «{room.name or 'чат'}»)",
+        priority=(ttype.default_priority if ttype else "medium"),
+        status="open", stage_code=route[0].get("code"),
+        assignee_id=assignee, author_id=current_user.id,
+        object_id=room.scope_object_id, due_at=due)
+    db.add(task)
+    await db.flush()
+    # Адрес комнаты в событии — обратная дорога к разговору: без неё «почему эта
+    # задача вообще появилась» остаётся только в тексте описания.
+    db.add(TaskEvent(task_id=task.id, kind="created", user_id=current_user.id,
+                     from_value=str(room.id), to_value=route[0].get("name"),
+                     note=f"из обсуждения «{room.name or 'чат'}»"))
+
+    note = ChatMessage(
+        room_id=room.id, user_id=current_user.id, user_name=current_user.name,
+        type="text",
+        content=f"→ Поставлена задача №{task.number}: {title} — открыть в «Задачах»",
+        reply_to=mid)
+    db.add(note)
+    room.updated_at = _now()
+    await db.flush()
+    parties = await _party_types(db, room.company_id, {current_user.id})
+    payload = _msg_out(note, 0, msg, None, parties.get(current_user.id))
+    await db.commit()
+    await manager.broadcast(f"chat:{room.id}", {"type": "chat:message", **payload.model_dump()})
+    return {"ok": True, "taskId": str(task.id), "taskNumber": task.number}
+
+
+@router.post("/tasks/{task_id}/room", response_model=RoomDetailOut)
+async def ensure_task_room(
+    task_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Чат задачи: скрытая группа «быстро обсудить, не засоряя ленту».
+
+    Лента задачи — это след работы (кто двинул, кто передал, чем подтвердил), и
+    короткие «а когда сможешь?» в ней только мешают. Поэтому обсуждение живёт
+    отдельной комнатой, в общий список чатов она не попадает и открывается
+    только из карточки задачи — как у заявок.
+    """
+    from app.models import Task, TaskWatcher
+
+    cid = await _company_of(current_user, db)
+    await assert_company_product(str(cid), current_user, db, "plan")
+    try:
+        tid = uuid.UUID(task_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID")
+    task = await db.get(Task, tid)
+    if task is None or task.company_id != cid:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Задача не найдена")
+
+    existing = (await db.execute(select(ChatRoom).where(
+        ChatRoom.scope_task_id == tid, ChatRoom.company_id == cid,
+        ChatRoom.is_active.is_(True)))).scalar_one_or_none()
+    if existing is not None:
+        p = (await db.execute(select(ChatParticipant.id).where(
+            ChatParticipant.room_id == existing.id,
+            ChatParticipant.user_id == current_user.id))).scalar_one_or_none()
+        if p is None:
+            db.add(ChatParticipant(room_id=existing.id, user_id=current_user.id, role="member"))
+            await db.commit()
+        return await get_room(str(existing.id), current_user, db)
+
+    room = ChatRoom(type="group", kind=None, name=f"Задача №{task.number}",
+                    company_id=cid, created_by=current_user.id, scope_task_id=tid,
+                    scope_object_id=task.object_id)
+    db.add(room)
+    await db.flush()
+    db.add(ChatParticipant(room_id=room.id, user_id=current_user.id, role="owner"))
+    # Кто причастен к работе, тот и в обсуждении: автор, исполнитель, наблюдатели.
+    watchers = (await db.execute(select(TaskWatcher.user_id).where(
+        TaskWatcher.task_id == tid))).scalars().all()
+    for uid in {i for i in (task.author_id, task.assignee_id, *watchers)
+                if i and i != current_user.id}:
+        db.add(ChatParticipant(room_id=room.id, user_id=uid, role="member"))
+    await db.commit()
+    return await get_room(str(room.id), current_user, db)
 
 
 @router.post("/tickets/{ticket_id}/room", response_model=RoomDetailOut)

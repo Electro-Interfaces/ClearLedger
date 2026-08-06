@@ -4563,6 +4563,11 @@ class ChatRoom(Base):
     # открывается только из карточки заявки (решение МАГа 31.07.2026).
     scope_ticket_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), nullable=True, index=True)
+    # Чат ЗАДАЧИ — та же скрытая группа, но для работы компании. Задача живёт в
+    # этой же схеме, поэтому FK настоящий: комната исчезает вместе с задачей.
+    scope_task_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="CASCADE"),
+        nullable=True, index=True)
     # Аватар чата: относительный путь файла пространства (/api/files/<id>), грузится
     # владельцем/админом чата. NULL — иконка по типу комнаты.
     avatar_url: Mapped[str | None] = mapped_column(String(300), nullable=True)

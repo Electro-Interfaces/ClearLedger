@@ -278,6 +278,17 @@ export const ticketFromMessage = (messageId: string,
   post<{ ok: boolean; ticketId: string | null; ticketNumber: string | null }>(
     `/api/chat/messages/${messageId}/ticket`, body)
 
+/** Задача из сообщения: обсудили — записали, что надо сделать (docs/TASKS.md). */
+export const taskFromMessage = (messageId: string,
+  body: { title?: string; assigneeId?: string; typeId?: string; dueAt?: string }) =>
+  post<{ ok: boolean; taskId: string; taskNumber: number }>(
+    `/api/chat/messages/${messageId}/task`, body)
+
+/** Чат задачи (скрытая группа): короткие «а когда сможешь?» не должны засорять
+ *  ленту задачи — она про след работы, а не про разговор. */
+export const ensureTaskRoom = (taskId: string) =>
+  post<ChatRoomDetail>(`/api/chat/tasks/${taskId}/room`, {})
+
 /** Чат заявки (скрытая группа): создаётся при первом обращении из её карточки. */
 export const ensureTicketRoom = (ticketId: string) =>
   post<ChatRoomDetail>(`/api/chat/tickets/${ticketId}/room`, {})

@@ -267,6 +267,52 @@ async def test_рабочее_место_отделяет_моё_от_поруч
     assert handed["id"] in ids(watching["tasks"])
 
 
+async def test_закрытая_задача_по_маршруту_не_ходит(auth_client: AsyncClient):
+    """Ревизия против YouTrack/Jira: у закрытой задачи переходов нет.
+
+    Иначе выходит «выполнена, но стадия ползёт»: в ленте движение есть, работы
+    нет, и любой отчёт по стадиям начинает врать. Вернуть в работу — можно,
+    и после этого маршрут снова доступен.
+    """
+    me = await _me(auth_client)
+    cid = me["companies"][0]["id"]
+    types = (await auth_client.get("/api/tasks/types",
+                                   params={"company_id": cid})).json()["types"]
+    incident = next(t for t in types if t["code"] == "incident")
+    t = (await auth_client.post("/api/tasks", json={
+        "company_id": cid, "title": "Цикл задачи", "type_id": incident["id"],
+        "assignee_id": me["id"]})).json()
+
+    await auth_client.post(f"/api/tasks/{t['id']}/action", json={
+        "company_id": cid, "stage_code": "diag"})
+    r = await auth_client.post(f"/api/tasks/{t['id']}/action", json={
+        "company_id": cid, "status": "done"})
+    assert r.status_code == 200, r.text
+
+    r = await auth_client.post(f"/api/tasks/{t['id']}/action", json={
+        "company_id": cid, "stage_code": "fix"})
+    assert r.status_code == 409, "закрытая задача поехала по маршруту"
+
+    # Переоткрытие снимает отметку закрытия и возвращает движение.
+    r = await auth_client.post(f"/api/tasks/{t['id']}/action", json={
+        "company_id": cid, "status": "open", "note": "вернули"})
+    assert r.status_code == 200 and r.json()["closed_at"] is None
+    r = await auth_client.post(f"/api/tasks/{t['id']}/action", json={
+        "company_id": cid, "stage_code": "fix"})
+    assert r.status_code == 200 and r.json()["stage"] == "Устранение"
+
+    # Просрочка — свойство живой задачи: у закрытой срок уже не сигнал.
+    past = "2020-01-01T00:00:00Z"
+    await auth_client.post(f"/api/tasks/{t['id']}/action", json={
+        "company_id": cid, "due_at": past})
+    assert (await auth_client.get(f"/api/tasks/{t['id']}",
+                                  params={"company_id": cid})).json()["overdue"] is True
+    await auth_client.post(f"/api/tasks/{t['id']}/action", json={
+        "company_id": cid, "status": "done"})
+    assert (await auth_client.get(f"/api/tasks/{t['id']}",
+                                  params={"company_id": cid})).json()["overdue"] is False
+
+
 async def test_поручение_внешнему_письмом(auth_client: AsyncClient, monkeypatch):
     """Режим B: подрядчик не заходит в пространство, разговариваем почтой.
 

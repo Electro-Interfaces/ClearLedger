@@ -13,7 +13,7 @@ import {
   ChevronLeft, ChevronRight, FileText, MoreVertical, Archive, ArchiveRestore,
   Trash2, Reply, Pencil, X, Check, Megaphone, Lock, Pin, Video, UserPlus,
   Folder, AtSign, Loader2, Paperclip, Camera, Search as SearchIcon,
-  Shield, ShieldOff, UserMinus, LogOut, Bell, BellOff, Forward, MapPin, ClipboardList,
+  Shield, ShieldOff, UserMinus, LogOut, Bell, BellOff, Forward, MapPin, ClipboardList, ListChecks,
   Mail, Palette, Smile, Images, Volume2, VolumeX, Mic, BarChart3, WifiOff,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -31,8 +31,9 @@ import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle,
+  Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
+import { Label } from '@/components/ui/label'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuTrigger, DropdownMenuSeparator,
@@ -47,6 +48,8 @@ import { ensurePushSubscription, pushPreview, pushSupported, requestPushPermissi
 import * as chat from '@/services/chatService'
 import { isMuted } from '@/services/chatService'
 import { listSpaceObjects } from '@/services/spaceObjectsService'
+import { listTaskPeople, listTaskTypes } from '@/services/tasksService'
+import { useTasksApp } from '@/hooks/useTasksApp'
 import { useSupportContext } from '@/contexts/SupportContext'
 import type {
   ChatRoom, ChatMessage, ChatParticipant, ChatPresence, ChatFolder as ChatFolderModel, ChatPoll,
@@ -1072,6 +1075,109 @@ function GlobalSearchResults({ q, onOpen }: {
 }
 
 // ── «В заявку»: обсудили — отправили на выполнение ───────────────────────────
+/**
+ * «Задача из сообщения»: обсудили — записали, что надо сделать.
+ *
+ * Проще заявки намеренно: объект не обязателен (задача может быть ни про какую
+ * точку сети), стадию и срок задаёт тип, остальное дописывается в карточке.
+ * Лишний шаг в диалоге здесь дороже, чем правка потом: задачу ставят на ходу.
+ */
+function TaskFromMessageDialog({ message, companyId, onClose, onDone }: {
+  message: ChatMessage
+  companyId: string
+  onClose: () => void
+  onDone: (taskNumber: number) => void
+}) {
+  const src = (message.content || message.fileName || '').trim()
+  const [title, setTitle] = useState(src.slice(0, 300))
+  const [assigneeId, setAssigneeId] = useState('')
+  const [typeId, setTypeId] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const peopleQ = useQuery({
+    queryKey: ['task-people', companyId],
+    queryFn: () => listTaskPeople(companyId),
+    enabled: !!companyId, staleTime: 5 * 60 * 1000,
+  })
+  const typesQ = useQuery({
+    queryKey: ['task-types', companyId],
+    queryFn: () => listTaskTypes(companyId),
+    enabled: !!companyId, staleTime: 5 * 60 * 1000,
+  })
+
+  const send = async () => {
+    setBusy(true)
+    try {
+      const res = await chat.taskFromMessage(message.id, {
+        title: title.trim() || undefined,
+        assigneeId: assigneeId || undefined,
+        typeId: typeId || undefined,
+      })
+      onDone(res.taskNumber)
+    } catch (e) {
+      toast.error((e as Error).message || 'Не удалось поставить задачу')
+    } finally { setBusy(false) }
+  }
+
+  return (
+    <Dialog open onOpenChange={(o) => { if (!o) onClose() }}>
+      <DialogContent className="max-w-sm gap-0 p-0 sm:max-w-sm">
+        <DialogHeader className="border-b border-border/50 px-4 py-3">
+          <DialogTitle className="text-sm">Задача из сообщения</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3 p-4">
+          <p className="max-h-20 overflow-hidden rounded-md bg-muted/40 px-2.5 py-1.5 text-xs text-muted-foreground">
+            {message.userName ? `${message.userName}: ` : ''}{src || 'вложение'}
+          </p>
+          <div className="space-y-1">
+            <Label className="text-xs">Что сделать</Label>
+            <Input value={title} onChange={(e) => setTitle(e.target.value)}
+              maxLength={300} placeholder="Коротко: что нужно сделать" />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1">
+              <Label className="text-xs">Исполнитель</Label>
+              <Select value={assigneeId || 'none'}
+                onValueChange={(v) => setAssigneeId(v === 'none' ? '' : v)}>
+                <SelectTrigger className="h-8 text-xs">
+                  <SelectValue placeholder="Не назначен" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Не назначен</SelectItem>
+                  {(peopleQ.data?.people ?? []).map((p) => (
+                    <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Тип</Label>
+              <Select value={typeId || 'none'}
+                onValueChange={(v) => setTypeId(v === 'none' ? '' : v)}>
+                <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Поручение</SelectItem>
+                  {(typesQ.data?.types ?? []).filter((t) => t.is_active).map((t) => (
+                    <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            В чате останется отметка со ссылкой, в ленте задачи — откуда она взялась.
+          </p>
+        </div>
+        <DialogFooter className="border-t border-border/50 px-4 py-3">
+          <Button size="sm" disabled={busy || title.trim().length < 3} onClick={send}>
+            {busy && <Loader2 className="mr-1.5 size-3.5 animate-spin" />}Поставить
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 function TicketFromMessageDialog({ message, defaultObjectId, defaultObjectName, onClose, onDone }: {
   message: ChatMessage
   defaultObjectId: string | null
@@ -1479,7 +1585,7 @@ function CreateChatDialog({ open, onOpenChange, onCreated, scopeProduct }: {
 function ChatBubble({
   message, album, isOwn, grouping, canDelete, editingId, editText, searchHighlight,
   onReply, onEditStart, onEditCancel, onEditSave, onEditTextChange, onDelete,
-  onAuthorClick, authorAvatar, withAvatar, selfId, onReact, onPin, onForward, onTicket, onImageClick,
+  onAuthorClick, authorAvatar, withAvatar, selfId, onReact, onPin, onForward, onTicket, onTask, onImageClick,
 }: {
   message: ChatMessage
   album?: ChatMessage[]
@@ -1506,6 +1612,7 @@ function ChatBubble({
   onPin?: () => void
   onForward?: () => void
   onTicket?: () => void
+  onTask?: () => void
   onImageClick?: (path: string) => void
 }) {
   const { isFirstInGroup, isLastInGroup, showDate } = grouping
@@ -1595,6 +1702,11 @@ function ChatBubble({
               className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"><Forward className="size-4" /></button>}
             {onTicket && <button onClick={onTicket} title="Создать заявку из сообщения"
               className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"><ClipboardList className="size-4" /></button>}
+            {/* Задача ≠ заявка: заявка уходит в Поддержку про поломку у заявителя,
+                задача остаётся внутренней работой компании. Поэтому две кнопки, а
+                не одна с выбором — обсудили и сразу знаешь, что именно ставишь. */}
+            {onTask && <button onClick={onTask} title="Поставить задачу из сообщения"
+              className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"><ListChecks className="size-4" /></button>}
             {onPin && <button onClick={onPin} title="Закрепить"
               className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"><Pin className="size-4" /></button>}
             {isOwn && <button onClick={onEditStart} title="Редактировать"
@@ -1812,6 +1924,10 @@ export function ChatPanel({ compact, scopeProduct }: {
   const [forwardMsg, setForwardMsg] = useState<ChatMessage | null>(null)
   // «В заявку»: сообщение, из которого создаётся заявка.
   const [ticketMsg, setTicketMsg] = useState<ChatMessage | null>(null)
+  const [taskMsg, setTaskMsg] = useState<ChatMessage | null>(null)
+  // Кнопку показываем только там, где продукт подключён: иначе человек жмёт и
+  // получает отказ гарда — обещание, которого система не держит.
+  const tasksEnabled = useTasksApp()
   // Разрешение на браузерные уведомления — для кнопки-колокольчика в шапке списка.
   const [pushPerm, setPushPerm] = useState<NotificationPermission | 'unsupported'>(
     () => (pushSupported() ? Notification.permission : 'unsupported'))
@@ -2830,6 +2946,7 @@ export function ChatPanel({ compact, scopeProduct }: {
                       onPin={() => pinMutation.mutate(msg.id)}
                       onForward={() => setForwardMsg(msg)}
                       onTicket={activeRoom?.type !== 'direct' ? () => setTicketMsg(msg) : undefined}
+                      onTask={tasksEnabled ? () => setTaskMsg(msg) : undefined}
                       onImageClick={openImage} />
                     </div>
                     </Fragment>
@@ -2992,6 +3109,16 @@ export function ChatPanel({ compact, scopeProduct }: {
             toast.success(num ? `Заявка №${num} создана` : 'Заявка создана')
             qc.invalidateQueries({ queryKey: ['chat-messages', selectedRoom] })
             qc.invalidateQueries({ queryKey: ['chat-rooms'] })
+          }} />
+      )}
+      {taskMsg && (
+        <TaskFromMessageDialog message={taskMsg} companyId={companyId ?? ''}
+          onClose={() => setTaskMsg(null)}
+          onDone={(num) => {
+            setTaskMsg(null)
+            toast.success(`Задача №${num} поставлена`)
+            qc.invalidateQueries({ queryKey: ['chat-messages', selectedRoom] })
+            qc.invalidateQueries({ queryKey: ['tasks'] })
           }} />
       )}
       <CreateChatDialog open={createOpen} onOpenChange={setCreateOpen} scopeProduct={scope}

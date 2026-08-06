@@ -1127,7 +1127,16 @@ async def task_action(
     """
     cid = await assert_company_product(payload.company_id, current_user, db, "plan")
     t = await _task_or_404(db, cid, task_id)
-    await _assert_actor(db, cid, current_user, t)
+    # Реплика — не действие над задачей. Кто задачу видит, тот может в неё
+    # написать: коллега, заметивший «это уже сделано», не должен молчать
+    # только потому, что работа не на нём (так же в YouTrack и Jira —
+    # комментарий отделён от перехода). Всё остальное — по праву участника.
+    only_note = (payload.note is not None and not any((
+        payload.stage_code, payload.assignee_id, payload.status, payload.priority,
+        payload.due_at, payload.title, payload.description, payload.object_id,
+        payload.add_label_id, payload.remove_label_id)))
+    if not only_note:
+        await _assert_actor(db, cid, current_user, t)
 
     ttype = await db.get(TaskType, t.type_id) if t.type_id else None
     route = _route_of(ttype)
@@ -1136,6 +1145,14 @@ async def task_action(
     if payload.stage_code is not None:
         if payload.stage_code not in [s["code"] for s in route]:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Стадии нет в маршруте типа")
+        # Закрытая задача по маршруту не ходит. Иначе получается «выполнена, но
+        # стадия ползёт»: в ленте движение есть, а работы нет, и любой отчёт по
+        # стадиям начинает врать. Хочешь двигать — сначала верни в работу
+        # (в YouTrack/Jira это ровно тот же порядок: переход только у живой).
+        if t.status != "open":
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "Задача закрыта — сначала верните её в работу, потом двигайте по маршруту")
         if payload.stage_code != t.stage_code:
             db.add(TaskEvent(task_id=t.id, kind="stage", user_id=current_user.id,
                              from_value=_stage_name(route, t.stage_code),

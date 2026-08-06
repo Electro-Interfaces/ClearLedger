@@ -9,10 +9,11 @@
  * задваивается отдельным комментарием (так сделано на сервере, не ломать).
  */
 import { useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowRight, CheckCircle2, Eye, EyeOff, Link2, Loader2, Mail, Paperclip, Plus,
-  RefreshCw, Send, Trash2, X,
+  MessagesSquare, RefreshCw, Send, Trash2, X,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
@@ -30,6 +31,7 @@ import * as tasksService from '@/services/tasksService'
 import type { LinkKind, TaskDetails } from '@/services/tasksService'
 import { listSpaceObjects } from '@/services/spaceObjectsService'
 import { listSpaceConnectors } from '@/services/spaceConnectorsService'
+import { ensureTaskRoom } from '@/services/chatService'
 import {
   LINK_LABEL, PRIORITY_LABEL, PRIORITY_TONE, STATUS_LABEL, WAITING_LABEL,
   dt, dtT, eventText, fileSize,
@@ -40,6 +42,7 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther }: {
   onOpenOther?: (taskId: string) => void
 }) {
   const qc = useQueryClient()
+  const navigate = useNavigate()
   const [note, setNote] = useState('')
   const [onlyComments, setOnlyComments] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -76,6 +79,13 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther }: {
     },
     onError: (e) => toast.error((e as Error).message),
   })
+  // Комната задачи создаётся при первом обращении: заводить её каждой задаче
+  // заранее — плодить пустые чаты, которые никто не откроет.
+  const discuss = useMutation({
+    mutationFn: () => ensureTaskRoom(id),
+    onSuccess: (room) => navigate(`/messages?room=${room.id}`),
+    onError: (e) => toast.error((e as Error).message),
+  })
   const upload = useMutation({
     mutationFn: (file: File) => tasksService.uploadTaskFile(id, companyId, file),
     onSuccess: () => { toast.success('Файл приложен'); reload() },
@@ -98,6 +108,8 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther }: {
     )
   }
 
+  const origin = t.events.find(
+    (e) => e.kind === 'created' && e.from && e.from.includes('-'))?.from ?? null
   const live = t.status === 'open'
   const stageIndex = t.route.findIndex((s) => s.code === t.stage_code)
   const next = stageIndex >= 0 ? t.route[stageIndex + 1] : t.route[0]
@@ -109,6 +121,25 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther }: {
         onRename={(title) => act.mutate({ companyId, title })} />
 
       <div className="flex-1 space-y-5 overflow-y-auto px-5 py-4 text-sm">
+        {/* Обсуждение отдельно от ленты: лента — след работы (кто двинул, чем
+            подтвердил), а короткие «когда сможешь?» её только засоряют. Кнопка
+            открывает скрытую группу задачи — как у заявок. */}
+        <div className="flex flex-wrap items-center gap-2">
+          <Button size="sm" variant="outline" className="h-8" disabled={discuss.isPending}
+            onClick={() => discuss.mutate()}>
+            {discuss.isPending
+              ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+              : <MessagesSquare className="mr-1.5 h-3.5 w-3.5" />}
+            Обсудить в чате
+          </Button>
+          {origin && (
+            <button type="button" onClick={() => navigate(`/messages?room=${origin}`)}
+              className="text-[11px] text-muted-foreground hover:text-foreground hover:underline">
+              задача из обсуждения — открыть разговор
+            </button>
+          )}
+        </div>
+
         {live && (
           <div className="flex flex-wrap items-center gap-2">
             {next && (
