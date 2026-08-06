@@ -12,7 +12,8 @@ import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import {
   ArrowDownRight, ArrowUpRight, Building2, CalendarDays, ChevronRight, ClipboardList,
-  Gauge, HardHat, LifeBuoy, MapPin, MessageCircle, PhoneCall, TrendingUp, Users,
+  Gauge, HardHat, LifeBuoy, ListChecks, MapPin, MessageCircle, PhoneCall, TrendingUp,
+  Users,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -31,6 +32,7 @@ import {
 import { ContactCenterView } from './ContactCenter'
 import { SalesView } from './SalesView'
 import { ProjectsView } from './ProjectsView'
+import { TasksView } from './TasksView'
 import { OperationsView } from './OperationsView'
 import { ObjectsView } from './ObjectsView'
 import { AccessView } from './AccessView'
@@ -91,6 +93,7 @@ export function PulseBusinessPage() {
     projects: { title: 'Проекты', hint: 'Что строим: движется ли портфель, где застрял и у кого на руках' },
     ops: { title: 'Эксплуатация', hint: 'Хозяйство: во сколько обходится период, чем подтверждён, кому должны' },
     support: { title: 'Поддержка', hint: 'Сервисный контур: сколько и где стоит работа' },
+    tasks: { title: 'Задачи', hint: 'Работа компании: успеваем ли, у кого затор, что уже горит' },
     contacts: { title: 'Обращения', hint: 'Разговор с потребителем: дозвонились ли, быстро ли ответили, нет ли хвостов' },
     objects: { title: 'Где болит', hint: 'Точки сети, где сошлось несколько проблем сразу — выручка, расходы, документы' },
     summary: { title: 'Коротко', hint: 'Выжимка для куратора: цифры сети, воронка и вехи' },
@@ -131,6 +134,19 @@ export function PulseBusinessPage() {
         <Title icon={Gauge} title={meta.title} hint={meta.hint}
           aside="ожидание против подтверждённого" />
         <OperationsView />
+      </div>
+    )
+  }
+  if (view === 'tasks') {
+    return (
+      <div className="space-y-4">
+        {/* Свой разрез, а не «Обзор» приложения: тот отвечает исполнителю и
+            постановщику, этот — руководителю (успеваем ли, у кого затор).
+            Цифры считает та же ручка, что и приложение: два набора метрик про
+            одну работу расходятся на первой же правке. */}
+        <Title icon={ListChecks} title={meta.title} hint={meta.hint}
+          aside="месяц работы" />
+        <TasksView />
       </div>
     )
   }
