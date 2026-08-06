@@ -392,6 +392,49 @@ async def test_регламент_шаблоны_расписания_эскал
     assert nxt > now and nxt.astimezone(
         task_scheduler._tz({"tz": "Europe/Moscow"})).weekday() == 0
 
+    # Эскалация: на задачу не откликнулись за отведённое типом время.
+    # Гоняем сам прогон планировщика — в нём и живёт логика, которую иначе
+    # проверяет только стенд (так уже поймали `await` не на том выражении).
+    import uuid as _uuid
+
+    from app.database import async_session_factory
+    from app.models import Task
+
+    r = await auth_client.post("/api/tasks/types", json={
+        "company_id": cid, "code": "urgent-react", "name": "С реакцией",
+        "route": [{"code": "new", "name": "Постановка"}], "reaction_hours": 1})
+    assert r.status_code == 201, r.text
+    urgent = r.json()
+    assert urgent["reaction_hours"] == 1
+
+    stale = (await auth_client.post("/api/tasks", json={
+        "company_id": cid, "title": "На эту никто не откликнулся",
+        "type_id": urgent["id"], "assignee_id": me["id"]})).json()
+    fresh = (await auth_client.post("/api/tasks", json={
+        "company_id": cid, "title": "А эту сразу взяли",
+        "type_id": urgent["id"], "assignee_id": me["id"]})).json()
+    # По второй откликнулись — эскалация её трогать не должна.
+    await auth_client.post(f"/api/tasks/{fresh['id']}/action", json={
+        "company_id": cid, "note": "Взял в работу"})
+
+    now = datetime.now(timezone.utc)
+    async with async_session_factory() as db:
+        row = await db.get(Task, _uuid.UUID(stale["id"]))
+        row.created_at = now - timedelta(hours=3)
+        row2 = await db.get(Task, _uuid.UUID(fresh["id"]))
+        row2.created_at = now - timedelta(hours=3)
+        await db.commit()
+        sent = await task_scheduler.run_escalations(db, now)
+        await db.commit()
+    assert sent == 1, f"эскалаций {sent}, а должна быть одна"
+
+    card = (await auth_client.get(f"/api/tasks/{stale['id']}",
+                                  params={"company_id": cid})).json()
+    assert "escalate" in [e["kind"] for e in card["events"]], "след эскалации не записан"
+    card2 = (await auth_client.get(f"/api/tasks/{fresh['id']}",
+                                   params={"company_id": cid})).json()
+    assert "escalate" not in [e["kind"] for e in card2["events"]], "эскалация по взятой задаче"
+
     # Представление: сохранённый отбор появляется в списке и возвращает свой запрос.
     r = await auth_client.post("/api/tasks/views", json={
         "company_id": cid, "name": "Мои просрочки",

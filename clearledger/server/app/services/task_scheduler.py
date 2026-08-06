@@ -175,7 +175,7 @@ async def run_escalations(db, now: datetime) -> int:
         .join(TaskType, TaskType.id == Task.type_id)
         .where(Task.status == "open", Task.reacted_at.is_(None),
                TaskType.reaction_hours.is_not(None),
-               Task.assignee_id.is_not(None))).all())
+               Task.assignee_id.is_not(None)))).all()
     sent = 0
     for t, ttype in rows:
         deadline = t.created_at + timedelta(hours=ttype.reaction_hours)
