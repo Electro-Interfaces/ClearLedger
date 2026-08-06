@@ -8,6 +8,15 @@ export interface RouteStage { code: string; name: string }
 
 export interface TaskLabel { id: string; name: string; color: string }
 export interface TaskProgress { total: number; done: number }
+/** План и факт по времени: оценка задачи и сумма записей о работе. */
+export interface TaskTime {
+  estimate: number | null; spent: number
+  estimate_text: string; spent_text: string
+}
+export interface TaskWorkItem {
+  id: string; minutes: number; duration: string; work_date: string
+  description: string | null; kind: string | null; user: string | null
+}
 export interface TaskSubtasks { total: number; open: number }
 
 export interface TaskType {
@@ -52,6 +61,7 @@ export interface SpaceTask {
   labels: TaskLabel[]
   checklist: TaskProgress
   subtasks: TaskSubtasks
+  time: TaskTime
 }
 
 export interface TaskEvent {
@@ -98,6 +108,7 @@ export interface TaskDetails extends SpaceTask {
   /** Адрес, по которому внешний отвечает письмом. null — канал не настроен. */
   reply_address: string | null
   external: TaskExternalRef[]
+  work_items: TaskWorkItem[]
 }
 
 /** Ответ действия: сервер может предупредить, не отказав (открытые подзадачи). */
@@ -187,7 +198,7 @@ export async function taskAction(id: string, data: {
   companyId: string; stageCode?: string; assigneeId?: string | null
   status?: string; priority?: string; dueAt?: string; note?: string
   title?: string; description?: string; objectId?: string | null
-  addLabelId?: string; removeLabelId?: string
+  addLabelId?: string; removeLabelId?: string; estimate?: string
 }) {
   return post<TaskActionResult>(`/api/tasks/${id}/action`, {
     company_id: data.companyId,
@@ -199,6 +210,7 @@ export async function taskAction(id: string, data: {
     title: data.title, description: data.description,
     object_id: data.objectId === null ? '' : data.objectId,
     add_label_id: data.addLabelId, remove_label_id: data.removeLabelId,
+    estimate: data.estimate,
   })
 }
 
@@ -332,6 +344,24 @@ export async function createTaskRecurrence(data: {
 
 export async function deleteTaskRecurrence(id: string, companyId: string) {
   return del(`/api/tasks/recurrences/${id}?company_id=${encodeURIComponent(companyId)}`)
+}
+
+/** Записать время по задаче. Длительность строкой — «2ч 30м», «1,5ч», «90м». */
+export async function addWorkItem(taskId: string, data: {
+  companyId: string; duration: string; description?: string
+  workDate?: string; kind?: string; userId?: string
+}) {
+  return post<{ id: string; minutes: number; duration: string; work_date: string }>(
+    `/api/tasks/${taskId}/work`, {
+      company_id: data.companyId, duration: data.duration,
+      description: data.description || undefined,
+      work_date: data.workDate || undefined, kind: data.kind || undefined,
+      user_id: data.userId || undefined,
+    })
+}
+
+export async function deleteWorkItem(taskId: string, itemId: string, companyId: string) {
+  return del(`/api/tasks/${taskId}/work/${itemId}?company_id=${encodeURIComponent(companyId)}`)
 }
 
 /** Зеркало работы во внешней системе: у нас наша задача, у них своя. */

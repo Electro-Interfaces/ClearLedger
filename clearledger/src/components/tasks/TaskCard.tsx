@@ -12,8 +12,8 @@ import { useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  ArrowRight, CheckCircle2, Eye, EyeOff, Link2, Loader2, Mail, Paperclip, Plus,
-  MessagesSquare, RefreshCw, Send, Trash2, X,
+  ArrowRight, CheckCircle2, Clock, Eye, EyeOff, Link2, Loader2, Mail, MessagesSquare,
+  Paperclip, Plus, RefreshCw, Send, Trash2, X,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
@@ -196,6 +196,9 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther }: {
 
         <Links task={t} companyId={companyId} live={live}
           onChanged={reload} onOpenOther={onOpenOther} />
+
+        <TimePanel task={t} companyId={companyId} live={live}
+          onChanged={reload} onEstimate={(v) => act.mutate({ companyId, estimate: v })} />
 
         <External task={t} companyId={companyId} live={live} onChanged={reload} />
 
@@ -689,6 +692,112 @@ function Links({ task, companyId, live, onChanged, onOpenOther }: {
           <p className="text-xs text-muted-foreground">Связей нет.</p>
         )}
       </div>
+    </Section>
+  )
+}
+
+/* ── Время: план и факт ──────────────────────────────────────────────── */
+
+function TimePanel({ task, companyId, live, onChanged, onEstimate }: {
+  task: TaskDetails; companyId: string; live: boolean
+  onChanged: () => void; onEstimate: (v: string) => void
+}) {
+  const [dur, setDur] = useState('')
+  const [what, setWhat] = useState('')
+  const [estimate, setEstimateText] = useState('')
+  const [editEstimate, setEditEstimate] = useState(false)
+
+  const add = useMutation({
+    mutationFn: () => tasksService.addWorkItem(task.id, {
+      companyId, duration: dur.trim(), description: what.trim() || undefined,
+    }),
+    onSuccess: () => { setDur(''); setWhat(''); onChanged() },
+    onError: (e) => toast.error((e as Error).message),
+  })
+  const drop = useMutation({
+    mutationFn: (id: string) => tasksService.deleteWorkItem(task.id, id, companyId),
+    onSuccess: onChanged,
+    onError: (e) => toast.error((e as Error).message),
+  })
+
+  const time = task.time
+  // Перерасход показываем словами и тоном: «плана 4 ч, потрачено 6 ч» — это
+  // повод для разговора, а не для молчаливой красной цифры.
+  const over = time.estimate != null && time.spent > time.estimate
+
+  return (
+    <Section title="Время" action={live && !editEstimate && (
+      <button type="button"
+        onClick={() => { setEstimateText(time.estimate_text.replace(' ', '')); setEditEstimate(true) }}
+        className="text-[11px] text-muted-foreground hover:text-foreground">
+        {time.estimate == null ? 'поставить оценку' : 'изменить оценку'}
+      </button>
+    )}>
+      <div className="flex flex-wrap items-center gap-3 text-xs">
+        {editEstimate ? (
+          <span className="flex items-center gap-1">
+            <Input value={estimate} onChange={(e) => setEstimateText(e.target.value)}
+              autoFocus placeholder="4ч" className="h-7 w-[90px] text-xs"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') { onEstimate(estimate); setEditEstimate(false) }
+                if (e.key === 'Escape') setEditEstimate(false)
+              }} />
+            <Button size="sm" className="h-7"
+              onClick={() => { onEstimate(estimate); setEditEstimate(false) }}>ок</Button>
+            <Button size="sm" variant="ghost" className="h-7"
+              onClick={() => { onEstimate(''); setEditEstimate(false) }}>снять</Button>
+          </span>
+        ) : (
+          <span className="text-muted-foreground">
+            оценка: <span className="text-foreground">{time.estimate_text}</span>
+          </span>
+        )}
+        <span className="text-muted-foreground">
+          потрачено: <span className={cn('font-medium',
+            over ? 'text-amber-600 dark:text-amber-400' : 'text-foreground')}>
+            {time.spent_text}
+          </span>
+        </span>
+        {over && (
+          <span className="text-[11px] text-amber-600 dark:text-amber-400">
+            больше оценки на {Math.round((time.spent - (time.estimate ?? 0)) / 60 * 10) / 10} ч
+          </span>
+        )}
+      </div>
+
+      {task.work_items.length > 0 && (
+        <div className="mt-2 space-y-1">
+          {task.work_items.map((w) => (
+            <div key={w.id} className="flex items-center gap-2 text-xs">
+              <Clock className="h-3 w-3 shrink-0 text-muted-foreground" />
+              <span className="w-[92px] shrink-0 font-medium">{w.duration}</span>
+              <span className="shrink-0 text-muted-foreground">
+                {new Date(w.work_date).toLocaleDateString('ru-RU')}
+              </span>
+              <span className="truncate">{w.user}{w.description ? ` · ${w.description}` : ''}</span>
+              <Button variant="ghost" size="sm" className="ml-auto h-6 px-1.5"
+                aria-label="Убрать запись" onClick={() => drop.mutate(w.id)}>
+                <Trash2 className="h-3 w-3" />
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {live && (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <Input value={dur} onChange={(e) => setDur(e.target.value)}
+            placeholder="2ч 30м" className="h-7 w-[110px] text-xs"
+            onKeyDown={(e) => { if (e.key === 'Enter' && dur.trim()) add.mutate() }} />
+          <Input value={what} onChange={(e) => setWhat(e.target.value)}
+            placeholder="что делали" maxLength={500} className="h-7 flex-1 text-xs"
+            onKeyDown={(e) => { if (e.key === 'Enter' && dur.trim()) add.mutate() }} />
+          <Button size="sm" variant="outline" className="h-7"
+            disabled={!dur.trim() || add.isPending} onClick={() => add.mutate()}>
+            {add.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Записать время'}
+          </Button>
+        </div>
+      )}
     </Section>
   )
 }

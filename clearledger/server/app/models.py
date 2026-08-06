@@ -6359,6 +6359,9 @@ class Task(Base):
     # каждый тик планировщика, и его перестали бы читать на второй день.
     reminded_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True)
+    # Оценка трудоёмкости в минутах (как `estimation` в YouTrack). План живёт в
+    # задаче, факт — в записях о работе: их сравнение и есть весь смысл учёта.
+    estimate_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True)
     updated_at: Mapped[datetime] = mapped_column(
@@ -6531,6 +6534,39 @@ class TaskParticipant(Base):
     # Адрес в канале: почтовый ящик, идентификатор в чужой системе.
     channel_ref: Mapped[str | None] = mapped_column(String(300), nullable=True)
     added_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+
+class TaskWorkItem(Base):
+    """Запись о работе: сколько времени человек потратил и на что.
+
+    Устроено как в YouTrack (`IssueWorkItem`): отдельная запись, а не поле-счётчик
+    в задаче. Счётчик отвечает только «сколько всего», а запись — «кто, когда и
+    что делал», и именно по ней собираются трудозатраты за период по людям.
+
+    Длительность в минутах: часы дробью («1,5 ч») в сумме дают копеечные ошибки,
+    а минуты складываются точно. Человеку она показывается как «2 ч 30 мин».
+    """
+    __tablename__ = "task_work_items"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    task_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    # Чья работа. Отделено от `created_by`: руководитель может записать время за
+    # человека, и в отчёте оно должно лечь на того, кто работал.
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    # Дата работы, а не записи: время часто заносят на следующий день.
+    work_date: Mapped[date_type] = mapped_column(Date, nullable=False)
+    minutes: Mapped[int] = mapped_column(Integer, nullable=False)
+    description: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # Вид работы для разреза отчёта: выезд, разработка, согласование…
+    kind: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now())

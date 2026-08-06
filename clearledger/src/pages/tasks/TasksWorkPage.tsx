@@ -398,6 +398,14 @@ function TasksTable({ tasks, sort, onSort, picked, onPick, groupByObject, onOpen
                       {t.subtasks.total > 0 && (
                         <span>· подзадач {t.subtasks.open} из {t.subtasks.total} открыто</span>
                       )}
+                      {(t.time.spent > 0 || t.time.estimate != null) && (
+                        <span className={cn(t.time.estimate != null
+                          && t.time.spent > t.time.estimate
+                          && 'text-amber-600 dark:text-amber-400')}>
+                          · {t.time.spent_text}
+                          {t.time.estimate != null && ` из ${t.time.estimate_text}`}
+                        </span>
+                      )}
                       {t.waiting_for === 'external' && (
                         <span className="rounded border border-amber-500/40 bg-amber-500/5 px-1 py-px text-amber-700 dark:text-amber-400">
                           {WAITING_LABEL.external}

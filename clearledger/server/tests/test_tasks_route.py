@@ -267,6 +267,59 @@ async def test_рабочее_место_отделяет_моё_от_поруч
     assert handed["id"] in ids(watching["tasks"])
 
 
+async def test_учёт_времени_план_и_факт(auth_client: AsyncClient):
+    """Оценка и записи о работе — как `estimation` и work items в YouTrack.
+
+    Ловим: длительность понимается только числом (учётом, где надо считать
+    минуты в уме, не пользуются); факт не суммируется в строку списка; правка
+    оценки не оставляет следа.
+    """
+    from app.routers.tasks_router import human_duration, parse_duration
+
+    # Люди пишут длительность как придётся — разбирать надо все формы.
+    assert parse_duration("2ч 30м") == 150
+    assert parse_duration("1,5ч") == 90
+    assert parse_duration("90м") == 90
+    assert parse_duration("2") == 120, "голое число — это часы"
+    assert parse_duration("ерунда") is None
+    assert human_duration(150) == "2 ч 30 мин"
+
+    me = await _me(auth_client)
+    cid = me["companies"][0]["id"]
+    t = (await auth_client.post("/api/tasks", json={
+        "company_id": cid, "title": "Работа с учётом времени",
+        "assignee_id": me["id"]})).json()
+
+    r = await auth_client.post(f"/api/tasks/{t['id']}/action", json={
+        "company_id": cid, "estimate": "4ч"})
+    assert r.status_code == 200, r.text
+
+    for dur in ("2ч 30м", "45м"):
+        r = await auth_client.post(f"/api/tasks/{t['id']}/work", json={
+            "company_id": cid, "duration": dur, "description": f"работа {dur}"})
+        assert r.status_code == 201, r.text
+    r = await auth_client.post(f"/api/tasks/{t['id']}/work", json={
+        "company_id": cid, "duration": "ерунда"})
+    assert r.status_code == 400, "неразборчивая длительность прошла"
+
+    card = (await auth_client.get(f"/api/tasks/{t['id']}",
+                                  params={"company_id": cid})).json()
+    assert card["time"]["estimate"] == 240
+    assert card["time"]["spent"] == 195, card["time"]
+    assert card["time"]["spent_text"] == "3 ч 15 мин"
+    assert len(card["work_items"]) == 2
+    # Время попадает в след: «делал три часа» отвечает на «почему так долго».
+    assert "work" in [e["kind"] for e in card["events"]]
+    # Правка оценки — тоже событие.
+    assert any(e["kind"] == "field" and "оценка" in (e["from"] or "")
+               for e in card["events"]), [e["kind"] for e in card["events"]]
+
+    # Факт виден в строке списка — не открывая карточку.
+    row = next(x for x in (await auth_client.get("/api/tasks", params={
+        "company_id": cid, "scope": "all"})).json()["tasks"] if x["id"] == t["id"])
+    assert row["time"]["spent"] == 195 and row["time"]["estimate"] == 240
+
+
 async def test_закрытая_задача_по_маршруту_не_ходит(auth_client: AsyncClient):
     """Ревизия против YouTrack/Jira: у закрытой задачи переходов нет.
 

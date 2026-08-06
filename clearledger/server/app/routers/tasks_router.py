@@ -16,7 +16,7 @@ import hashlib
 import os
 import re
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date as date_type, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -31,7 +31,8 @@ from app.database import get_db
 from app.models import (
     Company, ServiceLocation, SourceFile, Task, TaskAttachment, TaskChecklistItem,
     TaskEvent, TaskExternalRef, TaskLabel, TaskLabelLink, TaskLink, TaskParticipant,
-    TaskRecurrence, TaskTemplate, TaskType, TaskView, TaskWatcher, User, UserCompany,
+    TaskRecurrence, TaskTemplate, TaskType, TaskView, TaskWatcher, TaskWorkItem,
+    User, UserCompany,
 )
 from app.services import space_connectors, task_mail, task_scheduler
 
@@ -183,6 +184,13 @@ async def _extras(db: AsyncSession, tasks: list[Task]) -> dict[uuid.UUID, dict[s
         .group_by(TaskChecklistItem.task_id))).all():
         check[tid] = {"total": total, "done": done}
 
+    spent: dict[uuid.UUID, int] = {}
+    for tid, total in (await db.execute(
+        select(TaskWorkItem.task_id, func.coalesce(func.sum(TaskWorkItem.minutes), 0))
+        .where(TaskWorkItem.task_id.in_(ids))
+        .group_by(TaskWorkItem.task_id))).all():
+        spent[tid] = int(total or 0)
+
     kids: dict[uuid.UUID, dict[str, int]] = {}
     for tid, total, open_cnt in (await db.execute(
         select(TaskLink.task_id, func.count(),
@@ -196,6 +204,12 @@ async def _extras(db: AsyncSession, tasks: list[Task]) -> dict[uuid.UUID, dict[s
         "labels": labels.get(t.id, []),
         "checklist": check.get(t.id, {"total": 0, "done": 0}),
         "subtasks": kids.get(t.id, {"total": 0, "open": 0}),
+        "time": {
+            "estimate": t.estimate_minutes,
+            "spent": spent.get(t.id, 0),
+            "estimate_text": human_duration(t.estimate_minutes),
+            "spent_text": human_duration(spent.get(t.id, 0)),
+        },
     } for t in tasks}
 
 
@@ -1056,6 +1070,11 @@ async def task_details(
     externals = (await db.execute(
         select(TaskExternalRef).where(TaskExternalRef.task_id == t.id)
         .order_by(TaskExternalRef.created_at))).scalars().all()
+    work = (await db.execute(
+        select(TaskWorkItem).where(TaskWorkItem.task_id == t.id)
+        .order_by(TaskWorkItem.work_date.desc(), TaskWorkItem.created_at.desc()))).all()
+    people = {u: n for u, n in (await db.execute(select(User.id, User.name).where(
+        User.id.in_({w.user_id for (w,) in work if w.user_id})))).all()} if work else {}
     participants = (await db.execute(
         select(TaskParticipant, User.name, User.email)
         .join(User, User.id == TaskParticipant.user_id)
@@ -1094,6 +1113,11 @@ async def task_details(
             "created_at": a.created_at.isoformat() if a.created_at else None,
         } for a, sf in attachments],
         "links": await _links_out(db, t),
+        "work_items": [{
+            "id": str(w.id), "minutes": w.minutes, "duration": human_duration(w.minutes),
+            "work_date": w.work_date.isoformat(), "description": w.description,
+            "kind": w.kind, "user": people.get(w.user_id),
+        } for w, in work],
     }
 
 
@@ -1110,6 +1134,7 @@ class TaskAction(BaseModel):
     object_id: str | None = None
     add_label_id: str | None = None
     remove_label_id: str | None = None
+    estimate: str | None = Field(None, max_length=40)   # «4ч», «30м»; "" — снять
 
 
 @router.post("/{task_id}/action")
@@ -1215,6 +1240,14 @@ async def task_action(
     if payload.object_id is not None and (payload.object_id or None) != t.object_id:
         field_changed("объект", t.object_id, payload.object_id or None)
         t.object_id = payload.object_id or None
+    if payload.estimate is not None:
+        est = parse_duration(payload.estimate) if payload.estimate.strip() else None
+        if payload.estimate.strip() and est is None:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "Не разобрал оценку. Пишите «4ч», «1,5ч» или «90м»")
+        if est != t.estimate_minutes:
+            field_changed("оценка", human_duration(t.estimate_minutes), human_duration(est))
+            t.estimate_minutes = est
 
     if payload.add_label_id:
         lid = _uuid_or_400(payload.add_label_id, "add_label_id")
@@ -1603,6 +1636,126 @@ async def delete_attachment(
     await db.delete(att)
     await db.commit()
     return {"deleted": attachment_id}
+
+
+# ── Учёт времени: план и факт ────────────────────────────────────────────
+
+
+# «2ч 30м», «1,5 ч», «90м», «45» — люди пишут длительность как придётся, и
+# заставлять их вводить минуты числом значит получить учёт, которым не пользуются.
+_DUR = re.compile(r"(\d+(?:[.,]\d+)?)\s*(ч|час[а-я]*|h|м|мин[а-я]*|m)?", re.IGNORECASE)
+
+
+def parse_duration(text: str) -> int | None:
+    """Строка длительности → минуты. None — разобрать не удалось."""
+    if text is None:
+        return None
+    raw = str(text).strip().lower()
+    if not raw:
+        return None
+    total = 0.0
+    found = False
+    for value, unit in _DUR.findall(raw):
+        num = float(value.replace(",", "."))
+        u = (unit or "").lower()
+        if u.startswith(("ч", "h")):
+            total += num * 60
+        elif u.startswith(("м", "m")):
+            total += num
+        else:
+            # Голое число без единицы — часы: «поставил 2» человек имеет в виду
+            # два часа, а не две минуты.
+            total += num * 60
+        found = True
+    minutes = int(round(total))
+    return minutes if found and 0 < minutes <= 60 * 24 * 30 else None
+
+
+def human_duration(minutes: int | None) -> str:
+    if not minutes:
+        return "—"
+    hours, mins = divmod(int(minutes), 60)
+    if hours and mins:
+        return f"{hours} ч {mins} мин"
+    return f"{hours} ч" if hours else f"{mins} мин"
+
+
+class WorkItemIn(BaseModel):
+    company_id: str
+    # Строкой, а не числом: сервер разбирает «2ч 30м» одинаково для всех клиентов.
+    duration: str = Field(min_length=1, max_length=40)
+    work_date: date_type | None = None
+    description: str | None = Field(None, max_length=500)
+    kind: str | None = Field(None, max_length=60)
+    user_id: str | None = None       # чья работа; пусто — своя
+
+
+@router.post("/{task_id}/work", status_code=status.HTTP_201_CREATED)
+async def add_work_item(
+    task_id: str,
+    payload: WorkItemIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Записать время по задаче.
+
+    Записывать может любой, кто задачу видит: время тратит не только исполнитель
+    (согласовали, съездили, помогли). За другого человека время заносит только
+    участник задачи или администратор — иначе учёт становится местом, где можно
+    приписать работу кому угодно.
+    """
+    cid = await assert_company_product(payload.company_id, current_user, db, "plan")
+    t = await _task_or_404(db, cid, task_id)
+    minutes = parse_duration(payload.duration)
+    if minutes is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Не разобрал длительность. Пишите «2ч 30м», «1,5ч» или «90м»")
+    uid = current_user.id
+    if payload.user_id:
+        uid = _uuid_or_400(payload.user_id, "user_id")
+        if uid != current_user.id:
+            await _assert_actor(db, cid, current_user, t)
+            if await db.get(UserCompany, (uid, cid)) is None:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                    "Человек не состоит в пространстве")
+    item = TaskWorkItem(
+        task_id=t.id, user_id=uid,
+        work_date=payload.work_date or datetime.now(timezone.utc).date(),
+        minutes=minutes, description=payload.description, kind=payload.kind,
+        created_by=current_user.id)
+    db.add(item)
+    # Время — часть следа работы: «делал три часа» отвечает на «почему так долго».
+    db.add(TaskEvent(task_id=t.id, kind="work", user_id=current_user.id,
+                     to_value=human_duration(minutes), note=payload.description))
+    # Записал время — значит взялся: отдельного «отклика» ждать незачем.
+    if t.reacted_at is None and uid == t.assignee_id:
+        t.reacted_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(item)
+    return {"id": str(item.id), "minutes": item.minutes,
+            "duration": human_duration(item.minutes),
+            "work_date": item.work_date.isoformat()}
+
+
+@router.delete("/{task_id}/work/{item_id}")
+async def delete_work_item(
+    task_id: str,
+    item_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Убрать свою запись о работе; чужую — участник задачи или администратор."""
+    cid = await assert_company_product(company_id, current_user, db, "plan")
+    t = await _task_or_404(db, cid, task_id)
+    item = await db.get(TaskWorkItem, _uuid_or_400(item_id, "item_id"))
+    if item is None or item.task_id != t.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Запись не найдена")
+    if item.user_id != current_user.id and item.created_by != current_user.id:
+        await _assert_actor(db, cid, current_user, t)
+    await db.delete(item)
+    await db.commit()
+    return {"deleted": item_id}
 
 
 # ── Внешние участники: разговор почтой ───────────────────────────────────
