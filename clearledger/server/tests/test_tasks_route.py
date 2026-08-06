@@ -185,10 +185,10 @@ async def test_карточка_собирает_работу_целиком(aut
         assert r.status_code == 201, r.text
     card = (await auth_client.get(f"/api/tasks/{parent['id']}",
                                   params={"company_id": cid})).json()
-    assert [c["text"] for c in card["checklist"]] == [
+    assert [c["text"] for c in card["checklist_items"]] == [
         "Заказать оборудование", "Вызвать бригаду"], "порядок пунктов не по position"
     r = await auth_client.patch(
-        f"/api/tasks/{parent['id']}/checklist/{card['checklist'][0]['id']}",
+        f"/api/tasks/{parent['id']}/checklist/{card['checklist_items'][0]['id']}",
         json={"company_id": cid, "done": True})
     assert r.status_code == 200, r.text
 

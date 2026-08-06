@@ -17,6 +17,7 @@ import {
   Archive, Megaphone, MessagesSquare, UserRound, Users2,
   BookOpen, Compass, Scale, FileSignature, HelpCircle,
   Activity, TrendingUp, Users, CalendarDays, LayoutDashboard,
+  ListChecks, Building2, BarChart3, Settings2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -126,6 +127,18 @@ const PULSE_SECTIONS: { to: string; label: string; icon: typeof Activity }[] = [
   { to: '/pulse/week', label: 'Неделя', icon: CalendarDays },
 ]
 
+/**
+ * Разделы «Задач» (ecosystem-deploy/docs/TASKS.md): сначала своя работа, потом
+ * работа компании. «Моя работа» открывается по умолчанию — человек приходит в
+ * трекер делать своё, а не смотреть сводку по всем.
+ */
+const TASKS_SECTIONS: { to: string; label: string; icon: typeof Activity }[] = [
+  { to: '/tasks', label: 'Моя работа', icon: ListChecks },
+  { to: '/tasks/company', label: 'Работа компании', icon: Building2 },
+  { to: '/tasks/overview', label: 'Обзор', icon: BarChart3 },
+  { to: '/tasks/setup', label: 'Настройка', icon: Settings2 },
+]
+
 const CHAT_VIEWS: { key: string; label: string; icon: typeof MessagesSquare }[] = [
   { key: 'all', label: 'Все чаты', icon: MessagesSquare },
   { key: 'channel', label: 'Каналы', icon: Megaphone },
@@ -201,6 +214,51 @@ function SidebarNavBody({ collapsed = false, onNavigate }: {
                 collapsed={collapsed} onNavigate={onNavigate}
                 active={pathname === s.to
                   || (s.to === '/pulse' && pathname === '/pulse/')} />
+            ))}
+          </SidebarMenu>
+        </SidebarGroup>
+
+        <SidebarSeparator className="my-2" />
+        <SidebarGroup className="py-0">
+          {!collapsed && (
+            <p className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/60">
+              Пространство
+            </p>
+          )}
+          <SidebarMenu>
+            {spaceItems.map((item) => (
+              <NavItem key={item.to} to={item.to} icon={item.icon} label={item.label}
+                collapsed={collapsed} onNavigate={onNavigate} />
+            ))}
+            {SPACE_LINKS.filter((l) => canApp(l.app)).map((l) => (
+              <NavItem key={l.to} to={l.to} icon={l.icon} label={l.label}
+                collapsed={collapsed} onNavigate={onNavigate} />
+            ))}
+          </SidebarMenu>
+        </SidebarGroup>
+      </>
+    )
+  }
+
+  // «Задачи» — трекер работы компании (ecosystem-deploy/docs/TASKS.md): такое же
+  // приложение Ядра, как «Пульс», и раскладка у него такая же. Без этой ветки на
+  // экране «Задач» висело меню Учёта — то есть своей навигации у продукта не было
+  // вовсе, и человек не понимал, где он.
+  if (pathname === '/tasks' || pathname.startsWith('/tasks/')) {
+    const spaceItems = SPACE_PAGES
+      .filter((p) => navByPath[p])
+      .map((p) => navByPath[p])
+    return (
+      <>
+        <SidebarGroup className="py-0">
+          <SidebarMenu>
+            {TASKS_SECTIONS.map((s) => (
+              <NavItem key={s.to} to={s.to} icon={s.icon} label={s.label}
+                collapsed={collapsed} onNavigate={onNavigate}
+                // Корень раздела не должен подсвечиваться на дочерних путях:
+                // иначе «Моя работа» горит и в «Работе компании».
+                active={pathname === s.to
+                  || (s.to === '/tasks' && pathname === '/tasks/')} />
             ))}
           </SidebarMenu>
         </SidebarGroup>

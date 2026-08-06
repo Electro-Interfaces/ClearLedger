@@ -788,7 +788,10 @@ async def task_details(
             "from": e.from_value, "to": e.to_value, "note": e.note,
             "created_at": e.created_at.isoformat() if e.created_at else None,
         } for e in events],
-        "checklist": [{
+        # Пункты — отдельным именем: `checklist` уже занят прогрессом «3 из 5»,
+        # который едет и в строку списка. Одно имя под два разных типа заставило
+        # бы фронт гадать, что пришло.
+        "checklist_items": [{
             "id": str(c.id), "text": c.text, "done": c.done, "position": c.position,
             "done_at": c.done_at.isoformat() if c.done_at else None,
         } for c in checklist],

@@ -39,7 +39,11 @@ const AdminSectionPage = lazy(() => import('@/pages/AdminSectionPage').then((m) 
 const AdminHomeRedirect = lazy(() => import('@/pages/AdminSectionPage').then((m) => ({ default: m.AdminHomeRedirect })))
 const MessagesPage = lazy(() => import('@/pages/MessagesPage').then((m) => ({ default: m.MessagesPage })))
 const TicketsAppPage = lazy(() => import('@/pages/TicketsAppPage').then((m) => ({ default: m.TicketsAppPage })))
-const TasksAppPage = lazy(() => import('@/pages/TasksAppPage').then((m) => ({ default: m.TasksAppPage })))
+const TasksLayout = lazy(() => import('@/pages/tasks/TasksLayout').then((m) => ({ default: m.TasksLayout })))
+const TasksWorkPage = lazy(() => import('@/pages/tasks/TasksWorkPage').then((m) => ({ default: m.TasksWorkPage })))
+const TasksCompanyPage = lazy(() => import('@/pages/tasks/TasksWorkPage').then((m) => ({ default: m.TasksCompanyPage })))
+const TasksOverviewPage = lazy(() => import('@/pages/tasks/TasksOverviewPage').then((m) => ({ default: m.TasksOverviewPage })))
+const TasksSetupPage = lazy(() => import('@/pages/tasks/TasksSetupPage').then((m) => ({ default: m.TasksSetupPage })))
 const PulseAppPage = lazy(() => import('@/pulse/PulseAppPage').then((m) => ({ default: m.PulseAppPage })))
 const PulseBusinessPage = lazy(() => import('@/pulse/PulseSections').then((m) => ({ default: m.PulseBusinessPage })))
 const PulseTeamPage = lazy(() => import('@/pulse/PulseSections').then((m) => ({ default: m.PulseTeamPage })))
@@ -228,8 +232,20 @@ const router = createBrowserRouter([
           // карточки объекта, поэтому гарда по продукту здесь нет.
           { path: '/tickets', element: <LazyPage><TicketsAppPage /></LazyPage> },
           // «Задачи» — работа компании на своём движке Ядра (docs/TASKS.md).
+          // Разделы приложения — своими путями, их пункты — во второй колонке
+          // (TasksLayout), как у «Пульса»: это тоже приложение Ядра, а не продукт
+          // разреза, и в CoreMode его разделы не заводятся.
           // Гард по продукту: задачи видят только те, кому продукт подключён.
-          { path: '/tasks', element: <RequireApp code="plan"><LazyPage><TasksAppPage /></LazyPage></RequireApp> },
+          {
+            path: '/tasks',
+            element: <RequireApp code="plan"><LazyPage><TasksLayout /></LazyPage></RequireApp>,
+            children: [
+              { index: true, element: <LazyPage><TasksWorkPage /></LazyPage> },
+              { path: 'company', element: <LazyPage><TasksCompanyPage /></LazyPage> },
+              { path: 'overview', element: <LazyPage><TasksOverviewPage /></LazyPage> },
+              { path: 'setup', element: <LazyPage><TasksSetupPage /></LazyPage> },
+            ],
+          },
           // «Пульс» — рабочее место руководителя (ecosystem-deploy/docs/PULSE.md):
           // разделы в рельсе приложения, их пункты — во второй колонке (PulseLayout),
           // как в «Продажах» и «Проектах».
