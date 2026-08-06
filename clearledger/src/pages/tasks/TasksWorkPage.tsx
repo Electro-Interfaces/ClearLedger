@@ -22,7 +22,6 @@ import { Input } from '@/components/ui/input'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
-import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet'
 import { QueryError } from '@/components/common/QueryError'
 import { cn } from '@/lib/utils'
 import { useCompany } from '@/contexts/CompanyContext'
@@ -125,6 +124,19 @@ export function TasksWorkPage() {
   const hasFilter = !!(objectId || typeId || assigneeId || authorId || priority || labelId || q)
 
   const refresh = () => { void listQ.refetch(); setPicked(new Set()) }
+
+  // Открытая задача занимает экран целиком: это рабочее место, а не всплывающая
+  // справка. Возврат — кнопкой «к списку», отбор при этом сохраняется в адресе.
+  if (openId) {
+    return (
+      <div className="flex h-full min-h-0 flex-col">
+        <TaskCard id={openId} companyId={company.id}
+          onChanged={() => void listQ.refetch()}
+          onOpenOther={(id) => set({ task: id })}
+          onBack={() => set({ task: null })} />
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-3 p-4">
@@ -264,16 +276,6 @@ export function TasksWorkPage() {
         </div>
       )}
 
-      <Sheet open={!!openId} onOpenChange={(v) => { if (!v) set({ task: null }) }}>
-        <SheetContent side="right" className="w-full p-0 sm:max-w-2xl">
-          <SheetTitle className="sr-only">Карточка задачи</SheetTitle>
-          <SheetDescription className="sr-only">Работа, атрибуты и лента</SheetDescription>
-          {openId && (
-            <TaskCard id={openId} companyId={company.id} onChanged={() => void listQ.refetch()}
-              onOpenOther={(id) => set({ task: id })} />
-          )}
-        </SheetContent>
-      </Sheet>
     </div>
   )
 }

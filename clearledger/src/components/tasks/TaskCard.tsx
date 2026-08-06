@@ -12,8 +12,8 @@ import { useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  ArrowRight, CheckCircle2, Clock, Eye, EyeOff, Link2, Loader2, Lock, Mail,
-  MessagesSquare, Paperclip, Pin, Plus, RefreshCw, Send, Trash2, X,
+  ArrowLeft, ArrowRight, CheckCircle2, Clock, Eye, EyeOff, Link2, Loader2, Lock,
+  Mail, MessagesSquare, Paperclip, Pin, Plus, RefreshCw, Send, Trash2, X,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
@@ -40,9 +40,11 @@ import {
   dt, dtT, eventText, fileSize,
 } from './taskWords'
 
-export function TaskCard({ id, companyId, onChanged, onOpenOther }: {
+export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
   id: string; companyId: string; onChanged: () => void
   onOpenOther?: (taskId: string) => void
+  /** Возврат к списку. Есть — карточка показана экраном, нет — врезкой. */
+  onBack?: () => void
 }) {
   const qc = useQueryClient()
   const navigate = useNavigate()
@@ -132,10 +134,11 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther }: {
 
   return (
     <div className="flex h-full flex-col">
-      <Header task={t} companyId={companyId}
+      <Header task={t} companyId={companyId} onBack={onBack}
         onRename={(title) => act.mutate({ companyId, title })} />
 
-      <div className="flex-1 overflow-y-auto px-5 py-4 text-sm">
+      <div className="flex min-h-0 flex-1">
+      <div className="min-w-0 flex-1 overflow-y-auto px-5 py-4 text-sm">
         {/* Обсуждение отдельно от ленты: лента — след работы (кто двинул, чем
             подтвердил), а короткие «когда сможешь?» её только засоряют. Кнопка
             открывает скрытую группу задачи — как у заявок. */}
@@ -206,7 +209,9 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther }: {
               чек-лист и файлы. */}
           <TabsList variant="line" className="h-9 w-full justify-start">
             <TabsTrigger value="work">Работа</TabsTrigger>
-            <TabsTrigger value="attrs">Свойства</TabsTrigger>
+            {/* На узком экране свойства живут вкладкой, на широком — колонкой
+                справа: там они нужны постоянно, а не по клику. */}
+            <TabsTrigger value="attrs" className="xl:hidden">Свойства</TabsTrigger>
             <TabsTrigger value="links">
               Связи{t.subtasks.total ? ` · ${t.subtasks.total}` : ''}
             </TabsTrigger>
@@ -225,7 +230,7 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther }: {
 
         <Checklist task={t} companyId={companyId} live={live} onChanged={reload} />
           </TabsContent>
-          <TabsContent value="attrs" className="space-y-5 pt-4">
+          <TabsContent value="attrs" className="space-y-5 pt-4 xl:hidden">
         <Attributes task={t} companyId={companyId} live={live}
           people={peopleQ.data?.people ?? []} labels={labelsQ.data?.labels ?? []}
           pending={act.isPending} onAct={(d) => act.mutate(d)} onChanged={reload} />
@@ -344,6 +349,14 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther }: {
         </Tabs>
       </div>
 
+      {/* Свойства колонкой — только когда есть куда её положить. */}
+      <aside className="hidden w-[320px] shrink-0 overflow-y-auto border-l px-4 py-4 text-sm xl:block">
+        <Attributes task={t} companyId={companyId} live={live}
+          people={peopleQ.data?.people ?? []} labels={labelsQ.data?.labels ?? []}
+          pending={act.isPending} onAct={(d) => act.mutate(d)} onChanged={reload} />
+      </aside>
+      </div>
+
       {live && (
         <div className="border-t px-5 py-3">
           <div className="flex items-end gap-2">
@@ -371,13 +384,20 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther }: {
 
 /* ── Шапка: номер, тип, заголовок правится на месте ──────────────────── */
 
-function Header({ task, onRename }: {
+function Header({ task, onRename, onBack }: {
   task: TaskDetails; companyId: string; onRename: (title: string) => void
+  onBack?: () => void
 }) {
   const [editing, setEditing] = useState(false)
   const [title, setTitle] = useState(task.title)
   return (
     <div className="border-b px-5 py-4">
+      {onBack && (
+        <button type="button" onClick={onBack}
+          className="mb-2 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+          <ArrowLeft className="h-3.5 w-3.5" />к списку
+        </button>
+      )}
       <div className="flex items-center gap-2">
         <span className="text-base font-semibold">№{task.number}</span>
         {task.type && <Badge variant="outline" className="h-5 px-1.5 text-[11px]">{task.type}</Badge>}

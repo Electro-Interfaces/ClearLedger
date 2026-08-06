@@ -20,7 +20,6 @@ import { toast } from 'sonner'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
-import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet'
 import { QueryError } from '@/components/common/QueryError'
 import { cn } from '@/lib/utils'
 import { useCompany } from '@/contexts/CompanyContext'
@@ -81,6 +80,17 @@ export function TasksBoardPage() {
     if (!id) return
     const t = tasks.find((x) => x.id === id)
     if (t && t.stage_code !== stage) move.mutate({ id, stageCode: stage })
+  }
+
+  if (openId) {
+    return (
+      <div className="flex h-full min-h-0 flex-col">
+        <TaskCard id={openId} companyId={company.id}
+          onChanged={() => void listQ.refetch()}
+          onOpenOther={(id) => set({ task: id })}
+          onBack={() => set({ task: null })} />
+      </div>
+    )
   }
 
   return (
@@ -158,16 +168,6 @@ export function TasksBoardPage() {
         </div>
       )}
 
-      <Sheet open={!!openId} onOpenChange={(v) => { if (!v) set({ task: null }) }}>
-        <SheetContent side="right" className="w-full p-0 sm:max-w-2xl">
-          <SheetTitle className="sr-only">Карточка задачи</SheetTitle>
-          <SheetDescription className="sr-only">Работа, атрибуты и лента</SheetDescription>
-          {openId && (
-            <TaskCard id={openId} companyId={company.id}
-              onChanged={() => void listQ.refetch()} onOpenOther={(id) => set({ task: id })} />
-          )}
-        </SheetContent>
-      </Sheet>
     </div>
   )
 }
