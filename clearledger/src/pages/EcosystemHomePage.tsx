@@ -180,7 +180,12 @@ function Section({ title, hint, children, divider }: {
   )
 }
 
-export function EcosystemHomePage() {
+export function EcosystemHomePage({ embedded, onNavigate }: {
+  /** Встроенный вид: без шапки стола и приветствия — сетка живёт в чужой области. */
+  embedded?: boolean
+  /** Дать знать хозяину области, что человек ушёл в приложение (закрыть панель). */
+  onNavigate?: () => void
+} = {}) {
   const navigate = useNavigate()
   // Тот же порог, что у раскладок: ниже него интерфейс живёт в руке, а не под курсором.
   const narrow = useMaxWidth(1024)
@@ -243,8 +248,14 @@ export function EcosystemHomePage() {
       // В текущей вкладке: телефон, продукты с кнопкой рядом (Чат · Заявки ·
       // Конференция) и функции Ядра — «Инфо», «Данные», «Управление», «Пульс».
       // Последние не рабочие места продуктов, а экраны самого пространства.
-      if (narrow || hasSideButton(app.code) || isCoreApp(app.code)) navigate(app.route)
-      else window.open(`${window.location.origin}${BASE}${app.route}`, '_blank', 'noopener,noreferrer')
+      if (narrow || hasSideButton(app.code) || isCoreApp(app.code)) {
+        navigate(app.route)
+        onNavigate?.()
+      }
+      else {
+        window.open(`${window.location.origin}${BASE}${app.route}`, '_blank', 'noopener,noreferrer')
+        onNavigate?.()
+      }
       return
     }
     await openExternal(app)
@@ -275,6 +286,57 @@ export function EcosystemHomePage() {
         readiness={productReadiness(a.code, company.profileId)}
         onClick={() => openProduct(a)}
       />
+    )
+  }
+
+  /** Слои продуктов — общая часть стола и встроенной панели «Приложения». */
+  function Layers() {
+    return (
+      <>
+        {lead.length > 0 && (
+          <Section title="Руководство" hint="как идут дела и куда вмешаться">
+            {lead.map((a) => <ProductTile key={a.code} a={a} />)}
+          </Section>
+        )}
+        {commerce.length > 0 && (
+          <Section title="Клиенты и продажи" hint="кому продаём и как обслуживаем" divider={lead.length > 0}>
+            {commerce.map((a) => <ProductTile key={a.code} a={a} />)}
+          </Section>
+        )}
+        <Section title="Сеть и учёт" hint="чем владеем и как считаем" divider>
+          {internal.map((a) => <ProductTile key={a.code} a={a} />)}
+          {q.isLoading && (
+            <div className="flex items-center gap-2 px-3 py-2.5 text-sm text-muted-foreground">
+              <Loader2 className="size-4 animate-spin" /> Загрузка каталога…
+            </div>
+          )}
+          {!q.isLoading && apps.length === 0 && (
+            <div className="px-3 py-2.5 text-sm text-muted-foreground">
+              Приложения не подключены. Состав задаётся в «Управлении» → «Приложения».
+            </div>
+          )}
+        </Section>
+        {services.length > 0 && (
+          <Section title="Сервисы экосистемы" hint="общие для всех приложений" divider>
+            {services.map((a) => <ProductTile key={a.code} a={a} />)}
+          </Section>
+        )}
+        {management.length > 0 && (
+          <Section title="Ядро системы" divider>
+            {management.map((a) => <ProductTile key={a.code} a={a} />)}
+          </Section>
+        )}
+      </>
+    )
+  }
+
+  // Встроенный вид: сетка внутри чужой рабочей области. Шапки и приветствия нет —
+  // человек не уходил со своего экрана, он открыл меню приложений поверх него.
+  if (embedded) {
+    return (
+      <div className="flex w-full flex-col gap-5 px-4 py-4 sm:px-6">
+        <Layers />
+      </div>
     )
   }
 
@@ -344,55 +406,9 @@ export function EcosystemHomePage() {
           {user?.name ? `Здравствуйте, ${user.name}` : 'Рабочий стол'}
         </h1>
 
-        {/* Все три слоя — из ОДНОГО каталога продуктов пространства. Раньше Управление,
-            Учёт и Чаты рисовались хардкодом, и в списке приложений их не было: состав
-            стола расходился с реестром. Теперь источник один. */}
-        {/* Руководителю его рабочее место нужно первым — он заходит за состоянием
-            дел, а не за настройкой пространства. */}
-        {lead.length > 0 && (
-          <Section title="Руководство" hint="как идут дела и куда вмешаться">
-            {lead.map((a) => <ProductTile key={a.code} a={a} />)}
-          </Section>
-        )}
-
-        {/* Приложения разведены по двум контурам (решение МАГа 28.07.2026): клиентская
-            сторона и внутренняя. Один список из десяти плиток не читался — рядом
-            стояли «Продажи» и «Бухгалтерия», между которыми нет ничего общего. */}
-        {commerce.length > 0 && (
-          <Section title="Клиенты и продажи" hint="кому продаём и как обслуживаем" divider={lead.length > 0}>
-            {commerce.map((a) => <ProductTile key={a.code} a={a} />)}
-          </Section>
-        )}
-
-        {/* Второй контур растёт вместе с пространством — прокрутка достаётся ему. */}
-        <Section title="Сеть и учёт" hint="чем владеем и как считаем" divider>
-          {internal.map((a) => <ProductTile key={a.code} a={a} />)}
-          {q.isLoading && (
-            <div className="flex items-center gap-2 px-3 py-2.5 text-sm text-muted-foreground">
-              <Loader2 className="size-4 animate-spin" /> Загрузка каталога…
-            </div>
-          )}
-          {!q.isLoading && apps.length === 0 && (
-            <div className="px-3 py-2.5 text-sm text-muted-foreground">
-              Приложения не подключены. Состав задаётся в «Управлении» → «Приложения».
-            </div>
-          )}
-        </Section>
-
-        {/* Внизу — то, к чему возвращаются реже рабочих приложений (решение МАГа
-            01.08.2026). Сервисы общие для всех продуктов и открываются по случаю,
-            ядро — настройка самого пространства: люди, подключения, загрузка. */}
-        {services.length > 0 && (
-          <Section title="Сервисы экосистемы" hint="общие для всех приложений" divider>
-            {services.map((a) => <ProductTile key={a.code} a={a} />)}
-          </Section>
-        )}
-
-        {management.length > 0 && (
-          <Section title="Ядро системы" divider>
-            {management.map((a) => <ProductTile key={a.code} a={a} />)}
-          </Section>
-        )}
+        {/* Все слои — из ОДНОГО каталога продуктов пространства (`Layers`), тем же
+            составом, что и панель «Приложения» в рабочей области приложений. */}
+        <Layers />
       </main>
     </div>
   )

@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/sidebar'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { NavLink, useLocation } from 'react-router-dom'
+import { useAppsPanel } from './AppsPanel'
 import {
   PanelLeftClose, PanelLeftOpen, ChevronDown, Database, Layers,
   Archive, Megaphone, MessagesSquare, UserRound, Users2,
@@ -90,6 +91,37 @@ export function NavItem({ to, icon: Icon, label, end, collapsed, onNavigate, act
 }
 
 /**
+ * Пункт «Приложения»: открывает плашки пространства в рабочей области.
+ *
+ * Экспортируется, потому что это единственный вход в пространство: тот же пункт
+ * первым стоит в меню «Управления» (`AdminSidebar`). Кнопок «Стол» и «Приложения»
+ * в шапках больше нет — уберёшь пункт здесь, и уйти из приложения станет некуда.
+ */
+export function AppsNavItem({ collapsed }: { collapsed?: boolean }) {
+  const { open, toggle } = useAppsPanel()
+  return (
+    <SidebarMenuItem>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <SidebarMenuButton asChild>
+            <button type="button" onClick={toggle} aria-expanded={open}
+              className={`relative flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
+                open
+                  ? 'bg-primary/15 font-semibold text-primary before:absolute before:left-0 before:top-1.5 before:bottom-1.5 before:w-0.5 before:rounded-full before:bg-primary'
+                  : 'font-medium text-muted-foreground hover:bg-accent hover:text-foreground'
+              } ${collapsed ? 'justify-center px-2' : ''}`}>
+              <LayoutDashboard className="h-4 w-4 shrink-0" />
+              {!collapsed && <span>Приложения</span>}
+            </button>
+          </SidebarMenuButton>
+        </TooltipTrigger>
+        {collapsed && <TooltipContent side="right">Приложения</TooltipContent>}
+      </Tooltip>
+    </SidebarMenuItem>
+  )
+}
+
+/**
  * Содержимое навигации сайдбара — без обёртки `<Sidebar>` из ui-кита.
  * Используется в двух контекстах:
  *  - десктоп: внутри `<Sidebar collapsible="icon">` (AppSidebar ниже);
@@ -158,14 +190,21 @@ export function SidebarNavContent(props: { collapsed?: boolean; onNavigate?: () 
   const { pathname } = useLocation()
   return (
     <>
-      {/* На самом столе пункт не нужен — человек уже там. */}
+      {/* Единственный вход в состав пространства: пункт меню показывает плашки
+          ПОВЕРХ рабочей области, экран под ними остаётся. Переход происходит
+          только по нажатию плашки (решение МАГа 06.08.2026). Кнопки «Стол» и
+          «Приложения» в шапке убраны — они дублировали этот же пункт. */}
       {pathname !== '/' && (
-        <SidebarGroup className="py-0">
-          <SidebarMenu>
-            <NavItem to="/" icon={LayoutDashboard} label="Рабочий стол" end
-              collapsed={props.collapsed} onNavigate={props.onNavigate} />
-          </SidebarMenu>
-        </SidebarGroup>
+        <>
+          <SidebarGroup className="py-0">
+            <SidebarMenu>
+              <AppsNavItem collapsed={props.collapsed} />
+            </SidebarMenu>
+          </SidebarGroup>
+          {/* Черта отделяет вход в пространство от разделов самого приложения:
+              выше — «куда уйти», ниже — «где я работаю». */}
+          <SidebarSeparator className="my-2" />
+        </>
       )}
       <SidebarNavBody {...props} />
     </>

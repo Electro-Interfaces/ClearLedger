@@ -10,8 +10,6 @@ import { ECOSYSTEM_BRAND } from '@/config/brand'
 import { useCompany } from '@/contexts/CompanyContext'
 import { coreAppTitle, isCarvedProfile, productForPath, productLabel } from '@/config/spaceProducts'
 import { CompanySelector } from '@/components/company/CompanySelector'
-import { AppLauncher } from '@/components/layout/AppLauncher'
-import { DeskButton } from '@/components/layout/DeskButton'
 
 interface HeaderProps {
   onMobileMenuToggle?: () => void
@@ -74,15 +72,11 @@ export function Header({ onMobileMenuToggle, isMobile }: HeaderProps) {
         {/* Центр: переключатель компании + кнопки взаимодействия.
             Фильтры (период/точки/регионы/типы) переехали в свёрнутый фильтр
             рабочей области — единый фильтр над разделами. */}
-        {/* Навигация пространства — только на десктопе: «Стол» и «Приложения»
-            рисовались двумя неотличимыми сетками, а оба маршрута на телефоне и так
-            есть — стол в нижней навигации, продукты плитками на нём же. */}
+        {/* «Стол» и «Приложения» из шапки убраны (решение МАГа 06.08.2026): они
+            дублировали пункт «Приложения» в левом меню, который открывает плашки
+            прямо в рабочей области. В шапке остаётся выбор компании. */}
         <div className="hidden flex-1 items-center justify-end min-w-0 gap-2 px-2 sm:flex sm:justify-center">
           <CompanySelector />
-          {/* Стол пространства — перед лаунчером: сперва «вернуться», потом «перейти». */}
-          <DeskButton />
-          {/* Лаунчер приложений экосистемы (Ядро) — скрыт, если SSO не настроен */}
-          <AppLauncher />
         </div>
 
         {/* Распорка: прижимает связь и профиль к правому краю. */}

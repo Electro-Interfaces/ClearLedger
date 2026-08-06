@@ -7,13 +7,14 @@ import { MobileBottomNav } from './MobileBottomNav'
 import { Header } from './Header'
 import { WorkspaceTabBar } from './WorkspaceTabBar'
 import { KeepAliveOutlet } from './KeepAliveOutlet'
+import { AppsPanelProvider, AppsPanelSurface } from './AppsPanel'
 import InteractionHost from '@/components/support/InteractionHost'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useMaxWidth } from '@/hooks/use-mobile'
 import { isWorkspacePath } from '@/config/tabRegistry'
 import { useCompany } from '@/contexts/CompanyContext'
 import { routeAllowed } from '@/config/accessModules'
-import { pathAllowed, homePath, productForPath } from '@/config/spaceProducts'
+import { pathAllowed, homePath, productForPath, coreAppTitle } from '@/config/spaceProducts'
 import { productModuleAllowed } from '@/config/productAccess'
 
 // Состояние левого сайдбара сохраняется между запусками. По умолчанию (первый
@@ -77,16 +78,20 @@ export function MainLayout() {
   // писем и открытие в новой вкладке, где sessionStorage всегда пуст и любой
   // переход выглядит холодным стартом.
   //
-  // Продукты пространства сюда не попадают: у каждого свой рабочий стол, и ссылка
-  // на «Финансы» или на их «Документы» должна открываться там, куда ведёт, — иначе
-  // открытие продукта в новой вкладке всегда выбрасывало бы на общий стол.
+  // Продукты пространства и приложения Ядра сюда не попадают: у каждого свой
+  // экран, и ссылка на «Финансы», их «Документы» или «Пульс» должна открываться
+  // там, куда ведёт, — иначе открытие в новой вкладке всегда выбрасывало бы на
+  // общий стол. «Пульс» — как раз такой случай: он живёт в WORKSPACE_PATHS ради
+  // полноэкранной раскладки, но в SPACE_PRODUCTS его нет, и одного
+  // `productForPath` для исключения не хватило.
   useEffect(() => {
     try {
       if (sessionStorage.getItem('cl-booted')) return
       sessionStorage.setItem('cl-booted', '1')
       const home = homePath(company.profileId)
       if (location.pathname !== home && isWorkspacePath(location.pathname)
-          && !productForPath(location.pathname)) {
+          && !productForPath(location.pathname)
+          && !coreAppTitle(location.pathname)) {
         navigate(home, { replace: true })
       }
     } catch { /* ignore */ }
@@ -100,6 +105,7 @@ export function MainLayout() {
 
   return (
     <ActiveModeProvider>
+    <AppsPanelProvider>
     <SidebarProvider
       open={sidebarOpen}
       onOpenChange={setSidebarOpen}
@@ -131,6 +137,9 @@ export function MainLayout() {
         )}
 
         <SidebarInset id="workspace-area" className="overflow-hidden">
+          {/* «Приложения» — меню пространства в рабочей области: плашки поверх
+              текущего экрана, переход только по плашке (решение МАГа 06.08.2026). */}
+          <AppsPanelSurface />
           {isMobile ? (
             // Мобильный: одностраничная навигация без вкладок (как раньше).
             isWorkspace ? (
@@ -162,6 +171,7 @@ export function MainLayout() {
       {/* Нижняя навигация телефонов (<768px; сама скрывается md:hidden) */}
       {isMobile && <MobileBottomNav />}
     </SidebarProvider>
+    </AppsPanelProvider>
     </ActiveModeProvider>
   )
 }

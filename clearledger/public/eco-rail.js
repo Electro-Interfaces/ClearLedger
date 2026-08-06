@@ -1,40 +1,32 @@
 /**
- * Пространство в приложениях ВНЕ Ledger: `<eco-apps>` — кнопки «Стол» и «Приложения»
- * в шапке, `<eco-nav>` — блок функций Ядра в левом меню (объекты, загрузка, документы,
- * контрагенты, база пространства, люди и доступ).
+ * Пространство в приложениях ВНЕ Ledger: `<eco-nav>` — блок Ядра в левом меню
+ * (пункт «Приложения» и функции Ядра: объекты, загрузка, документы, контрагенты,
+ * база пространства, люди и доступ), `<eco-info>` — контекстная подсказка.
  *
  * Ядро отдаёт этот файл по адресу `/eco/rail.js` (nginx стека), приложение подключает
- * одной строкой и ставит элемент в СВОЮ шапку. Реализация одна на все приложения —
- * ванильный web-component, без React и без сборки, поэтому годится и для чужих фронтов.
- *
- * Раньше здесь жила ещё вертикальная колонка `<eco-rail>` у правого края. Её убрали:
- * она отнимала ширину, а после переезда на плавающую плашку — перекрывала шапку
- * приложения. Переходы дублировались с этими же кнопками, поэтому осталось одно место.
+ * одной строкой и ставит элемент в СВОЮ колонку меню. Реализация одна на все
+ * приложения — ванильный web-component, без React и без сборки, поэтому годится и
+ * для чужих фронтов.
  *
  *   <script defer src="/eco/rail.js"></script>
- *   <eco-rail admin></eco-rail>          // admin — показать «Центр управления»
+ *   <eco-nav></eco-nav>                  // в своей колонке меню
  *
- * Атрибуты (все необязательные):
- *   home       — адрес рабочего стола (по умолчанию «/»)
- *   admin-url  — адрес Центра управления (по умолчанию «/admin»)
- *   admin      — присутствует → показывать переход в Центр управления
- *   label      — подпись экосистемы во всплывающей подсказке
+ * ВХОД В ПРОСТРАНСТВО ОДИН — пункт «Приложения» в меню (решение МАГа 06.08.2026).
+ * До этого было три места: вертикальная колонка `<eco-rail>` у правого края (убрана —
+ * отнимала ширину и перекрывала шапку), затем пара кнопок «Стол» и «Приложения» в
+ * шапке (`<eco-apps>`, убрана — уводила со страницы ради того, чтобы просто посмотреть
+ * состав пространства). Теперь пункт меню открывает плашки ПОВЕРХ текущего экрана,
+ * переход — только по плашке, а рабочий стол стал первой из них.
  *
- * Признак `admin` приложение берёт из handoff-токена Ядра (клейм `adm`). Это ТОЛЬКО
- * про отрисовку кнопки: права проверяет Ядро — не-админа оно вернёт на стол.
- *
- * ПЕРЕКЛЮЧАТЕЛЬ ПРОДУКТОВ. Каталог берётся из единого реестра Ядра
- * (`GET /api/sso/apps`) — того же, что питает рабочий стол и рельс Ledger, поэтому
- * отключённый в «Управлении» продукт исчезает и здесь. Приложения контейнера живут
- * на ОДНОМ origin (docs/CORE.md §6), значит токен Ядра лежит в том же localStorage —
- * им и авторизуемся. Токена нет (человек вошёл прямой формой приложения, минуя Ядро)
- * или каталог не ответил — кнопки просто не будет: рельс не должен ломать приложение.
- *
- * Кнопки — обычный inline-элемент внутри шапки приложения: ширины у страницы не
- * отнимают и ничего не перекрывают.
+ * КАТАЛОГ. Продукты берутся из единого реестра Ядра (`GET /api/sso/apps`) — того же,
+ * что питает рабочий стол Ledger, поэтому отключённый в «Управлении» продукт исчезает
+ * и здесь. Приложения контейнера живут на ОДНОМ origin (docs/CORE.md §6), значит токен
+ * Ядра лежит в том же localStorage — им и авторизуемся. Токена нет (человек вошёл
+ * прямой формой приложения, минуя Ядро) или каталог не ответил — блока просто не
+ * будет: Ядро не должно ломать приложение.
  */
 ;(() => {
-  if (customElements.get('eco-apps')) return
+  if (customElements.get('eco-nav')) return
 
   // Ключ токена Ядра в localStorage — тот же, что у фронта Ledger (services/apiClient.ts).
   // Один origin на контейнер делает хранилище общим, поэтому приложению достаточно того,
@@ -129,151 +121,44 @@
     `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
       stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`
 
-  // Плавающая плашка ширины у страницы не отнимает: отступ снимаем, если остался
-  // от прежней версии рельса (человек мог не перезагрузить вкладку).
-
-
-
-
-
   /**
-   * <eco-apps> — «Стол» и «Приложения» в ШАПКЕ приложения контейнера.
+   * Фон и цвет текста САМОЙ страницы — для непрозрачной панели поверх приложения.
    *
-   * Тот же жест, что в Ядре (`DeskButton` + `AppLauncher`): сначала вернуться на стол,
-   * потом выбрать, куда идти дальше. Рельс остаётся для навигации по краю экрана, но
-   * переход между продуктами нужен так же часто, как прикладные кнопки рядом, — поэтому
-   * он живёт в шапке, а не прячется в углу.
-   *
-   *   <eco-apps></eco-apps>            // внутри своей шапки, рядом с кнопками приложения
-   *
-   * Атрибуты: `home` (адрес стола, по умолчанию «/»), `label` (подпись списка).
-   * Каталог и открытие — общие с рельсом (см. выше), поэтому отключённый в «Управлении»
-   * продукт исчезает и здесь. Без токена Ядра компонент не рисует ничего.
+   * Тему задаёт приложение (класс `dark` на корне), а не системная настройка, поэтому
+   * `prefers-color-scheme` врёт: на тёмной Поддержке при светлой системе панель выходила
+   * белой, а текст наследовался светлый. Берём вычисленные цвета у body, при прозрачном
+   * фоне поднимаемся к html, и только в самом крайнем случае — светлая пара.
    */
-  class EcoApps extends HTMLElement {
-    #apps = null
-    #open = false
-    #busy = null
-
-    connectedCallback() {
-      this.render()
-      this.onDocClick = (e) => { if (this.#open && !e.composedPath().includes(this)) this.#close() }
-      this.onKey = (e) => { if (e.key === 'Escape') this.#close() }
-      document.addEventListener('click', this.onDocClick)
-      document.addEventListener('keydown', this.onKey)
-    }
-
-    disconnectedCallback() {
-      document.removeEventListener('click', this.onDocClick)
-      document.removeEventListener('keydown', this.onKey)
-    }
-
-    #close() { if (this.#open) { this.#open = false; this.render() } }
-
-    async #toggle() {
-      if (this.#open) return this.#close()
-      this.#open = true
-      this.render()
-      if (this.#apps !== null) return
-      this.#apps = (await loadApps()).filter((a) => !SIDE_BUTTON_APPS.includes(a.code))
-      if (this.#open) this.render()
-    }
-
-    async #openApp(app, newTab) {
-      if (this.#busy) return
-      if (app.mode === 'internal' && app.route) {
-        if (newTab) window.open(app.route, '_blank', 'noopener,noreferrer')
-        else location.assign(app.route)
-        return
-      }
-      this.#busy = app.code
-      this.render()
-      try {
-        const r = await core(`/api/sso/authorize?app=${encodeURIComponent(app.code)}`)
-        if (newTab || !sameOrigin(r.url)) window.open(r.url, '_blank', 'noopener,noreferrer')
-        else location.assign(r.url)
-      } catch {
-        /* переход между продуктами не должен ронять приложение */
-      } finally {
-        this.#busy = null
-        this.render()
-      }
-    }
-
-    render() {
-      const root = this.shadowRoot ?? this.attachShadow({ mode: 'open' })
-      const home = this.getAttribute('home') || '/'
-      const label = this.getAttribute('label') || 'Пространство'
-      // Нет токена Ядра — человек вошёл прямой формой приложения: показывать ему
-      // переключатель продуктов не на что.
-      if (!token()) { root.innerHTML = ''; return }
-
-      root.innerHTML = `
-        <style>
-          :host{ display:inline-flex; align-items:center; gap:8px; position:relative;
-                 font:inherit; color:inherit }
-          /* Кнопки ПРОСТРАНСТВА намеренно нейтральные: рамка и цвет текста приложения,
-             без заливки. Рядом стоят прикладные кнопки (Конференция · Чат · Заявки),
-             и они синие — это действия внутри продукта. Навигация между продуктами
-             не должна спорить с ними за внимание, поэтому у неё свой, тихий вид
-             (решение МАГа 27.07.2026). Размеры при этом общие: высота 44, радиус 12. */
-          button{
-            display:inline-flex; align-items:center; gap:8px; height:44px; padding:0 12px;
-            border-radius:12px; font:inherit; font-weight:500; font-size:14px; cursor:pointer;
-            color:inherit; background:none; border:1px solid currentColor;
-            opacity:.75; transition:opacity .2s, background .2s;
-          }
-          button:hover{ opacity:1; background:rgba(127,127,127,.14) }
-          svg{ width:16px; height:16px; flex:none }
-          .menu{
-            position:absolute; top:52px; left:0; z-index:2147483000; width:232px; padding:4px;
-            box-sizing:border-box; border:1px solid rgba(127,127,127,.28); border-radius:12px;
-            background:rgba(127,127,127,.16); backdrop-filter:blur(16px) saturate(160%);
-            box-shadow:0 8px 28px rgba(0,0,0,.28); font-size:13px; font-weight:400;
-          }
-          .menu .head{ padding:6px 8px 4px; font-size:11px; opacity:.6 }
-          /* Пункты списка — не пилюли: это строки меню, у них своя роль. */
-          .menu button{
-            width:100%; height:auto; padding:7px 8px; border:0; border-radius:8px;
-            justify-content:flex-start; font-size:13px; font-weight:400;
-            color:inherit; background:none;
-          }
-          .menu button:hover{ background:rgba(127,127,127,.18); color:inherit }
-          .spin{ animation:eco-spin 1s linear infinite; display:inline-flex }
-          @media (max-width:1023px){ .lbl{ display:none } }
-        </style>
-        <button id="desk" title="Рабочий стол пространства">
-          ${svg(ICONS.home)}<span class="lbl">Стол</span>
-        </button>
-        <button id="apps" aria-expanded="${this.#open}" title="Продукты пространства">
-          ${this.#busy ? `<span class="spin">${svg(ICONS.apps)}</span>` : svg(ICONS.apps)}
-          <span class="lbl">Приложения</span>
-        </button>
-        ${this.#open ? `
-          <div class="menu">
-            ${this.#apps === null ? '<div class="head">Загрузка…</div>' : ''}
-            ${this.#apps && !this.#apps.length ? '<div class="head">Продукты недоступны</div>' : ''}
-            <div class="head">${escapeHtml(label)}</div>
-            ${(this.#apps || []).map((a) => `
-              <button data-app="${escapeHtml(a.code)}">
-                ${svg(a.mode === 'link' ? ICONS.external : ICONS.apps)}
-                <span>${escapeHtml(a.name || a.code)}</span>
-              </button>`).join('')}
-          </div>` : ''}
-      `
-
-      root.getElementById('desk')?.addEventListener('click', () => location.assign(home))
-      root.getElementById('apps')?.addEventListener('click', () => this.#toggle())
-      root.querySelectorAll('[data-app]').forEach((el) => {
-        const app = (this.#apps || []).find((a) => a.code === el.dataset.app)
-        if (!app) return
-        el.addEventListener('click', (e) => this.#openApp(app, wantsNewTab(e)))
-        el.addEventListener('auxclick', (e) => { if (e.button === 1) this.#openApp(app, true) })
-      })
+  const colorOk = (v) => !!v && /^(rgb|hsl|#)/.test(v) && !/rgba?\([^)]*,\s*0\s*\)/.test(v)
+  function pageColors() {
+    const b = getComputedStyle(document.body)
+    const h = getComputedStyle(document.documentElement)
+    return {
+      bg: colorOk(b.backgroundColor) ? b.backgroundColor
+        : colorOk(h.backgroundColor) ? h.backgroundColor : '#ffffff',
+      fg: colorOk(b.color) ? b.color : '#111111',
     }
   }
 
-  customElements.define('eco-apps', EcoApps)
+  /** Переход в продукт пространства: внутренний — по адресу, чужой — через ключ Ядра. */
+  async function openApp(app, newTab, onBusy) {
+    if (app.mode === 'internal' && app.route) {
+      if (newTab) window.open(app.route, '_blank', 'noopener,noreferrer')
+      else location.assign(app.route)
+      return
+    }
+    onBusy(app.code)
+    try {
+      const r = await core(`/api/sso/authorize?app=${encodeURIComponent(app.code)}`)
+      if (newTab || !sameOrigin(r.url)) window.open(r.url, '_blank', 'noopener,noreferrer')
+      else location.assign(r.url)
+    } catch {
+      /* переход между продуктами не должен ронять приложение */
+    } finally {
+      onBusy(null)
+    }
+  }
+
 
   /**
    * <eco-nav> — блок ЯДРА в левом меню приложения контейнера.
@@ -287,13 +172,26 @@
    *   <eco-nav></eco-nav>              // в самом низу своей колонки меню
    *   <eco-nav collapsed></eco-nav>    // свёрнутая колонка: только иконки
    *
+   * ПУНКТ «ПРИЛОЖЕНИЯ» — первый в блоке (решение МАГа 06.08.2026). Он не уводит со
+   * страницы: показывает плашки продуктов ПОВЕРХ текущего экрана, переход происходит
+   * только по плашке. Раньше на его месте в ШАПКЕ стояли две кнопки, «Стол» и
+   * «Приложения» (`<eco-apps>`): чтобы просто посмотреть состав пространства,
+   * человек покидал свою работу. Компонент шапки убран, рабочий стол стал первой
+   * плашкой панели — вход в пространство остался один и там же, где в Ledger.
+   *
    * Состав фильтруется правами: каталог `/api/sso/apps` уже отдаёт только то, что роль
    * разрешила и что подключено компании. Нет ни одного рабочего места Ledger — страницы
    * Ядра не показываем: они всё равно закрыты. Нет токена Ядра (вход прямой формой
    * приложения) — компонент не рисует ничего.
+   *
+   * Атрибуты: `collapsed` (только иконки), `label` (подпись блока), `home` (адрес
+   * рабочего стола, по умолчанию «/»).
    */
   class EcoNav extends HTMLElement {
     #items = null
+    #apps = null
+    #open = false
+    #busy = null
 
     static observedAttributes = ['collapsed', 'label']
 
@@ -307,9 +205,18 @@
           ...(host ? SPACE_PAGES.map((p) => ({ ...p, href: `${host.route}${p.path}` })) : []),
           ...SPACE_LINKS.filter((l) => codes.includes(l.app)),
         ]
+        // Чат · Заявки · Конференция стоят кнопками в шапке приложения — в панели
+        // тот же вход, названный второй раз, только удлиняет список.
+        this.#apps = apps.filter((a) => !SIDE_BUTTON_APPS.includes(a.code))
         this.render()
       })
+      this.onKey = (e) => { if (e.key === 'Escape') this.#close() }
+      document.addEventListener('keydown', this.onKey)
     }
+
+    disconnectedCallback() { document.removeEventListener('keydown', this.onKey) }
+
+    #close() { if (this.#open) { this.#open = false; this.render() } }
 
     attributeChangedCallback() { if (this.#items) this.render() }
 
@@ -317,11 +224,14 @@
       const root = this.shadowRoot ?? this.attachShadow({ mode: 'open' })
       const collapsed = this.hasAttribute('collapsed')
       const label = this.getAttribute('label') || 'Пространство'
-      // Пустой блок не должен оставлять после себя ни отступа, ни разделителя: у роли
-      // без доступа к Ledger в колонке приложения просто ничего не меняется.
-      const empty = !token() || !this.#items || !this.#items.length
-      this.style.display = empty ? 'none' : ''
-      if (empty) { root.innerHTML = ''; return }
+      const home = this.getAttribute('home') || '/'
+      const items = this.#items || []
+      const { bg, fg } = pageColors()
+      // Без токена Ядра человек вошёл прямой формой приложения: ни страниц Ядра, ни
+      // перехода в соседний продукт ему показывать не на чем. Блок исчезает целиком,
+      // не оставляя ни отступа, ни разделителя.
+      this.style.display = token() ? '' : 'none'
+      if (!token()) { root.innerHTML = ''; return }
 
       root.innerHTML = `
         <style>
@@ -331,19 +241,100 @@
              больше нет: в отдельной колонке пространства отделять не от чего. */
           .head{ padding:8px 12px; font-size:12px; font-weight:600; letter-spacing:.08em;
                  text-transform:uppercase; opacity:.75 }
-          a{ display:flex; align-items:center; gap:12px; padding:8px 12px; margin:1px 0;
-             border-radius:6px; font-size:14px; font-weight:500; text-decoration:none;
-             color:inherit; opacity:.85; transition:opacity .15s, background .15s }
-          a:hover{ opacity:1; background:rgba(127,127,127,.14) }
-          a.narrow{ justify-content:center; padding:8px 0 }
+          a, button.nav{ display:flex; align-items:center; gap:12px; width:100%; padding:8px 12px;
+             margin:1px 0; box-sizing:border-box; border:0; border-radius:6px; font:inherit;
+             font-size:14px; font-weight:500; text-align:left; text-decoration:none; cursor:pointer;
+             color:inherit; background:none; opacity:.85; transition:opacity .15s, background .15s }
+          a:hover, button.nav:hover{ opacity:1; background:rgba(127,127,127,.14) }
+          button.nav[aria-expanded="true"]{ opacity:1; background:rgba(127,127,127,.18) }
+          a.narrow, button.narrow{ justify-content:center; padding:8px 0 }
+          /* Разделитель под «Приложениями»: ниже — функции Ядра, это другой род пунктов. */
+          .sep{ height:1px; margin:6px 8px; background:rgba(127,127,127,.28) }
           svg{ width:16px; height:16px; flex:none }
+          /* Панель приложений — поверх страницы, а не вместо неё: экран под ней
+             остаётся на месте, человек возвращается к работе закрытием.
+             Фон и цвет берём У САМОЙ СТРАНИЦЫ (см. pageColors), а не у
+             prefers-color-scheme: тема приложения задаётся его же классом, и на тёмной
+             Поддержке при светлой системной теме панель выходила белой со светлым
+             текстом — читать было нечего. */
+          .scrim{ position:fixed; inset:0; z-index:2147483000; background:rgba(0,0,0,.45);
+                  backdrop-filter:blur(4px) }
+          .panel{ position:fixed; inset:0; z-index:2147483001; display:flex; flex-direction:column;
+                  padding:16px; box-sizing:border-box; overflow-y:auto;
+                  background:${bg}; color:${fg} }
+          .ptop{ display:flex; align-items:flex-start; gap:12px; width:100%; max-width:1120px;
+                 margin:0 auto; padding-bottom:12px;
+                 border-bottom:1px solid rgba(127,127,127,.25) }
+          .ptitle{ flex:1; min-width:0 }
+          .ptitle b{ display:block; font-size:14px; font-weight:600 }
+          .ptitle span{ font-size:12px; opacity:.7 }
+          .px{ border:0; background:none; color:inherit; font:inherit; font-size:18px;
+               line-height:1; padding:6px; border-radius:8px; cursor:pointer; opacity:.6 }
+          .px:hover{ opacity:1; background:rgba(127,127,127,.16) }
+          .grid{ display:grid; gap:10px; width:100%; max-width:1120px; margin:0 auto;
+                 padding-top:14px; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr)) }
+          .tile{ display:flex; align-items:center; gap:10px; padding:14px; box-sizing:border-box;
+                 border:1px solid rgba(127,127,127,.28); border-radius:12px; background:none;
+                 color:inherit; font:inherit; font-size:14px; font-weight:500; text-align:left;
+                 cursor:pointer; transition:border-color .15s, background .15s }
+          .tile:hover{ border-color:rgba(80,130,255,.6); background:rgba(127,127,127,.1) }
+          .tile .sub{ display:block; font-size:11px; font-weight:400; opacity:.65 }
+          .spin{ animation:eco-spin 1s linear infinite; display:inline-flex }
+          @keyframes eco-spin{ to{ transform:rotate(360deg) } }
         </style>
         ${collapsed ? '' : `<div class="head">${escapeHtml(label)}</div>`}
-        ${this.#items.map((i) => `
+        <button class="nav ${collapsed ? 'narrow' : ''}" id="apps" aria-expanded="${this.#open}"
+                title="Приложения пространства">
+          ${this.#busy ? `<span class="spin">${svg(ICONS.apps)}</span>` : svg(ICONS.apps)}
+          ${collapsed ? '' : '<span>Приложения</span>'}
+        </button>
+        ${items.length ? '<div class="sep"></div>' : ''}
+        ${items.map((i) => `
           <a href="${escapeHtml(i.href)}" class="${collapsed ? 'narrow' : ''}" title="${escapeHtml(i.label)}">
             ${svg(ICONS[i.icon])}${collapsed ? '' : `<span>${escapeHtml(i.label)}</span>`}
           </a>`).join('')}
+        ${this.#open ? `
+          <div class="scrim" data-close></div>
+          <section class="panel" role="dialog" aria-label="Приложения пространства">
+            <div class="ptop">
+              <div class="ptitle">
+                <b>Приложения пространства</b>
+                <span>Выберите, куда перейти — экран под панелью останется на месте</span>
+              </div>
+              <button class="px" data-close title="Закрыть">✕</button>
+            </div>
+            <div class="grid">
+              <button class="tile" data-home>
+                ${svg(ICONS.home)}<span>Рабочий стол</span>
+              </button>
+              ${this.#apps === null ? '' : (this.#apps || []).map((a) => `
+                <button class="tile" data-app="${escapeHtml(a.code)}">
+                  ${this.#busy === a.code
+                    ? `<span class="spin">${svg(ICONS.apps)}</span>`
+                    : svg(a.mode === 'link' ? ICONS.external : ICONS.apps)}
+                  <span>${escapeHtml(a.name || a.code)}
+                    ${a.mode === 'link' ? '<span class="sub">вход отдельный</span>' : ''}
+                  </span>
+                </button>`).join('')}
+            </div>
+            ${this.#apps === null ? '<div class="head">Загрузка…</div>' : ''}
+          </section>` : ''}
       `
+
+      root.getElementById('apps').onclick = () => { this.#open = !this.#open; this.render() }
+      root.querySelectorAll('[data-close]').forEach((el) => { el.onclick = () => this.#close() })
+      const deskTile = root.querySelector('[data-home]')
+      if (deskTile) deskTile.onclick = (e) => {
+        if (wantsNewTab(e)) window.open(home, '_blank', 'noopener,noreferrer')
+        else location.assign(home)
+      }
+      root.querySelectorAll('[data-app]').forEach((el) => {
+        const app = (this.#apps || []).find((a) => a.code === el.dataset.app)
+        if (!app) return
+        const busy = (code) => { this.#busy = code; this.render() }
+        el.onclick = (e) => { if (!this.#busy) openApp(app, wantsNewTab(e), busy) }
+        el.onauxclick = (e) => { if (e.button === 1 && !this.#busy) openApp(app, true, busy) }
+      })
     }
   }
 

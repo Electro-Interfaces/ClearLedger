@@ -20,8 +20,7 @@ import { Button } from '@/components/ui/button'
 import { Menu } from 'lucide-react'
 import { CompanySelector } from '@/components/company/CompanySelector'
 import { AdminNavContent, AdminSidebar } from '@/components/layout/AdminSidebar'
-import { AppLauncher } from '@/components/layout/AppLauncher'
-import { DeskButton } from '@/components/layout/DeskButton'
+import { AppsPanelProvider, AppsPanelSurface } from '@/components/layout/AppsPanel'
 import { HeaderInteractionButtons } from '@/components/layout/HeaderInteractionButtons'
 import { HeaderUserMenu } from '@/components/layout/HeaderUserMenu'
 import InteractionHost from '@/components/support/InteractionHost'
@@ -98,7 +97,7 @@ export function AdminLayout() {
   if (!isLoading && !canApp('admin')) return <Navigate to="/" replace />
 
   return (
-    <SidebarProvider
+    <AppsPanelProvider><SidebarProvider
       open={sidebarOpen}
       onOpenChange={setSidebarOpen}
       className="flex h-dvh max-h-dvh flex-col overflow-hidden"
@@ -142,10 +141,8 @@ export function AdminLayout() {
                 )}
               </>
             )}
-            {/* Порядок и состав — как в остальных продуктах пространства: сначала выход
-                на стол, потом переключение продукта, затем прикладные кнопки. */}
-            <DeskButton />
-            <AppLauncher />
+            {/* Вход в состав пространства — пункт «Приложения» в левом меню:
+                кнопки в шапке дублировали его (решение МАГа 06.08.2026). */}
             {/* Чат · Заявки · Инфо — тот же вход в поддержку, что в Учёте. */}
             <HeaderInteractionButtons conference />
           </div>
@@ -172,6 +169,8 @@ export function AdminLayout() {
         )}
 
         <SidebarInset className="overflow-hidden">
+          {/* Панель «Приложения» — в рабочей области, как в остальных продуктах. */}
+          <AppsPanelSurface />
           <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 md:px-6">
             {/* Ширину не ограничиваем: в разделах таблицы (сотрудники, объекты, аудит),
                 им нужна вся рабочая область — так же, как экранам Учёта. */}
@@ -191,10 +190,11 @@ export function AdminLayout() {
           </div>
         </SidebarInset>
 
-        {/* Та же правая область, что в Учёте: рейл Чат/Заявки/Инфо, док с панелями и
-            экосистемная зона внизу (стол, приложения). Рейл рисует EcoRail сам. */}
+        {/* Та же правая область, что в Учёте: рейл Чат/Заявки/Инфо и док с панелями.
+            Переход между приложениями живёт в левом меню («Приложения» → плашки в
+            рабочей области), в правом рельсе его нет — один вход, а не три. */}
         <InteractionHost />
       </div>
-    </SidebarProvider>
+    </SidebarProvider></AppsPanelProvider>
   )
 }

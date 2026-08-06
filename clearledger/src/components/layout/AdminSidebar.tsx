@@ -18,7 +18,7 @@ import {
 } from '@/components/ui/sidebar'
 import { PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { NavItem } from '@/components/layout/AppSidebar'
+import { AppsNavItem, NavItem } from '@/components/layout/AppSidebar'
 import { adminPath, companySections, ecosystemSections, sectionGroups } from '@/config/adminNav'
 import { useAuth } from '@/contexts/AuthContext'
 import { useCompany } from '@/contexts/CompanyContext'
@@ -34,6 +34,15 @@ export function AdminNavContent({ collapsed = false, onNavigate }: {
 
   return (
     <>
+      {/* «Приложения» — тот же первый пункт, что в меню Учёта: плашки пространства
+          поверх текущего экрана. В шапке этого входа больше нет. */}
+      <SidebarGroup className="py-0">
+        <SidebarMenu>
+          <AppsNavItem collapsed={collapsed} />
+        </SidebarMenu>
+      </SidebarGroup>
+      <SidebarSeparator className="my-2" />
+
       {isSuper && (
         <SidebarGroup className="py-0">
           {!collapsed && (
