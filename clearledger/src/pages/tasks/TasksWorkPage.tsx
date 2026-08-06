@@ -31,6 +31,7 @@ import type { SpaceTask, TaskScope } from '@/services/tasksService'
 import { listSpaceObjects } from '@/services/spaceObjectsService'
 import { TaskCard } from '@/components/tasks/TaskCard'
 import { NewTaskDialog } from '@/components/tasks/NewTaskDialog'
+import { SearchPicker } from '@/components/tasks/SearchPicker'
 import {
   PRIORITY_LABEL, PRIORITY_TONE, STATUS_LABEL, WAITING_LABEL, dt, dtT,
 } from '@/components/tasks/taskWords'
@@ -175,18 +176,26 @@ export function TasksWorkPage() {
                 if (e.key === 'Enter') set({ q: (e.target as HTMLInputElement).value || null })
               }} />
           </div>
-          <Pick value={assigneeId} onChange={(v) => set({ assignee: v })} width={170}
-            placeholder="Исполнитель" allLabel="Любой исполнитель"
-            items={(peopleQ.data?.people ?? []).map((p) => ({ id: p.id, name: p.name }))} />
-          <Pick value={authorId} onChange={(v) => set({ author: v })} width={150}
-            placeholder="Автор" allLabel="Любой автор"
-            items={(peopleQ.data?.people ?? []).map((p) => ({ id: p.id, name: p.name }))} />
+          <SearchPicker className="w-[170px]" value={assigneeId}
+            onChange={(v) => set({ assignee: v || null })}
+            items={(peopleQ.data?.people ?? []).map((p) => ({ id: p.id, name: p.name }))}
+            placeholder="Любой исполнитель" emptyLabel="Любой исполнитель"
+            searchPlaceholder="Фамилия…" />
+          <SearchPicker className="w-[150px]" value={authorId}
+            onChange={(v) => set({ author: v || null })}
+            items={(peopleQ.data?.people ?? []).map((p) => ({ id: p.id, name: p.name }))}
+            placeholder="Любой автор" emptyLabel="Любой автор"
+            searchPlaceholder="Фамилия…" />
           <Pick value={typeId} onChange={(v) => set({ type: v })} width={150}
             placeholder="Тип" allLabel="Все типы"
             items={(typesQ.data?.types ?? []).map((t) => ({ id: t.id, name: t.name }))} />
-          <Pick value={objectId} onChange={(v) => set({ object: v })} width={180}
-            placeholder="Объект" allLabel="Все объекты"
-            items={(objectsQ.data ?? []).map((o) => ({ id: o.id, name: o.name }))} />
+          <SearchPicker className="w-[200px]" value={objectId}
+            onChange={(v) => set({ object: v || null })}
+            items={(objectsQ.data ?? []).map((o) => ({
+              id: o.id, name: o.name, hint: o.address }))}
+            placeholder="Все объекты" emptyLabel="Все объекты"
+            searchPlaceholder="Номер, название или адрес…"
+            loading={objectsQ.isLoading} width="w-[340px]" />
           <Pick value={priority} onChange={(v) => set({ priority: v })} width={140}
             placeholder="Срочность" allLabel="Любая срочность"
             items={Object.entries(PRIORITY_LABEL).map(([id, name]) => ({ id, name }))} />

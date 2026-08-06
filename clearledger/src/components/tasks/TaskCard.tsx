@@ -25,6 +25,7 @@ import { Textarea } from '@/components/ui/textarea'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { QueryError } from '@/components/common/QueryError'
 import { cn } from '@/lib/utils'
 import * as tasksService from '@/services/tasksService'
@@ -33,6 +34,7 @@ import { listSpaceObjects } from '@/services/spaceObjectsService'
 import { listSpaceConnectors } from '@/services/spaceConnectorsService'
 import { ensureTaskRoom } from '@/services/chatService'
 import { RichText } from './RichText'
+import { SearchPicker } from './SearchPicker'
 import {
   LINK_LABEL, PRIORITY_LABEL, PRIORITY_TONE, STATUS_LABEL, WAITING_LABEL,
   dt, dtT, eventText, fileSize,
@@ -45,7 +47,7 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther }: {
   const qc = useQueryClient()
   const navigate = useNavigate()
   const [note, setNote] = useState('')
-  const [onlyComments, setOnlyComments] = useState(false)
+  const [feedKind, setFeedKind] = useState<'all' | 'talk' | 'move' | 'meta'>('all')
   const fileRef = useRef<HTMLInputElement>(null)
 
   const q = useQuery({
@@ -119,7 +121,11 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther }: {
   const live = t.status === 'open'
   const stageIndex = t.route.findIndex((s) => s.code === t.stage_code)
   const next = stageIndex >= 0 ? t.route[stageIndex + 1] : t.route[0]
-  const shown = onlyComments ? t.events.filter((e) => e.kind === 'comment') : t.events
+  const shown = feedKind === 'all' ? t.events
+    : feedKind === 'talk' ? t.events.filter((e) => ['comment', 'mail'].includes(e.kind))
+      : feedKind === 'move' ? t.events.filter(
+        (e) => ['stage', 'status', 'assign', 'created', 'delegate', 'external_stage'].includes(e.kind))
+        : t.events.filter((e) => ['work', 'field'].includes(e.kind))
   // Закреплённое — наверх: договорённость, к которой возвращаются, не должна
   // тонуть в ленте из тридцати событий.
   const events = [...shown].sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned))
@@ -129,7 +135,7 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther }: {
       <Header task={t} companyId={companyId}
         onRename={(title) => act.mutate({ companyId, title })} />
 
-      <div className="flex-1 space-y-5 overflow-y-auto px-5 py-4 text-sm">
+      <div className="flex-1 overflow-y-auto px-5 py-4 text-sm">
         {/* Обсуждение отдельно от ленты: лента — след работы (кто двинул, чем
             подтвердил), а короткие «когда сможешь?» её только засоряют. Кнопка
             открывает скрытую группу задачи — как у заявок. */}
@@ -171,7 +177,7 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther }: {
           </div>
         )}
 
-        {/* Маршрут: где задача сейчас и что дальше. Полоса, а не выпадающий
+                {/* Маршрут: где задача сейчас и что дальше. Полоса, а не выпадающий
             список — человек должен видеть весь путь, а не текущий шаг. */}
         <Section title="Маршрут">
           <div className="flex flex-wrap items-center gap-1">
@@ -194,23 +200,46 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther }: {
           </div>
         </Section>
 
+        <Tabs defaultValue="work" className="mt-4">
+          {/* Вкладки вместо одной длинной колонки: у задачи с полусотней ходов
+              история — отдельная работа, и ради неё не нужно прокручивать
+              чек-лист и файлы. */}
+          <TabsList variant="line" className="h-9 w-full justify-start">
+            <TabsTrigger value="work">Работа</TabsTrigger>
+            <TabsTrigger value="attrs">Свойства</TabsTrigger>
+            <TabsTrigger value="links">
+              Связи{t.subtasks.total ? ` · ${t.subtasks.total}` : ''}
+            </TabsTrigger>
+            <TabsTrigger value="time">
+              Время{t.time.spent ? ` · ${t.time.spent_text}` : ''}
+            </TabsTrigger>
+            <TabsTrigger value="files">
+              Файлы{t.attachments.length ? ` · ${t.attachments.length}` : ''}
+            </TabsTrigger>
+            <TabsTrigger value="feed">История · {t.events.length}</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="work" className="space-y-5 pt-4">
         <Description task={t} disabled={!live || act.isPending}
           onSave={(description) => act.mutate({ companyId, description })} />
 
         <Checklist task={t} companyId={companyId} live={live} onChanged={reload} />
-
+          </TabsContent>
+          <TabsContent value="attrs" className="space-y-5 pt-4">
         <Attributes task={t} companyId={companyId} live={live}
           people={peopleQ.data?.people ?? []} labels={labelsQ.data?.labels ?? []}
           pending={act.isPending} onAct={(d) => act.mutate(d)} onChanged={reload} />
-
+          </TabsContent>
+          <TabsContent value="links" className="space-y-5 pt-4">
         <Links task={t} companyId={companyId} live={live}
           onChanged={reload} onOpenOther={onOpenOther} />
-
+        <External task={t} companyId={companyId} live={live} onChanged={reload} />
+          </TabsContent>
+          <TabsContent value="time" className="space-y-5 pt-4">
         <TimePanel task={t} companyId={companyId} live={live}
           onChanged={reload} onEstimate={(v) => act.mutate({ companyId, estimate: v })} />
-
-        <External task={t} companyId={companyId} live={live} onChanged={reload} />
-
+          </TabsContent>
+          <TabsContent value="files" className="space-y-5 pt-4">
         <Section title="Файлы">
           <input ref={fileRef} type="file" className="hidden"
             onChange={(e) => {
@@ -249,14 +278,23 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther }: {
             </Button>
           )}
         </Section>
-
+          </TabsContent>
+          <TabsContent value="feed" className="space-y-5 pt-4">
         {/* Единая лента: события и реплики одним потоком — иначе «почему стоит»
             приходится собирать из двух списков. */}
-        <Section title="Лента" action={
-          <button type="button" onClick={() => setOnlyComments((v) => !v)}
-            className="text-[11px] text-muted-foreground hover:text-foreground">
-            {onlyComments ? 'показать всё' : 'только реплики'}
-          </button>
+        <Section title="История" action={
+          <span className="flex gap-1">
+            {([['all', 'всё'], ['talk', 'разговор'], ['move', 'движение'],
+               ['meta', 'правки и время']] as const).map(([k, label]) => (
+              <button key={k} type="button" onClick={() => setFeedKind(k)}
+                className={cn('rounded px-1.5 py-0.5 text-[11px] transition-colors',
+                  feedKind === k
+                    ? 'bg-primary/10 font-medium text-primary'
+                    : 'text-muted-foreground hover:text-foreground')}>
+                {label}
+              </button>
+            ))}
+          </span>
         }>
           <div className="space-y-2">
             {events.map((e) => (
@@ -296,10 +334,14 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther }: {
               </div>
             ))}
             {events.length === 0 && (
-              <p className="text-xs text-muted-foreground">Реплик пока нет.</p>
+              <p className="text-xs text-muted-foreground">
+                {feedKind === 'all' ? 'Ходов пока нет.' : 'В этом разрезе ходов нет.'}
+              </p>
             )}
           </div>
         </Section>
+          </TabsContent>
+        </Tabs>
       </div>
 
       {live && (
@@ -504,14 +546,11 @@ function Attributes({ task, companyId, live, people, labels, pending, onAct, onC
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="space-y-1.5">
           <Label className="text-xs">Исполнитель</Label>
-          <Select value={task.assignee_id ?? 'none'} disabled={!live || pending}
-            onValueChange={(v) => onAct({ companyId, assigneeId: v === 'none' ? null : v })}>
-            <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Не назначен" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="none">Не назначен</SelectItem>
-              {people.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <SearchPicker items={people.map((p) => ({ id: p.id, name: p.name }))}
+            value={task.assignee_id ?? ''} disabled={!live || pending}
+            onChange={(v) => onAct({ companyId, assigneeId: v || null })}
+            placeholder="Не назначен" emptyLabel="Не назначен"
+            searchPlaceholder="Фамилия или имя…" />
         </div>
         <div className="space-y-1.5">
           <Label className="text-xs">Срочность</Label>
@@ -540,16 +579,13 @@ function Attributes({ task, companyId, live, people, labels, pending, onAct, onC
         </div>
         <div className="space-y-1.5">
           <Label className="text-xs">Объект</Label>
-          <Select value={task.object_id ?? 'none'} disabled={!live || pending}
-            onValueChange={(v) => onAct({ companyId, objectId: v === 'none' ? null : v })}>
-            <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Без объекта" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="none">Без объекта</SelectItem>
-              {(objectsQ.data ?? []).map((o) => (
-                <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <SearchPicker items={(objectsQ.data ?? []).map((o) => ({
+            id: o.id, name: o.name, hint: o.address }))}
+            value={task.object_id ?? ''} disabled={!live || pending}
+            onChange={(v) => onAct({ companyId, objectId: v || null })}
+            placeholder="Без объекта" emptyLabel="Без объекта"
+            searchPlaceholder="Номер, название или адрес…"
+            loading={objectsQ.isLoading} width="w-[340px]" />
         </div>
       </div>
 
@@ -664,6 +700,9 @@ function Links({ task, companyId, live, onChanged, onOpenOther }: {
     mutationFn: (linkId: string) => tasksService.deleteTaskLink(task.id, linkId, companyId),
     onSuccess: onChanged,
   })
+  // Подзадачи — ветвление работы, остальные связи — её окружение.
+  const kids = task.links.filter((l) => l.kind === 'subtask')
+  const rest = task.links.filter((l) => l.kind !== 'subtask')
 
   return (
     <Section title="Связи и подзадачи" action={live && (
@@ -703,8 +742,36 @@ function Links({ task, companyId, live, onChanged, onOpenOther }: {
           </div>
         </div>
       )}
+      {kids.length > 0 && (
+        <div className="mb-3">
+          <div className="mb-1 flex items-center justify-between text-[11px] text-muted-foreground">
+            <span>Подзадачи</span>
+            <span>{kids.filter((k) => k.status !== 'open').length} из {kids.length} закрыто</span>
+          </div>
+          <div className="space-y-0.5 border-l-2 border-border/60 pl-3">
+            {kids.map((l) => (
+              <div key={l.id} className="flex items-center gap-2 text-xs">
+                <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full',
+                  l.status === 'open' ? 'bg-amber-500' : 'bg-emerald-500')} />
+                <button type="button" onClick={() => onOpenOther?.(l.task_id)}
+                  className={cn('truncate text-left hover:underline',
+                    l.status !== 'open' && 'text-muted-foreground line-through')}>
+                  <span className="font-medium">№{l.number}</span> {l.title}
+                </button>
+                {live && (
+                  <Button variant="ghost" size="sm" className="ml-auto h-6 px-1.5"
+                    aria-label="Снять связь" onClick={() => remove.mutate(l.id)}>
+                    <Trash2 className="h-3 w-3" />
+                  </Button>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="space-y-1">
-        {task.links.map((l) => (
+        {rest.map((l) => (
           <div key={`${l.id}-${l.kind}`} className="flex items-center gap-2 text-xs">
             <span className="w-[104px] shrink-0 text-muted-foreground">
               {LINK_LABEL[l.kind] ?? l.kind}
@@ -726,7 +793,10 @@ function Links({ task, companyId, live, onChanged, onOpenOther }: {
           </div>
         ))}
         {task.links.length === 0 && !adding && (
-          <p className="text-xs text-muted-foreground">Связей нет.</p>
+          <p className="text-xs text-muted-foreground">
+            Связей нет. Крупную работу удобно разбить на подзадачи — они появятся
+            здесь деревом, а прогресс будет виден в списке.
+          </p>
         )}
       </div>
     </Section>

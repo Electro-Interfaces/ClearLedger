@@ -875,10 +875,11 @@ async def delete_template(
     current_user: User = Depends(get_current_user),
 ):
     cid = await assert_company_product(company_id, current_user, db, "plan")
-    await _assert_admin(db, cid, current_user)
     tpl = await db.get(TaskTemplate, _uuid_or_400(template_id, "template_id"))
     if tpl is None or tpl.company_id != cid:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Шаблон не найден")
+    if tpl.assignee_id is not None and tpl.assignee_id != current_user.id:
+        await _assert_admin(db, cid, current_user)
     await db.delete(tpl)
     await db.commit()
     return {"deleted": template_id}
@@ -947,12 +948,19 @@ async def create_recurrence(
     current_user: User = Depends(get_current_user),
 ):
     """Завести расписание. Первое срабатывание считаем сразу — человек должен
-    видеть в списке дату, а не «когда-нибудь»."""
+    видеть в списке дату, а не «когда-нибудь».
+
+    Себе расписание заводит любой: «каждый понедельник свести отчёт» — личная
+    дисциплина, а не регламент компании, и ходить за ней к администратору никто
+    не станет. Регулярную работу ДРУГОМУ человеку ставит администратор
+    пространства: иначе кто угодно навесит на коллегу еженедельную задачу.
+    """
     cid = await assert_company_product(payload.company_id, current_user, db, "plan")
-    await _assert_admin(db, cid, current_user)
     tpl = await db.get(TaskTemplate, _uuid_or_400(payload.template_id, "template_id"))
     if tpl is None or tpl.company_id != cid:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Шаблон не найден")
+    if tpl.assignee_id is not None and tpl.assignee_id != current_user.id:
+        await _assert_admin(db, cid, current_user)
     rec = TaskRecurrence(
         company_id=cid, template_id=tpl.id, rule=payload.rule or {},
         enabled=payload.enabled, created_by=current_user.id,
@@ -974,10 +982,11 @@ async def delete_recurrence(
     current_user: User = Depends(get_current_user),
 ):
     cid = await assert_company_product(company_id, current_user, db, "plan")
-    await _assert_admin(db, cid, current_user)
     rec = await db.get(TaskRecurrence, _uuid_or_400(rec_id, "rec_id"))
     if rec is None or rec.company_id != cid:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Расписание не найдено")
+    if rec.created_by != current_user.id:
+        await _assert_admin(db, cid, current_user)
     await db.delete(rec)
     await db.commit()
     return {"deleted": rec_id}

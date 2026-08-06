@@ -28,6 +28,8 @@ import { cn } from '@/lib/utils'
 import * as tasksService from '@/services/tasksService'
 import { listSpaceObjects } from '@/services/spaceObjectsService'
 import { PRIORITY_LABEL, fileSize } from './taskWords'
+import { SearchPicker } from './SearchPicker'
+import { useAuth } from '@/contexts/AuthContext'
 
 export function NewTaskDialog({ companyId, onCreated, defaultObjectId }: {
   companyId: string
@@ -35,6 +37,8 @@ export function NewTaskDialog({ companyId, onCreated, defaultObjectId }: {
   defaultObjectId?: string
 }) {
   const qc = useQueryClient()
+  const { user } = useAuth()
+  const me = user?.id ?? ''
   const [open, setOpen] = useState(false)
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
@@ -170,19 +174,18 @@ export function NewTaskDialog({ companyId, onCreated, defaultObjectId }: {
               )}
             </div>
             <div className="space-y-1.5">
-              <Label>Исполнитель</Label>
-              <Select value={assigneeId || 'none'}
-                onValueChange={(v) => setAssigneeId(v === 'none' ? '' : v)}>
-                <SelectTrigger>
-                  <SelectValue placeholder={peopleQ.isLoading ? 'Загрузка…' : 'Не назначен'} />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Не назначен</SelectItem>
-                  {(peopleQ.data?.people ?? []).map((p) => (
-                    <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <div className="flex items-center justify-between">
+                <Label>Исполнитель</Label>
+                {me && assigneeId !== me && (
+                  <button type="button" onClick={() => setAssigneeId(me)}
+                    className="text-[11px] text-primary hover:underline">мне</button>
+                )}
+              </div>
+              <SearchPicker items={(peopleQ.data?.people ?? []).map((p) => ({
+                id: p.id, name: p.name,
+              }))} value={assigneeId} onChange={setAssigneeId}
+                placeholder="Не назначен" emptyLabel="Не назначен"
+                searchPlaceholder="Фамилия или имя…" loading={peopleQ.isLoading} />
             </div>
             <div className="space-y-1.5">
               <Label>Срок</Label>
@@ -193,16 +196,13 @@ export function NewTaskDialog({ companyId, onCreated, defaultObjectId }: {
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label>Объект</Label>
-              <Select value={objectId || 'none'}
-                onValueChange={(v) => setObjectId(v === 'none' ? '' : v)}>
-                <SelectTrigger><SelectValue placeholder="Без объекта" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Без объекта</SelectItem>
-                  {(objectsQ.data ?? []).filter((o) => o.status !== 'closed').map((o) => (
-                    <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <SearchPicker items={(objectsQ.data ?? [])
+                .filter((o) => o.status !== 'closed')
+                .map((o) => ({ id: o.id, name: o.name, hint: o.address }))}
+                value={objectId} onChange={setObjectId}
+                placeholder="Без объекта" emptyLabel="Без объекта"
+                searchPlaceholder="Номер, название или адрес…"
+                loading={objectsQ.isLoading} width="w-[340px]" />
             </div>
             <div className="space-y-1.5">
               <Label>Срочность</Label>

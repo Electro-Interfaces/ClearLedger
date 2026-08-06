@@ -568,10 +568,21 @@ async def test_регламент_шаблоны_расписания_эскал
     rec = r.json()
     assert rec["next_run_at"], "дата следующего запуска не посчиталась"
 
+    # Расписание себе заводит любой: за личной дисциплиной к администратору
+    # никто не пойдёт. Проверяем, что ручка не требует прав на свой шаблон.
+    mine = (await auth_client.post("/api/tasks/templates", json={
+        "company_id": cid, "name": "Мой еженедельный отчёт",
+        "title": "Свести отчёт за неделю", "assignee_id": me["id"]})).json()
+    r = await auth_client.post("/api/tasks/recurrences", json={
+        "company_id": cid, "template_id": mine["id"],
+        "rule": {"mode": "weekly", "weekday": 0, "at": "09:00", "tz": "Europe/Moscow"}})
+    assert r.status_code == 201, r.text
+
     # Заведение расписания задачу не порождает — ждём срока.
     listed = (await auth_client.get("/api/tasks/recurrences",
                                     params={"company_id": cid})).json()["recurrences"]
-    assert [x["template"] for x in listed] == ["Закрытие месяца"]
+    assert "Закрытие месяца" in [x["template"] for x in listed]
+    assert "Мой еженедельный отчёт" in [x["template"] for x in listed]
 
     # Правило считается в местном времени пояса, а не в UTC.
     now = datetime(2026, 8, 6, 12, 0, tzinfo=timezone.utc)
