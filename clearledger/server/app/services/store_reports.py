@@ -599,6 +599,7 @@ async def shifts(db: AsyncSession, cid, date_from, date_to,
     rows = (await db.execute(text(f"""
         SELECT p.station_id,
                p.payload->'Смена'->>'НомерСмены' AS shift,
+               p.payload->'Смена'->>'НомерСменыВнутр' AS shift_inner,
                coalesce((p.payload->'Смена'->>'Закрытие')::timestamptz,
                         (p.payload->'Смена'->>'Открытие')::timestamptz,
                         p.received_at) AS shift_date,
@@ -623,6 +624,9 @@ async def shifts(db: AsyncSession, cid, date_from, date_to,
 
     # Чеки приезжают отдельным пакетом и есть не у всех смен: колонка честно
     # показывает ноль там, где чеков ещё нет, вместо того чтобы прятать смену.
+    # Сопоставление — по ВНУТРЕННЕМУ номеру смены: касса нумерует свои смены
+    # сама (7067), а в отчёте виден номер ОСЭ (2082080508202601) — тот, что
+    # печатается на документах.
     чеки = {(r["station_id"], str(r["shift_number"])): int(r["n"])
             for r in (await db.execute(text(f"""
         SELECT station_id, shift_number, count(*) AS n
@@ -636,7 +640,7 @@ async def shifts(db: AsyncSession, cid, date_from, date_to,
         "shift_date": r["shift_date"], "operator": r["operator"],
         "revenue": round(float(r["revenue"] or 0), 2),
         "positions": int(r["positions"] or 0),
-        "cheques": чеки.get((r["station_id"], str(r["shift"])), 0),
+        "cheques": чеки.get((r["station_id"], str(r["shift_inner"])), 0),
     } for r in rows]
     return {"rows": строки, "total": len(строки),
             "revenue": round(sum(s["revenue"] for s in строки), 2),

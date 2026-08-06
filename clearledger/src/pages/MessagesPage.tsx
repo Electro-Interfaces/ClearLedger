@@ -27,6 +27,7 @@ import { CreateRoomDialog } from '@/components/chat/CreateRoomDialog'
 import { PartyBadge } from '@/components/chat/PartyBadge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
+import { useSupportContext } from '@/contexts/SupportContext'
 import * as chat from '@/services/chatService'
 import * as admin from '@/services/chatAdminService'
 import { SPACE_PRODUCTS } from '@/config/spaceProducts'
@@ -188,6 +189,9 @@ export function MessagesPage() {
   }
   const [q, setQ] = useState('')
   const [open, setOpen] = useState<string | null>(null)
+  // Открыть саму переписку (не админ-состав): та же панель чата, что у «Чат» в
+  // шапке, наведённая на комнату — как в мессенджере, клик по чату входит в него.
+  const { openInteraction } = useSupportContext()
   const [create, setCreate] = useState<'channel' | 'group' | null>(null)
 
   const { data, isLoading, error } = useQuery({
@@ -351,8 +355,9 @@ export function MessagesPage() {
                       <tr key={r.id}
                         className={cn('border-b border-border/40 hover:bg-muted/25', isOpen && 'bg-muted/30')}>
                         <td className="p-2">
-                          <button type="button" onClick={() => setOpen(isOpen ? null : r.id)}
-                            className="text-left font-medium hover:underline" title="Показать состав">
+                          <button type="button" onClick={() => openInteraction('chat', `room:${r.id}`)}
+                            className="text-left font-medium hover:text-primary hover:underline"
+                            title="Открыть переписку">
                             {r.name ?? 'Личный чат'}
                           </button>
                         </td>
@@ -361,7 +366,11 @@ export function MessagesPage() {
                         </td>
                         <td className="max-w-[180px] truncate p-2 text-muted-foreground">{r.ownerName ?? '—'}</td>
                         <td className="p-2 text-right tabular-nums">
-                          {nf0.format(r.participantCount)}
+                          <button type="button" onClick={() => setOpen(isOpen ? null : r.id)}
+                            className="tabular-nums hover:underline"
+                            title={isOpen ? 'Скрыть состав' : 'Показать состав участников'}>
+                            {nf0.format(r.participantCount)}
+                          </button>
                           {r.externalCount > 0 && (
                             <span className="ml-1 text-[10px] text-amber-600 dark:text-amber-400"
                               title={`${r.externalCount} из компаний-партнёров`}>+{r.externalCount}</span>
