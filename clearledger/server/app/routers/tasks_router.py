@@ -458,12 +458,16 @@ async def list_people(
     список админский (роли, модули, скоуп), а переадресовать задачу должен уметь
     любой исполнитель, не только администратор."""
     cid = await assert_company_product(company_id, current_user, db, "plan")
+    # Принадлежность отдаём вместе с именем: поручая работу, надо видеть, свой это
+    # человек или подрядчик, — задача внешнему участнику раскрывает ему внутреннее.
     rows = (await db.execute(
-        select(User.id, User.name, User.email)
+        select(User.id, User.name, User.email, UserCompany.party_type, User.avatar_url)
         .join(UserCompany, UserCompany.user_id == User.id)
         .where(UserCompany.company_id == cid)
         .order_by(User.name))).all()
-    return {"people": [{"id": str(i), "name": n or (e or "—")} for i, n, e in rows]}
+    return {"people": [{"id": str(i), "name": n or (e or "—"),
+                        "partyType": p or "internal", "avatarUrl": a}
+                       for i, n, e, p, a in rows]}
 
 
 # ── Типы задач и маршруты ────────────────────────────────────────────────

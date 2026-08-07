@@ -543,7 +543,7 @@ function Checklist({ task, companyId, live, onChanged }: {
 
 function Attributes({ task, companyId, live, people, labels, pending, onAct, onChanged }: {
   task: LoadedTask; companyId: string; live: boolean
-  people: { id: string; name: string }[]
+  people: tasksService.TaskPerson[]
   labels: { id: string; name: string }[]
   pending: boolean
   onAct: (d: Parameters<typeof tasksService.taskAction>[1]) => void
@@ -575,7 +575,7 @@ function Attributes({ task, companyId, live, people, labels, pending, onAct, onC
     <Section title="">
       <div className="space-y-3">
         <Field label="Исполнитель">
-          <SearchPicker items={people.map((p) => ({ id: p.id, name: p.name }))}
+          <SearchPicker items={people.map((p) => ({ id: p.id, name: p.name, party: p.partyType }))}
             value={task.assignee_id ?? ''} disabled={!live || pending}
             onChange={(v) => onAct({ companyId, assigneeId: v || null })}
             placeholder="Не назначен" emptyLabel="Не назначен"

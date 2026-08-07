@@ -11,6 +11,7 @@
  * порядок, та же клавиатура.
  */
 import { useState } from 'react'
+import { PartyChip } from '@/components/chat/PartyBadge'
 import { Check, ChevronsUpDown, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -24,6 +25,8 @@ export interface PickItem {
   name: string
   /** Вторая строка: адрес объекта, должность человека — то, что различает тёзок. */
   hint?: string | null
+  /** Кто это пространству: у внешнего рядом с именем стоит знак. */
+  party?: 'internal' | 'partner' | 'vendor' | null
 }
 
 export function SearchPicker({
@@ -89,7 +92,10 @@ export function SearchPicker({
                       <Check className={cn('mr-2 h-3 w-3',
                         i.id === value ? 'opacity-100' : 'opacity-0')} />
                       <span className="min-w-0">
-                        <span className="block truncate">{i.name}</span>
+                        <span className="flex items-center gap-1.5 truncate">
+                          <PartyChip party={i.party} />
+                          {i.name}
+                        </span>
                         {i.hint && (
                           <span className="block truncate text-[11px] text-muted-foreground">
                             {i.hint}

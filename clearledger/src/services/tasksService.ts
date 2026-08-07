@@ -222,9 +222,16 @@ export async function taskDetails(id: string, companyId: string) {
 }
 
 /** Кому можно поручить: члены пространства (доступно любому исполнителю). */
+/** Человек, которому можно поручить работу. `partyType` — свой он или внешний. */
+export interface TaskPerson {
+  id: string
+  name: string
+  partyType?: 'internal' | 'partner' | 'vendor'
+  avatarUrl?: string | null
+}
+
 export async function listTaskPeople(companyId: string) {
-  return get<{ people: { id: string; name: string }[] }>(
-    '/api/tasks/people', { company_id: companyId })
+  return get<{ people: TaskPerson[] }>('/api/tasks/people', { company_id: companyId })
 }
 
 export async function listTaskTypes(companyId: string) {

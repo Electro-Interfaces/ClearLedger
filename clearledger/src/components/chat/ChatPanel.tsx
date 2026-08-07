@@ -20,7 +20,7 @@ import { cn } from '@/lib/utils'
 import { useAuth } from '@/contexts/AuthContext'
 import { useCompany } from '@/contexts/CompanyContext'
 import { SPACE_PRODUCTS } from '@/config/spaceProducts'
-import { PartyBadge } from '@/components/chat/PartyBadge'
+import { PartyBadge, PartyMark } from '@/components/chat/PartyBadge'
 import { MetricHint } from '@/components/workspace/analytics/MetricHint'
 import { ConfirmActionDialog } from '@/components/common/ConfirmActionDialog'
 import { useIsMobile } from '@/hooks/use-mobile'
@@ -576,10 +576,12 @@ const CHAT_SKINS: Record<string, { label: string; style?: React.CSSProperties }>
   },
 }
 
-function Avatar({ seed, name, icon: Icon, online, size = 40, src }: {
+function Avatar({ seed, name, icon: Icon, online, size = 40, src, party }: {
   seed: string; name?: string | null; icon?: typeof UserIcon; online?: boolean; size?: number
   /** Фото человека или чата (/api/files/<id>); нет — генеративный кружок с инициалами. */
   src?: string | null
+  /** Кто это пространству: свой сотрудник, человек партнёра или поддержка платформы. */
+  party?: PartyType | null
 }) {
   return (
     <div className="relative shrink-0" style={{ width: size, height: size }}>
@@ -591,6 +593,7 @@ function Avatar({ seed, name, icon: Icon, online, size = 40, src }: {
           {Icon ? <Icon style={{ width: size * 0.5, height: size * 0.5 }} /> : initials(name)}
         </div>
       )}
+      <PartyMark party={party} size={size} />
       {online && <span className="absolute -bottom-px -right-px h-2.5 w-2.5 rounded-full bg-emerald-500 ring-2 ring-card" />}
     </div>
   )
@@ -939,7 +942,8 @@ function RoomInfoPanel({
                 <button type="button" onClick={() => onShowProfile(p.userId)}
                   className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
                   title="Кто это — карточка человека">
-                <Avatar seed={p.userId} name={p.name} online={online} size={32} src={p.avatarUrl} />
+                <Avatar seed={p.userId} name={p.name} online={online} size={32} src={p.avatarUrl}
+                  party={p.partyType} />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">
                     <span className="truncate text-[13px]">{p.name}{p.userId === userId && ' (вы)'}</span>
@@ -1024,7 +1028,8 @@ function RoomInfoPanel({
           <div className="space-y-0.5">
             {addable.map((u) => (
               <button key={u.userId} onClick={() => onAdd(u.userId, seeHistory)} className="flex w-full items-center gap-2.5 rounded-md px-1.5 py-1.5 text-left hover:bg-accent">
-                <Avatar seed={u.userId} name={u.name} online={u.online} size={30} src={u.avatarUrl} />
+                <Avatar seed={u.userId} name={u.name} online={u.online} size={30} src={u.avatarUrl}
+                  party={u.partyType} />
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm">{u.name}</div>
                   <div className="truncate text-[11px] text-muted-foreground">{u.email}</div>
@@ -1688,7 +1693,8 @@ function ChatBubble({
         {withAvatar && !isOwn && (
           isLastInGroup
             ? <button type="button" onClick={onAuthorClick} disabled={!onAuthorClick} className="mb-0.5 shrink-0">
-                <Avatar seed={message.userId || message.id} name={message.userName} size={26} src={authorAvatar} />
+                <Avatar seed={message.userId || message.id} name={message.userName} size={26} src={authorAvatar}
+                  party={message.authorParty} />
               </button>
             : <span className="w-[26px] shrink-0" />
         )}

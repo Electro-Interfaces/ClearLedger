@@ -17,6 +17,7 @@
  * бы полсотни запросов и невозможность передумать.
  */
 import { Fragment, useMemo, useState } from 'react'
+import { useAuth } from '@/contexts/AuthContext'
 import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
@@ -752,7 +753,16 @@ function MemberCard({
 }) {
   const [name, setName] = useState(u.name)
   const [position, setPosition] = useState(u.position ?? '')
-  const editable = canManage && !u.is_superadmin && !isSelf
+  const { user: me } = useAuth()
+  // Кто он и чем занят — сведения о человеке: их ведёт тот, кто ведёт состав,
+  // и себя в том числе. Раньше карточка запиралась целиком у себя и у любого
+  // суперадмина, из-за чего собственную должность нельзя было вписать вообще
+  // никак — при том что сервер это всегда разрешал.
+  const editable = canManage && (!u.is_superadmin || !!me?.is_superadmin)
+  // Уровень доступа — другое дело: понизив себя, человек запирает управление
+  // пространством, и вернуть его будет некому. Своя роль остаётся только
+  // для чтения; чужую суперадминскую меняет лишь суперадмин.
+  const accessEditable = editable && !isSelf
 
   const update = useMutation({
     mutationFn: (data: Parameters<typeof userService.updateUser>[1]) => userService.updateUser(u.id, data),
@@ -917,7 +927,7 @@ function MemberCard({
 
         <section className="space-y-3">
           <SectionTitle>Уровень в организации</SectionTitle>
-          <Select value={u.role} disabled={!editable}
+          <Select value={u.role} disabled={!accessEditable}
             onValueChange={(v) => update.mutate({ companyId, role: v as 'user' | 'admin' })}>
             <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
             <SelectContent>
@@ -927,6 +937,7 @@ function MemberCard({
           </Select>
           <p className="text-[11px] text-muted-foreground">
             Администратор видит все продукты организации и настраивает доступ остальным.
+            {isSelf && ' Свой уровень доступа не меняют: понизив себя, вернуть его будет некому.'}
           </p>
         </section>
 
