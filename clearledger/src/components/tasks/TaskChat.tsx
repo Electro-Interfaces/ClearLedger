@@ -24,6 +24,7 @@ import { QueryError } from '@/components/common/QueryError'
 import { cn } from '@/lib/utils'
 import { ensureTaskRoom, getMessages, sendMessage } from '@/services/chatService'
 import { dtT } from './taskWords'
+import { useSendMode } from '@/hooks/useSendMode'
 
 export function TaskChat({ taskId, taskNumber, selfName }: {
   taskId: string
@@ -31,6 +32,7 @@ export function TaskChat({ taskId, taskNumber, selfName }: {
   selfName?: string | null
 }) {
   const qc = useQueryClient()
+  const { shouldSend, hint: sendHint } = useSendMode()
   const [text, setText] = useState('')
   const bottomRef = useRef<HTMLDivElement>(null)
 
@@ -130,12 +132,12 @@ export function TaskChat({ taskId, taskNumber, selfName }: {
 
       <div className="flex shrink-0 items-end gap-2 pt-2">
         <Textarea value={text} onChange={(e) => setText(e.target.value)} rows={1}
-          maxLength={2000} className="min-h-9 resize-none text-sm"
-          placeholder="Написать участникам задачи. Enter — отправить"
+          maxLength={2000} className="min-h-9 resize-none text-sm" title={sendHint}
+          placeholder={`Написать участникам задачи. ${sendHint}`}
           onKeyDown={(e) => {
-            // Enter отправляет, Shift+Enter переносит строку: в коротком
-            // разговоре так быстрее, а длинные абзацы здесь не пишут.
-            if (e.key === 'Enter' && !e.shiftKey && text.trim() && roomId) {
+            // Чем отправляется — выбор человека в меню профиля: та же привычка,
+            // что и в чате, здесь она не должна меняться.
+            if (shouldSend(e) && text.trim() && roomId) {
               e.preventDefault()
               send.mutate()
             }

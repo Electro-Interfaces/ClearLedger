@@ -4619,6 +4619,11 @@ class ChatParticipant(Base):
     # разговоры), поэтому живёт в участии, а не в комнате.
     pinned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # Граница видимой истории: NULL — человек видит переписку с самого начала
+    # (так по умолчанию), время — приходит «с чистого листа» и читает только то,
+    # что написано после. Решает тот, кто добавляет: в рабочую группу зовут ради
+    # общего контекста, а к разговору с подрядчиком новичку прошлое ни к чему.
+    history_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
         Index("uq_chat_participants", "room_id", "user_id", unique=True),

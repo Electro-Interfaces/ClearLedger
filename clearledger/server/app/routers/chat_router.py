@@ -177,6 +177,32 @@ async def _assert_participant(room_id: uuid.UUID, user: User, db: AsyncSession) 
     return room
 
 
+def _событие(kind: str, message: dict) -> dict:
+    """Событие сокета из сообщения — так, чтобы вид события пережил распаковку.
+
+    У сообщения есть своё поле `type` (text/image/file/system), и в форме
+    `{"type": kind, **message}` оно затирало вид события: подписчик получал
+    `type: "text"` вместо `chat:message` и не узнавал событие вовсе. Вид ставим
+    последним, а тип самого сообщения отдаём отдельным полем — по нему лента
+    отличает служебную запись от реплики.
+    """
+    return {**message, "type": kind, "messageType": message.get("type") or "text"}
+
+
+async def _history_from(room_id: uuid.UUID, user: User, db: AsyncSession) -> datetime | None:
+    """С какого момента человеку видна переписка комнаты.
+
+    None — с самого начала (так у всех, кого добавили обычным порядком). Время —
+    его позвали «с чистого листа»: прошлое группы закрыто, и закрыто везде, где
+    история отдаётся, — в ленте, поиске, счётчике непрочитанного, превью в списке
+    и закреплённом сообщении. Достаточно одной незакрытой двери, чтобы правило
+    перестало существовать.
+    """
+    return (await db.execute(select(ChatParticipant.history_from).where(
+        ChatParticipant.room_id == room_id,
+        ChatParticipant.user_id == user.id))).scalar_one_or_none()
+
+
 # Базовый набор чатов, который есть в пространстве с первого дня (концепция МАГа
 # 30.07.2026). Больше — по потребности, руками: пусто открывшееся пространство не
 # объясняет человеку, зачем ему чат, а десяток заготовок он закроет и не вернётся.
@@ -449,6 +475,10 @@ class SendMessageBody(BaseModel):
 
 class AddParticipantBody(BaseModel):
     userId: str
+    # Видит ли новичок прошлое группы. По умолчанию да — в рабочую группу зовут
+    # ради общего контекста, и чаще всего он нужен целиком. Снимают галочку там,
+    # где до прихода человека обсуждали не его дело.
+    seeHistory: bool = True
 
 
 class ReactBody(BaseModel):
@@ -491,7 +521,7 @@ async def list_rooms(
     rows = (await db.execute(
         select(ChatRoom, ChatParticipant.last_read_at, ChatParticipant.role,
                ChatParticipant.muted_until, ChatParticipant.pinned_at,
-               ChatParticipant.joined_at)
+               ChatParticipant.joined_at, ChatParticipant.history_from)
         .join(ChatParticipant, and_(ChatParticipant.room_id == ChatRoom.id,
                                     ChatParticipant.user_id == current_user.id))
         .where(ChatRoom.is_active.is_(True), ChatRoom.is_archived.is_(archived),
@@ -536,8 +566,12 @@ async def list_rooms(
         # которого только что вписали в «Общий чат», иначе встречает вся его история
         # как непрочитанная, и счётчик показывает сотни. Порог у каждой комнаты свой,
         # поэтому условие собирается по комнатам — но запрос остаётся один.
-        thresholds = [(room.id, last_read or joined_at or epoch)
-                      for room, last_read, _role, _mute, _pin, joined_at in rows]
+        # Позванному «с чистого листа» прошлое комнаты закрыто и здесь: иначе он
+        # прочёл бы его в превью списка и получил бы всю историю в счётчике.
+        hidden = {room.id: hist for room, *_rest, hist in rows if hist is not None}
+        thresholds = [(room.id, max(filter(None, (last_read or joined_at or epoch,
+                                                  hidden.get(room.id)))))
+                      for room, last_read, _role, _mute, _pin, joined_at, _hist in rows]
         unread_map = dict((await db.execute(
             select(ChatMessage.room_id, func.count()).where(
                 ChatMessage.deleted_at.is_(None),
@@ -546,9 +580,12 @@ async def list_rooms(
                       for r, t in thresholds]),
             ).group_by(ChatMessage.room_id))).all())
         # DISTINCT ON — последнее живое сообщение каждой комнаты одним проходом.
+        видимые = or_(*[and_(ChatMessage.room_id == r,
+                             ChatMessage.created_at >= hidden[r]) if r in hidden
+                        else ChatMessage.room_id == r for r in rids])
         last_map = {m.room_id: m for m in (await db.execute(
             select(ChatMessage).distinct(ChatMessage.room_id)
-            .where(ChatMessage.room_id.in_(rids), ChatMessage.deleted_at.is_(None))
+            .where(видимые, ChatMessage.deleted_at.is_(None))
             .order_by(ChatMessage.room_id, ChatMessage.created_at.desc()))).scalars().all()}
         # У личного чата лицо собеседника, а не иконка комнаты: список из десяти
         # одинаковых кружков не отличить, а человека узнают по фото.
@@ -566,7 +603,7 @@ async def list_rooms(
                                           ChatMessage.deleted_at.is_(None)))).scalars().all()}
 
     out: list[RoomOut] = []
-    for room, last_read, my_role, muted_until, pinned_at, joined_at in rows:
+    for room, last_read, my_role, muted_until, pinned_at, joined_at, hist in rows:
         pcount = counts.get(room.id, 0)
         unread = unread_map.get(room.id, 0)
         last = last_map.get(room.id)
@@ -575,6 +612,8 @@ async def list_rooms(
             peer_id, peer_name, peer_avatar = peer_map[room.id]
             name = name or peer_name
         pm = pin_map.get(room.pinned_message_id) if room.pinned_message_id else None
+        if pm is not None and hist is not None and pm.created_at < hist:
+            pm = None                      # закреплено до его прихода — не его история
         pinned = None if pm is None else PinnedOut(
             id=str(pm.id), userName=pm.user_name,
             content=((pm.content if pm.type == "text" else (pm.file_name or f"[{pm.type}]")) or "")[:200])
@@ -614,12 +653,15 @@ def _neg(iso: str) -> str:
     return "".join(chr(0x10FFFF - ord(c)) if c.isdigit() else c for c in iso)
 
 
-async def _pinned_out(room: ChatRoom, db: AsyncSession) -> PinnedOut | None:
+async def _pinned_out(room: ChatRoom, db: AsyncSession,
+                      since: datetime | None = None) -> PinnedOut | None:
     if not room.pinned_message_id:
         return None
     m = await db.get(ChatMessage, room.pinned_message_id)
     if m is None or m.deleted_at is not None:
         return None
+    if since is not None and m.created_at < since:
+        return None                        # закреплено до его прихода в группу
     txt = m.content if m.type == "text" else (m.file_name or f"[{m.type}]")
     return PinnedOut(id=str(m.id), content=(txt or "")[:200], userName=m.user_name)
 
@@ -751,7 +793,7 @@ async def get_room(
         id=str(room.id), type=room.type, kind=room.kind, name=name,
         isArchived=room.is_archived, participantCount=len(plist), directPeerId=peer_id,
         createdBy=str(room.created_by) if room.created_by else None, participants=plist,
-        pinnedMessage=await _pinned_out(room, db),
+        pinnedMessage=await _pinned_out(room, db, await _history_from(rid, current_user, db)),
         canWrite=can_write,
         avatarUrl=room.avatar_url,
         scopeProduct=room.scope_product,
@@ -832,6 +874,9 @@ async def list_messages(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID")
     room = await _assert_participant(rid, current_user, db)
     stmt = select(ChatMessage).where(ChatMessage.room_id == rid)
+    граница = await _history_from(rid, current_user, db)
+    if граница is not None:
+        stmt = stmt.where(ChatMessage.created_at >= граница)
     if before:
         try:
             stmt = stmt.where(ChatMessage.created_at < datetime.fromisoformat(before))
@@ -932,7 +977,7 @@ async def send_message(
     payload = _msg_out(msg, 0, reply, None, parties.get(current_user.id))
     await db.commit()
     # live-рассылка участникам комнаты
-    await manager.broadcast(f"chat:{rid}", {"type": "chat:message", **payload.model_dump()})
+    await manager.broadcast(f"chat:{rid}", _событие("chat:message", payload.model_dump()))
     # Web Push тем, кого нет в системе: вкладка закрыта — сообщение всё равно догонит.
     web_push.push_room_async(
         rid, room.name or current_user.name,
@@ -1088,7 +1133,7 @@ async def edit_message(
     reply = await db.get(ChatMessage, msg.reply_to) if msg.reply_to else None
     reactions = (await _load_reactions([mid], current_user.id, db)).get(mid)
     payload = _msg_out(msg, 0, reply, reactions)
-    await manager.broadcast(f"chat:{rid}", {"type": "message:edited", **payload.model_dump()})
+    await manager.broadcast(f"chat:{rid}", _событие("message:edited", payload.model_dump()))
     return payload
 
 
@@ -1275,9 +1320,23 @@ async def add_participant(
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Пользователь не из компании чата")
     exists = (await db.execute(select(ChatParticipant.id).where(
         ChatParticipant.room_id == rid, ChatParticipant.user_id == target))).scalar_one_or_none()
-    if exists is None:
-        db.add(ChatParticipant(room_id=rid, user_id=target, role="member"))
-        await db.commit()
+    if exists is not None:
+        return {"ok": True}
+    сейчас = _now()
+    db.add(ChatParticipant(room_id=rid, user_id=target, role="member",
+                           history_from=None if body.seeHistory else сейчас))
+    # Появление человека в группе — событие разговора, а не тихая правка состава:
+    # остальные должны видеть, кто пришёл и чьими стараниями. Заодно это событие
+    # обновляет у всех состав комнаты — оно приезжает тем же сокетом, что и текст.
+    имя = (await db.execute(select(User.name).where(User.id == target))).scalar_one_or_none()
+    msg = ChatMessage(room_id=rid, user_id=current_user.id, user_name=current_user.name,
+                      type="system", content=f"Добавлен участник: {имя or 'без имени'}")
+    db.add(msg)
+    room.updated_at = сейчас
+    await db.flush()
+    payload = _msg_out(msg, 0, None, None, None)
+    await db.commit()
+    await manager.broadcast(f"chat:{rid}", _событие("chat:message", payload.model_dump()))
     return {"ok": True}
 
 
@@ -1419,7 +1478,7 @@ async def inbound_email(
     payload = _msg_out(msg, 0, None, None, parties.get(author.id))
     await db.commit()
 
-    await manager.broadcast(f"chat:{rid}", {"type": "chat:message", **payload.model_dump()})
+    await manager.broadcast(f"chat:{rid}", _событие("chat:message", payload.model_dump()))
     web_push.push_room_async(rid, room.name or author.name,
                              f"{author.name}: {text_body[:140]}", author.id)
     # Письмо ушло одному участнику, но разговор общий: остальные почтовые
@@ -1681,7 +1740,7 @@ async def create_poll(
     await db.commit()
 
     body_out = {**payload.model_dump(), "poll": poll_data}
-    await manager.broadcast(f"chat:{rid}", {"type": "chat:message", **body_out})
+    await manager.broadcast(f"chat:{rid}", _событие("chat:message", body_out))
     web_push.push_room_async(rid, room.name or current_user.name,
                              f"{current_user.name}: опрос «{question[:100]}»", current_user.id)
     chat_mail.push_room_mail_async(rid, room.name, current_user.name,
@@ -1985,7 +2044,7 @@ async def forward_message(
     outs = [_msg_out(m, 0, None, None, parties.get(current_user.id)) for m, _ in made]
     await db.commit()
     for out_msg, (m, room) in zip(outs, made):
-        await manager.broadcast(f"chat:{m.room_id}", {"type": "chat:message", **out_msg.model_dump()})
+        await manager.broadcast(f"chat:{m.room_id}", _событие("chat:message", out_msg.model_dump()))
         web_push.push_room_async(
             m.room_id, room.name or current_user.name,
             f"{current_user.name}: {(m.content or m.file_name or 'вложение')[:140]}",
@@ -2096,7 +2155,7 @@ async def ticket_from_message(
     parties = await _party_types(db, room.company_id, {current_user.id})
     payload = _msg_out(note, 0, msg, None, parties.get(current_user.id))
     await db.commit()
-    await manager.broadcast(f"chat:{room.id}", {"type": "chat:message", **payload.model_dump()})
+    await manager.broadcast(f"chat:{room.id}", _событие("chat:message", payload.model_dump()))
     return {"ok": True, "ticketId": str(t_id) if t_id else None, "ticketNumber": t_num or None}
 
 
@@ -2186,7 +2245,7 @@ async def task_from_message(
     parties = await _party_types(db, room.company_id, {current_user.id})
     payload = _msg_out(note, 0, msg, None, parties.get(current_user.id))
     await db.commit()
-    await manager.broadcast(f"chat:{room.id}", {"type": "chat:message", **payload.model_dump()})
+    await manager.broadcast(f"chat:{room.id}", _событие("chat:message", payload.model_dump()))
     return {"ok": True, "taskId": str(task.id), "taskNumber": task.number}
 
 

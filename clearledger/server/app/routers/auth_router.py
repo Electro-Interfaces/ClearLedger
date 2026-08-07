@@ -311,6 +311,7 @@ async def get_me(
         role=current_user.role,
         is_superadmin=current_user.is_superadmin,
         default_company_id=str(current_user.company_id) if current_user.company_id else None,
+        avatar_url=current_user.avatar_url,
         companies=briefs,
     )
 

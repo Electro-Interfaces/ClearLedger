@@ -84,6 +84,9 @@ class MeResponse(BaseModel):
     role: str
     is_superadmin: bool
     default_company_id: str | None = None
+    # Фото профиля — одно на всё пространство: его ставят в своей учётной записи,
+    # а показывают везде, где человек появляется, — в чате, составе группы, ленте.
+    avatar_url: str | None = None
     companies: list[CompanyBrief]
 
 

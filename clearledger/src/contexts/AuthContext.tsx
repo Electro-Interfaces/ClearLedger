@@ -25,6 +25,8 @@ interface AuthContextType {
   logout: () => void
   /** Усыновить сессию по готовому access-токену (после принятия приглашения). */
   applySession: (accessToken: string) => Promise<void>
+  /** Перечитать свой профиль — после смены фото или имени в учётной записи. */
+  refreshMe: () => Promise<void>
 }
 
 // Demo-пользователь (офлайн без бэкенда): суперадмин со всеми компаниями.
@@ -76,6 +78,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(me)
   }, [])
 
+  const refreshMe = useCallback(async () => {
+    setUser(await authService.getMe())
+  }, [])
+
   const logout = useCallback(() => {
     authService.logout()
     setUser(null)
@@ -87,7 +93,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ user, token, isAuthenticated: !!user, loading, login, logout, applySession }}
+      value={{ user, token, isAuthenticated: !!user, loading, login, logout, applySession, refreshMe }}
     >
       {children}
     </AuthContext.Provider>

@@ -190,8 +190,8 @@ export const archiveRoom = (roomId: string) =>
 export const unarchiveRoom = (roomId: string) =>
   post<{ ok: boolean; isArchived: boolean }>(`/api/chat/rooms/${roomId}/unarchive`, {})
 
-export const addParticipant = (roomId: string, userId: string) =>
-  post<{ ok: boolean }>(`/api/chat/rooms/${roomId}/participants`, { userId })
+export const addParticipant = (roomId: string, userId: string, seeHistory = true) =>
+  post<{ ok: boolean }>(`/api/chat/rooms/${roomId}/participants`, { userId, seeHistory })
 
 /** Позвать в чат человека, который работает в своей почте и в пространство не заходит.
  * Сообщения комнаты уходят ему письмом, ответ возвращается в ленту. */

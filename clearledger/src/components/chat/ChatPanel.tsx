@@ -50,6 +50,7 @@ import { isMuted } from '@/services/chatService'
 import { listSpaceObjects } from '@/services/spaceObjectsService'
 import { listTaskPeople, listTaskTypes } from '@/services/tasksService'
 import { useTasksApp } from '@/hooks/useTasksApp'
+import { useSendMode } from '@/hooks/useSendMode'
 import { useSupportContext } from '@/contexts/SupportContext'
 import type {
   ChatRoom, ChatMessage, ChatParticipant, ChatPresence, ChatFolder as ChatFolderModel, ChatPoll,
@@ -704,7 +705,7 @@ function RoomInfoPanel({
   canManage: boolean
   /** Права владельца: раздача ролей и снятие админов. */
   canOwn: boolean
-  onAdd: (uid: string) => void
+  onAdd: (uid: string, seeHistory: boolean) => void
   /** Позвали участника по почте — перечитать состав комнаты. */
   onMailAdded: () => void
   onRename: (name: string) => void
@@ -723,6 +724,9 @@ function RoomInfoPanel({
 }) {
   const { companyId } = useCompany()
   const [q, setQ] = useState('')
+  // Видит ли новый участник прошлое группы. Держим здесь, а не у каждой строки:
+  // решение принимают один раз, а зовут иногда сразу нескольких.
+  const [seeHistory, setSeeHistory] = useState(true)
   // Переименование — инлайн у заголовка: отдельного «меню чата» в панели нет.
   const [nameDraft, setNameDraft] = useState<string | null>(null)
   // Поиск объекта для привязки: объектов сотни, селектом их не выбрать.
@@ -1004,9 +1008,22 @@ function RoomInfoPanel({
             <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Поиск сотрудника…" className="h-8 pl-8 text-xs" />
           </div>
+          {/* Прошлое группы новичку видно по умолчанию — за этим людей и зовут.
+              Снимают галочку там, где до его прихода обсуждали не его дело. */}
+          <label className="mb-2 flex cursor-pointer items-start gap-2 text-[12px] text-muted-foreground">
+            <input type="checkbox" checked={seeHistory} onChange={(e) => setSeeHistory(e.target.checked)}
+              className="mt-0.5 size-3.5 accent-primary" />
+            <span>
+              Показать прошлую переписку
+              <span className="block text-[11px] opacity-70">
+                {seeHistory ? 'Новый участник прочитает группу с самого начала'
+                            : 'Новый участник увидит только то, что напишут после'}
+              </span>
+            </span>
+          </label>
           <div className="space-y-0.5">
             {addable.map((u) => (
-              <button key={u.userId} onClick={() => onAdd(u.userId)} className="flex w-full items-center gap-2.5 rounded-md px-1.5 py-1.5 text-left hover:bg-accent">
+              <button key={u.userId} onClick={() => onAdd(u.userId, seeHistory)} className="flex w-full items-center gap-2.5 rounded-md px-1.5 py-1.5 text-left hover:bg-accent">
                 <Avatar seed={u.userId} name={u.name} online={u.online} size={30} src={u.avatarUrl} />
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm">{u.name}</div>
@@ -1616,6 +1633,7 @@ function ChatBubble({
   onImageClick?: (path: string) => void
 }) {
   const { isFirstInGroup, isLastInGroup, showDate } = grouping
+  const { shouldSend: editSend } = useSendMode()
   // Ответ свайпом: сдвиг пузыря вправо ставит его в цитату — привычный жест
   // мобильных мессенджеров, на мыши остаётся кнопка «Ответить».
   const [swipeX, setSwipeX] = useState(0)
@@ -1630,6 +1648,22 @@ function ChatBubble({
   const isVideo = message.fileUrl && !message.isDeleted
     && (message.type === 'video' || /\.(mp4|webm|mov|m4v)$/i.test(message.fileName || message.fileUrl))
   const isEditing = editingId === message.id
+
+  // Служебная запись ленты — не чья-то реплика, а событие группы: кто пришёл и
+  // чьими стараниями. Поэтому без пузыря и без стороны — плашка по центру.
+  if (message.type === 'system') {
+    return (
+      <>
+        {showDate && <DateChip iso={message.createdAt} />}
+        <div className="mb-2 flex justify-center">
+          <div className="rounded-full bg-muted/60 px-3 py-1 text-center text-[11px] text-muted-foreground">
+            {message.content}
+            {message.userName && <span className="opacity-70"> · {message.userName}</span>}
+          </div>
+        </div>
+      </>
+    )
+  }
 
   if (message.isDeleted) {
     return (
@@ -1779,7 +1813,8 @@ function ChatBubble({
             <div className="space-y-1">
               <textarea autoFocus value={editText} onChange={(e) => onEditTextChange(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onEditSave() }
+                  // Правка сохраняется тем же жестом, каким отправляют новое.
+                  if (editSend(e)) { e.preventDefault(); onEditSave() }
                   if (e.key === 'Escape') onEditCancel()
                 }}
                 className="min-h-[28px] w-full resize-none rounded border border-border bg-transparent p-1 text-[13px] outline-none focus:border-primary" rows={2} />
@@ -2048,6 +2083,8 @@ export function ChatPanel({ compact, scopeProduct }: {
     refetchInterval: 60000,
   })
   const presenceMap = useMemo(() => new Map(presence.map((p) => [p.userId, p])), [presence])
+  // Чем отправляется сообщение — личная привычка человека, одна на всё пространство.
+  const { shouldSend, hint: sendHint } = useSendMode()
 
   // ── WebSocket ──
   const onWs = useCallback((e: WsEvent) => {
@@ -2055,6 +2092,10 @@ export function ChatPanel({ compact, scopeProduct }: {
       case 'chat:message':
         qc.invalidateQueries({ queryKey: ['chat-messages', selectedRoom] })
         qc.invalidateQueries({ queryKey: ['chat-rooms'] })
+        // Появление участника приезжает служебной записью ленты — по ней и
+        // обновляем состав. Раньше он обновлялся только у того, кто добавлял:
+        // у остальных счётчик в шапке уходил вперёд, а список оставался старым.
+        if (e.messageType === 'system') qc.invalidateQueries({ queryKey: ['chat-room-detail', selectedRoom] })
         // Звук — на чужое сообщение и только если человек не смотрит в этот чат:
         // пикать на собственную отправку и на открытую переписку незачем.
         if (e.userId && String(e.userId) !== user?.id
@@ -2841,7 +2882,7 @@ export function ChatPanel({ compact, scopeProduct }: {
           canManage={isAdmin || activeRoom?.createdBy === user?.id
             || activeRoom?.myRole === 'owner' || activeRoom?.myRole === 'admin'}
           canOwn={isAdmin || activeRoom?.createdBy === user?.id || activeRoom?.myRole === 'owner'}
-          onAdd={(uid) => { chat.addParticipant(selectedRoom!, uid).then(() => { qc.invalidateQueries({ queryKey: ['chat-room-detail', selectedRoom] }); toast.success('Участник добавлен') }).catch(() => toast.error('Не удалось добавить')) }}
+          onAdd={(uid, seeHistory) => { chat.addParticipant(selectedRoom!, uid, seeHistory).then(() => { qc.invalidateQueries({ queryKey: ['chat-room-detail', selectedRoom] }); qc.invalidateQueries({ queryKey: ['chat-rooms'] }); toast.success(seeHistory ? 'Участник добавлен' : 'Участник добавлен — без прошлой переписки') }).catch(() => toast.error('Не удалось добавить')) }}
           onMailAdded={() => qc.invalidateQueries({ queryKey: ['chat-room-detail', selectedRoom] })}
           onRename={(name) => { chat.patchRoom(selectedRoom!, { name }).then(() => { qc.invalidateQueries({ queryKey: ['chat-rooms'] }); qc.invalidateQueries({ queryKey: ['chat-room-detail', selectedRoom] }); toast.success('Чат переименован') }).catch((e: Error) => toast.error(e.message || 'Не удалось переименовать')) }}
           onAvatar={(file) => {
@@ -3046,8 +3087,9 @@ export function ChatPanel({ compact, scopeProduct }: {
                     состояние. Размер текста тот же, что в пузырях ленты (13/1.45):
                     набранное выглядит ровно так, как встанет в переписку. */}
                 <textarea ref={inputRef} value={messageText} onChange={(e) => handleTextChange(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() } }}
+                  onKeyDown={(e) => { if (shouldSend(e)) { e.preventDefault(); handleSend() } }}
                   onPaste={handlePaste}
+                  title={sendHint}
                   placeholder="Сообщение… (Ctrl+V — вставить скриншот)" rows={1}
                   className="min-h-[32px] flex-1 resize-none overflow-y-auto rounded-2xl border border-border bg-muted/40 px-3 py-1.5 text-[13px] leading-[1.45] outline-none focus:ring-1 focus:ring-primary" />
                 <button onClick={handleSend} disabled={(!messageText.trim() && !pendingFiles.length) || sendMutation.isPending || uploading}

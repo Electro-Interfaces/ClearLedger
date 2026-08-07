@@ -24,6 +24,8 @@ export interface AuthUser {
   role: string
   is_superadmin: boolean
   default_company_id?: string | null
+  /** Фото профиля — одно на пространство, показывается везде, где виден человек. */
+  avatar_url?: string | null
   companies: CompanyRef[]
 }
 
