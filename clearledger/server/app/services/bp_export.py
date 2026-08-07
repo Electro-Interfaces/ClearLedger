@@ -392,6 +392,19 @@ class BpPackageEmitter:
         seen: set[tuple[str, str]] = set()
         code2guid = {str((ref.extra or {}).get("code") or ""): uid for uid, ref in whs.items()}
 
+        # Склады станции по короткому названию. Внутреннее перемещение агент
+        # подписывает так, как это звучит на АЗС — «Склад» → «Торговый зал», —
+        # а в НСИ те же места зовутся «АЗС №208, Склад» и «АЗС №208, Торговый
+        # зал». Без сопоставления документ откладывался как нерасшифрованный.
+        свои_склады: dict[str, str] = {}
+        for uid, ref in whs.items():
+            голова, _, хвост = str(getattr(ref, "name", "") or "").partition(",")
+            if station and голова.strip().endswith(f"№{station}") and хвост.strip():
+                свои_склады[хвост.strip().lower()] = uid
+
+        def склад_по_имени(значение) -> str:
+            return свои_склады.get(str(значение or "").strip().lower(), "")
+
         # Склады перемещения по номеру документа — из зеркала ЦБ.
         #
         # Перемещения, приехавшие выгрузкой ЦБ, приходят без мест: в нормализованном
@@ -419,6 +432,21 @@ class BpPackageEmitter:
             if dedup in seen or doc.get("ПометкаУдаления"):
                 continue
             seen.add(dedup)
+            # Товар, отсканированный по коду маркировки, которого нет ни в НСИ
+            # сети, ни в мастере: агент честно ставит «КарточкаНеОпознана» и
+            # оставляет строку без номенклатуры. Грузить документ с дырой в
+            # бухгалтерию нельзя — откладываем целиком, пока карточку не заведут.
+            безымянные = [str(строка.get("Наименование") or строка.get("ШтрихКод") or "?")
+                          for тч in ("Товары", "ВыпускБлюд", "ВозвращенныеТовары")
+                          for строка in (doc.get(тч) or [])
+                          if not str(строка.get("Номенклатура") or "").strip()]
+            if безымянные:
+                skipped.append({
+                    "Тип": kind,
+                    "Номер": str(doc.get("Номер") or source_uuid),
+                    "Причина": f"строка без карточки: {', '.join(безымянные[:3])}",
+                })
+                continue
             doc["Тип"] = kind
             doc["ИсточникUUID"] = source_uuid
             doc["Дата"] = _iso(doc.get("Дата"))
@@ -503,8 +531,8 @@ class BpPackageEmitter:
                     if зеркало:
                         from_code = from_code or зеркало[0]
                         to_code = to_code or зеркало[1]
-                from_uuid = code2guid.get(from_code, "")
-                to_uuid = code2guid.get(to_code, "")
+                from_uuid = code2guid.get(from_code, "") or склад_по_имени(doc.get("Отправитель"))
+                to_uuid = code2guid.get(to_code, "") or склад_по_имени(doc.get("Получатель"))
                 if direction == "out":
                     from_uuid = from_uuid or wh_uuid
                     to_uuid = to_uuid or station_wh.get(int(doc.get("КодАЗСПолучателя") or 0), "")
