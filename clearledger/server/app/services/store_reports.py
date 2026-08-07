@@ -55,6 +55,39 @@ def _период(date_from: str | None, date_to: str | None) -> tuple[datetime,
             datetime.combine(d2, time.max, tzinfo=timezone.utc))
 
 
+def _остатки_карточек(ф: str = "", доп: str = "") -> str:
+    """Остатки, сведённые к карточке: строка на (станция, место, карточка).
+
+    Станция шлёт остаток по штрихкодам, а штрихкодов у карточки бывает много:
+    у «Арахиса МААГ» на 208 их семь, у «Ароматизатора AREON» — восемь. Прежний
+    DISTINCT ON брал ОДИН штрихкод и молча терял остальные — по 208 ведомость
+    показывала 51 641 единицу вместо 17 541, потому что у «Молока» выбиралась
+    плюсовая строка, а минусовая (−37 350) исчезала. Остаток карточки — это
+    сумма по её штрихкодам, других вариантов нет.
+
+    Дедуп по (место, balance_key) внутри — страховка на случай, если снимок
+    ляжет поверх недоудалённого: приёмник (edge_stock.sync_from_snapshot)
+    сначала чистит станцию, потом пишет заново, и сорванная посередине
+    транзакция теоретически может оставить две одинаковые строки. Место в
+    ключе обязательно: сам balance_key считается от карточки и штрихкода, и у
+    одного товара в зале и на складе он ОДИНАКОВ — без места дедуп съел бы
+    складской остаток.
+    """
+    return f"""
+        SELECT station_id, place, max(place_name) AS place_name, item_uuid,
+               max(name) AS name, min(barcode) AS barcode,
+               sum(quantity) AS quantity, max(retail_price) AS retail_price,
+               max(cost_unit) AS cost_unit, max(snapshot_at) AS snapshot_at
+        FROM (
+            SELECT DISTINCT ON (station_id, place, balance_key) *
+            FROM store_stock_balances
+            WHERE company_id = :cid{ф}{доп}
+            ORDER BY station_id, place, balance_key, snapshot_at DESC
+        ) u
+        GROUP BY station_id, place, item_uuid
+    """
+
+
 async def documents(db: AsyncSession, cid, date_from, date_to,
                     stations: list[int] | None = None) -> dict:
     """Единый журнал документов сети: всё, чем двигался товар.
@@ -227,20 +260,16 @@ async def turnover(db: AsyncSession, cid, date_from, date_to,
 
     начало = {(r["station_id"], r["item_uuid"]): float(r["quantity"] or 0)
               for r in (await db.execute(text(f"""
-        SELECT DISTINCT ON (station_id, item_uuid)
-               station_id, item_uuid, quantity
-        FROM store_stock_balances
-        WHERE company_id = :cid{ф_ст} AND snapshot_at <= :d1
-        ORDER BY station_id, item_uuid, snapshot_at DESC
+        SELECT station_id, item_uuid, sum(quantity) AS quantity
+        FROM ({_остатки_карточек(ф_ст, " AND snapshot_at <= :d1")}) t
+        GROUP BY station_id, item_uuid
     """), p)).mappings().all()}
 
     конец = {(r["station_id"], r["item_uuid"]): (float(r["quantity"] or 0), r["name"])
              for r in (await db.execute(text(f"""
-        SELECT DISTINCT ON (station_id, item_uuid)
-               station_id, item_uuid, quantity, name
-        FROM store_stock_balances
-        WHERE company_id = :cid{ф_ст} AND snapshot_at <= :d2
-        ORDER BY station_id, item_uuid, snapshot_at DESC
+        SELECT station_id, item_uuid, sum(quantity) AS quantity, max(name) AS name
+        FROM ({_остатки_карточек(ф_ст, " AND snapshot_at <= :d2")}) t
+        GROUP BY station_id, item_uuid
     """), p)).mappings().all()}
 
     приход: dict[tuple, float] = {}
@@ -450,14 +479,7 @@ async def stock(db: AsyncSession, cid, date_from, date_to,
     ф = " AND station_id = ANY(:st)" if stations else ""
     if stations:
         p["st"] = stations
-    rows = (await db.execute(text(f"""
-        SELECT DISTINCT ON (station_id, place, item_uuid)
-               station_id, place, place_name, name, barcode, quantity, item_uuid,
-               retail_price, cost_unit, snapshot_at
-        FROM store_stock_balances
-        WHERE company_id = :cid{ф}
-        ORDER BY station_id, place, item_uuid, snapshot_at DESC
-    """), p)).mappings().all()
+    rows = (await db.execute(text(_остатки_карточек(ф)), p)).mappings().all()
     # Станция знает себестоимость только по тому, что приняла сама. Остальное
     # оценивается по последней закупке — с пометкой, откуда взялась цена: без
     # этого «стоимость запаса» превращается в число без происхождения.
@@ -775,16 +797,19 @@ async def mrc(db: AsyncSession, cid, date_from, date_to,
     задаёт он.
     """
     p = {"cid": cid}
-    ф = " AND b.station_id = ANY(:st)" if stations else ""
+    ф = " AND station_id = ANY(:st)" if stations else ""
     if stations:
         p["st"] = stations
     rows = (await db.execute(text(f"""
-        SELECT DISTINCT ON (b.station_id, b.item_uuid)
-               b.station_id, b.name, b.barcode, b.retail_price, i.mrc, b.quantity
-        FROM store_stock_balances b
+        SELECT b.station_id, b.name, b.barcode, b.retail_price, i.mrc, b.quantity
+        FROM (
+            SELECT station_id, item_uuid, max(name) AS name, min(barcode) AS barcode,
+                   max(retail_price) AS retail_price, sum(quantity) AS quantity
+            FROM ({_остатки_карточек(ф)}) t
+            GROUP BY station_id, item_uuid
+        ) b
         JOIN edge.item i ON i.external_uuid::text = b.item_uuid
-        WHERE b.company_id = :cid{ф} AND i.mrc IS NOT NULL AND i.mrc > 0
-        ORDER BY b.station_id, b.item_uuid, b.snapshot_at DESC
+        WHERE i.mrc IS NOT NULL AND i.mrc > 0
     """), p)).mappings().all()
     строки = []
     for r in rows:
