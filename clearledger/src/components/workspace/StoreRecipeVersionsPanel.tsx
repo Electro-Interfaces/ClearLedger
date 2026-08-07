@@ -288,6 +288,9 @@ export function StoreRecipeVersionsPanel() {
   const { company } = useCompany()
   const queryClient = useQueryClient()
   const [selected, setSelected] = useState<string | null>(null)
+  // Раскрытая станция: список того, что мешает её блюдам. Свёрнуто по умолчанию —
+  // сеть смотрят сводкой, разбираются по одной точке.
+  const [открыта, открыть] = useState<number | null>(null)
   const query = useQuery({
     queryKey: ['store-recipe-versions', company.id],
     queryFn: getStoreRecipeWorkspace,
@@ -403,7 +406,11 @@ export function StoreRecipeVersionsPanel() {
               <tbody>
                 {data.deliveries.map((delivery) => {
                   const readiness = delivery.readiness
+                  const блюда = readiness?.dishes ?? []
+                  const мешает = блюда.filter((d) => d.state !== 'готово')
+                  const раскрыто = открыта === delivery.station_id
                   return (
+                    <>
                     <tr key={delivery.station_id} className="border-b border-border last:border-0">
                       <td className="px-4 py-3 font-semibold">{delivery.station_id}</td>
                       <td className="px-4 py-3"><span className={`rounded-full border px-2 py-1 text-xs ${DELIVERY_STYLE[delivery.state]}`}>{DELIVERY_LABEL[delivery.state]}</span></td>
@@ -416,6 +423,39 @@ export function StoreRecipeVersionsPanel() {
                       <td className="px-4 py-3 text-xs text-muted-foreground"><span className="inline-flex items-center gap-1.5"><Clock3 className="h-3.5 w-3.5" />{localDate(delivery.agent_last_seen)}</span></td>
                       <td className="px-4 py-3 text-right"><Button size="xs" variant="outline" onClick={() => push.mutate(delivery.station_id)} disabled={!data.bundle || push.isPending}><Send />Отправить</Button></td>
                     </tr>
+                    {раскрыто && мешает.length > 0 && (
+                      <tr key={`${delivery.station_id}-детали`} className="border-b border-border bg-muted/20">
+                        <td colSpan={6} className="px-4 py-3">
+                          <div className="mb-2 text-xs text-muted-foreground">
+                            Причины разной природы и чинят их разные люди: цену назначает товаровед,
+                            код кассы закрепляется на станции, штрихкод и ставку правят в карточке
+                            центра, сырьё надо заказать. «Без прихода» продажу не блокирует — там
+                            неверны себестоимость и остаток.
+                          </div>
+                          <table className="w-full text-xs">
+                            <tbody>
+                              {мешает.map((d) => (
+                                <tr key={d.name} className="border-t border-border/30">
+                                  <td className="py-1.5 pr-3">{d.name}</td>
+                                  <td className="py-1.5 pr-3 whitespace-nowrap">
+                                    <span className={d.state === 'стоп' ? 'text-red-300' : 'text-amber-300/90'}>
+                                      {d.state}
+                                    </span>
+                                  </td>
+                                  <td className="py-1.5 pr-3 text-muted-foreground">
+                                    {(d.reasons ?? []).join(' · ') || '—'}
+                                  </td>
+                                  <td className="py-1.5 text-muted-foreground/80">
+                                    {(d.owners ?? []).join(' · ')}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </td>
+                      </tr>
+                    )}
+                    </>
                   )
                 })}
               </tbody>

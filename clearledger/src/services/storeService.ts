@@ -1793,6 +1793,11 @@ export interface StoreRecipeDelivery {
     bundle_id?: string
     critical?: number
     warnings?: number
+    /** Блюда, а не проблемы: «27 блюд не продаются» говорит больше, чем «60 критичных». */
+    blocked?: number
+    unposted?: number
+    /** Состояние каждого блюда с причиной и адресатом — как на станции. */
+    dishes?: Array<{ name: string; state: string; reasons?: string[]; owners?: string[] }>
     issues?: Array<{ code: string; message: string; dish?: string }>
   } | null
 }
