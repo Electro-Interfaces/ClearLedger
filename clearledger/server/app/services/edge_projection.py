@@ -45,15 +45,59 @@ def enrich_retail_meta(meta: dict, recipes: dict[str, list[dict]], dish_ids: set
 
 
 def _station_shift(meta: dict) -> tuple[str, str]:
-    """Станция и ВНУТРЕННИЙ номер смены — единственный надёжный ключ факта.
+    """Станция и номер смены — ключ, под которым один факт виден из обоих каналов.
 
-    Номер смены (`2082083007202601`) собирается из даты открытия и уникальным не
-    является: смена, начавшаяся 30 июля в 23:59, получает тот же номер, что и
-    начавшаяся в 00:05 того же дня. Внутренний номер кассы — сквозной счётчик,
-    он различает их точно.
+    Раньше ключом был ВНУТРЕННИЙ номер кассы, но в выгрузке ЦБ его нет, и пара
+    «станционный ОРП / ОРП из ЦБ» просто не встречалась в одной группе: 53 смены
+    и 1,95 млн ₽ выручки остались посчитанными дважды. Общий у обоих каналов
+    только номер смены.
+
+    Он не уникален сам по себе — смена, начавшаяся 30 июля в 23:59, получает тот
+    же номер, что и начавшаяся в 00:05 того же дня, — поэтому внутренний номер
+    остаётся различителем ВНУТРИ группы: см. _supersede_rivals.
     """
     shift = (meta or {}).get("Смена") or {}
-    return (str(shift.get("КодАЗС") or ""), str(shift.get("НомерСменыВнутр") or ""))
+    return (str(shift.get("КодАЗС") or ""),
+            str(shift.get("НомерСмены") or shift.get("Смена") or ""))
+
+
+def _shift_inner(meta: dict) -> str:
+    return str(((meta or {}).get("Смена") or {}).get("НомерСменыВнутр") or "")
+
+
+def _станционный(row) -> bool:
+    return bool(((row.meta or {}).get("Edge") or {}).get("from_station"))
+
+
+def _doc_total(row) -> float:
+    return round(float(((row.meta or {}).get("Документ") or {}).get("СуммаДокумента") or 0), 2)
+
+
+def _split_by_inner(group: list) -> list[list]:
+    """Разбить смены-однофамильцы на настоящие факты.
+
+    Смена, открытая 30 июля в 23:59, и открытая в 00:05 того же дня делят номер,
+    но не внутренний номер кассы. У документов ЦБ внутреннего номера нет вовсе,
+    поэтому такую запись прикрепляем к той смене, с которой сходится сумма — а
+    если сумма не решает однозначно, оставляем отдельно: лучше лишний документ в
+    L2, чем вытесненная чужая смена.
+    """
+    свои: dict[str, list] = {}
+    ничьи: list = []
+    for row in group:
+        (свои.setdefault(_shift_inner(row.meta or {}), []) if _shift_inner(row.meta or {})
+         else ничьи).append(row)
+    if not свои:
+        return [ничьи]
+    for row in ничьи:
+        сумма = _doc_total(row)
+        похожие = [k for k, rs in свои.items() if any(_doc_total(r) == сумма for r in rs)]
+        цель = похожие[0] if len(похожие) == 1 else (next(iter(свои)) if len(свои) == 1 else None)
+        if цель is None:
+            свои.setdefault(f"?{row.id}", []).append(row)
+        else:
+            свои[цель].append(row)
+    return list(свои.values())
 
 
 # Пакеты одной и той же смены приезжают из двух источников: от агента станции и
@@ -239,9 +283,11 @@ async def _supersede_rivals(
     """
     if not touched_ids:
         return 0
+    # Канал ЦБ пишет свои документы с source='oneC'. Пока выборка ограничивалась
+    # каналом 'edge', станционный ОРП соперничал сам с собой, а пара «станция /
+    # ЦБ» вообще не встречалась: 49 смен и 1,95 млн ₽ выручки остались вдвойне.
     rows = (await db.execute(select(DataEntry).where(
         DataEntry.company_id == company_id,
-        DataEntry.source == "edge",
         DataEntry.doc_type_id == "retail_sale_sidegoods",
     ))).scalars().all()
 
@@ -255,16 +301,17 @@ async def _supersede_rivals(
     for group in groups.values():
         if len(group) < 2:
             continue
-        # Победитель — документ станции; если станционного нет, оставляем тот,
-        # что пришёл первым, чтобы выбор не прыгал между пересборками.
-        def станционный(row: DataEntry) -> bool:
-            return bool(((row.meta or {}).get("Edge") or {}).get("from_station"))
-        group.sort(key=lambda r: (not станционный(r), r.created_at, str(r.id)))
-        for loser in group[1:]:
-            if loser.status == "superseded":
+        for подгруппа in _split_by_inner(group):
+            if len(подгруппа) < 2:
                 continue
-            loser.status = "superseded"
-            count += 1
+            # Победитель — документ станции; если станционного нет, оставляем тот,
+            # что пришёл первым, чтобы выбор не прыгал между пересборками.
+            подгруппа.sort(key=lambda r: (not _станционный(r), r.created_at, str(r.id)))
+            for loser in подгруппа[1:]:
+                if loser.status == "superseded":
+                    continue
+                loser.status = "superseded"
+                count += 1
     if count:
         await db.flush()
     return count

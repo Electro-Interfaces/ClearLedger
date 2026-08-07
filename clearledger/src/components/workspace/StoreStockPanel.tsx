@@ -9,6 +9,7 @@ import { useMemo, useState } from 'react'
 import { rowDrill } from './rowDrill'
 import { SkuDetailModal } from './SkuDetailModal'
 import { useQuery } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import { ShowMore, useVisible } from '@/components/common/ShowMore'
 import { PivotView } from './PivotView'
 import {
@@ -32,6 +33,7 @@ export function StoreStockPanel({ companyId, dateFrom, dateTo }: { companyId: st
   // Список и сводная — две подачи одного отбора, как в «Топливе»: там разрез
   // собирают мышью, и здесь он собирается тем же конструктором, а не своим.
   const [подача, задатьПодачу] = useState<'list' | 'pivot'>('list')
+  const [выгружается, задатьВыгрузку] = useState(false)
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['store-stock', companyId, warehouse ?? ''],
@@ -52,6 +54,23 @@ export function StoreStockPanel({ companyId, dateFrom, dateTo }: { companyId: st
     // сверху оказывались нули, а сами глубокие минусы — в хвосте. Разворачиваем.
     return onlyNegative ? [...rows].sort((a, b) => (a.retail_value ?? 0) - (b.retail_value ?? 0)) : rows
   }, [data, q, marked, onlyNegative])
+
+  const выгрузить = async () => {
+    задатьВыгрузку(true)
+    try {
+      const { exportStockBook } = await import('@/services/stockExport')
+      await exportStockBook({
+        items,
+        scopeLabel: warehouse ? `место ${warehouse}` : 'вся сеть',
+        snapshotAt: data?.snapshot_at ?? null,
+        summary: data?.summary,
+      })
+    } catch (e) {
+      toast.error('Не удалось собрать книгу', { description: (e as Error).message })
+    } finally {
+      задатьВыгрузку(false)
+    }
+  }
 
   if (isLoading) return <div className="p-6 text-sm text-muted-foreground">Загрузка остатков…</div>
   if (error) return <div className="p-6 text-sm text-red-400/90">Ошибка загрузки остатков</div>
@@ -113,6 +132,15 @@ export function StoreStockPanel({ companyId, dateFrom, dateTo }: { companyId: st
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          {/* Книга для сверки: сводка, лист проблемных и позиции с пустой
+              колонкой ФАКТ. Выгружается ТЕКУЩИЙ отбор — то, что человек видит,
+              иначе файл спорит с экраном. */}
+          <button type="button" disabled={выгружается || !items.length}
+            onClick={выгрузить}
+            title="Книга Excel: сводка, лист «Требуют решения» и остатки с колонкой ФАКТ — для сверки и подготовки пересчёта"
+            className="rounded-md border border-border/50 px-2.5 py-1.5 text-xs font-medium hover:bg-accent/40 disabled:opacity-50">
+            {выгружается ? 'Собираю…' : 'Выгрузить в Excel'}
+          </button>
           <div className="inline-flex rounded-md bg-muted p-[3px]">
             {(['list', 'pivot'] as const).map((v) => (
               <button key={v} type="button" onClick={() => задатьПодачу(v)}

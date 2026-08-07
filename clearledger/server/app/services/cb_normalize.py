@@ -36,6 +36,12 @@ _CATEGORY = {
 }
 
 
+# Документы, которые ЕСТЬ сама смена: их ключ обязан её включать. Выпуск блюд
+# сюда не входит — он оформляется по факту готовки и так же попадает в пакет
+# соседней смены (у 39 задвоенных выпусков ИсточникUUID один, а смены две).
+_SHIFT_BOUND = {"retail_sale_sidegoods", "return_sale"}
+
+
 def _shift_key(shift: dict) -> str:
     """Натуральный ключ смены: ОСЭ_Номер или НомерСмены (идемпотентность .epf)."""
     return str(shift.get("ОСЭНомер") or shift.get("НомерСмены") or "").strip()
@@ -264,7 +270,13 @@ def normalize_shift_package(
             "source": source,
             "source_label": source_label,
             # натуральный ключ для идемпотентности (смена + kind + источник)
-            "source_id": f"{skey}:{kind}:{src_uuid}",
+            # Ключ сменных документов включает смену, остальных — нет. Приёмка,
+            # инвентаризация и списание живут сами по себе: агент кладёт их в
+            # пакет той смены, что открыта в момент выгрузки, и один документ
+            # 11.06 попал в обе смены дня — 161 задвоенный документ за период.
+            "source_id": (f"{skey}:{kind}:{src_uuid}"
+                          if kind in _SHIFT_BOUND or not src_uuid
+                          else f"{kind}:{src_uuid}"),
             "layer": "clean",
             "status": "verified",
             "meta": meta,
@@ -301,6 +313,7 @@ def _selftest() -> dict:
 if __name__ == "__main__":
     import json
     _selftest_contour()
+    _selftest_keys()
     print(json.dumps(_selftest(), ensure_ascii=False, indent=2))
 
 
@@ -335,3 +348,23 @@ def _selftest_contour() -> None:
             {"Номенклатура": "uuid-chips", "Количество": 2}]}]}
     строки = normalize_shift_package(pkg, ingredients={"uuid-milk"})["entries"][0]["meta"]["Документ"]["Товары"]
     assert [s["КлассSKU"] for s in строки] == [_ОБЩЕПИТ, _СОПУТКА], строки
+
+
+def _selftest_keys() -> None:
+    """Ключ документа: смену включают только сменные, остальные — нет."""
+    def ключи(смена: str) -> dict:
+        pkg = {"Смена": {"КодАЗС": "208", "ОСЭНомер": смена}, "Документы": [
+            {"Тип": "retail_sale_sidegoods", "ИсточникUUID": "orp-1", "Товары": []},
+            {"Тип": "purchase", "ИсточникUUID": "ptu-1", "Товары": []},
+            {"Тип": "production_release", "ИсточникUUID": "vyp-1", "ВыпускБлюд": []},
+        ]}
+        return {e["doc_type_id"]: e["source_id"]
+                for e in normalize_shift_package(pkg)["entries"]}
+
+    a, b = ключи("2082081106202601"), ключи("2082081106202602")
+    # приёмка и выпуск блюд попадают в пакет той смены, что открыта в момент
+    # выгрузки: один документ в двух сменах обязан дать ОДНУ запись
+    assert a["purchase"] == b["purchase"], (a, b)
+    assert a["production_release"] == b["production_release"], (a, b)
+    # ОРП принадлежит смене — разные смены, разные документы
+    assert a["retail_sale_sidegoods"] != b["retail_sale_sidegoods"], (a, b)
