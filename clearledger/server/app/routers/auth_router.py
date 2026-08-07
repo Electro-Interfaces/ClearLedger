@@ -21,7 +21,7 @@ from app.auth import (
     verify_password,
 )
 from app.database import get_db
-from app.models import Company, User, UserCompany
+from app.models import Company, Counterparty, User, UserCompany
 from app.services import email_service
 from app.utils import resolve_company_id
 from app.schemas import (
@@ -304,6 +304,20 @@ async def get_me(
             for c, uc in rows
         ]
 
+    # Место человека в ТЕКУЩЕЙ компании: должность, кем он тут является и от какой
+    # организации. У мультикомпанийного участника это разное в разных пространствах,
+    # поэтому берём членство в компании по умолчанию, а не первое попавшееся.
+    членство = (await db.execute(
+        select(UserCompany, Company.name)
+        .join(Company, Company.id == UserCompany.company_id)
+        .where(UserCompany.user_id == current_user.id,
+               UserCompany.company_id == current_user.company_id)
+    )).first() if current_user.company_id else None
+    орг = None
+    if членство is not None and членство[0].organization_id:
+        орг = (await db.execute(select(Counterparty.name).where(
+            Counterparty.id == членство[0].organization_id))).scalar_one_or_none()
+
     return MeResponse(
         id=str(current_user.id),
         email=current_user.email,
@@ -312,6 +326,13 @@ async def get_me(
         is_superadmin=current_user.is_superadmin,
         default_company_id=str(current_user.company_id) if current_user.company_id else None,
         avatar_url=current_user.avatar_url,
+        phone_mobile=current_user.phone_mobile,
+        phone_office=current_user.phone_office,
+        position=членство[0].position if членство else None,
+        party_type=членство[0].party_type if членство else None,
+        party_org=орг,
+        company_name=членство[1] if членство else None,
+        company_role=членство[0].role if членство else None,
         companies=briefs,
     )
 

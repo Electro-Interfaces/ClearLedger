@@ -87,6 +87,20 @@ class MeResponse(BaseModel):
     # Фото профиля — одно на всё пространство: его ставят в своей учётной записи,
     # а показывают везде, где человек появляется, — в чате, составе группы, ленте.
     avatar_url: str | None = None
+    # Как связаться помимо пространства — заполняет сам человек.
+    phone_mobile: str | None = None
+    phone_office: str | None = None
+    # Место человека в пространстве. Заполняет администратор, поэтому в личных
+    # настройках показывается, но не правится: должность и принадлежность — это
+    # сведения о месте, а не личное дело.
+    #   party_type: internal — сотрудник организации пространства,
+    #               partner  — сотрудник внешней компании,
+    #               vendor   — поддержка платформы (особый статус и права).
+    position: str | None = None
+    party_type: str | None = None
+    party_org: str | None = None
+    company_name: str | None = None
+    company_role: str | None = None
     companies: list[CompanyBrief]
 
 

@@ -26,6 +26,20 @@ export interface AuthUser {
   default_company_id?: string | null
   /** Фото профиля — одно на пространство, показывается везде, где виден человек. */
   avatar_url?: string | null
+  /** Контакты — правит сам человек. */
+  phone_mobile?: string | null
+  phone_office?: string | null
+  /**
+   * Место человека в пространстве — заполняет администратор.
+   * party_type: internal — сотрудник организации пространства,
+   *             partner  — сотрудник внешней компании,
+   *             vendor   — поддержка платформы (особый статус и права).
+   */
+  position?: string | null
+  party_type?: 'internal' | 'partner' | 'vendor' | null
+  party_org?: string | null
+  company_name?: string | null
+  company_role?: string | null
   companies: CompanyRef[]
 }
 

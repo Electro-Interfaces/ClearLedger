@@ -27,11 +27,29 @@ import * as chat from '@/services/chatService'
 
 type Draft = {
   name: string
+  mobile: string
+  office: string
   theme: ThemePreference
   level: UiLevel
   send: SendMode
   photo: File | null
   photoRemoved: boolean
+}
+
+/** Кем человек приходится этому пространству. Заполняет администратор. */
+const УЧАСТИЕ: Record<string, { label: string; hint: string }> = {
+  internal: {
+    label: 'Сотрудник организации',
+    hint: 'Полноценный участник компании, которой принадлежит пространство.',
+  },
+  partner: {
+    label: 'Внешний участник',
+    hint: 'Сотрудник другой компании — подрядчик, поставщик, заказчик. Видит то, что ему открыли.',
+  },
+  vendor: {
+    label: 'Поддержка платформы',
+    hint: 'Канал помощи по самой платформе: особый статус, свои права и доступы.',
+  },
 }
 
 /** Сегменты выбора — один язык на все настройки страницы. */
@@ -74,6 +92,8 @@ export function PersonalSettings() {
 
   const исходный = (): Draft => ({
     name: user?.name ?? '',
+    mobile: user?.phone_mobile ?? '',
+    office: user?.phone_office ?? '',
     theme: themePref,
     level,
     send: sendMode,
@@ -94,6 +114,8 @@ export function PersonalSettings() {
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => setDraft((d) => ({ ...d, [k]: v }))
 
   const dirty = draft.name.trim() !== (user?.name ?? '')
+    || draft.mobile.trim() !== (user?.phone_mobile ?? '')
+    || draft.office.trim() !== (user?.phone_office ?? '')
     || draft.theme !== themePref || draft.level !== level || draft.send !== sendMode
     || !!draft.photo || draft.photoRemoved
 
@@ -118,8 +140,10 @@ export function PersonalSettings() {
     try {
       // Сначала серверное — если оно не пройдёт, локальные настройки не должны
       // разъехаться с тем, что человек видит на других устройствах.
-      const тело: { name?: string; avatarUrl?: string } = {}
+      const тело: { name?: string; avatarUrl?: string; phoneMobile?: string; phoneOffice?: string } = {}
       if (имя !== (user?.name ?? '')) тело.name = имя
+      if (draft.mobile.trim() !== (user?.phone_mobile ?? '')) тело.phoneMobile = draft.mobile.trim()
+      if (draft.office.trim() !== (user?.phone_office ?? '')) тело.phoneOffice = draft.office.trim()
       if (draft.photoRemoved) тело.avatarUrl = ''
       else if (draft.photo) тело.avatarUrl = (await chat.uploadAttachment(draft.photo, company.id)).fileUrl
       if (Object.keys(тело).length) {
@@ -193,8 +217,84 @@ export function PersonalSettings() {
           </div>
         </div>
 
+        {/* Связь — как с человеком связаться помимо пространства */}
+        <div className="space-y-3 border-t pt-5">
+          <div>
+            <Label>Связь</Label>
+            <p className="text-xs text-muted-foreground">
+              Эти сведения видят участники пространства, когда нужно с вами связаться
+              напрямую. Заполняете вы сами.
+            </p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="pers-mail" className="text-xs font-normal text-muted-foreground">
+                Электронная почта
+              </Label>
+              <Input id="pers-mail" value={user?.email ?? ''} readOnly disabled />
+              <p className="text-[11px] text-muted-foreground">Ею же вы входите — меняет администратор.</p>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="pers-mob" className="text-xs font-normal text-muted-foreground">
+                Мобильный
+              </Label>
+              <Input id="pers-mob" value={draft.mobile} maxLength={40} inputMode="tel"
+                onChange={(e) => set('mobile', e.target.value)} placeholder="+7 900 000-00-00" />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="pers-off" className="text-xs font-normal text-muted-foreground">
+                Городской
+              </Label>
+              <Input id="pers-off" value={draft.office} maxLength={40} inputMode="tel"
+                onChange={(e) => set('office', e.target.value)} placeholder="+7 812 000-00-00, доб. 123" />
+            </div>
+          </div>
+        </div>
+
+        {/* Место в пространстве — сведения администратора, не личное дело */}
+        <div className="space-y-3 border-t pt-5">
+          <div>
+            <Label>Место в пространстве</Label>
+            <p className="text-xs text-muted-foreground">
+              Кем вы здесь являетесь и что вам открыто. Эти сведения ведёт
+              администратор пространства — если что-то указано неверно, обратитесь к нему.
+            </p>
+          </div>
+          <dl className="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
+            <div>
+              <dt className="text-xs text-muted-foreground">Компания</dt>
+              <dd className="mt-0.5">{user?.company_name || company.name || '—'}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-muted-foreground">Должность</dt>
+              <dd className="mt-0.5">{user?.position || <span className="text-muted-foreground">не указана</span>}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-muted-foreground">Кто вы здесь</dt>
+              <dd className="mt-0.5">
+                {УЧАСТИЕ[user?.party_type ?? 'internal']?.label ?? 'Участник'}
+                {user?.party_org && <span className="text-muted-foreground"> · {user.party_org}</span>}
+                <p className="mt-0.5 text-[11px] text-muted-foreground">
+                  {УЧАСТИЕ[user?.party_type ?? 'internal']?.hint}
+                </p>
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs text-muted-foreground">Роль</dt>
+              <dd className="mt-0.5">
+                {user?.is_superadmin ? 'Суперадминистратор'
+                  : user?.company_role === 'admin' ? 'Администратор пространства' : 'Сотрудник'}
+                <p className="mt-0.5 text-[11px] text-muted-foreground">
+                  Роль решает, что вам доступно: администратор ведёт состав людей и
+                  настройки пространства.
+                </p>
+              </dd>
+            </div>
+          </dl>
+        </div>
+
         {/* Оформление */}
-        <div className="space-y-2">
+        <div className="space-y-2 border-t pt-5">
           <Label>Оформление</Label>
           <Segments value={draft.theme} onChange={(v) => set('theme', v)} options={[
             { value: 'light', label: 'Светлая', icon: Sun, hint: 'Всегда светлый экран.' },

@@ -2524,6 +2524,10 @@ class MyProfileBody(BaseModel):
     name: str | None = None
     # Файл пространства (/api/files/<id>); "" — убрать фото.
     avatarUrl: str | None = None
+    # Телефоны — его личные контакты, а не сведения о месте работы: их он и
+    # правит сам. "" — убрать номер.
+    phoneMobile: str | None = None
+    phoneOffice: str | None = None
 
 
 @router.patch("/me")
@@ -2546,6 +2550,10 @@ async def update_me(
         if url and not url.startswith("/api/files/"):
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Ожидается файл пространства")
         current_user.avatar_url = url or None
+    for поле, значение in (("phone_mobile", body.phoneMobile),
+                           ("phone_office", body.phoneOffice)):
+        if значение is not None:
+            setattr(current_user, поле, значение.strip()[:40] or None)
     await db.commit()
     return {"ok": True, "name": current_user.name, "avatarUrl": current_user.avatar_url}
 

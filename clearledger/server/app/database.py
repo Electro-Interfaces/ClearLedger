@@ -1429,6 +1429,13 @@ async def create_all() -> None:
         ):
             await conn.execute(_sa.text(stmt))
 
+        # v2.42: телефоны в карточке человека — как с ним связаться помимо чата.
+        for stmt in (
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_mobile VARCHAR(40)",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_office VARCHAR(40)",
+        ):
+            await conn.execute(_sa.text(stmt))
+
         # v2.41: новичок в группе может прийти «с чистого листа».
         #
         # Кто добавляет, тот и решает, видно ли новому участнику прошлое группы.
