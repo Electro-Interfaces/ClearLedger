@@ -143,8 +143,11 @@ export function NextStepsPlanPanel({ companyId }: { companyId: string }) {
             <table className="w-full text-sm">
               <tbody>
                 {b.items.map((p) => (
+                  // Открываем по ПЛОЩАДКЕ (`siteId`), а не по id проекта: рабочий экран
+                  // проекта грузится ручкой площадки, и с чужим ключом карточка
+                  // отвечала «не найдено» и висела в загрузке (замечание 07.08.2026).
                   <tr key={p.id} className="cursor-pointer border-b border-border/30 last:border-0 hover:bg-accent/40"
-                    onClick={() => openProject(p.id)}>
+                    onClick={() => openProject(p.siteId)}>
                     <td className="w-[92px] py-1.5 pl-3 font-mono text-xs text-muted-foreground align-top">
                       <span className="inline-flex items-center gap-1">
                         <CalendarClock className="h-3 w-3" />{fmt(p.nextActionDue)}

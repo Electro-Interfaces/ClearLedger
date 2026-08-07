@@ -1490,6 +1490,9 @@ async def create_all() -> None:
             "ALTER TABLE chat_rooms ADD COLUMN IF NOT EXISTS scope_task_id UUID "
             "REFERENCES tasks(id) ON DELETE CASCADE",
             "CREATE INDEX IF NOT EXISTS idx_chat_rooms_task ON chat_rooms (scope_task_id)",
+            # Проекты ЭЗС: серийный номер станции вносит ОКС по ходу СМР — раньше
+            # постановки на учёт, когда единицы склада ещё нет.
+            "ALTER TABLE ezs_site_equipment ADD COLUMN IF NOT EXISTS serial_number VARCHAR(120)",
         ):
             await conn.execute(_sa.text(stmt))
 

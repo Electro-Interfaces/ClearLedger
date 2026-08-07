@@ -653,6 +653,28 @@ async def put_equipment(
     return res
 
 
+@router.post("/{site_id}/equipment/{eq_id}/register")
+async def register_equipment_unit(
+    site_id: uuid.UUID, eq_id: uuid.UUID, payload: dict, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Мастер «Принять станцию на учёт»: из потребности проекта — карточка в парке.
+
+    Проект отвечает на «что этой площадке нужно», парк — «что за железка, где она и
+    что с ней было». До этой ручки перехода между ними не было: серийный номер
+    приезжал в переписке, а единицу заводили руками, сверяясь с проектом
+    (замечание отдела развития 07.08.2026).
+
+    Тело: { serialNumber, warehouseId, inventoryNumber?, occurredOn?, install? }.
+    Приход на склад обязателен — это основание постановки на учёт; `install`
+    сразу двигает станцию на точку проекта, если та уже заведена в реестре сети.
+    """
+    cid = await assert_company_member(company_id, user, db)
+    site = await _owned(db, cid, site_id)
+    return await ezs_project.register_equipment_unit(
+        db, cid, site, eq_id, payload, user)
+
+
 @router.delete("/{site_id}/equipment/{eq_id}")
 async def del_equipment(
     site_id: uuid.UUID, eq_id: uuid.UUID, company_id: str = Query(...),
@@ -912,10 +934,16 @@ async def add_project_participant(
         EzsSiteParticipant.site_id == site_id,
         EzsSiteParticipant.user_id == target.id,
         EzsSiteParticipant.role_code == role_code))).scalar_one_or_none()
+    note = (payload.get("note") or "").strip() or None
     if exists is None:
         db.add(EzsSiteParticipant(company_id=cid, site_id=site_id, user_id=target.id,
-                                  role_code=role_code, note=payload.get("note")))
+                                  role_code=role_code, note=note))
         await db.commit()
+        # Человек узнаёт о назначении письмом, а не случайно открыв проект: кнопки
+        # маршрута принадлежат его службе, и пока он не знает о назначении, проект
+        # стоит (замечание отдела развития 07.08.2026). Себе письмо не шлём.
+        if target.id != user.id:
+            _notify_participant(site, target, role_code, note, user)
 
     # Состав — часть полномочий маршрута, поэтому уезжает в кейс сразу, а не при
     # следующем шаге: иначе назначенный человек не увидит своей кнопки.
@@ -939,6 +967,49 @@ async def drop_project_participant(
         await db.commit()
     await _push_participants(db, cid, site, user)
     return {"ok": True}
+
+
+def _notify_participant(site: EzsSite, target: User, role_code: str,
+                        note: str | None, actor: User) -> None:
+    """Письмо человеку, которого включили в состав проекта. Ошибки — только в лог.
+
+    Fire-and-forget, как оповещения пространства (`notify.dispatch_async`): почта не
+    должна ни задерживать ответ, ни ронять назначение, если SMTP недоступен.
+    """
+    import asyncio
+    import logging
+
+    from app.config import settings
+    from app.services import email_service
+
+    email = (target.email or "").strip()
+    if not email:
+        return
+    role = ezs_checklist.ROLES.get(role_code, role_code)
+    where = site.full_address or site.address or site.title or "без адреса"
+    project = site.project_no or "проект"
+    link = f"{settings.app_public_url.rstrip('/')}/?mode=projects&sub=pr_project&project={site.id}"
+    subject = f"Вы в составе проекта {project} — роль {role_code}"
+    text = (
+        f"{actor.name or actor.email} включил(а) вас в состав проекта.\n\n"
+        f"Проект: {project}\nОбъект: {where}\n"
+        f"Ваша роль по регламенту: {role_code} — {role}"
+        f"{f' ({note})' if note else ''}\n\n"
+        f"Карточка проекта: {link}\n\n"
+        "Кнопки маршрута, закреплённые за вашей службой, теперь доступны вам."
+    )
+
+    async def _run() -> None:
+        try:
+            await email_service.send_notice([email], subject, text)
+        except Exception as e:  # noqa: BLE001 — письмо не должно ломать назначение
+            logging.getLogger("clearledger.sites").warning(
+                "Письмо о назначении не ушло (%s): %s", email, e)
+
+    try:
+        asyncio.get_running_loop().create_task(_run())
+    except RuntimeError:
+        pass
 
 
 async def _push_participants(db: AsyncSession, cid, site: EzsSite, user: User) -> None:

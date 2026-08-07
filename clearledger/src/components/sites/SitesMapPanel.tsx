@@ -99,16 +99,25 @@ export function SitesMapPanel({ companyId }: { companyId: string }) {
               <MapContainer center={CENTER} zoom={4} style={{ height: '100%', width: '100%' }} preferCanvas>
                 <TileLayer url={TILE} attribution="&copy; OpenStreetMap, &copy; CARTO" />
 
+                {/* Действующая станция: видимая точка 5 px, а ловит клик прозрачный
+                    круг 12 px вокруг неё. В точку радиусом 3 px мышью было почти не
+                    попасть, и карточка станции не открывалась (замечание отдела
+                    развития 07.08.2026). Растить саму точку нельзя — фон сети забьёт
+                    проекты, ради которых карту и открывают. */}
                 {showNetwork && stations.map((l) => (
-                  <CircleMarker key={`n-${l.id}`} center={[l.lat, l.lon]}
-                    radius={3} pathOptions={{ color: '#64748b', fillColor: '#64748b', fillOpacity: 0.5, weight: 1 }}>
-                    <Popup>
-                      <div className="text-sm">
-                        <div className="font-medium">{l.name}</div>
-                        <div className="text-muted-foreground">действующая станция сети</div>
-                      </div>
-                    </Popup>
-                  </CircleMarker>
+                  <Fragment key={`n-${l.id}`}>
+                    <CircleMarker center={[l.lat, l.lon]} radius={5} interactive={false}
+                      pathOptions={{ color: '#64748b', fillColor: '#64748b', fillOpacity: 0.55, weight: 1 }} />
+                    <CircleMarker center={[l.lat, l.lon]} radius={12}
+                      pathOptions={{ opacity: 0, fillOpacity: 0 }}>
+                      <Popup>
+                        <div className="text-sm">
+                          <div className="font-medium">{l.name}</div>
+                          <div className="text-muted-foreground">действующая станция сети</div>
+                        </div>
+                      </Popup>
+                    </CircleMarker>
+                  </Fragment>
                 ))}
 
                 {points.map((p) => {

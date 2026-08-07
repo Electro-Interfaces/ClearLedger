@@ -410,9 +410,9 @@ export async function getSiteParticipants(companyId: string, id: string): Promis
 
 /** Назначить человека на роль в проекте — состав сразу уезжает в кейс маршрута. */
 export async function addSiteParticipant(
-  companyId: string, id: string, userId: string, roleCode: string,
+  companyId: string, id: string, userId: string, roleCode: string, note?: string,
 ): Promise<{ ok: boolean }> {
-  return post(`/api/sites/${id}/participants?company_id=${companyId}`, { userId, roleCode })
+  return post(`/api/sites/${id}/participants?company_id=${companyId}`, { userId, roleCode, note })
 }
 
 /** Снять человека с роли в проекте. */
@@ -584,6 +584,10 @@ export interface SiteEquipment {
   orderDate: string | null; dueDate: string | null
   suppliedDate: string | null; installedDate: string | null
   note: string | null; overdue: boolean
+  /** Серийный номер станции — вносит ОКС по ходу СМР, до постановки на учёт. */
+  serialNumber?: string | null
+  /** Единица в парке оборудования: заполнена — станция уже стоит на учёте. */
+  unitId?: string | null
   projectNo?: string | null; projectTitle?: string | null; city?: string | null
   address?: string | null; stage?: string; stageLabel?: string
 }
@@ -869,6 +873,19 @@ export async function saveEquipment(
 
 export async function deleteEquipment(companyId: string, id: string, eqId: string): Promise<unknown> {
   return del(`/api/sites/${id}/equipment/${eqId}?company_id=${companyId}`)
+}
+
+/**
+ * Принять станцию на учёт: из строки потребности — карточка единицы в парке.
+ * Серийный номер и склад поступления обязательны, `install` двигает станцию
+ * на точку проекта сразу, чтобы она не висела в остатках склада всю стройку.
+ */
+export async function registerEquipmentUnit(
+  companyId: string, id: string, eqId: string,
+  body: { serialNumber: string; warehouseId: string; inventoryNumber?: string
+          occurredOn?: string; install?: boolean },
+): Promise<{ unitId: string; serialNumber: string; movedToSite: boolean }> {
+  return post(`/api/sites/${id}/equipment/${eqId}/register?company_id=${companyId}`, body)
 }
 
 export async function saveCost(

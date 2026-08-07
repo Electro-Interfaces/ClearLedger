@@ -23,6 +23,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import {
   Loader2, ExternalLink, Check, Circle, Save, MessageSquarePlus, AlertTriangle,
   Upload, Trash2, Lock, Link as LinkIcon, Plus, Undo2,
@@ -36,10 +37,12 @@ import {
   saveTechConnection, saveCost, deleteCost, saveEquipment, deleteEquipment,
   linkContract, linkLocation, getProjectKinds, getLocationWorks, startSuccessor,
   getProjectCase, openProjectCase, applyProjectStep, undoProjectStep,
-  getSiteParticipants, addSiteParticipant, removeSiteParticipant,
+  getSiteParticipants, addSiteParticipant, removeSiteParticipant, registerEquipmentUnit,
   STAGE_META, FUNNEL_STAGES, QUADRANT_META,
   type SiteDetail, type SiteStage, type ProjectContext, type CaseAction,
+  type SiteEquipment,
 } from '@/services/sitesService'
+import { getWarehousesSummary } from '@/services/equipmentService'
 import { getContracts, getCounterparties } from '@/services/referenceService'
 import { loadLocations } from '@/services/locationService'
 import { getObjectTickets, createObjectTicket } from '@/services/spaceObjectsService'
@@ -519,6 +522,11 @@ function PartiesPanel({ site, companyId, onChanged }: {
 }) {
   const [person, setPerson] = useState('')
   const [role, setRole] = useState('')
+  // Уточнение к роли: в ОКС на один проект нужны и энергетик, и проектировщик, и
+  // куратор СМР (замечание отдела развития 07.08.2026). Заводить под каждого свою
+  // роль регламента нельзя — права маршрута закреплены за службой, а не за
+  // специальностью; поэтому людей несколько, служба одна, а кто есть кто — здесь.
+  const [note, setNote] = useState('')
 
   const q = useQuery({
     queryKey: ['site-parties', companyId, site.id],
@@ -527,10 +535,10 @@ function PartiesPanel({ site, companyId, onChanged }: {
   const members = useQuery({ queryKey: ['site-members', companyId], queryFn: () => getSiteMembers(companyId) })
 
   const mAdd = useMutation({
-    mutationFn: () => addSiteParticipant(companyId, site.id, person, role),
+    mutationFn: () => addSiteParticipant(companyId, site.id, person, role, note),
     onSuccess: async () => {
-      setPerson(''); setRole('')
-      toast.success('Роль назначена')
+      setPerson(''); setRole(''); setNote('')
+      toast.success('Роль назначена — человеку ушло письмо')
       await q.refetch(); await onChanged()
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : 'Не удалось назначить'),
@@ -559,7 +567,10 @@ function PartiesPanel({ site, companyId, onChanged }: {
         {rows.map((p) => (
           <div key={p.id} className="flex items-center gap-2 text-sm px-1">
             <span className="font-mono text-xs px-1.5 py-0.5 rounded bg-muted">{p.roleCode}</span>
-            <span className="flex-1 truncate">{p.name}</span>
+            <span className="flex-1 truncate">
+              {p.name}
+              {p.note && <span className="text-muted-foreground"> · {p.note}</span>}
+            </span>
             <Button size="icon" variant="ghost" className="h-6 w-6"
               onClick={() => mDrop.mutate(p.id)} disabled={mDrop.isPending} title="Снять с роли">
               <Trash2 className="h-3.5 w-3.5" />
@@ -584,11 +595,18 @@ function PartiesPanel({ site, companyId, onChanged }: {
               ))}
             </SelectContent>
           </Select>
+          <Input value={note} onChange={(e) => setNote(e.target.value)}
+            placeholder="Уточнение: энергетик, проектировщик, куратор СМР"
+            className="h-8 w-64 text-xs" />
           <Button size="sm" variant="outline" disabled={!person || !role || mAdd.isPending}
             onClick={() => mAdd.mutate()}>
             {mAdd.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
             Назначить
           </Button>
+        </div>
+        <div className="text-xs text-muted-foreground px-1">
+          На одну службу можно назначить нескольких человек — например всех, кто ведёт
+          проект со стороны ОКС. Каждому уходит письмо с ссылкой на карточку проекта.
         </div>
       </div>
     </section>
@@ -1360,6 +1378,15 @@ export function EquipmentTab({ site, companyId, onDone }: {
     qty: '1', supplier: '', price: '', due_date: '',
   })
   const [busy, setBusy] = useState(false)
+  /** Позиция, которую сейчас ставим на учёт (мастер открыт). */
+  const [register, setRegister] = useState<SiteEquipment | null>(null)
+
+  const setSerial = async (id: string, serial: string) => {
+    try {
+      await saveEquipment(companyId, site.id, { id, serial_number: serial })
+      await ctx.refetch()
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Не удалось записать номер') }
+  }
 
   const add = async () => {
     if (!form.title.trim()) return
@@ -1432,10 +1459,14 @@ export function EquipmentTab({ site, companyId, onDone }: {
               <th className="text-left px-2 py-1 font-medium">Оборудование</th>
               <th className="text-right px-2 py-1 font-medium">кВт</th>
               <th className="text-right px-2 py-1 font-medium">Кол-во</th>
+              {/* Серийный номер вносит ОКС по ходу СМР: до постановки на учёт
+                  его негде было записать (замечание отдела развития 07.08.2026). */}
+              <th className="text-left px-2 py-1 font-medium">Серийный №</th>
               <th className="text-left px-2 py-1 font-medium">Поставщик</th>
               <th className="text-left px-2 py-1 font-medium">Поставка</th>
               <th className="text-right px-2 py-1 font-medium">Стоимость</th>
               <th className="text-left px-2 py-1 font-medium">Статус</th>
+              <th className="text-left px-2 py-1 font-medium">Учёт</th>
               <th />
             </tr>
           </thead>
@@ -1448,6 +1479,20 @@ export function EquipmentTab({ site, companyId, onDone }: {
                 </td>
                 <td className="px-2 py-1.5 text-right font-mono">{e.powerKwt ?? '—'}</td>
                 <td className="px-2 py-1.5 text-right font-mono">{e.qty}</td>
+                <td className="px-2 py-1.5">
+                  {e.unitId ? (
+                    <span className="font-mono text-xs">{e.serialNumber ?? '—'}</span>
+                  ) : (
+                    // Пишется по месту и сохраняется по уходу из поля: номер диктуют
+                    // с площадки по телефону, отдельная форма ради одной строки лишняя.
+                    <Input defaultValue={e.serialNumber ?? ''} placeholder="SN-…"
+                      className="h-7 w-[150px] text-xs font-mono"
+                      onBlur={(ev) => {
+                        const v = ev.target.value.trim()
+                        if (v !== (e.serialNumber ?? '')) void setSerial(e.id, v)
+                      }} />
+                  )}
+                </td>
                 <td className="px-2 py-1.5 text-muted-foreground">{e.supplier ?? '—'}</td>
                 <td className={`px-2 py-1.5 font-mono ${e.overdue ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground'}`}>
                   {e.suppliedDate ? `\u2713 ${e.suppliedDate}` : (e.dueDate ?? '—')}
@@ -1463,6 +1508,14 @@ export function EquipmentTab({ site, companyId, onDone }: {
                     </SelectContent>
                   </Select>
                 </td>
+                <td className="px-2 py-1.5">
+                  {e.unitId ? (
+                    <span className="text-xs text-emerald-600 dark:text-emerald-400">на учёте</span>
+                  ) : (
+                    <Button size="sm" variant="outline" className="h-7 text-xs"
+                      onClick={() => setRegister(e)}>Принять на учёт</Button>
+                  )}
+                </td>
                 <td className="py-1.5 text-right">
                   <button type="button" onClick={() => remove(e.id)}
                     className="text-muted-foreground hover:text-red-500"><Trash2 className="h-3.5 w-3.5" /></button>
@@ -1471,6 +1524,12 @@ export function EquipmentTab({ site, companyId, onDone }: {
             ))}
           </tbody>
         </table>
+      )}
+
+      {register && (
+        <RegisterUnitDialog site={site} companyId={companyId} item={register}
+          onClose={() => setRegister(null)}
+          onDone={async () => { setRegister(null); await onDone(); await ctx.refetch() }} />
       )}
 
       <section className="rounded-lg border border-border p-3 grid grid-cols-2 md:grid-cols-4 gap-2">
@@ -1493,6 +1552,120 @@ export function EquipmentTab({ site, companyId, onDone }: {
         </div>
       </section>
     </div>
+  )
+}
+
+/**
+ * Мастер «Принять станцию на учёт».
+ *
+ * Граница между проектом и парком: проект знает, ЧТО площадке нужно, парк —
+ * ЧТО за железка и где она. Пока моста не было, ОКС диктовал серийные номера в
+ * переписке, а карточку единицы заводили руками по памяти (замечание отдела
+ * развития 07.08.2026).
+ *
+ * Склад поступления обязателен — это основание постановки на учёт. Сразу следом
+ * станция уезжает на площадку: числиться в остатках склада всю стройку она не
+ * может, иначе инвентаризация склада не сойдётся с тем, что стоит в поле.
+ */
+function RegisterUnitDialog({ site, companyId, item, onClose, onDone }: {
+  site: SiteDetail; companyId: string; item: SiteEquipment
+  onClose: () => void; onDone: () => Promise<void>
+}) {
+  const [serial, setSerial] = useState(item.serialNumber ?? '')
+  const [warehouse, setWarehouse] = useState('')
+  const [inv, setInv] = useState('')
+  const [when, setWhen] = useState(new Date().toISOString().slice(0, 10))
+  const [install, setInstall] = useState(true)
+  const [busy, setBusy] = useState(false)
+
+  const wh = useQuery({
+    queryKey: ['equipment-warehouses', companyId],
+    queryFn: () => getWarehousesSummary(companyId),
+  })
+  const rows = wh.data?.warehouses ?? []
+
+  const submit = async () => {
+    setBusy(true)
+    try {
+      const r = await registerEquipmentUnit(companyId, site.id, item.id, {
+        serialNumber: serial.trim(), warehouseId: warehouse,
+        inventoryNumber: inv.trim() || undefined, occurredOn: when, install,
+      })
+      toast.success(r.movedToSite
+        ? 'Станция на учёте и числится на площадке'
+        : 'Станция принята на учёт — лежит на складе')
+      await onDone()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Не удалось поставить на учёт')
+    } finally { setBusy(false) }
+  }
+
+  return (
+    <Dialog open onOpenChange={(v) => { if (!v) onClose() }}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader><DialogTitle>Принять станцию на учёт</DialogTitle></DialogHeader>
+        <div className="space-y-3 text-sm">
+          <div className="text-muted-foreground">
+            {item.title ?? 'Станция'}{item.manufacturer ? ` · ${item.manufacturer}` : ''}
+            {item.powerKwt ? ` · ${item.powerKwt} кВт` : ''}
+          </div>
+          <div>
+            <Label>Серийный номер</Label>
+            <Input value={serial} onChange={(e) => setSerial(e.target.value)}
+              placeholder="SN-…" className="h-8 text-sm font-mono" />
+          </div>
+          <div>
+            <Label>Склад поступления</Label>
+            <Select value={warehouse} onValueChange={setWarehouse}>
+              <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Выберите склад" /></SelectTrigger>
+              <SelectContent>
+                {rows.map((w) => (
+                  <SelectItem key={w.location.id} value={w.location.id} className="text-sm">
+                    {w.location.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {rows.length === 0 && !wh.isLoading && (
+              <p className="mt-1 text-xs text-muted-foreground">
+                Складов нет — их заводят в разделе «Оборудование», вкладка «Склады».
+              </p>
+            )}
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <Label>Инвентарный №</Label>
+              <Input value={inv} onChange={(e) => setInv(e.target.value)}
+                placeholder="из бухгалтерии" className="h-8 text-sm font-mono" />
+            </div>
+            <div>
+              <Label>Дата постановки</Label>
+              <Input type="date" value={when} onChange={(e) => setWhen(e.target.value)}
+                className="h-8 text-sm" />
+            </div>
+          </div>
+          <label className="flex items-start gap-2 text-sm">
+            <input type="checkbox" checked={install} className="mt-0.5"
+              onChange={(e) => setInstall(e.target.checked)} disabled={!site.locationId} />
+            <span>
+              Станция уже на площадке — сразу перевести из склада на объект.
+              {!site.locationId && (
+                <span className="block text-xs text-muted-foreground">
+                  Точка обслуживания у проекта не заведена: свяжите её на вкладке «Паспорт»,
+                  иначе станция останется в остатках склада.
+                </span>
+              )}
+            </span>
+          </label>
+        </div>
+        <div className="flex justify-end gap-2 pt-2">
+          <Button variant="ghost" size="sm" onClick={onClose}>Отмена</Button>
+          <Button size="sm" disabled={busy || !serial.trim() || !warehouse} onClick={submit}>
+            {busy && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}Принять на учёт
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }
 

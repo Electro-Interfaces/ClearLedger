@@ -4481,6 +4481,11 @@ class EzsSiteEquipment(Base):
     due_date: Mapped[str | None] = mapped_column(String(10), nullable=True)     # плановая поставка
     supplied_date: Mapped[str | None] = mapped_column(String(10), nullable=True)
     installed_date: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    # Серийный номер приехавшей станции. Вносит ОКС по ходу СМР, до постановки на
+    # учёт: пока единицы склада нет, записать номер было некуда, и он жил в
+    # переписке (замечание отдела развития 07.08.2026). При постановке на учёт
+    # номер уезжает в карточку единицы (`unit_id`) и остаётся здесь как след.
+    serial_number: Mapped[str | None] = mapped_column(String(120), nullable=True)
     # Связь с фактом на складе — появляется, когда железо приехало.
     unit_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     supply_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)

@@ -63,7 +63,14 @@ function ProjectWorkspace({ companyId, id, tab, onTab, onBack }: {
   onTab: (k: ProjectTabKey) => void; onBack: () => void
 }) {
   const qc = useQueryClient()
-  const q = useQuery({ queryKey: ['site-detail', companyId, id], queryFn: () => getSite(companyId, id) })
+  // staleTime: 0 — шапка обязана быть свежей. Стадию проекта меняют и с соседних
+  // экранов (маршрут, «Разобрать», реестр), а общий кэш держит ответ пять минут:
+  // отклонённый проект показывал в шапке «Лид» и «Подбор», пока история на той же
+  // странице уже писала «Лид → Архив» (замечание отдела развития 07.08.2026).
+  const q = useQuery({
+    queryKey: ['site-detail', companyId, id], queryFn: () => getSite(companyId, id),
+    staleTime: 0, refetchOnMount: 'always',
+  })
   const s = q.data
 
   const refresh = async () => {
@@ -98,8 +105,24 @@ function ProjectWorkspace({ companyId, id, tab, onTab, onBack }: {
     return set
   }, [s])
 
-  if (q.isLoading || !s) {
+  if (q.isLoading) {
     return <div className="flex justify-center py-16"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+  }
+  // Запрос отказал — так и говорим. Раньше здесь стояло `isLoading || !s`, и любая
+  // ошибка (не тот ключ в ссылке, нет прав, оборвалась сеть) оставляла крутящийся
+  // значок навсегда: человек ждал минутами карточку, которая уже не придёт.
+  if (q.isError || !s) {
+    return (
+      <div className="p-4">
+        <Card><CardContent className="py-10 text-center text-sm space-y-3">
+          <div>Карточка проекта не загрузилась: {q.error instanceof Error ? q.error.message : 'проект не найден'}</div>
+          <div className="flex justify-center gap-2">
+            <Button size="sm" variant="outline" onClick={() => q.refetch()}>Повторить</Button>
+            <Button size="sm" variant="ghost" onClick={onBack}>К списку</Button>
+          </div>
+        </CardContent></Card>
+      </div>
+    )
   }
 
   return (

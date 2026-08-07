@@ -20,6 +20,7 @@ import uuid as _uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
+from fastapi import HTTPException
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -379,7 +380,8 @@ EQ_STATUSES = [
 ]
 EQ_LABELS = {s["key"]: s["label"] for s in EQ_STATUSES}
 EQ_FIELDS = {"status", "title", "manufacturer", "power_kwt", "connectors", "qty", "supplier",
-             "price", "order_date", "due_date", "supplied_date", "installed_date", "note"}
+             "price", "order_date", "due_date", "supplied_date", "installed_date", "note",
+             "serial_number"}
 _EQ_NUM = {"power_kwt", "price"}
 
 
@@ -395,6 +397,10 @@ def _eq_out(e: EzsSiteEquipment) -> dict[str, Any]:
         "orderDate": e.order_date, "dueDate": e.due_date,
         "suppliedDate": e.supplied_date, "installedDate": e.installed_date,
         "note": e.note, "overdue": overdue,
+        "serialNumber": e.serial_number,
+        # Уже стоит на учёте — значит есть карточка единицы в парке оборудования,
+        # и повторно ставить нельзя: инвентарный номер и амортизация задвоятся.
+        "unitId": str(e.unit_id) if e.unit_id else None,
     }
 
 
@@ -464,6 +470,86 @@ async def upsert_equipment(db: AsyncSession, company_id, site: EzsSite, payload:
         await log_event(db, site, "note", user=user,
                         text=f"Оборудование в план: {row.title or '—'} × {row.qty}")
     return _eq_out(row)
+
+
+async def register_equipment_unit(
+    db: AsyncSession, company_id, site: EzsSite, eq_id, payload: dict[str, Any],
+    user: User | None,
+) -> dict[str, Any]:
+    """Поставить станцию проекта на учёт: карточка единицы в парке + связь со строкой.
+
+    Одна строка потребности — одна станция, поэтому и единица одна: количеству
+    серийный номер не выдашь. Строку с qty > 1 сначала разносят по станциям
+    (о чём вкладка «Оборудование» и предупреждает), иначе учёт получит одну
+    карточку на две железки.
+
+    Приход (`receipt`) идёт на склад — это основание постановки на учёт; сразу
+    следом станция уезжает на площадку (`to_installation`), если точка обслуживания
+    у проекта уже заведена. Ввод в эксплуатацию остаётся за маршрутом: он про
+    приёмку, а не про железо.
+    """
+    from app.services import ezs_equipment
+
+    row = (await db.execute(select(EzsSiteEquipment).where(
+        EzsSiteEquipment.company_id == company_id, EzsSiteEquipment.site_id == site.id,
+        EzsSiteEquipment.id == _uuid.UUID(str(eq_id))))).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(404, "Позиция оборудования не найдена")
+    if row.unit_id:
+        raise HTTPException(409, "Эта позиция уже стоит на учёте — карточка есть в парке оборудования")
+    if (row.qty or 1) > 1:
+        raise HTTPException(
+            400, f"В строке {row.qty} шт. Серийный номер выдаётся станции, а не количеству: "
+                 "разнесите позицию по станциям, каждой — своя строка")
+
+    serial = str(payload.get("serialNumber") or "").strip()
+    if not serial:
+        raise HTTPException(400, "Серийный номер обязателен — без него единицу не отличить от соседней")
+    warehouse_id = payload.get("warehouseId")
+    if not warehouse_id:
+        raise HTTPException(400, "Укажите склад поступления")
+
+    occurred = str(payload.get("occurredOn") or "").strip() or date.today().isoformat()
+    unit = await ezs_equipment.create_unit(db, company_id, user, {
+        "kind": "station", "serial_number": serial,
+        "vendor": row.manufacturer, "vendor_raw": row.manufacturer,
+        "model": row.title, "power_kwt": row.power_kwt,
+        "connector_types": row.connectors,
+        "inventory_number": str(payload.get("inventoryNumber") or "").strip() or None,
+        "supplier": row.supplier, "purchase_date": row.supplied_date,
+        "initial_location_id": warehouse_id, "occurred_on": occurred,
+        "basis": f"Проект {site.project_no or ''}".strip(),
+        "comment": f"Принято на учёт из проекта {site.project_no or site.title or ''}".strip(),
+    })
+    await db.flush()
+
+    # Станция физически на площадке, а не на складе: оставить её в остатках склада
+    # значит соврать в учёте на весь срок стройки. Двигаем сразу, если точка есть.
+    moved_to_site = False
+    if payload.get("install") and site.location_id:
+        await ezs_equipment.apply_movement(db, company_id, user, unit.id, {
+            "op": "to_installation", "to_location_id": site.location_id,
+            "occurred_on": occurred, "basis": f"Проект {site.project_no or ''}".strip(),
+        })
+        moved_to_site = True
+
+    row.unit_id = unit.id
+    row.serial_number = serial
+    if row.status in ("planned", "ordered", "supplied"):
+        row.status = "installed"
+        row.installed_date = row.installed_date or occurred
+    row.updated_at = datetime.now(timezone.utc)
+    await db.flush()
+
+    await log_event(
+        db, site, "edit", user=user,
+        text=f"Станция принята на учёт: {row.title or '—'}, серийный № {serial}",
+        changes=[make_change("equipment.serial_number", None, serial,
+                             label="Оборудование: серийный номер", category="technical")],
+    )
+    await db.commit()
+    return {"unitId": str(unit.id), "serialNumber": serial, "movedToSite": moved_to_site,
+            "equipment": _eq_out(row)}
 
 
 async def delete_equipment(
