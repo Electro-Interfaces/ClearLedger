@@ -20,6 +20,7 @@ import { useLocations } from '@/hooks/useLocations'
 import { scopeStationCodes } from '@/services/locationService'
 import { StoreOverviewPanel } from './StoreOverviewPanel'
 import { StoreSalesPanel } from './StoreSalesPanel'
+import { StoreDynamicsPanel } from './StoreDynamicsPanel'
 import { StoreNomenclaturePanel } from './StoreNomenclaturePanel'
 import { StoreSkuPanel, type SkuMode } from './StoreSkuPanel'
 import { StoreStockPanel } from './StoreStockPanel'
@@ -190,6 +191,13 @@ export function StorePanel() {
     return (
       <div className="h-full overflow-y-auto">
         <StoreSalesPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} stations={scopeStations} />
+      </div>
+    )
+  }
+  if (sub === 'dynamics') {
+    return (
+      <div className="h-full overflow-y-auto">
+        <StoreDynamicsPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} stations={scopeStations} />
       </div>
     )
   }

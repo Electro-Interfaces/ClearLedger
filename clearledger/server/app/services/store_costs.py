@@ -22,8 +22,13 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
-async def ориентиры(db: AsyncSession, cid, stations: list[int] | None = None) -> dict[str, dict]:
+async def ориентиры(db: AsyncSession, cid, stations: list[int] | None = None,
+                    на_дату=None) -> dict[str, dict]:
     """UUID карточки → {cost, at, source} по последней известной закупке.
+
+    `на_дату` ограничивает поиск моментом: «во что обходился товар тогда».
+    Сравнение периодов без этого показывало бы одну и ту же себестоимость в
+    обоих окнах, и фактор закупки всегда выходил нулём.
 
     Источников два, и они не равны по достоверности: приёмка станции (её завёл
     человек на АЗС) и приёмка из выгрузки 1С (исторический контур). Побеждает
@@ -34,6 +39,10 @@ async def ориентиры(db: AsyncSession, cid, stations: list[int] | None =
     ф = " AND station_id = ANY(:st)" if stations else ""
     if stations:
         p["st"] = stations
+    if на_дату is not None:
+        p["on"] = на_дату
+        ф_p += " AND coalesce((d->>'Дата')::timestamptz, p.received_at) <= :on"
+        ф += " AND doc_date <= :on"
 
     итог: dict[str, dict] = {}
 

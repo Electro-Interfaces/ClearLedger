@@ -28,7 +28,8 @@ from app.models import (
     User, UserCompany,
 )
 from app.routers import edge_router
-from app.services import edge_nsi, edge_projection, edge_service, store_costs, store_reports
+from app.services import (edge_nsi, edge_projection, edge_service, store_costs,
+                          store_dynamics, store_reports)
 from app.services import recipe_versions
 from app.services.export_audit import log_export
 from app.services.edo_upd import parse_upd
@@ -1173,6 +1174,38 @@ async def store_network_reports(
     return {"groups": store_reports.GROUPS,
             "reports": [{"key": k, **{f: v for f, v in r.items() if f != "fields"}}
                         for k, r in store_reports.REPORTS.items()]}
+
+
+@router.get("/dynamics")
+async def store_dynamics_compare(
+    date_from: str | None = Query(None),
+    date_to: str | None = Query(None),
+    stations: str | None = Query(None, description="коды АЗС через запятую; пусто — вся сеть"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Период против равного предыдущего с раскладкой изменения маржи.
+
+    Та же раскладка, что считает станция у себя: центр и АЗС обязаны объяснять
+    одну разницу одинаково, иначе разбор месяца превращается в спор отчётов.
+    """
+    cid: uuid.UUID = await scope_company_id(user, db)
+    коды = [int(s) for s in (stations or "").replace(" ", "").split(",") if s.isdigit()]
+    return await store_dynamics.compare(db, cid, date_from, date_to, коды or None)
+
+
+@router.get("/price-log")
+async def store_price_log(
+    date_from: str | None = Query(None),
+    date_to: str | None = Query(None),
+    stations: str | None = Query(None),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Журнал цен сети: кто и когда двигал цену, было → стало."""
+    cid: uuid.UUID = await scope_company_id(user, db)
+    коды = [int(s) for s in (stations or "").replace(" ", "").split(",") if s.isdigit()]
+    return await store_dynamics.price_log(db, cid, date_from, date_to, коды or None)
 
 
 @router.get("/reports/{kind}")

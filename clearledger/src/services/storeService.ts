@@ -2134,3 +2134,69 @@ export const createItemGroup = (body: {
 export const resolveBarcodeCollision = (
   claimId: number, body: { action: 'move' | 'drop'; note?: string },
 ) => post<Record<string, unknown>>(`/api/store/barcode-collisions/${claimId}`, body)
+
+
+/* ── Динамика сети: период против прошлого ────────────────────────────────── */
+
+export interface DynamicsRow {
+  station_id: number
+  item_uuid: string
+  name: string
+  qty: number
+  qty_prev: number
+  revenue: number
+  revenue_prev: number
+  margin: number
+  margin_prev: number
+  price: number
+  price_prev: number
+  delta_margin: number
+  fate: string
+}
+
+export interface DynamicsData {
+  period: { from: string; to: string }
+  period_prev: { from: string; to: string }
+  total: {
+    revenue: number; revenue_prev: number
+    margin: number; margin_prev: number
+    delta_revenue: number; delta_margin: number
+    margin_pct: number; margin_pct_prev: number
+    cost_known_pct: number; cost_known_pct_prev: number
+  }
+  factors: { price: number; cost: number; volume: number; new: number; gone: number }
+  factors_sum: number
+  by_station: {
+    station_id: number; revenue: number; revenue_prev: number
+    margin: number; margin_prev: number; delta_margin: number; delta_revenue: number
+  }[]
+  up: DynamicsRow[]
+  down: DynamicsRow[]
+  has_prev: boolean
+}
+
+export const getStoreDynamics = (dateFrom: string, dateTo: string, stations?: string[]) =>
+  get<DynamicsData>('/api/store/dynamics', {
+    date_from: dateFrom,
+    date_to: dateTo,
+    stations: stations?.length ? stations.join(',') : undefined,
+  })
+
+export interface PriceLogRow {
+  station_id: number
+  name: string
+  item_uuid: string
+  at: string | null
+  author: string
+  price_prev: number | null
+  price: number
+  delta: number | null
+  delta_pct: number | null
+}
+
+export const getStorePriceLog = (dateFrom: string, dateTo: string, stations?: string[]) =>
+  get<{ rows: PriceLogRow[]; total: number }>('/api/store/price-log', {
+    date_from: dateFrom,
+    date_to: dateTo,
+    stations: stations?.length ? stations.join(',') : undefined,
+  })
