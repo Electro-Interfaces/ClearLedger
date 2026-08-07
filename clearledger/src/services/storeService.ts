@@ -2200,3 +2200,57 @@ export const getStorePriceLog = (dateFrom: string, dateTo: string, stations?: st
     date_to: dateTo,
     stations: stations?.length ? stations.join(',') : undefined,
   })
+
+
+/* ── Переоценка по сети: отбор → правило → предпросмотр → применение ──────── */
+
+export interface RepricingRule {
+  mode: string
+  value: number
+  round: string
+  floor: number
+  step: number
+  kvi: boolean
+  group?: string
+  q?: string
+  sold?: boolean
+  date_from?: string
+  date_to?: string
+  stations?: number[]
+  items?: string[]
+}
+
+export interface RepricingRow {
+  station_id: number
+  item_uuid: string
+  name: string
+  group_path: string
+  price: number
+  new_price: number
+  cost: number
+  qty: number
+  revenue: number
+  kvi: boolean
+  reject: string
+  delta: number
+  delta_pct: number
+  margin: number | null
+  new_margin: number | null
+  effect: number
+}
+
+export interface RepricingPreview {
+  total: { selected: number; changed: number; rejected: number; effect: number; avg_growth: number }
+  reasons: { reason: string; count: number; what: string }[]
+  by_station: { station_id: number; changed: number; rejected: number; effect: number }[]
+  rows: RepricingRow[]
+  shown: number
+  total_rows: number
+}
+
+export const previewRepricing = (rule: RepricingRule) =>
+  post<RepricingPreview>('/api/store/repricing/preview', rule)
+
+export const applyRepricing = (rule: RepricingRule) =>
+  post<{ applied: number; stations: number; effect?: number; note: string }>(
+    '/api/store/repricing/apply', rule)

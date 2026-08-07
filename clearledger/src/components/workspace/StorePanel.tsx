@@ -21,6 +21,7 @@ import { scopeStationCodes } from '@/services/locationService'
 import { StoreOverviewPanel } from './StoreOverviewPanel'
 import { StoreSalesPanel } from './StoreSalesPanel'
 import { StoreDynamicsPanel } from './StoreDynamicsPanel'
+import { StorePricingWorkPanel } from './StorePricingWorkPanel'
 import { StoreNomenclaturePanel } from './StoreNomenclaturePanel'
 import { StoreSkuPanel, type SkuMode } from './StoreSkuPanel'
 import { StoreStockPanel } from './StoreStockPanel'
@@ -239,7 +240,7 @@ export function StorePanel() {
   if (sub === 'revaluation') {
     return (
       <div className="h-full overflow-y-auto">
-        <StoreRevaluationPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />
+        <StorePricingWorkPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} stations={scopeStations} />
       </div>
     )
   }

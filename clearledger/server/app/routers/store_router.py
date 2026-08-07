@@ -29,7 +29,7 @@ from app.models import (
 )
 from app.routers import edge_router
 from app.services import (edge_nsi, edge_projection, edge_service, store_costs,
-                          store_dynamics, store_reports)
+                          store_dynamics, store_repricing, store_reports)
 from app.services import recipe_versions
 from app.services.export_audit import log_export
 from app.services.edo_upd import parse_upd
@@ -1206,6 +1206,61 @@ async def store_price_log(
     cid: uuid.UUID = await scope_company_id(user, db)
     коды = [int(s) for s in (stations or "").replace(" ", "").split(",") if s.isdigit()]
     return await store_dynamics.price_log(db, cid, date_from, date_to, коды or None)
+
+
+class _RepricingRule(BaseModel):
+    """Правило и отбор массовой переоценки — те же поля, что у станции."""
+    mode: str = "процент"
+    value: float = 0
+    round: str = ""
+    floor: float = 5          # пол маржи, %
+    step: float = 15          # потолок разового шага, %
+    kvi: bool = False         # трогать ли ключевые позиции
+    group: str = ""
+    q: str = ""
+    sold: bool = False
+    date_from: str | None = None
+    date_to: str | None = None
+    stations: list[int] | None = None
+    items: list[str] | None = None   # только эти карточки (галочки в таблице)
+
+
+def _правило_и_отбор(r: _RepricingRule) -> tuple[dict, dict]:
+    правило = {"mode": r.mode, "value": r.value, "round": r.round,
+               "floor": r.floor, "step": r.step, "kvi": r.kvi}
+    отбор = {"group": r.group, "q": r.q, "sold": r.sold,
+             "date_from": r.date_from, "date_to": r.date_to}
+    return правило, отбор
+
+
+@router.post("/repricing/preview")
+async def store_repricing_preview(
+    body: _RepricingRule,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Что станет с ценами сети по этому правилу. Ничего не меняет."""
+    cid: uuid.UUID = await scope_company_id(user, db)
+    правило, отбор = _правило_и_отбор(body)
+    return await store_repricing.preview(db, cid, правило, отбор, body.stations)
+
+
+@router.post("/repricing/apply")
+async def store_repricing_apply(
+    body: _RepricingRule,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Применить правило: история цен центра + задания станциям.
+
+    Автор берётся из сессии, а не из формы: цена — это деньги, и подписать
+    чужим именем её нельзя.
+    """
+    cid: uuid.UUID = await scope_company_id(user, db)
+    правило, отбор = _правило_и_отбор(body)
+    автор = getattr(user, "full_name", None) or getattr(user, "email", "") or "центр"
+    return await store_repricing.apply(db, cid, правило, отбор, автор,
+                                       body.stations, body.items)
 
 
 @router.get("/reports/{kind}")
