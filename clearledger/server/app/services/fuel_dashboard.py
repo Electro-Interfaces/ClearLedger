@@ -26,9 +26,19 @@ _PAY_MAP: dict[str, tuple[str, bool]] = {
     "retail_card": ("card", False),
     "cards": ("fuel_card", True),
     "online": ("online", True),
-    "voucher": ("coupon", True),
+    "voucher": ("voucher", True),
+    # Купон на сдачу — свой канал и своя строка на экране: с талонами его
+    # смешивать нельзя, это разные расчётные единицы.
+    "coupon": ("coupon", True),
     "ledger": ("corporate", True),
+    "writeoff_fuel": ("writeoff", True),
 }
+
+# Каналы, по которым в периоде НЕ возникает выручки: топливо отпущено, а деньги
+# либо получены раньше (купон на сдачу, талон — там оплата прошла в смене выдачи
+# и уже сидит в наличных/картах), либо не возникают вовсе (техсписание).
+# Объём такие каналы дают, деньги — нет; иначе выручка периода задваивается.
+_NON_REVENUE = ("coupon", "voucher", "writeoff_fuel")
 
 
 class FuelDashboardService:
@@ -271,8 +281,9 @@ class FuelDashboardService:
             liters = float(s.liters or 0)
             amount = float(s.amount or 0)
             fuel_agg[fc]["volume"] += liters
-            fuel_agg[fc]["revenue"] += amount
-            total_revenue += amount
+            if s.payment_channel not in _NON_REVENUE:
+                fuel_agg[fc]["revenue"] += amount
+                total_revenue += amount
             pt = _PAY_MAP.get(s.payment_channel)
             if pt:
                 ptype = pt[0]
@@ -333,7 +344,8 @@ class FuelDashboardService:
             if st is None:
                 continue
             agg[st]["volume"] += float(s.liters or 0)
-            agg[st]["revenue"] += float(s.amount or 0)
+            if s.payment_channel not in _NON_REVENUE:
+                agg[st]["revenue"] += float(s.amount or 0)
         shift_cnt: dict = defaultdict(int)
         for s in shifts:
             shift_cnt[s.station_id] += 1
@@ -613,10 +625,28 @@ class FuelDashboardService:
                 "pos": m.pos_number, "shift": shift_num.get(m.shift_id),
             })
         calc = income - expense
+        # Остаток кассы — снимок STS «на конец смены по всей АЗС» у последней смены
+        # каждой станции периода, а НЕ сумма потоков: начального остатка периода в
+        # money-секции нет, поэтому «приход − расход» остатком не является.
+        # difference раньше был жёстко 0.0 — экран всегда писал «сходится», то есть
+        # контроль не мог сработать ни при каких данных. Пока сходимость не выведена
+        # (по 208/Кудрово цепочка снимков ломается на инкассациях), отдаём None:
+        # «не рассчитано» честнее ложного нуля.
+        last_by_station: dict = {}
+        for s in shifts:
+            cur = last_by_station.get(s.station_id)
+            if cur is None or (s.opened_at and cur.opened_at and s.opened_at > cur.opened_at):
+                last_by_station[s.station_id] = s
+        last_ids = {s.id for s in last_by_station.values()}
+        closing = 0.0
+        for m in cash:
+            nm = (m.operation_name or "").lower()
+            if m.shift_id in last_ids and "остаток на кон" in nm and "всей" in nm:
+                closing += float(m.amount or 0)
         return {
             "cash_flow": {
                 "income": round(income, 2), "expense": round(expense, 2),
-                "calculated": round(calc, 2), "closing": round(calc, 2), "difference": 0.0,
+                "calculated": round(calc, 2), "closing": round(closing, 2), "difference": None,
                 "operations_count": len(cf_details), "details": cf_details,
             },
             "cashout": {
@@ -644,7 +674,8 @@ class FuelDashboardService:
                 continue
             for s in sales_by_shift.get(sh.id, []):
                 amount = float(s.amount or 0)
-                g["revenue"] += amount
+                if s.payment_channel not in _NON_REVENUE:
+                    g["revenue"] += amount
                 g["volume"] += float(s.liters or 0)
                 pt = _PAY_MAP.get(s.payment_channel)
                 if pt:
@@ -660,7 +691,8 @@ class FuelDashboardService:
         fuel_agg = defaultdict(lambda: {"volume": 0.0, "revenue": 0.0})
         for s in sales:
             fuel_agg[s.fuel_code]["volume"] += float(s.liters or 0)
-            fuel_agg[s.fuel_code]["revenue"] += float(s.amount or 0)
+            if s.payment_channel not in _NON_REVENUE:
+                fuel_agg[s.fuel_code]["revenue"] += float(s.amount or 0)
         total_v = sum(f["volume"] for f in fuel_agg.values())
         by_fuel = [{
             "fuel_code": fc, "fuel_name": fuel_name(fc),

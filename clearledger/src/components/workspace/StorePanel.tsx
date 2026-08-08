@@ -28,7 +28,6 @@ import { StoreStockPanel } from './StoreStockPanel'
 import { StoreInventoryPanel } from './StoreInventoryPanel'
 import { StoreWriteoffPanel } from './StoreWriteoffPanel'
 import { StoreTransferPanel } from './StoreTransferPanel'
-import { StoreRevaluationPanel } from './StoreRevaluationPanel'
 import { StoreReceiptsPanel, StoreSuppliersPanel, StoreCategoriesPanel, StoreBarcodesPanel } from './StoreReportPanels'
 import { StoreRecipeVersionsPanel } from './StoreRecipeVersionsPanel'
 import { StoreCateringPanel } from './StoreCateringPanel'
@@ -46,6 +45,7 @@ import { StoreAgentVersionsPanel } from './StoreAgentVersionsPanel'
 import { StoreStoragePanel } from './StoreStoragePanel'
 import { StoreMarkCodesPanel } from './StoreMarkCodesPanel'
 import { StoreChequesPanel } from './StoreChequesPanel'
+import { StoreReturnsPanel } from './StoreReturnsPanel'
 import { StoreReportsPanel } from './StoreReportsPanel'
 import { StoreMarkingIntegrationsPanel } from './StoreMarkingIntegrationsPanel'
 import { StoreParityPanel } from './StoreParityPanel'
@@ -346,6 +346,13 @@ export function StorePanel() {
     return (
       <div className="h-full overflow-y-auto">
         <StoreChequesPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />
+      </div>
+    )
+  }
+  if (sub === 'returns') {
+    return (
+      <div className="h-full overflow-y-auto">
+        <StoreReturnsPanel dateFrom={period.from} dateTo={period.to} />
       </div>
     )
   }

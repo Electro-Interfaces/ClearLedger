@@ -179,6 +179,12 @@ class UserCompany(Base):
     # экраны», скоуп — «по каким объектам»: подрядчику нужен «Парк оборудования», но
     # только на своих пяти станциях. Механика — `app/scope.py`.
     object_scope: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    # Бизнес-полномочия «Магазина». Не смешиваются с role/modules: один человек
+    # может быть товароведом сети и администратором нескольких конкретных АЗС.
+    # [{role, scope_type, scope_id}]
+    business_grants: Mapped[list] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
     # ОСНОВАНИЕ: договоры (`contracts.id`), по которым человек допущен в пространство.
     # Это справка, а не права — доступ даёт роль, а здесь видно, ЧЕМ он обоснован:
     # у подрядчика это его договор обслуживания. Список, потому что оснований бывает
@@ -5950,6 +5956,7 @@ class EdgePacket(Base):
     shift_internal_no: Mapped[int | None] = mapped_column(Integer, nullable=True)
     payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    wire_size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     source: Mapped[str | None] = mapped_column(String(80), nullable=True)
     received_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now())
@@ -6045,6 +6052,10 @@ class StoreReceipt(Base):
     signing_mode: Mapped[str] = mapped_column(
         String(30), nullable=False, default="office_director")
     signer_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # Кто принял товар на станции: «Жукова» либо «Михеев (из центра)». Не то же,
+    # что подписант ЭДО и не подотчётное лицо: тот покупал, этот считал коробки.
+    # Пусто у документов, принятых до появления подписи.
+    author: Mapped[str | None] = mapped_column(String(200), nullable=True)
     mchd_guid: Mapped[str | None] = mapped_column(String(100), nullable=True)
     mchd_registry: Mapped[str | None] = mapped_column(String(200), nullable=True)
     mchd_valid_until: Mapped[date_type | None] = mapped_column(Date, nullable=True)

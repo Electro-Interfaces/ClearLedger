@@ -13,7 +13,7 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { ChevronDown, ChevronRight, Download, FileSpreadsheet, ExternalLink } from 'lucide-react'
+import { ChevronRight, Download, FileSpreadsheet, ExternalLink } from 'lucide-react'
 import {
   getStoreNetworkReports, getStoreNetworkReport, storeNetworkReportCsvUrl, getStoreStations,
   type StoreStation,

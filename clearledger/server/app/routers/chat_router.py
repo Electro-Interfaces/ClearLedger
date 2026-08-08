@@ -2468,7 +2468,7 @@ async def search_users(
     cid = await _company_of(current_user, db)
     # Только сотрудники ВЫБРАННОЙ организации (user_companies) ≠ я — сотрудников
     # другой организации не видно (изоляция пространств).
-    stmt = (select(User.id, User.name, User.email, User.avatar_url)
+    stmt = (select(User.id, User.name, User.email, User.avatar_url, UserCompany.party_type)
             .join(UserCompany, UserCompany.user_id == User.id)
             .where(UserCompany.company_id == cid, User.id != current_user.id))
     if q.strip():
@@ -2477,8 +2477,8 @@ async def search_users(
     rows = (await db.execute(stmt.order_by(User.name).limit(20))).all()
     online = manager.online_user_ids()
     return [{"userId": str(uid), "name": nm, "email": em, "online": str(uid) in online,
-             "avatarUrl": av}
-            for uid, nm, em, av in rows]
+             "avatarUrl": av, "partyType": party_type or "internal"}
+            for uid, nm, em, av, party_type in rows]
 
 
 # ── карточка человека ────────────────────────────────────────────────────────

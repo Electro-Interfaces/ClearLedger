@@ -2335,8 +2335,13 @@ async def fuel_readiness(
         rq = rq.where(FuelReceipt.station_id.in_(station_ids))
     receipts = (await db.execute(rq)).scalars().all()
     st_counts = {"pending": 0, "confirmed": 0, "corrected": 0, "rejected": 0}
+    # В поле status пишут два разных контура: загрузка ставит 'new', правка
+    # значений ТТН (override) — 'verified', workflow приёмки — свои четыре.
+    # Без этого маппинга уже проверенная ТТН попадала в «не проверено».
+    _ST_ALIAS = {"new": "pending", "verified": "corrected"}
     for r in receipts:
-        st_counts[r.status if r.status in st_counts else "pending"] += 1
+        key = _ST_ALIAS.get(r.status, r.status)
+        st_counts[key if key in st_counts else "pending"] += 1
 
     rcpt_ov = (await db.execute(select(FuelReceiptOverride).where(
         FuelReceiptOverride.company_id == cid))).scalars().all()
@@ -2353,9 +2358,20 @@ async def fuel_readiness(
     receipts_corrected = sum(1 for r in receipts
                              if (str(r.station_id), r.ttn, _receipt_fuel_key(r.fuel_code)) in ov_keys)
 
-    # ── Очередь выгрузки (пакеты по компании) ──
-    pk_rows = (await db.execute(select(ExportPacket.status, func.count()).where(
-        ExportPacket.company_id == cid).group_by(ExportPacket.status))).all()
+    # ── Очередь выгрузки: тот же контур, что у смен и ТТН ──
+    # Без периода и станции блок показывал всю очередь компании за всё время:
+    # на экране «Кудрово · июль» висели черновики другой АЗС за июнь.
+    # ponytail: станция берётся из натурального ключа (TL|ВИД|система|станция|…) —
+    # своей колонки станции у пакета нет; появится — фильтровать по ней.
+    pq = select(ExportPacket.status, func.count()).where(
+        ExportPacket.company_id == cid,
+        ExportPacket.created_at >= dt_from, ExportPacket.created_at <= dt_to)
+    if station_ids:
+        codes = (await db.execute(select(FuelStation.code).where(
+            FuelStation.id.in_(station_ids)))).scalars().all()
+        pq = pq.where(func.split_part(ExportPacket.idem_key, "|", 4).in_(
+            [str(c) for c in codes]))
+    pk_rows = (await db.execute(pq.group_by(ExportPacket.status))).all()
     pk = {row[0]: row[1] for row in pk_rows}
 
     return {

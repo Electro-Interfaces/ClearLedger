@@ -3,6 +3,7 @@
  * Работает только в API-режиме (требует бэкенд /api/users, /api/companies).
  */
 import { get, post, patch, put, del } from './apiClient'
+import type { BusinessGrant } from './businessAccessService'
 
 export interface MembershipRef {
   slug: string
@@ -28,6 +29,7 @@ export interface AdminUser {
   // Скоуп данных: объекты, по которым человек видит данные; null = вся сеть компании.
   // Ортогонален правам: modules — какие экраны, object_scope — по каким объектам.
   object_scope?: string[] | null
+  business_grants?: BusinessGrant[]
   // Основание допуска: договоры, по которым человек здесь работает. Не права и не
   // скоуп — справка «почему он в пространстве»; у своих сотрудников обычно пусто.
   contract_ids?: string[] | null
@@ -137,6 +139,15 @@ export async function setMemberScope(
 ): Promise<AdminUser> {
   return put<AdminUser>(`/api/users/${id}/scope`, {
     company_id: companyId, object_scope: objectScope,
+  })
+}
+
+/** Бизнес-роли Магазина. В отличие от одной роли доступа, grant складываются. */
+export async function setBusinessGrants(
+  id: string, companyId: string, grants: BusinessGrant[],
+): Promise<AdminUser> {
+  return put<AdminUser>(`/api/users/${id}/business-grants`, {
+    company_id: companyId, grants,
   })
 }
 

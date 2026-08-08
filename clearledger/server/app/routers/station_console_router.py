@@ -25,6 +25,8 @@ from __future__ import annotations
 
 import os
 import re
+import json
+import uuid
 from urllib.parse import quote
 from datetime import datetime, timedelta, timezone
 
@@ -34,10 +36,11 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user
+from app.business_access import ROLE_STATION_ADMINISTRATOR, SCOPE_STATION, has_station_administrator
 from app.config import get_settings
 from app.database import get_db
 from app.deps import scope_company_id
-from app.models import User
+from app.models import User, UserCompany
 
 router = APIRouter(prefix="/store/station", tags=["станция"])
 
@@ -59,9 +62,10 @@ COOKIE = "station_console"
 СЕССИЯ_МИНУТ = 60
 
 
-def _выдать_сессию(user: User, station_id: int) -> str:
+def _выдать_сессию(user: User, station_id: int, company_id) -> str:
     payload = {
         "sub": str(user.id),
+        "company": str(company_id),
         "station": station_id,
         "name": (user.name or user.email or "").strip(),
         "exp": datetime.now(timezone.utc) + timedelta(minutes=СЕССИЯ_МИНУТ),
@@ -71,23 +75,21 @@ def _выдать_сессию(user: User, station_id: int) -> str:
     return jwt.encode(payload, get_settings().secret_key, algorithm=get_settings().algorithm)
 
 
-def _выдать_сессию_из_имени(name: str, station_id: int) -> str:
-    """Продление: тот же владелец и станция, новый срок.
-
-    Пользователя из базы не перечитываем — сессия уже подписана нами, и права
-    проверены при её выдаче. Ходить в базу на каждой картинке рабочего места
-    значило бы платить запросом за каждый килобайт.
-    """
+def _продлить_сессию(payload: dict) -> str:
+    """Продление после повторной проверки актуальных grant в базе."""
     payload = {
-        "sub": "", "station": station_id, "name": name,
+        "sub": str(payload.get("sub") or ""),
+        "company": str(payload.get("company") or ""),
+        "station": int(payload.get("station") or 0),
+        "name": str(payload.get("name") or ""),
         "exp": datetime.now(timezone.utc) + timedelta(minutes=СЕССИЯ_МИНУТ),
         "iat": datetime.now(timezone.utc), "typ": "station_console",
     }
     return jwt.encode(payload, get_settings().secret_key, algorithm=get_settings().algorithm)
 
 
-def _имя_из_сессии(request: Request, station_id: int) -> str | None:
-    """Кто работает по cookie-сессии. None — сессии нет или она чужая."""
+def _сессия(request: Request, station_id: int) -> dict | None:
+    """Проверенные claims console-cookie. None — сессии нет или она чужая."""
     raw = request.cookies.get(COOKIE)
     if not raw:
         return None
@@ -97,7 +99,12 @@ def _имя_из_сессии(request: Request, station_id: int) -> str | None:
         return None
     if payload.get("typ") != "station_console" or int(payload.get("station", -1)) != station_id:
         return None
-    return str(payload.get("name") or "")
+    return payload
+
+
+def _имя_из_сессии(request: Request, station_id: int) -> str | None:
+    payload = _сессия(request, station_id)
+    return str(payload.get("name") or "") if payload else None
 
 
 def _префикс(station_id: int) -> str:
@@ -177,9 +184,17 @@ async def station_console_session(
     вернуться к работе на другой АЗС без нового входа нельзя, а забытая
     вкладка перестаёт быть доступом сама.
     """
-    await scope_company_id(user, db)
+    cid = await scope_company_id(user, db)
+    membership = await db.get(UserCompany, (user.id, cid))
+    grants = list(getattr(membership, "business_grants", None) or []) if membership else []
+    if not has_station_administrator(grants, station_id):
+        raise HTTPException(
+            403,
+            f"Для работы на АЗС {station_id} нужна роль «Администратор АЗС» "
+            "с назначением на эту станцию",
+        )
     ответ = Response(status_code=204)
-    _поставить_cookie(ответ, _выдать_сессию(user, station_id), station_id)
+    _поставить_cookie(ответ, _выдать_сессию(user, station_id, cid), station_id)
     return ответ
 
 
@@ -191,13 +206,13 @@ async def station_console(
     station_id: int,
     path: str,
     request: Request,
+    db: AsyncSession = Depends(get_db),
 ) -> Response:
     """Прокси к рабочему месту станции."""
-    # Права проверены при выдаче сессии; здесь достаточно её подписи. Иначе
-    # каждая картинка и каждая форма станции требовали бы заголовка, которого у
-    # навигации в рамке нет.
-    автор = _имя_из_сессии(request, station_id)
-    if автор is None:
+    # Cookie несёт личность без браузерного Authorization. Актуальный grant
+    # перечитываем на каждом запросе, поэтому отзыв действует сразу.
+    claims = _сессия(request, station_id)
+    if claims is None:
         # Страницу отдаём людям, JSON — фоновым запросам самой станции: скрипт
         # рабочего места должен получить понятный код, а не HTML в ответ.
         if "text/html" in request.headers.get("accept", ""):
@@ -206,6 +221,22 @@ async def station_console(
                 status_code=401, media_type="text/html; charset=utf-8",
             )
         raise HTTPException(401, "сессия работы на станции не открыта или истекла")
+    try:
+        user_id = uuid.UUID(str(claims.get("sub") or ""))
+        company_id = uuid.UUID(str(claims.get("company") or ""))
+    except ValueError:
+        raise HTTPException(401, "сессия работы на станции повреждена")
+    membership = await db.get(UserCompany, (user_id, company_id))
+    grants = list(getattr(membership, "business_grants", None) or []) if membership else []
+    if not has_station_administrator(grants, station_id):
+        raise HTTPException(403, "Назначение администратора этой АЗС отозвано")
+    автор = str(claims.get("name") or "")
+    station_grants = [
+        grant for grant in grants
+        if grant.get("role") == ROLE_STATION_ADMINISTRATOR
+        and grant.get("scope_type") == SCOPE_STATION
+        and str(grant.get("scope_id") or "") == str(station_id)
+    ]
     if not HUB_KEY:
         raise HTTPException(503, "не настроен ключ интеграции с хабом TradeLink")
 
@@ -214,6 +245,10 @@ async def station_console(
         # Фамилия едет процентным кодированием: заголовки HTTP — latin-1, а имя
         # русское, и без этого прокси падает на первом же «Жукова».
         "X-Ledger-User": quote(автор, safe=""),
+        "X-Ledger-User-ID": str(user_id),
+        "X-Ledger-Grants": quote(
+            json.dumps(station_grants, ensure_ascii=False, separators=(",", ":")), safe=""
+        ),
     }
     if ct := request.headers.get("content-type"):
         заголовки["content-type"] = ct
@@ -254,9 +289,9 @@ async def station_console(
                         headers=исходящие, media_type=тип or None)
 
     # Сессия продлевается работой: час отсчитывается от последнего действия, а
-    # не от входа. Товаровед считает склад дольше часа, и обрывать его посреди
+    # не от входа. Администратор считает склад дольше часа, и обрывать его посреди
     # инвентаризации значит терять пересчёт.
-    _поставить_cookie(итог, _выдать_сессию_из_имени(автор, station_id), station_id)
+    _поставить_cookie(итог, _продлить_сессию(claims), station_id)
     return итог
 
 

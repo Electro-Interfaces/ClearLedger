@@ -307,7 +307,8 @@ def _ts(value) -> datetime | None:
 async def ingest_station_nsi(db: AsyncSession, company_id, station_id: int,
                              docs: list[dict]) -> dict:
     """Принять черновики справочников и изменения цен со станции."""
-    stats = {"item_drafts": 0, "partner_drafts": 0, "price_changes": 0, "proposals": 0}
+    stats = {"item_drafts": 0, "partner_drafts": 0, "price_changes": 0,
+             "proposals": 0, "mrc_facts": 0}
 
     for doc in docs:
         if not isinstance(doc, dict):
@@ -372,6 +373,28 @@ async def ingest_station_nsi(db: AsyncSession, company_id, station_id: int,
                    "at": _ts(doc.get("Момент"))})
             stats["proposals"] += 1
 
+        elif вид == "mrc_fact":
+            # МРЦ, снятая станцией с кода маркировки.
+            #
+            # В очередь на разбор не кладём: максимальную розничную цену никто
+            # не назначает — её печатают на пачке. Спрашивать человека «принять
+            # ли то, что написано на упаковке» бессмысленно, а без неё контроль
+            # «не продавать выше МРЦ» не работает вовсе: в справочнике сети её
+            # нет ни у одной позиции, из 1С она не переносилась.
+            #
+            # Пишем только там, где своего значения у центра нет. Данные ЭДО
+            # точнее выборки по последнему увиденному коду, и станция их не
+            # переспорит.
+            item = doc.get("НоменклатураUUID") or ""
+            мрц = doc.get("МРЦ")
+            if not item or not мрц or float(мрц) <= 0:
+                continue
+            await db.execute(text("""
+                UPDATE edge.item SET mrc = :mrc, updated_at = now()
+                 WHERE external_uuid::text = :item AND mrc IS NULL
+            """), {"item": item, "mrc": float(мрц)})
+            stats["mrc_facts"] += 1
+
         elif вид == "price_change":
             # Изменение цены неизменяемо: это запись о случившемся, а не
             # состояние. Повтор пакета не должен переписывать автора и причину.
@@ -392,16 +415,17 @@ async def ingest_station_nsi(db: AsyncSession, company_id, station_id: int,
                 continue
             stats["price_changes"] += 1
 
-            # Право станции на цену — не просто журнал. Если центр явно отдал
-            # карточку станции, её новая цена становится текущей ценой мастера
-            # и затем разъезжается по остальному контуру. Сетевую цену станция
-            # переписать не может даже подделанным пакетом.
+            # Политика v1 отдаёт станции весь ассортимент. Её новая цена — не
+            # только журнал, а текущая цена мастер-проекции этой АЗС.
             item = (await db.execute(text("""
                 SELECT id, coalesce(price_owner, 'master') AS price_owner
                 FROM edge.item WHERE external_uuid::text = :u
             """), {"u": doc.get("НоменклатураUUID") or ""})).first()
             new_price = float(doc.get("ЦенаСтала") or 0)
-            if item is not None and item.price_owner == "station" and new_price >= 0:
+            if item is not None and new_price >= 0:
+                await db.execute(text(
+                    "UPDATE edge.item SET price_owner = 'station' WHERE id = :item"
+                ), {"item": item.id})
                 changed_at = _ts(doc.get("Момент")) or datetime.now(timezone.utc)
                 await db.execute(text("""
                     UPDATE edge.price SET valid_to = :at

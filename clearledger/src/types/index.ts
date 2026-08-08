@@ -536,6 +536,8 @@ export interface AccountingDoc {
   matchedEntryId?: string    // ссылка на DataEntry
   matchStatus: MatchStatus
   matchDetails?: MatchDetails
+  discrepancyStatus?: string
+  discrepancySummary?: string | null
   warehouseCode?: string
   createdAt: string
   updatedAt: string
@@ -966,4 +968,3 @@ export interface AuditorNormResult {
   startedAt?: string
   finishedAt?: string
 }
-

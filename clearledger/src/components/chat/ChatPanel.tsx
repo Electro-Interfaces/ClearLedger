@@ -53,7 +53,7 @@ import { useTasksApp } from '@/hooks/useTasksApp'
 import { useSendMode } from '@/hooks/useSendMode'
 import { useSupportContext } from '@/contexts/SupportContext'
 import type {
-  ChatRoom, ChatMessage, ChatParticipant, ChatPresence, ChatFolder as ChatFolderModel, ChatPoll,
+  ChatRoom, ChatMessage, ChatParticipant, ChatPresence, ChatFolder as ChatFolderModel, ChatPoll, PartyType,
 } from '@/services/chatService'
 
 // ── константы ────────────────────────────────────────────────────────────────
@@ -526,8 +526,10 @@ function EmojiPicker({ onPick }: { onPick: (emoji: string) => void }) {
           // Составные эмодзи (жест + модификатор) — это несколько кодовых точек,
           // и посимвольный разбор рвал бы их пополам.
           const last = acc[acc.length - 1]
-          if (last && /[‍️\u{1F3FB}-\u{1F3FF}]/u.test(ch)) acc[acc.length - 1] = last + ch
-          else if (last && /[‍]$/u.test(last)) acc[acc.length - 1] = last + ch
+          const codePoint = ch.codePointAt(0) ?? 0
+          if (last && (ch === '\u200D' || ch === '\uFE0F' || (codePoint >= 0x1f3fb && codePoint <= 0x1f3ff))) {
+            acc[acc.length - 1] = last + ch
+          } else if (last?.endsWith('\u200D')) acc[acc.length - 1] = last + ch
           else acc.push(ch)
           return acc
         }, []).map((e, i) => (
@@ -2091,6 +2093,7 @@ export function ChatPanel({ compact, scopeProduct }: {
   const presenceMap = useMemo(() => new Map(presence.map((p) => [p.userId, p])), [presence])
   // Чем отправляется сообщение — личная привычка человека, одна на всё пространство.
   const { shouldSend, hint: sendHint } = useSendMode()
+  const beepRef = useRef<() => void>(() => {})
 
   // ── WebSocket ──
   const onWs = useCallback((e: WsEvent) => {
@@ -2105,7 +2108,7 @@ export function ChatPanel({ compact, scopeProduct }: {
         // Звук — на чужое сообщение и только если человек не смотрит в этот чат:
         // пикать на собственную отправку и на открытую переписку незачем.
         if (e.userId && String(e.userId) !== user?.id
-            && (String(e.roomId ?? '') !== selectedRoom || document.hidden)) beep()
+            && (String(e.roomId ?? '') !== selectedRoom || document.hidden)) beepRef.current()
         break
       case 'chat:poll':      // проголосовали или завершили — расклад изменился у всех
       case 'chat:read':
@@ -2504,6 +2507,7 @@ export function ChatPanel({ compact, scopeProduct }: {
       setTimeout(() => ctx.close().catch(() => {}), 600)
     } catch { /* браузер не дал звук — не беда, есть бейдж и push */ }
   }, [soundOn])
+  useEffect(() => { beepRef.current = beep }, [beep])
 
   // Фон ленты: личная настройка, живёт в браузере (см. CHAT_SKINS).
   const [skin, setSkin] = useState<string>(() => localStorage.getItem('cl-chat-skin') || 'none')

@@ -1,20 +1,34 @@
-"""Ростер станции: проверка чистой логики доступа _covers.
+"""Ростер станции строится только из явных бизнес-grant."""
 
-Мост станция↔объект и SQL тривиальны; нетривиально — кого включать в ростер.
-"""
+from app.business_access import (
+    ROLE_NETWORK_MERCHANDISER,
+    ROLE_STATION_ADMINISTRATOR,
+    SCOPE_NETWORK,
+    SCOPE_STATION,
+)
 from app.services.station_roster import _covers
 
 
-def test_covers_доступ_к_станции():
-    # NULL-скоуп — вся сеть: видит любую станцию.
-    assert _covers(None, "ezs-208", False) is True
-    # Станция явно в скоупе — видит.
-    assert _covers(["ezs-208", "ezs-9"], "ezs-208", False) is True
-    # Чужая станция в скоупе — не видит.
-    assert _covers(["ezs-9"], "ezs-208", False) is False
-    # Суперадмин — везде, даже с чужим скоупом.
-    assert _covers(["ezs-9"], "ezs-208", True) is True
-    # Станция не размечена (loc_id=None) и скоуп ограничен — не пускаем.
-    assert _covers(["ezs-208"], None, False) is False
-    # …но суперадмина пускаем и без разметки.
-    assert _covers(["ezs-208"], None, True) is True
+def test_covers_only_explicit_station_administrator_grant():
+    assert _covers(None, 208) is False
+    assert _covers([], 208) is False
+    assert _covers([
+        {"role": ROLE_NETWORK_MERCHANDISER, "scope_type": SCOPE_NETWORK, "scope_id": "gig"},
+    ], 208) is False
+    assert _covers([
+        {"role": ROLE_STATION_ADMINISTRATOR, "scope_type": SCOPE_STATION, "scope_id": "209"},
+    ], 208) is False
+    assert _covers([
+        {"role": ROLE_STATION_ADMINISTRATOR, "scope_type": SCOPE_STATION, "scope_id": "208"},
+    ], 208) is True
+
+
+def test_grants_are_union_across_roles():
+    grants = [
+        {"role": ROLE_NETWORK_MERCHANDISER, "scope_type": SCOPE_NETWORK, "scope_id": "gig"},
+        {"role": ROLE_STATION_ADMINISTRATOR, "scope_type": SCOPE_STATION, "scope_id": "208"},
+        {"role": ROLE_STATION_ADMINISTRATOR, "scope_type": SCOPE_STATION, "scope_id": "210"},
+    ]
+    assert _covers(grants, 208) is True
+    assert _covers(grants, 210) is True
+    assert _covers(grants, 211) is False

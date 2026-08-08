@@ -141,7 +141,7 @@ export interface ShiftDetail extends LoadedShift {
   sales: ShiftSale[]
   receipts: LoadedReceipt[]
   /** Сырой сменный отчёт STS — вход эталонного просмотрщика. null у старых смен. */
-  raw_report?: Record<string, any> | null
+  raw_report?: Record<string, unknown> | null
   /** Комментарий менеджера по корректировке (в целом по документу). */
   correction_note?: string | null
   correction_note_author?: string | null
@@ -473,7 +473,8 @@ export interface ShiftDashboardData {
   volume: { total: number; by_fuel: DashFuelItem[] }
   financial: { total_revenue: number; avg_price?: number; payment_details: Record<string, DashPaymentDetail> }
   receipts: { total_doc: number; total_fact: number; total_diff: number; ttn_count: number; by_fuel: DashReceiptFuel[]; details: DashReceiptDetail[] }
-  cash_flow: { income: number; expense: number; calculated: number; closing: number; difference: number; operations_count: number; details: DashCashDetail[] }
+  /** closing — снимок остатка кассы из STS; difference не рассчитывается (null), пока сходимость кассы не выведена. */
+  cash_flow: { income: number; expense: number; calculated: number; closing: number; difference: number | null; operations_count: number; details: DashCashDetail[] }
   cashout: { total: number; count: number; details: DashCashoutDetail[] }
   operational: {
     shifts_count: number

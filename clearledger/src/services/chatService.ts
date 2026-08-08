@@ -143,6 +143,8 @@ export const closePoll = (pollId: string) =>
 
 export interface ChatUser {
   userId: string; name: string; email: string; online: boolean
+  /** vendor | internal | partner — принадлежность в выбранном пространстве. */
+  partyType?: PartyType
   /** Фото человека (/api/files/<id>) — то же, что у участника комнаты. */
   avatarUrl?: string | null
 }

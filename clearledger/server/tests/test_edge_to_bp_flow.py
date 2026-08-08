@@ -177,6 +177,8 @@ def _emitter_session(entries):
         _Result(scalar="ГИГ"),
         _Result(rows=[{"id": 208, "name": "АЗС 208", "warehouse_uuid": "warehouse-208"}]),
         _Result(rows=entries),
+        _Result(rows=[]),
+        _Result(rows=[]),
     ])
 
 

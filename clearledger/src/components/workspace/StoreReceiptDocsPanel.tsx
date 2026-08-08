@@ -124,6 +124,8 @@ export function StoreReceiptDocsPanel({ stations }: { stations?: string[] }) {
                 <th className="px-3 py-2 text-right">Расхождений</th>
                 <th className="px-3 py-2 text-right">Сумма, ₽</th>
                 <th className="px-3 py-2 text-left">Ввод</th>
+                {/* Кто принял: приёмка, проведённая из центра, коробок не открывала. */}
+                <th className="px-3 py-2 text-left">Принял</th>
               </tr>
             </thead>
             <tbody>
@@ -144,6 +146,9 @@ export function StoreReceiptDocsPanel({ stations }: { stations?: string[] }) {
                   <td className="px-3 py-2 text-right tabular-nums">{money(r.total_amount)}</td>
                   <td className="px-3 py-2 text-xs text-muted-foreground">
                     {r.origin === 'station' ? 'станция' : r.origin === 'edo' ? 'ЭДО' : 'центр'}
+                  </td>
+                  <td className="px-3 py-2 text-xs text-muted-foreground">
+                    {r.author ?? <span className="text-muted-foreground/60">—</span>}
                   </td>
                 </tr>
               ))}

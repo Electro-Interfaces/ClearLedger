@@ -323,6 +323,11 @@ async def create_all() -> None:
             "REFERENCES counterparties(id) ON DELETE SET NULL",
             # Скоуп данных: объекты, которые видит участник (NULL = вся сеть компании).
             "ALTER TABLE user_companies ADD COLUMN IF NOT EXISTS object_scope JSONB",
+            # Бизнес-роли Магазина — массив назначений с областью. Отдельно от
+            # одной platform-роли и object_scope, чтобы права нескольких ролей
+            # складывались, а администратор АЗС не получал соседние станции.
+            "ALTER TABLE user_companies ADD COLUMN IF NOT EXISTS business_grants JSONB "
+            "NOT NULL DEFAULT '[]'::jsonb",
             # Основание допуска: договоры, по которым человек работает в пространстве.
             # Не права — справка «на каком основании он здесь» (docs/SPACE.md §4).
             "ALTER TABLE user_companies ADD COLUMN IF NOT EXISTS contract_ids JSONB",
@@ -1363,6 +1368,9 @@ async def create_all() -> None:
             "ALTER TABLE store_receipts ADD COLUMN IF NOT EXISTS signing_mode "
             "VARCHAR(30) NOT NULL DEFAULT 'office_director'",
             "ALTER TABLE store_receipts ADD COLUMN IF NOT EXISTS signer_name VARCHAR(200)",
+            # Кто принял товар на станции. Прежние документы остаются без автора:
+            # задним числом его взять неоткуда, пустое честнее подставленного.
+            "ALTER TABLE store_receipts ADD COLUMN IF NOT EXISTS author VARCHAR(200)",
             "ALTER TABLE store_receipts ADD COLUMN IF NOT EXISTS mchd_guid VARCHAR(100)",
             "ALTER TABLE store_receipts ADD COLUMN IF NOT EXISTS mchd_registry VARCHAR(200)",
             "ALTER TABLE store_receipts ADD COLUMN IF NOT EXISTS mchd_valid_until DATE",
@@ -1402,6 +1410,18 @@ async def create_all() -> None:
             )
         """))
 
+        # Политика Магазина v1: цены всех карточек находятся в ведении АЗС.
+        # Колонка остаётся — позже она снова станет различаться по категории
+        # или карточке, когда будет включён сетевой контроль ценообразования.
+        await conn.execute(_sa.text("""
+            DO $$ BEGIN
+                IF to_regclass('edge.item') IS NOT NULL THEN
+                    UPDATE edge.item SET price_owner = 'station'
+                    WHERE coalesce(price_owner, '') <> 'station';
+                END IF;
+            END $$
+        """))
+
         # v2.38: задание центра можно отменить, не выдавая его за применённое.
         #
         # Агент забирает всё неподтверждённое, поэтому единственным способом
@@ -1413,6 +1433,11 @@ async def create_all() -> None:
             "ALTER TABLE edge_downlink ADD COLUMN IF NOT EXISTS cancelled_by UUID",
         ):
             await conn.execute(_sa.text(stmt))
+
+        # Фактический трафик станции: size_bytes хранит JSON после распаковки,
+        # поэтому выдавать его за объём LTE-канала нельзя.
+        await conn.execute(_sa.text(
+            "ALTER TABLE edge_packets ADD COLUMN IF NOT EXISTS wire_size_bytes INTEGER"))
 
         # v2.39: у документа станции появились сквозной номер центра и статус.
         #

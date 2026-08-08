@@ -9,7 +9,7 @@
  * Топлива здесь нет: оно ведёт свой контур. Смешанный чек (заправка плюс кофе)
  * помечен — иначе его сумма читалась бы как весь чек, а это не так.
  */
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Search, X, Receipt, RotateCcw } from 'lucide-react'
 import {
@@ -163,8 +163,11 @@ export function StoreChequesPanel({ companyId, dateFrom, dateTo }: {
             </thead>
             <tbody>
               {чеки.map((c: StoreCheque) => (
-                <>
-                  <tr key={c.id}
+                // Ключ на фрагменте, а не на строках внутри: React сверяет
+                // список по корню элемента, и без него раскрытый состав чека
+                // при перерисовке уезжает на соседнюю строку.
+                <Fragment key={c.id}>
+                  <tr
                       onClick={() => открыть(открыт === c.id ? null : c.id)}
                       className="cursor-pointer border-t border-border/30 hover:bg-accent/20">
                     <td className="whitespace-nowrap px-3 py-1.5">{время(c.at)}</td>
@@ -186,7 +189,7 @@ export function StoreChequesPanel({ companyId, dateFrom, dateTo }: {
                     </td>
                   </tr>
                   {открыт === c.id && (
-                    <tr key={`${c.id}-lines`} className="bg-background/40">
+                    <tr className="bg-background/40">
                       <td colSpan={8} className="px-3 py-2">
                         <table className="w-full text-[11px]">
                           <thead className="text-muted-foreground">
@@ -215,7 +218,7 @@ export function StoreChequesPanel({ companyId, dateFrom, dateTo }: {
                       </td>
                     </tr>
                   )}
-                </>
+                </Fragment>
               ))}
             </tbody>
           </table>

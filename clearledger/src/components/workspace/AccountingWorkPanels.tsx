@@ -15,7 +15,7 @@ import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import {
-  AlertTriangle, ArrowRight, CheckCircle2, ChefHat, FileText, Fuel, Loader2, Users,
+  AlertTriangle, ArrowRight, CheckCircle2, ChefHat, FileText, Loader2, Users,
 } from 'lucide-react'
 
 import { Card, CardContent } from '@/components/ui/card'

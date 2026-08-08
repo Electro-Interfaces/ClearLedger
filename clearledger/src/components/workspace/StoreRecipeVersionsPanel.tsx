@@ -13,6 +13,8 @@ import {
   type StoreRecipeEntry, type StoreRecipeKind, type StoreRecipeLine,
   type StoreRecipeVersion,
 } from '@/services/storeService'
+import { StoreCommercialPolicyNotice } from './StoreCommercialPolicyNotice'
+import { useCentralCommercialWrite } from './useStoreCommercialPolicy'
 
 const KIND_LABEL: Record<StoreRecipeKind, string> = {
   dish: 'Блюдо', semi: 'Полуфабрикат', combo: 'Комбо',
@@ -73,13 +75,14 @@ function VersionBadge({ version }: { version: StoreRecipeVersion }) {
   return <span className={`rounded-full border px-2 py-0.5 text-[10px] ${style}`}>v{version.version} · {label}</span>
 }
 
-function RecipeEditor({ entry, createNew, onChanged }: {
+function RecipeEditor({ entry, createNew, canWrite, onChanged }: {
   entry?: StoreRecipeEntry
   createNew?: boolean
+  canWrite: boolean
   onChanged: (dishUuid?: string) => void
 }) {
   const source = entry?.draft ?? entry?.active
-  const editable = createNew || Boolean(entry?.draft)
+  const editable = canWrite && (createNew || Boolean(entry?.draft))
   const [dishUuid, setDishUuid] = useState(source?.dish_uuid ?? '')
   const [name, setName] = useState(source?.dish_name ?? '')
   const [kind, setKind] = useState<StoreRecipeKind>(source?.recipe_kind ?? 'dish')
@@ -285,12 +288,13 @@ function RecipeEditor({ entry, createNew, onChanged }: {
 }
 
 export function StoreRecipeVersionsPanel() {
+  const centralWrite = useCentralCommercialWrite()
   const { company } = useCompany()
   const queryClient = useQueryClient()
   const [selected, setSelected] = useState<string | null>(null)
   // Раскрытая станция: список того, что мешает её блюдам. Свёрнуто по умолчанию —
   // сеть смотрят сводкой, разбираются по одной точке.
-  const [открыта, открыть] = useState<number | null>(null)
+  const [открыта] = useState<number | null>(null)
   const query = useQuery({
     queryKey: ['store-recipe-versions', company.id],
     queryFn: getStoreRecipeWorkspace,
@@ -327,6 +331,7 @@ export function StoreRecipeVersionsPanel() {
 
   return (
     <div className="space-y-5 p-6">
+      <StoreCommercialPolicyNotice />
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="max-w-3xl">
           <h3 className="text-base font-semibold">Версионные ТТК</h3>
@@ -354,7 +359,7 @@ export function StoreRecipeVersionsPanel() {
             <div className="text-sm font-medium">Найдены ТТК из текущего среза 1С</div>
             <div className="text-xs text-muted-foreground">{data.legacy_available} карт можно один раз перенести как действующие версии v1.</div>
           </div>
-          <Button onClick={() => bootstrap.mutate()} disabled={bootstrap.isPending}>Перенести в реестр</Button>
+          <Button onClick={() => bootstrap.mutate()} disabled={!centralWrite || bootstrap.isPending}>Перенести в реестр</Button>
         </div>
       )}
 
@@ -362,7 +367,8 @@ export function StoreRecipeVersionsPanel() {
         <div className="overflow-hidden rounded-xl border border-border bg-card">
           <div className="flex items-center justify-between border-b border-border p-3">
             <span className="text-sm font-medium">Карты</span>
-            <Button size="icon-xs" variant="outline" aria-label="Новая ТТК" onClick={() => setSelected('__new')}><Plus /></Button>
+            <Button size="icon-xs" variant="outline" aria-label="Новая ТТК" disabled={!centralWrite}
+              onClick={() => setSelected('__new')}><Plus /></Button>
           </div>
           <div className="max-h-[680px] overflow-y-auto p-1.5">
             {data.recipes.map((recipe) => {
@@ -383,7 +389,8 @@ export function StoreRecipeVersionsPanel() {
             )}
           </div>
         </div>
-        <RecipeEditor key={selectedDish ?? 'empty'} entry={entry} createNew={selectedDish === '__new'} onChanged={(uuid) => setSelected(uuid ?? selectedDish)} />
+        <RecipeEditor key={selectedDish ?? 'empty'} entry={entry} createNew={selectedDish === '__new'}
+          canWrite={centralWrite} onChanged={(uuid) => setSelected(uuid ?? selectedDish)} />
       </div>
 
       <div className="rounded-xl border border-border bg-card">
@@ -421,15 +428,15 @@ export function StoreRecipeVersionsPanel() {
                           : <span className="inline-flex items-center gap-1.5 text-xs text-red-300" title={readiness.issues?.map((issue) => issue.message).join('\n')}><CircleAlert className="h-4 w-4" />{readiness.critical ?? 0} крит.</span>}
                       </td>
                       <td className="px-4 py-3 text-xs text-muted-foreground"><span className="inline-flex items-center gap-1.5"><Clock3 className="h-3.5 w-3.5" />{localDate(delivery.agent_last_seen)}</span></td>
-                      <td className="px-4 py-3 text-right"><Button size="xs" variant="outline" onClick={() => push.mutate(delivery.station_id)} disabled={!data.bundle || push.isPending}><Send />Отправить</Button></td>
+                      <td className="px-4 py-3 text-right"><Button size="xs" variant="outline" onClick={() => push.mutate(delivery.station_id)} disabled={!centralWrite || !data.bundle || push.isPending}><Send />Отправить</Button></td>
                     </tr>
                     {раскрыто && мешает.length > 0 && (
                       <tr key={`${delivery.station_id}-детали`} className="border-b border-border bg-muted/20">
                         <td colSpan={6} className="px-4 py-3">
                           <div className="mb-2 text-xs text-muted-foreground">
-                            Причины разной природы и чинят их разные люди: цену назначает товаровед,
-                            код кассы закрепляется на станции, штрихкод и ставку правят в карточке
-                            центра, сырьё надо заказать. «Без прихода» продажу не блокирует — там
+                            Причины разной природы и чинят их разные люди: цену назначает администратор АЗС,
+                            код кассы закрепляется на станции, канон штрихкода и ставки ведёт товаровед сети,
+                            сырьё надо заказать. «Без прихода» продажу не блокирует — там
                             неверны себестоимость и остаток.
                           </div>
                           <table className="w-full text-xs">

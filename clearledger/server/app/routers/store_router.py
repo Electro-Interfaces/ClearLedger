@@ -16,10 +16,11 @@ import os
 
 from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel
-from sqlalchemy import func, select, text
+from sqlalchemy import String, cast, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import check_module_access, get_current_user
+from app.business_access import has_network_merchandiser, store_policy as resolve_store_policy
 from app.database import get_db
 from app.deps import capture_company_header, scope_company_id
 from app.models import (
@@ -62,10 +63,94 @@ router = APIRouter(prefix="/store", tags=["Магазин"],
                                  Depends(_require_store_module)])
 
 
+async def _require_central_commercial_control(user: User, db: AsyncSession) -> uuid.UUID:
+    """Запись коммерческих решений из центра.
+
+    В v1 владелец — станция, поэтому центр остаётся витриной/аналитикой. Когда
+    появится сетевой режим, запись дополнительно потребует явный grant
+    network_merchandiser, а не техническую роль admin.
+    """
+    cid = await scope_company_id(user, db)
+    company = await db.get(Company, cid)
+    if company is None:
+        raise HTTPException(404, "Организация не найдена")
+    policy = resolve_store_policy(company.customization)
+    if policy["commercial_owner"] == "station":
+        raise HTTPException(
+            409,
+            "Коммерческие решения v1 принадлежат администратору АЗС. "
+            "Центр показывает аналитику и предложения, но не перезаписывает станцию.",
+        )
+    membership = await db.get(UserCompany, (user.id, cid))
+    grants = list(getattr(membership, "business_grants", None) or []) if membership else []
+    if not has_network_merchandiser(grants, company.slug):
+        raise HTTPException(403, "Требуется роль «Товаровед сети»")
+    return cid
+
+
+async def _require_network_merchandiser(user: User, db: AsyncSession) -> uuid.UUID:
+    """Изменение канона сети: карточки, штрихкоды и разрешение дублей."""
+    cid = await scope_company_id(user, db)
+    company = await db.get(Company, cid)
+    if company is None:
+        raise HTTPException(404, "Организация не найдена")
+    membership = await db.get(UserCompany, (user.id, cid))
+    grants = list(getattr(membership, "business_grants", None) or []) if membership else []
+    if not has_network_merchandiser(grants, company.slug):
+        raise HTTPException(403, "Требуется роль «Товаровед сети»")
+    return cid
+
+
 # Молчание свыше трёх минут при телеметрии раз в минуту — это уже не «сеть
 # моргнула», а обрыв. Час — станция требует внимания человека.
 STATION_OFFLINE_AFTER = 180
 STATION_STALE_AFTER = 3600
+
+
+def _station_state(silence: int | None) -> str:
+    """Единая шкала свежести телеметрии для всех экранов станции."""
+    if silence is None or silence > STATION_STALE_AFTER:
+        return "молчит"
+    if silence > STATION_OFFLINE_AFTER:
+        return "офлайн"
+    return "онлайн"
+
+
+def _int_metric(details: dict, key: str) -> int:
+    try:
+        return max(0, int(details.get(key) or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _queue_metrics(details: dict) -> dict:
+    return {
+        "queue_bytes": _int_metric(details, "queue_bytes"),
+        "queue_wire_bytes": _int_metric(details, "queue_wire_bytes"),
+        "queue_oldest_at": details.get("queue_oldest_at"),
+        "queue_failing": _int_metric(details, "queue_failing"),
+        "queue_sent_24": _int_metric(details, "queue_sent_24"),
+        "sent_24_bytes": _int_metric(details, "sent_24_bytes"),
+        "sent_24_wire_bytes": _int_metric(details, "sent_24_wire_bytes"),
+        "last_sent_at": details.get("last_sent_at"),
+        "last_attempt_at": details.get("last_attempt_at"),
+        "last_error": details.get("last_error"),
+    }
+
+
+def _clock_skew_seconds(details: dict, received_at: datetime | None) -> int | None:
+    raw = details.get("client_time")
+    if not raw or received_at is None:
+        return None
+    try:
+        client_at = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if client_at.tzinfo is None:
+        client_at = client_at.replace(tzinfo=timezone.utc)
+    if received_at.tzinfo is None:
+        received_at = received_at.replace(tzinfo=timezone.utc)
+    return round((client_at - received_at).total_seconds())
 
 
 @router.get("/stations")
@@ -91,12 +176,7 @@ async def store_stations(
     stations = []
     for r in rows:
         silence = int((now - r.last_seen).total_seconds()) if r.last_seen else None
-        if silence is None or silence > STATION_STALE_AFTER:
-            state = "молчит"
-        elif silence > STATION_OFFLINE_AFTER:
-            state = "офлайн"
-        else:
-            state = "онлайн"
+        state = _station_state(silence)
         details = r.payload or {}
         stations.append({
             "station_id": r.station_id,
@@ -112,6 +192,8 @@ async def store_stations(
             "ledger_stock_ok": details.get("ledger_stock_ok", False),
             "stock_source": details.get("stock_source"),
             "cash_policy": details.get("cash_policy"),
+            **_queue_metrics(details),
+            "clock_skew_seconds": _clock_skew_seconds(details, r.last_seen),
             # Кто работает на станции прямо сейчас — по её же телеметрии.
             # Открывать рабочее место вслепую, когда там считают склад, значит
             # столкнуться на одном документе и потерять чью-то работу.
@@ -132,8 +214,8 @@ async def store_stations(
 
 # Пакеты приходят пачкой: агент, дождавшись канала, отдаёт всё накопленное
 # подряд. Пауза свыше четверти часа — это уже следующий выход на связь, а не
-# та же передача. Отдельной истории heartbeat в базе нет, и заводить её ради
-# счётчика незачем: сеанс виден по самим пакетам.
+# та же передача. Heartbeat показывает доступность станции, а сеанс обмена
+# считаем отдельно по самим пакетам.
 EXCHANGE_SESSION_GAP_MIN = 15
 
 PACKET_KIND_LABEL = {
@@ -144,10 +226,15 @@ PACKET_KIND_LABEL = {
     "writeoff": "Списание",
     "transfer": "Перемещение",
     "production": "Производство",
+    "cheques": "Чеки",
     "return_sale": "Возврат покупателя",
     "station-nsi": "Черновики НСИ",
     "station-recipes": "Рецептуры станции",
+    "station-mrc": "МРЦ станции",
     "nsi_delta": "Карточка НСИ",
+    "nsi_bulk": "Пакет НСИ",
+    "user_roster": "Пользователи станции",
+    "partners": "Поставщики",
     "price_update": "Цена",
     "goods_receipt_expected": "Заготовка приёмки",
     "cash_policy": "Политика кассы",
@@ -178,6 +265,8 @@ async def store_exchange(
 
     by_kind = [dict(r) for r in (await db.execute(text(f"""
         SELECT kind, count(*) AS packets, coalesce(sum(size_bytes), 0) AS bytes,
+               coalesce(sum(wire_size_bytes), 0) AS wire_bytes,
+               count(wire_size_bytes) AS wire_packets,
                max(received_at) AS last_at
         FROM edge_packets WHERE company_id = :cid AND {period}
         GROUP BY kind ORDER BY count(*) DESC
@@ -187,7 +276,9 @@ async def store_exchange(
 
     by_day = [dict(r) for r in (await db.execute(text(f"""
         SELECT received_at::date AS day, count(*) AS packets,
-               coalesce(sum(size_bytes), 0) AS bytes
+               coalesce(sum(size_bytes), 0) AS bytes,
+               coalesce(sum(wire_size_bytes), 0) AS wire_bytes,
+               count(wire_size_bytes) AS wire_packets
         FROM edge_packets WHERE company_id = :cid AND {period}
         GROUP BY 1 ORDER BY 1
     """), p)).mappings().all()]
@@ -197,12 +288,14 @@ async def store_exchange(
     # тащить сюда все пакеты периода ради одного числа.
     by_station = {r["station_id"]: dict(r) for r in (await db.execute(text(f"""
         SELECT station_id, count(*) AS packets, coalesce(sum(size_bytes), 0) AS bytes,
+               coalesce(sum(wire_size_bytes), 0) AS wire_bytes,
+               count(wire_size_bytes) AS wire_packets,
                max(received_at) AS last_at,
                count(*) FILTER (
                    WHERE prev IS NULL
                       OR received_at - prev > make_interval(mins => :gap)) AS sessions
         FROM (
-            SELECT station_id, received_at, size_bytes,
+            SELECT station_id, received_at, size_bytes, wire_size_bytes,
                    lag(received_at) OVER (
                        PARTITION BY station_id ORDER BY received_at) AS prev
             FROM edge_packets WHERE company_id = :cid AND {period}
@@ -216,19 +309,29 @@ async def store_exchange(
                count(*) FILTER (WHERE delivered_at IS NULL AND cancelled_at IS NULL) AS waiting,
                count(*) FILTER (WHERE delivered_at IS NOT NULL AND acked_at IS NULL
                                   AND cancelled_at IS NULL) AS unacked,
-               count(*) FILTER (WHERE acked_at IS NOT NULL) AS acked
+               count(*) FILTER (WHERE acked_at IS NOT NULL) AS acked,
+               coalesce(sum(octet_length(payload::text)) FILTER (
+                   WHERE acked_at IS NULL AND cancelled_at IS NULL), 0) AS pending_bytes,
+               min(created_at) FILTER (
+                   WHERE acked_at IS NULL AND cancelled_at IS NULL) AS oldest_pending_at,
+               round(avg(EXTRACT(epoch FROM acked_at - created_at)) FILTER (
+                   WHERE acked_at IS NOT NULL)) AS avg_ack_seconds,
+               round(max(EXTRACT(epoch FROM acked_at - created_at)) FILTER (
+                   WHERE acked_at IS NOT NULL)) AS max_ack_seconds
         FROM edge_downlink WHERE company_id = :cid GROUP BY station_id
     """), {"cid": cid})).mappings().all()}
 
     # Лента последних обменов в обе стороны: она объясняет цифры выше — видно,
     # чем именно занят канал и когда станция выходила на связь последний раз.
     recent = [dict(r) for r in (await db.execute(text("""
-        SELECT received_at AS at, station_id, kind, size_bytes, 'вверх' AS direction,
+        SELECT received_at AS at, station_id, kind, size_bytes, wire_size_bytes,
+               'вверх' AS direction,
                shift_number AS note
         FROM edge_packets WHERE company_id = :cid
         UNION ALL
         SELECT coalesce(acked_at, delivered_at, created_at) AS at, station_id, kind,
-               0 AS size_bytes, 'вниз' AS direction,
+               octet_length(payload::text) AS size_bytes,
+               octet_length(payload::text) AS wire_size_bytes, 'вниз' AS direction,
                CASE WHEN cancelled_at IS NOT NULL THEN 'отменено'
                     WHEN acked_at IS NOT NULL THEN 'применено'
                     WHEN delivered_at IS NOT NULL THEN 'доставлено'
@@ -278,15 +381,52 @@ async def store_exchange(
         i["unprojected"] = max(0, int(i["packets"]) - int(i["projected"])
                                - int(i["empty"] or 0))
 
-    # Доступность канала по станциям: минуты со следом телеметрии против минут
-    # с момента, как станция впервые вышла на связь.
+    # Доступность = время наблюдения минус обрывы длиннее трёх минут. Последний
+    # heartbeat до периода нужен, чтобы не терять обрыв на его левой границе.
     uptime = {r["station_id"]: dict(r) for r in (await db.execute(text("""
-        SELECT station_id, count(DISTINCT date_trunc('minute', at)) AS minutes,
-               min(at) AS first_at
-        FROM edge_heartbeats
-        WHERE company_id = :cid AND at >= :d1 AND at < (CAST(:d2 AS date) + 1)
-        GROUP BY station_id
-    """), p)).mappings().all()}
+        WITH bounds AS (
+            SELECT station_id,
+                   greatest(first_seen, CAST(:d1 AS date)::timestamptz) AS start_at,
+                   least(:now, (CAST(:d2 AS date) + 1)::timestamptz) AS end_at
+            FROM edge_agents WHERE company_id = :cid
+        ), points AS (
+            SELECT b.station_id, b.start_at, b.end_at, h.at
+            FROM bounds b
+            JOIN LATERAL (
+                SELECT at FROM edge_heartbeats
+                WHERE company_id = :cid AND station_id = b.station_id
+                  AND at >= b.start_at AND at <= b.end_at
+                UNION ALL
+                SELECT max(at) FROM edge_heartbeats
+                WHERE company_id = :cid AND station_id = b.station_id
+                  AND at < b.start_at
+            ) h ON h.at IS NOT NULL
+        ), seq AS (
+            SELECT *, lag(at) OVER (PARTITION BY station_id ORDER BY at) AS prev
+            FROM points
+        ), gaps AS (
+            SELECT station_id,
+                   coalesce(sum(EXTRACT(epoch FROM least(at, end_at) -
+                       greatest(prev, start_at))) FILTER (
+                       WHERE prev IS NOT NULL
+                         AND at - prev > make_interval(secs => 180)
+                         AND at > start_at AND prev < end_at), 0) AS seconds
+            FROM seq GROUP BY station_id
+        ), last_points AS (
+            SELECT station_id, max(at) AS last_at FROM points GROUP BY station_id
+        )
+        SELECT b.station_id,
+               (lp.last_at IS NOT NULL) AS has_heartbeat,
+               greatest(0, EXTRACT(epoch FROM b.end_at - b.start_at)) AS window_seconds,
+               coalesce(g.seconds, 0) + CASE
+                   WHEN lp.last_at IS NOT NULL
+                    AND b.end_at - lp.last_at > make_interval(secs => 180)
+                   THEN EXTRACT(epoch FROM b.end_at - greatest(lp.last_at, b.start_at))
+                   ELSE 0 END AS outage_seconds
+        FROM bounds b
+        LEFT JOIN gaps g USING (station_id)
+        LEFT JOIN last_points lp USING (station_id)
+    """), {**p, "now": datetime.now(timezone.utc)})).mappings().all()}
 
     # Что станции прислали на решение центра: карточки и поставщики, заведённые
     # при мёртвой связи, заявки об ошибке в сетевой карточке, цены, назначенные
@@ -315,27 +455,38 @@ async def store_exchange(
         silence = int((now - a.last_seen).total_seconds()) if a.last_seen else None
         ex = by_station.get(a.station_id, {})
         d = down.get(a.station_id, {})
+        details = a.payload or {}
         stations.append({
             "station_id": a.station_id,
-            "state": ("молчит" if silence is None or silence > STATION_STALE_AFTER
-                      else "офлайн" if silence > STATION_OFFLINE_AFTER else "онлайн"),
+            "state": _station_state(silence),
             "silence_seconds": silence,
+            "last_seen": a.last_seen,
             "version": a.version,
             "queue_pending": a.queue_pending,
             "queue_sent": a.queue_sent,
+            **_queue_metrics(details),
+            "clock_skew_seconds": _clock_skew_seconds(details, a.last_seen),
             "last_shift": a.last_shift,
-            "snapshot_at": (a.payload or {}).get("snapshot_at"),
+            "snapshot_at": details.get("snapshot_at"),
             # Кто работает на станции прямо сейчас — по её же телеметрии.
             # Открывать рабочее место вслепую, когда там считают склад, значит
             # столкнуться на одном документе и потерять чью-то работу.
-            "active_users": (a.payload or {}).get("active_users") or [],
+            "active_users": details.get("active_users") or [],
             "packets": int(ex.get("packets") or 0),
             "bytes": int(ex.get("bytes") or 0),
+            "wire_bytes": int(ex.get("wire_bytes") or 0),
+            "wire_packets": int(ex.get("wire_packets") or 0),
             "sessions": int(ex.get("sessions") or 0),
             "last_packet_at": ex.get("last_at"),
             "down_waiting": int(d.get("waiting") or 0),
             "down_unacked": int(d.get("unacked") or 0),
             "down_acked": int(d.get("acked") or 0),
+            "down_pending_bytes": int(d.get("pending_bytes") or 0),
+            "down_oldest_pending_at": d.get("oldest_pending_at"),
+            "down_avg_ack_seconds": (int(d["avg_ack_seconds"])
+                                     if d.get("avg_ack_seconds") is not None else None),
+            "down_max_ack_seconds": (int(d["max_ack_seconds"])
+                                     if d.get("max_ack_seconds") is not None else None),
             "uptime_pct": _uptime_pct(uptime.get(a.station_id), d1, d2, now),
         })
 
@@ -346,13 +497,28 @@ async def store_exchange(
         ex, d = by_station[sid], down.get(sid, {})
         stations.append({
             "station_id": sid, "state": "нет агента", "silence_seconds": None,
+            "last_seen": None,
             "version": None, "queue_pending": 0, "queue_sent": 0, "last_shift": None,
             "snapshot_at": None,
+            "queue_bytes": 0, "queue_wire_bytes": 0, "queue_oldest_at": None,
+            "queue_failing": 0, "queue_sent_24": 0,
+            "sent_24_bytes": 0, "sent_24_wire_bytes": 0,
+            "last_sent_at": None, "last_attempt_at": None, "last_error": None,
+            "clock_skew_seconds": None,
             "packets": int(ex.get("packets") or 0), "bytes": int(ex.get("bytes") or 0),
+            "wire_bytes": int(ex.get("wire_bytes") or 0),
+            "wire_packets": int(ex.get("wire_packets") or 0),
             "sessions": int(ex.get("sessions") or 0), "last_packet_at": ex.get("last_at"),
             "down_waiting": int(d.get("waiting") or 0),
             "down_unacked": int(d.get("unacked") or 0),
             "down_acked": int(d.get("acked") or 0),
+            "down_pending_bytes": int(d.get("pending_bytes") or 0),
+            "down_oldest_pending_at": d.get("oldest_pending_at"),
+            "down_avg_ack_seconds": (int(d["avg_ack_seconds"])
+                                     if d.get("avg_ack_seconds") is not None else None),
+            "down_max_ack_seconds": (int(d["max_ack_seconds"])
+                                     if d.get("max_ack_seconds") is not None else None),
+            "uptime_pct": None,
         })
 
     return {
@@ -361,14 +527,20 @@ async def store_exchange(
         "totals": {
             "packets": sum(k["packets"] for k in by_kind),
             "bytes": sum(int(k["bytes"]) for k in by_kind),
+            "wire_bytes": sum(int(k["wire_bytes"]) for k in by_kind),
+            "wire_packets": sum(int(k["wire_packets"]) for k in by_kind),
             "sessions": sum(s["sessions"] for s in stations),
             "online": sum(1 for s in stations if s["state"] == "онлайн"),
             # Знаменатель «на связи X из Y» — только станции с агентом: строки
             # без телеметрии не станции парка, а следы старого обмена.
             "stations": len(agents),
             "queue_pending": sum(s["queue_pending"] for s in stations),
+            "queue_bytes": sum(s["queue_bytes"] for s in stations),
+            "queue_wire_bytes": sum(s["queue_wire_bytes"] for s in stations),
+            "queue_failing": sum(s["queue_failing"] for s in stations),
             "down_waiting": sum(s["down_waiting"] for s in stations),
             "down_unacked": sum(s["down_unacked"] for s in stations),
+            "down_pending_bytes": sum(s["down_pending_bytes"] for s in stations),
             "last_packet_at": max((s["last_packet_at"] for s in stations
                                    if s["last_packet_at"]), default=None),
         },
@@ -381,28 +553,35 @@ async def store_exchange(
     }
 
 
-def _uptime_pct(строка, d1: date, d2: date, now: datetime) -> float | None:
-    """Доступность станции за период, %. None — следа телеметрии ещё нет."""
-    if not строка or not строка.get("minutes"):
+def _uptime_pct(строка, _d1: date, _d2: date, _now: datetime) -> float | None:
+    """Доступность станции за период по длительности обрывов, %."""
+    if not строка or not строка.get("has_heartbeat"):
         return None
-    всего = _minutes_since(строка, d1, d2, now)
+    всего = float(строка.get("window_seconds") or 0)
     if всего <= 0:
         return None
-    return round(min(100.0, int(строка["minutes"]) / всего * 100), 1)
+    простой = min(всего, float(строка.get("outage_seconds") or 0))
+    return round((всего - простой) / всего * 100, 1)
 
 
-def _minutes_since(строка, d1: date, d2: date, now: datetime) -> int:
-    """Знаменатель доступности: минуты периода, когда станция уже была на связи.
-
-    Считать от начала периода нечестно — агента могли поставить позже, и
-    доступность вышла бы 3% там, где канал не падал ни разу.
-    """
-    начало = строка["first_at"] if строка and строка["first_at"] else None
-    старт = datetime.combine(d1, time.min, tzinfo=timezone.utc)
-    if начало and начало > старт:
-        старт = начало
-    конец = min(now, datetime.combine(d2, time.max, tzinfo=timezone.utc))
-    return max(0, int((конец - старт).total_seconds() // 60))
+def _tail_outage(last_at: datetime | None, d2: date,
+                 now: datetime) -> dict | None:
+    """Незакрытый хвост после последнего heartbeat в выбранном периоде."""
+    if last_at is None:
+        return None
+    if last_at.tzinfo is None:
+        last_at = last_at.replace(tzinfo=timezone.utc)
+    конец_периода = min(now, datetime.combine(d2, time.max, tzinfo=timezone.utc))
+    seconds = (конец_периода - last_at).total_seconds()
+    if seconds <= STATION_OFFLINE_AFTER:
+        return None
+    ongoing = конец_периода == now
+    return {
+        "started": last_at,
+        "ended": None if ongoing else конец_периода,
+        "minutes": round(seconds / 60),
+        "ongoing": ongoing,
+    }
 
 
 @router.get("/exchange/{station_id}")
@@ -429,7 +608,7 @@ async def store_exchange_station(
     # такая нумерация даёт границы серии без временных таблиц и второго запроса.
     sessions = [dict(r) for r in (await db.execute(text(f"""
         WITH шаги AS (
-            SELECT received_at, size_bytes, kind,
+            SELECT received_at, size_bytes, wire_size_bytes, kind,
                    lag(received_at) OVER (ORDER BY received_at) AS prev
             FROM edge_packets
             WHERE company_id = :cid AND station_id = :st AND {period}
@@ -446,6 +625,8 @@ async def store_exchange_station(
         )
         SELECT session_no, min(received_at) AS started, max(received_at) AS finished,
                count(*) AS packets, coalesce(sum(size_bytes), 0) AS bytes,
+               coalesce(sum(wire_size_bytes), 0) AS wire_bytes,
+               count(wire_size_bytes) AS wire_packets,
                string_agg(DISTINCT kind, ', ') AS kinds,
                max(пауза) FILTER (WHERE новый) AS silence_before_min
         FROM пронумерованные GROUP BY session_no ORDER BY started DESC LIMIT 100
@@ -460,6 +641,8 @@ async def store_exchange_station(
 
     by_kind = [dict(r) for r in (await db.execute(text(f"""
         SELECT kind, count(*) AS packets, coalesce(sum(size_bytes), 0) AS bytes,
+               coalesce(sum(wire_size_bytes), 0) AS wire_bytes,
+               count(wire_size_bytes) AS wire_packets,
                max(received_at) AS last_at
         FROM edge_packets
         WHERE company_id = :cid AND station_id = :st AND {period}
@@ -469,7 +652,8 @@ async def store_exchange_station(
         k["label"] = PACKET_KIND_LABEL.get(k["kind"], k["kind"])
 
     downlink = [dict(r) for r in (await db.execute(text("""
-        SELECT id, kind, note, created_at, delivered_at, acked_at, cancelled_at
+        SELECT id, kind, note, created_at, delivered_at, acked_at, cancelled_at,
+               octet_length(payload::text) AS size_bytes
         FROM edge_downlink WHERE company_id = :cid AND station_id = :st
         ORDER BY created_at DESC LIMIT 50
     """), {"cid": cid, "st": station_id})).mappings().all()]
@@ -479,59 +663,117 @@ async def store_exchange_station(
         d["state"] = ("отменено" if d["cancelled_at"] else
                       "применено" if d["acked_at"] else
                       "доставлено" if d["delivered_at"] else "ждёт станции")
-
-    # Доступность канала — по следу телеметрии, а не по пакетам: пакеты идут
-    # неравномерно (снимок раз в час), и по ним нельзя сказать, была ли связь
-    # между ними. Минута с heartbeat считается доступной.
-    доступность = (await db.execute(text("""
-        SELECT count(DISTINCT date_trunc('minute', at)) AS minutes,
-               min(at) AS first_at, max(at) AS last_at
-        FROM edge_heartbeats
-        WHERE company_id = :cid AND station_id = :st
-          AND at >= :d1 AND at < (CAST(:d2 AS date) + 1)
-    """), p)).mappings().first()
-
-    # Обрыв = пауза между соседними heartbeat дольше порога офлайна. Это и
-    # есть «станция была недоступна», в отличие от «сеанса обмена».
-    обрывы = [dict(r) for r in (await db.execute(text(f"""
-        SELECT prev AS started, at AS ended,
-               round(EXTRACT(epoch FROM at - prev) / 60) AS minutes
-        FROM (
-            SELECT at, lag(at) OVER (ORDER BY at) AS prev
-            FROM edge_heartbeats
-            WHERE company_id = :cid AND station_id = :st
-              AND at >= :d1 AND at < (CAST(:d2 AS date) + 1)
-        ) t
-        WHERE prev IS NOT NULL
-          AND at - prev > make_interval(secs => {STATION_OFFLINE_AFTER})
-        ORDER BY at - prev DESC LIMIT 20
-    """), p)).mappings().all()]
-    for о in обрывы:
-        о["minutes"] = int(о["minutes"] or 0)
+        d["delivery_seconds"] = (round((d["delivered_at"] - d["created_at"]).total_seconds())
+                                 if d["delivered_at"] else None)
+        d["ack_seconds"] = (round((d["acked_at"] - d["created_at"]).total_seconds())
+                            if d["acked_at"] else None)
+    down_stats = (await db.execute(text("""
+        SELECT count(*) FILTER (
+                   WHERE delivered_at IS NULL AND cancelled_at IS NULL) AS waiting,
+               count(*) FILTER (
+                   WHERE delivered_at IS NOT NULL AND acked_at IS NULL
+                     AND cancelled_at IS NULL) AS unacked,
+               count(*) FILTER (WHERE acked_at IS NOT NULL) AS acked,
+               coalesce(sum(octet_length(payload::text)) FILTER (
+                   WHERE cancelled_at IS NULL), 0) AS bytes,
+               round(avg(EXTRACT(epoch FROM acked_at - created_at)) FILTER (
+                   WHERE acked_at IS NOT NULL)) AS avg_ack_seconds
+        FROM edge_downlink WHERE company_id = :cid AND station_id = :st
+    """), {"cid": cid, "st": station_id})).mappings().first() or {}
 
     agent = (await db.execute(select(EdgeAgent).where(
         EdgeAgent.company_id == cid, EdgeAgent.station_id == station_id
     ))).scalar_one_or_none()
     now = datetime.now(timezone.utc)
+    начало_периода = datetime.combine(d1, time.min, tzinfo=timezone.utc)
+    конец_периода = min(now, datetime.combine(d2, time.max, tzinfo=timezone.utc))
+    начало_наблюдения = начало_периода
+    if agent and agent.first_seen:
+        first_seen = agent.first_seen
+        if first_seen.tzinfo is None:
+            first_seen = first_seen.replace(tzinfo=timezone.utc)
+        начало_наблюдения = max(начало_наблюдения, first_seen)
+    hp = {"cid": cid, "st": station_id,
+          "start": начало_наблюдения, "end": конец_периода}
+
+    # Пульс нужен для числа наблюдений, а доступность считаем по длительности
+    # обрывов: пропущенная минута сама по себе ещё не авария.
+    доступность = (await db.execute(text("""
+        SELECT count(DISTINCT date_trunc('minute', at)) AS minutes,
+               min(at) AS first_at, max(at) AS last_at
+        FROM edge_heartbeats
+        WHERE company_id = :cid AND station_id = :st
+          AND at >= :start AND at <= :end
+    """), hp)).mappings().first()
+
+    # Берём последний heartbeat ДО начала окна: иначе обрыв, который начался
+    # вчера и закончился сегодня, исчезает ровно на границе выбранного периода.
+    обрывы = [dict(r) for r in (await db.execute(text(f"""
+        WITH points AS (
+            SELECT at
+            FROM edge_heartbeats
+            WHERE company_id = :cid AND station_id = :st
+              AND at >= :start AND at <= :end
+            UNION ALL
+            SELECT max(at) AS at
+            FROM edge_heartbeats
+            WHERE company_id = :cid AND station_id = :st AND at < :start
+        ), gaps AS (
+            SELECT at, lag(at) OVER (ORDER BY at) AS prev
+            FROM points WHERE at IS NOT NULL
+        )
+        SELECT greatest(prev, :start) AS started, least(at, :end) AS ended,
+               round(EXTRACT(epoch FROM least(at, :end) - greatest(prev, :start)) / 60)
+                   AS minutes
+        FROM gaps
+        WHERE prev IS NOT NULL
+          AND at - prev > make_interval(secs => {STATION_OFFLINE_AFTER})
+          AND at > :start AND prev < :end
+        ORDER BY at - prev DESC LIMIT 20
+    """), hp)).mappings().all()]
+    for о in обрывы:
+        о["minutes"] = int(о["minutes"] or 0)
+        о["ongoing"] = False
+
+    последний = (await db.execute(text("""
+        SELECT max(at) FROM edge_heartbeats
+        WHERE company_id = :cid AND station_id = :st AND at <= :end
+    """), hp)).scalar_one_or_none()
+    хвост = _tail_outage(последний, d2, now)
+    if хвост:
+        if хвост["started"] < начало_наблюдения:
+            хвост["started"] = начало_наблюдения
+            граница = хвост["ended"] or now
+            хвост["minutes"] = round(
+                (граница - начало_наблюдения).total_seconds() / 60)
+        обрывы.insert(0, хвост)
+
     silence = (int((now - agent.last_seen).total_seconds())
                if agent and agent.last_seen else None)
     details = (agent.payload or {}) if agent else {}
     паузы = [s["silence_before_min"] for s in sessions
              if s["silence_before_min"] is not None]
+    всего_минут = max(0, round((конец_периода - начало_наблюдения).total_seconds() / 60))
+    простой_минут = sum(о["minutes"] for о in обрывы)
+    availability_pct = None
+    if agent and последний is not None and всего_минут > 0:
+        availability_pct = round(
+            max(0, всего_минут - простой_минут) / всего_минут * 100, 1)
 
     return {
         "station_id": station_id,
         "from": d1, "to": d2,
         "session_gap_minutes": EXCHANGE_SESSION_GAP_MIN,
         "agent": None if agent is None else {
-            "state": ("молчит" if silence is None or silence > STATION_STALE_AFTER
-                      else "офлайн" if silence > STATION_OFFLINE_AFTER else "онлайн"),
+            "state": _station_state(silence),
             "silence_seconds": silence,
             "version": agent.version,
-            "version_ok": bool(agent.version) and agent.version == os.environ.get(
-                "EDGE_DESIRED_AGENT_VERSION", "0.58.10"),
+            "version_ok": bool(agent.version) and agent.version == edge_router.desired_version(
+                await db.get(Company, cid)),
             "queue_pending": agent.queue_pending,
             "queue_sent": agent.queue_sent,
+            **_queue_metrics(details),
+            "clock_skew_seconds": _clock_skew_seconds(details, agent.last_seen),
             "last_shift": agent.last_shift,
             "snapshot_at": details.get("snapshot_at"),
             "onec_ok": details.get("onec_ok"),
@@ -543,29 +785,30 @@ async def store_exchange_station(
             "sessions": len(sessions),
             "packets": sum(s["packets"] for s in sessions),
             "bytes": sum(int(s["bytes"]) for s in sessions),
+            "wire_bytes": sum(int(s["wire_bytes"]) for s in sessions),
+            "wire_packets": sum(int(s["wire_packets"]) for s in sessions),
             # Средняя и худшая пауза между выходами на связь: экран про канал, а
             # длина молчания и есть его качество.
             "avg_silence_min": round(sum(паузы) / len(паузы)) if паузы else None,
             "max_silence_min": max(паузы) if паузы else None,
-            "down_waiting": sum(1 for d in downlink if d["state"] == "ждёт станции"),
-            "down_unacked": sum(1 for d in downlink if d["state"] == "доставлено"),
-            "down_acked": sum(1 for d in downlink if d["state"] == "применено"),
+            "down_waiting": int(down_stats.get("waiting") or 0),
+            "down_unacked": int(down_stats.get("unacked") or 0),
+            "down_acked": int(down_stats.get("acked") or 0),
+            "down_bytes": int(down_stats.get("bytes") or 0),
+            "down_avg_ack_seconds": (int(down_stats["avg_ack_seconds"])
+                                     if down_stats.get("avg_ack_seconds") is not None else None),
         },
         # Доля минут периода, в которые агент выходил на связь. Считается от
         # первого heartbeat станции: до него канала не было не потому, что
         # связь падала, а потому, что агента ещё не поставили.
         "availability": {
             "minutes_seen": int(доступность["minutes"] or 0) if доступность else 0,
-            # Знаменатель не может быть меньше числителя: минуты heartbeat
-            # считаются по границам, и на коротком окне их выходит на одну
-            # больше, чем прошло целых минут.
-            "minutes_total": max(_minutes_since(доступность, d1, d2, now),
-                                 int(доступность["minutes"] or 0)) if доступность else 0,
-            "pct": _uptime_pct(доступность, d1, d2, now) if доступность else None,
-            "first_at": доступность["first_at"] if доступность else None,
+            "minutes_total": всего_минут,
+            "pct": availability_pct,
+            "first_at": начало_наблюдения if agent else None,
             "last_at": доступность["last_at"] if доступность else None,
             "outages": обрывы,
-            "outage_minutes": sum(о["minutes"] for о in обрывы),
+            "outage_minutes": простой_минут,
         },
         "sessions": sessions,
         "by_kind": by_kind,
@@ -711,7 +954,7 @@ async def nsi_push_recipes(
     db: AsyncSession = Depends(get_db),
 ):
     """Отправить станции атомарный набор действующих версий ТТК."""
-    cid: uuid.UUID = await scope_company_id(user, db)
+    cid: uuid.UUID = await _require_central_commercial_control(user, db)
     bundle = recipe_versions.build_bundle(await recipe_versions.active_versions(db, cid))
     agent = (await db.execute(select(EdgeAgent).where(
         EdgeAgent.company_id == cid, EdgeAgent.station_id == station_id
@@ -861,7 +1104,7 @@ async def recipe_versions_bootstrap(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    cid = await scope_company_id(user, db)
+    cid = await _require_central_commercial_control(user, db)
     count = await recipe_versions.bootstrap_legacy(db, cid, user.id)
     return {"ok": True, "created": count}
 
@@ -873,7 +1116,8 @@ async def recipe_create_draft(
     db: AsyncSession = Depends(get_db),
 ):
     row = await recipe_versions.create_draft(
-        db, await scope_company_id(user, db), user.id, body.model_dump(exclude_none=True))
+        db, await _require_central_commercial_control(user, db), user.id,
+        body.model_dump(exclude_none=True))
     return recipe_versions.row_dict(row)
 
 
@@ -885,7 +1129,7 @@ async def recipe_update_draft(
     db: AsyncSession = Depends(get_db),
 ):
     row = await recipe_versions.update_draft(
-        db, await scope_company_id(user, db), version_id,
+        db, await _require_central_commercial_control(user, db), version_id,
         body.model_dump(exclude_none=True))
     return recipe_versions.row_dict(row)
 
@@ -898,7 +1142,7 @@ async def recipe_activate(
     db: AsyncSession = Depends(get_db),
 ):
     row = await recipe_versions.activate(
-        db, await scope_company_id(user, db), version_id,
+        db, await _require_central_commercial_control(user, db), version_id,
         body.valid_from if body else None)
     return recipe_versions.row_dict(row)
 
@@ -1256,7 +1500,7 @@ async def store_repricing_apply(
     Автор берётся из сессии, а не из формы: цена — это деньги, и подписать
     чужим именем её нельзя.
     """
-    cid: uuid.UUID = await scope_company_id(user, db)
+    cid: uuid.UUID = await _require_central_commercial_control(user, db)
     правило, отбор = _правило_и_отбор(body)
     автор = getattr(user, "full_name", None) or getattr(user, "email", "") or "центр"
     return await store_repricing.apply(db, cid, правило, отбор, автор,
@@ -1433,8 +1677,14 @@ STATION_DOC_KINDS = {
     "transfer": "Перемещение",
     "inventory": "Инвентаризация",
     "purchase": "Приёмка",
-    "return_supplier": "Возврат поставщику",
+    # Возврат поставщику агент шлёт видом return_purchase (BuildReturn в
+    # packet.go). Здесь стояло return_supplier — вид, которого станция никогда
+    # не присылала, и такой возврат в реестре центра не появлялся вовсе.
+    "return_purchase": "Возврат поставщику",
     "return_sale": "Возврат покупателя",
+    # Оприходование: 49 документов станции лежали в пакетах и не показывались
+    # нигде — вида просто не было в списке.
+    "gain": "Оприходование",
     "production_release": "Производство",
     "revaluation": "Переоценка",
 }
@@ -1572,17 +1822,28 @@ async def store_cheques(
     if only_returns:
         условия.append(StoreCheque.is_return.is_(True))
 
+    # Поиск идёт в SQL, а не по уже отобранной тысяче.
+    #
+    # Раньше лимит применялся первым, и фильтр работал по хвосту выборки: за
+    # месяц брались последние 1000 чеков, и «Camel», проданный в начале месяца,
+    # не находился вовсе. Товаровед при этом видел «показаны первые N» и решал,
+    # что чеков просто мало. Ищем по названию позиции, номеру чека и номеру ФД —
+    # по тем трём полям, которыми чек и опознают.
+    игла = (q or "").strip()
+    if игла:
+        шаблон = f"%{игла}%"
+        условия.append(or_(
+            cast(StoreCheque.number, String).ilike(шаблон),
+            cast(StoreCheque.fiscal_number, String).ilike(шаблон),
+            text("EXISTS (SELECT 1 FROM jsonb_array_elements(store_cheques.lines) AS поз"
+                 " WHERE поз->>'name' ILIKE :игла)").bindparams(игла=шаблон),
+        ))
+
     rows = (await db.execute(select(StoreCheque).where(*условия)
                              .order_by(StoreCheque.at.desc()).limit(limit))).scalars().all()
 
-    игла = (q or "").strip().lower()
     чеки = []
     for r in rows:
-        if игла:
-            свой = (игла in str(r.number) or игла in str(r.fiscal_number or "")
-                    or any(игла in str(l.get("name", "")).lower() for l in r.lines))
-            if not свой:
-                continue
         чеки.append({
             "id": str(r.id), "station_id": r.station_id, "shift_number": r.shift_number,
             "number": r.number, "fiscal_number": r.fiscal_number, "at": r.at,
@@ -2485,8 +2746,7 @@ async def store_agent_versions(
             "station_id": r.station_id,
             "version": r.version,
             "version_ok": r.version == желаемая,
-            "state": ("молчит" if silence is None or silence > STATION_STALE_AFTER
-                      else "офлайн" if silence > STATION_OFFLINE_AFTER else "онлайн"),
+            "state": _station_state(silence),
             "silence_seconds": silence,
             "last_seen": r.last_seen,
             "first_seen": r.first_seen,
@@ -2804,7 +3064,7 @@ async def assortment_rule_set(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    cid = await scope_company_id(user, db)
+    cid = await _require_central_commercial_control(user, db)
     if body.valid_from and body.valid_to and body.valid_to <= body.valid_from:
         raise HTTPException(400, "Дата окончания должна быть позже даты начала")
     agent = (await db.execute(select(EdgeAgent.id).where(
@@ -2840,7 +3100,7 @@ async def assortment_publish(
     db: AsyncSession = Depends(get_db),
 ):
     """Отправить матрицу агенту для проверки против NeftoMS без записи в кассу."""
-    cid = await scope_company_id(user, db)
+    cid = await _require_central_commercial_control(user, db)
     agent = (await db.execute(select(EdgeAgent).where(
         EdgeAgent.company_id == cid, EdgeAgent.station_id == station_id,
     ))).scalar_one_or_none()
@@ -3171,11 +3431,14 @@ async def nsi_item_update(
     db: AsyncSession = Depends(get_db),
 ):
     """Правка карточки. UUID и код 1С не меняются: по ним держится связь с БП."""
+    cid = await _require_network_merchandiser(user, db)
     item_id = await _nsi_item_id(db, item_id)
     if body.vat_rate is not None and body.vat_rate not in VAT_CODES:
         raise HTTPException(400, f"Неизвестная ставка НДС: {body.vat_rate}")
     if body.price_owner is not None and body.price_owner not in PRICE_OWNERS:
         raise HTTPException(400, f"Неизвестный владелец цены: {body.price_owner}")
+    if body.price_owner not in (None, "station"):
+        raise HTTPException(409, "В политике v1 владелец цены — АЗС")
 
     fields = {k: v for k, v in body.model_dump().items() if v is not None}
     if not fields:
@@ -3189,7 +3452,7 @@ async def nsi_item_update(
     fields["id"] = item_id
     await db.execute(
         text(f"UPDATE edge.item SET {sets}, updated_at = now() WHERE id = :id"), fields)
-    sent = await _queue_nsi_delta(db, await scope_company_id(user, db), item_id)
+    sent = await _queue_nsi_delta(db, cid, item_id)
     await db.commit()
     return {"ok": True, "changed": [k for k in fields if k != "id"], "станций": sent}
 
@@ -3206,6 +3469,7 @@ async def nsi_set_price(
     Прежняя запись закрывается, новая открывается — цена ведётся историей, а не
     перезаписью: по какой цене продавали вчера, нужно знать для разбора продаж.
     """
+    cid = await _require_central_commercial_control(user, db)
     if body.price < 0:
         raise HTTPException(400, "Цена не может быть отрицательной")
     item_id = await _nsi_item_id(db, item_id)
@@ -3228,7 +3492,7 @@ async def nsi_set_price(
         VALUES (:id, :st, :p, :who)
     """), {"id": item_id, "st": body.station_id, "p": body.price,
             "who": getattr(user, "email", None) or "центр"})
-    await _queue_nsi_delta(db, await scope_company_id(user, db), item_id, body.station_id)
+    await _queue_nsi_delta(db, cid, item_id, body.station_id)
     await db.commit()
     return {"ok": True, "price": body.price, "station_id": body.station_id,
             "note": "цена ушла на станцию; агент применит её своим тактом"}
@@ -3247,6 +3511,7 @@ async def nsi_add_barcode(
     перевесить значит сломать кассу тому товару, который сейчас по нему
     пробивается.
     """
+    cid = await _require_network_merchandiser(user, db)
     item_id = await _nsi_item_id(db, item_id)
     code = (body.code or "").strip()
     if not code:
@@ -3263,7 +3528,7 @@ async def nsi_add_barcode(
     await db.execute(text("""
         INSERT INTO edge.barcode (item_id, code, status) VALUES (:id, :c, 'active')
     """), {"id": item_id, "c": code})
-    await _queue_nsi_delta(db, await scope_company_id(user, db), item_id)
+    await _queue_nsi_delta(db, cid, item_id)
     await db.commit()
     return {"ok": True}
 
@@ -3275,6 +3540,7 @@ async def nsi_retire_barcode(
     db: AsyncSession = Depends(get_db),
 ):
     """Перевести штрихкод в исторические: выпуск сменился, код больше не нужен."""
+    cid = await _require_network_merchandiser(user, db)
     res = await db.execute(text("""
         UPDATE edge.barcode SET status = 'historical'
         WHERE id = :id AND status = 'active'
@@ -3283,7 +3549,7 @@ async def nsi_retire_barcode(
         raise HTTPException(404, "Активный штрихкод не найден")
     owner = (await db.execute(text("SELECT item_id FROM edge.barcode WHERE id = :id"),
                               {"id": barcode_id})).scalar_one()
-    await _queue_nsi_delta(db, await scope_company_id(user, db), int(owner))
+    await _queue_nsi_delta(db, cid, int(owner))
     await db.commit()
     return {"ok": True}
 
@@ -3432,6 +3698,7 @@ def _receipt_out(r: StoreReceipt) -> dict:
         "delivery_scheme": r.delivery_scheme,
         "receiving_warehouse": r.receiving_warehouse,
         "signing_mode": r.signing_mode, "signer_name": r.signer_name,
+        "author": r.author,
         "mchd_guid": r.mchd_guid, "mchd_registry": r.mchd_registry,
         "mchd_valid_until": r.mchd_valid_until,
         "signature_status": r.signature_status, "signature_ref": r.signature_ref,
@@ -4237,7 +4504,7 @@ async def catalog_group_create(
     db: AsyncSession = Depends(get_db),
 ):
     """Завести группу. Путь строится от родителя — руками его не задают."""
-    await scope_company_id(user, db)
+    await _require_network_merchandiser(user, db)
     путь = body.name.strip()
     if not путь:
         raise HTTPException(400, "Имя группы пустое")
@@ -4820,7 +5087,7 @@ async def store_resolve_item_draft(
     остались бы две карточки на один штрихкод — то, ради чего очередь и
     заведена.
     """
-    cid: uuid.UUID = await scope_company_id(user, db)
+    cid: uuid.UUID = await _require_network_merchandiser(user, db)
     try:
         res = await edge_nsi.resolve_item_draft(
             db, cid, draft_id, str(body.get("action") or ""),
@@ -4863,7 +5130,7 @@ async def store_resolve_partner_draft(
     db: AsyncSession = Depends(get_db),
 ):
     """Решение по контрагенту станции: принять в справочник сети или отклонить."""
-    cid: uuid.UUID = await scope_company_id(user, db)
+    cid: uuid.UUID = await _require_network_merchandiser(user, db)
     try:
         return await edge_nsi.resolve_partner_draft(
             db, cid, draft_id, str(body.get("action") or ""), body.get("note"))
@@ -4884,7 +5151,7 @@ async def store_resolve_nsi_proposal(
     применялась, карточка там оставалась прежней. Отклонить — заявка
     закрывается с пояснением, чтобы её не слали снова.
     """
-    cid: uuid.UUID = await scope_company_id(user, db)
+    cid: uuid.UUID = await _require_network_merchandiser(user, db)
     try:
         return await edge_nsi.resolve_nsi_proposal(
             db, cid, proposal_id, str(body.get("action") or ""), body.get("note"))
@@ -4939,7 +5206,7 @@ async def edge_merge_items(
     """
     if body.alias_id == body.canonical_id:
         raise HTTPException(400, "Дубль и канон совпадают")
-    cid = await scope_company_id(user, db)
+    cid = await _require_network_merchandiser(user, db)
     cards = (await db.execute(text("""
         SELECT id, external_uuid::text AS uuid, name, deleted
         FROM edge.item WHERE id = ANY(:ids)
@@ -5117,7 +5384,7 @@ async def store_resolve_collision(
     пробивается в кассе, изменилось, и станция обязана об этом узнать — иначе
     на полке останется старая привязка до ближайшей полной выгрузки.
     """
-    cid: uuid.UUID = await scope_company_id(user, db)
+    cid: uuid.UUID = await _require_network_merchandiser(user, db)
     try:
         res = await edge_nsi.resolve_collision(
             db, cid, claim_id, str(body.get("action") or ""), body.get("note"))

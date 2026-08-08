@@ -1,4 +1,4 @@
-"""Ростер профилей станции — офлайн-вход на edge-агенте АЗС.
+"""Снимок профилей и бизнес-политики станции для офлайн-работы Edge.
 
 Экосистемный SSO (RS256 handoff, JWKS) требует связи, а рабочее место станции
 обязано пускать человека и при мёртвом канале. Поэтому центр заранее спускает
@@ -7,64 +7,39 @@
 очередь edge_downlink (kind="user_roster").
 
 Кого включаем в ростер станции:
-  * суперадминов (видят всю сеть);
-  * членов компании со скоупом «вся сеть» (object_scope = NULL);
-  * членов, у кого станция есть в object_scope.
+  * только членов с явным grant station_administrator на эту АЗС.
+
+Технический admin/суперадмин и объектный скоуп сами по себе права работать с
+товаром на станции не дают. Товаровед сети попадает в ростер только если у него
+одновременно есть grant администратора этой станции.
 Исключаем mail_only (вход невозможен) и тех, у кого нет ни PIN, ни пароля.
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..models import EdgeAgent, EdgeDownlink, ServiceLocation, User, UserCompany
+from ..business_access import has_station_administrator, store_policy
+from ..models import Company, EdgeAgent, EdgeDownlink, User, UserCompany
 
 ROSTER_KIND = "user_roster"
 
 
-def _covers(object_scope: list | None, loc_id: str | None, is_superadmin: bool) -> bool:
-    """Виден ли пользователю объект станции. NULL-скоуп — вся сеть; суперадмин —
-    везде. Чистая функция: её и проверяем тестом, мост и запрос тривиальны."""
-    if is_superadmin or object_scope is None:
-        return True
-    return loc_id is not None and loc_id in object_scope
-
-
-async def _station_location_id(
-    db: AsyncSession, company_id, station_id: int
-) -> str | None:
-    """service_locations.id для int-кода станции. Мост — code == str(station_id)
-    или source_bindings[].config.station == station_id. None, если не размечено:
-    тогда скоуп по станции не сработает, но «вся сеть» и суперадмины пройдут."""
-    target = str(station_id)
-    rows = (
-        await db.execute(
-            select(
-                ServiceLocation.id,
-                ServiceLocation.code,
-                ServiceLocation.source_bindings,
-            ).where(ServiceLocation.company_id == company_id)
-        )
-    ).all()
-    for sid, code, bindings in rows:
-        if str(code) == target:
-            return sid
-        for b in bindings or []:
-            cfg = (b or {}).get("config") or {}
-            if str(cfg.get("station") or "") == target:
-                return sid
-    return None
+def _covers(grants: list[dict] | None, station_id: int) -> bool:
+    """Есть ли явное бизнес-полномочие администратора этой станции."""
+    return has_station_administrator(grants, station_id)
 
 
 async def build_station_roster(
     db: AsyncSession, company_id, station_id: int
 ) -> list[dict]:
-    """Список профилей станции: {id, login, name, role, pin_hash, pwd_hash}."""
-    loc_id = await _station_location_id(db, company_id, station_id)
+    """Профили с явным grant администратора этой станции."""
     out: list[dict] = []
     seen: set = set()
 
-    def add(user: User, role: str) -> None:
+    def add(user: User, grants: list[dict]) -> None:
         if user.id in seen or user.mail_only:
             return
         if not (user.station_pin_hash or user.password_hash):
@@ -75,7 +50,8 @@ async def build_station_roster(
                 "id": str(user.id),
                 "login": user.email,
                 "name": user.name,
-                "role": role,
+                "role": "station_administrator",
+                "grants": grants,
                 "pin_hash": user.station_pin_hash or "",
                 "pwd_hash": user.password_hash or "",
             }
@@ -89,17 +65,11 @@ async def build_station_roster(
         )
     ).all()
     for user, member in rows:
-        if _covers(member.object_scope, loc_id, user.is_superadmin):
-            add(user, member.role or user.role or "user")
-
-    # Суперадмины без членства в этой компании тоже входят на любую станцию.
-    supers = (
-        await db.execute(
-            select(User).where(User.is_superadmin.is_(True), User.mail_only.is_(False))
-        )
-    ).scalars().all()
-    for user in supers:
-        add(user, "admin")
+        grants = list(getattr(member, "business_grants", None) or [])
+        if _covers(grants, station_id):
+            # Станционный grant обязателен; сетевой сохраняем, если он есть у
+            # того же человека, чтобы профиль отражал объединение его ролей.
+            add(user, grants)
 
     return out
 
@@ -122,12 +92,21 @@ async def enqueue_station_roster(
     ).scalars().all()
     for t in stale:
         await db.delete(t)
+    company = await db.get(Company, company_id)
+    policy = store_policy(company.customization if company else None)
+    generated_at = datetime.now(timezone.utc).isoformat()
     db.add(
         EdgeDownlink(
             company_id=company_id,
             station_id=station_id,
             kind=ROSTER_KIND,
-            payload={"users": users},
+            payload={
+                "schema_version": 1,
+                "revision": generated_at,
+                "generated_at": generated_at,
+                "policy": policy,
+                "users": users,
+            },
             note=f"roster:{station_id}",
         )
     )

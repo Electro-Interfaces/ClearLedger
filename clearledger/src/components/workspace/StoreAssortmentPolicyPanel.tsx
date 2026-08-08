@@ -10,9 +10,12 @@ import {
   publishStoreAssortment,
   setStoreAssortmentRule,
 } from '@/services/storeService'
+import { StoreCommercialPolicyNotice } from './StoreCommercialPolicyNotice'
+import { useCentralCommercialWrite } from './useStoreCommercialPolicy'
 
 export function StoreAssortmentPolicyPanel() {
   const client = useQueryClient()
+  const centralWrite = useCentralCommercialWrite()
   const [selectedStation, setSelectedStation] = useState<number | null>(null)
   const [itemUuid, setItemUuid] = useState('')
   const [itemSearch, setItemSearch] = useState('')
@@ -75,6 +78,7 @@ export function StoreAssortmentPolicyPanel() {
   return (
     <section className="px-6 pt-6" aria-labelledby="assortment-policy-title">
       <div className="rounded-lg border border-border bg-card/40 p-4 space-y-4">
+        <StoreCommercialPolicyNotice />
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div>
             <h3 id="assortment-policy-title" className="text-sm font-semibold">Политика станции и проверка кассы</h3>
@@ -93,7 +97,7 @@ export function StoreAssortmentPolicyPanel() {
               ))}
             </select>
             <Button size="sm" onClick={() => publish.mutate()}
-              disabled={publish.isPending || !stations.data?.stations.length}>
+              disabled={!centralWrite || publish.isPending || !stations.data?.stations.length}>
               <Send />{publish.isPending ? 'Отправляем…' : 'Отправить в dry-run'}
             </Button>
           </div>
@@ -157,7 +161,7 @@ export function StoreAssortmentPolicyPanel() {
               className="mt-1 h-8 w-full rounded-md border border-border bg-background px-2 text-foreground" />
           </label>
           <Button size="sm" variant="outline" onClick={() => save.mutate()}
-            disabled={!itemUuid.trim() || save.isPending}>Сохранить</Button>
+            disabled={!centralWrite || !itemUuid.trim() || save.isPending}>Сохранить</Button>
         </div>
 
         <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">

@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { getSettings, saveSettings, type AppSettings } from '@/services/settingsService'
 import { stsTestConnection, clearToken } from '@/services/fuel/stsApiClient'
-import { Loader2, CheckCircle2, XCircle, Wifi, Gauge } from 'lucide-react'
+import { Loader2, CheckCircle2, XCircle, Wifi } from 'lucide-react'
 import { PersonalSettings } from '@/components/settings/PersonalSettings'
 import { useCompany } from '@/contexts/CompanyContext'
 

@@ -21,12 +21,13 @@
 import { useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { Kpi } from './analytics/Kpi'
-import { rowDrill } from './rowDrill'
 import {
   previewRepricing, applyRepricing,
   type RepricingRule, type RepricingPreview,
 } from '@/services/storeService'
 import { fmtMoney } from '@/services/analyticsService'
+import { StoreCommercialPolicyNotice } from './StoreCommercialPolicyNotice'
+import { useCentralCommercialWrite } from './useStoreCommercialPolicy'
 
 const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: d }).format(n)
 const знак = (n: number) => (n > 0 ? '+' : '')
@@ -61,6 +62,7 @@ const вход = 'h-8 rounded-md border border-border/60 bg-background px-2 text
 export function StoreRepricingPanel({ dateFrom, dateTo, stations }: {
   companyId: string; dateFrom: string; dateTo: string; stations?: string[]
 }) {
+  const centralWrite = useCentralCommercialWrite()
   const [rule, setRule] = useState<RepricingRule>({
     mode: 'процент', value: 0, round: '1', floor: 5, step: 15, kvi: false,
     group: '', q: '', sold: true,
@@ -92,12 +94,13 @@ export function StoreRepricingPanel({ dateFrom, dateTo, stations }: {
 
   return (
     <div className="p-4 md:p-6 space-y-6">
+      <StoreCommercialPolicyNotice />
       <div>
         <h2 className="text-lg font-semibold">Переоценка</h2>
         <p className="text-sm text-muted-foreground max-w-4xl mt-1">
           Отберите позиции, задайте правило, посмотрите, что из этого выйдет, и только потом
-          применяйте. Центр распоряжается <b>центральными</b> ценами; там, где право отдано
-          станции, правило не трогает ничего — иначе решение АЗС молча затиралось бы сетевым.
+          применяйте. В v1 расчёт в центре — предложение для анализа; цену утверждает
+          и применяет администратор соответствующей АЗС.
         </p>
       </div>
 
@@ -228,7 +231,7 @@ export function StoreRepricingPanel({ dateFrom, dateTo, stations }: {
               </div>
               <button
                 className="h-8 px-4 rounded-md bg-primary text-primary-foreground text-sm disabled:opacity-50"
-                disabled={применение.isPending || !поедут.length}
+                disabled={!centralWrite || применение.isPending || !поедут.length}
                 onClick={() => {
                   if (confirm(`Применить новые цены к ${отмечено} позициям? Цены уедут на станции заданиями.`)) {
                     применение.mutate()
@@ -269,7 +272,7 @@ export function StoreRepricingPanel({ dateFrom, dateTo, stations }: {
                                  }} />
                         )}
                       </td>
-                      <td className="py-1.5 pr-3 cursor-pointer" {...rowDrill({ sku: r.item_uuid, name: r.name })}>
+                      <td className="py-1.5 pr-3">
                         {r.name}
                         {r.kvi && <span className="ml-1.5 text-[10px] px-1 py-0.5 rounded bg-muted text-muted-foreground"
                                         title="ключевая позиция: по ней покупатель судит об уровне цен">KVI</span>}

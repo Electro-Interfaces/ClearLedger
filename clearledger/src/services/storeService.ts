@@ -882,6 +882,17 @@ export interface StoreStation {
   version_ok: boolean
   queue_pending: number
   queue_sent: number
+  queue_bytes: number
+  queue_wire_bytes: number
+  queue_oldest_at: string | null
+  queue_failing: number
+  queue_sent_24: number
+  sent_24_bytes: number
+  sent_24_wire_bytes: number
+  last_sent_at: string | null
+  last_attempt_at: string | null
+  last_error: string | null
+  clock_skew_seconds: number | null
   last_shift: number | null
   snapshot_at: string | null
   onec_ok: boolean | null
@@ -913,19 +924,37 @@ export interface StoreExchangeStation {
   station_id: number
   state: string
   silence_seconds: number | null
+  last_seen: string | null
   version: string | null
   queue_pending: number
   queue_sent: number
+  queue_bytes: number
+  queue_wire_bytes: number
+  queue_oldest_at: string | null
+  queue_failing: number
+  queue_sent_24: number
+  sent_24_bytes: number
+  sent_24_wire_bytes: number
+  last_sent_at: string | null
+  last_attempt_at: string | null
+  last_error: string | null
+  clock_skew_seconds: number | null
   last_shift: number | null
   snapshot_at: string | null
   packets: number
   bytes: number
+  wire_bytes: number
+  wire_packets: number
   sessions: number
   last_packet_at: string | null
   down_waiting: number
   down_unacked: number
   down_acked: number
-  /** Доля минут периода со следом телеметрии; null — истории ещё нет. */
+  down_pending_bytes: number
+  down_oldest_pending_at: string | null
+  down_avg_ack_seconds: number | null
+  down_max_ack_seconds: number | null
+  /** Доля времени без обрывов heartbeat дольше трёх минут; null — истории ещё нет. */
   uptime_pct: number | null
 }
 
@@ -934,16 +963,19 @@ export interface StoreExchangeData {
   to: string
   session_gap_minutes: number
   totals: {
-    packets: number; bytes: number; sessions: number; online: number; stations: number
-    queue_pending: number; down_waiting: number; down_unacked: number
+    packets: number; bytes: number; wire_bytes: number; wire_packets: number
+    sessions: number; online: number; stations: number
+    queue_pending: number; queue_bytes: number; queue_wire_bytes: number; queue_failing: number
+    down_waiting: number; down_unacked: number; down_pending_bytes: number
     last_packet_at: string | null
   }
-  by_kind: { kind: string; label: string; packets: number; bytes: number; last_at: string }[]
-  by_day: { day: string; packets: number; bytes: number }[]
+  by_kind: { kind: string; label: string; packets: number; bytes: number; wire_bytes: number; wire_packets: number; last_at: string }[]
+  by_day: { day: string; packets: number; bytes: number; wire_bytes: number; wire_packets: number }[]
   stations: StoreExchangeStation[]
   recent: {
     at: string; station_id: number; kind: string; label: string
-    size_bytes: number; direction: 'вверх' | 'вниз'; note: string | null
+    size_bytes: number; wire_size_bytes: number | null
+    direction: 'вверх' | 'вниз'; note: string | null
   }[]
   /** Что станции прислали на решение центра: черновики, заявки, свои цены. */
   nsi: Record<string, number>
@@ -965,6 +997,8 @@ export interface StoreExchangeSession {
   duration_min: number
   packets: number
   bytes: number
+  wire_bytes: number
+  wire_packets: number
   kinds: string[]
   /** Сколько станция молчала перед этим выходом на связь, минут. */
   silence_before_min: number | null
@@ -978,13 +1012,19 @@ export interface StoreExchangeStationDetail {
   agent: {
     state: string; silence_seconds: number | null; version: string | null; version_ok: boolean
     queue_pending: number; queue_sent: number; last_shift: number | null
+    queue_bytes: number; queue_wire_bytes: number; queue_oldest_at: string | null
+    queue_failing: number; queue_sent_24: number
+    sent_24_bytes: number; sent_24_wire_bytes: number
+    last_sent_at: string | null; last_attempt_at: string | null; last_error: string | null
+    clock_skew_seconds: number | null
     snapshot_at: string | null; onec_ok: boolean | null; stock_source: string | null
     first_seen: string; last_seen: string
   } | null
   totals: {
-    sessions: number; packets: number; bytes: number
+    sessions: number; packets: number; bytes: number; wire_bytes: number; wire_packets: number
     avg_silence_min: number | null; max_silence_min: number | null
     down_waiting: number; down_unacked: number; down_acked: number
+    down_bytes: number; down_avg_ack_seconds: number | null
   }
   availability: {
     minutes_seen: number
@@ -994,13 +1034,14 @@ export interface StoreExchangeStationDetail {
     first_at: string | null
     last_at: string | null
     outage_minutes: number
-    outages: { started: string; ended: string; minutes: number }[]
+    outages: { started: string; ended: string | null; minutes: number; ongoing: boolean }[]
   }
   sessions: StoreExchangeSession[]
-  by_kind: { kind: string; label: string; packets: number; bytes: number; last_at: string }[]
+  by_kind: { kind: string; label: string; packets: number; bytes: number; wire_bytes: number; wire_packets: number; last_at: string }[]
   downlink: {
     kind: string; label: string; note: string | null; state: string
     created_at: string; delivered_at: string | null; acked_at: string | null
+    size_bytes: number; delivery_seconds: number | null; ack_seconds: number | null
   }[]
 }
 
@@ -1632,6 +1673,9 @@ export interface StoreReceipt {
   receiving_warehouse: string | null
   signing_mode: StoreSigningMode
   signer_name: string | null
+  /** Кто принял товар на станции: «Жукова» либо «Михеев (из центра)».
+   *  Пусто у документов, принятых до появления подписи. */
+  author: string | null
   mchd_guid: string | null
   mchd_registry: string | null
   mchd_valid_until: string | null

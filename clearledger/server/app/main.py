@@ -47,6 +47,7 @@ from app.routers import (
     tariff_router,
     overview_router,
     store_router,
+    business_access_router,
     station_console_router,
     onec_router,
     equipment_router,
@@ -294,6 +295,7 @@ app.include_router(retail_router.router, prefix=API_PREFIX)
 app.include_router(tariff_router.router, prefix=API_PREFIX)
 app.include_router(overview_router.router, prefix=API_PREFIX)
 app.include_router(store_router.router, prefix=API_PREFIX)
+app.include_router(business_access_router.router, prefix=API_PREFIX)
 app.include_router(netservice_router.router, prefix=API_PREFIX)
 app.include_router(meetings_router.router, prefix=API_PREFIX)
 app.include_router(chat_router.router, prefix=API_PREFIX)

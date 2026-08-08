@@ -15,7 +15,6 @@
  */
 import { useQuery } from '@tanstack/react-query'
 import { Kpi } from './analytics/Kpi'
-import { rowDrill } from './rowDrill'
 import { getStoreDynamics, getStorePriceLog, type DynamicsRow } from '@/services/storeService'
 import { fmtMoney } from '@/services/analyticsService'
 
@@ -62,8 +61,7 @@ function ТаблицаВкладов({ rows, empty }: { rows: DynamicsRow[]; em
         <tbody>
           {rows.map((r, i) => (
             <tr key={`${r.station_id}-${r.item_uuid}-${i}`}
-                className="border-b border-border/30 hover:bg-accent/30 cursor-pointer"
-                {...rowDrill({ sku: r.item_uuid, name: r.name })}>
+                className="border-b border-border/30 hover:bg-accent/30">
               <td className="py-1.5 pr-3">{r.name}</td>
               <td className="py-1.5 pr-3 text-muted-foreground">{r.station_id}</td>
               <td className="py-1.5 pr-3 text-right">{nf(r.qty_prev, 1)} → {nf(r.qty, 1)}</td>
@@ -243,8 +241,7 @@ export function StoreDynamicsPanel({ dateFrom, dateTo, stations }: {
               </thead>
               <tbody>
                 {журнал.rows.slice(0, 100).map((r, i) => (
-                  <tr key={i} className="border-b border-border/30 hover:bg-accent/30 cursor-pointer"
-                      {...rowDrill({ sku: r.item_uuid, name: r.name })}>
+                  <tr key={i} className="border-b border-border/30 hover:bg-accent/30">
                     <td className="py-1.5 pr-3 text-muted-foreground">
                       {r.at ? new Date(r.at).toLocaleDateString('ru-RU') : '—'}
                     </td>

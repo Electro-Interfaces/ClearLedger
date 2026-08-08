@@ -19,6 +19,8 @@ import {
   getItemGroups, NSI_VAT_CODES, type NsiCard,
 } from '@/services/storeService'
 import { fmtMoney } from '@/services/analyticsService'
+import { StoreCommercialPolicyNotice } from './StoreCommercialPolicyNotice'
+import { useStoreAccessPolicy } from './useStoreCommercialPolicy'
 
 const money = (n: number | null | undefined) => (n == null ? '—' : fmtMoney(n))
 
@@ -58,6 +60,8 @@ export function NsiEditSection({ guid, companyId, stationId = 208 }: {
     queryFn: getItemGroups,
     staleTime: 5 * 60_000,
   })
+  const accessPolicy = useStoreAccessPolicy()
+  const networkWrite = accessPolicy?.capabilities.network_merchandiser === true
 
   // Классификация и свойства правятся здесь же, а не отдельным экраном: товар
   // один, и ходить за его группой в другое место — верный способ не заполнить
@@ -85,20 +89,23 @@ export function NsiEditSection({ guid, companyId, stationId = 208 }: {
 
   useEffect(() => {
     if (!data) return
-    const i = data.item
-    const s = (v: string | number | null | undefined) => (v == null ? '' : String(v))
-    setForm({
-      name: i.name, unit: i.unit, vat_rate: i.vat_rate, price_owner: i.price_owner,
-      group_id: i.group_id, sku_class: s(i.sku_class), purpose: s(i.purpose),
-      gtin: s(i.gtin), marked: !!i.marked, mark_group: s(i.mark_group),
-      adult_only: !!i.adult_only, mrc: s(i.mrc),
-      shelf_life_days: s(i.shelf_life_days), storage_mode: s(i.storage_mode),
-      brand: s(i.brand), manufacturer: s(i.manufacturer), country: s(i.country),
-      net_qty: s(i.net_qty), net_unit: s(i.net_unit), pack_qty: s(i.pack_qty),
-      photo_url: s(i.photo_url), composition: s(i.composition),
-      allergens: s(i.allergens), kcal: s(i.kcal),
-    })
-    setPrice(data.prices.find((p) => p.valid_to == null)?.price?.toString() ?? '')
+    const timer = window.setTimeout(() => {
+      const i = data.item
+      const s = (v: string | number | null | undefined) => (v == null ? '' : String(v))
+      setForm({
+        name: i.name, unit: i.unit, vat_rate: i.vat_rate, price_owner: 'station',
+        group_id: i.group_id, sku_class: s(i.sku_class), purpose: s(i.purpose),
+        gtin: s(i.gtin), marked: !!i.marked, mark_group: s(i.mark_group),
+        adult_only: !!i.adult_only, mrc: s(i.mrc),
+        shelf_life_days: s(i.shelf_life_days), storage_mode: s(i.storage_mode),
+        brand: s(i.brand), manufacturer: s(i.manufacturer), country: s(i.country),
+        net_qty: s(i.net_qty), net_unit: s(i.net_unit), pack_qty: s(i.pack_qty),
+        photo_url: s(i.photo_url), composition: s(i.composition),
+        allergens: s(i.allergens), kcal: s(i.kcal),
+      })
+      setPrice(data.prices.find((p) => p.valid_to == null)?.price?.toString() ?? '')
+    }, 0)
+    return () => window.clearTimeout(timer)
   }, [data])
 
   const done = (text: string) => {
@@ -180,6 +187,10 @@ export function NsiEditSection({ guid, companyId, stationId = 208 }: {
         </div>
       )}
 
+      <StoreCommercialPolicyNotice />
+
+      <fieldset disabled={!networkWrite} className="contents disabled:opacity-75">
+
       <Box icon={Pencil} title="Карточка в мастер-НСИ Ledger"
         right={<span className="text-[10px] text-muted-foreground">изменено {new Date(it.updated_at).toLocaleString('ru-RU')}</span>}>
         <div className="grid gap-3 md:grid-cols-2">
@@ -205,7 +216,6 @@ export function NsiEditSection({ guid, companyId, stationId = 208 }: {
             <select value={form.price_owner}
               onChange={(e) => setForm({ ...form, price_owner: e.target.value as 'master' | 'station' })}
               className="mt-0.5 w-full text-sm px-2 py-1.5 rounded-md border border-border/50 bg-background">
-              <option value="master">Центр — единая цена сети</option>
               <option value="station">Станция — локальная цена с журналом изменений</option>
             </select>
           </label>
@@ -373,6 +383,7 @@ export function NsiEditSection({ guid, companyId, stationId = 208 }: {
           {dirty && <span className="text-[11px] text-muted-foreground">есть несохранённые правки</span>}
         </div>
       </Box>
+      </fieldset>
 
       <div className="grid gap-3.5 md:grid-cols-2">
         <Box icon={Wallet} title={`Цена на станции ${data.station_id}`}>
@@ -413,6 +424,7 @@ export function NsiEditSection({ guid, companyId, stationId = 208 }: {
           )}
         </Box>
 
+        <fieldset disabled={!networkWrite} className="contents disabled:opacity-75">
         <Box icon={Barcode} title="Штрихкоды"
           right={<span className="text-[11px] text-muted-foreground">{active.length} активных</span>}>
           <div className="space-y-1">
@@ -446,6 +458,7 @@ export function NsiEditSection({ guid, companyId, stationId = 208 }: {
             </div>
           )}
         </Box>
+        </fieldset>
       </div>
     </div>
   )

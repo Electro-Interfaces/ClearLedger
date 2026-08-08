@@ -2,7 +2,7 @@
  * Команда компании: сотрудники (роль-на-компанию) + приглашения по email.
  * Используется в админ-разделе (мастер-деталь) для выбранной компании.
  */
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Card, CardAction, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -33,6 +33,7 @@ import { DepartmentsPanel } from './DepartmentsPanel'
 import { MembersBoard } from './MembersBoard'
 import { projectSpaceUsers, listSpaceOrganizations } from '@/services/spaceObjectsService'
 import { PartyBadge } from '@/components/chat/PartyBadge'
+import { StoreBusinessAccess } from './StoreBusinessAccess'
 
 const ROLE_LABEL: Record<string, string> = { admin: 'Администратор', user: 'Сотрудник' }
 
@@ -449,6 +450,7 @@ export function RolesAccessTab({ companyId, canManage }: { companyId: string; ca
   })
   return (
     <div className="space-y-4">
+      <StoreBusinessAccess companyId={companyId} canManage={canManage} />
       {/* Матрица — главный экран доступа: весь контур прав компании разом. Карточки
           ролей под ней остаются для создания, переименования и удаления. */}
       <AccessMatrix companyId={companyId} roles={roles} canManage={canManage} />
@@ -566,12 +568,15 @@ function RoleEditDialog({ companyId, roles, editRole, onSaved }: {
   const [full, setFull] = useState(editRole ? editRole.modules == null : false)
   const [sel, setSel] = useState<Set<string>>(new Set(editRole?.modules ?? []))
   const [cloneId, setCloneId] = useState<string>('')
-  useEffect(() => {
-    if (open) {
-      setName(editRole?.name ?? ''); setFull(editRole ? editRole.modules == null : false)
-      setSel(new Set(editRole?.modules ?? [])); setCloneId('')
+  const changeOpen = (next: boolean) => {
+    if (next) {
+      setName(editRole?.name ?? '')
+      setFull(editRole ? editRole.modules == null : false)
+      setSel(new Set(editRole?.modules ?? []))
+      setCloneId('')
     }
-  }, [open, editRole])
+    setOpen(next)
+  }
   const applyClone = (id: string) => {
     setCloneId(id)
     const src = roles.find((r) => r.id === id)
@@ -584,7 +589,12 @@ function RoleEditDialog({ companyId, roles, editRole, onSaved }: {
     onSuccess: () => { toast.success(isEdit ? 'Роль сохранена' : 'Роль создана'); onSaved(); setOpen(false) },
     onError: (e) => toast.error(`Ошибка: ${(e as Error).message}`),
   })
-  const toggle = (k: string) => setSel((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n })
+  const toggle = (k: string) => setSel((s) => {
+    const n = new Set(s)
+    if (n.has(k)) n.delete(k)
+    else n.add(k)
+    return n
+  })
   // «Разжать» продукт из грида: снять отметку целиком, оставить разделы кроме закрытого.
   const carve = (app: string, keep: string[]) => setSel((s) =>
     new Set([...[...s].filter((k) => k !== app && !k.startsWith(`${app}:`)), ...keep]))
@@ -594,7 +604,7 @@ function RoleEditDialog({ companyId, roles, editRole, onSaved }: {
   const added = tmplSet && cur ? [...cur].filter((k) => !tmplSet.has(k)) : []
   const removed = tmplSet && cur ? [...tmplSet].filter((k) => !cur.has(k)) : []
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={changeOpen}>
       <DialogTrigger asChild>
         {isEdit
           ? <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-foreground" title="Изменить роль"><Pencil className="h-3.5 w-3.5" /></Button>

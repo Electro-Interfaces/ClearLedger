@@ -1,7 +1,7 @@
 /**
  * «Магазин» → Станции → Рабочее место АЗС.
  *
- * Менеджер выбирает станцию и работает на ней так же, как товаровед у кассы:
+ * Администратор выбирает назначенную ему станцию и работает в её агенте:
  * приёмка, инвентаризация, остатки, карточки. Внутри — не копия экранов, а сам
  * агент станции: он и есть источник правды АЗС, а вторая реализация тех же
  * операций в центре разъехалась бы с первой в первый же месяц.
@@ -17,9 +17,11 @@ import { MonitorSmartphone, RadioTower } from 'lucide-react'
 import { getStoreStations, openStationSession, type StoreStation } from '@/services/storeService'
 import { useCompany } from '@/contexts/CompanyContext'
 import { Button } from '@/components/ui/button'
+import { useStoreAccessPolicy } from './useStoreCommercialPolicy'
 
 export function StoreStationConsolePanel() {
   const { company } = useCompany()
+  const accessPolicy = useStoreAccessPolicy()
   const [открываем, setОткрываем] = useState<number | null>(null)
 
   // Станция открывается отдельной вкладкой: центр остаётся там, где был, и к
@@ -65,13 +67,15 @@ export function StoreStationConsolePanel() {
           Выберите станцию, чтобы работать на ней из центра: приёмка, инвентаризация, остатки,
           карточки. Открывается сам агент станции, а не копия его экранов, — всё введённое
           сразу становится учётом АЗС и помечается вашим именем. Станция открывается
-          отдельной вкладкой, эта остаётся здесь.
+          отдельной вкладкой, эта остаётся здесь. Кнопка доступна только администратору,
+          назначенному именно на эту АЗС.
         </p>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2">
         {stations.map((s) => {
           const онлайн = s.state === 'онлайн'
+          const назначен = accessPolicy?.capabilities.station_administrator.includes(String(s.station_id)) === true
           return (
             <div key={s.station_id}
                  className={`rounded-lg border p-4 ${онлайн ? 'border-border' : 'border-dashed border-border'}`}>
@@ -96,9 +100,10 @@ export function StoreStationConsolePanel() {
                     </div>
                   )}
                 </div>
-                <Button size="sm" disabled={!онлайн || открываем !== null}
+                <Button size="sm" disabled={!онлайн || !назначен || открываем !== null}
                         onClick={() => void войти(s.station_id)}
-                        title={онлайн ? 'Открыть рабочее место станции' : 'Станция не на связи'}>
+                        title={!назначен ? 'Нужно назначение «Администратор АЗС» на эту станцию'
+                          : онлайн ? 'Открыть рабочее место станции' : 'Станция не на связи'}>
                   {открываем === s.station_id ? 'Открываем…' : 'Работать'}
                 </Button>
               </div>

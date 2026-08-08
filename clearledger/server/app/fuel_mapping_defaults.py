@@ -20,6 +20,11 @@ GIG_PAYMENT_CHANNELS: list[dict] = [
     {"code": "cards",         "name": "Топливные карты",                "warehouse_name": "Карты",     "requires_transfer": True},
     {"code": "online",        "name": "Онлайн (Яндекс, МобилПр.)",      "warehouse_name": "ЯНДЕКС",    "requires_transfer": True},
     {"code": "voucher",       "name": "Талоны",                         "warehouse_name": "Талоны",    "requires_transfer": True},
+    # Купон на сдачу — САМОСТОЯТЕЛЬНАЯ расчётная единица со своей историей
+    # (выдача при недоливе оплаченного, погашение в другой день, невостребованный
+    # остаток в доход). С талонами не смешивать: у талона своя природа и свой
+    # склад, иначе два разных обязательства сходятся в одну аналитику.
+    {"code": "coupon",        "name": "Купоны на сдачу",                "warehouse_name": "Купоны",    "requires_transfer": True},
     {"code": "ledger",        "name": "Ведомости",                      "warehouse_name": "Ведомости", "requires_transfer": True},
     {"code": "writeoff_fuel", "name": "Списание топлива (Прочие)",      "warehouse_name": None,        "requires_transfer": False},
 ]
@@ -47,7 +52,17 @@ GIG_PAYMENT_MAPPINGS: list[dict] = [
     {"pattern": "талон",        "channel_code": "voucher",       "warehouse_override": "Талоны"},
     {"pattern": "прочи",        "channel_code": "writeoff_fuel", "warehouse_override": None},
     {"pattern": "прочие",       "channel_code": "writeoff_fuel", "warehouse_override": None},
-    {"pattern": "купон",        "channel_code": "",              "warehouse_override": None},
+    # Купон на сдачу: клиент оплатил, но получил не весь объём — остаток уходит
+    # в купон. В смене выдачи строка ОТРИЦАТЕЛЬНАЯ (топливо не налито, деньги
+    # взяты — это аванс), в смене погашения ПОЛОЖИТЕЛЬНАЯ (топливо налито, денег
+    # нет). Купон проходит через ТРК и списывается из резервуара (проверено: в
+    # 24 из 32 смен Кудрово Σsales = psm при ненулевом купоне), поэтому товар
+    # двигать обязан. Выручкой периода погашение НЕ является — см. NON_REVENUE
+    # в fuel_dashboard. В ОРП не идёт (RETAIL_CHANNELS = наличные и карты).
+    {"pattern": "купон",        "channel_code": "coupon",        "warehouse_override": "Купоны"},
+    # Прокачка — технологический тест ТРК: топливо прогоняется через колонку и
+    # возвращается в ту же ёмкость. Ни реализации, ни списания: объём станции не
+    # меняется. Поэтому канал пустой — строка в учёт не попадает.
     {"pattern": "прокач",       "channel_code": "",              "warehouse_override": None},
     # ↓ живой справочник прода (сверка 13-14.07.2026): дубли-аналитика и спец-виды.
     {"pattern": "дисконт",      "channel_code": "",              "warehouse_override": None},

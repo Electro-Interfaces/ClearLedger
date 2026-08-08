@@ -6,7 +6,7 @@
  */
 import { useMemo, useState, Fragment } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { format, subDays, subMonths } from 'date-fns'
+import { format } from 'date-fns'
 import {
   Fuel, Banknote, CreditCard, Smartphone, Building2, Ticket, Truck,
   ChevronRight, Wallet, TrendingUp, TrendingDown, Minus,
@@ -22,6 +22,10 @@ import { cn } from '@/lib/utils'
 import { getFuelColor } from '@/utils/fuelColors'
 import { getShiftDashboard, getFuelReadiness, type ShiftDashboardData } from '@/services/fuel/fuelMappingService'
 import { useCompany } from '@/contexts/CompanyContext'
+import { useFilters } from '@/contexts/FilterContext'
+import { useLocations } from '@/hooks/useLocations'
+import { useFuelKindFilter } from '@/hooks/useFuelKindFilter'
+import { scopeStationCodes } from '@/services/locationService'
 import { rechartsTooltipTheme } from '@/components/ui/chart-utils'
 
 const rub = (v: number) => (v ?? 0).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -30,33 +34,18 @@ const vol = (v: number) => (v ?? 0).toLocaleString('ru-RU', { minimumFractionDig
 const vol0 = (v: number) => (v ?? 0).toLocaleString('ru-RU', { maximumFractionDigits: 0 })
 const fc = (name: string) => getFuelColor(name).hex
 
-type Preset = 'today' | 'yesterday' | 'week' | 'month' | 'quarter'
-const PRESETS: { key: Preset; label: string }[] = [
-  { key: 'today', label: 'Сегодня' }, { key: 'yesterday', label: 'Вчера' },
-  { key: 'week', label: 'Неделя' }, { key: 'month', label: 'Месяц' }, { key: 'quarter', label: 'Квартал' },
-]
-function presetDates(p: Preset): { from: string; to: string } {
-  const today = new Date()
-  const iso = (d: Date) => format(d, 'yyyy-MM-dd')
-  switch (p) {
-    case 'today': return { from: iso(today), to: iso(today) }
-    case 'yesterday': { const y = subDays(today, 1); return { from: iso(y), to: iso(y) } }
-    case 'week': return { from: iso(subDays(today, 6)), to: iso(today) }
-    case 'month': return { from: iso(subMonths(today, 1)), to: iso(today) }
-    case 'quarter': return { from: iso(subMonths(today, 3)), to: iso(today) }
-  }
-}
-
 // Способы оплаты: порядок, иконка, цвет, только-объём (безнал без выручки в кассе)
 const PAY_META: Record<string, { label: string; icon: typeof Banknote; color: string; volumeOnly: boolean }> = {
   cash: { label: 'Наличные', icon: Banknote, color: 'text-emerald-500', volumeOnly: false },
   card: { label: 'Банковские карты', icon: CreditCard, color: 'text-blue-500', volumeOnly: false },
   online: { label: 'Онлайн заказы', icon: Smartphone, color: 'text-purple-500', volumeOnly: true },
   corporate: { label: 'Корп. карты', icon: Building2, color: 'text-orange-500', volumeOnly: true },
-  coupon: { label: 'Купоны/Талоны', icon: Ticket, color: 'text-amber-500', volumeOnly: true },
+  coupon: { label: 'Купоны на сдачу', icon: Ticket, color: 'text-amber-500', volumeOnly: true },
+  voucher: { label: 'Талоны', icon: Ticket, color: 'text-amber-600', volumeOnly: true },
   fuel_card: { label: 'Топливные карты', icon: CreditCard, color: 'text-amber-500', volumeOnly: true },
+  writeoff: { label: 'Тех. отпуск (прокачка, мерник)', icon: Fuel, color: 'text-muted-foreground', volumeOnly: true },
 }
-const PAY_ORDER = ['cash', 'card', 'fuel_card', 'corporate', 'online', 'coupon']
+const PAY_ORDER = ['cash', 'card', 'fuel_card', 'corporate', 'online', 'coupon', 'voucher', 'writeoff']
 
 const H3 = 'text-xs font-semibold uppercase tracking-wide text-muted-foreground'
 const TH = 'py-1.5 text-[11px] font-medium text-muted-foreground'
@@ -64,32 +53,46 @@ const TD = 'py-1.5 tabular-nums'
 
 export function ShiftDashboardPanel() {
   const { companyId } = useCompany()
-  const [preset, setPreset] = useState<Preset>('month')
   const [compare, setCompare] = useState(false)
-  const { from, to } = presetDates(preset)
+  /**
+   * Контур — только из верхнего фильтра (CLAUDE.md, «Взаимодействие верхнего
+   * фильтра и параметров таба», правила 1 и 3). Свои пресеты периода панель
+   * держать не имеет права: шапка заявляла «1 июл — 31 июл», а дашборд считал
+   * последние 30 дней от сегодня — и вдобавок по всей сети при выбранной
+   * одной АЗС. Тот же дефект уже был закрыт в FuelOverviewPanel.
+   */
+  const { period } = useFilters()
+  const { from, to } = period
+  const locations = useLocations()
+  const { locationIds, regionIds } = useFilters()
+  const scopeCodes = useMemo(
+    () => scopeStationCodes(locations, locationIds, regionIds),
+    [locations, locationIds, regionIds],
+  )
+  const scopeKey = scopeCodes.join(',')
+  const fk = useFuelKindFilter()
   const days = Math.round((new Date(to).getTime() - new Date(from).getTime()) / 86400000) + 1
 
   const { data, isLoading } = useQuery({
-    queryKey: ['shift-dashboard', companyId, from, to, compare],
-    queryFn: () => getShiftDashboard(from, to, { compare }),
+    queryKey: ['shift-dashboard', companyId, from, to, scopeKey, fk.key, compare],
+    queryFn: () => getShiftDashboard(from, to, {
+      compare,
+      stations: scopeCodes.length ? scopeCodes.map(String) : undefined,
+      fuelCodes: fk.fuelCodes,
+    }),
   })
 
   return (
     <div className="space-y-5 p-4">
-      {/* Период */}
+      {/* Период — отражение контура, не собственный выбор панели */}
       <div className="flex flex-wrap items-center gap-2">
-        <div className="flex gap-1 rounded-lg bg-card p-1">
-          {PRESETS.map((p) => (
-            <button key={p.key} onClick={() => setPreset(p.key)}
-              className={cn('rounded px-3 py-1.5 text-sm transition-colors', preset === p.key ? 'bg-primary text-white' : 'text-muted-foreground hover:bg-accent/40')}>
-              {p.label}
-            </button>
-          ))}
-        </div>
         <div className="rounded-lg border border-border bg-card px-3 py-1.5 text-xs">
           <span className="text-muted-foreground">Период:</span>{' '}
           {format(new Date(from), 'dd.MM.yyyy')} — {format(new Date(to), 'dd.MM.yyyy')}
           <span className="ml-2 text-muted-foreground">Дней: {days}</span>
+          <span className="ml-2 text-muted-foreground">
+            {scopeCodes.length ? `АЗС: ${scopeCodes.join(', ')}` : 'Вся сеть'}
+          </span>
         </div>
         <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
           <input type="checkbox" checked={compare} onChange={(e) => setCompare(e.target.checked)} />
@@ -102,7 +105,7 @@ export function ShiftDashboardPanel() {
       ) : (
         <>
           <KpiRow data={data} />
-          <ReadinessBlock from={from} to={to} />
+          <ReadinessBlock from={from} to={to} stations={scopeCodes} />
           <div className="grid gap-4 lg:grid-cols-2">
             <FuelTable data={data} />
             <PaymentTable data={data} />
@@ -146,22 +149,29 @@ function TrendMini({ t }: { t: { percent: number; direction: string } }) {
   return <span className={cn('ml-auto flex items-center gap-0.5 text-[10px]', c)}><Icon className="h-3 w-3" />{t.percent > 0 ? '+' : ''}{t.percent}%</span>
 }
 
-/* ── Готовность к 1С ── */
-function ReadinessBlock({ from, to }: { from: string; to: string }) {
-  const { companyId } = useCompany()
-  const { data: r } = useQuery({
-    queryKey: ['fuel-readiness', companyId, from, to],
-    queryFn: () => getFuelReadiness(from, to),
-  })
-  if (!r) return null
-  const rc = r.receipts
-  const pk = r.packets
-  const Stat = ({ label, value, cls, icon: Icon }: { label: string; value: number; cls?: string; icon?: typeof AlertTriangle }) => (
+function ReadinessStat({ label, value, cls, icon: Icon }: {
+  label: string; value: number; cls?: string; icon?: typeof AlertTriangle
+}) {
+  return (
     <div className="flex items-center justify-between text-xs">
       <span className="flex items-center gap-1 text-muted-foreground">{Icon && <Icon className={cn('h-3 w-3', cls)} />}{label}</span>
       <span className={cn('font-semibold tabular-nums', cls)}>{value}</span>
     </div>
   )
+}
+
+/* ── Готовность к 1С ── */
+function ReadinessBlock({ from, to, stations }: { from: string; to: string; stations: number[] }) {
+  const { companyId } = useCompany()
+  const { data: r } = useQuery({
+    queryKey: ['fuel-readiness', companyId, from, to, stations.join(',')],
+    queryFn: () => getFuelReadiness(from, to, {
+      stations: stations.length ? stations.map(String) : undefined,
+    }),
+  })
+  if (!r) return null
+  const rc = r.receipts
+  const pk = r.packets
   return (
     <Card>
       <CardContent className="pt-4">
@@ -169,23 +179,23 @@ function ReadinessBlock({ from, to }: { from: string; to: string }) {
         <div className="grid gap-3 md:grid-cols-3">
           <div className="space-y-1.5 rounded-lg border border-border bg-background p-3">
             <div className="flex items-center gap-1.5 text-sm font-medium"><Fuel className="h-3.5 w-3.5 text-blue-500" />Смены</div>
-            <Stat label="Всего" value={r.shifts.total} />
-            <Stat label="С корректировкой" value={r.shifts.corrected} cls={r.shifts.corrected > 0 ? 'text-amber-600 dark:text-amber-400' : ''} icon={r.shifts.corrected > 0 ? Pencil : undefined} />
+            <ReadinessStat label="Всего" value={r.shifts.total} />
+            <ReadinessStat label="С корректировкой" value={r.shifts.corrected} cls={r.shifts.corrected > 0 ? 'text-amber-600 dark:text-amber-400' : ''} icon={r.shifts.corrected > 0 ? Pencil : undefined} />
           </div>
           <div className="space-y-1.5 rounded-lg border border-border bg-background p-3">
             <div className="flex items-center gap-1.5 text-sm font-medium"><Truck className="h-3.5 w-3.5 text-emerald-500" />Приёмка ТТН</div>
-            <Stat label="Всего" value={rc.total} />
-            <Stat label="Не проверено" value={rc.pending} cls={rc.pending > 0 ? 'text-amber-600 dark:text-amber-400' : ''} icon={rc.pending > 0 ? AlertTriangle : undefined} />
-            <Stat label="Принято" value={rc.confirmed} cls={rc.confirmed > 0 ? 'text-emerald-600 dark:text-emerald-400' : ''} />
-            <Stat label="Отклонено" value={rc.rejected} cls={rc.rejected > 0 ? 'text-red-500' : ''} />
-            <Stat label="С корректировкой" value={rc.with_corrections} cls={rc.with_corrections > 0 ? 'text-amber-600 dark:text-amber-400' : ''} icon={rc.with_corrections > 0 ? Pencil : undefined} />
+            <ReadinessStat label="Всего" value={rc.total} />
+            <ReadinessStat label="Не проверено" value={rc.pending} cls={rc.pending > 0 ? 'text-amber-600 dark:text-amber-400' : ''} icon={rc.pending > 0 ? AlertTriangle : undefined} />
+            <ReadinessStat label="Принято" value={rc.confirmed} cls={rc.confirmed > 0 ? 'text-emerald-600 dark:text-emerald-400' : ''} />
+            <ReadinessStat label="Отклонено" value={rc.rejected} cls={rc.rejected > 0 ? 'text-red-500' : ''} />
+            <ReadinessStat label="С корректировкой" value={rc.with_corrections} cls={rc.with_corrections > 0 ? 'text-amber-600 dark:text-amber-400' : ''} icon={rc.with_corrections > 0 ? Pencil : undefined} />
           </div>
           <div className="space-y-1.5 rounded-lg border border-border bg-background p-3">
             <div className="flex items-center gap-1.5 text-sm font-medium"><Upload className="h-3.5 w-3.5 text-primary" />Выгрузка в 1С</div>
-            <Stat label="Готово к отправке" value={pk.draft} cls={pk.draft > 0 ? 'text-blue-600 dark:text-blue-400' : ''} />
-            <Stat label="В пути" value={pk.in_flight} />
-            <Stat label="Загружено" value={pk.acked} cls={pk.acked > 0 ? 'text-emerald-600 dark:text-emerald-400' : ''} icon={pk.acked > 0 ? CheckCircle2 : undefined} />
-            <Stat label="Отклонено 1С" value={pk.rejected} cls={pk.rejected > 0 ? 'text-red-500' : ''} />
+            <ReadinessStat label="Готово к отправке" value={pk.draft} cls={pk.draft > 0 ? 'text-blue-600 dark:text-blue-400' : ''} />
+            <ReadinessStat label="В пути" value={pk.in_flight} />
+            <ReadinessStat label="Загружено" value={pk.acked} cls={pk.acked > 0 ? 'text-emerald-600 dark:text-emerald-400' : ''} icon={pk.acked > 0 ? CheckCircle2 : undefined} />
+            <ReadinessStat label="Отклонено 1С" value={pk.rejected} cls={pk.rejected > 0 ? 'text-red-500' : ''} />
           </div>
         </div>
         {(rc.pending > 0 || pk.rejected > 0) && (
@@ -348,11 +358,13 @@ function CashRow({ data }: { data: ShiftDashboardData }) {
   const co = data.cashout
   if (c.operations_count === 0 && c.income === 0 && co.count === 0) return null
   const items = [
-    { label: 'Приход', value: `${rub0(c.income)} ₽`, cls: 'text-emerald-600 dark:text-emerald-400', sub: '' },
-    { label: 'Расход', value: `${rub0(c.expense)} ₽`, cls: 'text-red-500', sub: '' },
-    { label: 'Остаток (расч.)', value: `${rub0(c.calculated)} ₽`, cls: 'text-foreground', sub: '' },
+    { label: 'Наличная выручка', value: `${rub0(c.income)} ₽`, cls: 'text-emerald-600 dark:text-emerald-400', sub: 'money-секция ККТ' },
+    { label: 'Расход (в т.ч. инкассация)', value: `${rub0(c.expense)} ₽`, cls: 'text-red-500', sub: '' },
+    { label: 'Δ за период', value: `${c.calculated > 0 ? '+' : ''}${rub0(c.calculated)} ₽`, cls: 'text-foreground', sub: 'приход − расход' },
     { label: 'Инкассация', value: `${rub0(co.total)} ₽`, cls: 'text-foreground', sub: `${co.count} шт.` },
-    { label: 'Разница', value: `${c.difference > 0 ? '+' : ''}${rub0(c.difference)} ₽`, cls: Math.abs(c.difference) > 0.01 ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground', sub: Math.abs(c.difference) > 0.01 ? 'проверить' : 'сходится' },
+    // Остаток — снимок STS, а не расчёт. Прежняя плитка «Разница» была зашита
+    // в ноль на бэкенде и всегда рапортовала «сходится».
+    { label: 'Остаток кассы', value: `${rub0(c.closing)} ₽`, cls: 'text-foreground', sub: 'снимок на конец последней смены' },
   ]
   return (
     <Card>

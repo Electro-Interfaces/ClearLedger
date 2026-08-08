@@ -167,6 +167,18 @@ class MemberScopeUpdate(BaseModel):
     object_scope: list[str] | None = None
 
 
+class BusinessGrant(BaseModel):
+    role: Literal["station_administrator", "network_merchandiser"]
+    scope_type: Literal["station", "network"]
+    scope_id: str = Field(min_length=1, max_length=80)
+
+
+class MemberBusinessGrantsUpdate(BaseModel):
+    """Аддитивные бизнес-роли Магазина с явной областью действия."""
+    company_id: str
+    grants: list[BusinessGrant] = Field(default_factory=list)
+
+
 class StationPinUpdate(BaseModel):
     """PIN станции участника — короткий код входа на рабочем месте АЗС (edge).
 
@@ -222,6 +234,7 @@ class UserAdminResponse(BaseModel):
     role_id: str | None = None      # назначенная именованная роль доступа (company_roles)
     role_name: str | None = None    # имя назначенной роли (для UI)
     object_scope: list[str] | None = None  # скоуп данных: объекты; null = вся сеть
+    business_grants: list[BusinessGrant] = Field(default_factory=list)  # права = объединение grant
     contract_ids: list[str] | None = None  # основание допуска: договоры (справка, не права)
     department_id: str | None = None       # подразделение штатной структуры
     department_name: str | None = None     # имя подразделения (для UI)

@@ -144,6 +144,9 @@ async def _ingest_receipts(db: AsyncSession, company_id, station_id: int,
             "receiving_warehouse": doc.get("СкладПриемки") or None,
             "signing_mode": doc.get("СхемаПодписания") or "office_director",
             "signer_name": doc.get("Подписант") or None,
+            # Кто принял товар. Сверке важно не только что приняли, но и кто:
+            # приёмка, проведённая кнопкой из центра, коробок не открывала.
+            "author": doc.get("Автор") or None,
             "mchd_guid": doc.get("ИдентификаторМЧД") or None,
             "mchd_registry": doc.get("РеестрМЧД") or None,
             "mchd_valid_until": mchd_until,
@@ -309,7 +312,8 @@ async def heartbeat(
         select(func.count()).select_from(EdgeDownlink).where(
             EdgeDownlink.company_id == company.id,
             EdgeDownlink.station_id == station_id,
-            EdgeDownlink.acked_at.is_(None)))).scalar() or 0
+            EdgeDownlink.acked_at.is_(None),
+            EdgeDownlink.cancelled_at.is_(None)))).scalar() or 0
 
     peers = (await db.execute(select(EdgeAgent).where(
         EdgeAgent.company_id == company.id,
@@ -450,6 +454,7 @@ async def receive_packet(
     """Принять пакет от агента станции. Тело — JSON, при Content-Encoding: gzip
     приходит сжатым (смена ~200 КБ → ~30 КБ, важно для LTE)."""
     raw = await request.body()
+    wire_size = len(raw)
     if len(raw) > MAX_BODY:
         raise HTTPException(413, "Пакет слишком большой")
     if request.headers.get("content-encoding", "").lower() == "gzip":
@@ -506,6 +511,7 @@ async def receive_packet(
         прежний = (existing.payload or {}).get("ХешПакета")
         новый = payload.get("ХешПакета")
         if not новый or новый == прежний:
+            existing.wire_size_bytes = wire_size
             if packet_kind == "station-recipes":
                 await recipe_versions.ingest_station_bundle(
                     db, company.id, int(station_id),
@@ -533,6 +539,7 @@ async def receive_packet(
             raise HTTPException(status.HTTP_409_CONFLICT, "Пакет уже принят ранее")
         existing.payload = payload
         existing.size_bytes = len(raw)
+        existing.wire_size_bytes = wire_size
         existing.source = str(payload.get("Источник") or "") or existing.source
         existing.received_at = datetime.now(timezone.utc)
         docs = payload.get("Документы") or []
@@ -573,6 +580,7 @@ async def receive_packet(
         shift_internal_no=shift.get("НомерСменыВнутр"),
         payload=payload,
         size_bytes=len(raw),
+        wire_size_bytes=wire_size,
         source=str(payload.get("Источник") or "") or None,
     ))
     routed = 0
@@ -605,7 +613,11 @@ async def receive_packet(
     # Черновики справочников и цены, назначенные станцией. Это не документы
     # учёта — они ничего не проводят; это заявка на признание, и разбирает её
     # человек в центре.
-    if (request.headers.get("X-Packet-Kind") or "") == "station-nsi":
+    # МРЦ станции идут своим видом пакета, но тем же разбором: документ у них
+    # один (mrc_fact) и он не заявка — станция сообщает то, что напечатано на
+    # пачке. Отдельный вид нужен, чтобы состояние справочника не смешивалось с
+    # потоком событий и могло приезжать повторно без вреда.
+    if (request.headers.get("X-Packet-Kind") or "") in ("station-nsi", "station-mrc"):
         try:
             await edge_nsi.ingest_station_nsi(db, company.id, int(station_id), docs)
         except Exception as exc:  # noqa: BLE001
@@ -634,6 +646,7 @@ async def receive_packet(
         "documents": len(docs),
         "recipes": recipe_stats,
         "size_bytes": len(raw),
+        "wire_size_bytes": wire_size,
         "projection": projection,
         "nsi": nsi_stats,
         "routed_transfers": routed,
@@ -661,6 +674,7 @@ async def list_packets(
         "shift_internal_no": r.shift_internal_no,
         "kind": r.kind,
         "size_bytes": r.size_bytes,
+        "wire_size_bytes": r.wire_size_bytes,
         "source": r.source,
         "received_at": r.received_at,
         "documents": len(r.payload.get("Документы") or []),

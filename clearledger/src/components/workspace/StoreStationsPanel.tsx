@@ -39,6 +39,24 @@ function объём(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} МБ`
 }
 
+function трафик(bytes: number, measured: number, packets: number): string {
+  if (!measured) return packets ? 'замер начнётся после обновления' : '—'
+  const coverage = measured < packets ? ` · ${measured} из ${packets} пакетов` : ''
+  return `${объём(bytes)}${coverage}`
+}
+
+function время(sec: number | null): string {
+  if (sec === null) return '—'
+  if (sec < 60) return `${sec} с`
+  if (sec < 3600) return `${Math.round(sec / 60)} мин`
+  return `${Math.round(sec / 3600)} ч`
+}
+
+function возраст(iso: string | null): string {
+  if (!iso) return '—'
+  return silence(Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000)))
+}
+
 function когда(iso: string | null): string {
   if (!iso) return '—'
   return new Date(iso).toLocaleString('ru-RU',
@@ -62,13 +80,21 @@ const STATE_STYLE: Record<string, string> = {
   'онлайн': 'bg-emerald-500',
   'офлайн': 'bg-amber-500',
   'молчит': 'bg-red-500',
+  'нет агента': 'bg-zinc-500',
+}
+
+const STATE_LABEL: Record<string, string> = {
+  'онлайн': 'на связи',
+  'офлайн': 'нет связи',
+  'молчит': 'нет связи больше часа',
+  'нет агента': 'агент не зарегистрирован',
 }
 
 function StateDot({ state }: { state: string }) {
   return (
-    <span className="inline-flex items-center gap-2">
-      <span className={`h-2.5 w-2.5 rounded-full ${STATE_STYLE[state] ?? 'bg-zinc-500'}`} />
-      {state}
+    <span className="inline-flex items-center gap-2" aria-label={`Связь: ${STATE_LABEL[state] ?? state}`}>
+      <span aria-hidden="true" className={`h-2.5 w-2.5 rounded-full ${STATE_STYLE[state] ?? 'bg-zinc-500'}`} />
+      {STATE_LABEL[state] ?? state}
     </span>
   )
 }
@@ -88,9 +114,11 @@ function Kpi({ icon: Icon, label, value, hint, alarm }: {
 }
 
 /** Пара «подпись — значение» в шапке карточки станции. */
-function Факт({ label, value }: { label: string; value: string | number | null }) {
+function Факт({ label, value, title }: {
+  label: string; value: string | number | null; title?: string
+}) {
   return (
-    <div>
+    <div title={title}>
       <div className="text-[11px] text-muted-foreground">{label}</div>
       <div className="text-sm">{value ?? '—'}</div>
     </div>
@@ -130,14 +158,74 @@ function StationExchangeDialog({ stationId, dateFrom, dateTo, onClose }: {
           <div className="p-4 text-sm text-muted-foreground">Загрузка обмена станции…</div>
         ) : (
           <div className="space-y-5">
+            {data.agent ? (
+              <div className={`rounded-lg border px-3 py-2.5 ${
+                data.agent.state === 'онлайн'
+                  ? 'border-emerald-500/25 bg-emerald-500/5'
+                  : 'border-amber-500/30 bg-amber-500/5'
+              }`}>
+                <div className="text-sm font-medium">
+                  {data.agent.state === 'онлайн'
+                    ? 'Центр видит актуальное состояние станции'
+                    : 'Центр показывает последнее известное состояние'}
+                </div>
+                <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+                  {data.agent.state === 'онлайн'
+                    ? 'Станция обновляет телеметрию раз в минуту. Очередь ниже совпадает с тем, что видит локальный экран «Состояние».'
+                    : `Последний ответ — ${silence(data.agent.silence_seconds)}. Очередь и показатели ниже зафиксированы на тот момент; сейчас точные значения видны только на самой станции. Работа на АЗС продолжается локально, накопленное уйдёт после восстановления связи.`}
+                </p>
+              </div>
+            ) : (
+              <div className="rounded-lg border border-border bg-muted/20 px-3 py-2.5 text-sm text-muted-foreground">
+                Агент этой станции ещё не зарегистрирован — у центра нет локального состояния АЗС.
+              </div>
+            )}
+
             <div className="grid grid-cols-2 gap-3 rounded-lg border border-border p-3 sm:grid-cols-3 lg:grid-cols-6">
               <Факт label="Сеансов" value={data.totals.sessions} />
               <Факт label="Пакетов" value={data.totals.packets} />
-              <Факт label="Объём" value={объём(data.totals.bytes)} />
+              <Факт label="Трафик наверх"
+                    value={трафик(data.totals.wire_bytes, data.totals.wire_packets, data.totals.packets)}
+                    title="Фактический объём HTTP-тел после gzip; старые пакеты без замера не включены" />
+              <Факт label="Данных до сжатия" value={объём(data.totals.bytes)} />
               <Факт label="Пауза в среднем" value={длительность(data.totals.avg_silence_min)} />
-              <Факт label="Дольше всего молчала" value={длительность(data.totals.max_silence_min)} />
-              <Факт label="Очередь наверх" value={data.agent?.queue_pending ?? '—'} />
+              <Факт label={data.agent?.state === 'онлайн' ? 'Очередь наверх' : 'Очередь на последнем ответе'}
+                    value={data.agent
+                      ? `${data.agent.queue_pending} · ${объём(data.agent.queue_wire_bytes)}`
+                      : '—'} />
             </div>
+
+            {data.agent && (
+              <div className={`rounded-lg border px-3 py-2.5 ${
+                data.agent.queue_failing > 0
+                  ? 'border-amber-500/30 bg-amber-500/5'
+                  : 'border-border'
+              }`}>
+                <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-sm">
+                  <span className="font-medium">Очередь станции наверх</span>
+                  <span>{data.agent.queue_pending} пакетов</span>
+                  <span className="text-muted-foreground">
+                    {объём(data.agent.queue_wire_bytes)} по каналу · {объём(data.agent.queue_bytes)} данных
+                  </span>
+                  <span className="text-muted-foreground">
+                    старшему {возраст(data.agent.queue_oldest_at)}
+                  </span>
+                  <span className={data.agent.queue_failing > 0 ? 'text-amber-400/90' : 'text-muted-foreground'}>
+                    с ошибкой {data.agent.queue_failing}
+                  </span>
+                </div>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  За сутки доставлено {data.agent.queue_sent_24} пакетов ·{' '}
+                  {объём(data.agent.sent_24_wire_bytes)} по каналу · последняя доставка{' '}
+                  {когда(data.agent.last_sent_at)}
+                </div>
+                {data.agent.last_error && (
+                  <div className="mt-2 rounded-md bg-amber-500/10 px-2 py-1.5 text-xs text-amber-200/90">
+                    Последняя ошибка отправки: {data.agent.last_error}
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="rounded-lg border border-border p-3">
               <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -158,9 +246,9 @@ function StationExchangeDialog({ stationId, dateFrom, dateTo, onClose }: {
                      style={{ width: `${data.availability.pct ?? 0}%` }} />
               </div>
               <div className="mt-1 text-[10px] text-muted-foreground">
-                Считается по следу телеметрии от первого выхода станции на связь
-                ({когда(data.availability.first_at)}), а не по пакетам: снимок раз в час не
-                доказывает, что между снимками канал был.
+                Считается от начала наблюдения ({когда(data.availability.first_at)}): из времени
+                периода вычитаются паузы между heartbeat дольше трёх минут. Короткая осечка
+                отдельным обрывом не считается.
               </div>
               {data.availability.outages.length > 0 && (
                 <div className="mt-2 max-h-40 overflow-y-auto">
@@ -169,7 +257,9 @@ function StationExchangeDialog({ stationId, dateFrom, dateTo, onClose }: {
                       {data.availability.outages.map((o, i) => (
                         <tr key={`${o.started}-${i}`} className="border-t border-border/30 first:border-t-0">
                           <td className="py-1 text-muted-foreground">{когда(o.started)}</td>
-                          <td className="py-1 text-muted-foreground">→ {когда(o.ended)}</td>
+                          <td className="py-1 text-muted-foreground">
+                            → {o.ongoing ? 'идёт сейчас' : когда(o.ended)}
+                          </td>
                           <td className="py-1 text-right tabular-nums text-amber-400/90">
                             {длительность(o.minutes)}
                           </td>
@@ -186,10 +276,15 @@ function StationExchangeDialog({ stationId, dateFrom, dateTo, onClose }: {
                 <Факт label="Последний ответ" value={silence(data.agent.silence_seconds)} />
                 <Факт label="Версия агента"
                       value={`${data.agent.version ?? '—'}${data.agent.version_ok ? '' : ' (отстаёт)'}`} />
-                <Факт label="Отдано всего" value={data.agent.queue_sent} />
-                <Факт label="Последняя смена" value={data.agent.last_shift} />
+                <Факт label="Последняя доставка" value={когда(data.agent.last_sent_at)} />
+                <Факт label="Последняя попытка" value={когда(data.agent.last_attempt_at)} />
                 <Факт label="Снимок остатков" value={когда(data.agent.snapshot_at)} />
-                <Факт label="На связи с" value={когда(data.agent.first_seen)} />
+                <Факт label="Часы станции"
+                      value={data.agent.clock_skew_seconds === null
+                        ? 'нет замера'
+                        : Math.abs(data.agent.clock_skew_seconds) <= 60
+                          ? 'совпадают'
+                          : `расходятся на ${время(Math.abs(data.agent.clock_skew_seconds))}`} />
               </div>
             )}
 
@@ -209,7 +304,7 @@ function StationExchangeDialog({ stationId, dateFrom, dateTo, onClose }: {
                         <th className="px-3 py-2 text-left">Начало</th>
                         <th className="px-3 py-2 text-left">Длился</th>
                         <th className="px-3 py-2 text-right">Пакетов</th>
-                        <th className="px-3 py-2 text-right">Объём</th>
+                        <th className="px-3 py-2 text-right">Канал / данные</th>
                         <th className="px-3 py-2 text-left">Что везла</th>
                         <th className="px-3 py-2 text-left">Молчала перед этим</th>
                       </tr>
@@ -220,7 +315,10 @@ function StationExchangeDialog({ stationId, dateFrom, dateTo, onClose }: {
                           <td className="px-3 py-1.5">{когда(s.started)}</td>
                           <td className="px-3 py-1.5 text-muted-foreground">{длительность(s.duration_min)}</td>
                           <td className="px-3 py-1.5 text-right tabular-nums">{s.packets}</td>
-                          <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{объём(s.bytes)}</td>
+                          <td className="px-3 py-1.5 text-right tabular-nums">
+                            <div>{трафик(s.wire_bytes, s.wire_packets, s.packets)}</div>
+                            <div className="text-[10px] text-muted-foreground">{объём(s.bytes)} данных</div>
+                          </td>
                           <td className="px-3 py-1.5 text-muted-foreground">{s.kinds.join(' · ')}</td>
                           <td className="px-3 py-1.5 text-muted-foreground">
                             {длительность(s.silence_before_min)}
@@ -247,7 +345,10 @@ function StationExchangeDialog({ stationId, dateFrom, dateTo, onClose }: {
                         <tr key={k.kind} className="border-b border-border last:border-0">
                           <td className="px-3 py-1.5">{k.label}</td>
                           <td className="px-3 py-1.5 text-right tabular-nums">{k.packets}</td>
-                          <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{объём(k.bytes)}</td>
+                          <td className="px-3 py-1.5 text-right tabular-nums">
+                            <div>{трафик(k.wire_bytes, k.wire_packets, k.packets)}</div>
+                            <div className="text-[10px] text-muted-foreground">{объём(k.bytes)} данных</div>
+                          </td>
                           <td className="px-3 py-1.5 text-right text-muted-foreground">{когда(k.last_at)}</td>
                         </tr>
                       ))}
@@ -259,7 +360,9 @@ function StationExchangeDialog({ stationId, dateFrom, dateTo, onClose }: {
               <div className="rounded-lg border border-border">
                 <div className="border-b border-border px-3 py-2 text-xs text-muted-foreground">
                   Задания центра станции — ждёт {data.totals.down_waiting} ·
-                  без подтверждения {data.totals.down_unacked} · применено {data.totals.down_acked}
+                  без подтверждения {data.totals.down_unacked} · применено {data.totals.down_acked} ·{' '}
+                  {объём(data.totals.down_bytes)} данных · подтверждение в среднем{' '}
+                  {время(data.totals.down_avg_ack_seconds)}
                 </div>
                 {data.downlink.length === 0 ? (
                   <div className="p-3 text-sm text-muted-foreground">
@@ -274,6 +377,10 @@ function StationExchangeDialog({ stationId, dateFrom, dateTo, onClose }: {
                             <td className="px-3 py-1.5 text-muted-foreground">{когда(d.created_at)}</td>
                             <td className="px-3 py-1.5">{d.label}</td>
                             <td className="px-3 py-1.5 text-muted-foreground">{d.note ?? ''}</td>
+                            <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+                              <div>{объём(d.size_bytes)}</div>
+                              <div className="text-[10px]">{d.ack_seconds === null ? 'без подтверждения' : `за ${время(d.ack_seconds)}`}</div>
+                            </td>
                             <td className={`px-3 py-1.5 text-right ${
                               d.state === 'ждёт станции' ? 'text-amber-400/90' : 'text-muted-foreground'}`}>
                               {d.state}
@@ -317,6 +424,7 @@ export function StoreStationsPanel({ dateFrom, dateTo }: { dateFrom: string; dat
   // только те виды, которые обязаны порождать документы.
   const неразобрано = (ingest ?? []).filter((i) => i.projects_docs)
     .reduce((a, i) => a + i.unprojected, 0)
+  const безСвежихДанных = stations.filter((s) => s.state === 'офлайн' || s.state === 'молчит').length
 
   return (
     <div className="space-y-4 p-6">
@@ -337,13 +445,15 @@ export function StoreStationsPanel({ dateFrom, dateTo }: { dateFrom: string; dat
              hint={`сеансов обмена за период: ${totals.sessions}`}
              alarm={totals.stations > 0 && totals.online < totals.stations} />
         <Kpi icon={ArrowUpFromLine} label="Принято наверх" value={totals.packets}
-             hint={`${объём(totals.bytes)} · последний ${когда(totals.last_packet_at)}`} />
+             hint={`${трафик(totals.wire_bytes, totals.wire_packets, totals.packets)} по каналу · ${объём(totals.bytes)} данных`} />
         <Kpi icon={PackageOpen} label="В очереди на станциях" value={totals.queue_pending}
-             hint="ещё не доехало до центра" alarm={totals.queue_pending > 20} />
+             hint={`${объём(totals.queue_wire_bytes)} по каналу${
+               безСвежихДанных > 0 ? ` · у ${безСвежихДанных} АЗС значение неактуально` : ''}`}
+             alarm={totals.queue_failing > 0 || totals.queue_pending > 20} />
         <Kpi icon={ArrowDownToLine} label="Отправлено вниз" value={totals.down_waiting}
              hint={totals.down_unacked
-               ? `ждут станции · ${totals.down_unacked} без подтверждения`
-               : 'ждут станции'}
+               ? `${объём(totals.down_pending_bytes)} · ${totals.down_unacked} без подтверждения`
+               : `${объём(totals.down_pending_bytes)} ждёт станции`}
              alarm={totals.down_waiting > 0} />
       </div>
 
@@ -352,7 +462,8 @@ export function StoreStationsPanel({ dateFrom, dateTo }: { dateFrom: string; dat
           <div className="text-xs text-muted-foreground">Приём по дням, пакетов</div>
           <div className="mt-3 flex items-end gap-1.5">
             {by_day.map((d) => (
-              <div key={d.day} className="flex-1 min-w-0" title={`${d.day}: ${d.packets} пакетов · ${объём(d.bytes)}`}>
+              <div key={d.day} className="min-w-0 flex-1"
+                   title={`${d.day}: ${d.packets} пакетов · ${трафик(d.wire_bytes, d.wire_packets, d.packets)} по каналу · ${объём(d.bytes)} данных`}>
                 <div className="rounded-sm bg-primary/70"
                      style={{ height: `${Math.max(3, Math.round((d.packets / пик) * 72))}px` }} />
                 <div className="mt-1 truncate text-center text-[10px] text-muted-foreground">
@@ -387,9 +498,9 @@ export function StoreStationsPanel({ dateFrom, dateTo }: { dateFrom: string; dat
                 <th className="px-3 py-2 text-right">Доступность</th>
                 <th className="px-3 py-2 text-right">Сеансов</th>
                 <th className="px-3 py-2 text-right">Пакетов ↑</th>
-                <th className="px-3 py-2 text-right">Объём ↑</th>
+                <th className="px-3 py-2 text-right">Канал / данные ↑</th>
                 <th className="px-3 py-2 text-left">Последний пакет</th>
-                <th className="px-3 py-2 text-right">В очереди</th>
+                <th className="px-3 py-2 text-right">Очередь ↑</th>
                 <th className="px-3 py-2 text-left">Вниз</th>
                 <th className="px-3 py-2 text-left">Версия</th>
                 <th className="px-3 py-2 text-right">Смена</th>
@@ -406,19 +517,33 @@ export function StoreStationsPanel({ dateFrom, dateTo }: { dateFrom: string; dat
                   <td className="px-3 py-2 text-muted-foreground">{silence(s.silence_seconds)}</td>
                   <td className={`px-3 py-2 text-right tabular-nums ${
                     s.uptime_pct !== null && s.uptime_pct < 95 ? 'text-amber-400/90' : ''}`}
-                      title="Доля минут периода, в которые агент выходил на связь">
+                      title="Доля времени без обрывов heartbeat дольше трёх минут">
                     {s.uptime_pct === null ? '—' : `${s.uptime_pct}%`}
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums">{s.sessions || '—'}</td>
                   <td className="px-3 py-2 text-right tabular-nums">{s.packets || '—'}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">{объём(s.bytes)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">
+                    <div>{трафик(s.wire_bytes, s.wire_packets, s.packets)}</div>
+                    <div className="whitespace-nowrap text-[10px] text-muted-foreground">{объём(s.bytes)} данных</div>
+                  </td>
                   <td className="px-3 py-2 text-muted-foreground">{когда(s.last_packet_at)}</td>
                   <td className={`px-3 py-2 text-right tabular-nums ${s.queue_pending > 0 ? 'text-amber-400/90' : ''}`}>
-                    {s.queue_pending}
+                    <div>{s.queue_pending}</div>
+                    {s.queue_pending > 0 && (
+                      <div className="whitespace-nowrap text-[10px] font-normal text-muted-foreground">
+                        {объём(s.queue_wire_bytes)} · старшему {возраст(s.queue_oldest_at)}
+                        {s.queue_failing > 0 ? ` · ошибок ${s.queue_failing}` : ''}
+                      </div>
+                    )}
+                    {s.state !== 'онлайн' && s.state !== 'нет агента' && (
+                      <div className="whitespace-nowrap text-[10px] font-normal text-muted-foreground">
+                        последнее известное
+                      </div>
+                    )}
                   </td>
                   <td className="px-3 py-2 text-muted-foreground">
                     {s.down_waiting > 0
-                      ? <span className="text-amber-400/90">ждёт {s.down_waiting}</span>
+                      ? <span className="text-amber-400/90">ждёт {s.down_waiting} · {объём(s.down_pending_bytes)}</span>
                       : s.down_unacked > 0
                         ? `${s.down_unacked} без подтверждения`
                         : s.down_acked > 0 ? `применено ${s.down_acked}` : '—'}
@@ -479,7 +604,10 @@ export function StoreStationsPanel({ dateFrom, dateTo }: { dateFrom: string; dat
                         )}
                       </td>
                       <td className="px-3 py-1.5 text-right tabular-nums">{k.packets}</td>
-                      <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{объём(k.bytes)}</td>
+                      <td className="px-3 py-1.5 text-right tabular-nums">
+                        <div>{трафик(k.wire_bytes, k.wire_packets, k.packets)}</div>
+                        <div className="text-[10px] text-muted-foreground">{объём(k.bytes)} данных</div>
+                      </td>
                       <td className="px-3 py-1.5 text-right text-muted-foreground">{когда(k.last_at)}</td>
                     </tr>
                   )
@@ -507,7 +635,9 @@ export function StoreStationsPanel({ dateFrom, dateTo }: { dateFrom: string; dat
                     </td>
                     <td className="px-3 py-1.5">{r.label}</td>
                     <td className="px-3 py-1.5 text-right text-muted-foreground">
-                      {r.direction === 'вверх' ? объём(r.size_bytes) : r.note}
+                      {r.direction === 'вверх'
+                        ? `${r.wire_size_bytes === null ? 'без замера' : объём(r.wire_size_bytes)} · ${объём(r.size_bytes)} данных`
+                        : `${r.note ?? ''} · ${объём(r.size_bytes)}`}
                     </td>
                   </tr>
                 ))}
@@ -520,7 +650,8 @@ export function StoreStationsPanel({ dateFrom, dateTo }: { dateFrom: string; dat
       <p className="text-xs text-muted-foreground">
         Сеанс — серия пакетов без паузы дольше {data.session_gap_minutes} минут: агент,
         дождавшись канала, отдаёт накопленное подряд. Работать на самой станции —
-        в пункте «Рабочее место АЗС».
+        в пункте «Рабочее место АЗС». «Канал» — фактический размер HTTP-тела после gzip;
+        «данные» — JSON после распаковки.
       </p>
 
       {выбрана !== null && (

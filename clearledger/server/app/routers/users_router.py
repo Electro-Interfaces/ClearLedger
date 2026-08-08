@@ -18,15 +18,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.access_catalog import sanitize_modules
 from app.audit import log_audit
 from app.auth import get_current_user, hash_password, resolve_member_modules
+from app.business_access import normalize_business_grants
 from app.database import get_db
 from app.models import (ChatParticipant, ChatRoom, Contract, Counterparty, Company,
-                        CompanyRole, Department, ServiceLocation, User, UserCompany)
+                        CompanyRole, Department, EdgeAgent, ServiceLocation, User,
+                        UserCompany)
 from app.services import email_service
 from app.utils import resolve_company_id, resolve_org_id
 from app.schemas import (
     CompanyMembership,
     GrantCompanyBody,
     MemberAccessUpdate,
+    MemberBusinessGrantsUpdate,
     MemberContractsUpdate,
     MemberModulesUpdate,
     MemberScopeUpdate,
@@ -104,6 +107,7 @@ async def _resp(
     org_id: str | None = None
     org_name: str | None = None
     object_scope: list[str] | None = None
+    business_grants: list[dict] = []
     contract_ids: list[str] | None = None
     department_id: str | None = None
     department_name: str | None = None
@@ -121,6 +125,7 @@ async def _resp(
             # Скоуп отдаём как есть: на админа он не действует, но админом человек
             # может перестать быть — заранее заданный список тогда пригодится.
             object_scope = [str(x) for x in (m.object_scope or [])] or None
+            business_grants = list(getattr(m, "business_grants", None) or [])
             # Основание допуска — справка, а не права: отдаём всем, включая админов.
             contract_ids = [str(x) for x in (getattr(m, "contract_ids", None) or [])] or None
             party_type = getattr(m, "party_type", None) or "internal"
@@ -138,6 +143,7 @@ async def _resp(
         id=str(u.id), email=u.email, name=u.name,
         role=role, position=position, modules=modules,
         role_id=role_id_str, role_name=role_name, object_scope=object_scope,
+        business_grants=business_grants,
         contract_ids=contract_ids,
         department_id=department_id, department_name=department_name,
         party_type=party_type, organization_id=org_id, organization_name=org_name,
@@ -383,13 +389,63 @@ async def set_member_scope(
     await log_audit(db, actor=current_user, company_id=cid, action="member.scope",
                     target=(target.email if target else user_id),
                     details={"objects": len(ids) if ids else "вся сеть"})
-    # Смена скоупа меняет состав ростеров станций: кто теперь видит станцию —
-    # тот и должен уметь войти на её рабочем месте. Ростер вторичен: сбой его
-    # доставки не должен ронять запись скоупа.
+    await db.commit()
+    return await _resp(target, db, scope_cid=cid)
+
+
+@router.put("/{user_id}/business-grants", response_model=UserAdminResponse)
+async def set_member_business_grants(
+    user_id: str,
+    payload: MemberBusinessGrantsUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Назначить бизнес-роли Магазина. Права нескольких grant складываются."""
+    try:
+        uid = uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID")
+    cid = await require_company_admin(payload.company_id, current_user, db)
+    membership = await db.get(UserCompany, (uid, cid))
+    target = await db.get(User, uid)
+    if membership is None or target is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Пользователь не член компании")
+
+    company = await db.get(Company, cid)
+    if company is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Организация не найдена")
+    station_ids = {
+        str(x) for x in (await db.execute(select(EdgeAgent.station_id).where(
+            EdgeAgent.company_id == cid))).scalars().all()
+    }
+    locations = (await db.execute(select(
+        ServiceLocation.code, ServiceLocation.source_bindings
+    ).where(ServiceLocation.company_id == cid))).all()
+    for code, bindings in locations:
+        if str(code or "").isdigit():
+            station_ids.add(str(code))
+        for binding in bindings or []:
+            station = ((binding or {}).get("config") or {}).get("station")
+            if station is not None:
+                station_ids.add(str(station))
+    try:
+        grants = normalize_business_grants(
+            [g.model_dump() for g in payload.grants],
+            network_id=company.slug,
+            station_ids=station_ids,
+        )
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+    membership.business_grants = grants
+    await log_audit(
+        db, actor=current_user, company_id=cid, action="member.business_grants",
+        target=target.email, details={"grants": grants},
+    )
     try:
         await refresh_company_rosters(db, cid)
     except Exception:
-        logger.exception("ростер станций не переспущен после смены скоупа")
+        logger.exception("ростер станций не переспущен после смены бизнес-ролей")
     await db.commit()
     return await _resp(target, db, scope_cid=cid)
 
