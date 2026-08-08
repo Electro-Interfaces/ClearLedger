@@ -439,7 +439,7 @@ export const getStoreCateringMenu = (dateFrom: string, dateTo: string, stations?
     stations: stations?.length ? stations.join(',') : undefined,
   })
 
-// ── Цены и маржа: сегмент + группы + реестр SKU + детализация товара ──
+// ── Маржа и наценка: сегмент + группы + реестр SKU + детализация товара ──
 export interface PricingSku extends StoreSku { kind: string }
 export interface PricingGroup {
   group: string; revenue: number; revenue_net: number; qty: number

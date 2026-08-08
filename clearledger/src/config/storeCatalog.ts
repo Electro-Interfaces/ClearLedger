@@ -165,8 +165,8 @@ export const STORE_VIEWS: StoreView[] = [
     ],
   },
   {
-    key: 'pricing', label: 'Цены и маржа', section: 'store', icon: Tag,
-    title: 'Цены и маржа',
+    key: 'pricing', label: 'Маржа и наценка', section: 'store', icon: Tag,
+    title: 'Маржа и наценка',
     subtitle: 'Инструмент менеджера: сегмент (Всё / Сопутка / Общепит), прибыльность по группам и реестр SKU. Данные 208: маржа Сопутка 11% / Общепит 61%. Клик по товару — история цен, продажи, закупки.',
     status: 'ready',
     blocks: [
@@ -177,8 +177,8 @@ export const STORE_VIEWS: StoreView[] = [
     ],
   },
   {
-    key: 'revaluation', label: 'Переоценка', section: 'store', icon: RefreshCw,
-    title: 'Переоценка',
+    key: 'revaluation', label: 'Цены', section: 'store', icon: RefreshCw,
+    title: 'Цены',
     subtitle: 'Рабочее место ценообразования сети: отбор → правило → предпросмотр → применение. Плюс история — что переоценивала 1С, пока станции вела она. Центр распоряжается центральными ценами; там, где право отдано станции, правило не трогает ничего.',
     status: 'ready',
     blocks: [

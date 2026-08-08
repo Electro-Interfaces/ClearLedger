@@ -1,5 +1,5 @@
 /**
- * «Цены и маржа» (Аналитика) — инструмент менеджера: сегмент (Всё / Сопутка /
+ * «Маржа и наценка» (Аналитика) — инструмент менеджера: сегмент (Всё / Сопутка /
  * Общепит), анализ по группам (категория / вид номенклатуры — какая группа сколько
  * маржи приносит) и реестр SKU. Клик по товару → модалка: метрики + история цен
  * (переоценки) + динамика продаж + закупки + остаток.
@@ -49,6 +49,7 @@ export function StorePricingPanel({ companyId, dateFrom, dateTo, stations }: { c
       return av === bv ? 0 : (av > bv ? dir : -dir)
     })
   }, [data, q, sortKey, sortDir])
+  const показ = useVisible(skus)
 
   if (isLoading) return <div className="p-6 text-sm text-muted-foreground">Загрузка цен и маржи…</div>
   if (error) return <div className="p-6 text-sm text-red-400/90">Ошибка загрузки</div>
@@ -76,15 +77,11 @@ export function StorePricingPanel({ companyId, dateFrom, dateTo, stations }: { c
     { label: 'Убыточных SKU', value: nf(s.loss_makers), cls: s.loss_makers > 0 ? 'text-red-400/90' : '' },
   ]
 
-  // Список показывается порциями: обрезать его молча нельзя —
-  // товаровед приходит смотреть весь ассортимент, а не первые строки.
-  const показ = useVisible(skus)
-
   return (
     <div ref={ref} className="p-6 space-y-4">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
-          <h3 className="text-base font-semibold">Цены и маржа</h3>
+          <h3 className="text-base font-semibold">Маржа и наценка</h3>
           <p className="text-xs text-muted-foreground mt-0.5">
             {data.period.from} – {data.period.to}. Сегмент, разбивка по группам и реестр SKU.
             Клик по товару — история цен, продажи, закупки. Себестоимость: сопутка — закупка, общепит — по ТТК.
@@ -100,7 +97,7 @@ export function StorePricingPanel({ companyId, dateFrom, dateTo, stations }: { c
               </button>
             ))}
           </div>
-          <ExportButton title="Цены и маржа" subtitle={`${data.period.from} — ${data.period.to} · ${SEGMENTS.find((x) => x.key === category)?.label}`} getEl={() => ref.current} />
+          <ExportButton title="Маржа и наценка" subtitle={`${data.period.from} — ${data.period.to} · ${SEGMENTS.find((x) => x.key === category)?.label}`} getEl={() => ref.current} />
         </div>
       </div>
 

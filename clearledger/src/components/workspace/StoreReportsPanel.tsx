@@ -36,7 +36,7 @@ const ЭКРАНЫ: Record<string, { label: string; hint: string; to: string }[]
     { label: 'Продажи', hint: 'выручка и маржа по товарам', to: '/shop?mode=store&sub=sales' },
     { label: 'Чеки', hint: 'продажа на уровне покупки', to: '/shop?mode=store&sub=cheques' },
     { label: 'Ассортимент', hint: 'ABC×XYZ, оборачиваемость', to: '/shop?mode=store&sub=assortment' },
-    { label: 'Цены и маржа', hint: 'прибыльность и наценка', to: '/shop?mode=store&sub=pricing' },
+    { label: 'Маржа и наценка', hint: 'прибыльность и наценка', to: '/shop?mode=store&sub=pricing' },
   ],
   priem: [
     { label: 'Приёмка', hint: 'журнал поставок и расхождений', to: '/shop?mode=store_stock&sub=receipts' },

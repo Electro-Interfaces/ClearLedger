@@ -143,7 +143,7 @@ export function StoreHelpPanel() {
 
 export function StorePanel() {
   // Раздел магазина = coreMode; валидные пункты — только его собственные. Иначе в
-  // «Складе» остался бы валидным «Цены и маржа» из «Торговли».
+  // «Складе» остался бы валидным «Маржа и наценка» из «Торговли».
   const { coreMode, setCoreMode } = useWorkspace()
   const mode: StoreMode = (STORE_MODES.includes(coreMode) ? coreMode : 'store') as StoreMode
   const [raw] = useWorkspaceSubView(storeDefaultKey(mode), STORE_KEYS)

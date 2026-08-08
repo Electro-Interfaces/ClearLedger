@@ -90,7 +90,7 @@ const COLS: Record<SkuMode, Col[]> = {
 
 const TITLES: Record<SkuMode, string> = {
   assortment: 'Ассортимент — ABC-анализ',
-  pricing: 'Цены и маржа',
+  pricing: 'Маржа и наценка',
   nomenclature: 'Номенклатура',
   sales: 'Продажи по товарам',
   stock: 'Остатки (приход − продажа)',
