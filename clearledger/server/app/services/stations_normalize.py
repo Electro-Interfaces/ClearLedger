@@ -505,13 +505,23 @@ async def ingest_stations(
         # № затирает боевую станцию.
         if loc.is_test:
             continue
-        if loc.code:
-            by_serial.setdefault(str(loc.code).strip(), loc)
+        # Код карточки и серийный — РАЗНЫЕ ключи: у 385 станций id витрины лежит в
+        # code, у 134 — только в serial_number. Индексируем оба, code приоритетнее.
+        for k in (loc.code, loc.serial_number):
+            if k is not None and str(k).strip():
+                by_serial.setdefault(str(k).strip(), loc)
         num = loc.station_number or md.get("number")
         if num is not None and str(num).strip():
             by_num.setdefault(str(num).strip(), loc)
 
     def _is_non_network(r) -> bool:
+        # В витринной выгрузке (partial) «выведена из эксплуатации» — это ТЕКУЩЕЕ
+        # состояние той же карточки, а не отдельная мусорная запись: витрина отдаёт
+        # весь парк одним списком. Резолвить такие строки только по ext_id нельзя —
+        # у карточек прежних импортов этого ключа нет, и первый же прогон завёл
+        # дубль на каждую из 59 выведенных станций.
+        if r.get("partial"):
+            return bool(r.get("is_test"))
         return bool(r.get("is_test")) or "выведен" in str(r.get("status_dev") or "").lower()
 
     def _resolve(r) -> ServiceLocation | None:
@@ -576,6 +586,29 @@ async def ingest_stations(
                 hubex_link_status=row.get("hubex_link_status"),
                 rating=row.get("rating"), success_pct=row.get("success_pct"),
             )
+            # Витринная выгрузка (asuim) отдаёт паспорт ЧАСТИЧНО: мощность, даты,
+            # рейтинг, процент успеха, id бренда и группы пусты во всех строках.
+            # Такой файл дозаполняет, а не переписывает: иначе один прогон стёр бы
+            # мощность у 351 станции и обнулил бы их в разрезах по скорости.
+            if row.get("partial"):
+                typed = {k: v for k, v in typed.items() if v is not None}
+                passport_extra = {k: v for k, v in
+                                  {**passport_extra, **(row.get("extra") or {})}.items()
+                                  if v is not None}
+                # Стадию жизненного цикла витрина не описывает («этап» = Active даже
+                # у выведенных из эксплуатации). Берём её из статуса устройства:
+                # выведена → closed, остальным своё значение не меняем.
+                typed["status"] = ("closed" if typed.get("operational_status") == "decommissioned"
+                                   else (loc.status if loc is not None else "active"))
+                # Владелец в витрине — ОПЕРАТОР сети (РусГидро/СНК), в Учёте —
+                # собственник по договору («ООО Доступная энергия»). Своё не трогаем.
+                if loc is not None and loc.owner:
+                    typed.pop("owner", None)
+                # Тестовую станцию, которой у нас нет, не заводим: это прогоны
+                # симуляторов CPO, в сети их не существует.
+                if loc is None and row.get("is_test"):
+                    skipped += 1
+                    continue
             if loc is not None:
                 # ОБОГАЩАЕМ существующий объект: заполняем типизированные колонки +
                 # мержим паспорт; id / code / source_bindings НЕ трогаем.

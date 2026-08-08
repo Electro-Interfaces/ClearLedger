@@ -12,6 +12,7 @@
 import { CorporatePanel } from './CorporatePanel'
 import { RetailPanel } from './RetailPanel'
 import { TariffsPanel } from './TariffsPanel'
+import { PaymentsPanel } from './PaymentsPanel'
 import { OverviewDashboardPanel } from './OverviewDashboardPanel'
 import { ChargeListPanel } from './ChargeListPanel'
 import { ChargeMapPanel } from './ChargeMapPanel'
@@ -40,6 +41,7 @@ export function ChargeSalesRouter({ tab, companyId, dateFrom, dateTo }: {
     case 'cs_corporate':   return <CorporatePanel {...p} />
     case 'cs_retail':      return <RetailPanel {...p} />
     case 'cs_segments':    return <RetailPanel {...p} group="segments" />
+    case 'cs_payments':    return <PaymentsPanel {...p} />
     default:               return null
   }
 }

@@ -3707,6 +3707,182 @@ class ChargeSession(Base):
     )
 
 
+class ChargePayment(Base):
+    """Платёж эквайринга по зарядной сессии — витрина АСУиМ (`payments_ru`).
+
+    Закрывает контур «сессия → списание → фискальный чек» без отдельных
+    коннекторов к банку и ОФД. Механика оплаты картой трёхтактная: на старте
+    ставится ХОЛД (предавторизация), по завершении списывается фактическая
+    сумма, разница ВОЗВРАЩАЕТСЯ. Поэтому выручка — это `amount`; складывать
+    `hold_amount` нельзя (в пробной выгрузке холдов 73,6 млн ₽ против 24,5 млн ₽
+    выручки). Проверка целостности строки: hold − refund = amount.
+
+    Связь с сессией — по `session_ext_id` (без FK): платежи приходят окнами по
+    датам и обгоняют сессии, поэтому платёж существует и до того, как загружена
+    его сессия. Дедуп по (компания, id платежа) — повторные окна безопасны."""
+    __tablename__ = "charge_payments"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    channel_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("channels.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    payment_ext_id: Mapped[str] = mapped_column(String(64), nullable=False)      # «id_платежа»
+    bank_txn_id: Mapped[str | None] = mapped_column(String(64), nullable=True)   # «id_транзакции_банка»
+    session_ext_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False), nullable=True, index=True)
+    amount: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, default=0)         # списано
+    hold_amount: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, default=0)    # предавторизация
+    refund_amount: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, default=0)  # возврат остатка
+
+    by_card: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    op_type_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    op_type: Mapped[str | None] = mapped_column(String(60), nullable=True, index=True)
+    # Код статуса АСУиМ (0/1/2/4). Выручку несут и «0», и «2», поэтому фильтром по
+    # статусу пользоваться нельзя, пока заказчик не расшифрует значения.
+    status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    receipt_url: Mapped[str | None] = mapped_column(String(500), nullable=True)  # чек ОФД
+    user_ext_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    user_phone: Mapped[str | None] = mapped_column(String(40), nullable=True, index=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("uq_charge_payments", "company_id", "payment_ext_id", unique=True),
+        Index("idx_charge_payments_paid", "company_id", "paid_at"),
+    )
+
+
+class EzsCustomer(Base):
+    """Клиент ЭЗС из витрины АСУиМ (`users_ru`) — БЕЗ персональных данных.
+
+    Решение МАГа 08.08.2026: пока нет отдельного разрешения на обработку ПДн,
+    из справочника физлиц берём ТОЛЬКО номер телефона — он и так является ключом
+    связи в модели (в сессиях `user_id` = телефон). ФИО, отчество, e-mail, логин
+    и аватар не переносим и не храним. Для юридических лиц ограничения нет:
+    телефон корпоративного аккаунта — идентификатор организации, а не человека.
+
+    Зачем нужен: телефон + дата регистрации дают когорты («когда клиент пришёл»),
+    а `organization_ext_id` — точную связку с ЮЛ вместо сопоставления по телефону."""
+    __tablename__ = "ezs_customers"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    customer_ext_id: Mapped[str] = mapped_column(String(40), nullable=False)   # «id_пользователя»
+    # Нормализованный (+7XXXXXXXXXX): витрина отдаёт «+7(999) 999 99-95», а сессии
+    # и платежи — «+79999999995». Без приведения связка не собирается.
+    phone: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)
+    organization_ext_id: Mapped[str | None] = mapped_column(String(40), nullable=True, index=True)
+    registered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False), nullable=True)
+    is_active: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    balance: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("uq_ezs_customers", "company_id", "customer_ext_id", unique=True),
+    )
+
+
+class EzsRfidCard(Base):
+    """RFID-карта клиента ЭЗС — витрина АСУиМ (`rfid_cards_ru`).
+
+    Нужна, чтобы у сессии по карте был владелец: в `charge_sessions.rfid` лежит
+    UID карты (в нижнем регистре), в витрине — тот же UID в верхнем, поэтому
+    храним нормализованный. Персональных данных, кроме телефона, не несёт."""
+    __tablename__ = "ezs_rfid_cards"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    card_ext_id: Mapped[str] = mapped_column(String(40), nullable=False)       # «id_карты»
+    uid: Mapped[str | None] = mapped_column(String(60), nullable=True, index=True)   # UPPER
+    number: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    status: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    customer_ext_id: Mapped[str | None] = mapped_column(String(40), nullable=True, index=True)
+    phone: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("uq_ezs_rfid_cards", "company_id", "card_ext_id", unique=True),
+    )
+
+
+class EzsReference(Base):
+    """Малые справочники витрины АСУиМ: бренды станций, группы станций, модели ЭМ.
+
+    Одна таблица на три вида, а не три модели: вместе они дают 282 строки, а
+    состав полей у каждого — два-три значения. `kind` разделяет виды, редкие
+    атрибуты лежат в `payload`.
+
+    Связи с объектами пока нет и она не наша вина: в `stations_ru` колонки
+    `id_бренда` и `id_группы` пусты, бренд записан текстом. Справочники держим
+    заведёнными, чтобы связь села сразу, как заказчик её отдаст."""
+    __tablename__ = "ezs_references"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    kind: Mapped[str] = mapped_column(String(20), nullable=False, index=True)  # brand|group|car
+    ext_id: Mapped[str] = mapped_column(String(40), nullable=False)
+    name: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    payload: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("uq_ezs_references", "company_id", "kind", "ext_id", unique=True),
+    )
+
+
+class EzsTariff(Base):
+    """Номинал прайса ЭЗС — витрина АСУиМ (`tariffs_ru`).
+
+    Тариф разложен построчно по типу разъёма, поэтому строка = (тариф, тип
+    разъёма). Нужен, чтобы «факт против номинала» сравнивал факт с прайсом, а не
+    факт с фактом: до появления справочника цена бралась из самой сессии."""
+    __tablename__ = "ezs_tariffs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    tariff_ext_id: Mapped[str] = mapped_column(String(40), nullable=False)
+    name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    owner_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    tariff_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    connector_type_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    connector_type: Mapped[str | None] = mapped_column(String(40), nullable=True)
+
+    price_all_day: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
+    price_day: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
+    price_night: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
+    price_halfpeak: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
+    price_peak: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
+    reservation_cost: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
+    idle_cost: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
+
+    valid_from: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    valid_to: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Привязки приходят строкой-перечислением (в пробной выгрузке пусты).
+    stations: Mapped[str | None] = mapped_column(Text, nullable=True)
+    organizations: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("uq_ezs_tariffs", "company_id", "tariff_ext_id", "connector_type_id", unique=True),
+    )
+
+
 class AnalyticsCacheVersion(Base):
     """Версия агрегатных данных компании — для инвалидации кеша раздела «Продажи».
     Инкрементируется при ingest/обогащении сессий: все прежние кеш-ключи

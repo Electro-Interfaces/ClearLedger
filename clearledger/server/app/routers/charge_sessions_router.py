@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import io
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile
@@ -15,13 +15,25 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import assert_company_member, get_current_user
 from app.database import get_db
-from app.models import ChargeSession, User
+from app.models import ChargePayment, ChargeSession, User
 from app.services.export_audit import log_export
 from app.services.export_files import xlsx_response
 from app.services.session_scope import session_scope_conds
 from app.services.pivot_export import build_sessions_pivot
 
 router = APIRouter(prefix="/charge-sessions", tags=["Зарядные сессии"])
+
+
+def _day_bounds(date_from: str, date_to: str) -> tuple[datetime, datetime]:
+    """«YYYY-MM-DD» × 2 → полуинтервал [начало дня; начало следующего за date_to).
+    Верхняя граница исключающая — иначе платежи последней секунды дня теряются."""
+    try:
+        df = date.fromisoformat(date_from[:10])
+        dt = date.fromisoformat(date_to[:10])
+    except ValueError as exc:
+        raise HTTPException(400, "Неверный формат даты (YYYY-MM-DD)") from exc
+    return (datetime.combine(df, datetime.min.time()),
+            datetime.combine(dt, datetime.min.time()) + timedelta(days=1))
 
 
 @router.post("/import")
@@ -113,6 +125,117 @@ async def count_sessions(
         select(func.count()).select_from(ChargeSession).where(ChargeSession.company_id == cid)
     )).scalar_one()
     return {"count": int(n)}
+
+
+@router.get("/payments/summary")
+async def payments_summary(
+    company_id: str,
+    date_from: str,
+    date_to: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Сводка эквайринга ЭЗС за период — витрина «Платежи и чеки».
+
+    Выручка — это `amount` (фактическое списание). Холд считаем отдельно и НЕ
+    суммируем с выручкой: оплата картой трёхтактная (холд → списание → возврат
+    остатка), и по холдам сумма втрое больше реальной.
+
+    «Зависший холд» — строка, где деньги заблокированы, но ни списания, ни
+    возврата не было: клиент заряжаться не начал, а средства у него удержаны."""
+    cid = await assert_company_member(company_id, current_user, db)
+    df, dt = _day_bounds(date_from, date_to)
+    scope = [ChargePayment.company_id == cid,
+             ChargePayment.paid_at >= df, ChargePayment.paid_at < dt]
+
+    t = (await db.execute(select(
+        func.count().label("count"),
+        func.coalesce(func.sum(ChargePayment.amount), 0).label("amount"),
+        func.coalesce(func.sum(ChargePayment.hold_amount), 0).label("hold"),
+        func.coalesce(func.sum(ChargePayment.refund_amount), 0).label("refund"),
+        func.count(ChargePayment.receipt_url).label("receipts"),
+    ).where(*scope))).one()
+
+    stuck = (await db.execute(select(
+        func.count().label("count"),
+        func.coalesce(func.sum(ChargePayment.hold_amount), 0).label("amount"),
+    ).where(*scope, ChargePayment.hold_amount > 0, ChargePayment.refund_amount <= 0,
+            ChargePayment.amount <= 0))).one()
+
+    linked = (await db.execute(select(func.count()).where(
+        *scope, ChargePayment.session_ext_id.is_not(None),
+        select(ChargeSession.id).where(
+            ChargeSession.company_id == cid,
+            ChargeSession.session_ext_id == ChargePayment.session_ext_id).exists()))).scalar_one()
+
+    month = func.to_char(ChargePayment.paid_at, "YYYY-MM")
+    by_month = (await db.execute(select(
+        month.label("bucket"), func.count().label("count"),
+        func.coalesce(func.sum(ChargePayment.amount), 0).label("amount"),
+        func.coalesce(func.sum(ChargePayment.refund_amount), 0).label("refund"),
+        func.count(ChargePayment.receipt_url).label("receipts"),
+    ).where(*scope).group_by(month).order_by(month))).all()
+
+    by_type = (await db.execute(select(
+        ChargePayment.op_type.label("name"), func.count().label("count"),
+        func.coalesce(func.sum(ChargePayment.amount), 0).label("amount"),
+    ).where(*scope).group_by(ChargePayment.op_type)
+     .order_by(func.sum(ChargePayment.amount).desc()))).all()
+
+    cnt = int(t.count or 0)
+    return {
+        "totals": {
+            "count": cnt,
+            "amount": float(t.amount or 0),
+            "hold": float(t.hold or 0),
+            "refund": float(t.refund or 0),
+            "receipts": int(t.receipts or 0),
+            "avgCheck": round(float(t.amount or 0) / cnt, 2) if cnt else 0,
+            "linked": int(linked or 0),
+            "orphans": cnt - int(linked or 0),
+            "stuckCount": int(stuck.count or 0),
+            "stuckAmount": float(stuck.amount or 0),
+        },
+        "byMonth": [{"bucket": r.bucket, "count": int(r.count), "amount": float(r.amount),
+                     "refund": float(r.refund), "receipts": int(r.receipts)} for r in by_month],
+        "byType": [{"name": r.name or "—", "count": int(r.count), "amount": float(r.amount)}
+                   for r in by_type],
+    }
+
+
+@router.get("/payments/list")
+async def payments_list(
+    company_id: str,
+    date_from: str,
+    date_to: str,
+    only: str | None = Query(None, description="orphans | stuck | refunds — фильтр разбора"),
+    limit: int = Query(200, le=2000),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[dict[str, Any]]:
+    """Реестр платежей за период (последние сверху). `only` — срез для разбора."""
+    cid = await assert_company_member(company_id, current_user, db)
+    df, dt = _day_bounds(date_from, date_to)
+    conds = [ChargePayment.company_id == cid,
+             ChargePayment.paid_at >= df, ChargePayment.paid_at < dt]
+    if only == "orphans":
+        conds.append(~select(ChargeSession.id).where(
+            ChargeSession.company_id == cid,
+            ChargeSession.session_ext_id == ChargePayment.session_ext_id).exists())
+    elif only == "stuck":
+        conds += [ChargePayment.hold_amount > 0, ChargePayment.refund_amount <= 0,
+                  ChargePayment.amount <= 0]
+    elif only == "refunds":
+        conds.append(ChargePayment.refund_amount > 0)
+    rows = (await db.execute(select(ChargePayment).where(*conds)
+            .order_by(ChargePayment.paid_at.desc()).limit(limit))).scalars().all()
+    return [{
+        "id": p.payment_ext_id, "sessionId": p.session_ext_id, "bankTxnId": p.bank_txn_id,
+        "paidAt": p.paid_at.isoformat() if p.paid_at else None,
+        "amount": float(p.amount or 0), "hold": float(p.hold_amount or 0),
+        "refund": float(p.refund_amount or 0), "opType": p.op_type,
+        "status": p.status_code, "receiptUrl": p.receipt_url, "phone": p.user_phone,
+    } for p in rows]
 
 
 @router.get("/export")

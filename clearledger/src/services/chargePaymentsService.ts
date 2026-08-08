@@ -1,0 +1,58 @@
+/**
+ * Клиент API /api/charge-sessions/payments/* — эквайринг ЭЗС (витрина АСУиМ).
+ *
+ * Выручка = `amount` (фактическое списание). `hold` — предавторизация, её нельзя
+ * складывать с выручкой: оплата картой трёхтактная (холд → списание → возврат
+ * остатка), по холдам сумма получается втрое больше реальной.
+ */
+import { get } from './apiClient'
+
+export interface PaymentTotals {
+  count: number
+  amount: number        // списано — это и есть выручка
+  hold: number          // заблокировано на карте
+  refund: number        // возвращено (остаток холда)
+  receipts: number      // платежей с фискальным чеком
+  avgCheck: number
+  linked: number        // нашли свою сессию
+  orphans: number       // сессии в Учёте нет (её ещё не загрузили)
+  stuckCount: number    // холд без списания и без возврата
+  stuckAmount: number
+}
+export interface PaymentMonth {
+  bucket: string; count: number; amount: number; refund: number; receipts: number
+}
+export interface PaymentType { name: string; count: number; amount: number }
+export interface PaymentsSummary {
+  totals: PaymentTotals
+  byMonth: PaymentMonth[]
+  byType: PaymentType[]
+}
+export interface PaymentLine {
+  id: string
+  sessionId: string | null
+  bankTxnId: string | null
+  paidAt: string | null
+  amount: number
+  hold: number
+  refund: number
+  opType: string | null
+  status: number | null
+  receiptUrl: string | null
+  phone: string | null
+}
+
+interface P { companyId: string; dateFrom: string; dateTo: string }
+const qp = (p: P) => ({ company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo })
+
+export async function getPaymentsSummary(p: P): Promise<PaymentsSummary> {
+  return get<PaymentsSummary>('/api/charge-sessions/payments/summary', qp(p))
+}
+
+export async function getPaymentsList(
+  p: P & { only?: 'orphans' | 'stuck' | 'refunds'; limit?: number },
+): Promise<PaymentLine[]> {
+  return get<PaymentLine[]>('/api/charge-sessions/payments/list', {
+    ...qp(p), ...(p.only ? { only: p.only } : {}), limit: String(p.limit ?? 200),
+  })
+}

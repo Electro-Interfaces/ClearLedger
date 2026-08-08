@@ -273,6 +273,8 @@ export const SALES_COMMERCE_MENU: CentralMenuItem[] = [
   { key: 'cs_corporate', label: 'Корпоратив' },
   { key: 'cs_retail',    label: 'Частные лица' },
   { key: 'cs_segments',  label: 'Сегменты и когорты' },
+  // Платежи — про деньги и чеки, а не про энергию: эквайринг из витрины АСУиМ.
+  { key: 'cs_payments',  label: 'Платежи и чеки' },
 ]
 
 // Общий список — для карты прав и роутера панелей: право на пункт и то, какая панель

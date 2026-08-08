@@ -95,6 +95,7 @@ const SUB_LABELS: Partial<Record<CoreMode, Record<string, string>>> = {
   sales_commerce: {
     cs_clients: 'Тарифы', cs_corporate: 'Корпоратив',
     cs_retail: 'Частные лица', cs_segments: 'Сегменты и когорты',
+    cs_payments: 'Платежи и чеки',
     'fuel-tariffs': 'Тарифы', 'fuel-corporate': 'Корпоратив', 'fuel-retail': 'Частные лица',
     clients: 'Клиенты и когорты',
   },

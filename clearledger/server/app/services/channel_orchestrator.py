@@ -503,6 +503,13 @@ async def _run_charge_sessions(db: AsyncSession, channel: Channel, src: Source,
         return {"status": "error", "message": f"файл {file_id} не найден"}
     with open(sf.storage_path, "rb") as fh:
         content = fh.read()
+    # Выгрузка витрины АСУиМ (сессии или платежи) опознаётся по шапке и идёт своим
+    # маппером; файл админпанели — прежним индексным разбором.
+    from app.services.asuim_normalize import ingest_asuim_file
+    vitrina = await ingest_asuim_file(db, channel.company_id, content,
+                                      channel_id=channel.id, mode=mode, log_id=log_id)
+    if vitrina is not None:
+        return vitrina
     from app.services.charge_sessions_normalize import (
         enrich_from_registry, ingest_charge_sessions, parse_sessions_xlsx,
     )
@@ -541,6 +548,12 @@ async def _run_stations(db: AsyncSession, channel: Channel, src: Source,
         return {"status": "error", "message": f"файл {file_id} не найден"}
     with open(sf.storage_path, "rb") as fh:
         content = fh.read()
+    # Витрина АСУиМ (станции, коннекторы, тарифы, организации) — по именам колонок.
+    from app.services.asuim_normalize import ingest_asuim_file
+    vitrina = await ingest_asuim_file(db, channel.company_id, content,
+                                      channel_id=channel.id, mode=mode, log_id=log_id)
+    if vitrina is not None:
+        return vitrina
     from app.services.stations_normalize import ingest_stations, parse_stations_xlsx
     rows = parse_stations_xlsx(content)
     return await ingest_stations(db, channel.company_id, rows, channel_id=channel.id,
