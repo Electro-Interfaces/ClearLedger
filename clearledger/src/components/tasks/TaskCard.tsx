@@ -10,6 +10,7 @@
  */
 import { useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useSupportContext } from '@/contexts/SupportContext'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowLeft, ArrowRight, CheckCircle2, ChevronRight, Clock, Eye, EyeOff, Link2,
@@ -47,6 +48,7 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
 }) {
   const qc = useQueryClient()
   const navigate = useNavigate()
+  const { openInteraction } = useSupportContext()
   const [note, setNote] = useState('')
   const [feedKind, setFeedKind] = useState<'all' | 'talk' | 'move' | 'meta'>('all')
   const [tab, setTab] = useState('work')
@@ -188,7 +190,11 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
           )}
         </div>
         {origin && (
-          <button type="button" onClick={() => navigate(`/messages?room=${origin}`)}
+          // Разговор открывается той же панелью чата, что и кнопка «Чат» в шапке,
+          // наведённой на комнату. Раньше вело на `/messages?room=` — а это админский
+          // реестр чатов пространства, который параметр не читает: обычного человека
+          // он не пускал вовсе, администратора приводил в таблицу без разговора.
+          <button type="button" onClick={() => openInteraction('chat', `room:${origin}`)}
             className="mt-2 text-[11px] text-muted-foreground hover:text-foreground hover:underline">
             задача из обсуждения — открыть разговор
           </button>

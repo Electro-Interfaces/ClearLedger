@@ -25,7 +25,7 @@ import { MetricHint } from '@/components/workspace/analytics/MetricHint'
 import { ConfirmActionDialog } from '@/components/common/ConfirmActionDialog'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { useChatWs, type WsEvent } from '@/hooks/useChatWs'
-import { createMeeting } from '@/services/conferenceService'
+import { startMeeting } from '@/services/conferenceService'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -38,6 +38,10 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuTrigger, DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu'
+import {
+  ContextMenu, ContextMenuContent, ContextMenuItem,
+  ContextMenuTrigger, ContextMenuSeparator,
+} from '@/components/ui/context-menu'
 import {
   getUserColor, getDateLabel, formatTime, computeGrouping, bubbleRadius,
   type GroupingInfo,
@@ -2231,8 +2235,7 @@ export function ChatPanel({ compact, scopeProduct }: {
     // ссылку. Организатор входит модератором по подписанному токену, в чат уходит
     // гостевая ссылка.
     mutationFn: async () => {
-      const m = await createMeeting()
-      window.open(m.moderator_url, '_blank', 'noopener,noreferrer')
+      const m = await startMeeting()
       return chat.sendMessage(selectedRoom!, { content: `📹 ${user?.name || 'Участник'} приглашает в видеозвонок — присоединяйтесь: ${m.guest_url}` })
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['chat-messages', selectedRoom] }),
@@ -2384,6 +2387,60 @@ export function ChatPanel({ compact, scopeProduct }: {
   }
   const deleteFolder = (id: string) => {
     chat.deleteFolder(id).then(() => { qc.invalidateQueries({ queryKey: ['chat-folders'] }); if (folder === id) setFolder('all') }).catch(() => toast.error('Не удалось удалить папку'))
+  }
+  /**
+   * Пункты меню чата — одни и те же для кнопки «⋮» и для правого клика по строке.
+   * Radix требует СВОИ Item-компоненты в каждом меню, поэтому их передают
+   * параметром: разметка одна, оболочек две. Иначе список пунктов пришлось бы
+   * держать в двух местах и чинить дважды.
+   */
+  const roomMenuItems = (
+    room: ChatRoom,
+    Item: React.ComponentType<{ className?: string; onClick?: () => void; children?: React.ReactNode }>,
+    Separator: React.ComponentType<{ className?: string }>,
+  ) => {
+    const isSystem = room.kind === 'news' || room.kind === 'general' || room.kind === 'platform'
+    return (
+      <>
+        {/* Закрепление — личное: список у каждого свой, и «важное сверху» не
+            должно навязываться остальным участникам. */}
+        <Item className="gap-2 text-xs"
+          onClick={() => chat.pinRoom(room.id)
+            .then(() => qc.invalidateQueries({ queryKey: ['chat-rooms'] }))
+            .catch(() => toast.error('Не удалось закрепить чат'))}>
+          <Pin className="size-3.5" />{room.isPinned ? 'Открепить' : 'Закрепить сверху'}
+        </Item>
+        {/* «Без звука» доступен и системным чатам: выйти из «Объявлений»
+            нельзя, а не получать push о каждом — можно. */}
+        <Item className="gap-2 text-xs"
+          onClick={() => chat.muteRoom(room.id, isMuted(room) ? null : 'forever')
+            .then(() => qc.invalidateQueries({ queryKey: ['chat-rooms'] }))
+            .catch(() => toast.error('Не удалось изменить уведомления'))}>
+          {isMuted(room)
+            ? <><Bell className="size-3.5" />Со звуком</>
+            : <><BellOff className="size-3.5" />Без звука</>}
+        </Item>
+        {!isSystem && (showArchived ? (
+          <Item className="gap-2 text-xs" onClick={() => archiveRoom(room.id, false)}>
+            <ArchiveRestore className="size-3.5" />Вернуть из архива
+          </Item>
+        ) : (
+          <Item className="gap-2 text-xs" onClick={() => archiveRoom(room.id, true)}>
+            <Archive className="size-3.5" />Архивировать
+          </Item>
+        ))}
+        {folders.length > 0 && (
+          <>
+            <Separator />
+            {folders.map((f) => (
+              <Item key={f.id} className="gap-2 text-xs" onClick={() => toggleRoomInFolder(f, room.id)}>
+                {f.roomIds.includes(room.id) ? <Check className="size-3.5 text-primary" /> : <Folder className="size-3.5" />}{f.name}
+              </Item>
+            ))}
+          </>
+        )}
+      </>
+    )
   }
   const reorderFolders = (draggedId: string, targetId: string) => {
     const ids = folders.map((f) => f.id)
@@ -2661,11 +2718,15 @@ export function ChatPanel({ compact, scopeProduct }: {
           </div>
         ) : filteredRooms.map((room) => {
           const Icon = roomIcon(room)
-          const isSystem = room.kind === 'news' || room.kind === 'general'
-            || room.kind === 'platform'
           const peerOnline = room.type === 'direct' && room.directPeerId ? presenceMap.get(room.directPeerId)?.online : false
           return (
-            <div key={room.id} onClick={() => { setSelectedRoom(room.id); setShowRoomInfo(false) }}
+            // Правый клик (и долгое нажатие на телефоне) по строке открывает те же
+            // действия, что кнопка «⋮»: закрепить, звук, архив, папки. Так их ищут
+            // по привычке из мессенджеров, а «⋮» проявляется только при наведении —
+            // с тачпада и на телефоне до неё ещё надо додуматься.
+            <ContextMenu key={room.id}>
+              <ContextMenuTrigger asChild>
+            <div onClick={() => { setSelectedRoom(room.id); setShowRoomInfo(false) }}
               className={cn('group/room flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 py-2 text-left transition-colors hover:bg-accent',
                 selectedRoom === room.id && 'bg-accent')}>
               <div className="relative">
@@ -2712,43 +2773,7 @@ export function ChatPanel({ compact, scopeProduct }: {
                         </button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
-                        {/* Закрепление — личное: список у каждого свой, и «важное
-                            сверху» не должно навязываться остальным участникам. */}
-                        <DropdownMenuItem className="gap-2 text-xs"
-                          onClick={() => chat.pinRoom(room.id)
-                            .then(() => qc.invalidateQueries({ queryKey: ['chat-rooms'] }))
-                            .catch(() => toast.error('Не удалось закрепить чат'))}>
-                          <Pin className="size-3.5" />{room.isPinned ? 'Открепить' : 'Закрепить сверху'}
-                        </DropdownMenuItem>
-                        {/* «Без звука» доступен и системным чатам: выйти из «Объявлений»
-                            нельзя, а не получать push о каждом — можно. */}
-                        <DropdownMenuItem className="gap-2 text-xs"
-                          onClick={() => chat.muteRoom(room.id, isMuted(room) ? null : 'forever')
-                            .then(() => qc.invalidateQueries({ queryKey: ['chat-rooms'] }))
-                            .catch(() => toast.error('Не удалось изменить уведомления'))}>
-                          {isMuted(room)
-                            ? <><Bell className="size-3.5" />Со звуком</>
-                            : <><BellOff className="size-3.5" />Без звука</>}
-                        </DropdownMenuItem>
-                        {!isSystem && (showArchived ? (
-                          <DropdownMenuItem className="gap-2 text-xs" onClick={() => archiveRoom(room.id, false)}>
-                            <ArchiveRestore className="size-3.5" />Вернуть из архива
-                          </DropdownMenuItem>
-                        ) : (
-                          <DropdownMenuItem className="gap-2 text-xs" onClick={() => archiveRoom(room.id, true)}>
-                            <Archive className="size-3.5" />Архивировать
-                          </DropdownMenuItem>
-                        ))}
-                        {folders.length > 0 && (
-                          <>
-                            <DropdownMenuSeparator />
-                            {folders.map((f) => (
-                              <DropdownMenuItem key={f.id} className="gap-2 text-xs" onClick={() => toggleRoomInFolder(f, room.id)}>
-                                {f.roomIds.includes(room.id) ? <Check className="size-3.5 text-primary" /> : <Folder className="size-3.5" />}{f.name}
-                              </DropdownMenuItem>
-                            ))}
-                          </>
-                        )}
+                        {roomMenuItems(room, DropdownMenuItem, DropdownMenuSeparator)}
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </div>
@@ -2774,6 +2799,11 @@ export function ChatPanel({ compact, scopeProduct }: {
                 </div>
               </div>
             </div>
+              </ContextMenuTrigger>
+              <ContextMenuContent className="w-52">
+                {roomMenuItems(room, ContextMenuItem, ContextMenuSeparator)}
+              </ContextMenuContent>
+            </ContextMenu>
           )
         })}
         {/* Глобальный поиск: тот же ввод, что фильтрует комнаты, от трёх символов

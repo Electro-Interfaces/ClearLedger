@@ -11,7 +11,7 @@ import { useState } from 'react'
 import { HelpCircle, LifeBuoy, ListChecks, MessageCircle, Video } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
-import { createMeeting } from '@/services/conferenceService'
+import { startMeeting } from '@/services/conferenceService'
 import { useSupportContext } from '@/contexts/SupportContext'
 import { useTasksApp } from '@/hooks/useTasksApp'
 
@@ -41,8 +41,7 @@ export function HeaderInteractionButtons({ conference = false }: { conference?: 
     if (confBusy) return
     setConfBusy(true)
     try {
-      const m = await createMeeting()
-      window.open(m.moderator_url, '_blank', 'noopener,noreferrer')
+      const m = await startMeeting()
       try { await navigator.clipboard.writeText(m.guest_url) } catch { /* буфер недоступен */ }
       toast.success('Конференция создана — гостевая ссылка скопирована', { description: m.guest_url })
     } catch (e) {

@@ -23,6 +23,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { CompanySelector } from '@/components/company/CompanySelector'
 import { HeaderInteractionButtons } from '@/components/layout/HeaderInteractionButtons'
+import { InteractionModal } from '@/components/support/InteractionModal'
 import { SidebarNavContent } from '@/components/layout/AppSidebar'
 import { SidebarProvider } from '@/components/ui/sidebar'
 import { Sheet, SheetContent, SheetDescription, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
@@ -410,6 +411,12 @@ export function EcosystemHomePage({ embedded, onNavigate }: {
             составом, что и панель «Приложения» в рабочей области приложений. */}
         <Layers />
       </main>
+
+      {/* Окно «Взаимодействие» — то же, что открывают кнопки шапки в приложениях.
+          Стол живёт вне AdminLayout, который его монтирует, и без этой строки
+          кнопки Чат/Задачи/Инфо переключали состояние вхолостую: подсвечивались,
+          но рисовать окно было некому. Док сюда не берём — рейла на столе нет. */}
+      <InteractionModal />
     </div>
   )
 }

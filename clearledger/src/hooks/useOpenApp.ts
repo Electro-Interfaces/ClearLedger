@@ -12,7 +12,7 @@ import { useCallback, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { authorizeApp, hasSideButton, type SsoApp } from '@/services/ssoService'
-import { createMeeting } from '@/services/conferenceService'
+import { startMeeting } from '@/services/conferenceService'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useMaxWidth } from '@/hooks/use-mobile'
 
@@ -48,8 +48,7 @@ export function useOpenApp() {
       // Поэтому здесь комната создаётся сразу: организатор входит по своей ссылке, а
       // гостевая ложится в буфер, чтобы было чем позвать участников.
       if (code === 'conf') {
-        const m = await createMeeting()
-        window.open(m.moderator_url, '_blank', 'noopener,noreferrer')
+        const m = await startMeeting()
         try { await navigator.clipboard.writeText(m.guest_url) } catch { /* буфер недоступен */ }
         toast.success('Конференция создана — ссылка для участников скопирована', { description: m.guest_url })
         return

@@ -533,9 +533,12 @@ async def list_rooms(
                or_(ChatRoom.scope_product.is_(None), ChatRoom.scope_product == product)
                if product else text("true"),
                ChatRoom.scope_object_id == object_id if object_id else text("true"),
-               # Чаты заявок скрыты из общего пространства: их видно только из
-               # карточки заявки (решение МАГа) — сюда попадают лишь обычные комнаты.
-               ChatRoom.scope_ticket_id.is_(None))
+               # Чаты заявок и задач скрыты из общего пространства: их видно только
+               # из карточки заявки/задачи (решение МАГа) — сюда попадают лишь
+               # обычные комнаты. Про задачу это было записано в `ensure_task_room`
+               # и в `TaskChat`, но не сделано: «Задача №25» висела в общем списке
+               # у всех, кто открыл вкладку «Обсуждение».
+               ChatRoom.scope_ticket_id.is_(None), ChatRoom.scope_task_id.is_(None))
     )).all()
 
     # Имена привязанных объектов — одним запросом, а не по комнате.
@@ -2234,10 +2237,15 @@ async def task_from_message(
                      from_value=str(room.id), to_value=route[0].get("name"),
                      note=f"из обсуждения «{room.name or 'чат'}»"))
 
+    # Отметка со ССЫЛКОЙ, а не с приглашением «открыть в „Задачах“»: панель чата
+    # делает адреса кликабельными сама (`linkifyText`), и обратная дорога к работе
+    # становится одним нажатием. Полный адрес, а не путь: то же сообщение уходит
+    # письмом почтовому участнику, а там относительная ссылка мертва.
+    task_url = f"{get_settings().app_public_url.rstrip('/')}/tasks?task={task.id}"
     note = ChatMessage(
         room_id=room.id, user_id=current_user.id, user_name=current_user.name,
         type="text",
-        content=f"→ Поставлена задача №{task.number}: {title} — открыть в «Задачах»",
+        content=f"→ Поставлена задача №{task.number}: {title}\n{task_url}",
         reply_to=mid)
     db.add(note)
     room.updated_at = _now()
@@ -2274,30 +2282,33 @@ async def ensure_task_room(
     if task is None or task.company_id != cid:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Задача не найдена")
 
-    existing = (await db.execute(select(ChatRoom).where(
+    room = (await db.execute(select(ChatRoom).where(
         ChatRoom.scope_task_id == tid, ChatRoom.company_id == cid,
         ChatRoom.is_active.is_(True)))).scalar_one_or_none()
-    if existing is not None:
-        p = (await db.execute(select(ChatParticipant.id).where(
-            ChatParticipant.room_id == existing.id,
-            ChatParticipant.user_id == current_user.id))).scalar_one_or_none()
-        if p is None:
-            db.add(ChatParticipant(room_id=existing.id, user_id=current_user.id, role="member"))
-            await db.commit()
-        return await get_room(str(existing.id), current_user, db)
+    if room is None:
+        room = ChatRoom(type="group", kind=None, name=f"Задача №{task.number}",
+                        company_id=cid, created_by=current_user.id, scope_task_id=tid,
+                        scope_object_id=task.object_id)
+        db.add(room)
+        await db.flush()
+        db.add(ChatParticipant(room_id=room.id, user_id=current_user.id, role="owner"))
 
-    room = ChatRoom(type="group", kind=None, name=f"Задача №{task.number}",
-                    company_id=cid, created_by=current_user.id, scope_task_id=tid,
-                    scope_object_id=task.object_id)
-    db.add(room)
-    await db.flush()
-    db.add(ChatParticipant(room_id=room.id, user_id=current_user.id, role="owner"))
     # Кто причастен к работе, тот и в обсуждении: автор, исполнитель, наблюдатели.
+    # Состав добирается при КАЖДОМ заходе, а не только при заведении комнаты: работу
+    # передают, наблюдателей добавляют потом, и назначенный позже исполнитель иначе
+    # оставался вне разговора — сообщения ему не приходили, пока он сам не откроет
+    # вкладку. Тот же идемпотентный добор, что у системных комнат пространства.
     watchers = (await db.execute(select(TaskWatcher.user_id).where(
         TaskWatcher.task_id == tid))).scalars().all()
-    for uid in {i for i in (task.author_id, task.assignee_id, *watchers)
-                if i and i != current_user.id}:
-        db.add(ChatParticipant(room_id=room.id, user_id=uid, role="member"))
+    known = set((await db.execute(select(ChatParticipant.user_id).where(
+        ChatParticipant.room_id == room.id))).scalars().all())
+    missing = {i for i in (task.author_id, task.assignee_id, current_user.id, *watchers)
+               if i and i not in known}
+    if missing:
+        await db.execute(pg_insert(ChatParticipant.__table__).values([
+            {"id": uuid.uuid4(), "room_id": room.id, "user_id": uid,
+             "role": "member", "is_muted": False} for uid in missing
+        ]).on_conflict_do_nothing(index_elements=["room_id", "user_id"]))
     await db.commit()
     return await get_room(str(room.id), current_user, db)
 
@@ -2760,9 +2771,13 @@ async def admin_rooms(
     cid = await _company_of(current_user, db)
     await _assert_space_admin(current_user, cid, db)
 
+    # Комнаты-спутники (обсуждение задачи, чат заявки) в реестр не идут: это часть
+    # карточки, а не чат пространства. Иначе администратор считает их за живые
+    # группы — на пилоте пустая «Задача №25» попадала и в счётчик «молчат месяц».
     rooms = (await db.execute(select(ChatRoom).where(
         ChatRoom.company_id == cid, ChatRoom.is_active.is_(True),
         ChatRoom.is_archived.is_(archived),
+        ChatRoom.scope_task_id.is_(None), ChatRoom.scope_ticket_id.is_(None),
     ).order_by(ChatRoom.updated_at.desc()))).scalars().all()
     if not rooms:
         return []
