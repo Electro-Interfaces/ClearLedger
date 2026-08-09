@@ -26,6 +26,7 @@ from app.services import (
     space_connectors, space_data_model, space_desk, space_links, space_projection,
     space_registry,
 )
+from app.services.ezs_reference_link import link_references
 
 router = APIRouter(prefix="/registry", tags=["ElsyPlus Core — реестр объектов"])
 
@@ -258,6 +259,26 @@ async def link_counterparties(
     cid = await (_admin if apply else _member)(company_id, user, db)
     keys = {k.strip() for k in only.split(",") if k.strip()} if only else None
     data = await space_links.link_counterparties(db, cid, apply=apply, only=keys)
+    return {"companyId": str(cid), **data}
+
+
+@router.post("/link-ezs-references")
+async def link_ezs_references(
+    company_id: str = Query(...),
+    apply: bool = Query(False, description="false — только отчёт, в базу ничего не пишем"),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Связать станции с брендами и группами витрины АСУиМ.
+
+    В выгрузке станций колонки `id_бренда` и `id_группы` пусты во всех строках,
+    поэтому связь восстанавливается по содержимому: бренд — по названию без
+    страны и регистра, группа — по владельцу, адресу или паре «регион + класс
+    размещения». Группа применяется только если число станций совпало с тем,
+    которое сама витрина указала для этой группы; в отчёт попадает и то, что не
+    подтвердилось, — там связь остаётся незакрытой сознательно.
+    """
+    cid = await (_admin if apply else _member)(company_id, user, db)
+    data = await link_references(db, cid, apply=apply)
     return {"companyId": str(cid), **data}
 
 
