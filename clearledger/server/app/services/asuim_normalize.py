@@ -45,8 +45,19 @@ from app.models import (
     ChargePayment, CorporateClient, EzsCustomer, EzsReference, EzsRfidCard, EzsTariff,
     ServiceLocation,
 )
+from app.services.mapping import normalize_default
 
 logger = logging.getLogger("clearledger.asuim")
+
+
+def _conn_type(raw) -> str | None:
+    """Тип разъёма к канону сессий («CCS2» → «CCS Combo 2»).
+
+    Витрина, выгрузки админпанели и прайс называют один разъём по-разному.
+    Разрез «факт против номинала» и разбор по типу собираются только на общем
+    написании, поэтому канон применяется на входе, а не при чтении."""
+    s = _s(raw, 40)
+    return normalize_default("connector", s)[:40] if s else None
 
 # Представление → набор заголовков, по которому оно опознаётся однозначно.
 VIEW_SIGNATURES: dict[str, set[str]] = {
@@ -75,6 +86,14 @@ VIEW_LABELS = {
 # Код протокола OCPP в витрине → версия (расшифровка снята с фактических данных:
 # 380 станций «0» стоят в Учёте как 1.6, «2» — как 2.0.1).
 OCPP_BY_CODE = {"0": "1.6", "1": "2.0", "2": "2.0.1"}
+
+# Код типа разъёма → канон. В `tariffs_ru` название разъёма пусто у ВСЕХ 399
+# строк, заполнен только код, — без расшифровки прайс не с чем сопоставлять.
+# Соответствие снято с `connectors_ru`, где рядом лежат и код, и название.
+CONNECTOR_BY_CODE = {
+    0: "CCS Combo 2", 1: "CHAdeMO", 2: "Type 1", 3: "Type 2",
+    4: "GB/T DC", 5: "GB/T AC", 6: "SHUKO",
+}
 
 
 def _s(v, maxlen: int | None = None) -> str | None:
@@ -308,7 +327,7 @@ async def ingest_connectors(db: AsyncSession, company_id, rows: list[dict[str, A
         types: list[str] = []
         powers: list[float] = []
         for r in sorted(items, key=lambda x: _int(x.get("номер_коннектора")) or 0):
-            t = _s(r.get("тип"), 40)
+            t = _conn_type(r.get("тип"))
             p = _pos(r.get("мощность_квт"))
             if t and t not in types:
                 types.append(t)
@@ -640,7 +659,8 @@ async def ingest_tariffs(db: AsyncSession, company_id, rows: list[dict[str, Any]
             owner_name=_s(r.get("владелец"), 200),
             tariff_type=_s(r.get("тип_тарифа"), 20),
             connector_type_id=conn_id,
-            connector_type=_s(r.get("тип_коннектора"), 40),
+            connector_type=_conn_type(r.get("тип_коннектора"))
+                           or CONNECTOR_BY_CODE.get(conn_id),
             price_all_day=_num(r.get("цена_круглосуточно")),
             price_day=_num(r.get("цена_день")),
             price_night=_num(r.get("цена_ночь")),

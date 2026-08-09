@@ -1,21 +1,27 @@
 /**
  * Реализация станции — продажи в разрезе конкретной точки.
- * АЗС: P&L + структура оплат + последняя смена (STS, реально). EV: задел кВт·ч.
- * Прочие типы — каркас/заглушка.
+ * АЗС: P&L + структура оплат + последняя смена (STS). ЭЗС: сессии, энергия,
+ * деньги и чеки из витрины АСУиМ. Прочие типы — каркас/заглушка.
  */
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
+import { Card, CardContent } from '@/components/ui/card'
 import {
-  Wallet, Fuel, Banknote, CreditCard, Ticket, GitCompare, ChevronLeft, ChevronRight, Zap, Box,
+  Wallet, Fuel, Banknote, CreditCard, Ticket, GitCompare, ChevronLeft, ChevronRight,
+  Zap, Box, Loader2, Receipt,
 } from 'lucide-react'
 import { useCompany } from '@/contexts/CompanyContext'
 import { locationStationNumber } from '@/components/reconciliation/locationMapping'
 import { useStationPnL, useStationPaymentMix, useStationLastShift } from '@/hooks/useStationData'
 import { fmtMoney, fmtMoneyShort, fmtLiters, fmtPct } from '@/services/analyticsService'
+import { getStationSales, type StationSales } from '@/services/chargePaymentsService'
 import type { ServiceLocation } from '@/types/location'
 import { SectionCard, InfoRow, Placeholder, WipBadge, ScrollTab, typeFlags } from './shared'
 import { MetricTile as Kpi } from '@/components/ui/metric-tile'
+
+const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 
 function monthBounds(year: number, month: number) {
   const first = new Date(year, month - 1, 1)
@@ -26,20 +32,7 @@ function monthBounds(year: number, month: number) {
 export function SalesTab({ location }: { location: ServiceLocation }) {
   const flags = typeFlags(location.type)
 
-  if (flags.isEv) {
-    return (
-      <ScrollTab>
-        <SectionCard title="Реализация энергии (кВт·ч)" icon={Zap} muted action={<WipBadge>EV-пайплайн</WipBadge>}>
-          <InfoRow label="Сессий зарядки" value="—" />
-          <InfoRow label="Отпущено кВт·ч" value="—" />
-          <InfoRow label="Выручка" value="—" />
-        </SectionCard>
-        <p className="text-xs text-muted-foreground/70">
-          Учёт зарядных сессий (кВт·ч → платежи) — будущая фаза EV-пайплайна.
-        </p>
-      </ScrollTab>
-    )
-  }
+  if (flags.isEv) return <EvSales location={location} />
 
   if (!flags.isFuel) {
     if (flags.isRetail || flags.isFood) {
@@ -64,6 +57,103 @@ export function SalesTab({ location }: { location: ServiceLocation }) {
   }
 
   return <FuelSales location={location} />
+}
+
+/**
+ * Реализация ЭЗС: сессии → энергия → деньги → чек, по этой точке.
+ *
+ * Две суммы намеренно разные и стоят рядом. «Отпущено на сумму» — сколько
+ * начислено по сессиям, «списано эквайрингом» — сколько банк реально снял с
+ * карт. Расходятся они не от ошибки: у ЮЛ постоплата (платежа в эквайринге нет
+ * вовсе), а на краях периода платежи выгружены глубже, чем сессии. Показывать
+ * одну цифру вместо двух — значит прятать этот разрыв.
+ */
+function EvSales({ location }: { location: ServiceLocation }) {
+  const { companyId } = useCompany()
+  const { data, isLoading } = useQuery<StationSales>({
+    queryKey: ['station-sales', companyId, location.id],
+    queryFn: () => getStationSales(companyId!, location.id),
+    enabled: !!companyId && !!location.id,
+  })
+
+  if (isLoading) {
+    return (
+      <ScrollTab>
+        <div className="flex justify-center py-12">
+          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+        </div>
+      </ScrollTab>
+    )
+  }
+
+  const t = data?.totals
+  if (!t || !t.sessions) {
+    return (
+      <ScrollTab>
+        <Placeholder icon={Zap} title="Зарядных сессий нет"
+          text="По этой станции в Учёте нет ни одной сессии: либо она ещё не работала, либо не сопоставлена с выгрузкой (вкладка «Интеграции»)." />
+      </ScrollTab>
+    )
+  }
+
+  const period = [t.firstAt, t.lastAt]
+    .map((d) => (d ? new Date(d).toLocaleDateString('ru-RU') : null))
+    .filter(Boolean).join(' — ')
+  const receiptPct = t.payments ? Math.round((t.receipts / t.payments) * 100) : 0
+
+  return (
+    <ScrollTab>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <Kpi label="Сессий" value={nf0.format(t.sessions)} sub={period || undefined} />
+        <Kpi label="Отпущено" value={`${nf0.format(t.kwh)} кВт·ч`} />
+        <Kpi label="Отпущено на сумму" value={`${fmtMoneyShort(t.amount)} ₽`}
+             sub={`средняя ${fmtMoney(t.avgCheck)} ₽`} />
+        <Kpi label="Клиентов" value={nf0.format(t.clients)} />
+      </div>
+
+      <SectionCard title="Деньги и чеки" icon={Receipt}>
+        <InfoRow label="Списано эквайрингом"
+          value={`${fmtMoney(t.paid)} ₽ · ${nf0.format(t.payments)} платежей`} />
+        <InfoRow label="Фискальный чек"
+          value={`${receiptPct} % · ${nf0.format(t.receipts)} из ${nf0.format(t.payments)}`} />
+        <InfoRow label="Заблокировано (холд)"
+          value={`${fmtMoney(t.hold)} ₽ · возвращено ${fmtMoney(t.refund)} ₽`} />
+        <InfoRow label="Сессий без платежа"
+          value={t.unpaidSessions
+            ? `${nf0.format(t.unpaidSessions)} — постоплата ЮЛ или платёж ещё не выгружен`
+            : 'нет'} />
+      </SectionCard>
+
+      {!!data?.byMonth.length && (
+        <Card><CardContent className="p-0 overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead><tr className="border-b bg-muted/40 text-muted-foreground">
+              <th className="p-2 text-left font-medium">Месяц</th>
+              <th className="p-2 text-right font-medium">Сессий</th>
+              <th className="p-2 text-right font-medium">кВт·ч</th>
+              <th className="p-2 text-right font-medium">Отпущено на</th>
+              <th className="p-2 text-right font-medium">Списано</th>
+              <th className="p-2 text-right font-medium">С чеком</th>
+            </tr></thead>
+            <tbody>
+              {data.byMonth.map((m) => (
+                <tr key={m.bucket} className="border-b last:border-0">
+                  <td className="p-2">{m.bucket}</td>
+                  <td className="p-2 text-right tabular-nums">{nf0.format(m.sessions)}</td>
+                  <td className="p-2 text-right tabular-nums">{nf0.format(m.kwh)}</td>
+                  <td className="p-2 text-right tabular-nums">{fmtMoney(m.amount)} ₽</td>
+                  <td className="p-2 text-right tabular-nums">{fmtMoney(m.paid)} ₽</td>
+                  <td className="p-2 text-right tabular-nums text-muted-foreground">
+                    {m.payments ? `${Math.round((m.receipts / m.payments) * 100)} %` : '—'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </CardContent></Card>
+      )}
+    </ScrollTab>
+  )
 }
 
 /** Реализация АЗС: P&L + оплаты + последняя смена (STS). */

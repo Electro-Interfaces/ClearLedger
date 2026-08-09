@@ -102,6 +102,20 @@ async def retail_cohorts(
         cid, months, stations=_csv(stations), regions=_csv(regions))
 
 
+@router.get("/customers")
+async def retail_customers(
+    company_id: str, months: int = 24,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Клиентская база витрины: регистрации по месяцам, активация, карты.
+
+    Не зависит от периода рабочей области: база — это состояние справочника, а
+    не события за интервал."""
+    cid = await assert_company_member(company_id, current_user, db)
+    return await RetailService(db).customers(cid, months)
+
+
 @router.get("/accounts")
 async def retail_accounts(
     company_id: str, date_from: str, date_to: str,

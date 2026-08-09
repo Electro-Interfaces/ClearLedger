@@ -25,7 +25,7 @@ from typing import Any
 from sqlalchemy import String, case, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import ChargeSession, Region, ServiceLocation
+from app.models import ChargeSession, EzsCustomer, EzsRfidCard, Region, ServiceLocation
 from app.services.analytics_cache import cached_report
 from app.services.pii_account import account_hash, mask_phone
 from app.services.session_scope import session_scope_conds
@@ -350,6 +350,87 @@ class RetailService:
         return {"period": {"from": df.isoformat(), "to": dt.isoformat()},
                 "mobility": mobility, "avg_stations": avg_stations,
                 "coverage": coverage, "regions": regions, "totals": {"accounts": n}}
+
+    # ── customers: клиентская база из витрины (регистрации и активация) ───
+    @cached_report("retail:customers")
+    async def customers(self, company_id, months: int = 24) -> dict[str, Any]:
+        """Клиентская база АСУиМ: кто зарегистрирован и кто из них доехал до зарядки.
+
+        Это другой вопрос, чем `cohorts`. Там когорта — месяц ПЕРВОЙ СЕССИИ, то
+        есть по определению только заряжавшиеся. Здесь основа — справочник
+        `ezs_customers` (28 385 записей витрины), и видно обратное: сколько людей
+        зарегистрировалось и молчит. По сессиям такого клиента не существует.
+
+        Ключ связи — телефон, нормализованный на загрузке (`+7XXXXXXXXXX`):
+        витрина отдаёт его форматированным, сессии — сплошной строкой.
+        Карта считается по своему владельцу (`customer_ext_id`), а не по телефону:
+        у 93 карт из 2 341 владельца в витрине нет вовсе."""
+        C, R = EzsCustomer, EzsRfidCard
+        base = [C.company_id == company_id]
+
+        # Телефоны, у которых есть хотя бы одна сессия, — одним множеством в память:
+        # 28 тыс. клиентов против 135 тыс. сессий, join по строке дороже.
+        charged = {p for (p,) in (await self.db.execute(
+            select(func.distinct(S.user_id)).where(
+                S.company_id == company_id, S.user_id.is_not(None)))).all()}
+
+        # Глубина сессий в Учёте: клиент, заряжавшийся ДО первой загруженной
+        # сессии, здесь выглядит молчащим. Отдаём дату, чтобы экран сказал это
+        # вслух, а не показывал заниженную активацию как факт.
+        sessions_from = (await self.db.execute(select(func.min(S.started_at)).where(
+            S.company_id == company_id))).scalar()
+
+        rows = (await self.db.execute(select(
+            C.customer_ext_id, C.phone, C.registered_at, C.is_active,
+            C.balance, C.organization_ext_id).where(*base))).all()
+
+        cards = (await self.db.execute(select(
+            func.count().label("total"),
+            func.count(R.customer_ext_id).label("with_owner"),
+            func.count(func.distinct(R.customer_ext_id)).label("owners"),
+        ).where(R.company_id == company_id))).one()
+
+        by_month: dict[str, dict[str, int]] = {}
+        total = active = corp = charged_cnt = 0
+        balance = 0.0
+        for r in rows:
+            total += 1
+            if r.is_active:
+                active += 1
+            if r.organization_ext_id:
+                corp += 1
+            balance += float(r.balance or 0)
+            has = bool(r.phone and r.phone in charged)
+            if has:
+                charged_cnt += 1
+            key = r.registered_at.strftime("%Y-%m") if r.registered_at else "—"
+            m = by_month.setdefault(key, {"registered": 0, "charged": 0, "corp": 0})
+            m["registered"] += 1
+            m["charged"] += int(has)
+            m["corp"] += int(bool(r.organization_ext_id))
+
+        months_list = [
+            {"bucket": k, **v,
+             "activation_pct": round(v["charged"] / v["registered"] * 100, 1) if v["registered"] else 0.0}
+            for k, v in sorted(by_month.items(), reverse=True)
+        ][:months]
+
+        return {
+            "totals": {
+                "customers": total,
+                "charged": charged_cnt,           # доехали до первой зарядки
+                "silent": total - charged_cnt,    # зарегистрировались и молчат
+                "activation_pct": round(charged_cnt / total * 100, 1) if total else 0.0,
+                "active_flag": active,            # признак активности в витрине
+                "corporate": corp,                # привязаны к ЮЛ
+                "balance": round(balance, 2),
+                "cards": int(cards.total or 0),
+                "cards_with_owner": int(cards.with_owner or 0),
+                "card_owners": int(cards.owners or 0),
+                "sessions_from": sessions_from.isoformat() if sessions_from else None,
+            },
+            "byMonth": months_list,
+        }
 
     # ── cohorts: удержание (вся история, не период) ──────────────────────
     @cached_report("retail:cohorts")

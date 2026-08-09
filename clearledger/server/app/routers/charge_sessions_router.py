@@ -10,7 +10,7 @@ from datetime import date, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile
-from sqlalchemy import func, select
+from sqlalchemy import and_ as sa_and, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import assert_company_member, get_current_user
@@ -236,6 +236,99 @@ async def payments_list(
         "refund": float(p.refund_amount or 0), "opType": p.op_type,
         "status": p.status_code, "receiptUrl": p.receipt_url, "phone": p.user_phone,
     } for p in rows]
+
+
+@router.get("/station-sales")
+async def station_sales(
+    company_id: str,
+    location_id: str,
+    months: int = Query(12, ge=1, le=60, description="глубина помесячной разбивки"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Реализация одной точки: сессии + деньги + чеки — вкладка «Реализация» карточки.
+
+    Разрез объекта, а не сети: сессии берутся по материализованной связи
+    `location_id`, платежи — те, что сцепились со своими сессиями по
+    `session_ext_id`. Платёж без сессии объекта не имеет и в карточку не
+    попадает: у него нет станции — это разбор сетевого уровня («Платежи и чеки»).
+
+    «Сессия без платежа» тут — не потеря денег, а либо постоплата ЮЛ, либо
+    период, за который платежи ещё не выгружены; поэтому считается и
+    показывается отдельно от выручки.
+    """
+    cid = await assert_company_member(company_id, current_user, db)
+    S, P = ChargeSession, ChargePayment
+    scope = [S.company_id == cid, S.location_id == location_id]
+
+    t = (await db.execute(select(
+        func.count().label("count"),
+        func.coalesce(func.sum(S.energy_kwh), 0).label("kwh"),
+        func.coalesce(func.sum(S.amount), 0).label("amount"),
+        func.min(S.started_at).label("first_at"),
+        func.max(S.started_at).label("last_at"),
+        func.count(func.distinct(S.user_id)).label("clients"),
+    ).where(*scope))).one()
+
+    # Платежи объекта: join по внешнему id сессии (FK нет — платежи обгоняют сессии).
+    pay_join = P.company_id == cid, P.session_ext_id == S.session_ext_id
+    p = (await db.execute(select(
+        func.count().label("count"),
+        func.coalesce(func.sum(P.amount), 0).label("amount"),
+        func.coalesce(func.sum(P.hold_amount), 0).label("hold"),
+        func.coalesce(func.sum(P.refund_amount), 0).label("refund"),
+        func.count(P.receipt_url).label("receipts"),
+    ).select_from(S).join(P, sa_and(*pay_join)).where(*scope))).one()
+
+    unpaid = (await db.execute(select(func.count()).select_from(S).where(
+        *scope, S.amount > 0,
+        ~select(P.id).where(P.company_id == cid,
+                            P.session_ext_id == S.session_ext_id).exists()))).scalar_one()
+
+    month = func.to_char(S.started_at, "YYYY-MM")
+    by_month = (await db.execute(select(
+        month.label("bucket"),
+        func.count().label("sessions"),
+        func.coalesce(func.sum(S.energy_kwh), 0).label("kwh"),
+        func.coalesce(func.sum(S.amount), 0).label("amount"),
+    ).where(*scope, S.started_at.is_not(None))
+     .group_by(month).order_by(month.desc()).limit(months))).all()
+
+    pay_month = func.to_char(S.started_at, "YYYY-MM")
+    by_month_pay = {r.bucket: r for r in (await db.execute(select(
+        pay_month.label("bucket"),
+        func.count().label("payments"),
+        func.coalesce(func.sum(P.amount), 0).label("paid"),
+        func.count(P.receipt_url).label("receipts"),
+    ).select_from(S).join(P, sa_and(*pay_join))
+     .where(*scope, S.started_at.is_not(None))
+     .group_by(pay_month))).all()}
+
+    cnt = int(t.count or 0)
+    return {
+        "totals": {
+            "sessions": cnt,
+            "kwh": float(t.kwh or 0),
+            "amount": float(t.amount or 0),
+            "avgCheck": round(float(t.amount or 0) / cnt, 2) if cnt else 0,
+            "clients": int(t.clients or 0),
+            "firstAt": t.first_at.isoformat() if t.first_at else None,
+            "lastAt": t.last_at.isoformat() if t.last_at else None,
+            "payments": int(p.count or 0),
+            "paid": float(p.amount or 0),
+            "hold": float(p.hold or 0),
+            "refund": float(p.refund or 0),
+            "receipts": int(p.receipts or 0),
+            "unpaidSessions": int(unpaid or 0),
+        },
+        "byMonth": [{
+            "bucket": r.bucket,
+            "sessions": int(r.sessions), "kwh": float(r.kwh), "amount": float(r.amount),
+            "payments": int(getattr(by_month_pay.get(r.bucket), "payments", 0) or 0),
+            "paid": float(getattr(by_month_pay.get(r.bucket), "paid", 0) or 0),
+            "receipts": int(getattr(by_month_pay.get(r.bucket), "receipts", 0) or 0),
+        } for r in by_month],
+    }
 
 
 @router.get("/export")

@@ -130,6 +130,21 @@ export const getRetailCohorts = (p: { companyId: string; months?: number; statio
     ...(p.regions?.length ? { regions: p.regions.join(',') } : {}),
   })
 
+/** Клиентская база витрины АСУиМ: состояние справочника, а не события периода. */
+export interface RetailCustomers {
+  totals: {
+    customers: number; charged: number; silent: number; activation_pct: number
+    active_flag: number; corporate: number; balance: number
+    cards: number; cards_with_owner: number; card_owners: number
+    sessions_from: string | null   // глубина сессий в Учёте — граница честности активации
+  }
+  byMonth: { bucket: string; registered: number; charged: number; corp: number; activation_pct: number }[]
+}
+export const getRetailCustomers = (p: { companyId: string; months?: number }) =>
+  get<RetailCustomers>('/api/retail/customers', {
+    company_id: p.companyId, months: p.months ?? 24,
+  })
+
 export interface AccountsParams extends P {
   region?: string; station?: string; segment?: string
   minSessions?: number; search?: string; sort?: string; order?: string; limit?: number

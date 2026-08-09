@@ -25,7 +25,8 @@ import { TzToggle, type Tz } from './analytics/TzToggle'
 import { ApplyToScope } from './ApplyToScope'
 import {
   getRetailOverview, getRetailSegments, getRetailEconomics, getRetailGeo, getRetailCohorts,
-  getRetailAccounts, getRetailDimensions, getRetailProfile, getRetailAccount, getRetailMarketing, getRetailDashboard,
+  getRetailAccounts, getRetailDimensions, getRetailProfile, getRetailAccount, getRetailMarketing,
+  getRetailDashboard, getRetailCustomers,
   type RetailSegment, type RetailAccount, type HeatCell,
 } from '@/services/retailService'
 import { rechartsTooltipTheme } from '@/components/ui/chart-utils'
@@ -613,6 +614,74 @@ function RetailGeoTab({ companyId, dateFrom, dateTo }: TabProps) {
   )
 }
 
+// ── Таб: База и карты (справочник клиентов витрины АСУиМ) ──
+/**
+ * Кто зарегистрирован — против того, кто заряжается.
+ *
+ * Все остальные табы считают по сессиям, поэтому клиента, который завёл аккаунт
+ * и не приехал, там не существует вовсе. Здесь основа — справочник витрины, и
+ * молчащая часть базы наконец видна. Период рабочей области сюда не применяется:
+ * база — это состояние справочника, а не события интервала.
+ */
+function RetailBaseTab({ companyId }: TabProps) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['retail-customers', companyId],
+    queryFn: () => getRetailCustomers({ companyId }),
+  })
+  if (isLoading) return <Loading />
+  const t = data?.totals
+  if (!t || !t.customers) {
+    return <Empty text="Справочник клиентов не загружен: нужна выгрузка users_ru из витрины АСУиМ" />
+  }
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <Kpi label="Клиентов в базе" value={nf0.format(t.customers)}
+             sub={t.corporate ? `${nf0.format(t.corporate)} привязаны к ЮЛ` : undefined} />
+        <Kpi label="Доехали до зарядки" value={nf0.format(t.charged)} sub={pct(t.activation_pct)} />
+        <Kpi label="Молчат" value={nf0.format(t.silent)} sub="аккаунт есть, сессий нет" />
+        <Kpi label="Карт выдано" value={nf0.format(t.cards)}
+             sub={`владелец известен у ${nf0.format(t.cards_with_owner)}`} />
+      </div>
+
+      <div className="text-xs text-muted-foreground">
+        Регистрации по месяцам и доля тех, кто затем хотя бы раз заряжался. Связь
+        клиента с сессией — по телефону.
+        {t.sessions_from && (
+          <> Сессии в Учёте есть с {new Date(t.sessions_from).toLocaleDateString('ru-RU')} —
+          кто заряжался раньше, здесь выглядит молчащим.</>
+        )}
+      </div>
+
+      <Card><CardContent className="p-0 overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead><tr className="border-b bg-muted/40 text-muted-foreground">
+            <th className="p-2 text-left font-medium">Месяц регистрации</th>
+            <th className="p-2 text-right font-medium">Зарегистрировано</th>
+            <th className="p-2 text-right font-medium">Из них заряжались</th>
+            <th className="p-2 text-right font-medium">Активация</th>
+            <th className="p-2 text-right font-medium">Из них ЮЛ</th>
+          </tr></thead>
+          <tbody>
+            {data.byMonth.map((m) => (
+              <tr key={m.bucket} className="border-b last:border-0">
+                <td className="p-2">{m.bucket}</td>
+                <td className="p-2 text-right tabular-nums">{nf0.format(m.registered)}</td>
+                <td className="p-2 text-right tabular-nums">{nf0.format(m.charged)}</td>
+                <td className="p-2 text-right tabular-nums"
+                    style={{ background: retColor(m.activation_pct) }}>{pct(m.activation_pct)}</td>
+                <td className="p-2 text-right tabular-nums text-muted-foreground">
+                  {m.corp ? nf0.format(m.corp) : '—'}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </CardContent></Card>
+    </div>
+  )
+}
+
 // ── Таб: Когорты (retention-матрица) ──
 function retColor(p: number): string {
   // Приглушённый emerald с прозрачностью ∝ удержанию (0..100%).
@@ -925,6 +994,9 @@ function RetailProfileTab({ companyId, dateFrom, dateTo }: TabProps) {
 const RETAIL_TABS: { k: string; label: string }[] = [
   { k: 'overview', label: 'Обзор' },
   { k: 'accounts', label: 'Аккаунты' },
+  // «База и карты» — справочник клиентов витрины: единственный вид, где виден
+  // тот, кто зарегистрировался и не приехал (по сессиям его не существует).
+  { k: 'base', label: 'База и карты' },
   { k: 'profile', label: 'Станция/регион' },
   { k: 'economics', label: 'Экономика' },
   { k: 'geo', label: 'Гео' },
@@ -975,6 +1047,7 @@ export function RetailPanel({ companyId, dateFrom, dateTo, group = 'retail' }: T
         {tab === 'overview' && <RetailOverviewTab {...p} />}
         {tab === 'segments' && <RetailSegmentsTab {...p} onDrill={drill} />}
         {tab === 'accounts' && <RetailAccountsTab {...p} initialSegment={initialSegment} />}
+        {tab === 'base' && <RetailBaseTab {...p} />}
         {tab === 'profile' && <RetailProfileTab {...p} />}
         {tab === 'economics' && <RetailEconomicsTab {...p} />}
         {tab === 'cohorts' && <RetailCohortsTab {...p} />}

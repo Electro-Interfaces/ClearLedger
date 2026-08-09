@@ -9,6 +9,7 @@ import io
 import openpyxl
 
 from app.services.asuim_normalize import (
+    _conn_type,
     _phone,
     map_payments,
     map_stations,
@@ -142,3 +143,21 @@ def test_unknown_file_is_not_claimed():
     прежний индексный разбор."""
     view, _ = read_asuim_xlsx(_xlsx(["Номер", "Название", "OCPP ID"], [["1", "ЭЗС", "x"]]))
     assert view is None
+
+
+def test_connector_type_canon_matches_sessions():
+    """Паспорт станции и прайс называют разъём так же, как сессия.
+
+    Слева — написания витрины, справа — то, что лежит в
+    `charge_sessions.connector_type`. Разойдутся — разрез по типу разъёма и
+    сравнение факта с прайсом молча посчитают один разъём двумя."""
+    assert _conn_type("CCS2") == "CCS Combo 2"
+    assert _conn_type("GBT/DC") == "GB/T DC"
+    assert _conn_type("GBT/AC") == "GB/T AC"
+    assert _conn_type("Type 1") == "Type 1"
+    assert _conn_type("Chademo") == "CHAdeMO"
+    assert _conn_type("TYPE2") == "Type 2"
+    assert _conn_type("Переходник T2-T1") == "Type 1"
+    # Неоднозначное и пустое не выдумываем.
+    assert _conn_type("GB/T") == "GB/T"
+    assert _conn_type("") is None

@@ -56,3 +56,37 @@ export async function getPaymentsList(
     ...qp(p), ...(p.only ? { only: p.only } : {}), limit: String(p.limit ?? 200),
   })
 }
+
+/* ── Реализация одной точки (вкладка «Реализация» карточки объекта) ────────── */
+
+export interface StationSalesTotals {
+  sessions: number
+  kwh: number
+  amount: number          // сумма по сессиям (сколько отпущено на деньги)
+  avgCheck: number
+  clients: number
+  firstAt: string | null
+  lastAt: string | null
+  payments: number
+  paid: number            // фактически списано эквайрингом
+  hold: number
+  refund: number
+  receipts: number        // платежей с фискальным чеком
+  unpaidSessions: number  // сессия с суммой есть, платежа к ней нет
+}
+export interface StationSalesMonth {
+  bucket: string; sessions: number; kwh: number; amount: number
+  payments: number; paid: number; receipts: number
+}
+export interface StationSales {
+  totals: StationSalesTotals
+  byMonth: StationSalesMonth[]
+}
+
+export async function getStationSales(
+  companyId: string, locationId: string, months = 12,
+): Promise<StationSales> {
+  return get<StationSales>('/api/charge-sessions/station-sales', {
+    company_id: companyId, location_id: locationId, months: String(months),
+  })
+}
