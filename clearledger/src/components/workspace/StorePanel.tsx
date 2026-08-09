@@ -50,11 +50,13 @@ import { StoreReportsPanel } from './StoreReportsPanel'
 import { StoreMarkingIntegrationsPanel } from './StoreMarkingIntegrationsPanel'
 import { StoreParityPanel } from './StoreParityPanel'
 import { StoreChainPanel } from './StoreChainPanel'
+import { StoreCurePanel } from './StoreCurePanel'
 import { StoreKktPanel } from './StoreKktPanel'
 import { StoreStationDraftsPanel } from './StoreStationDraftsPanel'
 import { StoreBarcodeCollisionsPanel } from './StoreBarcodeCollisionsPanel'
 import { StoreCatalogHealthPanel } from './StoreCatalogHealthPanel'
 import { StoreReceiptDocsPanel } from './StoreReceiptDocsPanel'
+import { StoreDocumentsPanel } from './StoreDocumentsPanel'
 import {
   STORE_KEYS, STORE_MODES, STORE_MENU, STORE_HELP_KEYS, getStoreView, storeDefaultKey, storeModeForKey,
   type StoreMode, type StoreStatus, type StoreView,
@@ -189,6 +191,9 @@ export function StorePanel() {
         <StoreOverviewPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} stations={scopeStations} />
       </div>
     )
+  }
+  if (sub === 'store_documents') {
+    return <StoreDocumentsPanel key={`${period.from}:${period.to}:${scopeStations.join(',')}`} dateFrom={period.from} dateTo={period.to} stations={scopeStations} />
   }
   if (sub === 'sales') {
     return (
@@ -411,6 +416,13 @@ export function StorePanel() {
     return (
       <div className="h-full overflow-y-auto">
         <StoreChainPanel />
+      </div>
+    )
+  }
+  if (sub === 'cure') {
+    return (
+      <div className="h-full overflow-y-auto">
+        <StoreCurePanel />
       </div>
     )
   }

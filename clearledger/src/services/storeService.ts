@@ -1715,6 +1715,47 @@ export const getStoreKkt = (stationId: number, limit = 30) =>
 export const getStoreChain = (stationId: number) =>
   get<StoreChainData>('/api/store/chain', { station_id: stationId })
 
+/** Болезнь переходного контура рядом с тем, как она выглядит у нас. */
+export interface StoreCureDisease {
+  key: string
+  name: string
+  /** null — величина в срезе 1С не выгружается: прочерк, а не ноль. */
+  onec: number | null
+  onec_hint: string
+  ours: number | null
+  ours_hint: string
+  /** true — у нас не воспроизводится, false — есть и у нас, null — сравнить не с чем. */
+  cured: boolean | null
+  how: string
+  screen: string | null
+}
+
+export interface StoreCureData {
+  station_id: number | null
+  ours: {
+    снято: string | null
+    карточек_каталога: number; карточек_с_остатком: number
+    строк: number; мест: number; остаток: number
+  }
+  onec: {
+    срез: string | null
+    карточек: number; помеченных: number
+    остаток: number; снимок_остатка?: string | null; карточек_с_остатком: number
+  }
+  diseases: StoreCureDisease[]
+  treatment: {
+    инвентаризаций: number
+    последняя_инвентаризация: string | null
+    признано_карточек: number
+    черновиков_всего: number
+    разобрано_групп: number
+    групп_в_контуре: number
+  }
+}
+
+export const getStoreCure = (stationId?: number) =>
+  get<StoreCureData>('/api/store/cure', { station_id: stationId })
+
 export interface StoreAssortmentRule {
   item_uuid: string
   name: string

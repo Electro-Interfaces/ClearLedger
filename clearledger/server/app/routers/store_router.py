@@ -35,14 +35,25 @@ from app.models import (
     User, UserCompany, Warehouse,
 )
 from app.routers import edge_router
+from app.routers.store_documents_router import (
+    DocumentAccess,
+    _station_allowed,
+    resolve_document_access,
+)
 from app.services import (edge_nsi, edge_projection, edge_service, store_costs,
-                          store_dynamics, store_repricing, store_reports)
+                          store_cure, store_dynamics, store_repricing, store_reports)
 from app.services import recipe_versions, store_receipts as receipt_rules
 from app.services import store_receipt_accounting
 from app.services.export_audit import log_export
 from app.services.edo_upd import parse_upd
 from app.services.goods_dashboard import GoodsDashboardService
 from app.services.onec.crypto import encrypt_password
+from app.services.store_document_contract import PROJECTION_DOCUMENT_KINDS
+from app.services.store_documents import (
+    cheque_lines_with_legacy_provenance,
+    goods_only_cheque_totals,
+    sanitize_edge_document,
+)
 
 async def _require_store_module(
     user: User = Depends(get_current_user),
@@ -1241,6 +1252,22 @@ async def store_chain(
     """
     cid = await scope_company_id(user, db)
     return await edge_service.chain_report(db, cid, station_id)
+
+
+@router.get("/cure")
+async def store_cure_report(
+    station_id: int | None = Query(None, description="код АЗС; пусто — вся сеть"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Болезни старой 1С рядом с состоянием нашей базы.
+
+    Отвечает на вопрос, ради которого переход и затевался: что в 1С сломано
+    сегодня и что из этого у нас вылечено. Наши разобранные дубли болезнь 1С не
+    гасят — она остаётся там до Дня X, и экран показывает обе величины.
+    """
+    cid = await scope_company_id(user, db)
+    return await store_cure.compare(db, cid, station_id)
 
 
 @router.get("/kkt")
