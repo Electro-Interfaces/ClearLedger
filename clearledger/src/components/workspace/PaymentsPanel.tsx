@@ -271,8 +271,9 @@ function Reconciliation({ companyId, dateFrom, dateTo }: Props) {
       <div className="space-y-2">
         <div className="flex items-center justify-between gap-3">
           <div className="text-xs text-muted-foreground">
-            Где копятся расхождения — станции и регионы, у которых деньги расходятся
-            с данными о зарядках сильнее всего.
+            Где копятся расхождения. Разовый сбой лечится правкой строки, а
+            повторяющийся из месяца в месяц — это оборудование: такие отмечены
+            «хроника» и стоят выше.
           </div>
           <PanelViewTabs
             tabs={[{ k: 'station', label: 'По станциям' }, { k: 'region', label: 'По регионам' }]}
@@ -285,6 +286,7 @@ function Reconciliation({ companyId, dateFrom, dateTo }: Props) {
             <table className="w-full text-xs">
               <thead><tr className="border-b bg-muted/40 text-muted-foreground">
                 <th className="p-2 text-left font-medium">{by === 'station' ? 'Станция' : 'Регион'}</th>
+                <th className="p-2 text-left font-medium">Повторяемость</th>
                 <th className="p-2 text-right font-medium">Разрыв</th>
                 <th className="p-2 text-right font-medium">Доля</th>
                 <th className="p-2 text-right font-medium">Против физики</th>
@@ -293,9 +295,19 @@ function Reconciliation({ companyId, dateFrom, dateTo }: Props) {
                 <th className="p-2 text-right font-medium">Сессий</th>
               </tr></thead>
               <tbody>
-                {where.data.map((r) => (
+                {[...where.data].sort((a, b) =>
+                  (b.chronic ? 1 : 0) - (a.chronic ? 1 : 0)
+                  || b.badMonths - a.badMonths
+                  || Math.abs(b.gap) - Math.abs(a.gap)).map((r) => (
                   <tr key={r.label} className="border-b last:border-0">
                     <td className="p-2 max-w-[240px] truncate" title={r.label}>{r.label}</td>
+                    <td className="p-2 whitespace-nowrap">
+                      {r.badMonths > 0 ? (
+                        <span className={r.chronic ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'}>
+                          {r.badMonths} из {r.months} мес{r.chronic ? ' · хроника' : ''}
+                        </span>
+                      ) : <span className="text-muted-foreground/60">—</span>}
+                    </td>
                     <td className="p-2 text-right tabular-nums text-amber-600 dark:text-amber-400">
                       {money(r.gap)}
                     </td>

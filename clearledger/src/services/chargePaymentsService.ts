@@ -145,6 +145,11 @@ export interface ReconByRow {
   underpaid: number
   multi: number
   noReceipt: number
+  /** В скольких месяцах периода были расхождения (и сколько месяцев станция работала). */
+  badMonths: number
+  months: number
+  /** Хроника: расхождения повторяются больше чем в одном месяце — это оборудование. */
+  chronic: boolean
 }
 export async function getReconciliationBy(
   p: P & { by: 'station' | 'region'; limit?: number },

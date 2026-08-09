@@ -229,7 +229,15 @@ async def reconciliation_by(db: AsyncSession, company_id, df: date, dt: date,
                      and s.energy_kwh / (s.duration_min / 60.0) > :maxkw), 0) as impossible_amount,
                count(*) filter (where pay.pay_ok > 0 and s.amount - pay.paid > :eps) as underpaid,
                count(*) filter (where pay.pay_ok > 1) as multi,
-               count(*) filter (where pay.pay_ok > 0 and pay.receipts = 0) as no_receipt
+               count(*) filter (where pay.pay_ok > 0 and pay.receipts = 0) as no_receipt,
+               -- Месяцы, в которых у этой станции были расхождения. Разовый сбой
+               -- и хроника лечатся по-разному: первое — правка строки, второе —
+               -- выезд к оборудованию.
+               count(distinct date_trunc('month', s.started_at)) filter (
+                   where (s.duration_min > 0 and s.energy_kwh > 0
+                          and s.energy_kwh / (s.duration_min / 60.0) > :maxkw)
+                      or (pay.pay_ok > 0 and s.amount - pay.paid > :eps)) as bad_months,
+               count(distinct date_trunc('month', s.started_at)) as months
           from charge_sessions s
           left join lateral (
               select coalesce(sum(pp.amount) filter (where pp.bank_txn_id is not null), 0) as paid,
@@ -263,5 +271,8 @@ async def reconciliation_by(db: AsyncSession, company_id, df: date, dt: date,
             "impossibleAmount": round(float(r["impossible_amount"] or 0), 2),
             "underpaid": int(r["underpaid"]), "multi": int(r["multi"]),
             "noReceipt": int(r["no_receipt"]),
+            "badMonths": int(r["bad_months"] or 0), "months": int(r["months"] or 0),
+            # Хроника: расхождения повторяются больше чем в одном месяце периода.
+            "chronic": int(r["bad_months"] or 0) > 1,
         })
     return out
