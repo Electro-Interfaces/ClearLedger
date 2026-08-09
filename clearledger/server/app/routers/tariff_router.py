@@ -68,3 +68,23 @@ async def tariff_fact_vs_nominal(
     return await TariffService(db).fact_vs_nominal(
         cid, _d(date_from, "date_from"), _d(date_to, "date_to"), group_by, user_type,
         stations=_csv(stations), regions=_csv(regions))
+
+
+@router.get("/pricelist-vs-fact")
+async def tariff_pricelist_vs_fact(
+    company_id: str,
+    date_from: str,
+    date_to: str,
+    stations: str | None = None,
+    regions: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Объявленный прайс АСУиМ против фактической цены: регион × тип разъёма.
+
+    Прайс сопоставляется с регионом по названию тарифа — привязки к станциям
+    витрина не отдаёт. Несколько версий цены показываются диапазоном."""
+    cid = await assert_company_member(company_id, current_user, db)
+    return await TariffService(db).pricelist_vs_fact(
+        cid, _d(date_from, "date_from"), _d(date_to, "date_to"),
+        stations=_csv(stations), regions=_csv(regions))

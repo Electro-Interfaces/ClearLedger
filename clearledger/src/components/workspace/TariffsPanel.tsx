@@ -14,7 +14,10 @@ import { PanelViewTabs } from './PanelViewTabs'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Loader2, ArrowUp, ArrowDown, ChevronsUpDown } from 'lucide-react'
 import { useTabParams } from '@/hooks/useTabParams'
-import { getTariffGrid, getFactVsNominal, type FvnLine } from '@/services/tariffService'
+import {
+  getTariffGrid, getFactVsNominal, getPricelistVsFact,
+  type FvnLine, type PricelistResponse,
+} from '@/services/tariffService'
 import { getChargeSessions, getChargeTimeseries, type ChargeSessionLine } from '@/services/analyticsService'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { formatBucket } from '@/lib/formatDate'
@@ -277,8 +280,81 @@ const TARIFF_TABS: { k: string; label: string }[] = [
   { k: 'by', label: 'По тарифам' },
   { k: 'avg', label: 'Средний тариф' },
   { k: 'fvn', label: 'Факт vs номинал' },
+  // Соседний «Факт vs номинал» сравнивает факт с ценой из самой сессии, то есть
+  // факт с фактом. Здесь номинал — объявленный прайс-лист АСУиМ.
+  { k: 'price', label: 'Работа по прайсу' },
   { k: 'dyn', label: 'Динамика' },
 ]
+
+/** Прайс АСУиМ против фактической цены: регион × тип разъёма. */
+function PricelistVsFact({ companyId, dateFrom, dateTo }: TabProps) {
+  const { data, isLoading } = useQuery<PricelistResponse>({
+    queryKey: ['tariff-pricelist', companyId, dateFrom, dateTo],
+    queryFn: () => getPricelistVsFact({ companyId, dateFrom, dateTo }),
+    enabled: !!companyId,
+  })
+  if (isLoading) return <div className="flex justify-center py-12"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+  if (!data || !data.lines.length) return <div className="p-6 text-sm text-muted-foreground text-center">За период нет заправок с отпуском энергии</div>
+  const t = data.totals
+  const outside = data.lines.filter((l) => l.versions && !l.inside)
+    .sort((a, b) => Math.abs(b.delta ?? 0) - Math.abs(a.delta ?? 0))
+
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <Kpi label="Идут по прайсу" value={`${t.inside} из ${t.with_price}`} sub="регион × разъём" />
+        <Kpi label="Отклоняются" value={String(t.outside)} sub="цена вне объявленного прайса" />
+        <Kpi label="Без прайса" value={String(t.rows - t.with_price)} sub="тариф в витрине назван иначе" />
+        <Kpi label="Всего сочетаний" value={String(t.rows)} />
+      </div>
+
+      <div className="text-xs text-muted-foreground">
+        Прайс сопоставляется с регионом по названию тарифа: привязки к станциям витрина
+        не отдаёт. Если на разъём объявлено несколько версий цены, показан диапазон —
+        попадание внутрь и означает работу по прайсу.
+      </div>
+
+      <Card><CardContent className="p-0 overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead><tr className="border-b bg-muted/40 text-muted-foreground">
+            <th className="p-2 text-left font-medium">Регион</th>
+            <th className="p-2 text-left font-medium">Разъём</th>
+            <th className="p-2 text-right font-medium">Факт ₽/кВт·ч</th>
+            <th className="p-2 text-right font-medium">Прайс</th>
+            <th className="p-2 text-right font-medium">Отклонение</th>
+            <th className="p-2 text-right font-medium">кВт·ч</th>
+            <th className="p-2 text-right font-medium">Заправок</th>
+          </tr></thead>
+          <tbody>
+            {[...outside, ...data.lines.filter((l) => !outside.includes(l))].map((l, i) => (
+              <tr key={`${l.region}|${l.connector}|${i}`} className="border-b last:border-0">
+                <td className="p-2">{l.region}</td>
+                <td className="p-2 text-muted-foreground">{l.connector}</td>
+                <td className="p-2 text-right tabular-nums">{rub(l.fact)}</td>
+                <td className="p-2 text-right tabular-nums text-muted-foreground">
+                  {!l.versions ? '—'
+                    : l.price_min === l.price_max ? rub(l.price_min ?? 0)
+                    : `${rub(l.price_min ?? 0)}–${rub(l.price_max ?? 0)}`}
+                </td>
+                <td className={`p-2 text-right tabular-nums ${l.versions && !l.inside ? gapCls(l.delta ?? 0) : 'text-muted-foreground'}`}>
+                  {!l.versions ? '—' : l.inside ? 'по прайсу' : `${(l.delta ?? 0) > 0 ? '+' : ''}${rub(l.delta ?? 0)}`}
+                </td>
+                <td className="p-2 text-right tabular-nums">{nf0.format(l.energy_kwh)}</td>
+                <td className="p-2 text-right tabular-nums text-muted-foreground">{nf0.format(l.sessions)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </CardContent></Card>
+
+      {!!t.no_price_regions.length && (
+        <div className="text-xs text-muted-foreground">
+          Прайса нет для: {t.no_price_regions.map(([n, s]) => `${n} (${nf0.format(s)} заправок)`).join(' · ')}
+        </div>
+      )}
+    </div>
+  )
+}
 
 /** Контейнер пункта «Тарифы» с внутренними табами. */
 export function TariffsPanel({ companyId, dateFrom, dateTo }: TabProps) {
@@ -298,6 +374,7 @@ export function TariffsPanel({ companyId, dateFrom, dateTo }: TabProps) {
         {t.sub === 'by' && <ByTariff {...p} />}
         {t.sub === 'avg' && <AvgTariff {...p} />}
         {t.sub === 'fvn' && <FactVsNominal {...p} />}
+        {t.sub === 'price' && <PricelistVsFact {...p} />}
         {t.sub === 'dyn' && <TariffDynamics {...p} />}
       </div>
     </div>

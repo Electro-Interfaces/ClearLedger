@@ -151,3 +151,99 @@ class TariffService:
         }
         return {"period": {"from": df.isoformat(), "to": dt.isoformat()},
                 "group_by": group_by, "lines": lines, "totals": totals}
+
+    # ── Прайс витрины против факта ───────────────────────────────────────────
+    @cached_report("tariff:pricelist")
+    async def pricelist_vs_fact(self, company_id, df: date, dt: date,
+                                stations: list[str] | None = None,
+                                regions: list[str] | None = None) -> dict[str, Any]:
+        """Объявленный прайс АСУиМ против фактической цены — регион × разъём.
+
+        Отличие от `fact_vs_nominal`: там «номинал» берётся из самой сессии, то
+        есть факт сравнивается с фактом. Здесь номинал — прайс-лист витрины
+        (`ezs_tariffs`), и видно, работает ли сеть по своему прайсу.
+
+        Прайс приходит без привязки к станциям — колонки «привязанные станции» и
+        «организации» пусты во всех 399 строках, — зато НАЗВАНИЕ тарифа это
+        регион или город («Московская область», «Владивосток»). По нему и
+        сопоставляем. На один разъём в регионе бывает несколько версий цены,
+        поэтому прайс показывается диапазоном: попадание факта внутрь диапазона
+        и есть работа по прайсу.
+        """
+        from app.models import EzsTariff, Region, ServiceLocation
+        from app.services.ezs_reference_link import _region_key
+
+        S = ChargeSession
+        lo, hi = self._range(df, dt)
+
+        # Факт: регион берём из справочника, а не из денормализованной колонки
+        # сессии — в паспортах 87 написаний на 48 субъектов.
+        # Группировка по самим выражениям, а не по алиасам: алиас «region»
+        # совпадает с колонкой charge_sessions.region, и Postgres берёт колонку —
+        # запрос падает на GROUP BY.
+        reg_expr = func.coalesce(Region.name, S.region, "—")
+        conn_expr = func.coalesce(S.connector_type, "—")
+        stmt = select(
+            reg_expr.label("region"),
+            conn_expr.label("connector"),
+            func.count().label("sessions"),
+            func.coalesce(func.sum(S.energy_kwh), 0).label("energy"),
+            func.coalesce(func.sum(func.coalesce(S.client_amount, S.amount)), 0).label("amount"),
+        ).select_from(S).join(
+            ServiceLocation, ServiceLocation.id == S.location_id, isouter=True,
+        ).join(
+            Region, Region.id == ServiceLocation.region_id, isouter=True,
+        ).where(*self._base_conds(company_id, lo, hi, None, stations, regions)
+                ).group_by(reg_expr, conn_expr)
+        facts = (await self.db.execute(stmt)).all()
+
+        prices: dict[tuple[str, str], list[float]] = {}
+        for t in (await self.db.execute(select(EzsTariff).where(
+                EzsTariff.company_id == company_id))).scalars().all():
+            if t.price_all_day is None or not t.connector_type:
+                continue
+            prices.setdefault((_region_key(t.name or ""), t.connector_type), []) \
+                  .append(float(t.price_all_day))
+
+        lines: list[dict[str, Any]] = []
+        unmatched: dict[str, int] = {}
+        for r in facts:
+            energy = float(r.energy)
+            if energy <= 0:
+                continue
+            fact = float(r.amount) / energy
+            plist = prices.get((_region_key(r.region), r.connector)) or []
+            lo_p = min(plist) if plist else None
+            hi_p = max(plist) if plist else None
+            inside = bool(plist) and lo_p - 0.01 <= fact <= hi_p + 0.01
+            if not plist:
+                unmatched[r.region] = unmatched.get(r.region, 0) + int(r.sessions)
+                delta = None
+            elif inside:
+                delta = 0.0
+            else:
+                delta = round(fact - (hi_p if fact > hi_p else lo_p), 2)
+            lines.append({
+                "region": r.region, "connector": r.connector,
+                "sessions": int(r.sessions), "energy_kwh": round(energy, 1),
+                "fact": round(fact, 2),
+                "price_min": round(lo_p, 2) if lo_p is not None else None,
+                "price_max": round(hi_p, 2) if hi_p is not None else None,
+                "versions": len(plist), "inside": inside, "delta": delta,
+            })
+        lines.sort(key=lambda x: -x["energy_kwh"])
+
+        covered = [l for l in lines if l["versions"]]
+        return {
+            "period": {"from": df.isoformat(), "to": dt.isoformat()},
+            "lines": lines,
+            "totals": {
+                "rows": len(lines),
+                "with_price": len(covered),
+                "inside": sum(1 for l in covered if l["inside"]),
+                "outside": sum(1 for l in covered if not l["inside"]),
+                # Регионы, где прайса нет вовсе: не ошибка расчёта, а незакрытая
+                # связь — тариф в витрине назван иначе, чем субъект.
+                "no_price_regions": sorted(unmatched.items(), key=lambda x: -x[1])[:10],
+            },
+        }
