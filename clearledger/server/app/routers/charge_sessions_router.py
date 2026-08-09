@@ -258,6 +258,13 @@ async def station_sales(
     показывается отдельно от выручки.
     """
     cid = await assert_company_member(company_id, current_user, db)
+    # Скоуп данных участника: у кого выдано пять станций, чужой объект по прямой
+    # ссылке не открывается — id объекта приходит из запроса, а не из его списка.
+    from app.scope import current_object_scope
+    allowed = current_object_scope()
+    if allowed and location_id not in allowed:
+        raise HTTPException(403, "Объект вне вашего доступа")
+
     S, P = ChargeSession, ChargePayment
     scope = [S.company_id == cid, S.location_id == location_id]
 

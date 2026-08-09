@@ -4,7 +4,7 @@
  */
 import type { ComponentType } from 'react'
 import {
-  ClipboardList, Cpu, Plug, Activity,
+  ClipboardList, Cpu, Plug, Activity, Wrench,
   FileSignature, Wallet, Truck, MessageCircle,
 } from 'lucide-react'
 
@@ -29,6 +29,9 @@ export const COCKPIT_TABS: CockpitTab[] = [
   { value: 'equipment', label: 'Оборудование', icon: Cpu, group: 'object' },
   { value: 'integrations', label: 'Интеграции', icon: Plug, group: 'connection' },
   { value: 'diagnostics', label: 'Статус и диагностика', icon: Activity, group: 'connection' },
+  // Заявки по объекту. Вкладка отрисовывалась модалкой, но кнопки в шапке не было —
+  // открыть её было нельзя, и обслуживание объекта из его карточки не смотрелось.
+  { value: 'service', label: 'Обслуживание', icon: Wrench, group: 'service' },
   { value: 'contracts', label: 'Договоры', icon: FileSignature, group: 'commerce' },
   { value: 'sales', label: 'Реализация', icon: Wallet, group: 'commerce' },
   { value: 'supply', label: 'Снабжение', icon: Truck, group: 'commerce' },

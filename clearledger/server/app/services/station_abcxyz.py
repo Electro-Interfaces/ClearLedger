@@ -30,6 +30,7 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.scope import acl_params, acl_sql
 from app.services.station_owner import CLASS_LABELS, owner_class_sql
 
 ABC_LABELS = {"A": "A — лидеры", "B": "B — середина", "C": "C — хвост"}
@@ -77,9 +78,13 @@ async def station_abc_xyz(
 
     lo = datetime.combine(df, datetime.min.time())
     hi = datetime.combine(dt, datetime.max.time())
-    params: dict[str, Any] = {"cid": company_id, "lo": lo, "hi": hi, "bucket": bucket}
+    params: dict[str, Any] = {"cid": company_id, "lo": lo, "hi": hi, "bucket": bucket,
+                              **acl_params()}
 
-    scope = ""
+    # Скоуп данных участника: тому, кому выдано пять станций, матрица считается по
+    # его пяти. Это был единственный разрез «Продаж» без такого сужения — остальные
+    # ходят через session_scope/acl_sql, и подрядчик видел здесь всю сеть.
+    scope = acl_sql("cs.location_id")
     if stations:
         scope += " and cs.station_code = any(:stations)"
         params["stations"] = list(stations)
@@ -110,13 +115,13 @@ async def station_abc_xyz(
             from per_bucket group by loc
         ),
         sess as (
-            select location_id as loc, count(*) as sessions,
+            select cs.location_id as loc, count(*) as sessions,
                    coalesce(sum(energy_kwh), 0) as energy,
                    coalesce(sum(coalesce(client_amount, amount)), 0) as amount
-            from charge_sessions
-            where company_id = :cid and location_id is not null
-              and started_at >= :lo and started_at <= :hi
-            group by location_id
+            from charge_sessions cs
+            where cs.company_id = :cid and cs.location_id is not null
+              and cs.started_at >= :lo and cs.started_at <= :hi{scope}
+            group by cs.location_id
         )
         select a.loc, a.total, a.active_buckets, a.sv2,
                coalesce(s.sessions, 0) as sessions,
