@@ -461,6 +461,14 @@ export interface ChargeSessionRow {
   /** Договорной ₽/кВт·ч ЮЛ (NULL у розницы). */
   client_tariff: number | null
   paid_at: string | null; cut_key: string | null
+  /** Сколько банк списал по этой сессии (платежи с банковской транзакцией). */
+  paid_amount?: number
+  /** Успешных платежей на сессию: больше одного — повод посмотреть разрыв. */
+  payments?: number
+  /** Выбит ли фискальный чек. */
+  receipt?: boolean
+  /** Начислено минус списано: расхождение сессии с эквайрингом. */
+  pay_gap?: number
 }
 export interface ChargeSessionRowsResponse { rows: ChargeSessionRow[]; total: number; truncated: boolean }
 export async function getChargeSessionRows(p: {

@@ -342,6 +342,11 @@ export function ChargeListPanel({ companyId, dateFrom, dateTo }: {
                   {th('revenue', 'Выручка, ₽', true)}
                   {th('result', 'Исход')}
                   <TableHead className="text-center">Оплата</TableHead>
+                  {/* Деньги эквайринга рядом со строкой: сколько банк реально
+                      списал и сошлось ли это с начисленным по сессии. */}
+                  <TableHead className="text-right whitespace-nowrap">Списано</TableHead>
+                  <TableHead className="text-right whitespace-nowrap">Разрыв</TableHead>
+                  <TableHead className="text-center">Чек</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -369,6 +374,18 @@ export function ChargeListPanel({ companyId, dateFrom, dateTo }: {
                     <TableCell className="text-center">
                       {r.paid_at ? <span className="text-emerald-600 dark:text-emerald-400" title={fmtDT(r.paid_at)} aria-label="Оплачено">✓</span> : <span className="text-muted-foreground/70" aria-label="Не оплачено">✗</span>}
                     </TableCell>
+                    <TableCell className="text-right font-mono tabular-nums"
+                      title={(r.payments ?? 0) > 1 ? `${r.payments} списаний` : undefined}>
+                      {r.paid_amount != null ? fmtMoney(r.paid_amount) : '—'}
+                    </TableCell>
+                    <TableCell className={`text-right font-mono tabular-nums ${
+                      Math.abs(r.pay_gap ?? 0) > 1 ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground/70'}`}>
+                      {r.pay_gap != null && Math.abs(r.pay_gap) > 0.01 ? fmtMoney(r.pay_gap) : '—'}
+                    </TableCell>
+                    <TableCell className="text-center">
+                      {r.receipt ? <span className="text-emerald-600 dark:text-emerald-400" aria-label="Чек есть">✓</span>
+                        : <span className="text-muted-foreground/70" aria-label="Чека нет">—</span>}
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -381,7 +398,7 @@ export function ChargeListPanel({ companyId, dateFrom, dateTo }: {
                   <TableCell />
                   <TableCell />
                   <TableCell className="text-right font-mono tabular-nums">{fmtMoney(totals.revenue)}</TableCell>
-                  <TableCell colSpan={2} />
+                  <TableCell colSpan={5} />
                 </TableRow>
               </TableFooter>
             </Table>

@@ -25,7 +25,7 @@ from decimal import Decimal
 from types import SimpleNamespace
 from typing import Any
 
-from sqlalchemy import String, and_, case, distinct, func, select
+from sqlalchemy import String, and_, case, distinct, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
@@ -1663,12 +1663,30 @@ class AnalyticsService:
         """Детальные строки нормализованных сессий (L2) за период — лист «Сессии»
         в шаблонах экспорта. limit+1 для детекции усечения (без тихой потери)."""
         S = ChargeSession
+        # Деньги эквайринга рядом со строкой сессии: сколько банк реально списал и
+        # выбит ли чек. Деньгами считается платёж с банковской транзакцией — без
+        # неё это попытка оплаты (см. services/charge_reconciliation.py).
+        from app.models import ChargePayment as _P
+        pay = (
+            select(
+                func.coalesce(func.sum(case((_P.bank_txn_id.is_not(None), _P.amount),
+                                            else_=0)), 0).label("paid"),
+                func.coalesce(func.sum(case((_P.bank_txn_id.is_not(None), 1),
+                                            else_=0)), 0).label("pay_ok"),
+                func.coalesce(func.sum(case(
+                    (and_(_P.bank_txn_id.is_not(None), _P.receipt_url.is_not(None)), 1),
+                    else_=0)), 0).label("receipts"),
+            )
+            .where(_P.company_id == S.company_id, _P.session_ext_id == S.session_ext_id)
+            .lateral("pay")
+        )
         stmt = select(
             S.session_ext_id, S.station_code, S.station_name, S.region, S.connector_type,
             S.started_at, S.finished_at, S.duration_min, S.result, S.charge_type, S.user_type,
             S.client_name, S.energy_kwh, S.amount, S.client_amount, S.client_tariff,
             S.tariff, S.paid_at, S.cut_key,
-        ).where(
+            pay.c.paid, pay.c.pay_ok, pay.c.receipts,
+        ).select_from(S).outerjoin(pay, text("true")).where(
             *self._cs_conds(f.company_id, f.date_from, f.date_to, f.station_codes, f.regions, f.dim_by, f.dim_val,
                             station_id=f.station_id)
         ).order_by(S.started_at, S.session_ext_id).limit(limit + 1)  # tie-break: started_at не уникален
@@ -1694,6 +1712,14 @@ class AnalyticsService:
             "client_tariff": float(r.client_tariff) if r.client_tariff is not None else None,
             "paid_at": iso(r.paid_at),
             "cut_key": r.cut_key,
+            # Эквайринг по этой сессии: сколько списал банк, есть ли чек и не
+            # разошлись ли деньги с начислением.
+            "paid_amount": float(r.paid or 0),
+            "payments": int(r.pay_ok or 0),
+            "receipt": bool((r.receipts or 0) > 0),
+            "pay_gap": round(
+                float(r.client_amount if r.client_amount is not None else (r.amount or 0))
+                - float(r.paid or 0), 2),
         } for r in res[:limit]]
         return {"rows": out, "total": len(out), "truncated": truncated}
 

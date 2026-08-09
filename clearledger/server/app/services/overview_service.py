@@ -13,7 +13,7 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import case, distinct, func, select
+from sqlalchemy import and_, case, distinct, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import ChargeSession
@@ -110,10 +110,18 @@ class OverviewService:
             func.count().label("cnt"),
             func.coalesce(func.sum(func.coalesce(S.client_amount, S.amount)), 0).label("amount"),
             func.coalesce(func.sum(case((S.paid_at.is_not(None), 1), else_=0)), 0).label("paid"),
+            # Отдельно — сессии, где ток ПОШЁЛ, и оплаченные среди них. Долг бывает
+            # только за отпущенную энергию: за сорвавшуюся попытку платить не за что,
+            # а без этого «Без оплаты» бил тревогу на 3,7 % при нулевой задолженности.
+            func.coalesce(func.sum(case((S.energy_kwh > 0, 1), else_=0)), 0).label("charged"),
+            func.coalesce(func.sum(case(
+                (and_(S.energy_kwh > 0, S.paid_at.is_not(None)), 1), else_=0)), 0).label("charged_paid"),
         ).where(*self.a._cs_conds(f.company_id, f.date_from, f.date_to, f.station_codes, f.regions)).group_by(seg)
-        out = {k: {"amount": 0.0, "sessions": 0, "paid": 0} for k in ("corp", "retail", "anon")}
+        out = {k: {"amount": 0.0, "sessions": 0, "paid": 0, "charged": 0, "charged_paid": 0}
+               for k in ("corp", "retail", "anon")}
         for r in (await self.db.execute(stmt)).all():
-            out[r.seg] = {"amount": float(r.amount), "sessions": int(r.cnt), "paid": int(r.paid)}
+            out[r.seg] = {"amount": float(r.amount), "sessions": int(r.cnt), "paid": int(r.paid),
+                          "charged": int(r.charged), "charged_paid": int(r.charged_paid)}
         return out
 
     @cached_report("ezs:overview")
@@ -406,11 +414,37 @@ class OverviewService:
                            "message": f"Загрузка сети {tc['utilization_pct']:.1f}% — ниже порога безубыточности (15%)"})
         # «Без оплаты» — только по не-постоплатным (розница+аноним): у ЮЛ постоплата,
         # paid_at штатно пуст → не считаем их неоплаченными (иначе ложный алерт).
-        noncorp_sess = seg["retail"]["sessions"] + seg["anon"]["sessions"]
-        noncorp_paid = seg["retail"]["paid"] + seg["anon"]["paid"]
-        noncorp_unpaid_pct = round((noncorp_sess - noncorp_paid) / noncorp_sess * 100, 1) if noncorp_sess else 0.0
-        if noncorp_unpaid_pct > 3:
-            alerts.append({"level": "warn", "message": f"Без оплаты {noncorp_unpaid_pct:.1f}% розничных сессий"})
+        # Считаем только заправки с отпуском: попытка без тока — не долг.
+        noncorp_sess = seg["retail"]["charged"] + seg["anon"]["charged"]
+        noncorp_paid = seg["retail"]["charged_paid"] + seg["anon"]["charged_paid"]
+        noncorp_unpaid = noncorp_sess - noncorp_paid
+        noncorp_unpaid_pct = round(noncorp_unpaid / noncorp_sess * 100, 1) if noncorp_sess else 0.0
+        if noncorp_unpaid > 0 and noncorp_unpaid_pct > 3:
+            alerts.append({"level": "warn",
+                           "message": f"Без оплаты {noncorp_unpaid} заправок розницы "
+                                      f"({noncorp_unpaid_pct:.1f}%)"})
+
+        # Расхождение с эквайрингом. Разрыв между начисленным по сессиям и списанным
+        # банком — не погрешность отчёта: там сидят битые строки вроде 10 341 кВт·ч
+        # за 11 секунд. Разбор — «Платежи и чеки» → «Сверка с сессиями».
+        recon = None
+        try:
+            from app.services.charge_reconciliation import reconciliation
+            recon = await reconciliation(self.db, company_id, df, dt)
+            gap, billed = recon["totals"]["gap"], recon["totals"]["amount"]
+            broken = next((k for k in recon["kinds"] if k["key"] == "impossible"), None)
+            if broken and broken["count"]:
+                alerts.append({"level": "warn",
+                               "message": f"{broken['count']} сессий противоречат физике "
+                                          f"(мощность выше 400 кВт) на {broken['amount']:,.0f} ₽ — "
+                                          f"разбор в «Платежи и чеки → Сверка с сессиями»".replace(",", " ")})
+            elif billed and abs(gap) / billed > 0.05:
+                alerts.append({"level": "warn",
+                               "message": f"Начислено по сессиям и списано банком расходятся на "
+                                          f"{gap:,.0f} ₽ ({abs(gap) / billed * 100:.1f} %)".replace(",", " ")})
+        except Exception:  # noqa: BLE001 — сверка не повод ронять обзор
+            recon = None
+
         # Станции риска — тоже по визитам: станция, где люди уезжают незаряженными,
         # а не где сорвалось касание разъёма.
         v_stations = await visit_success_by_station(
@@ -436,6 +470,15 @@ class OverviewService:
             "stations": stations,
             "hourly": hourly,
             "weekday": weekday,
+            # Сверка с эквайрингом — свод, чтобы разрыв был виден на первом экране,
+            # а не только в «Платежах». None, если сверка не посчиталась.
+            "reconciliation": ({
+                "billed": recon["totals"]["amount"],
+                "paid": recon["totals"]["paid"],
+                "gap": recon["totals"]["gap"],
+                "kinds": [{"key": k["key"], "label": k["label"], "count": k["count"],
+                           "gap": k["gap"]} for k in recon["kinds"] if k["count"]],
+            } if recon else None),
             "corporate": {
                 "corp_revenue": round(corp_rev, 2),
                 "retail_revenue": round(corp["totals"]["retail_revenue"], 2),
