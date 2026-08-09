@@ -207,3 +207,17 @@ def test_connector_type_canon_matches_sessions():
     # Неоднозначное и пустое не выдумываем.
     assert _conn_type("GB/T") == "GB/T"
     assert _conn_type("") is None
+
+
+def test_batch_orders_files_by_dependency():
+    """Пакет грузится в порядке связей, а не в порядке выбора файлов.
+
+    Станции резолвят всё остальное, телефон организации проставляется из её
+    клиента, платёж ссылается на сессию — если порядок перепутать, часть строк
+    осядет «сиротами» до следующего прогона."""
+    from app.services.asuim_normalize import VIEW_ORDER
+    pos = {v: i for i, v in enumerate(VIEW_ORDER)}
+    assert pos["stations"] < pos["connectors"]
+    assert pos["organizations"] < pos["users"]
+    assert pos["sessions"] < pos["payments"]
+    assert "admins" not in VIEW_ORDER          # не грузим никогда

@@ -45,8 +45,10 @@ from app.routers import (
     departments_router,
     retail_router,
     tariff_router,
+    asuim_router,
     overview_router,
     store_router,
+    store_documents_router,
     business_access_router,
     station_console_router,
     onec_router,
@@ -293,6 +295,7 @@ app.include_router(charge_sessions_router.router, prefix=API_PREFIX)
 app.include_router(corporate_router.router, prefix=API_PREFIX)
 app.include_router(retail_router.router, prefix=API_PREFIX)
 app.include_router(tariff_router.router, prefix=API_PREFIX)
+app.include_router(asuim_router.router, prefix=API_PREFIX)
 app.include_router(overview_router.router, prefix=API_PREFIX)
 # Роутеры с префиксом /store подключаются ДО store_router.
 #
@@ -302,6 +305,7 @@ app.include_router(overview_router.router, prefix=API_PREFIX)
 # выглядело как отказ прав — политика доступа не приезжала, и кнопка «Работать»
 # на рабочем месте АЗС гасла у человека, у которого назначение на станцию есть.
 app.include_router(business_access_router.router, prefix=API_PREFIX)
+app.include_router(store_documents_router.router, prefix=API_PREFIX)
 app.include_router(store_router.router, prefix=API_PREFIX)
 app.include_router(netservice_router.router, prefix=API_PREFIX)
 app.include_router(meetings_router.router, prefix=API_PREFIX)

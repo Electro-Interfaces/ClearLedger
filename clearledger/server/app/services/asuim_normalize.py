@@ -759,6 +759,89 @@ async def _invalidate(db: AsyncSession, company_id, res: dict[str, Any]) -> dict
     return res
 
 
+# Порядок загрузки представлений. Он задан связями, а не алфавитом:
+# станции резолвят всё остальное; телефон организации проставляется из её
+# клиента, поэтому организации идут раньше клиентов; платёж ссылается на
+# сессию. Обратный порядок загрузку не рушит, но оставляет лишние «сироты»
+# до следующего прогона.
+VIEW_ORDER = ["stations", "connectors", "organizations", "users", "rfid",
+              "brands", "groups", "cars", "tariffs", "sessions", "payments"]
+
+
+async def ingest_asuim_batch(
+    db: AsyncSession, company_id, files: list[tuple[str, bytes]],
+    channel_id=None, mode: str = "append",
+) -> dict[str, Any]:
+    """Пакет выгрузок витрины за один заход: опознать, разложить, загрузить.
+
+    Регулярное обновление — это десять файлов; по одному за прогон их приходится
+    вести руками десять раз, а порядок при этом легко перепутать. Здесь порядок
+    выдерживается автоматически (`VIEW_ORDER`), а протокол показывает по каждому
+    файлу, чем он опознан и что с ним стало.
+
+    Файл, не похожий на витрину, не ошибка пакета — он просто не наш: попадает в
+    протокол отдельной строкой и не мешает остальным."""
+    recognized: list[tuple[str, str, bytes]] = []
+    report: list[dict[str, Any]] = []
+
+    for name, content in files:
+        try:
+            view, _ = read_asuim_xlsx(content)
+        except Exception as exc:  # noqa: BLE001 — битый файл не должен ронять пакет
+            report.append({"file": name, "view": None, "status": "error",
+                           "message": f"файл не прочитан: {type(exc).__name__}: {exc}"})
+            continue
+        if view is None:
+            report.append({"file": name, "view": None, "status": "skipped",
+                           "message": "не выгрузка витрины — пропущен"})
+            continue
+        if view == "admins":
+            # Единственное представление, которое мы не берём принципиально:
+            # ФИО и почта сотрудников, потребителя в учёте нет (§9 постановки).
+            report.append({"file": name, "view": view, "status": "skipped",
+                           "message": "администраторы АСУиМ не загружаются: персональные данные"})
+            continue
+        recognized.append((view, name, content))
+
+    order = {v: i for i, v in enumerate(VIEW_ORDER)}
+    recognized.sort(key=lambda x: order.get(x[0], len(order)))
+
+    for view, name, content in recognized:
+        try:
+            res = await ingest_asuim_file(db, company_id, content,
+                                          channel_id=channel_id, mode=mode)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("asuim batch: файл %s (%s) не загружен", name, view)
+            report.append({"file": name, "view": view, "status": "error",
+                           "message": f"{type(exc).__name__}: {exc}"})
+            continue
+        report.append({"file": name, "view": view,
+                       "label": VIEW_LABELS.get(view, view), **(res or {})})
+
+    # Связь станций с брендами и группами витрина не отдаёт (колонки пусты), её
+    # восстанавливает сопоставление по содержимому. После обновления справочников
+    # или парка её нужно пересчитать, иначе она протухает до ручного запуска.
+    if any(r.get("view") in ("stations", "brands", "groups") and r.get("status") == "success"
+           for r in report):
+        try:
+            from app.services.ezs_reference_link import link_references
+            link = await link_references(db, company_id, apply=True)
+            report.append({"file": "—", "view": "links", "status": "success",
+                           "label": "связи справочников", "message": link["message"]})
+        except Exception as exc:  # noqa: BLE001 — связывание не повод рушить загрузку
+            logger.warning("asuim batch: связывание справочников не выполнено: %s", exc)
+
+    ok = sum(1 for r in report if r.get("status") == "success")
+    bad = sum(1 for r in report if r.get("status") == "error")
+    return {
+        "files": len(files), "loaded": ok, "failed": bad,
+        "skipped": sum(1 for r in report if r.get("status") == "skipped"),
+        "report": report,
+        "message": f"пакет витрины: загружено {ok} из {len(files)}"
+                   + (f", с ошибкой {bad}" if bad else ""),
+    }
+
+
 async def ingest_asuim_file(
     db: AsyncSession, company_id, content: bytes, channel_id=None,
     mode: str = "append", log_id=None,
