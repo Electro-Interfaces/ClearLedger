@@ -519,6 +519,68 @@ async def chain_report(db: AsyncSession, company_id, station_id: int) -> dict:
     return отчёт
 
 
+async def kkt_report(db: AsyncSession, company_id, station_id: int,
+                     limit: int = 30) -> dict:
+    """Фискальные итоги кассовых смен станции.
+
+    Единственная выручка, подтверждённая не нашим счётом, а фискальной памятью
+    аппарата: столько ушло в ОФД. Приезжает вместе с чеками — тем же пакетом,
+    потому что отвечает на тот же вопрос с другой стороны.
+
+    Своей таблицы у итогов нет намеренно: пакет станции хранится целиком, а
+    смен здесь десятки, не миллионы. Заводить схему ради тридцати строк —
+    значит платить миграцией за то, что и так лежит рядом.
+    """
+    rows = (await db.execute(
+        select(EdgePacket)
+        .where(EdgePacket.company_id == company_id,
+               EdgePacket.station_id == station_id,
+               EdgePacket.kind == "cheques")
+        .order_by(EdgePacket.received_at.desc())
+        .limit(max(1, min(limit, 200)))
+    )).scalars().all()
+
+    смены: list[dict] = []
+    аппараты: dict[str, dict] = {}
+    for row in rows:
+        for пост in разобрать_итоги_ккт(row.payload):
+            пост["received_at"] = row.received_at
+            смены.append(пост)
+            рнм = пост.get("РНМ") or ""
+            if рнм and рнм not in аппараты:
+                аппараты[рнм] = {"РНМ": рнм, "Пост": пост.get("Пост"),
+                                 "МодельККТ": пост.get("МодельККТ"),
+                                 "ЗаводскойНомер": пост.get("ЗаводскойНомер")}
+    return {"station_id": station_id, "available": bool(смены),
+            "posts": смены, "devices": list(аппараты.values())}
+
+
+def разобрать_итоги_ккт(payload: dict | None) -> list[dict]:
+    """Достать фискальные итоги постов из пакета чеков.
+
+    Пакет старой версии агента итогов не содержит вовсе — это не ошибка, а
+    смена, снятая до того, как станция научилась их отдавать.
+    """
+    out: list[dict] = []
+    смена = (payload or {}).get("Смена") or {}
+    for doc in (payload or {}).get("Документы") or []:
+        if not isinstance(doc, dict) or doc.get("Тип") != "kkt_shift":
+            continue
+        for пост in doc.get("Посты") or []:
+            if not isinstance(пост, dict):
+                continue
+            строка = dict(пост)
+            строка["Смена"] = doc.get("НомерСменыВнутр") or смена.get("НомерСменыВнутр")
+            строка["Закрытие"] = смена.get("Закрытие")
+            # Счётчик поста возвраты не вычитает, фискальный итог вычитает:
+            # их разница — это возвращённое за смену, а не расхождение.
+            строка["Возвращено"] = round(
+                float(пост.get("ВозвратНаличными") or 0)
+                + float(пост.get("ВозвратКартой") or 0), 2)
+            out.append(строка)
+    return out
+
+
 def разобрать_снимок_цепочки(payload: dict | None) -> dict:
     """Достать снимок цепочки из пакета станции.
 

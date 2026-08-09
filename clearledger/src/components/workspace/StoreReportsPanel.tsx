@@ -34,7 +34,7 @@ const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { maximumFractio
 const ЭКРАНЫ: Record<string, { label: string; hint: string; to: string }[]> = {
   torg: [
     { label: 'Продажи', hint: 'выручка и маржа по товарам', to: '/shop?mode=store&sub=sales' },
-    { label: 'Чеки', hint: 'продажа на уровне покупки', to: '/shop?mode=store&sub=cheques' },
+    { label: 'Чеки', hint: 'продажа на уровне покупки', to: '/shop?mode=store_cash&sub=cheques' },
     { label: 'Ассортимент', hint: 'ABC×XYZ, оборачиваемость', to: '/shop?mode=store&sub=assortment' },
     { label: 'Маржа и наценка', hint: 'прибыльность и наценка', to: '/shop?mode=store&sub=pricing' },
   ],

@@ -1650,6 +1650,38 @@ export interface StoreChainData {
   фантомы?: StoreChainItem[]
 }
 
+/** Фискальный итог одного кассового поста за смену. */
+export interface StoreKktPost {
+  Смена?: number
+  Пост?: number
+  Оператор?: string
+  МодельККТ?: string
+  РНМ?: string
+  ЗаводскойНомер?: string
+  НомерСменыККТ?: number
+  НомерZОтчёта?: number
+  Наличными?: number
+  Картой?: number
+  ВозвратНаличными?: number
+  ВозвратКартой?: number
+  Возвращено?: number
+  ФискальныйИтог?: number
+  ПробитоПоСчётчику?: number
+  ЧековВСмене?: number
+  Закрытие?: string
+  received_at?: string
+}
+
+export interface StoreKktData {
+  station_id: number
+  available: boolean
+  posts: StoreKktPost[]
+  devices: { РНМ?: string; Пост?: number; МодельККТ?: string; ЗаводскойНомер?: string }[]
+}
+
+export const getStoreKkt = (stationId: number, limit = 30) =>
+  get<StoreKktData>('/api/store/kkt', { station_id: stationId, limit })
+
 export const getStoreChain = (stationId: number) =>
   get<StoreChainData>('/api/store/chain', { station_id: stationId })
 

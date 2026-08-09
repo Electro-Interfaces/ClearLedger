@@ -50,6 +50,7 @@ import { StoreReportsPanel } from './StoreReportsPanel'
 import { StoreMarkingIntegrationsPanel } from './StoreMarkingIntegrationsPanel'
 import { StoreParityPanel } from './StoreParityPanel'
 import { StoreChainPanel } from './StoreChainPanel'
+import { StoreKktPanel } from './StoreKktPanel'
 import { StoreStationDraftsPanel } from './StoreStationDraftsPanel'
 import { StoreBarcodeCollisionsPanel } from './StoreBarcodeCollisionsPanel'
 import { StoreCatalogHealthPanel } from './StoreCatalogHealthPanel'
@@ -396,6 +397,13 @@ export function StorePanel() {
     return (
       <div className="h-full overflow-y-auto">
         <StoreStationHealthPanel />
+      </div>
+    )
+  }
+  if (sub === 'kkt') {
+    return (
+      <div className="h-full overflow-y-auto">
+        <StoreKktPanel />
       </div>
     )
   }

@@ -46,7 +46,7 @@ export type StoreStatus = 'ready' | 'wip' | 'planned'
  * `store` остаётся кодом первого раздела: по нему идут старые ссылки, подписи режимов и
  * ключ доступа. Раздел задаётся полем `section` записи — второго источника правды нет.
  */
-export type StoreMode = 'store' | 'store_catering' | 'store_stock' | 'store_catalog' | 'store_marking' | 'store_network' | 'store_1c' | 'store_reports'
+export type StoreMode = 'store' | 'store_catering' | 'store_stock' | 'store_cash' | 'store_catalog' | 'store_marking' | 'store_network' | 'store_1c' | 'store_reports'
 
 export const STORE_SECTIONS: {
   mode: StoreMode; label: string; icon: ComponentType<{ className?: string }>
@@ -54,6 +54,10 @@ export const STORE_SECTIONS: {
   { mode: 'store', label: 'Торговля', icon: ShoppingCart },
   { mode: 'store_catering', label: 'Общепит', icon: UtensilsCrossed },
   { mode: 'store_stock', label: 'Склад', icon: Warehouse },
+  // Касса — свой раздел, а не хвост «Торговли»: это первичный документ станции.
+  // Чек, оператор и фискальный итог отвечают на вопросы кассира и бухгалтера, а
+  // не товароведа у полки, и раньше «Чеки» стояли посреди аналитики продаж.
+  { mode: 'store_cash', label: 'Касса', icon: Receipt },
   { mode: 'store_catalog', label: 'Каталог', icon: Boxes },
   { mode: 'store_marking', label: 'Маркировка', icon: QrCode },
   // Станции — свой раздел: здесь смотрят парк АЗС и заходят работать на конкретную
@@ -142,7 +146,19 @@ export const STORE_VIEWS: StoreView[] = [
     ],
   },
   {
-    key: 'cheques', label: 'Чеки', section: 'store', icon: Receipt,
+    key: 'kkt', label: 'Кассовые смены', section: 'store_cash', icon: Receipt,
+    title: 'Кассовые смены',
+    subtitle: 'Фискальная сторона станции: сами аппараты ККТ, их итоги за смену и то, чем подтверждена выручка. Итог пишет касса при закрытии смены, и он уже за вычетом возвратов — это единственная цифра станции, посчитанная не нами.',
+    status: 'ready',
+    blocks: [
+      { name: 'Парк аппаратов', desc: 'Модель, регистрационный номер ККТ и заводской номер по каждому посту — по ним чек ищут в ОФД и в налоговой.', source: 'пакет cheques · документ kkt_shift · /api/store/kkt' },
+      { name: 'Итог смены', desc: 'Наличными и картой, отдельно возвраты, фискальный итог. Номер смены аппарата идёт своим счётом и с номером смены станции не совпадает.' },
+      { name: 'Пробито и фискально', desc: 'Счётчик поста возвраты не вычитает, фискальная память вычитает: разница между ними в норме равна возвращённой сумме, а не нулю.' },
+      { name: 'Чего здесь нет', desc: 'Корпоративные отпуски чеком не пробиваются и в фискальный итог не попадают — их выручка видна в «Сменах», а не тут. Это не расхождение.' },
+    ],
+  },
+  {
+    key: 'cheques', label: 'Чеки', section: 'store_cash', icon: Receipt,
     title: 'Чеки',
     subtitle: 'Продажи на уровне покупки, а не смены: время, позиции, сумма, фискальный номер. Отчёт о розничных продажах закрывает смену сводом — этого хватает бухгалтерии, но спорную продажу, возврат и проверку маркированного товара разбирают по конкретному чеку.',
     status: 'ready',

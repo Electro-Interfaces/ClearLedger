@@ -35,6 +35,9 @@ class Base(DeclarativeBase):
 
 
 STORE_RECEIPT_MIGRATION_DDL = (
+    "DROP TRIGGER IF EXISTS store_receipt_stock_movement_immutable_trg "
+    "ON store_receipt_stock_movements",
+    "DROP TRIGGER IF EXISTS store_receipt_accounting_revision_trg ON store_receipts",
     "ALTER TABLE store_receipts ALTER COLUMN station_id DROP NOT NULL",
     "ALTER TABLE store_receipts ADD COLUMN IF NOT EXISTS services JSONB NOT NULL DEFAULT '[]'::jsonb",
     "ALTER TABLE store_receipts ADD COLUMN IF NOT EXISTS evidence JSONB NOT NULL DEFAULT '{}'::jsonb",
@@ -44,8 +47,45 @@ STORE_RECEIPT_MIGRATION_DDL = (
     "REFERENCES counterparties(id) ON DELETE RESTRICT",
     "ALTER TABLE store_receipts ADD COLUMN IF NOT EXISTS contract_id UUID "
     "REFERENCES contracts(id) ON DELETE RESTRICT",
+    "ALTER TABLE store_receipts ADD COLUMN IF NOT EXISTS organization_id UUID "
+    "REFERENCES organizations(id) ON DELETE RESTRICT",
+    "ALTER TABLE store_receipts ADD COLUMN IF NOT EXISTS warehouse_id UUID "
+    "REFERENCES warehouses(id) ON DELETE RESTRICT",
+    "ALTER TABLE store_receipts ADD COLUMN IF NOT EXISTS supplier_snapshot JSONB",
+    "ALTER TABLE store_receipts ADD COLUMN IF NOT EXISTS contract_snapshot JSONB",
+    "ALTER TABLE store_receipts ADD COLUMN IF NOT EXISTS organization_snapshot JSONB",
+    "ALTER TABLE store_receipts ADD COLUMN IF NOT EXISTS warehouse_snapshot JSONB",
+    "ALTER TABLE store_receipts ADD COLUMN IF NOT EXISTS accounting_status "
+    "VARCHAR(20) NOT NULL DEFAULT 'pending'",
+    "ALTER TABLE store_receipts ADD COLUMN IF NOT EXISTS accounting_error TEXT",
+    "ALTER TABLE store_receipts ADD COLUMN IF NOT EXISTS accounting_revision "
+    "INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE store_receipts ADD COLUMN IF NOT EXISTS content_hash CHAR(64)",
+    """
+    DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                        WHERE conname = 'ck_store_receipt_accounting_status') THEN
+            ALTER TABLE store_receipts ADD CONSTRAINT ck_store_receipt_accounting_status
+            CHECK (accounting_status IN ('pending','needs_review','ready'));
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                        WHERE conname = 'ck_store_receipt_accounting_revision') THEN
+            ALTER TABLE store_receipts ADD CONSTRAINT ck_store_receipt_accounting_revision
+            CHECK (accounting_revision >= 0);
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                        WHERE conname = 'ck_store_receipt_content_hash') THEN
+            ALTER TABLE store_receipts ADD CONSTRAINT ck_store_receipt_content_hash
+            CHECK (content_hash IS NULL OR content_hash ~ '^[0-9a-f]{64}$');
+        END IF;
+    END $$
+    """,
     "CREATE INDEX IF NOT EXISTS ix_store_receipts_supplier ON store_receipts (company_id, supplier_id)",
     "CREATE INDEX IF NOT EXISTS ix_store_receipts_contract ON store_receipts (company_id, contract_id)",
+    "CREATE INDEX IF NOT EXISTS ix_store_receipts_organization "
+    "ON store_receipts (company_id, organization_id)",
+    "CREATE INDEX IF NOT EXISTS ix_store_receipts_warehouse "
+    "ON store_receipts (company_id, warehouse_id)",
     "ALTER TABLE store_receipts DROP CONSTRAINT IF EXISTS store_receipts_source_uuid_key",
     "DROP INDEX IF EXISTS ix_store_receipts_source_uuid",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_store_receipts_company_source "
@@ -94,8 +134,10 @@ STORE_RECEIPT_MIGRATION_DDL = (
         receipt_id UUID NOT NULL REFERENCES store_receipts(id) ON DELETE RESTRICT,
         reversal_of_id UUID REFERENCES store_receipt_stock_movements(id) ON DELETE RESTRICT,
         allocation_id VARCHAR(64),
+        line_id UUID NOT NULL,
         line_index INTEGER NOT NULL,
         station_id INTEGER,
+        warehouse_id UUID REFERENCES warehouses(id) ON DELETE RESTRICT,
         warehouse VARCHAR(200) NOT NULL,
         item_key VARCHAR(200) NOT NULL,
         item_uuid VARCHAR(64),
@@ -115,6 +157,677 @@ STORE_RECEIPT_MIGRATION_DDL = (
     "ON store_receipt_stock_movements (receipt_id, created_at)",
     "CREATE INDEX IF NOT EXISTS ix_store_receipt_stock_movement_balance "
     "ON store_receipt_stock_movements (company_id, warehouse, item_key, created_at)",
+    "ALTER TABLE store_receipt_stock_movements ADD COLUMN IF NOT EXISTS line_id UUID",
+    "ALTER TABLE store_receipt_stock_movements ADD COLUMN IF NOT EXISTS warehouse_id UUID "
+    "REFERENCES warehouses(id) ON DELETE RESTRICT",
+    """
+    UPDATE store_receipts r
+       SET accounting_status = 'needs_review',
+           accounting_error = 'Некорректный legacy line_id требует ручной проверки'
+     WHERE EXISTS (
+        SELECT 1 FROM jsonb_array_elements(r.lines) line
+         WHERE line ? 'line_id'
+           AND NOT (line->>'line_id' ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
+     ) OR EXISTS (
+        SELECT 1 FROM jsonb_array_elements(r.services) service
+         WHERE service ? 'line_id'
+           AND NOT (service->>'line_id' ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
+     )
+    """,
+    """
+    UPDATE store_receipts r
+       SET lines = filled.value
+      FROM (
+        SELECT source.id,
+               jsonb_agg(
+                   CASE WHEN element.value->>'line_id' ~*
+                                  '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                        THEN element.value
+                        ELSE jsonb_set(
+                            element.value, '{line_id}',
+                            to_jsonb(md5(
+                                source.id::text || '|goods|' ||
+                                coalesce(nullif(element.value->>'Key', ''),
+                                         nullif(element.value->>'Ключ', ''),
+                                         nullif(element.value->>'ИдентификаторСтроки', ''),
+                                         (element.value - 'qty_expected' - 'qty_fact' -
+                                          'amount' - 'vat_amount' - 'price' - 'vat_rate' -
+                                          'retail_price' - 'markup' - 'mark_codes' -
+                                          'upd_codes' - 'pack_codes')::text)
+                            )::uuid::text), true)
+                   END ORDER BY element.ordinality
+               ) AS value
+          FROM store_receipts source
+          CROSS JOIN LATERAL jsonb_array_elements(source.lines)
+               WITH ORDINALITY AS element(value, ordinality)
+         GROUP BY source.id
+      ) filled
+     WHERE filled.id = r.id
+       AND EXISTS (SELECT 1 FROM jsonb_array_elements(r.lines) line
+                    WHERE NOT line ? 'line_id'
+                       OR NOT (line->>'line_id' ~*
+                           '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'))
+    """,
+    """
+    UPDATE store_receipts r
+       SET services = filled.value
+      FROM (
+        SELECT source.id,
+               jsonb_agg(
+                   CASE WHEN element.value->>'line_id' ~*
+                                  '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                        THEN element.value
+                        ELSE jsonb_set(
+                            element.value, '{line_id}',
+                            to_jsonb(md5(
+                                source.id::text || '|service|' ||
+                                coalesce(nullif(element.value->>'Key', ''),
+                                         nullif(element.value->>'Ключ', ''),
+                                         nullif(element.value->>'ИдентификаторСтроки', ''),
+                                         (element.value - 'amount' - 'vat_amount' -
+                                          'vat_rate' - 'into_cost')::text)
+                            )::uuid::text), true)
+                   END ORDER BY element.ordinality
+               ) AS value
+          FROM store_receipts source
+          CROSS JOIN LATERAL jsonb_array_elements(source.services)
+               WITH ORDINALITY AS element(value, ordinality)
+         GROUP BY source.id
+      ) filled
+     WHERE filled.id = r.id
+       AND EXISTS (SELECT 1 FROM jsonb_array_elements(r.services) service
+                    WHERE NOT service ? 'line_id'
+                       OR NOT (service->>'line_id' ~*
+                           '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'))
+    """,
+    """
+    UPDATE store_receipts r
+       SET accounting_status = 'needs_review',
+           accounting_error = 'Неразличимые legacy-строки требуют ручного line_id'
+     WHERE EXISTS (
+        SELECT 1
+          FROM jsonb_array_elements(r.lines) line
+         GROUP BY line->>'line_id'
+        HAVING count(*) > 1
+     ) OR EXISTS (
+        SELECT 1
+          FROM jsonb_array_elements(r.services) service
+         GROUP BY service->>'line_id'
+        HAVING count(*) > 1
+     )
+    """,
+    """
+    UPDATE store_receipt_stock_movements movement
+       SET line_id = (receipt.lines->movement.line_index->>'line_id')::uuid
+      FROM store_receipts receipt
+     WHERE movement.receipt_id = receipt.id
+       AND movement.line_id IS NULL
+       AND receipt.lines->movement.line_index->>'line_id' ~*
+           '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+    """,
+    # Двоеточие в литерале удвоено. SQLAlchemy разбирает «:имя» как подстановку
+    # даже внутри строковой константы SQL, и приложение падало на старте с
+    # «A value is required for bind parameter 'legacy'»: миграции идут до
+    # готовности воркера, поэтому стек не поднимался вовсе. Сама строка здесь —
+    # только соль для md5, её вид ни на что не влияет.
+    "UPDATE store_receipt_stock_movements SET line_id = "
+    "md5(receipt_id::text || '::legacy-movement::' || line_index::text)::uuid "
+    "WHERE line_id IS NULL",
+    "ALTER TABLE store_receipt_stock_movements ALTER COLUMN line_id SET NOT NULL",
+    "UPDATE store_receipt_stock_movements m SET warehouse_id = r.warehouse_id "
+    "FROM store_receipts r WHERE m.receipt_id = r.id AND m.warehouse_id IS NULL",
+    "CREATE INDEX IF NOT EXISTS ix_store_receipt_stock_movement_canonical_balance "
+    "ON store_receipt_stock_movements (company_id, warehouse_id, item_key, created_at)",
+    """
+    CREATE OR REPLACE FUNCTION protect_store_receipt_stock_movement()
+    RETURNS trigger AS $$
+    BEGIN
+        RAISE EXCEPTION 'store receipt stock movements are append-only';
+    END;
+    $$ LANGUAGE plpgsql
+    """,
+    "DROP TRIGGER IF EXISTS store_receipt_stock_movement_immutable_trg "
+    "ON store_receipt_stock_movements",
+    """
+    CREATE TRIGGER store_receipt_stock_movement_immutable_trg
+    BEFORE UPDATE OR DELETE ON store_receipt_stock_movements
+    FOR EACH ROW EXECUTE FUNCTION protect_store_receipt_stock_movement()
+    """,
+    """
+    CREATE OR REPLACE FUNCTION protect_store_receipt_accounting_revision()
+    RETURNS trigger AS $$
+    BEGIN
+        IF OLD.status IN ('accepted', 'reversed')
+           AND (NEW.evidence IS DISTINCT FROM OLD.evidence
+                OR NEW.lines IS DISTINCT FROM OLD.lines
+                OR NEW.services IS DISTINCT FROM OLD.services
+                OR NEW.total_amount IS DISTINCT FROM OLD.total_amount
+                OR NEW.vat_amount IS DISTINCT FROM OLD.vat_amount) THEN
+            RAISE EXCEPTION 'accepted store receipt evidence is immutable';
+        END IF;
+        IF NEW.accounting_revision < OLD.accounting_revision THEN
+            RAISE EXCEPTION 'store receipt accounting revision cannot decrease';
+        END IF;
+        IF (NEW.content_hash IS DISTINCT FROM OLD.content_hash
+            OR NEW.supplier_snapshot IS DISTINCT FROM OLD.supplier_snapshot
+            OR NEW.contract_snapshot IS DISTINCT FROM OLD.contract_snapshot
+            OR NEW.organization_snapshot IS DISTINCT FROM OLD.organization_snapshot
+            OR NEW.warehouse_snapshot IS DISTINCT FROM OLD.warehouse_snapshot)
+           AND NEW.accounting_revision <= OLD.accounting_revision
+           AND OLD.accounting_revision > 0 THEN
+            RAISE EXCEPTION 'accounting snapshot change requires a new revision';
+        END IF;
+        RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql
+    """,
+    "DROP TRIGGER IF EXISTS store_receipt_accounting_revision_trg ON store_receipts",
+    """
+    CREATE TRIGGER store_receipt_accounting_revision_trg
+    BEFORE UPDATE ON store_receipts
+    FOR EACH ROW EXECUTE FUNCTION protect_store_receipt_accounting_revision()
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS edge_packet_revisions (
+        id UUID PRIMARY KEY,
+        company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+        edge_packet_id UUID NOT NULL REFERENCES edge_packets(id) ON DELETE RESTRICT,
+        packet_uuid VARCHAR(64) NOT NULL,
+        content_hash CHAR(64) NOT NULL,
+        payload JSONB NOT NULL,
+        size_bytes INTEGER NOT NULL DEFAULT 0,
+        wire_size_bytes INTEGER,
+        status VARCHAR(20) NOT NULL DEFAULT 'received',
+        error TEXT,
+        received_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        CONSTRAINT ck_edge_packet_revision_content_hash
+            CHECK (content_hash ~ '^[0-9a-f]{64}$'),
+        CONSTRAINT ck_edge_packet_revision_status
+            CHECK (status IN ('received','needs_review')),
+        CONSTRAINT uq_edge_packet_revision_content
+            UNIQUE (company_id, packet_uuid, content_hash)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS ix_edge_packet_revision_packet "
+    "ON edge_packet_revisions (edge_packet_id, received_at)",
+    """
+    CREATE OR REPLACE FUNCTION protect_edge_packet_revision()
+    RETURNS trigger AS $$
+    BEGIN
+        RAISE EXCEPTION 'edge packet raw revisions are append-only';
+    END;
+    $$ LANGUAGE plpgsql
+    """,
+    "DROP TRIGGER IF EXISTS edge_packet_revision_immutable_trg ON edge_packet_revisions",
+    """
+    CREATE TRIGGER edge_packet_revision_immutable_trg
+    BEFORE UPDATE OR DELETE ON edge_packet_revisions
+    FOR EACH ROW EXECUTE FUNCTION protect_edge_packet_revision()
+    """,
+)
+
+
+ACCOUNTING_EGRESS_MIGRATION_DDL = (
+    """
+    CREATE OR REPLACE FUNCTION reject_accounting_source_policy_overlap()
+    RETURNS trigger AS $$
+    BEGIN
+        IF NEW.effective_to IS NOT NULL AND NEW.effective_to <= NEW.effective_from THEN
+            RAISE EXCEPTION 'accounting source policy interval must be [from, to)';
+        END IF;
+        PERFORM pg_advisory_xact_lock(hashtextextended(
+            NEW.company_id::text || ':' || NEW.station_id::text || ':' || NEW.policy_group,
+            0
+        ));
+        IF EXISTS (
+            SELECT 1
+              FROM accounting_source_policies p
+             WHERE p.company_id = NEW.company_id
+               AND p.station_id = NEW.station_id
+               AND p.policy_group = NEW.policy_group
+               AND p.id <> NEW.id
+               AND p.effective_from < COALESCE(NEW.effective_to, 'infinity'::timestamptz)
+               AND NEW.effective_from < COALESCE(p.effective_to, 'infinity'::timestamptz)
+        ) THEN
+            RAISE EXCEPTION 'overlapping accounting source policy interval';
+        END IF;
+        RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql
+    """,
+    "DROP TRIGGER IF EXISTS accounting_source_policy_overlap_trg ON accounting_source_policies",
+    """
+    CREATE TRIGGER accounting_source_policy_overlap_trg
+    BEFORE INSERT OR UPDATE ON accounting_source_policies
+    FOR EACH ROW EXECUTE FUNCTION reject_accounting_source_policy_overlap()
+    """,
+    """
+    CREATE OR REPLACE FUNCTION protect_cutover_manifest_payload()
+    RETURNS trigger AS $$
+    BEGIN
+        IF TG_OP = 'DELETE' THEN
+            PERFORM pg_advisory_xact_lock(hashtextextended(
+                OLD.company_id::text || ':' || OLD.station_id::text || ':' || OLD.policy_group,
+                0
+            ));
+        ELSE
+            PERFORM pg_advisory_xact_lock(hashtextextended(
+                NEW.company_id::text || ':' || NEW.station_id::text || ':' || NEW.policy_group,
+                0
+            ));
+        END IF;
+        IF TG_OP = 'INSERT' THEN
+            RETURN NEW;
+        END IF;
+        IF TG_OP = 'DELETE' THEN
+            RAISE EXCEPTION 'cutover manifest is immutable';
+        END IF;
+        IF NEW.policy_id IS DISTINCT FROM OLD.policy_id
+           OR NEW.company_id IS DISTINCT FROM OLD.company_id
+           OR NEW.station_id IS DISTINCT FROM OLD.station_id
+           OR NEW.policy_group IS DISTINCT FROM OLD.policy_group
+           OR NEW.revision IS DISTINCT FROM OLD.revision
+           OR NEW.canonical_payload IS DISTINCT FROM OLD.canonical_payload
+           OR NEW.manifest_hash IS DISTINCT FROM OLD.manifest_hash
+           OR NEW.approvals IS DISTINCT FROM OLD.approvals
+           OR NEW.operational_cutover_at IS DISTINCT FROM OLD.operational_cutover_at
+           OR NEW.accounting_transport_cutover_at IS DISTINCT FROM OLD.accounting_transport_cutover_at
+           OR NEW.late_arrival_until IS DISTINCT FROM OLD.late_arrival_until
+           OR NEW.arm_deadline IS DISTINCT FROM OLD.arm_deadline THEN
+            RAISE EXCEPTION 'cutover manifest payload is immutable';
+        END IF;
+        RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql
+    """,
+    "DROP TRIGGER IF EXISTS cutover_manifest_immutable_trg ON cutover_manifests",
+    """
+    CREATE TRIGGER cutover_manifest_immutable_trg
+    BEFORE INSERT OR UPDATE OR DELETE ON cutover_manifests
+    FOR EACH ROW EXECUTE FUNCTION protect_cutover_manifest_payload()
+    """,
+    """
+    CREATE OR REPLACE FUNCTION protect_accounting_shadow_result()
+    RETURNS trigger AS $$
+    BEGIN
+        RAISE EXCEPTION 'accounting shadow result is immutable';
+    END;
+    $$ LANGUAGE plpgsql
+    """,
+    "DROP TRIGGER IF EXISTS accounting_shadow_result_immutable_trg ON accounting_shadow_results",
+    """
+    CREATE TRIGGER accounting_shadow_result_immutable_trg
+    BEFORE UPDATE OR DELETE ON accounting_shadow_results
+    FOR EACH ROW EXECUTE FUNCTION protect_accounting_shadow_result()
+    """,
+)
+
+
+ACCOUNTING_REVISION_MIGRATION_DDL = (
+    "ALTER TABLE data_entries ADD COLUMN IF NOT EXISTS document_id UUID",
+    "ALTER TABLE data_entries ADD COLUMN IF NOT EXISTS revision INTEGER",
+    "ALTER TABLE data_entries ADD COLUMN IF NOT EXISTS content_hash CHAR(64)",
+    "ALTER TABLE data_entries ADD COLUMN IF NOT EXISTS fact_origin VARCHAR(20)",
+    "ALTER TABLE data_entries ADD COLUMN IF NOT EXISTS supersedes_entry_id UUID",
+    """
+    DO $$ BEGIN
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint
+             WHERE conname = 'fk_data_entry_supersedes'
+        ) THEN
+            ALTER TABLE data_entries
+            ADD CONSTRAINT fk_data_entry_supersedes
+            FOREIGN KEY (supersedes_entry_id) REFERENCES data_entries(id) ON DELETE RESTRICT;
+        END IF;
+    END $$
+    """,
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_data_entry_document_revision "
+    "ON data_entries(company_id, document_id, revision) "
+    "WHERE document_id IS NOT NULL",
+    "ALTER TABLE export_packets ADD COLUMN IF NOT EXISTS packet_uuid UUID",
+    "ALTER TABLE export_packets ADD COLUMN IF NOT EXISTS revision INTEGER",
+    "ALTER TABLE export_packets ADD COLUMN IF NOT EXISTS contract_version VARCHAR(10)",
+    "ALTER TABLE export_packets ADD COLUMN IF NOT EXISTS content_hash CHAR(64)",
+    "ALTER TABLE export_packets ADD COLUMN IF NOT EXISTS fact_origin VARCHAR(20)",
+    "ALTER TABLE export_packets ADD COLUMN IF NOT EXISTS transport_producer VARCHAR(30)",
+    "ALTER TABLE export_packets ADD COLUMN IF NOT EXISTS attempt_id UUID",
+    "ALTER TABLE export_packets ADD COLUMN IF NOT EXISTS lease_until TIMESTAMPTZ",
+    "ALTER TABLE export_packets ADD COLUMN IF NOT EXISTS ack_payload JSONB",
+    "ALTER TABLE export_packets ADD COLUMN IF NOT EXISTS component_result JSONB",
+    "ALTER TABLE export_packets ADD COLUMN IF NOT EXISTS error_code VARCHAR(80)",
+    "ALTER TABLE export_packets ADD COLUMN IF NOT EXISTS error_detail TEXT",
+    """
+    DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                       WHERE conname = 'ck_data_entry_revision_positive') THEN
+            ALTER TABLE data_entries ADD CONSTRAINT ck_data_entry_revision_positive
+            CHECK (revision IS NULL OR revision > 0) NOT VALID;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                       WHERE conname = 'ck_data_entry_content_hash') THEN
+            ALTER TABLE data_entries ADD CONSTRAINT ck_data_entry_content_hash
+            CHECK (content_hash IS NULL OR content_hash ~ '^[0-9a-f]{64}$') NOT VALID;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                       WHERE conname = 'ck_data_entry_fact_origin') THEN
+            ALTER TABLE data_entries ADD CONSTRAINT ck_data_entry_fact_origin
+            CHECK (fact_origin IS NULL OR fact_origin IN
+                   ('edge','store','onec_legacy','edo','cash')) NOT VALID;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                       WHERE conname = 'ck_export_packet_revision_positive') THEN
+            ALTER TABLE export_packets ADD CONSTRAINT ck_export_packet_revision_positive
+            CHECK (revision IS NULL OR revision > 0) NOT VALID;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                       WHERE conname = 'ck_export_packet_content_hash') THEN
+            ALTER TABLE export_packets ADD CONSTRAINT ck_export_packet_content_hash
+            CHECK (content_hash IS NULL OR content_hash ~ '^[0-9a-f]{64}$') NOT VALID;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                       WHERE conname = 'ck_export_packet_fact_origin') THEN
+            ALTER TABLE export_packets ADD CONSTRAINT ck_export_packet_fact_origin
+            CHECK (fact_origin IS NULL OR fact_origin IN
+                   ('edge','store','onec_legacy','edo','cash')) NOT VALID;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                       WHERE conname = 'ck_export_packet_accounting_contract') THEN
+            ALTER TABLE export_packets ADD CONSTRAINT ck_export_packet_accounting_contract
+            CHECK (
+                kind NOT IN ('food_accounting_group','store_accounting_group') OR (
+                    packet_uuid IS NOT NULL AND revision IS NOT NULL
+                    AND contract_version IS NOT NULL AND content_hash IS NOT NULL
+                    AND fact_origin IS NOT NULL AND transport_producer IS NOT NULL
+                    AND status IN ('draft','validated','queued','retry_wait','leased',
+                                   'sent_waiting_ack','accepted','rejected','needs_review')
+                )
+            ) NOT VALID;
+        END IF;
+    END $$
+    """,
+    "DROP INDEX IF EXISTS uq_export_packets_active_idem",
+    """
+    CREATE UNIQUE INDEX uq_export_packets_active_idem
+    ON export_packets(company_id, idem_key)
+    WHERE idem_key IS NOT NULL
+      AND status <> 'rejected'
+      AND kind NOT IN ('food_accounting_group', 'store_accounting_group')
+    """,
+    """
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_export_packets_accounting_revision
+    ON export_packets(company_id, packet_uuid, revision)
+    WHERE kind IN ('food_accounting_group', 'store_accounting_group')
+    """,
+    """
+    CREATE OR REPLACE FUNCTION protect_canonical_data_entry()
+    RETURNS trigger AS $$
+    DECLARE
+        latest_id UUID;
+        latest_revision INTEGER;
+        latest_hash CHAR(64);
+    BEGIN
+        IF TG_OP = 'DELETE' THEN
+            IF OLD.document_id IS NOT NULL THEN
+                RAISE EXCEPTION 'canonical data entry is append-only';
+            END IF;
+            RETURN OLD;
+        END IF;
+        IF TG_OP = 'INSERT' THEN
+            IF NEW.document_id IS NOT NULL AND (
+                NEW.layer <> 'clean'
+                OR NEW.revision IS NULL OR NEW.revision <= 0
+                OR NEW.content_hash IS NULL
+                OR NEW.content_hash !~ '^[0-9a-f]{64}$'
+                OR NEW.fact_origin NOT IN ('edge','store','onec_legacy','edo','cash')
+            ) THEN
+                RAISE EXCEPTION 'invalid canonical data entry';
+            END IF;
+            IF NEW.document_id IS NOT NULL THEN
+                PERFORM pg_advisory_xact_lock(hashtextextended(
+                    'canonical-fact:' || NEW.company_id::text || ':' || NEW.document_id::text,
+                    0
+                ));
+                SELECT d.id, d.revision, d.content_hash
+                  INTO latest_id, latest_revision, latest_hash
+                  FROM data_entries d
+                 WHERE d.company_id = NEW.company_id
+                   AND d.document_id = NEW.document_id
+                 ORDER BY d.revision DESC
+                 LIMIT 1
+                 FOR UPDATE;
+                IF latest_id IS NULL THEN
+                    IF NEW.supersedes_entry_id IS NOT NULL THEN
+                        RAISE EXCEPTION 'first canonical revision cannot supersede a row';
+                    END IF;
+                ELSE
+                    IF NEW.content_hash = latest_hash THEN
+                        RAISE EXCEPTION 'canonical content hash already exists';
+                    END IF;
+                    IF NEW.revision <= latest_revision THEN
+                        RAISE EXCEPTION 'canonical revision must increase';
+                    END IF;
+                    IF NEW.supersedes_entry_id IS DISTINCT FROM latest_id THEN
+                        RAISE EXCEPTION 'canonical revision must supersede latest row';
+                    END IF;
+                    UPDATE data_entries
+                       SET status = 'superseded'
+                     WHERE id = latest_id AND status <> 'superseded';
+                END IF;
+            END IF;
+            RETURN NEW;
+        END IF;
+        IF OLD.document_id IS NULL AND NEW.document_id IS NULL THEN
+            RETURN NEW;
+        END IF;
+        IF OLD.document_id IS NULL OR NEW.document_id IS NULL THEN
+            RAISE EXCEPTION 'canonical identity cannot be attached or removed in-place';
+        END IF;
+        IF NEW.title IS DISTINCT FROM OLD.title
+           OR NEW.category_id IS DISTINCT FROM OLD.category_id
+           OR NEW.subcategory_id IS DISTINCT FROM OLD.subcategory_id
+           OR NEW.doc_type_id IS DISTINCT FROM OLD.doc_type_id
+           OR NEW.company_id IS DISTINCT FROM OLD.company_id
+           OR NEW.source IS DISTINCT FROM OLD.source
+           OR NEW.source_label IS DISTINCT FROM OLD.source_label
+           OR NEW.file_url IS DISTINCT FROM OLD.file_url
+           OR NEW.file_type IS DISTINCT FROM OLD.file_type
+           OR NEW.file_size IS DISTINCT FROM OLD.file_size
+           OR NEW.metadata IS DISTINCT FROM OLD.metadata
+           OR NEW.ocr_data IS DISTINCT FROM OLD.ocr_data
+           OR NEW.source_id IS DISTINCT FROM OLD.source_id
+           OR NEW.channel_id IS DISTINCT FROM OLD.channel_id
+           OR NEW.layer IS DISTINCT FROM OLD.layer
+           OR NEW.derived_from_entry_id IS DISTINCT FROM OLD.derived_from_entry_id
+           OR NEW.document_id IS DISTINCT FROM OLD.document_id
+           OR NEW.revision IS DISTINCT FROM OLD.revision
+           OR NEW.content_hash IS DISTINCT FROM OLD.content_hash
+           OR NEW.fact_origin IS DISTINCT FROM OLD.fact_origin
+           OR NEW.supersedes_entry_id IS DISTINCT FROM OLD.supersedes_entry_id THEN
+            RAISE EXCEPTION 'canonical data entry payload is immutable';
+        END IF;
+        IF NEW.status IS DISTINCT FROM OLD.status
+           AND (NEW.status <> 'superseded' OR OLD.status = 'superseded') THEN
+            RAISE EXCEPTION 'invalid canonical data entry status transition';
+        END IF;
+        RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql
+    """,
+    "DROP TRIGGER IF EXISTS canonical_data_entry_guard_trg ON data_entries",
+    """
+    CREATE TRIGGER canonical_data_entry_guard_trg
+    BEFORE INSERT OR UPDATE OR DELETE ON data_entries
+    FOR EACH ROW EXECUTE FUNCTION protect_canonical_data_entry()
+    """,
+    """
+    CREATE OR REPLACE FUNCTION protect_accounting_export_packet()
+    RETURNS trigger AS $$
+    DECLARE
+        latest_revision INTEGER;
+        latest_kind VARCHAR(30);
+    BEGIN
+        IF TG_OP = 'DELETE' THEN
+            IF OLD.kind IN ('food_accounting_group', 'store_accounting_group') THEN
+                RAISE EXCEPTION 'accounting outbox is append-only';
+            END IF;
+            RETURN OLD;
+        END IF;
+        IF TG_OP = 'UPDATE'
+           AND NEW.kind IS DISTINCT FROM OLD.kind
+           AND (NEW.kind IN ('food_accounting_group', 'store_accounting_group')
+                OR OLD.kind IN ('food_accounting_group', 'store_accounting_group')) THEN
+            RAISE EXCEPTION 'accounting outbox kind is immutable';
+        END IF;
+        IF NEW.kind NOT IN ('food_accounting_group', 'store_accounting_group') THEN
+            RETURN NEW;
+        END IF;
+        IF NEW.packet_uuid IS NULL OR NEW.revision IS NULL OR NEW.revision <= 0
+           OR NEW.contract_version IS NULL
+           OR NEW.content_hash IS NULL OR NEW.content_hash !~ '^[0-9a-f]{64}$'
+           OR NEW.fact_origin NOT IN ('edge','store','onec_legacy','edo','cash')
+           OR NEW.transport_producer IS NULL THEN
+            RAISE EXCEPTION 'invalid accounting outbox contract';
+        END IF;
+        IF TG_OP = 'INSERT' THEN
+            IF NEW.status <> 'draft' THEN
+                RAISE EXCEPTION 'accounting outbox must start in draft';
+            END IF;
+            PERFORM pg_advisory_xact_lock(hashtextextended(
+                'accounting-outbox:' || NEW.company_id::text || ':' || NEW.packet_uuid::text,
+                0
+            ));
+            IF EXISTS (
+                SELECT 1 FROM export_packets p
+                 WHERE p.company_id = NEW.company_id
+                   AND p.packet_uuid = NEW.packet_uuid
+                   AND p.kind IN ('food_accounting_group', 'store_accounting_group')
+                   AND p.content_hash = NEW.content_hash
+            ) THEN
+                RAISE EXCEPTION 'accounting packet hash already exists';
+            END IF;
+            SELECT p.revision, p.kind
+              INTO latest_revision, latest_kind
+              FROM export_packets p
+             WHERE p.company_id = NEW.company_id
+               AND p.packet_uuid = NEW.packet_uuid
+               AND p.kind IN ('food_accounting_group', 'store_accounting_group')
+             ORDER BY p.revision DESC
+             LIMIT 1
+             FOR UPDATE;
+            IF latest_revision IS NOT NULL AND NEW.revision <= latest_revision THEN
+                RAISE EXCEPTION 'accounting packet revision must increase';
+            END IF;
+            IF latest_kind IS NOT NULL AND NEW.kind <> latest_kind THEN
+                RAISE EXCEPTION 'accounting packet kind cannot change between revisions';
+            END IF;
+            RETURN NEW;
+        END IF;
+        IF NEW.status IS DISTINCT FROM OLD.status AND NOT (
+            (OLD.status = 'draft' AND NEW.status = 'validated')
+            OR (OLD.status = 'validated' AND NEW.status IN ('queued','retry_wait'))
+            OR (OLD.status IN ('queued','retry_wait') AND NEW.status = 'leased')
+            OR (OLD.status = 'leased' AND NEW.status IN ('sent_waiting_ack','retry_wait'))
+            OR (OLD.status = 'sent_waiting_ack'
+                AND NEW.status IN ('accepted','rejected','needs_review'))
+        ) THEN
+            RAISE EXCEPTION 'invalid accounting outbox status transition: % -> %',
+                OLD.status, NEW.status;
+        END IF;
+        IF OLD.status <> 'draft' AND (
+            NEW.company_id IS DISTINCT FROM OLD.company_id
+            OR NEW.kind IS DISTINCT FROM OLD.kind
+            OR NEW.idem_key IS DISTINCT FROM OLD.idem_key
+            OR NEW.source_entry_ids IS DISTINCT FROM OLD.source_entry_ids
+            OR NEW.payload IS DISTINCT FROM OLD.payload
+            OR NEW.packet_uuid IS DISTINCT FROM OLD.packet_uuid
+            OR NEW.revision IS DISTINCT FROM OLD.revision
+            OR NEW.contract_version IS DISTINCT FROM OLD.contract_version
+            OR NEW.content_hash IS DISTINCT FROM OLD.content_hash
+            OR NEW.fact_origin IS DISTINCT FROM OLD.fact_origin
+            OR NEW.transport_producer IS DISTINCT FROM OLD.transport_producer
+        ) THEN
+            RAISE EXCEPTION 'validated accounting outbox core is immutable';
+        END IF;
+        IF NEW.status = 'leased'
+           AND (NEW.attempt_id IS NULL OR NEW.lease_until IS NULL) THEN
+            RAISE EXCEPTION 'leased accounting outbox requires attempt and lease';
+        END IF;
+        IF OLD.status IN ('accepted','rejected','needs_review') AND (
+            NEW.status IS DISTINCT FROM OLD.status
+            OR NEW.attempt_id IS DISTINCT FROM OLD.attempt_id
+            OR NEW.lease_until IS DISTINCT FROM OLD.lease_until
+            OR NEW.sent_at IS DISTINCT FROM OLD.sent_at
+            OR NEW.acked_at IS DISTINCT FROM OLD.acked_at
+            OR NEW.ack_payload IS DISTINCT FROM OLD.ack_payload
+            OR NEW.component_result IS DISTINCT FROM OLD.component_result
+            OR NEW.error_code IS DISTINCT FROM OLD.error_code
+            OR NEW.error_detail IS DISTINCT FROM OLD.error_detail
+            OR NEW.reject_reason IS DISTINCT FROM OLD.reject_reason
+            OR NEW.target_doc_id IS DISTINCT FROM OLD.target_doc_id
+        ) THEN
+            RAISE EXCEPTION 'terminal accounting outbox result is immutable';
+        END IF;
+        RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql
+    """,
+    "DROP TRIGGER IF EXISTS accounting_export_packet_guard_trg ON export_packets",
+    """
+    CREATE TRIGGER accounting_export_packet_guard_trg
+    BEFORE INSERT OR UPDATE OR DELETE ON export_packets
+    FOR EACH ROW EXECUTE FUNCTION protect_accounting_export_packet()
+    """,
+    """
+    CREATE OR REPLACE FUNCTION append_accounting_outbox_history()
+    RETURNS trigger AS $$
+    BEGIN
+        IF NEW.kind NOT IN ('food_accounting_group', 'store_accounting_group') THEN
+            RETURN NEW;
+        END IF;
+        IF TG_OP = 'INSERT' THEN
+            INSERT INTO accounting_outbox_attempts (
+                company_id, packet_id, attempt_id, event, from_status, to_status,
+                lease_until, ack_payload, component_result, error_code, error_detail
+            ) VALUES (
+                NEW.company_id, NEW.id, NEW.attempt_id, NEW.status, NULL, NEW.status,
+                NEW.lease_until, NEW.ack_payload, NEW.component_result,
+                NEW.error_code, NEW.error_detail
+            );
+        ELSIF NEW.status IS DISTINCT FROM OLD.status THEN
+            INSERT INTO accounting_outbox_attempts (
+                company_id, packet_id, attempt_id, event, from_status, to_status,
+                lease_until, ack_payload, component_result, error_code, error_detail
+            ) VALUES (
+                NEW.company_id, NEW.id, COALESCE(NEW.attempt_id, OLD.attempt_id),
+                NEW.status, OLD.status, NEW.status, NEW.lease_until,
+                NEW.ack_payload, NEW.component_result, NEW.error_code, NEW.error_detail
+            );
+        END IF;
+        RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql
+    """,
+    "DROP TRIGGER IF EXISTS accounting_outbox_history_trg ON export_packets",
+    """
+    CREATE TRIGGER accounting_outbox_history_trg
+    AFTER INSERT OR UPDATE OF status ON export_packets
+    FOR EACH ROW EXECUTE FUNCTION append_accounting_outbox_history()
+    """,
+    """
+    CREATE OR REPLACE FUNCTION protect_accounting_outbox_attempt()
+    RETURNS trigger AS $$
+    BEGIN
+        RAISE EXCEPTION 'accounting outbox history is append-only';
+    END;
+    $$ LANGUAGE plpgsql
+    """,
+    "DROP TRIGGER IF EXISTS accounting_outbox_attempt_immutable_trg "
+    "ON accounting_outbox_attempts",
+    """
+    CREATE TRIGGER accounting_outbox_attempt_immutable_trg
+    BEFORE UPDATE OR DELETE ON accounting_outbox_attempts
+    FOR EACH ROW EXECUTE FUNCTION protect_accounting_outbox_attempt()
+    """,
 )
 
 
@@ -1471,6 +2184,17 @@ async def create_all() -> None:
         # складские проводки центрального склада. Для старой БД одного изменения
         # ORM недостаточно: create_all не добавляет колонки в готовую таблицу.
         for stmt in STORE_RECEIPT_MIGRATION_DDL:
+            await conn.execute(_sa.text(stmt))
+
+        # v2.39: fail-closed policy/manifest/shadow для бухгалтерского egress
+        # сопутки и общепита. Триггер policy дублирует сервисную проверку и не
+        # позволяет создать неоднозначный transport producer прямым SQL.
+        for stmt in ACCOUNTING_EGRESS_MIGRATION_DDL:
+            await conn.execute(_sa.text(stmt))
+
+        # v2.40: канонические ревизии L2 и ревизионный accounting-only outbox.
+        # Legacy/fuel idem_key сохраняет прежнюю семантику отдельным predicate.
+        for stmt in ACCOUNTING_REVISION_MIGRATION_DDL:
             await conn.execute(_sa.text(stmt))
 
         # v2.37: станция заявляет об ошибке в сетевой карточке.
