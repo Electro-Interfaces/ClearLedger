@@ -784,6 +784,8 @@ export interface DedupSummary {
   dupGroups: number; excessCards: number; liveDupGroups: number; assortmentCards: number
   scopedGroups: number; outOfScopeGroups: number
   priceDesyncGroups: number
+  /** Привязок кассы с прочитанной ценой. Ноль — «рассинхрон цен» считать не по чему. */
+  pricesLoaded?: number
   nsActive: number; nsOnMarked: number; multiCodeCards: number; cbLinked: number
   /** Аномалии связи с ЦБ: карточка заведена локально и не уехала / код разошёлся. */
   cbMissing: number; cbCodeDiff: number
@@ -1594,9 +1596,15 @@ export interface StoreReconcileData {
   criterion: {
     target_days: number; days: number; met: boolean
     from: string | null; to: string | null
-    stale: number | null; broken_by: string | null
+    /** Отставание последнего сверенного дня от сегодня, в днях. */
+    stale: number | null
+    /** Чем оборвана серия: дата и что в этот день было (или его не было вовсе). */
+    broken_by: { дата: string; статус: string; смен_в_дне: number } | null
   }
   shifts: StoreReconcileShift[]
+  /** Сколько смен вообще есть против того, сколько влезло в окно запроса. */
+  limit?: number
+  total?: number
 }
 
 export const getStoreReconcile = (stationId: number | null, limit = 60) =>
@@ -1636,12 +1644,17 @@ export interface StoreChainSnapshot {
   снято: string
   касса_доступна: boolean
   касса_позиций: number
+  /** Карточек в кассе. Позиций больше: один товар живёт под несколькими кодами. */
+  касса_карточек?: number
   касса_остаток: number
   касса_лишних_кодов: number
   наш_позиций: number
   наш_остаток: number
   наш_минусов: number
+  одинс_доступна?: boolean
   одинс_есть_снимок: boolean
+  /** Снимок 1С мог быть снят неделю назад: сравнивать с ним сегодняшний остаток нельзя. */
+  одинс_снимок_свежий?: boolean
   одинс_позиций: number
   одинс_остаток: number
   одинс_фантомов: number
@@ -1651,6 +1664,8 @@ export interface StoreChainSnapshot {
   обмен_очередь: string[]
   обмен_очередь_всего: number
   обмен_не_отправлено: number
+  /** Очередь не прочиталась: 1С ответила ошибкой на каждый объект обмена. */
+  обмен_ошибки_очереди?: string[]
 }
 
 export interface StoreChainData {

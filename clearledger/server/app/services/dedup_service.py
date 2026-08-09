@@ -362,6 +362,10 @@ async def summary(db: AsyncSession, cid: uuid.UUID) -> dict:
         "dupGroups": len(dup_groups), "excessCards": excess, "liveDupGroups": live_groups,
         "scopedGroups": len(scoped), "outOfScopeGroups": len(dup_groups) - len(scoped),
         "priceDesyncGroups": price_desync,
+        # Сколько привязок кассы вообще принесли цену. Дамп станции её сейчас не
+        # содержит (0 из 5507), поэтому «рассинхрон цен» считается по пустоте —
+        # экран обязан знать, стоит ли за числом хоть один прочитанный ценник.
+        "pricesLoaded": sum(1 for b in binds if b.retail_price is not None),
         "assortmentCards": sum(1 for c in cards if c.is_assortment),
         "nsActive": len(binds), "nsOnMarked": on_marked, "multiCodeCards": multi_code_cards,
         "cbLinked": len(cb_cards),
@@ -578,8 +582,12 @@ async def export_plan(db: AsyncSession, cid: uuid.UUID, *, only_scope_208: bool 
     gs = await groups(db, cid, include_assortment=False, only_scope_208=only_scope_208)
     plan = []
     for g in gs:
-        # «не дубль» и «архив» (снята с продажи) — не сливаем на канон
-        if g["status"] in ("not_duplicate", "not_used"):
+        # «не дубль» и «архив» (снята с продажи) — не сливаем на канон.
+        # Выполненное — тоже не план: работа, а не её история. Иначе исполнитель
+        # получает 90 строк, из которых актуальны четыре, и решает сам, какие
+        # делать по второму разу.
+        if g["status"] in ("not_duplicate", "not_used",
+                           "done", "merged", "repointed"):
             continue
         canon = g.get("canonGuid") or g.get("recommendedCanon")
         if not canon:

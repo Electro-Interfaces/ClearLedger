@@ -29,7 +29,8 @@ import {
   Boxes, Barcode, FolderTree, ChefHat, Truck,
   PackagePlus, Warehouse, ArrowLeftRight, ClipboardList, Trash2, Undo2, RefreshCw,
   QrCode, ScanLine, PackageMinus, ShieldAlert, ShieldCheck, Plug, CalendarClock, CopyCheck, ShoppingCart, Database, Receipt, FileSpreadsheet,
-  RadioTower, HeartPulse,
+  Link2, GitCompareArrows, Layers,
+  RadioTower, HeartPulse, Files,
 } from 'lucide-react'
 
 export type StoreStatus = 'ready' | 'wip' | 'planned'
@@ -46,12 +47,13 @@ export type StoreStatus = 'ready' | 'wip' | 'planned'
  * `store` остаётся кодом первого раздела: по нему идут старые ссылки, подписи режимов и
  * ключ доступа. Раздел задаётся полем `section` записи — второго источника правды нет.
  */
-export type StoreMode = 'store' | 'store_catering' | 'store_stock' | 'store_cash' | 'store_catalog' | 'store_marking' | 'store_network' | 'store_1c' | 'store_reports'
+export type StoreMode = 'store' | 'store_documents' | 'store_catering' | 'store_stock' | 'store_cash' | 'store_catalog' | 'store_marking' | 'store_network' | 'store_1c' | 'store_reports'
 
 export const STORE_SECTIONS: {
   mode: StoreMode; label: string; icon: ComponentType<{ className?: string }>
 }[] = [
   { mode: 'store', label: 'Торговля', icon: ShoppingCart },
+  { mode: 'store_documents', label: 'Документы', icon: Files },
   { mode: 'store_catering', label: 'Общепит', icon: UtensilsCrossed },
   { mode: 'store_stock', label: 'Склад', icon: Warehouse },
   // Касса — свой раздел, а не хвост «Торговли»: это первичный документ станции.
@@ -108,6 +110,13 @@ export interface StoreView {
 }
 
 export const STORE_VIEWS: StoreView[] = [
+  {
+    key: 'store_documents', label: 'Документы', section: 'store_documents', icon: Files,
+    title: 'Документы магазина',
+    subtitle: 'Сквозной реестр товарных документов, первичных подтверждений и готовности к бухгалтерскому учёту.',
+    status: 'ready',
+    blocks: [],
+  },
   /* ───────────────────── ТОРГОВЛЯ — сопутка, деньги и спрос ───────────────────── */
   {
     key: 'overview', label: 'Обзор', section: 'store', icon: LayoutDashboard,
@@ -346,7 +355,7 @@ export const STORE_VIEWS: StoreView[] = [
     ],
   },
   {
-    key: 'chain', label: 'Цепочка учёта', section: 'store_1c', icon: CopyCheck,
+    key: 'chain', label: 'Цепочка учёта', section: 'store_1c', icon: Link2,
     title: 'Цепочка учёта',
     subtitle: 'Товар считают в трёх местах сразу: касса знает, чем торгуют, наш журнал — чем владеем, старая 1С осталась переходным контуром и передаёт данные в центральную базу. Снимок делает станция одним заходом и присылает как есть: сравнивать источники, снятые в разное время, — самый простой способ увидеть расхождение там, где его нет.',
     status: 'ready',
@@ -358,7 +367,7 @@ export const STORE_VIEWS: StoreView[] = [
     ],
   },
   {
-    key: 'parity', label: 'Сверка с 1С', section: 'store_1c', icon: CopyCheck,
+    key: 'parity', label: 'Сверка с 1С', section: 'store_1c', icon: GitCompareArrows,
     title: 'Сверка с 1С',
     subtitle: 'Доказательство, что 1С на станции больше не нужна: каждая смена сходится с её пакетом, а все виды документов мы умеем порождать сами. Критерий этапа — четырнадцать чистых дней подряд и свежих, а не сумма совпадений за всё время.',
     status: 'ready',
@@ -366,7 +375,7 @@ export const STORE_VIEWS: StoreView[] = [
       { name: 'Критерий 14 дней', desc: 'Дни идут подряд по календарю и заканчиваются сегодняшним. Дыра в сверке серию рвёт: непроверенный день ничего не доказывает.', source: 'edge_service._streak' },
       { name: 'Сверка смен', desc: 'Пакет агента против пакета 1С по внутреннему номеру смены: суммы, позиции, оплаты, НДС. Расхождения раскрываются построчно.', source: 'edge_service.reconcile · /api/store/reconcile' },
       { name: 'Паритет видов', desc: 'Что 1С делает и что за то же время делаем мы: оприходования, перемещения, переоценки. Вопрос охвата, а не точности.', source: 'edge_service.parity · /api/store/parity' },
-      { name: 'Что не рвёт серию', desc: 'Отсутствие пакета 1С (его выгружают руками) и смена без документа продаж — сравнивать нечего, но и в зачёт такие дни не идут.' },
+      { name: 'Что обнуляет серию', desc: 'Расхождение — и любой день, за который сверки не было вовсе. Невыгруженный вручную пакет 1С отдельную смену из зачёта убирает, но если за день не сверилось ничего, календарь рвётся и счёт начинается заново: «14 дней» — про непрерывность.' },
     ],
   },
   {
@@ -512,7 +521,7 @@ export const STORE_VIEWS: StoreView[] = [
     ],
   },
   {
-    key: 'dedup', label: 'Дубли старой 1С', section: 'store_1c', icon: CopyCheck,
+    key: 'dedup', label: 'Дубли старой 1С', section: 'store_1c', icon: Layers,
     title: 'Дубли',
     subtitle: 'Дубли карточек по всей цепочке Нефтосервер → локальная 1С 208 → ЦБ на примере АЗС 208: наглядно видно проблемы (один товар под кодами 008/208/ЦБ, касса бьёт удалённый дубль, рассинхрон цен), можно отмечать статусы правок и вести трекинг после корректировок скриптами и руками.',
     status: 'ready',

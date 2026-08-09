@@ -22,6 +22,7 @@ import {
   type StoreStation, type StoreReconcileShift,
 } from '@/services/storeService'
 import { useCompany } from '@/contexts/CompanyContext'
+import { rowDrill } from './rowDrill'
 
 const СТАТУС: Record<string, string> = {
   'совпало': 'text-emerald-400/90',
@@ -32,7 +33,10 @@ const СТАТУС: Record<string, string> = {
 
 function когда(iso: string | null | undefined): string {
   if (!iso) return '—'
-  return new Date(iso).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' })
+  const d = new Date(iso)
+  // Битая дата даёт «Invalid Date» посреди таблицы — прочерк честнее.
+  if (Number.isNaN(d.getTime())) return '—'
+  return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' })
 }
 
 /** Строка сверки: причины расхождения раскрываются, а не висят в таблице. */
@@ -42,8 +46,12 @@ function СменаСтрока({ s }: { s: StoreReconcileShift }) {
   const есть = причины.length > 0
   return (
     <>
-      <tr className={`border-t border-border/30 ${есть ? 'cursor-pointer hover:bg-accent/20' : ''}`}
-          onClick={() => есть && открыть(!открыта)}>
+      {/* Раскрытие — общим хелпером: строка берётся и мышью, и с клавиатуры.
+          Раньше `onClick` висел прямо на `tr`, и причины расхождения были
+          недостижимы без мыши. */}
+      <tr {...rowDrill(есть ? () => открыть(!открыта) : null,
+                       `Смена ${s.shift ?? ''} — показать расхождения`,
+                       'border-t border-border/30', открыта)}>
         <td className="px-3 py-1.5">
           {есть && <ChevronRight className={`mr-1 inline h-3 w-3 transition-transform ${открыта ? 'rotate-90' : ''}`} />}
           {когда(s.closed_at ?? s.opened_at)}
@@ -81,7 +89,7 @@ export function StoreParityPanel() {
     if (станция === null && станции.length > 0) выбрать(станции[0].station_id)
   }, [станция, станции])
 
-  const { data: сверка, isLoading } = useQuery({
+  const { data: сверка, isLoading, error, refetch } = useQuery({
     queryKey: ['store-reconcile', company.id, станция],
     queryFn: () => getStoreReconcile(станция),
     enabled: станция !== null,
@@ -94,6 +102,26 @@ export function StoreParityPanel() {
 
   const кр = сверка?.criterion
   const прогресс = кр ? Math.min(100, Math.round((кр.days / Math.max(1, кр.target_days)) * 100)) : 0
+  // Свежесть важнее обрыва: серия, оборвавшаяся месяц назад, и серия, которая
+  // просто не продолжается неделю, — разные новости, и вторая сейчас важнее.
+  const несвежая = (кр?.stale ?? 0) > 0
+
+  // Пока сверка не пришла, критерий не показывается вовсе. Раньше рисовался
+  // «0 из 14 · серия ещё не начиналась» — при каждом открытии экран сначала
+  // сообщал, что доказательства нет.
+  if (error) {
+    return (
+      <div className="space-y-4 p-6">
+        <h3 className="text-base font-semibold">Сверка с 1С</h3>
+        <div className="text-sm text-red-400/90">
+          Не удалось получить сверку — это сбой запроса, а не отсутствие данных.{' '}
+          <button type="button" className="underline underline-offset-2" onClick={() => refetch()}>
+            Повторить
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-4 p-6">
@@ -126,23 +154,35 @@ export function StoreParityPanel() {
           <div className="text-sm font-medium">
             Чистых дней подряд:{' '}
             <span className={`tabular-nums ${кр?.met ? 'text-emerald-400/90' : ''}`}>
-              {кр?.days ?? 0}
+              {кр ? кр.days : '—'}
             </span>
             <span className="text-muted-foreground"> из {кр?.target_days ?? 14}</span>
+            {/* Выполнение критерия — словами, а не одним зелёным цветом:
+                иначе главный ответ экрана недоступен без цветового зрения. */}
+            {кр && (
+              <span className={`ml-2 text-xs font-normal ${кр.met ? 'text-emerald-400/90' : 'text-muted-foreground'}`}>
+                {кр.met ? '· критерий выполнен' : '· критерий не выполнен'}
+              </span>
+            )}
           </div>
           <div className="text-xs text-muted-foreground">
-            {кр?.from ? `окно ${когда(кр.from)} — ${когда(кр.to)}` : 'серия ещё не начиналась'}
+            {isLoading ? 'считаем серию…'
+              : кр?.from ? `окно ${когда(кр.from)} — ${когда(кр.to)}` : 'серия ещё не начиналась'}
           </div>
         </div>
         <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
-          <div className={`h-full ${кр?.met ? 'bg-emerald-500/80' : 'bg-primary/70'}`}
+          <div className={`h-full ${кр?.met ? 'bg-emerald-500/80' : несвежая ? 'bg-amber-500/70' : 'bg-primary/70'}`}
                style={{ width: `${прогресс}%` }} />
         </div>
         <div className="mt-2 text-xs text-muted-foreground">
-          {кр?.broken_by
-            ? <>серию оборвал день {когда(кр.broken_by)}</>
-            : кр?.stale
-              ? <>последняя сверка была {кр.stale} дн. назад — серия считается несвежей</>
+          {/* Несвежесть идёт первой: серия может быть длинной и оборванной год
+              назад, но если сверки нет неделю — новость именно эта. Раньше ветка
+              «несвежая» была недостижима, потому что обрыв есть почти всегда. */}
+          {несвежая
+            ? <>последний сверенный день — {когда(кр?.to)}, отставание {кр?.stale} дн.: сверка не идёт{' '}
+                {кр?.broken_by && <>(до этого серию оборвал {когда(кр.broken_by.дата)} — {кр.broken_by.статус})</>}</>
+            : кр?.broken_by
+              ? <>серию оборвал {когда(кр.broken_by.дата)} — {кр.broken_by.статус}</>
               : 'дни обязаны идти подряд по календарю и заканчиваться сегодняшним днём'}
         </div>
       </div>
@@ -151,6 +191,13 @@ export function StoreParityPanel() {
         <div className="rounded-lg border border-border/50 bg-card/40 p-3">
           <div className="text-[11px] text-muted-foreground">Сверено смен</div>
           <div className="mt-0.5 text-xl font-semibold tabular-nums">{сверка?.shifts_compared ?? 0}</div>
+          {/* Окно запроса — часть цифры: строки «нет пары» занимают в нём место
+              наравне со сверенными, и потолок молча срезает доказательство. */}
+          {сверка?.total != null && сверка.limit != null && сверка.total > сверка.limit && (
+            <div className="mt-0.5 text-[11px] text-muted-foreground">
+              показаны {сверка.limit} последних смен из {сверка.total}
+            </div>
+          )}
         </div>
         <div className="rounded-lg border border-border/50 bg-card/40 p-3">
           <div className="text-[11px] text-muted-foreground">Совпало</div>

@@ -12,14 +12,22 @@
  */
 import type { KeyboardEvent } from 'react'
 
-export function rowDrill(open: (() => void) | null, label?: string, base = '') {
+export function rowDrill(open: (() => void) | null, label?: string, base = '',
+                         expanded?: boolean) {
   if (!open) {
     // Нечего раскрывать (документ без строк, агрегат) — состояние видно и ассистивно.
     return { 'aria-disabled': true as const, className: `${base} opacity-60`.trim() }
   }
+  // Раскрытие бывает двух видов: модалка (по умолчанию) и продолжение записи
+  // следующей строкой. Второму `aria-haspopup="dialog"` врёт — ничего не
+  // всплывает; такой вызывающий передаёт своё состояние и получает
+  // `aria-expanded`.
+  const раскрытие = expanded === undefined
+    ? { 'aria-haspopup': 'dialog' as const }
+    : { 'aria-expanded': expanded }
   return {
     tabIndex: 0,
-    'aria-haspopup': 'dialog' as const,
+    ...раскрытие,
     'aria-label': label,
     className: `${base} cursor-pointer hover:bg-accent/20`.trim(),
     onClick: open,

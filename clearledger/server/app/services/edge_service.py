@@ -269,7 +269,25 @@ async def reconcile(db: AsyncSession, company_id, station_id: int | None = None,
         "clean": mismatched == 0 and matched > 0,
         "criterion": streak,
         "shifts": shifts,
+        # Сколько смен всего против того, сколько влезло в окно. Строки «нет
+        # пары» занимают место наравне со сверенными: при потолке 60 их набралось
+        # 21, и «сверено 39» читалось как весь объём доказательства вместо 59.
+        "limit": limit,
+        "total": await _всего_смен(db, company_id, station_id),
     }
+
+
+async def _всего_смен(db: AsyncSession, company_id, station_id: int | None) -> int:
+    """Сколько смен станции вообще известно — знаменатель для окна сверки."""
+    ф = " AND station_id = :st" if station_id is not None else ""
+    p = {"cid": company_id}
+    if station_id is not None:
+        p["st"] = station_id
+    return int((await db.execute(text(f"""
+        SELECT count(DISTINCT (station_id,
+                               coalesce(shift_internal_no::text, shift_number)))
+        FROM edge_packets WHERE company_id = :cid AND kind = 'shift'{ф}
+    """), p)).scalar() or 0)
 
 
 def _shift_date(row: dict) -> str | None:
@@ -332,22 +350,25 @@ def _streak(shifts: list[dict], today: date | None = None) -> dict:
         подряд.append(д)
         ожидаемый = текущий - timedelta(days=1)
 
-    свежесть = None
+    # Отставание — числом дней, а не фразой. Фраза уезжала в поле, которое
+    # фронт печатает как «последняя сверка была {stale} дн. назад», и предложение
+    # складывалось само с собой.
+    отставание = None
     if подряд:
         сегодня = today or datetime.now(timezone.utc).date()
-        отставание = (сегодня - date.fromisoformat(подряд[0])).days
-        if отставание > 1:
-            свежесть = f"последний сверенный день — {подряд[0]}, отставание {отставание} дн."
+        разрыв = (сегодня - date.fromisoformat(подряд[0])).days
+        if разрыв > 1:
+            отставание = разрыв
 
     return {
         "target_days": 14,
         "days": len(подряд),
         # Серия на исторических данных критерий не закрывает: он о том, что
         # канал сходится СЕЙЧАС.
-        "met": len(подряд) >= 14 and свежесть is None,
+        "met": len(подряд) >= 14 and отставание is None,
         "from": подряд[-1] if подряд else None,
         "to": подряд[0] if подряд else None,
-        "stale": свежесть,
+        "stale": отставание,
         "broken_by": сорвала,
     }
 
@@ -784,7 +805,13 @@ async def parity(db: AsyncSession, company_id, station_id: int, days: int = 30) 
     """Что 1С делает за период и что за тот же период делаем мы."""
     rows = (await db.execute(text("""
         WITH src AS (
-            SELECT CASE WHEN p.source LIKE 'Edge%' THEN 'ledger' ELSE 'onec' END AS сторона,
+            -- Сторона «1С» — только выгрузка центральной базы. Наш собственный
+            -- контур приезжает под двумя именами: агент станции («Edge Agent
+            -- 208») и перенос Ledger («TradeLedger»). Пока второй попадал в
+            -- 1С, он приписывал ей наши же документы: 76 смен вместо 73,
+            -- техкарт 44 вместо 32.
+            SELECT CASE WHEN p.source LIKE 'Edge%' OR p.source LIKE 'TradeLedger%'
+                        THEN 'ledger' ELSE 'onec' END AS сторона,
                    d->>'Тип' AS вид,
                    -- Считаем ДОКУМЕНТЫ, а не вхождения в пакеты. Техкарты едут
                    -- вместе с каждым выпуском (так делает и 1С), поэтому 32
@@ -797,11 +824,15 @@ async def parity(db: AsyncSession, company_id, station_id: int, days: int = 30) 
                    -- пересборке он пересчитывается. Печатный номер смены тоже
                    -- не ключ: он строится из даты открытия, и одна смена 208
                    -- приехала под двумя разными печатными номерами.
+                   -- У документов не из смены к номеру добавляется дата: на 208
+                   -- девять печатных номеров приходятся на две-три разные даты,
+                   -- и по одному номеру схлопывались четыре разных выпуска.
                    CASE WHEN d->>'Тип' = 'retail_sale_sidegoods'
                         THEN 'смена:' || coalesce(
                                  nullif(p.payload->'Смена'->>'НомерСменыВнутр', '0'),
                                  p.packet_uuid)
-                        ELSE coalesce(nullif(d->>'Номер', ''), md5(d::text)) END AS ид,
+                        ELSE coalesce(nullif(d->>'Номер', ''), md5(d::text))
+                             || ':' || coalesce(left(d->>'Дата', 10), '') END AS ид,
                    coalesce((p.payload->'Смена'->>'Закрытие')::timestamptz,
                             p.received_at) AS момент
             FROM edge_packets p, jsonb_array_elements(p.payload->'Документы') d

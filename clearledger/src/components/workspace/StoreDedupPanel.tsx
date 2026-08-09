@@ -560,7 +560,17 @@ export function StoreDedupPanel() {
     }
   }, [jobs]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const refreshing = jobs.some((j) => j.kind === 'refresh' && ['pending', 'running'].includes(j.status))
+  // Кнопка ждёт станцию, но не вечно. Задание от 05.08 висело в pending четвёртый
+  // день — нода его не забрала, — и всё это время «Обновить срез» была
+  // заблокирована подписью «Станция собирает…», то есть сообщала о работе,
+  // которой нет. Через час задание считается зависшим: срез можно запросить снова.
+  const ЧАС = 3_600_000
+  const свежее = (j: { created_at?: string | null }) =>
+    !j.created_at || Date.now() - new Date(j.created_at).getTime() < ЧАС
+  const refreshing = jobs.some(
+    (j) => j.kind === 'refresh' && ['pending', 'running'].includes(j.status) && свежее(j))
+  const зависшее = jobs.find(
+    (j) => j.kind === 'refresh' && j.status === 'pending' && !свежее(j))
 
   // Разобрана группа, по которой принято решение — включая «Перецеплено» и «Не дубль».
   // Раньше считались только merged+done, и 18 перецепленных групп не попадали в счётчик:
@@ -658,7 +668,13 @@ export function StoreDedupPanel() {
           <Kpi label="Групп в контуре 208" value={fmt(sum.scopedGroups)} hint={`из ${fmt(sum.dupGroups)} · вне контура ${fmt(sum.outOfScopeGroups)}`} />
           <Kpi label="Разобрано" value={`${fmt(sum.scopedResolved)} / ${fmt(sum.scopedGroups)}`}
             hint={`осталось решить ${fmt((sum.scopedGroups ?? 0) - (sum.scopedResolved ?? 0))}`} />
-          <Kpi label="Рассинхрон цен" value={fmt(sum.priceDesyncGroups)} hint="разные цены, касса 208 бьёт" warn={(sum.priceDesyncGroups ?? 0) > 0} />
+          {/* Цены в дампе станции не заполнены ни у одной из 5507 привязок, и
+              «рассинхрон» считается по пустоте: плитка горела красным на семи
+              группах, все из которых давно в архиве. Показываем только когда за
+              числом действительно стоят цены. */}
+          {(sum.priceDesyncGroups ?? 0) > 0 && (sum.pricesLoaded ?? 0) > 0 && (
+            <Kpi label="Рассинхрон цен" value={fmt(sum.priceDesyncGroups)} hint="разные цены, касса 208 бьёт" warn />
+          )}
           <Kpi label="В ассортименте" value={fmt(sum.assortmentCards)} hint="не дубли (исключены)" />
           <Kpi label="Привязок кассы" value={fmt(sum.nsActive)} hint="активных кодов НС" />
           <Kpi label="Нет в ЦБ" value={fmt(sum.cbMissing)} warn={(sum.cbMissing ?? 0) > 0}
@@ -678,12 +694,15 @@ export function StoreDedupPanel() {
           onChange={(e) => { const f = e.target.files?.[0]; if (f) reloadMut.mutate(f); if (fileRef.current) fileRef.current.value = '' }} />
         <Button size="sm" variant="outline" className="h-8 text-xs"
           onClick={() => refreshMut.mutate()} disabled={refreshMut.isPending || refreshing}
-          title="Станция 208 снимет свежий срез с локальной 1С и зальёт сюда (≈1 мин). Ночью то же самое идёт по расписанию.">
+          title={зависшее
+            ? 'Прошлое задание станция не забрала — видимо, планировщик на 208 стоит. Кнопка ставит новое.'
+            : 'Станция 208 снимет свежий срез с локальной 1С и зальёт сюда (≈1 мин).'}>
           {refreshMut.isPending || refreshing ? <Loader2 className="mr-1 size-3.5 animate-spin" /> : <RefreshCw className="mr-1 size-3.5" />}
-          {refreshing ? 'Станция собирает…' : 'Обновить срез'}
+          {refreshing ? 'Станция собирает…' : зависшее ? 'Запросить срез заново' : 'Обновить срез'}
         </Button>
         <Button size="sm" variant="ghost" className="h-8 px-2 text-xs text-muted-foreground"
           onClick={() => fileRef.current?.click()} disabled={reloadMut.isPending}
+          aria-label="Залить срез файлом"
           title="Запасной ход: залить дамп файлом, если станция недоступна">
           {reloadMut.isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Upload className="size-3.5" />}
         </Button>
