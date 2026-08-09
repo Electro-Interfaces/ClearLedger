@@ -362,10 +362,11 @@ async def summary(db: AsyncSession, cid: uuid.UUID) -> dict:
         "dupGroups": len(dup_groups), "excessCards": excess, "liveDupGroups": live_groups,
         "scopedGroups": len(scoped), "outOfScopeGroups": len(dup_groups) - len(scoped),
         "priceDesyncGroups": price_desync,
-        # Сколько привязок кассы вообще принесли цену. Дамп станции её сейчас не
-        # содержит (0 из 5507), поэтому «рассинхрон цен» считается по пустоте —
-        # экран обязан знать, стоит ли за числом хоть один прочитанный ценник.
-        "pricesLoaded": sum(1 for b in binds if b.retail_price is not None),
+        # Сколько цен вообще прочитано. Считаем по КАРТОЧКАМ (секция #PRICES
+        # дампа, 5894 из 7250), а не по привязкам кассы: у привязки цена стоит
+        # только там, где её несёт сам код (28 из 1812 активных), и по ней
+        # выходило, что цен нет вовсе, хотя рассинхрон считать есть по чему.
+        "pricesLoaded": sum(1 for c in cards if c.price is not None),
         "assortmentCards": sum(1 for c in cards if c.is_assortment),
         "nsActive": len(binds), "nsOnMarked": on_marked, "multiCodeCards": multi_code_cards,
         "cbLinked": len(cb_cards),
