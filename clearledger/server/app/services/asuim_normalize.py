@@ -871,15 +871,28 @@ async def ingest_asuim_file(
     if view == "users":
         return await ingest_customers(db, company_id, rows)
     if view == "rfid":
-        return await ingest_rfid_cards(db, company_id, rows)
+        res = await ingest_rfid_cards(db, company_id, rows)
+        # Свежие карты — повод развернуть их в сессии: номер, статус и владелец
+        # живут в строке сессии, иначе разбор идёт по невнятному UID.
+        from app.services.charge_sessions_normalize import enrich_session_cards
+        cards = await enrich_session_cards(db, company_id)
+        res["message"] = f"{res['message']}; {cards['message']}"
+        return res
     if view == "tariffs":
         return await ingest_tariffs(db, company_id, rows)
     if view in ("brands", "groups", "cars"):
         return await ingest_references(db, company_id, view, rows)
     if view == "sessions":
         from app.services.charge_sessions_normalize import ingest_charge_sessions
-        return await ingest_charge_sessions(db, company_id, map_sessions(rows),
-                                            channel_id=channel_id, mode=mode, log_id=log_id)
+        from app.services.charge_sessions_normalize import (
+            enrich_session_cards, ingest_charge_sessions,
+        )
+        res = await ingest_charge_sessions(db, company_id, map_sessions(rows),
+                                           channel_id=channel_id, mode=mode, log_id=log_id)
+        if res.get("status") == "success":
+            cards = await enrich_session_cards(db, company_id)
+            res["message"] = f"{res.get('message', '')}; {cards['message']}"
+        return res
     return {"status": "skipped", "kind": f"asuim_{view}",
             "message": f"витрина «{VIEW_LABELS.get(view, view)}»: приёмника в Учёте нет, "
                        f"файл не загружен ({len(rows)} строк)"}

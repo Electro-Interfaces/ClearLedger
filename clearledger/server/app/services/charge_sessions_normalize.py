@@ -15,7 +15,7 @@ from typing import Any
 
 import re
 
-from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy import delete, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import async_session_factory
@@ -622,3 +622,58 @@ async def enrich_from_registry(db: AsyncSession, company_id, channel_id=None) ->
     await rebuild_mart(db, company_id)  # витрина L3 — атомарно с данными (коммит в bump)
     await bump_version(db, company_id)  # обогащение меняет выручку → сброс кеша
     return await _enrichment_result(db, company_id, len(orgs), named, priced, matched)
+
+
+async def enrich_session_cards(db: AsyncSession, company_id) -> dict[str, Any]:
+    """Проставить сессиям данные их RFID-карты (номер, статус, владелец).
+
+    В выгрузке сессия несёт от карты только UID вида «26AA5969». По нему нельзя
+    ни отобрать заправки по заблокированной карте, ни назвать владельца, ни
+    сгруппировать реестр — поэтому справочник витрины разворачивается в саму
+    строку сессии, как это уже сделано для корпоративных клиентов.
+
+    Отдельно помечаются заправки НЕ владельцем карты: телефон карты не совпал с
+    телефоном сессии. Карта, которой заряжается кто-то другой, — законный случай
+    (служебная машина, каршеринг), но его надо видеть списком.
+
+    Идемпотентно: повторный запуск переписывает те же значения. Вызывается после
+    загрузки сессий и после загрузки карт — свежими могут оказаться и те, и те.
+    """
+    res = await db.execute(text("""
+        update charge_sessions s
+           set card_number       = c.number,
+               card_status       = c.status,
+               card_owner_ext_id = c.customer_ext_id,
+               card_foreign      = (c.phone is not null and s.user_id is not null
+                                    and c.phone <> s.user_id)
+          from ezs_rfid_cards c
+         where c.company_id = s.company_id
+           and c.uid = s.rfid
+           and s.company_id = :cid
+           and s.rfid is not null and s.rfid <> ''
+           and (s.card_number is distinct from c.number
+                or s.card_status is distinct from c.status
+                or s.card_owner_ext_id is distinct from c.customer_ext_id
+                or s.card_foreign is distinct from (c.phone is not null and s.user_id is not null
+                                                    and c.phone <> s.user_id))
+    """), {"cid": str(company_id)})
+    updated = res.rowcount or 0
+
+    stat = (await db.execute(text("""
+        select count(*) filter (where rfid is not null and rfid <> '')      as by_card,
+               count(*) filter (where card_number is not null)              as enriched,
+               count(*) filter (where card_foreign)                          as foreign_use,
+               count(*) filter (where card_status is not null
+                                  and card_status not in ('Активная'))       as not_active
+          from charge_sessions where company_id = :cid
+    """), {"cid": str(company_id)})).one()
+
+    msg = (f"карты в сессиях: обогащено {int(stat.enriched)} из {int(stat.by_card)}"
+           f"; заправок не владельцем {int(stat.foreign_use)}")
+    if stat.not_active:
+        msg += f"; по неактивным картам {int(stat.not_active)}"
+    logger.info("enrich_session_cards: обновлено %s строк; %s", updated, msg)
+    return {"status": "success", "updated": updated,
+            "by_card": int(stat.by_card), "enriched": int(stat.enriched),
+            "foreign": int(stat.foreign_use), "not_active": int(stat.not_active),
+            "message": msg}

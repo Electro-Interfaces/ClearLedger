@@ -10,6 +10,10 @@
 её не имеет и чека тоже — это попытка оплаты, а не оплата. Статусы 0 и 2 — одно
 и то же успешное состояние в двух кодировках (02.04.2026 АСУиМ сменил код).
 
+**Разрыв считается только по рознице.** У юрлиц постоплата по договору: эквайринга
+по их сессиям нет вовсе, и включать их в сравнение — значит объявить расхождением
+2,5 млн ₽ там, где его нет. Корп-начисления показываются отдельной величиной.
+
 Шесть расхождений, каждое со своим смыслом:
   • `impossible`  — сессия противоречит физике: средняя мощность выше предела;
   • `double`      — на одну сессию несколько успешных списаний;
@@ -57,10 +61,33 @@ KINDS: list[Kind] = [
          "Ток отпущен розничному клиенту, платежа нет вовсе — это задолженность."),
     Kind("no_receipt", "Списано без фискального чека",
          "Деньги получены, чек ОФД не выбит: разрыв в фискализации."),
+    Kind("overpaid", "Списано больше начисленного",
+         "Банк снял больше, чем начислено по сессии, — это деньги клиента. "
+         "На пилоте таких нет ни одной, и правило стоит именно чтобы это было видно."),
     Kind("orphan", "Платёж без сессии",
          "Деньги пришли, а зарядки в Учёте нет. На краях периода это глубина выгрузки, "
          "внутри периода — потерянная сессия."),
+    # ── Платёжные расхождения: считаются по строкам эквайринга, а не по сессиям ──
+    Kind("refund_full", "Полный возврат",
+         "Холд снят и возвращён целиком: зарядка не состоялась. Деньги клиенту вернули, "
+         "но занятый коннектор и неудачный приезд остались."),
+    Kind("hold_rule", "Холд не сходится с возвратом",
+         "Нарушено «холд − возврат = списание»: у операции не сходится трёхтактная "
+         "схема оплаты картой, разбирать с банком."),
+    Kind("receipt_no_txn", "Чек без банковской операции",
+         "Фискальный чек выбит, а банковской транзакции нет — чек не на что."),
+    Kind("not_card", "Оплата не картой",
+         "Операция помечена как оплаченная не картой: другой канал расчёта, "
+         "который не покрывается эквайрингом."),
 ]
+
+# Расхождения, которые живут в самих платежах: тут ключ — строка эквайринга.
+_PAY_WHERE = {
+    "refund_full": "pp.refund_amount > 0 and pp.amount <= 0",
+    "hold_rule": "pp.hold_amount > 0 and abs(pp.hold_amount - pp.refund_amount - pp.amount) >= 0.01",
+    "receipt_no_txn": "pp.receipt_url is not null and pp.bank_txn_id is null",
+    "not_card": "pp.by_card is false",
+}
 
 _SESSION_JOIN = """
     from charge_sessions s
@@ -84,6 +111,7 @@ _WHERE = {
     "no_payment": "s.energy_kwh > 0 and pay.pay_all = 0 "
                   "and s.user_type is distinct from 'ЮЛ'",
     "no_receipt": "pay.pay_ok > 0 and pay.receipts = 0",
+    "overpaid": "pay.pay_ok > 0 and pay.paid - s.amount > :eps",
 }
 
 
@@ -103,13 +131,37 @@ async def reconciliation(db: AsyncSession, company_id, df: date, dt: date) -> di
     totals = (await db.execute(text(f"""
         select count(*) as sessions,
                coalesce(sum(coalesce(s.client_amount, s.amount)), 0) as amount,
+               -- Розница: только по ней ожидается эквайринг, только её и сверяем.
+               coalesce(sum(s.amount) filter (where s.client_name is null), 0) as retail_amount,
+               coalesce(sum(coalesce(s.client_amount, 0)) filter (
+                   where s.client_name is not null), 0) as corp_amount,
                coalesce(sum(s.energy_kwh), 0) as energy,
-               coalesce(sum(pay.paid), 0) as paid
+               coalesce(sum(pay.paid), 0) as paid,
+               -- Энергия недостоверных строк: отпуск завышен ровно на неё.
+               coalesce(sum(s.energy_kwh) filter (
+                   where s.duration_min > 0 and s.energy_kwh > 0
+                     and s.energy_kwh / (s.duration_min / 60.0) > :maxkw), 0) as bad_energy
         {join}
     """), p)).one()
 
     items: list[dict[str, Any]] = []
     for k in KINDS:
+        if k.key in _PAY_WHERE:
+            row = (await db.execute(text(f"""
+                select count(*) as n,
+                       coalesce(sum(pp.amount), 0) as amount,
+                       coalesce(sum(pp.refund_amount), 0) as refund
+                  from charge_payments pp
+                 where pp.company_id = :cid and pp.paid_at >= :lo and pp.paid_at < :hi
+                   and ({_PAY_WHERE[k.key]})
+            """), p)).one()
+            amount = float(row.amount or 0)
+            # Для полного возврата «деньги» — это возвращённая сумма, а не списание.
+            shown = float(row.refund or 0) if k.key == "refund_full" else amount
+            items.append({"key": k.key, "label": k.label, "hint": k.hint,
+                          "count": int(row.n or 0), "amount": round(shown, 2),
+                          "paid": round(amount, 2), "gap": 0.0})
+            continue
         if k.key == "orphan":
             row = (await db.execute(text("""
                 select count(*) as n, coalesce(sum(pp.amount), 0) as amount
@@ -145,7 +197,12 @@ async def reconciliation(db: AsyncSession, company_id, df: date, dt: date) -> di
             "amount": round(float(totals.amount or 0), 2),      # начислено по сессиям
             "paid": round(float(totals.paid or 0), 2),          # списано банком
             "energy_kwh": round(float(totals.energy or 0), 1),
-            "gap": round(float(totals.amount or 0) - float(totals.paid or 0), 2),
+            "bad_energy_kwh": round(float(totals.bad_energy or 0), 1),
+            # Начислено рознице и оплачено картой — сопоставимые величины.
+            "retail_amount": round(float(totals.retail_amount or 0), 2),
+            # Корпоратив идёт по договору и в сверку эквайринга не входит.
+            "corp_amount": round(float(totals.corp_amount or 0), 2),
+            "gap": round(float(totals.retail_amount or 0) - float(totals.paid or 0), 2),
         },
         "kinds": items,
     }
@@ -158,7 +215,22 @@ async def reconciliation_list(db: AsyncSession, company_id, df: date, dt: date,
     p = {"cid": str(company_id), "lo": lo, "hi": hi, "maxkw": MAX_POWER_KW,
          "eps": MONEY_EPS, "lim": max(1, min(limit, 2000)), **acl_params()}
 
-    if kind == "orphan":
+    if kind in _PAY_WHERE:
+        rows = (await db.execute(text(f"""
+            select pp.payment_ext_id as id, pp.session_ext_id as session,
+                   s.station_name as station, pp.paid_at as at,
+                   coalesce(s.energy_kwh, 0) as energy,
+                   coalesce(s.amount, 0) as amount,
+                   pp.amount as paid, (pp.receipt_url is not null) as receipt, 1 as payments,
+                   null::numeric as power_kw
+              from charge_payments pp
+              left join charge_sessions s
+                     on s.company_id = pp.company_id and s.session_ext_id = pp.session_ext_id
+             where pp.company_id = :cid and pp.paid_at >= :lo and pp.paid_at < :hi
+               and ({_PAY_WHERE[kind]})
+             order by coalesce(pp.refund_amount, 0) + pp.amount desc limit :lim
+        """), p)).mappings().all()
+    elif kind == "orphan":
         rows = (await db.execute(text("""
             select pp.payment_ext_id as id, pp.session_ext_id as session, null as station,
                    pp.paid_at as at, 0 as energy, 0 as amount, pp.amount as paid,
@@ -198,9 +270,22 @@ async def reconciliation_list(db: AsyncSession, company_id, df: date, dt: date,
     } for r in rows]
 
 
+# Разрезы расхождений. Вопрос «где не сходится» задают по-разному: сервису важна
+# станция, финансам — месяц и клиент, эксплуатации — тип разъёма и канал запуска.
+BY_DIMS = {
+    "station": "coalesce(s.station_code, '—')",
+    "region": "coalesce(r.name, s.region, '—')",
+    "month": "to_char(s.started_at, 'YYYY-MM')",
+    "connector": "coalesce(s.connector_type, '—')",
+    "charge_type": "coalesce(s.charge_type, '—')",
+    "client": "coalesce(s.client_name, 'Розница')",
+    "card_status": "coalesce(s.card_status, '—')",
+}
+
+
 async def reconciliation_by(db: AsyncSession, company_id, df: date, dt: date,
                             by: str = "station", limit: int = 100) -> list[dict[str, Any]]:
-    """Где копятся расхождения: разрез сверки по станции или региону.
+    """Где копятся расхождения: разрез сверки по выбранному измерению.
 
     Список расхождений отвечает «какие строки битые», этот разрез — «где именно».
     Станция, у которой из месяца в месяц лезут сессии против физики, — это не
@@ -213,8 +298,7 @@ async def reconciliation_by(db: AsyncSession, company_id, df: date, dt: date,
     # По станции группируем ПО КОДУ — он идентичность станции, имя может меняться
     # (волна переименований CPO). Подпись собираем как в разрезах: «Имя (код)»,
     # чтобы строки этого разреза соединялись со списками «Надёжности».
-    dim = ("coalesce(r.name, s.region, '—')" if by == "region"
-           else "coalesce(s.station_code, '—')")
+    dim = BY_DIMS.get(by, BY_DIMS["station"])
     join_dim = ("""
         left join service_locations l on l.id = s.location_id
         left join regions r on r.id = l.region_id
@@ -225,7 +309,16 @@ async def reconciliation_by(db: AsyncSession, company_id, df: date, dt: date,
                max(s.station_name) as station_name,
                count(*) as sessions,
                coalesce(sum(coalesce(s.client_amount, s.amount)), 0) as amount,
+               coalesce(sum(s.amount) filter (where s.client_name is null), 0) as retail_amount,
+               coalesce(sum(coalesce(s.client_amount, 0)) filter (
+                   where s.client_name is not null), 0) as corp_amount,
                coalesce(sum(pay.paid), 0) as paid,
+               -- Энергия рядом с деньгами: битые строки завышают не только
+               -- выручку, но и отпуск — в отчётности это разные показатели.
+               coalesce(sum(s.energy_kwh), 0) as energy,
+               coalesce(sum(s.energy_kwh) filter (
+                   where s.duration_min > 0 and s.energy_kwh > 0
+                     and s.energy_kwh / (s.duration_min / 60.0) > :maxkw), 0) as impossible_energy,
                count(*) filter (where s.duration_min > 0 and s.energy_kwh > 0
                                   and s.energy_kwh / (s.duration_min / 60.0) > :maxkw) as impossible,
                coalesce(sum(coalesce(s.client_amount, s.amount)) filter (
@@ -255,9 +348,9 @@ async def reconciliation_by(db: AsyncSession, company_id, df: date, dt: date,
          group by 1
         having count(*) filter (where s.duration_min > 0 and s.energy_kwh > 0
                                   and s.energy_kwh / (s.duration_min / 60.0) > :maxkw) > 0
-            or abs(coalesce(sum(coalesce(s.client_amount, s.amount)), 0)
+            or abs(coalesce(sum(s.amount) filter (where s.client_name is null), 0)
                    - coalesce(sum(pay.paid), 0)) > :eps
-         order by abs(coalesce(sum(coalesce(s.client_amount, s.amount)), 0)
+         order by abs(coalesce(sum(s.amount) filter (where s.client_name is null), 0)
                       - coalesce(sum(pay.paid), 0)) desc
          limit :lim
     """.format(acl=acl_sql("s.location_id"), dim=dim, join_dim=join_dim)),
@@ -266,16 +359,24 @@ async def reconciliation_by(db: AsyncSession, company_id, df: date, dt: date,
     out: list[dict[str, Any]] = []
     for r in rows:
         amount, paid = float(r["amount"] or 0), float(r["paid"] or 0)
+        retail = float(r["retail_amount"] or 0)
+        corp = float(r["corp_amount"] or 0)
         code = r["label"] if by == "station" else None
+        energy = float(r["energy"] or 0)
+        bad_energy = float(r["impossible_energy"] or 0)
         label = (f"{(r['station_name'] or 'Станция').strip()} ({code})"
                  if by == "station" else r["label"])
         out.append({
             "label": label, "code": code, "sessions": int(r["sessions"]),
             "amount": round(amount, 2), "paid": round(paid, 2),
-            "gap": round(amount - paid, 2),
-            "gapPct": round((amount - paid) / amount * 100, 1) if amount else 0.0,
+            "retailAmount": round(retail, 2), "corpAmount": round(corp, 2),
+            "gap": round(retail - paid, 2),
+            "gapPct": round((retail - paid) / retail * 100, 1) if retail else 0.0,
             "impossible": int(r["impossible"]),
             "impossibleAmount": round(float(r["impossible_amount"] or 0), 2),
+            "energy": round(energy, 1),
+            "impossibleEnergy": round(bad_energy, 1),
+            "impossibleEnergyPct": round(bad_energy / energy * 100, 1) if energy else 0.0,
             "underpaid": int(r["underpaid"]), "multi": int(r["multi"]),
             "noReceipt": int(r["no_receipt"]),
             "badMonths": int(r["bad_months"] or 0), "months": int(r["months"] or 0),

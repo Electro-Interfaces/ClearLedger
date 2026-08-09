@@ -61,6 +61,32 @@ STORE_RECEIPT_MIGRATION_DDL = (
     "ALTER TABLE store_receipts ADD COLUMN IF NOT EXISTS accounting_revision "
     "INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE store_receipts ADD COLUMN IF NOT EXISTS content_hash CHAR(64)",
+    "ALTER TABLE space_inbound_keys ADD COLUMN IF NOT EXISTS station_id INTEGER",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_space_inbound_key_station_active "
+    "ON space_inbound_keys (company_id, station_id) "
+    "WHERE station_id IS NOT NULL AND revoked_at IS NULL",
+    """
+    DO $$ BEGIN
+        IF NOT EXISTS (
+            -- current_schema(), а не 'public': в пространстве Ядро живёт в схеме
+            -- `core` (базы Ядра и Поддержки сведены). С жёстким 'public' проверка
+            -- ничего не находит, ALTER идёт по search_path и падает
+            -- DuplicateColumnError — бэкенд не поднимается вовсе.
+            SELECT 1 FROM information_schema.columns
+             WHERE table_schema = current_schema() AND table_name = 'counterparties'
+               AND column_name = 'lifecycle_status'
+        ) THEN
+            ALTER TABLE counterparties ADD COLUMN lifecycle_status
+                VARCHAR(20) NOT NULL DEFAULT 'draft';
+            UPDATE counterparties SET lifecycle_status = 'verified'
+             WHERE external_ref IS NOT NULL AND btrim(external_ref) <> ''
+               AND btrim(inn) <> '' AND btrim(name) <> '';
+        END IF;
+    END $$
+    """,
+    "ALTER TABLE warehouses ADD COLUMN IF NOT EXISTS organization_id UUID "
+    "REFERENCES organizations(id) ON DELETE RESTRICT",
+    "ALTER TABLE warehouses ADD COLUMN IF NOT EXISTS station_id INTEGER",
     """
     DO $$ BEGIN
         IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -78,6 +104,11 @@ STORE_RECEIPT_MIGRATION_DDL = (
             ALTER TABLE store_receipts ADD CONSTRAINT ck_store_receipt_content_hash
             CHECK (content_hash IS NULL OR content_hash ~ '^[0-9a-f]{64}$');
         END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                        WHERE conname = 'ck_counterparty_lifecycle_status') THEN
+            ALTER TABLE counterparties ADD CONSTRAINT ck_counterparty_lifecycle_status
+            CHECK (lifecycle_status IN ('draft','verified','blocked','archived'));
+        END IF;
     END $$
     """,
     "CREATE INDEX IF NOT EXISTS ix_store_receipts_supplier ON store_receipts (company_id, supplier_id)",
@@ -86,6 +117,8 @@ STORE_RECEIPT_MIGRATION_DDL = (
     "ON store_receipts (company_id, organization_id)",
     "CREATE INDEX IF NOT EXISTS ix_store_receipts_warehouse "
     "ON store_receipts (company_id, warehouse_id)",
+    "CREATE INDEX IF NOT EXISTS ix_warehouses_accounting_scope "
+    "ON warehouses (company_id, organization_id, station_id)",
     "ALTER TABLE store_receipts DROP CONSTRAINT IF EXISTS store_receipts_source_uuid_key",
     "DROP INDEX IF EXISTS ix_store_receipts_source_uuid",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_store_receipts_company_source "
@@ -351,6 +384,30 @@ STORE_RECEIPT_MIGRATION_DDL = (
     "CREATE INDEX IF NOT EXISTS ix_edge_packet_revision_packet "
     "ON edge_packet_revisions (edge_packet_id, received_at)",
     """
+    CREATE TABLE IF NOT EXISTS edge_packet_processing_issues (
+        id UUID PRIMARY KEY,
+        company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+        edge_packet_id UUID NOT NULL REFERENCES edge_packets(id) ON DELETE RESTRICT,
+        revision_id UUID NOT NULL REFERENCES edge_packet_revisions(id) ON DELETE RESTRICT,
+        packet_uuid VARCHAR(64) NOT NULL,
+        content_hash CHAR(64) NOT NULL,
+        phase VARCHAR(30) NOT NULL DEFAULT 'derived',
+        status VARCHAR(20) NOT NULL DEFAULT 'needs_review',
+        error TEXT NOT NULL,
+        error_hash CHAR(64) NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        CONSTRAINT ck_edge_packet_issue_content_hash
+            CHECK (content_hash ~ '^[0-9a-f]{64}$'),
+        CONSTRAINT ck_edge_packet_issue_error_hash
+            CHECK (error_hash ~ '^[0-9a-f]{64}$'),
+        CONSTRAINT ck_edge_packet_issue_status CHECK (status = 'needs_review'),
+        CONSTRAINT uq_edge_packet_processing_issue_error
+            UNIQUE (company_id, packet_uuid, content_hash, error_hash)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS ix_edge_packet_issue_packet "
+    "ON edge_packet_processing_issues (edge_packet_id, created_at)",
+    """
     CREATE OR REPLACE FUNCTION protect_edge_packet_revision()
     RETURNS trigger AS $$
     BEGIN
@@ -363,6 +420,21 @@ STORE_RECEIPT_MIGRATION_DDL = (
     CREATE TRIGGER edge_packet_revision_immutable_trg
     BEFORE UPDATE OR DELETE ON edge_packet_revisions
     FOR EACH ROW EXECUTE FUNCTION protect_edge_packet_revision()
+    """,
+    """
+    CREATE OR REPLACE FUNCTION protect_edge_packet_processing_issue()
+    RETURNS trigger AS $$
+    BEGIN
+        RAISE EXCEPTION 'edge packet processing issues are append-only';
+    END;
+    $$ LANGUAGE plpgsql
+    """,
+    "DROP TRIGGER IF EXISTS edge_packet_processing_issue_immutable_trg "
+    "ON edge_packet_processing_issues",
+    """
+    CREATE TRIGGER edge_packet_processing_issue_immutable_trg
+    BEFORE UPDATE OR DELETE ON edge_packet_processing_issues
+    FOR EACH ROW EXECUTE FUNCTION protect_edge_packet_processing_issue()
     """,
 )
 
@@ -1194,6 +1266,14 @@ async def create_all() -> None:
             "CREATE INDEX IF NOT EXISTS idx_charge_sessions_location ON charge_sessions(location_id)",
             # v2.8: скидка корп-клиента к рознице (каршеринг = 25%; применяется к матрице)
             "ALTER TABLE corporate_clients ADD COLUMN IF NOT EXISTS discount_pct NUMERIC(5,2) NOT NULL DEFAULT 0",
+            # Обогащение сессии картой (витрина АСУиМ): в сессии от карты есть
+            # только UID, а разбор нужен по номеру, статусу и владельцу.
+            "ALTER TABLE charge_sessions ADD COLUMN IF NOT EXISTS card_number VARCHAR(60)",
+            "ALTER TABLE charge_sessions ADD COLUMN IF NOT EXISTS card_status VARCHAR(40)",
+            "ALTER TABLE charge_sessions ADD COLUMN IF NOT EXISTS card_owner_ext_id VARCHAR(40)",
+            "ALTER TABLE charge_sessions ADD COLUMN IF NOT EXISTS card_foreign BOOLEAN",
+            "CREATE INDEX IF NOT EXISTS idx_charge_sessions_card ON charge_sessions(company_id, card_number)",
+            "CREATE INDEX IF NOT EXISTS idx_charge_sessions_card_status ON charge_sessions(company_id, card_status)",
             # v3.9: составные индексы под шаблон WHERE аналитики «Продаж». Одиночный
             # company_id неселективен (≈одна компания на всю таблицу) — диапазонные
             # сканы опирались на голый ix_started_at. Составные ускоряют overview/
@@ -2259,12 +2339,97 @@ async def create_all() -> None:
         # поставщику нужен номер, который в сети один. Статус отвечает, что с
         # документом сделали здесь: принят, проверен, спорный, закрыт.
         for stmt in (
+            "ALTER TABLE store_cheques ADD COLUMN IF NOT EXISTS version "
+            "INTEGER NOT NULL DEFAULT 1",
+            "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint "
+            "WHERE conname = 'ck_store_cheque_version') THEN "
+            "ALTER TABLE store_cheques ADD CONSTRAINT ck_store_cheque_version "
+            "CHECK (version > 0) NOT VALID; END IF; END $$",
+            "ALTER TABLE store_document_projections ADD COLUMN IF NOT EXISTS "
+            "projection_source VARCHAR(20)",
+            "ALTER TABLE store_document_projections ADD COLUMN IF NOT EXISTS "
+            "accounting_group_id UUID",
+            "ALTER TABLE store_document_projections ADD COLUMN IF NOT EXISTS "
+            "document_role VARCHAR(30)",
+            "ALTER TABLE store_document_projections ADD COLUMN IF NOT EXISTS "
+            "source_document_id UUID",
+            "ALTER TABLE store_document_projections ALTER COLUMN vat_amount DROP NOT NULL",
+            "UPDATE store_document_projections SET document_role = CASE "
+            "WHEN source_kind IN ('cheque','store_shift') THEN 'fiscal' "
+            "WHEN source_kind IN ('accounting_doc','accounting_packet',"
+            "'onec_inventory','onec_movement') THEN 'accounting_derived' "
+            "WHEN source_kind IN ('receipt','canonical_entry') THEN 'primary_evidence' "
+            "ELSE 'operational' END WHERE document_role IS NULL",
+            "ALTER TABLE store_document_projections ALTER COLUMN document_role SET NOT NULL",
+            "CREATE INDEX IF NOT EXISTS ix_store_document_projection_accounting_group "
+            "ON store_document_projections (company_id, accounting_group_id)",
+            "CREATE INDEX IF NOT EXISTS ix_store_document_projection_source_document "
+            "ON store_document_projections (company_id, projection_source, source_document_id)",
+            "UPDATE store_document_projections SET projection_source = CASE "
+            "WHEN source_kind IN ('receipt') THEN 'store' "
+            "WHEN source_kind IN ('edge_document') THEN 'edge' "
+            "WHEN source_kind IN ('cheque','store_shift') THEN 'cash' "
+            "WHEN source_kind IN ('onec_inventory','onec_movement') THEN 'onec_legacy' "
+            "WHEN source_kind = 'accounting_doc' THEN 'bp' "
+            "WHEN source_kind = 'canonical_entry' AND "
+            "header->>'fact_origin' IN ('edge','store','onec_legacy','edo','cash','bp') "
+            "THEN header->>'fact_origin' ELSE 'store' END "
+            "WHERE projection_source IS NULL",
+            "ALTER TABLE store_document_projections ALTER COLUMN projection_source SET NOT NULL",
+            "ALTER TABLE store_document_projections DROP CONSTRAINT IF EXISTS "
+            "uq_store_document_projection_source",
+            "ALTER TABLE store_document_projections ADD CONSTRAINT "
+            "uq_store_document_projection_source UNIQUE "
+            "(company_id, projection_source, source_kind, source_record_id)",
+            "DO $$ BEGIN "
+            "IF NOT EXISTS (SELECT 1 FROM pg_constraint "
+            "WHERE conname = 'ck_store_document_projection_source') THEN "
+            "ALTER TABLE store_document_projections ADD CONSTRAINT "
+            "ck_store_document_projection_source CHECK "
+            "(projection_source IN ('edge','store','onec_legacy','edo','cash','bp')) "
+            "NOT VALID; END IF; END $$",
+            "DO $$ BEGIN "
+            "IF NOT EXISTS (SELECT 1 FROM pg_constraint "
+            "WHERE conname = 'ck_store_document_projection_role') THEN "
+            "ALTER TABLE store_document_projections ADD CONSTRAINT "
+            "ck_store_document_projection_role CHECK "
+            "(document_role IN ('primary_evidence','operational','fiscal',"
+            "'accounting_derived')) NOT VALID; END IF; END $$",
             "ALTER TABLE store_doc_meta ADD COLUMN IF NOT EXISTS reg_number VARCHAR(40)",
             "ALTER TABLE store_doc_meta ADD COLUMN IF NOT EXISTS registered_at TIMESTAMPTZ",
             "ALTER TABLE store_doc_meta ADD COLUMN IF NOT EXISTS status "
             "VARCHAR(20) NOT NULL DEFAULT 'принят'",
+            "ALTER TABLE store_doc_meta ADD COLUMN IF NOT EXISTS record_id UUID",
+            "ALTER TABLE store_doc_meta ADD COLUMN IF NOT EXISTS document_id UUID",
+            "ALTER TABLE store_doc_meta ADD COLUMN IF NOT EXISTS revision INTEGER",
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_store_doc_meta_reg "
             "ON store_doc_meta (reg_number) WHERE reg_number IS NOT NULL",
+            "ALTER TABLE store_doc_files ADD COLUMN IF NOT EXISTS record_id UUID",
+            "ALTER TABLE store_doc_files ADD COLUMN IF NOT EXISTS document_id UUID",
+            "ALTER TABLE store_doc_files ADD COLUMN IF NOT EXISTS role VARCHAR(30)",
+            "ALTER TABLE store_doc_files ADD COLUMN IF NOT EXISTS sha256 CHAR(64)",
+            "ALTER TABLE store_doc_files ADD COLUMN IF NOT EXISTS revision INTEGER",
+            "ALTER TABLE store_doc_files ADD COLUMN IF NOT EXISTS author_id UUID "
+            "REFERENCES users(id) ON DELETE SET NULL",
+            "ALTER TABLE store_doc_files ADD COLUMN IF NOT EXISTS tombstoned_at TIMESTAMPTZ",
+            "ALTER TABLE store_doc_files ADD COLUMN IF NOT EXISTS tombstoned_by UUID "
+            "REFERENCES users(id) ON DELETE SET NULL",
+            "ALTER TABLE store_doc_files ADD COLUMN IF NOT EXISTS tombstone_reason VARCHAR(300)",
+            "UPDATE store_doc_files SET role = kind WHERE role IS NULL",
+            "UPDATE store_doc_files SET author_id = uploaded_by WHERE author_id IS NULL",
+            "UPDATE store_doc_files SET revision = 1 WHERE revision IS NULL",
+            "CREATE INDEX IF NOT EXISTS ix_store_doc_files_record "
+            "ON store_doc_files (company_id, record_id, tombstoned_at)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_store_doc_file_revision "
+            "ON store_doc_files (record_id, revision, role, sha256) "
+            "WHERE record_id IS NOT NULL AND revision IS NOT NULL "
+            "AND role IS NOT NULL AND sha256 IS NOT NULL",
+            "DO $$ BEGIN "
+            "IF NOT EXISTS (SELECT 1 FROM pg_constraint "
+            "WHERE conname = 'ck_store_doc_file_sha256') THEN "
+            "ALTER TABLE store_doc_files ADD CONSTRAINT ck_store_doc_file_sha256 "
+            "CHECK (sha256 IS NULL OR sha256 ~ '^[0-9a-f]{64}$') NOT VALID; "
+            "END IF; END $$",
         ):
             await conn.execute(_sa.text(stmt))
 

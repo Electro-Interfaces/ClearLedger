@@ -9,6 +9,8 @@ from datetime import date as date_type, datetime
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CHAR,
+    CheckConstraint,
     Date,
     DateTime,
     Float,
@@ -225,6 +227,7 @@ class SpaceInboundKey(Base):
     consumer: Mapped[str] = mapped_column(String(200), nullable=False)
     key_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     key_prefix: Mapped[str] = mapped_column(String(12), nullable=False)
+    station_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -381,6 +384,21 @@ class DataEntry(Base):
         nullable=True, index=True,
     )
 
+    document_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    revision: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    content_hash: Mapped[str | None] = mapped_column(CHAR(64), nullable=True)
+    fact_origin: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    supersedes_entry_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "data_entries.id", ondelete="RESTRICT",
+            name="fk_data_entry_supersedes",
+        ),
+        nullable=True,
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -391,6 +409,68 @@ class DataEntry(Base):
     # Связи
     company: Mapped["Company"] = relationship(back_populates="entries")
     audit_events: Mapped[list["AuditEvent"]] = relationship(back_populates="entry")
+
+    __table_args__ = (
+        CheckConstraint(
+            "revision IS NULL OR revision > 0",
+            name="ck_data_entry_revision_positive",
+        ),
+        CheckConstraint(
+            "content_hash IS NULL OR content_hash ~ '^[0-9a-f]{64}$'",
+            name="ck_data_entry_content_hash",
+        ),
+        CheckConstraint(
+            "fact_origin IS NULL OR fact_origin IN "
+            "('edge','store','onec_legacy','edo','cash')",
+            name="ck_data_entry_fact_origin",
+        ),
+        Index(
+            "uq_data_entry_document_revision",
+            "company_id", "document_id", "revision",
+            unique=True,
+            postgresql_where=text("document_id IS NOT NULL"),
+        ),
+    )
+
+
+class AccountingSourceLink(Base):
+    __tablename__ = "accounting_source_links"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    projection_source: Mapped[str] = mapped_column(String(20), nullable=False)
+    source_kind: Mapped[str] = mapped_column(String(50), nullable=False)
+    source_document_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False
+    )
+    canonical_document_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False
+    )
+    confirmed_by: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    confirmed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "projection_source IN ('edge','store','onec_legacy','edo','cash','bp')",
+            name="ck_accounting_source_link_projection_source",
+        ),
+        Index(
+            "uq_accounting_source_link_scope",
+            "company_id", "projection_source", "source_kind", "source_document_id",
+            unique=True,
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -803,6 +883,9 @@ class Counterparty(Base):
     # internal (наша организация для внутренних движений). См. TRADELEDGER_COUNTERPARTY_AXIS §6.
     kind: Mapped[str] = mapped_column(
         String(20), nullable=False, default="external", server_default=text("'external'")
+    )
+    lifecycle_status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="draft", server_default=text("'draft'")
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -1319,6 +1402,25 @@ class ExportPacket(Base):
     # Полезная нагрузка, что мы реально отправили (JSON, сериализация L3).
     payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
 
+    packet_uuid: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    revision: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    contract_version: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    content_hash: Mapped[str | None] = mapped_column(CHAR(64), nullable=True)
+    fact_origin: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    transport_producer: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    attempt_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    lease_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    ack_payload: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    component_result: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    error_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     acked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     reject_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -1336,6 +1438,235 @@ class ExportPacket(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(),
         onupdate=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "revision IS NULL OR revision > 0",
+            name="ck_export_packet_revision_positive",
+        ),
+        CheckConstraint(
+            "content_hash IS NULL OR content_hash ~ '^[0-9a-f]{64}$'",
+            name="ck_export_packet_content_hash",
+        ),
+        CheckConstraint(
+            "fact_origin IS NULL OR fact_origin IN "
+            "('edge','store','onec_legacy','edo','cash')",
+            name="ck_export_packet_fact_origin",
+        ),
+        CheckConstraint(
+            "kind NOT IN ('food_accounting_group','store_accounting_group') OR "
+            "(packet_uuid IS NOT NULL AND revision IS NOT NULL "
+            "AND contract_version IS NOT NULL AND content_hash IS NOT NULL "
+            "AND fact_origin IS NOT NULL AND transport_producer IS NOT NULL "
+            "AND status IN ('draft','validated','queued','retry_wait','leased',"
+            "'sent_waiting_ack','accepted','rejected','needs_review'))",
+            name="ck_export_packet_accounting_contract",
+        ),
+        Index(
+            "uq_export_packets_accounting_revision",
+            "company_id", "packet_uuid", "revision",
+            unique=True,
+            postgresql_where=text(
+                "kind IN ('food_accounting_group','store_accounting_group')"
+            ),
+        ),
+    )
+
+
+class AccountingOutboxAttempt(Base):
+    __tablename__ = "accounting_outbox_attempts"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    packet_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("export_packets.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    attempt_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    event: Mapped[str] = mapped_column(String(30), nullable=False)
+    from_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    to_status: Mapped[str] = mapped_column(String(20), nullable=False)
+    lease_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    ack_payload: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    component_result: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    error_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        Index(
+            "ix_accounting_outbox_attempt_packet",
+            "company_id", "packet_id", "created_at",
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Защитный контур бухгалтерского egress сопутки/общепита
+# ---------------------------------------------------------------------------
+
+class AccountingSourcePolicy(Base):
+    __tablename__ = "accounting_source_policies"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    station_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    policy_group: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="sidegoods_foodservice"
+    )
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    effective_from: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    effective_to: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    transport_producer: Mapped[str] = mapped_column(String(30), nullable=False)
+    shadow_validation_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "effective_to IS NULL OR effective_to > effective_from",
+            name="ck_accounting_source_policy_window",
+        ),
+        CheckConstraint(
+            "transport_producer IN ('central_ledger', 'legacy_epf')",
+            name="ck_accounting_source_policy_producer",
+        ),
+        UniqueConstraint(
+            "company_id", "station_id", "policy_group", "revision",
+            name="uq_accounting_source_policy_revision",
+        ),
+        Index(
+            "ix_accounting_source_policy_lookup",
+            "company_id", "station_id", "policy_group", "effective_from",
+        ),
+    )
+
+
+class CutoverManifest(Base):
+    __tablename__ = "cutover_manifests"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    policy_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("accounting_source_policies.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    station_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    policy_group: Mapped[str] = mapped_column(String(50), nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    state: Mapped[str] = mapped_column(String(20), nullable=False, default="prepared")
+    canonical_payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    manifest_hash: Mapped[str] = mapped_column(String(71), nullable=False, unique=True)
+    approvals: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    operational_cutover_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    accounting_transport_cutover_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    late_arrival_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    arm_deadline: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    prepare_ack_hash: Mapped[str | None] = mapped_column(String(71), nullable=True)
+    arm_ack_hash: Mapped[str | None] = mapped_column(String(71), nullable=True)
+    armed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    effective_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "state IN ('prepared', 'armed', 'effective', 'expired', 'superseded')",
+            name="ck_cutover_manifest_state",
+        ),
+        CheckConstraint(
+            "accounting_transport_cutover_at >= operational_cutover_at",
+            name="ck_cutover_manifest_cutover_order",
+        ),
+        CheckConstraint(
+            "arm_deadline IS NULL OR arm_deadline < accounting_transport_cutover_at",
+            name="ck_cutover_manifest_arm_deadline",
+        ),
+        UniqueConstraint("policy_id", name="uq_cutover_manifest_policy"),
+        UniqueConstraint(
+            "company_id", "station_id", "policy_group", "revision",
+            name="uq_cutover_manifest_revision",
+        ),
+        Index(
+            "ix_cutover_manifest_lookup",
+            "company_id", "station_id", "policy_group", "state",
+        ),
+    )
+
+
+class AccountingShadowResult(Base):
+    __tablename__ = "accounting_shadow_results"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    station_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    policy_group: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="sidegoods_foodservice"
+    )
+    source_document_id: Mapped[str] = mapped_column(String(120), nullable=False)
+    accounting_group_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    fact_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    status: Mapped[str] = mapped_column(String(30), nullable=False)
+    result_hash: Mapped[str] = mapped_column(String(71), nullable=False)
+    result: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    blockers: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('shadow_validated', 'shadow_blocked')",
+            name="ck_accounting_shadow_result_status",
+        ),
+        UniqueConstraint(
+            "company_id", "source_document_id", "result_hash",
+            name="uq_accounting_shadow_result_version",
+        ),
+        Index(
+            "ix_accounting_shadow_result_lookup",
+            "company_id", "station_id", "policy_group", "fact_at",
+        ),
     )
 
 
@@ -1546,6 +1877,10 @@ class Warehouse(Base):
     address: Mapped[str | None] = mapped_column(Text, nullable=True)
     type: Mapped[str] = mapped_column(String(30), nullable=False, default="warehouse")
     external_ref: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=True,
+    )
+    station_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -3670,6 +4005,15 @@ class ChargeSession(Base):
     user_type: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)      # «Тип пользователя» (ФЛ/ЮЛ)
     user_id: Mapped[str | None] = mapped_column(String(160), nullable=True, index=True)       # «Пользователь» (телефон)
     rfid: Mapped[str | None] = mapped_column(String(120), nullable=True)                      # «RFID-карта»
+    # Обогащение картой (`ezs_rfid_cards` витрины АСУиМ). В самой сессии от карты
+    # есть только UID вида «26AA5969»: по нему нельзя ни отобрать заправки по
+    # заблокированной карте, ни назвать владельца. Проставляет enrich_session_cards().
+    card_number: Mapped[str | None] = mapped_column(String(60), nullable=True, index=True)
+    card_status: Mapped[str | None] = mapped_column(String(40), nullable=True, index=True)
+    card_owner_ext_id: Mapped[str | None] = mapped_column(String(40), nullable=True, index=True)
+    # Заправка не владельцем карты: телефон карты не совпал с телефоном сессии.
+    # Для корпоративных карт это то, что стоит видеть списком, а не находить.
+    card_foreign: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     # Обогащение: наименование корпоративного клиента (ЮЛ) — джойн справочника
     # «Организации» по телефону (user_id). NULL для ФЛ/несопоставленных.
     client_name: Mapped[str | None] = mapped_column(String(300), nullable=True, index=True)
@@ -5968,6 +6312,87 @@ class EdgePacket(Base):
     )
 
 
+class EdgePacketRevision(Base):
+    """Неизменяемая raw-версия доставки Edge-пакета."""
+    __tablename__ = "edge_packet_revisions"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    edge_packet_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("edge_packets.id", ondelete="RESTRICT"), nullable=False)
+    packet_uuid: Mapped[str] = mapped_column(String(64), nullable=False)
+    content_hash: Mapped[str] = mapped_column(CHAR(64), nullable=False)
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    wire_size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="received")
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        CheckConstraint(
+            "content_hash ~ '^[0-9a-f]{64}$'",
+            name="ck_edge_packet_revision_content_hash",
+        ),
+        CheckConstraint(
+            "status IN ('received','needs_review')",
+            name="ck_edge_packet_revision_status",
+        ),
+        UniqueConstraint(
+            "company_id", "packet_uuid", "content_hash",
+            name="uq_edge_packet_revision_content",
+        ),
+        Index("ix_edge_packet_revision_packet", "edge_packet_id", "received_at"),
+    )
+
+
+class EdgePacketProcessingIssue(Base):
+    """Append-only ошибка обработки уже сохранённой raw-версии пакета."""
+    __tablename__ = "edge_packet_processing_issues"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    edge_packet_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("edge_packets.id", ondelete="RESTRICT"), nullable=False)
+    revision_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("edge_packet_revisions.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    packet_uuid: Mapped[str] = mapped_column(String(64), nullable=False)
+    content_hash: Mapped[str] = mapped_column(CHAR(64), nullable=False)
+    phase: Mapped[str] = mapped_column(String(30), nullable=False, default="derived")
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="needs_review")
+    error: Mapped[str] = mapped_column(Text, nullable=False)
+    error_hash: Mapped[str] = mapped_column(CHAR(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        CheckConstraint(
+            "content_hash ~ '^[0-9a-f]{64}$'",
+            name="ck_edge_packet_issue_content_hash",
+        ),
+        CheckConstraint(
+            "error_hash ~ '^[0-9a-f]{64}$'",
+            name="ck_edge_packet_issue_error_hash",
+        ),
+        CheckConstraint(
+            "status = 'needs_review'",
+            name="ck_edge_packet_issue_status",
+        ),
+        UniqueConstraint(
+            "company_id", "packet_uuid", "content_hash", "error_hash",
+            name="uq_edge_packet_processing_issue_error",
+        ),
+        Index("ix_edge_packet_issue_packet", "edge_packet_id", "created_at"),
+    )
+
+
 class StoreStockBalance(Base):
     """Последний полный остаток собственного учёта агента.
 
@@ -6040,6 +6465,10 @@ class StoreReceipt(Base):
         UUID(as_uuid=True), ForeignKey("counterparties.id", ondelete="RESTRICT"), nullable=True)
     contract_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("contracts.id", ondelete="RESTRICT"), nullable=True)
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=True)
+    warehouse_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("warehouses.id", ondelete="RESTRICT"), nullable=True)
     incoming_number: Mapped[str | None] = mapped_column(String(60), nullable=True)
     incoming_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -6071,8 +6500,18 @@ class StoreReceipt(Base):
     lines: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     services: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     evidence: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    supplier_snapshot: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    contract_snapshot: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    organization_snapshot: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    warehouse_snapshot: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    accounting_status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="pending", server_default=text("'pending'"))
+    accounting_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    accounting_revision: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0"))
+    content_hash: Mapped[str | None] = mapped_column(CHAR(64), nullable=True)
     total_amount: Mapped[float] = mapped_column(Numeric(16, 2), nullable=False, default=0)
-    vat_amount: Mapped[float] = mapped_column(Numeric(16, 2), nullable=False, default=0)
+    vat_amount: Mapped[float | None] = mapped_column(Numeric(16, 2), nullable=True)
     comment: Mapped[str | None] = mapped_column(String(500), nullable=True)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     dedup_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
@@ -6089,6 +6528,20 @@ class StoreReceipt(Base):
         Index("ix_store_receipts_company_station", "company_id", "station_id", "doc_date"),
         Index("ix_store_receipts_supplier", "company_id", "supplier_id"),
         Index("ix_store_receipts_contract", "company_id", "contract_id"),
+        Index("ix_store_receipts_organization", "company_id", "organization_id"),
+        Index("ix_store_receipts_warehouse", "company_id", "warehouse_id"),
+        CheckConstraint(
+            "accounting_status IN ('pending','needs_review','ready')",
+            name="ck_store_receipt_accounting_status",
+        ),
+        CheckConstraint(
+            "accounting_revision >= 0",
+            name="ck_store_receipt_accounting_revision",
+        ),
+        CheckConstraint(
+            "content_hash IS NULL OR content_hash ~ '^[0-9a-f]{64}$'",
+            name="ck_store_receipt_content_hash",
+        ),
         UniqueConstraint("company_id", "source_uuid", name="uq_store_receipts_company_source"),
         UniqueConstraint("company_id", "dedup_key", name="uq_store_receipts_company_dedup"),
     )
@@ -6108,8 +6561,11 @@ class StoreReceiptStockMovement(Base):
         UUID(as_uuid=True), ForeignKey("store_receipt_stock_movements.id", ondelete="RESTRICT"),
         nullable=True)
     allocation_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    line_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     line_index: Mapped[int] = mapped_column(Integer, nullable=False)
     station_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    warehouse_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("warehouses.id", ondelete="RESTRICT"), nullable=True)
     warehouse: Mapped[str] = mapped_column(String(200), nullable=False)
     item_key: Mapped[str] = mapped_column(String(200), nullable=False)
     item_uuid: Mapped[str | None] = mapped_column(String(64), nullable=True)
@@ -6130,6 +6586,8 @@ class StoreReceiptStockMovement(Base):
         Index("ix_store_receipt_stock_movement_receipt", "receipt_id", "created_at"),
         Index("ix_store_receipt_stock_movement_balance",
               "company_id", "warehouse", "item_key", "created_at"),
+        Index("ix_store_receipt_stock_movement_canonical_balance",
+              "company_id", "warehouse_id", "item_key", "created_at"),
     )
 
 
@@ -6297,6 +6755,8 @@ class StoreCheque(Base):
     positions: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     lines: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     packet_uuid: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default=text("1"))
     received_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False)
 
@@ -6304,6 +6764,127 @@ class StoreCheque(Base):
         UniqueConstraint("company_id", "station_id", "shift_number", "number",
                          name="uq_store_cheque"),
         Index("ix_store_cheques_at", "company_id", "station_id", "at"),
+        CheckConstraint("version > 0", name="ck_store_cheque_version"),
+    )
+
+
+class StoreDocumentProjection(Base):
+    """Пересобираемая поисковая шапка документа сопутки/общепита."""
+    __tablename__ = "store_document_projections"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    document_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    accounting_group_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True)
+    projection_source: Mapped[str] = mapped_column(String(20), nullable=False)
+    source_kind: Mapped[str] = mapped_column(String(30), nullable=False)
+    source_record_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    source_document_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True)
+    document_kind: Mapped[str] = mapped_column(String(40), nullable=False)
+    document_role: Mapped[str] = mapped_column(String(30), nullable=False)
+    station_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    warehouse_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    number: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    document_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    counterparty_name: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    counterparty_inn: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    amount: Mapped[float] = mapped_column(Numeric(16, 2), nullable=False, default=0)
+    vat_amount: Mapped[float | None] = mapped_column(Numeric(16, 2), nullable=True)
+    author: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    operational_status: Mapped[str] = mapped_column(String(30), nullable=False, default="unknown")
+    sync_status: Mapped[str] = mapped_column(String(30), nullable=False, default="unknown")
+    accounting_status: Mapped[str] = mapped_column(String(30), nullable=False, default="pending")
+    discrepancy_status: Mapped[str] = mapped_column(String(30), nullable=False, default="none")
+    requires_attention: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    has_files: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    has_fuel: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    raw_payload_available: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_primary: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    content_hash: Mapped[str | None] = mapped_column(CHAR(64), nullable=True)
+    header: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    rebuilt_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index("ix_store_document_projection_document", "company_id", "document_id"),
+        Index("ix_store_document_projection_source_document", "company_id",
+              "projection_source", "source_document_id"),
+        Index("ix_store_document_projection_accounting_group",
+              "company_id", "accounting_group_id"),
+        UniqueConstraint("company_id", "projection_source", "source_kind", "source_record_id",
+                         name="uq_store_document_projection_source"),
+        Index("ix_store_document_projection_register",
+              "company_id", "station_id", "document_at", "document_kind"),
+        CheckConstraint(
+            "document_kind IN ('purchase','return_purchase','transfer','inventory',"
+            "'gain','writeoff','retail_sale_sidegoods','return_sale','recipe',"
+            "'production_release','ingredients_writeoff','fiscal_receipt','store_shift',"
+            "'revaluation')",
+            name="ck_store_document_projection_kind",
+        ),
+        CheckConstraint(
+            "projection_source IN ('edge','store','onec_legacy','edo','cash','bp')",
+            name="ck_store_document_projection_source",
+        ),
+        CheckConstraint(
+            "document_role IN ('primary_evidence','operational','fiscal','accounting_derived')",
+            name="ck_store_document_projection_role",
+        ),
+        CheckConstraint("revision > 0", name="ck_store_document_projection_revision"),
+        CheckConstraint(
+            "content_hash IS NULL OR content_hash ~ '^[0-9a-f]{64}$'",
+            name="ck_store_document_projection_content_hash",
+        ),
+    )
+
+
+class StoreDocumentProjectionLine(Base):
+    """Ссылка на строку первичного источника без копирования её содержимого."""
+    __tablename__ = "store_document_projection_lines"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    record_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("store_document_projections.id", ondelete="CASCADE"), nullable=False)
+    source_section: Mapped[str] = mapped_column(String(30), nullable=False)
+    source_line_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("company_id", "record_id", "source_section", "source_line_id",
+                         name="uq_store_document_projection_line"),
+        Index("ix_store_document_projection_line_record", "record_id", "ordinal"),
+    )
+
+
+class StoreDocumentRelation(Base):
+    """Связь документа с другим документом либо неизменяемым source-ref."""
+    __tablename__ = "store_document_relations"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    record_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("store_document_projections.id", ondelete="CASCADE"), nullable=False)
+    related_record_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("store_document_projections.id", ondelete="SET NULL"), nullable=True)
+    relation_kind: Mapped[str] = mapped_column(String(40), nullable=False)
+    target_ref: Mapped[str] = mapped_column(String(250), nullable=False)
+    metadata_json: Mapped[dict] = mapped_column("metadata", JSONB, nullable=False, default=dict)
+
+    __table_args__ = (
+        UniqueConstraint("company_id", "record_id", "relation_kind", "target_ref",
+                         name="uq_store_document_relation"),
+        Index("ix_store_document_relation_related", "company_id", "related_record_id"),
     )
 
 
@@ -6325,6 +6906,9 @@ class StoreDocMeta(Base):
     company_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
     doc_ref: Mapped[str] = mapped_column(String(120), nullable=False)
+    record_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    document_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    revision: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Кто передал имущество и кто принял: фамилии, как в накладной.
     responsible_from: Mapped[str | None] = mapped_column(String(200), nullable=True)
     responsible_to: Mapped[str | None] = mapped_column(String(200), nullable=True)
@@ -6369,9 +6953,14 @@ class StoreDocFile(Base):
     company_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
     doc_ref: Mapped[str] = mapped_column(String(120), nullable=False)
+    record_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    document_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     station_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # накладная | упд | акт | опись | фото | прочее
     kind: Mapped[str] = mapped_column(String(30), nullable=False, default="накладная")
+    role: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    sha256: Mapped[str | None] = mapped_column(CHAR(64), nullable=True)
+    revision: Mapped[int | None] = mapped_column(Integer, nullable=True)
     file_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     file_name: Mapped[str] = mapped_column(String(300), nullable=False, default="")
     mime: Mapped[str | None] = mapped_column(String(120), nullable=True)
@@ -6379,11 +6968,31 @@ class StoreDocFile(Base):
     note: Mapped[str | None] = mapped_column(String(300), nullable=True)
     uploaded_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    author_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     uploaded_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False)
+    tombstoned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    tombstoned_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    tombstone_reason: Mapped[str | None] = mapped_column(String(300), nullable=True)
 
     __table_args__ = (
         Index("ix_store_doc_files_ref", "company_id", "doc_ref"),
+        Index("ix_store_doc_files_record", "company_id", "record_id", "tombstoned_at"),
+        Index(
+            "uq_store_doc_file_revision",
+            "record_id", "revision", "role", "sha256",
+            unique=True,
+            postgresql_where=text(
+                "record_id IS NOT NULL AND revision IS NOT NULL "
+                "AND role IS NOT NULL AND sha256 IS NOT NULL"
+            ),
+        ),
+        CheckConstraint(
+            "sha256 IS NULL OR sha256 ~ '^[0-9a-f]{64}$'",
+            name="ck_store_doc_file_sha256",
+        ),
     )
 
 

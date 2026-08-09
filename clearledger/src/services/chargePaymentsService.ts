@@ -94,7 +94,8 @@ export async function getStationSales(
 /* ── Сверка «сессия ↔ платёж ↔ чек» ───────────────────────────────────────── */
 
 export interface ReconKind {
-  key: 'impossible' | 'double' | 'underpaid' | 'no_payment' | 'no_receipt' | 'orphan'
+  key: 'impossible' | 'double' | 'underpaid' | 'overpaid' | 'no_payment' | 'no_receipt'
+    | 'orphan' | 'refund_full' | 'hold_rule' | 'receipt_no_txn' | 'not_card'
   label: string
   hint: string
   count: number
@@ -104,7 +105,15 @@ export interface ReconKind {
 }
 export interface ReconSummary {
   period: { from: string; to: string }
-  totals: { sessions: number; amount: number; paid: number; energy_kwh: number; gap: number }
+  totals: {
+    sessions: number; amount: number; paid: number; energy_kwh: number; gap: number
+    /** кВт·ч из сессий, противоречащих физике: ровно на них завышен отпуск. */
+    bad_energy_kwh: number
+    /** Начислено рознице — единственное, что сопоставимо со списаниями банка. */
+    retail_amount: number
+    /** Корпоратив: постоплата по договору, в сверку эквайринга не входит. */
+    corp_amount: number
+  }
   kinds: ReconKind[]
 }
 export interface ReconRow {
@@ -140,10 +149,17 @@ export interface ReconByRow {
   sessions: number
   amount: number
   paid: number
+  /** Розница и корпоратив отдельно: сверять с эквайрингом можно только первое. */
+  retailAmount: number
+  corpAmount: number
   gap: number
   gapPct: number
   impossible: number
   impossibleAmount: number
+  /** Отпуск и та его часть, что пришла из недостоверных строк. */
+  energy: number
+  impossibleEnergy: number
+  impossibleEnergyPct: number
   underpaid: number
   multi: number
   noReceipt: number
@@ -153,8 +169,11 @@ export interface ReconByRow {
   /** Хроника: расхождения повторяются больше чем в одном месяце — это оборудование. */
   chronic: boolean
 }
+export type ReconDim = 'station' | 'region' | 'month' | 'connector' | 'charge_type'
+  | 'client' | 'card_status'
+
 export async function getReconciliationBy(
-  p: P & { by: 'station' | 'region'; limit?: number },
+  p: P & { by: ReconDim; limit?: number },
 ): Promise<ReconByRow[]> {
   return get<ReconByRow[]>('/api/charge-sessions/reconciliation/by', {
     ...qp(p), by: p.by, limit: String(p.limit ?? 100),
