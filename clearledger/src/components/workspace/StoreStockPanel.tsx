@@ -127,7 +127,7 @@ export function StoreStockPanel({ companyId, dateFrom, dateTo, stations }: {
           <p className="text-xs text-muted-foreground mt-0.5">
             {data.source === 'edge_agent'
               ? 'Собственный остаток агента АЗС: стартовый перенос + документы и продажи станции.'
-              : 'Переходный снимок 1С: агент ещё не прислал собственный остаток.'}
+              : 'Нет собственного снимка агента: рабочий остаток станции ещё не получен.'}
             {' '}Не за период — текущее состояние.
             {curWh
               ? <> Место: <span className="text-foreground">{curWh.name}</span> (АЗС {curWh.station_id}).</>

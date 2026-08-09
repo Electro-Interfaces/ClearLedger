@@ -356,7 +356,7 @@ export function StoreRecipeVersionsPanel() {
       {data.recipes.length === 0 && data.legacy_available > 0 && (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-sky-500/30 bg-sky-500/5 p-4">
           <div>
-            <div className="text-sm font-medium">Найдены ТТК из текущего среза 1С</div>
+            <div className="text-sm font-medium">Найдены архивные ТТК до перехода</div>
             <div className="text-xs text-muted-foreground">{data.legacy_available} карт можно один раз перенести как действующие версии v1.</div>
           </div>
           <Button onClick={() => bootstrap.mutate()} disabled={!centralWrite || bootstrap.isPending}>Перенести в реестр</Button>

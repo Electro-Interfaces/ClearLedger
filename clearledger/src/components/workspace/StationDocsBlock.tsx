@@ -54,7 +54,7 @@ export function StationDocsBlock({ kind, dateFrom, dateTo, title }: {
       ) : docs.length === 0 ? (
         <div className="px-3 py-4 text-xs text-muted-foreground">
           Станция таких документов ещё не присылала. Это не пустой отчёт: реестр выше —
-          история 1С, а здесь появится то, что заведут на самой АЗС.
+          архив до перехода, а здесь появится то, что заведут на самой АЗС.
         </div>
       ) : (
         <div className="overflow-x-auto">

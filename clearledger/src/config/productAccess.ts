@@ -97,6 +97,7 @@ export const PRODUCT_MODULES: Record<string, ProductModuleDef[]> = {
     ...items(storeMenu('store_catalog'), 'Каталог'),
     ...items(storeMenu('store_marking'), 'Маркировка'),
     ...items(storeMenu('store_network'), 'Станции'),
+    ...items(storeMenu('store_1c'), '1С до перехода'),
     ...items(storeMenu('store_reports'), 'Отчёты'),
     ...items(STORE_HELP_MENU, 'Помощь'),
   ],

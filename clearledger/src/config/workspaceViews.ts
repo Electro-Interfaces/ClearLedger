@@ -36,6 +36,7 @@ export const MODE_LABELS: Record<CoreMode, string> = {
   store_catalog: 'Магазин · Каталог',
   store_marking: 'Магазин · Маркировка',
   store_network: 'Магазин · Станции',
+  store_1c: 'Магазин · 1С до перехода',
   store_reports: 'Магазин · Отчёты',
   corporate: 'Процессинг',
   marketing: 'Маркетинг',
@@ -136,6 +137,7 @@ const SUB_LABELS: Partial<Record<CoreMode, Record<string, string>>> = {
   store_catalog: Object.fromEntries(storeMenu('store_catalog').map((m) => [m.key, m.label])),
   store_marking: Object.fromEntries(storeMenu('store_marking').map((m) => [m.key, m.label])),
   store_network: Object.fromEntries(storeMenu('store_network').map((m) => [m.key, m.label])),
+  store_1c: Object.fromEntries(storeMenu('store_1c').map((m) => [m.key, m.label])),
   store_reports: Object.fromEntries(storeMenu('store_reports').map((m) => [m.key, m.label])),
   financial: {
     overview: 'Обзор', cashflow: 'Денежный поток', receivables: 'Дебиторка', payables: 'Кредиторка',

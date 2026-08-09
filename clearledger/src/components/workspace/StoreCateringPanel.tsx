@@ -23,7 +23,7 @@ const CLASS_META: Record<MenuClass, { label: string; short: string; emoji: strin
   plowhorse: { label: 'Рабочая лошадка', short: 'Лошадка', emoji: '🐎', text: 'text-amber-300', badge: 'border-amber-400/40 text-amber-300/90', desc: 'Популярное, но низкомаржинальное. Поднять цену аккуратно / снизить себестоимость порции.' },
   puzzle:    { label: 'Загадка', short: 'Загадка', emoji: '🧩', text: 'text-sky-300', badge: 'border-sky-400/40 text-sky-300/90', desc: 'Маржинальное, но мало продаётся. Продвигать, переставить в меню, попробовать промо.' },
   dog:       { label: 'Собака', short: 'Собака', emoji: '🐶', text: 'text-red-300', badge: 'border-red-400/40 text-red-300/80', desc: 'Непопулярное и немаржинальное — кандидат на вывод из меню.' },
-  unknown:   { label: 'Без себестоимости', short: '—', emoji: '❔', text: 'text-muted-foreground', badge: 'border-zinc-600 text-zinc-400', desc: 'Нет ни выпуска 1С, ни закупок по составу ТТК — себестоимость не рассчитана.' },
+  unknown:   { label: 'Без себестоимости', short: '—', emoji: '❔', text: 'text-muted-foreground', badge: 'border-zinc-600 text-zinc-400', desc: 'Нет ни архивного выпуска, ни закупок по составу ТТК — себестоимость не рассчитана.' },
 }
 
 // «Без себестоимости» — полноправная клетка матрицы: пока она скрывалась, блюда без
@@ -168,7 +168,7 @@ export function StoreCateringPanel({ companyId, dateFrom, dateTo, stations }: { 
                     {/* Покрытие ТТК помечаем ТОЛЬКО у сборки из закупок: у цифры из выпуска
                         1С состав ни при чём, а «(80%)» рядом с ней читалось как «неполная». */}
                     {d.cost_source === 'ttk' && d.coverage < 100 && d.food_cost_pct != null && <span className="ml-1 text-[10px] text-muted-foreground/60" title={`сборка по ТТК: цена известна у ${d.coverage}% состава — цифра неполная, это нижняя граница`}>({d.coverage}%)</span>}
-                    {d.food_cost_pct == null && <span className="ml-1 text-[10px] text-muted-foreground/50" title={`себестоимость не рассчитана: выпуска 1С нет, по ТТК цена известна у ${d.coverage}% состава`}>❔{d.coverage}%</span>}
+                    {d.food_cost_pct == null && <span className="ml-1 text-[10px] text-muted-foreground/50" title={`себестоимость не рассчитана: архивного выпуска нет, по ТТК цена известна у ${d.coverage}% состава`}>❔{d.coverage}%</span>}
                   </td>
                   <td className={`px-3 py-1.5 text-right tabular-nums ${d.margin_pct != null && d.margin_pct < 30 ? 'text-red-400/70' : 'text-emerald-300/70'}`}>{pctStr(d.margin_pct)}</td>
                 </tr>
@@ -237,7 +237,7 @@ function DishModal({ dish: d, onClose }: { dish: CateringDish; onClose: () => vo
             <div>
               <div className="text-xs font-medium mb-1.5">
                 Состав порции (ТТК) · {d.ing_count} ингр.
-                <span className="ml-1 font-normal text-muted-foreground/60" title="доля ингредиентов состава, у которых нашлась закупочная цена; на итог из выпуска 1С не влияет">· цена известна у {d.coverage}% состава</span>
+                <span className="ml-1 font-normal text-muted-foreground/60" title="доля ингредиентов состава, у которых нашлась закупочная цена; на итог архивного выпуска не влияет">· цена известна у {d.coverage}% состава</span>
               </div>
               <div className="rounded-md border border-border/40 overflow-hidden">
                 <table className="w-full text-xs">

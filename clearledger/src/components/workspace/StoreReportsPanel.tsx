@@ -58,7 +58,7 @@ const ЭКРАНЫ: Record<string, { label: string; hint: string; to: string }[]
     { label: 'Смены', hint: 'закрытые смены станций', to: '/shop?mode=store_network&sub=shifts' },
   ],
   skvoz: [
-    { label: 'Сверка с 1С', hint: 'расхождения переходного контура', to: '/shop?mode=store_network&sub=parity' },
+    { label: 'Сверка с 1С', hint: 'расхождения переходного контура', to: '/shop?mode=store_1c&sub=parity' },
     { label: 'Состояние станций', hint: 'связь, очередь, свежесть данных', to: '/shop?mode=store_network&sub=station_health' },
     { label: 'Хранение сырья', hint: 'пакеты и их разбор', to: '/shop?mode=store_network&sub=storage' },
   ],

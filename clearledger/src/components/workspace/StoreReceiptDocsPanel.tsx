@@ -101,7 +101,7 @@ function replaceCachedReceipt(
 }
 
 function counterpartySource(counterparty: Counterparty) {
-  return counterparty.externalRef || counterparty.raw ? '1С' : 'Ledger'
+  return counterparty.externalRef || counterparty.raw ? 'центр' : 'станция'
 }
 
 function isSupplierContract(contract: Contract) {
@@ -366,7 +366,7 @@ function ContractPicker({
               <span className="block truncate">{selected?.number || snapshot || 'Выберите договор с поставщиком'}</span>
               {selected ? (
                 <span className={`mt-0.5 block truncate text-xs font-normal ${selectedEligible ? 'text-muted-foreground' : 'text-warning'}`}>
-                  {selected.kind || 'вид не указан'} · {selected.externalRef ? '1С' : 'Ledger'}
+                  {selected.kind || 'вид не указан'} · {selected.externalRef ? 'центр' : 'станция'}
                 </span>
               ) : snapshot ? (
                 <span className="mt-0.5 block truncate text-xs font-normal text-warning">
@@ -407,7 +407,7 @@ function ContractPicker({
                           {organization ? 'организация' : 'без организации'}
                         </Badge>
                         <Badge variant={contract.isClosed ? 'destructive' : 'secondary'}>
-                          {contract.isClosed ? 'закрыт' : contract.externalRef ? '1С' : 'Ledger'}
+                          {contract.isClosed ? 'закрыт' : contract.externalRef ? 'центр' : 'станция'}
                         </Badge>
                       </span>
                     </CommandItem>

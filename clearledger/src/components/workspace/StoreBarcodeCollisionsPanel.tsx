@@ -162,7 +162,7 @@ function CollisionCard({ c, onDone }: { c: BarcodeCollision; onDone: () => void 
                 <AlertDialogDescription>
                   «{c.holder_name}» останется основной. Остатки, штрихкоды, цены,
                   правила ассортимента и рецептуры «{c.claimant_name}» будут перенесены,
-                  а карточка-дубль архивирована. Записи в кассу и 1С не выполняются.
+                  а карточка-дубль архивирована. Во внешние системы ничего не записывается.
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>

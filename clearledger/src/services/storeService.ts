@@ -1532,12 +1532,11 @@ export const resendStoreDownlink = (id: string) =>
 export const cancelStoreDownlink = (id: string) =>
   post<{ ok: boolean; state: DownlinkState }>(`/api/store/downlink/${id}/cancel`, {})
 
-/** Что на станции требует человека: касса, выгрузка, учёт, коды, сверка смен. */
+/** Что на станции требует человека: касса, выгрузка, учёт и коды. */
 export interface StoreStationHealth {
   station_id: number
   critical: number
   warnings: number
-  shifts_clean: boolean | null
   alerts: {
     level: 'critical' | 'warning'
     topic: string

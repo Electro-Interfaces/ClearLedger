@@ -507,7 +507,7 @@ def _pool(doc: dict) -> dict:
     return doc.get("КодыНС") or {}
 
 
-def build_alerts(stock: dict, recon: dict | None = None) -> list[dict]:
+def build_alerts(stock: dict) -> list[dict]:
     """Собрать список того, что требует внимания, из отчётов сверки."""
     alerts: list[dict] = []
     if not stock.get("available"):
@@ -556,13 +556,6 @@ def build_alerts(stock: dict, recon: dict | None = None) -> list[dict]:
             alerts.append({"level": "warning", "topic": "коды кассы",
                            "text": f"свободных кодов нефтесервера мало: {free}"})
 
-    if recon and recon.get("shifts_compared") and recon.get("mismatched"):
-        bad = [s for s in recon["shifts"] if s.get("status") == "расхождение"]
-        alerts.append({
-            "level": "critical", "topic": "сверка смен",
-            "text": f"расхождение агента и 1С по {recon['mismatched']} сменам",
-            "items": [f"смена {s['shift']}: " + "; ".join(s.get("issues") or []) for s in bad[:5]],
-        })
     return alerts
 
 
@@ -615,8 +608,7 @@ async def sync_alerts(db: AsyncSession, company_id, station_id: int,
 async def alerts(db: AsyncSession, company_id, station_id: int,
                  remember: bool = True) -> dict:
     stock = await stock_report(db, company_id, station_id)
-    recon = await reconcile(db, company_id, station_id, limit=20)
-    items = build_alerts(stock, recon)
+    items = build_alerts(stock)
     if remember:
         items = await sync_alerts(db, company_id, station_id, items)
     return {
@@ -624,7 +616,6 @@ async def alerts(db: AsyncSession, company_id, station_id: int,
         "critical": sum(1 for a in items if a["level"] == "critical"),
         "warnings": sum(1 for a in items if a["level"] == "warning"),
         "alerts": items,
-        "shifts_clean": recon.get("clean"),
     }
 
 
@@ -632,7 +623,6 @@ def alerts_as_text(report: dict) -> str:
     """Текст для письма: коротко и по делу, без служебных полей."""
     lines = [f"АЗС {report['station_id']} — сводка Ledger Edge",
              f"критично: {report['critical']}, предупреждений: {report['warnings']}",
-             f"сверка смен с 1С: {'чисто' if report.get('shifts_clean') else 'есть расхождения'}",
              ""]
     if not report["alerts"]:
         lines.append("Замечаний нет.")
