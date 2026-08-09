@@ -184,84 +184,102 @@ export function StorePanel() {
     )
   }
 
+  return <StoreView sub={sub} companyId={companyId} dateFrom={period.from} dateTo={period.to} stations={scopeStations} />
+}
+
+// Экран пункта отдельно от маршрута.
+//
+// Раньше выбор пункта был вшит в цепочку условий и читался только из адреса —
+// поэтому один и тот же пункт нельзя было показать где-то ещё. Теперь пункт
+// рисуется по ключу, и окно поверх экрана берёт ровно то же, что и экран: два
+// разных рендера разошлись бы молча — в одном колонку добавили, в другом нет.
+export type StoreViewProps = {
+  sub: string
+  companyId: string
+  dateFrom: string
+  dateTo: string
+  stations: string[]
+}
+
+export function StoreView({ sub, companyId, dateFrom, dateTo, stations }: StoreViewProps) {
   // «Обзор» — executive-дашборд; SKU-экраны — реестр товаров; прочие — scaffold.
   if (sub === 'overview') {
     return (
       <div className="h-full overflow-y-auto">
-        <StoreOverviewPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} stations={scopeStations} />
+        <StoreOverviewPanel companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} stations={stations} />
       </div>
     )
   }
   if (sub === 'store_documents') {
-    return <StoreDocumentsPanel key={`${period.from}:${period.to}:${scopeStations.join(',')}`} dateFrom={period.from} dateTo={period.to} stations={scopeStations} />
+    return <StoreDocumentsPanel key={`${dateFrom}:${dateTo}:${stations.join(',')}`} dateFrom={dateFrom} dateTo={dateTo} stations={stations} />
   }
   if (sub === 'sales') {
     return (
       <div className="h-full overflow-y-auto">
-        <StoreSalesPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} stations={scopeStations} />
+        <StoreSalesPanel companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} stations={stations} />
       </div>
     )
   }
   if (sub === 'dynamics') {
     return (
       <div className="h-full overflow-y-auto">
-        <StoreDynamicsPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} stations={scopeStations} />
+        <StoreDynamicsPanel companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} stations={stations} />
       </div>
     )
   }
   if (sub === 'nomenclature') {
     return (
       <div className="h-full overflow-y-auto">
-        <StoreNomenclaturePanel companyId={companyId} dateFrom={period.from} dateTo={period.to} stations={scopeStations} />
+        <StoreNomenclaturePanel companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} stations={stations} />
       </div>
     )
   }
   if (sub === 'stock') {
     return (
       <div className="h-full overflow-y-auto">
-        <StoreStockPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} stations={scopeStations} />
+        <StoreStockPanel companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} stations={stations} />
       </div>
     )
   }
   if (sub === 'inventory') {
     return (
       <div className="h-full overflow-y-auto">
-        <StoreInventoryPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} stations={scopeStations} />
+        <StoreInventoryPanel companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} stations={stations} />
       </div>
     )
   }
   if (sub === 'writeoffs') {
     return (
       <div className="h-full overflow-y-auto">
-        <StoreWriteoffPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} stations={scopeStations} />
+        <StoreWriteoffPanel companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} stations={stations} />
       </div>
     )
   }
   if (sub === 'transfers') {
     return (
       <div className="h-full overflow-y-auto">
-        <StoreTransferPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} stations={scopeStations} />
+        <StoreTransferPanel companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} stations={stations} />
       </div>
     )
   }
   if (sub === 'revaluation') {
     return (
       <div className="h-full overflow-y-auto">
-        <StorePricingWorkPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} stations={scopeStations} />
+        <StorePricingWorkPanel companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} stations={stations} />
       </div>
     )
   }
   if (sub === 'menu') {
     return (
       <div className="h-full overflow-y-auto">
-        <StoreCateringPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} stations={scopeStations} />
+        <StoreCateringPanel companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} stations={stations} />
       </div>
     )
   }
   if (sub === 'pricing') {
     return (
       <div className="h-full overflow-y-auto">
-        <StorePricingPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} stations={scopeStations} />
+        <StorePricingPanel companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} stations={stations} />
       </div>
     )
   }
@@ -269,14 +287,14 @@ export function StorePanel() {
     return (
       <div className="h-full overflow-y-auto">
         <StoreAssortmentPolicyPanel />
-        <StoreAssortmentPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} stations={scopeStations} />
+        <StoreAssortmentPanel companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} stations={stations} />
       </div>
     )
   }
   if (sub === 'mrc') {
     return (
       <div className="h-full overflow-y-auto">
-        <StoreMrcPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />
+        <StoreMrcPanel companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />
       </div>
     )
   }
@@ -304,7 +322,7 @@ export function StorePanel() {
   if (sub === 'shifts') {
     return (
       <div className="h-full overflow-y-auto">
-        <StoreShiftsPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} stations={scopeStations} />
+        <StoreShiftsPanel companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} stations={stations} />
       </div>
     )
   }
@@ -322,10 +340,10 @@ export function StorePanel() {
   if (sub === 'receipts') {
     return (
       <div className="h-full overflow-y-auto">
-        <StoreReceiptDocsPanel stations={scopeStations} />
+        <StoreReceiptDocsPanel stations={stations} />
         <div className="border-t border-border/60">
-          <StoreReceiptsPanel companyId={companyId} dateFrom={period.from} dateTo={period.to}
-                              stations={scopeStations} />
+          <StoreReceiptsPanel companyId={companyId} dateFrom={dateFrom} dateTo={dateTo}
+                              stations={stations} />
         </div>
       </div>
     )
@@ -338,28 +356,28 @@ export function StorePanel() {
   if (sub === 'stations') {
     return (
       <div className="h-full overflow-y-auto">
-        <StoreStationsPanel dateFrom={period.from} dateTo={period.to} />
+        <StoreStationsPanel dateFrom={dateFrom} dateTo={dateTo} />
       </div>
     )
   }
   if (sub === 'reports') {
     return (
       <div className="h-full overflow-y-auto">
-        <StoreReportsPanel dateFrom={period.from} dateTo={period.to} />
+        <StoreReportsPanel dateFrom={dateFrom} dateTo={dateTo} />
       </div>
     )
   }
   if (sub === 'cheques') {
     return (
       <div className="h-full overflow-y-auto">
-        <StoreChequesPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} stations={scopeStations} />
+        <StoreChequesPanel companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} stations={stations} />
       </div>
     )
   }
   if (sub === 'returns') {
     return (
       <div className="h-full overflow-y-auto">
-        <StoreReturnsPanel dateFrom={period.from} dateTo={period.to} />
+        <StoreReturnsPanel dateFrom={dateFrom} dateTo={dateTo} />
       </div>
     )
   }
@@ -444,7 +462,7 @@ export function StorePanel() {
   if (skuMode) {
     return (
       <div className="h-full overflow-y-auto">
-        <StoreSkuPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} stations={scopeStations} mode={skuMode} />
+        <StoreSkuPanel companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} stations={stations} mode={skuMode} />
       </div>
     )
   }
@@ -452,7 +470,7 @@ export function StorePanel() {
   if (Report) {
     return (
       <div className="h-full overflow-y-auto">
-        <Report companyId={companyId} dateFrom={period.from} dateTo={period.to} stations={scopeStations} />
+        <Report companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} stations={stations} />
       </div>
     )
   }

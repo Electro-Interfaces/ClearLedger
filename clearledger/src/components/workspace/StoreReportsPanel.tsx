@@ -10,17 +10,18 @@
  *   — экраны сети рядом с отчётами: каталог — единственный вход, и уводить
  *     человека искать «Перемещения» в меню незачем.
  */
-import { useState } from 'react'
+import { useState, type MouseEvent } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { ChevronRight, Download, FileSpreadsheet, ExternalLink } from 'lucide-react'
 import {
-  getStoreNetworkReports, getStoreNetworkReport, storeNetworkReportCsvUrl, getStoreStations,
+  getStoreNetworkReports, getStoreNetworkReport, скачатьОтчётСети, getStoreStations,
   type StoreStation,
 } from '@/services/storeService'
 import { fmtMoney } from '@/services/analyticsService'
 import { useCompany } from '@/contexts/CompanyContext'
 import { ShowMore, useVisible } from '@/components/common/ShowMore'
+import { useStoreWindow, окномМожно } from './StoreWindow'
 
 const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: d }).format(n)
 
@@ -88,6 +89,34 @@ export function StoreReportsPanel({ dateFrom, dateTo }: { dateFrom: string; date
   // Свёрнутые разделы: развёрнут тот, где сейчас смотрят. Пятнадцать отчётов
   // одним свитком читаются как список названий, а не как каталог.
   const [раздел, выбратьРаздел] = useState<string | null>(null)
+  // Какой отчёт сейчас скачивается: файл собирается на сервере и по крупному
+  // периоду это заметная пауза, а кнопка без отклика читается как сломанная.
+  const [скачивается, скачивать] = useState<string | null>(null)
+  const [бедаВыгрузки, сказатьОБеде] = useState<string | null>(null)
+  // Экран сети открывается окном поверх каталога: человек пришёл сюда за
+  // разбором и обязан вернуться в тот же раздел и к тому же отчёту, а не
+  // искать каталог заново. Ctrl-клик и средняя кнопка по-прежнему открывают
+  // вкладкой — ссылка настоящая.
+  const открытьОкном = useStoreWindow()
+  const окном = (e: MouseEvent, to: string) => {
+    if (e.ctrlKey || e.metaKey || e.shiftKey || e.button !== 0) return
+    const key = new URLSearchParams(to.split('?')[1] ?? '').get('sub') ?? ''
+    if (!окномМожно(key)) return
+    e.preventDefault()
+    открытьОкном(key)
+  }
+
+  const скачать = async (kind: string, формат: 'csv' | 'xlsx' = 'xlsx') => {
+    скачивать(kind)
+    сказатьОБеде(null)
+    try {
+      await скачатьОтчётСети(kind, { dateFrom, dateTo, stations: станции, format: формат })
+    } catch {
+      сказатьОБеде('Не удалось выгрузить отчёт. Проверьте связь и попробуйте ещё раз.')
+    } finally {
+      скачивать(null)
+    }
+  }
 
   const { data: витрина } = useQuery({
     queryKey: ['store-reports', company.id],
@@ -126,6 +155,12 @@ export function StoreReportsPanel({ dateFrom, dateTo }: { dateFrom: string; date
           считается вся сеть.
         </p>
       </div>
+
+      {бедаВыгрузки && (
+        <div className="rounded-md border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-xs text-foreground">
+          {бедаВыгрузки}
+        </div>
+      )}
 
       {/* Разделы каталога — как пункты меню: отчёт ищут там, где работают */}
       <div className="flex flex-wrap items-center gap-1.5">
@@ -195,10 +230,22 @@ export function StoreReportsPanel({ dateFrom, dateTo }: { dateFrom: string; date
                         {r.title}
                       </button>
                       <span className="text-xs text-muted-foreground"> — {r.about}</span>
-                      <a href={storeNetworkReportCsvUrl(r.key, { dateFrom, dateTo, stations: станции })}
-                         className="ml-2 inline-flex items-center gap-1 whitespace-nowrap text-[11px] text-muted-foreground hover:text-foreground">
-                        <Download className="h-3 w-3" />Excel
-                      </a>
+                      {/* Скачивание, а не ссылка: <a href> не несёт токен и
+                          компанию, эндпоинт закрыт авторизацией — вместо файла
+                          приходил отказ. */}
+                      <button type="button"
+                        onClick={() => { void скачать(r.key) }}
+                        disabled={скачивается === r.key}
+                        className="ml-2 inline-flex items-center gap-1 whitespace-nowrap text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-50">
+                        <Download className="h-3 w-3" />
+                        {скачивается === r.key ? 'готовим…' : 'Excel'}
+                      </button>
+                      <button type="button"
+                        onClick={() => { void скачать(r.key, 'csv') }}
+                        disabled={скачивается === r.key}
+                        className="ml-1.5 whitespace-nowrap text-[11px] text-muted-foreground/70 hover:text-foreground disabled:opacity-50">
+                        CSV
+                      </button>
                     </div>
                   </li>
                 ))}
@@ -207,7 +254,7 @@ export function StoreReportsPanel({ dateFrom, dateTo }: { dateFrom: string; date
               {экраны.length > 0 && (
                 <div className="mb-3 flex flex-wrap gap-1.5 border-t border-border/40 pt-2.5">
                   {экраны.map((э) => (
-                    <Link key={э.to} to={э.to} title={э.hint}
+                    <Link key={э.to} to={э.to} title={э.hint} onClick={(e) => окном(e, э.to)}
                       className="inline-flex items-center gap-1 rounded-md border border-border/60 px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:border-primary/50 hover:text-primary">
                       <ExternalLink className="h-3 w-3" />{э.label}
                     </Link>

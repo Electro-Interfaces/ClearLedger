@@ -39,6 +39,7 @@ const AccountingPanel = lazy(() => import('./AccountingPanels').then((m) => ({ d
 const TaxPanel = lazy(() => import('./AccountingPanels').then((m) => ({ default: m.TaxPanel })))
 const StorePanel = lazy(() => import('./StorePanel').then((m) => ({ default: m.StorePanel })))
 const StoreHelpPanel = lazy(() => import('./StorePanel').then((m) => ({ default: m.StoreHelpPanel })))
+const StoreWindow = lazy(() => import('./StoreWindow').then((m) => ({ default: m.StoreWindow })))
 const ExportLayerPanel = lazy(() => import('./ExportLayerPanel').then((m) => ({ default: m.ExportLayerPanel })))
 
 /**
@@ -149,6 +150,9 @@ function ModePanel() {
       {coreMode === 'projects' && <ManagementPanel mode="projects" />}
       {coreMode === 'projects_analytics' && <ManagementPanel mode="projects_analytics" />}
       {STORE_MODES.includes(coreMode) && <StorePanel />}
+      {/* Окно пункта поверх экрана — рядом с панелью, а не внутри неё: панель
+          перерисовывается сменой пункта и уносила бы окно с собой. */}
+      {STORE_MODES.includes(coreMode) && <StoreWindow />}
       {coreMode === 'store_help' && <StoreHelpPanel />}
       {/* Корпоратив и маркетинг — продукты в подключении: их коммерческие
           разделы вернулись в «Продажи» (решение МАГа 28.07.2026). */}

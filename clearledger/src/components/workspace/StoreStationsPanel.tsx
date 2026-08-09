@@ -20,7 +20,7 @@ import {
   getStoreExchange, getStoreExchangeStation, type StoreExchangeStation,
 } from '@/services/storeService'
 import { useCompany } from '@/contexts/CompanyContext'
-import { useWorkspace } from '@/contexts/WorkspaceContext'
+import { useStoreWindow } from './StoreWindow'
 import { rowDrill } from './rowDrill'
 
 /** Молчание в человеческих единицах: секунды оператору ничего не говорят. */
@@ -408,7 +408,7 @@ function StationExchangeDialog({ stationId, dateFrom, dateTo, onClose }: {
 
 export function StoreStationsPanel({ dateFrom, dateTo }: { dateFrom: string; dateTo: string }) {
   const { company } = useCompany()
-  const { setCoreMode } = useWorkspace()
+  const открытьОкном = useStoreWindow()
   // Два уровня чтения: сверху сеть целиком, по клику — конкретная АЗС. Смешивать
   // их в одной таблице нельзя: у сети вопрос «где плохо», у станции — «что там
   // произошло», и ответы на них живут в разных разрезах.
@@ -574,8 +574,10 @@ export function StoreStationsPanel({ dateFrom, dateTo }: { dateFrom: string; dat
               <span className="text-muted-foreground">{вид}</span>
             </span>
           ))}
+          {/* Очередь разбирают, не отходя от состояния станций: уйти отсюда
+              совсем — значит потерять из виду, кто именно молчит. */}
           <button type="button"
-            onClick={() => setCoreMode('store_catalog', 'station-drafts')}
+            onClick={() => открытьОкном('station-drafts')}
             className="ml-auto text-xs text-primary hover:underline">
             разобрать в «Каталоге» →
           </button>
