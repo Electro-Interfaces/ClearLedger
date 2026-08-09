@@ -10,6 +10,9 @@ import openpyxl
 
 from app.services.asuim_normalize import (
     _conn_type,
+    _is_phone_stub,
+    _keep_filled,
+    _org_phone_stub,
     _phone,
     map_payments,
     map_stations,
@@ -143,6 +146,49 @@ def test_unknown_file_is_not_claimed():
     прежний индексный разбор."""
     view, _ = read_asuim_xlsx(_xlsx(["Номер", "Название", "OCPP ID"], [["1", "ЭЗС", "x"]]))
     assert view is None
+
+
+def test_repeat_load_does_not_erase_known_values():
+    """Повторная выгрузка не стирает то, что уже загружено.
+
+    Витрина отдаёт данные частями: пустая колонка означает «в этой выгрузке нет»,
+    а не «значение удалили». Безусловная перезапись обнуляла телефон и баланс
+    клиента на каждой второй загрузке."""
+    class Row:
+        pass
+    o = Row()
+    o.phone, o.balance, o.is_active = "+79990000000", 100.0, True
+    _keep_filled(o, {"phone": None, "balance": 250.0, "is_active": None})
+    assert o.phone == "+79990000000"   # пустое не затирает
+    assert o.balance == 250.0          # непустое обновляет
+    assert o.is_active is True
+
+
+def test_new_organizations_do_not_collide_on_empty_phone():
+    """Две новых организации в одном файле не роняют прогон.
+
+    `corporate_clients.phone` уникален по компании и NOT NULL, а витрина телефон
+    организации не отдаёт. Пустой строкой заводилась только первая, вторая падала
+    по уникальному индексу и откатывала весь файл."""
+    assert _org_phone_stub("11") != _org_phone_stub("12")
+    assert len(_org_phone_stub("x" * 40)) <= 20
+    assert _is_phone_stub(_org_phone_stub("11"))
+    assert not _is_phone_stub("+79990000000")
+
+
+def test_payment_amounts_stay_empty_when_column_is_empty():
+    """Пустая сумма остаётся пустой в маппере: ноль на обновлении затёр бы платёж.
+    Ноль подставляется только при создании строки (поля NOT NULL)."""
+    content = _xlsx(PAYMENT_HEADERS, [[
+        139544, "019fc8f9-77aa", None, "2026-08-03 19:04:50", None, None, None,
+        1, 3, "Оплата картой за зарядку", 0, None, 14765, "8 (994) 107-80-40",
+    ]])
+    _, rows = read_asuim_xlsx(content)
+    p = map_payments(rows)[0]
+    assert p["amount"] is None and p["hold_amount"] is None and p["refund_amount"] is None
+    # Телефон плательщика приводится к тому же виду, что в справочнике клиентов,
+    # иначе связка «платёж → клиент» по телефону не собирается.
+    assert p["user_phone"] == "+79941078040"
 
 
 def test_connector_type_canon_matches_sessions():

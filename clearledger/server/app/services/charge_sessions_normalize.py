@@ -228,7 +228,12 @@ async def ingest_charge_sessions(
                 started_at=row.get("started_at"), finished_at=row.get("finished_at"),
                 duration_min=row.get("duration_min") or 0.0,
                 result=row.get("result"), charge_type=row.get("charge_type"),
-                user_type=user_type, user_id=row.get("user_id"), rfid=row.get("rfid"),
+                user_type=user_type, user_id=row.get("user_id"),
+                # UID карты — в верхнем регистре, как в справочнике витрины
+                # (`ezs_rfid_cards.uid`). Выгрузка сессий отдаёт его строчными, и
+                # прямой join «сессия ↔ карта» давал 6 % вместо 99,7 %: владелец
+                # карты в отчётах терялся, хотя данные есть.
+                rfid=(row.get("rfid") or None) and str(row["rfid"]).upper(),
                 energy_kwh=row.get("energy_kwh") or 0.0, amount=row.get("amount") or 0.0,
                 tariff=row.get("tariff") or 0.0,
                 paid_at=row.get("paid_at"), payment_id=row.get("payment_id"),
@@ -426,13 +431,24 @@ async def enrich_sessions_with_orgs(
 
     # Реестр корп-клиентов: полная замена из справочника (справочник = актуальная
     # картина). Включаем ВСЕХ (даже без сессий) — для клиент-центричных табов.
+    # Перед заменой запоминаем id организации из витрины АСУиМ: он приходит ДРУГИМ
+    # каналом (organizations_ru), в этом справочнике его нет, и пересоздание реестра
+    # стирало точную связку ЮЛ, откатывая её к сопоставлению по телефону и имени.
+    prev = (await db.execute(select(CorporateClient).where(
+        CorporateClient.company_id == company_id,
+        CorporateClient.ext_id.is_not(None)))).scalars().all()
+    ext_by_phone = {c.phone: c.ext_id for c in prev if c.phone}
+    ext_by_name = {(c.name or "").strip().lower(): c.ext_id for c in prev if c.name}
+
     await db.execute(delete(CorporateClient).where(CorporateClient.company_id == company_id))
     for o in orgs:
         if not (o.get("phone") and o.get("name")):
             continue
         db.add(CorporateClient(
             company_id=company_id, name=o["name"], phone=o["phone"],
-            ext_id=o.get("ext_id"), mode=(o.get("mode") or "retail"), rate=o.get("rate"),
+            ext_id=(o.get("ext_id") or ext_by_phone.get(o["phone"])
+                    or ext_by_name.get(o["name"].strip().lower())),
+            mode=(o.get("mode") or "retail"), rate=o.get("rate"),
             matrix=matrix.get(o["name"]) or None, discount_pct=float(o.get("discount") or 0),
             contract_start=o.get("contract_start"), status=o.get("status"), users=o.get("users"),
         ))

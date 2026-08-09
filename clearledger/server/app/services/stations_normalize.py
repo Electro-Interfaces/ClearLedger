@@ -591,6 +591,15 @@ async def ingest_stations(
             # Такой файл дозаполняет, а не переписывает: иначе один прогон стёр бы
             # мощность у 351 станции и обнулил бы их в разрезах по скорости.
             if row.get("partial"):
+                # Два значения не становятся None от пустоты и потому проскакивали
+                # фильтр ниже: `_oper_status(None)` возвращает «unknown», а `is_test`
+                # приводится к False. На частичной выгрузке это гасило рабочий статус
+                # станции и снимало метку тестовой — выкидываем их, если витрина
+                # ничего про них не сказала.
+                if not row.get("status_dev"):
+                    typed.pop("operational_status", None)
+                if not row.get("is_test"):
+                    typed.pop("is_test", None)
                 typed = {k: v for k, v in typed.items() if v is not None}
                 passport_extra = {k: v for k, v in
                                   {**passport_extra, **(row.get("extra") or {})}.items()

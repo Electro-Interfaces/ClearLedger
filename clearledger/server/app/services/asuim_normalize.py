@@ -38,7 +38,7 @@ from collections import defaultdict
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
@@ -48,6 +48,30 @@ from app.models import (
 from app.services.mapping import normalize_default
 
 logger = logging.getLogger("clearledger.asuim")
+
+
+def _org_phone_stub(ext: str) -> str:
+    """Заглушка телефона организации до появления настоящего номера.
+
+    `corporate_clients.phone` — NOT NULL и уникален по компании, поэтому пустой
+    строкой можно завести только ОДНУ организацию: вторая роняет прогон целиком."""
+    return f"org-{ext}"[:20]
+
+
+def _is_phone_stub(phone: str | None) -> bool:
+    return bool(phone) and str(phone).startswith("org-")
+
+
+def _keep_filled(obj, vals: dict[str, Any]) -> None:
+    """Обновить поля, не затирая накопленное пустотой из витрины.
+
+    Витрина отдаёт паспорт частями: колонка, пустая в этой выгрузке, означает «нет
+    данных в этой выгрузке», а не «значение стёрли». Безусловный `setattr` по всем
+    полям на второй загрузке обнулял бы телефон, UID и баланс — то же правило, что
+    у флага `partial` в паспорте станции."""
+    for k, v in vals.items():
+        if v is not None:
+            setattr(obj, k, v)
 
 
 def _conn_type(raw) -> str | None:
@@ -381,16 +405,22 @@ def map_payments(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "bank_txn_id": _s(r.get("id_транзакции_банка"), 64),
             "session_ext_id": _s(r.get("id_сессии"), 64),
             "paid_at": _dt(r.get("дата")),
-            "amount": _num(r.get("сумма_руб.")) or 0,
-            "hold_amount": _num(r.get("сумма_холда_руб.")) or 0,
-            "refund_amount": _num(r.get("сумма_возврата_руб")) or 0,
+            # Суммы остаются None, если колонка пуста: ноль на обновлении затирал бы
+            # уже загруженный платёж. Ноль вместо пустоты подставляется только при
+            # создании строки (поля NOT NULL) — см. ingest_payments.
+            "amount": _num(r.get("сумма_руб.")),
+            "hold_amount": _num(r.get("сумма_холда_руб.")),
+            "refund_amount": _num(r.get("сумма_возврата_руб")),
             "by_card": _bool(r.get("оплата_картой")),
             "op_type_id": _int(r.get("id_типа_операции")),
             "op_type": _s(r.get("тип_операции"), 60),
             "status_code": _int(r.get("статус")),
             "receipt_url": _s(r.get("url_фискального_чека"), 500),
             "user_ext_id": _s(r.get("id_пользователя"), 40),
-            "user_phone": _s(r.get("телефон_пользователя"), 40),
+            # Тот же канон, что у справочника клиентов: в платежах номер приходит
+            # сплошной строкой, в users_ru — форматированным. Разные написания
+            # одного номера ломают связку «платёж → клиент» по телефону.
+            "user_phone": _phone(r.get("телефон_пользователя")) or _s(r.get("телефон_пользователя"), 40),
         })
     return out
 
@@ -421,15 +451,22 @@ async def ingest_payments(
             seen.add(ext)
             cur = existing.get(ext)
             if cur is None:
+                # Денежные поля NOT NULL: пустое в выгрузке = 0 при создании строки.
+                vals = {k: row.get(k) for k in fields}
+                for money in ("amount", "hold_amount", "refund_amount"):
+                    vals[money] = vals.get(money) or 0
                 db.add(ChargePayment(company_id=company_id, channel_id=channel_id,
-                                     payment_ext_id=ext,
-                                     **{k: row.get(k) for k in fields}))
+                                     payment_ext_id=ext, **vals))
                 created += 1
             elif mode == "append" and cur.status_code == row.get("status_code"):
                 continue   # ничего не поменялось — не трогаем строку
             else:
+                # Пустое поле выгрузки не стирает уже известное: у платежа так
+                # терялись чек и id сессии, если очередное окно отдало их пустыми.
                 for k in fields:
-                    setattr(cur, k, row.get(k))
+                    v = row.get(k)
+                    if v is not None:
+                        setattr(cur, k, v)
                 cur.channel_id = channel_id or cur.channel_id
                 updated += 1
             if (idx + 1) % 2000 == 0:
@@ -472,16 +509,24 @@ async def ingest_organizations(db: AsyncSession, company_id, rows: list[dict[str
             continue
         obj = by_ext.get(ext) or by_name.get(name.lower())
         users = _int(r.get("кол_во_пользователей"))
-        status = "active" if _bool(r.get("активна")) else "inactive"
+        # Статус — только если колонка реально пришла: пустая «активна» иначе
+        # переведёт работающую организацию в inactive на ровном месте.
+        raw_active = r.get("активна")
+        status = ("active" if _bool(raw_active) else "inactive") if raw_active is not None else None
         start = _s(r.get("дата_начала_договора"), 20)
         if obj is None:
-            db.add(CorporateClient(company_id=company_id, name=name, phone="",
-                                   ext_id=ext, mode="retail", status=status,
+            # Телефон корпоративного аккаунта витрина не отдаёт, а он ключ джойна с
+            # сессиями и уникален в пределах компании. Пустая строка у ВТОРОЙ новой
+            # организации в том же файле роняла весь прогон по uq_corporate_clients,
+            # поэтому до появления настоящего номера стоит заглушка, уникальная по ext_id.
+            db.add(CorporateClient(company_id=company_id, name=name, phone=_org_phone_stub(ext),
+                                   ext_id=ext, mode="retail", status=status or "active",
                                    users=users, contract_start=start))
             created += 1
         else:
             obj.ext_id = ext
-            obj.status = status
+            if status:
+                obj.status = status
             if users is not None:
                 obj.users = users
             if start and not obj.contract_start:
@@ -523,8 +568,7 @@ async def ingest_customers(db: AsyncSession, company_id, rows: list[dict[str, An
             db.add(EzsCustomer(company_id=company_id, customer_ext_id=ext, **vals))
             created += 1
         else:
-            for k, v in vals.items():
-                setattr(obj, k, v)
+            _keep_filled(obj, vals)
             updated += 1
     await db.flush()
 
@@ -543,7 +587,7 @@ async def ingest_customers(db: AsyncSession, company_id, rows: list[dict[str, An
         if not mates:
             continue
         org.users = len(mates)
-        if not org.phone:
+        if not org.phone or _is_phone_stub(org.phone):
             phone = next((m.phone for m in mates if m.phone), None)
             if phone:
                 org.phone = phone
@@ -580,8 +624,7 @@ async def ingest_rfid_cards(db: AsyncSession, company_id, rows: list[dict[str, A
             db.add(EzsRfidCard(company_id=company_id, card_ext_id=ext, **vals))
             created += 1
         else:
-            for k, v in vals.items():
-                setattr(obj, k, v)
+            _keep_filled(obj, vals)
             updated += 1
     await db.flush()
     return {"status": "success", "kind": "asuim_rfid", "created": created,
@@ -599,6 +642,15 @@ async def ingest_references(db: AsyncSession, company_id, view: str,
     заведённым, и связь сядет, как только придёт."""
     from sqlalchemy import delete
     kind = {"brands": "brand", "groups": "group", "cars": "car"}[view]
+    id_col = {"brand": "id_бренда", "group": "id_группы", "car": "id_модели"}[kind]
+    # Пустой или битый файл не должен сносить справочник: удаляем только тогда,
+    # когда есть чем заменить (режим здесь — полная перезагрузка вида).
+    if not any(_s(r.get(id_col), 40) for r in rows):
+        return {"status": "skipped", "kind": f"asuim_{kind}", "created": 0, "updated": 0,
+                "skipped": len(rows), "errors": 0,
+                "message": "справочник не загружен: в файле нет ни одной строки с идентификатором"}
+    had = (await db.execute(select(func.count()).select_from(EzsReference).where(
+        EzsReference.company_id == company_id, EzsReference.kind == kind))).scalar_one()
     await db.execute(delete(EzsReference).where(
         EzsReference.company_id == company_id, EzsReference.kind == kind))
     seen: set[str] = set()
@@ -626,9 +678,13 @@ async def ingest_references(db: AsyncSession, company_id, view: str,
         created += 1
     await db.flush()
     label = {"brand": "бренды станций", "group": "группы станций", "car": "модели электромобилей"}[kind]
+    msg = f"{label}: загружено {created}"
+    # Справочник перезагружается целиком, поэтому заметное «похудение» — повод
+    # посмотреть на выгрузку, а не молча принять её за новую правду.
+    if had and created < had:
+        msg += f" (было {had}, стало {created} — записи из выгрузки пропали)"
     return {"status": "success", "kind": f"asuim_{kind}", "created": created,
-            "updated": 0, "skipped": 0, "errors": 0,
-            "message": f"{label}: загружено {created}"}
+            "updated": 0, "skipped": 0, "errors": 0, "message": msg}
 
 
 # ---------------------------------------------------------------------------
@@ -641,6 +697,12 @@ async def ingest_tariffs(db: AsyncSession, company_id, rows: list[dict[str, Any]
     (id тарифа, id типа разъёма). Полная перезагрузка: справочник маленький и
     приходит целиком, инкремент смысла не имеет."""
     from sqlalchemy import delete
+    if not any(_s(r.get("id_тарифа"), 40) for r in rows):
+        return {"status": "skipped", "kind": "asuim_tariffs", "created": 0, "updated": 0,
+                "skipped": len(rows), "errors": 0,
+                "message": "прайс не загружен: в файле нет ни одной строки с id тарифа"}
+    had = (await db.execute(select(func.count()).select_from(EzsTariff).where(
+        EzsTariff.company_id == company_id))).scalar_one()
     await db.execute(delete(EzsTariff).where(EzsTariff.company_id == company_id))
     seen: set[tuple[str, int | None]] = set()
     created = 0
@@ -675,9 +737,11 @@ async def ingest_tariffs(db: AsyncSession, company_id, rows: list[dict[str, Any]
         ))
         created += 1
     await db.flush()
+    msg = f"тарифы: загружено {created} строк ({len({s[0] for s in seen})} тарифов)"
+    if had and created < had:
+        msg += f" (было {had} строк — часть прайса из выгрузки пропала)"
     return {"status": "success", "kind": "asuim_tariffs", "created": created,
-            "updated": 0, "skipped": 0, "errors": 0,
-            "message": f"тарифы: загружено {created} строк ({len({s[0] for s in seen})} тарифов)"}
+            "updated": 0, "skipped": 0, "errors": 0, "message": msg}
 
 
 # ---------------------------------------------------------------------------
