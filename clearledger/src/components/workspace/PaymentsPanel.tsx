@@ -14,8 +14,8 @@ import { Kpi } from './analytics/Kpi'
 import { PanelViewTabs } from './PanelViewTabs'
 import { useTabParams } from '@/hooks/useTabParams'
 import {
-  getPaymentsList, getPaymentsSummary,
-  type PaymentLine, type PaymentsSummary,
+  getPaymentsList, getPaymentsSummary, getReconciliation, getReconciliationRows,
+  type PaymentLine, type PaymentsSummary, type ReconRow, type ReconSummary,
 } from '@/services/chargePaymentsService'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
@@ -34,6 +34,9 @@ function Empty({ text }: { text: string }) {
 const VIEWS = [
   { k: 'summary', label: 'Сводка' },
   { k: 'months', label: 'Помесячно' },
+  // Главное, что даёт связка с сессиями: не «сколько денег пришло», а где данные
+  // о зарядках расходятся с деньгами.
+  { k: 'recon', label: 'Сверка с сессиями' },
   { k: 'list', label: 'Реестр' },
 ] as const
 
@@ -114,6 +117,8 @@ export function PaymentsPanel({ companyId, dateFrom, dateTo }: Props) {
         </div>
       )}
 
+      {view === 'recon' && <Reconciliation companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />}
+
       {view === 'months' && (
         <Card><CardContent className="p-0 overflow-x-auto">
           <table className="w-full text-xs">
@@ -173,6 +178,125 @@ export function PaymentsPanel({ companyId, dateFrom, dateTo }: Props) {
                             </a>
                           : <span className="text-muted-foreground">—</span>}
                       </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </CardContent></Card>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Сверка «сессия ↔ платёж ↔ чек».
+ *
+ * Начислено по сессиям и списано банком — две разные суммы, и разрыв между ними
+ * не ошибка отчёта, а вопрос к данным. Шесть видов расхождений; клик по виду
+ * открывает строки, с которыми идут разбираться.
+ */
+function Reconciliation({ companyId, dateFrom, dateTo }: Props) {
+  const [kind, setKind] = useState<string | null>(null)
+  const sum = useQuery<ReconSummary>({
+    queryKey: ['charge-recon', companyId, dateFrom, dateTo],
+    queryFn: () => getReconciliation({ companyId, dateFrom, dateTo }),
+    enabled: !!companyId,
+  })
+  const rows = useQuery<ReconRow[]>({
+    queryKey: ['charge-recon-rows', companyId, dateFrom, dateTo, kind],
+    queryFn: () => getReconciliationRows({ companyId, dateFrom, dateTo, kind: kind! }),
+    enabled: !!companyId && !!kind,
+  })
+
+  if (sum.isLoading) return <Loading />
+  if (!sum.data || !sum.data.totals.sessions) return <Empty text="За период сессий нет" />
+  const t = sum.data.totals
+  const active = sum.data.kinds.find((k) => k.key === kind)
+
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <Kpi label="Начислено по сессиям" value={money(t.amount)} sub={`${nf0.format(t.sessions)} сессий`} />
+        <Kpi label="Списано банком" value={money(t.paid)} />
+        <Kpi label="Разрыв" value={money(t.gap)}
+             sub={t.amount ? `${pct(Math.abs(t.gap), t.amount)} % от начисленного` : undefined} />
+        <Kpi label="Отпущено" value={`${nf0.format(t.energy_kwh)} кВт·ч`} />
+      </div>
+
+      <Card><CardContent className="p-0 overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead><tr className="border-b bg-muted/40 text-muted-foreground">
+            <th className="p-2 text-left font-medium">Расхождение</th>
+            <th className="p-2 text-right font-medium">Строк</th>
+            <th className="p-2 text-right font-medium">Начислено</th>
+            <th className="p-2 text-right font-medium">Списано</th>
+            <th className="p-2 text-right font-medium">Разрыв</th>
+          </tr></thead>
+          <tbody>
+            {sum.data.kinds.map((k) => (
+              <tr key={k.key}
+                  onClick={() => setKind(kind === k.key ? null : k.key)}
+                  className={`border-b last:border-0 cursor-pointer hover:bg-muted/30 ${
+                    kind === k.key ? 'bg-muted/40' : ''}`}>
+                <td className="p-2">
+                  <div className="font-medium">{k.label}</div>
+                  <div className="text-muted-foreground">{k.hint}</div>
+                </td>
+                <td className={`p-2 text-right tabular-nums ${k.count ? '' : 'text-muted-foreground'}`}>
+                  {nf0.format(k.count)}
+                </td>
+                <td className="p-2 text-right tabular-nums text-muted-foreground">{money(k.amount)}</td>
+                <td className="p-2 text-right tabular-nums text-muted-foreground">{money(k.paid)}</td>
+                <td className={`p-2 text-right tabular-nums ${
+                  Math.abs(k.gap) > 1 ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'}`}>
+                  {k.gap ? money(k.gap) : '—'}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </CardContent></Card>
+
+      {kind && (
+        <div className="space-y-2">
+          <div className="text-xs text-muted-foreground">{active?.label}: {active?.hint}</div>
+          {rows.isLoading ? <Loading /> : !rows.data?.length ? <Empty text="Строк нет" /> : (
+            <Card><CardContent className="p-0 overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead><tr className="border-b bg-muted/40 text-muted-foreground">
+                  <th className="p-2 text-left font-medium">Дата</th>
+                  <th className="p-2 text-left font-medium">Станция</th>
+                  <th className="p-2 text-left font-medium">Сессия</th>
+                  <th className="p-2 text-right font-medium">кВт·ч</th>
+                  {kind === 'impossible' && <th className="p-2 text-right font-medium">Мощность</th>}
+                  <th className="p-2 text-right font-medium">Начислено</th>
+                  <th className="p-2 text-right font-medium">Списано</th>
+                  <th className="p-2 text-right font-medium">Разрыв</th>
+                  <th className="p-2 text-left font-medium">Чек</th>
+                </tr></thead>
+                <tbody>
+                  {rows.data.map((r) => (
+                    <tr key={r.id} className="border-b last:border-0">
+                      <td className="p-2 whitespace-nowrap">
+                        {r.at ? new Date(r.at).toLocaleDateString('ru-RU') : '—'}
+                      </td>
+                      <td className="p-2 max-w-[220px] truncate">{r.station ?? '—'}</td>
+                      <td className="p-2 font-mono text-muted-foreground">{r.session ?? '—'}</td>
+                      <td className="p-2 text-right tabular-nums">{nf2.format(r.energy)}</td>
+                      {kind === 'impossible' && (
+                        <td className="p-2 text-right tabular-nums text-amber-600 dark:text-amber-400">
+                          {r.powerKw != null ? `${nf0.format(r.powerKw)} кВт` : '—'}
+                        </td>
+                      )}
+                      <td className="p-2 text-right tabular-nums">{rub(r.amount)}</td>
+                      <td className="p-2 text-right tabular-nums">{rub(r.paid)}</td>
+                      <td className={`p-2 text-right tabular-nums ${
+                        Math.abs(r.gap) > 1 ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'}`}>
+                        {rub(r.gap)}
+                      </td>
+                      <td className="p-2">{r.receipt ? 'есть' : '—'}</td>
                     </tr>
                   ))}
                 </tbody>

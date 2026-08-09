@@ -1,0 +1,198 @@
+"""Сверка «сессия ↔ платёж ↔ чек» — правило `ezs_payments` из docs/CHANNEL_ASUIM_EZS.md.
+
+Пока платежи жили отдельным пунктом, они отвечали на вопрос «сколько денег
+пришло». Сведённые с сессиями, они отвечают на более важный: **где данные о
+зарядках расходятся с деньгами**. Именно платёж показывает, что сессия на
+10 341 кВт·ч за одиннадцать секунд — не рекорд сети, а битая строка: банк по ней
+списал 1 007 ₽, а не 226 468 ₽.
+
+Что считаем деньгами: платёж с банковской транзакцией (`bank_txn_id`). Статус 1
+её не имеет и чека тоже — это попытка оплаты, а не оплата. Статусы 0 и 2 — одно
+и то же успешное состояние в двух кодировках (02.04.2026 АСУиМ сменил код).
+
+Шесть расхождений, каждое со своим смыслом:
+  • `impossible`  — сессия противоречит физике: средняя мощность выше предела;
+  • `double`      — на одну сессию несколько успешных списаний;
+  • `underpaid`   — начислено больше, чем списано;
+  • `no_payment`  — ток отпущен, оплаты нет (розница);
+  • `no_receipt`  — деньги списаны, фискального чека нет;
+  • `orphan`      — платёж есть, а сессии в Учёте нет.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import date, datetime
+from typing import Any
+
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.scope import acl_params, acl_sql
+
+# Предел средней мощности сессии. Самые быстрые станции сети — 150–350 кВт;
+# 400 взято с запасом, чтобы под правило не попала честная быстрая зарядка.
+MAX_POWER_KW = 400.0
+# Порог денежного расхождения: копеечные хвосты округления разбирать незачем.
+MONEY_EPS = 1.0
+
+
+@dataclass(frozen=True)
+class Kind:
+    key: str
+    label: str
+    hint: str
+
+
+KINDS: list[Kind] = [
+    Kind("impossible", "Сессии против физики",
+         "Средняя мощность выше 400 кВт — энергия и сумма в такой строке недостоверны. "
+         "Сколько списал банк, видно в колонке «Оплачено»."),
+    Kind("double", "Несколько списаний на зарядку",
+         "На одну зарядку прошло больше одного успешного платежа. Часто это законная "
+         "доплата, но если списано больше начисленного — деньги клиента; смотрите разрыв."),
+    Kind("underpaid", "Списано меньше начисленного",
+         "Сессия говорит одну сумму, банк списал меньшую. Либо ошибка в сессии, "
+         "либо часть денег не дошла."),
+    Kind("no_payment", "Отпуск без оплаты",
+         "Ток отпущен розничному клиенту, платежа нет вовсе — это задолженность."),
+    Kind("no_receipt", "Списано без фискального чека",
+         "Деньги получены, чек ОФД не выбит: разрыв в фискализации."),
+    Kind("orphan", "Платёж без сессии",
+         "Деньги пришли, а зарядки в Учёте нет. На краях периода это глубина выгрузки, "
+         "внутри периода — потерянная сессия."),
+]
+
+_SESSION_JOIN = """
+    from charge_sessions s
+    left join lateral (
+        select coalesce(sum(p.amount) filter (where p.bank_txn_id is not null), 0) as paid,
+               count(*) filter (where p.bank_txn_id is not null)                  as pay_ok,
+               count(*)                                                            as pay_all,
+               count(p.receipt_url) filter (where p.bank_txn_id is not null)       as receipts
+          from charge_payments p
+         where p.company_id = s.company_id and p.session_ext_id = s.session_ext_id
+    ) pay on true
+   where s.company_id = :cid and s.started_at >= :lo and s.started_at < :hi{acl}
+"""
+
+# Условие каждого расхождения — одно и то же в сводке и в списке.
+_WHERE = {
+    "impossible": "s.duration_min > 0 and s.energy_kwh > 0 "
+                  "and s.energy_kwh / (s.duration_min / 60.0) > :maxkw",
+    "double": "pay.pay_ok > 1",
+    "underpaid": "pay.pay_ok > 0 and s.amount - pay.paid > :eps",
+    "no_payment": "s.energy_kwh > 0 and pay.pay_all = 0 "
+                  "and s.user_type is distinct from 'ЮЛ'",
+    "no_receipt": "pay.pay_ok > 0 and pay.receipts = 0",
+}
+
+
+def _bounds(df: date, dt: date) -> tuple[datetime, datetime]:
+    from datetime import timedelta
+    return (datetime.combine(df, datetime.min.time()),
+            datetime.combine(dt, datetime.min.time()) + timedelta(days=1))
+
+
+async def reconciliation(db: AsyncSession, company_id, df: date, dt: date) -> dict[str, Any]:
+    """Сводка расхождений за период: сколько строк и на какие деньги."""
+    lo, hi = _bounds(df, dt)
+    p = {"cid": str(company_id), "lo": lo, "hi": hi,
+         "maxkw": MAX_POWER_KW, "eps": MONEY_EPS, **acl_params()}
+    join = _SESSION_JOIN.format(acl=acl_sql("s.location_id"))
+
+    totals = (await db.execute(text(f"""
+        select count(*) as sessions,
+               coalesce(sum(coalesce(s.client_amount, s.amount)), 0) as amount,
+               coalesce(sum(s.energy_kwh), 0) as energy,
+               coalesce(sum(pay.paid), 0) as paid
+        {join}
+    """), p)).one()
+
+    items: list[dict[str, Any]] = []
+    for k in KINDS:
+        if k.key == "orphan":
+            row = (await db.execute(text("""
+                select count(*) as n, coalesce(sum(pp.amount), 0) as amount
+                  from charge_payments pp
+                 where pp.company_id = :cid and pp.paid_at >= :lo and pp.paid_at < :hi
+                   and pp.bank_txn_id is not null
+                   and not exists (select 1 from charge_sessions ss
+                                    where ss.company_id = pp.company_id
+                                      and ss.session_ext_id = pp.session_ext_id)
+            """), p)).one()
+        else:
+            row = (await db.execute(text(f"""
+                select count(*) as n,
+                       coalesce(sum(coalesce(s.client_amount, s.amount)), 0) as amount,
+                       coalesce(sum(pay.paid), 0) as paid
+                {join} and ({_WHERE[k.key]})
+            """), p)).one()
+        paid = float(getattr(row, "paid", 0) or 0)
+        amount = float(row.amount or 0)
+        items.append({
+            "key": k.key, "label": k.label, "hint": k.hint,
+            "count": int(row.n or 0),
+            "amount": round(amount, 2),          # начислено по сессиям
+            "paid": round(paid if k.key != "orphan" else amount, 2),   # списано банком
+            # Деньги, о которых спор. У сирот спорить не о чем — там всё списано.
+            "gap": round(0.0 if k.key == "orphan" else amount - paid, 2),
+        })
+
+    return {
+        "period": {"from": df.isoformat(), "to": dt.isoformat()},
+        "totals": {
+            "sessions": int(totals.sessions or 0),
+            "amount": round(float(totals.amount or 0), 2),      # начислено по сессиям
+            "paid": round(float(totals.paid or 0), 2),          # списано банком
+            "energy_kwh": round(float(totals.energy or 0), 1),
+            "gap": round(float(totals.amount or 0) - float(totals.paid or 0), 2),
+        },
+        "kinds": items,
+    }
+
+
+async def reconciliation_list(db: AsyncSession, company_id, df: date, dt: date,
+                              kind: str, limit: int = 200) -> list[dict[str, Any]]:
+    """Строки одного расхождения — то, с чем идут разбираться."""
+    lo, hi = _bounds(df, dt)
+    p = {"cid": str(company_id), "lo": lo, "hi": hi, "maxkw": MAX_POWER_KW,
+         "eps": MONEY_EPS, "lim": max(1, min(limit, 2000)), **acl_params()}
+
+    if kind == "orphan":
+        rows = (await db.execute(text("""
+            select pp.payment_ext_id as id, pp.session_ext_id as session, null as station,
+                   pp.paid_at as at, 0 as energy, 0 as amount, pp.amount as paid,
+                   (pp.receipt_url is not null) as receipt, 1 as payments
+              from charge_payments pp
+             where pp.company_id = :cid and pp.paid_at >= :lo and pp.paid_at < :hi
+               and pp.bank_txn_id is not null
+               and not exists (select 1 from charge_sessions ss
+                                where ss.company_id = pp.company_id
+                                  and ss.session_ext_id = pp.session_ext_id)
+             order by pp.amount desc limit :lim
+        """), p)).mappings().all()
+    else:
+        join = _SESSION_JOIN.format(acl=acl_sql("s.location_id"))
+        order = ("abs(s.amount - pay.paid) desc" if kind in ("underpaid", "double")
+                 else ("s.energy_kwh desc" if kind == "impossible" else "s.amount desc"))
+        rows = (await db.execute(text(f"""
+            select s.session_ext_id as id, s.session_ext_id as session,
+                   s.station_name as station, s.started_at as at,
+                   s.energy_kwh as energy, coalesce(s.client_amount, s.amount) as amount,
+                   pay.paid as paid, (pay.receipts > 0) as receipt, pay.pay_ok as payments,
+                   case when s.duration_min > 0 and s.energy_kwh > 0
+                        then round((s.energy_kwh / (s.duration_min / 60.0))::numeric, 1) end as power_kw
+            {join} and ({_WHERE[kind]})
+            order by {order} limit :lim
+        """), p)).mappings().all()
+
+    return [{
+        "id": r["id"], "session": r["session"], "station": r["station"],
+        "at": r["at"].isoformat() if r["at"] else None,
+        "energy": round(float(r["energy"] or 0), 2),
+        "amount": round(float(r["amount"] or 0), 2),
+        "paid": round(float(r["paid"] or 0), 2),
+        "gap": round(float(r["amount"] or 0) - float(r["paid"] or 0), 2),
+        "receipt": bool(r["receipt"]), "payments": int(r["payments"] or 0),
+        "powerKw": float(r["power_kw"]) if r.get("power_kw") is not None else None,
+    } for r in rows]

@@ -90,3 +90,44 @@ export async function getStationSales(
     company_id: companyId, location_id: locationId, months: String(months),
   })
 }
+
+/* ── Сверка «сессия ↔ платёж ↔ чек» ───────────────────────────────────────── */
+
+export interface ReconKind {
+  key: 'impossible' | 'double' | 'underpaid' | 'no_payment' | 'no_receipt' | 'orphan'
+  label: string
+  hint: string
+  count: number
+  amount: number   // начислено по сессиям
+  paid: number     // списано банком
+  gap: number      // деньги, о которых спор
+}
+export interface ReconSummary {
+  period: { from: string; to: string }
+  totals: { sessions: number; amount: number; paid: number; energy_kwh: number; gap: number }
+  kinds: ReconKind[]
+}
+export interface ReconRow {
+  id: string
+  session: string | null
+  station: string | null
+  at: string | null
+  energy: number
+  amount: number
+  paid: number
+  gap: number
+  receipt: boolean
+  payments: number
+  powerKw: number | null
+}
+
+export async function getReconciliation(p: P): Promise<ReconSummary> {
+  return get<ReconSummary>('/api/charge-sessions/reconciliation', qp(p))
+}
+export async function getReconciliationRows(
+  p: P & { kind: string; limit?: number },
+): Promise<ReconRow[]> {
+  return get<ReconRow[]>('/api/charge-sessions/reconciliation/list', {
+    ...qp(p), kind: p.kind, limit: String(p.limit ?? 200),
+  })
+}

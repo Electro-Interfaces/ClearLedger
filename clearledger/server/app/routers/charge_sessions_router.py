@@ -238,6 +238,39 @@ async def payments_list(
     } for p in rows]
 
 
+@router.get("/reconciliation")
+async def charge_reconciliation_summary(
+    company_id: str,
+    date_from: str,
+    date_to: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Сверка «сессия ↔ платёж ↔ чек»: где данные о зарядках расходятся с деньгами."""
+    cid = await assert_company_member(company_id, current_user, db)
+    from app.services.charge_reconciliation import reconciliation
+    df, dt = _day_bounds(date_from, date_to)
+    return await reconciliation(db, cid, df.date(), (dt - timedelta(days=1)).date())
+
+
+@router.get("/reconciliation/list")
+async def charge_reconciliation_rows(
+    company_id: str,
+    date_from: str,
+    date_to: str,
+    kind: str = Query(..., pattern="^(impossible|double|underpaid|no_payment|no_receipt|orphan)$"),
+    limit: int = Query(200, le=2000),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[dict[str, Any]]:
+    """Строки одного расхождения — то, с чем идут разбираться."""
+    cid = await assert_company_member(company_id, current_user, db)
+    from app.services.charge_reconciliation import reconciliation_list
+    df, dt = _day_bounds(date_from, date_to)
+    return await reconciliation_list(db, cid, df.date(), (dt - timedelta(days=1)).date(),
+                                     kind, limit)
+
+
 @router.get("/station-sales")
 async def station_sales(
     company_id: str,
