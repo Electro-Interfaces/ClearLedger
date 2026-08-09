@@ -132,7 +132,11 @@ WITH v AS (
            max(client_name)                       AS client_name,
            max(connector_type)                    AS connector_type,
            sum(energy_kwh)                        AS kwh,
-           sum(amount)                            AS amount,
+           -- Выручка по канону раздела: у ЮЛ amount = 0 (постоплата), реальная
+           -- сумма лежит в client_amount. Пока тут стоял голый amount,
+           -- «Надёжность» показывала за июль 5,18 млн ₽ против 5,53 млн ₽ на
+           -- «Обзоре» — терялась вся корпоративная выручка.
+           sum(coalesce(client_amount, amount))   AS amount,
            sum(duration_min)                      AS duration_min,
            bool_or(paid_at IS NOT NULL)           AS paid,
            -- Сессии-попытки, не давшие энергии: чистые потери времени клиента

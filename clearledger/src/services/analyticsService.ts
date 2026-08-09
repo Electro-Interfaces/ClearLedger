@@ -142,12 +142,15 @@ export interface SalesChannelsResponse {
 export interface ChargeSessionLine {
   label: string
   sessions: number
+  charged?: number          // сессий, где ток пошёл, — знаменатель средних
+  charged_pct?: number      // их доля от всех попыток подключения
+  visits?: number           // визитов (склейка попыток одного приезда)
   energy_kwh: number
   amount: number
-  avg_check: number
+  avg_check: number         // на состоявшуюся заправку, не на попытку
   avg_energy: number
   avg_duration_min: number
-  success_pct: number
+  success_pct: number       // доля ВИЗИТОВ, закончившихся зарядкой (как на «Обзоре»)
   price_per_kwh: number
   share_pct: number
   // порт-нормированные метрики (валидны для физических разрезов: станция/коннектор/регион; и в totals)
@@ -156,7 +159,8 @@ export interface ChargeSessionLine {
   utilization_pct: number   // time-based: активные минуты ÷ (порты × период) × 100
   throughput_port: number   // кВтч/день на порт
   revenue_port: number      // ₽ на порт за период
-  unpaid_pct: number        // % сессий без отметки оплаты (paid_at пуст)
+  unpaid_pct: number        // % заправок с отпуском, но без отметки оплаты
+  unpaid_sessions?: number  // их количество — тревога поднимается только если оно > 0
 }
 export interface ChargeSessionsResponse {
   period: { from: string; to: string }

@@ -271,7 +271,8 @@ async def station_sales(
     t = (await db.execute(select(
         func.count().label("count"),
         func.coalesce(func.sum(S.energy_kwh), 0).label("kwh"),
-        func.coalesce(func.sum(S.amount), 0).label("amount"),
+        # Канон выручки раздела: у ЮЛ amount = 0 (постоплата), сумма в client_amount.
+        func.coalesce(func.sum(func.coalesce(S.client_amount, S.amount)), 0).label("amount"),
         func.min(S.started_at).label("first_at"),
         func.max(S.started_at).label("last_at"),
         func.count(func.distinct(S.user_id)).label("clients"),
@@ -297,7 +298,7 @@ async def station_sales(
         month.label("bucket"),
         func.count().label("sessions"),
         func.coalesce(func.sum(S.energy_kwh), 0).label("kwh"),
-        func.coalesce(func.sum(S.amount), 0).label("amount"),
+        func.coalesce(func.sum(func.coalesce(S.client_amount, S.amount)), 0).label("amount"),
     ).where(*scope, S.started_at.is_not(None))
      .group_by(month).order_by(month.desc()).limit(months))).all()
 

@@ -725,6 +725,19 @@ class AnalyticsService:
             func.coalesce(func.sum(func.coalesce(S.client_amount, S.amount)), 0).label("amount"),
             func.coalesce(func.sum(S.duration_min), 0).label("duration"),
             func.coalesce(func.sum(case((S.result == "Complete", 1), else_=0)), 0).label("success"),
+            # ── Знаменатель средних: сессии, где ток ПОШЁЛ ──────────────────
+            # Треть сессий — попытки подключения с нулевым отпуском. Пока они
+            # стояли в знаменателе, «средний чек» показывал 184 ₽ вместо 296 ₽,
+            # а «средняя заправка» — 9,9 кВт·ч вместо 15,9.
+            func.coalesce(func.sum(case((S.energy_kwh > 0, 1), else_=0)), 0).label("charged"),
+            func.coalesce(func.sum(case((S.energy_kwh > 0, S.duration_min), else_=0)), 0)
+                .label("dur_charged"),
+            # ── Успех: визитами, а не сессиями ──────────────────────────────
+            # Человек, у которого разъём схватился с третьей попытки, зарядился.
+            # Тот же показатель, что на «Обзоре» (89 %), — раньше разрезы считали
+            # долю result='Complete' (67 %), и два экрана спорили друг с другом.
+            func.count(distinct(S.visit_key)).label("visits"),
+            func.count(distinct(case((S.visit_charged.is_(True), S.visit_key)))).label("visits_ok"),
             # «Неоплачено» считаем только по не-ЮЛ: у ЮЛ paid_at штатно пуст
             # (постоплата по договору) — это не задолженность розницы.
             func.coalesce(func.sum(case(
@@ -732,6 +745,15 @@ class AnalyticsService:
             func.coalesce(func.sum(case(
                 (and_(S.paid_at.is_not(None), S.user_type.is_distinct_from("ЮЛ")), 1),
                 else_=0)), 0).label("paid"),
+            # Настоящий долг розницы: ток отпущен, а оплаты нет. Без условия по
+            # энергии сюда попадали сорвавшиеся попытки, и панель поднимала
+            # тревогу на 3,7 % там, где не заплачено ровно ноль рублей.
+            func.coalesce(func.sum(case(
+                (and_(S.user_type.is_distinct_from("ЮЛ"), S.energy_kwh > 0), 1),
+                else_=0)), 0).label("cnt_retail_charged"),
+            func.coalesce(func.sum(case(
+                (and_(S.user_type.is_distinct_from("ЮЛ"), S.energy_kwh > 0,
+                      S.paid_at.is_(None)), 1), else_=0)), 0).label("unpaid_charged"),
             func.count(distinct(self._port_key())).label("ports"),
             func.count(distinct(S.station_code)).label("stations"),
         ).where(*self._cs_conds(company_id, date_from, date_to, station_codes, regions, dim_by, dim_val,
@@ -800,6 +822,13 @@ class AnalyticsService:
         dur = float(r.duration); success = int(r.success)
         paid = int(getattr(r, "paid", 0) or 0)
         cnt_retail = int(getattr(r, "cnt_retail", 0) or 0)
+        # Средние — на состоявшуюся заправку; успех — на визит (см. _cs_aggregate).
+        charged = int(getattr(r, "charged", 0) or 0)
+        dur_charged = float(getattr(r, "dur_charged", 0) or 0)
+        visits = int(getattr(r, "visits", 0) or 0)
+        visits_ok = int(getattr(r, "visits_ok", 0) or 0)
+        retail_charged = int(getattr(r, "cnt_retail_charged", 0) or 0)
+        unpaid_charged = int(getattr(r, "unpaid_charged", 0) or 0)
         ports = int(getattr(r, "ports", 0) or 0)
         stations = int(getattr(r, "stations", 0) or 0)
         port_min = ports * period_days * 1440  # доступные порт-минуты за период
@@ -808,10 +837,15 @@ class AnalyticsService:
             "sessions": cnt,
             "energy_kwh": round(energy, 1),
             "amount": round(amount, 2),
-            "avg_check": round(amount / cnt, 2) if cnt else 0.0,
-            "avg_energy": round(energy / cnt, 2) if cnt else 0.0,
-            "avg_duration_min": round(dur / cnt, 1) if cnt else 0.0,
-            "success_pct": round(success / cnt * 100, 1) if cnt else 0.0,
+            "charged": charged,
+            "avg_check": round(amount / charged, 2) if charged else 0.0,
+            "avg_energy": round(energy / charged, 2) if charged else 0.0,
+            "avg_duration_min": round(dur_charged / charged, 1) if charged else 0.0,
+            "success_pct": round(visits_ok / visits * 100, 1) if visits else 0.0,
+            "visits": visits,
+            # Доля сессий, где ток пошёл, — отдельный от «успеха» показатель:
+            # он про попытки подключения, а не про людей.
+            "charged_pct": round(charged / cnt * 100, 1) if cnt else 0.0,
             "price_per_kwh": round(amount / energy, 2) if energy else 0.0,
             # порт-нормированные метрики (валидны для физических разрезов: станция/коннектор/регион)
             "ports": ports,
@@ -819,9 +853,14 @@ class AnalyticsService:
             "utilization_pct": round(dur / port_min * 100, 1) if port_min else 0.0,
             "throughput_port": round(energy / ports / period_days, 1) if (ports and period_days) else 0.0,
             "revenue_port": round(amount / ports, 0) if ports else 0.0,
-            # только розница/аноним: ЮЛ-постоплата — не «неоплачено»
-            "unpaid_pct": round((cnt_retail - paid) / cnt_retail * 100, 1) if cnt_retail else 0.0,
+            # Только розница (ЮЛ-постоплата — не «неоплачено») и только там, где
+            # ток отпущен: за сорвавшуюся попытку платить не за что.
+            "unpaid_pct": round(unpaid_charged / retail_charged * 100, 1) if retail_charged else 0.0,
+            "unpaid_sessions": unpaid_charged,
             "_dur_sum": dur, "_success": success, "_paid": paid, "_cnt_retail": cnt_retail,
+            "_charged": charged, "_dur_charged": dur_charged,
+            "_visits": visits, "_visits_ok": visits_ok,
+            "_unpaid_charged": unpaid_charged, "_retail_charged": retail_charged,
         }
 
     async def _cs_aggregate_2d(
@@ -950,6 +989,14 @@ class AnalyticsService:
         tsucc = sum(l["_success"] for l in lines)
         tpaid = sum(l["_paid"] for l in lines)
         tretail = sum(l["_cnt_retail"] for l in lines)
+        # Итог считается по тем же правилам, что строка: средние — на состоявшуюся
+        # заправку, успех — на визит, «без оплаты» — только там, где ток пошёл.
+        tcharged = sum(l["_charged"] for l in lines)
+        tdur_charged = sum(l.get("_dur_charged", 0) for l in lines)
+        tvisits = sum(l["_visits"] for l in lines)
+        tvisits_ok = sum(l["_visits_ok"] for l in lines)
+        tunpaid = sum(l["_unpaid_charged"] for l in lines)
+        tretail_charged = sum(l["_retail_charged"] for l in lines)
         # порты сети — distinct (не сумма строк: для нефизических разрезов порт делят
         # сегменты). 2 доп. distinct-скана; пропускаем, если totals не нужны.
         if with_totals:
@@ -963,20 +1010,27 @@ class AnalyticsService:
         totals = {
             "label": "Итого", "sessions": ts, "energy_kwh": round(te, 1), "amount": round(total_amount, 2),
             "stations": net_stations,
-            "avg_check": round(total_amount / ts, 2) if ts else 0.0,
-            "avg_energy": round(te / ts, 2) if ts else 0.0,
-            "avg_duration_min": round(td / ts, 1) if ts else 0.0,
-            "success_pct": round(tsucc / ts * 100, 1) if ts else 0.0,
+            "charged": tcharged,
+            "avg_check": round(total_amount / tcharged, 2) if tcharged else 0.0,
+            "avg_energy": round(te / tcharged, 2) if tcharged else 0.0,
+            "avg_duration_min": round(tdur_charged / tcharged, 1) if tcharged else 0.0,
+            "success_pct": round(tvisits_ok / tvisits * 100, 1) if tvisits else 0.0,
+            "visits": tvisits,
+            "charged_pct": round(tcharged / ts * 100, 1) if ts else 0.0,
             "price_per_kwh": round(total_amount / te, 2) if te else 0.0,
             "ports": net_ports,
             "utilization_pct": round(td / port_min * 100, 1) if port_min else 0.0,
             "throughput_port": round(te / net_ports / period_days, 1) if (net_ports and period_days) else 0.0,
             "revenue_port": round(total_amount / net_ports, 0) if net_ports else 0.0,
-            "unpaid_pct": round((tretail - tpaid) / tretail * 100, 1) if tretail else 0.0,
+            "unpaid_pct": round(tunpaid / tretail_charged * 100, 1) if tretail_charged else 0.0,
+            "unpaid_sessions": tunpaid,
             "share_pct": 100.0,
         }
         for l in lines:
-            l.pop("_dur_sum", None); l.pop("_success", None); l.pop("_paid", None); l.pop("_cnt_retail", None)
+            for k in ("_dur_sum", "_success", "_paid", "_cnt_retail", "_charged",
+                      "_dur_charged", "_visits", "_visits_ok", "_unpaid_charged",
+                      "_retail_charged"):
+                l.pop(k, None)
         out: dict[str, Any] = {
             "period": {"from": f.date_from.isoformat(), "to": f.date_to.isoformat()},
             "group_by": group_by, "lines": lines, "totals": totals, "period_days": period_days}

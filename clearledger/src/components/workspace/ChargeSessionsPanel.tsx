@@ -152,11 +152,16 @@ function SessionKpis({ t, series }: { t: ChargeSessionLine; series?: ChargeTotal
     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
       <KpiCard label="Выручка" value={fmtMoneyShort(t.amount) + ' ₽'} accent="success" spark={series?.amount} sparkLabel="Выручка по периодам" />
       <KpiCard label="Загрузка (util)" value={t.utilization_pct.toFixed(1) + '%'} accent={utilAccent(t.utilization_pct)} hint={`${nf0.format(t.ports)} портов`} info={HINTS.utilization} />
-      <KpiCard label="Успешных" value={t.success_pct.toFixed(1) + '%'} accent={succAccent(t.success_pct)} info={HINTS.sessionSuccess} spark={series?.success_pct} sparkLabel="Успешность по периодам" />
-      <KpiCard label="Сессий" value={nf0.format(t.sessions)} spark={series?.sessions} sparkLabel="Сессии по периодам" />
+      {/* Успех — доля ВИЗИТОВ, закончившихся зарядкой: человек, у которого разъём
+          схватился со второй попытки, зарядился. Та же цифра, что на «Обзоре». */}
+      <KpiCard label="Зарядились" value={t.success_pct.toFixed(1) + '%'} accent={succAccent(t.success_pct)} info={HINTS.sessionSuccess} spark={series?.success_pct} sparkLabel="Успешность по периодам" />
+      <KpiCard label="Сессий" value={nf0.format(t.sessions)}
+        hint={t.charged ? `${nf0.format(t.charged)} с отпуском` : undefined}
+        spark={series?.sessions} sparkLabel="Сессии по периодам" />
       <KpiCard label="Энергия" value={kwh(t.energy_kwh)} accent="info" spark={series?.energy} sparkLabel="Энергия по периодам" />
       <KpiCard label="Цена ₽/кВтч" value={fmtMoney(t.price_per_kwh)} />
-      <KpiCard label="Средний чек" value={fmtMoney(t.avg_check) + ' ₽'} spark={series?.avg_check} sparkLabel="Средний чек по периодам" />
+      {/* Средняя заправка — на состоявшуюся зарядку, а не на попытку подключения. */}
+      <KpiCard label="Средняя заправка" value={fmtMoney(t.avg_check) + ' ₽'} spark={series?.avg_check} sparkLabel="Средний чек по периодам" />
       <KpiCard label="кВтч/день/порт" value={nf1.format(t.throughput_port)} hint="throughput" />
     </div>
   )
@@ -367,9 +372,13 @@ function Overview({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom
   const t = st.data.totals
   const bar = (rows: ChargeSessionLine[] | undefined) => (rows ?? []).slice(0, 6)
   const alerts: string[] = []
-  if (t.success_pct < 85) alerts.push(`Успешных ${t.success_pct.toFixed(1)}% — ${(100 - t.success_pct).toFixed(1)}% сессий с ошибкой`)
+  if (t.success_pct < 85) alerts.push(`Зарядились ${t.success_pct.toFixed(1)}% визитов — ${(100 - t.success_pct).toFixed(1)}% уехали без зарядки`)
   if (t.utilization_pct < 15) alerts.push(`Загрузка сети ${t.utilization_pct.toFixed(1)}% — ниже порога безубыточности (15%)`)
-  if (t.unpaid_pct > 3) alerts.push(`Без оплаты ${t.unpaid_pct.toFixed(1)}% сессий`)
+  // Тревога только по настоящему долгу: ток отпущен, оплаты нет. Раньше сюда
+  // попадали сорвавшиеся попытки, и панель горела при нулевой задолженности.
+  if (t.unpaid_pct > 3 && (t.unpaid_sessions ?? 0) > 0) {
+    alerts.push(`Без оплаты ${nf0.format(t.unpaid_sessions ?? 0)} заправок (${t.unpaid_pct.toFixed(1)}%)`)
+  }
   return (
     <div className="p-4 space-y-4">
       <SessionKpis t={t} />
