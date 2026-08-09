@@ -74,6 +74,11 @@ CHECKS: list[Check] = [
           "select count(*) from charge_sessions where company_id=:cid and cut_key is null",
           "Разрез расчёта (розница · корпоратив · служебная) проставляется при загрузке; "
           "у перенесённых с прода строк его нет, и они выпадают из сверки по каналам."),
+    Check("ses_admin", "Служебные заезды персонала", "Продажи",
+          "select count(*) from charge_sessions where company_id=:cid and charge_type='ADMIN'",
+          "Заезды персонала (проверка станции, обслуживание). Решение МАГа 10.08.2026: "
+          "считаем их выручкой наравне с клиентскими — отдельной корзины у них нет. "
+          "Цифра стоит здесь, чтобы её видели, а не находили в разборе.", "info"),
     Check("card_no_owner", "Карты без владельца", "Продажи",
           "select count(*) from ezs_rfid_cards where company_id=:cid and customer_ext_id is null",
           "Карта есть, а чья — неизвестно: сессии по ней не связываются с клиентом."),
