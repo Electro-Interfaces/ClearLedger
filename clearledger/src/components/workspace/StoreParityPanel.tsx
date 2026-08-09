@@ -16,13 +16,14 @@
  */
 import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { ChevronRight, RadioTower } from 'lucide-react'
+import { ChevronRight, Download, RadioTower } from 'lucide-react'
 import {
   getStoreStations, getStoreReconcile, getStoreParity,
   type StoreStation, type StoreReconcileShift,
 } from '@/services/storeService'
 import { useCompany } from '@/contexts/CompanyContext'
 import { rowDrill } from './rowDrill'
+import { csvDownload } from './csvDownload'
 
 const СТАТУС: Record<string, string> = {
   'совпало': 'text-emerald-400/90',
@@ -123,15 +124,32 @@ export function StoreParityPanel() {
     )
   }
 
+  const выгрузить = () => csvDownload(
+    `сверка-с-1с-${станция ?? 'сеть'}`,
+    ['Дата', 'Смена', 'АЗС', 'Статус', 'Подробность', 'Расхождений'],
+    (сверка?.shifts ?? []).map((s) => [
+      когда(s.closed_at ?? s.opened_at), s.shift ?? '', s.station,
+      s.status, s.detail ?? s.note ?? '', (s.issues ?? []).length,
+    ]))
+
   return (
     <div className="space-y-4 p-6">
-      <div>
-        <h3 className="text-base font-semibold">Сверка с 1С</h3>
-        <p className="text-xs text-muted-foreground">
-          Пока 1С считает станцию параллельно, её пакеты приходят тем же каналом. Сходимость
-          каждой смены доказывает, что агент считает верно; паритет видов документов показывает,
-          чего мы ещё не умеем. Вместе это условие вывода 1С из контура станции.
-        </p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-base font-semibold">Сверка с 1С</h3>
+          <p className="text-xs text-muted-foreground">
+            Пока 1С считает станцию параллельно, её пакеты приходят тем же каналом. Сходимость
+            каждой смены доказывает, что агент считает верно; паритет видов документов показывает,
+            чего мы ещё не умеем. Вместе это условие вывода 1С из контура станции.
+          </p>
+        </div>
+        {/* Доказательство сходимости нужно предъявлять, а не пересказывать. */}
+        {(сверка?.shifts?.length ?? 0) > 0 && (
+          <button type="button" onClick={выгрузить}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-border/60 px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground">
+            <Download className="size-3.5" />Выгрузить сверку
+          </button>
+        )}
       </div>
 
       {станции.length > 1 && (

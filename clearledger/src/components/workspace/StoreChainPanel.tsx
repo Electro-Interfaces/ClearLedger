@@ -14,12 +14,14 @@
  */
 import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { ChevronRight, RadioTower } from 'lucide-react'
+import { ChevronRight, Download, RadioTower } from 'lucide-react'
 import {
   getStoreStations, getStoreChain,
   type StoreStation, type StoreChainItem,
 } from '@/services/storeService'
 import { useCompany } from '@/contexts/CompanyContext'
+import { ShowMore, useVisible } from '@/components/common/ShowMore'
+import { csvDownload } from './csvDownload'
 
 function число(v: number | undefined | null): string {
   if (v === undefined || v === null) return '—'
@@ -75,6 +77,7 @@ function Расхождение({ что, сколько, почему, трев
 }) {
   const [открыта, открыть] = useState(false)
   const есть = позиции.length > 0
+  const показ = useVisible(позиции)
   return (
     <div className="rounded-lg border border-border/50 bg-card/40">
       <button type="button" onClick={() => есть && открыть(!открыта)}
@@ -107,7 +110,7 @@ function Расхождение({ что, сколько, почему, трев
               </tr>
             </thead>
             <tbody>
-              {позиции.map((п, i) => (
+              {показ.visible.map((п, i) => (
                 <tr key={`${п.uuid ?? п.товар}-${i}`} className="border-t border-border/30">
                   <td className="px-3 py-1.5">{п.товар}</td>
                   {деталь && <td className="px-3 py-1.5 text-muted-foreground">{п.деталь ?? '—'}</td>}
@@ -121,6 +124,9 @@ function Расхождение({ что, сколько, почему, трев
               ))}
             </tbody>
           </table>
+          {/* Раскрытие рендерит не всё разом: у «источники разошлись» на 208
+              триста строк, и они разворачивались одним куском. */}
+          <ShowMore {...показ} onMore={показ.more} onAll={показ.all} unit="позиций" />
         </div>
       )}
     </div>
@@ -160,9 +166,18 @@ export function StoreChainPanel() {
   const возраст = с?.снято ? (Date.now() - new Date(с.снято).getTime()) / 3_600_000 : null
   const староват = возраст !== null && возраст >= 12
 
+  const выгрузить = () => csvDownload(
+    `цепочка-${станция ?? 'сеть'}-${(с?.снято ?? '').slice(0, 10)}`,
+    ['Товар', 'Место', 'Касса', 'У нас', '1С'],
+    (data?.разошлись ?? []).map((п) => [
+      п.товар, п.деталь ?? '',
+      п.касса ?? '', п.наш ?? '', п.одинс ?? '',
+    ]))
+
   return (
     <div className="space-y-4 p-6">
-      <div>
+      <div className="flex items-start justify-between gap-3">
+        <div>
         <h3 className="text-base font-semibold">Цепочка учёта</h3>
         <p className="text-xs text-muted-foreground">
           Товар считают в трёх местах сразу: касса знает, чем торгуют, наш журнал — чем владеем,
@@ -170,6 +185,15 @@ export function StoreChainPanel() {
           делает станция одним заходом: сравнивать источники, снятые в разное время, — самый
           простой способ увидеть расхождение там, где его нет.
         </p>
+        </div>
+        {/* Разговор о расхождении идёт не у экрана: список нужно отдать
+            товароведу на станцию или приложить к письму. */}
+        {(data?.разошлись?.length ?? 0) > 0 && (
+          <button type="button" onClick={выгрузить}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-border/60 px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground">
+            <Download className="size-3.5" />Выгрузить расхождения
+          </button>
+        )}
       </div>
 
       {станции.length > 1 && (

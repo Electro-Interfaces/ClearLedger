@@ -644,8 +644,9 @@ export function StoreDedupPanel() {
     } catch { toast.error('Не удалось выгрузить план') }
   }
 
+  // Отступ как у соседей раздела: p-4 против p-6 читался как чужой экран.
   return (
-    <div className="p-4 space-y-4">
+    <div className="space-y-4 p-6">
       {/* Заголовок */}
       <div className="flex items-start gap-3">
         <div className="mt-0.5 rounded-lg bg-primary/10 p-2 text-primary shrink-0"><CopyCheck className="size-5" /></div>
@@ -666,8 +667,8 @@ export function StoreDedupPanel() {
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-4 xl:grid-cols-8">
           <Kpi label="Карточек 208" value={fmt(sum.cardsTotal)} hint={`008:${fmt(sum.byPrefix['008'])} · 208:${fmt(sum.byPrefix['208'])} · ЦБ:${fmt(sum.byPrefix['ЦБ'])}`} />
           <Kpi label="Групп в контуре 208" value={fmt(sum.scopedGroups)} hint={`из ${fmt(sum.dupGroups)} · вне контура ${fmt(sum.outOfScopeGroups)}`} />
-          <Kpi label="Разобрано" value={`${fmt(sum.scopedResolved)} / ${fmt(sum.scopedGroups)}`}
-            hint={`осталось решить ${fmt((sum.scopedGroups ?? 0) - (sum.scopedResolved ?? 0))}`} />
+          <Kpi label="Разобрано в контуре 208" value={`${fmt(sum.scopedResolved)} / ${fmt(sum.scopedGroups)}`}
+            hint={`осталось решить ${fmt((sum.scopedGroups ?? 0) - (sum.scopedResolved ?? 0))} · в самой 1С дубли остаются до Дня X`} />
           {/* Цены в дампе станции не заполнены ни у одной из 5507 привязок, и
               «рассинхрон» считается по пустоте: плитка горела красным на семи
               группах, все из которых давно в архиве. Показываем только когда за
@@ -734,10 +735,19 @@ export function StoreDedupPanel() {
               <Search className="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Поиск по названию…" className="h-8 pl-8 text-xs" />
             </div>
-            <label className="flex items-center gap-1.5 text-xs text-muted-foreground"
+            {/* Оба отбора включены с открытия экрана. Пока они выглядели как
+                обычные галочки в ряду прочих, человек видел «134 группы» в KPI и
+                «94» в списке и не понимал, куда делись сорок: ограничение было
+                применено молча — ровно то, что PRODUCT.md называет анти-референсом. */}
+            <label className={cn('flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs',
+              onlyScope ? 'border-primary/50 bg-primary/10 text-foreground' : 'border-transparent text-muted-foreground')}
               title="Оставить группы, через которые касса 208 реально работает: активный код склада 208 или продажи. Префикс кода (008/208/ЦБ) на это не влияет.">
-              <input type="checkbox" checked={onlyScope} onChange={(e) => setOnlyScope(e.target.checked)} />только контур 208</label>
-            <label className="flex items-center gap-1.5 text-xs text-muted-foreground"><input type="checkbox" checked={onlyLive} onChange={(e) => setOnlyLive(e.target.checked)} />только с &gt;1 живой</label>
+              <input type="checkbox" checked={onlyScope} onChange={(e) => setOnlyScope(e.target.checked)} />
+              только контур 208{onlyScope && <span className="text-[10px] text-muted-foreground">· отбор включён</span>}</label>
+            <label className={cn('flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs',
+              onlyLive ? 'border-primary/50 bg-primary/10 text-foreground' : 'border-transparent text-muted-foreground')}>
+              <input type="checkbox" checked={onlyLive} onChange={(e) => setOnlyLive(e.target.checked)} />
+              только с &gt;1 живой{onlyLive && <span className="text-[10px] text-muted-foreground">· отбор включён</span>}</label>
             <label className="flex items-center gap-1.5 text-xs text-muted-foreground"><input type="checkbox" checked={priceDesync} onChange={(e) => setPriceDesync(e.target.checked)} />только рассинхрон цен</label>
             <label className="flex items-center gap-1.5 text-xs text-muted-foreground"><input type="checkbox" checked={inclAssort} onChange={(e) => setInclAssort(e.target.checked)} />показать «в ассортименте»</label>
             <Select value={statusFilter} onValueChange={setStatusFilter}>
@@ -759,8 +769,10 @@ export function StoreDedupPanel() {
               </Select>
             )}
             <span className="ml-auto text-xs text-muted-foreground">
-              {groups.length} групп · разобрано {doneCount}
-              {openCount > 0 && <> · <span className="text-amber-300/80">осталось {openCount}</span></>}
+              {/* Тот же глагол в двух смыслах путал: KPI считает весь контур,
+                  а эта строка — только текущий отбор. Отбор и назван. */}
+              в отборе {groups.length} групп · решено {doneCount}
+              {openCount > 0 && <> · <span className="text-amber-300/80">открыто {openCount}</span></>}
               {(sum?.notUsedGroups ?? 0) > 0 && <> · <span className="text-slate-300/80">в архиве {fmt(sum?.notUsedGroups)}</span></>}
             </span>
           </div>
