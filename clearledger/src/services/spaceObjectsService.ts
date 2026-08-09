@@ -295,3 +295,24 @@ export async function projectSpaceUsers(
 ): Promise<ProjectionResult> {
   return projectSpaceEntity(companyId, 'users', app)
 }
+
+/* ── Качество данных: именованные проверки с числом и подсказкой ─────────── */
+
+export interface QualityCheck {
+  key: string
+  label: string
+  group: string
+  count: number
+  target: number
+  severity: 'warn' | 'info'
+  hint: string
+  ok: boolean
+  error: string | null
+}
+export interface DataQuality {
+  groups: { label: string; checks: QualityCheck[] }[]
+  totals: { checks: number; clean: number; issues: number }
+}
+export async function getDataQuality(companyId: string): Promise<DataQuality> {
+  return get<DataQuality>('/api/registry/data-quality', { company_id: companyId })
+}

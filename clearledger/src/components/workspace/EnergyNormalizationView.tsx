@@ -15,8 +15,8 @@ import { loadChannels } from '@/services/channelService'
 import { isApiEnabled } from '@/services/apiClient'
 import { getChargeModel, getStationsModel, getStationsLinkage } from '@/services/analyticsService'
 import { usePaymentDisciplineSummary, useReestrModel, useDispenseRecon } from '@/hooks/useReferences'
-import { getSpaceDataModel, linkCounterparties } from '@/services/spaceObjectsService'
-import type { LinkCounterpartiesResult } from '@/services/spaceObjectsService'
+import { getSpaceDataModel, getDataQuality, linkCounterparties } from '@/services/spaceObjectsService'
+import type { DataQuality, LinkCounterpartiesResult } from '@/services/spaceObjectsService'
 import type { Channel } from '@/types/channel'
 import { CentralPanelLayout, type CentralMenuItem } from './CentralPanelLayout'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -317,6 +317,69 @@ function ChannelLinkageBlock({ companyId }: { companyId: string }) {
    там же контрагенты, договоры и весь проектный контур, которые файлом не приезжают.
    Столбец «Связь» показывает долг схемы: где роль до сих пор хранится строкой, а не
    ссылкой на карточку контрагента — такие записи в общий реестр не сводятся. ── */
+/**
+ * Качество данных: именованные проверки с числом и подсказкой «что делать».
+ *
+ * Разовая чистка не закрепляется — через месяц выгрузка приносит новые
+ * расхождения. Здесь состояние видно постоянно, и с ним можно идти к
+ * поставщику данных со списком, а не с общим «у вас что-то не так».
+ */
+function DataQualityBlock() {
+  const { companyId } = useCompany()
+  const q = useQuery<DataQuality>({
+    queryKey: ['data-quality', companyId],
+    queryFn: () => getDataQuality(companyId),
+    enabled: !!companyId, staleTime: 60_000,
+  })
+  if (q.isLoading) {
+    return <div className="px-6 py-10 text-sm text-muted-foreground">Проверка данных…</div>
+  }
+  if (!q.data) {
+    return <div className="px-6 py-10 text-sm text-muted-foreground">Проверки недоступны.</div>
+  }
+  const { groups, totals } = q.data
+  return (
+    <div className="px-6 py-5 space-y-5">
+      <div>
+        <h2 className="text-base font-semibold">Качество данных</h2>
+        <p className="mt-1 text-xs text-muted-foreground">
+          {totals.clean} из {totals.checks} проверок без замечаний. Часть цифр никогда не
+          станет нулём — например, платежи за период, за который сессии не выгружались;
+          у таких проверок пометка «наблюдаем».
+        </p>
+      </div>
+      {groups.map((g) => (
+        <div key={g.label} className="space-y-2">
+          <div className="text-xs font-medium text-muted-foreground">{g.label}</div>
+          <Card><CardContent className="p-0 overflow-x-auto">
+            <table className="w-full text-xs">
+              <tbody>
+                {g.checks.map((c) => (
+                  <tr key={c.key} className="border-b last:border-0 align-top">
+                    <td className="p-2 w-64 font-medium">{c.label}</td>
+                    <td className={`p-2 w-24 text-right tabular-nums ${
+                      c.ok ? 'text-emerald-600 dark:text-emerald-400'
+                        : c.severity === 'warn' ? 'text-amber-600 dark:text-amber-400'
+                        : 'text-muted-foreground'}`}>
+                      {c.error ? "—" : fmtN(c.count)}
+                    </td>
+                    <td className="p-2 text-muted-foreground">
+                      {c.error ?? c.hint}
+                      {c.severity === 'info' && !c.ok && (
+                        <span className="ml-1 text-[11px] text-muted-foreground/70">· наблюдаем</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </CardContent></Card>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function SpaceDataModelBlock() {
   const { companyId } = useCompany()
   const q = useQuery({
@@ -666,6 +729,8 @@ export function EnergyNormalizationView() {
   const menu = useMemo<CentralMenuItem[]>(() => {
     const items: CentralMenuItem[] = [
       { key: 'base', label: 'База пространства' },
+      // Состояние данных постоянным экраном, а не по итогам разбора.
+      { key: 'quality', label: 'Качество данных' },
       { key: 'overview', label: 'Обзор каналов' },
     ]
     for (const ch of normChannels) items.push({ key: ch.id, label: ch.name })
@@ -679,6 +744,7 @@ export function EnergyNormalizationView() {
 
   function render() {
     if (activeKey === 'base') return <SpaceDataModelBlock />
+    if (activeKey === 'quality') return <DataQualityBlock />
     if (activeKey === 'overview') return <NormalizationOverview channels={normChannels} onOpen={setTab} />
     const ch = normChannels.find((c) => c.id === activeKey)
     const tpl = ch?.templateId ?? ''

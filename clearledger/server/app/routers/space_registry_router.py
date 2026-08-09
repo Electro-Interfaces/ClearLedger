@@ -26,6 +26,7 @@ from app.services import (
     space_connectors, space_data_model, space_desk, space_links, space_projection,
     space_registry,
 )
+from app.services.data_quality import data_quality
 from app.services.ezs_reference_link import link_references
 
 router = APIRouter(prefix="/registry", tags=["ElsyPlus Core — реестр объектов"])
@@ -240,6 +241,21 @@ async def data_model(
     """Состав нормализованной базы пространства: сущности, объёмы, незакрытые связи."""
     cid = await _member(company_id, user, db)
     data = await space_data_model.data_model(db, cid)
+    return {"companyId": str(cid), **data}
+
+
+@router.get("/data-quality")
+async def data_quality_report(
+    company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Качество данных пространства: именованные проверки с числом и подсказкой.
+
+    Отвечает на вопрос «что сейчас не в порядке и что с этим делать». Часть
+    проверок никогда не станет нулём (например, платежи за период, за который
+    сессий у нас нет вовсе) — у каждой указано, сколько считается нормой."""
+    cid = await _member(company_id, user, db)
+    data = await data_quality(db, cid)
     return {"companyId": str(cid), **data}
 
 
