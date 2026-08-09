@@ -135,6 +135,8 @@ export async function getReconciliationRows(
 /** Где копятся расхождения: разрез сверки по станции или региону. */
 export interface ReconByRow {
   label: string
+  /** Код станции — им строки соединяются с разрезами «Продаж» (там подпись «Имя (код)»). */
+  code?: string | null
   sessions: number
   amount: number
   paid: number

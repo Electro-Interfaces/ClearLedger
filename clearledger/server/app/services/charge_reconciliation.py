@@ -210,8 +210,11 @@ async def reconciliation_by(db: AsyncSession, company_id, df: date, dt: date,
          "eps": MONEY_EPS, "lim": max(1, min(limit, 500)), **acl_params()}
     # Регион берём из справочника объектов: в самих сессиях он денормализован и
     # написан по-разному (87 написаний на 48 субъектов).
+    # По станции группируем ПО КОДУ — он идентичность станции, имя может меняться
+    # (волна переименований CPO). Подпись собираем как в разрезах: «Имя (код)»,
+    # чтобы строки этого разреза соединялись со списками «Надёжности».
     dim = ("coalesce(r.name, s.region, '—')" if by == "region"
-           else "coalesce(s.station_name, s.station_code, '—')")
+           else "coalesce(s.station_code, '—')")
     join_dim = ("""
         left join service_locations l on l.id = s.location_id
         left join regions r on r.id = l.region_id
@@ -219,6 +222,7 @@ async def reconciliation_by(db: AsyncSession, company_id, df: date, dt: date,
 
     rows = (await db.execute(text("""
         select {dim} as label,
+               max(s.station_name) as station_name,
                count(*) as sessions,
                coalesce(sum(coalesce(s.client_amount, s.amount)), 0) as amount,
                coalesce(sum(pay.paid), 0) as paid,
@@ -262,8 +266,11 @@ async def reconciliation_by(db: AsyncSession, company_id, df: date, dt: date,
     out: list[dict[str, Any]] = []
     for r in rows:
         amount, paid = float(r["amount"] or 0), float(r["paid"] or 0)
+        code = r["label"] if by == "station" else None
+        label = (f"{(r['station_name'] or 'Станция').strip()} ({code})"
+                 if by == "station" else r["label"])
         out.append({
-            "label": r["label"], "sessions": int(r["sessions"]),
+            "label": label, "code": code, "sessions": int(r["sessions"]),
             "amount": round(amount, 2), "paid": round(paid, 2),
             "gap": round(amount - paid, 2),
             "gapPct": round((amount - paid) / amount * 100, 1) if amount else 0.0,

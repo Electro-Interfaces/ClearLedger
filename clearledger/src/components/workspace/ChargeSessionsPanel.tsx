@@ -30,6 +30,7 @@ import { PanelViewTabs } from './PanelViewTabs'
 import { ViewParamsBar } from './ViewParamsBar'
 import { HorizonControl } from './HorizonControl'
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RTooltip } from 'recharts'
+import { getReconciliationBy, type ReconByRow } from '@/services/chargePaymentsService'
 import {
   getChargeSessions, getChargeTimeseries, getChargeCompareMulti, getChargeSlice, getChargeHeatmap,
   getChargeNewClients, getChargeNewClientsList, getChargeVisits, getChargeUnpaid, getChargeUnpaidStation,
@@ -2145,6 +2146,11 @@ function Reliability({ companyId, dateFrom, dateTo }: { companyId: string; dateF
   const byConn = useCS(companyId, period.from, period.to, 'connector')
   const byStation = useCS(companyId, period.from, period.to, 'station')
   const n = useNarrow()
+  const recon = useQuery<ReconByRow[]>({
+    queryKey: ['reliability-recon', companyId, period.from, period.to],
+    queryFn: () => getReconciliationBy({ companyId, dateFrom: period.from, dateTo: period.to, by: 'station', limit: 200 }),
+    enabled: !!companyId,
+  })
   const trend = useQuery({
     queryKey: ['charge-timeseries', companyId, period.from, period.to, 'month', 'success_pct', '__net__', n.key],
     queryFn: () => getChargeTimeseries({ companyId, dateFrom: period.from, dateTo: period.to, bucket: 'month', metric: 'success_pct', stations: n.stations, regions: n.regions, dim: n.dim, dimVal: n.dimVal }),
@@ -2156,7 +2162,21 @@ function Reliability({ companyId, dateFrom, dateTo }: { companyId: string; dateF
   const errors = t.sessions - complete
   const stations = byStation.data?.lines ?? []
   const risk = stations.filter((l) => l.sessions >= 30 && l.success_pct < 70)
-  const worst = [...stations].filter((l) => l.sessions >= 30).sort((a, b) => a.success_pct - b.success_pct).slice(0, 15)
+  // Вторая причина вызывать сервис — не «люди уезжают незаряженными», а «счётчик
+  // врёт»: станция может показывать отличный успех и при этом писать 10 000 кВт·ч
+  // за 11 секунд. Оба признака должны стоять в одном списке кандидатов на ТО.
+  const byCode = new Map(
+    (recon.data ?? []).filter((r) => r.code).map((r) => [String(r.code), r]))
+  const codeOf = (label: string) => label.match(/\(([^)]+)\)\s*$/)?.[1] ?? ''
+  const dataIssue = (l: { label: string }): ReconByRow | undefined => byCode.get(codeOf(l.label))
+  const worstBase = [...stations].filter((l) => l.sessions >= 30)
+    .sort((a, b) => a.success_pct - b.success_pct).slice(0, 15)
+  // Хронику по данным добавляем, даже если по успеху станция не худшая.
+  const chronicExtra = stations.filter((l) => {
+    const d = dataIssue(l)
+    return d?.chronic && !worstBase.some((w) => w.label === l.label)
+  }).slice(0, 5)
+  const worst = [...worstBase, ...chronicExtra]
   // Ряд для плитки берём из того же запроса, что кормит график ниже: динамика под
   // цифрой не стоит экрану ни одного лишнего обращения.
   const netSpark = trend.data?.data.map((d) => {
@@ -2232,10 +2252,15 @@ function Reliability({ companyId, dateFrom, dateTo }: { companyId: string; dateF
       <Card>
         <CardContent className="p-0">
           <div className="px-3 py-2 text-xs font-semibold text-muted-foreground border-b bg-muted/40">
-            Худшие станции по надёжности — кандидаты на ТО (≥30 сессий)
+            Кандидаты на ТО: люди уезжают незаряженными или врут данные счётчика
           </div>
-          <table className="w-full text-xs" {...exportRows('Худшие станции', ['Станция', 'Сессий', 'Успех, %', 'Загрузка, %', 'Выручка, ₽'],
-            worst.map((l) => [l.label, l.sessions, l.success_pct, l.utilization_pct, l.amount]))}>
+          <table className="w-full text-xs" {...exportRows('Кандидаты на ТО',
+            ['Станция', 'Сессий', 'Успех, %', 'Загрузка, %', 'Выручка, ₽', 'Битых сессий', 'Разрыв, ₽', 'Месяцев с расхождением'],
+            worst.map((l) => {
+              const d = dataIssue(l)
+              return [l.label, l.sessions, l.success_pct, l.utilization_pct, l.amount,
+                d?.impossible ?? 0, d?.gap ?? 0, d?.badMonths ?? 0]
+            }))}>
             <thead>
               <tr className="border-b bg-muted/20 text-muted-foreground">
                 <th className="text-left p-2 font-medium">Станция</th>
@@ -2243,6 +2268,11 @@ function Reliability({ companyId, dateFrom, dateTo }: { companyId: string; dateF
                 <th className="text-right p-2 font-medium">Успех</th>
                 <th className="text-right p-2 font-medium">Загрузка</th>
                 <th className="text-right p-2 font-medium">Выручка</th>
+                {/* Данные счётчика: сессии, противоречащие физике, и разрыв с
+                    эквайрингом. Их источник — сверка «сессия ↔ платёж». */}
+                <th className="text-right p-2 font-medium">Битых</th>
+                <th className="text-right p-2 font-medium">Разрыв</th>
+                <th className="text-left p-2 font-medium">Данные</th>
               </tr>
             </thead>
             <tbody>
@@ -2253,6 +2283,28 @@ function Reliability({ companyId, dateFrom, dateTo }: { companyId: string; dateF
                   <td className={`p-2 text-right font-mono ${succTxt(l.success_pct)}`}>{l.success_pct.toFixed(1)}%</td>
                   <td className={`p-2 text-right font-mono ${utilTxt(l.utilization_pct)}`}>{l.utilization_pct.toFixed(1)}%</td>
                   <td className="p-2 text-right font-mono text-muted-foreground">{fmtMoney(l.amount)} ₽</td>
+                  {(() => {
+                    const d = dataIssue(l)
+                    return (
+                      <>
+                        <td className={`p-2 text-right font-mono ${
+                          d?.impossible ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground/60'}`}>
+                          {d?.impossible || '—'}
+                        </td>
+                        <td className={`p-2 text-right font-mono ${
+                          Math.abs(d?.gap ?? 0) > 1 ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground/60'}`}>
+                          {d && Math.abs(d.gap) > 1 ? `${fmtMoney(d.gap)} ₽` : '—'}
+                        </td>
+                        <td className="p-2 whitespace-nowrap text-muted-foreground">
+                          {d?.chronic ? (
+                            <span className="text-amber-600 dark:text-amber-400">
+                              хроника · {d.badMonths} из {d.months} мес
+                            </span>
+                          ) : d?.badMonths ? `${d.badMonths} из ${d.months} мес` : '—'}
+                        </td>
+                      </>
+                    )
+                  })()}
                 </tr>
               ))}
             </tbody>
