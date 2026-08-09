@@ -1607,6 +1607,52 @@ export interface StoreParityData {
 export const getStoreParity = (stationId: number, days = 30) =>
   get<StoreParityData>('/api/store/parity', { station_id: stationId, days })
 
+/** Позиция внутри расхождения цепочки: карточка и её числа в трёх источниках. */
+export interface StoreChainItem {
+  uuid?: string
+  товар: string
+  деталь?: string
+  касса?: number
+  наш?: number
+  одинс?: number
+}
+
+export interface StoreChainSnapshot {
+  снято: string
+  касса_доступна: boolean
+  касса_позиций: number
+  касса_остаток: number
+  касса_лишних_кодов: number
+  наш_позиций: number
+  наш_остаток: number
+  наш_минусов: number
+  одинс_есть_снимок: boolean
+  одинс_позиций: number
+  одинс_остаток: number
+  одинс_фантомов: number
+  одинс_снято: string
+  обмен_отправлено: number
+  обмен_принято: number
+  обмен_очередь: string[]
+  обмен_очередь_всего: number
+  обмен_не_отправлено: number
+}
+
+export interface StoreChainData {
+  station_id: number
+  available: boolean
+  detail?: string
+  received_at?: string
+  snapshot?: StoreChainSnapshot
+  разошлись?: StoreChainItem[]
+  минусы?: StoreChainItem[]
+  много_кодов?: StoreChainItem[]
+  фантомы?: StoreChainItem[]
+}
+
+export const getStoreChain = (stationId: number) =>
+  get<StoreChainData>('/api/store/chain', { station_id: stationId })
+
 export interface StoreAssortmentRule {
   item_uuid: string
   name: string

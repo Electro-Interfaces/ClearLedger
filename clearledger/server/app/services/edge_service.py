@@ -493,6 +493,53 @@ async def stock_report(db: AsyncSession, company_id, station_id: int) -> dict:
     return out
 
 
+async def chain_report(db: AsyncSession, company_id, station_id: int) -> dict:
+    """Контрольный снимок цепочки учёта станции: касса, наш учёт, старая 1С.
+
+    Снять его в центре нельзя: касса NeftoMS и локальная 1С видны только с АЗС,
+    и любой «свой» пересчёт здесь был бы сравнением снимков разной свежести —
+    той самой ложной тревогой, ради которой станция снимает всю цепочку одним
+    заходом. Поэтому центр показывает ровно то, что прислала станция.
+    """
+    row = (await db.execute(
+        select(EdgePacket)
+        .where(EdgePacket.company_id == company_id,
+               EdgePacket.station_id == station_id,
+               EdgePacket.kind == "chain")
+        .order_by(EdgePacket.received_at.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+    if row is None:
+        return {"station_id": station_id, "available": False,
+                "detail": "станция ещё не присылала снимок цепочки"}
+    отчёт = разобрать_снимок_цепочки(row.payload)
+    отчёт["station_id"] = station_id
+    if отчёт["available"]:
+        отчёт["received_at"] = row.received_at
+    return отчёт
+
+
+def разобрать_снимок_цепочки(payload: dict | None) -> dict:
+    """Достать снимок цепочки из пакета станции.
+
+    Отдельной функцией, потому что формат пакета — единственное, что здесь
+    может сломаться молча: агент обновится, ключ переименуется, и экран станет
+    показывать «снимка нет» вместо ошибки.
+    """
+    снимок = None
+    for doc in (payload or {}).get("Документы") or []:
+        if isinstance(doc, dict) and doc.get("Вид") == "chain_snapshot":
+            снимок = doc.get("Снимок")
+            break
+    if not isinstance(снимок, dict):
+        return {"available": False, "detail": "в последнем пакете нет снимка"}
+    return {"available": True, "snapshot": снимок,
+            "разошлись": снимок.get("разошлись") or [],
+            "минусы": снимок.get("наши_минусы") or [],
+            "много_кодов": снимок.get("касса_много_кодов") or [],
+            "фантомы": снимок.get("фантомы_список") or []}
+
+
 # ---------------------------------------------------------------------------
 # Алерты (шаг 2.4): то, что требует действия человека
 # ---------------------------------------------------------------------------

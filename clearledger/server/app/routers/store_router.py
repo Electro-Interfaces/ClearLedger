@@ -1233,6 +1233,23 @@ async def store_parity(
     return await edge_service.parity(db, cid, station_id, days)
 
 
+@router.get("/chain")
+async def store_chain(
+    station_id: int = Query(208),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Контрольный снимок цепочки станции: касса, наш учёт, старая 1С, обмен.
+
+    Снимок делает агент АЗС одним заходом и присылает как есть. Центр его не
+    пересчитывает: касса NeftoMS и локальная 1С видны только со станции, а
+    сравнение источников, снятых в разные моменты, даёт расхождение там, где
+    его нет, — на этом уже обжигались.
+    """
+    cid = await scope_company_id(user, db)
+    return await edge_service.chain_report(db, cid, station_id)
+
+
 class AgentVersionIn(BaseModel):
     version: str
 
@@ -5493,28 +5510,56 @@ async def store_bp_package(
 @router.post("/bp-package/emit")
 async def store_bp_package_emit(
     shift_key: str = Query(..., description="GUID смены или 'дата|станция'"),
+    manifest_hash: str | None = Query(
+        None, description="SHA-256 exact effective CutoverManifest",
+    ),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Выгрузить пакет в серверный каталог BP_EXPORT_DIR (клиент путь НЕ задаёт).
-    Файл АЗС{код}_{дата}_смена-{номер}_{uuid}.json."""
+    """Проверить пакет и поставить его в guarded queue без записи файла."""
+    from collections import Counter
+
     from app.services.bp_export import BpPackageEmitter
+    from app.services.accounting_egress import AccountingEgressGuard
+
     cid = await scope_company_id(user, db)
     try:
-        res = await BpPackageEmitter(db, cid).emit_to_dir(shift_key, BP_EXPORT_DIR)
+        emitter = BpPackageEmitter(db, cid)
+        verification = await emitter.verify_shift_package(shift_key)
+        if not verification["ok"]:
+            failed = [
+                check["Проверка"] for check in verification["checks"]
+                if not check["ok"]
+            ]
+            raise ValueError(
+                "Пакет не прошёл обязательную сверку: " + "; ".join(failed)
+            )
+        packet = await emitter.build_shift_package(shift_key)
+        queued = await AccountingEgressGuard(db, cid).queue_packet(
+            packet, manifest_hash,
+        )
     except ValueError as e:
         raise HTTPException(409, str(e))
     except Exception as e:
-        raise HTTPException(400, f"Выгрузка в каталог: {e}")
+        raise HTTPException(400, f"Постановка пакета в очередь: {e}")
 
-    # След выгрузки: единственное действие раздела, меняющее состояние снаружи —
-    # файл ложится в каталог обмена и уходит в БП. Хеш нужен, чтобы потом
-    # опознать, какой именно пакет приёмник забрал (идемпотентность по ХешПакета).
-    docs = sum(res.get("documents", {}).values())
+    documents = dict(Counter(doc["Тип"] for doc in packet["Документы"]))
     log_export(db, cid, user,
-               f"Пакет Ledger→БП, смена {shift_key}: {res.get('file')}, "
-               f"{docs} документов, НСИ {res.get('nsi')}, хеш {res.get('hash')}")
-    return res
+               f"Пакет Ledger→БП поставлен в guarded queue, смена {shift_key}: "
+               f"{queued.packet.id}, {sum(documents.values())} документов, "
+               f"НСИ {len(packet['НСИ'])}, хеш {packet['ХешПакета']}")
+    return {
+        "status": "queued",
+        "packet_id": str(queued.packet.id),
+        "created": queued.created,
+        "kind": queued.packet.kind,
+        "hash": packet["ХешПакета"],
+        "manifest_hash": queued.decision.manifest_hash,
+        "policy_id": str(queued.decision.policy_id),
+        "policy_revision": queued.decision.revision,
+        "documents": documents,
+        "nsi": len(packet["НСИ"]),
+    }
 
 
 @router.get("/bp-package/verify")
