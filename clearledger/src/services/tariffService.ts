@@ -55,3 +55,28 @@ export async function getTariffGrid(p: P & { by?: string }): Promise<TariffGridR
 export async function getFactVsNominal(p: P & { groupBy: string }): Promise<FvnResponse> {
   return get<FvnResponse>('/api/tariffs/fact-vs-nominal', { ...qp(p), group_by: p.groupBy })
 }
+
+/** Прайс-лист АСУиМ против фактической цены: регион × тип разъёма. */
+export interface PricelistLine {
+  region: string
+  connector: string
+  sessions: number
+  energy_kwh: number
+  fact: number
+  price_min: number | null
+  price_max: number | null
+  versions: number      // сколько версий цены объявлено на это сочетание
+  inside: boolean       // факт попал в объявленный диапазон
+  delta: number | null  // на сколько вышел за границу (0 — внутри, null — прайса нет)
+}
+export interface PricelistResponse {
+  period: { from: string; to: string }
+  lines: PricelistLine[]
+  totals: {
+    rows: number; with_price: number; inside: number; outside: number
+    no_price_regions: [string, number][]
+  }
+}
+export async function getPricelistVsFact(p: P): Promise<PricelistResponse> {
+  return get<PricelistResponse>('/api/tariffs/pricelist-vs-fact', qp(p))
+}
