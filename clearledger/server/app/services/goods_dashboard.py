@@ -37,6 +37,19 @@ def _day(smena: dict) -> str:
     return str(smena.get("Закрытие") or smena.get("Открытие") or "")[:10]
 
 
+def _warehouse_in_stations(code: str | None, stations: list[str] | None) -> bool:
+    if not stations:
+        return True
+    value = str(code or "").strip()
+    return any(value == station or value.startswith(f"{station}000") for station in stations)
+
+
+def _station_of_warehouse(code: str | None, stations: list[str]) -> str | None:
+    """Определить АЗС по коду её склада, предпочитая самый длинный код станции."""
+    matches = [station for station in stations if _warehouse_in_stations(code, [station])]
+    return max(matches, key=len) if matches else None
+
+
 def _prefer_edge_sales(rows: list[DataEntry]) -> list[DataEntry]:
     """Не считать параллельные oneC- и Edge-проекции одной смены дважды."""
     edge = [row for row in rows if row.source == "edge"]
@@ -370,6 +383,10 @@ class GoodsDashboardService:
             "avg_cheque": round(выручка / чеков, 2) if чеков else 0.0,
         }
 
+    async def visits(self, date_from: date, date_to: date,
+                     stations: list[str] | None = None) -> dict:
+        return await self._visits(date_from, date_to, stations)
+
     # ── SKU-аналитика: реестр товаров с маржой + ABC (Ассортимент/Цены/Номенклатура) ──
 
     async def _load_purchases(self, df: date, dt: date, stations: list[str] | None) -> list[dict]:
@@ -465,14 +482,14 @@ class GoodsDashboardService:
                 "key": str(smena.get("Смена") or f"{day}|{station}"),
                 "number": smena.get("НомерСмены") or smena.get("Номер"),
                 "open": smena.get("Открытие"), "close": smena.get("Закрытие"),
-                "day": day,
+                "day": day, "station": station,
             })
         for lst in idx.values():
             lst.sort(key=lambda x: str(x["open"] or ""))
         return idx
 
     @staticmethod
-    def _shift_of(shifts: list[dict], day: str) -> dict:
+    def _shift_of(shifts: list[dict], day: str, station: str | None = None) -> dict:
         """Смены дня, к которым относится документ.
 
         Витринные документы (инвентаризация, списания, перемещения) несут только дату,
@@ -481,7 +498,15 @@ class GoodsDashboardService:
         связь, которая есть. Так же устроен и учётный контур ЦБ: документ попадает в
         смену по интервалу «НачалоДня(Открытие)…КонецДня(Закрытие)», а не по ссылке.
         """
-        same_day = [sh for sh in shifts if sh["day"] == day]
+        same_day = [
+            sh for sh in shifts
+            if sh["day"] == day and (station is None or sh.get("station") == station)
+        ]
+        if station is None and len({sh.get("station") for sh in same_day}) > 1:
+            return {
+                "key": None, "number": None, "count": 0,
+                "reason": "не удалось определить станцию документа",
+            }
         if not same_day:
             # Сменные отчёты загружены за более короткий период, чем документы движения:
             # у документа просто нет смены в данных. Догружается обменом, не кодом.
@@ -506,7 +531,7 @@ class GoodsDashboardService:
             CbNomenclature.company_id == self.company_id))).scalars().all()}
         return self._names_cache
 
-    async def _cost_unit_map(self) -> dict[str, tuple[float, str, float]]:
+    async def _cost_unit_map(self, stations: list[str] | None = None) -> dict[str, tuple[float, str, float]]:
         """Удельная себестоимость (закуп. NET, без НДС) за единицу закупки по GUID:
         {ref: (unit_cost_net, source, purch_qty_all)}.
 
@@ -515,10 +540,12 @@ class GoodsDashboardService:
         (табак ~6%) и убирает margin=None узкого окна. Партийную StockOnHand.cost_unit НЕ
         используем для маржи продаж: на розничных АЗС партийный регистр отрицательно-
         смешанный (пересорт) → удельная себест. по нему ненадёжна. Кеш в инстансе (К-27)."""
-        if getattr(self, "_ccache", None) is not None:
-            return self._ccache
+        cache_key = tuple(sorted(stations or []))
+        cache = getattr(self, "_ccache", {})
+        if cache_key in cache:
+            return cache[cache_key]
         agg: dict[str, list] = defaultdict(lambda: [0.0, 0.0])
-        for m in await self._load_purchases(date(2000, 1, 1), date(2100, 1, 1), None):
+        for m in await self._load_purchases(date(2000, 1, 1), date(2100, 1, 1), stations):
             doc = m.get("Документ") or {}
             for ln in doc.get("Товары") or []:
                 g = ln.get("Номенклатура")
@@ -529,6 +556,9 @@ class GoodsDashboardService:
         # F2: возвраты поставщику уменьшают чистую закупку (net + количество). Так
         # удельная закупка = (Σзакуп − Σвозврат)/(Σкол − Σвозврат) не завышена.
         for m in await self._load_returns():
+            shift = m.get("Смена") or {}
+            if stations and str(shift.get("КодАЗС") or "") not in stations:
+                continue
             doc = m.get("Документ") or {}
             for ln in doc.get("Товары") or []:
                 g = ln.get("Номенклатура")
@@ -547,10 +577,12 @@ class GoodsDashboardService:
         # 166 тыс ₽ — 16% оборота) шли в «Ассортименте», «Ценах и марже», ABC-XYZ и
         # карточке товара вовсе без маржи. Выпуск перекрывает закупку: у блюда с обоими
         # источниками верна себестоимость производства, а не цена разовой перепродажи.
-        for g, (amt, qty) in (await self._release_agg(date(2000, 1, 1), date(2100, 1, 1), None)).items():
+        for g, (amt, qty) in (await self._release_agg(
+                date(2000, 1, 1), date(2100, 1, 1), stations)).items():
             if qty > 0 and amt > 0:
                 cm[g] = (amt / qty, "release", qty)
-        self._ccache = cm
+        cache[cache_key] = cm
+        self._ccache = cache
         return cm
 
     async def sku_analytics(self, date_from: date, date_to: date,
@@ -585,7 +617,7 @@ class GoodsDashboardService:
                 purch[g]["cost_net"] += self._purch_net(doc, ln)   # F8: учёт СуммаВключаетНДС
                 purch[g]["qty"] += float(ln.get("Количество") or 0)
 
-        cost_map = await self._cost_unit_map()  # единая себест.: партии→закупка (К-2)
+        cost_map = await self._cost_unit_map(stations)  # единая себест.: партии→закупка (К-2)
         rows = []
         for g, s in sku.items():
             n = nom.get(g)
@@ -679,7 +711,7 @@ class GoodsDashboardService:
 
         # общепит: себестоимость блюда — по ингредиентам ТТК (напрямую не закупается),
         # иначе маржа сегмента «Общепит» пустая. Реюз логики catering, покрытие ≥90% (К-5).
-        avgc = {g: c[0] for g, c in (await self._cost_unit_map()).items()}
+        avgc = {g: c[0] for g, c in (await self._cost_unit_map(stations)).items()}
         dishc: dict[str, dict] = defaultdict(lambda: {"cost": 0.0, "ings": set(), "known": set()})
         for m in self._select(await self._load(), date_from, date_to, stations):
             for ln in (((m.get("Секции") or {}).get("продажа_общепит")) or {}).get("строки") or []:
@@ -763,7 +795,7 @@ class GoodsDashboardService:
         # как в catering_menu/pricing (раньше карточка считала по _avg_cost окна →
         # тот же food-cost блюда расходился между меню и карточкой, а в узком окне
         # без закупок терялся).
-        avgc = {g: c[0] for g, c in (await self._cost_unit_map()).items()}
+        avgc = {g: c[0] for g, c in (await self._cost_unit_map(stations)).items()}
 
         # продажи (сопутка+общепит) — итоги + дневная динамика; для общепита копим
         # себестоимость по ингредиентам ТТК.
@@ -823,6 +855,9 @@ class GoodsDashboardService:
             CbMovementDoc.company_id == self.company_id,
             CbMovementDoc.deleted.is_(False), CbMovementDoc.posted.is_(True),
             CbMovementDoc.kind == "revaluation"))).scalars().all()
+        revs = self._by_period(revs, date_from, date_to)
+        if stations:
+            revs = [r for r in revs if _warehouse_in_stations(r.warehouse_code, stations)]
         history = []
         for r in revs:
             for ln in (r.lines or []):
@@ -835,6 +870,8 @@ class GoodsDashboardService:
         soh = (await self.session.execute(select(StockOnHand).where(
             StockOnHand.company_id == self.company_id,
             StockOnHand.nomenclature_ref == guid))).scalars().all()
+        if stations:
+            soh = [r for r in soh if _warehouse_in_stations(r.warehouse_code, stations)]
         stock = [{
             "warehouse": r.warehouse_name or r.warehouse_code,
             "qty": float(r.quantity or 0),
@@ -917,22 +954,36 @@ class GoodsDashboardService:
                 break
         base["recipe"] = recipe
 
-        # движение по SKU (инвентаризации/списания/перемещения) — до 40 последних
+        # Движение по SKU за тот же период и по тем же станциям, что продажи.
         movement: list[dict] = []
         for kind in ("writeoff", "transfer"):
-            for r in (await self.session.execute(select(CbMovementDoc).where(
-                    CbMovementDoc.company_id == self.company_id,
-            CbMovementDoc.deleted.is_(False), CbMovementDoc.posted.is_(True),
-                    CbMovementDoc.kind == kind))).scalars().all():
+            movement_docs = (await self.session.execute(select(CbMovementDoc).where(
+                CbMovementDoc.company_id == self.company_id,
+                CbMovementDoc.deleted.is_(False), CbMovementDoc.posted.is_(True),
+                CbMovementDoc.kind == kind))).scalars().all()
+            movement_docs = self._by_period(movement_docs, date_from, date_to)
+            if stations:
+                movement_docs = [
+                    r for r in movement_docs
+                    if _warehouse_in_stations(r.warehouse_code, stations)
+                    or (kind == "transfer" and _warehouse_in_stations(r.warehouse_to_code, stations))
+                ]
+            for r in movement_docs:
                 for ln in (r.lines or []):
                     if ln.get("ref") == guid:
                         movement.append({"kind": kind, "date": r.doc_date, "number": r.number,
                                          "qty": ln.get("qty"), "amount": ln.get("amount"),
                                          "reason": r.reason})
                         break
-        for r in (await self.session.execute(select(CbInventoryDoc).where(
-                CbInventoryDoc.company_id == self.company_id,
-            CbInventoryDoc.deleted.is_(False)))).scalars().all():
+        inventory_docs = (await self.session.execute(select(CbInventoryDoc).where(
+            CbInventoryDoc.company_id == self.company_id,
+            CbInventoryDoc.deleted.is_(False)))).scalars().all()
+        inventory_docs = self._by_period(inventory_docs, date_from, date_to)
+        if stations:
+            inventory_docs = [
+                r for r in inventory_docs if _warehouse_in_stations(r.warehouse_code, stations)
+            ]
+        for r in inventory_docs:
             for ln in (r.lines or []):
                 # lines теперь полная ТЧ — движение по SKU только из строк-отклонений
                 if ln.get("ref") == guid and ln.get("dev"):
@@ -941,7 +992,7 @@ class GoodsDashboardService:
                                      "reason": "отклонение факт−учёт"})
                     break
         movement.sort(key=lambda x: (x["date"] or ""), reverse=True)
-        base["movement"] = movement[:40]
+        base["movement"] = movement
         return base
 
     # ── Ассортимент: ABC×XYZ + оборачиваемость/запасы (реальный остаток) + GMROI ──
@@ -954,14 +1005,12 @@ class GoodsDashboardService:
         skus = data["skus"]
         nom = await self._names()
         catmap = {"soputka": "Сопутка", "obshepit": "Общепит"}
-        STORE = {"208", "20800002"}
-
-        # реальный остаток из StockOnHand (склады магазина)
+        # реальный остаток из StockOnHand выбранных станций
         soh = (await self.session.execute(select(StockOnHand).where(
             StockOnHand.company_id == self.company_id))).scalars().all()
         stk: dict[str, dict] = defaultdict(lambda: {"qty": 0.0, "cost": 0.0, "retail": 0.0})
         for r in soh:
-            if (r.warehouse_code or "") in STORE:
+            if _warehouse_in_stations(r.warehouse_code, stations):
                 q = float(r.quantity or 0)
                 a = stk[r.nomenclature_ref]; a["qty"] += q
                 if r.cost_unit is not None:
@@ -1435,7 +1484,7 @@ class GoodsDashboardService:
         класс меню (Звезда/Загадка/Рабочая лошадка/Собака), состав ТТК (ингредиенты с
         себестоимостью на порцию) и дневная динамика продаж (для раскрытия строки)."""
         sale_metas = self._select(await self._load(), date_from, date_to, stations)
-        avgc = {g: c[0] for g, c in (await self._cost_unit_map()).items()}  # закуп-net all-time
+        avgc = {g: c[0] for g, c in (await self._cost_unit_map(stations)).items()}  # закуп-net all-time
         # Себестоимость от 1С по документу выпуска — то, чем реально закрывается смена.
         rel = await self._release_cost_unit(date_from, date_to, stations)
         nom = await self._names()
@@ -1627,7 +1676,8 @@ class GoodsDashboardService:
         }
 
     async def _edge_stock_onhand(self, *, warehouse: str | None, q: str,
-                                 marked: str, only_negative: bool) -> dict | None:
+                                 marked: str, only_negative: bool,
+                                 stations: list[str] | None = None) -> dict | None:
         """Последний полный остаток собственного журнала агента.
 
         Возвращает None только пока компания не прислала новый edge_ledger-снимок;
@@ -1639,6 +1689,8 @@ class GoodsDashboardService:
         ))).scalars().all()
         if not rows:
             return None
+        if stations:
+            rows = [row for row in rows if str(row.station_id) in stations]
 
         nom = await self._names()
         wh_agg: dict[str, dict] = defaultdict(
@@ -1791,24 +1843,28 @@ class GoodsDashboardService:
 
     # ── Остатки: основной источник — собственный журнал агента ──
     async def stock_onhand(self, *, warehouse: str | None = None, q: str = "",
-                           marked: str = "all", only_negative: bool = False) -> dict:
+                           marked: str = "all", only_negative: bool = False,
+                           stations: list[str] | None = None) -> dict:
         """Достоверный остаток товара (снимок регистров ЦБ), не оценка stock_est.
 
         warehouse — код склада (по умолчанию склад с наибольшим числом SKU, обычно 208
         Торговый зал). Возвращает позиции выбранного склада + список складов для селектора.
         """
         edge = await self._edge_stock_onhand(
-            warehouse=warehouse, q=q, marked=marked, only_negative=only_negative)
+            warehouse=warehouse, q=q, marked=marked, only_negative=only_negative,
+            stations=stations)
         if edge is not None:
             return edge
 
         rows = (await self.session.execute(select(StockOnHand).where(
             StockOnHand.company_id == self.company_id))).scalars().all()
+        if stations:
+            rows = [r for r in rows if _warehouse_in_stations(r.warehouse_code, stations)]
         nom = await self._names()
         # Средняя закупка — не вторая база себестоимости, а ПРОВЕРКА партийной: на рознице
         # партийный регистр смешанный (пересорт, старые партии), и у каждой пятой позиции
         # цифра мусорная — то выше розничной цены, то вдвое ниже реальной закупки.
-        buy = {g: c[0] for g, c in (await self._cost_unit_map()).items()}
+        buy = {g: c[0] for g, c in (await self._cost_unit_map(stations)).items()}
 
         # склады: сводка (код → имя, SKU, стоимость остатка) для селектора
         wh_agg: dict[str, dict] = defaultdict(
@@ -1932,7 +1988,8 @@ class GoodsDashboardService:
         return [d for d in docs if d.doc_date and a <= d.doc_date <= b]
 
     async def inventory(self, *, warehouse: str | None = None, only_dev: bool = False,
-                        date_from: date | None = None, date_to: date | None = None) -> dict:
+                        date_from: date | None = None, date_to: date | None = None,
+                        stations: list[str] | None = None) -> dict:
         """Реестр инвентаризаций ЦБ + агрегаты недостач/излишков (shrinkage).
 
         warehouse — код склада (по умолч. все склады магазина). only_dev — только
@@ -1941,12 +1998,16 @@ class GoodsDashboardService:
         docs = self._by_period((await self.session.execute(select(CbInventoryDoc).where(
             CbInventoryDoc.company_id == self.company_id,
             CbInventoryDoc.deleted.is_(False)))).scalars().all(), date_from, date_to)
+        if stations:
+            docs = [d for d in docs if _warehouse_in_stations(d.warehouse_code, stations)]
 
         # Смена документа: движение товара живёт внутри смены, поэтому смена нужна в
         # реестре. У витринных документов есть только дата — в двухсменный день
         # документ относится к обеим сменам, и это показывается, а не прячется.
-        _shifts = [sh for lst in (await self._shift_index(
-            date_from or date(2000, 1, 1), date_to or date(2100, 1, 1))).values() for sh in lst]
+        shift_index = await self._shift_index(
+            date_from or date(2000, 1, 1), date_to or date(2100, 1, 1), stations)
+        _shifts = [sh for lst in shift_index.values() for sh in lst]
+        shift_stations = stations or list(shift_index)
 
         # склады для селектора
         wh_agg: dict[str, dict] = defaultdict(lambda: {"name": None, "count": 0})
@@ -1984,7 +2045,10 @@ class GoodsDashboardService:
                 "warehouse_code": d.warehouse_code, "warehouse_name": d.warehouse_name,
                 "comment": d.comment, "dev_positions": d.dev_positions,
                 **{f"shift_{k}": v for k, v in
-                   self._shift_of(_shifts, (d.doc_date or "")[:10]).items()},
+                   self._shift_of(
+                       _shifts, (d.doc_date or "")[:10],
+                       _station_of_warehouse(d.warehouse_code, shift_stations),
+                   ).items()},
                 "shortage_qty": float(d.shortage_qty or 0), "shortage_amount": float(d.shortage_amount or 0),
                 "surplus_qty": float(d.surplus_qty or 0), "surplus_amount": float(d.surplus_amount or 0),
                 "net_amount": float(d.net_amount or 0),
@@ -2018,18 +2082,23 @@ class GoodsDashboardService:
 
     # ── Списания: реестр + причины (недостача/брак/…) + топ списанных SKU ──
     async def writeoffs(self, *, warehouse: str | None = None, reason: str | None = None,
-                        date_from: date | None = None, date_to: date | None = None) -> dict:
+                        date_from: date | None = None, date_to: date | None = None,
+                        stations: list[str] | None = None) -> dict:
         """Реестр списаний ЦБ (СписаниеТоваров) + разбивка по причинам и топ SKU."""
         docs = self._by_period((await self.session.execute(select(CbMovementDoc).where(
             CbMovementDoc.company_id == self.company_id,
             CbMovementDoc.deleted.is_(False), CbMovementDoc.posted.is_(True),
             CbMovementDoc.kind == "writeoff"))).scalars().all(), date_from, date_to)
+        if stations:
+            docs = [d for d in docs if _warehouse_in_stations(d.warehouse_code, stations)]
 
         # Смена документа: движение товара живёт внутри смены, поэтому смена нужна в
         # реестре. У витринных документов есть только дата — в двухсменный день
         # документ относится к обеим сменам, и это показывается, а не прячется.
-        _shifts = [sh for lst in (await self._shift_index(
-            date_from or date(2000, 1, 1), date_to or date(2100, 1, 1))).values() for sh in lst]
+        shift_index = await self._shift_index(
+            date_from or date(2000, 1, 1), date_to or date(2100, 1, 1), stations)
+        _shifts = [sh for lst in shift_index.values() for sh in lst]
+        shift_stations = stations or list(shift_index)
 
         wh_agg: dict[str, dict] = defaultdict(lambda: {"name": None, "count": 0})
         reasons_all: dict[str, dict] = defaultdict(lambda: {"count": 0, "amount": 0.0})
@@ -2066,7 +2135,10 @@ class GoodsDashboardService:
                 "warehouse_code": d.warehouse_code, "warehouse_name": d.warehouse_name,
                 "reason": d.reason, "from_inventory": d.from_inventory, "comment": d.comment,
                 **{f"shift_{k}": v for k, v in
-                   self._shift_of(_shifts, (d.doc_date or "")[:10]).items()},
+                   self._shift_of(
+                       _shifts, (d.doc_date or "")[:10],
+                       _station_of_warehouse(d.warehouse_code, shift_stations),
+                   ).items()},
                 "positions": d.positions, "total_qty": float(d.total_qty or 0),
                 "total_amount": amt, "lines": d.lines or [],
             })
@@ -2097,7 +2169,8 @@ class GoodsDashboardService:
 
     # ── Перемещения: реестр откуда→куда + направления (внутр/приход/расход) ──
     async def transfers(self, *, direction: str | None = None,
-                        date_from: date | None = None, date_to: date | None = None) -> dict:
+                        date_from: date | None = None, date_to: date | None = None,
+                        stations: list[str] | None = None) -> dict:
         """Реестр перемещений ЦБ (ПеремещениеТоваров) относительно складов магазина.
 
         Сумма = розн. стоимость перемещённого (Количество × Цена; себестоимость у
@@ -2107,12 +2180,20 @@ class GoodsDashboardService:
             CbMovementDoc.company_id == self.company_id,
             CbMovementDoc.deleted.is_(False), CbMovementDoc.posted.is_(True),
             CbMovementDoc.kind == "transfer"))).scalars().all(), date_from, date_to)
+        if stations:
+            docs = [
+                d for d in docs
+                if _warehouse_in_stations(d.warehouse_code, stations)
+                or _warehouse_in_stations(d.warehouse_to_code, stations)
+            ]
 
         # Смена документа: движение товара живёт внутри смены, поэтому смена нужна в
         # реестре. У витринных документов есть только дата — в двухсменный день
         # документ относится к обеим сменам, и это показывается, а не прячется.
-        _shifts = [sh for lst in (await self._shift_index(
-            date_from or date(2000, 1, 1), date_to or date(2100, 1, 1))).values() for sh in lst]
+        shift_index = await self._shift_index(
+            date_from or date(2000, 1, 1), date_to or date(2100, 1, 1), stations)
+        _shifts = [sh for lst in shift_index.values() for sh in lst]
+        shift_stations = stations or list(shift_index)
 
         dirs_all: dict[str, dict] = defaultdict(lambda: {"count": 0, "amount": 0.0})
         for d in docs:
@@ -2142,7 +2223,11 @@ class GoodsDashboardService:
                 "from_code": d.warehouse_code, "from_name": d.warehouse_name,
                 "to_code": d.warehouse_to_code, "to_name": d.warehouse_to_name,
                 **{f"shift_{k}": v for k, v in
-                   self._shift_of(_shifts, (d.doc_date or "")[:10]).items()},
+                   self._shift_of(
+                       _shifts, (d.doc_date or "")[:10],
+                       _station_of_warehouse(d.warehouse_code, shift_stations)
+                       or _station_of_warehouse(d.warehouse_to_code, shift_stations),
+                   ).items()},
                 "direction": d.reason, "comment": d.comment,
                 "positions": d.positions, "total_qty": float(d.total_qty or 0),
                 "total_amount": amt, "lines": d.lines or [],
@@ -2174,13 +2259,16 @@ class GoodsDashboardService:
 
     # ── Переоценка: реестр изменений цен + подорожания/удешевления ──
     async def revaluation(self, *, reason: str | None = None,
-                          date_from: date | None = None, date_to: date | None = None) -> dict:
+                          date_from: date | None = None, date_to: date | None = None,
+                          stations: list[str] | None = None) -> dict:
         """Реестр переоценок ЦБ (ПереоценкаТоваровАЗК): старая→новая розн. цена,
         Δ%, влияние на стоимость остатка (Σ Δ×кол). reason — фильтр направления."""
         docs = self._by_period((await self.session.execute(select(CbMovementDoc).where(
             CbMovementDoc.company_id == self.company_id,
             CbMovementDoc.deleted.is_(False), CbMovementDoc.posted.is_(True),
             CbMovementDoc.kind == "revaluation"))).scalars().all(), date_from, date_to)
+
+        docs = [d for d in docs if _warehouse_in_stations(d.warehouse_code, stations)]
 
         reasons_all: dict[str, dict] = defaultdict(lambda: {"count": 0})
         for d in docs:
@@ -2722,7 +2810,7 @@ class GoodsDashboardService:
                 missing_mrc += 1
 
         return {
-            "items": items[:1000],
+            "items": items,
             "summary": {
                 "controlled": len(items),
                 "violations": violations,
@@ -2743,44 +2831,59 @@ class GoodsDashboardService:
         metas = self._select(await self._load(), date_from, date_to, stations)
 
         # приходы (ПТУ) по дате
-        rec_by_day: dict[str, dict] = defaultdict(lambda: {"amount_net": 0.0, "count": 0})
+        rec_by_day: dict[tuple[str, str], dict] = defaultdict(
+            lambda: {"amount_net": 0.0, "count": 0})
         for m in await self._load_purchases(date_from, date_to, stations):
             d = m.get("Документ") or {}
+            station = str((m.get("Смена") or {}).get("КодАЗС") or "—")
             day = str(d.get("Дата") or "")[:10]
             lines = d.get("Товары") or []
             amt = sum(float(l.get("Сумма") or 0) for l in lines)
             vat = sum(float(l.get("СуммаНДС") or 0) for l in lines)
-            rec_by_day[day]["amount_net"] += amt - vat
-            rec_by_day[day]["count"] += 1
+            rec_by_day[(station, day)]["amount_net"] += amt - vat
+            rec_by_day[(station, day)]["count"] += 1
+
+        shift_stations = sorted({
+            str((m.get("Смена") or {}).get("КодАЗС") or "") for m in metas
+        }, key=len, reverse=True)
+
+        def station_of_warehouse(code: str | None) -> str | None:
+            return next((st for st in shift_stations
+                         if st and _warehouse_in_stations(code, [st])), None)
 
         # инвентаризации по дате
-        inv_by_day: dict[str, dict] = defaultdict(lambda: {"count": 0, "net": 0.0})
+        inv_by_day: dict[tuple[str, str], dict] = defaultdict(lambda: {"count": 0, "net": 0.0})
         for r in (await self.session.execute(select(CbInventoryDoc).where(
                 CbInventoryDoc.company_id == self.company_id,
             CbInventoryDoc.deleted.is_(False)))).scalars().all():
             day = (r.doc_date or "")[:10]
-            if d0 <= day <= d1:
-                inv_by_day[day]["count"] += 1
-                inv_by_day[day]["net"] += float(r.net_amount or 0)
+            station = station_of_warehouse(r.warehouse_code)
+            if station and d0 <= day <= d1:
+                inv_by_day[(station, day)]["count"] += 1
+                inv_by_day[(station, day)]["net"] += float(r.net_amount or 0)
 
         # списания / перемещения / переоценки по дате (все движения одним запросом)
-        wo_by_day: dict[str, dict] = defaultdict(lambda: {"count": 0, "amount": 0.0})
-        tr_by_day: dict[str, dict] = defaultdict(lambda: {"count": 0, "amount": 0.0})
-        rv_by_day: dict[str, dict] = defaultdict(lambda: {"count": 0})
+        wo_by_day: dict[tuple[str, str], dict] = defaultdict(lambda: {"count": 0, "amount": 0.0})
+        tr_by_day: dict[tuple[str, str], dict] = defaultdict(lambda: {"count": 0, "amount": 0.0})
+        rv_by_day: dict[tuple[str, str], dict] = defaultdict(lambda: {"count": 0})
         for r in (await self.session.execute(select(CbMovementDoc).where(
                 CbMovementDoc.company_id == self.company_id,
                 CbMovementDoc.deleted.is_(False), CbMovementDoc.posted.is_(True)))).scalars().all():
             day = (r.doc_date or "")[:10]
-            if not (d0 <= day <= d1):
+            station = station_of_warehouse(r.warehouse_code)
+            if r.kind == "transfer" and not station:
+                station = station_of_warehouse(r.warehouse_to_code)
+            if not station or not (d0 <= day <= d1):
                 continue
+            key = (station, day)
             if r.kind == "writeoff":
-                wo_by_day[day]["count"] += 1
-                wo_by_day[day]["amount"] += float(r.total_amount or 0)
+                wo_by_day[key]["count"] += 1
+                wo_by_day[key]["amount"] += float(r.total_amount or 0)
             elif r.kind == "transfer":
-                tr_by_day[day]["count"] += 1
-                tr_by_day[day]["amount"] += float(r.total_amount or 0)
+                tr_by_day[key]["count"] += 1
+                tr_by_day[key]["amount"] += float(r.total_amount or 0)
             elif r.kind == "revaluation":
-                rv_by_day[day]["count"] += 1
+                rv_by_day[key]["count"] += 1
 
         # F6: документы дня (приходы/инвентаризации/списания/перемещения) связаны с
         # днём, не со сменой; на ДВУХСМЕННОМ дне они приписывались КАЖДОЙ смене и
@@ -2789,7 +2892,7 @@ class GoodsDashboardService:
         metas = sorted(metas, key=lambda m: (
             _day(m.get("Смена") or {}), str((m.get("Смена") or {}).get("Открытие") or "")))
 
-        day_assigned: set[str] = set()
+        day_assigned: set[tuple[str, str]] = set()
         shifts = []
         for m in metas:
             smena = m.get("Смена") or {}
@@ -2800,13 +2903,16 @@ class GoodsDashboardService:
             obsh = sec.get("продажа_общепит") or {}
             sop_rev = float(sop.get("сумма") or 0)
             obsh_rev = float(obsh.get("сумма") or 0)
-            dkey = f"{station}|{day}"
+            dkey = (station, day)
             if dkey in day_assigned:
                 rec = inv = wo = tr = rv = {}   # день уже отдан первой смене
             else:
                 day_assigned.add(dkey)
-                rec, inv, wo = rec_by_day.get(day, {}), inv_by_day.get(day, {}), wo_by_day.get(day, {})
-                tr, rv = tr_by_day.get(day, {}), rv_by_day.get(day, {})
+                rec = rec_by_day.get(dkey, {})
+                inv = inv_by_day.get(dkey, {})
+                wo = wo_by_day.get(dkey, {})
+                tr = tr_by_day.get(dkey, {})
+                rv = rv_by_day.get(dkey, {})
             shifts.append({
                 "shift_key": str(smena.get("Смена") or f"{day}|{station}"),
                 "date": day, "station": station,
@@ -2815,6 +2921,8 @@ class GoodsDashboardService:
                 # Оператор смены — из пакета станции; у документов ЦБ его нет,
                 # поэтому поле пустое, а не выдуманное.
                 "operator": smena.get("Оператор") or None,
+                "register": smena.get("Касса") or None,
+                "internal_no": smena.get("НомерСменыВнутр") or None,
                 "revenue": round(sop_rev + obsh_rev, 2),
                 "soputka": round(sop_rev, 2), "obshepit": round(obsh_rev, 2),
                 "positions": len(sop.get("строки") or []) + len(obsh.get("строки") or []),
@@ -2907,7 +3015,7 @@ class GoodsDashboardService:
         receipts: list[dict] = []
         if d0 is not None:
             cparty = await self._refs("counterparty")
-            for m in await self._load_purchases(d0, d0, None):
+            for m in await self._load_purchases(d0, d0, [station]):
                 dd = m.get("Документ") or {}
                 lns = dd.get("Товары") or []
                 amt = sum(float(l.get("Сумма") or 0) for l in lns)
@@ -2934,7 +3042,7 @@ class GoodsDashboardService:
             "lines": [{"name": ln.get("name"), "fact": ln.get("fact"), "uchet": ln.get("uchet"),
                        "dev": ln.get("dev"), "amount": ln.get("amount_dev")}
                       for ln in (r.lines or []) if ln.get("dev")],
-        } for r in inv_docs]
+        } for r in inv_docs if _warehouse_in_stations(r.warehouse_code, [station])]
 
         mv = (await self.session.execute(select(CbMovementDoc).where(
             CbMovementDoc.company_id == self.company_id,
@@ -2946,6 +3054,11 @@ class GoodsDashboardService:
                      "price": ln.get("price"), "old": ln.get("old"), "new": ln.get("new"),
                      "pct": ln.get("pct")} for ln in (r.lines or [])]
 
+        mv = [
+            r for r in mv
+            if _warehouse_in_stations(r.warehouse_code, [station])
+            or (r.kind == "transfer" and _warehouse_in_stations(r.warehouse_to_code, [station]))
+        ]
         writeoffs = [{"number": r.number, "reason": r.reason, "positions": r.positions,
                       "amount": round(float(r.total_amount or 0), 2), "lines": _mv_lines(r)}
                      for r in mv if r.kind == "writeoff"]

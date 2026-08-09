@@ -10,28 +10,36 @@ import httpx
 import json
 import math
 import uuid
+from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 
 import os
 
 from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, UploadFile
-from pydantic import BaseModel
-from sqlalchemy import String, cast, func, or_, select, text
+from pydantic import BaseModel, Field
+from sqlalchemy import String, case, cast, func, or_, select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import check_module_access, get_current_user
-from app.business_access import has_network_merchandiser, store_policy as resolve_store_policy
+from app.business_access import (
+    ROLE_STATION_ADMINISTRATOR,
+    SCOPE_STATION,
+    has_network_merchandiser,
+    store_policy as resolve_store_policy,
+)
 from app.database import get_db
 from app.deps import capture_company_header, scope_company_id
 from app.models import (
-    Company, EdgeAgent, EdgeDownlink, EdgePacket, MarkingIntegration, StoreCheque, StoreDocFile, StoreDocMeta, StoreAssortmentRule, StoreItemAlias, StoreReceipt,
-    StoreRecipeVersion, StoreStockBalance,
+    Company, Contract, Counterparty, EdgeAgent, EdgeDownlink, EdgePacket, MarkingIntegration,
+    Organization, StoreCheque, StoreDocFile, StoreDocMeta, StoreAssortmentRule, StoreItemAlias, StoreReceipt,
+    StoreReceiptStockMovement, StoreRecipeVersion, StoreStockBalance,
     User, UserCompany,
 )
 from app.routers import edge_router
 from app.services import (edge_nsi, edge_projection, edge_service, store_costs,
                           store_dynamics, store_repricing, store_reports)
-from app.services import recipe_versions
+from app.services import recipe_versions, store_receipts as receipt_rules
 from app.services.export_audit import log_export
 from app.services.edo_upd import parse_upd
 from app.services.goods_dashboard import GoodsDashboardService
@@ -99,6 +107,66 @@ async def _require_network_merchandiser(user: User, db: AsyncSession) -> uuid.UU
     if not has_network_merchandiser(grants, company.slug):
         raise HTTPException(403, "Требуется роль «Товаровед сети»")
     return cid
+
+
+@dataclass(frozen=True)
+class ReceiptAccess:
+    company_id: uuid.UUID
+    network: bool
+    station_ids: frozenset[int]
+
+
+def _receipt_grant_scope(
+    *, is_superadmin: bool, grants: list[dict], network_id: str,
+) -> tuple[bool, frozenset[int]]:
+    station_ids: set[int] = set()
+    for grant in grants:
+        if (str((grant or {}).get("role") or "") != ROLE_STATION_ADMINISTRATOR
+                or str((grant or {}).get("scope_type") or "") != SCOPE_STATION):
+            continue
+        try:
+            station_ids.add(int(grant.get("scope_id")))
+        except (TypeError, ValueError):
+            continue
+    network = is_superadmin or has_network_merchandiser(grants, network_id)
+    return network, frozenset(station_ids)
+
+
+async def _receipt_access(user: User, db: AsyncSession) -> ReceiptAccess:
+    cid = await scope_company_id(user, db)
+    company = await db.get(Company, cid)
+    if company is None:
+        raise HTTPException(404, "Организация не найдена")
+    membership = await db.get(UserCompany, (user.id, cid))
+    grants = list(getattr(membership, "business_grants", None) or []) if membership else []
+    network, station_ids = _receipt_grant_scope(
+        is_superadmin=bool(user.is_superadmin), grants=grants, network_id=company.slug)
+    if not network and not station_ids:
+        raise HTTPException(403, "Требуется роль товароведа сети или администратора АЗС")
+    return ReceiptAccess(cid, network, station_ids)
+
+
+def _require_receipt_station(access: ReceiptAccess, station_id: int | None) -> None:
+    if station_id is None:
+        if not access.network:
+            raise HTTPException(403, "Центральный склад доступен только товароведу сети")
+        return
+    if not access.network and station_id not in access.station_ids:
+        raise HTTPException(403, "Нет полномочий на эту АЗС")
+
+
+def _require_receipt_row(access: ReceiptAccess, row: StoreReceipt) -> None:
+    _require_receipt_station(access, row.station_id)
+
+
+def _receipt_list_scope(
+    access: ReceiptAccess, requested: set[int],
+) -> tuple[set[int], bool]:
+    if access.network:
+        return requested, True
+    if requested and not requested.issubset(access.station_ids):
+        raise HTTPException(403, "Нет полномочий на одну из запрошенных АЗС")
+    return requested or set(access.station_ids), False
 
 
 # Молчание свыше трёх минут при телеметрии раз в минуту — это уже не «сеть
@@ -629,7 +697,7 @@ async def store_exchange_station(
                count(wire_size_bytes) AS wire_packets,
                string_agg(DISTINCT kind, ', ') AS kinds,
                max(пауза) FILTER (WHERE новый) AS silence_before_min
-        FROM пронумерованные GROUP BY session_no ORDER BY started DESC LIMIT 100
+        FROM пронумерованные GROUP BY session_no ORDER BY started DESC
     """), p)).mappings().all()]
     for s in sessions:
         s["kinds"] = [PACKET_KIND_LABEL.get(k.strip(), k.strip())
@@ -655,7 +723,7 @@ async def store_exchange_station(
         SELECT id, kind, note, created_at, delivered_at, acked_at, cancelled_at,
                octet_length(payload::text) AS size_bytes
         FROM edge_downlink WHERE company_id = :cid AND station_id = :st
-        ORDER BY created_at DESC LIMIT 50
+        ORDER BY created_at DESC
     """), {"cid": cid, "st": station_id})).mappings().all()]
     for d in downlink:
         d["id"] = str(d["id"])
@@ -729,7 +797,7 @@ async def store_exchange_station(
         WHERE prev IS NOT NULL
           AND at - prev > make_interval(secs => {STATION_OFFLINE_AFTER})
           AND at > :start AND prev < :end
-        ORDER BY at - prev DESC LIMIT 20
+        ORDER BY at - prev DESC
     """), hp)).mappings().all()]
     for о in обрывы:
         о["minutes"] = int(о["minutes"] or 0)
@@ -1443,13 +1511,16 @@ async def store_price_log(
     date_from: str | None = Query(None),
     date_to: str | None = Query(None),
     stations: str | None = Query(None),
+    offset: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Журнал цен сети: кто и когда двигал цену, было → стало."""
     cid: uuid.UUID = await scope_company_id(user, db)
     коды = [int(s) for s in (stations or "").replace(" ", "").split(",") if s.isdigit()]
-    return await store_dynamics.price_log(db, cid, date_from, date_to, коды or None)
+    return await store_dynamics.price_log(
+        db, cid, date_from, date_to, коды or None, offset=offset, limit=limit)
 
 
 class _RepricingRule(BaseModel):
@@ -1793,10 +1864,12 @@ async def store_cheques(
     date_from: str = Query(...),
     date_to: str = Query(...),
     station_id: int | None = Query(None),
+    stations: str | None = Query(None, description="коды АЗС через запятую"),
     shift_number: int | None = Query(None),
     q: str | None = Query(None, description="товар, номер чека или фискальный номер"),
     only_returns: bool = Query(False),
-    limit: int = Query(1000, ge=1, le=20000),
+    limit: int = Query(500, ge=1, le=5000),
+    offset: int = Query(0, ge=0),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -1814,9 +1887,13 @@ async def store_cheques(
     d1, d2 = date.fromisoformat(date_from), date.fromisoformat(date_to)
     условия = [StoreCheque.company_id == cid,
                StoreCheque.at >= datetime.combine(d1, time.min, tzinfo=timezone.utc),
-               StoreCheque.at < datetime.combine(d2, time.max, tzinfo=timezone.utc)]
+               StoreCheque.at < datetime.combine(d2 + timedelta(days=1), time.min, tzinfo=timezone.utc)]
+    коды = {int(s.strip()) for s in stations.split(",")
+            if s.strip().isdigit()} if stations else set()
     if station_id is not None:
-        условия.append(StoreCheque.station_id == station_id)
+        коды.add(station_id)
+    if коды:
+        условия.append(StoreCheque.station_id.in_(sorted(коды)))
     if shift_number is not None:
         условия.append(StoreCheque.shift_number == shift_number)
     if only_returns:
@@ -1839,8 +1916,22 @@ async def store_cheques(
                  " WHERE поз->>'name' ILIKE :игла)").bindparams(игла=шаблон),
         ))
 
+    агрегаты = (await db.execute(select(
+        func.count(StoreCheque.id),
+        func.coalesce(func.sum(case((StoreCheque.is_return.is_(False), 1), else_=0)), 0),
+        func.coalesce(func.sum(case((StoreCheque.is_return.is_(True), 1), else_=0)), 0),
+        func.coalesce(func.sum(case(
+            (StoreCheque.is_return.is_(False), StoreCheque.total), else_=0)), 0),
+        func.coalesce(func.sum(case(
+            (StoreCheque.is_return.is_(True), StoreCheque.total), else_=0)), 0),
+        func.avg(case((StoreCheque.is_return.is_(False), StoreCheque.total), else_=None)),
+        func.coalesce(func.sum(case((StoreCheque.had_fuel.is_(True), 1), else_=0)), 0),
+    ).where(*условия))).one()
+    всего, продаж, возвратов, сумма, сумма_возвратов, средний, с_топливом = агрегаты
+
     rows = (await db.execute(select(StoreCheque).where(*условия)
-                             .order_by(StoreCheque.at.desc()).limit(limit))).scalars().all()
+                             .order_by(StoreCheque.at.desc(), StoreCheque.id.desc())
+                             .offset(offset).limit(limit))).scalars().all()
 
     чеки = []
     for r in rows:
@@ -1852,23 +1943,22 @@ async def store_cheques(
             "total": float(r.total or 0), "positions": r.positions, "lines": r.lines,
         })
 
-    возвраты = [c for c in чеки if c["is_return"]]
-    продажи = [c for c in чеки if not c["is_return"]]
-    сумма = sum(c["total"] for c in продажи)
     return {
         "cheques": чеки,
-        "total": len(чеки),
+        "total": int(всего or 0),
+        "offset": offset,
+        "limit": limit,
         "summary": {
-            "sales": len(продажи),
-            "returns": len(возвраты),
-            "amount": round(сумма, 2),
-            "returns_amount": round(sum(c["total"] for c in возвраты), 2),
+            "sales": int(продаж or 0),
+            "returns": int(возвратов or 0),
+            "amount": round(float(сумма or 0), 2),
+            "returns_amount": round(float(сумма_возвратов or 0), 2),
             # Средний чек считается по продажам без возвратов: возврат — это не
             # покупка, и включать его в среднее значит занижать его дважды.
-            "avg": round(сумма / len(продажи), 2) if продажи else None,
-            "with_fuel": sum(1 for c in чеки if c["had_fuel"]),
+            "avg": round(float(средний), 2) if средний is not None else None,
+            "with_fuel": int(с_топливом or 0),
         },
-        "truncated": len(rows) >= limit,
+        "truncated": offset + len(rows) < int(всего or 0),
     }
 
 
@@ -2952,7 +3042,7 @@ async def store_station_health(
         WHERE company_id = :cid AND station_id = :st
           AND resolved_at IS NOT NULL
           AND resolved_at > now() - interval '14 days'
-        ORDER BY resolved_at DESC LIMIT 20
+        ORDER BY resolved_at DESC
     """), {"cid": cid, "st": station_id})).mappings().all()]
     return отчёт
 
@@ -3026,7 +3116,7 @@ async def store_places(
         "station_id": station_id,
         "source": "edge_agent",
         "places": сводка,
-        "not_on_floor": не_в_зале[:200],
+        "not_on_floor": не_в_зале,
     }
 
 
@@ -3416,7 +3506,7 @@ async def nsi_item(
     prices = (await db.execute(text("""
         SELECT id, station_id, price, valid_from, valid_to, author
         FROM edge.price WHERE item_id = :id AND station_id = :st
-        ORDER BY valid_from DESC LIMIT 20
+        ORDER BY valid_from DESC
     """), {"id": item_id, "st": station_id})).mappings().all()
 
     return {"item": dict(item), "barcodes": [dict(b) for b in barcodes],
@@ -3578,15 +3668,17 @@ class ReceiptLine(BaseModel):
     purpose: str | None = None
     series: str | None = None
     expiry: str | None = None
-    upd_codes: list[str] = []
-    mark_codes: list[str] = []
-    pack_codes: list[str] = []
+    upd_codes: list[str] = Field(default_factory=list)
+    mark_codes: list[str] = Field(default_factory=list)
+    pack_codes: list[str] = Field(default_factory=list)
     requires_mark: bool = False
     no_card: bool = False
 
 
 class ReceiptIn(BaseModel):
     station_id: int | None = None
+    supplier_id: uuid.UUID | None = None
+    contract_id: uuid.UUID | None = None
     number: str | None = None
     doc_date: str | None = None
     supplier: str | None = None
@@ -3594,16 +3686,26 @@ class ReceiptIn(BaseModel):
     incoming_number: str | None = None
     incoming_date: str | None = None
     comment: str | None = None
-    delivery_scheme: str = "supplier_to_station"
+    delivery_scheme: str | None = None
     receiving_warehouse: str | None = None
-    signing_mode: str = "office_director"
+    signing_mode: str | None = None
     signer_name: str | None = None
     mchd_guid: str | None = None
     mchd_registry: str | None = None
     mchd_valid_until: str | None = None
-    signature_status: str = "pending"
+    signature_status: str | None = None
     signature_ref: str | None = None
-    lines: list[ReceiptLine] = []
+    lines: list[ReceiptLine] | None = None
+    services: list[dict] | None = None
+    place: str | None = None
+    purpose: str | None = None
+    invoice_kind: str | None = None
+    invoice_number: str | None = None
+    invoice_date: str | None = None
+    source_kind: str | None = None
+    purchased_by: str | None = None
+    payment_kind: str | None = None
+    version: int | None = None
 
 
 class ReceiptSignatureIn(BaseModel):
@@ -3613,6 +3715,7 @@ class ReceiptSignatureIn(BaseModel):
     mchd_guid: str | None = None
     mchd_registry: str | None = None
     mchd_valid_until: str | None = None
+    version: int | None = None
 
 
 class ReceiptDistributionLine(BaseModel):
@@ -3623,12 +3726,16 @@ class ReceiptDistributionLine(BaseModel):
 class ReceiptDistributionIn(BaseModel):
     station_id: int
     lines: list[ReceiptDistributionLine]
+    version: int | None = None
 
 
 class ReceiptScanIn(BaseModel):
-    code: str
-    qty: float = 1
-    lines: list[ReceiptLine] | None = None
+    barcode: str | None = None
+    delta: float | None = None
+    code: str | None = None
+    qty: float | None = None
+    lines: list[dict] | None = None
+    version: int | None = None
 
 
 def _parse_mchd_date(value: str | None):
@@ -3693,6 +3800,8 @@ def _receipt_out(r: StoreReceipt) -> dict:
     return {
         "id": str(r.id), "station_id": r.station_id, "number": r.number,
         "doc_date": r.doc_date, "supplier": r.supplier, "contract": r.contract,
+        "supplier_id": str(r.supplier_id) if r.supplier_id else None,
+        "contract_id": str(r.contract_id) if r.contract_id else None,
         "incoming_number": r.incoming_number, "incoming_date": r.incoming_date,
         "status": r.status, "origin": r.origin, "comment": r.comment,
         "delivery_scheme": r.delivery_scheme,
@@ -3704,19 +3813,263 @@ def _receipt_out(r: StoreReceipt) -> dict:
         "signature_status": r.signature_status, "signature_ref": r.signature_ref,
         "signed_at": r.signed_at, "distribution": r.distribution or [],
         "lines": lines, "lines_count": len(lines), "diff_count": diff,
+        "services": r.services or [], "evidence": r.evidence or {}, "version": r.version,
         "total_amount": float(r.total_amount or 0), "vat_amount": float(r.vat_amount or 0),
         "created_at": r.created_at, "updated_at": r.updated_at, "accepted_at": r.accepted_at,
     }
 
 
-def _recalc(lines: list[dict]) -> float:
+def _recalc(
+    lines: list[dict], services: list[dict] | None = None, *, require_lines: bool = True,
+) -> tuple[float, float]:
     """Сумма документа по ФАКТУ: платим за принятое, а не за заявленное."""
-    total = 0.0
-    for l in lines:
-        amount = float(l.get("qty_fact") or 0) * float(l.get("price") or 0)
-        l["amount"] = round(amount, 2)
-        total += amount
-    return round(total, 2)
+    try:
+        if require_lines or lines:
+            normalized_lines = receipt_rules.normalize_lines(lines)
+        else:
+            normalized_lines = []
+        normalized_services = receipt_rules.normalize_services(services)
+    except receipt_rules.ReceiptValidationError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    lines[:] = normalized_lines
+    if services is not None:
+        services[:] = normalized_services
+    return receipt_rules.totals(normalized_lines, normalized_services)
+
+
+def _check_receipt_version(row: StoreReceipt, expected: int | None) -> None:
+    if expected is not None and expected != row.version:
+        raise HTTPException(409, "Документ изменён другим пользователем; обновите данные")
+
+
+def _require_receipt_canonical(row: StoreReceipt) -> None:
+    if row.supplier_id is None or row.contract_id is None:
+        raise HTTPException(400, "Для принятия выберите канонического поставщика и договор")
+
+
+def _touch_receipt(row: StoreReceipt) -> None:
+    row.version = int(row.version or 0) + 1
+
+
+async def _set_receipt_basis(
+    db: AsyncSession, row: StoreReceipt, supplier, incoming_number, incoming_date,
+    *, required: bool = True,
+) -> None:
+    if not required and not (supplier and incoming_number and incoming_date):
+        row.supplier = str(supplier or "").strip() or None
+        row.incoming_number = str(incoming_number or "").strip() or None
+        try:
+            row.incoming_date = receipt_rules.parse_datetime(
+                incoming_date, "Дата входящего документа")
+        except receipt_rules.ReceiptValidationError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        row.dedup_key = None
+        return
+    try:
+        supplier_value, number_value, date_value = receipt_rules.require_basis(
+            supplier, incoming_number, incoming_date)
+    except receipt_rules.ReceiptValidationError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    key = receipt_rules.receipt_dedup_key(
+        row.supplier_id, supplier_value, number_value, date_value)
+    duplicate = (await db.execute(select(StoreReceipt.id).where(
+        StoreReceipt.company_id == row.company_id,
+        StoreReceipt.dedup_key == key,
+        StoreReceipt.id != row.id,
+    ).limit(1))).scalar_one_or_none()
+    if duplicate is not None:
+        raise HTTPException(
+            409,
+            "Накладная этого поставщика с тем же входящим номером и датой уже существует",
+        )
+    row.supplier = supplier_value
+    row.incoming_number = number_value
+    row.incoming_date = date_value
+    row.dedup_key = key
+
+
+async def _set_receipt_party(
+    db: AsyncSession, row: StoreReceipt, supplier_id: uuid.UUID | None,
+    contract_id: uuid.UUID | None, *, required: bool,
+) -> None:
+    if supplier_id is None:
+        if contract_id is not None:
+            raise HTTPException(400, "Договор нельзя выбрать без канонического поставщика")
+        if required:
+            raise HTTPException(400, "Выберите поставщика из справочника")
+        row.supplier_id = None
+        row.contract_id = None
+        return
+    supplier = (await db.execute(select(Counterparty).where(
+        Counterparty.id == supplier_id,
+        Counterparty.company_id == row.company_id,
+        Counterparty.kind == "external",
+    ))).scalar_one_or_none()
+    if supplier is None:
+        raise HTTPException(400, "Поставщик не найден в этой организации")
+    row.supplier_id = supplier.id
+    row.supplier = supplier.name
+    row.contract_id = None
+    if contract_id is None:
+        return
+    contract = (await db.execute(select(Contract).where(
+        Contract.id == contract_id,
+        Contract.company_id == row.company_id,
+    ))).scalar_one_or_none()
+    if contract is None:
+        raise HTTPException(400, "Договор не найден в этой организации")
+    supplier_keys = {str(supplier.id)}
+    if supplier.external_ref:
+        supplier_keys.add(str(supplier.external_ref))
+    if str(contract.counterparty_id) not in supplier_keys:
+        raise HTTPException(400, "Договор принадлежит другому контрагенту")
+    contract_kind = str(contract.kind or contract.type or "").casefold().replace(" ", "")
+    if "споставщик" not in contract_kind:
+        raise HTTPException(400, "Для приёмки нужен договор вида «С поставщиком»")
+    organization_key = str(contract.organization_id or "").strip()
+    organization = None
+    try:
+        organization_uuid = uuid.UUID(organization_key)
+    except ValueError:
+        organization_uuid = None
+    if organization_uuid:
+        organization = (await db.execute(select(Organization).where(
+            Organization.company_id == row.company_id,
+            Organization.id == organization_uuid,
+        ))).scalar_one_or_none()
+    if organization is None and organization_key:
+        organization = (await db.execute(select(Organization).where(
+            Organization.company_id == row.company_id,
+            Organization.external_ref == organization_key,
+        ))).scalar_one_or_none()
+    if organization is None:
+        raise HTTPException(400, "Организация договора не найдена в справочнике")
+    row.contract_id = contract.id
+    row.contract = contract.number
+    row.evidence = {**(row.evidence or {}), "organization_id": str(organization.id)}
+
+
+def _movement_item_key(line: dict, index: int) -> str:
+    return receipt_rules.movement_item_key(line, index)
+
+
+async def _record_receipt_acceptance(
+    db: AsyncSession, row: StoreReceipt, user_id: uuid.UUID,
+) -> None:
+    await receipt_rules.record_acceptance(db, row, user_id)
+
+
+async def _record_receipt_distribution(
+    db: AsyncSession, row: StoreReceipt, allocation_id: str,
+    allocation_lines: list[dict], user_id: uuid.UUID,
+) -> None:
+    movements = (await db.execute(select(StoreReceiptStockMovement).where(
+        StoreReceiptStockMovement.company_id == row.company_id,
+        StoreReceiptStockMovement.receipt_id == row.id,
+    ))).scalars().all()
+    existing = {movement.idempotency_key for movement in movements}
+    acceptance = {movement.line_index: movement for movement in movements
+                  if movement.kind == "receipt_acceptance"}
+    warehouse = str(row.receiving_warehouse or "").strip()
+    for item in allocation_lines:
+        index = int(item["line_index"])
+        line = (row.lines or [])[index]
+        key = f"receipt:{row.id}:distribution:{allocation_id}:{index}"
+        if key in existing:
+            continue
+        quantity = float(item["qty"])
+        unit_cost = float(acceptance[index].unit_cost) if index in acceptance else float(
+            line.get("price") or 0)
+        db.add(StoreReceiptStockMovement(
+            company_id=row.company_id, receipt_id=row.id, allocation_id=allocation_id,
+            line_index=index, station_id=None, warehouse=warehouse,
+            item_key=_movement_item_key(line, index),
+            item_uuid=str(line.get("nomenclature_ref") or "") or None,
+            barcode=str(line.get("barcode") or "") or None,
+            quantity=-quantity, unit_cost=unit_cost,
+            amount=-round(quantity * unit_cost, 2),
+            kind="central_distribution", idempotency_key=key, created_by=user_id,
+        ))
+
+
+async def _reverse_receipt_acceptance(
+    db: AsyncSession, row: StoreReceipt, user_id: uuid.UUID,
+) -> None:
+    movements = (await db.execute(select(StoreReceiptStockMovement).where(
+        StoreReceiptStockMovement.company_id == row.company_id,
+        StoreReceiptStockMovement.receipt_id == row.id,
+    ).with_for_update())).scalars().all()
+    if any(m.kind == "central_distribution" for m in movements):
+        raise HTTPException(409, "Сначала отмените распределение по станциям")
+    existing = {m.idempotency_key for m in movements}
+    for movement in movements:
+        if movement.kind != "receipt_acceptance":
+            continue
+        key = f"receipt:{row.id}:reverse:{movement.id}"
+        if key in existing:
+            continue
+        db.add(StoreReceiptStockMovement(
+            company_id=row.company_id, receipt_id=row.id, reversal_of_id=movement.id,
+            line_index=movement.line_index, station_id=movement.station_id,
+            warehouse=movement.warehouse, item_key=movement.item_key,
+            item_uuid=movement.item_uuid, barcode=movement.barcode,
+            quantity=-float(movement.quantity), unit_cost=float(movement.unit_cost),
+            amount=-float(movement.amount), kind="receipt_reversal",
+            idempotency_key=key, created_by=user_id,
+        ))
+
+
+def _receipt_downlink_payload(row: StoreReceipt) -> dict:
+    evidence = row.evidence or {}
+    lines = _normalized_receipt_lines(row)
+    purposes = {str(line.get("purpose") or "") for line in lines if line.get("purpose")}
+    return {
+        "id": str(row.id), "document_id": str(row.id), "number": row.number,
+        "supplier": row.supplier,
+        "supplier_id": str(row.supplier_id) if row.supplier_id else None,
+        "contract": row.contract,
+        "contract_id": str(row.contract_id) if row.contract_id else None,
+        "incoming_number": row.incoming_number,
+        "incoming_date": row.incoming_date.isoformat() if row.incoming_date else None,
+        "doc_date": row.doc_date.isoformat() if row.doc_date else None,
+        "place": evidence.get("place") or "",
+        "purpose": evidence.get("purpose") or (next(iter(purposes)) if len(purposes) == 1 else ""),
+        "invoice_kind": evidence.get("invoice_kind") or "",
+        "invoice_number": evidence.get("invoice_number") or row.incoming_number or "",
+        "invoice_date": evidence.get("invoice_date")
+                        or (row.incoming_date.date().isoformat() if row.incoming_date else ""),
+        "services": [{
+            "key": service.get("key") or "",
+            "name": service.get("name") or "",
+            "sum": float(service.get("amount") or service.get("sum") or 0),
+            "vat_rate": service.get("vat_rate") or "",
+            "into_cost": bool(service.get("into_cost")),
+        } for service in row.services or []],
+        "source_kind": evidence.get("source_kind") or "paper_invoice",
+        "purchased_by": evidence.get("purchased_by") or "",
+        "payment_kind": evidence.get("payment_kind") or "",
+        "comment": row.comment or "",
+        "delivery_scheme": row.delivery_scheme,
+        "receiving_warehouse": row.receiving_warehouse,
+        "signing_mode": row.signing_mode, "signer_name": row.signer_name,
+        "mchd_guid": row.mchd_guid, "mchd_registry": row.mchd_registry,
+        "mchd_valid_until": row.mchd_valid_until.isoformat() if row.mchd_valid_until else None,
+        "signature_status": row.signature_status, "signature_ref": row.signature_ref,
+        "signed_at": row.signed_at.isoformat() if row.signed_at else None,
+        "lines": [{
+            "item_uuid": line.get("nomenclature_ref") or "",
+            "name": line.get("name") or "", "barcode": line.get("barcode") or "",
+            "qty_expected": float(line.get("qty_expected") or 0),
+            "price": float(line.get("price") or 0), "vat_rate": line.get("vat_rate") or "",
+            "unit": line.get("unit") or "", "pack_factor": float(line.get("pack_factor") or 0),
+            "purpose": line.get("purpose") or "", "series": line.get("series") or "",
+            "expiry": line.get("expiry") or "",
+            "retail_price": float(line.get("retail_price") or 0),
+            "markup": float(line.get("markup") or 0),
+            "mark_codes": line.get("upd_codes") or line.get("mark_codes") or [],
+            "requires_mark": bool(line.get("requires_mark")),
+        } for line in lines],
+    }
 
 
 def _canonical_mark_code(raw: str) -> str:
@@ -3793,6 +4146,8 @@ def _validate_scanned_marks(lines: list[dict]) -> None:
 @router.post("/receipts/from-upd", status_code=201)
 async def receipt_from_upd(
     station_id: int | None = Query(None, description="код АЗС для прямой поставки"),
+    supplier_id: uuid.UUID | None = Query(None, description="канонический поставщик"),
+    contract_id: uuid.UUID | None = Query(None, description="канонический договор"),
     delivery_scheme: str = Query("supplier_to_station"),
     receiving_warehouse: str | None = Query(None),
     signing_mode: str = Query("office_director"),
@@ -3813,6 +4168,8 @@ async def receipt_from_upd(
     Фактическое количество из УПД НЕ берём никогда: заявленное — это то, что
     обещали привезти, а принимаем мы то, что реально стоит на полу.
     """
+    access = await _receipt_access(user, db)
+    _require_receipt_station(access, station_id)
     if file is None:
         raise HTTPException(400, "Файл УПД не передан")
     raw = await file.read()
@@ -3830,7 +4187,7 @@ async def receipt_from_upd(
         delivery_scheme, station_id, receiving_warehouse, signing_mode,
         signer_name, mchd_guid, mchd_registry, valid_until, "pending", None)
 
-    cid: uuid.UUID = await scope_company_id(user, db)
+    cid = access.company_id
     now = datetime.now(timezone.utc)
     destination = str(station_id) if station_id else "ЦС"
     number = "УПД-%s-%s" % (destination, now.strftime("%y%m%d-%H%M"))
@@ -3839,7 +4196,7 @@ async def receipt_from_upd(
         "name": l["name"], "barcode": l["barcode"] or None,
         "qty_expected": l["qty_expected"], "qty_fact": 0,
         "price": l["price"], "vat_rate": l["vat_rate"] or None,
-        "amount": 0,
+        "vat_amount": l.get("vat_amount") or 0, "amount": 0,
         "upd_codes": l["mark_codes"], "mark_codes": [], "pack_codes": l["pack_codes"],
         "requires_mark": bool(l["mark_codes"]),
     } for l in parsed["lines"]]
@@ -3861,7 +4218,9 @@ async def receipt_from_upd(
             if l["barcode"] and l["barcode"] in по_коду:
                 l["nomenclature_ref"] = по_коду[l["barcode"]]
 
+    _recalc(lines)
     row = StoreReceipt(
+        id=uuid.uuid4(),
         company_id=cid, station_id=station_id, number=number, doc_date=now,
         supplier=parsed["supplier"] or None,
         incoming_number=parsed["incoming_number"] or None,
@@ -3873,10 +4232,20 @@ async def receipt_from_upd(
         mchd_guid=mchd_guid, mchd_registry=mchd_registry,
         mchd_valid_until=valid_until, signature_status="pending",
         total_amount=0, vat_amount=0,
+        evidence={"upd_sha256": hashlib.sha256(raw).hexdigest(), "file_name": file.filename},
         comment="Загружен из УПД поставщика",
     )
+    await _set_receipt_party(db, row, supplier_id, contract_id, required=False)
+    await _set_receipt_basis(
+        db, row, row.supplier, parsed.get("incoming_number"),
+        parsed.get("incoming_date"),
+    )
     db.add(row)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(409, "Такая накладная уже загружена") from exc
     await db.refresh(row)
 
     out = _receipt_out(row)
@@ -3888,6 +4257,7 @@ async def receipt_from_upd(
 @router.post("/receipts/{receipt_id}/send-to-station")
 async def send_receipt_to_station(
     receipt_id: uuid.UUID,
+    version: int | None = Query(None),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -3897,47 +4267,64 @@ async def send_receipt_to_station(
     очередь: агент заберёт его своим тактом и создаст документ у себя. Пока не
     заберёт, задание висит и будет предложено снова.
     """
-    cid: uuid.UUID = await scope_company_id(user, db)
+    access = await _receipt_access(user, db)
+    cid = access.company_id
     row = (await db.execute(select(StoreReceipt).where(
-        StoreReceipt.id == receipt_id, StoreReceipt.company_id == cid))).scalar_one_or_none()
+        StoreReceipt.id == receipt_id, StoreReceipt.company_id == cid
+    ).with_for_update())).scalar_one_or_none()
     if row is None:
         raise HTTPException(404, "Документ не найден")
+    _require_receipt_row(access, row)
+    _check_receipt_version(row, version)
     if row.status == "accepted":
         raise HTTPException(409, "Документ уже принят — отправлять нечего")
     if row.delivery_scheme != "supplier_to_station" or row.station_id is None:
         raise HTTPException(409, "Центральный приход не отправляется как поставка на АЗС")
+    try:
+        _require_receipt_canonical(row)
+    except HTTPException as exc:
+        raise HTTPException(409, "Перед отправкой выберите канонического поставщика и договор") from exc
 
-    db.add(EdgeDownlink(
-        company_id=cid, station_id=row.station_id,
-        kind="goods_receipt_expected",
-        payload={
-            "id": str(row.id), "number": row.number,
-            "supplier": row.supplier, "incoming_number": row.incoming_number,
-            "doc_date": row.doc_date.isoformat() if row.doc_date else None,
-            "delivery_scheme": row.delivery_scheme,
-            "receiving_warehouse": row.receiving_warehouse,
-            "signing_mode": row.signing_mode, "signer_name": row.signer_name,
-            "mchd_guid": row.mchd_guid, "mchd_registry": row.mchd_registry,
-            "mchd_valid_until": row.mchd_valid_until.isoformat() if row.mchd_valid_until else None,
-            "signature_status": row.signature_status, "signature_ref": row.signature_ref,
-            "signed_at": row.signed_at.isoformat() if row.signed_at else None,
-            "lines": [{
-                **line,
-                # Карточка, сопоставленная при загрузке УПД: приход ляжет на
-                # реальный товар, а не под пустую карточку.
-                "item_uuid": line.get("nomenclature_ref") or "",
-                # Агент ожидает в mark_codes именно коды поставщика из УПД;
-                # физические сканы на станции он ведёт отдельно.
-                "mark_codes": line.get("upd_codes") or line.get("mark_codes") or [],
-            } for line in row.lines or []],
-        },
-        note="приёмка %s" % row.number,
-    ))
+    await _set_receipt_party(db, row, row.supplier_id, row.contract_id, required=True)
+    await _set_receipt_basis(db, row, row.supplier, row.incoming_number, row.incoming_date)
+    lines = _normalized_receipt_lines(row)
+    _recalc(lines, list(row.services or []))
+    payload = _receipt_downlink_payload(row)
+    idempotency_key = f"receipt:{row.id}:expected"
+    task = (await db.execute(select(EdgeDownlink).where(
+        EdgeDownlink.company_id == cid,
+        EdgeDownlink.idempotency_key == idempotency_key,
+    ).with_for_update())).scalar_one_or_none()
+    if task is None:
+        task = (await db.execute(select(EdgeDownlink).where(
+            EdgeDownlink.company_id == cid,
+            EdgeDownlink.station_id == row.station_id,
+            EdgeDownlink.kind == "goods_receipt_expected",
+            EdgeDownlink.payload["id"].astext == str(row.id),
+        ).order_by(EdgeDownlink.created_at).limit(1).with_for_update())).scalar_one_or_none()
+        if task is not None:
+            task.idempotency_key = idempotency_key
+    repeated = task is not None
+    if task is None:
+        task = EdgeDownlink(
+            company_id=cid, station_id=row.station_id,
+            kind="goods_receipt_expected", payload=payload,
+            note="приёмка %s" % row.number, idempotency_key=idempotency_key,
+        )
+        db.add(task)
+    elif task.payload != payload:
+        task.station_id = row.station_id
+        task.payload = payload
+        task.delivered_at = None
+        task.acked_at = None
+        task.cancelled_at = None
+        task.cancelled_by = None
     if row.status == "draft":
         row.status = "expected"
+        _touch_receipt(row)
     await db.commit()
-    return {"ok": True, "station_id": row.station_id, "number": row.number,
-            "lines": len(row.lines or [])}
+    return {"ok": True, "task_id": str(task.id), "idempotent": repeated,
+            "station_id": row.station_id, "number": row.number, "lines": len(lines)}
 
 
 @router.post("/receipts/{receipt_id}/signature")
@@ -3948,11 +4335,15 @@ async def record_receipt_signature(
     db: AsyncSession = Depends(get_db),
 ):
     """Зафиксировать уже выполненную подпись оператора ЭДО и полномочие МЧД."""
-    cid: uuid.UUID = await scope_company_id(user, db)
+    access = await _receipt_access(user, db)
+    cid = access.company_id
     row = (await db.execute(select(StoreReceipt).where(
-        StoreReceipt.id == receipt_id, StoreReceipt.company_id == cid))).scalar_one_or_none()
+        StoreReceipt.id == receipt_id, StoreReceipt.company_id == cid
+    ).with_for_update())).scalar_one_or_none()
     if row is None:
         raise HTTPException(404, "Документ не найден")
+    _require_receipt_row(access, row)
+    _check_receipt_version(row, body.version)
     valid_until = _parse_mchd_date(body.mchd_valid_until)
     signer_name = body.signer_name if row.signing_mode == "station_mchd" else row.signer_name
     mchd_guid = body.mchd_guid if row.signing_mode == "station_mchd" else row.mchd_guid
@@ -3969,6 +4360,7 @@ async def record_receipt_signature(
     row.signature_status = body.signature_status
     row.signature_ref = body.signature_ref
     row.signed_at = datetime.now(timezone.utc) if body.signature_status == "signed" else None
+    _touch_receipt(row)
     await db.commit()
     await db.refresh(row)
     return _receipt_out(row)
@@ -3982,11 +4374,15 @@ async def distribute_central_receipt(
     db: AsyncSession = Depends(get_db),
 ):
     """Передать часть центрального прихода на АЗС внутренним перемещением."""
-    cid: uuid.UUID = await scope_company_id(user, db)
+    access = await _receipt_access(user, db)
+    cid = access.company_id
     row = (await db.execute(select(StoreReceipt).where(
-        StoreReceipt.id == receipt_id, StoreReceipt.company_id == cid))).scalar_one_or_none()
+        StoreReceipt.id == receipt_id, StoreReceipt.company_id == cid
+    ).with_for_update())).scalar_one_or_none()
     if row is None:
         raise HTTPException(404, "Документ не найден")
+    _require_receipt_row(access, row)
+    _check_receipt_version(row, body.version)
     if row.delivery_scheme != "central_warehouse" or row.status != "accepted":
         raise HTTPException(409, "Распределять можно только принятый центральный приход")
     agent = (await db.execute(select(EdgeAgent.id).where(
@@ -3997,20 +4393,64 @@ async def distribute_central_receipt(
 
     lines = row.lines or []
     distribution = list(row.distribution or [])
+    allocation_lines = []
+    seen = set()
+    for requested in body.lines:
+        idx = requested.line_index
+        qty = float(requested.qty)
+        if (idx in seen or idx < 0 or idx >= len(lines) or not math.isfinite(qty)
+                or qty <= 0 or qty > 1_000_000):
+            raise HTTPException(400, "Некорректные строки распределения")
+        seen.add(idx)
+        allocation_lines.append({"line_index": idx, "qty": round(qty, 3)})
+    if not allocation_lines:
+        raise HTTPException(400, "Укажите количество хотя бы по одной позиции")
+    allocation_id, _ = receipt_rules.allocation_identity(
+        row.id, body.station_id, allocation_lines)
+    previous = next((item for item in distribution
+                     if int(item.get("station_id") or 0) == body.station_id
+                     and sorted(item.get("lines") or [], key=lambda value: value["line_index"])
+                     == sorted(allocation_lines, key=lambda value: value["line_index"])), None)
+    if previous is not None:
+        allocation_id = str(previous.get("id") or allocation_id)
+    idempotency_key = f"receipt:{row.id}:distribution:{allocation_id}"
+    if previous is not None:
+        task = (await db.execute(select(EdgeDownlink).where(
+            EdgeDownlink.company_id == cid,
+            EdgeDownlink.idempotency_key == idempotency_key,
+        ))).scalar_one_or_none()
+        if task is None:
+            task = (await db.execute(select(EdgeDownlink).where(
+                EdgeDownlink.company_id == cid,
+                EdgeDownlink.kind == "incoming_transfer",
+                EdgeDownlink.note == f"central-distribution:{row.id}:{allocation_id}"[:300],
+            ).limit(1))).scalar_one_or_none()
+            if task is not None:
+                task.idempotency_key = idempotency_key
+        return {"ok": True, "idempotent": True,
+                "task_id": str(task.id) if task else f"central:{row.id}:{allocation_id}",
+                "station_id": body.station_id, "lines": len(allocation_lines)}
+
     used: dict[int, float] = {}
     for allocation in distribution:
         for item in allocation.get("lines") or []:
             idx = int(item.get("line_index", -1))
             used[idx] = used.get(idx, 0) + float(item.get("qty") or 0)
 
+    ledger_rows = (await db.execute(select(
+        StoreReceiptStockMovement.line_index,
+        func.sum(-StoreReceiptStockMovement.quantity),
+    ).where(
+        StoreReceiptStockMovement.company_id == cid,
+        StoreReceiptStockMovement.receipt_id == row.id,
+        StoreReceiptStockMovement.kind == "central_distribution",
+    ).group_by(StoreReceiptStockMovement.line_index))).all()
+    for idx, quantity in ledger_rows:
+        used[int(idx)] = max(used.get(int(idx), 0), float(quantity or 0))
+
     task_lines = []
-    allocation_lines = []
-    seen = set()
-    for requested in body.lines:
-        idx, qty = requested.line_index, requested.qty
-        if idx in seen or idx < 0 or idx >= len(lines) or qty <= 0:
-            raise HTTPException(400, "Некорректные строки распределения")
-        seen.add(idx)
+    for requested in allocation_lines:
+        idx, qty = requested["line_index"], requested["qty"]
         source = lines[idx]
         available = float(source.get("qty_fact") or 0) - used.get(idx, 0)
         if qty > available + 1e-6:
@@ -4030,14 +4470,9 @@ async def distribute_central_receipt(
             "qty_sent": qty, "mark_codes": selected_marks,
             "unknown": not bool(source.get("nomenclature_ref")),
         })
-        allocation_lines.append({"line_index": idx, "qty": qty})
-    if not task_lines:
-        raise HTTPException(400, "Укажите количество хотя бы по одной позиции")
-
-    allocation_id = str(uuid.uuid4())
     task_id = f"central:{row.id}:{allocation_id}"
     now = datetime.now(timezone.utc)
-    db.add(EdgeDownlink(
+    task = EdgeDownlink(
         company_id=cid, station_id=body.station_id, kind="incoming_transfer",
         payload={
             "id": task_id, "number": f"ЦР-{row.number}", "doc_date": now.isoformat(),
@@ -4048,14 +4483,19 @@ async def distribute_central_receipt(
             "lines": task_lines,
         },
         note=f"central-distribution:{row.id}:{allocation_id}"[:300],
-    ))
+        idempotency_key=idempotency_key,
+    )
+    db.add(task)
+    await _record_receipt_distribution(db, row, allocation_id, allocation_lines, user.id)
     distribution.append({
         "id": allocation_id, "station_id": body.station_id,
         "created_at": now.isoformat(), "lines": allocation_lines,
     })
     row.distribution = distribution
+    _touch_receipt(row)
     await db.commit()
-    return {"ok": True, "task_id": task_id, "station_id": body.station_id,
+    return {"ok": True, "idempotent": False, "task_id": task_id,
+            "station_id": body.station_id,
             "lines": len(task_lines)}
 
 
@@ -4067,23 +4507,31 @@ async def scan_receipt_barcode(
     db: AsyncSession = Depends(get_db),
 ):
     """Атомарно принять один скан USB/радиосканера в центральном складе."""
-    cid: uuid.UUID = await scope_company_id(user, db)
+    access = await _receipt_access(user, db)
+    cid = access.company_id
     row = (await db.execute(select(StoreReceipt).where(
         StoreReceipt.id == receipt_id, StoreReceipt.company_id == cid,
     ).with_for_update())).scalar_one_or_none()
     if row is None:
         raise HTTPException(404, "Документ не найден")
+    _require_receipt_row(access, row)
+    _check_receipt_version(row, body.version)
     if row.status == "accepted":
         raise HTTPException(409, "Документ уже принят — сканирование закрыто")
     if row.delivery_scheme != "central_warehouse":
         raise HTTPException(409, "Прямую поставку сканируют на агенте АЗС")
 
-    product_barcode, mark_code, scan_type = _parse_scanned_product(body.code)
-    qty = 1.0 if mark_code else float(body.qty)
-    if not math.isfinite(qty) or qty <= 0 or qty > 100000:
-        raise HTTPException(400, "Количество за один скан должно быть больше нуля")
-    lines = ([line.model_dump() for line in body.lines]
-             if body.lines is not None else _normalized_receipt_lines(row))
+    code = body.barcode or body.code
+    product_barcode, mark_code, scan_type = _parse_scanned_product(code)
+    requested_delta = body.delta if body.delta is not None else body.qty
+    delta = float(requested_delta if requested_delta is not None else 1)
+    if not math.isfinite(delta) or delta == 0 or abs(delta) > 100000:
+        raise HTTPException(400, "Дельта сканирования должна быть ненулевой")
+    if mark_code and abs(delta) != 1:
+        raise HTTPException(400, "Код маркировки добавляется или снимается по одной штуке")
+    lines = _normalized_receipt_lines(row)
+    if body.lines is not None and body.lines != lines:
+        raise HTTPException(409, "Снимок строк устарел; обновите документ и повторите скан")
 
     def matches(stored: str | None) -> bool:
         return bool(set(_barcode_candidates(stored or "")) &
@@ -4118,23 +4566,38 @@ async def scan_receipt_barcode(
     line = lines[line_index]
     if mark_code:
         canonical = _canonical_mark_code(mark_code)
-        if any(canonical == _canonical_mark_code(existing)
-               for candidate in lines for existing in candidate.get("mark_codes") or []):
-            raise HTTPException(409, "Этот код маркировки уже отсканирован — количество не изменено")
-        expected = {_canonical_mark_code(code) for code in line.get("upd_codes") or []}
-        if expected and canonical not in expected:
-            raise HTTPException(409, "Кода маркировки нет в УПД поставщика — товар не принят")
-        line["mark_codes"] = [*(line.get("mark_codes") or []), mark_code]
+        current_codes = list(line.get("mark_codes") or [])
+        existing_index = next((index for index, existing in enumerate(current_codes)
+                               if canonical == _canonical_mark_code(existing)), None)
+        if delta > 0:
+            if any(canonical == _canonical_mark_code(existing)
+                   for candidate in lines for existing in candidate.get("mark_codes") or []):
+                raise HTTPException(409, "Этот код маркировки уже отсканирован — количество не изменено")
+            expected = {_canonical_mark_code(value) for value in line.get("upd_codes") or []}
+            if expected and canonical not in expected:
+                raise HTTPException(409, "Кода маркировки нет в УПД поставщика — товар не принят")
+            current_codes.append(mark_code)
+        elif existing_index is None:
+            raise HTTPException(409, "Этот код маркировки не был отсканирован")
+        else:
+            current_codes.pop(existing_index)
+        line["mark_codes"] = current_codes
         line["requires_mark"] = True
-    line["qty_fact"] = round(float(line.get("qty_fact") or 0) + qty, 3)
+    new_quantity = round(float(line.get("qty_fact") or 0) + delta, 3)
+    if new_quantity < 0:
+        raise HTTPException(409, "Фактическое количество не может стать отрицательным")
+    line["qty_fact"] = new_quantity
+    total, vat = _recalc(lines, list(row.services or []))
     row.lines = lines
-    row.total_amount = _recalc(lines)
+    row.total_amount = total
+    row.vat_amount = vat
+    _touch_receipt(row)
     await db.commit()
     await db.refresh(row)
     result = _receipt_out(row)
     result["scan"] = {
         "type": scan_type, "barcode": product_barcode,
-        "line_index": line_index, "qty_added": qty,
+        "line_index": line_index, "qty_added": delta,
         "name": line.get("name") or "",
     }
     return result
@@ -4154,24 +4617,47 @@ async def store_receipts_report(
     FastAPI отдавал отчёту его ответ — экран падал на отсутствующем периоде.
     Один путь на два разных ресурса не работает, как бы ни хотелось.
     """
-    svc = GoodsDashboardService(db, await scope_company_id(user, db))
-    return await svc.receipts(date.fromisoformat(date_from), date.fromisoformat(date_to),
-                              _stations(stations))
+    access = await _receipt_access(user, db)
+    selected = _stations(stations)
+    if not access.network:
+        try:
+            requested = {int(value) for value in selected or []}
+        except ValueError as exc:
+            raise HTTPException(400, "stations должен содержать коды АЗС") from exc
+        if requested and not requested.issubset(access.station_ids):
+            raise HTTPException(403, "Нет полномочий на одну из запрошенных АЗС")
+        selected = [str(value) for value in sorted(requested or access.station_ids)]
+    svc = GoodsDashboardService(db, access.company_id)
+    return await svc.receipts(date.fromisoformat(date_from), date.fromisoformat(date_to), selected)
 
 
 @router.get("/receipts")
 async def list_receipts(
     station_id: int | None = Query(None),
+    station_ids: str | None = Query(None, description="коды АЗС через запятую"),
     status: str | None = Query(None, description="draft|expected|accepted"),
     limit: int = Query(100, le=500),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Журнал приёмок -- то же окно, что у товароведа в 1С."""
-    cid: uuid.UUID = await scope_company_id(user, db)
-    q = select(StoreReceipt).where(StoreReceipt.company_id == cid)
+    access = await _receipt_access(user, db)
+    cid = access.company_id
+    requested: set[int] = set()
     if station_id is not None:
-        q = q.where(StoreReceipt.station_id == station_id)
+        requested.add(station_id)
+    if station_ids:
+        try:
+            requested.update(int(value.strip()) for value in station_ids.split(",") if value.strip())
+        except ValueError as exc:
+            raise HTTPException(400, "station_ids должен содержать коды АЗС через запятую") from exc
+    requested, include_central = _receipt_list_scope(access, requested)
+    q = select(StoreReceipt).where(StoreReceipt.company_id == cid)
+    if requested:
+        station_scope = StoreReceipt.station_id.in_(requested)
+        if include_central:
+            station_scope = or_(station_scope, StoreReceipt.station_id.is_(None))
+        q = q.where(station_scope)
     if status:
         q = q.where(StoreReceipt.status == status)
     rows = (await db.execute(
@@ -4187,42 +4673,78 @@ async def create_receipt(
     db: AsyncSession = Depends(get_db),
 ):
     """Завести приёмку в центре: накладная поставщика на конкретную станцию."""
-    cid: uuid.UUID = await scope_company_id(user, db)
+    access = await _receipt_access(user, db)
+    cid = access.company_id
+    delivery_scheme = body.delivery_scheme or "supplier_to_station"
+    signing_mode = body.signing_mode or "office_director"
+    signature_status = body.signature_status or "pending"
+    _require_receipt_station(access, body.station_id)
     valid_until = _parse_mchd_date(body.mchd_valid_until)
     _validate_receipt_route(
-        body.delivery_scheme, body.station_id, body.receiving_warehouse,
-        body.signing_mode, body.signer_name, body.mchd_guid, body.mchd_registry,
-        valid_until, body.signature_status, body.signature_ref)
-    lines = [l.model_dump() for l in body.lines]
-    total = _recalc(lines)
+        delivery_scheme, body.station_id, body.receiving_warehouse,
+        signing_mode, body.signer_name, body.mchd_guid, body.mchd_registry,
+        valid_until, signature_status, body.signature_ref)
+    lines = [line.model_dump() for line in body.lines or []]
+    services = list(body.services or [])
+    total, vat = _recalc(lines, services, require_lines=False)
     now = datetime.now(timezone.utc)
-    doc_date = datetime.fromisoformat(body.doc_date) if body.doc_date else now
-    if doc_date.tzinfo is None:
-        doc_date = doc_date.replace(tzinfo=timezone.utc)
+    try:
+        doc_date = receipt_rules.parse_datetime(body.doc_date, "Дата документа") or now
+    except receipt_rules.ReceiptValidationError as exc:
+        raise HTTPException(400, str(exc)) from exc
     # Номер по умолчанию -- дата и станция: различимый документ нужен сразу,
     # сквозная нумерация появится вместе со справочником поставщиков.
     destination = str(body.station_id) if body.station_id else "ЦС"
     number = body.number or ("П-%s-%s" % (destination, now.strftime("%y%m%d-%H%M")))
 
     row = StoreReceipt(
-        company_id=cid, station_id=body.station_id, number=number, doc_date=doc_date,
-        supplier=body.supplier, contract=body.contract,
-        incoming_number=body.incoming_number,
-        incoming_date=datetime.fromisoformat(body.incoming_date) if body.incoming_date else None,
-        status="draft", origin="center", lines=lines,
-        delivery_scheme=body.delivery_scheme,
+        id=uuid.uuid4(), company_id=cid, station_id=body.station_id,
+        number=number, doc_date=doc_date,
+        supplier=body.supplier, contract=body.contract, incoming_number=body.incoming_number,
+        status="draft", origin="center", lines=lines, services=services,
+        delivery_scheme=delivery_scheme,
         receiving_warehouse=body.receiving_warehouse,
-        signing_mode=body.signing_mode, signer_name=body.signer_name,
+        signing_mode=signing_mode, signer_name=body.signer_name,
         mchd_guid=body.mchd_guid, mchd_registry=body.mchd_registry,
-        mchd_valid_until=valid_until, signature_status=body.signature_status,
+        mchd_valid_until=valid_until, signature_status=signature_status,
         signature_ref=body.signature_ref,
-        signed_at=now if body.signature_status == "signed" else None,
-        total_amount=total, vat_amount=0, comment=body.comment,
+        signed_at=now if signature_status == "signed" else None,
+        total_amount=total, vat_amount=vat, comment=body.comment,
+        evidence={key: value for key, value in {
+            "place": body.place, "purpose": body.purpose,
+            "invoice_kind": body.invoice_kind, "invoice_number": body.invoice_number,
+            "invoice_date": body.invoice_date, "source_kind": body.source_kind,
+            "purchased_by": body.purchased_by, "payment_kind": body.payment_kind,
+        }.items() if value is not None},
     )
+    await _set_receipt_party(db, row, body.supplier_id, body.contract_id, required=False)
+    await _set_receipt_basis(
+        db, row, row.supplier, body.incoming_number, body.incoming_date, required=False)
     db.add(row)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(409, "Такая накладная уже существует") from exc
     await db.refresh(row)
     return _receipt_out(row)
+
+
+@router.get("/receipts/duplicate-audit")
+async def receipt_duplicate_audit(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Только dry-run: сомнительные пары не сливаются без решения человека."""
+    access = await _receipt_access(user, db)
+    if not access.network:
+        raise HTTPException(403, "Аудит дублей доступен товароведу сети")
+    rows = (await db.execute(select(StoreReceipt).where(
+        StoreReceipt.company_id == access.company_id,
+    ))).scalars().all()
+    plan = receipt_rules.duplicate_plan(rows)
+    return {"mode": "dry-run", "apply_supported": False, "candidates": plan,
+            "total": len(plan)}
 
 
 @router.get("/receipts/{receipt_id}")
@@ -4231,11 +4753,13 @@ async def get_receipt(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    cid: uuid.UUID = await scope_company_id(user, db)
+    access = await _receipt_access(user, db)
+    cid = access.company_id
     row = (await db.execute(select(StoreReceipt).where(
         StoreReceipt.id == receipt_id, StoreReceipt.company_id == cid))).scalar_one_or_none()
     if row is None:
         raise HTTPException(404, "Документ не найден")
+    _require_receipt_row(access, row)
     return _receipt_out(row)
 
 
@@ -4247,42 +4771,95 @@ async def update_receipt(
     db: AsyncSession = Depends(get_db),
 ):
     """Правка документа. Принятый не редактируется: это уже движение остатков."""
-    cid: uuid.UUID = await scope_company_id(user, db)
+    access = await _receipt_access(user, db)
+    cid = access.company_id
     row = (await db.execute(select(StoreReceipt).where(
-        StoreReceipt.id == receipt_id, StoreReceipt.company_id == cid))).scalar_one_or_none()
+        StoreReceipt.id == receipt_id, StoreReceipt.company_id == cid
+    ).with_for_update())).scalar_one_or_none()
     if row is None:
         raise HTTPException(404, "Документ не найден")
-    if row.status == "accepted":
+    _require_receipt_row(access, row)
+    _check_receipt_version(row, body.version)
+    if row.status in ("accepted", "reversed"):
         raise HTTPException(409, "Документ уже принят -- правка запрещена")
 
-    valid_until = _parse_mchd_date(body.mchd_valid_until)
+    fields = body.model_fields_set
+    station_id = body.station_id if "station_id" in fields else row.station_id
+    delivery_scheme = body.delivery_scheme if "delivery_scheme" in fields else row.delivery_scheme
+    receiving_warehouse = (body.receiving_warehouse if "receiving_warehouse" in fields
+                           else row.receiving_warehouse)
+    signing_mode = body.signing_mode if "signing_mode" in fields else row.signing_mode
+    signer_name = body.signer_name if "signer_name" in fields else row.signer_name
+    mchd_guid = body.mchd_guid if "mchd_guid" in fields else row.mchd_guid
+    mchd_registry = body.mchd_registry if "mchd_registry" in fields else row.mchd_registry
+    valid_until = (_parse_mchd_date(body.mchd_valid_until)
+                   if "mchd_valid_until" in fields else row.mchd_valid_until)
+    signature_status = (body.signature_status if "signature_status" in fields
+                        else row.signature_status)
+    signature_ref = body.signature_ref if "signature_ref" in fields else row.signature_ref
+    _require_receipt_station(access, station_id)
     _validate_receipt_route(
-        body.delivery_scheme, body.station_id, body.receiving_warehouse,
-        body.signing_mode, body.signer_name, body.mchd_guid, body.mchd_registry,
-        valid_until, body.signature_status, body.signature_ref)
-    lines = [l.model_dump() for l in body.lines]
-    row.total_amount = _recalc(lines)
+        delivery_scheme, station_id, receiving_warehouse,
+        signing_mode, signer_name, mchd_guid, mchd_registry,
+        valid_until, signature_status, signature_ref)
+    lines = ([line.model_dump() for line in body.lines or []]
+             if "lines" in fields else _normalized_receipt_lines(row))
+    services = list(body.services or []) if "services" in fields else list(row.services or [])
+    total, vat = _recalc(lines, services, require_lines=False)
     row.lines = lines
-    row.supplier = body.supplier
-    row.contract = body.contract
-    row.incoming_number = body.incoming_number
-    row.incoming_date = datetime.fromisoformat(body.incoming_date) if body.incoming_date else None
-    row.comment = body.comment
-    row.station_id = body.station_id
-    row.delivery_scheme = body.delivery_scheme
-    row.receiving_warehouse = body.receiving_warehouse
-    row.signing_mode = body.signing_mode
-    row.signer_name = body.signer_name
-    row.mchd_guid = body.mchd_guid
-    row.mchd_registry = body.mchd_registry
+    row.services = services
+    row.total_amount = total
+    row.vat_amount = vat
+    row.station_id = station_id
+    row.delivery_scheme = delivery_scheme
+    row.receiving_warehouse = receiving_warehouse
+    row.signing_mode = signing_mode
+    row.signer_name = signer_name
+    row.mchd_guid = mchd_guid
+    row.mchd_registry = mchd_registry
     row.mchd_valid_until = valid_until
-    row.signature_status = body.signature_status
-    row.signature_ref = body.signature_ref
-    row.signed_at = (datetime.now(timezone.utc) if body.signature_status == "signed"
+    row.signature_status = signature_status
+    row.signature_ref = signature_ref
+    row.signed_at = (datetime.now(timezone.utc) if signature_status == "signed"
                      and row.signed_at is None else row.signed_at)
-    if body.number:
+    if "comment" in fields:
+        row.comment = body.comment
+    if "number" in fields and body.number:
         row.number = body.number
-    await db.commit()
+    if "doc_date" in fields:
+        try:
+            row.doc_date = receipt_rules.parse_datetime(body.doc_date, "Дата документа")
+        except receipt_rules.ReceiptValidationError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        if row.doc_date is None:
+            raise HTTPException(400, "Укажите дату документа")
+    supplier_id = body.supplier_id if "supplier_id" in fields else row.supplier_id
+    contract_id = body.contract_id if "contract_id" in fields else row.contract_id
+    if supplier_id is None and "supplier" in fields:
+        row.supplier = body.supplier
+    if contract_id is None and "contract" in fields:
+        row.contract = body.contract
+    await _set_receipt_party(db, row, supplier_id, contract_id, required=False)
+    incoming_number = body.incoming_number if "incoming_number" in fields else row.incoming_number
+    incoming_date = body.incoming_date if "incoming_date" in fields else row.incoming_date
+    await _set_receipt_basis(
+        db, row, row.supplier, incoming_number, incoming_date, required=False)
+    evidence = dict(row.evidence or {})
+    for field in ("place", "purpose", "invoice_kind", "invoice_number", "invoice_date",
+                  "source_kind", "purchased_by", "payment_kind"):
+        if field in fields:
+            value = getattr(body, field)
+            if value is None:
+                evidence.pop(field, None)
+            else:
+                evidence[field] = value
+    row.evidence = evidence
+    _touch_receipt(row)
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(409, "Такая накладная уже существует") from exc
     await db.refresh(row)
     return _receipt_out(row)
 
@@ -4290,7 +4867,8 @@ async def update_receipt(
 @router.post("/receipts/{receipt_id}/status")
 async def set_receipt_status(
     receipt_id: uuid.UUID,
-    status: str = Query(..., description="expected|accepted"),
+    status: str = Query(..., description="expected|accepted|reversed"),
+    version: int | None = Query(None),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -4299,15 +4877,22 @@ async def set_receipt_status(
     Принять документ без единой посчитанной позиции нельзя: это верный признак,
     что кнопку нажали раньше, чем пересчитали товар.
     """
-    if status not in ("expected", "accepted"):
-        raise HTTPException(400, "Допустимы только expected и accepted")
-    cid: uuid.UUID = await scope_company_id(user, db)
+    if status not in ("expected", "accepted", "reversed"):
+        raise HTTPException(400, "Допустимы expected, accepted и reversed")
+    access = await _receipt_access(user, db)
+    cid = access.company_id
     row = (await db.execute(select(StoreReceipt).where(
-        StoreReceipt.id == receipt_id, StoreReceipt.company_id == cid))).scalar_one_or_none()
+        StoreReceipt.id == receipt_id, StoreReceipt.company_id == cid
+    ).with_for_update())).scalar_one_or_none()
     if row is None:
         raise HTTPException(404, "Документ не найден")
-    if row.status == "accepted":
-        raise HTTPException(409, "Документ уже принят")
+    _require_receipt_row(access, row)
+    _check_receipt_version(row, version)
+    if row.status == status:
+        if status == "accepted" and row.delivery_scheme == "central_warehouse":
+            await _record_receipt_acceptance(db, row, user.id)
+            await db.commit()
+        return _receipt_out(row)
     if status == "accepted":
         if row.delivery_scheme == "supplier_to_station":
             raise HTTPException(409, "Прямую поставку принимает агент на станции")
@@ -4320,12 +4905,65 @@ async def set_receipt_status(
             raise HTTPException(400, "В документе нет позиций")
         if not any(float(l.get("qty_fact") or 0) > 0 for l in row.lines):
             raise HTTPException(400, "Ни одна позиция не посчитана по факту")
-        _validate_scanned_marks(row.lines or [])
+        await _set_receipt_party(db, row, row.supplier_id, row.contract_id, required=True)
+        _require_receipt_canonical(row)
+        await _set_receipt_basis(db, row, row.supplier, row.incoming_number, row.incoming_date)
+        lines = _normalized_receipt_lines(row)
+        total, vat = _recalc(lines, list(row.services or []))
+        _validate_scanned_marks(lines)
+        row.lines = lines
+        row.total_amount = total
+        row.vat_amount = vat
+        await _record_receipt_acceptance(db, row, user.id)
         row.accepted_at = datetime.now(timezone.utc)
+    elif status == "reversed":
+        if row.status != "accepted" or row.delivery_scheme != "central_warehouse":
+            raise HTTPException(409, "Отменить можно только центральную принятую приёмку")
+        await _reverse_receipt_acceptance(db, row, user.id)
+    elif row.status == "accepted":
+        raise HTTPException(409, "Принятый документ меняется только обратной проводкой")
     row.status = status
+    _touch_receipt(row)
     await db.commit()
     await db.refresh(row)
     return _receipt_out(row)
+
+
+@router.get("/receipts/{receipt_id}/ledger")
+async def get_receipt_ledger(
+    receipt_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    access = await _receipt_access(user, db)
+    row = (await db.execute(select(StoreReceipt).where(
+        StoreReceipt.id == receipt_id,
+        StoreReceipt.company_id == access.company_id,
+    ))).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(404, "Документ не найден")
+    _require_receipt_row(access, row)
+    movements = (await db.execute(select(StoreReceiptStockMovement).where(
+        StoreReceiptStockMovement.company_id == access.company_id,
+        StoreReceiptStockMovement.receipt_id == receipt_id,
+    ).order_by(StoreReceiptStockMovement.created_at, StoreReceiptStockMovement.id))).scalars().all()
+    balances: dict[str, float] = {}
+    for movement in movements:
+        balances[movement.item_key] = round(
+            balances.get(movement.item_key, 0) + float(movement.quantity), 3)
+    return {
+        "receipt_id": str(receipt_id),
+        "movements": [{
+            "id": str(movement.id), "kind": movement.kind,
+            "reversal_of_id": str(movement.reversal_of_id) if movement.reversal_of_id else None,
+            "allocation_id": movement.allocation_id, "line_index": movement.line_index,
+            "station_id": movement.station_id, "warehouse": movement.warehouse,
+            "item_key": movement.item_key, "quantity": float(movement.quantity),
+            "unit_cost": float(movement.unit_cost), "amount": float(movement.amount),
+            "created_at": movement.created_at,
+        } for movement in movements],
+        "balance": balances,
+    }
 
 
 @router.get("/overview")
@@ -4357,6 +4995,22 @@ async def store_skus(
     cid: uuid.UUID = await scope_company_id(user, db)
     st = [s.strip() for s in stations.split(",") if s.strip()] if stations else None
     return await GoodsDashboardService(db, cid).sku_analytics(
+        date.fromisoformat(date_from), date.fromisoformat(date_to), st,
+    )
+
+
+@router.get("/visits")
+async def store_visits(
+    date_from: str = Query(...),
+    date_to: str = Query(...),
+    stations: str | None = Query(None),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Поток посетителей и конверсия без повторного расчёта всего обзора."""
+    cid: uuid.UUID = await scope_company_id(user, db)
+    st = [s.strip() for s in stations.split(",") if s.strip()] if stations else None
+    return await GoodsDashboardService(db, cid).visits(
         date.fromisoformat(date_from), date.fromisoformat(date_to), st,
     )
 
@@ -4554,13 +5208,15 @@ async def store_stock(
     q: str = Query(""),
     marked: str = Query("all", description="all|marked|plain"),
     only_negative: bool = Query(False, description="только отрицательные остатки"),
+    stations: str | None = Query(None, description="коды АЗС через запятую"),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Достоверный остаток товара (снимок регистров ЦБ ТоварыНаАЗК+Партии), не оценка."""
+    station_codes = [s for s in (stations or "").replace(" ", "").split(",") if s]
     return await GoodsDashboardService(db, await scope_company_id(user, db)).stock_onhand(
         warehouse=warehouse, q=q, marked=marked, only_negative=only_negative,
-    )
+        stations=station_codes or None)
 
 
 def _od(s: str | None):
@@ -4572,13 +5228,15 @@ async def store_inventory(
     warehouse: str | None = Query(None, description="код склада (по умолч. — все склады магазина)"),
     only_dev: bool = Query(False, description="только документы с отклонениями"),
     date_from: str | None = Query(None), date_to: str | None = Query(None),
+    stations: str | None = Query(None, description="коды АЗС через запятую"),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Реестр инвентаризаций ЦБ + недостачи/излишки (shrinkage) с drill-down по строкам."""
+    station_codes = [s for s in (stations or "").replace(" ", "").split(",") if s]
     return await GoodsDashboardService(db, await scope_company_id(user, db)).inventory(
         warehouse=warehouse, only_dev=only_dev, date_from=_od(date_from), date_to=_od(date_to),
-    )
+        stations=station_codes or None)
 
 
 @router.get("/writeoffs")
@@ -4586,37 +5244,45 @@ async def store_writeoffs(
     warehouse: str | None = Query(None, description="код склада (по умолч. — все склады магазина)"),
     reason: str | None = Query(None, description="фильтр по причине"),
     date_from: str | None = Query(None), date_to: str | None = Query(None),
+    stations: str | None = Query(None, description="коды АЗС через запятую"),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Реестр списаний ЦБ (СписаниеТоваров) + причины + топ списанных SKU."""
+    station_codes = [s for s in (stations or "").replace(" ", "").split(",") if s]
     return await GoodsDashboardService(db, await scope_company_id(user, db)).writeoffs(
         warehouse=warehouse, reason=reason, date_from=_od(date_from), date_to=_od(date_to),
-    )
+        stations=station_codes or None)
 
 
 @router.get("/transfers")
 async def store_transfers(
     direction: str | None = Query(None, description="фильтр по направлению"),
     date_from: str | None = Query(None), date_to: str | None = Query(None),
+    stations: str | None = Query(None, description="коды АЗС через запятую"),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Реестр перемещений ЦБ (ПеремещениеТоваров) откуда→куда + направления."""
+    station_codes = [s for s in (stations or "").replace(" ", "").split(",") if s]
     return await GoodsDashboardService(db, await scope_company_id(user, db)).transfers(
-        direction=direction, date_from=_od(date_from), date_to=_od(date_to))
+        direction=direction, date_from=_od(date_from), date_to=_od(date_to),
+        stations=station_codes or None)
 
 
 @router.get("/revaluation")
 async def store_revaluation(
     reason: str | None = Query(None, description="фильтр направления (Подорожание/Удешевление/Смешанная)"),
     date_from: str | None = Query(None), date_to: str | None = Query(None),
+    stations: str | None = Query(None, description="коды АЗС через запятую"),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Реестр переоценок ЦБ (ПереоценкаТоваровАЗК): старая→новая цена, Δ%, влияние."""
+    station_codes = [s for s in (stations or "").replace(" ", "").split(",") if s]
     return await GoodsDashboardService(db, await scope_company_id(user, db)).revaluation(
-        reason=reason, date_from=_od(date_from), date_to=_od(date_to))
+        reason=reason, date_from=_od(date_from), date_to=_od(date_to),
+        stations=station_codes or None)
 
 
 @router.get("/catering")
@@ -5122,6 +5788,56 @@ async def store_resolve_item_draft(
     return res
 
 
+@router.post("/station-drafts/partner", status_code=201)
+async def store_create_partner_draft(
+    body: dict = Body(...),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Создать станционный pending-черновик поставщика без обхода канона."""
+    access = await _receipt_access(user, db)
+    try:
+        station_id = int(body.get("station_id"))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(400, "Укажите station_id") from exc
+    _require_receipt_station(access, station_id)
+    name = str(body.get("name") or "").strip()
+    inn = "".join(char for char in str(body.get("inn") or "") if char.isdigit())
+    role = str(body.get("role") or "supplier").strip()
+    if not name:
+        raise HTTPException(400, "Укажите наименование поставщика")
+    if len(inn) not in (10, 12):
+        raise HTTPException(400, "ИНН должен содержать 10 или 12 цифр")
+    if role != "supplier":
+        raise HTTPException(400, "В приёмке можно заявить только поставщика")
+    draft_lock = int.from_bytes(hashlib.sha256(
+        f"partner-draft:{access.company_id}:{station_id}:{inn}".encode()
+    ).digest()[:8], "big", signed=True)
+    await db.execute(select(func.pg_advisory_xact_lock(draft_lock)))
+    existing = (await db.execute(text("""
+        SELECT id, source_uuid, station_id, name, inn, kpp, role, comment, created_at
+          FROM edge.partner_draft
+         WHERE company_id = :cid AND station_id = :station AND resolved_at IS NULL
+           AND regexp_replace(coalesce(inn, ''), '\\D', '', 'g') = :inn
+         FOR UPDATE
+    """), {"cid": access.company_id, "station": station_id, "inn": inn})).mappings().first()
+    if existing is None:
+        source_uuid = str(uuid.uuid4())
+        existing = (await db.execute(text("""
+            INSERT INTO edge.partner_draft
+                (company_id, station_id, source_uuid, name, inn, kpp, role, comment)
+            VALUES (:cid, :station, :source, :name, :inn, :kpp, :role, :comment)
+            RETURNING id, source_uuid, station_id, name, inn, kpp, role, comment, created_at
+        """), {"cid": access.company_id, "station": station_id, "source": source_uuid,
+                 "name": name, "inn": inn, "kpp": str(body.get("kpp") or "").strip(),
+                 "role": role, "comment": str(body.get("comment") or "").strip()})).mappings().one()
+        await db.commit()
+    result = dict(existing)
+    result["created_at"] = result["created_at"].isoformat()
+    result["status"] = "pending"
+    return result
+
+
 @router.post("/station-drafts/partner/{draft_id}")
 async def store_resolve_partner_draft(
     draft_id: int,
@@ -5130,12 +5846,15 @@ async def store_resolve_partner_draft(
     db: AsyncSession = Depends(get_db),
 ):
     """Решение по контрагенту станции: принять в справочник сети или отклонить."""
-    cid: uuid.UUID = await _require_network_merchandiser(user, db)
+    access = await _receipt_access(user, db)
+    if not access.network:
+        raise HTTPException(403, "Решение по поставщику принимает товаровед сети")
     try:
         return await edge_nsi.resolve_partner_draft(
-            db, cid, draft_id, str(body.get("action") or ""), body.get("note"))
+            db, access.company_id, draft_id, str(body.get("action") or ""), body.get("note"))
     except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
+        code = 409 if "несколько" in str(exc) or "другим" in str(exc) else 400
+        raise HTTPException(code, str(exc)) from exc
 
 
 @router.post("/station-drafts/proposal/{proposal_id}")
@@ -5437,13 +6156,18 @@ async def store_push_partners(
     Флагом можно отдать весь справочник сети — например, когда станция новая и
     истории поставок у неё ещё нет.
     """
-    cid: uuid.UUID = await scope_company_id(user, db)
+    access = await _receipt_access(user, db)
+    _require_receipt_station(access, station_id)
+    if all_network and not access.network:
+        raise HTTPException(403, "Весь справочник сети доступен только товароведу сети")
+    cid = access.company_id
     фильтр = "" if all_network else """
         AND EXISTS (SELECT 1 FROM edge.partner_station ps
                      WHERE ps.partner_id = p.id AND ps.station_id = :s)
     """
     rows = (await db.execute(text(f"""
-        SELECT p.id, p.name, p.name_full, p.inn, p.kpp, p.role, p.comment, p.archived
+        SELECT p.id, p.external_uuid, p.name, p.name_full, p.inn, p.kpp,
+               p.role, p.comment, p.archived
         FROM edge.partner p
         WHERE p.company_id = :cid AND NOT p.archived {фильтр}
         ORDER BY p.name
@@ -5464,7 +6188,8 @@ async def store_push_partners(
     db.add(EdgeDownlink(
         company_id=cid, station_id=station_id, kind="partners",
         payload={"partners": [
-            {"id": f"m{r['id']}", "name": r["name"], "name_full": r["name_full"] or "",
+            {"id": str(r["external_uuid"]) if r["external_uuid"] else f"m{r['id']}",
+             "name": r["name"], "name_full": r["name_full"] or "",
              "inn": r["inn"] or "", "kpp": r["kpp"] or "", "role": r["role"],
              "comment": r["comment"] or "", "archived": r["archived"],
              **(история.get(r["name"]) or {})} for r in rows]},

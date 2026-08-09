@@ -13,6 +13,7 @@
  *
  * Данные: /api/store/dynamics · /api/store/price-log.
  */
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Kpi } from './analytics/Kpi'
 import { getStoreDynamics, getStorePriceLog, type DynamicsRow } from '@/services/storeService'
@@ -83,20 +84,34 @@ function ТаблицаВкладов({ rows, empty }: { rows: DynamicsRow[]; em
   )
 }
 
-export function StoreDynamicsPanel({ dateFrom, dateTo, stations }: {
+export function StoreDynamicsPanel({ companyId, dateFrom, dateTo, stations }: {
   companyId: string; dateFrom: string; dateTo: string; stations?: string[]
 }) {
-  const { data, isLoading } = useQuery({
-    queryKey: ['store-dynamics', dateFrom, dateTo, stations?.join(',') || ''],
+  const [pricePage, setPricePage] = useState({ scope: '', offset: 0 })
+  const pageSize = 100
+  const scopeKey = stations?.join(',') || ''
+  const priceScope = [companyId, dateFrom, dateTo, scopeKey].join('|')
+  const priceOffset = pricePage.scope === priceScope ? pricePage.offset : 0
+
+  const { data, isLoading, error, refetch } = useQuery({
+    queryKey: ['store-dynamics', companyId, dateFrom, dateTo, scopeKey],
     queryFn: () => getStoreDynamics(dateFrom, dateTo, stations),
   })
-  const { data: журнал } = useQuery({
-    queryKey: ['store-price-log', dateFrom, dateTo, stations?.join(',') || ''],
-    queryFn: () => getStorePriceLog(dateFrom, dateTo, stations),
+  const { data: журнал, error: ошибкаЖурнала, refetch: повторитьЖурнал } = useQuery({
+    queryKey: ['store-price-log', companyId, dateFrom, dateTo, scopeKey, priceOffset],
+    queryFn: () => getStorePriceLog(dateFrom, dateTo, stations, priceOffset, pageSize),
   })
 
-  if (isLoading || !data) {
+  if (isLoading) {
     return <div className="p-6 text-sm text-muted-foreground">Считаем изменения…</div>
+  }
+  if (error || !data) {
+    return (
+      <div className="p-6 text-sm text-red-400/90">
+        Не удалось рассчитать динамику.{' '}
+        <button type="button" className="underline" onClick={() => refetch()}>Повторить</button>
+      </div>
+    )
   }
   const t = data.total
   const макс = Math.max(...ПРИЧИНЫ.map((п) => Math.abs(data.factors[п.key])), 1)
@@ -208,6 +223,9 @@ export function StoreDynamicsPanel({ dateFrom, dateTo, stations }: {
 
       <section className="rounded-lg border border-border/50 p-4">
         <h3 className="text-sm font-semibold">Что вытянуло период</h3>
+        {data.up_total > data.up.length && (
+          <p className="text-xs text-muted-foreground mt-1">Показаны 20 наибольших вкладов из {nf(data.up_total)}.</p>
+        )}
         <ТаблицаВкладов rows={data.up} empty="Прироста маржи нет ни по одной позиции." />
       </section>
 
@@ -217,10 +235,20 @@ export function StoreDynamicsPanel({ dateFrom, dateTo, stations }: {
           «Выбыла» значит, что позицию перестали продавать совсем — чаще всего это не решение,
           а кончившийся товар.
         </p>
+        {data.down_total > data.down.length && (
+          <p className="text-xs text-muted-foreground mt-1">Показаны 20 наибольших потерь из {nf(data.down_total)}.</p>
+        )}
         <ТаблицаВкладов rows={data.down} empty="Потерь маржи нет." />
       </section>
 
-      {!!журнал?.rows.length && (
+      {ошибкаЖурнала && (
+        <section className="rounded-lg border border-red-500/30 p-4 text-sm text-red-400/90">
+          Не удалось загрузить журнал цен.{' '}
+          <button type="button" className="underline" onClick={() => повторитьЖурнал()}>Повторить</button>
+        </section>
+      )}
+
+      {!ошибкаЖурнала && !!журнал?.rows.length && (
         <section className="rounded-lg border border-border/50 p-4">
           <h3 className="text-sm font-semibold">Журнал цен сети</h3>
           <p className="text-xs text-muted-foreground mt-1">
@@ -240,7 +268,7 @@ export function StoreDynamicsPanel({ dateFrom, dateTo, stations }: {
                 </tr>
               </thead>
               <tbody>
-                {журнал.rows.slice(0, 100).map((r, i) => (
+                {журнал.rows.map((r, i) => (
                   <tr key={i} className="border-b border-border/30 hover:bg-accent/30">
                     <td className="py-1.5 pr-3 text-muted-foreground">
                       {r.at ? new Date(r.at).toLocaleDateString('ru-RU') : '—'}
@@ -259,6 +287,23 @@ export function StoreDynamicsPanel({ dateFrom, dateTo, stations }: {
                 ))}
               </tbody>
             </table>
+          </div>
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+            <span>
+              {nf(журнал.offset + 1)}–{nf(журнал.offset + журнал.rows.length)} из {nf(журнал.total)} изменений
+            </span>
+            <div className="flex gap-2">
+              <button type="button" disabled={журнал.offset === 0}
+                className="rounded border border-border px-2 py-1 disabled:opacity-40"
+                onClick={() => setPricePage({ scope: priceScope, offset: Math.max(0, журнал.offset - журнал.limit) })}>
+                Назад
+              </button>
+              <button type="button" disabled={!журнал.truncated}
+                className="rounded border border-border px-2 py-1 disabled:opacity-40"
+                onClick={() => setPricePage({ scope: priceScope, offset: журнал.offset + журнал.limit })}>
+                Дальше
+              </button>
+            </div>
           </div>
         </section>
       )}

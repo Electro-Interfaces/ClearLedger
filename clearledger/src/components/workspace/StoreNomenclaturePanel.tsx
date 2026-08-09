@@ -127,7 +127,7 @@ export function StoreNomenclaturePanel({ companyId, dateFrom, dateTo, stations }
       )}
 
       {openGuid && (
-        <NomenclatureCardModal guid={openGuid} companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} onClose={() => setOpenGuid(null)} />
+        <NomenclatureCardModal guid={openGuid} companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} stations={stations} onClose={() => setOpenGuid(null)} />
       )}
     </div>
   )

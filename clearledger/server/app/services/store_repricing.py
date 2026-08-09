@@ -230,8 +230,8 @@ async def preview(db: AsyncSession, cid, правило: dict, отбор: dict,
         "reasons": [{"reason": k, "count": v, "what": ЧТО_ДЕЛАТЬ.get(k, "")}
                     for k, v in sorted(причины.items(), key=lambda x: -x[1])],
         "by_station": sorted(по_станциям.values(), key=lambda x: x["station_id"]),
-        "rows": строки[:500],
-        "shown": min(len(строки), 500),
+        "rows": строки,
+        "shown": len(строки),
         "total_rows": len(строки),
     }
 

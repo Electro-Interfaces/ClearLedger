@@ -6,13 +6,14 @@
  *   sales       — продажи по товарам (продано/выручка/ср.цена).
  * Данные: /api/store/skus (GoodsDashboardService.sku_analytics). Имена — из кеша НСИ ЦБ.
  */
-import { useState, type ReactNode } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { rowDrill } from './rowDrill'
 import { SkuDetailModal } from './SkuDetailModal'
 import { useQuery } from '@tanstack/react-query'
 import { getStoreSkus, type StoreSku } from '@/services/storeService'
 import { fmtMoney } from '@/services/analyticsService'
 import { ChzBadge } from '@/components/common/ChzBadge'
+import { ShowMore, useVisible } from '@/components/common/ShowMore'
 
 const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: d }).format(n)
 
@@ -102,27 +103,32 @@ export function StoreSkuPanel({ companyId, dateFrom, dateTo, mode, stations }: {
 }) {
   // Строка = товар: раскрывается его карточка (та же, что в «Ассортименте»).
   const [openSku, setOpenSku] = useState<string | null>(null)
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['store-skus', companyId, dateFrom, dateTo, stations],
     queryFn: () => getStoreSkus(dateFrom, dateTo, { stations }),
   })
   const [q, setQ] = useState('')
   const [markedOnly, setMarkedOnly] = useState(false)
 
+  const skus = useMemo(() => {
+    let rows = data?.skus ?? []
+    if (q) {
+      const ql = q.toLowerCase()
+      rows = rows.filter((s) => s.name.toLowerCase().includes(ql) || (s.article ?? '').includes(q))
+    }
+    if (mode === 'nomenclature' && markedOnly) rows = rows.filter((s) => s.marked)
+    if (mode === 'marked') rows = rows.filter((s) => s.marked)
+    if (mode === 'stock') rows = [...rows].sort((a, b) => b.stock_est - a.stock_est)
+    if (mode === 'pricing') rows = [...rows].sort((a, b) => (a.margin_pct ?? 9e9) - (b.margin_pct ?? 9e9))
+    return rows
+  }, [data, markedOnly, mode, q])
+  const показ = useVisible(skus)
+
   if (isLoading) return <div className="p-6 text-sm text-muted-foreground">Загрузка товаров…</div>
-  if (error) return <div className="p-6 text-sm text-red-400/90">Ошибка загрузки реестра SKU</div>
+  if (error) return <div className="p-6 text-sm text-red-400/90">Ошибка загрузки реестра SKU. <button type="button" className="underline" onClick={() => refetch()}>Повторить</button></div>
   if (!data) return null
 
   const cols = COLS[mode]
-  let skus = data.skus
-  if (q) {
-    const ql = q.toLowerCase()
-    skus = skus.filter((s) => s.name.toLowerCase().includes(ql) || (s.article ?? '').includes(q))
-  }
-  if (mode === 'nomenclature' && markedOnly) skus = skus.filter((s) => s.marked)
-  if (mode === 'marked') skus = skus.filter((s) => s.marked)
-  if (mode === 'stock') skus = [...skus].sort((a, b) => b.stock_est - a.stock_est)
-  if (mode === 'pricing') skus = [...skus].sort((a, b) => (a.margin_pct ?? 9e9) - (b.margin_pct ?? 9e9))
 
   return (
     <div className="p-6 space-y-4">
@@ -176,7 +182,7 @@ export function StoreSkuPanel({ companyId, dateFrom, dateTo, mode, stations }: {
             </tr>
           </thead>
           <tbody>
-            {skus.slice(0, 300).map((s) => (
+            {показ.visible.map((s) => (
               <tr key={s.guid}
                   {...rowDrill(() => setOpenSku(s.guid), `${s.name} — карточка товара`,
                     'border-t border-border/30')}>
@@ -189,17 +195,13 @@ export function StoreSkuPanel({ companyId, dateFrom, dateTo, mode, stations }: {
             ))}
           </tbody>
         </table>
-        {skus.length > 300 && (
-          <div className="px-3 py-2 text-[11px] text-muted-foreground border-t border-border/30">
-            Показано 300 из {skus.length}. Уточните поиск.
-          </div>
-        )}
+        {skus.length > 300 && <ShowMore {...показ} onMore={показ.more} onAll={показ.all} unit="товаров" />}
         {skus.length === 0 && (
-          <div className="px-3 py-6 text-sm text-muted-foreground text-center">Нет данных за период (поставьте апрель — локальная копия ЦБ до 29.04).</div>
+          <div className="px-3 py-6 text-sm text-muted-foreground text-center">За выбранный период данных нет.</div>
         )}
       </div>
       {openSku && (
-        <SkuDetailModal guid={openSku} dateFrom={dateFrom} dateTo={dateTo}
+        <SkuDetailModal guid={openSku} dateFrom={dateFrom} dateTo={dateTo} stations={stations}
           onClose={() => setOpenSku(null)} />
       )}
     </div>

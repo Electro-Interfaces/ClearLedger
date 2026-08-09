@@ -17,6 +17,7 @@ import { getStoreShifts, type ShiftComposite } from '@/services/storeService'
 import { fmtMoney } from '@/services/analyticsService'
 import { ExportButton } from './analytics/ExportButton'
 import { ShiftDetailModal } from './ShiftDetailModal'
+import { rowDrill } from './rowDrill'
 
 const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: d }).format(n)
 const money = (n: number) => (n === 0 ? '—' : fmtMoney(n))
@@ -55,7 +56,7 @@ function Th({ поле, текст, align = 'right', sort, setSort }: {
   const cls = `px-3 py-2 font-medium whitespace-nowrap ${ALIGN[align]}`
   if (!поле) return <th className={cls}>{текст}</th>
   return (
-    <th className={cls}>
+    <th className={cls} aria-sort={активно ? (sort.вниз ? 'descending' : 'ascending') : 'none'}>
       <button type="button"
         onClick={() => setSort({ поле, вниз: активно ? !sort.вниз : true })}
         className={`inline-flex items-center gap-1 hover:text-foreground ${активно ? 'text-foreground' : ''}`}
@@ -106,7 +107,7 @@ export function StoreShiftsPanel({ companyId, dateFrom, dateTo, stations }: { co
   const [признаки, задатьПризнаки] = useState<Признак[]>([])
   const [sort, setSort] = useState<{ поле: Поле; вниз: boolean }>({ поле: 'date', вниз: true })
 
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['store-shifts', companyId, dateFrom, dateTo, stations],
     queryFn: () => getStoreShifts(dateFrom, dateTo, stations),
   })
@@ -125,7 +126,8 @@ export function StoreShiftsPanel({ companyId, dateFrom, dateTo, stations }: { co
         if (п && !п.has(s)) return false
       }
       if (!q) return true
-      return `${s.date} ${s.station} ${s.number ?? ''}`.toLowerCase().includes(q)
+      return `${s.date} ${s.station} ${s.number ?? ''} ${s.operator ?? ''} ${s.register ?? ''} ${s.internal_no ?? ''}`
+        .toLowerCase().includes(q)
     })
     const знач = ЧИСЛОВЫЕ[sort.поле]
     return [...отобранные].sort((a, b) => {
@@ -159,7 +161,12 @@ export function StoreShiftsPanel({ companyId, dateFrom, dateTo, stations }: { co
   }), [строки])
 
   if (isLoading) return <div className="p-6 text-sm text-muted-foreground">Загрузка смен…</div>
-  if (error) return <div className="p-6 text-sm text-red-400/90">Ошибка загрузки смен</div>
+  if (error) return (
+    <div className="p-6 text-sm text-red-400/90">
+      Не удалось загрузить смены.{' '}
+      <button type="button" className="underline" onClick={() => refetch()}>Повторить</button>
+    </div>
+  )
   if (!data) return null
 
   const отбор = запрос.trim() !== '' || азс !== null || признаки.length > 0
@@ -189,7 +196,7 @@ export function StoreShiftsPanel({ companyId, dateFrom, dateTo, stations }: { co
             <input
               value={запрос}
               onChange={(e) => задатьЗапрос(e.target.value)}
-              placeholder="Дата, № смены или АЗС"
+              placeholder="Дата, смена, АЗС, оператор или пост"
               aria-label="Поиск по сменам"
               className="h-8 w-full rounded-md border border-border/60 bg-background/60 pl-8 pr-8 text-xs outline-none placeholder:text-muted-foreground/70 focus:border-primary/60"
             />
@@ -295,6 +302,7 @@ export function StoreShiftsPanel({ companyId, dateFrom, dateTo, stations }: { co
                   расхождения это первый вопрос. Приходит от агента станции;
                   у смен, полученных из ЦБ, его нет вовсе. */}
               <Th текст="Оператор" align="left" sort={sort} setSort={setSort} />
+              <Th текст="Пост" align="left" sort={sort} setSort={setSort} />
               <Th поле="revenue" текст="Выручка" sort={sort} setSort={setSort} />
               <Th текст="Сопутка" sort={sort} setSort={setSort} />
               <Th текст="Общепит" sort={sort} setSort={setSort} />
@@ -309,14 +317,19 @@ export function StoreShiftsPanel({ companyId, dateFrom, dateTo, stations }: { co
           </thead>
           <tbody>
             {строки.map((sh: ShiftComposite) => (
-              <tr key={sh.shift_key} onClick={() => setOpenKey(sh.shift_key)}
-                className="cursor-pointer border-t border-border/30 hover:bg-accent/20">
+              <tr key={sh.shift_key}
+                {...rowDrill(() => setOpenKey(sh.shift_key),
+                  `Открыть смену ${sh.number ?? sh.date}`, 'border-t border-border/30')}>
                 <td className="whitespace-nowrap px-3 py-1.5">{sh.date}</td>
                 <td className="px-3 py-1.5 text-muted-foreground">{sh.station}</td>
                 <td className="px-3 py-1.5 tabular-nums text-muted-foreground">{sh.number ?? '—'}</td>
                 <td className="max-w-[160px] truncate px-3 py-1.5 text-muted-foreground"
                   title={sh.operator ?? 'оператор не передан источником'}>
                   {sh.operator ?? '—'}
+                </td>
+                <td className="max-w-[120px] truncate px-3 py-1.5 text-muted-foreground"
+                  title={sh.internal_no ? `внутренний номер ${sh.internal_no}` : undefined}>
+                  {sh.register ?? '—'}{sh.internal_no ? ` · ${sh.internal_no}` : ''}
                 </td>
                 <td className="px-3 py-1.5 text-right font-medium tabular-nums">{money(sh.revenue)}</td>
                 <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{money(sh.soputka)}</td>

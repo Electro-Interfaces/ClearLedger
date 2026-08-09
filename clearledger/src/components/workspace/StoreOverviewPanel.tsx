@@ -74,7 +74,7 @@ export function StoreOverviewPanel({ companyId, dateFrom, dateTo, stations }: {
       {empty ? (
         <div className="rounded-lg border border-dashed border-border/50 p-6 text-sm text-muted-foreground">
           Нет продаж за выбранный период. Загрузите смены в разделе «Коннекторы» → «Сопутка (магазин)».
-          <br />Локальная копия ЦБ — снимок на 29.04.2026, данные есть по апрель (поставьте период в апреле).
+          <br />Проверьте выбранный период, область станций и свежесть пакетов в разделе «Станции».
         </div>
       ) : (
         <>
@@ -127,7 +127,7 @@ export function StoreOverviewPanel({ companyId, dateFrom, dateTo, stations }: {
             <div className="rounded-lg border border-border/50 bg-card/40 p-4">
               <div className="text-sm font-medium mb-3">Способы оплаты</div>
               <ShareBars rows={(f.payments_detail?.length
-                ? f.payments_detail.slice(0, 8)
+                ? f.payments_detail
                 : [{ name: 'Наличные', value: f.payments.cash }, { name: 'Безналичные', value: f.payments.card }]
               ).map((p) => ({ name: p.name, value: p.value }))} />
             </div>

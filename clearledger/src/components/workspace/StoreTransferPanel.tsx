@@ -6,31 +6,36 @@
  */
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { ShowMore, useVisible } from '@/components/common/ShowMore'
 import { StationDocsBlock } from './StationDocsBlock'
 import { TransfersBetweenBlock } from './TransfersBetweenBlock'
 import { getStoreTransfers, type StoreTransferDoc } from '@/services/storeService'
 import { SnapshotBadge } from '@/components/common/SnapshotBadge'
 import { fmtMoney } from '@/services/analyticsService'
+import { rowDrill } from './rowDrill'
 
 const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: d }).format(n)
 const money = (n: number) => (n === 0 ? '—' : fmtMoney(n))
 
-export function StoreTransferPanel({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom?: string; dateTo?: string }) {
+export function StoreTransferPanel({ companyId, dateFrom, dateTo, stations }: {
+  companyId: string; dateFrom?: string; dateTo?: string; stations?: string[]
+}) {
   const [direction, setDirection] = useState<string | null>(null)
   const [openDoc, setOpenDoc] = useState<StoreTransferDoc | null>(null)
 
-  const { data, isLoading, error } = useQuery({
-    queryKey: ['store-transfers', companyId, dateFrom, dateTo],
-    queryFn: () => getStoreTransfers({ dateFrom, dateTo }),
+  const { data, isLoading, error, refetch } = useQuery({
+    queryKey: ['store-transfers', companyId, dateFrom, dateTo, stations?.join(',') ?? ''],
+    queryFn: () => getStoreTransfers({ dateFrom, dateTo, stations }),
   })
 
   const docs = useMemo(
     () => (data?.docs ?? []).filter((d) => !direction || d.direction === direction),
     [data, direction],
   )
+  const показ = useVisible(docs)
 
   if (isLoading) return <div className="p-6 text-sm text-muted-foreground">Загрузка перемещений…</div>
-  if (error) return <div className="p-6 text-sm text-red-400/90">Ошибка загрузки перемещений</div>
+  if (error) return <div className="p-6 text-sm text-red-400/90">Ошибка загрузки перемещений. <button type="button" className="underline" onClick={() => refetch()}>Повторить</button></div>
   if (!data) return null
 
   const tot = docs.reduce((s, d) => s + d.total_amount, 0)
@@ -40,8 +45,8 @@ export function StoreTransferPanel({ companyId, dateFrom, dateTo }: { companyId:
   const KPIS: { label: string; value: string; hint?: string }[] = [
     { label: 'Перемещений', value: nf(docs.length), hint: `${s.period_from ?? ''} – ${s.period_to ?? ''}` },
     { label: 'Розн. стоимость', value: money(tot), hint: 'кол-во × цена' },
-    { label: 'Приход на 208', value: money(s.inbound_amount), hint: 'с других складов' },
-    { label: 'Расход с 208', value: money(s.outbound_amount), hint: 'на другие склады' },
+    { label: 'Приход на станцию', value: money(s.inbound_amount), hint: 'с других складов' },
+    { label: 'Расход со станции', value: money(s.outbound_amount), hint: 'на другие склады' },
   ]
 
   return (
@@ -50,7 +55,7 @@ export function StoreTransferPanel({ companyId, dateFrom, dateTo }: { companyId:
         <div>
           <h3 className="text-base font-semibold inline-flex items-center gap-2">Перемещения <SnapshotBadge at={data.snapshot_at} /></h3>
           <p className="text-xs text-muted-foreground mt-0.5">
-            ПеремещениеТоваров из ЦБ относительно складов 208. Большинство — внутренние (склад ↔ торговый
+            ПеремещениеТоваров из ЦБ относительно складов выбранных станций. Большинство — внутренние (склад ↔ торговый
             зал, пополнение полки). Клик по документу — строки. {direction && <>Фильтр: <b>{direction}</b> <button className="underline ml-1" onClick={() => setDirection(null)}>сбросить</button></>}
           </p>
         </div>
@@ -101,12 +106,12 @@ export function StoreTransferPanel({ companyId, dateFrom, dateTo }: { companyId:
               </tr>
             </thead>
             <tbody>
-              {docs.slice(0, 300).map((d) => (
-                <tr
-                  key={d.ref}
-                  onClick={() => d.positions && setOpenDoc(d)}
-                  className={`border-t border-border/30 ${d.positions ? 'hover:bg-accent/20 cursor-pointer' : 'opacity-60'}`}
-                >
+              {показ.visible.map((d) => (
+                <tr key={d.ref} {...rowDrill(
+                  d.lines.length ? () => setOpenDoc(d) : null,
+                  `перемещение ${d.number ?? ''}`,
+                  'border-t border-border/30',
+                )}>
                   <td className="px-3 py-1.5 whitespace-nowrap">{d.date ?? '—'}</td>
                   <td className="px-3 py-1.5 tabular-nums">{d.number ?? '—'}</td>
                   <td className="px-3 py-1.5 tabular-nums text-muted-foreground" title={d.shift_reason ?? undefined}>{d.shift_number ?? '—'}</td>
@@ -121,12 +126,10 @@ export function StoreTransferPanel({ companyId, dateFrom, dateTo }: { companyId:
               ))}
             </tbody>
           </table>
-          {docs.length > 300 && (
-            <div className="px-3 py-2 text-[11px] text-muted-foreground border-t border-border/30">Показано 300 из {nf(docs.length)}.</div>
-          )}
+          {docs.length > 300 && <ShowMore {...показ} onMore={показ.more} onAll={показ.all} unit="документов" />}
           {docs.length === 0 && (
             <div className="px-3 py-6 text-sm text-muted-foreground text-center">
-              Нет перемещений. Наполните: <code>py -3.13 scripts/pull_cb_transfer_dev.py</code>
+              За выбранный период перемещений нет.
             </div>
           )}
         </div>
@@ -158,7 +161,7 @@ export function StoreTransferPanel({ companyId, dateFrom, dateTo }: { companyId:
                   {openDoc.comment && <> · {openDoc.comment}</>}
                 </div>
               </div>
-              <button onClick={() => setOpenDoc(null)} className="text-muted-foreground hover:text-foreground text-lg leading-none px-2">×</button>
+              <button type="button" onClick={() => setOpenDoc(null)} className="text-muted-foreground hover:text-foreground text-lg leading-none px-2">×</button>
             </div>
             <div className="overflow-auto">
               <table className="w-full text-xs">

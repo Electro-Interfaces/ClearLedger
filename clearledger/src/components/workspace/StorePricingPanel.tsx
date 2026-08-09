@@ -13,6 +13,7 @@ import { fmtMoney } from '@/services/analyticsService'
 import { SkuDetailModal } from './SkuDetailModal'
 import { ExportButton } from './analytics/ExportButton'
 import { ChzBadge } from '@/components/common/ChzBadge'
+import { rowDrill } from './rowDrill'
 
 const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: d }).format(n)
 const pctStr = (v: number | null | undefined, d = 1) => (v == null ? '—' : `${nf(v, d)}%`)
@@ -63,8 +64,12 @@ export function StorePricingPanel({ companyId, dateFrom, dateTo, stations }: { c
     else { setSortKey(k); setSortDir('desc') }
   }
   const th = (k: SortKey, label: string) => (
-    <th onClick={() => toggleSort(k)} className="px-3 py-2 font-medium text-right whitespace-nowrap cursor-pointer select-none hover:text-foreground">
-      {label}{sortKey === k && <span className="ml-0.5 opacity-60">{sortDir === 'asc' ? '▲' : '▼'}</span>}
+    <th aria-sort={sortKey === k ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
+      className="p-0 font-medium text-right whitespace-nowrap">
+      <button type="button" onClick={() => toggleSort(k)}
+        className="w-full px-3 py-2 text-right select-none hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60">
+        {label}{sortKey === k && <span className="ml-0.5 opacity-60" aria-hidden="true">{sortDir === 'asc' ? '▲' : '▼'}</span>}
+      </button>
     </th>
   )
 
@@ -161,7 +166,10 @@ export function StorePricingPanel({ companyId, dateFrom, dateTo, stations }: { c
           </thead>
           <tbody>
             {показ.visible.map((d: PricingSku) => (
-              <tr key={d.guid} onClick={() => setOpenGuid(d.guid)} className="border-t border-border/30 hover:bg-accent/20 cursor-pointer">
+              <tr key={d.guid} {...rowDrill(
+                () => setOpenGuid(d.guid), `${d.name} — открыть карточку`,
+                'border-t border-border/30',
+              )}>
                 <td className="px-3 py-1.5">{d.name}</td>
                 <td className="px-3 py-1.5 text-center">{d.marked && <ChzBadge />}</td>
                 <td className="px-3 py-1.5 text-muted-foreground">{d.category ?? '—'}</td>
@@ -180,10 +188,10 @@ export function StorePricingPanel({ companyId, dateFrom, dateTo, stations }: { c
           </tbody>
         </table>
         <ShowMore {...показ} onMore={показ.more} onAll={показ.all} unit="позиций" />
-        {skus.length === 0 && <div className="px-3 py-6 text-sm text-muted-foreground text-center">Нет товаров за период (поставьте апрель).</div>}
+        {skus.length === 0 && <div className="px-3 py-6 text-sm text-muted-foreground text-center">Нет товаров по выбранному периоду и фильтрам.</div>}
       </div>
 
-      {openGuid && <SkuDetailModal guid={openGuid} dateFrom={dateFrom} dateTo={dateTo} onClose={() => setOpenGuid(null)} />}
+      {openGuid && <SkuDetailModal guid={openGuid} dateFrom={dateFrom} dateTo={dateTo} stations={stations} onClose={() => setOpenGuid(null)} />}
     </div>
   )
 }

@@ -23,11 +23,15 @@
 from __future__ import annotations
 
 import logging
+import hashlib
+import uuid
 from decimal import Decimal
 from datetime import datetime, timezone
 
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models import Counterparty, EdgeDownlink
 
 # Ставка в снимке приходит процентом (так её хранит касса), в контракте БП —
 # именем. Ноль это «Без НДС», законная ставка, а не отсутствие данных.
@@ -62,7 +66,7 @@ async def sync_from_snapshot(db: AsyncSession, station_id: int, payload: dict) -
     book_rows = doc.get("Учет") or []
 
     stats = {"barcodes_new": 0, "collisions": 0, "prices_changed": 0,
-             "ns_codes": 0, "stock_rows": 0, "stock_dropped": 0, "places": 0}
+             "ns_codes": 0, "places": 0}
 
     # ── Штрихкоды ────────────────────────────────────────────────────────
     # Источник — обе половины снимка: касса знает, чем товар пробивается,
@@ -217,64 +221,17 @@ async def sync_from_snapshot(db: AsyncSession, station_id: int, payload: dict) -
         """), {"s": station_id, "c": код, "n": имя, "f": код == str(station_id)})
     stats["places"] = len(места)
 
-    # ── Остатки ──────────────────────────────────────────────────────────
-    # Берём физику учёта, а не витрину кассы: касса — производная, и класть её
-    # в остаток значило бы считать одно и то же дважды.
+    # ── Остатки сюда больше не пишутся ───────────────────────────────────
     #
-    # Ключ — ПАРА (место, штрихкод). Складывать места в одну цифру нельзя:
-    # тогда товар со склада попадёт в витрину кассы, хотя на полке его нет.
-    qty_by_key: dict[tuple[str, str], float] = {}
-    for r in book_rows:
-        code = str(r.get("ШтрихКод") or "")
-        if not code:
-            continue
-        место = str(r.get("Место") or "") or str(station_id)
-        qty_by_key[(место, code)] = qty_by_key.get((место, code), 0.0) + float(r.get("Остаток") or 0)
-
-    # Снимок — ПОЛНАЯ картина остатков станции, а не список изменений. Строка,
-    # которой в снимке нет, означает ноль, и держать её дальше нельзя: к 02.08
-    # накопилось 1159 строк-сирот, из них 1021 с отрицательным остатком, и 33
-    # позиции на 27 142 ₽ протекли в витрину кассы как товар, которого нет.
-    for место in set(m for m, _ in qty_by_key) | set(места):
-        живые = [c for m, c in qty_by_key if m == место and c]
-        if живые:
-            удалено = await db.execute(text("""
-                DELETE FROM edge.stock s
-                WHERE s.station_id = :st AND s.place = :pl
-                  AND s.barcode_id NOT IN (
-                      SELECT b.id FROM edge.barcode b
-                      WHERE b.code = ANY(:codes) AND b.status = 'active')
-            """), {"st": station_id, "pl": место, "codes": живые})
-        else:
-            # Место есть, а строк по нему в снимке нет — значит там пусто.
-            удалено = await db.execute(text(
-                "DELETE FROM edge.stock WHERE station_id = :st AND place = :pl"),
-                {"st": station_id, "pl": место})
-        stats["stock_dropped"] += удалено.rowcount or 0
-
-    # Строка без карточки в справочнике не вставится: INSERT ... SELECT просто
-    # ничего не найдёт. Раньше это проходило молча — три позиции станции не
-    # доезжали до центра, и «остаток по данным центра» тихо отличался от
-    # остатка станции. Молча терять строки учёта нельзя: пусть лучше видно.
-    потеряно: list[str] = []
-    for (место, code), qty in qty_by_key.items():
-        res = await db.execute(text("""
-            INSERT INTO edge.stock (station_id, place, barcode_id, qty)
-            SELECT :s, :pl, b.id, :q FROM edge.barcode b
-            WHERE b.code = :c AND b.status = 'active'
-            ON CONFLICT (station_id, place, barcode_id)
-            DO UPDATE SET qty = excluded.qty, updated_at = now()
-        """), {"s": station_id, "pl": место, "c": code, "q": qty})
-        строк = res.rowcount or 0
-        stats["stock_rows"] += строк
-        if строк == 0:
-            потеряно.append(f"{code} ({место}, {qty:g})")
-    if потеряно:
-        stats["stock_no_barcode"] = len(потеряно)
-        stats["stock_no_barcode_items"] = потеряно[:10]
-        log.warning(
-            "остатки станции %s: %d строк без карточки в справочнике — не приняты: %s",
-            station_id, len(потеряно), ", ".join(потеряно[:10]))
+    # Раньше остаток заполняли ДВА приёмника со своей арифметикой каждый: этот
+    # писал edge.stock по штрихкоду и молча терял строки без кода, соседний —
+    # store_stock_balances по паре «карточка + штрихкод» и считал верно. Два
+    # экрана центра показывали разные цифры про одну станцию (13 883 против
+    # 8 384), и понять, какая правда, было нельзя.
+    #
+    # Теперь источник один: edge_stock.sync_from_snapshot считает остаток и сам
+    # пишет обе проекции. Здесь остаются справочники — штрихкоды, цены, ставки
+    # НДС, коды нефтесервера, места хранения.
 
     await db.commit()
     return stats
@@ -616,18 +573,111 @@ async def resolve_partner_draft(db: AsyncSession, company_id, draft_id: int,
     """Решение по контрагенту: принять в справочник сети или отклонить."""
     if action not in ("accept", "reject"):
         raise ValueError(f"неизвестное решение: {action}")
-    res = await db.execute(text("""
-        UPDATE edge.partner_draft
-           SET resolved_at = now(), rejected = :rej, note = :n
+    draft = (await db.execute(text("""
+        SELECT id, station_id, source_uuid, name, inn, kpp, role, comment
+          FROM edge.partner_draft
          WHERE id = :id AND company_id = :cid AND resolved_at IS NULL
-     RETURNING station_id, name
-    """), {"id": draft_id, "cid": company_id, "rej": action == "reject", "n": note})
-    row = res.mappings().first()
-    if row is None:
+         FOR UPDATE
+    """), {"id": draft_id, "cid": company_id})).mappings().first()
+    if draft is None:
         raise ValueError("черновик не найден или уже разобран")
+    if action == "reject":
+        await db.execute(text("""
+            UPDATE edge.partner_draft
+               SET resolved_at = now(), rejected = true, note = :n
+             WHERE id = :id
+        """), {"id": draft_id, "n": note})
+        await db.commit()
+        return {"action": action, "draft_id": draft_id, "name": draft["name"],
+                "station_id": draft["station_id"]}
+
+    if str(draft["role"] or "supplier") != "supplier":
+        raise ValueError("в справочник приёмки можно принять только поставщика")
+    if not str(draft["name"] or "").strip():
+        raise ValueError("у поставщика нет наименования")
+    inn = "".join(char for char in str(draft["inn"] or "") if char.isdigit())
+    if len(inn) not in (10, 12):
+        raise ValueError("для принятия поставщика нужен корректный ИНН")
+    lock_key = int.from_bytes(
+        hashlib.sha256(f"partner:{company_id}:{inn}".encode()).digest()[:8],
+        "big", signed=True)
+    await db.execute(select(__import__("sqlalchemy").func.pg_advisory_xact_lock(lock_key)))
+    candidates = (await db.execute(select(Counterparty).where(
+        Counterparty.company_id == company_id,
+        __import__("sqlalchemy").func.regexp_replace(
+            Counterparty.inn, r"\D", "", "g") == inn,
+    ).with_for_update())).scalars().all()
+    if len(candidates) > 1:
+        raise ValueError("по ИНН найдено несколько канонических контрагентов; требуется ручной разбор")
+    if candidates:
+        canonical = candidates[0]
+    else:
+        canonical = Counterparty(
+            id=uuid.uuid4(), company_id=company_id, inn=inn,
+            kpp=str(draft["kpp"] or "").strip() or None,
+            name=str(draft["name"] or "").strip(),
+            type="ИП" if len(inn) == 12 else "ЮЛ", aliases=[], kind="external",
+            raw={"source": "station_draft", "station_id": draft["station_id"],
+                 "source_uuid": draft["source_uuid"]},
+        )
+        db.add(canonical)
+        await db.flush()
+
+    partners = (await db.execute(text("""
+        SELECT id, external_uuid FROM edge.partner
+         WHERE company_id = :cid
+           AND regexp_replace(coalesce(inn, ''), '\\D', '', 'g') = :inn
+         FOR UPDATE
+    """), {"cid": company_id, "inn": inn})).mappings().all()
+    if len(partners) > 1:
+        raise ValueError("по ИНН найдено несколько partner; требуется ручной разбор")
+    if partners and partners[0]["external_uuid"] not in (None, canonical.id):
+        raise ValueError("partner уже связан с другим каноническим контрагентом")
+    if partners:
+        partner_id = partners[0]["id"]
+        await db.execute(text("""
+            UPDATE edge.partner
+               SET external_uuid = :uuid, updated_at = now()
+             WHERE id = :id
+        """), {"uuid": canonical.id, "id": partner_id})
+    else:
+        partner_id = (await db.execute(text("""
+            INSERT INTO edge.partner
+                (company_id, external_uuid, name, name_full, inn, kpp, role, source, comment)
+            VALUES (:cid, :uuid, :name, :name, :inn, :kpp, :role, 'station', :comment)
+            RETURNING id
+        """), {"cid": company_id, "uuid": canonical.id, "name": canonical.name,
+                 "inn": inn, "kpp": canonical.kpp,
+                 "role": draft["role"] or "supplier", "comment": draft["comment"]})).scalar_one()
+    await db.execute(text("""
+        INSERT INTO edge.partner_station (partner_id, station_id)
+        VALUES (:partner, :station) ON CONFLICT DO NOTHING
+    """), {"partner": partner_id, "station": draft["station_id"]})
+    await db.execute(text("""
+        UPDATE edge.partner_draft
+           SET resolved_at = now(), rejected = false, note = :n
+         WHERE id = :id
+    """), {"id": draft_id, "n": note})
+    downlink_key = f"partners:{draft['station_id']}:draft:{draft_id}"
+    existing_task = (await db.execute(select(EdgeDownlink).where(
+        EdgeDownlink.company_id == company_id,
+        EdgeDownlink.idempotency_key == downlink_key,
+    ))).scalar_one_or_none()
+    if existing_task is None:
+        db.add(EdgeDownlink(
+            company_id=company_id, station_id=draft["station_id"], kind="partners",
+            payload={"partners": [{
+                "id": str(canonical.id), "name": canonical.name,
+                "name_full": canonical.full_name or "", "inn": canonical.inn,
+                "kpp": canonical.kpp or "", "role": draft["role"] or "supplier",
+                "comment": draft["comment"] or "", "archived": False,
+            }]},
+            note=f"partner-draft:{draft_id}", idempotency_key=downlink_key,
+        ))
     await db.commit()
-    return {"action": action, "draft_id": draft_id, "name": row["name"],
-            "station_id": row["station_id"]}
+    return {"action": action, "draft_id": draft_id, "name": canonical.name,
+            "station_id": draft["station_id"], "supplier_id": str(canonical.id),
+            "partner_id": partner_id, "pushed": True}
 
 
 async def resolve_nsi_proposal(db: AsyncSession, company_id, proposal_id: int,

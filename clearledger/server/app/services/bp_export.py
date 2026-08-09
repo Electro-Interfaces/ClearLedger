@@ -18,7 +18,10 @@ from types import SimpleNamespace
 from sqlalchemy import select, func, or_, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import DataEntry, CbNomenclature, StockOnHand, CbRef, CbInventoryDoc, CbMovementDoc
+from app.models import (
+    CbInventoryDoc, CbMovementDoc, CbNomenclature, CbRef, Contract,
+    Counterparty, DataEntry, StockOnHand,
+)
 from app.services.bp_canon import packet_hash
 from app.services.goods_dashboard import _day
 
@@ -163,13 +166,29 @@ class BpPackageEmitter:
         иначе приёмник откатит документ, не сумев опознать контрагента.
         """
         rows = (await self.session.execute(text("""
-            SELECT id, name, name_full, inn, kpp, role, archived
+            SELECT id, external_uuid, name, name_full, inn, kpp, role, archived
             FROM edge.partner
             WHERE company_id = :company_id
         """), {"company_id": self.company_id})).mappings().all()
         by_name = {str(row["name"] or "").strip().casefold(): dict(row) for row in rows}
-        by_id = {str(row["id"]).lower(): dict(row) for row in rows}
+        by_id = {}
+        for row in rows:
+            by_id[str(row["id"]).lower()] = dict(row)
+            if row.get("external_uuid"):
+                by_id[str(row["external_uuid"]).lower()] = dict(row)
         return by_name, by_id
+
+    async def _canonical_accounting_refs(self) -> tuple[dict[str, Counterparty], dict[str, Contract]]:
+        counterparties = (await self.session.execute(select(Counterparty).where(
+            Counterparty.company_id == self.company_id,
+        ))).scalars().all()
+        contracts = (await self.session.execute(select(Contract).where(
+            Contract.company_id == self.company_id,
+        ))).scalars().all()
+        return (
+            {str(row.id).lower(): row for row in counterparties},
+            {str(row.id).lower(): row for row in contracts},
+        )
 
     async def _build_edge_shift_package(self, target: DataEntry, shift_key: str) -> dict:
         meta = target.meta or {}
@@ -178,6 +197,7 @@ class BpPackageEmitter:
         orgs = await self._refs("organization")
         whs = await self._refs("warehouse")
         partners, partners_by_id = await self._edge_partners()
+        canonical_partners, canonical_contracts = await self._canonical_accounting_refs()
         company_name = (await self.session.execute(text(
             "SELECT name FROM companies WHERE id = :company_id"
         ), {"company_id": self.company_id})).scalar_one_or_none() or ""
@@ -219,6 +239,7 @@ class BpPackageEmitter:
         nsi_org = {org_uuid} if org_uuid else set()
         nsi_wh = {wh_uuid} if wh_uuid else set()
         partner_nsi: dict[str, dict] = {}
+        contract_nsi: dict[str, dict] = {}
 
         def item_line(line: dict, number: int, with_vat: bool = True) -> dict:
             result = deepcopy(line)
@@ -239,7 +260,7 @@ class BpPackageEmitter:
                         float(result.get("Сумма") or 0), result["СтавкаНДС"])
             return result
 
-        def partner_uuid(value: str) -> str:
+        def partner_uuid(value: str, snapshot: str = "") -> str:
             name = str(value or "").strip()
             if not name:
                 return ""
@@ -254,14 +275,24 @@ class BpPackageEmitter:
                 # ни имени, ни ИНН мы не передали. Документ откатывался целиком:
                 # так не принимались приходы 47 смен. Карточку кладём всегда,
                 # реквизиты берём из мастера станций по этому же UUID.
+                canonical = canonical_partners.get(name.lower())
                 row = partners_by_id.get(name.lower())
+                raw = (canonical.raw or {}) if canonical else {}
                 partner_nsi[name] = {
-                    "name": (row or {}).get("name") or "Поставщик (реквизиты не переданы)",
-                    "full_name": (row or {}).get("name_full") or (row or {}).get("name")
+                    "name": (canonical.name if canonical else None)
+                            or (row or {}).get("name") or snapshot
+                            or "Поставщик (реквизиты не переданы)",
+                    "full_name": (canonical.full_name if canonical else None)
+                                 or (row or {}).get("name_full")
+                                 or (canonical.name if canonical else None)
+                                 or (row or {}).get("name") or snapshot
                                  or "Поставщик (реквизиты не переданы)",
-                    "inn": (row or {}).get("inn") or "",
-                    "kpp": (row or {}).get("kpp") or "",
-                    "archived": bool((row or {}).get("archived")),
+                    "inn": (canonical.inn if canonical else None) or (row or {}).get("inn") or "",
+                    "kpp": (canonical.kpp if canonical else None) or (row or {}).get("kpp") or "",
+                    "jur_fiz": "ФизЛицо" if canonical and canonical.type in {"ФЛ", "ИП"}
+                               else "ЮрЛицо",
+                    "archived": bool(raw.get("deleted")) if canonical
+                                else bool((row or {}).get("archived")),
                 }
                 return name
             row = partners.get(name.casefold())
@@ -271,6 +302,7 @@ class BpPackageEmitter:
                 "full_name": (row.get("name_full") if row else None) or (row["name"] if row else name),
                 "inn": (row.get("inn") if row else None) or "",
                 "kpp": (row.get("kpp") if row else None) or "",
+                "jur_fiz": "ЮрЛицо",
                 "archived": bool(row.get("archived")) if row else False,
             }
             return uid
@@ -495,7 +527,34 @@ class BpPackageEmitter:
             doc["Товары"] = [item_line(line, index, kind not in {"inventory", "writeoff", "transfer"})
                               for index, line in enumerate(doc.get("Товары") or [], 1)]
             if kind == "purchase":
-                doc["Контрагент"] = partner_uuid(doc.get("Контрагент"))
+                supplier_snapshot = str(doc.get("Контрагент") or "")
+                supplier_id = str(doc.get("supplier_id") or "").strip()
+                doc["Контрагент"] = partner_uuid(supplier_id or supplier_snapshot, supplier_snapshot)
+                contract_id = str(doc.get("contract_id") or "").strip()
+                if contract_id:
+                    contract = canonical_contracts.get(contract_id.lower())
+                    if contract is None:
+                        skipped.append({
+                            "Тип": kind,
+                            "Номер": str(doc.get("Номер") or source_uuid),
+                            "Причина": "канонический договор отсутствует в Ledger",
+                        })
+                        continue
+                    owner_id = str(doc["Контрагент"])
+                    organization_id = str(doc["Организация"])
+                    contract_nsi[contract_id] = {
+                        "owner_ref": owner_id,
+                        "organization_ref": organization_id,
+                        "name": str((contract.raw or {}).get("name") or contract.number or ""),
+                        "number": str(contract.number or ""),
+                        "date": str(contract.date or "")[:10],
+                        "kind": str(contract.kind or contract.type or "СПоставщиком"),
+                        "currency": str(contract.currency or "RUB"),
+                        "deleted": bool(contract.is_closed),
+                    }
+                    doc["ДоговорКонтрагента"] = contract_id
+                    if organization_id:
+                        nsi_org.add(organization_id)
                 for index, service in enumerate(doc.get("Услуги") or [], 1):
                     service["НомерСтроки"] = service.get("НомерСтроки") or index
                     service["СтавкаНДС"] = _nds(service.get("СтавкаНДС"))
@@ -666,8 +725,19 @@ class BpPackageEmitter:
         for uid, row in sorted(partner_nsi.items()):
             nsi.append({"Тип": "Контрагент", "ИсточникUUID": uid,
                         "Наименование": clean(row["name"]), "НаименованиеПолное": clean(row["full_name"]),
-                        "ИНН": clean(row["inn"]), "КПП": clean(row["kpp"]), "ВидКонтрагента": "ЮрЛицо",
+                        "ИНН": clean(row["inn"]), "КПП": clean(row["kpp"]),
+                        "ВидКонтрагента": clean(row.get("jur_fiz")) or "ЮрЛицо",
                         "ПометкаУдаления": row["archived"]})
+        for uid, row in sorted(contract_nsi.items()):
+            nsi.append({
+                "Тип": "Договор", "ИсточникUUID": uid,
+                "ВладелецКонтрагент": clean(row["owner_ref"]),
+                "Организация": clean(row["organization_ref"]),
+                "Наименование": clean(row["name"]), "Номер": clean(row["number"]),
+                "Дата": clean(row["date"]), "ВидДоговора": clean(row["kind"]),
+                "ВалютаВзаиморасчётов": clean(row["currency"]) or "RUB",
+                "ПометкаУдаления": bool(row["deleted"]),
+            })
         for uid in sorted(nsi_nom):
             card = nom.get(uid)
             sku_class = clean(card.sku_class if card else "") or ("Общепит" if card and card.is_dish else "Сопутка")
@@ -721,12 +791,15 @@ class BpPackageEmitter:
         orgs = await self._refs("organization")
         whs = await self._refs("warehouse")
         kinds = await self._refs("nom_kind")
+        cparty_ref = await self._refs("counterparty")
+        contract_ref = await self._refs("contract")
 
         # кэш UUID для НСИ
         nsi_nom: set[str] = set()
         nsi_org: set[str] = set()
         nsi_wh: set[str] = set()
         nsi_contr: set[str] = set()
+        nsi_contract: set[str] = set()
         contr_names: dict[str, str] = {}
         dish_uuids: set[str] = set()  # блюда общепита смены → эмитим их recipe (ТТК)
         dish_inline_ings: dict[str, list] = {}  # OB-1: inline-ТТК из строк продаж (фолбэк)
@@ -853,7 +926,6 @@ class BpPackageEmitter:
             DataEntry.doc_type_id == "purchase"))).scalars().all()
         purchases = []
         seen_purch: set[str] = set()   # дедуп ПТУ: двухсменные дни дают дубль DataEntry
-        cparty_ref = await self._refs("counterparty")
         shift_day = _day(sm)
         shift_station = str(sm.get("КодАЗС") or "")
         # П1-фикс: линковка документов по ИНТЕРВАЛУ смены [НачалоДня(Открытие)..
@@ -880,10 +952,13 @@ class BpPackageEmitter:
                 continue
             seen_purch.add(puid)
             контр = str(pdoc.get("Контрагент") or "")
+            договор = str(pdoc.get("ДоговорКонтрагента") or "")
             if контр:
                 nsi_contr.add(контр)
                 if контр in cparty_ref:
                     contr_names[контр] = cparty_ref[контр].name
+            if договор:
+                nsi_contract.add(договор)
             ptovары = []
             psum = pnds = 0.0
             for i, ln in enumerate(pdoc.get("Товары") or [], 1):
@@ -916,17 +991,17 @@ class BpPackageEmitter:
                 "ПометкаУдаления": bool(pdoc.get("ПометкаУдаления", False)),
                 "Организация": str(pdoc.get("Организация") or org_uuid),
                 "Контрагент": контр,
-                "ДоговорКонтрагента": "",   # TODO-Ф1: не тянули договор
+                "ДоговорКонтрагента": договор,
                 "Склад": wh_uuid,
                 "ВидОперации": "ОтПоставщика",   # фильтр пула = только ОтПоставщика
-                "СуммаДокумента": round(psum, 2),
+                "СуммаДокумента": round(float(pdoc.get("СуммаДокумента") or psum), 2),
                 "ВалютаДокумента": "RUB",
                 # F8: реальный флаг из ЦБ (default True для старых пакетов до досбора)
                 "СуммаВключаетНДС": bool(pdoc.get("СуммаВключаетНДС", True)),
-                "НДСНеВыделять": False,
-                "НДСВключенВСтоимость": False,
-                "НомерВходящегоДокумента": "",   # TODO-Ф1
-                "ДатаВходящегоДокумента": "",
+                "НДСНеВыделять": bool(pdoc.get("НДСНеВыделять", False)),
+                "НДСВключенВСтоимость": bool(pdoc.get("НДСВключенВСтоимость", False)),
+                "НомерВходящегоДокумента": str(pdoc.get("НомерВходящегоДокумента") or ""),
+                "ДатаВходящегоДокумента": str(pdoc.get("ДатаВходящегоДокумента") or "")[:10],
                 "СуммаНДС": round(pnds, 2),
                 "Товары": ptovары,
             })
@@ -1235,14 +1310,28 @@ class BpPackageEmitter:
                 "ПометкаУдаления": bool(ex.get("deleted")),
             })
         for uid in sorted(nsi_contr):
-            # Контрагент автосоздаётся приёмником по Наименованию (ИНН/КПП опц.).
-            # TODO-Ф1: ИНН/КПП/ВидКонтрагента из Catalog.Контрагенты.
-            nm = _s(contr_names.get(uid, ""))
+            r = cparty_ref.get(uid)
+            ex = (r.extra or {}) if r else {}
+            nm = _s(r.name if r else contr_names.get(uid, ""))
             нси.append({
                 "Тип": "Контрагент", "ИсточникUUID": uid,
-                "Наименование": nm, "НаименованиеПолное": nm,
-                "ИНН": "", "КПП": "", "ВидКонтрагента": "ЮрЛицо",
-                "ПометкаУдаления": False,
+                "Наименование": nm, "НаименованиеПолное": _s(ex.get("full_name")) or nm,
+                "ИНН": _s(ex.get("inn")), "КПП": _s(ex.get("kpp")),
+                "ВидКонтрагента": _s(ex.get("jur_fiz")) or "ЮрЛицо",
+                "ПометкаУдаления": bool(ex.get("deleted")),
+            })
+        for uid in sorted(nsi_contract):
+            r = contract_ref.get(uid)
+            ex = (r.extra or {}) if r else {}
+            нси.append({
+                "Тип": "Договор", "ИсточникUUID": uid,
+                "ВладелецКонтрагент": _s(ex.get("owner_ref")),
+                "Организация": _s(ex.get("organization_ref")),
+                "Наименование": _s(r.name if r else ""),
+                "Номер": _s(ex.get("number")), "Дата": _s(ex.get("date")),
+                "ВидДоговора": _s(ex.get("kind")) or "СПоставщиком",
+                "ВалютаВзаиморасчётов": _s(ex.get("currency")) or "RUB",
+                "ПометкаУдаления": bool(ex.get("deleted")),
             })
         # Ставка карточки — из мастер-НСИ, а не из зеркала ЦБ.
         #
@@ -1335,7 +1424,8 @@ class BpPackageEmitter:
         add("Все учётные документы передаются непроведёнными", not posted,
             f"нарушения: {posted[:5]}")
 
-        ref_nom: set = set(); ref_org: set = set(); ref_wh: set = set(); ref_partner: set = set()
+        ref_nom: set = set(); ref_org: set = set(); ref_wh: set = set()
+        ref_partner: set = set(); ref_contract: set = set()
         lines_without_nom: list[str] = []
         for d in docs:
             for t in (d.get("Товары") or []):
@@ -1362,6 +1452,8 @@ class BpPackageEmitter:
                     ref_org.add(d[k])
             if d.get("Контрагент"):
                 ref_partner.add(d["Контрагент"])
+            if d.get("ДоговорКонтрагента"):
+                ref_contract.add(d["ДоговорКонтрагента"])
             for k in ("Склад", "СкладОтправитель", "СкладПолучатель"):
                 if d.get(k):
                     ref_wh.add(d[k])
@@ -1372,6 +1464,8 @@ class BpPackageEmitter:
         add("Склады документов в НСИ", not (ref_wh - nsi_by_type.get("Склад", set())), f"нет: {len(ref_wh - nsi_by_type.get('Склад', set()))}")
         add("Контрагенты документов в НСИ", not (ref_partner - nsi_by_type.get("Контрагент", set())),
             f"нет: {len(ref_partner - nsi_by_type.get('Контрагент', set()))}")
+        add("Договоры документов в НСИ", not (ref_contract - nsi_by_type.get("Договор", set())),
+            f"нет: {len(ref_contract - nsi_by_type.get('Договор', set()))}")
 
         retail = next((d for d in docs if d.get("Тип") == "retail_sale_sidegoods"), None)
         if retail:

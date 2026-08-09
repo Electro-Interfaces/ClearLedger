@@ -59,7 +59,7 @@ export function StoreMrcPanel({ companyId, dateFrom, dateTo }: { companyId: stri
   const [q, setQ] = useState('')
   const [importMsg, setImportMsg] = useState<MrcImportResult | null>(null)
 
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['store-mrc', companyId],
     queryFn: () => getStoreMrc(),
   })
@@ -88,9 +88,10 @@ export function StoreMrcPanel({ companyId, dateFrom, dateTo }: { companyId: stri
       .filter((i) => !onlyViol || i.over)
       .filter((i) => !ql || i.name.toLowerCase().includes(ql) || (i.barcode ?? '').includes(q))
   }, [data, onlyViol, q])
+  const показ = useVisible(items)
 
   if (isLoading) return <div className="p-6 text-sm text-muted-foreground">Загрузка контроля МРЦ…</div>
-  if (error) return <div className="p-6 text-sm text-red-400/90">Ошибка загрузки</div>
+  if (error) return <div className="p-6 text-sm text-red-400/90">Ошибка загрузки. <button type="button" className="underline" onClick={() => refetch()}>Повторить</button></div>
   if (!data) return null
 
   const s = data.summary
@@ -100,10 +101,6 @@ export function StoreMrcPanel({ companyId, dateFrom, dateTo }: { companyId: stri
     { label: 'Без цены розницы', value: nf(s.missing_price), hint: 'нет в остатках' },
     { label: 'Табак без МРЦ', value: nf(s.missing_mrc), cls: s.missing_mrc > 0 ? 'text-amber-300/90' : '', hint: 'дозагрузить справочник' },
   ]
-
-  // Список показывается порциями: обрезать его молча нельзя —
-  // товаровед приходит смотреть весь ассортимент, а не первые строки.
-  const показ = useVisible(items)
 
   return (
     <div className="p-6 space-y-4">
@@ -121,7 +118,7 @@ export function StoreMrcPanel({ companyId, dateFrom, dateTo }: { companyId: stri
         <div className="flex items-center gap-2">
           <input ref={fileRef} type="file" accept=".csv,text/csv,text/plain" className="hidden"
             onChange={(e) => onFile(e.target.files?.[0] ?? null)} />
-          <button onClick={() => fileRef.current?.click()} disabled={imp.isPending}
+          <button type="button" onClick={() => fileRef.current?.click()} disabled={imp.isPending}
             className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-xs bg-primary/15 text-primary hover:bg-primary/25 disabled:opacity-50">
             {imp.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
             Импорт CSV
@@ -158,11 +155,11 @@ export function StoreMrcPanel({ companyId, dateFrom, dateTo }: { companyId: stri
         <>
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
-              <button onClick={() => setOnlyViol((v) => !v)}
+              <button type="button" onClick={() => setOnlyViol((v) => !v)}
                 className={`h-7 px-2.5 rounded-md text-xs border ${onlyViol ? 'border-red-400/50 text-red-400/90 bg-red-400/10' : 'border-border/50 text-muted-foreground hover:bg-accent/40'}`}>
                 Только нарушения{s.violations > 0 ? ` (${s.violations})` : ''}
               </button>
-              <span className="text-xs text-muted-foreground">Показано {nf(items.length)}</span>
+              <span className="text-xs text-muted-foreground">Найдено {nf(items.length)}</span>
             </div>
             <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="поиск товара / ШК…"
               className="text-xs px-2.5 py-1.5 rounded-md border border-border/50 bg-background w-56" />

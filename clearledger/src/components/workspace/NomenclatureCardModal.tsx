@@ -49,12 +49,12 @@ function Section({ icon: Icon, title, right, children }: {
   )
 }
 
-export function NomenclatureCardModal({ guid, companyId, dateFrom, dateTo, onClose }: {
-  guid: string; companyId: string; dateFrom: string; dateTo: string; onClose: () => void
+export function NomenclatureCardModal({ guid, companyId, dateFrom, dateTo, stations, onClose }: {
+  guid: string; companyId: string; dateFrom: string; dateTo: string; stations?: string[]; onClose: () => void
 }) {
   const { data, isLoading } = useQuery({
-    queryKey: ['store-sku-card', companyId, guid, dateFrom, dateTo],
-    queryFn: () => getStoreSkuCard(guid, dateFrom, dateTo),
+    queryKey: ['store-sku-card', companyId, guid, dateFrom, dateTo, stations?.join(',') ?? ''],
+    queryFn: () => getStoreSkuCard(guid, dateFrom, dateTo, stations),
   })
 
   const m = data?.metrics

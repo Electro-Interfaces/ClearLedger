@@ -115,6 +115,12 @@ async def documents(db: AsyncSession, cid, date_from, date_to,
           AND d->>'Тип' IN ('purchase','writeoff','transfer','inventory',
                             'return_supplier','return_sale','production_release','revaluation')
           AND coalesce((d->>'Дата')::timestamptz, p.received_at) BETWEEN :d1 AND :d2
+          AND (d->>'Тип' <> 'purchase' OR NOT EXISTS (
+              SELECT 1 FROM store_receipts r
+               WHERE r.company_id = p.company_id AND r.status = 'accepted'
+                 AND (r.source_uuid = d->>'ИсточникUUID'
+                      OR r.id::text = d->>'document_id')
+          ))
     """), p)).mappings().all()]
 
     фильтр2 = " AND station_id = ANY(:st)" if stations else ""
@@ -123,7 +129,8 @@ async def documents(db: AsyncSession, cid, date_from, date_to,
                total_amount AS amount, jsonb_array_length(lines) AS positions,
                'реестр приёмок' AS source
         FROM store_receipts
-        WHERE company_id = :cid{фильтр2} AND doc_date BETWEEN :d1 AND :d2
+        WHERE company_id = :cid{фильтр2} AND status = 'accepted'
+          AND doc_date BETWEEN :d1 AND :d2
     """), p)).mappings().all()]
 
     ВИДЫ = {"purchase": "Приёмка", "writeoff": "Списание", "transfer": "Перемещение",
@@ -154,7 +161,10 @@ async def documents(db: AsyncSession, cid, date_from, date_to,
     return {
         "rows": строки, "total": len(строки),
         "by_kind": sorted(по_видам.values(), key=lambda x: -x["docs"]),
-        "by_station": sorted(по_станциям.values(), key=lambda x: x["station_id"]),
+        "by_station": sorted(
+            по_станциям.values(),
+            key=lambda x: (x["station_id"] is None, x["station_id"] or 0),
+        ),
     }
 
 
@@ -173,7 +183,8 @@ async def purchase_diff(db: AsyncSession, cid, date_from, date_to,
     rows = (await db.execute(text(f"""
         SELECT station_id, number, doc_date, supplier, lines
         FROM store_receipts
-        WHERE company_id = :cid{фильтр} AND doc_date BETWEEN :d1 AND :d2
+        WHERE company_id = :cid{фильтр} AND status = 'accepted'
+          AND doc_date BETWEEN :d1 AND :d2
         ORDER BY doc_date DESC
     """), p)).mappings().all()
 
@@ -218,7 +229,8 @@ async def vat_book(db: AsyncSession, cid, date_from, date_to,
         SELECT station_id, number, doc_date, supplier, incoming_number,
                total_amount, vat_amount, signature_status, status
         FROM store_receipts
-        WHERE company_id = :cid{фильтр} AND doc_date BETWEEN :d1 AND :d2
+        WHERE company_id = :cid{фильтр} AND status = 'accepted'
+          AND doc_date BETWEEN :d1 AND :d2
         ORDER BY doc_date
     """), p)).mappings().all()
 
@@ -275,7 +287,8 @@ async def turnover(db: AsyncSession, cid, date_from, date_to,
     приход: dict[tuple, float] = {}
     for r in (await db.execute(text(f"""
         SELECT station_id, lines FROM store_receipts
-        WHERE company_id = :cid{ф_ст} AND doc_date BETWEEN :d1 AND :d2
+        WHERE company_id = :cid{ф_ст} AND status = 'accepted'
+          AND doc_date BETWEEN :d1 AND :d2
     """), p)).mappings().all():
         for l in r["lines"] or []:
             ключ = (r["station_id"], str(l.get("nomenclature_ref") or ""))
@@ -307,7 +320,8 @@ async def turnover(db: AsyncSession, cid, date_from, date_to,
             # есть предмет инвентаризации, прятать её внутри итога нельзя.
             "unexplained": round(к - расчётный, 3),
         })
-    строки.sort(key=lambda x: (x["station_id"], -abs(x["unexplained"])))
+    строки.sort(key=lambda x: (
+        x["station_id"] is None, x["station_id"] or 0, -abs(x["unexplained"])))
     return {"rows": строки, "total": len(строки),
             "unexplained_total": round(sum(abs(s["unexplained"]) for s in строки), 3)}
 
@@ -846,14 +860,16 @@ async def suppliers(db: AsyncSession, cid, date_from, date_to,
                array_agg(DISTINCT station_id) AS stations,
                count(*) FILTER (WHERE incoming_number IS NULL) AS no_doc
         FROM store_receipts
-        WHERE company_id = :cid{ф} AND doc_date BETWEEN :d1 AND :d2
+        WHERE company_id = :cid{ф} AND status = 'accepted'
+          AND doc_date BETWEEN :d1 AND :d2
         GROUP BY 1 ORDER BY 3 DESC
     """), p)).mappings().all()
     строки = [{
         "supplier": r["supplier"], "docs": int(r["docs"]),
         "amount": round(float(r["amount"] or 0), 2),
         "vat": round(float(r["vat"] or 0), 2),
-        "last_date": r["last_date"], "stations": sorted(r["stations"] or []),
+        "last_date": r["last_date"],
+        "stations": sorted(r["stations"] or [], key=lambda value: (value is None, value or 0)),
         "no_doc": int(r["no_doc"] or 0),
     } for r in rows]
     return {"rows": строки, "total": len(строки),

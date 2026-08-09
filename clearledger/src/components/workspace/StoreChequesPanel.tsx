@@ -9,15 +9,17 @@
  * Топлива здесь нет: оно ведёт свой контур. Смешанный чек (заправка плюс кофе)
  * помечен — иначе его сумма читалась бы как весь чек, а это не так.
  */
-import { Fragment, useState } from 'react'
+import { Fragment, useDeferredValue, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Search, X, Receipt, RotateCcw } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Search, X, Receipt, RotateCcw } from 'lucide-react'
 import {
   getStoreCheques, getStorePivot, getStorePivotCatalog, type StoreCheque,
 } from '@/services/storeService'
 import { PivotView } from './PivotView'
 import { fmtMoney } from '@/services/analyticsService'
-import { useCompany } from '@/contexts/CompanyContext'
+import { rowDrill } from './rowDrill'
+
+const PAGE_SIZE = 500
 
 const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: d }).format(n)
 
@@ -38,23 +40,28 @@ function Kpi({ label, value, hint, cls }: {
   )
 }
 
-export function StoreChequesPanel({ companyId, dateFrom, dateTo }: {
-  companyId: string; dateFrom: string; dateTo: string
+export function StoreChequesPanel({ companyId, dateFrom, dateTo, stations }: {
+  companyId: string; dateFrom: string; dateTo: string; stations?: string[]
 }) {
-  const { company } = useCompany()
   const [запрос, задатьЗапрос] = useState('')
+  const отложенныйЗапрос = useDeferredValue(запрос)
   const [возвраты, задатьВозвраты] = useState(false)
   const [открыт, открыть] = useState<string | null>(null)
-  // Потолок выборки — состояние, а не константа: «показано 1000 из 4000» без
-  // способа увидеть остальное это не отчёт, а отговорка.
-  const [лимит, задатьЛимит] = useState(1000)
+  const [страница, задатьСтраницу] = useState({ scope: '', offset: 0 })
   // Список и сводная — две подачи одного отбора: «сколько за смену наличными»
   // и «какой чек спорный» это разные вопросы к одним данным.
   const [подача, задатьПодачу] = useState<'list' | 'pivot'>('list')
 
-  const { data, isLoading, error } = useQuery({
-    queryKey: ['store-cheques', companyId ?? company.id, dateFrom, dateTo, запрос, возвраты, лимит],
-    queryFn: () => getStoreCheques({ dateFrom, dateTo, q: запрос, onlyReturns: возвраты, limit: лимит }),
+  const scopeKey = [companyId, dateFrom, dateTo, отложенныйЗапрос,
+    возвраты ? 'returns' : 'all', stations?.join(',') || ''].join('|')
+  const смещение = страница.scope === scopeKey ? страница.offset : 0
+
+  const { data, isLoading, error, refetch } = useQuery({
+    queryKey: ['store-cheques', companyId, dateFrom, dateTo, отложенныйЗапрос, возвраты, stations, смещение],
+    queryFn: () => getStoreCheques({
+      dateFrom, dateTo, stations, q: отложенныйЗапрос, onlyReturns: возвраты,
+      limit: PAGE_SIZE, offset: смещение,
+    }),
   })
 
   const чеки = data?.cheques ?? []
@@ -119,7 +126,10 @@ export function StoreChequesPanel({ companyId, dateFrom, dateTo }: {
       {isLoading ? (
         <div className="text-sm text-muted-foreground">Загрузка чеков…</div>
       ) : error ? (
-        <div className="text-sm text-red-400/90">Не удалось получить чеки</div>
+        <div className="flex flex-wrap items-center gap-3 rounded-md border border-red-400/30 bg-red-400/5 px-3 py-2 text-sm text-red-300/90">
+          Не удалось получить чеки. Проверьте связь с сервером.
+          <button type="button" onClick={() => refetch()} className="underline underline-offset-2">Повторить</button>
+        </div>
       ) : чеки.length === 0 ? (
         <div className="flex items-start gap-3 rounded-lg border border-dashed border-border/50 p-5">
           <Receipt className="mt-0.5 h-5 w-5 text-muted-foreground" />
@@ -140,8 +150,9 @@ export function StoreChequesPanel({ companyId, dateFrom, dateTo }: {
           fetchCatalog={getStorePivotCatalog}
           fetchLeaves={(dims) => getStorePivot({
             source: 'store_cheques', dims, dateFrom, dateTo,
+            stations: stations?.map(Number).filter(Number.isFinite),
           })}
-          queryKey={[dateFrom, dateTo]}
+          queryKey={[dateFrom, dateTo, stations?.join(',') ?? '']}
           dateFrom={dateFrom}
           dateTo={dateTo}
           hint="Средний чек считается делением суммы на число чеков в узле — подытоги сходятся с карточками выше."
@@ -168,8 +179,12 @@ export function StoreChequesPanel({ companyId, dateFrom, dateTo }: {
                 // при перерисовке уезжает на соседнюю строку.
                 <Fragment key={c.id}>
                   <tr
-                      onClick={() => открыть(открыт === c.id ? null : c.id)}
-                      className="cursor-pointer border-t border-border/30 hover:bg-accent/20">
+                      aria-expanded={открыт === c.id}
+                      {...rowDrill(
+                        () => открыть(открыт === c.id ? null : c.id),
+                        `Чек ${c.number} — ${открыт === c.id ? 'свернуть' : 'раскрыть'} состав`,
+                        'border-t border-border/30',
+                      )}>
                     <td className="whitespace-nowrap px-3 py-1.5">{время(c.at)}</td>
                     <td className="px-3 py-1.5 tabular-nums text-muted-foreground">{c.station_id}</td>
                     <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{c.shift_number}</td>
@@ -225,19 +240,24 @@ export function StoreChequesPanel({ companyId, dateFrom, dateTo }: {
         </div>
       )}
 
-      {data?.truncated && (
-        <div className="flex flex-wrap items-center gap-3 text-[11px]">
-          <span className="text-muted-foreground">
-            Показаны первые {nf(чеки.length)} чеков за период.
+      {подача === 'list' && data && data.total > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/30 pt-2 text-[11px]">
+          <span className="text-muted-foreground" aria-live="polite">
+            Показаны {nf(data.offset + 1)}–{nf(data.offset + чеки.length)} из {nf(data.total)} чеков.
+            KPI выше рассчитаны по всему отбору.
           </span>
-          <button type="button" onClick={() => задатьЛимит((l) => l + 5000)}
-            className="text-primary hover:underline">
-            загрузить ещё
-          </button>
-          <button type="button" onClick={() => задатьЛимит(20000)}
-            className="text-muted-foreground hover:text-foreground">
-            загрузить все
-          </button>
+          <div className="flex items-center gap-2">
+            <button type="button" disabled={смещение === 0}
+              onClick={() => задатьСтраницу({ scope: scopeKey, offset: Math.max(0, смещение - PAGE_SIZE) })}
+              className="inline-flex items-center gap-1 rounded-md border border-border/60 px-2 py-1 text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40">
+              <ChevronLeft className="h-3.5 w-3.5" />предыдущие
+            </button>
+            <button type="button" disabled={!data.truncated}
+              onClick={() => задатьСтраницу({ scope: scopeKey, offset: смещение + PAGE_SIZE })}
+              className="inline-flex items-center gap-1 rounded-md border border-border/60 px-2 py-1 text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40">
+              следующие<ChevronRight className="h-3.5 w-3.5" />
+            </button>
+          </div>
         </div>
       )}
     </div>

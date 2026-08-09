@@ -38,14 +38,16 @@ export interface StoreOverviewData {
   }
   operational: { shifts_count: number; stations_count: number }
   /** Поток людей: заправка — тоже визит, даже если человек ничего не купил. */
-  visits?: {
-    visits: number; fuel_ops: number; shop_cheques: number; mixed: number
-    fuel_only: number; conversion: number; revenue: number
-    per_visit: number; avg_cheque: number
-  }
+  visits?: StoreVisitsData
   charts: { daily: { date: string; revenue: number; soputka: number; obshepit: number }[] }
   by_station: { station: string; revenue: number; positions: number; shifts: number }[]
   trends?: Record<string, StoreTrend>
+}
+
+export interface StoreVisitsData {
+  visits: number; fuel_ops: number; shop_cheques: number; mixed: number
+  fuel_only: number; conversion: number; revenue: number
+  per_visit: number; avg_cheque: number
 }
 
 export const getStoreOverview = (
@@ -58,6 +60,13 @@ export const getStoreOverview = (
     date_to: dateTo,
     stations: opts?.stations?.length ? opts.stations.join(',') : undefined,
     compare: opts?.compare ? 'true' : undefined,
+  })
+
+export const getStoreVisits = (dateFrom: string, dateTo: string, stations?: string[]) =>
+  get<StoreVisitsData>('/api/store/visits', {
+    date_from: dateFrom,
+    date_to: dateTo,
+    stations: stations?.length ? stations.join(',') : undefined,
   })
 
 // ── Реестр SKU (Ассортимент / Цены-маржа / Номенклатура / Продажи) ──
@@ -250,13 +259,14 @@ export interface StoreStockData {
 }
 
 export const getStoreStock = (opts?: {
-  warehouse?: string; q?: string; marked?: SalesMarked; onlyNegative?: boolean
+  warehouse?: string; q?: string; marked?: SalesMarked; onlyNegative?: boolean; stations?: string[]
 }) =>
   get<StoreStockData>('/api/store/stock', {
     warehouse: opts?.warehouse || undefined,
     q: opts?.q || undefined,
     marked: opts?.marked && opts.marked !== 'all' ? opts.marked : undefined,
     only_negative: opts?.onlyNegative ? 'true' : undefined,
+    stations: opts?.stations?.join(',') || undefined,
   })
 
 // ── Инвентаризация: реестр + отклонения (недостачи/излишки, shrinkage) ──
@@ -289,11 +299,12 @@ export interface StoreInventoryData {
   }
 }
 
-export const getStoreInventory = (opts?: { warehouse?: string; onlyDev?: boolean; dateFrom?: string; dateTo?: string }) =>
+export const getStoreInventory = (opts?: { warehouse?: string; onlyDev?: boolean; dateFrom?: string; dateTo?: string; stations?: string[] }) =>
   get<StoreInventoryData>('/api/store/inventory', {
     warehouse: opts?.warehouse || undefined,
     only_dev: opts?.onlyDev ? 'true' : undefined,
     date_from: opts?.dateFrom || undefined, date_to: opts?.dateTo || undefined,
+    stations: opts?.stations?.join(',') || undefined,
   })
 
 // ── Списания: реестр + причины (недостача/брак/срок/…) + топ SKU ──
@@ -323,11 +334,12 @@ export interface StoreWriteoffData {
   }
 }
 
-export const getStoreWriteoffs = (opts?: { warehouse?: string; reason?: string; dateFrom?: string; dateTo?: string }) =>
+export const getStoreWriteoffs = (opts?: { warehouse?: string; reason?: string; dateFrom?: string; dateTo?: string; stations?: string[] }) =>
   get<StoreWriteoffData>('/api/store/writeoffs', {
     warehouse: opts?.warehouse || undefined,
     reason: opts?.reason || undefined,
     date_from: opts?.dateFrom || undefined, date_to: opts?.dateTo || undefined,
+    stations: opts?.stations?.join(',') || undefined,
   })
 
 // ── Перемещения: реестр откуда→куда + направления ──
@@ -356,10 +368,11 @@ export interface StoreTransferData {
   }
 }
 
-export const getStoreTransfers = (opts?: { direction?: string; dateFrom?: string; dateTo?: string }) =>
+export const getStoreTransfers = (opts?: { direction?: string; dateFrom?: string; dateTo?: string; stations?: string[] }) =>
   get<StoreTransferData>('/api/store/transfers', {
     direction: opts?.direction || undefined,
     date_from: opts?.dateFrom || undefined, date_to: opts?.dateTo || undefined,
+    stations: opts?.stations?.join(',') || undefined,
   })
 
 // ── Переоценка: изменения цен (старая→новая, Δ%) + подорожания/удешевления ──
@@ -395,10 +408,11 @@ export interface StoreRevaluationData {
   }
 }
 
-export const getStoreRevaluation = (opts?: { reason?: string; dateFrom?: string; dateTo?: string }) =>
+export const getStoreRevaluation = (opts?: { reason?: string; dateFrom?: string; dateTo?: string; stations?: string[] }) =>
   get<StoreRevaluationData>('/api/store/revaluation', {
     reason: opts?.reason || undefined,
     date_from: opts?.dateFrom || undefined, date_to: opts?.dateTo || undefined,
+    stations: opts?.stations?.length ? opts.stations.join(',') : undefined,
   })
 
 // ── Общепит: инжиниринг меню (продажи блюд + состав ТТК + динамика) ──
@@ -510,8 +524,10 @@ export interface SkuDetailData {
   stock: { warehouse: string; qty: number; retail_price: number | null; cost_unit: number | null }[]
 }
 
-export const getStoreSkuDetail = (guid: string, dateFrom: string, dateTo: string) =>
-  get<SkuDetailData>(`/api/store/sku/${encodeURIComponent(guid)}`, { date_from: dateFrom, date_to: dateTo })
+export const getStoreSkuDetail = (guid: string, dateFrom: string, dateTo: string, stations?: string[]) =>
+  get<SkuDetailData>(`/api/store/sku/${encodeURIComponent(guid)}`, {
+    date_from: dateFrom, date_to: dateTo, stations: stations?.join(',') || undefined,
+  })
 
 // ── Номенклатура: полный справочник НСИ + фильтры ──
 export interface StoreNomenclatureItem {
@@ -620,6 +636,8 @@ export interface ShiftComposite {
   close: string | null
   /** Кто стоял за кассой. У смен из ЦБ пусто — оператора там нет. */
   operator?: string | null
+  register?: string | null
+  internal_no?: string | null
   revenue: number
   soputka: number
   obshepit: number
@@ -710,6 +728,7 @@ export interface ShiftDetailData {
   shift?: {
     shift_key: string; date: string; station: string; number: string | null
     open: string | null; close: string | null
+    operator?: string | null; register?: string | null; internal_no?: string | null
     revenue: number; soputka: number; obshepit: number; positions: number; returns: number
   }
   sales?: ShiftSaleLine[]
@@ -739,8 +758,10 @@ export interface SkuCardData extends SkuDetailData {
   movement: SkuMovementRow[]
 }
 
-export const getStoreSkuCard = (guid: string, dateFrom: string, dateTo: string) =>
-  get<SkuCardData>(`/api/store/sku-card/${encodeURIComponent(guid)}`, { date_from: dateFrom, date_to: dateTo })
+export const getStoreSkuCard = (guid: string, dateFrom: string, dateTo: string, stations?: string[]) =>
+  get<SkuCardData>(`/api/store/sku-card/${encodeURIComponent(guid)}`, {
+    date_from: dateFrom, date_to: dateTo, stations: stations?.join(',') || undefined,
+  })
 
 /* ─────────────────────────── Контроль дублей ──────────────────────────── */
 export interface DedupSummary {
@@ -1182,11 +1203,13 @@ export interface StoreCheque {
 }
 
 export const getStoreCheques = (opts: {
-  dateFrom: string; dateTo: string; stationId?: number | null
-  shiftNumber?: number | null; q?: string; onlyReturns?: boolean; limit?: number
+  dateFrom: string; dateTo: string; stationId?: number | null; stations?: string[]
+  shiftNumber?: number | null; q?: string; onlyReturns?: boolean; limit?: number; offset?: number
 }) => get<{
   cheques: StoreCheque[]
   total: number
+  offset: number
+  limit: number
   summary: {
     sales: number; returns: number; amount: number; returns_amount: number
     avg: number | null; with_fuel: number
@@ -1195,10 +1218,12 @@ export const getStoreCheques = (opts: {
 }>('/api/store/cheques', {
   date_from: opts.dateFrom, date_to: opts.dateTo,
   station_id: opts.stationId ?? undefined,
+  stations: opts.stations?.length ? opts.stations.join(',') : undefined,
   shift_number: opts.shiftNumber ?? undefined,
   q: opts.q || undefined,
   only_returns: opts.onlyReturns ? 'true' : undefined,
   limit: opts.limit ?? undefined,
+  offset: opts.offset ?? undefined,
 })
 
 /** Передачи между АЗС: отправлено, принято, расхождение, в пути. */
@@ -1660,7 +1685,9 @@ export interface StoreReceipt {
   station_id: number | null
   number: string
   doc_date: string
+  supplier_id?: string | null
   supplier: string | null
+  contract_id?: string | null
   contract: string | null
   incoming_number: string | null
   incoming_date: string | null
@@ -1684,6 +1711,9 @@ export interface StoreReceipt {
   signed_at: string | null
   distribution: StoreReceiptDistribution[]
   lines: StoreReceiptLine[]
+  services: Record<string, unknown>[]
+  evidence: Record<string, unknown>
+  version: number
   lines_count: number
   diff_count: number
   total_amount: number
@@ -1697,7 +1727,9 @@ export interface StoreReceiptInput {
   station_id: number | null
   number?: string | null
   doc_date?: string | null
+  supplier_id?: string | null
   supplier?: string | null
+  contract_id?: string | null
   contract?: string | null
   incoming_number?: string | null
   incoming_date?: string | null
@@ -1712,13 +1744,29 @@ export interface StoreReceiptInput {
   signature_status?: 'pending' | 'signed'
   signature_ref?: string | null
   lines: StoreReceiptLine[]
+  services?: Record<string, unknown>[]
+  version?: number
 }
 
-export const getStoreReceipts = (opts?: { stationId?: number; status?: string }) =>
-  get<{ receipts: StoreReceipt[]; total: number }>('/api/store/receipts', {
-    ...(opts?.stationId ? { station_id: String(opts.stationId) } : {}),
-    ...(opts?.status ? { status: opts.status } : {}),
+export interface StoreReceiptJournalData {
+  receipts: StoreReceipt[]
+  total: number
+}
+
+export const getStoreReceipts = (opts: { stationIds: number[]; status?: string }) => {
+  const stationIds = [...new Set(opts.stationIds)]
+    .filter((stationId) => Number.isFinite(stationId) && stationId > 0)
+    .sort((left, right) => left - right)
+  if (stationIds.length === 0) {
+    throw new Error('Для журнала приёмок требуется явная область станций')
+  }
+
+  return get<StoreReceiptJournalData>('/api/store/receipts', {
+    ...(stationIds.length === 1 ? { station_id: String(stationIds[0]) } : {}),
+    ...(stationIds.length > 1 ? { station_ids: stationIds.join(',') } : {}),
+    ...(opts.status ? { status: opts.status } : {}),
   })
+}
 
 export const createStoreReceipt = (body: StoreReceiptInput) =>
   post<StoreReceipt>('/api/store/receipts', body)
@@ -1726,31 +1774,39 @@ export const createStoreReceipt = (body: StoreReceiptInput) =>
 export const updateStoreReceipt = (id: string, body: StoreReceiptInput) =>
   put<StoreReceipt>(`/api/store/receipts/${id}`, body)
 
-export const setStoreReceiptStatus = (id: string, status: 'expected' | 'accepted') =>
-  post<StoreReceipt>(`/api/store/receipts/${id}/status?status=${status}`, {})
+export const getStoreReceipt = (id: string) =>
+  get<StoreReceipt>(`/api/store/receipts/${id}`)
 
-export const sendStoreReceiptToStation = (id: string) =>
+export const setStoreReceiptStatus = (
+  id: string,
+  status: 'expected' | 'accepted',
+  version?: number,
+) => post<StoreReceipt>(
+  `/api/store/receipts/${id}/status?status=${status}${version == null ? '' : `&version=${version}`}`,
+  {},
+)
+
+export const sendStoreReceiptToStation = (id: string, version?: number) =>
   post<{ ok: boolean; station_id: number; number: string; lines: number }>(
-    `/api/store/receipts/${id}/send-to-station`, {})
+    `/api/store/receipts/${id}/send-to-station${version == null ? '' : `?version=${version}`}`, {})
 
 export const recordStoreReceiptSignature = (
   id: string,
   body: Pick<StoreReceiptInput, 'signature_status' | 'signature_ref' | 'signer_name' |
-    'mchd_guid' | 'mchd_registry' | 'mchd_valid_until'>,
+    'mchd_guid' | 'mchd_registry' | 'mchd_valid_until' | 'version'>,
 ) => post<StoreReceipt>(`/api/store/receipts/${id}/signature`, body)
 
 export const distributeStoreReceipt = (
-  id: string, stationId: number, lines: { line_index: number; qty: number }[],
+  id: string, stationId: number, lines: { line_index: number; qty: number }[], version?: number,
 ) => post<{ ok: boolean; task_id: string; station_id: number; lines: number }>(
-  `/api/store/receipts/${id}/distribute`, { station_id: stationId, lines })
+  `/api/store/receipts/${id}/distribute`, { station_id: stationId, lines, version })
 
 export interface StoreReceiptScanResult extends StoreReceipt {
   scan: { type: string; barcode: string; line_index: number; qty_added: number; name: string }
 }
 
-export const scanStoreReceipt = (
-  id: string, code: string, qty = 1, lines?: StoreReceiptLine[],
-) => post<StoreReceiptScanResult>(`/api/store/receipts/${id}/scan`, { code, qty, lines })
+export const scanStoreReceipt = (id: string, barcode: string, delta = 1) =>
+  post<StoreReceiptScanResult>(`/api/store/receipts/${id}/scan`, { barcode, delta })
 
 export const createStoreReceiptFromUPD = (
   file: File,
@@ -2037,6 +2093,24 @@ export interface DraftCandidate {
 export const getStationDrafts = (stationId?: number) =>
   get<StationDrafts>(`/api/store/station-drafts${stationId ? `?station_id=${stationId}` : ''}`)
 
+export interface StoreSupplierDraftInput {
+  station_id: number
+  name: string
+  inn: string | null
+  kpp: string | null
+  role: 'supplier'
+  comment: string | null
+}
+
+export interface StoreSupplierDraftResult extends StoreSupplierDraftInput {
+  id: number
+  source_uuid: string
+  status: 'pending'
+}
+
+export const createStoreSupplierDraft = (body: StoreSupplierDraftInput) =>
+  post<StoreSupplierDraftResult>('/api/store/station-drafts/partner', body)
+
 export const getDraftCandidates = (barcodes: string[]) =>
   get<{ candidates: DraftCandidate[] }>(
     `/api/store/station-drafts/candidates?barcodes=${encodeURIComponent(barcodes.join(','))}`)
@@ -2216,6 +2290,8 @@ export interface DynamicsData {
   }[]
   up: DynamicsRow[]
   down: DynamicsRow[]
+  up_total: number
+  down_total: number
   has_prev: boolean
 }
 
@@ -2238,11 +2314,13 @@ export interface PriceLogRow {
   delta_pct: number | null
 }
 
-export const getStorePriceLog = (dateFrom: string, dateTo: string, stations?: string[]) =>
-  get<{ rows: PriceLogRow[]; total: number }>('/api/store/price-log', {
+export const getStorePriceLog = (dateFrom: string, dateTo: string, stations?: string[], offset = 0, limit = 100) =>
+  get<{ rows: PriceLogRow[]; total: number; offset: number; limit: number; truncated: boolean }>('/api/store/price-log', {
     date_from: dateFrom,
     date_to: dateTo,
     stations: stations?.length ? stations.join(',') : undefined,
+    offset,
+    limit,
   })
 
 

@@ -6028,7 +6028,7 @@ class StoreReceipt(Base):
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     company_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
-    station_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    station_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     number: Mapped[str] = mapped_column(String(40), nullable=False)
     doc_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
@@ -6036,6 +6036,10 @@ class StoreReceipt(Base):
     # с ЭДО, а до тех пор товаровед пишет имя, как в накладной.
     supplier: Mapped[str | None] = mapped_column(String(300), nullable=True)
     contract: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    supplier_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("counterparties.id", ondelete="RESTRICT"), nullable=True)
+    contract_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("contracts.id", ondelete="RESTRICT"), nullable=True)
     incoming_number: Mapped[str | None] = mapped_column(String(60), nullable=True)
     incoming_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -6065,9 +6069,13 @@ class StoreReceipt(Base):
     distribution: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
 
     lines: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    services: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    evidence: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     total_amount: Mapped[float] = mapped_column(Numeric(16, 2), nullable=False, default=0)
     vat_amount: Mapped[float] = mapped_column(Numeric(16, 2), nullable=False, default=0)
     comment: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    dedup_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now())
@@ -6075,10 +6083,53 @@ class StoreReceipt(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # UUID пакета станции — идемпотентность при доставке снизу.
-    source_uuid: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
+    source_uuid: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     __table_args__ = (
         Index("ix_store_receipts_company_station", "company_id", "station_id", "doc_date"),
+        Index("ix_store_receipts_supplier", "company_id", "supplier_id"),
+        Index("ix_store_receipts_contract", "company_id", "contract_id"),
+        UniqueConstraint("company_id", "source_uuid", name="uq_store_receipts_company_source"),
+        UniqueConstraint("company_id", "dedup_key", name="uq_store_receipts_company_dedup"),
+    )
+
+
+class StoreReceiptStockMovement(Base):
+    """Неизменяемое движение склада, созданное приёмкой или распределением."""
+    __tablename__ = "store_receipt_stock_movements"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    receipt_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("store_receipts.id", ondelete="RESTRICT"), nullable=False)
+    reversal_of_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("store_receipt_stock_movements.id", ondelete="RESTRICT"),
+        nullable=True)
+    allocation_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    line_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    station_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    warehouse: Mapped[str] = mapped_column(String(200), nullable=False)
+    item_key: Mapped[str] = mapped_column(String(200), nullable=False)
+    item_uuid: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    barcode: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    quantity: Mapped[float] = mapped_column(Numeric(16, 3), nullable=False)
+    unit_cost: Mapped[float] = mapped_column(Numeric(16, 4), nullable=False, default=0)
+    amount: Mapped[float] = mapped_column(Numeric(16, 2), nullable=False, default=0)
+    kind: Mapped[str] = mapped_column(String(40), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(200), nullable=False)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("company_id", "idempotency_key",
+                         name="uq_store_receipt_stock_movement_key"),
+        Index("ix_store_receipt_stock_movement_receipt", "receipt_id", "created_at"),
+        Index("ix_store_receipt_stock_movement_balance",
+              "company_id", "warehouse", "item_key", "created_at"),
     )
 
 
@@ -6204,9 +6255,12 @@ class EdgeDownlink(Base):
     cancelled_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     note: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    idempotency_key: Mapped[str | None] = mapped_column(String(200), nullable=True)
 
     __table_args__ = (
         Index("ix_edge_downlink_pending", "company_id", "station_id", "acked_at"),
+        UniqueConstraint("company_id", "idempotency_key",
+                         name="uq_edge_downlink_company_idempotency"),
     )
 
 

@@ -14,11 +14,13 @@ const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { maximumFractio
 const pctStr = (v: number | null | undefined, d = 1) => (v == null ? '—' : `${nf(v, d)}%`)
 const marginCls = (v: number | null | undefined) => (v == null ? '' : v < 0 ? 'text-red-400/80' : v < 10 ? 'text-amber-300/90' : 'text-emerald-300/80')
 
-export function SkuDetailModal({ guid, dateFrom, dateTo, onClose }: { guid: string; dateFrom: string; dateTo: string; onClose: () => void }) {
+export function SkuDetailModal({ guid, dateFrom, dateTo, stations, onClose }: {
+  guid: string; dateFrom: string; dateTo: string; stations?: string[]; onClose: () => void
+}) {
   const { companyId } = useCompany()
   const { data: d, isLoading } = useQuery({
-    queryKey: ['store-sku', companyId, guid, dateFrom, dateTo],
-    queryFn: () => getStoreSkuDetail(guid, dateFrom, dateTo),
+    queryKey: ['store-sku', companyId, guid, dateFrom, dateTo, stations?.join(',') ?? ''],
+    queryFn: () => getStoreSkuDetail(guid, dateFrom, dateTo, stations),
   })
 
   return (
@@ -34,7 +36,7 @@ export function SkuDetailModal({ guid, dateFrom, dateTo, onClose }: { guid: stri
               {[d?.category, d?.kind, d?.article ? `арт. ${d.article}` : null, d?.vat ? `НДС ${d.vat}` : null].filter(Boolean).join(' · ') || ' '}
             </p>
           </div>
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground text-xl leading-none px-2 shrink-0">×</button>
+          <button type="button" onClick={onClose} className="text-muted-foreground hover:text-foreground text-xl leading-none px-2 shrink-0">×</button>
         </div>
 
         <div className="overflow-auto p-5 space-y-4">

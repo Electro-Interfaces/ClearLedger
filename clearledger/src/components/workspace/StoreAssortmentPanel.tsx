@@ -67,6 +67,7 @@ export function StoreAssortmentPanel({ companyId, dateFrom, dateTo, stations }: 
       return av === bv ? 0 : (av > bv ? dir : -dir)
     })
   }, [data, cell, statusF, q, sortKey, sortDir])
+  const показ = useVisible(skus)
 
   if (isLoading) return <div className="p-6 text-sm text-muted-foreground">Загрузка ассортимента…</div>
   if (error) return <div className="p-6 text-sm text-red-400/90">Ошибка загрузки</div>
@@ -103,10 +104,6 @@ export function StoreAssortmentPanel({ companyId, dateFrom, dateTo, stations }: 
     { key: 'out_of_stock', label: 'Дефицит' }, { key: 'loss', label: 'Ниже себест.' },
     { key: 'overstock', label: 'Затоварка' },
   ]
-
-  // Список показывается порциями: обрезать его молча нельзя —
-  // товаровед приходит смотреть весь ассортимент, а не первые строки.
-  const показ = useVisible(skus)
 
   return (
     <div ref={ref} className="p-6 space-y-4">
@@ -255,7 +252,7 @@ export function StoreAssortmentPanel({ companyId, dateFrom, dateTo, stations }: 
         {skus.length === 0 && <div className="px-3 py-6 text-sm text-muted-foreground text-center">Нет товаров по фильтру.</div>}
       </div>
 
-      {openGuid && <SkuDetailModal guid={openGuid} dateFrom={dateFrom} dateTo={dateTo} onClose={() => setOpenGuid(null)} />}
+      {openGuid && <SkuDetailModal guid={openGuid} dateFrom={dateFrom} dateTo={dateTo} stations={stations} onClose={() => setOpenGuid(null)} />}
     </div>
   )
 }

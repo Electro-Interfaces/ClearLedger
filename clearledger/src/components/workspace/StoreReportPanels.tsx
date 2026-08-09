@@ -17,6 +17,7 @@ import { SupplierCardModal } from './SupplierCardModal'
 import { NomenclatureCardModal } from './NomenclatureCardModal'
 import { DocsModal } from './DocsModal'
 import { rowDrill } from './rowDrill'
+import { ShowMore, useVisible } from '@/components/common/ShowMore'
 
 const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: d }).format(n)
 
@@ -47,6 +48,7 @@ function Table({ head, rows, onRowClick, rowLabel }: {
    *  правка открывает Приёмку, Поставщиков, Категории и Штрихкоды сразу. */
   onRowClick?: (i: number) => void; rowLabel?: (i: number) => string
 }) {
+  const показ = useVisible(rows)
   return (
     <div className="overflow-x-auto rounded-lg border border-border/50">
       <table className="w-full text-xs">
@@ -54,7 +56,7 @@ function Table({ head, rows, onRowClick, rowLabel }: {
           <tr>{head.map((h, i) => <th key={i} className={`px-3 py-2 font-medium whitespace-nowrap ${h.num ? 'text-right' : 'text-left'}`}>{h.label}</th>)}</tr>
         </thead>
         <tbody>
-          {rows.map((r, ri) => (
+          {показ.visible.map((r, ri) => (
             <tr key={ri}
               {...(onRowClick
                 ? rowDrill(() => onRowClick(ri), rowLabel?.(ri), 'border-t border-border/30')
@@ -64,6 +66,7 @@ function Table({ head, rows, onRowClick, rowLabel }: {
           ))}
         </tbody>
       </table>
+      {rows.length > 300 && <ShowMore {...показ} onMore={показ.more} onAll={показ.all} />}
       {rows.length === 0 && <div className="px-3 py-6 text-sm text-muted-foreground text-center">Нет данных за выбранный период.</div>}
     </div>
   )
@@ -99,7 +102,7 @@ export function StoreReceiptsPanel(p: PanelProps) {
             onOpenSku={setSku} onClose={() => setOpen(null)}
           />
         )}
-        {sku && <NomenclatureCardModal guid={sku} companyId={p.companyId} dateFrom={p.dateFrom} dateTo={p.dateTo} onClose={() => setSku(null)} />}
+        {sku && <NomenclatureCardModal guid={sku} companyId={p.companyId} dateFrom={p.dateFrom} dateTo={p.dateTo} stations={p.stations} onClose={() => setSku(null)} />}
       </Shell>
     )
   })
@@ -127,7 +130,7 @@ export function StoreSuppliersPanel(p: PanelProps) {
             onOpenSku={setSku} onClose={() => setOpen(null)}
           />
         )}
-        {sku && <NomenclatureCardModal guid={sku} companyId={p.companyId} dateFrom={p.dateFrom} dateTo={p.dateTo} onClose={() => setSku(null)} />}
+        {sku && <NomenclatureCardModal guid={sku} companyId={p.companyId} dateFrom={p.dateFrom} dateTo={p.dateTo} stations={p.stations} onClose={() => setSku(null)} />}
       </Shell>
     )
   })
@@ -175,21 +178,18 @@ export function StoreBarcodesPanel(p: PanelProps) {
             </div>
             <Table
               head={[{ label: 'Штрихкод' }, { label: 'Товар' }, { label: 'Тип' }, { label: 'Основной' }]}
-              rows={items.slice(0, 300).map((i) => [
+              rows={items.map((i) => [
                 <span className="font-mono">{i.barcode}</span>,
                 i.owner_guid
-                  ? <button onClick={() => setOpenGuid(i.owner_guid)} className="text-left hover:text-primary hover:underline">{i.owner_name}</button>
+                  ? <button type="button" onClick={() => setOpenGuid(i.owner_guid)} className="text-left hover:text-primary hover:underline">{i.owner_name}</button>
                   : i.owner_name,
                 i.type ?? '—', i.main ? 'да' : '',
               ])}
             />
-            {items.length > 300 && (
-              <div className="px-1 pt-2 text-[11px] text-muted-foreground">Показано 300 из {items.length}. Уточните поиск.</div>
-            )}
           </Shell>
         )
       })}
-      {openGuid && <NomenclatureCardModal guid={openGuid} companyId={p.companyId} dateFrom={p.dateFrom} dateTo={p.dateTo} onClose={() => setOpenGuid(null)} />}
+      {openGuid && <NomenclatureCardModal guid={openGuid} companyId={p.companyId} dateFrom={p.dateFrom} dateTo={p.dateTo} stations={p.stations} onClose={() => setOpenGuid(null)} />}
     </>
   )
 }
@@ -225,7 +225,7 @@ export function StoreRecipesPanel(p: PanelProps) {
           </Shell>
         )
       })}
-      {openGuid && <NomenclatureCardModal guid={openGuid} companyId={p.companyId} dateFrom={p.dateFrom} dateTo={p.dateTo} onClose={() => setOpenGuid(null)} />}
+      {openGuid && <NomenclatureCardModal guid={openGuid} companyId={p.companyId} dateFrom={p.dateFrom} dateTo={p.dateTo} stations={p.stations} onClose={() => setOpenGuid(null)} />}
     </>
   )
 }

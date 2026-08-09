@@ -5,7 +5,7 @@
  * Остаток — снимок на момент выгрузки (не за период): фильтр периода не применяется.
  * Отрицательные остатки — норма для розничных АЗС (учёт по средней) → флаг.
  */
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { rowDrill } from './rowDrill'
 import { SkuDetailModal } from './SkuDetailModal'
 import { useQuery } from '@tanstack/react-query'
@@ -23,7 +23,9 @@ const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { maximumFractio
 
 type MarkedFilter = 'all' | 'marked' | 'plain'
 
-export function StoreStockPanel({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom?: string; dateTo?: string }) {
+export function StoreStockPanel({ companyId, dateFrom, dateTo, stations }: {
+  companyId: string; dateFrom?: string; dateTo?: string; stations?: string[]
+}) {
   // Строка = товар: раскрывается его карточка (та же, что в «Ассортименте»).
   const [openSku, setOpenSku] = useState<string | null>(null)
   const [warehouse, setWarehouse] = useState<string | undefined>(undefined)
@@ -34,11 +36,14 @@ export function StoreStockPanel({ companyId, dateFrom, dateTo }: { companyId: st
   // собирают мышью, и здесь он собирается тем же конструктором, а не своим.
   const [подача, задатьПодачу] = useState<'list' | 'pivot'>('list')
   const [выгружается, задатьВыгрузку] = useState(false)
+  const stationKey = stations?.join(',') ?? ''
 
-  const { data, isLoading, error } = useQuery({
-    queryKey: ['store-stock', companyId, warehouse ?? ''],
-    queryFn: () => getStoreStock({ warehouse }),
+  const { data, isLoading, error, refetch } = useQuery({
+    queryKey: ['store-stock', companyId, warehouse ?? '', stationKey],
+    queryFn: () => getStoreStock({ warehouse, stations }),
   })
+
+  useEffect(() => { setWarehouse(undefined) }, [stationKey])
 
   const items = useMemo(() => {
     if (!data) return [] as StoreStockItem[]
@@ -54,6 +59,7 @@ export function StoreStockPanel({ companyId, dateFrom, dateTo }: { companyId: st
     // сверху оказывались нули, а сами глубокие минусы — в хвосте. Разворачиваем.
     return onlyNegative ? [...rows].sort((a, b) => (a.retail_value ?? 0) - (b.retail_value ?? 0)) : rows
   }, [data, q, marked, onlyNegative])
+  const показ = useVisible(items)
 
   const выгрузить = async () => {
     задатьВыгрузку(true)
@@ -73,7 +79,7 @@ export function StoreStockPanel({ companyId, dateFrom, dateTo }: { companyId: st
   }
 
   if (isLoading) return <div className="p-6 text-sm text-muted-foreground">Загрузка остатков…</div>
-  if (error) return <div className="p-6 text-sm text-red-400/90">Ошибка загрузки остатков</div>
+  if (error) return <div className="p-6 text-sm text-red-400/90">Ошибка загрузки остатков. <button type="button" className="underline" onClick={() => refetch()}>Повторить</button></div>
   if (!data) return null
 
   // KPI по отфильтрованному набору (что на экране)
@@ -90,6 +96,7 @@ export function StoreStockPanel({ companyId, dateFrom, dateTo }: { companyId: st
   const kpiRetailCosted = costed.reduce((s, i) => s + (i.retail_value ?? 0), 0)
   const kpiMarginPct = kpiRetailCosted ? ((kpiRetailCosted - kpiCost) / kpiRetailCosted) * 100 : null
   const curWh = data.warehouses.find((w) => w.code === data.warehouse)
+  const scopeStationIds = (stations ?? []).map(Number).filter(Number.isFinite)
   // В сводном разрезе один и тот же товар встречается несколько раз — по разу
   // на каждую полку, поэтому колонка «где лежит» появляется только здесь.
   const всяСеть = !curWh
@@ -108,10 +115,6 @@ export function StoreStockPanel({ companyId, dateFrom, dateTo }: { companyId: st
       hint: `от розницы ${fmtMoney(kpiRetailCosted)} тех же ${nf(costed.length)} SKU`,
     },
   ]
-
-  // Список показывается порциями: обрезать его молча нельзя —
-  // товаровед приходит смотреть весь ассортимент, а не первые строки.
-  const показ = useVisible(items)
 
   return (
     <div className="p-6 space-y-4">
@@ -158,7 +161,7 @@ export function StoreStockPanel({ companyId, dateFrom, dateTo }: { companyId: st
             {/* Вся сеть — первый пункт: вопрос «где вообще лежит этот товар»
                 задают чаще, чем «что на конкретной полке», и он не должен
                 требовать перебора станций. */}
-            <option value="all">Вся сеть — все станции и места</option>
+            <option value="all">{scopeStationIds.length ? 'Выбранные станции — все места' : 'Вся сеть — все станции и места'}</option>
             {data.warehouses.map((w) => (
               <option key={w.code} value={w.code}>{w.name ?? w.code} — на полке {w.positive} из {w.sku}</option>
             ))}
@@ -231,12 +234,12 @@ export function StoreStockPanel({ companyId, dateFrom, dateTo }: { companyId: st
           fetchCatalog={getStorePivotCatalog}
           fetchLeaves={(dims) => getStorePivot({
             source: 'store_stock', dims,
-            stations: curWh?.station_id ? [curWh.station_id] : undefined,
+            stations: curWh?.station_id ? [curWh.station_id] : (scopeStationIds.length ? scopeStationIds : undefined),
           })}
-          queryKey={[warehouse ?? '', marked, onlyNegative]}
+          queryKey={[warehouse ?? '', marked, onlyNegative, stationKey]}
           dateFrom={dateFrom ?? ''}
           dateTo={dateTo ?? ''}
-          scopeLabel={curWh ? `АЗС ${curWh.station_id}` : 'вся сеть'}
+          scopeLabel={curWh ? `АЗС ${curWh.station_id}` : (scopeStationIds.length ? 'выбранные станции' : 'вся сеть')}
           hint="Остаток — срез на момент снимка станции, а не за период: датами он не фильтруется."
         />
       ) : (
@@ -302,7 +305,7 @@ export function StoreStockPanel({ companyId, dateFrom, dateTo }: { companyId: st
       </div>
       )}
       {openSku && (
-        <SkuDetailModal guid={openSku} dateFrom={dateFrom ?? ''} dateTo={dateTo ?? ''}
+        <SkuDetailModal guid={openSku} dateFrom={dateFrom ?? ''} dateTo={dateTo ?? ''} stations={stations}
           onClose={() => setOpenSku(null)} />
       )}
     </div>

@@ -53,7 +53,7 @@ services:
       SEED_SUPERADMIN_PASSWORD: ${SEED_SUPERADMIN_PASSWORD:-}
       COM_AGENT_URL: ${COM_AGENT_URL:-http://10.10.70.45:8080}
       COM_AGENT_TOKEN: ${COM_AGENT_TOKEN}
-      EDGE_DESIRED_AGENT_VERSION: ${EDGE_DESIRED_AGENT_VERSION:-0.58.13}
+      EDGE_DESIRED_AGENT_VERSION: ${EDGE_DESIRED_AGENT_VERSION:-1.36.0}
       # Рабочее место станции внутри «Магазина»: доступ к вебу агента идёт через
       # хаб TradeLink — он единственный, кто видит станцию за CGNAT.
       TRADELINK_HUB_URL: ${TRADELINK_HUB_URL:-https://link.dataworker.ru}

@@ -6,6 +6,7 @@
  */
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { ShowMore, useVisible } from '@/components/common/ShowMore'
 import { StationDocsBlock } from './StationDocsBlock'
 import { getStoreWriteoffs, type StoreWriteoffDoc } from '@/services/storeService'
 import { SnapshotBadge } from '@/components/common/SnapshotBadge'
@@ -16,24 +17,27 @@ import { NomenclatureCardModal } from './NomenclatureCardModal'
 const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: d }).format(n)
 const money = (n: number) => (n === 0 ? '—' : fmtMoney(n))
 
-export function StoreWriteoffPanel({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom?: string; dateTo?: string }) {
+export function StoreWriteoffPanel({ companyId, dateFrom, dateTo, stations }: {
+  companyId: string; dateFrom?: string; dateTo?: string; stations?: string[]
+}) {
   const [warehouse, setWarehouse] = useState<string | undefined>(undefined)
   const [reason, setReason] = useState<string | null>(null)
   const [openDoc, setOpenDoc] = useState<StoreWriteoffDoc | null>(null)
   const [sku, setSku] = useState<string | null>(null)
 
-  const { data, isLoading, error } = useQuery({
-    queryKey: ['store-writeoffs', companyId, warehouse ?? '', dateFrom, dateTo],
-    queryFn: () => getStoreWriteoffs({ warehouse, dateFrom, dateTo }),
+  const { data, isLoading, error, refetch } = useQuery({
+    queryKey: ['store-writeoffs', companyId, warehouse ?? '', dateFrom, dateTo, stations?.join(',') ?? ''],
+    queryFn: () => getStoreWriteoffs({ warehouse, dateFrom, dateTo, stations }),
   })
 
   const docs = useMemo(
     () => (data?.docs ?? []).filter((d) => !reason || d.reason === reason),
     [data, reason],
   )
+  const показ = useVisible(docs)
 
   if (isLoading) return <div className="p-6 text-sm text-muted-foreground">Загрузка списаний…</div>
-  if (error) return <div className="p-6 text-sm text-red-400/90">Ошибка загрузки списаний</div>
+  if (error) return <div className="p-6 text-sm text-red-400/90">Ошибка загрузки списаний. <button type="button" className="underline" onClick={() => refetch()}>Повторить</button></div>
   if (!data) return null
 
   const tot = docs.reduce((s, d) => s + d.total_amount, 0)
@@ -113,12 +117,12 @@ export function StoreWriteoffPanel({ companyId, dateFrom, dateTo }: { companyId:
               </tr>
             </thead>
             <tbody>
-              {docs.slice(0, 300).map((d) => (
-                <tr
-                  key={d.ref}
-                  onClick={() => d.positions && setOpenDoc(d)}
-                  className={`border-t border-border/30 ${d.positions ? 'hover:bg-accent/20 cursor-pointer' : 'opacity-60'}`}
-                >
+              {показ.visible.map((d) => (
+                <tr key={d.ref} {...rowDrill(
+                  d.lines.length ? () => setOpenDoc(d) : null,
+                  `списание ${d.number ?? ''}`,
+                  'border-t border-border/30',
+                )}>
                   <td className="px-3 py-1.5 whitespace-nowrap">{d.date ?? '—'}</td>
                   <td className="px-3 py-1.5 tabular-nums">{d.number ?? '—'}</td>
                   <td className="px-3 py-1.5 tabular-nums text-muted-foreground" title={d.shift_reason ?? undefined}>{d.shift_number ?? '—'}</td>
@@ -132,12 +136,10 @@ export function StoreWriteoffPanel({ companyId, dateFrom, dateTo }: { companyId:
               ))}
             </tbody>
           </table>
-          {docs.length > 300 && (
-            <div className="px-3 py-2 text-[11px] text-muted-foreground border-t border-border/30">Показано 300 из {nf(docs.length)}.</div>
-          )}
+          {docs.length > 300 && <ShowMore {...показ} onMore={показ.more} onAll={показ.all} unit="документов" />}
           {docs.length === 0 && (
             <div className="px-3 py-6 text-sm text-muted-foreground text-center">
-              Нет списаний. Наполните: <code>py -3.13 scripts/pull_cb_writeoff_dev.py</code>
+              За выбранный период списаний нет.
             </div>
           )}
         </div>
@@ -172,7 +174,7 @@ export function StoreWriteoffPanel({ companyId, dateFrom, dateTo }: { companyId:
                   {openDoc.comment && <> · {openDoc.comment}</>}
                 </div>
               </div>
-              <button onClick={() => setOpenDoc(null)} className="text-muted-foreground hover:text-foreground text-lg leading-none px-2">×</button>
+              <button type="button" onClick={() => setOpenDoc(null)} className="text-muted-foreground hover:text-foreground text-lg leading-none px-2">×</button>
             </div>
             <div className="overflow-auto">
               <table className="w-full text-xs">
@@ -200,7 +202,7 @@ export function StoreWriteoffPanel({ companyId, dateFrom, dateTo }: { companyId:
         </div>
       )}
 
-      {sku && <NomenclatureCardModal guid={sku} companyId={companyId} dateFrom={dateFrom ?? ''} dateTo={dateTo ?? ''} onClose={() => setSku(null)} />}
+      {sku && <NomenclatureCardModal guid={sku} companyId={companyId} dateFrom={dateFrom ?? ''} dateTo={dateTo ?? ''} stations={stations} onClose={() => setSku(null)} />}
 
       {/* Второй источник того же предмета: реестр выше — история 1С, здесь —
           то, что заводят на самой АЗС. Пока 1С ведёт станцию, они идут рядом. */}

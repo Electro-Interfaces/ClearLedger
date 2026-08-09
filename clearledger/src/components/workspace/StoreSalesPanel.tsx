@@ -15,10 +15,11 @@ import { seriesColor } from './analytics/palette'
 import { ExportButton } from './analytics/ExportButton'
 import { useScopeSubtitle } from '@/hooks/useScopeReset'
 import { rowDrill } from './rowDrill'
+import { ShowMore, useVisible } from '@/components/common/ShowMore'
 import { SkuDetailModal } from './SkuDetailModal'
 import { ShiftDetailModal } from './ShiftDetailModal'
 import {
-  getStoreSales, getStoreOverview, type SalesGroupBy, type SalesCategory, type SalesMarked,
+  getStoreSales, getStoreVisits, type SalesGroupBy, type SalesCategory, type SalesMarked,
 } from '@/services/storeService'
 import { fmtMoney, fmtMoneyShort } from '@/services/analyticsService'
 import { rechartsTooltipTheme } from '@/components/ui/chart-utils'
@@ -42,11 +43,13 @@ const MARK_TABS: { key: SalesMarked; label: string }[] = [
   { key: 'all', label: 'Все' }, { key: 'marked', label: 'Маркир.' }, { key: 'plain', label: 'Обычные' },
 ]
 
-function Seg<T extends string>({ tabs, value, onChange }: { tabs: { key: T; label: string }[]; value: T; onChange: (v: T) => void }) {
+function Seg<T extends string>({ tabs, value, onChange, disabled = false }: {
+  tabs: { key: T; label: string }[]; value: T; onChange: (v: T) => void; disabled?: boolean
+}) {
   return (
     <div className="inline-flex rounded-md border border-border/50 overflow-hidden">
       {tabs.map((t) => (
-        <button key={t.key} onClick={() => onChange(t.key)}
+        <button key={t.key} type="button" disabled={disabled} onClick={() => onChange(t.key)}
           className={`px-2.5 py-1 text-xs transition-colors ${value === t.key ? 'bg-primary/15 text-primary font-medium' : 'text-muted-foreground hover:text-foreground hover:bg-accent/40'}`}>
           {t.label}
         </button>
@@ -67,21 +70,18 @@ export function StoreSalesPanel({ companyId, dateFrom, dateTo, stations }: { com
   const ref = useRef<HTMLDivElement>(null)
   const scopeSub = useScopeSubtitle()
 
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['store-sales', companyId, dateFrom, dateTo, groupBy, category, marked, q, stations],
     queryFn: () => getStoreSales(dateFrom, dateTo, { groupBy, category, marked, q, stations }),
   })
-  // Поток людей за тот же период: выручка сама по себе не говорит, плохо
-  // продавали или мало кто заезжал. Отдельным запросом — обзор считает его
-  // вместе со своими KPI, а здесь нужен только он.
-  const { data: обзор } = useQuery({
+  const { data: поток } = useQuery({
     queryKey: ['store-visits', companyId, dateFrom, dateTo, stations],
-    queryFn: () => getStoreOverview(dateFrom, dateTo, { stations }),
+    queryFn: () => getStoreVisits(dateFrom, dateTo, stations),
   })
-  const поток = обзор?.visits
 
   const isPayment = groupBy === 'payment'
   const showSkuCol = groupBy !== 'sku' && !isPayment
+  const показ = useVisible(data?.groups ?? [])
 
   return (
     <div ref={ref} className="p-6 space-y-4">
@@ -99,11 +99,12 @@ export function StoreSalesPanel({ companyId, dateFrom, dateTo, stations }: { com
       <Seg tabs={GROUP_TABS} value={groupBy} onChange={setGroupBy} />
 
       {/* фильтры (оплаты — по чекам, товарные фильтры к ним не применяются) */}
-      <div className={`flex flex-wrap items-center gap-3 ${isPayment ? 'opacity-40 pointer-events-none' : ''}`}>
-        <Seg tabs={CAT_TABS} value={category} onChange={setCategory} />
-        <Seg tabs={MARK_TABS} value={marked} onChange={setMarked} />
+      <div className={`flex flex-wrap items-center gap-3 ${isPayment ? 'opacity-50' : ''}`} aria-disabled={isPayment}>
+        <Seg tabs={CAT_TABS} value={category} onChange={setCategory} disabled={isPayment} />
+        <Seg tabs={MARK_TABS} value={marked} onChange={setMarked} disabled={isPayment} />
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="поиск товара…"
-          className="text-xs px-2.5 py-1.5 rounded-md border border-border/50 bg-background w-48" />
+          disabled={isPayment} aria-label="Поиск товара"
+          className="text-xs px-2.5 py-1.5 rounded-md border border-border/50 bg-background w-48 disabled:cursor-not-allowed" />
       </div>
       {/* Бэкенд вернул фильтры, которые к этому разрезу неприменимы — цифры по всей точке. */}
       {!!data?.filters_ignored?.length && (
@@ -114,7 +115,12 @@ export function StoreSalesPanel({ companyId, dateFrom, dateTo, stations }: { com
       )}
 
       {isLoading && <div className="text-sm text-muted-foreground">Загрузка…</div>}
-      {error && <div className="text-sm text-red-400/90">Ошибка загрузки продаж</div>}
+      {error && (
+        <div className="flex flex-wrap items-center gap-3 rounded-md border border-red-400/30 bg-red-400/5 px-3 py-2 text-sm text-red-300/90">
+          Продажи не загрузились. Проверьте связь с сервером.
+          <button type="button" onClick={() => refetch()} className="underline underline-offset-2">Повторить</button>
+        </div>
+      )}
       {data && (
         <>
           <div className="grid gap-2.5 sm:grid-cols-3 lg:grid-cols-6">
@@ -170,7 +176,7 @@ export function StoreSalesPanel({ companyId, dateFrom, dateTo, stations }: { com
                 </tr>
               </thead>
               <tbody>
-                {data.groups.slice(0, 300).map((g, i) => (
+                {показ.visible.map((g, i) => (
                   <tr key={g.key}
                       {...rowDrill(
                         groupBy === 'sku' ? () => setOpenSku(g.key)
@@ -197,13 +203,9 @@ export function StoreSalesPanel({ companyId, dateFrom, dateTo, stations }: { com
                 ))}
               </tbody>
             </table>
-            {data.groups.length > 300 && (
-              <div className="px-3 py-2 text-[11px] text-muted-foreground border-t border-border/30">
-                Показано 300 из {data.groups.length}. Уточните фильтр/поиск.
-              </div>
-            )}
+            <ShowMore {...показ} onMore={показ.more} onAll={показ.all} unit="групп" />
             {data.groups.length === 0 && (
-              <div className="px-3 py-6 text-sm text-muted-foreground text-center">Нет продаж по фильтру (период — апрель).</div>
+              <div className="px-3 py-6 text-sm text-muted-foreground text-center">Нет продаж по выбранному периоду и фильтрам.</div>
             )}
           </div>
         </>
@@ -211,7 +213,7 @@ export function StoreSalesPanel({ companyId, dateFrom, dateTo, stations }: { com
       {/* Расшифровка строки: товар и смена — единственные группировки, за которыми стоит
           сущность; у остальных строка агрегатная и по клику не раскрывается. */}
       {openSku && (
-        <SkuDetailModal guid={openSku} dateFrom={dateFrom} dateTo={dateTo}
+        <SkuDetailModal guid={openSku} dateFrom={dateFrom} dateTo={dateTo} stations={stations}
           onClose={() => setOpenSku(null)} />
       )}
       {openShift && (

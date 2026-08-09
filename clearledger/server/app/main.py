@@ -294,8 +294,15 @@ app.include_router(corporate_router.router, prefix=API_PREFIX)
 app.include_router(retail_router.router, prefix=API_PREFIX)
 app.include_router(tariff_router.router, prefix=API_PREFIX)
 app.include_router(overview_router.router, prefix=API_PREFIX)
-app.include_router(store_router.router, prefix=API_PREFIX)
+# Роутеры с префиксом /store подключаются ДО store_router.
+#
+# У него на хвосте стоит catch-all `/{report}` с обязательными date_from и
+# date_to, и он перехватывает всё, что зарегистрировано после него: запрос
+# `/api/store/access-policy` уходил в него и отвечал 422 «нет дат». Наружу это
+# выглядело как отказ прав — политика доступа не приезжала, и кнопка «Работать»
+# на рабочем месте АЗС гасла у человека, у которого назначение на станцию есть.
 app.include_router(business_access_router.router, prefix=API_PREFIX)
+app.include_router(store_router.router, prefix=API_PREFIX)
 app.include_router(netservice_router.router, prefix=API_PREFIX)
 app.include_router(meetings_router.router, prefix=API_PREFIX)
 app.include_router(chat_router.router, prefix=API_PREFIX)

@@ -21,6 +21,7 @@ import {
 } from '@/services/storeService'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useWorkspace } from '@/contexts/WorkspaceContext'
+import { rowDrill } from './rowDrill'
 
 /** Молчание в человеческих единицах: секунды оператору ничего не говорят. */
 function silence(sec: number | null): string {
@@ -134,7 +135,7 @@ function StationExchangeDialog({ stationId, dateFrom, dateTo, onClose }: {
   stationId: number; dateFrom: string; dateTo: string; onClose: () => void
 }) {
   const { company } = useCompany()
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['store-exchange-station', company.id, stationId, dateFrom, dateTo],
     queryFn: () => getStoreExchangeStation(stationId, dateFrom, dateTo),
   })
@@ -154,7 +155,12 @@ function StationExchangeDialog({ stationId, dateFrom, dateTo, onClose }: {
           </DialogDescription>
         </DialogHeader>
 
-        {isLoading || !data ? (
+        {error ? (
+          <div className="p-4 text-sm text-red-400/90">
+            Не удалось получить историю обмена станции.{' '}
+            <button type="button" className="underline" onClick={() => refetch()}>Повторить</button>
+          </div>
+        ) : isLoading || !data ? (
           <div className="p-4 text-sm text-muted-foreground">Загрузка обмена станции…</div>
         ) : (
           <div className="space-y-5">
@@ -407,7 +413,7 @@ export function StoreStationsPanel({ dateFrom, dateTo }: { dateFrom: string; dat
   // их в одной таблице нельзя: у сети вопрос «где плохо», у станции — «что там
   // произошло», и ответы на них живут в разных разрезах.
   const [выбрана, выбрать] = useState<number | null>(null)
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['store-exchange', company.id, dateFrom, dateTo],
     queryFn: () => getStoreExchange(dateFrom, dateTo),
     // Экран смотрят, когда что-то пошло не так — данные должны быть свежими.
@@ -415,7 +421,7 @@ export function StoreStationsPanel({ dateFrom, dateTo }: { dateFrom: string; dat
   })
 
   if (isLoading) return <div className="p-6 text-sm text-muted-foreground">Загрузка обмена…</div>
-  if (error) return <div className="p-6 text-sm text-red-400/90">Не удалось получить состояние обмена</div>
+  if (error) return <div className="p-6 text-sm text-red-400/90">Не удалось получить состояние обмена. <button type="button" className="underline" onClick={() => refetch()}>Повторить</button></div>
   if (!data) return null
 
   const { totals, stations, by_kind, by_day, recent, ingest } = data
@@ -509,9 +515,11 @@ export function StoreStationsPanel({ dateFrom, dateTo }: { dateFrom: string; dat
             <tbody>
               {stations.map((s: StoreExchangeStation) => (
                 <tr key={s.station_id}
-                    className="cursor-pointer border-b border-border last:border-0 hover:bg-muted/40"
-                    onClick={() => выбрать(s.station_id)}
-                    title={`АЗС ${s.station_id}: сеансы, состав обмена, задания вниз`}>
+                    {...rowDrill(
+                      () => выбрать(s.station_id),
+                      `АЗС ${s.station_id}: сеансы, состав обмена, задания вниз`,
+                      'border-b border-border last:border-0 hover:bg-muted/40',
+                    )}>
                   <td className="px-3 py-2 font-medium">{s.station_id}</td>
                   <td className="px-3 py-2"><StateDot state={s.state} /></td>
                   <td className="px-3 py-2 text-muted-foreground">{silence(s.silence_seconds)}</td>

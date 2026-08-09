@@ -38,7 +38,7 @@ export function StorePricingWorkPanel({ companyId, dateFrom, dateTo, stations }:
       </div>
       {вкладка === 'tool'
         ? <StoreRepricingPanel companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} stations={stations} />
-        : <StoreRevaluationPanel companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />}
+        : <StoreRevaluationPanel companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} stations={stations} />}
     </div>
   )
 }

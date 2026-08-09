@@ -7,10 +7,11 @@
 очередь edge_downlink (kind="user_roster").
 
 Кого включаем в ростер станции:
-  * только членов с явным grant station_administrator на эту АЗС.
+  * членов с явным grant station_administrator на эту АЗС;
+  * суперадминов платформы — с синтетическим grant этой станции.
 
-Технический admin/суперадмин и объектный скоуп сами по себе права работать с
-товаром на станции не дают. Товаровед сети попадает в ростер только если у него
+Технический admin и объектный скоуп сами по себе права работать с товаром на
+станции не дают. Товаровед сети попадает в ростер только если у него
 одновременно есть grant администратора этой станции.
 Исключаем mail_only (вход невозможен) и тех, у кого нет ни PIN, ни пароля.
 """
@@ -18,10 +19,15 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..business_access import has_station_administrator, store_policy
+from ..business_access import (
+    ROLE_STATION_ADMINISTRATOR,
+    SCOPE_STATION,
+    has_station_administrator,
+    store_policy,
+)
 from ..models import Company, EdgeAgent, EdgeDownlink, User, UserCompany
 
 ROSTER_KIND = "user_roster"
@@ -32,10 +38,24 @@ def _covers(grants: list[dict] | None, station_id: int) -> bool:
     return has_station_administrator(grants, station_id)
 
 
+def _effective_grants(
+    grants: list[dict] | None, station_id: int, *, is_superadmin: bool
+) -> list[dict]:
+    result = [dict(grant) for grant in grants or []]
+    if is_superadmin and not _covers(result, station_id):
+        result.append({
+            "role": ROLE_STATION_ADMINISTRATOR,
+            "scope_type": SCOPE_STATION,
+            "scope_id": str(station_id),
+            "synthetic": True,
+        })
+    return result
+
+
 async def build_station_roster(
     db: AsyncSession, company_id, station_id: int
 ) -> list[dict]:
-    """Профили с явным grant администратора этой станции."""
+    """Профили администраторов станции и суперадминов платформы."""
     out: list[dict] = []
     seen: set = set()
 
@@ -60,12 +80,18 @@ async def build_station_roster(
     rows = (
         await db.execute(
             select(User, UserCompany)
-            .join(UserCompany, UserCompany.user_id == User.id)
-            .where(UserCompany.company_id == company_id)
+            .outerjoin(
+                UserCompany,
+                and_(UserCompany.user_id == User.id, UserCompany.company_id == company_id),
+            )
+            .where(or_(User.is_superadmin.is_(True), UserCompany.company_id == company_id))
         )
     ).all()
     for user, member in rows:
-        grants = list(getattr(member, "business_grants", None) or [])
+        grants = _effective_grants(
+            getattr(member, "business_grants", None), station_id,
+            is_superadmin=bool(user.is_superadmin),
+        )
         if _covers(grants, station_id):
             # Станционный grant обязателен; сетевой сохраняем, если он есть у
             # того же человека, чтобы профиль отражал объединение его ролей.

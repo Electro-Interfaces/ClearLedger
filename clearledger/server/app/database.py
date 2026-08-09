@@ -34,6 +34,90 @@ class Base(DeclarativeBase):
     pass
 
 
+STORE_RECEIPT_MIGRATION_DDL = (
+    "ALTER TABLE store_receipts ALTER COLUMN station_id DROP NOT NULL",
+    "ALTER TABLE store_receipts ADD COLUMN IF NOT EXISTS services JSONB NOT NULL DEFAULT '[]'::jsonb",
+    "ALTER TABLE store_receipts ADD COLUMN IF NOT EXISTS evidence JSONB NOT NULL DEFAULT '{}'::jsonb",
+    "ALTER TABLE store_receipts ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1",
+    "ALTER TABLE store_receipts ADD COLUMN IF NOT EXISTS dedup_key VARCHAR(64)",
+    "ALTER TABLE store_receipts ADD COLUMN IF NOT EXISTS supplier_id UUID "
+    "REFERENCES counterparties(id) ON DELETE RESTRICT",
+    "ALTER TABLE store_receipts ADD COLUMN IF NOT EXISTS contract_id UUID "
+    "REFERENCES contracts(id) ON DELETE RESTRICT",
+    "CREATE INDEX IF NOT EXISTS ix_store_receipts_supplier ON store_receipts (company_id, supplier_id)",
+    "CREATE INDEX IF NOT EXISTS ix_store_receipts_contract ON store_receipts (company_id, contract_id)",
+    "ALTER TABLE store_receipts DROP CONSTRAINT IF EXISTS store_receipts_source_uuid_key",
+    "DROP INDEX IF EXISTS ix_store_receipts_source_uuid",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_store_receipts_company_source "
+    "ON store_receipts (company_id, source_uuid) WHERE source_uuid IS NOT NULL",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_store_receipts_company_dedup "
+    "ON store_receipts (company_id, dedup_key) WHERE dedup_key IS NOT NULL",
+    "ALTER TABLE edge_downlink ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(200)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_edge_downlink_company_idempotency "
+    "ON edge_downlink (company_id, idempotency_key) WHERE idempotency_key IS NOT NULL",
+    "ALTER TABLE IF EXISTS edge.partner ADD COLUMN IF NOT EXISTS external_uuid UUID",
+    """
+    DO $$ BEGIN
+        IF to_regclass('edge.partner') IS NOT NULL THEN
+            EXECUTE 'CREATE UNIQUE INDEX IF NOT EXISTS uq_edge_partner_company_external_uuid '
+                    'ON edge.partner (company_id, external_uuid) WHERE external_uuid IS NOT NULL';
+        END IF;
+    END $$
+    """,
+    """
+    DO $$ BEGIN
+        IF to_regclass('edge.partner') IS NOT NULL THEN
+            EXECUTE $sql$
+                UPDATE edge.partner p
+                   SET external_uuid = c.id
+                  FROM counterparties c
+                 WHERE p.external_uuid IS NULL
+                   AND c.company_id = p.company_id
+                   AND regexp_replace(c.inn, '\\D', '', 'g') =
+                       regexp_replace(coalesce(p.inn, ''), '\\D', '', 'g')
+                   AND regexp_replace(coalesce(p.inn, ''), '\\D', '', 'g') <> ''
+                   AND (SELECT count(*) FROM counterparties c2
+                         WHERE c2.company_id = p.company_id
+                           AND regexp_replace(c2.inn, '\\D', '', 'g') =
+                               regexp_replace(coalesce(p.inn, ''), '\\D', '', 'g')) = 1
+                   AND NOT EXISTS (SELECT 1 FROM edge.partner p2
+                                    WHERE p2.company_id = p.company_id
+                                      AND p2.external_uuid = c.id)
+            $sql$;
+        END IF;
+    END $$
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS store_receipt_stock_movements (
+        id UUID PRIMARY KEY,
+        company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+        receipt_id UUID NOT NULL REFERENCES store_receipts(id) ON DELETE RESTRICT,
+        reversal_of_id UUID REFERENCES store_receipt_stock_movements(id) ON DELETE RESTRICT,
+        allocation_id VARCHAR(64),
+        line_index INTEGER NOT NULL,
+        station_id INTEGER,
+        warehouse VARCHAR(200) NOT NULL,
+        item_key VARCHAR(200) NOT NULL,
+        item_uuid VARCHAR(64),
+        barcode VARCHAR(100),
+        quantity NUMERIC(16,3) NOT NULL,
+        unit_cost NUMERIC(16,4) NOT NULL DEFAULT 0,
+        amount NUMERIC(16,2) NOT NULL DEFAULT 0,
+        kind VARCHAR(40) NOT NULL,
+        idempotency_key VARCHAR(200) NOT NULL,
+        created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        CONSTRAINT uq_store_receipt_stock_movement_key
+            UNIQUE (company_id, idempotency_key)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS ix_store_receipt_stock_movement_receipt "
+    "ON store_receipt_stock_movements (receipt_id, created_at)",
+    "CREATE INDEX IF NOT EXISTS ix_store_receipt_stock_movement_balance "
+    "ON store_receipt_stock_movements (company_id, warehouse, item_key, created_at)",
+)
+
+
 async def create_all() -> None:
     """Создаёт все таблицы (если не существуют) + инкрементальные миграции."""
     async with engine.begin() as conn:
@@ -1381,6 +1465,12 @@ async def create_all() -> None:
             "ALTER TABLE store_receipts ADD COLUMN IF NOT EXISTS distribution "
             "JSONB NOT NULL DEFAULT '[]'::jsonb",
         ):
+            await conn.execute(_sa.text(stmt))
+
+        # v2.38: единый документ приёмки, идемпотентный downlink и неизменяемые
+        # складские проводки центрального склада. Для старой БД одного изменения
+        # ORM недостаточно: create_all не добавляет колонки в готовую таблицу.
+        for stmt in STORE_RECEIPT_MIGRATION_DDL:
             await conn.execute(_sa.text(stmt))
 
         # v2.37: станция заявляет об ошибке в сетевой карточке.

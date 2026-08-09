@@ -839,17 +839,27 @@ def _is_cashless(форма: str) -> bool:
     return not any(k in f for k in ("наличн", "нал."))
 
 
-def _attach_purchases(ib: Any, orp: Any) -> list[dict[str, Any]]:
+def _contract_kind(value: Any) -> str:
+    normalized = str(_val(value) or "").replace(" ", "").lower()
+    return {
+        "спокупателем": "СПокупателем",
+        "споставщиком": "СПоставщиком",
+        "спрочими": "СПрочими",
+    }.get(normalized, "СПоставщиком")
+
+
+def _attach_purchases(ib: Any, orp: Any) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """ПТУ (приходы) по Склад=ОРП.Склад + Дата ∈ [Открытие..Закрытие] (как .epf).
 
     ВидОперации=ОтПоставщика; документы с услугами/тарой пропускаются. → kind=purchase.
     """
     out: list[dict[str, Any]] = []
+    nsi: dict[tuple[str, str], dict[str, Any]] = {}
     try:
         otkr = getattr(orp, "ДатаВремяОткрытия", None)
         zakr = getattr(orp, "ДатаВремяЗакрытия", None)
         if not (otkr and zakr):
-            return out
+            return out, []
         q = ib.NewObject("Запрос")
         q.Текст = (
             "ВЫБРАТЬ Док.Ссылка КАК Ссылка, Док.Номер КАК Ном, Док.Дата КАК Дата, "
@@ -872,6 +882,41 @@ def _attach_purchases(ib: Any, orp: Any) -> list[dict[str, Any]]:
             obj = s.Ссылка.ПолучитьОбъект()
             if obj.Услуги.Количество() > 0 or obj.ВозвратнаяТара.Количество() > 0:
                 continue
+            контрагент_uuid = _xs(ib, obj.Контрагент)
+            договор_uuid = _xs(ib, obj.ДоговорКонтрагента)
+            контрагент = obj.Контрагент
+            if контрагент_uuid:
+                nsi[("Контрагент", контрагент_uuid)] = {
+                    "Тип": "Контрагент",
+                    "ИсточникUUID": контрагент_uuid,
+                    "Наименование": str(_val(getattr(контрагент, "Наименование", "")) or "").strip(),
+                    "НаименованиеПолное": str(
+                        _val(getattr(контрагент, "НаименованиеПолное", "")) or ""
+                    ).strip(),
+                    "ИНН": str(_val(getattr(контрагент, "ИНН", "")) or "").strip(),
+                    "КПП": str(_val(getattr(контрагент, "КПП", "")) or "").strip(),
+                    "ВидКонтрагента": str(
+                        _val(getattr(контрагент, "ВидКонтрагента", "")) or "ЮрЛицо"
+                    ).strip(),
+                    "ПометкаУдаления": bool(_val(getattr(контрагент, "ПометкаУдаления", False))),
+                }
+            if договор_uuid:
+                договор = obj.ДоговорКонтрагента
+                договор_дата = str(_val(getattr(договор, "Дата", "")) or "")[:10]
+                nsi[("Договор", договор_uuid)] = {
+                    "Тип": "Договор",
+                    "ИсточникUUID": договор_uuid,
+                    "ВладелецКонтрагент": контрагент_uuid,
+                    "Организация": _xs(ib, getattr(договор, "Организация", None)),
+                    "Наименование": str(
+                        _val(getattr(договор, "Наименование", "")) or ""
+                    ).strip(),
+                    "Номер": str(_val(getattr(договор, "Номер", "")) or "").strip(),
+                    "Дата": договор_дата,
+                    "ВидДоговора": _contract_kind(getattr(договор, "ВидДоговора", "")),
+                    "ВалютаВзаиморасчётов": "RUB",
+                    "ПометкаУдаления": bool(_val(getattr(договор, "ПометкаУдаления", False))),
+                }
             ql = ib.NewObject("Запрос")
             ql.Текст = (
                 "ВЫБРАТЬ Т.НомерСтроки КАК НС, Т.Номенклатура КАК Ном, Т.Количество КАК Кол, "
@@ -899,12 +944,22 @@ def _attach_purchases(ib: Any, orp: Any) -> list[dict[str, Any]]:
                 # Истина; для ПТУ «без НДС» net = Сумма без повторного вычитания).
                 "СуммаВключаетНДС": bool(_val(s.СумВклНДС)),
                 "Организация": _xs(ib, s.Орг), "СуммаДокумента": float(_val(s.СумДок) or 0),
-                "Контрагент": _xs(ib, s.Контр), "Товары": tovary,
+                "Контрагент": контрагент_uuid,
+                "ДоговорКонтрагента": договор_uuid,
+                "НДСНеВыделять": not bool(_val(getattr(obj, "УчитыватьНДС", True))),
+                "НДСВключенВСтоимость": False,
+                "НомерВходящегоДокумента": str(
+                    _val(getattr(obj, "НомерВходящегоДокумента", "")) or ""
+                ).strip(),
+                "ДатаВходящегоДокумента": str(
+                    _val(getattr(obj, "ДатаВходящегоДокумента", "")) or ""
+                )[:10],
+                "Товары": tovary,
             })
     except Exception as _e:
         # Не глушим молча (раньше `return out` маскировал синтакс-ошибку запроса → 0 ПТУ).
         raise RuntimeError(f"_attach_purchases (Склад ОРП): {_e}")
-    return out
+    return out, list(nsi.values())
 
 
 def _build_shift_package(ib: Any, orp: Any, station: str) -> dict[str, Any]:
@@ -1003,6 +1058,7 @@ def _build_shift_package(ib: Any, orp: Any, station: str) -> dict[str, Any]:
         "СуммаДокумента": float(_val(getattr(orp, "СуммаДокумента", 0)) or 0),
         "Товары": tovary, "Оплаты": oplaty, "ВозвращенныеТовары": vozvraty,
     }
+    purchases, purchase_nsi = _attach_purchases(ib, orp)
     return {
         "ВерсияФормата": "2",
         "Смена": {
@@ -1014,7 +1070,8 @@ def _build_shift_package(ib: Any, orp: Any, station: str) -> dict[str, Any]:
             "Закрытие": str(_val(getattr(orp, "ДатаВремяЗакрытия", ""))),
             "Склад": _xs(ib, orp.Склад), "Организация": _xs(ib, orp.Организация),
         },
-        "Документы": recipes + _attach_purchases(ib, orp) + [doc],
+        "Документы": recipes + purchases + [doc],
+        "НСИ": purchase_nsi,
     }
 
 

@@ -190,12 +190,15 @@ async def compare(db: AsyncSession, cid, date_from, date_to,
         "by_station": sorted(по_станциям.values(), key=lambda x: x["station_id"]),
         "up": [в for в in вклады if в["delta_margin"] > 0][:20],
         "down": [в for в in вклады if в["delta_margin"] < 0][:20],
+        "up_total": sum(1 for в in вклады if в["delta_margin"] > 0),
+        "down_total": sum(1 for в in вклады if в["delta_margin"] < 0),
         "has_prev": bool(раньше),
     }
 
 
 async def price_log(db: AsyncSession, cid, date_from, date_to,
-                    stations: list[int] | None = None) -> dict:
+                    stations: list[int] | None = None, *, offset: int = 0,
+                    limit: int = 100) -> dict:
     """Журнал цен сети: кто и когда двигал цену, было → стало.
 
     История лежит в `edge.price`: приёмник закрывает прежнюю запись и заводит
@@ -204,20 +207,29 @@ async def price_log(db: AsyncSession, cid, date_from, date_to,
     d1, d2 = _период(date_from, date_to)
     # Компания в edge.item не хранится: справочник номенклатуры общий, а
     # принадлежность даёт станция. Поэтому отбор идёт по станциям компании.
-    p = {"d1": d1, "d2": d2}
+    p = {"cid": cid, "d1": d1, "d2": d2, "offset": offset, "limit": limit}
     ф = " AND p.station_id = ANY(:st)" if stations else ""
     if stations:
         p["st"] = stations
     rows = (await db.execute(text(f"""
-        SELECT p.station_id, p.price, p.valid_from, p.author,
-               i.name, i.external_uuid AS item_uuid,
-               lag(p.price) OVER (PARTITION BY p.item_id, p.station_id
-                                  ORDER BY p.valid_from) AS price_prev
-        FROM edge.price p
-        JOIN edge.item i ON i.id = p.item_id
-        WHERE p.valid_from BETWEEN :d1 AND :d2{ф}
-        ORDER BY p.valid_from DESC
-        LIMIT 500
+        WITH history AS (
+            SELECT p.station_id, p.price, p.valid_from, p.author,
+                   i.name, i.external_uuid AS item_uuid,
+                   lag(p.price) OVER (PARTITION BY p.item_id, p.station_id
+                                      ORDER BY p.valid_from) AS price_prev
+            FROM edge.price p
+            JOIN edge.item i ON i.id = p.item_id
+            WHERE p.station_id IN (
+                SELECT station_id FROM edge_agents WHERE company_id = :cid
+            ){ф}
+        ), filtered AS (
+            SELECT *, count(*) OVER () AS total_count
+            FROM history
+            WHERE valid_from BETWEEN :d1 AND :d2
+        )
+        SELECT * FROM filtered
+        ORDER BY valid_from DESC, station_id, item_uuid
+        LIMIT :limit OFFSET :offset
     """), p)).mappings().all()
     строки = []
     for r in rows:
@@ -232,4 +244,8 @@ async def price_log(db: AsyncSession, cid, date_from, date_to,
             "delta": round(стало - было, 2) if было is not None else None,
             "delta_pct": round((стало - было) / было * 100, 2) if было else None,
         })
-    return {"rows": строки, "total": len(строки)}
+    total = int(rows[0]["total_count"]) if rows else 0
+    return {
+        "rows": строки, "total": total, "offset": offset, "limit": limit,
+        "truncated": offset + len(строки) < total,
+    }

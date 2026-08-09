@@ -16,12 +16,75 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import DataEntry
+from app.models import CbRef, DataEntry
 from app.selfcheck_catalog import list_selfchecks
 from app.services import mapping
 from app.services.cb_normalize import normalize_shift_package
 from app.services.edge_projection import load_ingredients
 from app.services.reconcile import selfcheck
+
+
+_NSI_KIND = {
+    "Контрагент": "counterparty",
+    "Договор": "contract",
+    "Организация": "organization",
+    "Склад": "warehouse",
+}
+
+_NSI_EXTRA = {
+    "НаименованиеПолное": "full_name",
+    "ИНН": "inn",
+    "КПП": "kpp",
+    "ОГРН": "ogrn",
+    "ОКПО": "okpo",
+    "ЮрФизЛицо": "jur_fiz",
+    "ВидКонтрагента": "jur_fiz",
+    "ВладелецКонтрагент": "owner_ref",
+    "Организация": "organization_ref",
+    "Номер": "number",
+    "Дата": "date",
+    "ВидДоговора": "kind",
+    "ВалютаВзаиморасчётов": "currency",
+    "Код": "code",
+    "ВидСклада": "kind_name",
+    "ПометкаУдаления": "deleted",
+}
+
+
+async def _ingest_nsi(db: AsyncSession, company_id: uuid.UUID, cards: list[dict]) -> tuple[int, int]:
+    created = 0
+    updated = 0
+    for card in cards:
+        kind = _NSI_KIND.get(str(card.get("Тип") or ""))
+        external_ref = str(card.get("ИсточникUUID") or "").strip()
+        if not kind or not external_ref:
+            continue
+        name = str(card.get("Наименование") or "").strip()
+        extra = {
+            target: card[source]
+            for source, target in _NSI_EXTRA.items()
+            if source in card
+        }
+        extra["source_card"] = dict(card)
+        row = (await db.execute(select(CbRef).where(
+            CbRef.company_id == company_id,
+            CbRef.kind == kind,
+            CbRef.external_ref == external_ref,
+        ))).scalar_one_or_none()
+        if row is None:
+            db.add(CbRef(
+                company_id=company_id,
+                kind=kind,
+                external_ref=external_ref,
+                name=name,
+                extra=extra,
+            ))
+            created += 1
+        else:
+            row.name = name
+            row.extra = extra
+            updated += 1
+    return created, updated
 
 
 def _apply_paytype(entry: dict, paymap: dict[str, str]) -> None:
@@ -46,6 +109,8 @@ async def ingest_packages(
     """
     created = 0
     updated = 0
+    nsi_created = 0
+    nsi_updated = 0
     shifts = 0
     skipped: list[str] = []
     paymap = await mapping.load_kind_map(db, company_id, "paytype", channel_id)
@@ -55,6 +120,9 @@ async def ingest_packages(
     sc_checked = 0
 
     for pkg in packages:
+        nsi_result = await _ingest_nsi(db, company_id, pkg.get("НСИ") or [])
+        nsi_created += nsi_result[0]
+        nsi_updated += nsi_result[1]
         res = normalize_shift_package(pkg, ingredients=ingredients)
         shifts += 1
         skipped.extend(res.get("skipped", []))
@@ -115,6 +183,8 @@ async def ingest_packages(
         "shifts": shifts,
         "created": created,
         "updated": updated,
+        "nsi_created": nsi_created,
+        "nsi_updated": nsi_updated,
         "skipped_kinds": sorted(set(skipped)),
         "selfcheck": {
             "checked": sc_checked,

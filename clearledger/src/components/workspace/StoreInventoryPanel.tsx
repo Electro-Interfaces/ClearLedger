@@ -19,21 +19,24 @@ import { NomenclatureCardModal } from './NomenclatureCardModal'
 const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: d }).format(n)
 const money = (n: number) => (n === 0 ? '—' : fmtMoney(n))
 
-export function StoreInventoryPanel({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom?: string; dateTo?: string }) {
+export function StoreInventoryPanel({ companyId, dateFrom, dateTo, stations }: {
+  companyId: string; dateFrom?: string; dateTo?: string; stations?: string[]
+}) {
   const [warehouse, setWarehouse] = useState<string | undefined>(undefined)
   const [onlyDev, setOnlyDev] = useState(false)
   const [openDoc, setOpenDoc] = useState<StoreInventoryDoc | null>(null)
   const [sku, setSku] = useState<string | null>(null)
 
-  const { data, isLoading, error } = useQuery({
-    queryKey: ['store-inventory', companyId, warehouse ?? '', onlyDev, dateFrom, dateTo],
-    queryFn: () => getStoreInventory({ warehouse, onlyDev, dateFrom, dateTo }),
+  const { data, isLoading, error, refetch } = useQuery({
+    queryKey: ['store-inventory', companyId, warehouse ?? '', onlyDev, dateFrom, dateTo, stations?.join(',') ?? ''],
+    queryFn: () => getStoreInventory({ warehouse, onlyDev, dateFrom, dateTo, stations }),
   })
 
   const docs = useMemo(() => data?.docs ?? [], [data])
+  const показ = useVisible(docs)
 
   if (isLoading) return <div className="p-6 text-sm text-muted-foreground">Загрузка инвентаризаций…</div>
-  if (error) return <div className="p-6 text-sm text-red-400/90">Ошибка загрузки инвентаризаций</div>
+  if (error) return <div className="p-6 text-sm text-red-400/90">Ошибка загрузки инвентаризаций. <button type="button" className="underline" onClick={() => refetch()}>Повторить</button></div>
   if (!data) return null
 
   const s = data.summary
@@ -44,10 +47,6 @@ export function StoreInventoryPanel({ companyId, dateFrom, dateTo }: { companyId
     { label: 'Излишки', value: money(s.surplus_amount), cls: 'text-emerald-300/90', hint: 'оприходование' },
     { label: 'Итог (shrinkage)', value: money(s.net_amount), cls: s.net_amount < 0 ? 'text-red-400/90' : 'text-emerald-300/90' },
   ]
-
-  // Список показывается порциями: обрезать его молча нельзя —
-  // товаровед приходит смотреть весь ассортимент, а не первые строки.
-  const показ = useVisible(docs)
 
   return (
     <div className="p-6 space-y-4">
@@ -107,11 +106,11 @@ export function StoreInventoryPanel({ companyId, dateFrom, dateTo }: { companyId
             </thead>
             <tbody>
               {показ.visible.map((d) => (
-                <tr
-                  key={d.ref}
-                  onClick={() => d.dev_positions && setOpenDoc(d)}
-                  className={`border-t border-border/30 ${d.dev_positions ? 'hover:bg-accent/20 cursor-pointer' : 'opacity-60'}`}
-                >
+                <tr key={d.ref} {...rowDrill(
+                  d.lines.length ? () => setOpenDoc(d) : null,
+                  `инвентаризация ${d.number ?? ''}`,
+                  'border-t border-border/30',
+                )}>
                   <td className="px-3 py-1.5 whitespace-nowrap">{d.date ?? '—'}</td>
                   <td className="px-3 py-1.5 tabular-nums">{d.number ?? '—'}</td>
                   <td className="px-3 py-1.5 tabular-nums text-muted-foreground" title={d.shift_reason ?? undefined}>{d.shift_number ?? '—'}</td>
@@ -129,7 +128,7 @@ export function StoreInventoryPanel({ companyId, dateFrom, dateTo }: { companyId
           )}
           {docs.length === 0 && (
             <div className="px-3 py-6 text-sm text-muted-foreground text-center">
-              Нет инвентаризаций. Наполните: <code>py -3.13 scripts/pull_cb_inventory_dev.py</code>
+              За выбранный период инвентаризаций нет.
             </div>
           )}
         </div>
@@ -165,7 +164,7 @@ export function StoreInventoryPanel({ companyId, dateFrom, dateTo }: { companyId
                   {openDoc.comment && <> · {openDoc.comment}</>}
                 </div>
               </div>
-              <button onClick={() => setOpenDoc(null)} className="text-muted-foreground hover:text-foreground text-lg leading-none px-2">×</button>
+              <button type="button" onClick={() => setOpenDoc(null)} className="text-muted-foreground hover:text-foreground text-lg leading-none px-2">×</button>
             </div>
             <div className="overflow-auto">
               <table className="w-full text-xs">
@@ -195,7 +194,7 @@ export function StoreInventoryPanel({ companyId, dateFrom, dateTo }: { companyId
         </div>
       )}
 
-      {sku && <NomenclatureCardModal guid={sku} companyId={companyId} dateFrom={dateFrom ?? ''} dateTo={dateTo ?? ''} onClose={() => setSku(null)} />}
+      {sku && <NomenclatureCardModal guid={sku} companyId={companyId} dateFrom={dateFrom ?? ''} dateTo={dateTo ?? ''} stations={stations} onClose={() => setSku(null)} />}
 
       {/* Второй источник того же предмета: реестр выше — история 1С, здесь —
           то, что заводят на самой АЗС. Пока 1С ведёт станцию, они идут рядом. */}

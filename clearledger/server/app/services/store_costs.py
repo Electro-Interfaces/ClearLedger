@@ -64,15 +64,36 @@ async def ориентиры(db: AsyncSession, cid, stations: list[int] | None =
              LATERAL jsonb_array_elements(coalesce(d->'Товары','[]'::jsonb)) l
         WHERE p.company_id = :cid{ф_p} AND d->>'Тип' = 'purchase'
           AND coalesce((l->>'Количество')::numeric, 0) > 0
+          AND NOT EXISTS (
+              SELECT 1 FROM store_receipts r
+               WHERE r.company_id = p.company_id AND r.status = 'accepted'
+                 AND (r.source_uuid = d->>'ИсточникUUID'
+                      OR r.id::text = d->>'document_id')
+          )
     """), p)).mappings().all():
         кол = float(r["qty"] or 0)
         if кол > 0:
             предложить(str(r["uuid"] or ""), float(r["amount"] or 0) / кол, r["at"], "закупка 1С")
 
-    # Реестр приёмок станции: сюда попадает то, что принял человек на АЗС.
+    # Неизменяемый ledger хранит фактическую себестоимость, включая услуги,
+    # которые поставщик включил в стоимость партии.
+    for r in (await db.execute(text(f"""
+        SELECT m.item_uuid AS uuid, m.unit_cost AS cost, r.doc_date AS at
+          FROM store_receipt_stock_movements m
+          JOIN store_receipts r ON r.id = m.receipt_id
+         WHERE r.company_id = :cid{ф.replace('station_id', 'r.station_id')}
+           AND r.status = 'accepted' AND m.kind = 'receipt_acceptance'
+           {"AND r.doc_date <= :on" if на_дату is not None else ""}
+    """), p)).mappings().all():
+        предложить(str(r["uuid"] or ""), float(r["cost"] or 0), r["at"], "ledger приёмки")
+
+    # Старые принятые документы до появления ledger остаются fallback.
     for r in (await db.execute(text(f"""
         SELECT lines, doc_date FROM store_receipts
-        WHERE company_id = :cid{ф} AND lines IS NOT NULL
+        WHERE company_id = :cid{ф} AND status = 'accepted' AND lines IS NOT NULL
+          AND NOT EXISTS (
+              SELECT 1 FROM store_receipt_stock_movements m
+               WHERE m.receipt_id = store_receipts.id AND m.kind = 'receipt_acceptance')
     """), p)).mappings().all():
         for l in r["lines"] or []:
             кол = float(l.get("qty_fact") or l.get("qty_expected") or 0)

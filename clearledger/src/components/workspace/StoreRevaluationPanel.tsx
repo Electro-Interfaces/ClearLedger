@@ -4,10 +4,12 @@
  * на стоимость остатка (Σ Δ×кол). Данные: /api/store/revaluation. Клик по док → строки.
  * ⚠ Экстремальные % часто = коррекции плейсхолдер-цен / весовые (цена за баз. ед.).
  */
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { getStoreRevaluation, type StoreRevalDoc, type StoreRevalMove } from '@/services/storeService'
 import { fmtMoney } from '@/services/analyticsService'
+import { ShowMore, useVisible } from '@/components/common/ShowMore'
+import { rowDrill } from './rowDrill'
 
 const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: d }).format(n)
 const pct = (v: number | null) => (v == null ? '—' : `${v > 0 ? '+' : ''}${nf(v, 1)}%`)
@@ -40,29 +42,34 @@ function MoveList({ title, moves, up }: { title: string; moves: StoreRevalMove[]
   )
 }
 
-export function StoreRevaluationPanel({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom?: string; dateTo?: string }) {
+export function StoreRevaluationPanel({ companyId, dateFrom, dateTo, stations }: {
+  companyId: string; dateFrom?: string; dateTo?: string; stations?: string[]
+}) {
   const [reason, setReason] = useState<string | null>(null)
   const [openDoc, setOpenDoc] = useState<StoreRevalDoc | null>(null)
 
-  const { data, isLoading, error } = useQuery({
-    queryKey: ['store-revaluation', companyId, dateFrom, dateTo],
-    queryFn: () => getStoreRevaluation({ dateFrom, dateTo }),
+  const { data, isLoading, error, refetch } = useQuery({
+    queryKey: ['store-revaluation', companyId, dateFrom, dateTo, stations?.join(',') || '', reason],
+    queryFn: () => getStoreRevaluation({ dateFrom, dateTo, stations, reason: reason || undefined }),
   })
 
-  const docs = useMemo(
-    () => (data?.docs ?? []).filter((d) => !reason || d.reason === reason),
-    [data, reason],
-  )
+  const docs = data?.docs ?? []
+  const visible = useVisible(docs)
 
   if (isLoading) return <div className="p-6 text-sm text-muted-foreground">Загрузка переоценок…</div>
-  if (error) return <div className="p-6 text-sm text-red-400/90">Ошибка загрузки переоценок</div>
+  if (error) return (
+    <div className="p-6 text-sm text-red-400/90">
+      Не удалось загрузить переоценки.{' '}
+      <button type="button" className="underline" onClick={() => refetch()}>Повторить</button>
+    </div>
+  )
   if (!data) return null
 
   const s = data.summary
   const maxCount = Math.max(1, ...data.by_reason.map((r) => r.count))
 
   const KPIS: { label: string; value: string; hint?: string; cls?: string }[] = [
-    { label: 'Переоценок', value: nf(docs.length), hint: `${s.period_from ?? ''} – ${s.period_to ?? ''}` },
+    { label: 'Переоценок', value: nf(s.docs_count), hint: `${s.period_from ?? ''} – ${s.period_to ?? ''}` },
     { label: 'Строк подорожало / подешевело', value: `${nf(s.up_lines)} / ${nf(s.down_lines)}`, hint: 'строк в документах, не документов' },
     { label: 'Средн. изменение', value: s.avg_pct == null ? '—' : `${s.avg_pct > 0 ? '+' : ''}${nf(s.avg_pct, 1)}%`, cls: (s.avg_pct ?? 0) < 0 ? 'text-red-400/90' : 'text-emerald-300/90' },
     { label: 'Влияние на стоимость', value: s.value_impact === 0 ? '—' : fmtMoney(s.value_impact), hint: 'Σ Δцены × остаток', cls: s.value_impact < 0 ? 'text-red-400/90' : 'text-emerald-300/90' },
@@ -74,7 +81,7 @@ export function StoreRevaluationPanel({ companyId, dateFrom, dateTo }: { company
         <h3 className="text-base font-semibold">Переоценка</h3>
         <p className="text-xs text-muted-foreground mt-0.5">
           Реестр переоценок из ЦБ: старая→новая цена, Δ%, влияние на стоимость остатка. Клик по документу — строки.
-          {reason && <> Фильтр: <b>{reason}</b> <button className="underline ml-1" onClick={() => setReason(null)}>сбросить</button></>}
+          {reason && <> Фильтр: <b>{reason}</b> <button type="button" className="underline ml-1" onClick={() => setReason(null)}>сбросить</button></>}
         </p>
       </div>
 
@@ -99,7 +106,8 @@ export function StoreRevaluationPanel({ companyId, dateFrom, dateTo }: { company
         <div className="space-y-1.5">
           {data.by_reason.map((r) => (
             <button
-              key={r.reason} onClick={() => setReason(reason === r.reason ? null : r.reason)}
+              type="button" key={r.reason} onClick={() => setReason(reason === r.reason ? null : r.reason)}
+              aria-pressed={reason === r.reason}
               className={`w-full flex items-center gap-2 text-xs group ${reason === r.reason ? 'font-semibold' : ''}`}
             >
               <span className="w-40 text-left truncate shrink-0">{r.reason}</span>
@@ -125,9 +133,10 @@ export function StoreRevaluationPanel({ companyId, dateFrom, dateTo }: { company
             </tr>
           </thead>
           <tbody>
-            {docs.slice(0, 300).map((d) => (
-              <tr key={d.ref} onClick={() => d.positions && setOpenDoc(d)}
-                className={`border-t border-border/30 ${d.positions ? 'hover:bg-accent/20 cursor-pointer' : 'opacity-60'}`}>
+            {visible.visible.map((d) => (
+              <tr key={d.ref}
+                {...rowDrill(d.positions ? () => setOpenDoc(d) : null, `Открыть переоценку ${d.number ?? ''}`,
+                  `border-t border-border/30 ${d.positions ? 'hover:bg-accent/20' : 'opacity-60'}`)}>
                 <td className="px-3 py-1.5 whitespace-nowrap">{d.date ?? '—'}</td>
                 <td className="px-3 py-1.5 tabular-nums">{d.number ?? '—'}</td>
                 <td className="px-3 py-1.5">{d.reason}</td>
@@ -137,10 +146,11 @@ export function StoreRevaluationPanel({ companyId, dateFrom, dateTo }: { company
             ))}
           </tbody>
         </table>
-        {docs.length > 300 && <div className="px-3 py-2 text-[11px] text-muted-foreground border-t border-border/30">Показано 300 из {nf(docs.length)}.</div>}
+        <ShowMore shown={visible.visible.length} total={docs.length} hasMore={visible.hasMore}
+          onMore={visible.more} onAll={visible.all} unit="документов" />
         {docs.length === 0 && (
           <div className="px-3 py-6 text-sm text-muted-foreground text-center">
-            Нет переоценок. Наполните: <code>py -3.13 scripts/pull_cb_revaluation_dev.py</code>
+            За выбранный период и станции переоценок нет.
           </div>
         )}
       </div>
@@ -157,7 +167,7 @@ export function StoreRevaluationPanel({ companyId, dateFrom, dateTo }: { company
                   {openDoc.comment && <> · {openDoc.comment}</>}
                 </div>
               </div>
-              <button onClick={() => setOpenDoc(null)} className="text-muted-foreground hover:text-foreground text-lg leading-none px-2">×</button>
+              <button type="button" aria-label="Закрыть" onClick={() => setOpenDoc(null)} className="text-muted-foreground hover:text-foreground text-lg leading-none px-2">×</button>
             </div>
             <div className="overflow-auto">
               <table className="w-full text-xs">

@@ -44,7 +44,7 @@ function DocGroup<T extends { number: string | null; lines: ShiftDocLine[] }>({
       <div>
         {docs.map((d, i) => (
           <div key={i} className="border-t border-border/20 first:border-t-0">
-            <button onClick={() => setOpen(open === i ? null : i)}
+            <button type="button" onClick={() => setOpen(open === i ? null : i)}
               aria-expanded={open === i}
               className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-accent/20">
               <ChevronRight className={`h-3 w-3 shrink-0 transition-transform ${open === i ? 'rotate-90' : ''}`} />
@@ -74,7 +74,7 @@ function Метрика({ label, value, hint, cls }: {
 
 export function ShiftDetailModal({ shiftKey, companyId, onClose }: { shiftKey: string; companyId: string; onClose: () => void }) {
   const [поиск, задатьПоиск] = useState('')
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['store-shift-detail', companyId, shiftKey],
     queryFn: () => getStoreShiftDetail(shiftKey),
   })
@@ -120,10 +120,13 @@ export function ShiftDetailModal({ shiftKey, companyId, onClose }: { shiftKey: s
               {sh?.open && (
                 <div className="mt-0.5 text-[11px] text-muted-foreground">
                   открыта {sh.open}{sh.close ? ` · закрыта ${sh.close}` : ''}
+                  {sh.operator ? ` · оператор ${sh.operator}` : ''}
+                  {sh.register ? ` · пост ${sh.register}` : ''}
+                  {sh.internal_no ? ` · внутр. № ${sh.internal_no}` : ''}
                 </div>
               )}
             </div>
-            <button onClick={onClose} aria-label="Закрыть"
+            <button type="button" onClick={onClose} aria-label="Закрыть"
               className="rounded-md p-1 text-muted-foreground hover:bg-accent/30 hover:text-foreground">
               <X className="h-4 w-4" />
             </button>
@@ -143,8 +146,13 @@ export function ShiftDetailModal({ shiftKey, companyId, onClose }: { shiftKey: s
           )}
         </div>
 
-        {isLoading || !data ? (
+        {isLoading ? (
           <div className="p-6 text-sm text-muted-foreground">Загрузка смены…</div>
+        ) : error || !data ? (
+          <div className="p-6 text-sm text-red-400/90">
+            Не удалось загрузить смену.{' '}
+            <button type="button" className="underline" onClick={() => refetch()}>Повторить</button>
+          </div>
         ) : !data.found ? (
           <div className="p-6 text-sm text-muted-foreground">Смена не найдена.</div>
         ) : (

@@ -212,28 +212,28 @@ export function StorePanel() {
   if (sub === 'stock') {
     return (
       <div className="h-full overflow-y-auto">
-        <StoreStockPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />
+        <StoreStockPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} stations={scopeStations} />
       </div>
     )
   }
   if (sub === 'inventory') {
     return (
       <div className="h-full overflow-y-auto">
-        <StoreInventoryPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />
+        <StoreInventoryPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} stations={scopeStations} />
       </div>
     )
   }
   if (sub === 'writeoffs') {
     return (
       <div className="h-full overflow-y-auto">
-        <StoreWriteoffPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />
+        <StoreWriteoffPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} stations={scopeStations} />
       </div>
     )
   }
   if (sub === 'transfers') {
     return (
       <div className="h-full overflow-y-auto">
-        <StoreTransferPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />
+        <StoreTransferPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} stations={scopeStations} />
       </div>
     )
   }
@@ -345,7 +345,7 @@ export function StorePanel() {
   if (sub === 'cheques') {
     return (
       <div className="h-full overflow-y-auto">
-        <StoreChequesPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />
+        <StoreChequesPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} stations={scopeStations} />
       </div>
     )
   }

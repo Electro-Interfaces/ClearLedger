@@ -56,3 +56,22 @@ async def test_no_release_keeps_purchase_base():
 
     assert cm[GOODS][1] == "purchase"
     assert DISH not in cm
+
+
+async def test_cost_cache_is_separate_for_each_station_scope():
+    s = GoodsDashboardService(session=None, company_id=uuid.uuid4())
+
+    async def purchases(df, dt, stations):
+        amount = 500.0 if stations == ["208"] else 800.0
+        return _ptu(GOODS, amount, 10)
+
+    async def returns():
+        return []
+
+    async def releases(df, dt, stations):
+        return {}
+
+    s._load_purchases, s._load_returns, s._release_agg = purchases, returns, releases
+
+    assert (await s._cost_unit_map(["208"]))[GOODS][0] == 50
+    assert (await s._cost_unit_map(["209"]))[GOODS][0] == 80

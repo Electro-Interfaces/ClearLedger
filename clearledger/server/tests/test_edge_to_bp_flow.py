@@ -6,9 +6,11 @@ import pytest
 
 from app.services.bp_canon import packet_hash
 from app.services.bp_export import BpPackageEmitter, _nds, _stable_uuid
+from app.services.cb_intake import _ingest_nsi
 from app.services.cb_normalize import normalize_shift_package
 from app.services.edge_projection import enrich_retail_meta
 from app.services.goods_dashboard import _prefer_edge_sales
+from app.services.onec.com_worker import _contract_kind
 
 
 def _edge_package():
@@ -44,6 +46,17 @@ def _edge_package():
             "Оплаты": [{"ВидОплаты": "Наличные", "Сумма": 300}],
         }],
     }
+
+
+@pytest.mark.parametrize(("source", "expected"), [
+    ("С поставщиком", "СПоставщиком"),
+    ("СПоставщиком", "СПоставщиком"),
+    ("С покупателем", "СПокупателем"),
+    ("С прочими", "СПрочими"),
+    ("", "СПоставщиком"),
+])
+def test_contract_kind_is_canonical(source, expected):
+    assert _contract_kind(source) == expected
 
 
 def test_edge_normalization_keeps_source_and_all_accounting_kinds():
@@ -158,6 +171,45 @@ class _Session:
         return self.results.pop(0)
 
 
+class _NsiSession(_Session):
+    def __init__(self, results):
+        super().__init__(results)
+        self.added = []
+
+    def add(self, row):
+        self.added.append(row)
+
+
+@pytest.mark.asyncio
+async def test_cb_nsi_persists_supplier_and_contract_accounting_fields():
+    session = _NsiSession([_Result(scalar=None), _Result(scalar=None)])
+    company_id = uuid.uuid4()
+
+    created, updated = await _ingest_nsi(session, company_id, [
+        {
+            "Тип": "Контрагент", "ИсточникUUID": "supplier-uuid",
+            "Наименование": "ООО Поставщик", "НаименованиеПолное": "ООО Поставщик",
+            "ИНН": "1234567890", "КПП": "123456789", "ВидКонтрагента": "ЮрЛицо",
+            "ПометкаУдаления": False,
+        },
+        {
+            "Тип": "Договор", "ИсточникUUID": "contract-uuid",
+            "Наименование": "Договор поставки", "Номер": "42", "Дата": "2026-08-01",
+            "ВладелецКонтрагент": "supplier-uuid", "ВидДоговора": "СПоставщиком",
+            "ВалютаВзаиморасчётов": "RUB", "ПометкаУдаления": False,
+        },
+    ])
+
+    assert (created, updated) == (2, 0)
+    supplier, contract = session.added
+    assert supplier.kind == "counterparty"
+    assert supplier.extra["inn"] == "1234567890"
+    assert supplier.extra["kpp"] == "123456789"
+    assert contract.kind == "contract"
+    assert contract.extra["owner_ref"] == "supplier-uuid"
+    assert contract.extra["number"] == "42"
+
+
 def _edge_item(item_uuid, name, vat, is_dish=False):
     return {
         "external_uuid": item_uuid, "code_1c": "", "name": name, "name_full": name,
@@ -167,13 +219,15 @@ def _edge_item(item_uuid, name, vat, is_dish=False):
     }
 
 
-def _emitter_session(entries):
+def _emitter_session(entries, counterparties=None, contracts=None):
     return _Session([
         _Result(rows=[_edge_item("dish-coffee", "Кофе", "НДС22", True),
                       _edge_item("milk", "Молоко", "НДС10")]),
         _Result(rows=[]),
         _Result(rows=[]),
         _Result(rows=[]),
+        _Result(rows=counterparties or []),
+        _Result(rows=contracts or []),
         _Result(scalar="ГИГ"),
         _Result(rows=[{"id": 208, "name": "АЗС 208", "warehouse_uuid": "warehouse-208"}]),
         _Result(rows=entries),
@@ -184,6 +238,8 @@ def _emitter_session(entries):
 
 @pytest.mark.asyncio
 async def test_edge_documents_build_manual_unposted_bp_package_with_ttk_and_line_vat():
+    supplier_id = uuid.uuid4()
+    contract_id = uuid.uuid4()
     package = _edge_package()
     package["Документы"][0]["Товары"][0]["СтавкаНДС"] = "НДС10"
     package["Документы"][0]["Товары"][0]["СуммаНДС"] = 27.27
@@ -220,6 +276,8 @@ async def test_edge_documents_build_manual_unposted_bp_package_with_ttk_and_line
             "Тип": "purchase", "ИсточникUUID": "purchase-1", "Номер": "П-1",
             "Дата": "2026-08-03T12:00:00+03:00", "Организация": "gig",
             "Склад": "warehouse-208", "СуммаДокумента": 110,
+            "supplier_id": str(supplier_id), "Контрагент": "ООО Канон",
+            "contract_id": str(contract_id), "ДоговорКонтрагента": "№ 42",
             "Товары": [{"Номенклатура": "milk", "Количество": 1, "Цена": 110,
                         "Сумма": 110, "СтавкаНДС": "НДС10", "СуммаНДС": 10}],
         }},
@@ -245,12 +303,23 @@ async def test_edge_documents_build_manual_unposted_bp_package_with_ttk_and_line
         }},
     )
     company_id = uuid.uuid4()
+    supplier = SimpleNamespace(
+        id=supplier_id, name="ООО Канон", full_name="Общество Канон",
+        inn="1234567890", kpp="123456789", type="ЮЛ", raw={},
+    )
+    contract = SimpleNamespace(
+        id=contract_id, counterparty_id=str(supplier_id), organization_id="gig",
+        number="42", date="2026-08-01", kind="СПоставщиком", type="Поставка",
+        currency="RUB", raw={}, is_closed=False,
+    )
 
     first = await BpPackageEmitter(
-        _emitter_session([recipe, purchase, production, newer_recipe, neighbor_purchase]), company_id,
+        _emitter_session([recipe, purchase, production, newer_recipe, neighbor_purchase],
+                         [supplier], [contract]), company_id,
     )._build_edge_shift_package(target, "retail-42")
     second = await BpPackageEmitter(
-        _emitter_session([recipe, purchase, production, newer_recipe, neighbor_purchase]), company_id,
+        _emitter_session([recipe, purchase, production, newer_recipe, neighbor_purchase],
+                         [supplier], [contract]), company_id,
     )._build_edge_shift_package(target, "retail-42")
 
     assert first["Источник"] == "Ledger Edge → Ledger"
@@ -268,6 +337,12 @@ async def test_edge_documents_build_manual_unposted_bp_package_with_ttk_and_line
     assert retail["Товары"][0]["СтавкаНДС"] == "НДС22"
     incoming = next(doc for doc in first["Документы"] if doc["Тип"] == "purchase")
     assert incoming["Товары"][0]["СтавкаНДС"] == "НДС10"
+    assert incoming["Контрагент"] == str(supplier_id)
+    assert incoming["ДоговорКонтрагента"] == str(contract_id)
+    supplier_card = next(card for card in first["НСИ"] if card["Тип"] == "Контрагент")
+    contract_card = next(card for card in first["НСИ"] if card["Тип"] == "Договор")
+    assert supplier_card["ИНН"] == "1234567890"
+    assert contract_card["ВладелецКонтрагент"] == str(supplier_id)
     release = next(doc for doc in first["Документы"] if doc["Тип"] == "production_release")
     assert release["Ингредиенты"][0]["Количество"] == 0.3
     assert release["Ингредиенты"][0]["ИдентификаторПродукция"] == "dish-1"
