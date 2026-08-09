@@ -104,7 +104,8 @@ async def documents(db: AsyncSession, cid, date_from, date_to,
         фильтр = " AND p.station_id = ANY(:st)"
 
     станционные = [dict(r) for r in (await db.execute(text(f"""
-        SELECT p.station_id, d->>'Тип' AS kind, d->>'Номер' AS number,
+        SELECT DISTINCT ON ({_КЛЮЧ_ДОКУМЕНТА})
+               p.station_id, d->>'Тип' AS kind, d->>'Номер' AS number,
                coalesce((d->>'Дата')::timestamptz, p.received_at) AS doc_date,
                coalesce((d->>'СуммаДокумента')::numeric, 0) AS amount,
                coalesce(jsonb_array_length(d->'Товары'), 0) AS positions,
@@ -121,6 +122,8 @@ async def documents(db: AsyncSession, cid, date_from, date_to,
                  AND (r.source_uuid = d->>'ИсточникUUID'
                       OR r.id::text = d->>'document_id')
           ))
+        -- Копии смены и повторные пакеты — один документ, а не журнал из клонов.
+        ORDER BY {_КЛЮЧ_ДОКУМЕНТА}, p.received_at DESC
     """), p)).mappings().all()]
 
     фильтр2 = " AND station_id = ANY(:st)" if stations else ""
@@ -378,6 +381,39 @@ async def abc(db: AsyncSession, cid, date_from, date_to,
 # Половина отчётов читает одно и то же — документы из пакетов агентов. Писать
 # каждому свой запрос значит каждый раз заново решать, где у документа дата и
 # как считать сумму; один разбор держит ответы согласованными.
+#
+# Один документ лежит в пакетах несколько раз: агент пересобирает и шлёт смену
+# заново (первичная заливка истории 208 дала до девяти копий одной смены), а
+# пакет хранится как есть — это правильно, переиграть разбор можно только по
+# сырью. Но читать его надо по одному разу, иначе выручка складывается со
+# своими копиями: на 208 за месяц это 2,66 млн ₽ вместо 1,44 млн ₽.
+_КЛЮЧ_ДОКУМЕНТА = """p.station_id, d->>'Тип',
+        CASE WHEN d->>'Тип' = 'retail_sale_sidegoods'
+             THEN 'смена:' || coalesce(nullif(p.payload->'Смена'->>'НомерСменыВнутр', '0'),
+                                       p.packet_uuid)
+             ELSE coalesce(nullif(d->>'Номер', ''), md5(d::text)) END"""
+"""Что считать одним документом станции.
+
+Пакет приезжает повторно — станция пересобирает и досылает смену (на 208 одна
+смена лежит в пакетах до девяти раз). Читать её надо один раз, иначе выручка
+складывается со своими копиями.
+
+Ключ у продаж и у остальных документов разный, и это не прихоть:
+
+* **Продажи** — один сводный документ на смену, и опознаётся смена внутренним
+  номером кассы (7046, 7051…). Печатный номер не годится: он строится из даты
+  ОТКРЫТИЯ, поэтому смена, открытая 30.07 в 23:59, носит номер за 30 июля — и
+  та же смена 7062 приехала под двумя разными печатными номерами. По номеру
+  копия считалась дважды, а две разные смены одного дня — слиплись бы в одну.
+* **Остальные документы** (приёмка, списание, выпуск) живут своими номерами и к
+  смене не привязаны: одна приёмка приезжает в пакетах разных смен, и смена в
+  ключе размножила бы её. У видов без номера ключом остаётся тело — тогда
+  схлопнутся только точные копии.
+
+`ИсточникUUID` не подходит нигде: при пересборке он пересчитывается.
+"""
+
+
 async def _документы(db: AsyncSession, cid, d1, d2, виды: list[str],
                      stations: list[int] | None,
                      строки_поле: str = "Товары") -> list[dict]:
@@ -390,7 +426,8 @@ async def _документы(db: AsyncSession, cid, d1, d2, виды: list[str]
         p["st"] = stations
         фильтр = " AND p.station_id = ANY(:st)"
     return [dict(r) for r in (await db.execute(text(f"""
-        SELECT p.station_id, d->>'Тип' AS kind, d->>'Номер' AS number,
+        SELECT DISTINCT ON ({_КЛЮЧ_ДОКУМЕНТА})
+               p.station_id, d->>'Тип' AS kind, d->>'Номер' AS number,
                coalesce((d->>'Дата')::timestamptz, p.received_at) AS doc_date,
                coalesce((d->>'СуммаДокумента')::numeric, 0) AS amount,
                d->>'Комментарий' AS note, d->>'Причина' AS reason,
@@ -401,6 +438,8 @@ async def _документы(db: AsyncSession, cid, d1, d2, виды: list[str]
         WHERE p.company_id = :cid{фильтр}
           AND d->>'Тип' = ANY(:kinds)
           AND coalesce((d->>'Дата')::timestamptz, p.received_at) BETWEEN :d1 AND :d2
+        -- Из копий остаётся последняя присланная: пересборка исправляет, а не портит.
+        ORDER BY {_КЛЮЧ_ДОКУМЕНТА}, p.received_at DESC
     """), p)).mappings().all()]
 
 
@@ -649,7 +688,17 @@ async def shifts(db: AsyncSession, cid, date_from, date_to,
     # Смена приезжает пакетом kind='shift': её паспорт (номер, оператор, время
     # открытия и закрытия) лежит в «Смена», продажи — документами внутри.
     rows = (await db.execute(text(f"""
-        SELECT p.station_id,
+        -- Одна смена — одна строка. Пакет смены приезжает повторно (пересборка,
+        -- заливка истории): на 208 это 290 пакетов на 129 смен, и без отбора
+        -- реестр показывал бы одну смену до девяти раз, каждый со своей выручкой.
+        --
+        -- Ключ — ВНУТРЕННИЙ номер смены кассы. Печатный номер строится из даты
+        -- открытия, и смена, открытая 30.07 в 23:59, носит номер за 30 июля —
+        -- по нему две разные смены слиплись бы в одну.
+        SELECT DISTINCT ON (p.station_id,
+                            coalesce(p.payload->'Смена'->>'НомерСменыВнутр',
+                                     p.payload->'Смена'->>'НомерСмены'))
+               p.station_id,
                p.payload->'Смена'->>'НомерСмены' AS shift,
                p.payload->'Смена'->>'НомерСменыВнутр' AS shift_inner,
                coalesce((p.payload->'Смена'->>'Закрытие')::timestamptz,
@@ -671,7 +720,12 @@ async def shifts(db: AsyncSession, cid, date_from, date_to,
           AND coalesce((p.payload->'Смена'->>'Закрытие')::timestamptz,
                        (p.payload->'Смена'->>'Открытие')::timestamptz,
                        p.received_at) BETWEEN :d1 AND :d2
-        ORDER BY 3 DESC
+        -- Порядок задаёт отбор копий (последняя присланная); по дате реестр
+        -- сортируется ниже, уже на готовых строках.
+        ORDER BY p.station_id,
+                 coalesce(p.payload->'Смена'->>'НомерСменыВнутр',
+                          p.payload->'Смена'->>'НомерСмены'),
+                 p.received_at DESC
     """), p)).mappings().all()
 
     # Чеки приезжают отдельным пакетом и есть не у всех смен: колонка честно
@@ -694,6 +748,7 @@ async def shifts(db: AsyncSession, cid, date_from, date_to,
         "positions": int(r["positions"] or 0),
         "cheques": чеки.get((r["station_id"], str(r["shift_inner"])), 0),
     } for r in rows]
+    строки.sort(key=lambda x: x["shift_date"], reverse=True)
     return {"rows": строки, "total": len(строки),
             "revenue": round(sum(s["revenue"] for s in строки), 2),
             "by_station": _по_станциям(строки, "revenue")}
@@ -769,18 +824,24 @@ async def visits(db: AsyncSession, cid, date_from, date_to,
             "fuel_only": max(заправок_всего - смешанных, 0),
             # Пустой топливный контур при живых чеках — не ноль заправок, а
             # «данные ещё не приехали». Молчать об этом нельзя: конверсия в
-            # такой смене завышена.
-            "note": "" if заправок else ("реализации топлива ещё не пришли"
-                                         if чеков_магазина else ""),
+            # такой смене завышена. Обратный случай — заправки без чеков:
+            # агента на станции нет или чеки за эту смену ещё не поднимали.
+            "note": ("реализации топлива ещё не пришли" if чеков_магазина and not заправок
+                     else "чеков смены нет" if заправок and not чеков_магазина else ""),
             "conversion": round(чеков_магазина / посещений * 100, 1) if посещений else 0.0,
             "amount": round(выручка, 2),
             "per_visit": round(выручка / посещений, 2) if посещений else 0.0,
             "avg_cheque": round(выручка / чеков_магазина, 2) if чеков_магазина else 0.0,
         })
 
-    всего_визитов = sum(s["visits"] for s in строки)
-    всего_чеков = sum(s["shop_cheques"] for s in строки)
-    выручка = sum(s["amount"] for s in строки)
+    # Итог конверсии считается только по сменам, где чеки есть. Смена, с которой
+    # чеки не приехали, не «смена без покупок»: её покупатели просто не видны, и
+    # в знаменателе они превращают конверсию сети в единицы процентов.
+    базис = [s for s in строки if s["shop_cheques"]]
+    вне_базиса = [s for s in строки if not s["shop_cheques"]]
+    всего_визитов = sum(s["visits"] for s in базис)
+    всего_чеков = sum(s["shop_cheques"] for s in базис)
+    выручка = sum(s["amount"] for s in базис)
     # Свод по станциям считается по своим итогам, а не усреднением средних:
     # смена с тремя посетителями иначе весила бы столько же, сколько смена с
     # четырьмя сотнями.
@@ -799,6 +860,10 @@ async def visits(db: AsyncSession, cid, date_from, date_to,
         "revenue": round(выручка, 2),
         "per_visit": round(выручка / всего_визитов, 2) if всего_визитов else 0.0,
         "by_station": sorted(по_станциям.values(), key=lambda x: x["station_id"]),
+        # По скольким сменам посчитан итог и сколько осталось за его пределами:
+        # без этой пары «конверсия 21 %» не отличить от «конверсия 21 % по трём
+        # сменам из тридцати».
+        "basis": {"shifts": len(базис), "shifts_without_cheques": len(вне_базиса)},
     }
 
 

@@ -91,18 +91,34 @@ export function StoreOverviewPanel({ companyId, dateFrom, dateTo, stations }: {
               заработали», а посещения — «из чего было зарабатывать». Заправился и
               уехал — это не потеря смены, это потенциал сопутки. */}
           {data.visits && data.visits.visits > 0 && (
-            <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
-              <Kpi label="Посещений" value={nf0(data.visits.visits)}
-                sub={`${nf0(data.visits.fuel_ops)} заправок · ${nf0(data.visits.shop_cheques)} чеков магазина`} />
-              <Kpi label="Конверсия магазина"
-                value={`${data.visits.conversion.toFixed(1)}%`}
-                sub={data.visits.conversion > 0
-                  ? `покупает каждый ${Math.round(100 / data.visits.conversion)}-й`
-                  : 'магазин не продаёт'} />
-              <Kpi label="Магазин на посетителя" value={fmtMoney(data.visits.per_visit)}
-                sub={`средний чек ${fmtMoney(data.visits.avg_cheque)}`} />
-              <Kpi label="Уехали без покупки" value={nf0(data.visits.fuel_only)}
-                sub="заправились и не зашли" />
+            <div className="space-y-2">
+              <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
+                <Kpi label="Посещений" value={nf0(data.visits.visits)}
+                  sub={`${nf0(data.visits.fuel_ops)} заправок · ${nf0(data.visits.shop_cheques)} чеков магазина`} />
+                <Kpi label="Конверсия магазина"
+                  value={`${data.visits.conversion.toFixed(1)}%`}
+                  sub={data.visits.conversion > 0
+                    ? `покупает каждый ${Math.round(100 / data.visits.conversion)}-й`
+                    : 'магазин не продаёт'} />
+                <Kpi label="Магазин на посетителя" value={fmtMoney(data.visits.per_visit)}
+                  sub={`средний чек ${fmtMoney(data.visits.avg_cheque)}`} />
+                <Kpi label="Уехали без покупки" value={nf0(data.visits.fuel_only)}
+                  sub="заправились и не зашли" />
+              </div>
+              {/* Поток считается только там, где чеки есть. Пока агент стоит не
+                  на всех станциях и лента поднята не за всё время, эта рамка —
+                  часть цифры, а не сноска: без неё «конверсия 21%» читается как
+                  «по всей сети за месяц». */}
+              {data.visits.basis?.partial && (
+                <p className="text-[11px] text-muted-foreground">
+                  Поток посчитан по сменам, чеки которых уже подняты:{' '}
+                  {data.visits.basis.shifts} смен за {data.visits.basis.days} из{' '}
+                  {data.visits.basis.period_days} дней периода
+                  {data.visits.basis.from && `, ${data.visits.basis.from} – ${data.visits.basis.to}`}
+                  {data.visits.basis.stations > 0 && `, АЗС с чеками: ${data.visits.basis.stations}`}.
+                  Заправки смен без чеков в знаменатель не идут — их покупателей не видно.
+                </p>
+              )}
             </div>
           )}
 
@@ -117,6 +133,24 @@ export function StoreOverviewPanel({ companyId, dateFrom, dateTo, stations }: {
               ? <Kpi label="Возвраты" value={fmtMoney(f.returns)} sub="в выручке (gross)" />
               : <Kpi label="Позиций" value={nf0(u.total_positions)} sub={`${nf0(u.total_units)} ед.`} />}
           </div>
+
+          {/* Прибыль. Отдельной полосой, а не в общей: выручка и НДС — про
+              оборот, а маржа — про то, ради чего магазин на станции держат.
+              Покрытие себестоимостью стоит рядом с самой маржой: процент,
+              посчитанный по половине ассортимента, — это не «маржа периода». */}
+          {data.margin && (
+            <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
+              <Kpi label="Валовая прибыль" value={fmtMoney(data.margin.margin)}
+                sub={`себестоимость ${fmtMoney(data.margin.cogs)}`} />
+              <Kpi label="Маржа" value={`${data.margin.margin_pct.toFixed(1)}%`}
+                sub={`наценка ${data.margin.markup_pct.toFixed(1)}%`} />
+              <Kpi label="Себестоимость известна"
+                value={`${nf0(data.margin.sku_costed)} из ${nf0(data.margin.sku_count)}`}
+                sub="по остальным маржа не считается" />
+              <Kpi label="Убыточных позиций" value={nf0(data.margin.loss_makers)}
+                sub="продаём дешевле закупки" />
+            </div>
+          )}
 
           {/* Категории + оплаты */}
           <div className="grid gap-4 lg:grid-cols-2">
@@ -179,11 +213,6 @@ export function StoreOverviewPanel({ companyId, dateFrom, dateTo, stations }: {
             </ResponsiveContainer>
           </div>
 
-          {/* Задел под маржу */}
-          <div className="rounded-lg border border-dashed border-border/40 p-3 text-xs text-muted-foreground">
-            Валовая прибыль, маржа %, GMROI, ABC-анализ — следующий блок: FIFO-себестоимость
-            из поступлений (поступления сопутки в периоде уже загружены).
-          </div>
         </>
       )}
     </div>

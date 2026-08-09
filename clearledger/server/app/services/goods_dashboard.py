@@ -50,8 +50,51 @@ def _station_of_warehouse(code: str | None, stations: list[str]) -> str | None:
     return max(matches, key=len) if matches else None
 
 
+def _одна_смена_один_раз(rows: list[DataEntry]) -> list[DataEntry]:
+    """Свернуть повторные проекции одной и той же смены внутри одного источника.
+
+    Станция пересобирает и присылает смену заново. Приёмник помечает прежнюю
+    запись `superseded`, только если узнал её — а узнаёт по времени закрытия;
+    пересборка двигает его на секунду (23:52:31 → 23:52:30), и обе записи
+    остаются `verified`.
+
+    Ключ — ВНУТРЕННИЙ номер смены кассы (7046, 7051…): он уникален на станции и
+    переживает пересборку. Печатного номера мало — он строится из даты открытия,
+    и смена, открытая 30.07 в 23:59 и закрытая 31.07, носит номер за 30 июля;
+    по нему две разные смены слиплись бы в одну, а из выручки пропал бы день.
+    Из копий остаётся последняя присланная.
+    """
+    def ключ(row: DataEntry) -> tuple | None:
+        shift = (row.meta or {}).get("Смена") or {}
+        внутр = str(shift.get("НомерСменыВнутр") or "").strip()
+        if not внутр:
+            # Проекции без внутреннего номера (выгрузка 1С) различаем печатным
+            # номером вместе с закрытием: без закрытия склеятся соседние смены.
+            печатный = str(shift.get("ОСЭНомер") or shift.get("НомерСмены") or "").strip()
+            if not печатный:
+                return None
+            return (row.source, str(shift.get("КодАЗС") or ""), печатный, _day(shift))
+        return (row.source, str(shift.get("КодАЗС") or ""), внутр)
+
+    def свежесть(row: DataEntry):
+        return (row.revision or 0, row.updated_at or row.created_at)
+
+    последние: dict[tuple, DataEntry] = {}
+    прочие: list[DataEntry] = []
+    for row in rows:
+        k = ключ(row)
+        if k is None:
+            прочие.append(row)
+            continue
+        было = последние.get(k)
+        if было is None or свежесть(row) > свежесть(было):
+            последние[k] = row
+    return list(последние.values()) + прочие
+
+
 def _prefer_edge_sales(rows: list[DataEntry]) -> list[DataEntry]:
     """Не считать параллельные oneC- и Edge-проекции одной смены дважды."""
+    rows = _одна_смена_один_раз(rows)
     edge = [row for row in rows if row.source == "edge"]
     if not edge:
         return rows
@@ -98,6 +141,34 @@ def _prefer_edge_documents(rows: list[DataEntry]) -> list[DataEntry]:
             str(doc.get("Номер") or "").strip().casefold(),
             round(float(doc.get("СуммаДокумента") or 0), 2),
         )
+
+    # Внутри одного источника документ тоже приезжает повторно — тем же номером
+    # на той же станции. Дню и сумме в ключе доверять нельзя: пересборка сдвигает
+    # время закрытия смены, и копия перестаёт узнаваться. Смены в ключе тоже нет:
+    # одна приёмка приезжает в пакетах разных смен и размножилась бы. Источник
+    # входит в ключ: сворачивать копии — да, выбирать между контурами — нет,
+    # это делает предпочтение Edge ниже.
+    def номер(row: DataEntry) -> tuple | None:
+        meta = row.meta or {}
+        смена = meta.get("Смена") or {}
+        н = str((meta.get("Документ") or {}).get("Номер") or "").strip().casefold()
+        if not н:
+            return None
+        return (str(row.source or ""), str(row.doc_type_id or ""),
+                str(смена.get("КодАЗС") or ""), н)
+
+    последние: dict[tuple, DataEntry] = {}
+    без_номера: list[DataEntry] = []
+    for row in rows:
+        k = номер(row)
+        if k is None:
+            без_номера.append(row)
+            continue
+        было = последние.get(k)
+        свежее = (row.revision or 0, row.updated_at or row.created_at)
+        if было is None or свежее > (было.revision or 0, было.updated_at or было.created_at):
+            последние[k] = row
+    rows = list(последние.values()) + без_номера
 
     edge_keys = {key(row) for row in rows if row.source == "edge" and key(row)[3]}
     return [row for row in rows if row.source == "edge" or key(row) not in edge_keys]
@@ -326,6 +397,12 @@ class GoodsDashboardService:
         # человек прошёл мимо витрины и ничего не взял, и это ровно тот
         # потенциал, ради которого магазин на станции и держат.
         result["visits"] = await self._visits(date_from, date_to, stations)
+        # Маржа в шапке обзора. Раздел заявлен про то, где зарабатывается
+        # прибыль, а полоса показывала одну выручку и обещала маржу «следующим
+        # блоком» — при том, что «Маржа и наценка» её уже считает. Берём ту же
+        # сводку, а не свой счёт: два экрана обязаны сходиться до копейки.
+        result["margin"] = (await self.pricing_analysis(
+            date_from, date_to, stations=stations))["summary"]
         if compare:
             days = (date_to - date_from).days + 1
             cmp_to = date_from - timedelta(days=1)
@@ -342,26 +419,49 @@ class GoodsDashboardService:
         заправки — в реестре топлива, покупки — в чеках станции. Смешанный чек
         в топливном контуре уже посчитан, поэтому к посещениям добавляются
         только чеки БЕЗ топлива, иначе один визит удвоился бы.
+
+        Контуры покрывают разное: топливо приходит по всей сети и с апреля, чеки
+        едут только с тех станций, где стоит агент, и только за последние дни.
+        Делить одно на другое напрямую нельзя — на ГИГ это давало «конверсия
+        1 %» и «49 225 уехали без покупки», то есть заправки одиннадцати чужих
+        станций против чеков одной 208 за шесть дней. Поэтому знаменатель
+        считается только по тем суткам и станциям, где чеки ЕСТЬ, а чем
+        ограничился базис — сказано в ответе.
         """
         p: dict = {"cid": self.company_id, "d1": date_from, "d2": date_to}
         коды = [int(s) for s in (stations or []) if str(s).isdigit()]
-        ф_т = " AND station_code = ANY(:st)" if коды else ""
         ф_ч = " AND station_id = ANY(:st)" if коды else ""
         if коды:
             p["st"] = коды
 
-        заправок = (await self.session.execute(text(f"""
-            SELECT count(*) FROM fuel_transactions
-            WHERE company_id = :cid{ф_т} AND dt::date BETWEEN :d1 AND :d2
-        """), p)).scalar() or 0
         ч = (await self.session.execute(text(f"""
             SELECT count(*) AS cheques,
                    count(*) FILTER (WHERE had_fuel) AS mixed,
                    count(*) FILTER (WHERE NOT had_fuel) AS shop_only,
-                   coalesce(sum(total), 0) AS amount
+                   coalesce(sum(total), 0) AS amount,
+                   count(DISTINCT station_id) AS stations,
+                   count(DISTINCT at::date) AS days,
+                   count(DISTINCT (station_id, shift_number)) AS shifts,
+                   min(at)::date AS d1, max(at)::date AS d2
             FROM store_cheques
             WHERE company_id = :cid{ф_ч} AND at::date BETWEEN :d1 AND :d2
         """), p)).mappings().first() or {}
+        # Заправки — только тех СМЕН, чеки которых у нас есть. Смена, а не
+        # сутки: она открывается в полночь с минутами и закрывается в 23:47,
+        # ровно её и считает станция. По суткам в знаменатель попадала смена
+        # 7065, чеки которой ещё не поднимали, и конверсия падала с 21,5 % до
+        # 18,9 % — та же болезнь, только мельче. Реестр смен считает так же.
+        заправок = (await self.session.execute(text(f"""
+            WITH базис AS (
+                SELECT DISTINCT station_id, shift_number
+                FROM store_cheques
+                WHERE company_id = :cid{ф_ч} AND at::date BETWEEN :d1 AND :d2
+            )
+            SELECT count(*) FROM fuel_transactions f
+            JOIN базис b ON b.station_id = f.station_code
+                        AND b.shift_number = f.shift_number
+            WHERE f.company_id = :cid
+        """), p)).scalar() or 0
 
         чеков = int(ч.get("cheques") or 0)
         смешанных = int(ч.get("mixed") or 0)
@@ -371,6 +471,8 @@ class GoodsDashboardService:
         заправок = max(int(заправок), смешанных)
         посещений = заправок + int(ч.get("shop_only") or 0)
         выручка = float(ч.get("amount") or 0)
+        дней_в_периоде = (date_to - date_from).days + 1
+        дней = int(ч.get("days") or 0)
         return {
             "visits": посещений,
             "fuel_ops": заправок,
@@ -381,6 +483,16 @@ class GoodsDashboardService:
             "revenue": round(выручка, 2),
             "per_visit": round(выручка / посещений, 2) if посещений else 0.0,
             "avg_cheque": round(выручка / чеков, 2) if чеков else 0.0,
+            # Чем ограничен счёт: пока чеки едут не отовсюду и не за всё время,
+            # цифра относится к части периода, и молчать об этом нельзя.
+            "basis": {
+                "days": дней, "period_days": дней_в_периоде,
+                "shifts": int(ч.get("shifts") or 0),
+                "stations": int(ч.get("stations") or 0),
+                "from": ч.get("d1").isoformat() if ч.get("d1") else None,
+                "to": ч.get("d2").isoformat() if ч.get("d2") else None,
+                "partial": bool(дней and дней < дней_в_периоде),
+            },
         }
 
     async def visits(self, date_from: date, date_to: date,

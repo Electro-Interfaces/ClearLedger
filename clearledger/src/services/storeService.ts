@@ -39,6 +39,12 @@ export interface StoreOverviewData {
   operational: { shifts_count: number; stations_count: number }
   /** Поток людей: заправка — тоже визит, даже если человек ничего не купил. */
   visits?: StoreVisitsData
+  /** Та же сводка, что считает экран «Маржа и наценка» — счёт один на оба. */
+  margin?: {
+    sku_count: number; sku_costed: number
+    revenue: number; revenue_net: number; cogs: number
+    margin: number; margin_pct: number; markup_pct: number; loss_makers: number
+  }
   charts: { daily: { date: string; revenue: number; soputka: number; obshepit: number }[] }
   by_station: { station: string; revenue: number; positions: number; shifts: number }[]
   trends?: Record<string, StoreTrend>
@@ -48,6 +54,15 @@ export interface StoreVisitsData {
   visits: number; fuel_ops: number; shop_cheques: number; mixed: number
   fuel_only: number; conversion: number; revenue: number
   per_visit: number; avg_cheque: number
+  /**
+   * По какой части периода посчитан поток. Чеки едут только со станций с
+   * агентом и только за последние дни, заправки — по всей сети и с апреля:
+   * без этой рамки конверсия считалась бы «чеки одной АЗС ÷ заправки всех».
+   */
+  basis?: {
+    days: number; period_days: number; shifts: number; stations: number
+    from: string | null; to: string | null; partial: boolean
+  }
 }
 
 export const getStoreOverview = (

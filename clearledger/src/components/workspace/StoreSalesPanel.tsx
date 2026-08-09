@@ -133,17 +133,26 @@ export function StoreSalesPanel({ companyId, dateFrom, dateTo, stations }: { com
           </div>
 
           {поток && поток.visits > 0 && (
-            <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
-              <Kpi label="Посещений" value={nf(поток.visits)}
-                sub={`${nf(поток.fuel_ops)} заправок · ${nf(поток.shop_cheques)} чеков магазина`} />
-              <Kpi label="Конверсия магазина" value={`${поток.conversion.toFixed(1)}%`}
-                sub={поток.conversion > 0
-                  ? `покупает каждый ${Math.round(100 / поток.conversion)}-й`
-                  : 'магазин не продаёт'} />
-              <Kpi label="На посетителя" value={fmtMoney(поток.per_visit)}
-                sub={`средний чек ${fmtMoney(поток.avg_cheque)}`} />
-              <Kpi label="Уехали без покупки" value={nf(поток.fuel_only)}
-                sub="потенциал сопутки" />
+            <div className="space-y-2">
+              <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
+                <Kpi label="Посещений" value={nf(поток.visits)}
+                  sub={`${nf(поток.fuel_ops)} заправок · ${nf(поток.shop_cheques)} чеков магазина`} />
+                <Kpi label="Конверсия магазина" value={`${поток.conversion.toFixed(1)}%`}
+                  sub={поток.conversion > 0
+                    ? `покупает каждый ${Math.round(100 / поток.conversion)}-й`
+                    : 'магазин не продаёт'} />
+                <Kpi label="На посетителя" value={fmtMoney(поток.per_visit)}
+                  sub={`средний чек ${fmtMoney(поток.avg_cheque)}`} />
+                <Kpi label="Уехали без покупки" value={nf(поток.fuel_only)}
+                  sub="потенциал сопутки" />
+              </div>
+              {поток.basis?.partial && (
+                <p className="text-[11px] text-muted-foreground">
+                  Поток посчитан по сменам с поднятыми чеками: {поток.basis.shifts} смен за{' '}
+                  {поток.basis.days} из {поток.basis.period_days} дней
+                  {поток.basis.from && `, ${поток.basis.from} – ${поток.basis.to}`}. Продажи выше — за весь период.
+                </p>
+              )}
             </div>
           )}
 
