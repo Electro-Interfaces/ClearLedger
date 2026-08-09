@@ -196,3 +196,72 @@ async def reconciliation_list(db: AsyncSession, company_id, df: date, dt: date,
         "receipt": bool(r["receipt"]), "payments": int(r["payments"] or 0),
         "powerKw": float(r["power_kw"]) if r.get("power_kw") is not None else None,
     } for r in rows]
+
+
+async def reconciliation_by(db: AsyncSession, company_id, df: date, dt: date,
+                            by: str = "station", limit: int = 100) -> list[dict[str, Any]]:
+    """Где копятся расхождения: разрез сверки по станции или региону.
+
+    Список расхождений отвечает «какие строки битые», этот разрез — «где именно».
+    Станция, у которой из месяца в месяц лезут сессии против физики, — это не
+    случайность в данных, а неисправный счётчик или контроллер."""
+    lo, hi = _bounds(df, dt)
+    p = {"cid": str(company_id), "lo": lo, "hi": hi, "maxkw": MAX_POWER_KW,
+         "eps": MONEY_EPS, "lim": max(1, min(limit, 500)), **acl_params()}
+    # Регион берём из справочника объектов: в самих сессиях он денормализован и
+    # написан по-разному (87 написаний на 48 субъектов).
+    dim = ("coalesce(r.name, s.region, '—')" if by == "region"
+           else "coalesce(s.station_name, s.station_code, '—')")
+    join_dim = ("""
+        left join service_locations l on l.id = s.location_id
+        left join regions r on r.id = l.region_id
+    """ if by == "region" else "")
+
+    rows = (await db.execute(text("""
+        select {dim} as label,
+               count(*) as sessions,
+               coalesce(sum(coalesce(s.client_amount, s.amount)), 0) as amount,
+               coalesce(sum(pay.paid), 0) as paid,
+               count(*) filter (where s.duration_min > 0 and s.energy_kwh > 0
+                                  and s.energy_kwh / (s.duration_min / 60.0) > :maxkw) as impossible,
+               coalesce(sum(coalesce(s.client_amount, s.amount)) filter (
+                   where s.duration_min > 0 and s.energy_kwh > 0
+                     and s.energy_kwh / (s.duration_min / 60.0) > :maxkw), 0) as impossible_amount,
+               count(*) filter (where pay.pay_ok > 0 and s.amount - pay.paid > :eps) as underpaid,
+               count(*) filter (where pay.pay_ok > 1) as multi,
+               count(*) filter (where pay.pay_ok > 0 and pay.receipts = 0) as no_receipt
+          from charge_sessions s
+          left join lateral (
+              select coalesce(sum(pp.amount) filter (where pp.bank_txn_id is not null), 0) as paid,
+                     count(*) filter (where pp.bank_txn_id is not null)                    as pay_ok,
+                     count(pp.receipt_url) filter (where pp.bank_txn_id is not null)       as receipts
+                from charge_payments pp
+               where pp.company_id = s.company_id and pp.session_ext_id = s.session_ext_id
+          ) pay on true
+          {join_dim}
+         where s.company_id = :cid and s.started_at >= :lo and s.started_at < :hi{acl}
+         group by 1
+        having count(*) filter (where s.duration_min > 0 and s.energy_kwh > 0
+                                  and s.energy_kwh / (s.duration_min / 60.0) > :maxkw) > 0
+            or abs(coalesce(sum(coalesce(s.client_amount, s.amount)), 0)
+                   - coalesce(sum(pay.paid), 0)) > :eps
+         order by abs(coalesce(sum(coalesce(s.client_amount, s.amount)), 0)
+                      - coalesce(sum(pay.paid), 0)) desc
+         limit :lim
+    """.format(acl=acl_sql("s.location_id"), dim=dim, join_dim=join_dim)),
+        p)).mappings().all()
+
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        amount, paid = float(r["amount"] or 0), float(r["paid"] or 0)
+        out.append({
+            "label": r["label"], "sessions": int(r["sessions"]),
+            "amount": round(amount, 2), "paid": round(paid, 2),
+            "gap": round(amount - paid, 2),
+            "gapPct": round((amount - paid) / amount * 100, 1) if amount else 0.0,
+            "impossible": int(r["impossible"]),
+            "impossibleAmount": round(float(r["impossible_amount"] or 0), 2),
+            "underpaid": int(r["underpaid"]), "multi": int(r["multi"]),
+            "noReceipt": int(r["no_receipt"]),
+        })
+    return out

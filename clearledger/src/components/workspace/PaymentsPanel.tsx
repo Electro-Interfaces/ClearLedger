@@ -14,8 +14,9 @@ import { Kpi } from './analytics/Kpi'
 import { PanelViewTabs } from './PanelViewTabs'
 import { useTabParams } from '@/hooks/useTabParams'
 import {
-  getPaymentsList, getPaymentsSummary, getReconciliation, getReconciliationRows,
-  type PaymentLine, type PaymentsSummary, type ReconRow, type ReconSummary,
+  getPaymentsList, getPaymentsSummary, getReconciliation, getReconciliationBy,
+  getReconciliationRows,
+  type PaymentLine, type PaymentsSummary, type ReconByRow, type ReconRow, type ReconSummary,
 } from '@/services/chargePaymentsService'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
@@ -199,6 +200,9 @@ export function PaymentsPanel({ companyId, dateFrom, dateTo }: Props) {
  */
 function Reconciliation({ companyId, dateFrom, dateTo }: Props) {
   const [kind, setKind] = useState<string | null>(null)
+  // Разрез «где копится»: список расхождений отвечает, какие строки битые,
+  // а этот — на каких станциях и в каких регионах они собираются.
+  const [by, setBy] = useState<'station' | 'region'>('station')
   const sum = useQuery<ReconSummary>({
     queryKey: ['charge-recon', companyId, dateFrom, dateTo],
     queryFn: () => getReconciliation({ companyId, dateFrom, dateTo }),
@@ -208,6 +212,11 @@ function Reconciliation({ companyId, dateFrom, dateTo }: Props) {
     queryKey: ['charge-recon-rows', companyId, dateFrom, dateTo, kind],
     queryFn: () => getReconciliationRows({ companyId, dateFrom, dateTo, kind: kind! }),
     enabled: !!companyId && !!kind,
+  })
+  const where = useQuery<ReconByRow[]>({
+    queryKey: ['charge-recon-by', companyId, dateFrom, dateTo, by],
+    queryFn: () => getReconciliationBy({ companyId, dateFrom, dateTo, by, limit: 40 }),
+    enabled: !!companyId,
   })
 
   if (sum.isLoading) return <Loading />
@@ -258,6 +267,53 @@ function Reconciliation({ companyId, dateFrom, dateTo }: Props) {
           </tbody>
         </table>
       </CardContent></Card>
+
+      <div className="space-y-2">
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-xs text-muted-foreground">
+            Где копятся расхождения — станции и регионы, у которых деньги расходятся
+            с данными о зарядках сильнее всего.
+          </div>
+          <PanelViewTabs
+            tabs={[{ k: 'station', label: 'По станциям' }, { k: 'region', label: 'По регионам' }]}
+            value={by} onChange={(k) => setBy(k as 'station' | 'region')} label={null} />
+        </div>
+        {where.isLoading ? <Loading /> : !where.data?.length ? (
+          <Empty text="Расхождений за период нет" />
+        ) : (
+          <Card><CardContent className="p-0 overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead><tr className="border-b bg-muted/40 text-muted-foreground">
+                <th className="p-2 text-left font-medium">{by === 'station' ? 'Станция' : 'Регион'}</th>
+                <th className="p-2 text-right font-medium">Разрыв</th>
+                <th className="p-2 text-right font-medium">Доля</th>
+                <th className="p-2 text-right font-medium">Против физики</th>
+                <th className="p-2 text-right font-medium">Недоплат</th>
+                <th className="p-2 text-right font-medium">Без чека</th>
+                <th className="p-2 text-right font-medium">Сессий</th>
+              </tr></thead>
+              <tbody>
+                {where.data.map((r) => (
+                  <tr key={r.label} className="border-b last:border-0">
+                    <td className="p-2 max-w-[240px] truncate" title={r.label}>{r.label}</td>
+                    <td className="p-2 text-right tabular-nums text-amber-600 dark:text-amber-400">
+                      {money(r.gap)}
+                    </td>
+                    <td className="p-2 text-right tabular-nums text-muted-foreground">{r.gapPct} %</td>
+                    <td className={`p-2 text-right tabular-nums ${
+                      r.impossible ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground/60'}`}>
+                      {r.impossible || '—'}
+                    </td>
+                    <td className="p-2 text-right tabular-nums text-muted-foreground">{r.underpaid || '—'}</td>
+                    <td className="p-2 text-right tabular-nums text-muted-foreground">{r.noReceipt || '—'}</td>
+                    <td className="p-2 text-right tabular-nums text-muted-foreground">{nf0.format(r.sessions)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </CardContent></Card>
+        )}
+      </div>
 
       {kind && (
         <div className="space-y-2">

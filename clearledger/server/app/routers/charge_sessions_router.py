@@ -271,6 +271,23 @@ async def charge_reconciliation_rows(
                                      kind, limit)
 
 
+@router.get("/reconciliation/by")
+async def charge_reconciliation_by(
+    company_id: str,
+    date_from: str,
+    date_to: str,
+    by: str = Query("station", pattern="^(station|region)$"),
+    limit: int = Query(100, le=500),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[dict[str, Any]]:
+    """Где копятся расхождения: разрез сверки по станции или региону."""
+    cid = await assert_company_member(company_id, current_user, db)
+    from app.services.charge_reconciliation import reconciliation_by
+    df, dt = _day_bounds(date_from, date_to)
+    return await reconciliation_by(db, cid, df.date(), (dt - timedelta(days=1)).date(), by, limit)
+
+
 @router.get("/station-sales")
 async def station_sales(
     company_id: str,

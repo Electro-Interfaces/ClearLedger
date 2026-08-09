@@ -131,3 +131,25 @@ export async function getReconciliationRows(
     ...qp(p), kind: p.kind, limit: String(p.limit ?? 200),
   })
 }
+
+/** Где копятся расхождения: разрез сверки по станции или региону. */
+export interface ReconByRow {
+  label: string
+  sessions: number
+  amount: number
+  paid: number
+  gap: number
+  gapPct: number
+  impossible: number
+  impossibleAmount: number
+  underpaid: number
+  multi: number
+  noReceipt: number
+}
+export async function getReconciliationBy(
+  p: P & { by: 'station' | 'region'; limit?: number },
+): Promise<ReconByRow[]> {
+  return get<ReconByRow[]>('/api/charge-sessions/reconciliation/by', {
+    ...qp(p), by: p.by, limit: String(p.limit ?? 100),
+  })
+}
