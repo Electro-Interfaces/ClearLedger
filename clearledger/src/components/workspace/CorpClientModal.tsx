@@ -19,6 +19,7 @@ import { fmtMoney, fmtMoneyShort } from '@/services/analyticsService'
 import { seriesColor } from './analytics/palette'
 import { TzToggle, type Tz } from './analytics/TzToggle'
 import { rechartsTooltipTheme } from '@/components/ui/chart-utils'
+import { ModalCard } from '@/components/ui/modal-card'
 import { MONTHS_SHORT_NOM } from '@/lib/formatDate'
 
 const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: d }).format(n)
@@ -52,31 +53,23 @@ export function CorpClientModal({ client, companyId, dateFrom, dateTo, onClose }
   })
 
   return (
-    <div className="fixed inset-0 z-[1200] flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
-      <div className="bg-card border border-border rounded-lg shadow-xl max-w-5xl w-full max-h-[88vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-start justify-between gap-3 px-5 py-3.5 border-b border-border/50">
-          <div className="min-w-0">
-            <h3 className="text-base font-semibold truncate">{client}</h3>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              {d ? [
-                d.profile.status,
-                d.profile.contract_start ? `договор с ${d.profile.contract_start}` : null,
-                d.profile.mode === 'flat' && d.profile.rate ? `плоский ${nf(d.profile.rate, 2)} ₽/кВтч`
-                  : d.profile.mode === 'matrix' ? 'тариф по матрице' : 'розничный тариф',
-                d.profile.phone,
-              ].filter(Boolean).join(' · ') : ' '}
-            </p>
-          </div>
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground text-xl leading-none px-2 shrink-0">×</button>
-        </div>
-
-        <div className="overflow-auto p-5 space-y-5">
-          {isLoading ? <div className="text-sm text-muted-foreground py-10 text-center">Загрузка карточки…</div>
-            : error || !d ? <div className="text-sm text-muted-foreground py-10 text-center">Не удалось загрузить карточку клиента</div>
-            : <Body d={d} horizon={horizon} setHorizon={setHorizon} tz={tz} setTz={setTz} />}
-        </div>
-      </div>
-    </div>
+    <ModalCard
+      className="max-w-5xl max-h-[88vh]"
+      bodyClassName="p-5 space-y-5"
+      onClose={onClose}
+      title={client}
+      subtitle={d ? [
+        d.profile.status,
+        d.profile.contract_start ? `договор с ${d.profile.contract_start}` : null,
+        d.profile.mode === 'flat' && d.profile.rate ? `плоский ${nf(d.profile.rate, 2)} ₽/кВтч`
+          : d.profile.mode === 'matrix' ? 'тариф по матрице' : 'розничный тариф',
+        d.profile.phone,
+      ].filter(Boolean).join(' · ') : ' '}
+    >
+      {isLoading ? <div className="text-sm text-muted-foreground py-10 text-center">Загрузка карточки…</div>
+        : error || !d ? <div className="text-sm text-muted-foreground py-10 text-center">Не удалось загрузить карточку клиента</div>
+        : <Body d={d} horizon={horizon} setHorizon={setHorizon} tz={tz} setTz={setTz} />}
+    </ModalCard>
   )
 }
 

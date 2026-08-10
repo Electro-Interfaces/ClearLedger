@@ -14,6 +14,7 @@ import {
 import { getStoreSkuCard, type SkuMovementRow } from '@/services/storeService'
 import { fmtMoney } from '@/services/analyticsService'
 import { rechartsTooltipTheme } from '@/components/ui/chart-utils'
+import { ModalCard } from '@/components/ui/modal-card'
 import { NsiEditSection } from './NsiEditSection'
 
 const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: d }).format(n)
@@ -81,27 +82,22 @@ export function NomenclatureCardModal({ guid, companyId, dateFrom, dateTo, stati
   const активна = ВКЛАДКИ.some((t) => t.key === вкладка) ? вкладка : 'card'
 
   return (
-    <div className="fixed inset-0 z-[1200] flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
-      <div className="bg-card border border-border rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
-        {/* шапка */}
-        <div className="flex items-start justify-between px-5 py-3.5 border-b border-border/50">
-          <div className="min-w-0">
-            <div className="text-base font-semibold flex items-center gap-2 flex-wrap">
-              {data?.name ?? 'Карточка товара'}
-            </div>
-            {data && (
-              <div className="flex items-center gap-1.5 mt-1 flex-wrap text-[11px]">
-                {data.kind && <span className="px-1.5 py-0.5 rounded border border-border/50 text-muted-foreground">{data.kind}</span>}
-                <span className="px-1.5 py-0.5 rounded border border-border/50 text-muted-foreground">{data.unit ?? (data.weighed ? 'весовой' : 'штучный')}</span>
-                <span className="px-1.5 py-0.5 rounded border border-border/50 text-muted-foreground">НДС {data.vat ?? '—'}</span>
-                {data.marked && <span className="px-1.5 py-0.5 rounded border border-zinc-600 text-zinc-400" title="Маркированный товар (Честный знак)">ЧЗ</span>}
-                {data.category && <span className="px-1.5 py-0.5 rounded border border-border/50 text-muted-foreground">{data.category}</span>}
-              </div>
-            )}
-          </div>
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground text-lg leading-none px-2 shrink-0">×</button>
-        </div>
-
+    <ModalCard
+      className="max-w-4xl max-h-[90vh]"
+      // Полоса цифр и вкладки закреплены — прокручивается только содержимое вкладки
+      bodyClassName="flex flex-col overflow-hidden"
+      onClose={onClose}
+      title={data?.name ?? 'Карточка товара'}
+      subtitle={data ? (
+        <span className="flex items-center gap-1.5 flex-wrap text-[11px]">
+          {data.kind && <span className="px-1.5 py-0.5 rounded border border-border/50">{data.kind}</span>}
+          <span className="px-1.5 py-0.5 rounded border border-border/50">{data.unit ?? (data.weighed ? 'весовой' : 'штучный')}</span>
+          <span className="px-1.5 py-0.5 rounded border border-border/50">НДС {data.vat ?? '—'}</span>
+          {data.marked && <span className="px-1.5 py-0.5 rounded border border-zinc-600 text-zinc-400" title="Маркированный товар (Честный знак)">ЧЗ</span>}
+          {data.category && <span className="px-1.5 py-0.5 rounded border border-border/50">{data.category}</span>}
+        </span>
+      ) : undefined}
+    >
         {/* Главные цифры видны на любой вкладке: сколько лежит, почём, сколько
             заработали. Ради них карточку и открывают, и прятать их за
             переключением разделов — значит менять один свиток на другой. */}
@@ -156,7 +152,7 @@ export function NomenclatureCardModal({ guid, companyId, dateFrom, dateTo, stati
               </button>
             ))}
           </div>
-          <div className="overflow-auto p-4 space-y-3.5">
+          <div className="min-h-0 flex-1 overflow-auto p-4 space-y-3.5">
             {активна === 'card' && <NsiEditSection guid={guid} companyId={companyId} />}
 
             {/* Паспорт + Штрихкоды */}
@@ -356,7 +352,6 @@ export function NomenclatureCardModal({ guid, companyId, dateFrom, dateTo, stati
           </div>
           </>
         )}
-      </div>
-    </div>
+    </ModalCard>
   )
 }

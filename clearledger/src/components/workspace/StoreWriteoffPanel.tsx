@@ -10,6 +10,7 @@ import { ShowMore, useVisible } from '@/components/common/ShowMore'
 import { StationDocsBlock } from './StationDocsBlock'
 import { getStoreWriteoffs, type StoreWriteoffDoc } from '@/services/storeService'
 import { SnapshotBadge } from '@/components/common/SnapshotBadge'
+import { ModalCard } from '@/components/ui/modal-card'
 import { fmtMoney } from '@/services/analyticsService'
 import { rowDrill } from './rowDrill'
 import { NomenclatureCardModal } from './NomenclatureCardModal'
@@ -163,20 +164,19 @@ export function StoreWriteoffPanel({ companyId, dateFrom, dateTo, stations }: {
 
       {/* Модалка строк документа */}
       {openDoc && (
-        <div className="fixed inset-0 z-[1200] flex items-center justify-center bg-black/50 p-4" onClick={() => setOpenDoc(null)}>
-          <div className="bg-card border border-border rounded-lg shadow-xl max-w-2xl w-full max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-4 py-3 border-b border-border/50">
-              <div>
-                <div className="text-sm font-semibold">Списание {openDoc.number} · {openDoc.date}</div>
-                <div className="text-xs text-muted-foreground">
-                  {openDoc.warehouse_name} · {openDoc.reason} · {openDoc.positions} позиций ·
-                  <span className="text-red-400/80"> {fmtMoney(openDoc.total_amount)}</span>
-                  {openDoc.comment && <> · {openDoc.comment}</>}
-                </div>
-              </div>
-              <button type="button" onClick={() => setOpenDoc(null)} className="text-muted-foreground hover:text-foreground text-lg leading-none px-2">×</button>
-            </div>
-            <div className="overflow-auto">
+        <ModalCard
+          className="max-w-2xl max-h-[80vh]"
+          bodyClassName=""
+          onClose={() => setOpenDoc(null)}
+          title={<span className="text-sm">Списание {openDoc.number} · {openDoc.date}</span>}
+          subtitle={
+            <>
+              {openDoc.warehouse_name} · {openDoc.reason} · {openDoc.positions} позиций ·
+              <span className="text-red-400/80"> {fmtMoney(openDoc.total_amount)}</span>
+              {openDoc.comment && <> · {openDoc.comment}</>}
+            </>
+          }
+        >
               <table className="w-full text-xs">
                 <thead className="bg-muted/30 text-muted-foreground sticky top-0">
                   <tr>
@@ -197,9 +197,7 @@ export function StoreWriteoffPanel({ companyId, dateFrom, dateTo, stations }: {
                   ))}
                 </tbody>
               </table>
-            </div>
-          </div>
-        </div>
+        </ModalCard>
       )}
 
       {sku && <NomenclatureCardModal guid={sku} companyId={companyId} dateFrom={dateFrom ?? ''} dateTo={dateTo ?? ''} stations={stations} onClose={() => setSku(null)} />}

@@ -13,8 +13,9 @@ import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   ShoppingCart, Wallet, PackagePlus, ClipboardList, Trash2, ArrowLeftRight, Tag,
-  ChevronRight, Search, X,
+  ChevronRight, Search,
 } from 'lucide-react'
+import { ModalCard } from '@/components/ui/modal-card'
 import { getStoreShiftDetail, type ShiftDocLine } from '@/services/storeService'
 import { fmtMoney } from '@/services/analyticsService'
 import { ChzBadge } from '@/components/common/ChzBadge'
@@ -106,34 +107,29 @@ export function ShiftDetailModal({ shiftKey, companyId, onClose }: { shiftKey: s
   const доляСопутки = sh && sh.revenue > 0 ? Math.round((sh.soputka / sh.revenue) * 100) : null
 
   return (
-    <div className="fixed inset-0 z-[1200] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
-      <div role="dialog" aria-modal="true" aria-label={`Смена ${sh?.number ?? ''}`}
-        className="flex max-h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-xl border border-border bg-card shadow-2xl"
-        onClick={(e) => e.stopPropagation()}>
-        <div className="border-b border-border/50 px-5 py-3">
-          <div className="flex items-start justify-between gap-4">
-            <div className="min-w-0">
-              <div className="text-sm font-semibold">
-                Смена {sh?.number ?? ''}
-                {sh && <span className="ml-2 font-normal text-muted-foreground">{sh.date} · АЗС {sh.station}</span>}
-              </div>
-              {sh?.open && (
-                <div className="mt-0.5 text-[11px] text-muted-foreground">
-                  открыта {sh.open}{sh.close ? ` · закрыта ${sh.close}` : ''}
-                  {sh.operator ? ` · оператор ${sh.operator}` : ''}
-                  {sh.register ? ` · пост ${sh.register}` : ''}
-                  {sh.internal_no ? ` · внутр. № ${sh.internal_no}` : ''}
-                </div>
-              )}
-            </div>
-            <button type="button" onClick={onClose} aria-label="Закрыть"
-              className="rounded-md p-1 text-muted-foreground hover:bg-accent/30 hover:text-foreground">
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-
+    <ModalCard
+      className="max-w-6xl max-h-[90vh]"
+      bodyClassName="flex flex-col overflow-hidden"
+      onClose={onClose}
+      title={
+        <span className="text-sm">
+          Смена {sh?.number ?? ''}
+          {sh && <span className="ml-2 font-normal text-muted-foreground">{sh.date} · АЗС {sh.station}</span>}
+        </span>
+      }
+      subtitle={sh?.open ? (
+        <>
+          открыта {sh.open}{sh.close ? ` · закрыта ${sh.close}` : ''}
+          {sh.operator ? ` · оператор ${sh.operator}` : ''}
+          {sh.register ? ` · пост ${sh.register}` : ''}
+          {sh.internal_no ? ` · внутр. № ${sh.internal_no}` : ''}
+        </>
+      ) : undefined}
+    >
+        {/* Итоги смены закреплены: с ними сверяют то, что ниже прокручивается */}
+        <div className="shrink-0 border-b border-border/50 px-5 py-3">
           {sh && (
-            <div className="mt-3 grid grid-cols-2 gap-4 sm:grid-cols-5">
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
               <Метрика label="Выручка" value={fmtMoney(sh.revenue)}
                        hint={доляСопутки !== null ? `сопутка ${доляСопутки}% · общепит ${100 - доляСопутки}%` : undefined} />
               <Метрика label="Сопутка" value={fmtMoney(sh.soputka)} />
@@ -156,7 +152,7 @@ export function ShiftDetailModal({ shiftKey, companyId, onClose }: { shiftKey: s
         ) : !data.found ? (
           <div className="p-6 text-sm text-muted-foreground">Смена не найдена.</div>
         ) : (
-          <div className="grid gap-4 overflow-auto p-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
+          <div className="grid min-h-0 flex-1 gap-4 overflow-auto p-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
             {/* Слева — чем смена закрыта: касса и документы дня */}
             <div className="space-y-3">
               <div className="rounded-lg border border-border/50 bg-card/40 p-3">
@@ -274,7 +270,6 @@ export function ShiftDetailModal({ shiftKey, companyId, onClose }: { shiftKey: s
             </div>
           </div>
         )}
-      </div>
-    </div>
+    </ModalCard>
   )
 }

@@ -38,6 +38,7 @@ import { formatPeriod, formatBucket } from '@/lib/formatDate'
 import { useFilters } from '@/contexts/FilterContext'
 import { rechartsTooltipTheme } from '@/components/ui/chart-utils'
 import { MetricTile } from '@/components/ui/metric-tile'
+import { ModalCard } from '@/components/ui/modal-card'
 import { useChartAxis } from '@/lib/chartAxis'
 
 /** Сужение по сети из контура (регион/станции) для запросов обзора. */
@@ -192,21 +193,19 @@ function BreakdownStationsDialog({ companyId, period, row, queryKey, fetchStatio
     : v >= 85 ? 'text-emerald-600 dark:text-emerald-400'
     : v >= 70 ? 'text-amber-600 dark:text-amber-400' : 'text-red-600 dark:text-red-400')
   return (
-    <div className="fixed inset-0 z-[1100] flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
-      <div className="max-h-[85dvh] w-full max-w-4xl overflow-hidden rounded-xl border bg-card shadow-xl"
-        onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-baseline justify-between gap-3 border-b px-4 py-3">
-          <div>
-            <div className="text-sm font-semibold">{row.label} — {nf0.format(row.stations)} станций</div>
-            <div className="mt-0.5 text-[11px] text-muted-foreground">
-              активны {nf0.format(q.data?.active ?? row.active)} · простой {nf0.format(q.data?.silent ?? row.silent)}
-              {' · '}за период {formatPeriod(period.from, period.to)}
-            </div>
-          </div>
-          <button type="button" onClick={onClose}
-            className="shrink-0 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-muted">Закрыть</button>
-        </div>
-        <div className="max-h-[70dvh] overflow-auto">
+    <ModalCard
+      className="max-w-4xl max-h-[85dvh]"
+      bodyClassName=""
+      onClose={onClose}
+      title={<span className="text-sm">{row.label} — {nf0.format(row.stations)} станций</span>}
+      subtitle={
+        <>
+          активны {nf0.format(q.data?.active ?? row.active)} · простой {nf0.format(q.data?.silent ?? row.silent)}
+          {' · '}за период {formatPeriod(period.from, period.to)}
+        </>
+      }
+    >
+        <div className="overflow-auto">
           {q.isLoading ? <Loading /> : (
             <table className="w-full text-xs">
               <thead className="sticky top-0 bg-card">
@@ -242,8 +241,7 @@ function BreakdownStationsDialog({ companyId, period, row, queryKey, fetchStatio
             </table>
           )}
         </div>
-      </div>
-    </div>
+    </ModalCard>
   )
 }
 
@@ -315,23 +313,20 @@ function SilentCard({ companyId, period, silent }: {
       </button>
 
       {open && (
-        <div className="fixed inset-0 z-[1100] flex items-center justify-center bg-black/50 p-4"
-          onClick={() => setOpen(false)}>
-          <div className="max-h-[85dvh] w-full max-w-3xl overflow-hidden rounded-xl border bg-card shadow-xl"
-            onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-baseline justify-between gap-3 border-b px-4 py-3">
-              <div>
-                <div className="text-sm font-semibold">Молчащие ЭЗС — {nf0.format(silent.silent)} из {nf0.format(silent.total)}</div>
-                <div className="mt-0.5 text-[11px] text-muted-foreground">
-                  {silent.never_worked > 0 && `${silent.never_worked} не работали никогда (вопрос запуска)`}
-                  {silent.never_worked > 0 && silent.went_quiet > 0 && ' · '}
-                  {silent.went_quiet > 0 && `${silent.went_quiet} замолчали (поломка или демонтаж)`}
-                </div>
-              </div>
-              <button type="button" onClick={() => setOpen(false)}
-                className="shrink-0 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-muted">Закрыть</button>
-            </div>
-            <div className="max-h-[70dvh] overflow-auto">
+        <ModalCard
+          className="max-w-3xl max-h-[85dvh]"
+          bodyClassName=""
+          onClose={() => setOpen(false)}
+          title={<span className="text-sm">Молчащие ЭЗС — {nf0.format(silent.silent)} из {nf0.format(silent.total)}</span>}
+          subtitle={
+            <>
+              {silent.never_worked > 0 && `${silent.never_worked} не работали никогда (вопрос запуска)`}
+              {silent.never_worked > 0 && silent.went_quiet > 0 && ' · '}
+              {silent.went_quiet > 0 && `${silent.went_quiet} замолчали (поломка или демонтаж)`}
+            </>
+          }
+        >
+            <div className="overflow-auto">
               {q.isLoading ? <Loading /> : (
                 <table className="w-full text-xs">
                   <thead className="sticky top-0 bg-card">
@@ -357,8 +352,7 @@ function SilentCard({ companyId, period, silent }: {
                 </table>
               )}
             </div>
-          </div>
-        </div>
+        </ModalCard>
       )}
     </>
   )

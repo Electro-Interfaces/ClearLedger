@@ -8,6 +8,7 @@ import { ResponsiveContainer, BarChart, Bar, XAxis, Tooltip, CartesianGrid } fro
 import { getStoreSkuDetail, type SkuDetailData } from '@/services/storeService'
 import { fmtMoney } from '@/services/analyticsService'
 import { ChzBadge } from '@/components/common/ChzBadge'
+import { ModalCard } from '@/components/ui/modal-card'
 import { useCompany } from '@/contexts/CompanyContext'
 
 const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: d }).format(n)
@@ -24,26 +25,20 @@ export function SkuDetailModal({ guid, dateFrom, dateTo, stations, onClose }: {
   })
 
   return (
-    <div className="fixed inset-0 z-[1200] flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
-      <div className="bg-card border border-border rounded-lg shadow-xl max-w-4xl w-full max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-start justify-between gap-3 px-5 py-3.5 border-b border-border/50">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <h3 className="text-base font-semibold truncate">{d?.name ?? 'Товар'}</h3>
-              {d?.marked && <ChzBadge />}
-            </div>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              {[d?.category, d?.kind, d?.article ? `арт. ${d.article}` : null, d?.vat ? `НДС ${d.vat}` : null].filter(Boolean).join(' · ') || ' '}
-            </p>
-          </div>
-          <button type="button" onClick={onClose} className="text-muted-foreground hover:text-foreground text-xl leading-none px-2 shrink-0">×</button>
-        </div>
-
-        <div className="overflow-auto p-5 space-y-4">
-          {isLoading || !d ? <div className="text-sm text-muted-foreground py-8 text-center">Загрузка детализации…</div> : <SkuDetailBody d={d} />}
-        </div>
-      </div>
-    </div>
+    <ModalCard
+      className="max-w-4xl max-h-[85vh]"
+      bodyClassName="p-5 space-y-4"
+      onClose={onClose}
+      title={
+        <span className="flex items-center gap-2">
+          <span className="truncate">{d?.name ?? 'Товар'}</span>
+          {d?.marked && <ChzBadge />}
+        </span>
+      }
+      subtitle={[d?.category, d?.kind, d?.article ? `арт. ${d.article}` : null, d?.vat ? `НДС ${d.vat}` : null].filter(Boolean).join(' · ') || ' '}
+    >
+      {isLoading || !d ? <div className="text-sm text-muted-foreground py-8 text-center">Загрузка детализации…</div> : <SkuDetailBody d={d} />}
+    </ModalCard>
   )
 }
 

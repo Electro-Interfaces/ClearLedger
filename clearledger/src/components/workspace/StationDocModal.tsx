@@ -13,7 +13,7 @@
 import { useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Paperclip, Upload, Trash2, X, FileText, Printer, Save } from 'lucide-react'
+import { Paperclip, Upload, Trash2, FileText, Printer, Save } from 'lucide-react'
 import {
   getStoreStationDoc, getStoreDocFiles, uploadStoreDocFile, deleteStoreDocFile,
   saveStoreDocMeta,
@@ -22,6 +22,7 @@ import { printStationDoc } from './printStationDoc'
 import { fmtMoney } from '@/services/analyticsService'
 import { useCompany } from '@/contexts/CompanyContext'
 import { Button } from '@/components/ui/button'
+import { ModalCard } from '@/components/ui/modal-card'
 
 const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: d }).format(n)
 
@@ -124,64 +125,60 @@ export function StationDocModal({ packetUuid, index, onClose }: {
   })
 
   return (
-    <div className="fixed inset-0 z-[1200] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
-      <div role="dialog" aria-modal="true" aria-label="Документ станции"
-        className="flex max-h-[88vh] w-full max-w-4xl flex-col overflow-hidden rounded-xl border border-border bg-card shadow-2xl"
-        onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-start justify-between gap-4 border-b border-border/50 px-5 py-3">
-          <div className="min-w-0">
-            <div className="text-sm font-semibold">
-              {data ? `${data.label} № ${data.number ?? 'б/н'}` : 'Документ станции'}
-              {data && <span className="ml-2 font-normal text-muted-foreground">
-                АЗС {data.station_id} · {когда(data.doc_date ?? data.received_at)}
-              </span>}
-            </div>
-            <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-              {data?.shift_number && <span>смена {data.shift_number}</span>}
-              {data?.reg_number && (
-                <span className="rounded-full border border-primary/50 px-1.5 py-0.5 text-primary">
-                  {data.reg_number}
-                </span>
-              )}
-              {data && (
-                <select value={data.status}
-                  onChange={(e) => статус.mutate(e.target.value)}
-                  aria-label="Статус документа"
-                  className="h-6 rounded-md border border-border/60 bg-background/60 px-1.5 text-[11px] outline-none">
-                  {(data.statuses ?? ['принят']).map((с) => <option key={с} value={с}>{с}</option>)}
-                </select>
-              )}
-              {data && !data.reg_number && (
-                <button type="button" onClick={() => зарегистрировать.mutate()}
-                  disabled={зарегистрировать.isPending}
-                  title="Присвоить сквозной номер центра: номер станции у двух АЗС совпадает"
-                  className="text-primary hover:underline">
-                  зарегистрировать
-                </button>
-              )}
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button size="sm" variant="outline" disabled={!data}
-              onClick={() => data && printStationDoc({
-                ...data,
-                responsible_from: сдал ?? data.responsible_from,
-                responsible_to: принял ?? data.responsible_to,
-              })}
-              title="Печатная форма: акт или накладная с реквизитами и подписями">
-              <Printer className="mr-1 h-3.5 w-3.5" />Печать
-            </Button>
-            <button onClick={onClose} aria-label="Закрыть"
-              className="rounded-md p-1 text-muted-foreground hover:bg-accent/30 hover:text-foreground">
-              <X className="h-4 w-4" />
+    <ModalCard
+      className="max-w-4xl max-h-[88vh]"
+      bodyClassName="flex flex-col overflow-hidden"
+      onClose={onClose}
+      title={
+        <span className="text-sm">
+          {data ? `${data.label} № ${data.number ?? 'б/н'}` : 'Документ станции'}
+          {data && <span className="ml-2 font-normal text-muted-foreground">
+            АЗС {data.station_id} · {когда(data.doc_date ?? data.received_at)}
+          </span>}
+        </span>
+      }
+      subtitle={
+        <span className="flex flex-wrap items-center gap-2 text-[11px]">
+          {data?.shift_number && <span>смена {data.shift_number}</span>}
+          {data?.reg_number && (
+            <span className="rounded-full border border-primary/50 px-1.5 py-0.5 text-primary">
+              {data.reg_number}
+            </span>
+          )}
+          {data && (
+            <select value={data.status}
+              onChange={(e) => статус.mutate(e.target.value)}
+              aria-label="Статус документа"
+              className="h-6 rounded-md border border-border/60 bg-background/60 px-1.5 text-[11px] outline-none">
+              {(data.statuses ?? ['принят']).map((с) => <option key={с} value={с}>{с}</option>)}
+            </select>
+          )}
+          {data && !data.reg_number && (
+            <button type="button" onClick={() => зарегистрировать.mutate()}
+              disabled={зарегистрировать.isPending}
+              title="Присвоить сквозной номер центра: номер станции у двух АЗС совпадает"
+              className="text-primary hover:underline">
+              зарегистрировать
             </button>
-          </div>
-        </div>
-
+          )}
+        </span>
+      }
+      actions={
+        <Button size="sm" variant="outline" disabled={!data}
+          onClick={() => data && printStationDoc({
+            ...data,
+            responsible_from: сдал ?? data.responsible_from,
+            responsible_to: принял ?? data.responsible_to,
+          })}
+          title="Печатная форма: акт или накладная с реквизитами и подписями">
+          <Printer className="mr-1 h-3.5 w-3.5" />Печать
+        </Button>
+      }
+    >
         {isLoading || !data ? (
           <div className="p-6 text-sm text-muted-foreground">Загрузка документа…</div>
         ) : (
-          <div className="space-y-4 overflow-auto p-4">
+          <div className="min-h-0 flex-1 space-y-4 overflow-auto p-4">
             <div className="grid grid-cols-2 gap-3 rounded-lg border border-border/50 bg-card/40 p-3 sm:grid-cols-4">
               <Факт label="Откуда" value={data.place_from} />
               <Факт label="Куда" value={data.place_to} />
@@ -342,7 +339,6 @@ export function StationDocModal({ packetUuid, index, onClose }: {
             </div>
           </div>
         )}
-      </div>
-    </div>
+    </ModalCard>
   )
 }
