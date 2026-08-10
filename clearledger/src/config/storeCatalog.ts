@@ -86,6 +86,11 @@ export const STORE_HELP_MENU = [
   { key: 'help-catalog', label: 'Каталог и рецептуры' },
   { key: 'help-marking', label: 'Маркировка' },
   { key: 'help-closing', label: 'Закрытие периода' },
+  // Рабочее место АЗС - день администратора станции, а не сетевой взгляд товароведа:
+  // экраны и порядок работы там свои, поэтому пласты отдельные (info_seed_station).
+  { key: 'help-station',       label: 'Станция: рабочее место' },
+  { key: 'help-station-goods', label: 'Станция: товар' },
+  { key: 'help-station-cash',  label: 'Станция: касса и кухня' },
   { key: 'help-docs',    label: 'Документы компании' },
 ]
 export const STORE_HELP_KEYS = STORE_HELP_MENU.map((m) => m.key)

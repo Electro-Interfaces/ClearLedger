@@ -25,6 +25,8 @@ from app.services.info_seed_fuel import CATEGORIES as FUEL_CATEGORIES
 from app.services.info_seed_fuel import PROFILE as FUEL_PROFILE
 from app.services.info_seed_shop import ARTICLES as SHOP_ARTICLES
 from app.services.info_seed_shop import CATEGORIES as SHOP_CATEGORIES
+from app.services.info_seed_station import ARTICLES as STATION_ARTICLES
+from app.services.info_seed_station import CATEGORIES as STATION_CATEGORIES
 
 PROFILE = "energy"
 
@@ -772,9 +774,11 @@ async def seed_info(db: AsyncSession) -> dict[str, int]:
     packs = [
         (None, COMMON_CATEGORIES, COMMON_ARTICLES),
         (PROFILE, CATEGORIES, ARTICLES),
-        # Топливный профиль ведёт два продукта: «Топливо» и «Магазин». Пакеты
+        # Топливный профиль ведёт «Топливо», «Магазин» и рабочее место АЗС. Пакеты
         # раздельные (их правят разные люди и в разное время), профиль один.
-        (FUEL_PROFILE, FUEL_CATEGORIES + SHOP_CATEGORIES, FUEL_ARTICLES + SHOP_ARTICLES),
+        (FUEL_PROFILE,
+         FUEL_CATEGORIES + SHOP_CATEGORIES + STATION_CATEGORIES,
+         FUEL_ARTICLES + SHOP_ARTICLES + STATION_ARTICLES),
     ]
     for profile, cats, arts in packs:
         res = await _seed_pack(db, profile, cats, arts)
