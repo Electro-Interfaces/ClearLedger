@@ -65,6 +65,9 @@ def _line(позиция: dict, имена: dict[str, str]) -> dict:
         количество = позиция.get("qty_expected")
     return {
         "name": название,
+        # ссылка номенклатуры: по ней станция связывает строку со своей карточкой
+        # (uuid карточки на станции - тот же идентификатор 1С)
+        "ref": ссылка or None,
         "unit": (позиция.get("unit") or "").strip() or None,
         "barcode": позиция.get("barcode") or None,
         "qty": _decimal(количество or 0),
