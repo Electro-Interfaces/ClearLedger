@@ -75,6 +75,29 @@ def _line(позиция: dict, имена: dict[str, str]) -> dict:
         "amount": _decimal(позиция.get("amount") or 0),
         "vat_rate": позиция.get("vat_rate") or None,
         "vat_amount": _decimal(позиция.get("vat_amount") or 0),
+        "qty_book": None,
+        "qty_diff": None,
+    }
+
+
+def _line_цб(позиция: dict) -> dict:
+    """Строка документа центральной базы: перемещение, списание, переоценка или
+    инвентаризация. У пересчёта своя арифметика - учёт, факт и отклонение."""
+    учёт, отклонение = позиция.get("uchet"), позиция.get("dev")
+    инвентаризация = учёт is not None or отклонение is not None
+    количество = позиция.get("fact") if инвентаризация else позиция.get("qty")
+    return {
+        "name": (позиция.get("name") or "").strip(),
+        "ref": str(позиция.get("ref") or "") or None,
+        "unit": None,
+        "barcode": None,
+        "qty": _decimal(количество or 0),
+        "price": _decimal(позиция.get("price") or 0),
+        "amount": _decimal(позиция.get("amount") or 0),
+        "vat_rate": None,
+        "vat_amount": None,
+        "qty_book": _decimal(учёт) if инвентаризация else None,
+        "qty_diff": _decimal(отклонение) if инвентаризация else None,
     }
 
 
@@ -202,12 +225,35 @@ async def _document_lines(
     """
     ids = [row.document_id for row in projections
            if row.projection_source == "store" and row.source_kind == "receipt"]
-    if not ids:
-        return {}
-    строки = (await db.execute(text(
-        "SELECT id, lines FROM core.store_receipts "
-        " WHERE company_id = :cid AND id = ANY(:ids) AND lines IS NOT NULL"),
-        {"cid": company_id, "ids": ids})).all()
+    строки = []
+    if ids:
+        строки = (await db.execute(text(
+            "SELECT id, lines FROM core.store_receipts "
+            " WHERE company_id = :cid AND id = ANY(:ids) AND lines IS NOT NULL"),
+            {"cid": company_id, "ids": ids})).all()
+
+    # Документы центральной базы: пересчёты, перемещения, списания, переоценки.
+    # Их состав давно лежит в снимке ЦБ - на станцию он просто не ехал.
+    из_цб: dict[uuid.UUID, list[dict]] = {}
+    for таблица, kind in (("core.cb_inventory_doc", "onec_inventory"),
+                          ("core.cb_movement_doc", "onec_movement")):
+        записи = [(row.source_record_id, row.document_id) for row in projections
+                  if row.projection_source == "onec_legacy" and row.source_kind == kind]
+        if not записи:
+            continue
+        по_записи = dict(записи)
+        состав_цб = (await db.execute(text(
+            f"SELECT id, lines FROM {таблица} "
+            " WHERE company_id = :cid AND id = ANY(CAST(:ids AS uuid[])) "
+            "   AND jsonb_typeof(lines) = 'array'"),
+            {"cid": company_id, "ids": list(по_записи)})).all()
+        for record_id, состав in состав_цб:
+            document_id = по_записи.get(str(record_id))
+            if document_id is not None:
+                из_цб[document_id] = [_line_цб(позиция) for позиция in состав
+                                      if isinstance(позиция, dict)]
+    if not строки:
+        return из_цб
     ссылки = {str(позиция.get("nomenclature_ref") or "")
               for _, состав in строки if isinstance(состав, list)
               for позиция in состав if isinstance(позиция, dict)}
@@ -220,9 +266,10 @@ async def _document_lines(
             "SELECT external_uuid, name FROM edge.item "
             " WHERE external_uuid = ANY(CAST(:refs AS uuid[]))"),
             {"refs": sorted(ссылки)})).all()}
-    return {record_id: [_line(позиция, имена) for позиция in состав
-                        if isinstance(позиция, dict)]
-            for record_id, состав in строки if isinstance(состав, list)}
+    из_цб.update({record_id: [_line(позиция, имена) for позиция in состав
+                              if isinstance(позиция, dict)]
+                  for record_id, состав in строки if isinstance(состав, list)})
+    return из_цб
 
 
 async def queue_onec_document_snapshot(
