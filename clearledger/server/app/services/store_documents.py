@@ -5,7 +5,7 @@ import json
 import re
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from sqlalchemy import delete, select, text
@@ -116,6 +116,15 @@ def _uuid(value: object) -> uuid.UUID | None:
 
 def _derived_uuid(company_id: uuid.UUID, source: str, value: object) -> uuid.UUID:
     return uuid.uuid5(PROJECTION_NAMESPACE, f"{company_id}:{source}:{value}")
+
+
+def _iso(value: object) -> str | None:
+    """Дата/время для JSONB: только строкой."""
+    if value is None:
+        return None
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    return str(value)
 
 
 def _counterparty(*candidates: object) -> str | None:
@@ -615,9 +624,16 @@ async def _receipt_adapter(db: AsyncSession, company_id: uuid.UUID) -> list[Proj
             content_hash=row.content_hash,
             header={
                 "incoming_number": row.incoming_number,
-                "incoming_date": row.incoming_date,
+                # дата в JSONB только строкой: объект даты валит сериализацию
+                # всей пересборки, а всплывает это лишь когда поле заполнено
+                "incoming_date": _iso(row.incoming_date),
                 "signature_status": row.signature_status,
                 "delivery_scheme": row.delivery_scheme,
+                # реквизиты исходного документа 1С: бухгалтерия сверяет по ним
+                "contract": (row.contract_snapshot or {}).get("name"),
+                "organization": (row.organization_snapshot or {}).get("name"),
+                "warehouse": ((row.warehouse_snapshot or {}).get("name")
+                              or row.receiving_warehouse),
             },
         )
         candidate.lines, ambiguous = _candidate_lines(
