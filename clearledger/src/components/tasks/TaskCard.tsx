@@ -9,7 +9,6 @@
  * задваивается отдельным комментарием (так сделано на сервере, не ломать).
  */
 import { useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { useSupportContext } from '@/contexts/SupportContext'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -47,7 +46,6 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
   onBack?: () => void
 }) {
   const qc = useQueryClient()
-  const navigate = useNavigate()
   const { openInteraction } = useSupportContext()
   const [note, setNote] = useState('')
   const [feedKind, setFeedKind] = useState<'all' | 'talk' | 'move' | 'meta'>('all')
