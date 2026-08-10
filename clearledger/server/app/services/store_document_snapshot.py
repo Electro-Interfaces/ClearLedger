@@ -56,10 +56,30 @@ def _строка(value: object) -> str | None:
     return value if isinstance(value, str) and value.strip() else None
 
 
+def _line(позиция: dict, имена: dict[str, str]) -> dict:
+    """Строка документа для станции: только то, что человек читает в бланке."""
+    ссылка = str(позиция.get("nomenclature_ref") or "")
+    название = (позиция.get("name") or "").strip() or имена.get(ссылка, "")
+    количество = позиция.get("qty_fact")
+    if количество in (None, 0) and позиция.get("qty_expected"):
+        количество = позиция.get("qty_expected")
+    return {
+        "name": название,
+        "unit": (позиция.get("unit") or "").strip() or None,
+        "barcode": позиция.get("barcode") or None,
+        "qty": _decimal(количество or 0),
+        "price": _decimal(позиция.get("price") or 0),
+        "amount": _decimal(позиция.get("amount") or 0),
+        "vat_rate": позиция.get("vat_rate") or None,
+        "vat_amount": _decimal(позиция.get("vat_amount") or 0),
+    }
+
+
 def build_snapshot_headers(
     projections: list[StoreDocumentProjection],
     links: list[AccountingSourceLink],
     entries: list[DataEntry],
+    состав: dict[uuid.UUID, list[dict]] | None = None,
 ) -> list[dict]:
     entry_by_document: dict[uuid.UUID, DataEntry] = {}
     for entry in sorted(entries, key=lambda row: int(row.revision or 0), reverse=True):
@@ -105,6 +125,9 @@ def build_snapshot_headers(
             "organization": _строка(header.get("organization")),
             "incoming_number": _строка(header.get("incoming_number")),
             "incoming_date": _строка(header.get("incoming_date")),
+            # Состав документа. Шапка без табличной части бесполезна: человек
+            # открывает документ, чтобы увидеть, что именно привезли и почём.
+            "lines": (состав or {}).get(row.document_id) or [],
             "canonical_link": {
                 "kind": row.document_kind,
                 "document_id": str(link.canonical_document_id),
@@ -163,6 +186,42 @@ def validate_snapshot_headers(headers: list[dict]) -> None:
             raise ValueError(f"Snapshot header {source_id or '<empty>'}: {exc}") from exc
 
 
+async def _document_lines(
+    db: AsyncSession, company_id: uuid.UUID,
+    projections: list[StoreDocumentProjection],
+) -> dict[uuid.UUID, list[dict]]:
+    """Состав документов приёмки для снимка.
+
+    Первичка неизменяема (триггер `accepted store receipt evidence is immutable`),
+    и в исторических строках лежит только ссылка номенклатуры 1С. Наименование
+    берём из справочника пространства по той же ссылке - он полный, товар туда
+    приехал вместе с остатками.
+    """
+    ids = [row.document_id for row in projections
+           if row.projection_source == "store" and row.source_kind == "receipt"]
+    if not ids:
+        return {}
+    строки = (await db.execute(text(
+        "SELECT id, lines FROM core.store_receipts "
+        " WHERE company_id = :cid AND id = ANY(:ids) AND lines IS NOT NULL"),
+        {"cid": company_id, "ids": ids})).all()
+    ссылки = {str(позиция.get("nomenclature_ref") or "")
+              for _, состав in строки if isinstance(состав, list)
+              for позиция in состав if isinstance(позиция, dict)}
+    ссылки.discard("")
+    имена: dict[str, str] = {}
+    if ссылки:
+        # справочник edge.item — общий на пространство, своей колонки компании
+        # у него нет: стек и так живёт одной компанией
+        имена = {str(ref): name for ref, name in (await db.execute(text(
+            "SELECT external_uuid, name FROM edge.item "
+            " WHERE external_uuid = ANY(CAST(:refs AS uuid[]))"),
+            {"refs": sorted(ссылки)})).all()}
+    return {record_id: [_line(позиция, имена) for позиция in состав
+                        if isinstance(позиция, dict)]
+            for record_id, состав in строки if isinstance(состав, list)}
+
+
 async def queue_onec_document_snapshot(
     db: AsyncSession, company_id: uuid.UUID, station_id: int,
 ) -> tuple[EdgeDownlink, bool]:
@@ -194,7 +253,8 @@ async def queue_onec_document_snapshot(
         DataEntry.company_id == company_id,
         DataEntry.document_id.in_(document_ids),
     ))).scalars().all()) if document_ids else []
-    headers = build_snapshot_headers(projections, links, entries)
+    состав = await _document_lines(db, company_id, projections)
+    headers = build_snapshot_headers(projections, links, entries, состав)
     validate_snapshot_headers(headers)
     content_hash = snapshot_content_hash(headers)
 
