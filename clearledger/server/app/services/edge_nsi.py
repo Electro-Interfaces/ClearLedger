@@ -48,6 +48,21 @@ def _stock_doc(payload: dict) -> dict | None:
     return None
 
 
+def коды_в_обороте(cash_rows: list, own_rows: list) -> list[int]:
+    """Номера, которые станция считает занятыми: кассовые плюс наши закрепления.
+
+    Всё, чего нет в этом списке, центр гасит. Пока список строился по одной
+    кассе, каждый снимок сносил наши закрепления: они живут в реестре агента и
+    в dba.Tariffs до Дня X не попадают.
+    """
+    номера = set()
+    for r in list(cash_rows or []) + list(own_rows or []):
+        ns = r.get("КодНС")
+        if isinstance(ns, int) and ns:
+            номера.add(ns)
+    return sorted(номера)
+
+
 async def sync_from_snapshot(db: AsyncSession, station_id: int, payload: dict) -> dict:
     """Обновить мастер-НСИ станции по свежему снимку. Возвращает счётчики."""
     doc = _stock_doc(payload)
@@ -229,8 +244,33 @@ async def sync_from_snapshot(db: AsyncSession, station_id: int, payload: dict) -
     # расхождения рождается ложный конфликт: код 644 в центре числился за
     # печеньем, которого касса под ним давно не выдаёт, и мешал отдать номер
     # новой карточке.
-    увиденные = sorted({int(r["КодНС"]) for r in cash_rows
-                        if isinstance(r.get("КодНС"), int) and r.get("КодНС")})
+    #
+    # Кассой список не исчерпывается: до Дня X часть кодов закреплена нами и в
+    # dba.Tariffs ещё не уехала. Станция везёт их разделом «КодыЛеджер» —
+    # без него центр каждым снимком гасил ровно те закрепления, ради которых
+    # реестр и заводился (43 гашения за один снимок 11.08.2026).
+    own_rows = doc.get("КодыЛеджер") or []
+    for r in own_rows:
+        code = str(r.get("ШтрихКод") or "")
+        ns = r.get("КодНС")
+        if not code or not isinstance(ns, int):
+            continue
+        bc = (await db.execute(text(
+            "SELECT id FROM edge.barcode WHERE code = :c AND status = 'active'"
+        ), {"c": code})).scalar_one_or_none()
+        if bc is None:
+            continue
+        await db.execute(text("""
+            UPDATE edge.ns_code SET status = 'released', released_at = :t
+             WHERE station_id = :s AND status = 'active'
+               AND (ns_code = :n) <> (barcode_id = :b)
+        """), {"t": now, "s": station_id, "n": ns, "b": bc})
+        await db.execute(text("""
+            INSERT INTO edge.ns_code (station_id, ns_code, barcode_id, status)
+            VALUES (:s, :n, :b, 'active') ON CONFLICT DO NOTHING
+        """), {"s": station_id, "n": ns, "b": bc})
+
+    увиденные = коды_в_обороте(cash_rows, own_rows)
     if увиденные:
         res = await db.execute(text("""
             UPDATE edge.ns_code SET status = 'released', released_at = :t
