@@ -611,7 +611,10 @@ def разобрать_снимок_цепочки(payload: dict | None) -> dict
     """
     снимок = None
     for doc in (payload or {}).get("Документы") or []:
-        if isinstance(doc, dict) and doc.get("Вид") == "chain_snapshot":
+        # Снимок цепочки — единственный документ агента, у которого вид лежит в
+        # «Вид», а не в «Тип» (packet.go). Принимаем оба: приведут агента к
+        # общему ключу — экран не погаснет.
+        if isinstance(doc, dict) and (doc.get("Вид") or doc.get("Тип")) == "chain_snapshot":
             снимок = doc.get("Снимок")
             break
     if not isinstance(снимок, dict):

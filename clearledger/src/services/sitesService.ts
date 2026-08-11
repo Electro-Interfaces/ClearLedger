@@ -5,6 +5,7 @@
  * пайплайн развития сети. НЕ путать с /equipment (склад железа).
  */
 import { get, post, patch, put, del, upload } from './apiClient'
+import { downloadAttachment } from '@/components/chat/AuthMedia'
 
 /**
  * Стадии — воронка подбора недвижимости с гейтами. Порядок = порядок гейтов;
@@ -850,6 +851,13 @@ export async function uploadSiteDoc(
 
 export async function deleteSiteDoc(companyId: string, id: string, docId: string): Promise<unknown> {
   return del(`/api/sites/${id}/docs/${docId}?company_id=${companyId}`)
+}
+
+/** Скачать приложенный документ: файл отдаётся по JWT, прямой ссылкой его не взять. */
+export async function downloadSiteDoc(
+  companyId: string, id: string, docId: string, fileName?: string,
+): Promise<void> {
+  await downloadAttachment(`/api/sites/${id}/docs/${docId}/file?company_id=${companyId}`, fileName)
 }
 
 export async function saveTechConnection(

@@ -7,12 +7,15 @@
  */
 import { useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
+import { useTabParams } from '@/hooks/useTabParams'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import {
+  Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select'
 import { Loader2, Search, X, ChevronLeft, ChevronRight, Plus } from 'lucide-react'
 import { ExportButton } from './ExportButton'
 import {
@@ -100,19 +103,27 @@ function StageBoard({ rows, onOpen }: { rows: SiteRow[]; onOpen: (id: string) =>
 }
 
 export function ProjectsListPanel({ companyId }: { companyId: string }) {
-  const [phase, setPhase] = useState('')
-  const [ownerId, setOwnerId] = useState('')
-  // Реестр «Площадок» схлопнут сюда (решение МАГа 28.07.2026): место и работа на
-  // нём — одна сущность, два одинаковых списка только путали. Регион и показ
-  // отклонённых пришли оттуда, без них реестр мест не заменить.
-  const [region, setRegion] = useState('')
-  const [closed, setClosed] = useState(false)
+  // Отбор живёт в параметрах пункта, а не в useState: уход в проект размонтирует
+  // реестр, и по «вернуться к списку» человек получал полный список со сброшенным
+  // отбором — искать свой населённый пункт заново (замечание И. Ступина 10.08.2026).
+  const [f, patch, setF] = useTabParams('pr_list', {
+    phase: '', stage: '', ownerId: '', region: '', closed: false,
+    overdue: false, search: '', view: 'table' as 'table' | 'board', page: 1,
+  })
+  const { phase, ownerId, region, closed, overdue, search, view, page } = f
+  // Блок и этап взаимно исключают друг друга: выбрали этап — блок снимается.
+  const setPhase = (v: string) => patch({ phase: v, stage: '' })
+  const setStage = (v: string) => patch({ stage: v, phase: '' })
+  const setOwnerId = (v: string) => patch({ ownerId: v })
+  const setRegion = (v: string) => patch({ region: v })
+  const setClosed = (v: boolean) => patch({ closed: v })
+  const setOverdue = (v: boolean) => patch({ overdue: v })
+  const setSearch = (v: string) => patch({ search: v })
+  const setView = (v: 'table' | 'board') => patch({ view: v })
+  const setPage = (v: number | ((p: number) => number)) =>
+    setF((c) => ({ ...c, page: typeof v === 'function' ? v(c.page) : v }))
   const [picked, setPicked] = useState<Set<string>>(new Set())
   const [assignTo, setAssignTo] = useState('')
-  const [view, setView] = useState<'table' | 'board'>('table')
-  const [overdue, setOverdue] = useState(false)
-  const [search, setSearch] = useState('')
-  const [page, setPage] = useState(1)
   const [detailId, setDetailId] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
   // Переход из обзора портфеля приносит фильтр риска в URL — реестр обязан его
@@ -141,14 +152,17 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
     return p ? p.stages.map((s) => s.stage) : []
   }, [pf.data, phase])
 
+  // Выбранная стадия: из URL (приход из воронки) либо из отбора реестра.
+  const stagePick = stageFromUrl || f.stage
+
   const q = useQuery({
-    queryKey: ['pr-projects', companyId, phase, ownerId, region, closed, overdue, search, risk, stageFromUrl, page],
+    queryKey: ['pr-projects', companyId, phase, stagePick, ownerId, region, closed, overdue, search, risk, page],
     queryFn: () => getSites({
       companyId,
       // «Отклонённые» — тоже проекты, просто закрытые с причиной: держим их за
       // фильтром, а не в отдельном разделе, иначе теряется история места.
       stage: closed ? 'archive'
-        : stageFromUrl
+        : stagePick
         || (phase && stagesOfPhase.length === 1 ? stagesOfPhase[0] : (phase ? undefined : 'active')),
       region: region || undefined,
       ownerId: ownerId || undefined, overdue, search: search || undefined,
@@ -186,7 +200,7 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
   // Сколько фильтров сейчас сужают выдачу — чтобы свёрнутая панель не скрывала
   // того, что список показан не целиком.
   const activeFilters = [phase, region, ownerId, overdue ? '1' : '', closed ? '1' : '',
-    risk, stageFromUrl].filter(Boolean).length
+    risk, stagePick, search].filter(Boolean).length
 
   return (
     <div className="p-4 space-y-3">
@@ -207,12 +221,30 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
       </div>
 
       <div className={`${filtersOpen ? 'flex' : 'hidden'} sm:flex flex-wrap items-center gap-2`}>
-        <Select value={phase || '__all__'} onValueChange={(v) => { setPhase(v === '__all__' ? '' : v); reset() }}>
-          <SelectTrigger className="h-8 w-[210px] text-sm"><SelectValue placeholder="Все этапы" /></SelectTrigger>
-          <SelectContent>
+        {/* Блок и его этапы в одном списке. Раньше выбирать можно было только блок
+            («Подбор 272»), и по нему не видно, у кого проект в работе: на переговорах,
+            в проработке или уже на пусконаладке (замечание И. Ступина 10.08.2026). */}
+        <Select value={stagePick ? `st:${stagePick}` : phase ? `ph:${phase}` : '__all__'}
+          onValueChange={(v) => {
+            if (v === '__all__') { patch({ phase: '', stage: '', page: 1 }); clearStage(); return }
+            if (v.startsWith('st:')) { setStage(v.slice(3)); clearStage() } else { setPhase(v.slice(3)); clearStage() }
+            reset()
+          }}>
+          <SelectTrigger className="h-8 w-[260px] text-sm"><SelectValue placeholder="Все этапы" /></SelectTrigger>
+          <SelectContent className="max-h-[420px]">
             <SelectItem value="__all__" className="text-sm">Все этапы ({nf0.format(pf.data?.active ?? 0)})</SelectItem>
             {(pf.data?.phases ?? []).filter((p) => p.key !== 'closed').map((p) => (
-              <SelectItem key={p.key} value={p.key} className="text-sm">{p.label} ({p.count})</SelectItem>
+              <SelectGroup key={p.key}>
+                <SelectItem value={`ph:${p.key}`} className="text-sm font-medium">
+                  {p.label} ({p.count})
+                </SelectItem>
+                {p.stages.map((s) => (
+                  <SelectItem key={s.stage} value={`st:${s.stage}`}
+                    className="text-sm pl-8 text-muted-foreground">
+                    {s.label} ({s.count})
+                  </SelectItem>
+                ))}
+              </SelectGroup>
             ))}
           </SelectContent>
         </Select>
@@ -239,12 +271,12 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
           </SelectContent>
         </Select>
 
-        <button type="button" onClick={() => { setOverdue((v) => !v); reset() }}
+        <button type="button" onClick={() => { setOverdue(!overdue); reset() }}
           className={`px-2.5 py-1 text-sm rounded-md border transition-colors ${overdue ? 'bg-primary text-primary-foreground border-transparent' : 'border-border text-muted-foreground hover:text-foreground'}`}>
           Просрочено
         </button>
 
-        <button type="button" onClick={() => { setClosed((v) => !v); reset() }}
+        <button type="button" onClick={() => { setClosed(!closed); reset() }}
           title="Проекты, закрытые с причиной: место рассмотрели и отказались"
           className={`px-2.5 py-1 text-sm rounded-md border transition-colors ${closed ? 'bg-primary text-primary-foreground border-transparent' : 'border-border text-muted-foreground hover:text-foreground'}`}>
           Отклонённые

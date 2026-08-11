@@ -58,9 +58,26 @@ async def sync_from_snapshot(db: AsyncSession, station_id: int, payload: dict) -
         text("SELECT 1 FROM edge.station WHERE id = :s"), {"s": station_id}
     )).scalar_one_or_none()
     if station is None:
-        # Станции нет в мастере — молча заводить её здесь нельзя: реквизиты
-        # (склад, организация) знает только конфигурация, а не снимок.
-        return {"skipped": f"станция {station_id} не заведена в мастер-НСИ"}
+        # Станция заводится из первого же пакета.
+        #
+        # Раньше здесь был отказ «станция не заведена в мастер-НСИ», и завести
+        # её можно было только SQL-ом руками: новая АЗС молча теряла снимок,
+        # цены, коды кассы и места хранения, а причину было видно лишь в ответе
+        # приёмника. Реквизиты, которых «знает только конфигурация», на деле
+        # едут в шапке каждого пакета — станция сама их и сообщает.
+        смена = (payload.get("Смена") or {}) if isinstance(payload, dict) else {}
+        склад = str(смена.get("СкладUUID") or "").strip()
+        орг = str(смена.get("ОрганизацияUUID") or "").strip()
+        if not склад or not орг:
+            return {"skipped": f"станция {station_id} не заведена, а в пакете нет "
+                               "СкладUUID и ОрганизацияUUID"}
+        await db.execute(text("""
+            INSERT INTO edge.station (id, name, warehouse_uuid, org_uuid)
+            VALUES (:s, :n, cast(:w as uuid), cast(:o as uuid))
+            ON CONFLICT (id) DO NOTHING
+        """), {"s": station_id, "n": str(смена.get("Касса") or f"АЗС №{station_id}")[:100],
+               "w": склад, "o": орг})
+        await db.commit()
 
     cash_rows = doc.get("Касса") or []
     book_rows = doc.get("Учет") or []
@@ -203,6 +220,25 @@ async def sync_from_snapshot(db: AsyncSession, station_id: int, payload: dict) -
         """), {"s": station_id, "n": ns, "b": bc})
         stats["ns_codes"] += 1
 
+    # Код, пропавший из кассы, гаснет и в центре.
+    #
+    # Раздел «Касса» снимка — полный список dba.Tariffs, а не изменения: раз
+    # позиции там нет, касса этот код больше не держит. Пока гасились только
+    # конфликтующие привязки, реестр центра умел лишь расти: 856 активных
+    # против 832 на станции, последнее гашение — за неделю до этого. Из такого
+    # расхождения рождается ложный конфликт: код 644 в центре числился за
+    # печеньем, которого касса под ним давно не выдаёт, и мешал отдать номер
+    # новой карточке.
+    увиденные = sorted({int(r["КодНС"]) for r in cash_rows
+                        if isinstance(r.get("КодНС"), int) and r.get("КодНС")})
+    if увиденные:
+        res = await db.execute(text("""
+            UPDATE edge.ns_code SET status = 'released', released_at = :t
+             WHERE station_id = :s AND status = 'active'
+               AND ns_code <> ALL(:codes)
+        """), {"t": now, "s": station_id, "codes": увиденные})
+        stats["ns_codes_released"] = res.rowcount or 0
+
     # ── Места хранения ───────────────────────────────────────────────────
     # Справочник приезжает вместе со снимком: свои склады станция знает из 1С,
     # центру их выдумывать неоткуда. Торговый зал определяем по коду, равному
@@ -281,31 +317,37 @@ async def ingest_station_nsi(db: AsyncSession, company_id, station_id: int,
         if вид == "item_draft":
             await db.execute(text("""
                 INSERT INTO edge.item_draft
-                    (company_id, station_id, source_uuid, name, unit, vat_rate, barcodes, created_at)
-                VALUES (:cid, :st, :key, :name, :unit, :vat, :codes, coalesce(CAST(:at AS timestamptz), now()))
+                    (company_id, station_id, source_uuid, name, unit, vat_rate, barcodes,
+                     created_at, author)
+                VALUES (:cid, :st, :key, :name, :unit, :vat, :codes,
+                        coalesce(CAST(:at AS timestamptz), now()), :author)
                 ON CONFLICT (company_id, station_id, source_uuid) DO UPDATE
                    SET name = excluded.name, unit = excluded.unit,
-                       vat_rate = excluded.vat_rate, barcodes = excluded.barcodes
+                       vat_rate = excluded.vat_rate, barcodes = excluded.barcodes,
+                       author = coalesce(nullif(excluded.author, ''),
+                                         edge.item_draft.author)
                  WHERE edge.item_draft.resolved_at IS NULL
             """), {"cid": company_id, "st": station_id, "key": ключ,
                    "name": doc.get("Наименование") or "", "unit": doc.get("Единица") or "шт",
                    "vat": doc.get("СтавкаНДС"), "codes": doc.get("Штрихкоды") or [],
-                   "at": _ts(doc.get("Заведена"))})
+                   "at": _ts(doc.get("Заведена")), "author": doc.get("Автор") or ""})
             stats["item_drafts"] += 1
 
         elif вид == "partner_draft":
             await db.execute(text("""
                 INSERT INTO edge.partner_draft
-                    (company_id, station_id, source_uuid, name, inn, kpp, role, comment)
-                VALUES (:cid, :st, :key, :name, :inn, :kpp, :role, :comment)
+                    (company_id, station_id, source_uuid, name, inn, kpp, role, comment, author)
+                VALUES (:cid, :st, :key, :name, :inn, :kpp, :role, :comment, :author)
                 ON CONFLICT (company_id, station_id, source_uuid) DO UPDATE
                    SET name = excluded.name, inn = excluded.inn, kpp = excluded.kpp,
-                       role = excluded.role, comment = excluded.comment
+                       role = excluded.role, comment = excluded.comment,
+                       author = coalesce(nullif(excluded.author, ''),
+                                         edge.partner_draft.author)
                  WHERE edge.partner_draft.resolved_at IS NULL
             """), {"cid": company_id, "st": station_id, "key": ключ,
                    "name": doc.get("Наименование") or "", "inn": doc.get("ИНН"),
                    "kpp": doc.get("КПП"), "role": doc.get("Роль") or "supplier",
-                   "comment": doc.get("Комментарий")})
+                   "comment": doc.get("Комментарий"), "author": doc.get("Автор") or ""})
             stats["partner_drafts"] += 1
 
         elif вид == "nsi_proposal":
@@ -346,11 +388,14 @@ async def ingest_station_nsi(db: AsyncSession, company_id, station_id: int,
             мрц = doc.get("МРЦ")
             if not item or not мрц or float(мрц) <= 0:
                 continue
-            await db.execute(text("""
+            применено = await db.execute(text("""
                 UPDATE edge.item SET mrc = :mrc, updated_at = now()
                  WHERE external_uuid::text = :item AND mrc IS NULL
             """), {"item": item, "mrc": float(мрц)})
-            stats["mrc_facts"] += 1
+            # Считаем применённое, а не присланное: условие `mrc IS NULL`
+            # отбрасывает большую часть фактов, и счётчик обещал работу,
+            # которой не было.
+            stats["mrc_facts"] += применено.rowcount or 0
 
         elif вид == "price_change":
             # Изменение цены неизменяемо: это запись о случившемся, а не
@@ -409,11 +454,13 @@ async def station_drafts(db: AsyncSession, company_id, station_id: int | None = 
         args["st"] = station_id
 
     items = (await db.execute(text(f"""
-        SELECT id, station_id, source_uuid, name, unit, vat_rate, barcodes, created_at
+        SELECT id, station_id, source_uuid, name, unit, vat_rate, barcodes, created_at,
+               coalesce(author, '') AS author
         FROM edge.item_draft WHERE {условие} ORDER BY created_at
     """), args)).mappings().all()
     partners = (await db.execute(text(f"""
-        SELECT id, station_id, source_uuid, name, inn, kpp, role, comment, created_at
+        SELECT id, station_id, source_uuid, name, inn, kpp, role, comment, created_at,
+               coalesce(author, '') AS author
         FROM edge.partner_draft WHERE {условие} ORDER BY created_at
     """), args)).mappings().all()
     prices = (await db.execute(text("""
@@ -488,7 +535,7 @@ async def resolve_item_draft(db: AsyncSession, company_id, draft_id: int,
     не разобрал, — это товар, который станция продаёт, а сеть не видит.
     """
     draft = (await db.execute(text("""
-        SELECT id, station_id, name, unit, vat_rate, barcodes, resolved_at
+        SELECT id, station_id, name, unit, vat_rate, barcodes, resolved_at, source_uuid
         FROM edge.item_draft WHERE id = :id AND company_id = :cid
     """), {"id": draft_id, "cid": company_id})).mappings().first()
     if draft is None:
@@ -504,7 +551,11 @@ async def resolve_item_draft(db: AsyncSession, company_id, draft_id: int,
             WHERE id = :id
         """), {"id": draft_id, "n": note})
         await db.commit()
-        return {"action": "reject", "draft_id": draft_id}
+        # source_uuid возвращаем, чтобы отказ доехал до станции адресно: там
+        # черновик опознаётся именно по нему, а не по нашему номеру строки.
+        return {"action": "reject", "draft_id": draft_id,
+                "station_id": draft["station_id"],
+                "source_uuid": str(draft["source_uuid"] or "")}
 
     if action == "create":
         row = (await db.execute(text("""

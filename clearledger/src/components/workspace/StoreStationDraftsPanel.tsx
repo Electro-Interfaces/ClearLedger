@@ -85,6 +85,7 @@ function ItemDraftCard({ draft, onDone }: { draft: StationItemDraft; onDone: () 
           <div className="text-xs text-muted-foreground mt-0.5">
             АЗС {draft.station_id} · {draft.unit} · {draft.vat_rate ?? 'ставка не указана'} ·
             заведена {when(draft.created_at)}
+            {draft.author ? ` · ${draft.author}` : ''}
           </div>
           <div className="text-xs font-mono mt-1">
             {draft.barcodes.length ? draft.barcodes.join(', ') : <span className="text-red-400/80">без штрихкода</span>}
@@ -225,6 +226,7 @@ export function StoreStationDraftsPanel() {
                   <div className="text-xs text-muted-foreground">
                     АЗС {p.station_id} · {p.inn ? `ИНН ${p.inn}` : 'ИНН не указан'}
                     {p.comment && ` · ${p.comment}`}
+                    {p.author ? ` · ${p.author}` : ''}
                   </div>
                 </div>
                 <div className="flex gap-2 shrink-0">

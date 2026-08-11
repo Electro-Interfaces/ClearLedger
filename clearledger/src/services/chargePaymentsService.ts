@@ -128,6 +128,9 @@ export interface ReconRow {
   receipt: boolean
   payments: number
   powerKw: number | null
+  /** Холд и возврат — только у платёжных расхождений, у сессионных null. */
+  hold: number | null
+  refund: number | null
 }
 
 export async function getReconciliation(p: P): Promise<ReconSummary> {

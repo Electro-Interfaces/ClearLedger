@@ -105,6 +105,12 @@ async def download_file(
     # 404 и для несуществующего, и для файла чужой компании (не раскрываем факт).
     source = await get_owned(SourceFile, uid, current_user, db)
 
+    # Файл проекции документов магазина повторно проверяет актуальный station grant.
+    # Company-membership недостаточно: сохранённая старая ссылка не должна пережить
+    # отзыв полномочий на АЗС или logical tombstone.
+    from app.routers.store_documents_router import authorize_store_file_download
+    await authorize_store_file_download(db, current_user, uid)
+
     # Вложение чата принадлежит РАЗГОВОРУ, а не компании: членства мало. Иначе любой
     # сотрудник, которому попался адрес файла (переслали ссылку, увидел в логе), качает
     # снимок из чужой личной переписки. Тем же запросом закрывается и мягкое удаление:

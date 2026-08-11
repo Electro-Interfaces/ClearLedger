@@ -42,7 +42,10 @@ def test_outgoing_transfer_becomes_recipient_downlink():
 
 def test_recipient_acceptance_returns_to_sender():
     payload = _outgoing()
-    payload["Выгружено"] = "2026-08-04T15:20:00+03:00"
+    # Имя поля — из конверта агента (packet.Envelope.ExportedAt), а не выдуманное:
+    # центр читал «Выгружено», такого ключа станция не шлёт никогда, и время
+    # приёмки молча подменялось временем сервера.
+    payload["ВремяВыгрузки"] = "2026-08-04T15:20:00+03:00"
     doc = payload["Документы"][0]
     doc.update({
         "Направление": "in",

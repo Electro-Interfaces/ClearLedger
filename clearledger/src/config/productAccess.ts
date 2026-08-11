@@ -92,6 +92,7 @@ export const PRODUCT_MODULES: Record<string, ProductModuleDef[]> = {
   ],
   shop: [
     ...items(storeMenu('store'), 'Торговля'),
+    ...items(storeMenu('store_documents'), 'Документы'),
     ...items(storeMenu('store_catering'), 'Общепит'),
     ...items(storeMenu('store_stock'), 'Склад'),
     ...items(storeMenu('store_cash'), 'Касса'),

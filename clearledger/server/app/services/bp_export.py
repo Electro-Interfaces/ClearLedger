@@ -6,9 +6,7 @@ oneC-путь сохранён как переходный fallback. Докум�
 """
 from __future__ import annotations
 
-import json as _json
 import logging as _logging
-import os as _os
 import re as _re
 import uuid as _uuid
 from copy import deepcopy
@@ -1375,24 +1373,10 @@ class BpPackageEmitter:
         return пакет
 
     async def emit_to_dir(self, shift_key: str, directory: str) -> dict:
-        """Собрать пакет и записать JSON-файл в каталог (Ф3). Формат: UTF-8 без
-        BOM, отступ таб (как ЗаписатьJSON приёмника). Возвращает сводку."""
-        verification = await self.verify_shift_package(shift_key)
-        if not verification["ok"]:
-            failed = [check["Проверка"] for check in verification["checks"] if not check["ok"]]
-            raise ValueError("Пакет не прошёл обязательную сверку: " + "; ".join(failed))
-        пакет = await self.build_shift_package(shift_key)
-        fname = package_filename(пакет)
-        _os.makedirs(directory, exist_ok=True)
-        path = _os.path.join(directory, fname)
-        with open(path, "w", encoding="utf-8", newline="\n") as f:
-            _json.dump(пакет, f, ensure_ascii=False, indent="\t")
-        from collections import Counter
-        return {
-            "file": fname, "path": path, "hash": пакет["ХешПакета"],
-            "documents": dict(Counter(d["Тип"] for d in пакет["Документы"])),
-            "nsi": len(пакет["НСИ"]),
-        }
+        """Legacy API оставлен только как fail-closed совместимый вызов."""
+        from app.services.accounting_egress import AccountingEgressGuard
+
+        AccountingEgressGuard.deny_direct_file_write()
 
     async def verify_shift_package(self, shift_key: str) -> dict:
         """Сверка сопутки: самосогласованность пакета + сверка с источником. Строит

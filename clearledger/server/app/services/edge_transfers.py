@@ -81,7 +81,8 @@ def transfer_tasks(payload: dict, source_station: int) -> list[dict]:
                 "payload": {
                     "id": sender_document_id,
                     "accepted_station": source_station,
-                    "accepted_at": str(payload.get("Выгружено") or datetime.now(timezone.utc).isoformat()),
+                    "accepted_at": str(payload.get("ВремяВыгрузки")
+                                       or datetime.now(timezone.utc).isoformat()),
                     "accepted_qty": accepted,
                     "difference": accepted - sent,
                 },

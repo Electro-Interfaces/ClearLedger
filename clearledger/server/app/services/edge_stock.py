@@ -162,10 +162,18 @@ async def записать_проекцию_по_штрихкодам(db: AsyncS
     for место in места:
         живые = [c for м, c in qty_by_key if м == место]
         if живые:
+            # Строку держит только АКТИВНЫЙ штрихкод. Условие «код есть среди
+            # живых» само по себе мало: один код бывает у двух строк
+            # справочника, когда выпуск переносят с карточки на карточку.
+            # Тогда снимок кладёт остаток на новую карточку, а строка старой
+            # остаётся с прежним числом — и товар задваивается. Так вышло с
+            # двумя шоколадами «Гейша» на одной карточке: 3 + 2 на станции
+            # против 3 + 2 + 2 в центре.
             res = await db.execute(text("""
                 DELETE FROM edge.stock WHERE station_id = :st AND place = :pl
                   AND barcode_id NOT IN (
-                      SELECT id FROM edge.barcode WHERE code = ANY(:codes))
+                      SELECT id FROM edge.barcode
+                      WHERE code = ANY(:codes) AND status = 'active')
             """), {"st": station_id, "pl": место, "codes": живые})
         else:
             res = await db.execute(text(

@@ -11,16 +11,19 @@ from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import assert_company_member, get_current_user
+from app.business_access import has_network_merchandiser
 from app.database import get_db
 from app.deps import get_owned
 from app.models import (
     AccountingDoc,
     BankAccount,
+    Company,
     Contract,
     ContractDimension,
     ContractLocation,
     Counterparty,
     DataEntry,
+    EdgeAgent,
     NomenclatureItem,
     Organization,
     ServiceLocation,
@@ -28,6 +31,7 @@ from app.models import (
     StationDispensePeriod,
     StationEnergyPeriod,
     User,
+    UserCompany,
     Warehouse,
 )
 from app.schemas import (
@@ -116,6 +120,36 @@ _CP_EXTRA_FIELDS = {
 }
 
 
+async def _assert_can_verify_counterparty(
+    db: AsyncSession, user: User, company_id: uuid.UUID,
+    *, inn: str | None, kpp: str | None, name: str | None,
+) -> None:
+    """Черновик поставщика заводит кто угодно, каноном его делает сеть.
+
+    `verified` — не оформление карточки, а утверждение, что реквизиты сверены:
+    после него документ этого поставщика получает право уехать в бухгалтерию.
+    Оставлять это любому участнику компании значит позволить станции самой себе
+    открыть путь в учёт.
+    """
+    company = await db.get(Company, company_id)
+    membership = await db.get(UserCompany, (user.id, company_id))
+    grants = list(getattr(membership, "business_grants", None) or []) if membership else []
+    if not (user.is_superadmin
+            or (company is not None and has_network_merchandiser(grants, company.slug))):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Карточку контрагента подтверждает товаровед сети или суперадминистратор",
+        )
+    clean_inn = str(inn or "").strip()
+    if not str(name or "").strip():
+        raise HTTPException(400, "Для подтверждения карточки нужно наименование")
+    if not clean_inn.isdigit() or len(clean_inn) not in (10, 12):
+        raise HTTPException(400, "Для подтверждения карточки нужен корректный ИНН")
+    # у ИП КПП не существует — требовать его значит запретить работу с ИП
+    if len(clean_inn) == 10 and not str(kpp or "").strip():
+        raise HTTPException(400, "Для юридического лица нужен КПП")
+
+
 def _counterparty_resp(cp: Counterparty) -> CounterpartyResponse:
     return CounterpartyResponse(
         id=str(cp.id),
@@ -130,6 +164,7 @@ def _counterparty_resp(cp: Counterparty) -> CounterpartyResponse:
         headRef=cp.head_ref,
         externalRef=cp.external_ref,
         raw=cp.raw,
+        lifecycleStatus=cp.lifecycle_status,
         createdAt=_ts(cp.created_at),
         updatedAt=_ts(cp.updated_at),
         **{camel: getattr(cp, snake) for camel, snake in _CP_EXTRA_FIELDS.items()},
@@ -194,6 +229,9 @@ async def create_counterparty(
     current_user: User = Depends(get_current_user),
 ):
     cid = await assert_company_member(body.company_id, current_user, db)
+    if str(body.lifecycleStatus) == "verified":
+        await _assert_can_verify_counterparty(
+            db, current_user, cid, inn=body.inn, kpp=body.kpp, name=body.name)
     cp = Counterparty(
         company_id=cid,
         inn=body.inn,
@@ -202,6 +240,7 @@ async def create_counterparty(
         short_name=body.shortName,
         type=body.type,
         aliases=body.aliases,
+        lifecycle_status=body.lifecycleStatus,
         **{snake: getattr(body, camel) for camel, snake in _CP_EXTRA_FIELDS.items()},
     )
     db.add(cp)
@@ -219,6 +258,15 @@ async def update_counterparty(
     uid = _parse_uuid(item_id)
     cp = await get_owned(Counterparty, uid, current_user, db)  # 404 для чужой/несуществующей
 
+    if body.lifecycleStatus is not None and str(body.lifecycleStatus) == "verified" \
+            and cp.lifecycle_status != "verified":
+        await _assert_can_verify_counterparty(
+            db, current_user, cp.company_id,
+            inn=cp.inn if body.inn is None else body.inn,
+            kpp=cp.kpp if body.kpp is None else body.kpp,
+            name=cp.name if body.name is None else body.name,
+        )
+
     if body.inn is not None:
         cp.inn = body.inn
     if body.kpp is not None:
@@ -231,6 +279,8 @@ async def update_counterparty(
         cp.type = body.type
     if body.aliases is not None:
         cp.aliases = body.aliases
+    if body.lifecycleStatus is not None:
+        cp.lifecycle_status = body.lifecycleStatus
     for camel, snake in _CP_EXTRA_FIELDS.items():
         val = getattr(body, camel)
         if val is not None:
@@ -1556,9 +1606,33 @@ def _warehouse_resp(w: Warehouse) -> WarehouseResponse:
         address=w.address,
         type=w.type,
         externalRef=w.external_ref,
+        organizationId=str(w.organization_id) if w.organization_id else None,
+        stationId=w.station_id,
         createdAt=_ts(w.created_at),
         updatedAt=_ts(w.updated_at),
     )
+
+
+async def _validate_warehouse_scope(
+    db: AsyncSession,
+    company_id: uuid.UUID,
+    organization_id: uuid.UUID | None,
+    station_id: int | None,
+) -> None:
+    if organization_id is not None:
+        organization = (await db.execute(select(Organization.id).where(
+            Organization.id == organization_id,
+            Organization.company_id == company_id,
+        ))).scalar_one_or_none()
+        if organization is None:
+            raise HTTPException(400, "Организация склада не принадлежит компании")
+    if station_id is not None:
+        agent = (await db.execute(select(EdgeAgent.id).where(
+            EdgeAgent.company_id == company_id,
+            EdgeAgent.station_id == station_id,
+        ))).scalar_one_or_none()
+        if agent is None:
+            raise HTTPException(400, "Станция склада не зарегистрирована в компании")
 
 
 @router.get("/warehouses", response_model=list[WarehouseResponse])
@@ -1619,12 +1693,17 @@ async def create_warehouse(
     current_user: User = Depends(get_current_user),
 ):
     cid = await assert_company_member(body.company_id, current_user, db)
+    await _validate_warehouse_scope(
+        db, cid, body.organization_id, body.station_id,
+    )
     w = Warehouse(
         company_id=cid,
         code=body.code,
         name=body.name,
         address=body.address,
         type=body.type,
+        organization_id=body.organization_id,
+        station_id=body.station_id,
     )
     db.add(w)
     await db.flush()
@@ -1640,6 +1719,12 @@ async def update_warehouse(
 ):
     uid = _parse_uuid(item_id)
     w = await get_owned(Warehouse, uid, current_user, db)  # 404 для чужого/несуществующего
+    organization_id = (
+        body.organization_id if "organization_id" in body.model_fields_set
+        else w.organization_id
+    )
+    station_id = body.station_id if "station_id" in body.model_fields_set else w.station_id
+    await _validate_warehouse_scope(db, w.company_id, organization_id, station_id)
 
     if body.code is not None:
         w.code = body.code
@@ -1649,6 +1734,10 @@ async def update_warehouse(
         w.address = body.address
     if body.type is not None:
         w.type = body.type
+    if "organization_id" in body.model_fields_set:
+        w.organization_id = body.organization_id
+    if "station_id" in body.model_fields_set:
+        w.station_id = body.station_id
 
     await db.flush()
     await db.refresh(w)   # дозагрузить onupdate-поля (updated_at) в async-контексте

@@ -20,8 +20,59 @@ from app.schemas import (
     ExportPacketResponse,
     ExportPacketUpdate,
 )
+from app.services.accounting_egress import ACCOUNTING_PACKET_KINDS
 
 router = APIRouter(prefix="/export-packets", tags=["Выгрузка в 1С (L3)"])
+
+
+def _reject_accounting_generic_mutation(packet: ExportPacket) -> None:
+    if packet.kind in ACCOUNTING_PACKET_KINDS:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Accounting-пакет изменяется только выделенным guarded sender",
+        )
+
+
+def _reject_accounting_generic_create(kind: str) -> None:
+    if kind in ACCOUNTING_PACKET_KINDS:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Accounting-пакет создаётся только через AccountingEgressGuard",
+        )
+
+
+def _generic_packet_list_statement(
+    company_id: uuid.UUID,
+    kind: str | None = None,
+    packet_status: str | None = None,
+):
+    stmt = select(ExportPacket).where(
+        ExportPacket.company_id == company_id,
+        ExportPacket.kind.notin_(ACCOUNTING_PACKET_KINDS),
+    )
+    if kind:
+        stmt = stmt.where(ExportPacket.kind == kind)
+    if packet_status:
+        stmt = stmt.where(ExportPacket.status == packet_status)
+    return stmt.order_by(ExportPacket.created_at.desc())
+
+
+def _generic_packet_stats_statement(company_id: uuid.UUID):
+    return (
+        select(ExportPacket.status, ExportPacket.kind, func.count())
+        .where(
+            ExportPacket.company_id == company_id,
+            ExportPacket.kind.notin_(ACCOUNTING_PACKET_KINDS),
+        )
+        .group_by(ExportPacket.status, ExportPacket.kind)
+    )
+
+
+def _generic_packets_by_doc_statement(doc_id: uuid.UUID):
+    return select(ExportPacket).where(
+        ExportPacket.target_doc_id == doc_id,
+        ExportPacket.kind.notin_(ACCOUNTING_PACKET_KINDS),
+    )
 
 
 def _resp(p: ExportPacket) -> ExportPacketResponse:
@@ -50,12 +101,7 @@ async def list_packets(
     current_user: User = Depends(get_current_user),
 ):
     cid = await assert_company_member(company_id, current_user, db)
-    stmt = select(ExportPacket).where(ExportPacket.company_id == cid)
-    if kind:
-        stmt = stmt.where(ExportPacket.kind == kind)
-    if pkt_status:
-        stmt = stmt.where(ExportPacket.status == pkt_status)
-    stmt = stmt.order_by(ExportPacket.created_at.desc())
+    stmt = _generic_packet_list_statement(cid, kind, pkt_status)
     rows = (await db.execute(stmt)).scalars().all()
     return [_resp(p) for p in rows]
 
@@ -67,6 +113,7 @@ async def create_packet(
     current_user: User = Depends(get_current_user),
 ):
     cid = await assert_company_member(payload.company_id, current_user, db)
+    _reject_accounting_generic_create(payload.kind)
     p = ExportPacket(
         id=uuid.uuid4(),
         company_id=cid,
@@ -93,6 +140,7 @@ async def update_packet(
     except ValueError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid id") from exc
     p = await get_owned(ExportPacket, pid, _u, db)  # 404 для чужого/несуществующего
+    _reject_accounting_generic_mutation(p)
 
     # Автозаполнение sent_at/acked_at при смене статуса
     if payload.status:
@@ -131,6 +179,7 @@ async def delete_packet(
     except ValueError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid id") from exc
     p = await get_owned(ExportPacket, pid, _u, db)  # 404 для чужого/несуществующего
+    _reject_accounting_generic_mutation(p)
     await db.delete(p)
 
 
@@ -141,11 +190,7 @@ async def packet_stats(
     current_user: User = Depends(get_current_user),
 ):
     cid = await assert_company_member(company_id, current_user, db)
-    rows = (await db.execute(
-        select(ExportPacket.status, ExportPacket.kind, func.count())
-        .where(ExportPacket.company_id == cid)
-        .group_by(ExportPacket.status, ExportPacket.kind)
-    )).all()
+    rows = (await db.execute(_generic_packet_stats_statement(cid))).all()
     by_status: dict[str, int] = {}
     by_kind: dict[str, int] = {}
     for st, kn, n in rows:
@@ -321,6 +366,17 @@ async def build_packets_from_clean(
 
 # ─── HTTP API для расширения 1С (TradeLedger.cfe тянет/квитирует) ────
 
+def _extension_queue_statement(company_id: uuid.UUID, kind: str | None = None):
+    stmt = select(ExportPacket).where(
+        ExportPacket.company_id == company_id,
+        ExportPacket.status.in_(["draft", "queued"]),
+        ExportPacket.kind.notin_(ACCOUNTING_PACKET_KINDS),
+    )
+    if kind:
+        stmt = stmt.where(ExportPacket.kind == kind)
+    return stmt.order_by(ExportPacket.created_at)
+
+
 @router.get("/queue", response_model=list[ExportPacketResponse])
 async def queue_for_extension(
     company_id: str = Query(...),
@@ -334,13 +390,7 @@ async def queue_for_extension(
     на 'sent' и заполняет sent_at, чтобы расширение их видело только
     один раз (idempotent от своей стороны через ack)."""
     cid = await assert_company_member(company_id, current_user, db)
-    stmt = select(ExportPacket).where(
-        ExportPacket.company_id == cid,
-        ExportPacket.status.in_(["draft", "queued"]),
-    )
-    if kind:
-        stmt = stmt.where(ExportPacket.kind == kind)
-    stmt = stmt.order_by(ExportPacket.created_at)
+    stmt = _extension_queue_statement(cid, kind)
     packets = (await db.execute(stmt)).scalars().all()
 
     if mark_as_sent and packets:
@@ -379,6 +429,7 @@ async def ack_packet(
     # 404 для чужого/несуществующего: иначе чужой тенант квитировал пакет и смена
     # /ТТН не доходила до 1С.
     p = await get_owned(ExportPacket, pid, _u, db)
+    _reject_accounting_generic_mutation(p)
 
     reject = body.get("reject_reason")
     if reject:
@@ -431,7 +482,5 @@ async def packets_by_doc(
     from app.models import AccountingDoc
     # Проверяем владение документом (404 для чужого) — иначе утекают пакеты чужой компании.
     await get_owned(AccountingDoc, did, _u, db)
-    rows = (await db.execute(
-        select(ExportPacket).where(ExportPacket.target_doc_id == did)
-    )).scalars().all()
+    rows = (await db.execute(_generic_packets_by_doc_statement(did))).scalars().all()
     return [_resp(p) for p in rows]

@@ -27,6 +27,7 @@ import { StoreSkuPanel, type SkuMode } from './StoreSkuPanel'
 import { StoreStockPanel } from './StoreStockPanel'
 import { StoreInventoryPanel } from './StoreInventoryPanel'
 import { StoreWriteoffPanel } from './StoreWriteoffPanel'
+import { StoreGainPanel } from './StoreGainPanel'
 import { StoreTransferPanel } from './StoreTransferPanel'
 import { StoreReceiptsPanel, StoreSuppliersPanel, StoreCategoriesPanel, StoreBarcodesPanel } from './StoreReportPanels'
 import { StoreRecipeVersionsPanel } from './StoreRecipeVersionsPanel'
@@ -252,6 +253,13 @@ export function StoreView({ sub, companyId, dateFrom, dateTo, stations }: StoreV
     return (
       <div className="h-full overflow-y-auto">
         <StoreWriteoffPanel companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} stations={stations} />
+      </div>
+    )
+  }
+  if (sub === 'gains') {
+    return (
+      <div className="h-full overflow-y-auto">
+        <StoreGainPanel dateFrom={dateFrom} dateTo={dateTo} />
       </div>
     )
   }

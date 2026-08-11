@@ -276,7 +276,8 @@ async def list_docs(db: AsyncSession, company_id: uuid.UUID,
 
 
 async def store_file(db: AsyncSession, company_id: uuid.UUID, filename: str | None,
-                     mime: str | None, content: bytes) -> uuid.UUID:
+                     mime: str | None, content: bytes,
+                     file_id: uuid.UUID | None = None) -> uuid.UUID:
     """Положить скан в общее хранилище файлов пространства.
 
     Тот же `source_files`, что и у документов проектов: скачивание берёт готовая
@@ -293,7 +294,7 @@ async def store_file(db: AsyncSession, company_id: uuid.UUID, filename: str | No
 
     from app.models import SourceFile
 
-    file_id = uuid.uuid4()
+    file_id = file_id or uuid.uuid4()
     upload_dir = Path(os.environ.get("UPLOAD_DIR", "/app/uploads"))
     upload_dir.mkdir(parents=True, exist_ok=True)
     ext = Path(filename or "file").suffix

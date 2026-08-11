@@ -12,6 +12,7 @@ from app.models import (
     Organization,
     StoreReceipt,
     StoreReceiptStockMovement,
+    Warehouse,
 )
 from app.routers.edge_router import _ingest_receipts
 
@@ -33,17 +34,23 @@ async def test_edge_ingest_updates_document_id_in_place_and_ledgers_once(db):
     company = (await db.execute(select(Company).where(Company.slug == "gig"))).scalar_one()
     supplier = Counterparty(
         company_id=company.id, inn="7812345678", name="ООО Тест Поставка",
-        type="ЮЛ", aliases=[], kind="external",
+        type="ЮЛ", aliases=[], kind="external", external_ref=str(uuid.uuid4()),
     )
     organization = Organization(
         company_id=company.id, inn="7800000000", name="ООО ГИГ Тест",
+        external_ref=str(uuid.uuid4()),
     )
-    db.add_all([supplier, organization])
+    warehouse = Warehouse(
+        company_id=company.id, code="208", name="АЗС 208",
+        external_ref=str(uuid.uuid4()),
+    )
+    db.add_all([supplier, organization, warehouse])
     await db.flush()
     contract = Contract(
         company_id=company.id, number="ПОСТ-1", date="2026-08-01",
         counterparty_id=str(supplier.id), organization_id=str(organization.id),
-        type="СПоставщиком", kind="СПоставщиком",
+        type="СПоставщиком", kind="СПоставщиком", scope_type="company",
+        external_ref=str(uuid.uuid4()),
     )
     db.add(contract)
     await db.flush()
@@ -53,6 +60,7 @@ async def test_edge_ingest_updates_document_id_in_place_and_ledgers_once(db):
         doc_date=datetime(2026, 8, 9, tzinfo=timezone.utc),
         supplier_id=supplier.id, supplier=supplier.name,
         contract_id=contract.id, contract=contract.number,
+        organization_id=organization.id, warehouse_id=warehouse.id,
         incoming_number="УПД-1",
         incoming_date=datetime(2026, 8, 8, tzinfo=timezone.utc),
         status="expected", origin="center", delivery_scheme="supplier_to_station",
@@ -78,7 +86,8 @@ async def test_edge_ingest_updates_document_id_in_place_and_ledgers_once(db):
         "ДоговорКонтрагента": str(contract.id),
         "НомерВходящегоДокумента": "УПД-1",
         "ДатаВходящегоДокумента": "2026-08-08",
-        "Организация": str(organization.id), "Склад": str(uuid.uuid4()),
+        "organization_id": str(organization.id), "warehouse_id": str(warehouse.id),
+        "Организация": str(organization.id), "Склад": str(warehouse.id),
         "СуммаДокумента": 120, "ВалютаДокумента": "RUB",
         "Товары": [{
             "Номенклатура": receipt.lines[0]["nomenclature_ref"],

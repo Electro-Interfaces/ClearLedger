@@ -589,6 +589,35 @@ async def upload_site_doc(
     return res
 
 
+@router.get("/{site_id}/docs/{doc_id}/file")
+async def download_site_doc(
+    site_id: uuid.UUID, doc_id: uuid.UUID, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Отдать приложенный файл. Без этой ручки документ в карточке было видно,
+    но не открыть: имя файла было просто текстом."""
+    from pathlib import Path
+
+    from fastapi.responses import FileResponse
+
+    from app.models import EzsSiteDoc, SourceFile
+
+    cid = await assert_company_member(company_id, user, db)
+    await _owned(db, cid, site_id)
+    doc = (await db.execute(select(EzsSiteDoc).where(
+        EzsSiteDoc.company_id == cid, EzsSiteDoc.site_id == site_id,
+        EzsSiteDoc.id == doc_id))).scalar_one_or_none()
+    if doc is None or doc.file_id is None:
+        raise HTTPException(404, "Документ не найден")
+    src = await db.get(SourceFile, doc.file_id)
+    if src is None or src.company_id != cid:
+        raise HTTPException(404, "Файл не найден")
+    path = Path(src.storage_path)
+    if not path.exists():
+        raise HTTPException(404, "Файл не найден на диске")
+    return FileResponse(str(path), media_type=src.mime_type, filename=src.file_name)
+
+
 @router.delete("/{site_id}/docs/{doc_id}")
 async def delete_site_doc(
     site_id: uuid.UUID, doc_id: uuid.UUID, company_id: str = Query(...),
@@ -988,7 +1017,10 @@ def _notify_participant(site: EzsSite, target: User, role_code: str,
     role = ezs_checklist.ROLES.get(role_code, role_code)
     where = site.full_address or site.address or site.title or "без адреса"
     project = site.project_no or "проект"
-    link = f"{settings.app_public_url.rstrip('/')}/?mode=projects&sub=pr_project&project={site.id}"
+    # Адрес приложения «Проекты», а не корень: на `/` живёт рабочий стол пространства,
+    # он `?mode=` не читает — письмо приводило на стол вместо карточки проекта.
+    link = (f"{settings.app_public_url.rstrip('/')}"
+            f"/projects?mode=projects&sub=pr_project&project={site.id}")
     subject = f"Вы в составе проекта {project} — роль {role_code}"
     text = (
         f"{actor.name or actor.email} включил(а) вас в состав проекта.\n\n"

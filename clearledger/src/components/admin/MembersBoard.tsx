@@ -204,7 +204,8 @@ export function MembersBoard({
   const locked = (u: AdminUser) => !canManage || u.is_superadmin || u.id === selfId
 
   const dirty = Object.keys(draft).filter((id) => {
-    const u = members.find((m) => m.id === id)
+    // По всем показанным: members не содержит поддержку платформы (см. card).
+    const u = (q.data ?? []).find((m) => m.id === id)
     return u ? !sameAccess(draft[id], u.modules ?? null) : false
   })
 
@@ -258,7 +259,11 @@ export function MembersBoard({
     }
   }
 
-  const card = members.find((m) => m.id === cardFor) ?? null
+  // Ищем среди ВСЕХ показанных, а не только в members: поддержка платформы
+  // (party_type = vendor) считается внешней и в members не попадает — она идёт
+  // отдельной группой platform. Пока карточку искали только там, у людей
+  // поддержки она молча не открывалась: кнопка есть, лист пуст.
+  const card = (q.data ?? []).find((m) => m.id === cardFor) ?? null
 
   return (
     <div className="space-y-3">
@@ -475,8 +480,11 @@ function HeaderRow({ groups, loading }: { groups: ColumnGroup[]; loading: boolea
   return (
     <div className="flex items-end gap-2 border-b border-border bg-muted/40 px-3 py-2 text-[11px] uppercase tracking-wide text-muted-foreground">
       <span className="w-5 shrink-0" />
-      <span className="min-w-0 flex-1 pb-0.5">Участник</span>
-      <span className="hidden w-[150px] shrink-0 pb-0.5 xl:block">Кто это</span>
+      {/* truncate у заголовков — не украшение: без него текст сжатой колонки
+          выходит за свой бокс и рисуется поверх соседней. Строки так уже
+          защищены, шапка оставалась единственной незакрытой. */}
+      <span className="min-w-0 flex-1 truncate pb-0.5">Участник</span>
+      <span className="hidden w-[150px] shrink-0 truncate pb-0.5 xl:block">Кто это</span>
       <span className="flex shrink-0 items-end">
         {loading && <Loader2 className="mb-0.5 h-3.5 w-3.5 animate-spin" />}
         {groups.map((g) => (
@@ -688,11 +696,23 @@ function MemberAccessPanel({
   return (
     <div className="border-t border-dashed border-border/60 bg-muted/20 px-4 py-3">
       {full ? (
-        <p className="text-xs text-muted-foreground">
-          {u.is_superadmin
-            ? 'Владелец контейнера видит всё пространство — ограничить его нельзя.'
-            : 'Администратор организации видит все продукты и разделы. Чтобы раздать доступ точечно, переведите его в «Сотрудники» в карточке участника.'}
-        </p>
+        // У полного доступа галочек нет — и разворот выглядит пустым. Тогда
+        // непонятно, где вообще что-то делать с человеком: строка ничего не
+        // предлагает, а всё нужное лежит в карточке справа. Говорим об этом
+        // прямо, иначе экран читается как «здесь ничего нельзя».
+        <div className="space-y-1 text-xs text-muted-foreground">
+          <p>
+            {u.is_superadmin
+              ? 'Владелец контейнера видит всё пространство — ограничить его нельзя.'
+              : 'Администратор организации видит все продукты и разделы. Чтобы раздать доступ точечно, переведите его в «Сотрудники» в карточке участника.'}
+          </p>
+          <p>
+            Остальное — в карточке (кнопка <SlidersHorizontal className="inline h-3 w-3 align-text-bottom" />{' '}
+            справа в строке): ФИО и должность, подразделение, уровень в организации,
+            принадлежность, журнал действий и ссылка для входа, если человек не может
+            попасть в пространство.
+          </p>
+        </div>
       ) : (
         <>
           <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">

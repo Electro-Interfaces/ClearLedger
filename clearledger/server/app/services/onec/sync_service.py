@@ -1107,6 +1107,12 @@ class OneCSyncService:
                         name=name, inn=inn, kpp=kpp,
                         full_name=full_name, okpo=okpo, head_ref=head_ref,
                         type=cp_type, kind="external", raw=item,
+                        # карточка с полными реквизитами и ссылкой БП уже канон
+                        # бухгалтерии — её завёл бухгалтер, а не станция. Тот же
+                        # критерий, что применила миграция к прежним записям.
+                        # Существующие карточки не трогаем: решение товароведа
+                        # (blocked/archived) синхронизация воскрешать не должна.
+                        lifecycle_status="verified" if inn and name else "draft",
                     ))
                     stats["created"] += 1
                 else:

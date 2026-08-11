@@ -34,6 +34,7 @@ import { useSupportContext } from '@/contexts/SupportContext'
 import {
   getSiteEvents, getSiteMembers, getSiteEconomics, getProjectContext, getSiteDocs,
   patchSite, moveSiteStage, markSiteGate, addSiteEvent, uploadSiteDoc, deleteSiteDoc,
+  downloadSiteDoc,
   saveTechConnection, saveCost, deleteCost, saveEquipment, deleteEquipment,
   linkContract, linkLocation, getProjectKinds, getLocationWorks, startSuccessor,
   getProjectCase, openProjectCase, applyProjectStep, undoProjectStep,
@@ -1704,6 +1705,11 @@ export function DocsTab({ site, companyId, onDone }: {
       await onDone(); await docs.refetch()
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Не удалось удалить') }
   }
+  const download = async (docId: string, name?: string) => {
+    try {
+      await downloadSiteDoc(companyId, site.id, docId, name)
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Не удалось открыть файл') }
+  }
 
   const rows = docs.data ?? []
   // Какой документ ждёт гейт именно сейчас — по незакрытым пунктам текущей стадии.
@@ -1756,7 +1762,14 @@ export function DocsTab({ site, companyId, onDone }: {
           {rows.map((d) => (
             <div key={d.id} className="flex items-center gap-2 px-3 py-2 text-sm">
               <span className="rounded border px-1.5 py-0.5 text-xs text-muted-foreground shrink-0">{d.kindLabel}</span>
-              <span className="truncate flex-1" title={d.title ?? d.fileName ?? ''}>{d.title || d.fileName || '—'}</span>
+              {/* Имя файла — ссылка на сам файл: список документов, который нельзя
+                  открыть, бесполезен. */}
+              <button type="button" disabled={!d.fileId}
+                onClick={() => download(d.id, d.fileName ?? d.title ?? undefined)}
+                className="truncate flex-1 text-left hover:underline disabled:no-underline disabled:cursor-default"
+                title={d.fileId ? `Скачать ${d.fileName ?? ''}` : 'Файл не приложен'}>
+                {d.title || d.fileName || '—'}
+              </button>
               <span className="text-xs text-muted-foreground whitespace-nowrap">
                 {d.stageLabel ?? ''}{d.uploadedBy ? ` · ${d.uploadedBy}` : ''} {fmtDate(d.createdAt)}
               </span>

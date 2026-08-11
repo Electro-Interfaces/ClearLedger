@@ -6338,6 +6338,8 @@ class EdgePacketRevision(Base):
             name="ck_edge_packet_revision_content_hash",
         ),
         CheckConstraint(
+            # Ревизия append-only: исход её разбора живёт отдельным фактом в
+            # edge_packet_revision_decisions, а не в этом поле (см. v2.41).
             "status IN ('received','needs_review')",
             name="ck_edge_packet_revision_status",
         ),

@@ -260,10 +260,15 @@ async def apply(db: AsyncSession, cid, правило: dict, отбор: dict, �
             SELECT i.id, i.external_uuid, i.name, i.unit, i.vat_rate, i.price_owner,
                    i.sku_class, i.marked, i.mark_group, i.adult_only, i.mrc,
                    i.brand, i.photo_url, i.deleted, g.path AS group_path,
-                   coalesce(array_agg(b.barcode) FILTER (WHERE b.barcode IS NOT NULL), '{}') AS codes
+                   -- Колонка кода называется code, а не barcode: запрос падал
+                   -- на UndefinedColumn уже после того, как часть цен была
+                   -- записана, — история обновлялась, а задания вниз не
+                   -- уезжали. Берём только активные коды: снятые и отклонённые
+                   -- на станцию слать нельзя, они там перевесят привязку кассы.
+                   coalesce(array_agg(b.code) FILTER (WHERE b.code IS NOT NULL), '{}') AS codes
             FROM edge.item i
             LEFT JOIN edge.item_group g ON g.id = i.group_id
-            LEFT JOIN edge.barcode b ON b.item_id = i.id
+            LEFT JOIN edge.barcode b ON b.item_id = i.id AND b.status = 'active'
             WHERE i.external_uuid = :u
             GROUP BY i.id, g.path
         """), {"u": uuid_})).mappings().first()

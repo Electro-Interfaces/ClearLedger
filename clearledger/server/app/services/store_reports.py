@@ -36,12 +36,19 @@ def csv_bytes(header: list[str], rows: list[list]) -> bytes:
     BOM. Числа с запятой в дробной части: без этого Excel читает 1234.5 как
     дату и молча портит отчёт.
     """
+    def число(v: float) -> str:
+        # Количества бывают трёхзначными (0,015 кг сырья на порцию), и жёсткие
+        # два знака превращали их в 0,02 — файл начинал спорить с экраном, где
+        # показано три. Хвостовые нули не пишем: 12,50 и 12,5 — одно и то же.
+        s = f"{v:.3f}".rstrip("0").rstrip(".")
+        return (s or "0").replace(".", ",")
+
     буфер = io.StringIO()
     писатель = csv.writer(буфер, delimiter=";", lineterminator="\r\n")
     писатель.writerow(header)
     for r in rows:
         писатель.writerow([
-            (f"{v:.2f}".replace(".", ",") if isinstance(v, float) else
+            (число(v) if isinstance(v, float) else
              "" if v is None else str(v))
             for v in r
         ])
@@ -941,6 +948,169 @@ async def suppliers(db: AsyncSession, cid, date_from, date_to,
             "amount": round(sum(s["amount"] for s in строки), 2)}
 
 
+async def returns(db: AsyncSession, cid, date_from, date_to,
+                  stations: list[int] | None = None) -> dict:
+    """Возвраты сети: покупателю и поставщику.
+
+    Единственный вид документа станции, у которого не было сетевой пары:
+    списания и оприходования сеть видела, а возвраты — нет. При этом возврат
+    поставщику — деньги обратно в сеть, а возврат покупателя — сигнал о товаре,
+    и оба вопроса задают именно по сети, а не по одной АЗС.
+    """
+    d1, d2 = _период(date_from, date_to)
+    доки = await _документы(db, cid, d1, d2, ["return_supplier", "return_sale"], stations)
+    ВИДЫ = {"return_supplier": "поставщику", "return_sale": "от покупателя"}
+    строки = []
+    for d in доки:
+        сумма = sum(_строка(l, "Сумма", "amount") for l in d["lines"] or [])
+        строки.append({
+            "station_id": d["station_id"], "kind": ВИДЫ.get(d["kind"], d["kind"]),
+            "number": d["number"], "doc_date": d["doc_date"],
+            "partner": d.get("partner") or "",
+            "positions": len(d["lines"] or []), "amount": round(сумма, 2),
+        })
+    строки.sort(key=lambda x: x["doc_date"], reverse=True)
+    return {"rows": строки, "total": len(строки),
+            "amount": round(sum(s["amount"] for s in строки), 2),
+            "by_station": _по_станциям(строки)}
+
+
+async def no_cost(db: AsyncSession, cid, date_from, date_to,
+                  stations: list[int] | None = None) -> dict:
+    """Товары без себестоимости — отчёт о готовности учёта сети.
+
+    Пока таких позиций много, оборотка, маржа и стоимость запаса считаются от
+    неизвестной базы и выглядят при этом обычными числами. По сети это ещё
+    важнее, чем по станции: видно, какая АЗС завела приход, а какая живёт на
+    стартовом снимке 1С без единой цены.
+    """
+    p = {"cid": cid}
+    ф = " AND station_id = ANY(:st)" if stations else ""
+    if stations:
+        p["st"] = stations
+    rows = (await db.execute(text(f"""
+        SELECT station_id, place_name, name, barcode, quantity, retail_price,
+               cost_unit, snapshot_at
+        FROM ({_остатки_карточек(ф)}) b
+        WHERE quantity > 0 AND (cost_unit IS NULL OR cost_unit = 0)
+        ORDER BY quantity * coalesce(retail_price, 0) DESC
+    """), p)).mappings().all()
+    строки = [{
+        "station_id": r["station_id"], "place": r["place_name"] or "",
+        "name": r["name"], "barcode": r["barcode"] or "",
+        "quantity": float(r["quantity"] or 0),
+        "price": float(r["retail_price"] or 0),
+        "amount": round(float(r["quantity"] or 0) * float(r["retail_price"] or 0), 2),
+        "snapshot_at": r["snapshot_at"],
+    } for r in rows]
+    return {"rows": строки, "total": len(строки),
+            "amount": round(sum(s["amount"] for s in строки), 2),
+            "by_station": _по_станциям(строки)}
+
+
+async def pay_mix(db: AsyncSession, cid, date_from, date_to,
+                  stations: list[int] | None = None) -> dict:
+    """Чем платили: наличные, карта, безналичный расчёт — по станциям.
+
+    Ежедневный вопрос сверки: сколько наличных должно быть в ящике и сколько
+    уйдёт эквайрингом. По сети добавляется второй: почему на одной АЗС доля
+    наличных вдвое выше, чем на соседней.
+    """
+    d1, d2 = _период(date_from, date_to)
+    p = {"cid": cid, "d1": d1, "d2": d2}
+    ф = " AND station_id = ANY(:st)" if stations else ""
+    if stations:
+        p["st"] = stations
+    rows = (await db.execute(text(f"""
+        SELECT station_id,
+               coalesce(nullif(pay_name, ''), 'код ' || coalesce(pay_type, -1)::text) AS pay,
+               count(*) FILTER (WHERE NOT is_return) AS cheques,
+               coalesce(sum(total) FILTER (WHERE NOT is_return), 0) AS amount,
+               count(*) FILTER (WHERE is_return) AS refunds,
+               coalesce(abs(sum(total) FILTER (WHERE is_return)), 0) AS refund_amount
+        FROM store_cheques
+        WHERE company_id = :cid{ф} AND at BETWEEN :d1 AND :d2
+        GROUP BY station_id, pay
+        ORDER BY amount DESC
+    """), p)).mappings().all()
+    всего = sum(float(r["amount"] or 0) for r in rows) or 1.0
+    строки = [{
+        "station_id": r["station_id"], "pay": r["pay"],
+        "cheques": int(r["cheques"] or 0),
+        "amount": round(float(r["amount"] or 0), 2),
+        "share": round(float(r["amount"] or 0) / всего * 100, 1),
+        "avg_cheque": round(float(r["amount"] or 0) / int(r["cheques"]), 2)
+        if int(r["cheques"] or 0) else 0.0,
+        "refunds": int(r["refunds"] or 0),
+        "refund_amount": round(float(r["refund_amount"] or 0), 2),
+    } for r in rows]
+    return {"rows": строки, "total": len(строки),
+            "amount": round(sum(s["amount"] for s in строки), 2),
+            "by_station": _по_станциям(строки)}
+
+
+async def stations_compare(db: AsyncSession, cid, date_from, date_to,
+                           stations: list[int] | None = None) -> dict:
+    """Сравнение станций: сеть одной цифрой прячет провал точки.
+
+    Отчёт, которого не может быть у станции по определению, — и ровно тот, ради
+    которого центр вообще нужен: выручка, чеки, средний чек, документы и
+    остаток рядом друг с другом, станция к станции.
+    """
+    d1, d2 = _период(date_from, date_to)
+    p = {"cid": cid, "d1": d1, "d2": d2}
+    ф = " AND station_id = ANY(:st)" if stations else ""
+    if stations:
+        p["st"] = stations
+
+    чеки = {r["station_id"]: r for r in (await db.execute(text(f"""
+        SELECT station_id, count(*) FILTER (WHERE NOT is_return) AS cheques,
+               coalesce(sum(total), 0) AS revenue,
+               count(DISTINCT shift_number) AS shifts
+        FROM store_cheques
+        WHERE company_id = :cid{ф} AND at BETWEEN :d1 AND :d2
+        GROUP BY station_id
+    """), p)).mappings().all()}
+
+    остаток = {r["station_id"]: r for r in (await db.execute(text(f"""
+        SELECT station_id, sum(quantity * coalesce(retail_price, 0)) AS stock_amount,
+               count(*) AS positions, max(snapshot_at) AS snapshot_at
+        FROM ({_остатки_карточек(ф)}) b
+        WHERE quantity > 0
+        GROUP BY station_id
+    """), {k: v for k, v in p.items() if k != "d1" and k != "d2"})).mappings().all()}
+
+    документы = {r["station_id"]: r["docs"] for r in (await db.execute(text(f"""
+        SELECT station_id, count(*) AS docs
+        FROM store_receipts
+        WHERE company_id = :cid{ф} AND status = 'accepted'
+          AND doc_date BETWEEN :d1 AND :d2
+        GROUP BY station_id
+    """), p)).mappings().all()}
+
+    коды = sorted(set(чеки) | set(остаток) | set(документы))
+    строки = []
+    for st in коды:
+        ч = чеки.get(st, {})
+        о = остаток.get(st, {})
+        выручка = float(ч.get("revenue") or 0)
+        чеков = int(ч.get("cheques") or 0)
+        строки.append({
+            "station_id": st,
+            "revenue": round(выручка, 2),
+            "cheques": чеков,
+            "avg_cheque": round(выручка / чеков, 2) if чеков else 0.0,
+            "shifts": int(ч.get("shifts") or 0),
+            "receipts": int(документы.get(st) or 0),
+            "positions": int(о.get("positions") or 0),
+            "stock_amount": round(float(о.get("stock_amount") or 0), 2),
+            "snapshot_at": о.get("snapshot_at"),
+        })
+    строки.sort(key=lambda x: x["revenue"], reverse=True)
+    return {"rows": строки, "total": len(строки),
+            "amount": round(sum(s["revenue"] for s in строки), 2)}
+
+
 REPORTS = {
     "documents": {
         "title": "Единый журнал документов",
@@ -1083,6 +1253,50 @@ REPORTS = {
                    "problem"],
         "group": "mark",
     },
+    "returns": {
+        "title": "Возвраты",
+        "about": "Возвраты поставщику и от покупателя по сети. Единственный вид "
+                 "документа станции, у которого не было сетевой пары: списания сеть "
+                 "видела, а возвраты — нет.",
+        "columns": ["АЗС", "Вид", "Документ", "Дата", "Контрагент", "Позиций", "Сумма"],
+        "fields": ["station_id", "kind", "number", "doc_date", "partner",
+                   "positions", "amount"],
+        "group": "sklad",
+    },
+    "no-cost": {
+        "title": "Товары без себестоимости",
+        "about": "Позиции с остатком, по которым приход не заводился: пока они есть, "
+                 "оборотка, маржа и стоимость запаса считаются от неизвестной базы. "
+                 "Сумма посчитана по рознице — это верхняя оценка того, чем сеть "
+                 "владеет вслепую.",
+        "columns": ["АЗС", "Место", "Товар", "Штрихкод", "Остаток", "Розничная цена",
+                    "Сумма по рознице", "Снимок"],
+        "fields": ["station_id", "place", "name", "barcode", "quantity", "price",
+                   "amount", "snapshot_at"],
+        "group": "sklad",
+    },
+    "pay-mix": {
+        "title": "Чем платили",
+        "about": "Наличные, карта, безналичный расчёт по станциям: чеков, сумма, доля "
+                 "и средний чек. Возвраты показаны отдельно — выручка ими не "
+                 "уменьшается, иначе смена с возвратом выглядит слабой продажей.",
+        "columns": ["АЗС", "Вид оплаты", "Чеков", "Сумма", "Доля, %", "Средний чек",
+                    "Возвратов", "Возвращено"],
+        "fields": ["station_id", "pay", "cheques", "amount", "share", "avg_cheque",
+                   "refunds", "refund_amount"],
+        "group": "close",
+    },
+    "stations": {
+        "title": "Сравнение станций",
+        "about": "Станция к станции: выручка, чеки, средний чек, смены, приёмки и "
+                 "остаток рядом друг с другом. Отчёт, которого не может быть у "
+                 "станции, и ровно тот, ради которого нужен центр.",
+        "columns": ["АЗС", "Выручка", "Чеков", "Средний чек", "Смен", "Приёмок",
+                    "Позиций на остатке", "Остаток по рознице", "Снимок"],
+        "fields": ["station_id", "revenue", "cheques", "avg_cheque", "shifts",
+                   "receipts", "positions", "stock_amount", "snapshot_at"],
+        "group": "skvoz",
+    },
     "suppliers": {
         "title": "Поставщики",
         "about": "Оборот, число поставок и последняя дата по каждому поставщику сети. "
@@ -1131,4 +1345,121 @@ BUILDERS = {
     "visits": visits,
     "mrc": mrc,
     "suppliers": suppliers,
+    "returns": returns,
+    "no-cost": no_cost,
+    "pay-mix": pay_mix,
+    "stations": stations_compare,
 }
+
+
+def xlsx_bytes(header: list[str], rows: list[list], meta: list[tuple[str, str]],
+               title: str, about: str) -> bytes:
+    """Собрать книгу отчёта: лист описания и лист данных.
+
+    CSV годится, чтобы утащить таблицу, но работать в нём нельзя: ни шапки, ни
+    фильтров, штрихкод превращается в «4,60355E+12», числа приезжают текстом и
+    не суммируются. Отчёт сети открывают не для просмотра — по нему отбирают,
+    сортируют и считают, а потом отправляют бухгалтеру или поставщику.
+
+    Формат совпадает со станцией (тот же лист «Отчёт», та же логика денежных и
+    текстовых колонок): один отчёт не должен выглядеть по-разному в зависимости
+    от того, откуда его выгрузили.
+    """
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.utils import get_column_letter
+
+    книга = Workbook()
+
+    описание = книга.active
+    описание.title = "Отчёт"
+    описание.append([title])
+    описание["A1"].font = Font(bold=True, size=14)
+    if about:
+        описание.append([about])
+    описание.append([])
+    for ключ, значение in meta:
+        описание.append([ключ, значение])
+    описание.column_dimensions["A"].width = 28
+    описание.column_dimensions["B"].width = 70
+    for строка in описание.iter_rows(min_col=2, max_col=2):
+        for ячейка in строка:
+            ячейка.alignment = Alignment(wrap_text=True, vertical="top")
+
+    лист = книга.create_sheet(_имя_листа(title))
+    лист.append(header)
+    шапка = Font(bold=True, color="FFFFFF")
+    заливка = PatternFill("solid", fgColor="4F6BED")
+    for ячейка in лист[1]:
+        ячейка.font = шапка
+        ячейка.fill = заливка
+        ячейка.alignment = Alignment(vertical="center", wrap_text=True)
+
+    деньги = _денежные(header)
+    текстовые = _текстовые(header)
+    for r in rows:
+        лист.append([
+            # Коды и штрихкоды остаются текстом: посчитать их не нужно, а
+            # экспоненциальная запись делает их бесполезными.
+            str(v) if (i in текстовые and v not in (None, "")) else v
+            for i, v in enumerate(r)
+        ])
+    for i in деньги:
+        буква = get_column_letter(i + 1)
+        for ячейка in лист[буква][1:]:
+            ячейка.number_format = "#,##0.00"
+
+    ширины = _ширины(header, rows)
+    for i, w in enumerate(ширины):
+        лист.column_dimensions[get_column_letter(i + 1)].width = w
+    # Шапка закреплена и с автофильтром: без этого таблица на тысячу строк
+    # нечитаема уже со второго экрана.
+    лист.freeze_panes = "A2"
+    if rows:
+        лист.auto_filter.ref = f"A1:{get_column_letter(len(header))}{len(rows) + 1}"
+
+    буфер = io.BytesIO()
+    книга.save(буфер)
+    return буфер.getvalue()
+
+
+_ДЕНЬГИ = ("сумм", "цена", "выручк", "оборот", "маржа", "себестоим", "вычет",
+           "ндс", "мрц", "стоимост")
+_ТЕКСТ = ("штрихкод", "шк", "код", "gtin", "номер", "инн", "кпп", "окпо", "артикул")
+
+
+def _денежные(header: list[str]) -> set[int]:
+    out = set()
+    for i, c in enumerate(header):
+        н = c.lower()
+        if any(k in н for k in _ДЕНЬГИ) and "чеков" not in н:
+            out.add(i)
+    return out
+
+
+def _текстовые(header: list[str]) -> set[int]:
+    return {i for i, c in enumerate(header) if any(k in c.lower() for k in _ТЕКСТ)}
+
+
+def _ширины(header: list[str], rows: list[list]) -> list[int]:
+    """Ширина по самой длинной ячейке, но в разумных пределах: колонка
+    «Проблема» с абзацем текста иначе растянет лист на метр."""
+    out = [len(c) + 2 for c in header]
+    for r in rows:
+        for i, v in enumerate(r):
+            if i >= len(out):
+                break
+            n = len(str(v if v is not None else "")) + 2
+            if n > out[i]:
+                out[i] = n
+    return [min(max(w, 9), 48) for w in out]
+
+
+def _имя_листа(title: str) -> str:
+    """У листа Excel 31 символ, а названия отчётов длиннее. Режем по словам,
+    чтобы не получить «Расхождения приёмки (ТОР»."""
+    if len(title) <= 31:
+        return title
+    срез = title[:31]
+    i = срез.rfind(" ")
+    return срез[:i] if i > 12 else срез

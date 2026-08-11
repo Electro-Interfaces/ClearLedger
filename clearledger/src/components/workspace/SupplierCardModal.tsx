@@ -12,7 +12,8 @@
  */
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Truck, X, TrendingUp, TrendingDown, Undo2 } from 'lucide-react'
+import { Truck, TrendingUp, TrendingDown, Undo2 } from 'lucide-react'
+import { ModalCard } from '@/components/ui/modal-card'
 import { getSupplierCard, type SupplierCard } from '@/services/storeService'
 import { fmtMoney } from '@/services/analyticsService'
 
@@ -49,31 +50,23 @@ export function SupplierCardModal({ name, companyId, dateFrom, dateTo, stations,
   }
 
   return (
-    <div className="fixed inset-0 z-[1200] flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
-      <div className="flex max-h-[90vh] w-full max-w-5xl flex-col rounded-lg border border-border bg-card shadow-xl"
-           onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-start justify-between border-b border-border/50 px-5 py-3.5">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 text-base font-semibold">
-              <Truck className="h-4 w-4 text-primary" />{name}
-            </div>
-            {data && (
-              <div className="mt-0.5 text-xs text-muted-foreground">
-                {data.totals.docs_all_time} поставок за всё время
-                {data.totals.first && ` · с ${data.totals.first}`}
-                {data.totals.avg_days != null && ` · обычно раз в ${data.totals.avg_days} дн.`}
-              </div>
-            )}
-          </div>
-          <button onClick={onClose} className="px-2 text-muted-foreground hover:text-foreground">
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-
+    <ModalCard
+      className="max-w-5xl max-h-[90vh]"
+      bodyClassName="flex flex-col overflow-hidden"
+      onClose={onClose}
+      title={<span className="flex items-center gap-2"><Truck className="h-4 w-4 text-primary" />{name}</span>}
+      subtitle={data ? (
+        <>
+          {data.totals.docs_all_time} поставок за всё время
+          {data.totals.first && ` · с ${data.totals.first}`}
+          {data.totals.avg_days != null && ` · обычно раз в ${data.totals.avg_days} дн.`}
+        </>
+      ) : undefined}
+    >
         {isLoading || !data ? (
           <div className="p-6 text-sm text-muted-foreground">Собираем историю поставок…</div>
         ) : (
-          <div className="overflow-auto p-4">
+          <div className="min-h-0 flex-1 overflow-auto p-4">
             <div className="grid gap-3 sm:grid-cols-4">
               <Плитка label="Поставок за период" value={String(data.totals.docs)} />
               <Плитка label="Закупки (нетто)" value={fmtMoney(data.totals.amount_net)} />
@@ -285,7 +278,6 @@ export function SupplierCardModal({ name, companyId, dateFrom, dateTo, stations,
             )}
           </div>
         )}
-      </div>
-    </div>
+    </ModalCard>
   )
 }

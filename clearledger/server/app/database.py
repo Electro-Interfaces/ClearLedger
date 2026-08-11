@@ -2277,6 +2277,61 @@ async def create_all() -> None:
         for stmt in ACCOUNTING_REVISION_MIGRATION_DDL:
             await conn.execute(_sa.text(stmt))
 
+        # v2.42: кто завёл черновик на станции.
+        #
+        # У цены и заявки на правку канона автор обязателен — «представьтесь:
+        # центр должен видеть, кто заявил». У карточки и контрагента его не было
+        # вовсе: в очереди признания видно, ЧТО предлагают и с какой АЗС, но не
+        # КТО, а решение центра переклеивает учёт станции.
+        await conn.execute(_sa.text("""
+            DO $$ BEGIN
+                IF to_regclass('edge.item_draft') IS NOT NULL THEN
+                    ALTER TABLE edge.item_draft
+                        ADD COLUMN IF NOT EXISTS author VARCHAR(120) NOT NULL DEFAULT '';
+                END IF;
+                IF to_regclass('edge.partner_draft') IS NOT NULL THEN
+                    ALTER TABLE edge.partner_draft
+                        ADD COLUMN IF NOT EXISTS author VARCHAR(120) NOT NULL DEFAULT '';
+                END IF;
+            END $$
+        """))
+
+        # v2.41: у перевыгрузки появился исход.
+        #
+        # Станция вправе прислать пакет заново с исправленным содержимым. Такой
+        # пакет откладывается ревизией needs_review — и лежал там вечно: читать
+        # его было некому, применить нечем, а обещание «исправление станции не
+        # потеряется» держалось на одной записи в таблицу.
+        #
+        # Решение — отдельный факт, а не правка ревизии: raw-ревизии append-only
+        # (триггер protect_edge_packet_revision запрещает UPDATE и DELETE), и это
+        # правильно — доказательство доставки не переписывают. Прежняя версия
+        # пакета при замене сохраняется обычной ревизией, то есть тем же
+        # доказательством, и остаётся обратный ход.
+        await conn.execute(_sa.text("""
+            CREATE TABLE IF NOT EXISTS edge_packet_revision_decisions (
+                id           UUID PRIMARY KEY,
+                company_id   UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+                revision_id  UUID NOT NULL REFERENCES edge_packet_revisions(id),
+                decision     VARCHAR(10) NOT NULL,
+                decided_by   VARCHAR(200) NOT NULL DEFAULT '',
+                decided_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+                note         TEXT NOT NULL DEFAULT '',
+                CONSTRAINT ck_edge_revision_decision
+                    CHECK (decision IN ('applied', 'rejected')),
+                CONSTRAINT uq_edge_revision_decision UNIQUE (revision_id)
+            )
+        """))
+        # Ограничение статусов вернули к исходному: применённость ревизии
+        # хранится решением, а не её собственным полем.
+        await conn.execute(_sa.text(
+            "ALTER TABLE edge_packet_revisions "
+            "DROP CONSTRAINT IF EXISTS ck_edge_packet_revision_status"))
+        await conn.execute(_sa.text(
+            "ALTER TABLE edge_packet_revisions ADD CONSTRAINT "
+            "ck_edge_packet_revision_status CHECK (status IN "
+            "('received','needs_review'))"))
+
         # v2.37: станция заявляет об ошибке в сетевой карточке.
         #
         # Канон ведёт центр, но ошибку в карточке первым видит тот, кто стоит у

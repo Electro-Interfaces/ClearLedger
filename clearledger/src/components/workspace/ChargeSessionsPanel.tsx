@@ -2155,9 +2155,21 @@ function Reliability({ companyId, dateFrom, dateTo }: { companyId: string; dateF
     queryKey: ['charge-timeseries', companyId, period.from, period.to, 'month', 'success_pct', '__net__', n.key],
     queryFn: () => getChargeTimeseries({ companyId, dateFrom: period.from, dateTo: period.to, bucket: 'month', metric: 'success_pct', stations: n.stations, regions: n.regions, dim: n.dim, dimVal: n.dimVal }),
   })
+  // Успех берём из визитов — из ТОГО ЖЕ источника, что вкладка «Повторные попытки».
+  // Раньше он приходил из разреза по result, где визит с ошибкой и повтором попадает
+  // в обе строки: на «Обзоре» выходило 95.6 %, на соседней вкладке 94.9 % — при одном
+  // и том же смысле («клиент уехал заряженным»). Замечание Л. Чурилова 10.08.2026.
+  const visits = useQuery({
+    queryKey: ['charge-visits-kpi', companyId, period.from, period.to, n.key],
+    queryFn: () => getChargeVisits({
+      companyId, dateFrom: period.from, dateTo: period.to,
+      stations: n.stations, regions: n.regions, dim: n.dim, dimVal: n.dimVal, top: 1,
+    }),
+  })
   if (outcomes.isLoading) return <Loading />
   if (!outcomes.data || outcomes.data.lines.length === 0) return <Empty />
   const t = outcomes.data.totals
+  const vt = visits.data?.totals
   const complete = outcomes.data.lines.find((l) => l.label === 'Complete')?.sessions ?? 0
   const errors = t.sessions - complete
   const stations = byStation.data?.lines ?? []
@@ -2187,9 +2199,15 @@ function Reliability({ companyId, dateFrom, dateTo }: { companyId: string; dateF
   return (
     <div className="p-4 space-y-4">
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <KpiCard label="Успешных" value={t.success_pct.toFixed(1) + '%'} accent={succAccent(t.success_pct)} hint={`${nf0.format(complete)} из ${nf0.format(t.sessions)}`} info={HINTS.sessionSuccess}
-          spark={netSpark} sparkLabel="Успешность по месяцам" />
-        <KpiCard label="С ошибкой" value={nf0.format(errors)} accent="danger" hint={`${(errors / t.sessions * 100).toFixed(1)}% сессий`} />
+        {/* Значение и подпись — из одного знаменателя. Раньше стояло «95.6 %» от
+            визитов с подписью «694 из 1 027» (это Complete-сессии, то есть 67.6 %):
+            цифра и её же расшифровка говорили разное. */}
+        <KpiCard label="Клиенты зарядились" value={vt ? vt.success_pct.toFixed(1) + '%' : '—'}
+          accent={succAccent(vt?.success_pct ?? 0)}
+          hint={vt ? `${nf0.format(vt.charged)} из ${nf0.format(vt.visits)} визитов` : 'считаем визиты'}
+          info={HINTS.visitSuccess} spark={netSpark} sparkLabel="Успешность по месяцам" />
+        <KpiCard label="Сессий с ошибкой" value={nf0.format(errors)} accent="danger"
+          hint={`${(errors / t.sessions * 100).toFixed(1)}% из ${nf0.format(t.sessions)} сессий`} />
         <KpiCard label="Станций риска" value={nf0.format(risk.length)} accent={risk.length ? 'warning' : 'success'} hint="success < 70% (≥30 сессий)" />
         <KpiCard label="Без оплаты" value={t.unpaid_pct.toFixed(1) + '%'} accent={t.unpaid_pct >= 10 ? 'danger' : t.unpaid_pct >= 3 ? 'warning' : 'success'} hint="сессий без отметки оплаты" />
       </div>
@@ -2215,15 +2233,31 @@ function Reliability({ companyId, dateFrom, dateTo }: { companyId: string; dateF
         <Card>
           <CardContent className="p-0">
             <div className="px-3 py-2 text-xs font-semibold text-muted-foreground border-b bg-muted/40">Исходы сессий</div>
-            <table className="w-full text-xs" {...exportRows('Исходы', ['Исход', 'Сессий', 'Доля, %', 'Выручка, ₽'],
-              outcomes.data.lines.map((l) => [l.label, l.sessions, l.share_pct, l.amount]))}>
+            {/* Доля — от СЕССИЙ: колонка стоит рядом со счётчиком сессий, а показывала
+                долю денег (у станции 353: 92.1 % денег против 67.6 % сессий) — читалось
+                как доля сессий. Деньги остались отдельной колонкой, со своей долей. */}
+            <table className="w-full text-xs" {...exportRows('Исходы', ['Исход', 'Сессий', 'Доля сессий, %', 'Выручка, ₽', 'Доля выручки, %'],
+              outcomes.data.lines.map((l) => [l.label, l.sessions,
+                +(l.sessions / t.sessions * 100).toFixed(1), l.amount, l.share_pct]))}>
+              <thead>
+                <tr className="border-b border-border/40 text-[10px] uppercase tracking-wider text-muted-foreground">
+                  <th className="p-2 text-left font-medium">Исход</th>
+                  <th className="p-2 text-right font-medium">Сессий</th>
+                  <th className="p-2 text-right font-medium">Доля сессий</th>
+                  <th className="p-2 text-right font-medium">Выручка</th>
+                  <th className="p-2 text-right font-medium">Доля ₽</th>
+                </tr>
+              </thead>
               <tbody>
                 {outcomes.data.lines.map((l) => (
                   <tr key={l.label} className="border-b border-border/30">
                     <td className="p-2 font-medium">{l.label}</td>
                     <td className="p-2 text-right font-mono">{nf0.format(l.sessions)}</td>
-                    <td className="p-2 text-right font-mono text-muted-foreground">{l.share_pct.toFixed(1)}%</td>
+                    <td className="p-2 text-right font-mono text-muted-foreground">
+                      {(l.sessions / t.sessions * 100).toFixed(1)}%
+                    </td>
                     <td className="p-2 text-right font-mono text-muted-foreground">{fmtMoney(l.amount)} ₽</td>
+                    <td className="p-2 text-right font-mono text-muted-foreground">{l.share_pct.toFixed(1)}%</td>
                   </tr>
                 ))}
               </tbody>

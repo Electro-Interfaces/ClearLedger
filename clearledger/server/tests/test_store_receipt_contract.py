@@ -128,13 +128,16 @@ def test_receipt_rbac_is_additive_and_operator_has_no_admin_scope():
 
 def test_draft_can_keep_supplier_snapshot_but_accept_requires_both_canonical_ids():
     pending = SimpleNamespace(supplier="ООО Новый", contract="Д-1",
-                              supplier_id=None, contract_id=None)
-    with pytest.raises(HTTPException, match="канонического поставщика и договор"):
+                              supplier_id=None, contract_id=None,
+                              organization_id=None, warehouse_id=None)
+    with pytest.raises(HTTPException, match="поставщика, договор, организацию и склад"):
         _require_receipt_canonical(pending)
     pending.supplier_id = uuid.uuid4()
     with pytest.raises(HTTPException):
         _require_receipt_canonical(pending)
     pending.contract_id = uuid.uuid4()
+    pending.organization_id = uuid.uuid4()
+    pending.warehouse_id = uuid.uuid4()
     _require_receipt_canonical(pending)
 
 
@@ -154,6 +157,7 @@ def test_expected_receipt_payload_keeps_accounting_evidence_roundtrip():
     row = SimpleNamespace(
         id=uuid.uuid4(), number="П-208-1", supplier="ООО Поставщик",
         supplier_id=uuid.uuid4(), contract="Д-1", contract_id=uuid.uuid4(),
+        organization_id=uuid.uuid4(), warehouse_id=uuid.uuid4(),
         incoming_number="УПД-7", incoming_date=datetime(2026, 8, 8, tzinfo=timezone.utc),
         doc_date=datetime(2026, 8, 9, tzinfo=timezone.utc), services=[{
             "name": "Доставка", "amount": 100, "vat_rate": "НДС22",
@@ -182,6 +186,7 @@ def test_expected_receipt_payload_keeps_accounting_evidence_roundtrip():
     assert payload["supplier_id"] == str(row.supplier_id)
     assert payload["contract_id"] == str(row.contract_id)
     assert payload["services"] == [{
+        "line_id": "",
         "key": "", "name": "Доставка", "sum": 100.0,
         "vat_rate": "НДС22", "into_cost": True,
     }]
@@ -189,6 +194,7 @@ def test_expected_receipt_payload_keeps_accounting_evidence_roundtrip():
     assert payload["payment_kind"] == "bank"
     assert payload["comment"] == row.comment
     assert payload["lines"][0] == {
+        "line_id": "",
         "item_uuid": row.lines[0]["nomenclature_ref"], "name": "Вода",
         "barcode": "4600000000007", "qty_expected": 2.0, "price": 50.0,
         "vat_rate": "НДС22", "unit": "шт", "pack_factor": 6.0,
@@ -202,6 +208,9 @@ def test_existing_database_migration_is_idempotent_by_construction():
     statements = "\n".join(STORE_RECEIPT_MIGRATION_DDL)
     assert "ADD COLUMN IF NOT EXISTS services" in statements
     assert "ADD COLUMN IF NOT EXISTS supplier_id" in statements
+    assert "ADD COLUMN IF NOT EXISTS organization_id" in statements
+    assert "ADD COLUMN IF NOT EXISTS warehouse_id" in statements
+    assert "store receipt stock movements are append-only" in statements
     assert "CREATE TABLE IF NOT EXISTS store_receipt_stock_movements" in statements
     assert "CREATE UNIQUE INDEX IF NOT EXISTS uq_edge_downlink_company_idempotency" in statements
     assert "DROP CONSTRAINT IF EXISTS store_receipts_source_uuid_key" in statements
@@ -234,8 +243,9 @@ async def test_acceptance_ledger_is_idempotent_for_edge_and_center():
     receipt = SimpleNamespace(
         id=uuid.uuid4(), company_id=uuid.uuid4(), station_id=208,
         delivery_scheme="supplier_to_station", receiving_warehouse=None,
+        warehouse_id=uuid.uuid4(),
         evidence={"warehouse_id": "warehouse-208"},
-        lines=[{"name": "Вода", "nomenclature_ref": str(uuid.uuid4()),
+        lines=[{"line_id": str(uuid.uuid4()), "name": "Вода", "nomenclature_ref": str(uuid.uuid4()),
                 "barcode": "4600000000007", "qty_fact": 2, "price": 50}],
     )
     await store_receipts.record_acceptance(db, receipt)

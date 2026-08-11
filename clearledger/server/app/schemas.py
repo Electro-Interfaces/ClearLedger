@@ -3,6 +3,7 @@ Pydantic v2 схемы — Request / Response для всех сущностей
 snake_case на стороне Python; apiClient на фронте конвертирует camelCase <-> snake_case.
 """
 
+import uuid
 from datetime import datetime
 from typing import Annotated, Literal
 
@@ -596,6 +597,7 @@ class OcrResponse(BaseModel):
 # camelCase для прямой совместимости с фронтендом (referenceService.ts)
 
 CounterpartyTypeEnum = Literal["ЮЛ", "ФЛ", "ИП"]
+CounterpartyLifecycleEnum = Literal["draft", "verified", "blocked", "archived"]
 
 
 class _CpExtra(BaseModel):
@@ -623,6 +625,7 @@ class CounterpartyCreate(_CpExtra):
     shortName: str | None = None
     type: CounterpartyTypeEnum = "ЮЛ"
     aliases: list[str] = Field(default_factory=list)
+    lifecycleStatus: CounterpartyLifecycleEnum = "draft"
 
 
 class CounterpartyUpdate(_CpExtra):
@@ -632,6 +635,7 @@ class CounterpartyUpdate(_CpExtra):
     shortName: str | None = None
     type: CounterpartyTypeEnum | None = None
     aliases: list[str] | None = None
+    lifecycleStatus: CounterpartyLifecycleEnum | None = None
 
 
 class CounterpartyResponse(_CpExtra):
@@ -647,6 +651,7 @@ class CounterpartyResponse(_CpExtra):
     headRef: str | None = None        # Ref_Key головного контрагента (иерархия)
     externalRef: str | None = None
     raw: dict | None = None           # полный снимок реквизитов 1С
+    lifecycleStatus: str = "draft"
     createdAt: str
     updatedAt: str
 
@@ -1206,6 +1211,8 @@ class WarehouseCreate(BaseModel):
     name: str = Field(min_length=1, max_length=500)
     address: str | None = None
     type: WarehouseTypeEnum = "warehouse"
+    organization_id: uuid.UUID | None = None
+    station_id: int | None = None
 
 
 class WarehouseUpdate(BaseModel):
@@ -1213,6 +1220,8 @@ class WarehouseUpdate(BaseModel):
     name: str | None = None
     address: str | None = None
     type: WarehouseTypeEnum | None = None
+    organization_id: uuid.UUID | None = None
+    station_id: int | None = None
 
 
 class WarehouseResponse(BaseModel):
@@ -1223,6 +1232,8 @@ class WarehouseResponse(BaseModel):
     address: str | None = None
     type: str
     externalRef: str | None = None    # GUID склада в 1С (для маппингов)
+    organizationId: str | None = None
+    stationId: int | None = None
     createdAt: str
     updatedAt: str
 

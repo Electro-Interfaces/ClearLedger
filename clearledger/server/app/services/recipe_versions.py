@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
-from sqlalchemy import func, or_, select, text
+from sqlalchemy import func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import StoreRecipeVersion
@@ -213,7 +213,16 @@ async def ingest_station_bundle(db: AsyncSession, company_id: uuid.UUID,
     recipes = validate_recipe_set(source_recipes)
     now = datetime.now(timezone.utc)
     bundle_id = str(bundle.get("bundle_id") or "")[:100]
-    note = str(bundle.get("note") or "Изменено на станции")[:500]
+    note = str(bundle.get("note") or "Изменено на станции")
+    # Автор правки приезжает со станции и раньше терялся здесь целиком: у цены
+    # и заявки на правку канона он обязателен, а у нормы вложения его не было
+    # нигде — на вопрос «кто поставил 18 г кофе в латте» ответить было нечем.
+    # Отдельной колонки не заводим: created_by хранит пользователя центра, а
+    # тут человек с АЗС, и его имя — часть причины изменения.
+    автор = str(bundle.get("author") or "").strip()
+    if автор:
+        note = f"{note} · {автор}"
+    note = note[:500]
     existing_count = (await db.execute(select(func.count()).select_from(
         StoreRecipeVersion).where(
             StoreRecipeVersion.company_id == company_id))).scalar() or 0
@@ -240,13 +249,29 @@ async def ingest_station_bundle(db: AsyncSession, company_id: uuid.UUID,
         except (TypeError, ValueError):
             station_version = 1
         version = max(station_version, (latest.version + 1 if latest else 1))
+        # Версия станции приходит УЖЕ ДЕЙСТВУЮЩЕЙ, а не черновиком.
+        #
+        # Владелец коммерческих решений в v1 — администратор АЗС: на станции
+        # эта карта уже применена, по ней прямо сейчас продают и списывают
+        # сырьё. Класть её сюда черновиком означало разомкнуть контур: путь в
+        # «active» был единственный — ручка активации, закрытая той же
+        # политикой 409. Версии копились, active_versions() навсегда оставался
+        # на первом наборе, и центр показывал канон, которого на станции нет.
+        # Предыдущая действующая закрывается: две активные карты одного блюда
+        # это спор о том, что списывать.
+        if latest is not None:
+            await db.execute(update(StoreRecipeVersion).where(
+                StoreRecipeVersion.company_id == company_id,
+                StoreRecipeVersion.dish_uuid == recipe["dish_uuid"],
+                StoreRecipeVersion.status == "active",
+            ).values(status="archived", valid_to=now))
         row = StoreRecipeVersion(
             company_id=company_id, dish_uuid=recipe["dish_uuid"],
             dish_name=recipe["dish_name"], recipe_kind=recipe["recipe_kind"],
-            version=version, status="active" if initial else "draft",
+            version=version, status="active",
             output_qty=recipe["output_qty"], output_unit=recipe["output_unit"],
             lines=recipe["lines"], content_hash=digest,
-            valid_from=now if initial else None, activated_at=now if initial else None,
+            valid_from=now, activated_at=now,
             source="station", source_station_id=station_id,
             change_note=note, source_bundle_id=bundle_id,
         )

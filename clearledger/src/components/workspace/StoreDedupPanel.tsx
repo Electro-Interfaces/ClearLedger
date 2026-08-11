@@ -565,8 +565,11 @@ export function StoreDedupPanel() {
   // заблокирована подписью «Станция собирает…», то есть сообщала о работе,
   // которой нет. Через час задание считается зависшим: срез можно запросить снова.
   const ЧАС = 3_600_000
-  const свежее = (j: { created_at?: string | null }) =>
-    !j.created_at || Date.now() - new Date(j.created_at).getTime() < ЧАС
+  // Поле задания зовётся createdAt (см. DedupJob): со змеиным именем условие
+  // было истинным всегда, «зависшее» не находилось никогда, и предложение
+  // запросить срез заново не появлялось.
+  const свежее = (j: { createdAt?: string | null }) =>
+    !j.createdAt || Date.now() - new Date(j.createdAt).getTime() < ЧАС
   const refreshing = jobs.some(
     (j) => j.kind === 'refresh' && ['pending', 'running'].includes(j.status) && свежее(j))
   const зависшее = jobs.find(

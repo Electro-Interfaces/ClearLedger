@@ -2,7 +2,7 @@
  * Клиент аналитики раздела «Магазин» (сопутка/общепит).
  * Пока — «Обзор магазина» (/api/store/overview → GoodsDashboardService).
  */
-import { get, put, post, upload, del } from './apiClient'
+import { get, put, post, upload, del, downloadBlob } from './apiClient'
 
 export interface StoreCategory {
   category: string
@@ -1173,11 +1173,40 @@ export const getStoreNetworkReport = (kind: string, opts: {
 
 /** Адрес выгрузки: CSV с BOM и точкой с запятой — Excel открывает двойным кликом. */
 export const storeNetworkReportCsvUrl = (kind: string, opts: {
-  dateFrom?: string; dateTo?: string; stations?: number[]
+  dateFrom?: string; dateTo?: string; stations?: number[]; format?: 'csv' | 'xlsx'
 }) => {
   const q = отчётПараметры(opts)
-  q.set('format', 'csv')
+  q.set('format', opts.format || 'csv')
   return `/api/store/reports/${kind}?${q.toString()}`
+}
+
+/**
+ * Скачать отчёт сети файлом.
+ *
+ * Ссылкой это не работало вовсе: обычный `<a href>` не несёт ни Bearer-токен,
+ * ни выбранную компанию — эндпоинт закрыт авторизацией и отвечал 401, а
+ * браузер вместо файла показывал ответ об отказе. Плюс имя файла всегда
+ * приходило «report.csv»: настоящее уезжало в нестандартный заголовок,
+ * который браузер не читает.
+ */
+export async function скачатьОтчётСети(kind: string, opts: {
+  dateFrom?: string; dateTo?: string; stations?: number[]; name?: string
+  format?: 'csv' | 'xlsx'
+}): Promise<void> {
+  // Книга по умолчанию: в ней шапка с периодом и отбором, закреплённые
+  // заголовки, автофильтр и денежный формат. CSV остаётся для загрузки файла
+  // в другие системы.
+  const формат = opts.format || 'xlsx'
+  const blob = await downloadBlob(storeNetworkReportCsvUrl(kind, { ...opts, format: формат }))
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  const период = (opts.dateFrom || '').slice(0, 10)
+  a.download = период ? `${kind}-${период}.${формат}` : `${kind}.${формат}`
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
 }
 
 
@@ -1493,6 +1522,30 @@ export const getStoreStorage = () => get<StoreStorageData>('/api/store/storage')
 export const cleanupStoreStorage = (body: {
   thin_after_days: number; heartbeat_days: number; dry_run: boolean
 }) => post<StoreStorageCleanup>('/api/store/storage/cleanup', body)
+
+/** Перевыгрузка: станция прислала тот же пакет с другим содержимым. */
+export interface StorePacketRevision {
+  id: string
+  packet_uuid: string
+  error: string | null
+  created_at: string
+  kind: string
+  station_id: number
+  принят: string
+  выгружен_принятый: string | null
+  выгружен_новый: string | null
+  документов_принято: number
+  документов_ново: number
+  смена: string | null
+}
+
+export const getStorePacketRevisions = (stationId?: number) =>
+  get<{ revisions: StorePacketRevision[]; count: number }>(
+    '/api/store/packet-revisions', stationId ? { station_id: stationId } : undefined)
+
+export const resolveStorePacketRevision = (id: string, decision: 'apply' | 'reject') =>
+  post<{ ok: boolean; status: string; kind?: string; station_id?: number }>(
+    `/api/store/packet-revisions/${id}/${decision}`, {})
 
 /** Парк версий агента: какая объявлена целевой и у кого какая стоит. */
 export interface StoreAgentVersions {
@@ -2180,6 +2233,8 @@ export interface StationItemDraft {
   vat_rate: string | null
   barcodes: string[]
   created_at: string
+  /** Кто завёл карточку на станции. Пусто у заведённых до появления поля. */
+  author?: string
   id?: number
 }
 
@@ -2192,6 +2247,7 @@ export interface StationPartnerDraft {
   role: string
   comment: string | null
   created_at: string
+  author?: string
   id?: number
 }
 
@@ -2334,6 +2390,34 @@ export interface CatalogHealth {
 }
 
 export const getCatalogHealth = () => get<CatalogHealth>('/api/store/catalog/health')
+
+/* ── Предложения к заполнению карточки ────────────────────────────────────
+ *
+ * Источник справочник не правит: разбор наименования и внешние базы ошибаются,
+ * и молча записанное чужое значение потом не отличить от нашего. Он предлагает,
+ * решение принимает товаровед — один раз на марку, а не на каждую карточку.
+ */
+export type EnrichmentValue = {
+  value: string
+  source: string
+  confidence: number | null
+  позиций: number
+  примеры: string[]
+  ids: number[]
+}
+
+export type EnrichmentProposals = {
+  поле: string
+  всего_предложений: number
+  значения: EnrichmentValue[]
+}
+
+export const getCatalogEnrichment = (field = 'brand') =>
+  get<EnrichmentProposals>(`/api/store/catalog/enrichment?field=${encodeURIComponent(field)}`)
+
+export const decideCatalogEnrichment = (ids: number[], accepted: boolean) =>
+  post<{ ok: boolean; решено: number; принято: boolean }>(
+    '/api/store/catalog/enrichment/decide', { ids, accepted })
 
 /* ── Карточка поставщика: история работы с ним ────────────────────────────
  *

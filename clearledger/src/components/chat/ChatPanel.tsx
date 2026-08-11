@@ -2718,6 +2718,11 @@ export function ChatPanel({ compact, scopeProduct }: {
           </div>
         ) : filteredRooms.map((room) => {
           const Icon = roomIcon(room)
+          // Каналы платформы и компании узнаются по значку, а не по аватару:
+          // им его никто не ставит. Признак считается здесь же — ниже он нужен
+          // в разметке строки, а одноимённая переменная живёт в другом
+          // компоненте и сюда не видна (групповой чат без аватара падал).
+          const isSystem = room.kind === 'news' || room.kind === 'general' || room.kind === 'platform'
           const peerOnline = room.type === 'direct' && room.directPeerId ? presenceMap.get(room.directPeerId)?.online : false
           return (
             // Правый клик (и долгое нажатие на телефоне) по строке открывает те же

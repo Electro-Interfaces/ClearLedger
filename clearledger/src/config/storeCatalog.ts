@@ -27,7 +27,7 @@ import {
   MonitorSmartphone,
   LayoutDashboard, TrendingUp, Package, Tag, UtensilsCrossed,
   Boxes, Barcode, FolderTree, ChefHat, Truck,
-  PackagePlus, Warehouse, ArrowLeftRight, ClipboardList, Trash2, Undo2, RefreshCw,
+  PackagePlus, PackageCheck, Warehouse, ArrowLeftRight, ClipboardList, Trash2, Undo2, RefreshCw,
   QrCode, ScanLine, PackageMinus, ShieldAlert, ShieldCheck, Plug, CalendarClock, CopyCheck, ShoppingCart, Database, Receipt, FileSpreadsheet,
   Link2, GitCompareArrows, Layers,
   RadioTower, HeartPulse, Files,
@@ -300,6 +300,16 @@ export const STORE_VIEWS: StoreView[] = [
     ],
   },
   {
+    key: 'gains', label: 'Оприходования', section: 'store_stock', icon: PackageCheck,
+    title: 'Оприходования',
+    subtitle: 'Постановка товара на учёт без накладной: найденное при пересчёте, приход без документов, исправление, возврат неопознанного. Документ ведёт агент станции — реестра из ЦБ у этого вида нет.',
+    status: 'ready',
+    blocks: [
+      { name: 'Документы станции', desc: 'Оприходования, оформленные на АЗС: дата, место, причина, автор, смена. Клик — состав документа.', source: 'edge_packets kind=gain · /api/store/station-docs' },
+      { name: 'Почему отдельный пункт', desc: 'Оприходование меняет остаток и попадает в себестоимость наравне со списанием. До этого его было видно только в общем журнале «Документы».' },
+    ],
+  },
+  {
     key: 'returns', label: 'Возвраты', section: 'store_stock', icon: Undo2,
     title: 'Возвраты',
     subtitle: 'Возврат от покупателя и поставщику; для маркированного — повторный ввод кода в оборот.',
@@ -405,6 +415,7 @@ export const STORE_VIEWS: StoreView[] = [
       { name: 'Что прореживается', desc: 'Только снимки остатков: остаётся самый свежий за каждый день. Документы и смены — первичка учёта, они не трогаются вовсе.' },
       { name: 'Почему это безопасно', desc: 'Снимок документов Ledger не порождает — его разбор ничего не строит, поэтому отчёты от чистки не меняются.' },
       { name: 'Сначала посчитать', desc: 'Действие идёт предпросмотром: сколько уйдёт и сколько освободится. Данные станции восстановить неоткуда, поэтому удаление выполняет администратор компании.' },
+      { name: 'Отложенные перевыгрузки', desc: 'Станция прислала тот же пакет с исправленным содержимым. Разобранную смену молча не переписываем: видно, что было в учёте и что предлагает станция, решение — принять новую версию или оставить принятую.', source: 'edge_packet_revisions · /api/store/packet-revisions' },
     ],
   },
   {

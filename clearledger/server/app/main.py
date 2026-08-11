@@ -201,6 +201,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         tasks_task.cancel()
     if digest_task is not None:
         digest_task.cancel()
+    if docsync_task is not None:
+        docsync_task.cancel()
     if scheduler_task is not None:
         scheduler_task.cancel()
     logger.info("TradeLedger Server остановлен")

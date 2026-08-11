@@ -11,8 +11,8 @@
  *
  * Классификация слоя приходит с бэкенда (`layer` в /api/sso/apps), не хардкодится по коду.
  */
-import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
   Menu, LayoutGrid, ExternalLink, Loader2, LogOut,
@@ -33,7 +33,9 @@ import { isApiEnabled } from '@/services/apiClient'
 import { listSsoApps, hasSideButton, isCoreApp, type SsoApp } from '@/services/ssoService'
 import { useOpenApp } from '@/hooks/useOpenApp'
 import { useMaxWidth } from '@/hooks/use-mobile'
-import { READINESS_LABEL, productReadiness, type Readiness } from '@/config/spaceProducts'
+import {
+  READINESS_LABEL, SPACE_PRODUCTS, productReadiness, type Readiness,
+} from '@/config/spaceProducts'
 
 /** База сборки SPA (`/ClearLedger/`) — новая вкладка открывается по полному адресу. */
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, '')
@@ -188,6 +190,16 @@ export function EcosystemHomePage({ embedded, onNavigate }: {
   onNavigate?: () => void
 } = {}) {
   const navigate = useNavigate()
+  const location = useLocation()
+  // Ссылки на разделы рабочей области (`/?mode=projects&sub=pr_project&project=…`)
+  // приземлялись на стол: `?mode=` читает область продукта, а не он. Уводим на адрес
+  // продукта со всеми параметрами — иначе письмо «вы в составе проекта» открывает стол.
+  useEffect(() => {
+    if (location.pathname !== '/') return
+    const mode = new URLSearchParams(location.search).get('mode')
+    const target = mode && SPACE_PRODUCTS.find((p) => (p.modes as string[]).includes(mode))
+    if (target) navigate(`${target.route}${location.search}`, { replace: true })
+  }, [location, navigate])
   // Тот же порог, что у раскладок: ниже него интерфейс живёт в руке, а не под курсором.
   const narrow = useMaxWidth(1024)
   const [menuOpen, setMenuOpen] = useState(false)

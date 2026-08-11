@@ -16,7 +16,8 @@ import { toast } from 'sonner'
 import { Database, Trash2, Eye } from 'lucide-react'
 import {
   getStoreStorage, cleanupStoreStorage, getStoreDocFilesSummary,
-  storeDocFilesArchiveUrl, type StoreStorageCleanup,
+  storeDocFilesArchiveUrl, getStorePacketRevisions, resolveStorePacketRevision,
+  type StoreStorageCleanup,
 } from '@/services/storeService'
 import { useCompany } from '@/contexts/CompanyContext'
 import { Button } from '@/components/ui/button'
@@ -218,6 +219,106 @@ export function StoreStoragePanel() {
           порождает, поэтому отчёты от чистки не меняются. Выполняет администратор компании.
         </p>
       </div>
+
+      <ОтложенныеПеревыгрузки />
+    </div>
+  )
+}
+
+/**
+ * Станция вправе прислать пакет заново с исправленным содержимым под тем же
+ * идентификатором. Такой пакет не применяется молча: разобранную смену нельзя
+ * переписать без ведома человека — он откладывается и ждёт решения здесь.
+ * Пока решения не было, в учёте живёт первая версия.
+ */
+function ОтложенныеПеревыгрузки() {
+  const { company } = useCompany()
+  const qc = useQueryClient()
+
+  const { data } = useQuery({
+    queryKey: ['store-packet-revisions', company.id],
+    queryFn: () => getStorePacketRevisions(),
+  })
+
+  const решить = useMutation({
+    mutationFn: ({ id, decision }: { id: string; decision: 'apply' | 'reject' }) =>
+      resolveStorePacketRevision(id, decision),
+    onSuccess: (r) => {
+      toast.success(r.status === 'applied'
+        ? 'Новая версия принята и разобрана'
+        : 'Перевыгрузка отклонена, в учёте осталась принятая версия')
+      qc.invalidateQueries({ queryKey: ['store-packet-revisions'] })
+      qc.invalidateQueries({ queryKey: ['store-exchange'] })
+      qc.invalidateQueries({ queryKey: ['store-cheques'] })
+    },
+    onError: (e: Error) => toast.error('Решение не применено', { description: e.message }),
+  })
+
+  const строки = data?.revisions ?? []
+
+  return (
+    <div className="rounded-lg border border-border/50 p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <Eye className="h-4 w-4 text-primary" />
+        <span className="text-sm font-medium">Отложенные перевыгрузки</span>
+        <span className="text-[11px] text-muted-foreground">
+          станция прислала тот же пакет с другим содержимым
+        </span>
+      </div>
+
+      {строки.length === 0 ? (
+        <p className="mt-2 text-xs text-muted-foreground">
+          Нет пакетов, ждущих решения. Здесь появится случай, когда станция
+          пересобрала уже разобранный документ — например, исправив ставку НДС.
+        </p>
+      ) : (
+        <div className="mt-2 overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead className="bg-muted/30 text-muted-foreground">
+              <tr>
+                <th className="px-2 py-1.5 text-left font-medium">Вид</th>
+                <th className="px-2 py-1.5 text-left font-medium">АЗС</th>
+                <th className="px-2 py-1.5 text-left font-medium">Смена</th>
+                <th className="px-2 py-1.5 text-left font-medium">В учёте с</th>
+                <th className="px-2 py-1.5 text-left font-medium">Новая версия</th>
+                <th className="px-2 py-1.5 text-right font-medium">Документов</th>
+                <th className="px-2 py-1.5 text-right font-medium">Решение</th>
+              </tr>
+            </thead>
+            <tbody>
+              {строки.map((r) => (
+                <tr key={r.id} className="border-t border-border/40">
+                  <td className="px-2 py-1.5">{r.kind}</td>
+                  <td className="px-2 py-1.5 tabular-nums">{r.station_id}</td>
+                  <td className="px-2 py-1.5 tabular-nums">{r.смена ?? '—'}</td>
+                  <td className="px-2 py-1.5">{когда(r.выгружен_принятый)}</td>
+                  <td className="px-2 py-1.5">{когда(r.выгружен_новый)}</td>
+                  <td className="px-2 py-1.5 text-right tabular-nums">
+                    {r.документов_принято} → {r.документов_ново}
+                  </td>
+                  <td className="px-2 py-1.5 text-right">
+                    <div className="inline-flex gap-1.5">
+                      <Button size="sm" variant="outline" disabled={решить.isPending}
+                        onClick={() => решить.mutate({ id: r.id, decision: 'apply' })}>
+                        Принять новую
+                      </Button>
+                      <Button size="sm" variant="ghost" disabled={решить.isPending}
+                        onClick={() => решить.mutate({ id: r.id, decision: 'reject' })}>
+                        Оставить принятую
+                      </Button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="mt-2 text-[10px] text-muted-foreground/70">
+            «Принять новую» переписывает сырьё пакета и разбирает его заново тем же
+            путём, каким разбирается живая доставка: документы ищутся по пакету и
+            переписываются, а не задваиваются. Выполняет администратор компании.
+          </p>
+        </div>
+      )}
     </div>
   )
 }

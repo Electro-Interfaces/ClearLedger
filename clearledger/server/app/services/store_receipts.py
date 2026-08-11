@@ -102,6 +102,153 @@ def normalize_services(services: list[dict] | None) -> list[dict]:
     return result
 
 
+def _line_source_identity(line: dict, kind: str) -> str:
+    explicit = next((str(line.get(field) or "").strip() for field in (
+        "line_id", "Key", "Ключ", "ИдентификаторСтроки",
+    ) if str(line.get(field) or "").strip()), "")
+    if explicit:
+        return f"source:{explicit}"
+    if kind == "goods":
+        parts = (
+            line.get("nomenclature_ref"), line.get("barcode"),
+            " ".join(str(line.get("name") or "").casefold().split()),
+            line.get("unit"), line.get("series"), line.get("expiry"),
+            line.get("purpose"),
+        )
+    else:
+        parts = (
+            line.get("key"),
+            " ".join(str(line.get("name") or "").casefold().split()),
+        )
+    return "signature:" + json.dumps(
+        parts, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+    )
+
+
+def deterministic_line_id(receipt_id: uuid.UUID, kind: str, line: dict) -> uuid.UUID:
+    if kind not in ("goods", "service"):
+        raise ReceiptValidationError("Неизвестный вид строки приёмки")
+    digest = hashlib.md5(
+        f"{receipt_id}:{kind}:{_line_source_identity(line, kind)}".encode("utf-8"),
+        usedforsecurity=False,
+    ).hexdigest()
+    return uuid.UUID(digest)
+
+
+def ensure_line_ids(
+    receipt_id: uuid.UUID,
+    lines: list[dict],
+    services: list[dict] | None = None,
+) -> tuple[list[dict], list[dict]]:
+    seen: set[uuid.UUID] = set()
+
+    def fill(rows: list[dict], kind: str) -> list[dict]:
+        result = []
+        identities: set[str] = set()
+        for index, source in enumerate(rows):
+            row = dict(source)
+            raw = row.get("line_id")
+            if raw:
+                try:
+                    line_id = uuid.UUID(str(raw))
+                except ValueError as exc:
+                    raise ReceiptValidationError(
+                        f"Строка {kind} {index + 1}: line_id должен быть UUID"
+                    ) from exc
+            else:
+                identity = _line_source_identity(row, kind)
+                if identity in identities:
+                    raise ReceiptValidationError(
+                        "Неразличимые legacy-строки требуют ручного line_id"
+                    )
+                identities.add(identity)
+                line_id = deterministic_line_id(receipt_id, kind, row)
+            if line_id in seen:
+                raise ReceiptValidationError("line_id строк приёмки должны быть уникальны")
+            seen.add(line_id)
+            row["line_id"] = str(line_id)
+            result.append(row)
+        return result
+
+    return fill(lines, "goods"), fill(list(services or []), "service")
+
+
+def assign_provisional_ambiguous_line_ids(
+    receipt_id: uuid.UUID,
+    lines: list[dict],
+    services: list[dict] | None = None,
+) -> tuple[list[dict], list[dict]]:
+    def fill(rows: list[dict], kind: str) -> list[dict]:
+        bases = [
+            uuid.UUID(str(row["line_id"])) if row.get("line_id")
+            else deterministic_line_id(receipt_id, kind, row)
+            for row in rows
+        ]
+        counts = {value: bases.count(value) for value in set(bases)}
+        occurrences: dict[uuid.UUID, int] = {}
+        result = []
+        for source, base in zip(rows, bases, strict=True):
+            row = dict(source)
+            if counts[base] > 1 and not row.get("line_id"):
+                occurrence = occurrences.get(base, 0) + 1
+                occurrences[base] = occurrence
+                row["line_id"] = str(uuid.uuid5(
+                    base, f"provisional-ambiguous:{occurrence}",
+                ))
+            else:
+                row["line_id"] = str(base)
+            result.append(row)
+        return result
+
+    return fill(lines, "goods"), fill(list(services or []), "service")
+
+
+def assign_document_line_ids(
+    lines: list[dict],
+    services: list[dict] | None = None,
+    *,
+    existing_lines: list[dict] | None = None,
+    existing_services: list[dict] | None = None,
+) -> tuple[list[dict], list[dict]]:
+    seen: set[uuid.UUID] = set()
+
+    def assign(rows: list[dict], existing: list[dict], kind: str) -> list[dict]:
+        previous: dict[str, list[uuid.UUID]] = {}
+        for row in existing:
+            if not row.get("line_id"):
+                continue
+            previous.setdefault(_line_source_identity(row, kind), []).append(
+                uuid.UUID(str(row["line_id"])))
+        result = []
+        for source in rows:
+            row = dict(source)
+            raw = row.get("line_id")
+            if raw:
+                try:
+                    line_id = uuid.UUID(str(raw))
+                except ValueError as exc:
+                    raise ReceiptValidationError("line_id должен быть UUID") from exc
+            else:
+                matches = previous.get(_line_source_identity(row, kind), [])
+                available = [value for value in matches if value not in seen]
+                if len(available) > 1:
+                    raise ReceiptValidationError(
+                        "Неразличимые строки требуют явного line_id"
+                    )
+                line_id = available[0] if available else uuid.uuid4()
+            if line_id in seen:
+                raise ReceiptValidationError("line_id строк приёмки должны быть уникальны")
+            seen.add(line_id)
+            row["line_id"] = str(line_id)
+            result.append(row)
+        return result
+
+    return (
+        assign(lines, list(existing_lines or []), "goods"),
+        assign(list(services or []), list(existing_services or []), "service"),
+    )
+
+
 def totals(lines: list[dict], services: list[dict] | None = None) -> tuple[float, float]:
     total = round(
         sum(float(line.get("amount") or 0) for line in lines)
@@ -158,7 +305,9 @@ def receipt_dedup_key(
 
 def allocation_identity(receipt_id: uuid.UUID, station_id: int, lines: list[dict]) -> tuple[str, str]:
     canonical = json.dumps(
-        {"station_id": station_id, "lines": sorted(lines, key=lambda item: item["line_index"])},
+        {"station_id": station_id, "lines": sorted(
+            lines, key=lambda item: str(item.get("line_id") or item.get("line_index")),
+        )},
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),
@@ -215,10 +364,21 @@ def movement_item_key(line: dict, index: int) -> str:
 async def record_acceptance(db, row, user_id=None) -> None:
     from app.models import StoreReceiptStockMovement
 
-    existing = set((await db.execute(select(StoreReceiptStockMovement.idempotency_key).where(
+    movements = (await db.execute(select(StoreReceiptStockMovement).where(
         StoreReceiptStockMovement.company_id == row.company_id,
         StoreReceiptStockMovement.receipt_id == row.id,
-    ))).scalars().all())
+    ))).scalars().all()
+    existing_keys = {
+        item if isinstance(item, str) else item.idempotency_key for item in movements
+    }
+    existing_lines = {
+        str(item.line_id) for item in movements
+        if not isinstance(item, str) and item.kind == "receipt_acceptance" and item.line_id
+    }
+    legacy_indexes = {
+        item.line_index for item in movements
+        if not isinstance(item, str) and item.kind == "receipt_acceptance"
+    }
     station_id = row.station_id if row.delivery_scheme == "supplier_to_station" else None
     warehouse = str(
         row.receiving_warehouse
@@ -234,6 +394,8 @@ async def record_acceptance(db, row, user_id=None) -> None:
                           if service.get("into_cost"))
     allocated = 0.0
     for position, (index, line) in enumerate(accepted_lines):
+        line_id = uuid.UUID(str(line.get("line_id") or deterministic_line_id(
+            row.id, "goods", line)))
         quantity = float(line.get("qty_fact") or 0)
         price = float(line.get("price") or 0)
         base_amount = round(quantity * price, 2)
@@ -246,12 +408,15 @@ async def record_acceptance(db, row, user_id=None) -> None:
         else:
             service_share = 0.0
         movement_amount = round(base_amount + service_share, 2)
-        key = f"receipt:{row.id}:accept:{index}"
-        if key in existing:
+        key = f"receipt:{row.id}:accept:{line_id}"
+        legacy_key = f"receipt:{row.id}:accept:{index}"
+        if (key in existing_keys or legacy_key in existing_keys
+                or str(line_id) in existing_lines or index in legacy_indexes):
             continue
         db.add(StoreReceiptStockMovement(
-            company_id=row.company_id, receipt_id=row.id, line_index=index,
-            station_id=station_id, warehouse=warehouse,
+            company_id=row.company_id, receipt_id=row.id, line_id=line_id,
+            line_index=index, station_id=station_id,
+            warehouse_id=getattr(row, "warehouse_id", None), warehouse=warehouse,
             item_key=movement_item_key(line, index),
             item_uuid=str(line.get("nomenclature_ref") or "") or None,
             barcode=str(line.get("barcode") or "") or None,

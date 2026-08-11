@@ -11,9 +11,13 @@
  * шеститысячный архив хоронит любой показатель. «Фото нет у 7 500 карточек»
  * звучит безнадёжно, «нет у 865 торгуемых» — это работа на неделю.
  */
-import { useQuery } from '@tanstack/react-query'
-import { HeartPulse, AlertTriangle, Boxes } from 'lucide-react'
-import { getCatalogHealth } from '@/services/storeService'
+import { useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { HeartPulse, AlertTriangle, Boxes, Check, X } from 'lucide-react'
+import {
+  decideCatalogEnrichment, getCatalogEnrichment, getCatalogHealth,
+  type EnrichmentValue,
+} from '@/services/storeService'
 import { useCompany } from '@/contexts/CompanyContext'
 
 /** Полоса заполненности: доля карточек, у которых поле есть. */
@@ -61,6 +65,99 @@ function Дефект({ label, значение, hint, критично }: {
         {значение.toLocaleString('ru-RU')}
       </div>
       <div className="mt-2 text-xs leading-relaxed text-muted-foreground">{hint}</div>
+    </div>
+  )
+}
+
+/**
+ * Разбор предложений: одна строка — одна марка, а не одна карточка.
+ *
+ * Подтверждать «Winston» двадцать три раза подряд — работа ни о чём: решение
+ * принимается один раз на марку и применяется ко всем её позициям. Примеры
+ * названий показаны рядом, чтобы решение принималось по товару, а не по слову.
+ */
+function МаркаНаРешение({ значение, onРешить, занят }: {
+  значение: EnrichmentValue
+  onРешить: (ids: number[], принять: boolean) => void
+  занят: boolean
+}) {
+  return (
+    <div className="flex items-start gap-3 border-b border-border py-3 last:border-0">
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline gap-2">
+          <span className="font-medium">{значение.value}</span>
+          <span className="text-xs text-muted-foreground">
+            {значение.позиций.toLocaleString('ru-RU')}&nbsp;позиций
+          </span>
+        </div>
+        <div className="mt-0.5 truncate text-xs text-muted-foreground">
+          {значение.примеры.join(' · ')}
+        </div>
+      </div>
+      <div className="flex shrink-0 gap-1">
+        <button type="button" disabled={занят}
+                onClick={() => onРешить(значение.ids, true)}
+                className="inline-flex items-center gap-1 rounded-md border border-emerald-500/40 px-2.5 py-1
+                           text-xs text-emerald-500 hover:bg-emerald-500/10 disabled:opacity-50">
+          <Check className="h-3.5 w-3.5" />Это бренд
+        </button>
+        <button type="button" disabled={занят}
+                onClick={() => onРешить(значение.ids, false)}
+                className="inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1
+                           text-xs text-muted-foreground hover:bg-muted disabled:opacity-50">
+          <X className="h-3.5 w-3.5" />Нет
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function БрендыНаПодтверждение() {
+  const { company } = useCompany()
+  const qc = useQueryClient()
+  const [показатьВсе, setПоказатьВсе] = useState(false)
+  const { data, isLoading } = useQuery({
+    queryKey: ['catalog-enrichment', 'brand', company.id],
+    queryFn: () => getCatalogEnrichment('brand'),
+  })
+  const решение = useMutation({
+    mutationFn: ({ ids, принять }: { ids: number[]; принять: boolean }) =>
+      decideCatalogEnrichment(ids, принять),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['catalog-enrichment', 'brand', company.id] })
+      qc.invalidateQueries({ queryKey: ['catalog-health', company.id] })
+    },
+  })
+
+  if (isLoading) return null
+  if (!data || !data.значения.length) return null
+
+  const видимые = показатьВсе ? data.значения : data.значения.slice(0, 12)
+  return (
+    <div>
+      <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        Бренды на подтверждение
+      </div>
+      <div className="rounded-lg border border-border px-4 py-1">
+        <p className="border-b border-border py-3 text-xs leading-relaxed text-muted-foreground">
+          Марки вынуты из наименований товара — то, что написано на карточке, а не
+          придумано. Подтверждённое значение ложится в справочник и уезжает на
+          станции обычным обновлением. Ждут решения{' '}
+          {data.всего_предложений.toLocaleString('ru-RU')} позиций в{' '}
+          {data.значения.length.toLocaleString('ru-RU')} марках.
+        </p>
+        {видимые.map((з) => (
+          <МаркаНаРешение key={`${з.value}:${з.source}`} значение={з}
+                          занят={решение.isPending}
+                          onРешить={(ids, принять) => решение.mutate({ ids, принять })} />
+        ))}
+        {data.значения.length > видимые.length && (
+          <button type="button" onClick={() => setПоказатьВсе(true)}
+                  className="w-full py-3 text-xs text-muted-foreground hover:text-foreground">
+            Показать все {data.значения.length} марок
+          </button>
+        )}
+      </div>
     </div>
   )
 }
@@ -113,6 +210,8 @@ export function StoreCatalogHealthPanel() {
                   hint="Опознание товара при приёмке и пересчёте: имя в мастер-каталоге может расходиться с этикеткой." />
         </div>
       </div>
+
+      <БрендыНаПодтверждение />
 
       <div>
         <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">

@@ -222,7 +222,10 @@ async def reconciliation_list(db: AsyncSession, company_id, df: date, dt: date,
                    coalesce(s.energy_kwh, 0) as energy,
                    coalesce(s.amount, 0) as amount,
                    pp.amount as paid, (pp.receipt_url is not null) as receipt, 1 as payments,
-                   null::numeric as power_kw
+                   null::numeric as power_kw,
+                   -- Холд и возврат: без них строка «Полного возврата» показывает нули,
+                   -- а сводка по нему считает именно возвращённое.
+                   pp.hold_amount as hold, pp.refund_amount as refund
               from charge_payments pp
               left join charge_sessions s
                      on s.company_id = pp.company_id and s.session_ext_id = pp.session_ext_id
@@ -267,6 +270,8 @@ async def reconciliation_list(db: AsyncSession, company_id, df: date, dt: date,
         "gap": round(float(r["amount"] or 0) - float(r["paid"] or 0), 2),
         "receipt": bool(r["receipt"]), "payments": int(r["payments"] or 0),
         "powerKw": float(r["power_kw"]) if r.get("power_kw") is not None else None,
+        "hold": float(r["hold"]) if r.get("hold") is not None else None,
+        "refund": float(r["refund"]) if r.get("refund") is not None else None,
     } for r in rows]
 
 

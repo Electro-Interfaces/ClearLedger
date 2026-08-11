@@ -12,6 +12,7 @@ import math
 import uuid
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
+from decimal import Decimal
 
 from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
@@ -300,6 +301,9 @@ PACKET_KIND_LABEL = {
     "production": "Производство",
     "cheques": "Чеки",
     "return_sale": "Возврат покупателя",
+    "return_purchase": "Возврат поставщику",
+    "gain": "Оприходование",
+    "chain": "Снимок цепочки учёта",
     "station-nsi": "Черновики НСИ",
     "station-recipes": "Рецептуры станции",
     "station-mrc": "МРЦ станции",
@@ -309,6 +313,7 @@ PACKET_KIND_LABEL = {
     "partners": "Поставщики",
     "price_update": "Цена",
     "goods_receipt_expected": "Заготовка приёмки",
+    "inventory_expected": "Пересчёт из центра",
     "cash_policy": "Политика кассы",
     "command": "Команда",
 }
@@ -984,14 +989,36 @@ async def _queue_nsi_delta(db: AsyncSession, cid, item_id: int, station_id: int 
     if card is None:
         return 0
 
+    # Реестр станций — агенты, а не только строки edge.station.
+    #
+    # Их два, и они расходятся: станция, чей агент жив, но строки в edge.station
+    # нет, не получала заданий вовсе — молча. Объединение честнее: лишнее
+    # задание безвредно, пропущенное оставляет АЗС со старым справочником.
     targets = [station_id] if station_id else [
-        r[0] for r in (await db.execute(text("SELECT id FROM edge.station"))).all()]
+        r[0] for r in (await db.execute(text("""
+            SELECT id FROM edge.station
+            UNION
+            SELECT station_id FROM edge_agents WHERE company_id = :c AND station_id IS NOT NULL
+        """), {"c": cid})).all()]
 
     codes = [r[0] for r in (await db.execute(text(
         "SELECT code FROM edge.barcode WHERE item_id = :id AND status = 'active' ORDER BY code"
     ), {"id": item_id})).all()]
 
     for st in targets:
+        # Не копим версии одной карточки в очереди.
+        #
+        # Задание несёт снимок карточки целиком, поэтому держать в очереди две
+        # её версии бессмысленно: станции нужна последняя. Раньше каждое
+        # нажатие в центре клало новое задание — на семи с половиной тысячах
+        # карточек это гнало по каналу LTE один и тот же справочник пачками.
+        # Снимаем только НЕ выданные: доставленное станция уже применяет.
+        await db.execute(text("""
+            DELETE FROM edge_downlink
+            WHERE company_id = :c AND station_id = :s AND kind = 'nsi_delta'
+              AND delivered_at IS NULL AND acked_at IS NULL AND cancelled_at IS NULL
+              AND payload->>'uuid' = :u
+        """), {"c": cid, "s": st, "u": str(card["external_uuid"])})
         price = (await db.execute(text("""
             SELECT price FROM edge.price
             WHERE item_id = :id AND station_id = :s AND valid_to IS NULL
@@ -1438,6 +1465,152 @@ async def store_reproject(
     return итог
 
 
+# ── Отложенные перевыгрузки ────────────────────────────────────────────────
+#
+# Станция вправе прислать пакет заново с исправленным содержимым под тем же
+# идентификатором: так было со ставкой НДС, взятой у чужого кода нефтесервера.
+# Приёмник такой пакет не применяет молча — он откладывает его как ревизию и
+# отвечает 409, потому что переписать уже разобранную смену без ведома человека
+# нельзя. Но дальше ревизия попадала в тупик: её никто не читал и применить её
+# было нечем. Обещание «исправление не потеряется» держалось на одной записи в
+# таблицу. Здесь ревизия становится решением: принять новую версию или
+# отклонить, оставив принятую.
+
+
+@router.get("/packet-revisions")
+async def store_packet_revisions(
+    station_id: int | None = Query(None),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Перевыгрузки, ждущие решения: чем новая версия отличается от принятой."""
+    cid: uuid.UUID = await scope_company_id(user, db)
+    p: dict = {"cid": cid}
+    условия = ["r.company_id = :cid", "r.status = 'needs_review'",
+               # Решение живёт отдельным фактом: сама ревизия неизменяема.
+               "NOT EXISTS (SELECT 1 FROM edge_packet_revision_decisions d"
+               "             WHERE d.revision_id = r.id)"]
+    if station_id is not None:
+        условия.append("p.station_id = :st")
+        p["st"] = station_id
+    строки = [dict(r) for r in (await db.execute(text(f"""
+        SELECT r.id::text AS id, r.packet_uuid, r.error,
+               r.received_at AS created_at,
+               p.kind, p.station_id, p.received_at AS принят,
+               -- Два имени у одного факта: смены шлют «ВремяВыгрузки»,
+               -- конверт формата 3 (рецептуры станции) — «Выгружен».
+               coalesce(p.payload->>'ВремяВыгрузки', p.payload->>'Выгружен') AS выгружен_принятый,
+               coalesce(r.payload->>'ВремяВыгрузки', r.payload->>'Выгружен') AS выгружен_новый,
+               jsonb_array_length(coalesce(p.payload->'Документы','[]'::jsonb)) AS документов_принято,
+               jsonb_array_length(coalesce(r.payload->'Документы','[]'::jsonb)) AS документов_ново,
+               p.payload#>>'{{Смена,НомерСменыВнутр}}' AS смена
+          FROM edge_packet_revisions r
+          JOIN edge_packets p ON p.id = r.edge_packet_id
+         WHERE {' AND '.join(условия)}
+         ORDER BY r.received_at DESC
+         LIMIT 200
+    """), p)).mappings().all()]
+    return {"revisions": строки, "count": len(строки)}
+
+
+@router.post("/packet-revisions/{revision_id}/{decision}")
+async def store_packet_revision_resolve(
+    revision_id: uuid.UUID,
+    decision: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Принять исправленную версию пакета или отклонить её.
+
+    «Принять» — заменить сырьё принятого пакета новой версией и разобрать его
+    заново теми же руками, какими разбирается живая доставка. Разбор идемпотентен
+    по происхождению: документы ищутся по пакету и переписываются, а не плодятся.
+    """
+    if decision not in ("apply", "reject"):
+        raise HTTPException(400, "Решение: apply или reject")
+    cid: uuid.UUID = await scope_company_id(user, db)
+    if not user.is_superadmin:
+        m = (await db.execute(select(UserCompany).where(
+            UserCompany.user_id == user.id, UserCompany.company_id == cid))).scalar_one_or_none()
+        if m is None or m.role != "admin":
+            raise HTTPException(403, "Перевыгрузки разбирает администратор компании")
+
+    ревизия = (await db.execute(select(edge_router.EdgePacketRevision).where(
+        edge_router.EdgePacketRevision.id == revision_id,
+        edge_router.EdgePacketRevision.company_id == cid,
+    ))).scalar_one_or_none()
+    if ревизия is None:
+        raise HTTPException(404, "Перевыгрузка не найдена")
+    if ревизия.status != "needs_review":
+        raise HTTPException(409, f"Это не отложенная перевыгрузка: {ревизия.status}")
+    принято_ранее = (await db.execute(text(
+        "SELECT decision FROM edge_packet_revision_decisions WHERE revision_id = :r"
+    ), {"r": revision_id})).scalar_one_or_none()
+    if принято_ранее is not None:
+        raise HTTPException(409, f"Перевыгрузка уже разобрана: {принято_ранее}")
+
+    async def записать_решение(исход: str, note: str = "") -> None:
+        await db.execute(text("""
+            INSERT INTO edge_packet_revision_decisions
+                (id, company_id, revision_id, decision, decided_by, note)
+            VALUES (:id, :cid, :r, :d, :by, :note)
+        """), {"id": uuid.uuid4(), "cid": cid, "r": revision_id, "d": исход,
+               "by": user.email or "", "note": note})
+
+    if decision == "reject":
+        await записать_решение("rejected")
+        await db.commit()
+        return {"ok": True, "status": "rejected"}
+
+    пакет = await db.get(EdgePacket, ревизия.edge_packet_id)
+    if пакет is None:
+        raise HTTPException(404, "Пакет перевыгрузки не найден")
+
+    # Прежнюю версию сохраняем ревизией, а не затираем: сырьё пакета — это
+    # доказательство доставки, и «принять новую» не должно быть операцией без
+    # обратного хода. Статус у неё «received» — она и была принятой доставкой.
+    прежний_хеш = edge_router._raw_payload_hash(пакет.payload or {})
+    уже_есть = (await db.execute(select(edge_router.EdgePacketRevision.id).where(
+        edge_router.EdgePacketRevision.company_id == cid,
+        edge_router.EdgePacketRevision.packet_uuid == str(пакет.packet_uuid),
+        edge_router.EdgePacketRevision.content_hash == прежний_хеш,
+    ))).scalar_one_or_none()
+    if уже_есть is None:
+        db.add(edge_router.EdgePacketRevision(
+            id=uuid.uuid4(), company_id=cid, edge_packet_id=пакет.id,
+            packet_uuid=str(пакет.packet_uuid), content_hash=прежний_хеш,
+            payload=пакет.payload, size_bytes=пакет.size_bytes,
+            wire_size_bytes=пакет.wire_size_bytes, status="received",
+            error=f"версия, заменённая перевыгрузкой: {user.email}",
+        ))
+
+    payload = ревизия.payload or {}
+    docs = payload.get("Документы") or []
+    пакет.payload = payload
+    пакет.size_bytes = ревизия.size_bytes
+    пакет.wire_size_bytes = ревизия.wire_size_bytes
+    try:
+        if пакет.kind == "transfer":
+            await edge_router._route_transfer_packet(db, cid, пакет.station_id, payload)
+        await edge_router._ingest_receipts(db, cid, пакет.station_id, payload, docs)
+        if пакет.kind == "cheques":
+            await edge_router._ingest_cheques(
+                db, cid, пакет.station_id, payload, str(пакет.packet_uuid))
+        if пакет.kind in ("station-nsi", "station-mrc"):
+            await edge_nsi.ingest_station_nsi(db, cid, пакет.station_id, docs)
+        if пакет.kind == "stock":
+            await edge_router._sync_stock_packet(db, cid, пакет.station_id, payload)
+        await edge_projection.project_packet(
+            db, cid, str(пакет.packet_uuid), пакет.station_id, payload)
+        await записать_решение("applied", f"вид {пакет.kind}, АЗС {пакет.station_id}")
+        await db.commit()
+    except Exception as exc:  # noqa: BLE001
+        await db.rollback()
+        raise HTTPException(422, f"Перевыгрузка не разобрана: {str(exc)[:300]}") from exc
+    return {"ok": True, "status": "applied", "kind": пакет.kind,
+            "station_id": пакет.station_id}
+
+
 # ── Сводная: тот же конструктор разрезов, что в «Топливе» ───────────────────
 #
 # Экран собирает разрез сам: уровни переставляются мышью, дерево и подытоги
@@ -1652,27 +1825,63 @@ async def store_network_report(
     коды = [int(s) for s in (stations or "").replace(" ", "").split(",") if s.isdigit()]
     данные = await строитель(db, cid, date_from, date_to, коды or None)
 
-    if format != "csv":
+    if format not in ("csv", "xlsx"):
         return {"kind": kind, "title": схема["title"], "about": схема["about"],
                 "columns": схема["columns"], "fields": схема["fields"],
                 "stations": коды, "date_from": date_from, "date_to": date_to,
                 **данные}
 
     from fastapi.responses import Response as FileResponse
-    строки = []
-    for r in данные["rows"]:
-        строки.append([
-            ", ".join(str(x) for x in r[f]) if isinstance(r.get(f), list)
-            else ("да" if r.get(f) is True else "нет" if r.get(f) is False
-                  else str(r[f])[:19] if f.endswith("date") or f == "doc_date"
-                  else r.get(f))
-            for f in схема["fields"]
-        ])
+    from app.services.export_files import XLSX_MIME, content_disposition
+
+    def ячейка(r: dict, f: str):
+        v = r.get(f)
+        if v is None:
+            # Пусто честнее слова «None»: раньше пустая дата смены печаталась
+            # в файле буквально этими четырьмя буквами.
+            return ""
+        if isinstance(v, list):
+            return ", ".join(str(x) for x in v)
+        if v is True:
+            return "да"
+        if v is False:
+            return "нет"
+        if f.endswith("date") or f == "doc_date":
+            return str(v)[:19]
+        return v
+
+    строки = [[ячейка(r, f) for f in схема["fields"]] for r in данные["rows"]]
+
+    if format == "xlsx":
+        # Книга — основная выгрузка: шапка с периодом и отбором, закреплённые
+        # заголовки, автофильтр, денежный формат, коды текстом. В CSV ничего
+        # этого нет, а отчёт открывают, чтобы отобрать и посчитать.
+        мета = [("Область", "вся сеть" if not коды else
+                 ", ".join(f"АЗС №{c}" for c in коды))]
+        if date_from:
+            мета.append(("С", date_from))
+        if date_to:
+            мета.append(("По", date_to))
+        мета += [
+            ("Строк в отчёте", str(len(строки))),
+            ("Сформирован", datetime.now(timezone.utc).astimezone().strftime("%d.%m.%Y %H:%M")),
+            ("Источник", "Магазин · отчёты сети"),
+        ]
+        книга = store_reports.xlsx_bytes(схема["columns"], строки, мета,
+                                         схема["title"], схема.get("about", ""))
+        имяКниги = f"{kind}-{date_from or 'все'}_{date_to or 'все'}.xlsx"
+        return FileResponse(content=книга, media_type=XLSX_MIME,
+                            headers={"Content-Disposition": content_disposition(имяКниги),
+                                     "Cache-Control": "private, no-store"})
+
     тело = store_reports.csv_bytes(схема["columns"], строки)
     имя = f"{kind}-{date_from or 'все'}_{date_to or 'все'}.csv"
+    # Имя файла — в заголовок по RFC 5987, а не в самодельный X-Report-Name:
+    # его браузер не читает, и все шестнадцать отчётов сохранялись как
+    # «report.csv», затирая друг друга.
     return FileResponse(content=тело, media_type="text/csv; charset=utf-8",
-                        headers={"Content-Disposition": 'attachment; filename="report.csv"',
-                                 "X-Report-Name": имя})
+                        headers={"Content-Disposition": content_disposition(имя),
+                                 "Cache-Control": "private, no-store"})
 
 
 @router.get("/storage")
@@ -1813,6 +2022,19 @@ STATION_DOC_KINDS = {
     "production_release": "Производство",
     "revaluation": "Переоценка",
 }
+STATION_DOC_ALLOWED_KINDS = tuple(
+    kind for kind in STATION_DOC_KINDS if kind in PROJECTION_DOCUMENT_KINDS)
+
+
+def _legacy_station_scope(
+    access: DocumentAccess, requested: set[int] | None,
+) -> tuple[int, ...] | None:
+    if access.network:
+        return tuple(sorted(requested)) if requested else None
+    allowed = set(access.station_ids)
+    if requested is not None:
+        allowed.intersection_update(requested)
+    return tuple(sorted(allowed))
 
 
 @router.get("/station-docs")
@@ -1836,17 +2058,24 @@ async def store_station_docs(
     реестр обязан показывать то, что станция реально прислала.
     """
     cid: uuid.UUID = await scope_company_id(user, db)
+    access = await resolve_document_access(user, db, cid)
     p: dict = {"cid": cid, "lim": limit}
     условия = ["p.company_id = :cid"]
-    if station_id is not None:
-        условия.append("p.station_id = :st")
-        p["st"] = station_id
+    station_scope = _legacy_station_scope(
+        access, {station_id} if station_id is not None else None)
+    if station_scope == ():
+        условия.append("FALSE")
+    elif station_scope is not None:
+        условия.append("p.station_id = ANY(CAST(:stations AS integer[]))")
+        p["stations"] = list(station_scope)
     if kind:
+        if kind not in STATION_DOC_ALLOWED_KINDS:
+            raise HTTPException(400, "Неизвестный или запрещённый вид документа")
         условия.append("d->>'Тип' = :kind")
         p["kind"] = kind
     else:
         условия.append("d->>'Тип' = ANY(:kinds)")
-        p["kinds"] = list(STATION_DOC_KINDS)
+        p["kinds"] = list(STATION_DOC_ALLOWED_KINDS)
     if date_from:
         условия.append("coalesce((d->>'Дата')::timestamptz, p.received_at) >= :d1")
         p["d1"] = date.fromisoformat(date_from)
@@ -1866,8 +2095,7 @@ async def store_station_docs(
                coalesce(d->>'СкладПолучатель', '') AS place_to,
                coalesce(d->>'Причина', d->>'Комментарий', '') AS note,
                coalesce(d->>'Автор', '') AS author,
-               coalesce(jsonb_array_length(d->'Товары'), 0) AS positions,
-               coalesce((d->>'СуммаДокумента')::numeric, 0) AS amount,
+               d AS document_payload,
                p.received_at, p.packet_uuid, p.shift_number
         FROM edge_packets p,
              LATERAL jsonb_array_elements(coalesce(p.payload->'Документы', '[]'::jsonb))
@@ -1882,13 +2110,26 @@ async def store_station_docs(
     мета = {m.doc_ref: m for m in (await db.execute(select(StoreDocMeta).where(
         StoreDocMeta.company_id == cid,
         StoreDocMeta.doc_ref.in_(ссылки or [""])))).scalars().all()} if ссылки else {}
+    safe_rows = []
     for r in rows:
+        sanitized = sanitize_edge_document(
+            r.pop("document_payload", {}) or {}, trusted_station_packet=True)
+        if sanitized["pure_fuel"]:
+            continue
         r["label"] = STATION_DOC_KINDS.get(r["kind"], r["kind"])
-        r["amount"] = float(r["amount"] or 0)
+        r["positions"] = len(sanitized["lines"]) + len(sanitized["services"])
+        r["amount"] = float(sanitized["amount"])
+        r["vat_amount"] = (None if sanitized["vat_amount"] is None
+                           else float(sanitized["vat_amount"]))
+        r["accounting_status"] = (
+            "needs_review" if sanitized["quarantined"] else "ready")
+        r["classification_error"] = sanitized["reason"]
         m = мета.get(f"station:{r['packet_uuid']}:{r['doc_index']}")
         r["status"] = m.status if m else "принят"
         r["reg_number"] = m.reg_number if m else None
         r["has_files"] = False
+        safe_rows.append(r)
+    rows = safe_rows
 
     свод: dict[str, dict] = {}
     станции: dict[int, int] = {}
@@ -1938,6 +2179,7 @@ async def store_cheques(
     бы как весь чек, а это не так.
     """
     cid: uuid.UUID = await scope_company_id(user, db)
+    access = await resolve_document_access(user, db, cid)
     d1, d2 = date.fromisoformat(date_from), date.fromisoformat(date_to)
     условия = [StoreCheque.company_id == cid,
                StoreCheque.at >= datetime.combine(d1, time.min, tzinfo=timezone.utc),
@@ -1946,8 +2188,9 @@ async def store_cheques(
             if s.strip().isdigit()} if stations else set()
     if station_id is not None:
         коды.add(station_id)
-    if коды:
-        условия.append(StoreCheque.station_id.in_(sorted(коды)))
+    station_scope = _legacy_station_scope(access, коды or None)
+    if station_scope is not None:
+        условия.append(StoreCheque.station_id.in_(station_scope))
     if shift_number is not None:
         условия.append(StoreCheque.shift_number == shift_number)
     if only_returns:
@@ -1970,49 +2213,69 @@ async def store_cheques(
                  " WHERE поз->>'name' ILIKE :игла)").bindparams(игла=шаблон),
         ))
 
-    агрегаты = (await db.execute(select(
-        func.count(StoreCheque.id),
-        func.coalesce(func.sum(case((StoreCheque.is_return.is_(False), 1), else_=0)), 0),
-        func.coalesce(func.sum(case((StoreCheque.is_return.is_(True), 1), else_=0)), 0),
-        func.coalesce(func.sum(case(
-            (StoreCheque.is_return.is_(False), StoreCheque.total), else_=0)), 0),
-        func.coalesce(func.sum(case(
-            (StoreCheque.is_return.is_(True), StoreCheque.total), else_=0)), 0),
-        func.avg(case((StoreCheque.is_return.is_(False), StoreCheque.total), else_=None)),
-        func.coalesce(func.sum(case((StoreCheque.had_fuel.is_(True), 1), else_=0)), 0),
-    ).where(*условия))).one()
-    всего, продаж, возвратов, сумма, сумма_возвратов, средний, с_топливом = агрегаты
-
     rows = (await db.execute(select(StoreCheque).where(*условия)
                              .order_by(StoreCheque.at.desc(), StoreCheque.id.desc())
-                             .offset(offset).limit(limit))).scalars().all()
+                             )).scalars().all()
+    packet_uuids = sorted({str(row.packet_uuid) for row in rows if row.packet_uuid})
+    packet_rows = (await db.execute(select(EdgePacket).where(
+        EdgePacket.company_id == cid,
+        EdgePacket.packet_uuid.in_(packet_uuids),
+    ))).scalars().all() if packet_uuids else []
+    packets = {str(row.packet_uuid): row for row in packet_rows}
+
+    safe_rows = []
+    for r in rows:
+        totals = goods_only_cheque_totals(
+            cheque_lines_with_legacy_provenance(
+                r, packets.get(str(r.packet_uuid))),
+            bool(r.had_fuel),
+        )
+        if ((r.had_fuel and not r.lines)
+                or (r.lines and totals["fuel_lines"] == len(r.lines))):
+            continue
+        safe_rows.append((r, totals))
+
+    всего = len(safe_rows)
+    продаж = sum(1 for r, _ in safe_rows if not r.is_return)
+    возвратов = sum(1 for r, _ in safe_rows if r.is_return)
+    сумма = sum((totals["amount"] for r, totals in safe_rows
+                 if not r.is_return), Decimal("0"))
+    сумма_возвратов = sum((totals["amount"] for r, totals in safe_rows
+                            if r.is_return), Decimal("0"))
+    средний = (сумма / продаж) if продаж else None
+    с_топливом = sum(1 for r, _ in safe_rows if r.had_fuel)
 
     чеки = []
-    for r in rows:
+    for r, totals in safe_rows[offset:offset + limit]:
         чеки.append({
             "id": str(r.id), "station_id": r.station_id, "shift_number": r.shift_number,
             "number": r.number, "fiscal_number": r.fiscal_number, "at": r.at,
             "is_return": r.is_return, "had_fuel": r.had_fuel,
             "pay_type": r.pay_type, "pay_name": r.pay_name,
-            "total": float(r.total or 0), "positions": r.positions, "lines": r.lines,
+            "total": float(totals["amount"]), "positions": len(totals["lines"]),
+            "vat_amount": (None if totals["vat_amount"] is None
+                           else float(totals["vat_amount"])),
+            "accounting_status": "needs_review" if totals["quarantined"] else "ready",
+            "classification_error": totals["reason"],
+            "lines": totals["lines"],
         })
 
     return {
         "cheques": чеки,
-        "total": int(всего or 0),
+        "total": всего,
         "offset": offset,
         "limit": limit,
         "summary": {
-            "sales": int(продаж or 0),
-            "returns": int(возвратов or 0),
+            "sales": продаж,
+            "returns": возвратов,
             "amount": round(float(сумма or 0), 2),
             "returns_amount": round(float(сумма_возвратов or 0), 2),
             # Средний чек считается по продажам без возвратов: возврат — это не
             # покупка, и включать его в среднее значит занижать его дважды.
             "avg": round(float(средний), 2) if средний is not None else None,
-            "with_fuel": int(с_топливом or 0),
+            "with_fuel": с_топливом,
         },
-        "truncated": offset + len(rows) < int(всего or 0),
+        "truncated": offset + len(чеки) < всего,
     }
 
 
@@ -2152,18 +2415,25 @@ async def store_station_doc(
     путём, но предъявлять при разборе полётов нужно то, что прислала станция.
     """
     cid: uuid.UUID = await scope_company_id(user, db)
+    access = await resolve_document_access(user, db, cid)
     пакет = (await db.execute(select(EdgePacket).where(
         EdgePacket.company_id == cid,
         EdgePacket.packet_uuid == packet_uuid))).scalar_one_or_none()
-    if пакет is None:
-        raise HTTPException(404, "Пакет не найден")
+    if пакет is None or not _station_allowed(access, пакет.station_id):
+        raise HTTPException(404, "Документ не найден")
     документы = (пакет.payload or {}).get("Документы") or []
     if index >= len(документы):
         raise HTTPException(404, "Документ не найден в пакете")
     d = документы[index]
+    if (not isinstance(d, dict)
+            or str(d.get("Тип") or "") not in STATION_DOC_ALLOWED_KINDS):
+        raise HTTPException(404, "Документ не найден")
+    sanitized = sanitize_edge_document(d, trusted_station_packet=True)
+    if sanitized["pure_fuel"]:
+        raise HTTPException(404, "Документ не найден")
 
     строки = []
-    for row in (d.get("Товары") or []):
+    for row in sanitized["lines"]:
         строки.append({
             "name": row.get("Наименование") or row.get("Номенклатура") or "",
             "barcode": row.get("ШтрихКод"),
@@ -2212,10 +2482,25 @@ async def store_station_doc(
         "responsible": d.get("Ответственный") or d.get("МОЛ"),
         "basis": d.get("Основание"),
         "source_uuid": d.get("ИсточникUUID"),
-        "amount": float(d.get("СуммаДокумента") or 0),
+        "amount": float(sanitized["amount"]),
+        "vat_amount": (None if sanitized["vat_amount"] is None
+                       else float(sanitized["vat_amount"])),
+        "accounting_status": (
+            "needs_review" if sanitized["quarantined"] else "ready"),
+        "classification_error": sanitized["reason"],
         "shift_number": пакет.shift_number,
         "received_at": пакет.received_at,
         "lines": строки,
+        "services": [
+            {
+                "name": row.get("Наименование") or "",
+                "amount": float(row.get("Сумма") or 0),
+                "vat_rate": row.get("СтавкаНДС"),
+                "vat_amount": (float(row["СуммаНДС"])
+                               if row.get("СуммаНДС") is not None else None),
+            }
+            for row in sanitized["services"]
+        ],
         "doc_ref": f"station:{packet_uuid}:{index}",
     }
 
@@ -2249,12 +2534,21 @@ async def store_doc_meta_save(
     скажет, что прислала станция, а что дорисовали в офисе.
     """
     cid: uuid.UUID = await scope_company_id(user, db)
+    if doc_ref.startswith("projection:"):
+        raise HTTPException(409, "Метаданные проекции изменяются только через документный API")
+    from app.routers.store_documents_router import authorize_legacy_document_ref
+    _, document = await authorize_legacy_document_ref(
+        db, user, cid, doc_ref, write=True)
     row = (await db.execute(select(StoreDocMeta).where(
         StoreDocMeta.company_id == cid,
         StoreDocMeta.doc_ref == doc_ref))).scalar_one_or_none()
     if row is None:
         row = StoreDocMeta(company_id=cid, doc_ref=doc_ref)
         db.add(row)
+    if document is not None:
+        row.record_id = document.id
+        row.document_id = document.document_id
+        row.revision = document.revision
     if body.responsible_from is not None:
         row.responsible_from = body.responsible_from.strip() or None
     if body.responsible_to is not None:
@@ -2299,8 +2593,11 @@ async def store_doc_files(
 ):
     """Образы, приложенные к документу: накладная, УПД, акт, опись, фото."""
     cid: uuid.UUID = await scope_company_id(user, db)
+    from app.routers.store_documents_router import authorize_legacy_document_ref
+    await authorize_legacy_document_ref(db, user, cid, doc_ref, write=False)
     rows = (await db.execute(select(StoreDocFile).where(
         StoreDocFile.company_id == cid, StoreDocFile.doc_ref == doc_ref,
+        StoreDocFile.tombstoned_at.is_(None),
     ).order_by(StoreDocFile.uploaded_at.desc()))).scalars().all()
     return {"files": [{
         "id": str(r.id), "kind": r.kind, "file_id": str(r.file_id),
@@ -2328,23 +2625,48 @@ async def store_doc_file_upload(
     что второй способ хранить одно и то же расходится с первым сразу.
     """
     cid: uuid.UUID = await scope_company_id(user, db)
+    if doc_ref.startswith("projection:"):
+        raise HTTPException(409, "Файлы проекции добавляются только через документный API")
+    from app.routers.store_documents_router import authorize_legacy_document_ref
+    _, document = await authorize_legacy_document_ref(db, user, cid, doc_ref, write=True)
     content = await file.read()
     if not content:
         raise HTTPException(400, "Пустой файл")
     if len(content) > 25 * 1024 * 1024:
         raise HTTPException(400, "Файл больше 25 МБ — приложите скан меньшего разрешения")
+    checksum = hashlib.sha256(content).hexdigest()
+    if document is not None:
+        await db.execute(text(
+            "SELECT pg_advisory_xact_lock(hashtextextended(:scope_key, 0))"
+        ), {"scope_key": f"store-document-file:{cid}:{document.id}"})
+        existing = (await db.execute(select(StoreDocFile).where(
+            StoreDocFile.company_id == cid,
+            StoreDocFile.record_id == document.id,
+            StoreDocFile.revision == document.revision,
+            StoreDocFile.role == kind,
+            StoreDocFile.sha256 == checksum,
+        ))).scalar_one_or_none()
+        if existing is not None:
+            return {"ok": True, "id": str(existing.id),
+                    "file_id": str(existing.file_id), "created": False,
+                    "url": f"/api/files/{existing.file_id}"}
 
     from app.services import ops_terms
     file_id = await ops_terms.store_file(db, cid, file.filename, file.content_type, content)
     row = StoreDocFile(
-        company_id=cid, doc_ref=doc_ref, station_id=station_id, kind=kind,
+        company_id=cid, doc_ref=doc_ref,
+        record_id=document.id if document else None,
+        document_id=document.document_id if document else None,
+        station_id=document.station_id if document else None, kind=kind, role=kind,
+        sha256=checksum,
+        revision=document.revision if document else 1,
         file_id=file_id, file_name=file.filename or "документ",
         mime=file.content_type, size_bytes=len(content), note=note,
-        uploaded_by=user.id,
+        uploaded_by=user.id, author_id=user.id,
     )
     db.add(row)
     await db.commit()
-    return {"ok": True, "id": str(row.id), "file_id": str(file_id),
+    return {"ok": True, "id": str(row.id), "file_id": str(file_id), "created": True,
             "url": f"/api/files/{file_id}"}
 
 
@@ -2376,7 +2698,12 @@ async def store_doc_files_archive(
     from app.models import SourceFile
 
     cid: uuid.UUID = await scope_company_id(user, db)
+    from app.routers.store_documents_router import resolve_document_access
+    access = await resolve_document_access(user, db, cid)
+    if not access.network:
+        raise HTTPException(403, "Архив первички доступен только центру")
     условия = [StoreDocFile.company_id == cid]
+    условия.append(StoreDocFile.tombstoned_at.is_(None))
     if station_id is not None:
         условия.append(StoreDocFile.station_id == station_id)
     if date_from:
@@ -2434,16 +2761,22 @@ async def store_doc_files_summary(
     отдельно от сырья станции: сырьё прореживают, образы — нет.
     """
     cid: uuid.UUID = await scope_company_id(user, db)
+    from app.routers.store_documents_router import resolve_document_access
+    access = await resolve_document_access(user, db, cid)
+    if not access.network:
+        raise HTTPException(403, "Сводка первички доступна только центру")
     виды = [dict(r) for r in (await db.execute(text("""
         SELECT kind, count(*) AS files, coalesce(sum(size_bytes), 0) AS bytes,
                min(uploaded_at) AS oldest, max(uploaded_at) AS newest
         FROM store_doc_files WHERE company_id = :cid
+          AND tombstoned_at IS NULL
         GROUP BY kind ORDER BY count(*) DESC
     """), {"cid": cid})).mappings().all()]
     итог = (await db.execute(text("""
         SELECT count(*) AS files, coalesce(sum(size_bytes), 0) AS bytes,
                count(DISTINCT doc_ref) AS docs, min(uploaded_at) AS oldest
         FROM store_doc_files WHERE company_id = :cid
+          AND tombstoned_at IS NULL
     """), {"cid": cid})).mappings().first()
     return {"kinds": виды, "total": dict(итог) if итог else {},
             "retention_years": 5}
@@ -2465,9 +2798,16 @@ async def store_doc_file_delete(
         StoreDocFile.id == file_row_id, StoreDocFile.company_id == cid))).scalar_one_or_none()
     if row is None:
         raise HTTPException(404, "Образ не найден")
-    await db.delete(row)
+    if row.record_id is not None:
+        raise HTTPException(409, "Файл проекции удаляется только логическим tombstone")
+    from app.routers.store_documents_router import authorize_legacy_document_ref
+    await authorize_legacy_document_ref(db, user, cid, row.doc_ref, write=True)
+    if row.tombstoned_at is None:
+        row.tombstoned_at = datetime.now(timezone.utc)
+        row.tombstoned_by = user.id
+        row.tombstone_reason = "Удалено через совместимый API"
     await db.commit()
-    return {"ok": True}
+    return {"ok": True, "tombstoned": True}
 
 
 @router.get("/marking/codes")
@@ -3759,6 +4099,13 @@ class ReceiptIn(BaseModel):
     invoice_kind: str | None = None
     invoice_number: str | None = None
     invoice_date: str | None = None
+    currency: str | None = None
+    vat_included: bool | None = None
+    vat_deductible: bool | None = None
+    declared_goods_total: float | None = None
+    declared_services_total: float | None = None
+    declared_vat_total: float | None = None
+    declared_total: float | None = None
     source_kind: str | None = None
     purchased_by: str | None = None
     payment_kind: str | None = None
@@ -3773,6 +4120,36 @@ class ReceiptSignatureIn(BaseModel):
     mchd_registry: str | None = None
     mchd_valid_until: str | None = None
     version: int | None = None
+
+
+class InventorySheetLine(BaseModel):
+    """Строка заполненной ведомости пересчёта.
+
+    Учётного количества здесь нет намеренно: его станция берёт из своего
+    журнала в момент проведения. Прислать своё значило бы считать разницу от
+    цифры, устаревшей на всё время, пока ведомость была на руках.
+    """
+    item_uuid: uuid.UUID
+    name: str = ""
+    barcode: str = ""
+    ns_code: int | None = None
+    qty_fact: float
+    price: float | None = None
+
+
+class InventorySheetIn(BaseModel):
+    document_id: uuid.UUID
+    number: str
+    place: str
+    doc_date: str | None = None
+    # Пересчёт считают по местам: излишек зала не должен гасить недостачу склада.
+    scope: str = "partial"
+    comment: str = ""
+    author: str = ""
+    # Провести сразу. Без этого лист ложится на станции черновиком, и человек
+    # проводит его сам, посмотрев глазами.
+    post: bool = True
+    lines: list[InventorySheetLine] = []
 
 
 class ReceiptDistributionLine(BaseModel):
@@ -3797,6 +4174,15 @@ class ReceiptScanIn(BaseModel):
 
 
 class ReceiptAccountingIn(BaseModel):
+    version: int | None = None
+    note: str | None = None
+
+
+class ReceiptCanonicalLinkIn(BaseModel):
+    supplier_id: uuid.UUID
+    contract_id: uuid.UUID
+    organization_id: uuid.UUID
+    warehouse_id: uuid.UUID
     version: int | None = None
     note: str | None = None
 
@@ -4145,6 +4531,9 @@ def _receipt_downlink_payload(row: StoreReceipt) -> dict:
         "invoice_number": evidence.get("invoice_number") or row.incoming_number or "",
         "invoice_date": evidence.get("invoice_date")
                         or (row.incoming_date.date().isoformat() if row.incoming_date else ""),
+        "currency": evidence.get("currency") or "",
+        "vat_included": evidence.get("vat_included"),
+        "vat_deductible": evidence.get("vat_deductible"),
         "services": [{
             "line_id": service.get("line_id") or "",
             "key": service.get("key") or "",
@@ -4344,7 +4733,13 @@ async def receipt_from_upd(
         mchd_guid=mchd_guid, mchd_registry=mchd_registry,
         mchd_valid_until=valid_until, signature_status="pending",
         total_amount=0, vat_amount=0,
-        evidence={"upd_sha256": hashlib.sha256(raw).hexdigest(), "file_name": file.filename},
+        evidence={
+            "upd_sha256": hashlib.sha256(raw).hexdigest(),
+            "file_name": file.filename,
+            "invoice_kind": "УПД",
+            "invoice_number": parsed.get("incoming_number"),
+            "invoice_date": parsed.get("incoming_date"),
+        },
         comment="Загружен из УПД поставщика",
     )
     await _set_receipt_party(
@@ -4444,6 +4839,80 @@ async def send_receipt_to_station(
     await db.commit()
     return {"ok": True, "task_id": str(task.id), "idempotent": repeated,
             "station_id": row.station_id, "number": row.number, "lines": len(lines)}
+
+
+@router.post("/stations/{station_id}/inventory-sheet")
+async def send_inventory_sheet_to_station(
+    station_id: int,
+    body: InventorySheetIn,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Отправить на станцию заполненную ведомость пересчёта.
+
+    Остаток станции ведёт агент: раз в час он присылает снимок своего журнала, и
+    центр этот снимок зеркалит. Поэтому исправить остаток запросом к базе центра
+    нельзя — до ближайшего снимка, который вернёт всё как было.
+
+    Пересчёт же часто идёт на бумаге: ведомость печатают здесь, человек обходит
+    зал и вписывает фактическое количество, лист возвращается в центр. Эта ручка
+    отдаёт заполненный лист станции заданием — она примет его своим обычным
+    документом пересчёта, проведёт и пришлёт результат наверх пакетом.
+
+    Учётное количество в задание не кладём: пока лист ходил туда-обратно, шли
+    продажи, и разницу станция считает от того, что у неё есть сейчас.
+    """
+    access = await _receipt_access(user, db)
+    _require_receipt_station(access, station_id)
+    if not body.lines:
+        raise HTTPException(422, "В ведомости нет строк")
+    без_карточки = [l.name for l in body.lines if not l.item_uuid]
+    if без_карточки:
+        # Проведение на станции считает остаток по карточке. Строка без неё
+        # уронила бы применение целиком уже на станции — скажем об этом здесь,
+        # пока ведомость можно поправить.
+        raise HTTPException(422, "Строки без карточки товара: " + ", ".join(без_карточки[:5]))
+
+    payload = {
+        "id": str(body.document_id),
+        "number": body.number,
+        "doc_date": body.doc_date,
+        "place": body.place,
+        "scope": body.scope,
+        "comment": body.comment,
+        "author": body.author,
+        "post": body.post,
+        "lines": [{"item_uuid": str(l.item_uuid), "name": l.name, "barcode": l.barcode,
+                   "ns_code": l.ns_code, "qty_fact": float(l.qty_fact),
+                   "price": float(l.price or 0)} for l in body.lines],
+    }
+    # Ключ идемпотентности — сам документ: повтор отправки правит одно задание,
+    # а не плодит второй пересчёт того же листа.
+    idempotency_key = f"inventory:{body.document_id}"
+    task = (await db.execute(select(EdgeDownlink).where(
+        EdgeDownlink.company_id == access.company_id,
+        EdgeDownlink.idempotency_key == idempotency_key,
+    ).with_for_update())).scalar_one_or_none()
+    repeated = task is not None
+    if task is None:
+        task = EdgeDownlink(
+            company_id=access.company_id, station_id=station_id,
+            kind="inventory_expected", payload=payload,
+            note="пересчёт %s (%s)" % (body.number, body.place),
+            idempotency_key=idempotency_key,
+        )
+        db.add(task)
+    elif task.payload != payload:
+        task.station_id = station_id
+        task.payload = payload
+        task.delivered_at = None
+        task.acked_at = None
+        task.cancelled_at = None
+        task.cancelled_by = None
+    await db.commit()
+    return {"ok": True, "task_id": str(task.id), "idempotent": repeated,
+            "station_id": station_id, "number": body.number,
+            "place": body.place, "lines": len(body.lines)}
 
 
 @router.post("/receipts/{receipt_id}/signature")
@@ -4871,7 +5340,12 @@ async def create_receipt(
         evidence={key: value for key, value in {
             "place": body.place, "purpose": body.purpose,
             "invoice_kind": body.invoice_kind, "invoice_number": body.invoice_number,
-            "invoice_date": body.invoice_date, "source_kind": body.source_kind,
+            "invoice_date": body.invoice_date, "currency": body.currency,
+            "vat_included": body.vat_included, "vat_deductible": body.vat_deductible,
+            "declared_goods_total": body.declared_goods_total,
+            "declared_services_total": body.declared_services_total,
+            "declared_vat_total": body.declared_vat_total,
+            "declared_total": body.declared_total, "source_kind": body.source_kind,
             "purchased_by": body.purchased_by, "payment_kind": body.payment_kind,
         }.items() if value is not None},
     )
@@ -5021,6 +5495,9 @@ async def update_receipt(
         db, row, row.supplier, incoming_number, incoming_date, required=False)
     evidence = dict(row.evidence or {})
     for field in ("place", "purpose", "invoice_kind", "invoice_number", "invoice_date",
+                  "currency", "vat_included", "vat_deductible",
+                  "declared_goods_total", "declared_services_total",
+                  "declared_vat_total", "declared_total",
                   "source_kind", "purchased_by", "payment_kind"):
         if field in fields:
             value = getattr(body, field)
@@ -5059,6 +5536,35 @@ async def set_receipt_accounting_ready(
     try:
         row = await store_receipt_accounting.canonicalize_receipt(
             db, access.company_id, receipt_id, user.id, body.note)
+    except store_receipt_accounting.ReceiptAccountingError as exc:
+        await db.commit()
+        raise HTTPException(409, str(exc)) from exc
+    await db.commit()
+    await db.refresh(row)
+    return _receipt_out(row)
+
+
+@router.post("/receipts/{receipt_id}/canonical-link")
+async def link_accepted_receipt_canonical_refs(
+    receipt_id: uuid.UUID,
+    body: ReceiptCanonicalLinkIn,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    access = await _receipt_access(user, db)
+    if not access.network:
+        raise HTTPException(403, "Позднее связывание НСИ выполняет центр")
+    try:
+        row = await store_receipt_accounting.link_receipt_canonical_refs(
+            db, access.company_id, receipt_id,
+            supplier_id=body.supplier_id,
+            contract_id=body.contract_id,
+            organization_id=body.organization_id,
+            warehouse_id=body.warehouse_id,
+            confirmed_by=user.id,
+            expected_version=body.version,
+            note=body.note,
+        )
     except store_receipt_accounting.ReceiptAccountingError as exc:
         await db.commit()
         raise HTTPException(409, str(exc)) from exc
@@ -5336,6 +5842,86 @@ async def catalog_health(
     return {"итого": dict(строка), "дубли": dict(дубли),
             "по_группам": [dict(g) for g in группы],
             "по_классам": [dict(k) for k in классы]}
+
+
+@router.get("/catalog/enrichment")
+async def catalog_enrichment(
+    field: str = Query("brand"),
+    limit: int = Query(300, le=2000),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Предложения к заполнению карточки, ждущие решения человека.
+
+    Источник — внешний или разбор наименования — карточку не правит. Он кладёт
+    предложение, а канон подтверждает человек: чужой состав, молча записанный в
+    справочник, потом не отличить от нашего.
+
+    Группируем по значению, а не по карточке: подтверждать «Winston» двадцать
+    три раза подряд — работа ни о чём, решение принимается один раз на марку.
+    """
+    await scope_company_id(user, db)
+    строки = (await db.execute(text("""
+        SELECT e.value, e.source, max(e.confidence) AS confidence,
+               count(*) AS позиций,
+               (array_agg(i.name ORDER BY i.name))[1:5] AS примеры,
+               array_agg(e.id) AS ids
+        FROM edge.item_enrichment e
+        JOIN edge.item i ON i.id = e.item_id
+        WHERE e.field = :f AND e.resolved_at IS NULL AND NOT i.deleted
+        GROUP BY e.value, e.source
+        ORDER BY count(*) DESC, e.value
+        LIMIT :lim
+    """), {"f": field, "lim": limit})).mappings().all()
+    всего = (await db.execute(text(
+        "SELECT count(*) FROM edge.item_enrichment WHERE field = :f AND resolved_at IS NULL"
+    ), {"f": field})).scalar_one()
+    return {"поле": field, "всего_предложений": int(всего),
+            "значения": [dict(r) for r in строки]}
+
+
+class EnrichmentDecisionIn(BaseModel):
+    ids: list[int] = []
+    accepted: bool
+    author: str = ""
+
+
+@router.post("/catalog/enrichment/decide")
+async def catalog_enrichment_decide(
+    body: EnrichmentDecisionIn,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Принять или отклонить предложения — пачкой, по одной марке разом.
+
+    Принятое значение ложится в карточку и уезжает на станции обычным
+    обновлением справочника. Отклонённое остаётся в журнале: источник повторит
+    догадку, и без записи об отказе человек будет разбирать её снова и снова.
+    """
+    cid = await _require_network_merchandiser(user, db)
+    if not body.ids:
+        raise HTTPException(422, "Не выбрано ни одного предложения")
+    автор = (body.author or user.email or "").strip()[:120]
+    поля = (await db.execute(text("""
+        UPDATE edge.item_enrichment
+        SET resolved_at = now(), accepted = :ok, author = :a
+        WHERE id = ANY(:ids) AND resolved_at IS NULL
+        RETURNING item_id, field, value
+    """), {"ok": body.accepted, "a": автор, "ids": body.ids})).mappings().all()
+    if body.accepted:
+        for r in поля:
+            if r["field"] != "brand":
+                # Пока подтверждаем только бренд: остальные поля придут из
+                # внешнего источника, и у них своя проверка.
+                continue
+            await db.execute(text("""
+                UPDATE edge.item SET brand = :v, enriched_from = 'name_parse',
+                       enriched_at = now(), updated_at = now()
+                WHERE id = :id
+            """), {"v": r["value"], "id": r["item_id"]})
+            await _queue_nsi_delta(db, cid, int(r["item_id"]))
+    await db.commit()
+    return {"ok": True, "решено": len(поля), "принято": bool(body.accepted)}
 
 
 @router.get("/catalog/groups")
@@ -6036,29 +6622,33 @@ async def store_resolve_item_draft(
         raise HTTPException(400, str(exc)) from exc
 
     if res["action"] in ("link", "create"):
-        row = (await db.execute(text("""
-            SELECT i.external_uuid, i.name, i.unit, i.vat_rate,
-                   coalesce((SELECT array_agg(b.code ORDER BY b.code) FROM edge.barcode b
-                              WHERE b.item_id = i.id AND b.status = 'active'), '{}') AS codes,
-                   (SELECT price FROM edge.price p
-                     WHERE p.item_id = i.id AND p.station_id = :s AND p.valid_to IS NULL) AS price,
-                   i.price_owner
-            FROM edge.item i WHERE i.id = :id
-        """), {"id": res["item_id"], "s": res["station_id"]})).mappings().first()
-        if row is not None:
-            db.add(EdgeDownlink(
-                # nsi_delta — вид, который агент умеет разбирать. Первая версия
-                # ставила «nsi_item», и станция честно писала «неизвестное
-                # задание центра», а признанная карточка до неё не доезжала.
-                company_id=cid, station_id=res["station_id"], kind="nsi_delta",
-                payload={"uuid": str(row["external_uuid"]), "name": row["name"],
-                         "unit": row["unit"], "vat_rate": row["vat_rate"],
-                         "barcodes": list(row["codes"] or []),
-                         "price": float(row["price"]) if row["price"] is not None else None,
-                         "price_owner": row["price_owner"], "deleted": False},
-            ))
-            await db.commit()
-            res["pushed"] = True
+        # Признанная карточка едет ВСЕЙ сети, а не только станции-источнику.
+        #
+        # Раньше задание уходило по res["station_id"], и товар, признанный по
+        # заявке одной АЗС, для остальных попросту не существовал: там он
+        # заводился заново своим черновиком — то есть ровно тем дублем, ради
+        # борьбы с которым признание и делается. Ставит задания общий
+        # _queue_nsi_delta: карточка целиком, всем станциям, без накопления
+        # версий в очереди.
+        pushed = await _queue_nsi_delta(db, cid, res["item_id"])
+        await db.commit()
+        res["pushed"] = pushed > 0
+        res["stations"] = pushed
+    elif res["action"] == "reject":
+        # Отказ обязан доехать до станции.
+        #
+        # Иначе она не узнаёт о нём никогда: черновик остаётся в её базе и
+        # уезжает наверх каждый такт до скончания времён, а товаровед видит
+        # вечно висящую заявку и заводит карточку второй раз.
+        db.add(EdgeDownlink(
+            company_id=cid, station_id=res["station_id"], kind="item_draft_rejected",
+            payload={"draft_id": draft_id, "source_uuid": res.get("source_uuid") or "",
+                     "reason": (body.get("note") or "").strip()},
+            note="отказ по черновику карточки",
+            idempotency_key=f"draft-reject:{res['station_id']}:{draft_id}",
+        ))
+        await db.commit()
+        res["pushed"] = True
     return res
 
 

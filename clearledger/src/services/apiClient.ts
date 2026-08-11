@@ -75,6 +75,13 @@ export function isNetworkError(err: unknown): boolean {
 /** Guard от множественных 401 редиректов (race condition при параллельных запросах) */
 let isRedirecting = false
 
+/** Страницы, доступные без сессии: увести отсюда на вход — значит сломать вход. */
+const PUBLIC_PAGES = ['/login', '/invite/', '/reset-password/']
+export function isPublicPage(pathname: string): boolean {
+  const p = pathname.replace(/\/$/, '')
+  return PUBLIC_PAGES.some((s) => p.endsWith(s.replace(/\/$/, '')) || p.includes(s))
+}
+
 async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
     let detail = res.statusText
@@ -88,10 +95,11 @@ async function handleResponse<T>(res: Response): Promise<T> {
 
     if (res.status === 401 && !isRedirecting) {
       const base = import.meta.env.BASE_URL ?? '/'
-      const onLogin = window.location.pathname.replace(/\/$/, '').endsWith('/login')
-      // На странице входа 401 от фоновых запросов — не «истёкшая сессия»: не шумим
-      // и не редиректим (иначе фоновый 401 сбивает свежий вход).
-      if (!onLogin) {
+      // На публичных страницах 401 от фоновых запросов — не «истёкшая сессия»: не шумим
+      // и не редиректим (иначе фоновый 401 сбивает свежий вход). Приглашение и сброс
+      // пароля открывают как раз те, у кого сессии нет или она протухла: `/auth/me`
+      // отвечал 401, и форма улетала на логин через полторы секунды.
+      if (!isPublicPage(window.location.pathname)) {
         isRedirecting = true
         clearToken()
         // Импортируем toast динамически чтобы избежать циклических зависимостей
