@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import io
+import logging
 from datetime import datetime
 from typing import Any
 
@@ -35,6 +36,8 @@ from app.services.reestr_normalize import _clean_cp_name, _cp_type, _normname
 _DT_FORMATS = ("%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M",
                "%m/%d/%Y %H:%M:%S", "%m/%d/%Y %H:%M",
                "%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S")
+
+logger = logging.getLogger("clearledger.charge_sessions")
 
 
 def _num(v) -> float:

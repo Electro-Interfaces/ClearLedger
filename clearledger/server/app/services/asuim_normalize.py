@@ -883,7 +883,6 @@ async def ingest_asuim_file(
     if view in ("brands", "groups", "cars"):
         return await ingest_references(db, company_id, view, rows)
     if view == "sessions":
-        from app.services.charge_sessions_normalize import ingest_charge_sessions
         from app.services.charge_sessions_normalize import (
             enrich_session_cards, ingest_charge_sessions,
         )
