@@ -1585,26 +1585,14 @@ async def create_all() -> None:
         ):
             await conn.execute(__import__("sqlalchemy").text(stmt))
 
-        # v2.13: имена объектов ЭЗС = свежайшее имя из сессий (волна переименований
-        # CPO 01.07.26: 611 «Новая Рига Аутлет Вилладж»→«Новая Рига» и др.; каталог
-        # грузился из xlsx до переименования и отстал). Старое имя — в
-        # extra_metadata.nameHistory (поиск по нему сохраняется). Идемпотентно:
-        # после выравнивания имён — no-op; при новых переименованиях в сессиях
-        # подхватит на следующем старте (страховка к обновлению при ingest).
-        await conn.execute(__import__("sqlalchemy").text(
-            "WITH fresh AS ("
-            "  SELECT DISTINCT ON (location_id) location_id, btrim(station_name) AS nm"
-            "  FROM charge_sessions"
-            "  WHERE location_id IS NOT NULL AND station_name IS NOT NULL"
-            "    AND btrim(station_name) <> ''"
-            "  ORDER BY location_id, started_at DESC NULLS LAST) "
-            "UPDATE service_locations sl SET "
-            "  extra_metadata = jsonb_set(coalesce(sl.extra_metadata, '{}'::jsonb), '{nameHistory}',"
-            "      coalesce(sl.extra_metadata->'nameHistory', '[]'::jsonb) || to_jsonb(sl.name)),"
-            "  name = f.nm "
-            "FROM fresh f "
-            "WHERE f.location_id = sl.id AND btrim(sl.name) IS DISTINCT FROM f.nm"
-        ))
+        # v2.13 УДАЛЕНА (12.08.2026). Здесь на каждом старте контейнера имена
+        # объектов ЭЗС переписывались именем из свежайшей сессии — без охраны
+        # `nameSource='cpo_registry'` и без фильтра по компании. Правило приоритета
+        # «реестр CPO старше выгрузки сессий» соблюдает refresh_location_names()
+        # (stations_normalize.py), и она же вызывается из конвейера сессий, поэтому
+        # страховка не нужна: рестарт откатывал имя к сессионному, следующая
+        # загрузка справочника возвращала обратно, и каждый круг дописывал элемент
+        # в nameHistory. Так «Кафе Хорт» ходило туда-сюда с «(на тестировании)».
 
         # v2.14: сводная выработка ЭЗС («ОБЩАЯ_2024-2026», слот obshaya канала
         # реестров) — паспортные атрибуты станции из станционного листа «Общие
@@ -1630,8 +1618,30 @@ async def create_all() -> None:
             "WHERE serial_number IS NOT NULL AND serial_number <> ''",
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_ezs_spare_name "
             "ON ezs_spare_parts (company_id, lower(name))",
+            # v2.16 (12.08.2026): у объектов сети не было НИ ОДНОГО уникального
+            # ключа — отсюда три карточки с кодом «123» и пары AC/DC, слипшиеся по
+            # серийнику. Код и серийник уникальны в пределах компании; тестовые
+            # карточки CPO из проверки исключены (они и так вне индексов резолва).
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_service_locations_code "
+            "ON service_locations (company_id, code) WHERE is_test = false",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_service_locations_serial "
+            "ON service_locations (company_id, lower(serial_number)) "
+            "WHERE is_test = false AND serial_number IS NOT NULL AND serial_number <> ''",
         ):
-            await conn.execute(__import__("sqlalchemy").text(stmt))
+            # Уникальный индекс на живых данных может не построиться (дубликаты
+            # накопились до правила). Падение роняло бы ВЕСЬ блок миграций и старт
+            # контейнера, поэтому каждый индекс — в SAVEPOINT: неудача пишется в
+            # лог, стенд поднимается, дубли видны в «Качестве данных».
+            # ВАЖНО: именно SAVEPOINT на текущем соединении. Отдельная транзакция
+            # (`engine.begin()`) здесь встаёт намертво — внешняя транзакция миграций
+            # держит блокировку service_locations, и старт зависает на «Waiting for
+            # application startup» без единой строки в логе.
+            try:
+                async with conn.begin_nested():
+                    await conn.execute(__import__("sqlalchemy").text(stmt))
+            except Exception as exc:  # noqa: BLE001
+                __import__("logging").getLogger(__name__).warning(
+                    "Уникальный индекс не создан (в данных есть дубликаты): %s", exc)
 
         # v2.16: чат (chat_rooms/participants/messages/reactions/folders — через
         # metadata.create_all). Здесь — presence-колонка + поля фазы 2 (закреп,

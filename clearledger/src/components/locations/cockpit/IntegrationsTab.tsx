@@ -7,7 +7,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Plug, Link2, Radio } from 'lucide-react'
 import { getSources } from '@/services/sourceService'
-import type { ServiceLocation, LocationSourceBinding } from '@/types/location'
+import { locationValues, type ServiceLocation, type LocationSourceBinding } from '@/types/location'
 import { SectionCard, InfoRow, Placeholder, ScrollTab } from './shared'
 
 const SOURCE_TYPE_LABEL: Record<string, string> = {
@@ -42,10 +42,16 @@ function bindingParams(b: LocationSourceBinding): { label: string; value: string
   return rows
 }
 
-export function IntegrationsTab({ location }: { location: ServiceLocation }) {
+export function IntegrationsTab({ location, embedded }: {
+  location: ServiceLocation
+  /** Показ внутри «Паспорта» — без своей прокрутки. */
+  embedded?: boolean
+}) {
   const sources = getSources()
   const bindings = location.sourceBindings ?? []
-  const meta = (location.metadata ?? {}) as Record<string, unknown>
+  // Паспорт поверх сырья: у части станций привязка к активу HubEx есть только
+  // в колонке паспорта, и вкладка отдавала «нет привязок» на связанной станции.
+  const meta = locationValues(location)
   const hubexAssetId = meta.hubexAssetId
   const linkStatus = meta.linkStatus != null ? String(meta.linkStatus) : null
 
@@ -53,7 +59,7 @@ export function IntegrationsTab({ location }: { location: ServiceLocation }) {
 
   if (!hasAny) {
     return (
-      <ScrollTab>
+      <ScrollTab plain={embedded}>
         <Placeholder
           icon={Plug}
           title="Нет привязок к источникам"
@@ -64,7 +70,7 @@ export function IntegrationsTab({ location }: { location: ServiceLocation }) {
   }
 
   return (
-    <ScrollTab>
+    <ScrollTab plain={embedded}>
       {bindings.map((b, i) => {
         const src = sources.find((s) => s.id === b.sourceId)
         const typeLabel = src ? (SOURCE_TYPE_LABEL[src.type] ?? src.type) : null

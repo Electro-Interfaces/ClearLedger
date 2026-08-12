@@ -42,7 +42,10 @@ export const EQUIPMENT_KEYS = [
 export function typeFlags(type: LocationType) {
   return {
     isFuel: type === 'fuel_station',
-    isEv: type === 'ev_charging',
+    // 'ezs' — зеркала реестра Поддержки: тип чужой, но объект тот же. Без этого
+    // вкладки проваливались в ветку «офис» и писали «продажи не учитываются»
+    // на действующей зарядной станции.
+    isEv: type === 'ev_charging' || type === 'ezs',
     isRetail: type === 'retail',
     isFood: type === 'food',
     isWarehouse: type === 'warehouse',
@@ -51,7 +54,14 @@ export function typeFlags(type: LocationType) {
 }
 
 /** Прокручиваемая обёртка тела вкладки (фикс. высота окна → внутренний скролл). */
-export function ScrollTab({ children, maxWidth = 'max-w-3xl' }: { children: ReactNode; maxWidth?: string }) {
+export function ScrollTab({ children, maxWidth = 'max-w-3xl', plain }: {
+  children: ReactNode
+  maxWidth?: string
+  /** Вкладка показана ВНУТРИ другой (паспорт вобрал оборудование и интеграции):
+   *  своя область прокрутки и отступы тут лишние — вложенный скролл в скролле. */
+  plain?: boolean
+}) {
+  if (plain) return <div className="space-y-4">{children}</div>
   return (
     <ScrollArea className="h-full">
       <div className={`p-5 space-y-4 ${maxWidth}`}>{children}</div>

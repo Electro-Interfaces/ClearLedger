@@ -390,6 +390,83 @@ async def station_sales(
     }
 
 
+@router.get("/station-energy")
+async def station_energy(
+    company_id: str,
+    location_id: str,
+    date_from: str,
+    date_to: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Отпуск электроэнергии одной станцией за произвольный период — вкладка
+    «Энергия» карточки. Отвечает на вопрос эксплуатации «сколько эта станция
+    отпустила с … по …», не требуя доступа к деньгам («Реализация» — разрез
+    продаж, у эксплуатации его нет).
+
+    Канон цифр раздела соблюдён: средние считаются по СОСТОЯВШИМСЯ заправкам
+    (`energy_kwh > 0`) — треть сессий не даёт тока и занижает среднее; «клиенты
+    зарядились» — доля ВИЗИТОВ с отпуском, а не доля `result='Complete'`.
+
+    Шаг ряда выбирается по длине периода: до 62 дней — по дням, дальше — по
+    месяцам (иначе таблица за год превращается в 365 строк).
+    """
+    cid = await assert_company_member(company_id, current_user, db)
+    from app.scope import current_object_scope
+    allowed = current_object_scope()
+    if allowed and location_id not in allowed:
+        raise HTTPException(403, "Объект вне вашего доступа")
+
+    dt_from, dt_to = _day_bounds(date_from, date_to)
+    S = ChargeSession
+    scope = [S.company_id == cid, S.location_id == location_id,
+             S.started_at >= dt_from, S.started_at < dt_to]
+    charged = S.energy_kwh > 0
+
+    t = (await db.execute(select(
+        func.count().label("sessions"),
+        func.count().filter(charged).label("charged"),
+        func.coalesce(func.sum(S.energy_kwh), 0).label("kwh"),
+        func.coalesce(func.avg(S.energy_kwh).filter(charged), 0).label("avg_kwh"),
+        func.coalesce(func.avg(S.duration_min).filter(charged), 0).label("avg_min"),
+        func.count(func.distinct(S.user_id)).label("clients"),
+        func.count(func.distinct(S.visit_key)).label("visits"),
+        func.count(func.distinct(S.visit_key)).filter(S.visit_charged.is_(True)).label("visits_charged"),
+        func.max(S.started_at).label("last_at"),
+    ).where(*scope))).one()
+
+    by_day = (dt_to - dt_from).days <= 62
+    bucket = func.to_char(S.started_at, "YYYY-MM-DD" if by_day else "YYYY-MM")
+    series = (await db.execute(select(
+        bucket.label("bucket"),
+        func.count().label("sessions"),
+        func.count().filter(charged).label("charged"),
+        func.coalesce(func.sum(S.energy_kwh), 0).label("kwh"),
+    ).where(*scope).group_by(bucket).order_by(bucket))).all()
+
+    conns = (await db.execute(select(
+        S.connector_no.label("no"),
+        func.max(S.connector_type).label("type"),
+        func.count().label("sessions"),
+        func.coalesce(func.sum(S.energy_kwh), 0).label("kwh"),
+    ).where(*scope).group_by(S.connector_no).order_by(func.sum(S.energy_kwh).desc()))).all()
+
+    return {
+        "bucket": "day" if by_day else "month",
+        "totals": {
+            "sessions": int(t.sessions or 0), "charged": int(t.charged or 0),
+            "kwh": float(t.kwh or 0), "avgKwh": float(t.avg_kwh or 0),
+            "avgMin": float(t.avg_min or 0), "clients": int(t.clients or 0),
+            "visits": int(t.visits or 0), "visitsCharged": int(t.visits_charged or 0),
+            "lastAt": t.last_at.isoformat() if t.last_at else None,
+        },
+        "series": [{"bucket": r.bucket, "sessions": int(r.sessions),
+                    "charged": int(r.charged), "kwh": float(r.kwh)} for r in series],
+        "byConnector": [{"no": r.no or "—", "type": r.type or "", "sessions": int(r.sessions),
+                         "kwh": float(r.kwh)} for r in conns],
+    }
+
+
 @router.get("/export")
 async def export_sessions(
     company_id: str,

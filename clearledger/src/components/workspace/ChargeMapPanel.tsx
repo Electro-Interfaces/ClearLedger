@@ -15,7 +15,8 @@ import { Loader2, Search, MapPin, Zap, Plug, Hash, Gauge, Wallet, type LucideIco
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { loadLocations } from '@/services/locationService'
-import type { ServiceLocation } from '@/types/location'
+import { locationValues, type ServiceLocation } from '@/types/location'
+import { isTestStation } from '@/components/locations/fleet/locationFleetService'
 import { getStationMetrics, type StationMetric } from '@/services/overviewService'
 import { fmtMoneyShort } from '@/services/analyticsService'
 import { useResetOnScopeChange } from '@/hooks/useScopeReset'
@@ -134,7 +135,9 @@ const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFi
 const str = (v: unknown): string => (typeof v === 'string' ? v : v == null ? '' : String(v))
 
 function toPoint(l: ServiceLocation): Pt | null {
-  const m = (l.metadata ?? {}) as Record<string, unknown>
+  // Паспорт поверх сырья: без него станции из витрины АСУиМ (координаты только
+  // в паспорте) на карту вообще не попадали.
+  const m = locationValues(l)
   const pp = (l.passport ?? {}) as Record<string, unknown>
   const lat = num(m.latitude), lon = num(m.longitude)
   if (lat === null || lon === null) return null
@@ -340,7 +343,11 @@ export function ChargeMapPanel({ companyId, dateFrom, dateTo }: {
   const [sizeBy, setSizeBy] = useState<SizeBy>('fixed')
 
   const metricMap = useMemo(() => new Map((metricsData?.metrics ?? []).map((m) => [m.location_id, m])), [metricsData])
-  const allPoints = useMemo(() => (data ?? []).map(toPoint).filter((p): p is Pt => p !== null), [data])
+  // Тестовые станции CPO на карту не пускаем: у них есть координаты (в том числе
+  // в Гренландии) и мощность 1 200 кВт, из-за чего они ломали шкалу раскраски и
+  // подсовывали в фильтры мусорные бренды и регионы.
+  const allPoints = useMemo(() => (data ?? []).filter((l) => !isTestStation(l))
+    .map(toPoint).filter((p): p is Pt => p !== null), [data])
   const uniq = (sel: (p: Pt) => string) => [...new Set(allPoints.map(sel))].filter((x) => x !== '—').sort((a, b) => a.localeCompare(b, 'ru'))
   const regions = useMemo(() => uniq((p) => p.region), [allPoints])
   const statuses = useMemo(() => [...new Set(allPoints.map((p) => p.opStatus))], [allPoints])

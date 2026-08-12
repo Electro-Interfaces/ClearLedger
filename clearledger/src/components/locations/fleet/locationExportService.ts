@@ -19,14 +19,16 @@ function fmtDate(iso?: string): string {
 }
 
 export const LOCATION_COLUMNS: LocationColumn[] = [
-  { key: 'code', label: 'Код / серийник', get: (l) => l.code },
+  // Серийник паспорта, а не внутренний код: у объектов, заведённых до сверки с
+  // витриной, code = номер станции, и графа «Код / серийник» повторяла «Номер».
+  { key: 'code', label: 'Код / серийник', get: (l) => m(l, 'serialNumber') || l.code },
   { key: 'number', label: 'Номер', get: (l) => m(l, 'number') },
   { key: 'name', label: 'Название', get: (l) => l.name },
   { key: 'type', label: 'Тип', get: (l, c) => c.typeByCode.get(l.type)?.name ?? l.type },
   { key: 'status', label: 'Жизненный статус', get: (l) => LOCATION_STATUS_META[l.status]?.label ?? l.status },
   { key: 'operationalStatus', label: 'Операц. статус', get: (l) => OP_META[l.operationalStatus ?? 'unknown']?.label ?? (l.operationalStatus ?? '') },
   { key: 'address', label: 'Адрес', get: (l) => l.address ?? '' },
-  { key: 'serialNumber', label: 'Серийник (HubEx)', get: (l) => m(l, 'serialNumber') },
+  { key: 'serialNumber', label: 'Серийный номер', get: (l) => m(l, 'serialNumber') },
   { key: 'ownerTitle', label: 'Владелец', get: (l) => m(l, 'ownerTitle') },
   { key: 'federalSubject', label: 'Регион', get: (l) => m(l, 'federalSubject') },
   { key: 'cityName', label: 'Город', get: (l) => m(l, 'cityName') },

@@ -29,6 +29,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.mapping import owner_key
 from app.models import EzsReference, Region, ServiceLocation
 
 logger = logging.getLogger("clearledger.ezs_refs")
@@ -156,7 +157,9 @@ async def link_references(db: AsyncSession, company_id, *, apply: bool = False) 
         # своих счётчиках не держит (Рязанская 31 против наших 32 с закрытой).
         live = [l for l in locs if l.status != "closed" and not l.is_test]
         if kind == "owner":
-            members = [l for l in live if (l.owner or "") == arg]
+            # Сравнение по ключу без правовой формы: компактная выгрузка пишет
+            # «СНК», витрина — «ООО СНК», и группа молча оставалась непривязанной.
+            members = [l for l in live if owner_key(l.owner) == owner_key(arg)]
         elif kind == "address":
             members = [l for l in live if arg in (l.address or "").lower()]
         elif kind == "name":
@@ -168,7 +171,7 @@ async def link_references(db: AsyncSession, company_id, *, apply: bool = False) 
                        and (cls is None or l.location_class == cls)
                        # Станции подрядчика живут в своей группе (СНК), иначе
                        # сахалинский регион вобрал бы 130 чужих станций.
-                       and (l.owner or "") != "ООО СНК"]
+                       and owner_key(l.owner) != owner_key("ООО СНК")]
         else:
             members = []
         ok = bool(members) and declared is not None and len(members) == int(declared)

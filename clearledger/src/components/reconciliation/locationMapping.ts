@@ -54,8 +54,13 @@ export function locationStationNumber(location: ServiceLocation): number | null 
   const fromBinding = readNumberFromConfig(location.sourceBindings, STATION_CONFIG_KEYS);
   if (fromBinding != null) return fromBinding;
 
-  // 2) Из числового кода точки ("208" → 208)
-  const fromCode = toNumber(location.code);
+  // 2) Из номера станции в паспорте (у ЭЗС code — серийник, и parseInt давал
+  //    «23» из «23E001329»)
+  const fromPassport = toNumber((location.passport as Record<string, unknown> | undefined)?.stationNumber);
+  if (fromPassport != null && fromPassport > 0) return fromPassport;
+
+  // 3) Из числового кода точки ("208" → 208) — только если он целиком число
+  const fromCode = /^\d+$/.test((location.code ?? '').trim()) ? toNumber(location.code) : null;
   if (fromCode != null && fromCode > 0) return fromCode;
 
   return null;

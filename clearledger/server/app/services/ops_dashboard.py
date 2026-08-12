@@ -123,7 +123,9 @@ def _loc_label(loc: ServiceLocation | None) -> dict[str, Any]:
         return {"bu": None, "name": "—", "region": None}
     md = loc.extra_metadata or {}
     return {
-        "bu": md.get("buNumber") or md.get("number") or loc.station_number,
+        # Номер станции — из паспорта: сырой снимок держит мусор («123321» у
+            # станции 268), и «Баланс (факт)» подписывал строку чужим номером.
+            "bu": md.get("buNumber") or loc.station_number,
         "name": loc.name,
         "region": (md.get("federalSubject") or loc.city or "").strip() or None,
     }

@@ -12,18 +12,14 @@ import { Tabs, TabsContent } from '@/components/ui/tabs'
 import { Tabs as TabsPrimitive } from 'radix-ui'
 import { Badge } from '@/components/ui/badge'
 import { X } from 'lucide-react'
-import { useLocation } from 'react-router-dom'
-import { useCompany } from '@/contexts/CompanyContext'
-import { objectTabsFor } from '@/config/spaceProducts'
 import { useLocationTypes } from '@/hooks/useLocationTypes'
 import { useLocationContracts } from '@/hooks/useReferences'
 import { resolveLocationIcon } from '@/components/locationTypes/locationIcons'
-import { LOCATION_STATUS_META, type ServiceLocation } from '@/types/location'
+import { LOCATION_STATUS_META, locationValues, type ServiceLocation } from '@/types/location'
 import { cockpitTabsFor, type CockpitGroup, type CockpitVariant } from './cockpit/tabsConfig'
 import { OP_META } from './cockpit/shared'
 import { PassportTab } from './cockpit/PassportTab'
-import { EquipmentTab } from './cockpit/EquipmentTab'
-import { IntegrationsTab } from './cockpit/IntegrationsTab'
+import { EnergyTab } from './cockpit/EnergyTab'
 import { StatusDiagnosticsTab } from './cockpit/StatusDiagnosticsTab'
 import { ServiceTab } from './cockpit/ServiceTab'
 import { ChatsTab } from './cockpit/ChatsTab'
@@ -47,12 +43,11 @@ export function LocationCockpitModal({
   variant?: CockpitVariant
 }) {
   const types = useLocationTypes()
-  // Станция одна на компанию, но каждое рабочее место смотрит на неё со своей стороны:
-  // из «Эксплуатации» — железо и связь, из «Продаж» — выручка, из «Финансов» — договоры
-  // и снабжение. Разрез берётся из продукта, в котором сейчас человек.
-  const { pathname } = useLocation()
-  const { company } = useCompany()
-  const allowedTabs = objectTabsFor(pathname, company.profileId)
+  // Карточка станции не режется по продукту (решение МАГа 12.08.2026): станция —
+  // ось работы, и все направления по ней — паспорт, железо, энергия, связь,
+  // обслуживание, договоры, реализация, снабжение — открываются из любого
+  // рабочего места. Раньше разрез продукта прятал направления: из «Продаж» не
+  // было видно ни оборудования, ни заявок, и человек считал, что их нет вовсе.
 
   // Портал направляем в рабочую область (SidebarInset), а не в body.
   const [container, setContainer] = useState<HTMLElement | null>(null)
@@ -67,7 +62,7 @@ export function LocationCockpitModal({
   if (!location) return null
 
   const typeDef = types.find((t) => t.code === location.type)
-  const meta = (location.metadata ?? {}) as Record<string, unknown>
+  const meta = locationValues(location)
   const Icon = resolveLocationIcon(typeDef?.icon)
   const curOp = location.operationalStatus ?? 'unknown'
   const lifeMeta = LOCATION_STATUS_META[location.status]
@@ -75,7 +70,7 @@ export function LocationCockpitModal({
   // Сборка ряда вкладок с разделителями и подписями групп.
   const triggers: ReactNode[] = []
   let prevGroup: CockpitGroup | null = null
-  for (const tab of cockpitTabsFor(variant, allowedTabs)) {
+  for (const tab of cockpitTabsFor(variant, location.type)) {
     if (tab.group !== prevGroup) {
       if (prevGroup !== null) {
         triggers.push(<span key={`sep-${tab.group}`} aria-hidden className="mx-1.5 h-5 w-px shrink-0 self-center bg-border/60" />)
@@ -142,11 +137,8 @@ export function LocationCockpitModal({
               <TabsContent value="passport" className="m-0 h-full">
                 <PassportTab location={location} renderEdit={renderEdit} />
               </TabsContent>
-              <TabsContent value="equipment" className="m-0 h-full">
-                <EquipmentTab location={location} />
-              </TabsContent>
-              <TabsContent value="integrations" className="m-0 h-full">
-                <IntegrationsTab location={location} />
+              <TabsContent value="energy" className="m-0 h-full">
+                <EnergyTab location={location} />
               </TabsContent>
               <TabsContent value="diagnostics" className="m-0 h-full">
                 <StatusDiagnosticsTab location={location} onChanged={onChanged} />

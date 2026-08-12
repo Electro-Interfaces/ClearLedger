@@ -91,6 +91,34 @@ export async function getStationSales(
   })
 }
 
+/* ── Отпуск энергии одной станцией за период (вкладка «Энергия») ───────────── */
+
+export interface StationEnergy {
+  /** Шаг ряда: период до 62 дней разбивается по дням, дальше — по месяцам. */
+  bucket: 'day' | 'month'
+  totals: {
+    sessions: number
+    charged: number        // из них дали ток (energy_kwh > 0)
+    kwh: number
+    avgKwh: number         // среднее по СОСТОЯВШИМСЯ заправкам (канон раздела)
+    avgMin: number
+    clients: number
+    visits: number
+    visitsCharged: number  // визиты, закончившиеся зарядкой
+    lastAt: string | null
+  }
+  series: { bucket: string; sessions: number; charged: number; kwh: number }[]
+  byConnector: { no: string; type: string; sessions: number; kwh: number }[]
+}
+
+export async function getStationEnergy(
+  companyId: string, locationId: string, from: string, to: string,
+): Promise<StationEnergy> {
+  return get<StationEnergy>('/api/charge-sessions/station-energy', {
+    company_id: companyId, location_id: locationId, date_from: from, date_to: to,
+  })
+}
+
 /* ── Сверка «сессия ↔ платёж ↔ чек» ───────────────────────────────────────── */
 
 export interface ReconKind {

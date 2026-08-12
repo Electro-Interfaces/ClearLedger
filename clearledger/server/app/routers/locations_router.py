@@ -104,6 +104,71 @@ def _passport(l: ServiceLocation) -> dict[str, Any] | None:
     return out or None
 
 
+# Ключи снимка, которые ведут конвейеры загрузки, а не человек в форме:
+# по ним карточка находится при следующей выгрузке. Правка объекта из интерфейса
+# присылает `metadata` целиком, и до 12.08.2026 запись заменяла снимок ЦЕЛИКОМ —
+# редактирование одного поля сносило `asuimStationId`/`hubexAssetId`/историю
+# номеров, карточка выпадала из индексов витрины и заводилась заново дублем.
+_SERVICE_META_KEYS = {
+    "ext_id", "stationId", "ocppId", "ocppUrl", "source", "nameSource",
+    "nameHistory", "numberHistory", "zoi1", "buNumber", "connectorsSource",
+}
+
+
+# Ключи, которые человек ЗАПОЛНЯЕТ руками, но которые нельзя терять, если форма
+# их не прислала: привязка к активу HubEx заводится вручную (поля типа
+# «Электрозарядная станция»), а стирать её молчаливым PATCH-ем нельзя.
+_EDITABLE_LINK_KEYS = {"hubexAssetId", "hubexName", "hubexNote", "linkStatus",
+                       "zoi1", "buNumber", "ocppUrl"}
+
+
+def _is_service_meta(key: str, value: Any) -> bool:
+    """Служебный ключ снимка: его ведёт загрузка, форма его не трогает вовсе.
+
+    Структурные значения (списки/словари: `connectors`, история) тоже служебные —
+    форма их всё равно не редактирует и присылает обратно потерянными."""
+    return (key.startswith("asuim")
+            or key in _SERVICE_META_KEYS
+            or isinstance(value, (dict, list)))
+
+
+def _merge_metadata(current: dict | None, incoming: dict | None) -> dict | None:
+    """Снимок после правки из интерфейса: служебное — из базы, остальное — из формы.
+
+    Три категории: служебные ключи загрузки берутся только из базы; ключи связи
+    (`hubexAssetId` и соседи) — из формы, если она их прислала, иначе из базы;
+    все прочие — только из формы, поэтому очистка поля по-прежнему работает."""
+    cur, inc = current or {}, incoming or {}
+    kept = {k: v for k, v in cur.items()
+            if _is_service_meta(k, v) or (k in _EDITABLE_LINK_KEYS and k not in inc)}
+    edited = {k: v for k, v in inc.items() if not _is_service_meta(k, v)}
+    merged = {**kept, **edited}
+    return merged or None
+
+
+def _sync_station_number(loc: ServiceLocation) -> None:
+    """Номер из формы — в колонку паспорта, а не только в снимок.
+
+    Поле «Номер станции» правится через `metadata.number`, а резолв сессий идёт по
+    колонке `station_number`. Без синхронизации правка выглядела применённой, но
+    заезды продолжали ходить по старому номеру."""
+    num = (loc.extra_metadata or {}).get("number")
+    num = str(num).strip() if num is not None else ""
+    if num and str(loc.station_number or "").strip() != num:
+        loc.station_number = num[:60]
+
+
+async def _assert_code_free(db: AsyncSession, company_id, code: str, except_id: str | None = None):
+    """Код объекта уникален в компании (уникальный индекс v2.16) — 409 вместо 500."""
+    stmt = select(ServiceLocation.id).where(
+        ServiceLocation.company_id == company_id, ServiceLocation.code == code,
+        ServiceLocation.is_test.is_(False))
+    if except_id:
+        stmt = stmt.where(ServiceLocation.id != except_id)
+    if (await db.execute(stmt)).first():
+        raise HTTPException(409, f"Код «{code}» уже занят другим объектом компании")
+
+
 def _out(l: ServiceLocation) -> LocationOut:
     return LocationOut(
         id=l.id, code=l.code, name=l.name, type=l.type, status=l.status,
@@ -162,9 +227,13 @@ async def create_location(
         existing.address = payload.address
         existing.description = payload.description
         existing.source_bindings = payload.sourceBindings
-        existing.extra_metadata = payload.metadata
+        existing.extra_metadata = _merge_metadata(existing.extra_metadata, payload.metadata)
+        _sync_station_number(existing)
+        if payload.code != existing.code:
+            await _assert_code_free(db, cid, payload.code, except_id=existing.id)
         loc = existing
     else:
+        await _assert_code_free(db, cid, payload.code)
         loc = ServiceLocation(
             id=payload.id, company_id=cid, code=payload.code, name=payload.name,
             type=payload.type, status=payload.status, address=payload.address,
@@ -188,10 +257,13 @@ async def update_location(
 ):
     loc = await get_owned(ServiceLocation, location_id, current_user, db)
     data = payload.model_dump(exclude_unset=True)
+    if data.get("code") and data["code"] != loc.code:
+        await _assert_code_free(db, loc.company_id, data["code"], except_id=loc.id)
     if "sourceBindings" in data:
         loc.source_bindings = data.pop("sourceBindings")
     if "metadata" in data:
-        loc.extra_metadata = data.pop("metadata")
+        loc.extra_metadata = _merge_metadata(loc.extra_metadata, data.pop("metadata"))
+        _sync_station_number(loc)
     for k, v in data.items():
         setattr(loc, k, v)
     await db.flush()
@@ -283,7 +355,9 @@ async def hubex_tasks(
 ):
     """Сервисные заявки HubEx FSM по станции (по metadata.hubexAssetId)."""
     loc = await get_owned(ServiceLocation, location_id, current_user, db)
-    asset_id = (loc.extra_metadata or {}).get("hubexAssetId")
+    # Привязка к активу живёт и колонкой паспорта (350 объектов), и в снимке:
+    # чтение только снимка отдавало пустой список заявок на связанной станции.
+    asset_id = loc.hubex_asset_id or (loc.extra_metadata or {}).get("hubexAssetId")
     if not hubex_service.is_configured():
         return {"configured": False, "assetId": asset_id, "tasks": [], "total": 0}
     if asset_id in (None, "", 0):

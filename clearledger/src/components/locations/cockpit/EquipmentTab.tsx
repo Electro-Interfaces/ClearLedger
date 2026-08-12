@@ -10,15 +10,20 @@ import { useLocationTypes } from '@/hooks/useLocationTypes'
 import { MetadataFieldsReader } from '@/components/manual/MetadataFieldsReader'
 import { locationStationNumber } from '@/components/reconciliation/locationMapping'
 import { useStationLastShift } from '@/hooks/useStationData'
-import type { ServiceLocation } from '@/types/location'
+import { locationValues, type ServiceLocation } from '@/types/location'
 import {
   Field, SectionCard, InfoRow, WipBadge, Placeholder, ScrollTab, EQUIPMENT_KEYS, typeFlags,
 } from './shared'
 
-export function EquipmentTab({ location }: { location: ServiceLocation }) {
+export function EquipmentTab({ location, embedded }: {
+  location: ServiceLocation
+  /** Показ внутри «Паспорта» — без своей прокрутки (решение МАГа 12.08.2026). */
+  embedded?: boolean
+}) {
   const types = useLocationTypes()
   const typeDef = types.find((t) => t.code === location.type)
-  const meta = (location.metadata ?? {}) as Record<string, unknown>
+  // Сырой снимок, перекрытый нормализованным паспортом (см. locationValues).
+  const meta = locationValues(location)
   const flags = typeFlags(location.type)
 
   if (flags.isEv) {
@@ -41,7 +46,7 @@ export function EquipmentTab({ location }: { location: ServiceLocation }) {
       { label: 'Стадия', value: String(meta.stage ?? '') },
     ].filter((f) => has(f.value))
     return (
-      <ScrollTab>
+      <ScrollTab plain={embedded}>
         <Card>
           <CardContent className="pt-5 text-sm">
             {summary.length > 0 ? (
@@ -77,11 +82,11 @@ export function EquipmentTab({ location }: { location: ServiceLocation }) {
     )
   }
 
-  if (flags.isFuel) return <FuelEquipment location={location} />
+  if (flags.isFuel) return <FuelEquipment location={location} embedded={embedded} />
 
   if (flags.isRetail || flags.isFood) {
     return (
-      <ScrollTab>
+      <ScrollTab plain={embedded}>
         <SectionCard title="Кассовое оборудование" icon={Cpu} muted action={<WipBadge />}>
           <InfoRow label="Касса / ФР" value="—" />
           <InfoRow label="Весы / сканеры" value="—" />
@@ -95,7 +100,7 @@ export function EquipmentTab({ location }: { location: ServiceLocation }) {
   }
 
   return (
-    <ScrollTab>
+    <ScrollTab plain={embedded}>
       <Placeholder icon={Box} title="Оборудование не описано"
         text={`Для типа «${typeDef?.name ?? location.type}» состав оборудования не ведётся.`} />
     </ScrollTab>
@@ -103,13 +108,13 @@ export function EquipmentTab({ location }: { location: ServiceLocation }) {
 }
 
 /** Оборудование АЗС: каркас ТРК/контроллера + реальные резервуары из последней смены. */
-function FuelEquipment({ location }: { location: ServiceLocation }) {
+function FuelEquipment({ location, embedded }: { location: ServiceLocation; embedded?: boolean }) {
   const stationId = locationStationNumber(location)
   const { reportQ, lastShift } = useStationLastShift(stationId)
   const tanks = reportQ.data?.tanks ?? []
 
   return (
-    <ScrollTab>
+    <ScrollTab plain={embedded}>
       <SectionCard title="ТРК (топливораздаточные колонки)" icon={Fuel} muted action={<WipBadge>из PayTerm/STS</WipBadge>}>
         <InfoRow label="Кол-во колонок" value="—" />
         <InfoRow label="Марка ТРК" value="—" />

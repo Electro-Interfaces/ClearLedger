@@ -213,7 +213,7 @@ const router = createBrowserRouter([
           { path: '/connect', element: <Navigate to="/connections" replace /> },
           // Функции Ядра открыты из КАЖДОГО рабочего места — под его адресом
           // (`/finance/objects`): экран один, но видно, откуда смотрят, и от этого
-          // зависят права (`finance:objects`) и состав карточки (`objectTabs`).
+          // зависят права (`finance:objects`).
           ...SPACE_PRODUCTS.flatMap((p) => SPACE_PAGES.map((path) => ({
             path: `${p.route}${path}`,
             element: <RequireApp code={p.code}>{SPACE_PAGE_ELEMENTS[path]}</RequireApp>,

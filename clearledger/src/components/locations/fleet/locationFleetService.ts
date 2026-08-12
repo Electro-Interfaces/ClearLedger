@@ -4,16 +4,13 @@
  * Чистые функции над ServiceLocation[] (данные синхронны, без React Query).
  */
 import {
-  LOCATION_STATUS_META, type LocationStatus, type ServiceLocation,
+  LOCATION_STATUS_META, locationField, type LocationStatus, type ServiceLocation,
 } from '@/types/location'
 import type { LocationTypeDef } from '@/types/locationType'
 import { OP_META, OP_OPTIONS } from '@/components/locations/cockpit/shared'
 
-/** Безопасное чтение строкового metadata-поля точки. */
-export function m(l: ServiceLocation, key: string): string {
-  const v = (l.metadata as Record<string, unknown> | undefined)?.[key]
-  return v == null ? '' : String(v)
-}
+/** Поле точки строкой: нормализованный паспорт, иначе сырой снимок metadata. */
+export const m = locationField
 
 /** Нормализованный операционный статус (старые точки без поля → 'unknown'). */
 export function opStatusOf(l: ServiceLocation): string {

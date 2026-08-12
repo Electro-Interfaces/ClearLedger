@@ -294,10 +294,16 @@ def map_stations(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 async def _station_index(db: AsyncSession, company_id) -> dict[str, ServiceLocation]:
-    """Ключ (id станции витрины / серийный / код / номер) → объект-станция.
+    """Ключ (id станции витрины / серийный / код) → объект-станция.
 
     Ключи разъехались исторически: часть карточек заведена по id станции, часть по
-    серийному, часть по номеру. Индекс собирает все три, приоритет — сверху вниз."""
+    серийному, часть по номеру. Индекс собирает идентификаторы, приоритет — сверху вниз.
+
+    Номера станции здесь НЕТ намеренно (12.08.2026): по этому индексу пишутся
+    мощность и состав разъёмов, а номер не уникален — пары AC/DC стоят на одном
+    номере (96, 110, 174, 175, 295). Совпадение по номеру уводило паспорт разъёмов
+    на соседнюю железку. Строка витрины, чью станцию не удалось опознать по
+    идентификатору, честно попадает в «не найдено»."""
     locs = (await db.execute(select(ServiceLocation).where(
         ServiceLocation.company_id == company_id,
         ServiceLocation.type == "ev_charging"))).scalars().all()
@@ -307,7 +313,6 @@ async def _station_index(db: AsyncSession, company_id) -> dict[str, ServiceLocat
         lambda l: l.code,
         lambda l: l.serial_number,
         lambda l: (l.extra_metadata or {}).get("stationId") or (l.extra_metadata or {}).get("ext_id"),
-        lambda l: l.station_number,
     ):
         for loc in locs:
             if loc.is_test:

@@ -8,8 +8,10 @@ import { Button } from '@/components/ui/button'
 import { Pencil, MapPin } from 'lucide-react'
 import { useLocationTypes } from '@/hooks/useLocationTypes'
 import { MetadataFieldsReader } from '@/components/manual/MetadataFieldsReader'
-import { LOCATION_STATUS_META, type ServiceLocation } from '@/types/location'
+import { LOCATION_STATUS_META, locationValues, type ServiceLocation } from '@/types/location'
 import { Field, SectionCard, OP_META, EQUIPMENT_KEYS, ScrollTab } from './shared'
+import { EquipmentTab } from './EquipmentTab'
+import { IntegrationsTab } from './IntegrationsTab'
 
 export function PassportTab({
   location,
@@ -20,7 +22,9 @@ export function PassportTab({
 }) {
   const types = useLocationTypes()
   const typeDef = types.find((t) => t.code === location.type)
-  const meta = (location.metadata ?? {}) as Record<string, unknown>
+  // Сырой снимок, перекрытый нормализованным паспортом: у станций из витрины
+  // АСУиМ город/бренд/владелец/координаты живут только в паспорте.
+  const meta = locationValues(location)
   const pp = (location.passport ?? {}) as Record<string, unknown>
   const curOp = location.operationalStatus ?? 'unknown'
   const lifeMeta = LOCATION_STATUS_META[location.status]
@@ -42,7 +46,7 @@ export function PassportTab({
     <ScrollTab>
       <Card>
         <CardContent className="grid grid-cols-2 gap-x-8 gap-y-2 pt-5 text-sm">
-          <Field label="Код / серийник" value={location.code} mono />
+          <Field label="Код / серийник" value={String(meta.serialNumber ?? '') || location.code} mono />
           <Field label="Тип" value={typeDef?.name ?? location.type} />
           <Field label="Жизненный статус" value={lifeMeta?.label ?? location.status} />
           <Field label="Операц. статус" value={OP_META[curOp]?.label ?? curOp} />
@@ -102,6 +106,19 @@ export function PassportTab({
           </div>
         </SectionCard>
       )}
+
+      {/* Оборудование и подключение — часть паспорта, а не отдельные вкладки
+          (решение МАГа 12.08.2026): десять табов на карточку станции читались
+          как десять разных экранов, хотя это свойства одного объекта. */}
+      <div className="pt-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground/70">
+        Оборудование
+      </div>
+      <EquipmentTab location={location} embedded />
+
+      <div className="pt-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground/70">
+        Интеграции
+      </div>
+      <IntegrationsTab location={location} embedded />
 
       {renderEdit?.(location, (
         <Button variant="outline"><Pencil className="mr-2 h-4 w-4" /> Редактировать паспорт</Button>

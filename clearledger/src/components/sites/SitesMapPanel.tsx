@@ -17,6 +17,8 @@ import {
   type Quadrant, type SiteStage,
 } from '@/services/sitesService'
 import { SiteCardDialog } from './SiteCardDialog'
+import { locationValues } from '@/types/location'
+import { isTestStation } from '@/components/locations/fleet/locationFleetService'
 
 const nf1 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 })
 const CENTER: [number, number] = [58, 60]
@@ -50,10 +52,10 @@ export function SitesMapPanel({ companyId }: { companyId: string }) {
     () => (pts.data?.points ?? []).filter((p) => !stage || p.stage === stage),
     [pts.data, stage],
   )
-  // Координаты станции лежат в metadata (как на карте сети), а не колонками.
+  // Координаты станции — в паспорте, иначе в сыром снимке (как на карте сети).
   const stations = useMemo(() => (net.data ?? []).flatMap((l) => {
-    if (l.type !== 'ev_charging') return []
-    const m = (l.metadata ?? {}) as Record<string, unknown>
+    if (l.type !== 'ev_charging' || isTestStation(l)) return []
+    const m = locationValues(l)
     const lat = typeof m.latitude === 'number' ? m.latitude : null
     const lon = typeof m.longitude === 'number' ? m.longitude : null
     return lat != null && lon != null ? [{ id: l.id, name: l.name || l.code, lat, lon }] : []

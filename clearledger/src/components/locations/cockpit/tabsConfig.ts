@@ -1,11 +1,13 @@
 /**
- * Конфиг вкладок окна станции: 9 вкладок, сгруппированы в 4 смысловые группы.
+ * Конфиг вкладок окна станции: 8 вкладок, сгруппированы в 4 смысловые группы.
+ * «Оборудование» и «Интеграции» отдельными вкладками не живут — они внутри
+ * «Паспорта» (решение МАГа 12.08.2026): это свойства объекта, а не свои экраны.
  * Порядок массива = порядок в шапке; группа задаёт визуальные разделители.
  */
 import type { ComponentType } from 'react'
 import {
-  ClipboardList, Cpu, Plug, Activity, Wrench,
-  FileSignature, Wallet, Truck, MessageCircle,
+  ClipboardList, Activity, Wrench,
+  FileSignature, Wallet, Truck, MessageCircle, Zap,
 } from 'lucide-react'
 
 export type CockpitGroup = 'object' | 'connection' | 'service' | 'commerce'
@@ -26,8 +28,10 @@ export const GROUP_META: Record<CockpitGroup, { label: string }> = {
 
 export const COCKPIT_TABS: CockpitTab[] = [
   { value: 'passport', label: 'Паспорт', icon: ClipboardList, group: 'object' },
-  { value: 'equipment', label: 'Оборудование', icon: Cpu, group: 'object' },
-  { value: 'integrations', label: 'Интеграции', icon: Plug, group: 'connection' },
+  // Отпуск ЭЭ за период. Сквозная, как «Чаты»: вопрос «сколько станция отпустила
+  // с … по …» задаёт и эксплуатация, и проекты, а «Реализация» — разрез продаж,
+  // и денег в ней им видеть не положено.
+  { value: 'energy', label: 'Энергия', icon: Zap, group: 'object' },
   { value: 'diagnostics', label: 'Статус и диагностика', icon: Activity, group: 'connection' },
   // Заявки по объекту. Вкладка отрисовывалась модалкой, но кнопки в шапке не было —
   // открыть её было нельзя, и обслуживание объекта из его карточки не смотрелось.
@@ -43,23 +47,20 @@ export const COCKPIT_TABS: CockpitTab[] = [
 export type CockpitVariant = 'intake' | 'full'
 // intake = сырой ввод (левое меню «Точки обслуживания»): только object+connection.
 // full = рабочий модуль «Объекты» в Управленческом: все табы.
-export const INTAKE_TAB_VALUES = ['passport', 'equipment', 'integrations', 'diagnostics']
+export const INTAKE_TAB_VALUES = ['passport', 'energy', 'diagnostics']
 
 /**
- * Вкладки станции для текущего места работы.
- *
- * `allowed` — разрез продукта пространства (`SpaceProduct.objectTabs`): станция одна на
- * всю компанию, но эксплуатации нужны железо и связь, продажам — выручка, финансам —
- * договоры и снабжение, данным — подключённые источники. Не задан — показываем всё.
+ * Вкладки станции. Разреза по продукту больше нет (решение МАГа 12.08.2026):
+ * станция — ось работы, направления по ней открываются из любого рабочего места.
+ * Прежний разрез `SpaceProduct.objectTabs` прятал оборудование и заявки от того,
+ * кто пришёл из «Продаж», и создавал впечатление, что их вовсе нет.
  */
-export function cockpitTabsFor(variant: CockpitVariant = 'full', allowed?: string[]): CockpitTab[] {
+export function cockpitTabsFor(variant: CockpitVariant = 'full', locationType?: string): CockpitTab[] {
   const base = variant === 'intake'
     ? COCKPIT_TABS.filter((t) => INTAKE_TAB_VALUES.includes(t.value))
     : COCKPIT_TABS
-  if (!allowed?.length) return base
-  // «Чаты» сквозные: разрезы продуктов перечислены до появления вкладки и не знают
-  // о ней, а обсуждение объекта нужно из любого рабочего места.
-  const shown = base.filter((t) => allowed.includes(t.value) || t.value === 'chats')
-  // Пустой разрез оставил бы окно вовсе без вкладок — лучше паспорт, чем ничего.
-  return shown.length > 0 ? shown : base.filter((t) => t.value === 'passport')
+  // «Энергия» считает зарядные сессии: у АЗС и офисов ей нечего показать.
+  return locationType && locationType !== 'ev_charging'
+    ? base.filter((t) => t.value !== 'energy')
+    : base
 }

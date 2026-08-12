@@ -10,12 +10,12 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Wrench } from 'lucide-react'
 import { getHubexTasks } from '@/services/locationService'
-import type { ServiceLocation } from '@/types/location'
+import { locationValues, type ServiceLocation } from '@/types/location'
 import { Field, Placeholder, ScrollTab } from './shared'
 import { CoordinatorTickets } from './CoordinatorTickets'
 
 export function ServiceTab({ location }: { location: ServiceLocation }) {
-  const meta = (location.metadata ?? {}) as Record<string, unknown>
+  const meta = locationValues(location)   // паспорт поверх сырья
   const hubexQ = useQuery({
     queryKey: ['hubex-tasks', location.id],
     queryFn: () => getHubexTasks(location.id),

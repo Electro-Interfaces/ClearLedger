@@ -138,6 +138,96 @@ def canon_region(raw) -> str | None:
     return _REGION_CANON.get(first, s)
 
 
+# Приставки населённого пункта: витрина пишет «г.Красноярск», HubEx — «Красноярск».
+# Из-за одной этой разницы 260 карточек пилота считались расходящимися с витриной,
+# а группировка по городу давала два «Красноярска».
+_CITY_PREFIX = ("г.", "г ", "город ", "с.", "с ", "село ", "п.", "п ", "пос.", "пос ",
+                "посёлок ", "поселок ", "д.", "д ", "деревня ", "ст.", "станица ",
+                "пгт.", "пгт ", "рп.", "рп ", "с/п ")
+
+
+def canon_city(raw) -> str | None:
+    """Название населённого пункта без приставки типа («г.Красноярск» → «Красноярск»)."""
+    s = " ".join(str(raw or "").split())
+    if not s:
+        return None
+    low = s.lower()
+    for prefix in _CITY_PREFIX:
+        if low.startswith(prefix):
+            s = s[len(prefix):].strip()
+            break
+    return s or None
+
+
+# Кириллические двойники латиницы: в паспорте станции 227 бренд записан как
+# «StarСharge» с кириллической «С» — глазами не отличить, а в справочнике это
+# отдельный бренд с одной станцией.
+_HOMOGLYPH = str.maketrans({
+    "А": "A", "В": "B", "Е": "E", "К": "K", "М": "M", "Н": "H", "О": "O", "Р": "P",
+    "С": "C", "Т": "T", "Х": "X", "У": "Y",
+    "а": "a", "е": "e", "к": "k", "о": "o", "р": "p", "с": "c", "х": "x", "у": "y",
+})
+# Ключ (без регистра, пробелов и дефисов) → каноническое написание.
+_BRAND_CANON = {
+    "fora": "FORA", "фора": "FORA",
+    "псс": "ПСС", "pss": "ПСС",
+    "kostad": "Kostad", "костад": "Kostad",
+    "rewatt": "REWATT", "реватт": "REWATT",
+    "eprom": "EPROM", "епром": "EPROM",
+    "starcharge": "StarCharge", "старчардж": "StarCharge",
+    "onder": "ONDER", "ондер": "ONDER",
+    "parus": "Парус", "парус": "Парус",
+    "svetozar": "Светозар", "светозар": "Светозар",
+    "nsp": "NSP", "abb": "ABB", "setec": "Setec", "touch": "Touch",
+    "nartis": "Нартис", "нартис": "Нартис", "enel": "Enel",
+}
+
+
+def canon_brand(raw) -> str | None:
+    """Каноническое написание бренда станции; неизвестный — как пришёл (без хвостов).
+
+    Витрина пишет «ПСС (Россия)», HubEx — «ПСС». Ключ ищется дважды: как есть и
+    после замены кириллических двойников латиницей — так «StarСharge» с
+    кириллической «С» опознаётся как «StarCharge», а «Фора» и «FORA» сходятся."""
+    s = " ".join(str(raw or "").split())
+    if not s:
+        return None
+    s = s.split(" (")[0].strip() or s
+    plain = s.lower().replace("-", "").replace(" ", "")
+    latin = s.translate(_HOMOGLYPH).lower().replace("-", "").replace(" ", "")
+    return _BRAND_CANON.get(plain) or _BRAND_CANON.get(latin) or s
+
+
+_OWNER_FORMS = ("ооо", "оао", "пао", "зао", "ао", "ип", "нао")
+
+
+def owner_key(raw) -> str:
+    """Ключ сравнения владельцев: «ООО СНК» и «СНК» — один и тот же контрагент.
+
+    Хранение не трогаем (юрлицо пишется как в документах), но сверять реестр с
+    витриной по строке нельзя: 130 из 134 «расхождений» — это правовая форма."""
+    s = " ".join(str(raw or "").replace('"', " ").replace("«", " ").replace("»", " ").split())
+    low = s.lower()
+    for form in _OWNER_FORMS:
+        if low.startswith(f"{form} "):
+            low = low[len(form) + 1:]
+            break
+        if low.endswith(f" {form}"):
+            low = low[: -len(form) - 1]
+            break
+    return low.strip()
+
+
+# Границы РФ с запасом: всё, что вне, — мусор источника (три тестовые карточки
+# пилота стоят в Гренландии и в Арктике).
+def geo_in_russia(lat, lon) -> bool:
+    try:
+        la, lo = float(lat), float(lon)
+    except (TypeError, ValueError):
+        return False
+    return 41.0 <= la <= 82.0 and 19.0 <= lo <= 191.0
+
+
 async def load_kind_map(
     db: AsyncSession,
     company_id: uuid.UUID,

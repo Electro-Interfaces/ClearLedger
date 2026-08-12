@@ -54,6 +54,49 @@ export interface ServiceLocation {
   updatedAt: string
 }
 
+/**
+ * Ключ сырого снимка (metadata) → поле нормализованного паспорта L2.
+ *
+ * Экраны сети исторически читали только metadata — снимок импорта из HubEx.
+ * Станции, приехавшие из витрины АСУиМ, кладут в metadata СВОИ ключи
+ * (`brandName`, `groupName`…), а бренд/город/мощность/владельца/серийник
+ * нормализация пишет в колонки паспорта. Из-за этого у 124–131 станции пилота
+ * графы «Город/Бренд/кВт/Коннекторы/Владелец» пустели в таблице, карточке и
+ * выгрузке, хотя данные в базе есть. Паспорт сверен с витриной — он старше
+ * сырья по приоритету (в сыром снимке у станции 268 номер вообще «123321»).
+ */
+const PASSPORT_ALIAS: Record<string, string> = {
+  number: 'stationNumber', serialNumber: 'serialNumber', ownerTitle: 'owner',
+  cityName: 'city', manufacturer: 'brand', model: 'model',
+  maxPowerKw: 'powerKwt', connectorCount: 'connectorsCount',
+  connectorTypes: 'connectorTypes', protocolOcpp: 'ocppProtocol',
+  latitude: 'latitude', longitude: 'longitude',
+  linkStatus: 'hubexLinkStatus', hubexAssetId: 'hubexAssetId',
+  inventoryNumber: 'inventoryNumber', stage: 'stage', firmware: 'firmware',
+  street: 'street', houseNumber: 'house',
+}
+
+/** Поле объекта строкой: сначала нормализованный паспорт, потом сырой снимок. */
+export function locationField(l: ServiceLocation, key: string): string {
+  const pk = PASSPORT_ALIAS[key]
+  const p = pk ? (l.passport as Record<string, unknown> | undefined)?.[pk] : undefined
+  const v = p == null || p === ''
+    ? (l.metadata as Record<string, unknown> | undefined)?.[key]
+    : p
+  return v == null ? '' : String(v)
+}
+
+/** Значения полей объекта: сырой снимок, перекрытый паспортом (для карточек). */
+export function locationValues(l: ServiceLocation): Record<string, unknown> {
+  const out = { ...((l.metadata ?? {}) as Record<string, unknown>) }
+  const p = (l.passport ?? {}) as Record<string, unknown>
+  for (const [mk, pk] of Object.entries(PASSPORT_ALIAS)) {
+    const v = p[pk]
+    if (v != null && v !== '') out[mk] = v
+  }
+  return out
+}
+
 /** Фолбэк-мета встроенных типов (когда каталог ещё не загружен). */
 export const LOCATION_TYPE_META: Record<string, { label: string; description: string; icon: string }> = {
   fuel_station: { label: 'АЗС', description: 'Автозаправочная станция', icon: 'Fuel' },

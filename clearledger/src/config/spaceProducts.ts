@@ -38,13 +38,6 @@ export interface SpaceProduct {
    * не входят — они одни на все рабочие места (`SPACE_PAGES`).
    */
   paths: string[]
-  /**
-   * Вкладки карточки станции, которые открывает этот продукт (коды `COCKPIT_TABS`).
-   * Станция — ось бизнеса: её ведут все рабочие места сразу, но каждому нужна своя
-   * сторона — эксплуатации железо и связь, продажам выручка, финансам договоры и
-   * снабжение, данным подключённые источники. Пусто = все вкладки (профиль без разреза).
-   */
-  objectTabs?: string[]
 }
 
 export const SPACE_PRODUCTS: SpaceProduct[] = [
@@ -57,7 +50,6 @@ export const SPACE_PRODUCTS: SpaceProduct[] = [
     // Два раздела: «Работа» (ведение) и «Аналитика» (сводки). В левой рельсе они
     // стоят рядом с пространством, пункты каждого — во второй панели.
     modes: ['projects', 'projects_analytics'], paths: [],
-    objectTabs: ['passport', 'equipment', 'integrations'],
   },
   {
     // Эксплуатация — железо и его состояние. Три раздела в рельсе: «Мониторинг» (что с
@@ -65,7 +57,6 @@ export const SPACE_PRODUCTS: SpaceProduct[] = [
     // закупка э/э и аренда). `operations` — исторический код первого раздела.
     code: 'ops', route: '/operations', label: 'Эксплуатация',
     modes: ['operations', 'ops_equipment', 'ops_economy'], paths: [],
-    objectTabs: ['passport', 'equipment', 'integrations', 'diagnostics'],
   },
   {
     // Продажи — коммерческая сторона: сессии, тарифы, ЮЛ/ФЛ, ABC-XYZ, маркетинг.
@@ -81,7 +72,6 @@ export const SPACE_PRODUCTS: SpaceProduct[] = [
     // топливо — товар, у него есть приход, книга остатков и инвентаризация.
     code: 'sales', route: '/sales', label: 'Продажи',
     modes: ['management', 'sales_sessions', 'sales_commerce', 'sales_goods', 'sales_help'], paths: ['/metrika'],
-    objectTabs: ['passport', 'contracts', 'sales'],
   },
   {
     // Процессинг — работа с юрлицами: договоры, лимиты, тарифные планы под ЮЛ. Продукт
@@ -89,7 +79,6 @@ export const SPACE_PRODUCTS: SpaceProduct[] = [
     // (решение МАГа 28.07.2026) — рабочая область даёт заставку.
     code: 'corp', route: '/corporate', label: 'Процессинг',
     modes: ['corporate'], paths: [],
-    objectTabs: ['passport', 'contracts', 'sales'],
   },
   {
     // Магазин — товароучёт сопутки и общепита на объектах. Общепит вынесен в свой
@@ -99,7 +88,6 @@ export const SPACE_PRODUCTS: SpaceProduct[] = [
     // они живут в «Бухгалтерском» (`finance`), поток «Магазин и общепит» (04.08.2026).
     code: 'shop', route: '/shop', label: 'Магазин',
     modes: ['store', 'store_documents', 'store_catering', 'store_stock', 'store_cash', 'store_catalog', 'store_marking', 'store_network', 'store_1c', 'store_reports', 'store_help'], paths: [],
-    objectTabs: ['passport', 'sales'],
   },
   {
     // Маркетинг — поведение клиентов: кампании, акции, сегменты под рассылку. Продукт
@@ -107,7 +95,6 @@ export const SPACE_PRODUCTS: SpaceProduct[] = [
     // «Продажи», своих экранов пока нет — рабочая область даёт заставку.
     code: 'marketing', route: '/marketing', label: 'Маркетинг',
     modes: ['marketing'], paths: [],
-    objectTabs: ['passport', 'sales'],
   },
   {
     // Финансы — счётная сторона: проводки, налоги, выгрузка, первичка, контрагенты
@@ -124,7 +111,6 @@ export const SPACE_PRODUCTS: SpaceProduct[] = [
     modes: ['accounting', 'acc_period', 'acc_store', 'acc_food', 'acc_recon', 'acc_docs',
             'acc_results', 'financial', 'tax', 'export'],
     paths: ['/organization'],
-    objectTabs: ['passport', 'contracts', 'sales', 'supply'],
   },
   {
     // Данные — служебная кухня: откуда берутся цифры и как приводятся к общему виду.
@@ -143,7 +129,6 @@ export const SPACE_PRODUCTS: SpaceProduct[] = [
     code: 'data', route: '/data', label: 'Данные',
     modes: ['normalize', 'reconcile'],
     paths: [],
-    objectTabs: ['passport'],
   },
   {
     // Подключения — чем пространство связано с внешним миром. Отделены от
@@ -157,7 +142,6 @@ export const SPACE_PRODUCTS: SpaceProduct[] = [
     // Режимов рабочей области нет: приложение целиком собрано из страниц, поэтому
     // корневой `/connect` — редирект на первую (см. App.tsx).
     paths: ['/connections', '/connectors', '/catalog', '/notifications', '/apps'],
-    objectTabs: ['passport', 'integrations', 'diagnostics'],
   },
 ]
 
@@ -474,11 +458,6 @@ function navFor(product: SpaceProduct, paths: string[], allowed?: PageGate): Nav
     .map((path) => ({ ...navByPath[path], to: productPagePath(product, path) }))
 }
 
-/** Вкладки карточки станции для продукта; вне разреза — все (undefined). */
-export function objectTabsFor(pathname: string, profileId: string | null | undefined): string[] | undefined {
-  if (!isCarvedProfile(profileId)) return undefined
-  return productForPath(pathname)?.objectTabs
-}
 
 /** Разделы, ушедшие из Учёта в отдельные продукты (при выключенном разрезе — пусто). */
 export function carvedModes(profileId: string | null | undefined): Set<CoreMode> {
