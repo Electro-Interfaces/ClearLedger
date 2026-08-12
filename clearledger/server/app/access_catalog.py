@@ -82,15 +82,33 @@ SYSTEM_ROLES_FUEL: list[dict] = [
 ]
 
 
+# Профиль `office` (компания без объектов: аудит, консалтинг, услуги). Рабочие места
+# идут не от объекта сети, а от Ядра и Поддержки, поэтому и роли другие: продуктов
+# разреза (`sales`, `ops`, `shop`, `finance`, `data`) у такой компании нет, и роль с
+# их ключами не открыла бы ничего.
+SYSTEM_ROLES_OFFICE: list[dict] = [
+    {"name": "Полный доступ", "modules": None},
+    # Руководитель практики: картина по людям и работам плюс канал с клиентами.
+    {"name": "Руководитель", "modules": ["pulse", "plan", "support", "chat"]},
+    # Специалист ведёт свои работы и переписку; обращения клиентов идут через них.
+    {"name": "Специалист", "modules": ["plan", "chat", "conf"]},
+    # Клиентская служба: приём обращений и переписка, без картины по людям.
+    {"name": "Клиентская служба", "modules": ["support", "chat"]},
+    {"name": "Наблюдатель", "modules": ["pulse"]},
+]
+
+
 def system_roles_for(profile_id: str | None) -> list[dict]:
     """Набор системных ролей под профиль компании.
 
     Набор идёт за разрезом: если у профиля Учёт разрезан на продукты, роли собираются на
     ключах продуктов, иначе — на модулях Учёта (`ledger:*`).
     """
-    from app.services.app_registry import carved_products
-    if not carved_products(profile_id):
+    from app.services.app_registry import is_carved
+    if not is_carved(profile_id):
         return SYSTEM_ROLES
+    if profile_id == "office":
+        return SYSTEM_ROLES_OFFICE
     return SYSTEM_ROLES_ENERGY if profile_id == "energy" else SYSTEM_ROLES_FUEL
 
 

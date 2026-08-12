@@ -2349,6 +2349,9 @@ async def create_all() -> None:
         # Раньше у станции было два выхода — звонить или завести дубль; на 208
         # так набралось 95 групп дублей. Теперь у неё есть право заявить, а
         # решение остаётся за центром.
+        # Схему `edge` заводит инициализатор базы пространства (support-db-run.sh) — у
+        # роли приложения нет права CREATE на базе, и «CREATE SCHEMA IF NOT EXISTS»
+        # отсюда падает с permission denied ДАЖЕ когда схема уже есть.
         await conn.execute(_sa.text("""
             CREATE TABLE IF NOT EXISTS edge.nsi_proposal (
                 id          BIGSERIAL PRIMARY KEY,

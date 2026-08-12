@@ -8,7 +8,9 @@
 
 from app.access_catalog import system_roles_for
 from app.routers.sso_router import INTERNAL_ROUTES
-from app.services.app_registry import _BY_PROFILE, _CARVED_BY_PROFILE, _default_app_on, carved_products
+from app.services.app_registry import (
+    _ALWAYS_ON, _BY_PROFILE, _CARVED_BY_PROFILE, _default_app_on, carved_products,
+)
 
 CARVED_PROFILES = sorted(_CARVED_BY_PROFILE)
 
@@ -70,9 +72,13 @@ def test_system_roles_follow_carve():
         keys = {k for r in system_roles_for(profile) for k in (r["modules"] or [])}
         assert keys, profile
         assert not any(k.startswith("ledger") for k in keys), profile
+        # Роль вправе ссылаться на продукты разреза, на всегда включённые рабочие места
+        # Ядра (Задачи, Пульс, Чаты, Конференции) и на Поддержку — она подключается
+        # явной записью. Раньше список был жёстким `{"support", "chat"}`, и профиль без
+        # своих продуктов (офис) не мог получить ни одной осмысленной роли.
+        allowed = carved_products(profile) | _ALWAYS_ON | {"support"}
         for key in keys:
-            assert key.split(":")[0] in carved_products(profile) | {"support", "chat"}, \
-                f"{profile}: {key}"
+            assert key.split(":")[0] in allowed, f"{profile}: {key}"
     plain = {k for r in system_roles_for("general") for k in (r["modules"] or [])}
     assert all(k.startswith("ledger") for k in plain)
 

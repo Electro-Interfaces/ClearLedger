@@ -277,7 +277,11 @@ export const PRODUCT_SETUP_NOTE: Record<string, {
  * уже описаны ниже. Различаются только названия (их подменяет сервер по профилю) и то,
  * какие из продуктов компании включены.
  */
-const CARVED_PROFILES = new Set(['energy', 'fuel'])
+// `office` в этом наборе не ради разреза, а ради его следствия: у компании без объектов
+// «Учёт» не показывается плиткой, а вход ведёт на рабочий стол пространства. Своих
+// продуктов из этой карты у неё пока нет — её рабочие места идут от Ядра (Задачи,
+// Пульс, Чаты) и от Поддержки; см. `app_registry._CARVED_BY_PROFILE`.
+const CARVED_PROFILES = new Set(['energy', 'fuel', 'office'])
 
 export function isCarvedProfile(profileId: string | null | undefined): boolean {
   return CARVED_PROFILES.has(profileId ?? '')
