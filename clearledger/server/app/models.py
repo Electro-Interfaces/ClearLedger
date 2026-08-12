@@ -1284,6 +1284,87 @@ class ContractDimension(Base):
 
 
 # ---------------------------------------------------------------------------
+# Бухгалтерия-эталон: план счетов и проводки (GlAccount / GlEntry)
+# ---------------------------------------------------------------------------
+# Первоисток концепции: бухгалтерия компании — источник ЭТАЛОНА. Закрытый период в
+# ней неизменяем, и всё остальное (первичка, продажи, услуги) сверяется с ним. До сих
+# пор в Ядре были только `accounting_docs` (документы) и `periods` (статус закрытия),
+# а самого регистра не было: топливной рознице эталон приходил агрегатами. Офисной
+# компании нужен регистр как есть — план счетов и проводки.
+#
+# Источник — выгрузка бухгалтерии клиента (первый заход: файл .dt, дальше коннектор к
+# живой базе). Данные принадлежат компании (`company_id`) и не пересекаются между
+# организациями пространства.
+# ---------------------------------------------------------------------------
+class GlAccount(Base):
+    """Счёт плана счетов организации."""
+
+    __tablename__ = "gl_accounts"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
+    )
+    code: Mapped[str] = mapped_column(String(20), nullable=False)
+    name: Mapped[str] = mapped_column(String(500), nullable=False)
+    # Активный | Пассивный | Активно-пассивный — как в источнике.
+    kind: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    off_balance: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    quantitative: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    currency: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    parent_code: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("uq_gl_account_code", "company_id", "code", unique=True),
+    )
+
+
+class GlEntry(Base):
+    """Проводка регистра бухгалтерии: дата, корреспонденция, сумма."""
+
+    __tablename__ = "gl_entries"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
+    )
+    entry_date: Mapped[date_type] = mapped_column(Date, nullable=False)
+    # Год и месяц держим колонками: обороты по периодам — самый частый запрос, а
+    # EXTRACT по дате индекс не берёт.
+    period_year: Mapped[int] = mapped_column(Integer, nullable=False)
+    period_month: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Вид документа-регистратора («Реализация (акт, накладная, УПД)») и его
+    # представление — по ним видно, чем порождена проводка.
+    doc_kind: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    doc_title: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    account_dt: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    account_kt: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    amount: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False, default=0)
+    content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Откуда приехало: `1c_dt` (разовая выгрузка), позже — код коннектора.
+    source: Mapped[str] = mapped_column(String(30), nullable=False, default="1c_dt")
+    # Ключ идемпотентности загрузки: повторный заход не должен задваивать обороты.
+    external_key: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("idx_gl_entries_period", "company_id", "period_year", "period_month"),
+        Index("idx_gl_entries_accounts", "company_id", "account_dt", "account_kt"),
+        Index("uq_gl_entry_external", "company_id", "external_key", unique=True),
+    )
+
+
+# ---------------------------------------------------------------------------
 # AccountingDoc (Учётные документы 1С)
 # ---------------------------------------------------------------------------
 class AccountingDoc(Base):

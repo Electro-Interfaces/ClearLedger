@@ -19,6 +19,7 @@ from app.routers import (
     audit_data_router,
     audit_router,
     auth_router,
+    books_router,
     dedup_ingest_router,
     edge_router,
     companies_router,
@@ -316,6 +317,9 @@ app.include_router(notifications_router.router, prefix=API_PREFIX)  # Опове
 app.include_router(metrika_router.router, prefix=API_PREFIX)
 # Рынок вокруг сети (продукт «Маркетинг», docs/MARKET.md): чужие точки и наблюдения.
 app.include_router(market_router.router, prefix=API_PREFIX)
+# Бухгалтерия офисного пространства и её разрезы («Продажи», «Услуги»): эталон
+# закрытого периода, из которого растут остальные приложения такой компании.
+app.include_router(books_router.router, prefix=API_PREFIX)
 
 
 @app.get("/api/health")
