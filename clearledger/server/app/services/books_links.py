@@ -124,10 +124,14 @@ _ENTRY_LINK_SQL = """
        AND d.date = to_char(to_date(
              substring(e.doc_title from '(\d{2}\.\d{2}\.\d{4})'), 'DD.MM.YYYY'),
              'YYYY-MM-DD')
-       AND NOT EXISTS (
+       -- Двойники по номеру и дате разводим ВРЕМЕНЕМ: оно есть и в представлении
+       -- проводки («…от 22.12.2023 12:00:01»), и в ключе документа. Без этого семь
+       -- проводок реализации на 439 225 ₽ оставались без первички.
+       AND (NOT EXISTS (
              SELECT 1 FROM accounting_docs x
               WHERE x.company_id = d.company_id AND x.doc_type = d.doc_type
                 AND x.number = d.number AND x.date = d.date AND x.id <> d.id)
+            OR position(substring(e.doc_title from '\d{2}:\d{2}:\d{2}') in d.external_id) > 0)
 """
 
 _ENTRY_UNLINK_SQL = """
