@@ -47,6 +47,9 @@ DOC_LABELS = {
     "vat_invoice_in": "Счёт-фактура полученный",
     "closing_op": "Регламентная операция закрытия",
     "manual_entry": "Операция вручную",
+    "invoice_in": "Счёт от поставщика",
+    "purchase_services": "Услуги поставщиков",
+    "act_recon": "Акт сверки взаиморасчётов",
     "bank_in": "Поступление на расчётный счёт",
     "bank_out": "Списание с расчётного счёта",
     "payment_order": "Платёжное поручение",
@@ -85,6 +88,18 @@ REF_LABELS = {
     "period_locks": "Даты запрета изменения",
     "accounting_policy": "Учётная политика",
     "org_contacts": "Контакты организации",
+    "units": "Единицы измерения",
+    "organizations": "Организация",
+    "users": "Пользователи базы",
+    "signers": "Подписанты",
+    "doc_status": "Статусы документов",
+    "pay_terms": "Сроки оплаты",
+    "payment_split": "Расшифровки платежей",
+    "vat_sales": "Книга продаж (НДС)",
+    "vat_purchases": "Книга покупок (НДС)",
+    "balances": "Остатки по счетам",
+    "contact_persons": "Контактные лица контрагентов",
+    "nom_accounts": "Счета учёта номенклатуры",
 }
 
 
@@ -773,7 +788,8 @@ async def quality(
     # операции закрытия и операции вручную его не бывает вовсе, и без этого условия
     # проверка показывала полтысячи «нарушений», которых нет.
     WITH_COUNTERPARTY = ("sale_goods", "sale_services", "purchase", "invoice_out",
-                         "vat_invoice_out", "vat_invoice_in")
+                         "vat_invoice_out", "vat_invoice_in", "invoice_in",
+                         "purchase_services", "act_recon")
     no_inn = (await db.execute(
         select(func.count()).select_from(AccountingDoc)
         .where(AccountingDoc.company_id == cid,
