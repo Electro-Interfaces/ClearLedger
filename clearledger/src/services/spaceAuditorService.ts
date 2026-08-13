@@ -9,7 +9,7 @@
  * Запрос идёт токеном пользователя: аудитор своих прав не имеет и не покажет того,
  * чего человек не видит сам.
  */
-import { getToken } from './apiClient'
+import { get, getToken, put } from './apiClient'
 
 /** Где человек находился, когда позвал. Отсюда агент понимает, куда смотреть. */
 export interface AuditorContext {
@@ -36,6 +36,28 @@ export interface AuditorEvents {
 
 export interface AuditorSkill { id: string; name: string; group: string; when: string }
 
+/** Настройки агента в пространстве. Живут в Ядре, а не в образе сервиса. */
+export interface AuditorSettings {
+  disabled_skills: string[]
+  instructions: string | null
+  mode: 'careful' | 'normal' | 'thorough'
+  model_plan: string | null
+  model_answer: string | null
+  updated_at?: string | null
+}
+
+export interface AuditorRun {
+  id: string
+  question: string
+  path: string | null
+  skills: string[]
+  answer: string | null
+  findings: AuditorFinding[]
+  duration_ms: number | null
+  created_at: string | null
+  user: string | null
+}
+
 const BASE = '/auditor/api'
 
 /** Каталог навыков — чем аудитор вообще умеет отвечать. */
@@ -48,6 +70,19 @@ export async function getSkills(): Promise<AuditorSkill[]> {
   }
   return res.json()
 }
+
+// ── Настройки и журнал: это Ядро, а не сервис агента ──────────────────────────
+// Адрес другой намеренно: настройки принадлежат ПРОСТРАНСТВУ (правятся человеком,
+// переживают пересборку образа, попадают в бэкап), а сервис агента — сменная часть.
+
+export const getSettings = (companyId: string) =>
+  get<AuditorSettings>('/api/auditor/settings', { company_id: companyId })
+
+export const saveSettings = (companyId: string, s: Omit<AuditorSettings, 'updated_at'>) =>
+  put<AuditorSettings>(`/api/auditor/settings?company_id=${encodeURIComponent(companyId)}`, s)
+
+export const getRuns = (companyId: string, limit = 50) =>
+  get<{ runs: AuditorRun[] }>('/api/auditor/runs', { company_id: companyId, limit })
 
 /**
  * Задать вопрос. Ответ приходит потоком: сначала статусы («смотрю данные»), затем

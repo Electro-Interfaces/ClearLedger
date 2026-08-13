@@ -8577,3 +8577,60 @@ class TaskLabelLink(Base):
         UUID(as_uuid=True), ForeignKey("task_labels.id", ondelete="CASCADE"), primary_key=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now())
+
+
+# ── Аудитор пространства (ecosystem-deploy/docs/AUDITOR.md) ──────────────────
+# Настройки живут в БАЗЕ, а не в окружении сервиса: их правит человек в интерфейсе,
+# они переживают пересборку образа и попадают в бэкап пространства. В окружении
+# остаётся только секрет подписки.
+
+class AuditorSetting(Base):
+    """Как аудитор работает в этой компании: чем ему нельзя пользоваться и что помнить."""
+    __tablename__ = "auditor_settings"
+
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), primary_key=True)
+    # ВЫКЛЮЧЕННЫЕ навыки, а не включённые: каталог растёт с каждым выкатом, и список
+    # «что разрешено» пришлось бы дополнять руками, иначе новое умение молча не работало бы.
+    disabled_skills: Mapped[list] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb"))
+    # Постоянные указания компании: «НДС по ставке 22 %», «Соболеву не трогать».
+    # Едут в системный промпт каждого ответа.
+    instructions: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Режим: careful — только факты; normal — ответ и находки; thorough — ищет сам, шире.
+    mode: Mapped[str] = mapped_column(String(20), nullable=False, default="normal")
+    model_plan: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    model_answer: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    updated_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+
+class AuditorRun(Base):
+    """След разговора: что спросили, куда смотрел, что нашёл.
+
+    Нужен не для истории чата, а для разбора: почему агент ответил именно так и
+    какие навыки при этом сработали. Отсюда же берутся находки, которые стоит
+    превратить в требование или задачу.
+    """
+    __tablename__ = "auditor_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    # Экран, с которого спросили: тот же вопрос из разных мест означает разное.
+    path: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    skills: Mapped[list] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb"))
+    answer: Mapped[str | None] = mapped_column(Text, nullable=True)
+    findings: Mapped[list] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb"))
+    duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True)

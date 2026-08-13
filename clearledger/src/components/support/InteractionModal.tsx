@@ -14,16 +14,22 @@ import { ChatPanel } from '@/components/chat/ChatPanel'
 import { TicketsPanel } from './InteractionPanels'
 import { TasksQuickPanel } from '@/components/tasks/TasksQuickPanel'
 import { InfoCenter } from '@/components/info/InfoCenter'
+import { AuditorPanel } from '@/components/auditor/AuditorPanel'
 import { useCompany } from '@/contexts/CompanyContext'
 
 // Ключ секции остался `tickets` (он в localStorage у людей), а подпись — «Поддержка»:
 // это разговор с поставщиком программы, а не заявки компании и не «Задачи».
-const TITLES: Record<string, string> = { chat: 'Чат', tasks: 'Задачи', tickets: 'Поддержка', help: 'Инфо' }
+const TITLES: Record<string, string> = {
+  chat: 'Чат', tasks: 'Задачи', tickets: 'Поддержка', help: 'Инфо', auditor: 'Аудитор',
+}
 
 export function InteractionModal() {
   const { interactionSection: section, interactionMode: mode, setInteractionMode, closeInteraction } = useSupportContext()
   const isOpen = !!section && mode === 'modal'
-  const isPanel = section === 'chat' || section === 'tasks' || section === 'tickets'
+  // Список окон ЗАКРЫТЫЙ: раздел, которого здесь нет, из шапки просто не открывается —
+  // кнопка нажимается, состояние меняется, а окна нет и ошибки тоже. Так и было с
+  // «Аудитором» на первом выкате.
+  const isPanel = section === 'chat' || section === 'tasks' || section === 'tickets' || section === 'auditor'
 
   const DockButton = (
     <button
@@ -52,7 +58,9 @@ export function InteractionModal() {
           className={
             'p-0 gap-0 bg-card border-border text-foreground shadow-2xl ring-1 ring-black/5 dark:ring-white/10 '
             + 'w-screen h-[100dvh] max-w-none max-h-none rounded-none sm:rounded-xl overflow-hidden flex flex-col '
-            + (section === 'chat'
+            // Аудитору нужна ширина чата: в ответах таблицы и карточки находок, в узком
+            // окне они переносятся по слогам.
+            + (section === 'chat' || section === 'auditor'
               ? 'sm:w-[94vw] sm:max-w-5xl sm:h-[84vh] sm:max-h-[84vh]'
               : 'sm:w-[92vw] sm:max-w-2xl sm:h-[70vh] sm:max-h-[70vh]')
           }
@@ -66,6 +74,7 @@ export function InteractionModal() {
             {section === 'chat' && <ChatPanel />}
             {section === 'tasks' && <TasksQuickPanel />}
             {section === 'tickets' && <TicketsPanel />}
+            {section === 'auditor' && <AuditorPanel />}
           </div>
         </DialogContent>
       </Dialog>

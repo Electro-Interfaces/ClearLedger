@@ -18,6 +18,7 @@ from app.routers import (
     accounting_docs_router,
     audit_data_router,
     audit_router,
+    auditor_router,
     auth_router,
     books_router,
     intake_docs_router,
@@ -277,6 +278,9 @@ app.include_router(accounting_docs_router.router, prefix=API_PREFIX)
 app.include_router(reconciliation_router.router, prefix=API_PREFIX)
 app.include_router(reconciliation_proxy_router.router, prefix=API_PREFIX)  # прокси «Сверки»: /api/tradecorp/*, /api/msto/*
 app.include_router(audit_data_router.router, prefix=API_PREFIX)
+# Аудитор пространства: настройки агента и след его работы
+# (сам агент — сервис стека, ecosystem-deploy/services/auditor).
+app.include_router(auditor_router.router, prefix=API_PREFIX)
 app.include_router(dedup_ingest_router.router, prefix=API_PREFIX)  # приём среза дублей 208 по X-Cloud-API-Key
 app.include_router(edge_router.router, prefix=API_PREFIX)  # приём пакетов edge-агентов АЗС по X-Cloud-API-Key
 app.include_router(ocr_router.router, prefix=API_PREFIX)
