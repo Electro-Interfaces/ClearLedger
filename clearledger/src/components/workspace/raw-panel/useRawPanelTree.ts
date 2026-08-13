@@ -270,7 +270,17 @@ export function useRawPanelTree(filters: RawPanelFilters, sortConfig: SortConfig
     if (filters.status === 'open') filtered = filtered.filter((d) => d.docType !== 'shift_report' || isShiftOpen(d))
     if (filters.status === 'closed') filtered = filtered.filter((d) => d.docType === 'shift_report' && !isShiftOpen(d))
     const q = filters.searchQuery.trim().toLowerCase()
-    if (q) filtered = filtered.filter((d) => d.title.toLowerCase().includes(q) || d.catalog.toLowerCase().includes(q))
+    if (q) {
+      filtered = filtered.filter((d) => {
+        if (d.title.toLowerCase().includes(q) || d.catalog.toLowerCase().includes(q)) return true
+        // У документа учёта искать по имени файла мало: номер, ИНН и назначение
+        // платежа в имя не попадают, а ищут чаще именно по ним.
+        const r = d.data as DocRow | undefined
+        if (!r?.label) return false
+        return `${r.number} ${r.counterparty} ${r.inn ?? ''} ${r.label} ${r.operation ?? ''}`
+          .toLowerCase().includes(q)
+      })
+    }
 
     // ── построение дерева по catalog-путям ──
     const ensureFolder = (parentKey: string, name: string, path: string) => {

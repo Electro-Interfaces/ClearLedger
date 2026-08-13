@@ -29,7 +29,6 @@ const SECTION_LABEL: Record<string, string> = {
 type Paid = 'all' | 'paid' | 'unpaid'
 
 interface Filters {
-  q: string
   from: string
   to: string
   type: string
@@ -38,7 +37,7 @@ interface Filters {
   paid: Paid
 }
 
-const EMPTY: Filters = { q: '', from: '', to: '', type: 'all', section: 'all', status: 'all', paid: 'all' }
+const EMPTY: Filters = { from: '', to: '', type: 'all', section: 'all', status: 'all', paid: 'all' }
 
 function Select({ value, onChange, items, title }: {
   value: string; onChange: (v: string) => void
@@ -52,11 +51,16 @@ function Select({ value, onChange, items, title }: {
   )
 }
 
-export function FlatDocsView({ files, sortConfig, onSort, onOpen }: {
+export function FlatDocsView({ files, sortConfig, onSort, onOpen, query, onQuery }: {
+  /** Уже отфильтрованные поиском узлы: строку ищет `useRawPanelTree`, чтобы дерево
+      и список отвечали на один запрос одинаково. */
   files: FsNode[]
   sortConfig: SortConfig
   onSort: (c: SortConfig['column']) => void
   onOpen: (node: FsNode) => void
+  /** Поиск живёт в адресной строке проводника — здесь то же поле, не второе. */
+  query: string
+  onQuery: (v: string) => void
 }) {
   const [f, setF] = useState<Filters>(EMPTY)
   const set = <K extends keyof Filters>(k: K, v: Filters[K]) => setF((p) => ({ ...p, [k]: v }))
@@ -84,7 +88,6 @@ export function FlatDocsView({ files, sortConfig, onSort, onOpen }: {
   }, [rows])
 
   const filtered = useMemo(() => {
-    const q = f.q.trim().toLowerCase()
     return rows.filter(({ doc }) => {
       if (!doc) return false
       if (f.type !== 'all' && doc.type !== f.type) return false
@@ -97,10 +100,6 @@ export function FlatDocsView({ files, sortConfig, onSort, onOpen }: {
         if (doc.paid === null || doc.paid === undefined) return false
         if (f.paid === 'paid' && doc.paid <= 0) return false
         if (f.paid === 'unpaid' && doc.paid > 0) return false
-      }
-      if (q) {
-        const hay = `${doc.number} ${doc.counterparty} ${doc.inn ?? ''} ${doc.label} ${doc.operation ?? ''}`
-        if (!hay.toLowerCase().includes(q)) return false
       }
       return true
     })
@@ -120,7 +119,7 @@ export function FlatDocsView({ files, sortConfig, onSort, onOpen }: {
 
   const total = filtered.reduce((s, r) => s + (r.doc?.amount ?? 0), 0)
   const vat = filtered.reduce((s, r) => s + (r.doc?.vat ?? 0), 0)
-  const dirty = JSON.stringify(f) !== JSON.stringify(EMPTY)
+  const dirty = JSON.stringify(f) !== JSON.stringify(EMPTY) || query.trim() !== ''
 
   const Th = ({ children, right, col }: {
     children: React.ReactNode; right?: boolean; col?: SortConfig['column']
@@ -141,7 +140,7 @@ export function FlatDocsView({ files, sortConfig, onSort, onOpen }: {
       <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-border bg-card/40">
         <div className="flex items-center gap-1.5 h-8 w-56 px-2.5 rounded-md bg-background/70 border border-border">
           <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          <input value={f.q} onChange={(e) => set('q', e.target.value)}
+          <input value={query} onChange={(e) => onQuery(e.target.value)}
             placeholder="Номер, контрагент, ИНН, назначение"
             className="bg-transparent outline-none text-[13px] w-full placeholder:text-muted-foreground/60" />
         </div>
@@ -167,7 +166,7 @@ export function FlatDocsView({ files, sortConfig, onSort, onOpen }: {
             className="h-8 rounded-md border border-border bg-background/70 px-2 outline-none" />
         </div>
         {dirty && (
-          <button onClick={() => setF(EMPTY)}
+          <button onClick={() => { setF(EMPTY); onQuery('') }}
             className="inline-flex items-center gap-1 h-8 px-2 rounded-md text-[13px] text-muted-foreground hover:bg-accent">
             <X className="h-3.5 w-3.5" /> Сбросить
           </button>

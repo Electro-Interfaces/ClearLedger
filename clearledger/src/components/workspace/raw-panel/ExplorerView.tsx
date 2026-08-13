@@ -252,7 +252,11 @@ export function ExplorerView() {
   // Список вместо дерева осмыслен там, где у файлов есть строка реестра: колонки
   // отбора берутся из неё. У смен и прогонов каналов её нет — там только дерево.
   const listable = tree.flatFiles.some((n) => !!n.typeText)
-  const asList = listable && state.viewMode === 'list'
+  // Во время поиска дерево бесполезно: найденные документы лежат в РАЗНЫХ ветках, а
+  // папка показывает только своё содержимое — человек видел пустоту или одну подпапку
+  // вместо результатов. Поиск переводит проводник в плоский результат по всему каталогу.
+  const searching = state.filters.searchQuery.trim().length > 0
+  const asList = listable && (state.viewMode === 'list' || searching)
 
   const currentKey = state.currentPath.join('/')
   const rawItems = tree.fsTree.get(currentKey) ?? []
@@ -338,7 +342,7 @@ export function ExplorerView() {
           <input
             value={state.filters.searchQuery}
             onChange={(e) => state.updateFilter('searchQuery', e.target.value)}
-            placeholder={`Поиск${state.currentPath.length ? ' в: ' + state.currentPath[state.currentPath.length - 1] : ''}`}
+            placeholder="Поиск по всем документам"
             className="bg-transparent outline-none text-[13px] w-full placeholder:text-muted-foreground/60"
           />
         </div>
@@ -359,7 +363,12 @@ export function ExplorerView() {
           onClick={() => state.toggleSort(state.sortConfig.column === 'name' ? 'date' : 'name')} />
         <CmdButton icon={LayoutList} label={asList ? 'Папками' : 'Списком'}
           disabled={!listable}
-          onClick={() => state.setViewMode(asList ? 'tree' : 'list')} />
+          onClick={() => {
+            // Возврат к папкам во время поиска обязан снять поиск, иначе кнопка
+            // нажимается, а экран не меняется: список держится самим запросом.
+            if (asList && searching) state.updateFilter('searchQuery', '')
+            state.setViewMode(asList ? 'tree' : 'list')
+          }} />
         <CmdButton icon={MoreHorizontal} />
         <div className="ml-auto" />
         <CmdButton icon={PanelRight} label="Просмотр" onClick={() => setPreviewOpen((v) => !v)} />
@@ -370,7 +379,9 @@ export function ExplorerView() {
       <div className="flex-1 flex min-h-0">
         {asList ? (
           <FlatDocsView files={tree.flatFiles} sortConfig={state.sortConfig}
-            onSort={state.toggleSort} onOpen={openNode} />
+            onSort={state.toggleSort} onOpen={openNode}
+            query={state.filters.searchQuery}
+            onQuery={(v) => state.updateFilter('searchQuery', v)} />
         ) : (
         <>
         <div className="hidden md:block w-64 shrink-0 bg-sidebar border-r border-border overflow-y-auto scroll-thin">
