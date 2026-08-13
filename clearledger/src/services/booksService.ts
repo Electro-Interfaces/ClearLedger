@@ -539,6 +539,8 @@ export interface PaymentTerms {
     counterparty: string; counterpartyId: string | null; amount: number; days: number
     /** Сколько платежей закрыло счёт: срок считается по последнему. */
     payments: number
+    /** Корзина срока — считает сервер, пороги там же. */
+    bucket: string
   }[]
   buckets: { key: string; label: string; count: number; amount: number }[]
   clients: {

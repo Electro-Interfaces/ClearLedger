@@ -2561,6 +2561,10 @@ async def payment_terms(
         "id": str(r[0]), "number": r[1], "date": r[2], "paidAt": r[3],
         "counterparty": r[4], "counterpartyId": str(r[5]) if r[5] else None,
         "amount": _num(r[6]), "days": int(r[7]), "payments": r[8],
+        # Корзину считает сервер: пороги живут здесь (PAY_BUCKETS), и вторая их копия
+        # на клиенте разъехалась бы при первом же сдвиге границы — молча.
+        "bucket": next((k for k, _, lo, hi in PAY_BUCKETS if lo <= int(r[7]) <= hi),
+                       PAY_BUCKETS[-1][0]),
     } for r in (await db.execute(text(f"""
         SELECT d.id, max(d.number), max(d.date), max(p.paid_at),
                max(d.counterparty_name), max(d.counterparty_id::text),

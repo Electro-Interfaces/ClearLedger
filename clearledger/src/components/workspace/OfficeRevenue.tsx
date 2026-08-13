@@ -169,10 +169,17 @@ function Share({ value, of }: { value: number; of: number }) {
   )
 }
 
-/** Столбики помесячно — один и тот же график в «Обзоре» и «Динамике». */
+/**
+ * Столбики помесячно — один и тот же график в «Обзоре» и «Динамике».
+ *
+ * Ряд достраивается нулями: месяц без продаж должен выглядеть провалом, а не
+ * исчезать. Пропущенный столбец делает разрыв невидимым, и график читается как
+ * непрерывная работа.
+ */
 function MonthBars({ months, height = 128 }: {
   months: { month: string; amount: number; docs: number }[]; height?: number
 }) {
+  months = fillMonths(months)
   const max = Math.max(...months.map((m) => m.amount), 1)
   if (!months.length) {
     return (
@@ -207,6 +214,20 @@ function useRevenue(companyId: string, kind: RevKind, period?: Period) {
     queryFn: () => getRevenue(companyId, kind, { top: FULL, from: period?.from, to: period?.to }),
     enabled: !!companyId,
   })
+}
+
+/** Достроить помесячный ряд нулями между первым и последним месяцем. */
+function fillMonths<T extends { month: string }>(rows: T[]): T[] {
+  if (rows.length < 2) return rows
+  const out: T[] = []
+  const [fy, fm] = rows[0].month.split('-').map(Number)
+  const [ly, lm] = rows[rows.length - 1].month.split('-').map(Number)
+  const by = new Map(rows.map((r) => [r.month, r]))
+  for (let y = fy, m = fm; y < ly || (y === ly && m <= lm); m === 12 ? (y++, m = 1) : m++) {
+    const key = `${y}-${String(m).padStart(2, '0')}`
+    out.push(by.get(key) ?? ({ month: key, amount: 0, docs: 0 } as unknown as T))
+  }
+  return out
 }
 
 /** Ключ покупателя: ссылка на карточку, а имя — только когда ссылки нет. */
@@ -720,7 +741,10 @@ function RevSlices({ companyId, kind, period }: {
 
   if (q.isError) return <div className="p-4"><QueryError onRetry={() => q.refetch()} /></div>
   if (!q.data) return <Loading />
-  const total = q.data.total || 1
+  // Доли считаются от суммы ПОКАЗАННЫХ строк, а не от итога документов: у позиций
+  // сумма собирается по строкам, и чужой знаменатель давал доли, не дающие ста.
+  const shownTotal = rows.reduce((s, r) => s + r.amount, 0)
+  const total = shownTotal || 1
 
   return (
     <div className="p-4 space-y-3">
@@ -733,7 +757,11 @@ function RevSlices({ companyId, kind, period }: {
         ], rows)} />
       </div>
       <TableCard
-        note={`${rows.length} строк · итог ${money.format(q.data.total)} ₽`}
+        note={`${rows.length} строк · итог ${money.format(shownTotal)} ₽`
+          + (dim === 'item' && Math.abs(shownTotal - q.data.total) > 1
+            ? ` · сумма документов ${money.format(q.data.total)} ₽: позиции считаются по`
+              + ' строкам, а документ — по шапке, и у части документов они разошлись'
+            : '')}
         head={<><Th>Разрез</Th><Th right>Документов</Th><Th right>Оборот</Th><Th right>Доля</Th></>}>
         {rows.map((r) => (
           <tr key={r.label} className="border-b last:border-0 hover:bg-muted/40">
@@ -1840,12 +1868,7 @@ function RevTerms({ companyId, period }: { companyId: string; period: Period }) 
   }
 
   const maxBucket = Math.max(...d.buckets.map((b) => b.amount), 1)
-  const rows = bucket
-    ? d.rows.filter((r) => {
-        const b = d.buckets.find((x) => x.key === bucket)
-        return b && bucketOf(r.days) === b.key
-      })
-    : d.rows
+  const rows = bucket ? d.rows.filter((r) => r.bucket === bucket) : d.rows
 
   return (
     <div className="p-4 space-y-4">
@@ -1965,16 +1988,6 @@ function RevTerms({ companyId, period }: { companyId: string; period: Period }) 
       {card && <CounterpartyWindow companyId={companyId} id={card} onClose={() => setCard(null)} />}
     </div>
   )
-}
-
-/** Корзина срока — те же границы, что на сервере (PAY_BUCKETS). */
-function bucketOf(days: number): string {
-  if (days < 0) return 'advance'
-  if (days <= 7) return 'week'
-  if (days <= 30) return 'month'
-  if (days <= 60) return 'q'
-  if (days <= 90) return 'late'
-  return 'overdue'
 }
 
 /**
