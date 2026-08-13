@@ -326,8 +326,12 @@ export interface Insights {
     facts: string[]
     mode: string
     sub: string
+    /** К чему этот вывод ведёт: связь задана правилом, а не корреляцией. */
+    leadsTo: { key: string; why: string }[]
   }[]
   count: number
+  /** Главная мысль: с чего начинается разговор о компании. */
+  headline: string | null
 }
 
 export const getInsights = (companyId: string) =>

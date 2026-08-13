@@ -1682,8 +1682,21 @@ function EconInsights({ companyId }: { companyId: string }) {
     )
   }
 
+  const titleOf = (key: string) => d.insights.find((x) => x.key === key)?.title ?? key
+
   return (
     <div className="p-4 space-y-3">
+      {d.headline && (
+        <Card>
+          <CardContent className="p-4">
+            <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-1">
+              Главное
+            </div>
+            <p className="text-sm">{d.headline}</p>
+          </CardContent>
+        </Card>
+      )}
+
       <p className="text-[11px] text-muted-foreground">
         Выводы собраны правилами из показателей продукта. Под каждым — цифры, из которых
         он получен: вывод, который нельзя проверить, ничем не лучше мнения.
@@ -1704,6 +1717,17 @@ function EconInsights({ companyId }: { companyId: string }) {
                     <li key={n} className="tabular-nums">· {f}</li>
                   ))}
                 </ul>
+                {i.leadsTo.length > 0 && (
+                  <ul className="text-[11px] space-y-0.5 border-l-2 border-muted pl-2">
+                    {i.leadsTo.map((l) => (
+                      <li key={l.key}>
+                        <span className="text-muted-foreground">ведёт к: </span>
+                        <b className="font-medium">{titleOf(l.key)}</b>
+                        <span className="text-muted-foreground"> — {l.why}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
                 <button onClick={() => setCoreMode(i.mode as never, i.sub)}
                   className="text-[11px] text-muted-foreground hover:text-primary hover:underline">
                   посмотреть цифры →
