@@ -37,7 +37,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
     Counterparty, CounterpartyEmail, IntakeBatch, MailAccount, MailAttachment,
-    MailMessage, MailRule, MailThread,
+    MailMessage, MailRule, MailThread, Task,
 )
 
 logger = logging.getLogger("clearledger.mail")
@@ -137,14 +137,26 @@ def _refs(msg: Message) -> list[str]:
     return re.findall(r"<[^>]+>", raw)
 
 
+def _connect_imap(account: dict[str, Any], password: str):
+    """Соединение с ящиком. Обычный порт 143 без шифрования встречается только во
+    внутренних почтовиках, но встречается — поэтому режим выбирается настройкой."""
+    if account.get("imap_security") == "none":
+        conn = imaplib.IMAP4(account["imap_host"], account["imap_port"])
+    else:
+        conn = imaplib.IMAP4_SSL(account["imap_host"], account["imap_port"])
+    # Пароль с кириллицей или знаками юникода валит login на кодировке ascii —
+    # imaplib отдаёт строку как есть. Отправляем байтами: сервер ждёт utf-8.
+    conn.login(account["login"], password.encode("utf-8") if password else "")
+    return conn
+
+
 def _fetch_sync(account: dict[str, Any]) -> tuple[list[tuple[int, bytes]], int | None, str | None]:
     """Синхронный заход в ящик: вернуть новые письма, UIDVALIDITY и ошибку."""
-    password = os.environ.get(account["secret_env"] or "", "")
+    password = account.get("password") or ""
     if not (account["imap_host"] and account["login"] and password):
-        return [], None, "не заданы адрес IMAP, логин или переменная с паролем"
+        return [], None, "не заданы адрес IMAP, логин или пароль"
     try:
-        conn = imaplib.IMAP4_SSL(account["imap_host"], account["imap_port"])
-        conn.login(account["login"], password)
+        conn = _connect_imap(account, password)
         conn.select(account["imap_folder"], readonly=True)
 
         validity = None
@@ -176,16 +188,93 @@ def _fetch_sync(account: dict[str, Any]) -> tuple[list[tuple[int, bytes]], int |
         return [], None, str(e)[:400]
 
 
+def _test_sync(account: dict[str, Any], password: str) -> dict[str, Any]:
+    """Синхронная проверка: доходим до ящика и до SMTP, каждый шаг — своим ответом."""
+    out: dict[str, Any] = {"imap": None, "smtp": None}
+    if account["imap_host"] and account["login"] and password:
+        try:
+            conn = _connect_imap(account, password)
+            typ, data = conn.select(account["imap_folder"], readonly=True)
+            count = int(data[0]) if typ == "OK" and data and data[0] else 0
+            conn.logout()
+            out["imap"] = {"ok": True, "text": f"подключение есть, писем в папке: {count}"}
+        except Exception as e:  # noqa: BLE001 — текст ошибки и есть ответ человеку
+            out["imap"] = {"ok": False, "text": _human_error(str(e))}
+    else:
+        out["imap"] = {"ok": False, "text": "не заполнены сервер, логин или пароль"}
+
+    if account["smtp_host"]:
+        try:
+            import smtplib
+            if account["smtp_security"] == "ssl":
+                srv = smtplib.SMTP_SSL(account["smtp_host"], account["smtp_port"], timeout=15)
+            else:
+                srv = smtplib.SMTP(account["smtp_host"], account["smtp_port"], timeout=15)
+                if account["smtp_security"] == "starttls":
+                    import ssl as _ssl
+                    srv.starttls(context=_ssl._create_unverified_context())
+            # На внутреннем релее аутентификации нет вовсе: попытка войти даёт
+            # отказ и выглядит как «неверный пароль», хотя пароль тут ни при чём.
+            if password and account["login"] and account["smtp_security"] != "none":
+                srv.login(account["login"], password)
+            srv.quit()
+            out["smtp"] = {"ok": True, "text": "подключение есть"}
+        except Exception as e:  # noqa: BLE001
+            out["smtp"] = {"ok": False, "text": _human_error(str(e))}
+    else:
+        out["smtp"] = {"ok": False, "text": "сервер отправки не задан"}
+    return out
+
+
+def _human_error(text: str) -> str:
+    """Ошибку почтового сервера человек читать не должен — он должен понять, что чинить."""
+    low = text.lower()
+    if "authenticationfailed" in low or "invalid credentials" in low or "auth" in low:
+        return "сервер не принял логин или пароль"
+    if "certificate" in low:
+        return "сертификат сервера не проверяется — проверьте режим шифрования"
+    if "timed out" in low or "timeout" in low:
+        return "сервер не отвечает — проверьте адрес и порт"
+    if "name or service not known" in low or "getaddrinfo" in low:
+        return "адрес сервера не найден"
+    if "connection refused" in low:
+        return "порт закрыт — проверьте номер порта"
+    return text[:200]
+
+
+async def test_account(db: AsyncSession, account: MailAccount) -> dict[str, Any]:
+    """Проверить настройки ящика: сотрудник должен видеть результат сразу, а не
+    узнавать о неверном пароле по пустой ленте через час."""
+    from app.services.mail_secrets import password_of
+    snapshot = {
+        "imap_host": account.imap_host, "imap_port": account.imap_port,
+        "imap_folder": account.imap_folder, "login": account.login,
+        "imap_security": account.imap_security,
+        "smtp_host": account.smtp_host, "smtp_port": account.smtp_port,
+        "smtp_security": account.smtp_security,
+    }
+    res = await asyncio.to_thread(_test_sync, snapshot, password_of(account))
+    # Результат проверки — в карточку ящика: он же ответ на «почему не идут письма».
+    account.last_error = None if res["imap"]["ok"] else res["imap"]["text"]
+    await db.commit()
+    return res
+
+
 async def poll_account(db: AsyncSession, account: MailAccount) -> dict[str, Any]:
     """Забрать новые письма ящика, разобрать и сохранить."""
     if account.mode == "out" or not account.is_active:
         return {"fetched": 0, "saved": 0, "skipped": "ящик не принимает почту"}
 
+    from app.services.mail_secrets import password_of
+
     snapshot = {
         "imap_host": account.imap_host, "imap_port": account.imap_port,
         "imap_folder": account.imap_folder, "login": account.login,
-        "secret_env": account.secret_env, "last_uid": account.last_uid,
-        "uid_validity": account.uid_validity,
+        "imap_security": account.imap_security,
+        # Пароль достаём ЗДЕСЬ, в асинхронном коде: поток разбора не должен знать,
+        # откуда он берётся — из окружения стека или из базы под шифром.
+        "password": password_of(account),
+        "last_uid": account.last_uid, "uid_validity": account.uid_validity,
     }
     letters, validity, error = await asyncio.to_thread(_fetch_sync, snapshot)
 
@@ -270,6 +359,8 @@ async def _save_message(db: AsyncSession, account: MailAccount, uid: int,
         # Заголовки целиком: по ним разбираются спорные случаи и проверки SPF/DKIM.
         headers={k: _decode(v)[:1000] for k, v in msg.items()},
         has_attachments=bool(atts),
+        # Оригинал письма: разбор — наша интерпретация, а спор решается исходником.
+        raw_eml=raw if len(raw) <= MAX_MESSAGE_BYTES else None,
         status="new",
     )
 
@@ -308,6 +399,15 @@ async def _save_message(db: AsyncSession, account: MailAccount, uid: int,
         )
         db.add(att)
         saved_atts.append(att)
+
+    # Правило сказало «в задачу» — заводим её из письма. Письмо, требующее работы,
+    # иначе живёт только в почтовой ленте: там его видит один человек и ровно до
+    # тех пор, пока помнит. Задача — место, где у работы есть срок и ответственный.
+    if rule is not None and rule.action == "task":
+        try:
+            await _task_from_message(db, account.company_id, row)
+        except Exception as e:  # noqa: BLE001 — задача не заводится, письмо остаётся
+            logger.exception("задача из письма %s не создана: %s", row.id, e)
 
     # Правило сказало «в приёмку» — вложения сразу становятся кандидатами. В учёт
     # они не попадают: приём документа остаётся отдельным решением человека
@@ -388,6 +488,25 @@ async def _guess_counterparty(db: AsyncSession, cid, from_email: str | None):
         Counterparty.company_id == cid,
         func.lower(Counterparty.email).like(f"%@{domain}")))).scalars().all()
     return same[0] if len(same) == 1 else None
+
+
+async def _task_from_message(db: AsyncSession, cid, row: MailMessage) -> None:
+    """Завести задачу по письму: тема — название, текст — описание, письмо — след.
+
+    Номер задачи выдаёт последовательность (`Task.number`), поэтому здесь его не
+    трогаем: ручная нумерация в двух местах рано или поздно расходится.
+    """
+    body = (row.body_text or "").strip()
+    task = Task(
+        company_id=cid,
+        title=(row.subject or "Письмо без темы")[:300],
+        description=(f"Письмо от {row.from_email or 'неизвестного отправителя'}"
+                     f"\n\n{body[:4000]}"),
+        priority="medium",
+        status="open",
+    )
+    db.add(task)
+    await db.flush()
 
 
 async def attachments_to_intake(db: AsyncSession, cid, message: MailMessage,
@@ -497,6 +616,32 @@ async def learn_address(db: AsyncSession, cid, address: str, counterparty_id,
         t.counterparty_id = counterparty_id
     await db.commit()
     return {"address": addr, "messages": len(msgs), "threads": len(threads)}
+
+
+async def poll_due(db: AsyncSession) -> dict[str, Any]:
+    """Опросить ящики, которым пора: интервал у каждого свой.
+
+    Регулярный опрос — единственное, что превращает коннектор из «кнопки» в канал:
+    письма должны приходить сами, иначе про них вспоминают, когда уже поздно.
+    """
+    now = datetime.now(timezone.utc)
+    accounts = (await db.execute(select(MailAccount).where(
+        MailAccount.is_active.is_(True),
+        MailAccount.poll_interval_min > 0))).scalars().all()
+    done = 0
+    for a in accounts:
+        if a.mode == "out":
+            continue
+        due = (a.last_sync_at is None
+               or (now - a.last_sync_at).total_seconds() >= a.poll_interval_min * 60)
+        if not due:
+            continue
+        try:
+            await poll_account(db, a)
+            done += 1
+        except Exception as e:  # noqa: BLE001 — один ящик не роняет остальные
+            logger.exception("опрос ящика %s не удался: %s", a.address, e)
+    return {"polled": done, "checked": len(accounts)}
 
 
 async def poll_all(db: AsyncSession, company_id) -> dict[str, Any]:

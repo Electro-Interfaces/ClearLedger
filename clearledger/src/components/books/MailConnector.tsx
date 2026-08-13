@@ -28,16 +28,32 @@ import {
   createMailAccount, createMailRule, deleteMailAccount, deleteMailRule, getMailAccounts,
   getMailAddresses, getMailRules, getMailThread, getMailThreads, learnMailAddress,
   decideMailQuarantine, getMailQuarantine, mailAttachmentUrl, mailToIntake, pollMail,
-  sendMail, updateMailAccount, updateMailRule,
+  sendMail, testMailAccount, updateMailAccount, updateMailRule,
   type MailAccount, type MailAccountInput, type MailRule, type MailRuleInput,
 } from '@/services/mailService'
 import { useCounterparties } from '@/hooks/useReferences'
 
 const EMPTY: MailAccountInput = {
   address: '', title: '', purpose: '', mode: 'both',
-  imapHost: '', imapPort: 993, imapFolder: 'INBOX', login: '', secretEnv: '',
-  smtpHost: '', smtpPort: 587, isActive: true,
+  imapHost: '', imapPort: 993, imapFolder: 'INBOX', imapSecurity: 'ssl',
+  login: '', secretEnv: '', password: '',
+  smtpHost: '', smtpPort: 587, smtpSecurity: 'starttls',
+  displayName: '', signature: '', pollIntervalMin: 15, isActive: true,
 }
+
+/** Готовые настройки известных почтовиков: сотрудник не обязан помнить порты. */
+const PRESETS: { label: string; imapHost: string; smtpHost: string }[] = [
+  { label: 'Яндекс', imapHost: 'imap.yandex.ru', smtpHost: 'smtp.yandex.ru' },
+  { label: 'Mail.ru', imapHost: 'imap.mail.ru', smtpHost: 'smtp.mail.ru' },
+  { label: 'Gmail', imapHost: 'imap.gmail.com', smtpHost: 'smtp.gmail.com' },
+  { label: 'Наш Mailcow', imapHost: 'mail.dataworker.ru', smtpHost: 'mail.dataworker.ru' },
+]
+
+const SECURITY: { key: 'ssl' | 'starttls' | 'none'; label: string }[] = [
+  { key: 'ssl', label: 'SSL' },
+  { key: 'starttls', label: 'STARTTLS' },
+  { key: 'none', label: 'без шифрования' },
+]
 
 const MODES: { key: MailAccountInput['mode']; label: string }[] = [
   { key: 'both', label: 'приём и отправка' },
@@ -95,6 +111,22 @@ export function MailConnector() {
   const remove = useMutation({
     mutationFn: (id: string) => deleteMailAccount(companyId, id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['mail'] }),
+  })
+
+  // Проверка подключения — то, без чего самостоятельная настройка невозможна:
+  // человек должен узнать «сервер не принял пароль» сразу, а не по пустой ленте.
+  const test = useMutation({
+    mutationFn: (id: string) => testMailAccount(companyId, id),
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ['mail'] })
+      const parts = [
+        r.imap && `приём: ${r.imap.ok ? '✓' : '✗'} ${r.imap.text}`,
+        r.smtp && `отправка: ${r.smtp.ok ? '✓' : '✗'} ${r.smtp.text}`,
+      ].filter(Boolean).join('\n')
+      const ok = !!r.imap?.ok
+      ok ? toast.success(parts) : toast.error(parts)
+    },
+    onError: () => toast.error('Проверка не выполнена'),
   })
 
   const rules = useQuery({
@@ -205,6 +237,7 @@ export function MailConnector() {
               <AccountRow key={a.id} a={a}
                 onEdit={() => setForm({ ...a })}
                 onPoll={() => poll.mutate(a.id)}
+                onTest={() => test.mutate(a.id)}
                 onDelete={() => remove.mutate(a.id)} />
             ))}
             {(accounts.data?.rows ?? []).length === 0 && (
@@ -250,25 +283,76 @@ export function MailConnector() {
                   ))}
                 </div>
               </Field>
-              <Field label="IMAP-сервер" hint="откуда забираем письма">
+              <Field label="Почтовый сервис" hint="подставит адреса серверов" span>
+                <div className="flex flex-wrap gap-1">
+                  {PRESETS.map((p) => (
+                    <Toggle key={p.label} on={form.imapHost === p.imapHost} label={p.label}
+                      onClick={() => setForm({ ...form, imapHost: p.imapHost,
+                        smtpHost: p.smtpHost, imapPort: 993, smtpPort: 587 })} />
+                  ))}
+                </div>
+              </Field>
+              <Field label="Сервер приёма (IMAP)">
                 <Input value={form.imapHost ?? ''} placeholder="imap.company.ru"
                   onChange={(e) => setForm({ ...form, imapHost: e.target.value })} />
+              </Field>
+              <Field label="Порт и шифрование приёма">
+                <div className="flex gap-1 items-center">
+                  <Input className="w-24" type="number" value={form.imapPort}
+                    onChange={(e) => setForm({ ...form, imapPort: Number(e.target.value) })} />
+                  {SECURITY.map((x) => (
+                    <Toggle key={x.key} on={form.imapSecurity === x.key} label={x.label}
+                      onClick={() => setForm({ ...form, imapSecurity: x.key })} />
+                  ))}
+                </div>
               </Field>
               <Field label="Логин">
                 <Input value={form.login ?? ''} placeholder="buh@company.ru"
                   onChange={(e) => setForm({ ...form, login: e.target.value })} />
               </Field>
-              <Field label="Переменная с паролем" hint="имя в .env стека, не сам пароль">
-                <Input value={form.secretEnv ?? ''} placeholder="MAIL_BUH_PASSWORD"
-                  onChange={(e) => setForm({ ...form, secretEnv: e.target.value })} />
+              <Field label="Пароль"
+                hint={form.id ? 'пусто — оставить прежний' : 'хранится в базе под шифром'}>
+                <Input type="password" value={form.password ?? ''} placeholder="••••••••"
+                  onChange={(e) => setForm({ ...form, password: e.target.value })} />
               </Field>
               <Field label="Папка">
                 <Input value={form.imapFolder} placeholder="INBOX"
                   onChange={(e) => setForm({ ...form, imapFolder: e.target.value })} />
               </Field>
-              <Field label="SMTP-сервер" hint="для ответов из пространства">
-                <Input value={form.smtpHost ?? ''} placeholder="mail"
+              <Field label="Забирать почту" hint="0 — только вручную">
+                <div className="flex items-center gap-2">
+                  <Input className="w-24" type="number" value={form.pollIntervalMin}
+                    onChange={(e) => setForm({ ...form,
+                      pollIntervalMin: Number(e.target.value) })} />
+                  <span className="text-[11px] text-muted-foreground">минут</span>
+                </div>
+              </Field>
+              <Field label="Сервер отправки (SMTP)" hint="для ответов из пространства">
+                <Input value={form.smtpHost ?? ''} placeholder="smtp.company.ru"
                   onChange={(e) => setForm({ ...form, smtpHost: e.target.value })} />
+              </Field>
+              <Field label="Порт и шифрование отправки">
+                <div className="flex gap-1 items-center">
+                  <Input className="w-24" type="number" value={form.smtpPort}
+                    onChange={(e) => setForm({ ...form, smtpPort: Number(e.target.value) })} />
+                  {SECURITY.map((x) => (
+                    <Toggle key={x.key} on={form.smtpSecurity === x.key} label={x.label}
+                      onClick={() => setForm({ ...form, smtpSecurity: x.key })} />
+                  ))}
+                </div>
+              </Field>
+              <Field label="Имя отправителя" hint="что видит контрагент в поле «От кого»">
+                <Input value={form.displayName ?? ''} placeholder="Бухгалтерия ПРОМИЗОЛ"
+                  onChange={(e) => setForm({ ...form, displayName: e.target.value })} />
+              </Field>
+              <Field label="Подпись" hint="приклеивается к каждому письму" span>
+                <Textarea rows={2} value={form.signature ?? ''}
+                  placeholder="С уважением, бухгалтерия ООО «ПРОМИЗОЛ СПБ», +7 812 ..."
+                  onChange={(e) => setForm({ ...form, signature: e.target.value })} />
+              </Field>
+              <Field label="Переменная с паролем" hint="альтернатива: секрет в .env стека">
+                <Input value={form.secretEnv ?? ''} placeholder="MAIL_BUH_PASSWORD"
+                  onChange={(e) => setForm({ ...form, secretEnv: e.target.value })} />
               </Field>
             </div>
             <div className="flex gap-2">
@@ -604,10 +688,13 @@ export function MailConnector() {
   )
 }
 
-function AccountRow({ a, onEdit, onPoll, onDelete }: {
-  a: MailAccount; onEdit: () => void; onPoll: () => void; onDelete: () => void
+function AccountRow({ a, onEdit, onPoll, onTest, onDelete }: {
+  a: MailAccount; onEdit: () => void; onPoll: () => void
+  onTest: () => void; onDelete: () => void
 }) {
-  const ready = a.secretPresent && !!a.imapHost
+  // Ящик готов, если есть сервер и пароль — неважно, введён он сотрудником или
+  // задан переменной окружения.
+  const ready = !!a.imapHost && (a.passwordSet || a.secretPresent)
   return (
     <div className="rounded-md border p-2.5">
       <div className="flex flex-wrap items-center gap-2">
@@ -619,9 +706,13 @@ function AccountRow({ a, onEdit, onPoll, onDelete }: {
         <span className={cn('rounded border px-1.5 py-0.5 text-[10px]',
           ready ? 'border-emerald-500/40 text-emerald-600 dark:text-emerald-400'
                 : 'border-amber-500/40 text-amber-700 dark:text-amber-400')}>
-          {ready ? 'настроен' : a.secretEnv ? 'нет пароля в окружении' : 'не настроен'}
+          {ready ? 'настроен' : !a.imapHost ? 'нет сервера' : 'нет пароля'}
         </span>
         <div className="ml-auto flex items-center gap-1">
+          <Button size="sm" variant="ghost" className="h-7 px-2 text-[11px]" onClick={onTest}
+            title="Проверить подключение к серверам">
+            проверить
+          </Button>
           <Button size="sm" variant="ghost" className="h-7 px-2" onClick={onPoll}
             title="Забрать почту из этого ящика">
             <RefreshCw className="size-3.5" />
@@ -634,6 +725,9 @@ function AccountRow({ a, onEdit, onPoll, onDelete }: {
       {a.purpose && <div className="mt-1 text-[11px] text-muted-foreground">{a.purpose}</div>}
       <div className="mt-1 flex flex-wrap items-center gap-3 text-[11px] text-muted-foreground">
         <span>{MODES.find((m) => m.key === a.mode)?.label}</span>
+        <span>{a.pollIntervalMin > 0
+          ? `забирать каждые ${a.pollIntervalMin} мин`
+          : 'только вручную'}</span>
         {a.lastSyncAt && (
           <span className="inline-flex items-center gap-1">
             <CheckCircle2 className="size-3" />

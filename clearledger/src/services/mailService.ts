@@ -16,10 +16,20 @@ export interface MailAccount {
   imapHost: string | null
   imapPort: number
   imapFolder: string
+  imapSecurity: 'ssl' | 'starttls' | 'none'
   login: string | null
+  /** Имя переменной окружения — путь для внедренца; сотрудник вводит пароль. */
   secretEnv: string | null
+  /** Пароль задан (сам он не отдаётся никогда). */
+  passwordSet: boolean
   smtpHost: string | null
   smtpPort: number
+  smtpSecurity: 'ssl' | 'starttls' | 'none'
+  /** Имя в поле «От кого» и подпись — настройка ящика, а не автора письма. */
+  displayName: string | null
+  signature: string | null
+  /** Каждые сколько минут забирать почту; 0 — только вручную. */
+  pollIntervalMin: number
   isActive: boolean
   lastUid: number | null
   lastSyncAt: string | null
@@ -61,14 +71,20 @@ export const getMailAccounts = (companyId: string) =>
   get<{ rows: MailAccount[] }>(`/api/mail/accounts?company_id=${companyId}`)
 
 export type MailAccountInput = Omit<MailAccount,
-  'id' | 'lastUid' | 'lastSyncAt' | 'lastError' | 'secretPresent'>
+  'id' | 'lastUid' | 'lastSyncAt' | 'lastError' | 'secretPresent' | 'passwordSet'>
+  & { password?: string }
 
 /** Ключи ручки — в змеином регистре: это тело pydantic-модели, а не наш camelCase. */
 const toBody = (a: MailAccountInput) => ({
   address: a.address, title: a.title, purpose: a.purpose, mode: a.mode,
   imap_host: a.imapHost, imap_port: a.imapPort, imap_folder: a.imapFolder,
+  imap_security: a.imapSecurity,
   login: a.login, secret_env: a.secretEnv,
-  smtp_host: a.smtpHost, smtp_port: a.smtpPort, is_active: a.isActive,
+  // Пустой пароль означает «не менять»: правка подписи не должна стирать доступ.
+  password: a.password || null,
+  smtp_host: a.smtpHost, smtp_port: a.smtpPort, smtp_security: a.smtpSecurity,
+  display_name: a.displayName, signature: a.signature,
+  poll_interval_min: a.pollIntervalMin, is_active: a.isActive,
 })
 
 export const createMailAccount = (companyId: string, a: MailAccountInput) =>
@@ -190,3 +206,9 @@ export const decideMailQuarantine = (
   companyId: string, messageIds: string[], decision: 'accept' | 'reject',
 ) => post<{ updated: number }>(`/api/mail/quarantine/decide?company_id=${companyId}`,
   { message_ids: messageIds, decision })
+
+
+/** Проверить настройки ящика: приём и отправка отдельными ответами. */
+export const testMailAccount = (companyId: string, id: string) =>
+  post<{ imap?: { ok: boolean; text: string }; smtp?: { ok: boolean; text: string } }>(
+    `/api/mail/accounts/${id}/test?company_id=${companyId}`, {})

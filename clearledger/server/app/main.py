@@ -198,8 +198,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception as e:  # noqa: BLE001 — регламент не критичен для API
         logger.warning(f"Регламент задач не запущен: {e}")
 
+    # Почта: регулярный опрос ящиков по их интервалу. Без него коннектор — кнопка,
+    # а письма контрагентов ждут, пока кто-нибудь про них вспомнит.
+    mail_task: asyncio.Task | None = None
+    try:
+        from app.services.mail_poller import run_forever as _mail_poll
+        mail_task = asyncio.create_task(_mail_poll())
+    except Exception as e:  # noqa: BLE001 — почта не критична для API
+        logger.warning(f"Опрос почты не запущен: {e}")
+
     logger.info("TradeLedger Server запущен")
     yield
+    if mail_task is not None:
+        mail_task.cancel()
     if tasks_task is not None:
         tasks_task.cancel()
     if digest_task is not None:

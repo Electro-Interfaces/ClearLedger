@@ -47,7 +47,10 @@ async def send_message(db: AsyncSession, cid, *, account_id, to: list[str],
             MailMessage.id == reply_to_message_id))).scalar_one_or_none()
 
     msg = EmailMessage()
-    msg["From"] = account.address
+    # Отображаемое имя — настройка ЯЩИКА, а не автора: письма с `buh@` подписаны
+    # бухгалтерией, кто бы из сотрудников их ни отправлял.
+    msg["From"] = (f"{account.display_name} <{account.address}>"
+                   if account.display_name else account.address)
     msg["To"] = ", ".join(to)
     msg["Subject"] = subject
     msg["Date"] = formatdate(localtime=True)
@@ -58,7 +61,9 @@ async def send_message(db: AsyncSession, cid, *, account_id, to: list[str],
         # письмом, и нить порвётся на его стороне, даже если у нас она цела.
         msg["In-Reply-To"] = parent.message_id
         msg["References"] = parent.message_id
-    msg.set_content(body)
+    # Подпись ящика приклеивается к каждому письму: контрагент должен видеть, с кем
+    # разговаривает, а сотрудник — не набирать её руками каждый раз.
+    msg.set_content(body + (f"\n\n--\n{account.signature}" if account.signature else ""))
 
     host = account.smtp_host or os.environ.get("SMTP_HOST", "")
     port = account.smtp_port or int(os.environ.get("SMTP_PORT", "587"))
@@ -67,7 +72,8 @@ async def send_message(db: AsyncSession, cid, *, account_id, to: list[str],
 
     try:
         import aiosmtplib
-        password = os.environ.get(account.secret_env or "", "")
+        from app.services.mail_secrets import password_of
+        password = password_of(account)
         # Сертификат внутреннего релея самоподписанный и выписан не на имя
         # контейнера: проверять его бессмысленно — связь идёт внутри стека, а не
         # через интернет. Та же ситуация уже разобрана в services/email_service.
@@ -75,10 +81,15 @@ async def send_message(db: AsyncSession, cid, *, account_id, to: list[str],
             "hostname": host, "port": port, "timeout": 20,
             "tls_context": ssl._create_unverified_context(),
         }
-        if password and account.login:
-            kwargs.update({"username": account.login, "password": password,
-                           "start_tls": True})
-        else:
+        if account.smtp_security == "ssl":
+            kwargs["use_tls"] = True
+        elif account.smtp_security == "starttls":
+            kwargs["start_tls"] = True
+        # На релее без шифрования аутентификация не нужна и вредна: сервер её не
+        # ждёт и отвечает отказом, который человек читает как «неверный пароль».
+        if password and account.login and account.smtp_security != "none":
+            kwargs.update({"username": account.login, "password": password})
+        if account.smtp_security == "none":
             # Релей стека принимает почту без аутентификации; STARTTLS с ним не
             # поднимаем вовсе, иначе рукопожатие падает на его же сертификате.
             kwargs["start_tls"] = False

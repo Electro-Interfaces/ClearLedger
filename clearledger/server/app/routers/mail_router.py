@@ -20,7 +20,7 @@ from app.models import (
     Counterparty, CounterpartyEmail, MailAccount, MailAttachment, MailMessage,
     MailRule, MailThread, User,
 )
-from app.services import mail_intake, mail_send
+from app.services import mail_intake, mail_secrets, mail_send
 
 router = APIRouter(prefix="/mail", tags=["Почта пространства"])
 
@@ -33,10 +33,19 @@ class AccountIn(BaseModel):
     imap_host: str | None = None
     imap_port: int = 993
     imap_folder: str = "INBOX"
+    imap_security: str = "ssl"
     login: str | None = None
+    # Пароль вводит сотрудник; в базу он ложится зашифрованным ключом стека.
+    # Пустая строка означает «не менять» — иначе редактирование ящика ради смены
+    # подписи стирало бы пароль.
+    password: str | None = None
     secret_env: str | None = None
     smtp_host: str | None = None
     smtp_port: int = 587
+    smtp_security: str = "starttls"
+    display_name: str | None = None
+    signature: str | None = None
+    poll_interval_min: int = 15
     is_active: bool = True
 
 
@@ -45,12 +54,16 @@ def _account(a: MailAccount) -> dict[str, Any]:
         "id": str(a.id), "address": a.address, "title": a.title, "purpose": a.purpose,
         "mode": a.mode, "imapHost": a.imap_host, "imapPort": a.imap_port,
         "imapFolder": a.imap_folder, "login": a.login, "secretEnv": a.secret_env,
-        "smtpHost": a.smtp_host, "smtpPort": a.smtp_port, "isActive": a.is_active,
+        "smtpHost": a.smtp_host, "smtpPort": a.smtp_port,
+        "smtpSecurity": a.smtp_security, "imapSecurity": a.imap_security,
+        "displayName": a.display_name, "signature": a.signature,
+        "pollIntervalMin": a.poll_interval_min, "isActive": a.is_active,
+        # Пароль не отдаём никогда — только признак, что он задан.
+        "passwordSet": bool(a.password_enc),
         "lastUid": a.last_uid, "lastSyncAt": a.last_sync_at.isoformat() if a.last_sync_at else None,
         "lastError": a.last_error,
-        # Пароль не показываем и не возвращаем никогда — в базе его нет вовсе.
-        # Здесь только признак, что переменная окружения на месте: без него
-        # «ящик не отвечает» выясняется опросом, а не настройкой.
+        # Признак, что переменная окружения на месте (для ящиков, настроенных
+        # внедренцем): без него «ящик не отвечает» выясняется опросом, а не настройкой.
         "secretPresent": bool(a.secret_env and os.environ.get(a.secret_env)),
     }
 
@@ -76,7 +89,11 @@ async def create_account(
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     cid = await assert_company_member(company_id, current_user, db)
-    a = MailAccount(company_id=cid, **body.model_dump())
+    data = body.model_dump()
+    password = data.pop("password", None)
+    a = MailAccount(company_id=cid, **data)
+    if password:
+        a.password_enc = mail_secrets.encrypt(password)
     db.add(a)
     await db.commit()
     return _account(a)
@@ -95,8 +112,14 @@ async def update_account(
         MailAccount.company_id == cid, MailAccount.id == account_id))).scalar_one_or_none()
     if a is None:
         return {"error": "not_found"}
-    for k, v in body.model_dump().items():
+    data = body.model_dump()
+    password = data.pop("password", None)
+    for k, v in data.items():
         setattr(a, k, v)
+    # Пустое поле пароля — «оставить как было»: правка подписи не должна стирать
+    # доступ к ящику.
+    if password:
+        a.password_enc = mail_secrets.encrypt(password)
     await db.commit()
     return _account(a)
 
@@ -476,3 +499,23 @@ async def decide(
         m.status = status
     await db.commit()
     return {"updated": len(rows), "status": status}
+
+
+@router.post("/accounts/{account_id}/test")
+async def test_account(
+    account_id: str,
+    company_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Проверить настройки ящика: приём и отправка отдельно.
+
+    Сотрудник должен увидеть результат сразу — «сервер не принял пароль» здесь и
+    сейчас, а не пустая лента через час и догадки, что пошло не так.
+    """
+    cid = await assert_company_member(company_id, current_user, db)
+    a = (await db.execute(select(MailAccount).where(
+        MailAccount.company_id == cid, MailAccount.id == account_id))).scalar_one_or_none()
+    if a is None:
+        return {"error": "not_found"}
+    return await mail_intake.test_account(db, a)

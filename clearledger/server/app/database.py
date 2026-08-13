@@ -970,6 +970,24 @@ async def create_all() -> None:
             "ON intake_items(company_id, batch_id)",
             "CREATE INDEX IF NOT EXISTS idx_intake_items_fp "
             "ON intake_items(company_id, fingerprint)",
+            # Почтовый коннектор (docs/MAIL.md). Таблицы заводит create_all, но
+            # КОЛОНКИ в уже существующую таблицу он не добавляет — на стенде,
+            # поднятом до этой правки, опрос падал на `password_enc does not exist`.
+            #
+            # Настройка ящика сотрудником: пароль в базе под шифром (ключ — в
+            # окружении стека), режимы шифрования, имя и подпись отправителя,
+            # интервал опроса.
+            "ALTER TABLE mail_accounts ADD COLUMN IF NOT EXISTS password_enc TEXT",
+            "ALTER TABLE mail_accounts ADD COLUMN IF NOT EXISTS smtp_security VARCHAR(10) "
+            "NOT NULL DEFAULT 'starttls'",
+            "ALTER TABLE mail_accounts ADD COLUMN IF NOT EXISTS imap_security VARCHAR(10) "
+            "NOT NULL DEFAULT 'ssl'",
+            "ALTER TABLE mail_accounts ADD COLUMN IF NOT EXISTS display_name VARCHAR(200)",
+            "ALTER TABLE mail_accounts ADD COLUMN IF NOT EXISTS signature TEXT",
+            "ALTER TABLE mail_accounts ADD COLUMN IF NOT EXISTS poll_interval_min INTEGER "
+            "NOT NULL DEFAULT 15",
+            # Оригинал письма: разбор — наша интерпретация, спор решается исходником.
+            "ALTER TABLE mail_messages ADD COLUMN IF NOT EXISTS raw_eml BYTEA",
             # v0.9: индекс по target (обратный поиск). Уникальность маппингов —
             # частичные индексы в v1.9 (с учётом channel_id).
             "CREATE INDEX IF NOT EXISTS idx_reconcile_mappings_target ON reconcile_mappings(company_id, kind, target_ref)",

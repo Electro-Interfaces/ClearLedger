@@ -1816,9 +1816,24 @@ class MailAccount(Base):
     imap_port: Mapped[int] = mapped_column(Integer, nullable=False, default=993)
     imap_folder: Mapped[str] = mapped_column(String(100), nullable=False, default="INBOX")
     login: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    # Два способа задать пароль, и оба нужны:
+    #   secret_env      — имя переменной окружения стека (ставит внедренец);
+    #   password_enc    — сам пароль, зашифрованный ключом стека (вводит СОТРУДНИК).
+    # Без второго настроить ящик может только тот, у кого есть доступ к `.env` и
+    # право провижинить стек, — то есть почта компании зависит от нас, а не от неё.
     secret_env: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    password_enc: Mapped[str | None] = mapped_column(Text, nullable=True)
     smtp_host: Mapped[str | None] = mapped_column(String(255), nullable=True)
     smtp_port: Mapped[int] = mapped_column(Integer, nullable=False, default=587)
+    # Как шифруется канал: ssl (порт 465), starttls (587) или none (внутренний релей).
+    smtp_security: Mapped[str] = mapped_column(String(10), nullable=False, default="starttls")
+    imap_security: Mapped[str] = mapped_column(String(10), nullable=False, default="ssl")
+    # Имя в поле «От кого» и подпись — то, что видит контрагент. Настройка ящика, а
+    # не отправителя: письма от `buh@` подписаны бухгалтерией, кто бы их ни писал.
+    display_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    signature: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Каждые сколько минут забирать почту. 0 — только вручную кнопкой.
+    poll_interval_min: Mapped[int] = mapped_column(Integer, nullable=False, default=15)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     # Где остановились в прошлый раз. UIDVALIDITY обязателен: сервер вправе
     # перенумеровать ящик, и тогда старый UID указывает на чужое письмо.
@@ -1906,6 +1921,9 @@ class MailMessage(Base):
     # Заголовки целиком: проверки SPF/DKIM и разбор спорных случаев идут по ним.
     headers: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     has_attachments: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Письмо целиком, как пришло. Тело и заголовки разобраны в колонках выше, но
+    # спор «что именно было в письме» решается оригиналом, а не нашим разбором.
+    raw_eml: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
