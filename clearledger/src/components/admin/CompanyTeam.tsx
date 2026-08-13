@@ -18,7 +18,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter,
 } from '@/components/ui/dialog'
 import {
-  Mail, UserPlus, Trash2, Loader2, Send, RotateCw, X,
+  Mail, UserPlus, Trash2, Loader2, Send, X,
   KeyRound, Plus, Pencil, Copy, Share2, Users,
 } from 'lucide-react'
 import * as userService from '@/services/userService'
@@ -132,9 +132,22 @@ export function InvitationsCard({ companyId }: { companyId: string }) {
   const [linkFor, setLinkFor] = useState<invitationService.Invitation | null>(null)
   const resend = useMutation({
     mutationFn: (id: string) => invitationService.resendInvitation(id),
-    onSuccess: (inv) => {
+    // Ссылку сразу кладём в буфер: за ней сюда и приходят — переслать человеку
+    // мессенджером. Раньше её надо было доставать из диалога вторым кликом, а сам
+    // диалог открывался кнопкой «Отправить снова», по имени которой не догадаться,
+    // что это вообще единственный способ взять ссылку.
+    onSuccess: async (inv) => {
       setLinkFor(inv)
       qc.invalidateQueries({ queryKey: ['team-invites', companyId] })
+      if (inv.invite_url) {
+        try {
+          await navigator.clipboard.writeText(inv.invite_url)
+          toast.success('Ссылка скопирована — можно вставить в мессенджер')
+        } catch {
+          // Буфер закрыт политикой браузера — ссылка всё равно видна в диалоге.
+          toast.info('Ссылка готова — скопируйте её в открывшемся окне')
+        }
+      }
     },
     onError: (e) => toast.error(`Ошибка: ${(e as Error).message}`),
   })
@@ -155,8 +168,9 @@ export function InvitationsCard({ companyId }: { companyId: string }) {
       <CardHeader>
         <CardTitle className="flex items-center gap-2"><Mail className="h-5 w-5" /> Приглашения</CardTitle>
         <CardDescription>
-          Ожидают принятия. Если письмо не дошло — «Отправить снова»: выпустит
-          новую ссылку, её можно скопировать и передать мессенджером.
+          Ожидают принятия: человек попадёт в «Сотрудники», когда перейдёт по ссылке и
+          задаст пароль. «Скопировать ссылку» выпускает новую, кладёт её в буфер и
+          заодно отправляет письмо повторно — прежняя ссылка при этом перестаёт работать.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -187,15 +201,18 @@ export function InvitationsCard({ companyId }: { companyId: string }) {
                 <TableCell>
                   <div className="flex items-center justify-end gap-1">
                     {/* Явная кнопка, а не иконка: письмо теряется в спаме, и
-                        «отправить заново / взять ссылку» — самое частое действие
-                        в этой таблице. Прячась под пиктограммой, оно не находится. */}
+                        «взять ссылку и переслать» — самое частое действие в этой
+                        таблице. Прячась под пиктограммой, оно не находится.
+                        Названа по результату («Скопировать ссылку»), а не по
+                        механике («отправить снова»): письмо при этом тоже уходит
+                        повторно, но пришли сюда не за ним. */}
                     <Button variant="outline" size="sm" className="h-8"
-                      title="Выпустить новую ссылку: письмо уйдёт повторно, ссылку можно скопировать в мессенджер"
+                      title="Выпустить новую ссылку, скопировать её в буфер и заодно отправить письмо повторно"
                       disabled={resend.isPending} onClick={() => resend.mutate(i.id)}>
                       {resend.isPending && resend.variables === i.id
                         ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-                        : <RotateCw className="h-3.5 w-3.5 mr-1.5" />}
-                      Отправить снова
+                        : <Copy className="h-3.5 w-3.5 mr-1.5" />}
+                      Скопировать ссылку
                     </Button>
                     <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive"
                       title="Отозвать" disabled={revoke.isPending} onClick={() => revoke.mutate(i.id)}>
