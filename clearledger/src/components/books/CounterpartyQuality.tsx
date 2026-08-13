@@ -11,12 +11,14 @@
  * несведённые документы сводятся кнопкой прямо здесь. Дубли не сливаем — справочник
  * ведут в 1С, и слияние карточек это решение бухгалтера, а не витрины.
  */
+import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { AlertTriangle, CheckCircle2, Link2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
+import { cn } from '@/lib/utils'
 import { QueryError } from '@/components/common/QueryError'
 import { useCompany } from '@/contexts/CompanyContext'
 import {
@@ -26,9 +28,15 @@ import {
 const money = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 const num = new Intl.NumberFormat('ru-RU')
 
+/** Какой список показан. `null` — все подряд, как при открытии вкладки. */
+type QualityFocus = 'unlinked' | 'inn' | 'name' | 'noinn' | null
+
 export function CounterpartyQuality({ onOpen }: { onOpen?: (id: string) => void }) {
   const { companyId } = useCompany()
   const qc = useQueryClient()
+  // Плитка — не подпись, а вход в свой список: цифра без перехода заставляет
+  // искать нужную таблицу глазами ниже по экрану.
+  const [focus, setFocus] = useState<QualityFocus>(null)
   const q = useQuery({
     queryKey: ['books', 'cp-quality', companyId],
     queryFn: () => getCounterpartyQuality(companyId),
@@ -39,6 +47,8 @@ export function CounterpartyQuality({ onOpen }: { onOpen?: (id: string) => void 
   if (!q.data) return <div className="p-6 text-sm text-muted-foreground">Загрузка…</div>
   const d = q.data
   const unlinkedDocs = d.unlinkedDocs.reduce((s, u) => s + u.docs, 0)
+  // Без выбранной плитки показываем всё — вкладка открывается общим обзором.
+  const show = (key: Exclude<QualityFocus, null>) => focus === null || focus === key
 
   async function link(name: string, candidateId: string) {
     try {
@@ -56,19 +66,34 @@ export function CounterpartyQuality({ onOpen }: { onOpen?: (id: string) => void 
       <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
         <Tile label="Документы сведены" ok={d.docsLinked === d.docsWithName}
           value={`${num.format(d.docsLinked)} из ${num.format(d.docsWithName)}`}
-          hint={unlinkedDocs ? `${num.format(unlinkedDocs)} без карточки` : 'все с карточкой'} />
+          hint={unlinkedDocs ? `${num.format(unlinkedDocs)} без карточки` : 'все с карточкой'}
+          active={focus === 'unlinked'} count={d.unlinkedDocs.length}
+          onClick={() => setFocus((f) => (f === 'unlinked' ? null : 'unlinked'))} />
         <Tile label="Дубли по ИНН" ok={d.duplicatesByInn.length === 0}
           value={num.format(d.duplicatesByInn.length)}
-          hint="одно юрлицо двумя карточками" />
+          hint="одно юрлицо двумя карточками"
+          active={focus === 'inn'} count={d.duplicatesByInn.length}
+          onClick={() => setFocus((f) => (f === 'inn' ? null : 'inn'))} />
         <Tile label="Дубли по имени" ok={d.duplicatesByName.length === 0}
           value={num.format(d.duplicatesByName.length)}
-          hint="совпадают без кавычек и пробелов" />
+          hint="совпадают без кавычек и пробелов"
+          active={focus === 'name'} count={d.duplicatesByName.length}
+          onClick={() => setFocus((f) => (f === 'name' ? null : 'name'))} />
         <Tile label="Без ИНН" ok={d.withoutInn.length === 0}
           value={num.format(d.withoutInn.length)}
-          hint={`пустых карточек: ${num.format(d.emptyCards)}`} />
+          hint={`пустых карточек: ${num.format(d.emptyCards)}`}
+          active={focus === 'noinn'} count={d.withoutInn.length}
+          onClick={() => setFocus((f) => (f === 'noinn' ? null : 'noinn'))} />
       </div>
 
-      {d.unlinkedDocs.length > 0 && (
+      {focus && (
+        <button onClick={() => setFocus(null)}
+          className="text-[11px] text-muted-foreground hover:text-foreground underline decoration-dotted">
+          показать все проверки
+        </button>
+      )}
+
+      {show('unlinked') && d.unlinkedDocs.length > 0 && (
         <Section title="Документы без карточки контрагента"
           note="Имя в документе написано иначе или ИНН не приехал. Кандидат найден по ИНН
                 или по имени без кавычек — сведение трогает только документы без ссылки.">
@@ -102,7 +127,7 @@ export function CounterpartyQuality({ onOpen }: { onOpen?: (id: string) => void 
         </Section>
       )}
 
-      {d.duplicatesByInn.length > 0 && (
+      {show('inn') && d.duplicatesByInn.length > 0 && (
         <Section title="Дубли по ИНН"
           note="Заведомо одно юрлицо: обороты и долг делятся между карточками, и ни одна
                 не показывает полной картины. Слияние — в 1С, здесь только видно, кого сливать.">
@@ -133,7 +158,7 @@ export function CounterpartyQuality({ onOpen }: { onOpen?: (id: string) => void 
         </Section>
       )}
 
-      {d.duplicatesByName.length > 0 && (
+      {show('name') && d.duplicatesByName.length > 0 && (
         <Section title="Дубли по имени"
           note="Совпадают после снятия кавычек и лишних пробелов. Бывает, что у одной
                 карточки ИНН есть, а у другой нет — тогда документы делятся по написанию.">
@@ -163,7 +188,7 @@ export function CounterpartyQuality({ onOpen }: { onOpen?: (id: string) => void 
         </Section>
       )}
 
-      {d.withoutInn.length > 0 && (
+      {show('noinn') && d.withoutInn.length > 0 && (
         <Section title="Карточки без ИНН"
           note="Сводятся с документами только по имени, поэтому легко разъезжаются.
                 Показаны те, у кого есть документы, — по ним потеря заметнее всего.">
@@ -190,11 +215,20 @@ export function CounterpartyQuality({ onOpen }: { onOpen?: (id: string) => void 
   )
 }
 
-function Tile({ label, value, hint, ok }: {
+function Tile({ label, value, hint, ok, active, count, onClick }: {
   label: string; value: string; hint?: string; ok?: boolean
+  active?: boolean; count?: number; onClick?: () => void
 }) {
+  // Пустую проверку не по чему открывать: нажатие показало бы пустоту, поэтому
+  // такая плитка остаётся подписью, а не кнопкой.
+  const clickable = !!onClick && (count ?? 0) > 0
   return (
-    <Card>
+    <Card
+      onClick={clickable ? onClick : undefined}
+      className={cn(
+        clickable && 'cursor-pointer transition-colors hover:border-primary/50',
+        active && 'border-primary bg-primary/5',
+      )}>
       <CardContent className="p-3">
         <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-muted-foreground">
           {ok
@@ -204,6 +238,11 @@ function Tile({ label, value, hint, ok }: {
         </div>
         <div className="mt-1 text-lg font-semibold tabular-nums">{value}</div>
         {hint && <div className="text-[11px] text-muted-foreground">{hint}</div>}
+        {clickable && (
+          <div className="mt-1 text-[10px] text-primary/80">
+            {active ? 'показан список ↓' : 'открыть список'}
+          </div>
+        )}
       </CardContent>
     </Card>
   )
