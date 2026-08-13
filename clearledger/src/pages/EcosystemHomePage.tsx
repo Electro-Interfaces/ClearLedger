@@ -19,6 +19,7 @@ import {
   LifeBuoy, ClipboardList, ListChecks, Video, FileText, MessagesSquare,
   ShieldCheck, BookOpen, HardHat, Gauge, BarChart3, Wallet, Database, MessageCircle,
   Building2, ShoppingCart, Megaphone, Network, Calculator, Stethoscope, Activity,
+  Briefcase,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { CompanySelector } from '@/components/company/CompanySelector'
@@ -65,6 +66,9 @@ const ICONS: Record<string, typeof FileText> = {
   'network': Network,
   'calculator': Calculator,
   'stethoscope': Stethoscope,
+  // Рабочие места компании без объектов: «Услуги». «Бухгалтерия» и «Продажи» берут
+  // book-open и bar-chart-3 — они выше. Незнакомое имя молча даёт LayoutGrid.
+  'briefcase': Briefcase,
 }
 
 interface TileProps {

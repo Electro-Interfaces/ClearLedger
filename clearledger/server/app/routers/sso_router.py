@@ -43,7 +43,11 @@ INTERNAL_ROUTES = {"admin": "/admin", "ledger": "/workspace", "chat": "/messages
                    # Центра управления и карточки объекта, продуктом она больше не числится.
                    "plan": "/tasks",
                    # Продукты в подключении: маршрут есть, за ним заставка.
-                   "netlink": "/netlink", "accounting": "/accounting", "diag": "/diagnostics"}
+                   "netlink": "/netlink", "accounting": "/accounting", "diag": "/diagnostics",
+                   # Рабочие места компании без объектов (профиль `office`): бухгалтерия-
+                   # эталон и два её разреза. Маршруты обязаны совпадать с фронтовой картой
+                   # `config/spaceProducts.ts` — это сверяет тест.
+                   "books": "/books", "trade": "/trade", "svc": "/services"}
 # Слой рабочего стола: управление пространством и служебная кухня стоят отдельно от
 # прикладных продуктов. «Данные» — служебное: ошибка там ломает все продукты сразу.
 INTERNAL_LAYERS = {"admin": "admin", "data": "admin", "info": "admin", "connect": "admin",
@@ -51,11 +55,13 @@ INTERNAL_LAYERS = {"admin": "admin", "data": "admin", "info": "admin", "connect"
                    "pulse": "app",
                    "ledger": "app", "projects": "app", "ops": "app",
                    "sales": "app", "corp": "app", "shop": "app", "marketing": "app",
-                   "finance": "app", "netlink": "app", "accounting": "app", "diag": "admin"}
+                   "finance": "app", "netlink": "app", "accounting": "app", "diag": "admin",
+                   "books": "app", "trade": "app", "svc": "app"}
 # Порядок в списке: сначала управление, потом приложения, сервисы — в конце.
 INTERNAL_SORT = {"admin": 5, "pulse": 8, "ledger": 10, "projects": 12, "ops": 14, "sales": 16,
                  "corp": 17, "shop": 18, "marketing": 19, "support": 20, "netlink": 22,
                  "finance": 25, "accounting": 26,
+                 "books": 20, "trade": 21, "svc": 22,
                  "chat": 30, "plan": 40, "conf": 50, "connect": 59, "data": 60, "diag": 61, "info": 62}
 
 
