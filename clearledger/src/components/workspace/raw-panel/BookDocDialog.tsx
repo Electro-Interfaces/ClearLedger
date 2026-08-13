@@ -16,6 +16,7 @@ import { cn } from '@/lib/utils'
 import { getDocCard, type DocCard, type DocLine } from '@/services/booksService'
 
 const money = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+const qty = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 3 })
 
 function ru(date?: string | null) {
   return date ? date.slice(0, 10).split('-').reverse().join('.') : '—'
@@ -30,12 +31,26 @@ const LINE_LABEL: Record<string, string> = {
   article: 'Статья', warehouse: 'Склад', code: 'Код',
 }
 
+/**
+ * Порядок колонок как в накладной: что продали → сколько → почём → на сколько.
+ * Ключи приходят в порядке JSON, и без этого первой колонкой вставало количество,
+ * а номенклатура — пятой.
+ */
+const LINE_ORDER = ['name', 'item', 'nomenclature', 'content', 'code', 'article', 'kind',
+  'unit', 'warehouse', 'account', 'qty', 'quantity', 'price', 'amount_raw', 'vat_rate',
+  'vat', 'amount', 'vat_included']
+
 const NUMERIC = new Set(['qty', 'quantity', 'price', 'amount', 'amount_raw', 'vat'])
+const KIND_LABEL: Record<string, string> = { goods: 'товар', service: 'услуга' }
 
 function lineValue(key: string, v: unknown): string {
   if (v === null || v === undefined || v === '') return '—'
   if (typeof v === 'boolean') return v ? 'да' : 'нет'
-  if (typeof v === 'number') return NUMERIC.has(key) ? money.format(v) : String(v)
+  if (key === 'kind' && typeof v === 'string') return KIND_LABEL[v] ?? v
+  if (typeof v === 'number') {
+    if (key === 'qty' || key === 'quantity') return qty.format(v)
+    return NUMERIC.has(key) ? money.format(v) : String(v)
+  }
   return String(v)
 }
 
@@ -74,7 +89,10 @@ export function BookDocDialog({ companyId, docId, onClose }: {
 
   return (
     <Dialog open={!!docId} onOpenChange={(v) => { if (!v) onClose() }}>
-      <DialogContent className="max-w-4xl max-h-[85vh] overflow-y-auto">
+      {/* Ширина по экрану, а не фиксированные 896px: у состава до десятка колонок,
+          и на широком мониторе документ прокручивался вбок при пустых полях справа.
+          Высота почти во весь экран — прокрутка внутри, шапка документа остаётся. */}
+      <DialogContent className="max-w-[min(1500px,94vw)] max-h-[92vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
             {q.data ? `${q.data.label} № ${q.data.number || 'б/н'} от ${ru(q.data.date)}` : 'Документ'}
@@ -90,10 +108,15 @@ export function BookDocDialog({ companyId, docId, onClose }: {
 
 function DocBody({ d }: { d: DocCard }) {
   // Колонки состава — объединение ключей всех строк: у видов документов они разные.
+  // Известные раскладываем как в накладной, незнакомые уходят в конец.
   const keys: string[] = []
   for (const line of d.lines as DocLine[]) {
     for (const k of Object.keys(line)) if (!keys.includes(k)) keys.push(k)
   }
+  keys.sort((a, b) => {
+    const ia = LINE_ORDER.indexOf(a), ib = LINE_ORDER.indexOf(b)
+    return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib)
+  })
   const isInvoice = d.type === 'invoice_out'
   const debt = d.amount - d.paid
 
@@ -132,7 +155,7 @@ function DocBody({ d }: { d: DocCard }) {
                 <tr className="border-b">
                   <th className="px-3 py-2 text-left font-normal">№</th>
                   {keys.map((k) => (
-                    <th key={k} className={cn('px-3 py-2 font-normal',
+                    <th key={k} className={cn('px-3 py-2 font-normal whitespace-nowrap',
                       NUMERIC.has(k) ? 'text-right' : 'text-left')}>{LINE_LABEL[k] ?? k}</th>
                   ))}
                 </tr>
@@ -142,8 +165,11 @@ function DocBody({ d }: { d: DocCard }) {
                   <tr key={i} className="border-b last:border-0 hover:bg-muted/40">
                     <td className="px-3 py-1.5 tabular-nums text-muted-foreground">{i + 1}</td>
                     {keys.map((k) => (
-                      <td key={k} className={cn('px-3 py-1.5',
-                        NUMERIC.has(k) ? 'text-right tabular-nums' : 'max-w-[280px] truncate')}
+                      // Наименование переносим, а не обрезаем: в нём марка и типоразмер,
+                      // по которым строку и опознают («Плиты из пеностекла Неопорм D 130…»).
+                      <td key={k} className={cn('px-3 py-1.5 align-top',
+                        NUMERIC.has(k) ? 'text-right tabular-nums whitespace-nowrap'
+                          : 'max-w-[420px] break-words')}
                         title={String(line[k] ?? '')}>
                         {lineValue(k, line[k])}
                       </td>
