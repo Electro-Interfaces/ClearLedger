@@ -868,15 +868,20 @@ async def model(
         .where(GlEntry.company_id == cid))).one()
 
     layers = [
-        {"key": "l1", "code": "L1 RAW", "title": "Выгрузка бухгалтерии",
-         "desc": "файл .dt как есть", "records": 1, "unit": "выгрузка", "tone": "raw"},
-        {"key": "l2", "code": "L2 CLEAN", "title": "Нормализованный слой",
+        # L1 у офиса ПОКА НЕ МАТЕРИАЛИЗОВАН: данные залиты скриптом снаружи, записи о
+        # приёме (SourceFile / RawBatchRecord) в базе нет. Рисовать здесь «1 выгрузку»
+        # значило бы показывать то, чего нет: сетевые в такой ситуации честно ставят
+        # `status: direct` (см. analytics_service.charge_model).
+        {"key": "l1", "code": "L1 · RAW", "title": "Приём выгрузки",
+         "desc": "файл .dt разобран вне продукта — записи о приёме в базе нет",
+         "records": 0, "unit": "выгрузок", "tone": "raw", "status": "direct"},
+        {"key": "l2", "code": "L2 · CLEAN", "title": "Нормализованный слой",
          "desc": "проводки, документы, справочники",
          "records": entries + docs + accounts + refs, "unit": "записей", "tone": "clean"},
-        {"key": "l3", "code": "L3 ВИТРИНЫ", "title": "Обороты и разрезы",
+        {"key": "l3", "code": "L3 · EXPORT", "title": "Обороты и разрезы",
          "desc": "оборотка, продажи, услуги, периоды",
          "records": None, "unit": "", "tone": "export"},
-        {"key": "l4", "code": "L4 ЭТАЛОН", "title": "Закрытые периоды",
+        {"key": "l4", "code": "L4 · 1C_REF", "title": "Закрытые периоды",
          "desc": "месяц, который бухгалтерия больше не меняет",
          "records": closed, "unit": "месяцев", "tone": "ref"},
     ]
@@ -925,6 +930,17 @@ async def model(
         ],
     }
 
+    # Доля проводок, чей счёт дебета реально нашёлся в плане счетов.
+    known = (await db.execute(
+        select(func.count()).select_from(GlEntry)
+        .where(GlEntry.company_id == cid, GlEntry.account_dt.is_not(None),
+               GlEntry.account_dt.in_(select(GlAccount.code)
+                                      .where(GlAccount.company_id == cid))))).scalar_one()
+    with_dt = (await db.execute(
+        select(func.count()).select_from(GlEntry)
+        .where(GlEntry.company_id == cid, GlEntry.account_dt.is_not(None)))).scalar_one()
+    account_coverage = round(known * 100 / with_dt, 1) if with_dt else 0.0
+
     # Качество полей: заполненность там, где пустое значение осмысленно проверять.
     async def fill(model_cls, column, label, role):
         total_n = (await db.execute(select(func.count()).select_from(model_cls)
@@ -946,8 +962,10 @@ async def model(
         # «Канонизация» здесь — сведение к справочнику: счёт к плану счетов,
         # контрагент к карточке по ИНН, номенклатура к своему справочнику.
         "canonicalization": [
+            # Покрытие СЧИТАЕТСЯ, а не объявляется: раньше здесь стояло 100 % константой,
+            # и проверка не заметила бы счёта, которого нет в плане счетов.
             {"name": "Счёт → план счетов", "from": "код счёта", "to": "gl_accounts",
-             "members": accounts, "coverage_pct": 100.0},
+             "members": accounts, "coverage_pct": account_coverage},
             {"name": "Контрагент → карточка", "from": "ИНН документа", "to": "counterparties",
              "members": (await db.execute(select(func.count()).select_from(Counterparty)
                                           .where(Counterparty.company_id == cid))).scalar_one(),
@@ -957,7 +975,7 @@ async def model(
         ],
     }
 
-    return {"rows": entries, "l1_files": 1, "layers": layers, "fact": fact,
+    return {"rows": entries, "l1_files": 0, "layers": layers, "fact": fact,
             "dimensions": dimensions, "quality": quality}
 
 

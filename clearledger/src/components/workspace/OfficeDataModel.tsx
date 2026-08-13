@@ -114,8 +114,15 @@ export function OfficeDataModel() {
                   <div className="text-sm font-medium">{l.title}</div>
                   <div className="text-[11px] text-muted-foreground">{l.desc}</div>
                   <div className="mt-1 text-lg font-semibold tabular-nums">
-                    {l.records === null ? '—' : nf.format(l.records)}
-                    {l.unit && <span className="ml-1 text-[11px] font-normal text-muted-foreground">{l.unit}</span>}
+                    {/* `status: direct` — слой не материализован, данные приняты
+                        прямым импортом. Показывать здесь ноль или единицу значило бы
+                        рисовать приём, которого в базе нет. */}
+                    {l.status === 'direct'
+                      ? <span className="text-sm font-normal text-muted-foreground">прямой импорт</span>
+                      : <>
+                          {l.records === null ? '—' : nf.format(l.records)}
+                          {l.unit && <span className="ml-1 text-[11px] font-normal text-muted-foreground">{l.unit}</span>}
+                        </>}
                   </div>
                 </div>
                 {i < layers.length - 1 && (

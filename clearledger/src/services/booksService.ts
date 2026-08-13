@@ -234,6 +234,8 @@ export const getQuality = (companyId: string) =>
 export interface ModelLayer {
   key: string; code: string; title: string; desc: string
   records: number | null; unit: string; tone: 'raw' | 'clean' | 'export' | 'ref'
+  /** `direct` — слой не материализован, данные приняты прямым импортом. */
+  status?: string
 }
 export interface ModelDimension {
   key: string; label: string; field: string; cardinality: number
