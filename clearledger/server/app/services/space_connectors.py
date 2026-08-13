@@ -243,7 +243,39 @@ async def list_connectors(db: AsyncSession, company_id: uuid.UUID) -> dict[str, 
     items.append(_service_entry(
         "chat", "Чат (Matrix)", "Переписка и темы пространства", settings.chat_enabled))
     items.append(_service_entry(
-        "mail", "Почта (SMTP)", "Письма приглашений и уведомлений", bool(settings.smtp_host)))
+        "mail", "Почта платформы (SMTP)", "Служебные письма: приглашения и уведомления",
+        bool(settings.smtp_host)))
+
+    # Почтовые ящики КОМПАНИИ — не то же, что служебный SMTP платформы выше: там
+    # уходят приглашения, здесь идёт деловая переписка с контрагентами. Пока ящики
+    # были видны только в «Загрузке», администратор не находил их там, где ищет все
+    # подключения пространства, и считал, что почта в контейнере одна.
+    from app.models import MailAccount
+    accounts = (await db.execute(
+        select(MailAccount).where(MailAccount.company_id == company_id)
+        .order_by(MailAccount.address))).scalars().all()
+    for a in accounts:
+        ready = bool(a.imap_host) and bool(a.password_enc or a.secret_env)
+        items.append({
+            "key": f"core:mail:{a.id}",
+            "app": "core", "app_name": "Ядро",
+            "provider": "mailbox",
+            "kind": "Почтовый ящик",
+            "label": f"{a.title or 'Почта'} · {a.address}",
+            "brings": a.purpose or "Деловая переписка компании: письма контрагентов, "
+                                   "вложения-документы, ответы из пространства",
+            "direction": "in" if a.mode == "in" else ("out" if a.mode == "out" else "both"),
+            # Ящик мы опрашиваем сами, а письма приходят когда угодно — обе стороны.
+            "initiator": "both",
+            "status": ("error" if a.last_error else "ok" if ready else "setup"),
+            "enabled": a.is_active,
+            "last_sync_at": a.last_sync_at.isoformat() if a.last_sync_at else None,
+            "last_error": a.last_error,
+            "records": None,
+            "files": 0,
+            # Настройка живёт там, где ящик заводят: в разделе приёма данных.
+            "settings_route": "/intake",
+        })
 
     # ВХОДЯЩИЕ: кто подключён к нам. До В1 этот класс не показывался нигде —
     # администратор не видел, что внешние системы толкают данные в пространство.
