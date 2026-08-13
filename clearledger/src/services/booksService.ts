@@ -105,3 +105,79 @@ export const getSlice = (
 ) =>
   get<SliceData>(`/api/books/${kind}?company_id=${companyId}&top=${opts.top ?? 15}`
     + periodQuery(opts))
+
+export interface BalanceRow {
+  code: string
+  name: string
+  kind: string | null
+  offBalance: boolean
+  parent: string | null
+  level: number
+  hasChildren: boolean
+  saldoInDt: number
+  saldoInKt: number
+  turnoverDt: number
+  turnoverKt: number
+  saldoOutDt: number
+  saldoOutKt: number
+  entries: number
+}
+
+export interface BalanceTotals {
+  saldoInDt: number; saldoInKt: number
+  turnoverDt: number; turnoverKt: number
+  saldoOutDt: number; saldoOutKt: number
+}
+
+export interface AccountCard {
+  code: string
+  name: string
+  kind: string | null
+  saldoInDt: number; saldoInKt: number
+  turnoverDt: number; turnoverKt: number
+  saldoOutDt: number; saldoOutKt: number
+  total: number
+  shown: number
+  rows: {
+    date: string; docKind: string | null; docTitle: string | null
+    account: string | null; corr: string | null
+    debit: number; credit: number; saldo: number; content: string | null
+  }[]
+  corr: { code: string; debit: number; credit: number; entries: number }[]
+  months: { month: string; debit: number; credit: number }[]
+}
+
+/** ОСВ за период: сальдо на начало, обороты, сальдо на конец (с иерархией счетов). */
+export const getBalance = (companyId: string, period?: PeriodOpts) =>
+  get<{ rows: BalanceRow[]; totals: BalanceTotals; offBalanceTotals: BalanceTotals }>(
+    `/api/books/balance?company_id=${companyId}` + periodQuery(period))
+
+/** Карточка счёта: проводки с корреспонденцией и сальдо нарастающим итогом. */
+export const getAccountCard = (companyId: string, code: string, period?: PeriodOpts) =>
+  get<AccountCard>(`/api/books/account?company_id=${companyId}`
+    + `&code=${encodeURIComponent(code)}` + periodQuery(period))
+
+export interface SourceInfo {
+  kind: string
+  name: string
+  loadedAt: string | null
+  periodFrom: string | null
+  periodTo: string | null
+  datasets: { key: string; label: string; records: number }[]
+}
+
+export interface QualityCheck {
+  key: string
+  label: string
+  status: 'ok' | 'warn' | 'error' | 'info'
+  value: string | number
+  hint: string
+  detail?: string | null
+}
+
+export const getSources = (companyId: string) =>
+  get<{ sources: SourceInfo[] }>(`/api/books/sources?company_id=${companyId}`)
+
+export const getQuality = (companyId: string) =>
+  get<{ checks: QualityCheck[]; errors: number; warnings: number; ok: number }>(
+    `/api/books/quality?company_id=${companyId}`)
