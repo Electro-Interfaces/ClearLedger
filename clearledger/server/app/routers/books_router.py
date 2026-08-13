@@ -807,9 +807,11 @@ async def quality(
     # Считаем только те виды, у которых контрагент есть по природе: у регламентной
     # операции закрытия и операции вручную его не бывает вовсе, и без этого условия
     # проверка показывала полтысячи «нарушений», которых нет.
-    WITH_COUNTERPARTY = ("sale", "purchase", "invoice_out",
-                         "vat_invoice_out", "vat_invoice_in", "invoice_in",
-                         "act_recon")
+    # Набор тот же, что у «Базы пространства» (space_data_model): один показатель на
+    # двух экранах обязан считаться по одному правилу, иначе продукт спорит сам с собой.
+    WITH_COUNTERPARTY = ("sale", "purchase", "invoice_out", "invoice_in",
+                         "vat_invoice_out", "vat_invoice_in", "act_recon",
+                         "bank_in", "bank_out")
     no_inn = (await db.execute(
         select(func.count()).select_from(AccountingDoc)
         .where(AccountingDoc.company_id == cid,
