@@ -12,6 +12,7 @@
 """
 from __future__ import annotations
 
+from datetime import date
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
@@ -148,6 +149,16 @@ def _saldo_side(net: float) -> tuple[float, float]:
     return (net, 0.0) if net > 0 else (0.0, -net)
 
 
+def _day(iso: str | None) -> date | None:
+    """ISO-строка периода → `date`.
+
+    ⚠ `gl_entries.entry_date` — настоящая ДАТА, в отличие от `accounting_docs.date`,
+    где дата хранится строкой. Сравнение колонки-даты со строкой Postgres не делает
+    вовсе: «operator does not exist: date < character varying».
+    """
+    return date.fromisoformat(iso) if iso else None
+
+
 @router.get("/balance")
 async def balance(
     company_id: str,
@@ -159,6 +170,7 @@ async def balance(
 ) -> dict[str, Any]:
     """ОСВ: сальдо на начало, обороты за период, сальдо на конец — с иерархией."""
     cid = await assert_company_member(company_id, current_user, db)
+    day_from, day_to = _day(date_from), _day(date_to)
 
     accounts = {a.code: a for a in (await db.execute(
         select(GlAccount).where(GlAccount.company_id == cid))).scalars()}
@@ -174,10 +186,10 @@ async def balance(
     for field, key_before, key_period in (
         (GlEntry.account_dt, "inDt", "dt"), (GlEntry.account_kt, "inKt", "kt"),
     ):
-        if date_from:
+        if day_from:
             q = (select(field, func.sum(GlEntry.amount))
                  .where(GlEntry.company_id == cid, field.is_not(None),
-                        GlEntry.entry_date < date_from)
+                        GlEntry.entry_date < day_from)
                  .group_by(field))
             for code, amount in (await db.execute(q)).all():
                 cell(code)[key_before] = _num(amount)
@@ -185,10 +197,10 @@ async def balance(
         q = (select(field, func.sum(GlEntry.amount), func.count())
              .where(GlEntry.company_id == cid, field.is_not(None))
              .group_by(field))
-        if date_from:
-            q = q.where(GlEntry.entry_date >= date_from)
-        if date_to:
-            q = q.where(GlEntry.entry_date <= date_to)
+        if day_from:
+            q = q.where(GlEntry.entry_date >= day_from)
+        if day_to:
+            q = q.where(GlEntry.entry_date <= day_to)
         for code, amount, n in (await db.execute(q)).all():
             c = cell(code)
             c[key_period] = _num(amount)
@@ -287,17 +299,18 @@ async def account_card(
             select(func.coalesce(func.sum(GlEntry.amount), 0))
             .where(GlEntry.company_id == cid, is_own(field), *conds))).scalar_one())
 
-    before = ([GlEntry.entry_date < date_from] if date_from else None)
+    day_from, day_to = _day(date_from), _day(date_to)
+    before = ([GlEntry.entry_date < day_from] if day_from else None)
     opening = 0.0
     if before:
         opening = (await side_sum(GlEntry.account_dt, *before)
                    - await side_sum(GlEntry.account_kt, *before))
 
     period = []
-    if date_from:
-        period.append(GlEntry.entry_date >= date_from)
-    if date_to:
-        period.append(GlEntry.entry_date <= date_to)
+    if day_from:
+        period.append(GlEntry.entry_date >= day_from)
+    if day_to:
+        period.append(GlEntry.entry_date <= day_to)
     turn_dt = await side_sum(GlEntry.account_dt, *period)
     turn_kt = await side_sum(GlEntry.account_kt, *period)
 

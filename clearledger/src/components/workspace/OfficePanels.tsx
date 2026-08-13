@@ -17,6 +17,7 @@
  */
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { ChevronDown, ChevronRight } from 'lucide-react'
 
 import { useCompany } from '@/contexts/CompanyContext'
 import { useFilters } from '@/contexts/FilterContext'
@@ -24,11 +25,12 @@ import { useWorkspace, useWorkspaceSubView } from '@/contexts/WorkspaceContext'
 import { QueryError } from '@/components/common/QueryError'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Card, CardContent } from '@/components/ui/card'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { MetricTile } from '@/components/ui/metric-tile'
 import { cn } from '@/lib/utils'
 import {
-  getBooksOverview, getDocs, getEntries, getPeriods, getSlice, getTurnover,
-  type BooksOverview, type SliceData,
+  getAccountCard, getBalance, getBooksOverview, getDocs, getEntries, getPeriods, getSlice,
+  type BalanceTotals, type BooksOverview, type SliceData,
 } from '@/services/booksService'
 import { useWorkspaceSections } from './workspaceSections'
 
@@ -294,7 +296,7 @@ export function BooksPanel() {
     <div className="h-full flex flex-col">
       <ScrollArea className="flex-1 min-h-0">
         {sub === 'bk_summary' && <BooksSummary companyId={companyId} />}
-        {sub === 'bk_turnover' && <BooksTurnover companyId={companyId} />}
+        {sub === 'bk_turnover' && <BooksBalance companyId={companyId} />}
         {sub === 'bk_entries' && <BooksEntries companyId={companyId} />}
         {sub === 'bk_docs' && <BooksDocs companyId={companyId} />}
         {sub === 'bk_periods' && <BooksPeriods companyId={companyId} />}
@@ -369,38 +371,232 @@ function Summary({ data }: { data: BooksOverview }) {
   )
 }
 
-function BooksTurnover({ companyId }: { companyId: string }) {
+/**
+ * Оборотно-сальдовая ведомость — главный экран бухгалтера.
+ *
+ * Обороты без сальдо отвечают только на «сколько прошло через счёт», а проверка
+ * любого месяца начинается с вопроса «сколько на нём лежало и сколько осталось».
+ * Отсюда шесть колонок: сальдо на начало · обороты · сальдо на конец.
+ *
+ * Дерево свёрнуто до счетов первого уровня: бухгалтер читает ведомость сверху
+ * («что на 90-м»), а субсчета разворачивает там, где нужно. Клик по строке
+ * открывает карточку счёта — тот же путь, что в 1С.
+ */
+function BooksBalance({ companyId }: { companyId: string }) {
+  const { period } = useFilters()
+  const [open, setOpen] = useState<Set<string>>(new Set())
+  const [card, setCard] = useState<string | null>(null)
   const q = useQuery({
-    queryKey: ['books', 'turnover', companyId],
-    queryFn: () => getTurnover(companyId),
+    queryKey: ['books', 'balance', companyId, period.from, period.to],
+    queryFn: () => getBalance(companyId, { from: period.from, to: period.to }),
   })
   if (q.isError) return <div className="p-4"><QueryError onRetry={() => q.refetch()} /></div>
   if (!q.data) return <Loading />
 
+  const toggle = (code: string) => setOpen((prev) => {
+    const next = new Set(prev)
+    next.has(code) ? next.delete(code) : next.add(code)
+    return next
+  })
+  // Строка видна, если раскрыты ВСЕ её предки: иначе разворот верхнего уровня
+  // вываливал бы сразу и субсчета третьего.
+  const visible = q.data.rows.filter((r) => {
+    let p = r.parent
+    while (p) {
+      if (!open.has(p)) return false
+      p = q.data!.rows.find((x) => x.code === p)?.parent ?? null
+    }
+    return true
+  })
+  const balance = visible.filter((r) => !r.offBalance)
+  const off = visible.filter((r) => r.offBalance)
+
+  const row = (r: typeof balance[number]) => (
+    <tr key={r.code} className="border-b last:border-0 hover:bg-muted/40">
+      <td className="px-3 py-1.5 tabular-nums" style={{ paddingLeft: 12 + r.level * 16 }}>
+        <span className="inline-flex items-center gap-1">
+          {r.hasChildren ? (
+            <button onClick={() => toggle(r.code)} className="text-muted-foreground hover:text-foreground"
+              title={open.has(r.code) ? 'Свернуть субсчета' : 'Развернуть субсчета'}>
+              {open.has(r.code) ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
+            </button>
+          ) : <span className="inline-block w-3.5" />}
+          <button onClick={() => setCard(r.code)}
+            className={cn('hover:text-primary hover:underline', !r.parent && 'font-semibold')}>
+            {r.code}
+          </button>
+        </span>
+      </td>
+      <td className="px-3 py-1.5 text-muted-foreground max-w-[380px] truncate" title={r.name}>
+        {r.name}
+      </td>
+      <Money v={r.saldoInDt} /><Money v={r.saldoInKt} />
+      <Money v={r.turnoverDt} /><Money v={r.turnoverKt} />
+      <Money v={r.saldoOutDt} strong /><Money v={r.saldoOutKt} strong />
+    </tr>
+  )
+
+  const totals = q.data.totals
   return (
-    <div className="p-4">
-      <TableCard head={<>
-        <Th>Счёт</Th><Th>Наименование</Th>
-        <Th right>Оборот по дебету</Th><Th right>Оборот по кредиту</Th><Th right>Проводок</Th>
-      </>}>
-        {q.data.rows.map((r) => (
-          <tr key={r.code} className="border-b last:border-0 hover:bg-muted/40">
-            <td className="px-3 py-1.5 tabular-nums font-medium">{r.code}</td>
-            <td className="px-3 py-1.5 text-muted-foreground">{r.name}</td>
-            <td className="px-3 py-1.5 text-right tabular-nums">
-              {r.debit ? money.format(r.debit) : '—'}
-            </td>
-            <td className="px-3 py-1.5 text-right tabular-nums">
-              {r.credit ? money.format(r.credit) : '—'}
-            </td>
-            <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
-              {num.format(r.entries)}
-            </td>
-          </tr>
-        ))}
-      </TableCard>
+    <div className="p-4 space-y-3">
+      <Card>
+        <CardContent className="p-0 overflow-x-auto">
+          <div className="px-3 py-2 text-[11px] text-muted-foreground border-b">
+            Сальдо считается нарастающим итогом от первой проводки: входящих остатков
+            в выгрузке нет, зато регистр полон с первого дня. Сальдо свёрнутое —
+            развёрнутое по 60, 62 и 76 требует субконто.
+          </div>
+          <table className="w-full text-sm">
+            <thead className="text-[11px] uppercase tracking-wider text-muted-foreground">
+              <tr className="border-b">
+                <th className="text-left font-normal px-3 py-2" rowSpan={2}>Счёт</th>
+                <th className="text-left font-normal px-3 py-2" rowSpan={2}>Наименование</th>
+                <th className="text-center font-normal px-3 py-1 border-l" colSpan={2}>Сальдо на начало</th>
+                <th className="text-center font-normal px-3 py-1 border-l" colSpan={2}>Обороты за период</th>
+                <th className="text-center font-normal px-3 py-1 border-l" colSpan={2}>Сальдо на конец</th>
+              </tr>
+              <tr className="border-b">
+                <th className="text-right font-normal px-3 py-1 border-l">Дт</th>
+                <th className="text-right font-normal px-3 py-1">Кт</th>
+                <th className="text-right font-normal px-3 py-1 border-l">Дт</th>
+                <th className="text-right font-normal px-3 py-1">Кт</th>
+                <th className="text-right font-normal px-3 py-1 border-l">Дт</th>
+                <th className="text-right font-normal px-3 py-1">Кт</th>
+              </tr>
+            </thead>
+            <tbody>
+              {balance.map(row)}
+              <tr className="border-t-2 bg-muted/30 font-medium">
+                <td className="px-3 py-2" colSpan={2}>Итого</td>
+                <Money v={totals.saldoInDt} strong /><Money v={totals.saldoInKt} strong />
+                <Money v={totals.turnoverDt} strong /><Money v={totals.turnoverKt} strong />
+                <Money v={totals.saldoOutDt} strong /><Money v={totals.saldoOutKt} strong />
+              </tr>
+              {off.length > 0 && (
+                <>
+                  <tr className="border-t bg-muted/10">
+                    <td className="px-3 py-1.5 text-[11px] uppercase tracking-wider text-muted-foreground"
+                      colSpan={8}>Забалансовые счета</td>
+                  </tr>
+                  {off.map(row)}
+                </>
+              )}
+            </tbody>
+          </table>
+        </CardContent>
+      </Card>
+      {/* Актив равен пассиву — единственная проверка, которая говорит, что
+          ведомость не врёт. Показываем её, а не прячем в тест. */}
+      <BalanceCheck totals={totals} />
+      {card && <AccountCardWindow companyId={companyId} code={card} onClose={() => setCard(null)} />}
     </div>
   )
+}
+
+function Money({ v, strong }: { v: number; strong?: boolean }) {
+  return (
+    <td className={cn('px-3 py-1.5 text-right tabular-nums whitespace-nowrap',
+      !v && 'text-muted-foreground/40', strong && v && 'font-medium')}>
+      {v ? money.format(v) : '—'}
+    </td>
+  )
+}
+
+function BalanceCheck({ totals }: { totals: BalanceTotals }) {
+  const diff = totals.saldoOutDt - totals.saldoOutKt
+  const ok = Math.abs(diff) < 1
+  return (
+    <div className={cn('rounded-md border px-3 py-2 text-xs',
+      ok ? 'border-emerald-500/40 bg-emerald-500/5 text-emerald-700 dark:text-emerald-400'
+         : 'border-red-500/40 bg-red-500/5 text-red-600 dark:text-red-400')}>
+      {ok
+        ? `Актив равен пассиву: ${money.format(totals.saldoOutDt)} ₽ — ведомость сходится.`
+        : `Расхождение актива и пассива: ${money.format(diff)} ₽ — в выгрузке не хватает проводок.`}
+    </div>
+  )
+}
+
+/**
+ * Карточка счёта окном поверх ведомости: проводки с корреспонденцией и сальдо
+ * нарастающим итогом. Уводить бухгалтера с ведомости на отдельный экран нельзя —
+ * он смотрит карточку, чтобы понять СТРОКУ ведомости, и должен вернуться в неё.
+ */
+function AccountCardWindow({ companyId, code, onClose }: {
+  companyId: string; code: string; onClose: () => void
+}) {
+  const { period } = useFilters()
+  const q = useQuery({
+    queryKey: ['books', 'account', companyId, code, period.from, period.to],
+    queryFn: () => getAccountCard(companyId, code, { from: period.from, to: period.to }),
+  })
+  return (
+    <Dialog open onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-w-6xl max-h-[85vh] overflow-hidden flex flex-col">
+        <DialogHeader>
+          <DialogTitle className="text-base">
+            Счёт {code}
+            {q.data?.name && <span className="ml-2 font-normal text-muted-foreground">{q.data.name}</span>}
+          </DialogTitle>
+        </DialogHeader>
+        {q.isError && <QueryError onRetry={() => q.refetch()} />}
+        {!q.data ? <Loading /> : (
+          <div className="flex-1 min-h-0 overflow-y-auto space-y-3 pr-1">
+            <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
+              <MetricTile label="Сальдо на начало"
+                value={saldoText(q.data.saldoInDt, q.data.saldoInKt)} />
+              <MetricTile label="Оборот по дебету" value={money.format(q.data.turnoverDt) + ' ₽'} />
+              <MetricTile label="Оборот по кредиту" value={money.format(q.data.turnoverKt) + ' ₽'} />
+              <MetricTile label="Сальдо на конец"
+                value={saldoText(q.data.saldoOutDt, q.data.saldoOutKt)} />
+            </div>
+
+            {q.data.corr.length > 0 && (
+              <TableCard note="С какими счетами корреспондирует"
+                head={<><Th>Счёт</Th><Th right>В дебет</Th><Th right>В кредит</Th><Th right>Проводок</Th></>}>
+                {q.data.corr.slice(0, 12).map((c) => (
+                  <tr key={c.code} className="border-b last:border-0 hover:bg-muted/40">
+                    <td className="px-3 py-1.5 tabular-nums">{c.code}</td>
+                    <Money v={c.debit} /><Money v={c.credit} />
+                    <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+                      {c.entries}
+                    </td>
+                  </tr>
+                ))}
+              </TableCard>
+            )}
+
+            <TableCard
+              note={q.data.shown < q.data.total
+                ? `Показаны первые ${num.format(q.data.shown)} из ${num.format(q.data.total)} проводок за период`
+                : `${num.format(q.data.total)} проводок за период`}
+              head={<>
+                <Th>Дата</Th><Th>Документ</Th><Th>Корр. счёт</Th>
+                <Th right>Дебет</Th><Th right>Кредит</Th><Th right>Сальдо</Th>
+              </>}>
+              {q.data.rows.map((r, i) => (
+                <tr key={i} className="border-b last:border-0 hover:bg-muted/40">
+                  <td className="px-3 py-1.5 tabular-nums whitespace-nowrap">{r.date}</td>
+                  <td className="px-3 py-1.5 text-muted-foreground max-w-[280px] truncate"
+                    title={r.docTitle ?? ''}>{r.docKind}</td>
+                  <td className="px-3 py-1.5 tabular-nums">{r.corr ?? '—'}</td>
+                  <Money v={r.debit} /><Money v={r.credit} />
+                  <td className="px-3 py-1.5 text-right tabular-nums font-medium">
+                    {money.format(r.saldo)}
+                  </td>
+                </tr>
+              ))}
+            </TableCard>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/** Сальдо одной строкой: сторона важнее знака — «Дт 1 057 692» читается сразу. */
+function saldoText(dt: number, kt: number): string {
+  if (!dt && !kt) return '—'
+  return dt ? `Дт ${money.format(dt)} ₽` : `Кт ${money.format(kt)} ₽`
 }
 
 function BooksEntries({ companyId }: { companyId: string }) {
