@@ -937,11 +937,11 @@ async def assortment(
     """
     cost_p = {"cid": str(cid), "dt": COST_DT, "kt": f"{STOCK_ACCOUNT}%"}
     if date_from:
-        cost_sql += " AND entry_date >= CAST(:df AS date)"
-        cost_p["df"] = date_from
+        cost_sql += " AND entry_date >= :df"
+        cost_p["df"] = _day(date_from)
     if date_to:
-        cost_sql += " AND entry_date <= CAST(:dt2 AS date)"
-        cost_p["dt2"] = date_to
+        cost_sql += " AND entry_date <= :dt2"
+        cost_p["dt2"] = _day(date_to)
 
     return {
         "by": by,
@@ -1694,11 +1694,15 @@ async def suppliers(
     """Поставщики: объём закупок, зависимость и разброс цен на одну позицию."""
     cid = await assert_company_member(company_id, current_user, db)
     p: dict[str, Any] = {"cid": str(cid)}
-    where = ""
+    # Два условия периода: внутри CTE документов алиаса `d` ещё нет (ссылка на него
+    # даёт «missing FROM entry for table d»), а в запросе спреда он есть.
+    where_bare, where = "", ""
     if date_from:
+        where_bare += " AND date >= :df"
         where += " AND d.date >= :df"
         p["df"] = date_from
     if date_to:
+        where_bare += " AND date <= :dt"
         where += " AND d.date <= :dt"
         p["dt"] = date_to
 
@@ -1714,7 +1718,7 @@ async def suppliers(
         WITH d AS (
           SELECT id, counterparty_id, counterparty_name, counterparty_inn, amount, date, lines
             FROM accounting_docs
-           WHERE company_id = :cid AND doc_type = 'purchase'{where}
+           WHERE company_id = :cid AND doc_type = 'purchase'{where_bare}
         ), agg AS (
           SELECT coalesce(counterparty_name, '—') nm,
                  max(counterparty_id::text) id, max(counterparty_inn) inn,
@@ -1817,11 +1821,11 @@ async def _pnl_rows(db: AsyncSession, cid, date_from: str | None, date_to: str |
     p: dict[str, Any] = {"cid": str(cid)}
     where = ""
     if date_from:
-        where += " AND entry_date >= CAST(:df AS date)"
-        p["df"] = date_from
+        where += " AND entry_date >= :df"
+        p["df"] = _day(date_from)
     if date_to:
-        where += " AND entry_date <= CAST(:dt AS date)"
-        p["dt"] = date_to
+        where += " AND entry_date <= :dt"
+        p["dt"] = _day(date_to)
 
     return [{
         "month": r[0],
@@ -1901,11 +1905,11 @@ async def pnl(
     p: dict[str, Any] = {"cid": str(cid)}
     where = ""
     if date_from:
-        where += " AND entry_date >= CAST(:df AS date)"
-        p["df"] = date_from
+        where += " AND entry_date >= :df"
+        p["df"] = _day(date_from)
     if date_to:
-        where += " AND entry_date <= CAST(:dt AS date)"
-        p["dt"] = date_to
+        where += " AND entry_date <= :dt"
+        p["dt"] = _day(date_to)
     # Реформация: прибыль (Дт 99 Кт 84) минус убыток (Дт 84 Кт 99).
     closed = (await db.execute(text(f"""
         SELECT coalesce(sum(amount) FILTER (
@@ -1942,11 +1946,11 @@ async def expenses(
     p: dict[str, Any] = {"cid": str(cid)}
     where = ""
     if date_from:
-        where += " AND e.entry_date >= CAST(:df AS date)"
-        p["df"] = date_from
+        where += " AND e.entry_date >= :df"
+        p["df"] = _day(date_from)
     if date_to:
-        where += " AND e.entry_date <= CAST(:dt AS date)"
-        p["dt"] = date_to
+        where += " AND e.entry_date <= :dt"
+        p["dt"] = _day(date_to)
 
     rows = [{
         "account": r[0], "accountName": r[1], "source": r[2], "sourceName": r[3],
@@ -2007,11 +2011,11 @@ async def taxes(
     p: dict[str, Any] = {"cid": str(cid)}
     where = ""
     if date_from:
-        where += " AND e.entry_date >= CAST(:df AS date)"
-        p["df"] = date_from
+        where += " AND e.entry_date >= :df"
+        p["df"] = _day(date_from)
     if date_to:
-        where += " AND e.entry_date <= CAST(:dt AS date)"
-        p["dt"] = date_to
+        where += " AND e.entry_date <= :dt"
+        p["dt"] = _day(date_to)
 
     rows = [{
         "account": r[0], "name": r[1] or r[0],
