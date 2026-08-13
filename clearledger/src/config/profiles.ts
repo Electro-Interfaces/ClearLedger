@@ -730,3 +730,17 @@ export const profiles: Record<ProfileId, CompanyProfile> = {
 export function getProfile(id: ProfileId): CompanyProfile {
   return profiles[id] ?? profiles.general
 }
+
+/**
+ * Есть ли у компании топливная розница — колонки, виды топлива, виды оплат кассы.
+ *
+ * Спрашивать это отрицанием («кроме энергетики») нельзя: каждый следующий профиль
+ * молча попадает в топливные экраны. Так на пространстве без единого объекта
+ * (`office` — бухгалтерия, аудит) в «Подключениях» оказались «Виды топлива» и
+ * «Маппинг видов оплат STS», а маршрут /1c/fuel-mappings открывался напрямую.
+ * Сеть ЭЗС (`energy`) в топливную розницу не входит: у неё киловатт-часы и свой
+ * разрез — она и раньше на эти экраны не пускалась.
+ */
+export function isFuelProfile(id: ProfileId): boolean {
+  return id === 'fuel' || id === 'retail'
+}

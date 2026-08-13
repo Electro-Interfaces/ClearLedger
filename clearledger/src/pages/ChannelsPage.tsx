@@ -12,6 +12,7 @@ import { getChannels, loadChannels, deleteChannel } from '@/services/channelServ
 import { getSources, loadSources } from '@/services/sourceService'
 import { isApiEnabled } from '@/services/apiClient'
 import { useCompany } from '@/contexts/CompanyContext'
+import { isFuelProfile } from '@/config/profiles'
 import { getChannelSourceIds } from '@/types/channel'
 import type { Channel } from '@/types/channel'
 import { Plus, Trash2, Radio, Database, Clock, Loader2, ArrowRightLeft, CheckCircle2, XCircle, Circle, PauseCircle, Mail } from 'lucide-react'
@@ -103,7 +104,8 @@ export function ChannelsPage() {
   const [loading, setLoading] = useState(getChannels().length === 0)
   const [wizardOpen, setWizardOpen] = useState(false)
   const [scheduleOpen, setScheduleOpen] = useState(false)
-  const { companyId } = useCompany()
+  const { companyId, company } = useCompany()
+  const profileId = company.profileId
   const [searchParams, setSearchParams] = useSearchParams()
 
   function refresh() { setChannels(getChannels()) }
@@ -189,8 +191,11 @@ export function ChannelsPage() {
         </details>
       )}
 
-      {/* Канонические маппинги компании — единый источник для всех каналов */}
-      {isApiEnabled() && (
+      {/* Канонические маппинги компании — единый источник для всех каналов.
+          Только там, где есть топливная розница: у компании без АЗС (профиль
+          `office` — бухгалтерия, аудит) виды топлива и виды оплат STS нечему
+          сопоставлять, а пустой блок с чужими словами читается как недоделка. */}
+      {isApiEnabled() && isFuelProfile(profileId) && (
         <details className="rounded-lg border border-border/50 bg-card/40">
           <summary className="cursor-pointer px-4 py-3 text-sm font-semibold flex items-center gap-2 select-none">
             <ArrowRightLeft className="h-4 w-4 text-muted-foreground shrink-0" />
@@ -218,8 +223,11 @@ export function ChannelsPage() {
             <Radio className="h-10 w-10 text-muted-foreground/30" />
             <p className="text-sm font-medium">Пока нет коннекторов</p>
             <p className="max-w-md text-center text-xs text-muted-foreground">
-              Коннектор подключает источник данных (STS, ЦБ, файлы) и превращает его в готовые
-              документы. Создайте первый из шаблона или настройте вручную.
+              {/* Примеры источников — по профилю: «STS, ЦБ» в бухгалтерской компании
+                  называют системы, которых у неё нет, и раздел читается как чужой. */}
+              Коннектор подключает источник данных ({isFuelProfile(profileId)
+                ? 'STS, ЦБ, файлы' : 'учётную систему, почту, файлы'}) и превращает его
+              в готовые документы. Создайте первый из шаблона или настройте вручную.
             </p>
             <Button variant="default" size="sm" className="gap-1.5 mt-2" onClick={() => setWizardOpen(true)}>
               <Plus className="h-4 w-4" />

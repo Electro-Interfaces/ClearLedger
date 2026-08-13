@@ -4,6 +4,7 @@ import { QueryClientProvider } from '@tanstack/react-query'
 import { queryClient } from '@/lib/queryClient'
 import { AuthProvider } from '@/contexts/AuthContext'
 import { CompanyProvider, useCompany } from '@/contexts/CompanyContext'
+import { isFuelProfile } from '@/config/profiles'
 import { useAppEnabled } from '@/hooks/useCompanyRegistry'
 import { SPACE_PAGES, SPACE_PRODUCTS, isCarvedProfile } from '@/config/spaceProducts'
 import { TabsProvider } from '@/contexts/TabsContext'
@@ -85,12 +86,13 @@ function LazyPage({ children }: { children: React.ReactNode }) {
 
 /**
  * Гард fuel-only роутов (1С, нормализация, закрытие месяца).
- * Для energy-профиля (РусГидро, сеть ЭЗС) этих разделов нет — прямой переход
- * по URL редиректит на рабочий стол. Fuel-профиль (ГИГ) проходит без изменений.
+ * Для профилей без топливной розницы — energy (РусГидро, сеть ЭЗС) и office
+ * (компания без объектов) — этих разделов нет: прямой переход по URL редиректит
+ * на рабочий стол. Раньше гард спрашивал «не energy ли», и office проходил насквозь.
  */
 function RequireFuel({ children }: { children: React.ReactNode }) {
   const { company } = useCompany()
-  if (company.profileId === 'energy') return <Navigate to="/workspace" replace />
+  if (!isFuelProfile(company.profileId)) return <Navigate to="/workspace" replace />
   return <>{children}</>
 }
 
