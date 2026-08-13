@@ -314,6 +314,25 @@ export interface RevenueQuality {
 export const getRevenueQuality = (companyId: string) =>
   get<RevenueQuality>(`/api/books/revenue-quality?company_id=${companyId}`)
 
+/** Связные выводы: что показатели означают вместе, а не по отдельности. */
+export interface Insights {
+  insights: {
+    key: string
+    tone: 'danger' | 'warn' | 'good'
+    title: string
+    /** Вывод словами. */
+    text: string
+    /** Цифры, из которых он получен — чтобы вывод можно было проверить. */
+    facts: string[]
+    mode: string
+    sub: string
+  }[]
+  count: number
+}
+
+export const getInsights = (companyId: string) =>
+  get<Insights>(`/api/books/insights?company_id=${companyId}`)
+
 /* ── «Экономика»: результат, расходы, налоги ─────────────────────────────── */
 
 export interface PnlTotals {

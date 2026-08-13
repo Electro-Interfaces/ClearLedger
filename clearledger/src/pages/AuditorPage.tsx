@@ -13,7 +13,7 @@
  * Не путать с `pages/partner/AuditorPage.tsx`: тот из партнёрского контура и
  * обслуживает внешние инстансы ClearLedger.
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Bot, ClipboardList, ListChecks, MessageSquare, Save, SlidersHorizontal } from 'lucide-react'

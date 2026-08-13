@@ -2496,6 +2496,161 @@ async def attention(
     }
 
 
+# ── Что говорят цифры ────────────────────────────────────────────────────────
+# Экраны показывают показатели, но вывод человек делает сам, соединяя четыре разных
+# места: динамику из отчёта, концентрацию из продаж, поток из денег, сроки из долга.
+# Связка «выручка падает, а рентабельность растёт» видна только тому, кто открыл оба
+# экрана и держит их в голове.
+#
+# Здесь эта работа делается правилами. Правило — не «умный текст», а проверяемое
+# утверждение: у каждого вывода перечислены цифры, из которых он получен, и адрес
+# экрана, где их можно посмотреть. Если цифра не подтверждает вывод, вывод не
+# появляется — порогов «на глаз» здесь нет.
+
+def _trend(values: list[float]) -> str:
+    """Направление ряда: три и более шага в одну сторону — тренд, иначе колебание."""
+    if len(values) < 3:
+        return "flat"
+    downs = sum(1 for a, b in zip(values, values[1:]) if b < a)
+    ups = sum(1 for a, b in zip(values, values[1:]) if b > a)
+    steps = len(values) - 1
+    if downs == steps:
+        return "down"
+    if ups == steps:
+        return "up"
+    return "flat"
+
+
+@router.get("/insights")
+async def insights(
+    company_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Связные выводы о компании: что показатели означают вместе."""
+    cid = await assert_company_member(company_id, current_user, db)
+    out: list[dict[str, Any]] = []
+
+    def add(key: str, tone: str, title: str, text: str,
+            facts: list[str], mode: str, sub: str) -> None:
+        out.append({"key": key, "tone": tone, "title": title, "text": text,
+                    "facts": facts, "mode": mode, "sub": sub})
+
+    p = await pnl(company_id, None, None, db, current_user)
+    years = [y for y in p["years"] if y["net"]]
+    conc = await concentration(company_id, db, current_user)
+    cf = await cashflow_items(company_id, None, None, db, current_user)
+    terms = await payment_terms(company_id, None, None, db, current_user)
+    items = await assortment(company_id, "item", None, None, 500, db, current_user)
+
+    # 1. Выручка и рентабельность в разные стороны — главный сюжет компании.
+    if len(years) >= 3:
+        tail = years[-3:]
+        rev_trend = _trend([y["net"] for y in tail])
+        prof_trend = _trend([y["profitPct"] or 0 for y in tail])
+        line = " → ".join(f"{y['year']}: {y['net']:,.0f} ₽".replace(",", " ") for y in tail)
+        pline = " → ".join(f"{y['year']}: {y['profitPct']} %" for y in tail)
+        if rev_trend == "down" and prof_trend == "up":
+            add("shrink_margin", "warn", "Компания сжимается, но продаёт дороже",
+                "Выручка падает третий год подряд, а рентабельность растёт. Так выглядит "
+                "уход из низкомаржинальных сделок: оборот теряется, но каждая оставшаяся "
+                "сделка приносит больше. Опасность в том, что дальше сокращать нечего — "
+                "постоянные расходы делятся на всё меньшую выручку.",
+                [f"Выручка без НДС: {line}", f"Чистая рентабельность: {pline}"],
+                "econ_result", "ec_dynamics")
+        elif rev_trend == "down" and prof_trend != "up":
+            add("shrink", "danger", "Выручка падает без выигрыша в марже",
+                "Оборот снижается, а рентабельность за ним не растёт — компания теряет "
+                "объём, не выигрывая в цене.",
+                [f"Выручка без НДС: {line}", f"Чистая рентабельность: {pline}"],
+                "econ_result", "ec_dynamics")
+        elif rev_trend == "up":
+            add("growth", "good", "Выручка растёт",
+                "Оборот увеличивается третий период подряд.",
+                [f"Выручка без НДС: {line}", f"Чистая рентабельность: {pline}"],
+                "econ_result", "ec_dynamics")
+
+    # 2. Концентрация: смотрим последний год, а не всю историю.
+    last = conc["years"][-1] if conc["years"] else None
+    if last and last.get("hhi"):
+        rising = (len(conc["years"]) >= 2
+                  and (conc["years"][-2].get("hhi") or 0) < last["hhi"])
+        if last["hhi"] > conc["levels"]["high"]:
+            add("concentration", "danger", "Выручка держится на нескольких покупателях",
+                "Уход одного клиента унесёт заметную часть оборота, и заменить его будет "
+                "нечем: новых сделок такого размера в базе нет."
+                + (" Концентрация при этом растёт." if rising else ""),
+                [f"HHI за {last['year']}: {last['hhi']} (высокой считается выше "
+                 f"{conc['levels']['high']})",
+                 f"Первые три покупателя дают {last['cr3']} % выручки",
+                 f"Покупателей за год: {last['clients']}"],
+                "rev_sales", "rev_conc")
+
+    # 3. Куда уходит заработанное.
+    oper = next((k for k in cf["kinds"] if k["kind"] == "operating"), None)
+    fin = next((k for k in cf["kinds"] if k["kind"] == "financing"), None)
+    inv = next((k for k in cf["kinds"] if k["kind"] == "investing"), None)
+    if oper and fin and oper["net"] > 0 and fin["net"] < 0:
+        share = abs(fin["net"]) / oper["net"] * 100 if oper["net"] else 0
+        add("cash_to_debt", "warn", "Заработанное уходит на погашение долгов",
+            f"Текущая деятельность даёт положительный поток, но {share:.0f} % его "
+            "забирает финансовая: займы гасятся быстрее, чем берутся. "
+            + ("Инвестиций при этом нет вовсе — компания не вкладывается в развитие."
+               if inv and inv["net"] == 0 else ""),
+            [f"Текущая деятельность: {oper['net']:,.0f} ₽".replace(",", " "),
+             f"Финансовая: {fin['net']:,.0f} ₽".replace(",", " "),
+             f"Инвестиционная: {(inv['net'] if inv else 0):,.0f} ₽".replace(",", " ")],
+            "rev_money", "rev_cfitems")
+
+    # 4. Платёжная дисциплина: медиана против типовой отсрочки.
+    if terms["total"] >= 10 and terms["medianDays"] is not None:
+        med = terms["medianDays"]
+        if med > 45:
+            add("payment_slow", "warn", "Типичный покупатель платит с большой задержкой",
+                f"Половина счетов оплачивается дольше {med:.0f} дней. При обычной "
+                "отсрочке в две-четыре недели это значит, что просрочка стала нормой, "
+                "а не исключением: деньги компании кредитуют покупателей.",
+                [f"Медиана срока оплаты: {med:.0f} дней",
+                 f"Средний срок: {terms['avgDays']} дней (его тянут вверх зависшие счета)",
+                 f"Счетов с известной оплатой: {terms['total']}"],
+                "rev_money", "rev_terms")
+
+    # 5. Повторяемость: на чём строится выручка.
+    rows = items["rows"]
+    total = sum(r.get("soldAmount") or 0 for r in rows) or 1
+    once = sum(r.get("soldAmount") or 0 for r in rows if r.get("freq") == "once")
+    if rows and once / total > 0.3:
+        add("one_off", "warn", "Треть выручки — неповторяющиеся продажи",
+            f"На позиции, проданные ровно один раз, приходится {once / total * 100:.0f} % "
+            "оборота. Планировать на такую выручку нельзя: она не воспроизводится сама, "
+            "каждый раз нужна новая сделка.",
+            [f"Разовых позиций: {sum(1 for r in rows if r.get('freq') == 'once')} "
+             f"из {len(rows)}",
+             f"Их доля в обороте: {once / total * 100:.1f} %"],
+            "rev_catalog", "rev_abc_items")
+
+    # 6. Постоянные расходы против маржи — запас прочности словами.
+    t = p["totals"]
+    fixed = t["commercial"] + t["admin"]
+    margin = (t["net"] - t["cogsTotal"]) / t["net"] if t["net"] else 0
+    if fixed and margin > 0:
+        point = fixed / margin
+        safety = (t["net"] - point) / t["net"] * 100 if t["net"] else 0
+        if safety < 30:
+            add("thin_safety", "danger" if safety < 10 else "warn",
+                "Запас прочности небольшой",
+                f"Выручка может упасть на {safety:.0f} % — дальше компания уходит в убыток. "
+                "При такой марже каждая потерянная сделка сразу видна в результате.",
+                [f"Маржинальность: {margin * 100:.1f} %",
+                 f"Постоянные расходы: {fixed:,.0f} ₽".replace(",", " "),
+                 f"Точка безубыточности: {point:,.0f} ₽".replace(",", " ")],
+                "econ_result", "ec_breakeven")
+
+    order = {"danger": 0, "warn": 1, "good": 2}
+    out.sort(key=lambda x: order.get(x["tone"], 9))
+    return {"insights": out, "count": len(out)}
+
+
 # ── Качество данных продукта ─────────────────────────────────────────────────
 # Волна 5. Отдельно от «Данных» пространства: там качество слоя целиком, здесь —
 # ровно то, что портит цифры «Реализации». Проверка = вопрос заказчику, поэтому
@@ -4857,6 +5012,22 @@ _CHECKS: list[tuple] = [
          ORDER BY date DESC"""),
 
     # ── НДС: то, что смотрят и в экспресс-проверке 1С, и при камеральной ────────
+    ("vat_book_vs_68", "vat_out", "Книга НДС расходится с регистром 68.02",
+     "Декларация собирается по книге, баланс — по счёту: расхождение вылезет при сдаче", """
+        SELECT gen_random_uuid()::text, b.period, 'книга/счёт',
+               'книга ' || round(b.book, 2) || ' · счёт ' || round(coalesce(a.acct, 0), 2),
+               round(b.book - coalesce(a.acct, 0), 2)
+          FROM (SELECT substr(doc_date, 1, 7) AS period, sum(vat) AS book
+                  FROM vat_entries
+                 WHERE company_id = :cid AND kind = 'book_sale' AND doc_date IS NOT NULL
+                 GROUP BY 1) b
+          LEFT JOIN (SELECT period_year || '-' || lpad(period_month::text, 2, '0') AS period,
+                            sum(amount) AS acct
+                       FROM gl_entries
+                      WHERE company_id = :cid AND account_kt LIKE '68.02%'
+                      GROUP BY 1) a ON a.period = b.period
+         WHERE abs(b.book - coalesce(a.acct, 0)) > 1
+         ORDER BY b.period DESC"""),
     ("vat_rate_mismatch", "vat_out", "Ставка НДС не сходится с суммой документа",
      "Налог в документе не равен ставке периода: либо ошибка ввода, либо смешанные ставки в одной строке", """
         SELECT id::text, date, number, coalesce(counterparty_name, ''), amount
@@ -5459,9 +5630,11 @@ async def tax_forecast(
     book_rows = (await db.execute(text("""
         SELECT substr(doc_date, 1, 4) || '-Q' ||
                to_char(ceil(substr(doc_date, 6, 2)::numeric / 3), 'FM9') AS q,
-               kind, sum(vat), count(*)
+               CASE WHEN kind = 'book_sale' THEN 'issued' ELSE 'received' END,
+               sum(vat), count(*)
           FROM vat_entries
          WHERE company_id = :cid AND doc_date IS NOT NULL
+           AND kind IN ('book_sale', 'book_purchase')
          GROUP BY 1, 2"""), p)).all()
 
     quarters: dict[str, dict[str, Any]] = {}

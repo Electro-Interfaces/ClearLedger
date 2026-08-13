@@ -26,8 +26,8 @@ import { Card, CardContent } from '@/components/ui/card'
 import { MetricTile } from '@/components/ui/metric-tile'
 import { cn } from '@/lib/utils'
 import {
-  getArAging, getAttention, getCostBridge, getExpenses, getPnl, getPnlEntries,
-  getRevenue, getTaxes,
+  getArAging, getAttention, getCostBridge, getExpenses, getInsights, getPnl,
+  getPnlEntries, getRevenue, getTaxes,
   type PnlData, type PnlTotals,
 } from '@/services/booksService'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -155,13 +155,15 @@ export function EconomyPanel() {
       case 'ec_dynamics':   return <EconDynamics companyId={companyId} period={period} />
       case 'ec_breakeven':  return <EconBreakeven companyId={companyId} period={period} />
       case 'ec_packet':     return <EconPacket companyId={companyId} period={period} />
+      case 'ec_insights':   return <EconInsights companyId={companyId} />
       case 'ec_items':      return <EconCosts companyId={companyId} period={period} view="items" />
       case 'ec_costs':      return <EconCosts companyId={companyId} period={period} view="structure" />
       case 'ec_costs_time': return <EconCosts companyId={companyId} period={period} view="months" />
       case 'ec_bridge_cost': return <EconCostBridge companyId={companyId} period={period} />
       case 'ec_taxes':      return <EconTaxes companyId={companyId} period={period} view="list" />
       case 'ec_load':       return <EconTaxes companyId={companyId} period={period} view="load" />
-      default:              return <EconBridge companyId={companyId} period={period} />
+      case 'ec_bridge':     return <EconBridge companyId={companyId} period={period} />
+      default:              return <EconInsights companyId={companyId} />
     }
   })()
 
@@ -1640,6 +1642,77 @@ function EconPacket({ companyId, period }: { companyId: string; period: Period }
         неизменяем и служит эталоном. Цифры этого листа сходятся с оборотами регистра:
         любую строку отчёта можно раскрыть до проводок на экране «Отчёт о результате».
       </p>
+    </div>
+  )
+}
+
+/**
+ * Что говорят цифры — слой интерпретации над показателями.
+ *
+ * Ради чего: экраны отвечают на вопрос, который человек задал, но связку между ними он
+ * делал сам. «Выручка падает третий год, а рентабельность растёт» видно только тому,
+ * кто открыл динамику и отчёт и держит оба в голове. Здесь эта работа выполнена
+ * правилами, и вывод сформулирован словами.
+ *
+ * Чтобы это не превратилось в гадание, у каждого вывода рядом стоят цифры, из которых
+ * он получен, и ссылка на экран, где их можно проверить. Правило, не подтверждённое
+ * цифрами, вывода не даёт вовсе — порогов «на глаз» здесь нет.
+ */
+function EconInsights({ companyId }: { companyId: string }) {
+  const { setCoreMode } = useWorkspace()
+  const q = useQuery({
+    queryKey: ['books', 'insights', companyId],
+    queryFn: () => getInsights(companyId),
+    enabled: !!companyId,
+  })
+
+  if (q.isError) return <div className="p-4"><QueryError onRetry={() => q.refetch()} /></div>
+  if (!q.data) return <Loading />
+  const d = q.data
+
+  if (!d.count) {
+    return (
+      <div className="p-6 text-sm text-muted-foreground space-y-2">
+        <p>Правила не нашли, что сказать: показатели не складываются в устойчивую картину.</p>
+        <p>
+          Так бывает при коротком периоде наблюдений — для вывода о тренде нужно хотя бы
+          три года, а для платёжной дисциплины десяток оплаченных счетов.
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="p-4 space-y-3">
+      <p className="text-[11px] text-muted-foreground">
+        Выводы собраны правилами из показателей продукта. Под каждым — цифры, из которых
+        он получен: вывод, который нельзя проверить, ничем не лучше мнения.
+      </p>
+
+      {d.insights.map((i) => (
+        <Card key={i.key}>
+          <CardContent className="p-4 space-y-2">
+            <div className="flex items-start gap-2">
+              <span className={cn('mt-1.5 h-2 w-2 rounded-full shrink-0',
+                i.tone === 'danger' ? 'bg-rose-500'
+                : i.tone === 'warn' ? 'bg-amber-500' : 'bg-emerald-500')} />
+              <div className="min-w-0 space-y-1.5">
+                <div className="font-medium">{i.title}</div>
+                <p className="text-sm">{i.text}</p>
+                <ul className="text-[11px] text-muted-foreground space-y-0.5">
+                  {i.facts.map((f, n) => (
+                    <li key={n} className="tabular-nums">· {f}</li>
+                  ))}
+                </ul>
+                <button onClick={() => setCoreMode(i.mode as never, i.sub)}
+                  className="text-[11px] text-muted-foreground hover:text-primary hover:underline">
+                  посмотреть цифры →
+                </button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      ))}
     </div>
   )
 }
