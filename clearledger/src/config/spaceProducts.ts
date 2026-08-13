@@ -363,6 +363,16 @@ export const SPACE_LINKS = [
   { to: '/admin/company/map', app: 'admin', module: 'map', label: 'Люди и доступ', icon: Map },
 ]
 
+/**
+ * Ссылки пространства для профиля. У компании без объектов «База пространства» —
+ * СОБСТВЕННЫЙ раздел «Данных» (`data_model`), и общий пункт дублировал его в меню,
+ * ведя при этом на режим `normalize`, которого у неё нет вовсе.
+ */
+export function spaceLinksFor(profileId: string | null | undefined) {
+  if (profileId !== 'office') return SPACE_LINKS
+  return SPACE_LINKS.filter((l) => l.to !== '/data?mode=normalize')
+}
+
 /** Страницы Ядра открыты каждому продукту, поэтому и адрес у них — внутри продукта. */
 export const SHARED_PATHS = SPACE_PAGES
 

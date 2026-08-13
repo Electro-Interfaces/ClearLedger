@@ -21,6 +21,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { MetricTile } from '@/components/ui/metric-tile'
 import { getQuality, getSources, type QualityCheck } from '@/services/booksService'
 import { getSpaceDataModel } from '@/services/spaceObjectsService'
+import { OfficeDataModel } from './OfficeDataModel'
 import { cn } from '@/lib/utils'
 
 const num = new Intl.NumberFormat('ru-RU')
@@ -133,6 +134,10 @@ function ModelTab() {
   const t = q.data.totals
   return (
     <div className="space-y-4">
+      {/* Модель данных — то же, что «Нормализация» показывает у сетевых пространств:
+          слои приёма, звёздная схема, качество. Ниже — карта сущностей базы. */}
+      <OfficeDataModel />
+
       <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
         <MetricTile label="Сущностей" value={num.format(t.entities)} />
         <MetricTile label="Записей" value={num.format(t.records)} />

@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import assert_company_member, get_current_user
 from app.database import get_db
 from app.models import (
-    AccountingDoc, GlAccount, GlEntry, GlReference, Period, User,
+    AccountingDoc, Counterparty, GlAccount, GlEntry, GlReference, Period, User,
 )
 
 router = APIRouter(prefix="/books", tags=["Бухгалтерия пространства"])
@@ -835,3 +835,126 @@ async def quality(
     warns = sum(1 for c in checks if c["status"] == "warn")
     return {"checks": checks, "errors": errors, "warnings": warns,
             "ok": sum(1 for c in checks if c["status"] == "ok")}
+
+
+@router.get("/model")
+async def model(
+    company_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Модель данных бухгалтерии: слои, звёздная схема, качество полей.
+
+    Подача та же, что у сетевых профилей («Нормализация» РусГидро и ГИГ): слои
+    приёма L1→L4, факт с мерами, измерения с кардинальностью и заполнением. Отличается
+    только предметная область: там факт — зарядная сессия, здесь — проводка регистра.
+    """
+    cid = await assert_company_member(company_id, current_user, db)
+
+    entries = (await db.execute(select(func.count()).select_from(GlEntry)
+                                .where(GlEntry.company_id == cid))).scalar_one()
+    docs = (await db.execute(select(func.count()).select_from(AccountingDoc)
+                             .where(AccountingDoc.company_id == cid))).scalar_one()
+    accounts = (await db.execute(select(func.count()).select_from(GlAccount)
+                                 .where(GlAccount.company_id == cid))).scalar_one()
+    refs = (await db.execute(select(func.count()).select_from(GlReference)
+                             .where(GlReference.company_id == cid))).scalar_one()
+    closed = (await db.execute(select(func.count()).select_from(Period)
+                               .where(Period.company_id == cid,
+                                      Period.status == "closed"))).scalar_one()
+    first, last = (await db.execute(
+        select(func.min(GlEntry.entry_date), func.max(GlEntry.entry_date))
+        .where(GlEntry.company_id == cid))).one()
+
+    layers = [
+        {"key": "l1", "code": "L1 RAW", "title": "Выгрузка бухгалтерии",
+         "desc": "файл .dt как есть", "records": 1, "unit": "выгрузка", "tone": "raw"},
+        {"key": "l2", "code": "L2 CLEAN", "title": "Нормализованный слой",
+         "desc": "проводки, документы, справочники",
+         "records": entries + docs + accounts + refs, "unit": "записей", "tone": "clean"},
+        {"key": "l3", "code": "L3 ВИТРИНЫ", "title": "Обороты и разрезы",
+         "desc": "оборотка, продажи, услуги, периоды",
+         "records": None, "unit": "", "tone": "export"},
+        {"key": "l4", "code": "L4 ЭТАЛОН", "title": "Закрытые периоды",
+         "desc": "месяц, который бухгалтерия больше не меняет",
+         "records": closed, "unit": "месяцев", "tone": "ref"},
+    ]
+
+    async def dimension(key, label, field, column, canonical, grain=None):
+        rows = (await db.execute(
+            select(column, func.count()).where(GlEntry.company_id == cid, column.is_not(None))
+            .group_by(column).order_by(func.count().desc()).limit(5))).all()
+        card = (await db.execute(
+            select(func.count(func.distinct(column))).where(GlEntry.company_id == cid))).scalar_one()
+        filled = (await db.execute(
+            select(func.count()).select_from(GlEntry)
+            .where(GlEntry.company_id == cid, column.is_not(None)))).scalar_one()
+        return {
+            "key": key, "label": label, "field": field, "cardinality": card,
+            "fill_pct": round(filled * 100 / entries, 1) if entries else 0,
+            "canonical": canonical, "grain": grain,
+            "members": [{"label": str(v), "count": n} for v, n in rows],
+        }
+
+    dimensions = [
+        await dimension("account_dt", "Счёт дебета", "gl_entries.account_dt",
+                        GlEntry.account_dt, True, "код счёта"),
+        await dimension("account_kt", "Счёт кредита", "gl_entries.account_kt",
+                        GlEntry.account_kt, True, "код счёта"),
+        await dimension("doc_kind", "Вид документа", "gl_entries.doc_kind",
+                        GlEntry.doc_kind, False, "регистратор проводки"),
+        await dimension("period_year", "Год периода", "gl_entries.period_year",
+                        GlEntry.period_year, True, "год"),
+    ]
+
+    total = await _turnover(db, cid)
+    revenue = await _turnover(db, cid, kt=REVENUE_KT)
+    fact = {
+        "table": "gl_entries", "name": "Проводка регистра бухгалтерии",
+        "grain": "одна проводка: дата + корреспонденция счетов + сумма",
+        "rows": entries,
+        "period": {"from": first.isoformat() if first else None,
+                   "to": last.isoformat() if last else None},
+        "measures": [
+            {"key": "amount", "label": "Оборот всего", "value": round(total, 2),
+             "unit": "₽", "agg": "SUM"},
+            {"key": "revenue", "label": "Выручка (Кт 90.01.1)", "value": round(revenue, 2),
+             "unit": "₽", "agg": "SUM"},
+            {"key": "count", "label": "Проводок", "value": entries, "unit": "", "agg": "COUNT"},
+        ],
+    }
+
+    # Качество полей: заполненность там, где пустое значение осмысленно проверять.
+    async def fill(model_cls, column, label, role):
+        total_n = (await db.execute(select(func.count()).select_from(model_cls)
+                                    .where(model_cls.company_id == cid))).scalar_one()
+        ok = (await db.execute(select(func.count()).select_from(model_cls)
+                               .where(model_cls.company_id == cid, column.is_not(None),
+                                      column != ""))).scalar_one()
+        return {"field": str(column).split(".")[-1], "label": label, "role": role,
+                "fill_pct": round(ok * 100 / total_n, 1) if total_n else 0}
+
+    quality = {
+        "fields": [
+            await fill(GlEntry, GlEntry.account_dt, "Счёт дебета", "измерение"),
+            await fill(GlEntry, GlEntry.account_kt, "Счёт кредита", "измерение"),
+            await fill(GlEntry, GlEntry.content, "Содержание", "атрибут"),
+            await fill(AccountingDoc, AccountingDoc.counterparty_inn, "ИНН контрагента", "ключ связи"),
+            await fill(AccountingDoc, AccountingDoc.number, "Номер документа", "атрибут"),
+        ],
+        # «Канонизация» здесь — сведение к справочнику: счёт к плану счетов,
+        # контрагент к карточке по ИНН, номенклатура к своему справочнику.
+        "canonicalization": [
+            {"name": "Счёт → план счетов", "from": "код счёта", "to": "gl_accounts",
+             "members": accounts, "coverage_pct": 100.0},
+            {"name": "Контрагент → карточка", "from": "ИНН документа", "to": "counterparties",
+             "members": (await db.execute(select(func.count()).select_from(Counterparty)
+                                          .where(Counterparty.company_id == cid))).scalar_one(),
+             "coverage_pct": None},
+            {"name": "Справочники учёта", "from": "склады, статьи, банки, лица",
+             "to": "gl_references", "members": refs, "coverage_pct": None},
+        ],
+    }
+
+    return {"rows": entries, "l1_files": 1, "layers": layers, "fact": fact,
+            "dimensions": dimensions, "quality": quality}

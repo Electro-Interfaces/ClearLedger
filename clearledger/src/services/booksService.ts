@@ -120,12 +120,30 @@ const periodQuery = (o: PeriodOpts = {}) =>
   (o.from ? `&date_from=${o.from}` : '') + (o.to ? `&date_to=${o.to}` : '')
 
 export const getDocs = (
-  companyId: string, docType?: string, period?: PeriodOpts, section?: string,
+  companyId: string, docType?: string, period?: PeriodOpts, section?: string, offset = 0,
 ) =>
   get<{ rows: DocRow[]; total: number; kinds: DocKind[]; sections: DocSection[] }>(
     `/api/books/docs?company_id=${companyId}${docType ? `&doc_type=${docType}` : ''}`
     + (section && !docType ? `&section=${section}` : '')
-    + periodQuery(period) + '&limit=500')
+    + periodQuery(period) + `&limit=500&offset=${offset}`)
+
+/**
+ * Весь реестр целиком — проводнику «Документы» дерево строить не из чего, пока не
+ * пришли все шапки. Ручка отдаёт максимум 500 за раз, поэтому дочитываем страницами:
+ * шапки лёгкие, три тысячи документов — семь запросов.
+ */
+export async function getAllDocs(
+  companyId: string,
+): Promise<{ rows: DocRow[]; sections: DocSection[] }> {
+  const first = await getDocs(companyId)
+  const rows = [...first.rows]
+  while (rows.length < first.total) {
+    const next = await getDocs(companyId, undefined, undefined, undefined, rows.length)
+    if (next.rows.length === 0) break   // страховка от бесконечного цикла
+    rows.push(...next.rows)
+  }
+  return { rows, sections: first.sections }
+}
 
 /** Разрез: `sales` — товары, `services` — услуги. Форма ответа одна. */
 export const getSlice = (
@@ -212,3 +230,31 @@ export const getSources = (companyId: string) =>
 export const getQuality = (companyId: string) =>
   get<{ checks: QualityCheck[]; errors: number; warnings: number; ok: number }>(
     `/api/books/quality?company_id=${companyId}`)
+
+export interface ModelLayer {
+  key: string; code: string; title: string; desc: string
+  records: number | null; unit: string; tone: 'raw' | 'clean' | 'export' | 'ref'
+}
+export interface ModelDimension {
+  key: string; label: string; field: string; cardinality: number
+  fill_pct: number; canonical: boolean; grain?: string | null
+  members: { label: string; count: number }[]
+}
+export interface DataModelResponse {
+  rows: number
+  layers: ModelLayer[]
+  fact: {
+    table: string; name: string; grain: string; rows: number
+    period: { from: string | null; to: string | null }
+    measures: { key: string; label: string; value: number; unit: string; agg: string }[]
+  } | null
+  dimensions: ModelDimension[]
+  quality: {
+    fields: { field: string; label: string; role: string; fill_pct: number }[]
+    canonicalization: { name: string; from: string; to: string; members: number | null; coverage_pct: number | null }[]
+  } | null
+}
+
+/** Модель данных бухгалтерии: слои, звезда, качество — как «Нормализация» у сетевых. */
+export const getDataModel = (companyId: string) =>
+  get<DataModelResponse>(`/api/books/model?company_id=${companyId}`)

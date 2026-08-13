@@ -27,6 +27,7 @@ import { mainNavItems, dataItems, oneCItems, settingsItems, navByPath } from '@/
 import { routeAllowed } from '@/config/accessModules'
 import {
   SPACE_LINKS, SPACE_PAGES, isCarvedProfile, isOneCPath, productForPath, productNav, spaceNav,
+  spaceLinksFor,
 } from '@/config/spaceProducts'
 import { productModuleAllowed, productHasModule } from '@/config/productAccess'
 import { useWorkspaceSections } from '@/components/workspace/workspaceSections'
@@ -269,7 +270,7 @@ function SidebarNavBody({ collapsed = false, onNavigate }: {
               <NavItem key={item.to} to={item.to} icon={item.icon} label={item.label}
                 collapsed={collapsed} onNavigate={onNavigate} />
             ))}
-            {SPACE_LINKS.filter((l) => canApp(l.app)).map((l) => (
+            {spaceLinksFor(company.profileId).filter((l) => canApp(l.app)).map((l) => (
               <NavItem key={l.to} to={l.to} icon={l.icon} label={l.label}
                 collapsed={collapsed} onNavigate={onNavigate} />
             ))}
@@ -314,7 +315,7 @@ function SidebarNavBody({ collapsed = false, onNavigate }: {
               <NavItem key={item.to} to={item.to} icon={item.icon} label={item.label}
                 collapsed={collapsed} onNavigate={onNavigate} />
             ))}
-            {SPACE_LINKS.filter((l) => canApp(l.app)).map((l) => (
+            {spaceLinksFor(company.profileId).filter((l) => canApp(l.app)).map((l) => (
               <NavItem key={l.to} to={l.to} icon={l.icon} label={l.label}
                 collapsed={collapsed} onNavigate={onNavigate} />
             ))}
