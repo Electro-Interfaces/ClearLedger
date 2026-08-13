@@ -13,7 +13,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -23,7 +23,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import assert_company_member, get_current_user
 from app.database import get_db
 from app.models import (
-    AccountingDoc, Contract, Counterparty, GlAccount, GlBalance, GlEntry, GlReference,
+    AccountingDoc, Contract, Counterparty, DocRequest, GlAccount, GlBalance, GlEntry,
+    GlReference,
     GlTurnover, InvoicePayment, NomenclatureItem, Period, User, ReferenceSnapshot,
     SourceFile, VatEntry,
 )
@@ -4367,3 +4368,234 @@ async def checks(
         "warnings": sum(1 for c in out if c["status"] == "warn"),
         "ok": sum(1 for c in out if c["status"] == "ok"),
     }
+
+
+# ── Реестр требований: что ждём от контрагентов и что для этого делали ───────
+# Находка живёт до следующей перезагрузки данных. Требование — находка, взятая
+# человеком под контроль: со сроком, ответственным, историей обращений и итогом.
+# Реестр внутри «Бухгалтерии», а не в «Задачах» (решение МАГа): работа идёт от
+# периода и контрагента, и требование обязано пересчитываться вместе с данными.
+
+_REQUEST_STATUS = {
+    "open": "На контроле", "requested": "Запрошен", "promised": "Обещан",
+    "received": "Получен", "disputed": "Спорный", "dropped": "Не ждём",
+}
+
+# Чего ждём по каждому правилу и в каком виде документа это придёт.
+_RULE_DOC_KIND = {
+    "purchase_no_vat_invoice": "Счёт-фактура поставщика",
+    "sale_no_vat_invoice": "Счёт-фактура покупателю (наш)",
+    "payment_no_document": "Закрывающий документ (акт, накладная, УПД)",
+    "invoice_paid_no_sale": "Отгрузка по оплаченному счёту (наша)",
+    "not_posted": "Проведение документа (наше действие)",
+}
+
+
+@router.get("/requests")
+async def doc_requests(
+    company_id: str,
+    period: str | None = None,
+    status: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Реестр требований документов: по периоду, статусу и контрагенту."""
+    cid = await assert_company_member(company_id, current_user, db)
+
+    q = select(DocRequest).where(DocRequest.company_id == cid)
+    if period:
+        q = q.where(DocRequest.period == period)
+    if status:
+        q = q.where(DocRequest.status == status)
+    rows = (await db.execute(q.order_by(DocRequest.period.desc(),
+                                        DocRequest.amount.desc()))).scalars().all()
+
+    today = date.today().isoformat()
+    items = [{
+        "id": str(r.id), "period": r.period, "rule": r.rule,
+        "counterparty": r.counterparty_name,
+        "counterpartyId": str(r.counterparty_id) if r.counterparty_id else None,
+        "docKind": r.doc_kind, "amount": _num(r.amount),
+        "status": r.status, "statusLabel": _REQUEST_STATUS.get(r.status, r.status),
+        "channel": r.channel, "dueDate": r.due_date, "assignee": r.assignee,
+        "contact": r.contact, "note": r.note,
+        "escalations": r.escalations or [],
+        # Просрочка — не отдельный статус, а состояние срока: статус говорит, что
+        # сделали, срок — успели ли.
+        "overdue": bool(r.due_date and r.due_date < today
+                        and r.status in ("open", "requested", "promised")),
+        "sourceDocId": str(r.source_doc_id) if r.source_doc_id else None,
+        "resolvedAt": r.resolved_at.isoformat() if r.resolved_at else None,
+    } for r in rows]
+
+    by_status: dict[str, int] = {}
+    for it in items:
+        by_status[it["status"]] = by_status.get(it["status"], 0) + 1
+
+    return {
+        "items": items,
+        "total": len(items),
+        "open": sum(1 for i in items if i["status"] in ("open", "requested", "promised")),
+        "overdue": sum(1 for i in items if i["overdue"]),
+        "amount": round(sum(i["amount"] for i in items
+                            if i["status"] in ("open", "requested", "promised")), 2),
+        "byStatus": [{"status": k, "label": _REQUEST_STATUS.get(k, k), "count": v}
+                     for k, v in sorted(by_status.items())],
+    }
+
+
+@router.post("/requests/from-gaps")
+async def create_requests_from_gaps(
+    company_id: str,
+    rule: str,
+    period: str | None = None,
+    due_days: int = Query(14, ge=1, le=180),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Поставить находки правила на контроль — по всему периоду разом.
+
+    Повторный вызов безопасен: требование по той же находке не заводится второй раз,
+    иначе история обращений расщепилась бы между дублями.
+    """
+    cid = await assert_company_member(company_id, current_user, db)
+    data = await closing(company_id=company_id, period=period, db=db, current_user=current_user)
+    gap = next((g for g in data["gaps"] if g["key"] == rule), None)
+    if gap is None:
+        raise HTTPException(status_code=404, detail="Правило не найдено")
+
+    known = {str(r) for r in (await db.execute(
+        select(DocRequest.source_doc_id).where(
+            DocRequest.company_id == cid, DocRequest.rule == rule))).scalars() if r}
+
+    created = 0
+    due = (date.today() + timedelta(days=due_days)).isoformat()
+    for row in gap["rows"]:
+        if row["id"] in known:
+            continue
+        db.add(DocRequest(
+            company_id=cid, period=row["period"] or (period or ""), rule=rule,
+            counterparty_name=row["counterparty"] or "",
+            source_doc_id=uuid.UUID(row["id"]),
+            doc_kind=_RULE_DOC_KIND.get(rule, gap["title"]),
+            amount=row["amount"], status="open", due_date=due,
+            created_by=current_user.email,
+        ))
+        created += 1
+
+    await db.commit()
+    return {"created": created, "skipped": len(gap["rows"]) - created, "rule": rule,
+            "title": gap["title"], "dueDate": due}
+
+
+@router.patch("/requests/{request_id}")
+async def update_request(
+    request_id: str,
+    company_id: str,
+    status: str | None = None,
+    channel: str | None = None,
+    due_date: str | None = None,
+    assignee: str | None = None,
+    contact: str | None = None,
+    note: str | None = None,
+    escalation: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Изменить требование или дописать обращение в его ленту."""
+    cid = await assert_company_member(company_id, current_user, db)
+    try:
+        uid = uuid.UUID(request_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Требование не найдено")
+    r = (await db.execute(select(DocRequest).where(
+        DocRequest.company_id == cid, DocRequest.id == uid))).scalar_one_or_none()
+    if r is None:
+        raise HTTPException(status_code=404, detail="Требование не найдено")
+
+    if status:
+        if status not in _REQUEST_STATUS:
+            raise HTTPException(status_code=400, detail="Неизвестный статус")
+        r.status = status
+        if status in ("received", "dropped"):
+            r.resolved_at = datetime.now(timezone.utc)
+    if channel is not None:
+        r.channel = channel or None
+    if due_date is not None:
+        r.due_date = due_date or None
+    if assignee is not None:
+        r.assignee = assignee or None
+    if contact is not None:
+        r.contact = contact or None
+    if note is not None:
+        r.note = note or None
+    if escalation:
+        # Обращение — запись в ленте, а не перезапись поля: важно, сколько раз и
+        # каким каналом просили, а не только последний факт.
+        r.escalations = [*(r.escalations or []), {
+            "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "who": current_user.email, "channel": channel or r.channel or "",
+            "text": escalation,
+        }]
+        if r.status == "open":
+            r.status = "requested"
+
+    await db.commit()
+    return {"id": str(r.id), "status": r.status,
+            "statusLabel": _REQUEST_STATUS.get(r.status, r.status),
+            "escalations": r.escalations or []}
+
+
+@router.post("/requests/resolve")
+async def resolve_requests(
+    company_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Закрыть требования, по которым документ уже появился в слое.
+
+    Требование закрывается ПОЯВЛЕНИЕМ ДОКУМЕНТА, а не кнопкой «сделано»: иначе реестр
+    расходится с данными, и человек отчитывается о том, чего в учёте нет.
+    """
+    cid = await assert_company_member(company_id, current_user, db)
+    rows = (await db.execute(select(DocRequest).where(
+        DocRequest.company_id == cid,
+        DocRequest.status.in_(("open", "requested", "promised"))))).scalars().all()
+
+    # Какой вид документа закрывает какое правило.
+    closes = {
+        "purchase_no_vat_invoice": ("vat_invoice_in",),
+        "sale_no_vat_invoice": ("vat_invoice_out",),
+        "payment_no_document": ("purchase", "advance_report", "invoice_in"),
+        "invoice_paid_no_sale": ("sale",),
+    }
+
+    resolved = 0
+    for r in rows:
+        types = closes.get(r.rule)
+        if r.rule == "not_posted":
+            # Наше действие: закрывается сменой статуса самого документа.
+            doc = (await db.execute(select(AccountingDoc).where(
+                AccountingDoc.id == r.source_doc_id))).scalar_one_or_none()
+            if doc is not None and doc.status_1c == "Проведён":
+                r.status, r.resolved_at = "received", datetime.now(timezone.utc)
+                r.resolved_doc_id = doc.id
+                resolved += 1
+            continue
+        if not types:
+            continue
+        found = (await db.execute(text("""
+            SELECT d.id FROM accounting_docs d
+             WHERE d.company_id = :cid AND d.doc_type = ANY(:types)
+               AND substr(d.date, 1, 7) >= :period
+               AND lower(coalesce(d.counterparty_name, '')) = lower(:name)
+             ORDER BY d.date LIMIT 1"""),
+            {"cid": str(cid), "types": list(types), "period": r.period,
+             "name": r.counterparty_name})).scalar_one_or_none()
+        if found:
+            r.status, r.resolved_at = "received", datetime.now(timezone.utc)
+            r.resolved_doc_id = found
+            resolved += 1
+
+    await db.commit()
+    return {"checked": len(rows), "resolved": resolved}

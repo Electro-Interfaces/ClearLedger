@@ -1616,6 +1616,79 @@ class InvoicePayment(Base):
     )
 
 
+class DocRequest(Base):
+    """Требование документа: что ждём от контрагента и что уже делали, чтобы получить.
+
+    Находка «оплата есть, документа нет» живёт ровно до перезагрузки данных, и пока
+    её никто не взял в работу, «не пришло» неотличимо от «не смотрели». Требование —
+    это находка, взятая человеком под контроль: у неё есть срок, ответственный,
+    история обращений и итог.
+
+    Реестр держим ЗДЕСЬ, а не в «Задачах» пространства (решение МАГа 13.08.2026):
+    работа бухгалтера идёт от периода и контрагента, а не от карточки задачи, и
+    требование обязано пересчитываться вместе с данными — задача этого не умеет.
+
+    Закрывается требование не кнопкой «сделано», а появлением документа: `resolve`
+    ищет его в слое по контрагенту, виду и периоду. Ручное закрытие тоже есть —
+    у него отдельный статус, чтобы «нашли» не смешивалось с «махнули рукой».
+    """
+
+    __tablename__ = "doc_requests"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
+    )
+    # Период, за который ждём документ (ГГГГ-ММ): у бухгалтера всё считается месяцем.
+    period: Mapped[str] = mapped_column(String(7), nullable=False)
+    # Правило, которым находка была найдена (`purchase_no_vat_invoice` и т. п.) —
+    # чтобы повторный разбор периода не заводил дубль того же требования.
+    rule: Mapped[str] = mapped_column(String(50), nullable=False)
+    counterparty_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("counterparties.id", ondelete="SET NULL"), nullable=True
+    )
+    counterparty_name: Mapped[str] = mapped_column(String(500), nullable=False, default="")
+    # Документ-повод: платёж без закрывающего, поступление без счёта-фактуры.
+    source_doc_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("accounting_docs.id", ondelete="SET NULL"), nullable=True
+    )
+    # Чего именно ждём («Счёт-фактура», «Акт», «Накладная») и на какую сумму.
+    doc_kind: Mapped[str] = mapped_column(String(100), nullable=False, default="")
+    amount: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False, default=0)
+    # open — на контроле, requested — запросили, promised — обещали, received —
+    # документ появился в слое, disputed — контрагент спорит, dropped — решили не ждать.
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="open")
+    # Как документ придёт: от этого зависит, можно ли оформить задним числом.
+    channel: Mapped[str | None] = mapped_column(String(20), nullable=True)   # edo | paper | unknown
+    due_date: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    assignee: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    contact: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # История обращений: [{at, who, channel, text, result}] — эскалация это не поле
+    # «напомнили», а лента: кто, когда, каким каналом и что ответили.
+    escalations: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    resolved_doc_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("accounting_docs.id", ondelete="SET NULL"), nullable=True
+    )
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        Index("idx_doc_requests_period", "company_id", "period", "status"),
+        # Одна находка — одно требование: повторный разбор периода не должен плодить
+        # дубли, а перезагрузка данных не должна терять историю обращений.
+        Index("uq_doc_request", "company_id", "rule", "source_doc_id", unique=True),
+    )
+
+
 class Employee(Base):
     """Сотрудник компании клиента: тот, кому начисляют и платят.
 
