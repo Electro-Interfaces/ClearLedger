@@ -823,6 +823,9 @@ class SourceFile(Base):
     size: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     storage_path: Mapped[str] = mapped_column(Text, nullable=False)
     fingerprint: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # data — приём данных (портал загрузки, выгрузка учётной системы);
+    # attachment — вложение чата или задачи. В слой L1 идёт только `data`.
+    purpose: Mapped[str] = mapped_column(String(20), nullable=False, default="data")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

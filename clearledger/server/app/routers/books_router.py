@@ -1148,8 +1148,11 @@ async def model(
         .where(GlEntry.company_id == cid))).one()
 
     # L1 и L4 материальны: приём выгрузки и снимок эталона закрытого месяца.
+    # Только приёмы данных: вложения переписки лежат в той же таблице, и без
+    # фильтра отчёт, отправленный в чат, считался очередной загрузкой источника.
     intakes = (await db.execute(select(func.count()).select_from(SourceFile)
-                                .where(SourceFile.company_id == cid))).scalar_one()
+                                .where(SourceFile.company_id == cid,
+                                       SourceFile.purpose == "data"))).scalar_one()
     snapshots = (await db.execute(select(func.count()).select_from(ReferenceSnapshot)
                                   .where(ReferenceSnapshot.company_id == cid))).scalar_one()
     analytics = 0

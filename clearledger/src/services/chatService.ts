@@ -388,7 +388,9 @@ export async function uploadAttachment(
 ): Promise<{ fileUrl: string; fileName: string; fileSize: number }> {
   const fd = new FormData()
   fd.append('file', file)
-  const q = companyId ? `?company_id=${encodeURIComponent(companyId)}` : ''
+  // Вложение переписки — не приём данных: без этой пометки файл из чата
+  // засчитывался приёмом в слое L1 наравне с выгрузкой учётной системы.
+  const q = `?purpose=attachment${companyId ? `&company_id=${encodeURIComponent(companyId)}` : ''}`
   const res = await upload<{ source_id: string }>(`/api/intake${q}`, fd)
   return { fileUrl: `/api/files/${res.source_id}`, fileName: file.name, fileSize: file.size }
 }

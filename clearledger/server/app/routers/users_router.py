@@ -200,6 +200,9 @@ async def create_user(
                                role=payload.role, position=payload.position,
                                party_type=party, organization_id=org_id))
             await db.flush()
+        # Человек в компании: висящее приглашение больше не о чём.
+        from app.routers.invitations_router import close_invites_for
+        await close_invites_for(db, existing.email, cid)
         return await _resp(existing, db, scope_cid=cid)
 
     user = User(
@@ -216,6 +219,8 @@ async def create_user(
                        role=payload.role, position=payload.position,
                        party_type=party, organization_id=org_id))
     await db.flush()
+    from app.routers.invitations_router import close_invites_for
+    await close_invites_for(db, user.email, cid)
     await log_audit(db, actor=current_user, company_id=cid, action="user.create",
                     target=user.email, details={"role": payload.role, "partyType": party})
     return await _resp(user, db, scope_cid=cid)

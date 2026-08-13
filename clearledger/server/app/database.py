@@ -951,6 +951,10 @@ async def create_all() -> None:
             # «его договоры» — три списка, которые между собой не сходятся: одно юрлицо
             # приезжает то с кавычками, то без, а платёж вообще приходит без ИНН.
             # Заполняет идемпотентное сведение (services/books_links.py), не загрузка.
+            # Назначение файла: приём данных или вложение переписки. Без него
+            # вложения чата попадали в слой приёма L1.
+            "ALTER TABLE source_files ADD COLUMN IF NOT EXISTS purpose "
+            "VARCHAR(20) NOT NULL DEFAULT 'data'",
             "ALTER TABLE accounting_docs ADD COLUMN IF NOT EXISTS counterparty_id UUID "
             "REFERENCES counterparties(id) ON DELETE SET NULL",
             "ALTER TABLE accounting_docs ADD COLUMN IF NOT EXISTS contract_id UUID "

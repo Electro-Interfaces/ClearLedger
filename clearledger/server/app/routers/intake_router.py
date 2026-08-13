@@ -34,6 +34,7 @@ def _ensure_upload_dir() -> None:
 async def upload_file(
     file: UploadFile,
     company_id: str | None = None,
+    purpose: str = "data",
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -83,6 +84,7 @@ async def upload_file(
         size=file_size,
         storage_path=str(storage_path),
         fingerprint=fingerprint,
+        purpose="attachment" if purpose == "attachment" else "data",
     )
     db.add(source)
     await db.flush()

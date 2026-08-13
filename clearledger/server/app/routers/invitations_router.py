@@ -12,7 +12,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import create_access_token, get_current_user, hash_password
@@ -186,6 +186,17 @@ async def list_invitations(
             .order_by(Invitation.created_at.desc())
         )
     ).scalars().all()
+    # Кто уже работает, того звать не нужно: показывать «ожидает принятия» на
+    # действующем сотруднике значит вводить администратора в заблуждение. Такие
+    # приглашения могли остаться от заведения человека напрямую или от повторного
+    # приглашения; на чтении их скрываем, а при следующем действии они закроются.
+    emails = {(i.email or "").strip().lower() for i in rows}
+    if emails:
+        members = {e.lower() for (e,) in (await db.execute(
+            select(User.email).join(UserCompany, UserCompany.user_id == User.id)
+            .where(func.lower(User.email).in_(emails),
+                   UserCompany.company_id == cid))).all()}
+        rows = [i for i in rows if (i.email or "").strip().lower() not in members]
     # Имена организаций пространства — для пометки «выпущено в …» у приглашений,
     # пришедших из другой организации (scope=space).
     companies = {
@@ -302,6 +313,27 @@ async def preview_invite(token: str, db: AsyncSession = Depends(get_db)):
         scope=scope, space_name=get_settings().ecosystem_brand,
         space_companies=space_companies,
     )
+
+
+async def close_invites_for(db, email: str, company_id) -> int:
+    """Закрыть открытые приглашения человека, который уже стал участником.
+
+    Приглашение это просьба зайти, а не запись о доступе. Человека нередко заводят
+    напрямую («Сотрудники» → добавить) или он приходит по второму приглашению, и
+    прежнее висит в списке «ожидают принятия» месяцами: на пилоте так висели двое
+    уже работающих сотрудников. Закрываем по факту членства, помечая, что вопрос
+    снят не переходом по ссылке.
+    """
+    rows = (await db.execute(select(Invitation).where(
+        Invitation.status == "pending",
+        func.lower(Invitation.email) == (email or "").strip().lower(),
+        (Invitation.company_id == company_id) | (Invitation.scope == "space"),
+    ))).scalars().all()
+    now = datetime.now(timezone.utc)
+    for inv in rows:
+        inv.status = "accepted"
+        inv.accepted_at = now
+    return len(rows)
 
 
 @router.post("/accept/{token}")
