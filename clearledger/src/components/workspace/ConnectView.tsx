@@ -1,17 +1,12 @@
 /**
- * «Подключения» — панель раздела рабочей области: пункты во второй колонке, экран
- * равен выбранному пункту.
+ * «Подключения» — панель раздела рабочей области: рисует экран выбранного пункта.
  *
- * Приложение было собрано из шести отдельных страниц (`paths` без секции в рельсе),
- * и левое меню показывало их плоским списком — как будто каждая страница отдельный
- * раздел. При этом маршрут `/connect`, на который ведут плитка стола и лаунчер, вёл
- * в рабочую область без единого раздела: секции `connect` не существовало.
- *
- * Пути страниц остаются рабочими — на них ведут глубокие ссылки из витрины и
- * каталога, — но входят люди сюда.
+ * Пункты раздела рисует ВТОРАЯ ПАНЕЛЬ рабочей области (`WorkspaceModeSidebar`) —
+ * она берёт их из `workspaceSections`, как у всех продуктов пространства. Панель
+ * своего меню не строит: когда она это делала (собственный `CentralPanelLayout`),
+ * один и тот же список пунктов стоял на экране дважды, двумя колонками подряд.
  */
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { CentralPanelLayout } from './CentralPanelLayout'
 import { useWorkspaceSections } from './workspaceSections'
 import { useWorkspace, useWorkspaceSubView } from '@/contexts/WorkspaceContext'
 import { ConnectionsPage, NotificationsPage, SpaceAppsPage } from '@/pages/ConnectPages'
@@ -23,11 +18,10 @@ export function ConnectView() {
   const { coreMode } = useWorkspace()
   const sections = useWorkspaceSections()
   const items = sections.find((s) => s.mode === coreMode)?.items ?? []
-  // Пункт живёт в адресе (`?sub=`), как во всех продуктах пространства: у пункта есть
-  // имя, ссылка и закладка, а «назад» возвращает к предыдущему пункту, а не выносит
-  // из приложения.
-  const [sub, setSub] = useWorkspaceSubView(items[0]?.key ?? 'connections',
-                                            items.map((i) => i.key))
+  // Выбранный пункт живёт в адресе (`?sub=`) — тот же ключ, которым его подсвечивает
+  // вторая панель: меню и содержимое читают одно и то же место.
+  const [sub] = useWorkspaceSubView(items[0]?.key ?? 'connections',
+                                    items.map((i) => i.key))
 
   // Роль могла закрыть все пункты раздела: показываем это словами, а не пустотой.
   if (!items.length) {
@@ -39,20 +33,17 @@ export function ConnectView() {
   }
 
   return (
-    <CentralPanelLayout items={items} activeKey={sub} onSelect={setSub}>
-      {/* Рабочая область раскладки — flex-1 overflow-hidden: без своей прокрутки
-          длинные экраны («Каталог типов», «Приложения и модули») обрезались по низу
-          окна и до конца списка было не долистать. */}
-      <ScrollArea className="h-full">
-        <div className="p-4">
-          {sub === 'connections' && <ConnectionsPage />}
-          {sub === 'connectors' && <ChannelsPage />}
-          {sub === 'sources' && <SourcesPage />}
-          {sub === 'catalog' && <CatalogPage />}
-          {sub === 'notifications' && <NotificationsPage />}
-          {sub === 'apps' && <SpaceAppsPage />}
-        </div>
-      </ScrollArea>
-    </CentralPanelLayout>
+    // Рабочая область — flex-1 overflow-hidden: без своей прокрутки длинные экраны
+    // («Каталог типов», «Приложения и модули») обрезаются по низу окна.
+    <ScrollArea className="h-full">
+      <div className="p-4">
+        {sub === 'connections' && <ConnectionsPage />}
+        {sub === 'connectors' && <ChannelsPage />}
+        {sub === 'sources' && <SourcesPage />}
+        {sub === 'catalog' && <CatalogPage />}
+        {sub === 'notifications' && <NotificationsPage />}
+        {sub === 'apps' && <SpaceAppsPage />}
+      </div>
+    </ScrollArea>
   )
 }
