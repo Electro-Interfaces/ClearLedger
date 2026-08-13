@@ -76,11 +76,46 @@ function SourcesTab() {
                 </div>
               </div>
             </div>
-            <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
+            <div className="grid gap-3 grid-cols-2 lg:grid-cols-3">
               {s.datasets.map((d) => (
                 <MetricTile key={d.key} label={d.label} value={num.format(d.records)} />
               ))}
             </div>
+
+            {/* Документы и справочники — списком по видам, а не одним числом:
+                срез компании читается именно по составу («390 счетов покупателю,
+                485 регламентных операций»), а «1500 документов» не говорит ничего. */}
+            {!!s.documents?.length && (
+              <div>
+                <div className="mb-1.5 text-[11px] uppercase tracking-wider text-muted-foreground">
+                  Документы по видам
+                </div>
+                <div className="rounded-lg border divide-y">
+                  {s.documents.map((d) => (
+                    <div key={d.key} className="flex items-baseline justify-between px-3 py-1.5 text-sm">
+                      <span>{d.label}</span>
+                      <span className="tabular-nums text-muted-foreground">{num.format(d.records)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {!!s.references?.length && (
+              <div>
+                <div className="mb-1.5 text-[11px] uppercase tracking-wider text-muted-foreground">
+                  Справочники
+                </div>
+                <div className="rounded-lg border divide-y">
+                  {s.references.map((r) => (
+                    <div key={r.key} className="flex items-baseline justify-between px-3 py-1.5 text-sm">
+                      <span>{r.label}</span>
+                      <span className="tabular-nums text-muted-foreground">{num.format(r.records)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
       ))}

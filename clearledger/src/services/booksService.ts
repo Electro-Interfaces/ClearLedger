@@ -53,11 +53,36 @@ export interface DocRow {
   date: string
   number: string
   type: string
+  /** Имя вида документа с сервера — словарь один на выгрузки и на экран. */
+  label: string
+  /** Участок учёта: sales, purchases, money, warehouse, closing. */
+  section: string | null
   counterparty: string
   inn: string | null
   amount: number
   vat: number
+  operation: string | null
+  status: string
+  /** closed — месяц закрыт в бухгалтерии, документ уже не переписать. */
+  periodStatus: string
   lines: number
+}
+
+export interface DocKind {
+  type: string
+  label: string
+  section: string | null
+  count: number
+  amount: number
+}
+
+/** Папка реестра — участок учёта, а не вид документа. Пустые тоже приходят. */
+export interface DocSection {
+  code: string
+  title: string
+  count: number
+  amount: number
+  kinds: DocKind[]
 }
 
 export interface SliceData {
@@ -94,9 +119,12 @@ interface PeriodOpts { from?: string; to?: string }
 const periodQuery = (o: PeriodOpts = {}) =>
   (o.from ? `&date_from=${o.from}` : '') + (o.to ? `&date_to=${o.to}` : '')
 
-export const getDocs = (companyId: string, docType?: string, period?: PeriodOpts) =>
-  get<{ rows: DocRow[]; total: number; kinds: { type: string; count: number; amount: number }[] }>(
+export const getDocs = (
+  companyId: string, docType?: string, period?: PeriodOpts, section?: string,
+) =>
+  get<{ rows: DocRow[]; total: number; kinds: DocKind[]; sections: DocSection[] }>(
     `/api/books/docs?company_id=${companyId}${docType ? `&doc_type=${docType}` : ''}`
+    + (section && !docType ? `&section=${section}` : '')
     + periodQuery(period) + '&limit=500')
 
 /** Разрез: `sales` — товары, `services` — услуги. Форма ответа одна. */
@@ -164,6 +192,9 @@ export interface SourceInfo {
   periodFrom: string | null
   periodTo: string | null
   datasets: { key: string; label: string; records: number }[]
+  /** Состав среза по видам — документы и справочники бухгалтерии. */
+  documents?: { key: string; label: string; records: number }[]
+  references?: { key: string; label: string; records: number }[]
 }
 
 export interface QualityCheck {

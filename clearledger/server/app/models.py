@@ -1334,6 +1334,47 @@ class GlAccount(Base):
     )
 
 
+class GlReference(Base):
+    """Справочник бухгалтерии, у которого нет своей таблицы в Ядре.
+
+    Складов, статей затрат, статей ДДС, банков, физлиц и единиц измерения в
+    нормализованном слое по отдельности не нужно — их не с чем сводить и незачем
+    расширять. Но без них срез компании неполон: документ ссылается на склад и
+    статью, и в разрезах учёта они обязаны существовать.
+
+    Поэтому одна таблица на все мелкие справочники: `kind` — вид, `meta` — то, что
+    у конкретного вида своё (БИК банка, вид статьи ДДС, родитель группы). Заводить
+    десяток таблиц ради двух-трёх колонок в каждой значило бы утроить схему без
+    единого нового вопроса, на который она отвечает.
+    """
+
+    __tablename__ = "gl_references"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
+    )
+    # Вид справочника как в источнике: warehouses, cost_items, cashflow_items,
+    # banks, bank_accounts, persons, units, nomenclature_kinds, subdivisions.
+    kind: Mapped[str] = mapped_column(String(40), nullable=False)
+    code: Mapped[str] = mapped_column(String(100), nullable=False, default="")
+    name: Mapped[str] = mapped_column(String(500), nullable=False)
+    parent_name: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    is_group: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    meta: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("idx_gl_references_kind", "company_id", "kind"),
+        Index("uq_gl_reference", "company_id", "kind", "code", "name", unique=True),
+    )
+
+
 class GlEntry(Base):
     """Проводка регистра бухгалтерии: дата, корреспонденция, сумма."""
 
@@ -1427,6 +1468,11 @@ class AccountingDoc(Base):
     )
     # Полный список расхождений с формулами (см. §7a.3 спецификации).
     discrepancy_details: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # Реквизиты документа, за которыми не заводят колонку: время проведения, автор,
+    # договор, комментарий, склад, статья ДДС, признак проведения. Для среза компании
+    # они обязательны (по времени формирования документов вопрос задаётся в первую
+    # очередь), но разбирать их по колонкам рано: у каждого вида документа состав свой.
+    doc_meta: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

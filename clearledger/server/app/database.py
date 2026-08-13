@@ -1229,6 +1229,9 @@ async def create_all() -> None:
             # человек обязан видеть, какое принимает.
             "ALTER TABLE invitations ADD COLUMN IF NOT EXISTS scope VARCHAR(10) "
             "NOT NULL DEFAULT 'company'",
+            # Реквизиты документа, за которыми не заводят колонку: время проведения,
+            # автор, договор, комментарий. Нужны срезу компании из бухгалтерии.
+            "ALTER TABLE accounting_docs ADD COLUMN IF NOT EXISTS doc_meta JSONB",
             # v2.5: универсальные справочники — raw-снимок всех реквизитов 1С + промо.
             "ALTER TABLE counterparties ADD COLUMN IF NOT EXISTS raw JSONB",
             "ALTER TABLE counterparties ADD COLUMN IF NOT EXISTS full_name VARCHAR(1000)",

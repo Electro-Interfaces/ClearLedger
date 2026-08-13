@@ -21,7 +21,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import assert_company_member, get_current_user
 from app.database import get_db
-from app.models import AccountingDoc, GlAccount, GlEntry, Period, User
+from app.models import (
+    AccountingDoc, GlAccount, GlEntry, GlReference, Period, User,
+)
 
 router = APIRouter(prefix="/books", tags=["Бухгалтерия пространства"])
 
@@ -31,6 +33,55 @@ router = APIRouter(prefix="/books", tags=["Бухгалтерия простра
 REVENUE_KT = "90.01.1"
 VAT_DT, VAT_KT = "90.03", "68.02"
 COST_DT = "90.02.1"
+
+# Имена видов документов и справочников для витрины «Данные». Держим на сервере: тот
+# же словарь нужен и выгрузкам, а дублировать его во фронте — расходиться при первом
+# же новом виде.
+DOC_LABELS = {
+    "sale_goods": "Реализация товаров",
+    "sale_services": "Оказание услуг",
+    "purchase": "Поступление товаров и услуг",
+    "invoice_out": "Счёт покупателю",
+    "vat_invoice_out": "Счёт-фактура выданный",
+    "vat_invoice_in": "Счёт-фактура полученный",
+    "closing_op": "Регламентная операция закрытия",
+    "manual_entry": "Операция вручную",
+    "bank_in": "Поступление на расчётный счёт",
+    "bank_out": "Списание с расчётного счёта",
+    "payment_order": "Платёжное поручение",
+    "cash_in": "Приходный кассовый ордер",
+    "cash_out": "Расходный кассовый ордер",
+    "advance_report": "Авансовый отчёт",
+    "demand_note": "Требование-накладная",
+    "proxy": "Доверенность",
+    "purchase_correction": "Корректировка поступления",
+}
+
+# Папки реестра — УЧАСТКИ УЧЁТА, а не виды документов: счёт, накладная и
+# счёт-фактура по одной сделке лежат в одной папке, потому что вопрос к ним общий
+# («чем закрыт этот счёт»), а не «где хранятся счета-фактуры».
+DOC_SECTIONS = [
+    ("sales", "Продажи", ["invoice_out", "sale_goods", "sale_services", "vat_invoice_out"]),
+    ("purchases", "Закупки", ["purchase", "vat_invoice_in", "purchase_correction", "proxy"]),
+    ("money", "Деньги", ["bank_in", "bank_out", "payment_order",
+                         "cash_in", "cash_out", "advance_report"]),
+    ("warehouse", "Склад", ["demand_note"]),
+    # Служебные документы отдельно: пять сотен регламентных операций в общем списке
+    # хоронят первичку, ради которой реестр и открывают.
+    ("closing", "Закрытие периода", ["closing_op", "manual_entry"]),
+]
+SECTION_OF = {code: sec for sec, _, codes in DOC_SECTIONS for code in codes}
+
+REF_LABELS = {
+    "warehouses": "Склады",
+    "subdivisions": "Подразделения",
+    "cost_items": "Статьи затрат",
+    "cashflow_items": "Статьи движения денежных средств",
+    "nomenclature_kinds": "Виды номенклатуры",
+    "persons": "Физические лица",
+    "banks": "Банки",
+    "bank_accounts": "Банковские счета",
+}
 
 
 def _num(v: Any) -> float:
@@ -457,6 +508,7 @@ async def periods(
 async def docs(
     company_id: str,
     doc_type: str | None = None,
+    section: str | None = Query(None, description="участок учёта: sales, purchases, money…"),
     date_from: str | None = None,
     date_to: str | None = None,
     limit: int = Query(100, ge=1, le=500),
@@ -470,6 +522,9 @@ async def docs(
     q = select(AccountingDoc).where(AccountingDoc.company_id == cid)
     if doc_type:
         q = q.where(AccountingDoc.doc_type == doc_type)
+    elif section:
+        codes = [c for c, s in SECTION_OF.items() if s == section]
+        q = q.where(AccountingDoc.doc_type.in_(codes))
     # Тот же период, что и у разрезов реализации: реестр под графиком обязан
     # показывать те же документы, из которых посчитаны цифры сверху.
     if date_from:
@@ -490,16 +545,34 @@ async def docs(
         kinds_q = kinds_q.where(AccountingDoc.date >= date_from)
     if date_to:
         kinds_q = kinds_q.where(AccountingDoc.date <= date_to)
-    kinds = [{"type": t, "count": n, "amount": _num(a)}
-             for t, n, a in (await db.execute(kinds_q)).all()]
+    counts = [(t, n, _num(a)) for t, n, a in (await db.execute(kinds_q)).all()]
+    kinds = [{"type": t, "label": DOC_LABELS.get(t, t), "section": SECTION_OF.get(t),
+              "count": n, "amount": a} for t, n, a in counts]
+
+    # Папки реестра. Отдаём ВСЕ участки, включая пустые: пустая «Касса» — это ответ
+    # («наличных операций нет»), а исчезнувшая папка читается как потерянные данные.
+    sections = [{
+        "code": code, "title": title,
+        "count": sum(n for t, n, _ in counts if t in codes),
+        "amount": sum(a for t, _, a in counts if t in codes),
+        "kinds": [k for k in kinds if k["type"] in codes],
+    } for code, title, codes in DOC_SECTIONS]
 
     return {
         "total": total,
         "kinds": kinds,
+        "sections": sections,
         "rows": [{
             "date": d.date, "number": d.number, "type": d.doc_type,
+            "label": DOC_LABELS.get(d.doc_type, d.doc_type),
+            "section": SECTION_OF.get(d.doc_type),
             "counterparty": d.counterparty_name, "inn": d.counterparty_inn,
             "amount": _num(d.amount), "vat": _num(d.vat_amount),
+            # Назначение платежа и вид операции: без них банковская строка — только сумма.
+            "operation": d.operation_type,
+            "status": d.status_1c,
+            # Закрытый период — половина ответа аудитору: документ уже не переписать.
+            "periodStatus": d.period_status,
             "lines": len(d.lines or []),
         } for d in rows],
     }
@@ -616,8 +689,22 @@ async def sources(
 
     entries_n, first, last = await stat(GlEntry, GlEntry.entry_date)
     accounts_n, _, _ = await stat(GlAccount)
-    docs_n, _, _ = await stat(AccountingDoc)
     periods_n, _, _ = await stat(Period)
+
+    # Документы — ПО ВИДАМ: «1500 документов» ничего не говорит, а «390 счетов
+    # покупателю и 485 регламентных операций» сразу показывает, какой срез приехал.
+    docs_by_kind = {
+        t: n for t, n in (await db.execute(
+            select(AccountingDoc.doc_type, func.count())
+            .where(AccountingDoc.company_id == cid)
+            .group_by(AccountingDoc.doc_type))).all()
+    }
+    refs_by_kind = {
+        k: n for k, n in (await db.execute(
+            select(GlReference.kind, func.count())
+            .where(GlReference.company_id == cid)
+            .group_by(GlReference.kind))).all()
+    }
 
     loaded = (await db.execute(
         select(func.max(GlEntry.created_at)).where(GlEntry.company_id == cid))).scalar_one()
@@ -634,8 +721,15 @@ async def sources(
             "datasets": [
                 {"key": "gl_accounts", "label": "План счетов", "records": accounts_n},
                 {"key": "gl_entries", "label": "Проводки", "records": entries_n},
-                {"key": "accounting_docs", "label": "Первичные документы", "records": docs_n},
                 {"key": "periods", "label": "Периоды", "records": periods_n},
+            ],
+            "documents": [
+                {"key": k, "label": DOC_LABELS.get(k, k), "records": n}
+                for k, n in sorted(docs_by_kind.items(), key=lambda kv: -kv[1])
+            ],
+            "references": [
+                {"key": k, "label": REF_LABELS.get(k, k), "records": n}
+                for k, n in sorted(refs_by_kind.items(), key=lambda kv: -kv[1])
             ],
         }],
     }

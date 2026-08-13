@@ -29,7 +29,7 @@ from app.models import (
     ContractLocation, CorporateClient, Counterparty, EzsCustomer, EzsEquipmentUnit,
     EzsReference, EzsRfidCard, EzsSite, EzsSiteCost, EzsSiteDoc, EzsSiteEquipment,
     EzsTariff, EzsSiteEvent, EzsTechConnection, ExportPacket, FuelExportDoc, FuelReceipt,
-    FuelShift, GlAccount, GlEntry, HubexAsset, HubexTask, LocationTypeDef,
+    FuelShift, GlAccount, GlEntry, GlReference, HubexAsset, HubexTask, LocationTypeDef,
     NomenclatureItem, OnlineOrder, Period, RawBatchRecord, Region, ServiceLocation,
     SourceFile, StationContractSettlement, StationDispensePeriod, StationEnergyPeriod,
     UserCompany,
@@ -214,6 +214,12 @@ _ENTITIES: list[tuple[str, str, list[tuple]]] = [
          "год + месяц", Period.status == "open", "не закрыт — цифры ещё поедут"),
         ("nomenclature", "Номенклатура", NomenclatureItem,
          "Справочник бухгалтерии", "продажи · услуги", "код номенклатуры", None, None),
+        # Склады, статьи затрат и ДДС, банки, физлица — в одной таблице: сводить их
+        # не с чем, а без них срез компании неполон (документ ссылается на склад и
+        # статью, и в разрезах учёта они обязаны существовать).
+        ("gl_references", "Справочники учёта", GlReference,
+         "Справочники бухгалтерии (склады, статьи, банки, лица)",
+         "разрезы учёта · документы", "вид + наименование", None, None),
     ]),
 ]
 
