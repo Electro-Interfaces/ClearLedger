@@ -279,6 +279,23 @@ async def list_connectors(db: AsyncSession, company_id: uuid.UUID) -> dict[str, 
     accounts = (await db.execute(
         select(MailAccount).where(MailAccount.company_id == company_id)
         .order_by(MailAccount.address))).scalars().all()
+    if not accounts:
+        # Пока ящиков нет, коннектора не было в списке ВООБЩЕ — и выходило, что почта
+        # компании не считается подключением наравне с остальными. Показываем его как
+        # платформенные сервисы: ненастроенный виден и уводит настраивать.
+        items.append({
+            "key": "core:mail:company",
+            "app": "core", "app_name": "Ядро",
+            "provider": "mailbox",
+            "kind": "Почта компании",
+            "label": "Почта компании — ящики не заведены",
+            "brings": "Деловая переписка: письма контрагентов, вложения-документы, "
+                      "ответы из пространства. Заведите первый ящик — приём пойдёт сам",
+            "direction": "both", "status": "off", "enabled": False,
+            "last_sync_at": None, "last_error": None, "records": None, "files": 0,
+            "initiator": "both",
+            "settings_route": "/connectors",
+        })
     for a in accounts:
         ready = bool(a.imap_host) and bool(a.password_enc or a.secret_env)
         items.append({

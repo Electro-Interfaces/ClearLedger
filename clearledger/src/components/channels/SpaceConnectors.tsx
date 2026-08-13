@@ -23,6 +23,9 @@ function statusView(c: SpaceConnector) {
   if (!c.enabled || c.status === 'off') return { label: 'Выключен', cls: 'text-muted-foreground', Icon: CircleOff }
   if (c.status === 'paused') return { label: 'Пауза', cls: 'text-amber-500', Icon: PauseCircle }
   if (c.status === 'draft') return { label: 'Черновик', cls: 'text-muted-foreground', Icon: PauseCircle }
+  // Заведён, но работать не может: у почтового ящика нет сервера или пароля. Без
+  // этой ветки такой ящик показывался «Работает» — витрина обещала приём, которого нет.
+  if (c.status === 'setup') return { label: 'Не настроен', cls: 'text-amber-500', Icon: Settings2 }
   return { label: 'Работает', cls: 'text-emerald-500', Icon: CheckCircle2 }
 }
 
