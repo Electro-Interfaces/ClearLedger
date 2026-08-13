@@ -17,6 +17,7 @@
  * продуктов не проверяются. Это защита от «увидел лишнее», а не от целенаправленного
  * запроса к API — тот же уровень, что был у разделов Учёта.
  */
+import { CONNECT_MENU } from '@/config/workspaceMenus'
 import { navByPath } from './navigation'
 import {
   ENERGY_MGMT, EQUIPMENT_MENU, OPS_MONITOR_MENU, SITES_MENU,
@@ -125,7 +126,9 @@ export const PRODUCT_MODULES: Record<string, ProductModuleDef[]> = {
     { code: 'reconcile', label: 'Сверка', group: 'Разделы' },
   ],
   // «Подключения» — приложение из одних страниц: каждая и есть модуль права.
-  connect: pages(['/connections', '/connectors', '/catalog', '/notifications', '/apps']),
+  // Пункты раздела, а не страницы: коды те же, что были у страниц, поэтому уже
+  // выданные роли продолжают действовать. Добавился `sources` — он не гейтился нигде.
+  connect: items(CONNECT_MENU, 'Разделы'),
   // Компания без объектов: право выдаётся на пункт, потому что разрезы адресованы
   // разным людям — коммерсанту нужны покупатели, но не журнал проводок.
   revenue: [

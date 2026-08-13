@@ -43,6 +43,7 @@ const StoreWindow = lazy(() => import('./StoreWindow').then((m) => ({ default: m
 const ExportLayerPanel = lazy(() => import('./ExportLayerPanel').then((m) => ({ default: m.ExportLayerPanel })))
 // Рабочие места компании без объектов: «Реализация» и «Бухгалтерия».
 const RevenuePanel = lazy(() => import('./OfficeRevenue').then((m) => ({ default: m.RevenuePanel })))
+const ConnectView = lazy(() => import('./ConnectView').then((m) => ({ default: m.ConnectView })))
 const REVENUE_MODES: CoreMode[] = ['rev_sales', 'rev_buyers', 'rev_catalog', 'rev_papers',
   'rev_money', 'rev_stock', 'rev_help']
 const EconomyPanel = lazy(() => import('./OfficeEconomy').then((m) => ({ default: m.EconomyPanel })))
@@ -176,6 +177,10 @@ function ModePanel() {
       {REVENUE_MODES.includes(coreMode) && <RevenuePanel />}
       {ECONOMY_MODES.includes(coreMode) && <EconomyPanel />}
       {(coreMode === 'books_ledger' || coreMode === 'books_primary') && <BooksPanel />}
+      {/* «Подключения»: один раздел, его пункты — во второй колонке. Пока ветки не
+          было, маршрут /connect (плитка стола, лаунчер) открывал рабочую область без
+          содержимого. */}
+      {coreMode === 'connect' && <ConnectView />}
     </Suspense>
   )
 }

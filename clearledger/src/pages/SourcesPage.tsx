@@ -658,7 +658,7 @@ export function SourcesPage() {
   const [sources, setSources] = useState<Source[]>(getSources)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [newName, setNewName] = useState('')
-  const [newType, setNewType] = useState<string>('sts')
+  const [newType, setNewType] = useState<string>('')
   const [focusId, setFocusId] = useState<string | null>(null)
   const { companyId } = useCompany()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -709,9 +709,10 @@ export function SourcesPage() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-bold">Источники данных</h1>
+          <h1 className="text-xl font-bold">Источники</h1>
           <p className="text-sm text-muted-foreground">
-            Подключения к внешним системам. Настройте источник, затем создайте канал.
+            Реквизиты доступа к внешним системам: адрес, учётка, ключи. Данные носит
+            коннектор, собранный поверх источника, — источник сам по себе ничего не грузит.
           </p>
         </div>
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
@@ -728,7 +729,7 @@ export function SourcesPage() {
             <div className="space-y-4 py-2">
               <div className="space-y-2">
                 <Label>Название</Label>
-                <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="STS API ГИГ" />
+                <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Бухгалтерия компании" />
               </div>
               <div className="space-y-2">
                 <Label>Тип подключения</Label>

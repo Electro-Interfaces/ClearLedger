@@ -19,7 +19,6 @@
 import { useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { Download, Printer } from 'lucide-react'
 
 import { useCompany } from '@/contexts/CompanyContext'
 import { useFilters, type Period } from '@/contexts/FilterContext'
@@ -41,6 +40,9 @@ import {
   CounterpartyWindow, Loading, NoCompany, NomenclatureWindow, TableCard, Th,
 } from './OfficePanels'
 import { useWorkspaceSections } from './workspaceSections'
+import {
+  ExportButton, SearchInput, Tabs, money, monthLabel, num, qty,
+} from './officeShared'
 import { ProductHelpPanel } from './ProductHelpPanel'
 import { REVENUE_HELP_SLICES } from './helpSlices'
 import {
@@ -48,19 +50,9 @@ import {
   REV_MONEY_MENU, REV_STOCK_MENU,
 } from '@/config/workspaceMenus'
 
-const money = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
-const num = new Intl.NumberFormat('ru-RU')
-const qty = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 })
-const MONTHS = ['', 'январь', 'февраль', 'март', 'апрель', 'май', 'июнь', 'июль',
-  'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь']
 
 /** Полный список, а не топ-15: экран разреза и есть его реестр. */
 const FULL = 500
-
-const monthLabel = (m: string) => {
-  const [y, mm] = m.split('-')
-  return `${MONTHS[Number(mm)] ?? mm} ${y}`
-}
 
 /* ── Периоды сравнения ───────────────────────────────────────────────────── */
 // Дата хранится строкой ISO, и сравнение периодов — единственное место, где её
@@ -114,22 +106,6 @@ const KIND_TABS: { key: RevKind; label: string }[] = [
   { key: 'service', label: 'Услуги' },
 ]
 
-function Tabs<T extends string>({ value, onChange, items }: {
-  value: T; onChange: (v: T) => void; items: { key: T; label: string }[]
-}) {
-  return (
-    <div className="flex flex-wrap gap-1">
-      {items.map((i) => (
-        <button key={i.key} onClick={() => onChange(i.key)}
-          className={cn('rounded-md px-2.5 py-1 text-xs',
-            value === i.key ? 'bg-muted font-medium' : 'text-muted-foreground hover:bg-muted/50')}>
-          {i.label}
-        </button>
-      ))}
-    </div>
-  )
-}
-
 /**
  * Фильтр «сумма от / до». Стоит рядом с поиском во всех реестрах: вопрос «покажи
  * сделки крупнее миллиона» задают чаще, чем ищут конкретное имя, а до этого его
@@ -143,9 +119,11 @@ function AmountRange({ from, to, onChange }: {
     <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
       <span>сумма</span>
       <input value={from} onChange={(e) => onChange(e.target.value, to)}
-        placeholder="от" inputMode="numeric" className={cls} />
+        placeholder="от" inputMode="numeric" className={cls}
+        aria-label="Сумма от" />
       <input value={to} onChange={(e) => onChange(from, e.target.value)}
-        placeholder="до" inputMode="numeric" className={cls} />
+        placeholder="до" inputMode="numeric" className={cls}
+        aria-label="Сумма до" />
     </div>
   )
 }
@@ -162,29 +140,6 @@ const inRange = (v: number, from: string, to: string) => {
 /** Сколько дней назад была последняя покупка — им меряются молчащие. */
 const daysSince = (iso: string | null) =>
   iso ? Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 86400000)) : null
-
-/**
- * Выгрузка экрана — по канону отчётности пространства: уходит видимое после фильтров.
- *
- * PDF делаем печатью браузера, а не генерацией на сервере: печать даёт правильную
- * кириллицу без шрифтовых пакетов в образе, а на выходе тот же PDF («Сохранить как
- * PDF» в диалоге печати). Печатные стили прячут меню и рельсы — на лист уходит только
- * рабочая область (`index.css`, `@media print`).
- */
-function ExportButton({ onClick, label = 'Excel' }: { onClick: () => void; label?: string }) {
-  const cls = 'inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs '
-    + 'text-muted-foreground hover:bg-muted/50'
-  return (
-    <div className="inline-flex items-center gap-1 no-print">
-      <button onClick={onClick} className={cls}>
-        <Download className="h-3.5 w-3.5" />{label}
-      </button>
-      <button onClick={() => window.print()} className={cls} title="Печать или сохранение в PDF">
-        <Printer className="h-3.5 w-3.5" />PDF
-      </button>
-    </div>
-  )
-}
 
 /**
  * Изменение к прошлому периоду. Рост с нуля процентом не выражается — показываем
@@ -408,6 +363,20 @@ function RevOverview({ companyId, kind, period }: {
 
   return (
     <div className="p-4 space-y-4">
+      <div className="flex justify-end">
+        <ExportButton onClick={() => exportTable('Обзор реализации', [
+          { header: 'Показатель', key: 'label', width: 30 },
+          { header: 'Период', key: 'now', width: 18, money: true },
+          { header: 'Прошлый период', key: 'was', width: 18, money: true },
+        ], [
+          { label: 'Оборот с НДС', now: d.total, was: p?.total ?? null },
+          { label: 'Оборот без НДС', now: d.net, was: p?.net ?? null },
+          { label: 'Документов', now: d.docs, was: p?.docs ?? null },
+          { label: 'Покупателей', now: d.clients, was: p?.clients ?? null },
+          { label: 'НДС', now: d.vat, was: p?.vat ?? null },
+        ])} />
+      </div>
+
       <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
         <MetricTile label="Оборот с НДС" value={money.format(d.total) + ' ₽'}
           hint={`без НДС ${money.format(d.net)} ₽`} />
@@ -660,8 +629,15 @@ function RevCompare({ companyId, kind, period }: {
           { key: 'prev' as const, label: 'Предыдущий период' },
           { key: 'year' as const, label: 'Год назад' },
         ]} />
-        <div className="text-xs text-muted-foreground tabular-nums">
-          {periodLabel(period)} · против · {periodLabel(other)}
+        <div className="flex items-center gap-3">
+          <div className="text-xs text-muted-foreground tabular-nums">
+            {periodLabel(period)} · против · {periodLabel(other)}
+          </div>
+          <ExportButton onClick={() => exportTable('Сравнение периодов', [
+            { header: 'Показатель', key: 'label', width: 30 },
+            { header: periodLabel(period), key: 'now', width: 20, money: true },
+            { header: periodLabel(other), key: 'was', width: 20, money: true },
+          ], rows.map((r) => ({ label: r.label, now: r.now, was: r.was })))} />
         </div>
       </div>
 
@@ -812,9 +788,8 @@ function RevClients({ companyId, kind, period }: {
     <div className="p-4 space-y-3">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-3 flex-wrap">
-          <input value={search} onChange={(e) => setSearch(e.target.value)}
-            placeholder="Покупатель или ИНН"
-            className="h-8 w-56 rounded-md border bg-background px-2.5 text-sm" />
+          <SearchInput value={search} onChange={setSearch}
+            placeholder="Покупатель или ИНН" label="Поиск по покупателю или ИНН" />
           <AmountRange from={amount.from} to={amount.to}
             onChange={(from, to) => setAmount({ from, to })} />
           <Tabs value={silent ? 'silent' : 'all'} onChange={(v) => setSilent(v === 'silent')}
@@ -1152,6 +1127,20 @@ function RevChurn({ companyId, kind, period }: {
         <MetricTile label="Ушедшие" value={num.format(gone.length)}
           hint={`покупали в ${periodLabel(prev)}, сейчас нет`} />
       </div>
+      <div className="flex justify-end">
+        <ExportButton onClick={() => exportTable('Новые и ушедшие', [
+          { header: 'Группа', key: 'group', width: 16 },
+          { header: 'Покупатель', key: 'name', width: 44 },
+          { header: 'ИНН', key: 'inn', width: 14 },
+          { header: 'Оборот', key: 'amount', width: 18, money: true },
+          { header: 'Документов', key: 'docs', width: 12 },
+        ], [
+          ...fresh.map((c) => ({ ...c, group: 'новые' })),
+          ...back.map((c) => ({ ...c, group: 'вернулись' })),
+          ...gone.map((c) => ({ ...c, group: 'ушедшие' })),
+        ])} />
+      </div>
+
       {list('Новые', 'первая покупка в истории компании', fresh)}
       {list('Вернулись', 'были в истории, пропустили прошлый период', back)}
       {list('Ушедшие', 'были в прошлом периоде, в этом не покупали', gone)}
@@ -1183,9 +1172,8 @@ function RevItems({ companyId, kind, period, title }: {
     <div className="p-4 space-y-3">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-3 flex-wrap">
-          <input value={search} onChange={(e) => setSearch(e.target.value)}
-            placeholder="Наименование или код"
-            className="h-8 w-56 rounded-md border bg-background px-2.5 text-sm" />
+          <SearchInput value={search} onChange={setSearch}
+            placeholder="Наименование или код" label="Поиск по наименованию или коду" />
           <AmountRange from={amount.from} to={amount.to}
             onChange={(from, to) => setAmount({ from, to })} />
         </div>
@@ -1264,9 +1252,8 @@ function RevSaleDocs({ companyId, kind, period }: {
     <div className="p-4 space-y-3">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-3 flex-wrap">
-          <input value={search} onChange={(e) => setSearch(e.target.value)}
-            placeholder="Контрагент или номер"
-            className="h-8 w-56 rounded-md border bg-background px-2.5 text-sm" />
+          <SearchInput value={search} onChange={setSearch}
+            placeholder="Контрагент или номер" label="Поиск по контрагенту или номеру документа" />
           <AmountRange from={amount.from} to={amount.to}
             onChange={(from, to) => setAmount({ from, to })} />
         </div>
@@ -1492,6 +1479,15 @@ function RevFunnel({ companyId, period }: { companyId: string; period: Period })
         </CardContent>
       </Card>
 
+      <div className="flex justify-end">
+        <ExportButton onClick={() => exportTable('Воронка', [
+          { header: 'Месяц', key: 'month', width: 12 },
+          { header: 'Счета', key: 'billed', width: 18, money: true },
+          { header: 'Реализации', key: 'shipped', width: 18, money: true },
+          { header: 'Оплачено', key: 'paid', width: 18, money: true },
+        ], months)} />
+      </div>
+
       <TableCard note="Помесячно: выставили, отгрузили, получили"
         head={<><Th>Месяц</Th><Th right>Счета</Th><Th right>Реализации</Th>
           <Th right>Оплачено</Th><Th right>Отгружено / выставлено</Th></>}>
@@ -1664,9 +1660,8 @@ function RevMargin({ companyId, period }: { companyId: string; period: Period })
 
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-3 flex-wrap">
-          <input value={search} onChange={(e) => setSearch(e.target.value)}
-            placeholder="Наименование или код"
-            className="h-8 w-56 rounded-md border bg-background px-2.5 text-sm" />
+          <SearchInput value={search} onChange={setSearch}
+            placeholder="Наименование или код" label="Поиск по наименованию или коду" />
           <AmountRange from={amount.from} to={amount.to}
             onChange={(from, to) => setAmount({ from, to })} />
           <Tabs value={onlyKnown ? 'known' : 'all'} onChange={(v) => setOnlyKnown(v === 'known')}
@@ -1899,6 +1894,16 @@ function RevTerms({ companyId, period }: { companyId: string; period: Period }) 
           расчёт этого экрана. Вопрос к выгрузке из 1С.
         </p>
       )}
+      <div className="flex justify-end">
+        <ExportButton onClick={() => exportTable('Сроки оплаты', [
+          { header: 'Покупатель', key: 'name', width: 44 },
+          { header: 'Счетов', key: 'invoices', width: 10 },
+          { header: 'Сумма', key: 'amount', width: 18, money: true },
+          { header: 'Средний срок, дней', key: 'avgDays', width: 18 },
+          { header: 'Худший счёт, дней', key: 'maxDays', width: 18 },
+        ], d.clients)} />
+      </div>
+
       <TableCard note="Покупатели по среднему сроку оплаты — с кем говорить об отсрочке"
         head={<><Th>Покупатель</Th><Th right>Счетов</Th><Th right>Сумма</Th>
           <Th right>Средний срок</Th><Th right>Худший</Th></>}>
@@ -2137,9 +2142,8 @@ function RevContracts({ companyId, period }: { companyId: string; period: Period
 
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-3 flex-wrap">
-          <input value={search} onChange={(e) => setSearch(e.target.value)}
-            placeholder="Договор или контрагент"
-            className="h-8 w-56 rounded-md border bg-background px-2.5 text-sm" />
+          <SearchInput value={search} onChange={setSearch}
+            placeholder="Договор или контрагент" label="Поиск по договору или контрагенту" />
           <Tabs value={onlyLinked ? 'linked' : 'all'} onChange={(v) => setOnlyLinked(v === 'linked')}
             items={[{ key: 'all', label: 'Все' }, { key: 'linked', label: 'Только с договором' }]} />
         </div>
@@ -2264,9 +2268,8 @@ function RevStock({ companyId }: { companyId: string }) {
             { key: 'idle' as const, label: 'Неликвиды' },
             { key: 'negative' as const, label: 'Отрицательные' },
           ]} />
-          <input value={search} onChange={(e) => setSearch(e.target.value)}
-            placeholder="Наименование или код"
-            className="h-8 w-56 rounded-md border bg-background px-2.5 text-sm" />
+          <SearchInput value={search} onChange={setSearch}
+            placeholder="Наименование или код" label="Поиск по наименованию или коду" />
         </div>
         <ExportButton onClick={() => exportTable('Остатки по номенклатуре', [
           { header: 'Код', key: 'code', width: 14 },
@@ -2357,9 +2360,8 @@ function RevSuppliers({ companyId, period, view }: {
     return (
       <div className="p-4 space-y-3">
         <div className="flex items-center justify-between gap-3 flex-wrap">
-          <input value={search} onChange={(e) => setSearch(e.target.value)}
-            placeholder="Наименование или код"
-            className="h-8 w-56 rounded-md border bg-background px-2.5 text-sm" />
+          <SearchInput value={search} onChange={setSearch}
+            placeholder="Наименование или код" label="Поиск по наименованию или коду" />
           <ExportButton onClick={() => exportTable('Цены закупки', [
             { header: 'Код', key: 'code', width: 14 },
             { header: 'Позиция', key: 'name', width: 40 },
@@ -2432,9 +2434,8 @@ function RevSuppliers({ companyId, period, view }: {
           hint="чем выше, тем сильнее зависимость от нескольких поставщиков" />
       </div>
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        <input value={search} onChange={(e) => setSearch(e.target.value)}
-          placeholder="Поставщик"
-          className="h-8 w-56 rounded-md border bg-background px-2.5 text-sm" />
+        <SearchInput value={search} onChange={setSearch}
+          placeholder="Поставщик" label="Поиск по поставщику" />
         <ExportButton onClick={() => exportTable('Поставщики', [
           { header: 'Поставщик', key: 'name', width: 44 },
           { header: 'ИНН', key: 'inn', width: 14 },
@@ -2826,9 +2827,8 @@ function RevDeals({ companyId, period }: { companyId: string; period: Period }) 
 
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-3 flex-wrap">
-          <input value={search} onChange={(e) => setSearch(e.target.value)}
-            placeholder="Покупатель или номер"
-            className="h-8 w-56 rounded-md border bg-background px-2.5 text-sm" />
+          <SearchInput value={search} onChange={setSearch}
+            placeholder="Покупатель или номер" label="Поиск по покупателю или номеру" />
           <Tabs value={only} onChange={setOnly} items={[
             { key: 'all' as const, label: 'Все' },
             { key: 'low' as const, label: 'Маржа ниже 30 %' },

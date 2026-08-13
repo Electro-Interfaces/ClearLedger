@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.adapters import get_adapter
 from app.auth import assert_company_member, get_current_user
+from app.routers.users_router import require_company_admin
 from app.database import get_db
 from app.deps import CompanyDep, get_owned
 from app.models import Source, SourceCredentials, User
@@ -77,9 +78,16 @@ def _require_adapter(source_type: str):
 
 
 def _split_config(source_type: str, config: dict) -> tuple[dict, dict]:
-    """(connection_config без секретов, secrets для шифрования)."""
+    """(connection_config без секретов, secrets для шифрования).
+
+    Поля, которых нет в схеме типа, отбрасываем. Иначе клиент, приславший пароль под
+    своим именем (`password` вместо `api_password`), клал бы его в открытый
+    `connection_config` — и получал обратно в ответе GET.
+    """
+    cls = get_adapter(source_type)
+    known = {f.key for f in cls.setup_schema}
     sk = _secret_keys(source_type)
-    public = {k: v for k, v in config.items() if k not in sk}
+    public = {k: v for k, v in config.items() if k in known and k not in sk}
     secrets = {k: v for k, v in config.items() if k in sk and v not in (None, "")}
     return public, secrets
 
@@ -117,7 +125,10 @@ async def create_source(
 ):
     """Создать источник из записи справочника и привязать к компании."""
     _require_adapter(payload.source_type)
-    cid = await assert_company_member(payload.company_id, current_user, db)
+    # Источник — это доступы во внешнюю систему компании (адреса, логины, ключи).
+    # Заводить и править их может администратор организации, а не любой участник:
+    # раньше рядовой член компании и внешний подрядчик создавали и удаляли источники.
+    cid = await require_company_admin(payload.company_id, current_user, db)
 
     public, secrets = _split_config(payload.source_type, payload.config)
     src = Source(
@@ -175,6 +186,7 @@ async def update_source(
     current_user: User = Depends(get_current_user),
 ):
     src = await get_owned(Source, source_id, current_user, db)
+    await require_company_admin(str(src.company_id), current_user, db)
     if payload.name is not None:
         src.name = payload.name
     if payload.description is not None:
@@ -202,6 +214,7 @@ async def delete_source(
     current_user: User = Depends(get_current_user),
 ):
     src = await get_owned(Source, source_id, current_user, db)
+    await require_company_admin(str(src.company_id), current_user, db)
     await db.delete(src)  # SourceCredentials каскадом (FK ondelete=CASCADE)
     return {"deleted": str(source_id)}
 
@@ -214,6 +227,7 @@ async def test_source(
 ):
     """Проверить подключение источника (через адаптер)."""
     src = await get_owned(Source, source_id, current_user, db)
+    await require_company_admin(str(src.company_id), current_user, db)
     adapter = _require_adapter(src.source_type)()
 
     # connection = публичные поля + расшифрованные секреты

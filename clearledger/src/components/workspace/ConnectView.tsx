@@ -1,38 +1,58 @@
 /**
- * «Подключения» по канону рабочей области: раздел стоит в рельсе, его пункты — во
- * второй колонке, заголовок экрана равен имени пункта.
+ * «Подключения» — панель раздела рабочей области: пункты во второй колонке, экран
+ * равен выбранному пункту.
  *
- * Приложение было собрано из шести отдельных страниц (`paths` без `modes`), и рельса
- * показывала их плоским списком — как будто каждая страница отдельный раздел. Пути
- * остаются рабочими (на них ведут глубокие ссылки из каталога и карточек), но входят
- * люди сюда.
+ * Приложение было собрано из шести отдельных страниц (`paths` без секции в рельсе),
+ * и левое меню показывало их плоским списком — как будто каждая страница отдельный
+ * раздел. При этом маршрут `/connect`, на который ведут плитка стола и лаунчер, вёл
+ * в рабочую область без единого раздела: секции `connect` не существовало.
+ *
+ * Пути страниц остаются рабочими — на них ведут глубокие ссылки из витрины и
+ * каталога, — но входят люди сюда.
  */
-import { useState } from 'react'
-import { CentralPanelLayout, type CentralMenuItem } from './CentralPanelLayout'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import { CentralPanelLayout } from './CentralPanelLayout'
+import { useWorkspaceSections } from './workspaceSections'
+import { useWorkspace, useWorkspaceSubView } from '@/contexts/WorkspaceContext'
 import { ConnectionsPage, NotificationsPage, SpaceAppsPage } from '@/pages/ConnectPages'
 import { CatalogPage } from '@/pages/CatalogPage'
 import { SourcesPage } from '@/pages/SourcesPage'
 import ChannelsPage from '@/pages/ChannelsPage'
 
-const MENU: CentralMenuItem[] = [
-  { key: 'state', label: 'Состояние' },
-  { key: 'connectors', label: 'Коннекторы' },
-  { key: 'sources', label: 'Источники' },
-  { key: 'catalog', label: 'Каталог типов' },
-  { key: 'notifications', label: 'Оповещения' },
-  { key: 'apps', label: 'Приложения и модули' },
-]
-
 export function ConnectView() {
-  const [tab, setTab] = useState('state')
+  const { coreMode } = useWorkspace()
+  const sections = useWorkspaceSections()
+  const items = sections.find((s) => s.mode === coreMode)?.items ?? []
+  // Пункт живёт в адресе (`?sub=`), как во всех продуктах пространства: у пункта есть
+  // имя, ссылка и закладка, а «назад» возвращает к предыдущему пункту, а не выносит
+  // из приложения.
+  const [sub, setSub] = useWorkspaceSubView(items[0]?.key ?? 'connections',
+                                            items.map((i) => i.key))
+
+  // Роль могла закрыть все пункты раздела: показываем это словами, а не пустотой.
+  if (!items.length) {
+    return (
+      <div className="p-6 text-sm text-muted-foreground">
+        В этом разделе нет доступных вам экранов. Права выдаются в «Управлении».
+      </div>
+    )
+  }
+
   return (
-    <CentralPanelLayout items={MENU} activeKey={tab} onSelect={setTab}>
-      {tab === 'state' && <ConnectionsPage />}
-      {tab === 'connectors' && <ChannelsPage />}
-      {tab === 'sources' && <SourcesPage />}
-      {tab === 'catalog' && <CatalogPage />}
-      {tab === 'notifications' && <NotificationsPage />}
-      {tab === 'apps' && <SpaceAppsPage />}
+    <CentralPanelLayout items={items} activeKey={sub} onSelect={setSub}>
+      {/* Рабочая область раскладки — flex-1 overflow-hidden: без своей прокрутки
+          длинные экраны («Каталог типов», «Приложения и модули») обрезались по низу
+          окна и до конца списка было не долистать. */}
+      <ScrollArea className="h-full">
+        <div className="p-4">
+          {sub === 'connections' && <ConnectionsPage />}
+          {sub === 'connectors' && <ChannelsPage />}
+          {sub === 'sources' && <SourcesPage />}
+          {sub === 'catalog' && <CatalogPage />}
+          {sub === 'notifications' && <NotificationsPage />}
+          {sub === 'apps' && <SpaceAppsPage />}
+        </div>
+      </ScrollArea>
     </CentralPanelLayout>
   )
 }

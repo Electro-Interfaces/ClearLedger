@@ -1087,6 +1087,8 @@ export interface ClosingData {
   }[]
   /** Тот же список, свёрнутый по контрагенту: документы просят у людей. */
   byCounterparty: { counterparty: string; count: number; amount: number; kinds: string[] }[]
+  /** Можно ли дооформить недостающее задним числом: зависит от способа получения. */
+  docFlow: { lock: string | null; edoDocs: number; note: string }
 }
 
 export const getClosing = (companyId: string, period?: string | null) =>
@@ -1111,6 +1113,8 @@ export interface CheckItem {
 
 export interface ChecksData {
   groups: { key: string; title: string; checks: CheckItem[]; errors: number; warnings: number }[]
+  /** Настройки, с которыми сверяется учёт: учётная политика и налоговый режим. */
+  policy: { kind: string; title: string; settings: Record<string, string> }[]
   errors: number
   warnings: number
   ok: number

@@ -10,7 +10,7 @@
  */
 
 import type { ComponentType } from 'react'
-import { BarChart3, Gauge, BookOpen, FileOutput, HardHat, Building2, Megaphone, Sparkles, GitCompare, Activity, Wallet, Boxes, Receipt, Truck, Scale, FileText, Users, Package, TrendingUp, Landmark } from 'lucide-react'
+import { BarChart3, Gauge, BookOpen, FileOutput, HardHat, Building2, Megaphone, Sparkles, GitCompare, Activity, Wallet, Boxes, Receipt, Truck, Scale, FileText, Users, Package, TrendingUp, Landmark, Cable } from 'lucide-react'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useWorkspace, type CoreMode } from '@/contexts/WorkspaceContext'
 import { modeAllowed } from '@/config/accessModules'
@@ -34,7 +34,7 @@ import {
   REV_SALES_MENU, REV_CLIENTS_MENU, REV_ITEMS_MENU, REV_DOCS_MENU, REV_MONEY_MENU,
   REV_STOCK_MENU, REV_HELP_MENU,
   ECON_RESULT_MENU, ECON_COSTS_MENU, ECON_TAXES_MENU, ECON_HELP_MENU,
-  BOOKS_LEDGER_MENU, BOOKS_PRIMARY_MENU,
+  BOOKS_LEDGER_MENU, BOOKS_PRIMARY_MENU, CONNECT_MENU,
 } from '@/config/workspaceMenus'
 // CHARGE_SESSIONS_MENU здесь не используется — общий список нужен карте прав и роутеру
 // панелей; секции собираются из трёх меню разделов.
@@ -233,6 +233,11 @@ export function useWorkspaceSections(): WorkspaceSection[] {
   // страницами Учёта (`/normalization`, `/reconciliation`). После разреза Учёта у
   // розницы нет — страницы осиротели, а «Данные» открывались без единого раздела.
   const normalize: WorkspaceSection = { mode: 'normalize', label: 'Нормализация', icon: Sparkles, items: [], connected: true }
+  // «Подключения»: раздел один, пункты — во второй колонке, как у всех продуктов
+  // пространства. Пока секции не было, маршрут /connect открывал рабочую область без
+  // единого раздела — плитка со стола вела в пустоту.
+  const connect: WorkspaceSection = { mode: 'connect', label: 'Подключения', icon: Cable,
+    items: CONNECT_MENU, connected: true }
   const reconcile: WorkspaceSection = { mode: 'reconcile', label: 'Сверка', icon: GitCompare, items: [], connected: true }
 
   // Порядок разделов: топливный профиль (ГИГ) — Продажи → Магазин → Управленческий →
@@ -244,13 +249,14 @@ export function useWorkspaceSections(): WorkspaceSection[] {
   // (пустыми, «неподключёнными») значило бы показывать рельсу про чужую жизнь.
   const all = isOffice
     ? [revSales, revBuyers, revCatalog, revPapers, revMoney, revStock, revHelp,
-       econResult, econCosts, econTaxes, econHelp, booksLedger, booksPrimary, normalize]
+       econResult, econCosts, econTaxes, econHelp, booksLedger, booksPrimary, normalize,
+       connect]
     : isEnergy
     ? [sales, salesSessions, salesCommerce, corporate, marketing,
        projects, projectsAnalytics, ops, opsEquipment, opsEconomy,
-       storeSections[0], ...accSections, exp, normalize, reconcile]
+       storeSections[0], ...accSections, exp, normalize, reconcile, connect]
     : [sales, salesSessions, salesCommerce, salesGoods, salesHelp, ...storeSections, storeHelp, ops,
-       ...accSections, normalize, reconcile]
+       ...accSections, normalize, reconcile, connect]
   // Права на пункты продукта режутся ЗДЕСЬ, а не в меню: тот же массив читают панели
   // (`AccountingPanels`), и урезать его в одном месте — значит не показать закрытый
   // пункт ни в гармошке, ни в контенте. Гейт есть только у продуктов разреза: там код

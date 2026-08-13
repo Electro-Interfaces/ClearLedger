@@ -1934,6 +1934,18 @@ def _pnl_totals(rows: list[dict[str, Any]]) -> dict[str, Any]:
     return t
 
 
+async def _pnl_light(db: AsyncSession, cid, date_from: str | None, date_to: str | None
+                     ) -> dict[str, Any]:
+    """Только те итоги отчёта, что нужны налоговым экранам: выручка и прибыль.
+
+    Отдельная функция, а не полный `_pnl_rows`: тот разворачивает помесячный ряд по
+    всем строкам формы, и «Налоги» сканировали регистр вторым разом за один запрос
+    ради двух чисел.
+    """
+    rows = await _pnl_rows(db, cid, date_from, date_to)
+    return _pnl_totals(rows)
+
+
 @router.get("/pnl")
 async def pnl(
     company_id: str,
@@ -2173,8 +2185,10 @@ async def taxes(
          GROUP BY 1 ORDER BY 1
     """), p)).all()]
 
-    pnl_rows = await _pnl_rows(db, cid, date_from, date_to)
-    totals = _pnl_totals(pnl_rows)
+    # Отчёт целиком здесь не нужен: нагрузке хватает выручки без НДС, а эффективной
+    # ставке — налога и прибыли до него. Полный `_pnl_rows` разворачивал весь регистр
+    # вторым разом за один запрос.
+    totals = await _pnl_light(db, cid, date_from, date_to)
     accrued = round(sum(r["accrued"] for r in rows), 2)
 
     # Раскладка по смыслу: что в отчёте о результате, что транзит, что удержание.
@@ -4420,11 +4434,34 @@ async def closing(
             if gap["title"] not in slot["kinds"]:
                 slot["kinds"].append(gap["title"])
 
+    # До какой даты недостающий документ ещё можно оформить. Ответ зависит от способа
+    # получения: бумагу подписывают датой события хоть сегодня, электронный документ
+    # уходит через оператора и получает его отметку времени — задним числом не выйдет.
+    # Способ берём из самой базы: если контур ЭДО пуст, у клиента вся первичка бумажная.
+    lock = (await db.execute(
+        select(func.max(GlReference.code))
+        .where(GlReference.company_id == cid, GlReference.kind == "period_locks"))).scalar_one()
+    edo_docs = (await db.execute(
+        select(func.count()).select_from(AccountingDoc).where(
+            AccountingDoc.company_id == cid,
+            AccountingDoc.details["Способ получения"].astext == "ЭДО"))).scalar_one()
+
     return {
         "period": period,
         "months": months,
         "gaps": gaps,
         "byCounterparty": sorted(by_party.values(), key=lambda x: -x["amount"])[:100],
+        "docFlow": {
+            "lock": lock,
+            "edoDocs": edo_docs,
+            "note": ("Часть первички приходит по ЭДО: такие документы оператор датирует "
+                     "моментом отправки, задним числом их не оформить — просить нужно сразу."
+                     if edo_docs else
+                     "Электронного документооборота в базе нет: вся первичка бумажная, "
+                     "недостающее можно дооформить датой события — но только до даты запрета.")
+                    + (f" Запрет изменений стоит на {lock}." if lock else
+                       " Дата запрета изменений не установлена — закрытый месяц могут переписать."),
+        },
     }
 
 
@@ -4460,6 +4497,65 @@ _CHECKS: list[tuple] = [
      "От метода зависит себестоимость: без него нечем обосновать списание", """
         SELECT id::text, '', kind, name, 0 FROM gl_references
          WHERE company_id = :cid AND kind = 'accounting_policy'"""),
+
+    # Соответствие политике проверяем ПО ДАННЫМ, а не по декларации: политика
+    # сказала «ПБУ 18 не ведём» — значит счетов 09 и 77 в проводках быть не может.
+    # Условие в SQL сверяется с самой политикой, поэтому у клиента с другой
+    # политикой проверка просто не сработает, а не выдаст ложную тревогу.
+    ("policy_pbu18", "policy", "Счета ПБУ 18/02 при отключённом ПБУ 18",
+     "Политика говорит, что отложенные налоги не ведутся, а проводки по 09 и 77 есть", """
+        SELECT e.id::text, e.entry_date::text,
+               e.account_dt || '/' || e.account_kt, coalesce(e.doc_title, ''), e.amount
+          FROM gl_entries e
+         WHERE e.company_id = :cid
+           AND (e.account_dt LIKE '09%' OR e.account_kt LIKE '09%'
+             OR e.account_dt LIKE '77%' OR e.account_kt LIKE '77%')
+           AND EXISTS (SELECT 1 FROM gl_references r WHERE r.company_id = :cid
+                        AND r.kind = 'accounting_policy'
+                        AND r.meta->>'ПБУ 18/02' = 'не ведётся')
+         ORDER BY e.entry_date DESC"""),
+    ("policy_reserves", "policy", "Резерв по сомнительным долгам при отключённом резерве",
+     "Счёт 63 работает, хотя политика резервы не предусматривает — расход не обоснован", """
+        SELECT e.id::text, e.entry_date::text,
+               e.account_dt || '/' || e.account_kt, coalesce(e.doc_title, ''), e.amount
+          FROM gl_entries e
+         WHERE e.company_id = :cid
+           AND (e.account_dt LIKE '63%' OR e.account_kt LIKE '63%')
+           AND EXISTS (SELECT 1 FROM gl_references r WHERE r.company_id = :cid
+                        AND r.kind = 'accounting_policy'
+                        AND r.meta->>'Резервы по сомнительным долгам' = 'не формируются')
+         ORDER BY e.entry_date DESC"""),
+    ("policy_transit", "policy", "Переводы в пути при отключённом счёте 57",
+     "Политика переводы в пути не использует, а счёт 57 в проводках есть", """
+        SELECT e.id::text, e.entry_date::text,
+               e.account_dt || '/' || e.account_kt, coalesce(e.doc_title, ''), e.amount
+          FROM gl_entries e
+         WHERE e.company_id = :cid
+           AND (e.account_dt LIKE '57%' OR e.account_kt LIKE '57%')
+           AND EXISTS (SELECT 1 FROM gl_references r WHERE r.company_id = :cid
+                        AND r.kind = 'accounting_policy'
+                        AND r.meta->>'Переводы в пути при перемещении денег' = 'не используются')
+         ORDER BY e.entry_date DESC"""),
+    ("policy_tax_mode", "policy", "Счета спецрежима при общей системе",
+     "Режим общий, а в учёте работают счета УСН (68.12) — налог считается не тем способом", """
+        SELECT e.id::text, e.entry_date::text,
+               e.account_dt || '/' || e.account_kt, coalesce(e.doc_title, ''), e.amount
+          FROM gl_entries e
+         WHERE e.company_id = :cid
+           AND (e.account_dt LIKE '68.12%' OR e.account_kt LIKE '68.12%')
+           AND EXISTS (SELECT 1 FROM gl_references r WHERE r.company_id = :cid
+                        AND r.kind = 'tax_mode'
+                        AND r.meta->>'Система налогообложения' = 'Общая')
+         ORDER BY e.entry_date DESC"""),
+    ("policy_vat_payer", "policy", "Реализация без НДС у плательщика НДС",
+     "Компания платит НДС, но у части реализаций налог не выделен — вычет и книга продаж поедут", """
+        SELECT d.id::text, d.date, d.number, coalesce(d.counterparty_name, ''), d.amount
+          FROM accounting_docs d
+         WHERE d.company_id = :cid AND d.doc_type = 'sale'
+           AND coalesce(d.vat_amount, 0) = 0 AND d.amount > 0
+           AND EXISTS (SELECT 1 FROM gl_references r WHERE r.company_id = :cid
+                        AND r.kind = 'tax_mode' AND r.meta->>'Плательщик НДС' = 'да')
+         ORDER BY d.amount DESC"""),
 
     ("entries_no_doc", "books", "Проводки без первичного документа",
      "Проводка есть, документа под ней нет: обосновать запись нечем", """
@@ -4639,8 +4735,17 @@ async def checks(
         "warnings": sum(1 for c in out if c["group"] == g and c["status"] == "warn"),
     } for g, t in _CHECK_GROUPS]
 
+    # Сама политика — рядом с проверками: сверять учёт с ней, не показывая её,
+    # значит требовать от бухгалтера помнить настройки наизусть.
+    policy = [{"kind": r[0], "title": r[1], "settings": r[2] or {}}
+              for r in (await db.execute(text("""
+        SELECT kind, name, meta FROM gl_references
+         WHERE company_id = :cid AND kind IN ('accounting_policy', 'tax_mode')
+         ORDER BY kind DESC"""), p)).all()]
+
     return {
         "groups": groups,
+        "policy": policy,
         "errors": sum(1 for c in out if c["status"] == "error"),
         "warnings": sum(1 for c in out if c["status"] == "warn"),
         "ok": sum(1 for c in out if c["status"] == "ok"),

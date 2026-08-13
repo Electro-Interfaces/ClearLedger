@@ -32,6 +32,7 @@ import {
 } from '@/services/booksService'
 import {
   BooksChecks, BooksClosing, BooksExportLayer, BooksForecast, BooksPayroll, BooksRequests,
+  BooksTrends,
   BooksSettlements, BooksVat,
 } from './OfficeSettlements'
 import { getMailByCounterparty } from '@/services/mailService'
@@ -114,6 +115,7 @@ export function BooksPanel() {
         {sub === 'bk_payroll' && <BooksPayroll companyId={companyId} />}
         {sub === 'bk_checks' && <BooksChecks companyId={companyId} />}
         {sub === 'bk_forecast' && <BooksForecast companyId={companyId} />}
+        {sub === 'bk_trends' && <BooksTrends companyId={companyId} />}
         {sub === 'bk_docs' && <BooksDocs companyId={companyId} />}
         {sub === 'bk_vat' && <BooksVat companyId={companyId} kind={vatKind} onKind={setVatKind} />}
         {sub === 'bk_periods' && <BooksPeriods companyId={companyId} />}

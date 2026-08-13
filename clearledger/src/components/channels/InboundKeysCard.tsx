@@ -129,7 +129,7 @@ export function InboundKeysCard({ canManage }: { canManage: boolean }) {
 
         <div className="flex items-center gap-2 pt-1">
           <Input value={consumer} onChange={(e) => setConsumer(e.target.value)}
-            placeholder="Кому ключ: напр. Дедуп-нода АЗС 208" className="h-8 text-xs" />
+            placeholder="Кому ключ: напр. система партнёра" className="h-8 text-xs" />
           <Button size="sm" className="h-8 shrink-0"
             disabled={consumer.trim().length < 2 || create.isPending}
             onClick={() => create.mutate()}>

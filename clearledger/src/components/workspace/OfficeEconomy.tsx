@@ -16,7 +16,6 @@
  */
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Download, Printer } from 'lucide-react'
 
 import { useCompany } from '@/contexts/CompanyContext'
 import { useFilters, type Period } from '@/contexts/FilterContext'
@@ -39,6 +38,7 @@ import {
   ECON_RESULT_MENU, ECON_COSTS_MENU, ECON_TAXES_MENU,
 } from '@/config/workspaceMenus'
 import { useWorkspaceSections } from './workspaceSections'
+import { ExportButton, Tabs, money, money2, monthLabel, num } from './officeShared'
 
 /** Все пункты продукта — по ним статья находит подпись экрана и кнопку перехода. */
 const ECON_MENU_FOR_HELP = [...ECON_RESULT_MENU, ...ECON_COSTS_MENU, ...ECON_TAXES_MENU]
@@ -48,16 +48,6 @@ const modeForHelpKey = (key: string): string =>
   : ECON_TAXES_MENU.some((m) => m.key === key) ? 'econ_taxes'
   : 'econ_result'
 
-const money = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
-const money2 = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-const num = new Intl.NumberFormat('ru-RU')
-const MONTHS = ['', 'январь', 'февраль', 'март', 'апрель', 'май', 'июнь', 'июль',
-  'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь']
-
-const monthLabel = (m: string) => {
-  const [y, mm] = m.split('-')
-  return `${MONTHS[Number(mm)] ?? mm} ${y}`
-}
 
 /* ── Периоды сравнения (та же арифметика, что в «Реализации») ─────────────── */
 
@@ -96,35 +86,6 @@ const yearAgo = (p: Period): Period => ({
 const periodLabel = (p: Period) => `${p.from} — ${p.to}`
 
 /* ── Общие мелочи ────────────────────────────────────────────────────────── */
-
-function Tabs<T extends string>({ value, onChange, items }: {
-  value: T; onChange: (v: T) => void; items: { key: T; label: string }[]
-}) {
-  return (
-    <div className="flex flex-wrap gap-1 no-print">
-      {items.map((i) => (
-        <button key={i.key} onClick={() => onChange(i.key)}
-          className={cn('rounded-md px-2.5 py-1 text-xs',
-            value === i.key ? 'bg-muted font-medium' : 'text-muted-foreground hover:bg-muted/50')}>
-          {i.label}
-        </button>
-      ))}
-    </div>
-  )
-}
-
-function ExportButton({ onClick }: { onClick: () => void }) {
-  const cls = 'inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs '
-    + 'text-muted-foreground hover:bg-muted/50'
-  return (
-    <div className="inline-flex items-center gap-1 no-print">
-      <button onClick={onClick} className={cls}><Download className="h-3.5 w-3.5" />Excel</button>
-      <button onClick={() => window.print()} className={cls} title="Печать или сохранение в PDF">
-        <Printer className="h-3.5 w-3.5" />PDF
-      </button>
-    </div>
-  )
-}
 
 /**
  * Изменение к базе. Процент не печатается на малых базах: «рост в восемь раз» с

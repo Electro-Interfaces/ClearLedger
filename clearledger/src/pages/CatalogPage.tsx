@@ -183,6 +183,11 @@ function Section<T>({
   const rows = query.data ? toRows(query.data) : []
   const groups = groupRows(rows)
 
+  // Пустую секцию не показываем вовсе. У компании без объектов половина каталога
+  // пуста по делу (топливных разрезов у неё нет), и заголовок «Разрезы учёта · 0»
+  // читается как поломка, а не как «этого у вас не бывает».
+  if (!query.isLoading && rows.length === 0) return null
+
   return (
     <section className="space-y-1">
       <div className="flex items-center gap-2 border-b border-border/60 pb-2">
@@ -217,6 +222,9 @@ function Section<T>({
 export function CatalogPage() {
   const navigate = useNavigate()
   const { company } = useCompany()
+  // Развилка была двоичной («energy или топливо»), и любой новый профиль попадал в
+  // топливную ветку — тем же способом, каким в аудиторскую фирму приехали «Виды
+  // топлива». Веток три: энергетика, топливная розница, все остальные.
   const isEnergy = company.profileId === 'energy'
   const moduleConn = useModuleConnections()
   const [configMod, setConfigMod] = useState<WorkspaceModuleDef | null>(null)
@@ -253,9 +261,13 @@ export function CatalogPage() {
       action: {
         label: 'Подключить',
         kind: 'connect',
+        // Внутрь приложения, а не на отдельную страницу: раньше кнопка выбрасывала
+        // человека из «Подключений» на голый маршрут, где левое меню сваливалось в
+        // чужое (страницы Учёта).
         onClick: () =>
           navigate(
-            `/sources?add=1&type=${s.source_type}&name=${encodeURIComponent(s.label)}`,
+            `/connect?mode=connect&sub=sources&add=1&type=${s.source_type}`
+            + `&name=${encodeURIComponent(s.label)}`,
           ),
       },
     }))
@@ -269,7 +281,7 @@ export function CatalogPage() {
       group: c.category,
       meta: `${c.streams.length} потоков · ${c.stages.length} стадий`,
       chips: c.reconcile_rules,
-      action: { label: 'Создать коннектор', kind: 'create', onClick: () => navigate('/connectors?wizard=1') },
+      action: { label: 'Создать коннектор', kind: 'create', onClick: () => navigate('/connect?mode=connect&sub=connectors&wizard=1') },
     }))
 
   const ruleRows = (items: ReconcileRuleItem[]): CatalogRow[] =>
@@ -346,12 +358,13 @@ export function CatalogPage() {
     }))
 
   return (
-    <div className="space-y-8 p-6">
+    <div className="space-y-8">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Каталоги</h1>
+        <h1 className="text-xl font-bold tracking-tight">Каталог типов</h1>
         <p className="text-sm text-muted-foreground">
-          Библиотека того, что можно подключить: модули рабочего стола, источники, каналы и разрезы сверки —
-          и настроить под организацию. Реальные подключения — в «Источниках данных»/«Каналах»; параметры модуля — кнопкой «Настроить».
+          Библиотека того, что можно подключить, — здесь ничего не работает и не хранит
+          данные. Порядок такой: выбрать тип → завести «Источник» с реквизитами доступа →
+          собрать над ним «Коннектор», который и понесёт данные.
         </p>
       </div>
 

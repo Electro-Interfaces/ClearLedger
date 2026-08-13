@@ -22,7 +22,7 @@ import { MetricTile } from '@/components/ui/metric-tile'
 import { cn } from '@/lib/utils'
 import {
   applyExportRules, createRequestsFromGaps, getChecks, getClosing, getExportLayer,
-  getPayroll, getRequests,
+  getPayroll, getRequests, getTrends,
   getSettlements, getTaxForecast, getVat, resolveRequests, updateAdjustment,
   updateRequest,
   type SettlementKind, type SettlementsData, type VatData, type VatKind,
@@ -403,6 +403,10 @@ export function BooksClosing({ companyId }: { companyId: string }) {
             .reduce((s, g) => s + g.amount, 0))} ₽`} />
       </div>
 
+      {/* Главный вопрос по недостающему документу — до какого числа его ещё можно
+          оформить. Ответ зависит от способа получения, а не от желания бухгалтера. */}
+      <p className="text-[11px] text-muted-foreground">{d.docFlow.note}</p>
+
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-xs text-muted-foreground">Период:</span>
         <button onClick={() => setPeriod(null)}
@@ -581,6 +585,36 @@ export function BooksChecks({ companyId }: { companyId: string }) {
           tone={d.warnings ? 'warning' : undefined} hint="не ошибка, но объяснимо не всё" />
         <MetricTile label="В порядке" value={String(d.ok)} />
       </div>
+
+      {/* Настройки, с которыми сверяется учёт. Проверка без показанной
+          политики требует помнить настройки наизусть. */}
+      {d.policy?.length > 0 && (
+        <details className="rounded-lg border border-border">
+          <summary className="cursor-pointer px-3 py-2 text-sm">
+            Учётная политика и режим налогообложения
+            <span className="ml-2 text-[11px] text-muted-foreground">
+              чему должен соответствовать учёт
+            </span>
+          </summary>
+          <div className="border-t px-3 py-2 space-y-3">
+            {d.policy.map((pl) => (
+              <div key={pl.kind}>
+                <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-1">
+                  {pl.title}
+                </div>
+                <div className="grid gap-x-6 gap-y-1 sm:grid-cols-2">
+                  {Object.entries(pl.settings).map(([k, v]) => (
+                    <div key={k} className="flex justify-between gap-3 text-[13px]">
+                      <span className="text-muted-foreground">{k}</span>
+                      <span className="text-right">{v}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
 
       {d.groups.filter((g) => g.checks.length).map((g) => (
         <div key={g.key} className="space-y-2">
@@ -1046,6 +1080,124 @@ export function BooksExportLayer({ companyId }: { companyId: string }) {
         <Card><CardContent className="py-8 text-center text-sm text-muted-foreground">
           Корректировок нет: выгрузка совпадает со слоем. Заводятся они из карточки
           документа или правилом, когда решение повторяется каждый период.
+        </CardContent></Card>
+      )}
+    </div>
+  )
+}
+
+
+/* ─────────────────────────────── Тенденции ────────────────────────────────── */
+
+/**
+ * «Бухгалтерия» → «Тенденции»: на что посмотреть, когда формально всё сходится.
+ *
+ * «Проверки учёта» ловят нарушенное правило. Здесь правило не нарушено — цифра
+ * просто ведёт себя необычно. Поэтому каждая находка подаётся с объяснением
+ * «почему это спрашивают», а не как ошибка: иначе экран станет генератором
+ * ложных тревог, и его перестанут открывать на второй неделе.
+ */
+export function BooksTrends({ companyId }: { companyId: string }) {
+  const [open, setOpen] = useState<string | null>(null)
+  const q = useQuery({
+    queryKey: ['books', 'trends', companyId],
+    queryFn: () => getTrends(companyId),
+  })
+
+  if (q.isError) {
+    return <div className="p-4"><QueryError message="Не удалось загрузить тенденции" onRetry={() => q.refetch()} /></div>
+  }
+  if (!q.data) return <div className="p-6 text-sm text-muted-foreground">Загрузка…</div>
+  const d = q.data
+  const shown = d.months.filter((m) => m.revenue || m.cost || m.expense)
+  const peak = Math.max(1, ...shown.map((m) => Math.max(m.revenue, m.cost + m.expense)))
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="grid gap-3 sm:grid-cols-3">
+        <MetricTile label="Месяцев с оборотом" value={String(shown.length)} />
+        <MetricTile label="Поводов посмотреть" value={String(d.summary.findings)}
+          tone={d.summary.findings ? 'warning' : undefined}
+          hint={`в ${d.summary.kinds} направлениях`} />
+        <MetricTile label="Прибыль за год"
+          value={`${money.format(shown.slice(-12).reduce((s, m) => s + m.profit, 0))} ₽`}
+          hint="последние 12 месяцев с оборотом" />
+      </div>
+
+      {/* Столбики без графической библиотеки: выручка против затрат помесячно.
+          Ставить сюда чарт-пакет ради двух рядов — лишняя зависимость. */}
+      <Card>
+        <CardContent className="p-3">
+          <div className="text-[11px] text-muted-foreground mb-2">
+            Выручка (сверху) против себестоимости и расходов (снизу) по месяцам
+          </div>
+          <div className="flex items-end gap-[3px] overflow-x-auto pb-1">
+            {shown.slice(-36).map((m) => (
+              <div key={m.month} className="flex flex-col items-center gap-[2px] min-w-[14px]"
+                title={`${monthLabel(m.month)}\nвыручка ${money.format(m.revenue)} ₽\n`
+                  + `себестоимость ${money.format(m.cost)} ₽\nрасходы ${money.format(m.expense)} ₽\n`
+                  + `прибыль ${money.format(m.profit)} ₽\nдокументов ${m.docs}`}>
+                <div className="w-full bg-primary/70 rounded-sm"
+                  style={{ height: `${Math.round((m.revenue / peak) * 70)}px` }} />
+                <div className={cn('w-full rounded-sm',
+                  m.profit < 0 ? 'bg-destructive/60' : 'bg-muted-foreground/35')}
+                  style={{ height: `${Math.round(((m.cost + m.expense) / peak) * 70)}px` }} />
+                <span className="text-[9px] text-muted-foreground rotate-0">
+                  {m.month.slice(5)}
+                </span>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      {d.findings.map((f) => (
+        <Card key={f.key}>
+          <CardContent className="p-0">
+            <button onClick={() => setOpen(open === f.key ? null : f.key)}
+              className="w-full flex items-start gap-3 px-3 py-2.5 text-left hover:bg-muted/40">
+              <span className="mt-0.5 text-muted-foreground text-xs">
+                {open === f.key ? '▾' : '▸'}
+              </span>
+              <span className="flex-1">
+                <span className="text-sm font-medium">{f.title}</span>
+                <span className="block text-[11px] text-muted-foreground mt-0.5">{f.why}</span>
+              </span>
+              <span className="text-sm tabular-nums text-muted-foreground">{f.count}</span>
+            </button>
+            {open === f.key && (
+              <table className="w-full text-sm border-t">
+                <tbody>
+                  {f.rows.map((r, i) => (
+                    <tr key={i} className="border-b last:border-0">
+                      <td className="px-3 py-1.5 w-28 whitespace-nowrap text-muted-foreground">
+                        {r.period ? monthLabel(r.period) : '—'}
+                      </td>
+                      <td className="px-3 py-1.5">{r.subject}</td>
+                      <td className="px-3 py-1.5 w-32 text-right tabular-nums whitespace-nowrap">
+                        {r.amount ? `${money.format(r.amount)} ₽` : ''}
+                      </td>
+                      <td className="px-3 py-1.5 w-64 text-[11px] text-muted-foreground">
+                        {r.note}
+                      </td>
+                    </tr>
+                  ))}
+                  {f.count > f.rows.length && (
+                    <tr><td colSpan={4} className="px-3 py-1.5 text-[11px] text-muted-foreground">
+                      показаны первые {f.rows.length} из {f.count}
+                    </td></tr>
+                  )}
+                </tbody>
+              </table>
+            )}
+          </CardContent>
+        </Card>
+      ))}
+
+      {!d.findings.length && (
+        <Card><CardContent className="py-8 text-center text-sm text-muted-foreground">
+          Ничего необычного: расходы ровные, разовых поставщиков нет, встречных
+          операций тоже. Экран заполнится, когда цифра начнёт выделяться.
         </CardContent></Card>
       )}
     </div>
