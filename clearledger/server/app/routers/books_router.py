@@ -40,8 +40,6 @@ COST_DT = "90.02.1"
 # же новом виде.
 DOC_LABELS = {
     "sale": "Реализация (товары и услуги)",
-    "sale_goods": "Реализация товаров",
-    "sale_services": "Оказание услуг",
     "purchase": "Поступление товаров и услуг",
     "invoice_out": "Счёт покупателю",
     "vat_invoice_out": "Счёт-фактура выданный",
@@ -49,7 +47,6 @@ DOC_LABELS = {
     "closing_op": "Регламентная операция закрытия",
     "manual_entry": "Операция вручную",
     "invoice_in": "Счёт от поставщика",
-    "purchase_services": "Услуги поставщиков",
     "act_recon": "Акт сверки взаиморасчётов",
     "bank_in": "Поступление на расчётный счёт",
     "bank_out": "Списание с расчётного счёта",
@@ -619,6 +616,7 @@ async def _slice(db: AsyncSession, cid, doc_type: str, top: int,
     by_client: dict[str, dict[str, Any]] = {}
     by_item: dict[str, dict[str, float]] = {}
     total = vat = 0.0
+    picked_docs = 0
 
     for d in rows:
         if line_kind:
@@ -631,6 +629,7 @@ async def _slice(db: AsyncSession, cid, doc_type: str, top: int,
             amount, dvat = _num(d.amount), _num(d.vat_amount)
         total += amount
         vat += dvat
+        picked_docs += 1
         month = (d.date or "")[:7]
         m = by_month.setdefault(month, {"amount": 0.0, "docs": 0})
         m["amount"] += amount
@@ -657,7 +656,7 @@ async def _slice(db: AsyncSession, cid, doc_type: str, top: int,
         "total": total,
         "vat": vat,
         "net": total - vat,
-        "docs": len(rows),
+        "docs": picked_docs,
         "clients": len(clients),
         "months": [{"month": k, **v} for k, v in sorted(by_month.items())],
         "topClients": clients[:top],
@@ -800,7 +799,7 @@ async def quality(
     # проверка показывала полтысячи «нарушений», которых нет.
     WITH_COUNTERPARTY = ("sale", "purchase", "invoice_out",
                          "vat_invoice_out", "vat_invoice_in", "invoice_in",
-                         "purchase_services", "act_recon")
+                         "act_recon")
     no_inn = (await db.execute(
         select(func.count()).select_from(AccountingDoc)
         .where(AccountingDoc.company_id == cid,
@@ -815,11 +814,11 @@ async def quality(
     # от 22.12.2023 на разных контрагентов), и ключ по номеру склеил бы их.
     dup = (await db.execute(
         select(func.count()).select_from(
-            select(AccountingDoc.number, AccountingDoc.date)
+            select(AccountingDoc.doc_type, AccountingDoc.number, AccountingDoc.date)
             .where(AccountingDoc.company_id == cid)
-            .group_by(AccountingDoc.number, AccountingDoc.date)
+            .group_by(AccountingDoc.doc_type, AccountingDoc.number, AccountingDoc.date)
             .having(func.count() > 1).subquery()))).scalar_one()
-    add("duplicate_numbers", "Номер+дата встречаются дважды",
+    add("duplicate_numbers", "Номер+дата дважды в одном виде",
         "ok" if not dup else "warn", dup,
         "Нормально для бухгалтерии: ключ документа включает ещё и контрагента")
 
@@ -838,11 +837,16 @@ async def quality(
         "ok" if not headless else "error", headless,
         "Проводка без счетов не попадёт ни в один оборот")
 
-    unlinked = (await db.execute(
-        select(func.count()).select_from(GlEntry)
-        .where(GlEntry.company_id == cid, GlEntry.doc_title.is_not(None)))).scalar_one()
-    add("entries_doc_as_text", "Документ в проводке записан строкой", "info", unlinked,
-        "Долг схемы: пока это текст, из проводки нельзя открыть карточку документа")
+    # Связь проводки с документом — то, чем оборот разворачивается до первички и
+    # чем проводка получает контрагента. Показываем долю, а не факт наличия текста:
+    # текст есть у всех 4950, а полезна именно ссылка.
+    total_e, linked_e = (await db.execute(
+        select(func.count(), func.count(GlEntry.doc_id))
+        .where(GlEntry.company_id == cid))).one()
+    add("entries_linked", "Проводка связана с документом",
+        "ok" if linked_e >= total_e * 0.9 else "warn",
+        "%d из %d" % (linked_e, total_e),
+        "Несвязанные — зарплатный контур и виды документов, которых нет в срезе")
 
     lock = (await db.execute(
         select(func.max(GlReference.code))
@@ -855,9 +859,9 @@ async def quality(
             select(func.count()).select_from(Period).where(
                 Period.company_id == cid, Period.status == "closed",
                 (Period.year > y) | ((Period.year == y) & (Period.month > m)))))            .scalar_one()
-        add("lock_vs_closed", "Закрыто позже даты запрета (%s)" % lock,
-            "ok" if not late else "warn", late,
-            "После даты запрета бухгалтерия правки не принимает — до неё месяц ещё может измениться")
+        add("lock_vs_closed", "Закрыто регламентно, но запрет не двинут",
+            "ok" if not late else "info", late,
+            "Месяц закрыт операциями закрытия, а запрет стоит на %s: до него бухгалтерия ещё принимает правки" % lock)
 
     errors = sum(1 for c in checks if c["status"] == "error")
     warns = sum(1 for c in checks if c["status"] == "warn")
