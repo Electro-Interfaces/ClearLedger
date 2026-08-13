@@ -1,14 +1,18 @@
 /**
- * Почтовый коннектор пространства — вкладка «Загрузка → Почта» (docs/MAIL.md).
+ * Почтовый коннектор пространства (docs/MAIL.md).
  *
  * Один коннектор, много ящиков: `info@`, `buh@`, `edo@`. У каждого своё назначение
  * человеческими словами — без него через месяц никто не помнит, чем ящики
  * отличаются и какие письма куда идут.
  *
- * Пароль ящика в интерфейс не вводится и в базе не лежит: указывается ИМЯ
- * переменной окружения стека, значение живёт в `.env` рядом с остальными
- * секретами. Экран показывает лишь, найдена ли переменная, — иначе «ящик не
- * отвечает» выясняется опросом, а не настройкой.
+ * Экран живёт в двух местах и показывает разное (`mode`): в «Подключениях» —
+ * НАСТРОЙКУ (ящики, правила, известные адреса), потому что коннекторы заводят там
+ * же, где все подключения пространства; в «Загрузке» — РАБОТУ (переписка, карантин,
+ * разбор вложений). Настройка в разделе приёма данных выглядела бы вторым местом
+ * для того же, а два места настройки одного объекта всегда расходятся.
+ *
+ * Пароль ящика вводит сотрудник, база хранит его под шифром ключом стека, а сервер
+ * отдаёт только почтовому серверу и никогда обратно в интерфейс.
  */
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -62,7 +66,15 @@ const MODES: { key: MailAccountInput['mode']; label: string }[] = [
   { key: 'out', label: 'только отправка' },
 ]
 
-export function MailConnector() {
+/**
+ * Режим экрана. Коннектор ЗАВОДЯТ и настраивают в «Подключениях» — там же, где
+ * живут все подключения пространства; «Загрузка» им ПОЛЬЗУЕТСЯ: читает переписку,
+ * разбирает вложения, разгребает карантин. Компонент один на оба места: механика
+ * одна, и разводить её по двум файлам значило бы чинить дважды.
+ */
+export function MailConnector({ mode = 'all' }: { mode?: 'setup' | 'work' | 'all' }) {
+  const showSetup = mode === 'setup' || mode === 'all'
+  const showWork = mode === 'work' || mode === 'all'
   const { companyId } = useCompany()
   const qc = useQueryClient()
   const [form, setForm] = useState<(MailAccountInput & { id?: string }) | null>(null)
@@ -220,6 +232,7 @@ export function MailConnector() {
 
   return (
     <div className="space-y-4">
+      {showSetup && (
       <Card>
         <CardContent className="p-4 space-y-3">
           <div className="flex items-center gap-2">
@@ -238,8 +251,8 @@ export function MailConnector() {
           </div>
           <p className="text-[11px] text-muted-foreground">
             Один коннектор на компанию: ящики отличаются учёткой, назначением и правилами.
-            Пароль здесь не вводится — указывается имя переменной окружения стека,
-            значение живёт в <code>.env</code> рядом с остальными секретами.
+            Пароль хранится в базе под шифром — сервер отдаёт его только почтовому
+            серверу и никогда обратно в интерфейс.
           </p>
 
           <div className="space-y-2">
@@ -259,8 +272,9 @@ export function MailConnector() {
           </div>
         </CardContent>
       </Card>
+      )}
 
-      {form && (
+      {showSetup && form && (
         <Card>
           <CardContent className="p-4 space-y-3">
             <div className="text-sm font-medium">
@@ -374,6 +388,7 @@ export function MailConnector() {
         </Card>
       )}
 
+      {showSetup && (
       <Card>
         <CardContent className="p-4 space-y-3">
           <div className="flex items-center gap-2">
@@ -500,8 +515,9 @@ export function MailConnector() {
           )}
         </CardContent>
       </Card>
+      )}
 
-      {(quarantine.data?.rows ?? []).length > 0 && (
+      {showWork && (quarantine.data?.rows ?? []).length > 0 && (
         <Card>
           <CardContent className="p-0">
             <div className="px-3 py-2 border-b">
@@ -556,6 +572,7 @@ export function MailConnector() {
         </Card>
       )}
 
+      {showWork && (
       <div className="grid gap-4 lg:grid-cols-[minmax(280px,380px)_1fr]">
         <Card>
           <CardContent className="p-0">
@@ -721,6 +738,7 @@ export function MailConnector() {
           </CardContent>
         </Card>
       </div>
+      )}
     </div>
   )
 }

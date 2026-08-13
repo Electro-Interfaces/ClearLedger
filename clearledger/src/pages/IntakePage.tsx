@@ -775,7 +775,7 @@ export function IntakePage() {
           <IntakeDocs />
         </TabsContent>
         <TabsContent value="mail" className="mt-4">
-          <MailConnector />
+          <MailConnector mode="work" />
         </TabsContent>
         <TabsContent value="files" className="mt-4">
           <FilesUploadTab />

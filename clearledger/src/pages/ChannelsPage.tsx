@@ -14,7 +14,8 @@ import { isApiEnabled } from '@/services/apiClient'
 import { useCompany } from '@/contexts/CompanyContext'
 import { getChannelSourceIds } from '@/types/channel'
 import type { Channel } from '@/types/channel'
-import { Plus, Trash2, Radio, Database, Clock, Loader2, ArrowRightLeft, CheckCircle2, XCircle, Circle, PauseCircle } from 'lucide-react'
+import { Plus, Trash2, Radio, Database, Clock, Loader2, ArrowRightLeft, CheckCircle2, XCircle, Circle, PauseCircle, Mail } from 'lucide-react'
+import { MailConnector } from '@/components/books/MailConnector'
 import { FuelMappingsPanel } from '@/components/fuel/FuelMappingsPanel'
 import { format } from 'date-fns'
 import { ConnectorWizard } from '@/components/channels/ConnectorWizard'
@@ -169,6 +170,24 @@ export function ChannelsPage() {
       {/* Все источники пространства одним списком: свои каналы и живые интеграции
           соседних приложений. Ниже — настройка каналов этого продукта. */}
       {isApiEnabled() && <SpaceConnectors />}
+
+      {/* Почта компании: ящики и правила заводятся ЗДЕСЬ, вместе с остальными
+          подключениями пространства. Работа с самими письмами — в «Загрузке»:
+          два места настройки одного объекта всегда расходятся. */}
+      {isApiEnabled() && (
+        <details className="rounded-lg border border-border/50 bg-card/40">
+          <summary className="cursor-pointer px-4 py-3 text-sm font-semibold flex items-center gap-2 select-none">
+            <Mail className="h-4 w-4 text-muted-foreground shrink-0" />
+            Почта компании
+            <span className="text-xs font-normal text-muted-foreground ml-1">
+              ящики, правила разбора писем и известные адреса контрагентов
+            </span>
+          </summary>
+          <div className="px-4 pb-4 pt-1">
+            <MailConnector mode="setup" />
+          </div>
+        </details>
+      )}
 
       {/* Канонические маппинги компании — единый источник для всех каналов */}
       {isApiEnabled() && (
