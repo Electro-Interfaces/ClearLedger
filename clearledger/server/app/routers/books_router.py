@@ -61,6 +61,11 @@ DOC_LABELS = {
     "purchase_correction": "Корректировка поступления",
     "payroll_accrual": "Начисление зарплаты",
     "payroll_payment": "Ведомость на выплату",
+    "vat_book_in": "Формирование записей книги покупок",
+    "vat_book_out": "Формирование записей книги продаж",
+    "debt_correction": "Корректировка долга",
+    "goods_writeoff": "Списание товаров",
+    "tax_notice": "Уведомление об исчисленных налогах",
 }
 
 # Папки реестра — УЧАСТКИ УЧЁТА, а не виды документов: счёт, накладная и
@@ -72,14 +77,17 @@ DOC_SECTIONS = [
                               "purchase_correction", "proxy"]),
     ("money", "Деньги", ["bank_in", "bank_out", "payment_order",
                          "cash_in", "cash_out", "advance_report"]),
-    ("warehouse", "Склад", ["demand_note"]),
+    ("warehouse", "Склад", ["demand_note", "goods_writeoff"]),
     ("recon", "Сверка", ["act_recon"]),
     # Зарплата — свой участок: у него другой предмет (человек, а не сделка), другие
     # счета учёта (70, 68.01, 69) и другой режим доступа — это персональные данные.
     ("payroll", "Зарплата", ["payroll_accrual", "payroll_payment"]),
     # Служебные документы отдельно: пять сотен регламентных операций в общем списке
     # хоронят первичку, ради которой реестр и открывают.
-    ("closing", "Закрытие периода", ["closing_op", "manual_entry"]),
+    # Книги покупок и продаж и корректировки долга — тоже закрытие периода: они не
+    # первичка, а способ, которым бухгалтерия сводит налог и расчёты.
+    ("closing", "Закрытие периода", ["closing_op", "manual_entry", "vat_book_in",
+                                     "vat_book_out", "debt_correction", "tax_notice"]),
 ]
 SECTION_OF = {code: sec for sec, _, codes in DOC_SECTIONS for code in codes}
 
@@ -636,6 +644,10 @@ async def docs(
         "total": total,
         "kinds": kinds,
         "sections": sections,
+        # Сколько показанных счетов вообще имеют запись в регистре оплат: без этой
+        # цифры «не оплачено» читается как факт, а это просто отсутствие данных.
+        "paidKnown": len(paid),
+        "paidTotal": len(doc_ids),
         "rows": [{
             # id нужен просмотрщику: по номеру с датой документ не найти —
             # пара не уникальна (два разных №1-2212 от 22.12.2023).
@@ -655,8 +667,12 @@ async def docs(
             # Закрытый период — половина ответа аудитору: документ уже не переписать.
             "periodStatus": _period_status(d.date, closed_months),
             "lines": len(d.lines or []),
-            # Только у счетов покупателям: null — вопрос неприменим, 0 — не оплачен.
-            "paid": (paid.get(d.id) or 0.0) if d.doc_type == "invoice_out" else None,
+            # Только у счетов покупателям. null здесь означает «оплата НЕИЗВЕСТНА»,
+            # а не «не оплачен»: связь «счёт ↔ платёж» живёт в регистре «Оплата
+            # счетов», и он покрывает 108 счетов из 390. Пока отсутствие записи
+            # считалось нулём, витрина показывала 282 счёта как неоплаченные и
+            # выводила из этого несуществующий долг в сотню миллионов.
+            "paid": paid.get(d.id) if d.doc_type == "invoice_out" else None,
         } for d in rows],
     }
 
@@ -833,12 +849,17 @@ async def assortment(
         return {"by": by, "rows": _with_stability(rows), "cost": None}
 
     # Позиции: продажи и закупки по коду номенклатуры одной выборкой.
+    # Суммы берём и с НДС, и без него (`amount_raw`). Разрез и ABC живут в деньгах
+    # покупателя (с НДС, как выручка на 90.01.1), а маржа обязана считаться БЕЗ
+    # налога: на 90.02.1 себестоимость лежит без НДС, и сравнение с ней иначе
+    # завышено на ставку. Первый прогон дал 112 % регистра именно поэтому.
     rows = [{
         "key": r[0], "code": r[0], "name": r[1],
         "soldQty": _num(r[2]), "soldAmount": _num(r[3]), "docs": r[4],
         "boughtQty": _num(r[5]), "boughtAmount": _num(r[6]),
         "first": r[7], "last": r[8],
         "months": [{"month": m, "amount": _num(a)} for m, a in (r[9] or [])],
+        "soldNet": _num(r[10]), "boughtNet": _num(r[11]),
     } for r in (await db.execute(text(f"""
         WITH l AS (
           SELECT d.id doc, d.doc_type, d.date, jsonb_array_elements(d.lines) ln
@@ -846,7 +867,8 @@ async def assortment(
            WHERE d.company_id = :cid AND d.doc_type IN ('sale', 'purchase'){where_date}
         ), x AS (
           SELECT doc, doc_type, date, btrim(ln->>'code') code, ln->>'name' name,
-                 (ln->>'qty')::numeric qty, (ln->>'amount')::numeric amount
+                 (ln->>'qty')::numeric qty, (ln->>'amount')::numeric amount,
+                 coalesce((ln->>'amount_raw')::numeric, (ln->>'amount')::numeric) net
             FROM l WHERE coalesce(btrim(ln->>'code'), '') <> ''
         ), m AS (
           SELECT code, max(name) name, substr(date, 1, 7) AS month,
@@ -855,13 +877,16 @@ async def assortment(
                  count(DISTINCT doc) FILTER (WHERE doc_type = 'sale') docs,
                  sum(qty)    FILTER (WHERE doc_type = 'purchase') bought_qty,
                  sum(amount) FILTER (WHERE doc_type = 'purchase') bought_amount,
+                 sum(net)    FILTER (WHERE doc_type = 'sale')     sold_net,
+                 sum(net)    FILTER (WHERE doc_type = 'purchase') bought_net,
                  min(date) FILTER (WHERE doc_type = 'sale') first,
                  max(date) FILTER (WHERE doc_type = 'sale') last
             FROM x GROUP BY code, 3
         )
         SELECT code, max(name), sum(sold_qty), sum(sold_amount), sum(docs),
                sum(bought_qty), sum(bought_amount), min(first), max(last),
-               array_agg(ARRAY[month, coalesce(sold_amount, 0)::text] ORDER BY month)
+               array_agg(ARRAY[month, coalesce(sold_amount, 0)::text] ORDER BY month),
+               sum(sold_net), sum(bought_net)
           FROM m GROUP BY code
          HAVING coalesce(sum(sold_amount), 0) <> 0
          ORDER BY sum(sold_amount) DESC NULLS LAST LIMIT :limit
@@ -988,6 +1013,10 @@ async def stock(
     cid = await assert_company_member(company_id, current_user, db)
     p = {"cid": str(cid)}
 
+    # Ключ — код И наименование: в выгрузке код переиспользован (у пилота два кода
+    # несут разные товары), и по одному коду остаток складывал бы несравнимое.
+    # Оценка идёт по суммам БЕЗ НДС (`amount_raw`): на счёте 41 товар лежит без
+    # налога, и с оценкой по суммам с НДС сверка расходилась на ставку.
     rows = [{
         "code": r[0], "name": r[1],
         "boughtQty": _num(r[2]), "boughtAmount": _num(r[3]),
@@ -1001,10 +1030,11 @@ async def stock(
            WHERE d.company_id = :cid AND d.doc_type IN ('sale', 'purchase')
         ), x AS (
           SELECT doc_type, date, btrim(ln->>'code') code, ln->>'name' name,
-                 (ln->>'qty')::numeric qty, (ln->>'amount')::numeric amount
+                 (ln->>'qty')::numeric qty,
+                 coalesce((ln->>'amount_raw')::numeric, (ln->>'amount')::numeric) amount
             FROM l WHERE coalesce(btrim(ln->>'code'), '') <> ''
         )
-        SELECT code, max(name),
+        SELECT code, name,
                sum(qty)    FILTER (WHERE doc_type = 'purchase'),
                sum(amount) FILTER (WHERE doc_type = 'purchase'),
                sum(qty)    FILTER (WHERE doc_type = 'sale'),
@@ -1013,7 +1043,7 @@ async def stock(
                max(date)   FILTER (WHERE doc_type = 'purchase'),
                max(date)   FILTER (WHERE doc_type = 'sale'),
                count(DISTINCT substr(date, 1, 7)) FILTER (WHERE doc_type = 'sale')
-          FROM x GROUP BY code
+          FROM x GROUP BY code, name
     """), p)).all()]
 
     today = date.today()
@@ -1042,6 +1072,9 @@ async def stock(
             "idleDays": idle,
         })
     out.sort(key=lambda r: -r["restAmount"])
+    # Приход по строкам против прихода на 41: разница — это то, что закуплено, но на
+    # товарный счёт не легло (материалы, услуги, ОС). Без этой цифры расхождение
+    # расчётного остатка с сальдо выглядит ошибкой витрины, а это состав закупки.
 
     positive = [r for r in out if r["restQty"] > 0.0001]
     negative = [r for r in out if r["restQty"] < -0.0001]
@@ -1054,10 +1087,18 @@ async def stock(
            AND as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid)
     """), {"cid": str(cid), "acc": f"{STOCK_ACCOUNT}%"})).scalar_one_or_none()
 
+    intake = (await db.execute(text("""
+        SELECT sum(amount) FROM gl_entries
+         WHERE company_id = :cid AND account_dt LIKE :acc
+    """), {"cid": str(cid), "acc": f"{STOCK_ACCOUNT}%"})).scalar_one_or_none()
+
     return {
         "rows": out,
         "restAmount": round(sum(r["restAmount"] for r in positive), 2),
         "positions": len(positive),
+        # Сколько всего закуплено по строкам и сколько из этого попало на 41.
+        "boughtTotal": round(sum(r["boughtAmount"] for r in out), 2),
+        "registerIntake": _num(intake),
         # Отрицательный остаток — не «минус на складе», а признак данных: продали
         # то, чего в выгрузке не покупали (старые остатки до периода выгрузки).
         "negative": len(negative),

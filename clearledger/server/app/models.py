@@ -873,6 +873,9 @@ class Counterparty(Base):
     type: Mapped[str] = mapped_column(String(10), nullable=False, default="ЮЛ")
     aliases: Mapped[list] = mapped_column(ARRAY(String), nullable=False, default=list)
     # Ref_Key из БП ГИГ (OData) — связка записей справочника с источником
+    # Папка справочника («Государственные органы»): не контрагент, но приезжает
+    # наравне с ними и попадает в счётчик «Контрагентов: 268».
+    is_group: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     external_ref: Mapped[str | None] = mapped_column(String(36), nullable=True)
     # v2.5: универсальный снимок ВСЕХ реквизитов источника (L1 RAW) + промо-колонки.
     raw: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
@@ -983,8 +986,22 @@ class NomenclatureItem(Base):
     code: Mapped[str] = mapped_column(String(100), nullable=False)
     name: Mapped[str] = mapped_column(String(500), nullable=False)
     unit: Mapped[str] = mapped_column(String(20), nullable=False)
+    # ⚠ Исторически сюда клали ВИД номенклатуры («Товары»), а экраны печатали его как
+    # единицу измерения — выходило «2548 Товары». Вид переехал в `kind`, здесь снова
+    # человеческое имя единицы.
     unit_label: Mapped[str] = mapped_column(String(100), nullable=False, default="")
+    # Ставка НДС позиции. Раньше у всех стояло 20 — значение по умолчанию модели, а не
+    # из источника: «Без НДС» было не отличить от общей ставки.
     vat_rate: Mapped[int] = mapped_column(Integer, nullable=False, default=20)
+    vat_kind: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    # Вид номенклатуры из справочника (Товары, Услуги, Материалы).
+    kind: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    article: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # Папка справочника: группы приезжают наравне с позициями и без признака выглядят
+    # товаром («ОБЩЕСТРОИТЕЛЬНЫЕ ТОВАРЫ» в списке номенклатуры).
+    is_group: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    parent_name: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     external_ref: Mapped[str | None] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
