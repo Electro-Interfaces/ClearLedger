@@ -26,7 +26,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { MetricTile } from '@/components/ui/metric-tile'
 import { cn } from '@/lib/utils'
 import {
-  getArAging, getAttention, getCostBridge, getExpenses, getInsights, getPnl,
+  getArAging, getCostBridge, getExpenses, getInsights, getPnl,
   getPnlEntries, getRevenue, getTaxes,
   type PnlData, type PnlTotals,
 } from '@/services/booksService'
@@ -1485,15 +1485,20 @@ function EconCostBridge({ companyId, period }: { companyId: string; period: Peri
 }
 
 /**
- * Пакет за период — то, что распечатывают и приносят на разговор.
+ * Пакет за период — лист, который аудитор собирает САМ.
  *
- * Своих цифр не заводит: собирает уже посчитанное отчётом, реестром старения и
- * сигналами. Смысл не в новых данных, а в компоновке — на одном листе видно, сколько
- * заработали, чем это обеспечено и что требует решения. Листать пять экранов при
- * собственнике или в банке неудобно.
+ * Ключевое в устройстве: выводы продукта это рабочий материал аудитора, а не готовое
+ * письмо клиенту. Что из найденного показывать компании и в каких словах — решение
+ * человека, а не программы: часть наблюдений требует проверки в первичке, часть
+ * объясняется тем, что известно аудитору и не видно в данных, а часть просто
+ * несвоевременна для разговора.
  *
- * Печать — браузерная (`@media print` прячет рельсы и меню), поэтому вёрстка здесь
- * плоская: карточки идут одна под другой и не рвутся между страницами.
+ * Поэтому здесь не «сформировать отчёт», а конструктор: блоки и отдельные выводы
+ * отмечаются галочками, рядом место для собственного комментария. В печать уходит
+ * только отмеченное, а служебные элементы (галочки, поле ввода) на лист не попадают.
+ *
+ * Своих цифр экран не считает — берёт посчитанное отчётом, реестром старения и
+ * правилами выводов.
  */
 function EconPacket({ companyId, period }: { companyId: string; period: Period }) {
   const q = usePnl(companyId, period)
@@ -1502,10 +1507,23 @@ function EconPacket({ companyId, period }: { companyId: string; period: Period }
     queryFn: () => getArAging(companyId),
     enabled: !!companyId,
   })
-  const att = useQuery({
-    queryKey: ['books', 'attention', companyId, period.from, period.to],
-    queryFn: () => getAttention(companyId, period),
+  const ins = useQuery({
+    queryKey: ['books', 'insights', companyId],
+    queryFn: () => getInsights(companyId),
     enabled: !!companyId,
+  })
+
+  // Что включено в лист. По умолчанию — результат и долг: это факт из учёта.
+  // Выводы по умолчанию ВЫКЛЮЧЕНЫ: их аудитор отбирает осознанно.
+  const [blocks, setBlocks] = useState({ pnl: true, debt: true, headline: false })
+  const [picked, setPicked] = useState<Set<string>>(new Set())
+  const [note, setNote] = useState('')
+
+  const toggle = (key: string) => setPicked((prev) => {
+    const next = new Set(prev)
+    if (next.has(key)) next.delete(key)
+    else next.add(key)
+    return next
   })
 
   if (q.isError) return <div className="p-4"><QueryError onRetry={() => q.refetch()} /></div>
@@ -1524,123 +1542,189 @@ function EconPacket({ companyId, period }: { companyId: string; period: Period }
     { key: 'tax', label: 'Налог' },
     { key: 'profit', label: 'Чистая прибыль', strong: true },
   ]
+  const chosen = (ins.data?.insights ?? []).filter((i) => picked.has(i.key))
 
   return (
     <div className="p-4 space-y-4">
-      <div className="flex items-center justify-between gap-3 flex-wrap no-print">
-        <div className="text-sm text-muted-foreground">
-          Лист для печати: цифры те же, что на экранах продукта, собраны в один свод.
-        </div>
-        <ExportButton onClick={() => exportTable('Пакет за период', [
-          { header: 'Показатель', key: 'label', width: 34 },
-          { header: 'Сумма', key: 'amount', width: 18, money: true },
-          { header: 'К выручке, %', key: 'share', width: 14 },
-        ], KEY_LINES.map((l) => ({
-          label: l.label,
-          amount: t[l.key] as number,
-          share: t.net ? Number((((t[l.key] as number) / t.net) * 100).toFixed(1)) : null,
-        })))} />
-      </div>
-
-      <Card>
+      {/* Конструктор: на лист не попадает */}
+      <Card className="no-print">
         <CardContent className="p-4 space-y-3">
-          <div>
-            <div className="text-base font-medium">Финансовый результат</div>
-            <div className="text-[11px] text-muted-foreground tabular-nums">
-              {periodLabel(period)}
-            </div>
+          <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
+            Что включить в лист
           </div>
-          <table className="w-full text-sm">
-            <tbody>
-              {KEY_LINES.map((l) => (
-                <tr key={l.key} className={cn('border-b last:border-0',
-                  l.strong ? 'font-medium' : '')}>
-                  <td className="py-1.5">{l.label}</td>
-                  <td className="py-1.5 text-right tabular-nums whitespace-nowrap">
-                    {money.format(t[l.key] as number)} ₽
-                  </td>
-                  <td className="py-1.5 text-right tabular-nums text-muted-foreground w-24">
-                    {t.net ? `${(((t[l.key] as number) / t.net) * 100).toFixed(1)} %` : '—'}
-                  </td>
-                </tr>
+          <div className="flex flex-wrap gap-3 text-sm">
+            {([
+              ['pnl', 'Финансовый результат'],
+              ['debt', 'Долг покупателей'],
+              ['headline', 'Главная мысль'],
+            ] as const).map(([key, label]) => (
+              <label key={key} className="inline-flex items-center gap-1.5">
+                <input type="checkbox" checked={blocks[key]}
+                  onChange={(e) => setBlocks({ ...blocks, [key]: e.target.checked })} />
+                {label}
+              </label>
+            ))}
+          </div>
+
+          {ins.data && ins.data.insights.length > 0 && (
+            <div className="space-y-1.5">
+              <div className="text-[11px] text-muted-foreground">
+                Выводы — по вашему выбору. Продукт их находит, но что показывать компании
+                и в каких словах, решаете вы: часть требует проверки в первичке, часть
+                объясняется тем, что вам известно, а данным нет.
+              </div>
+              {ins.data.insights.map((i) => (
+                <label key={i.key} className="flex items-start gap-2 text-sm">
+                  <input type="checkbox" className="mt-1" checked={picked.has(i.key)}
+                    onChange={() => toggle(i.key)} />
+                  <span>
+                    {i.title}
+                    <span className="text-[11px] text-muted-foreground"> · {i.facts[0]}</span>
+                  </span>
+                </label>
               ))}
-            </tbody>
-          </table>
-          <p className="text-[11px] text-muted-foreground">
-            Рентабельность: валовая {t.grossPct ?? '—'} %, операционная{' '}
-            {t.operatingPct ?? '—'} %, чистая {t.profitPct ?? '—'} %. Закрыто на
-            нераспределённую прибыль {money.format(d.closedToRetained)} ₽.
-          </p>
+            </div>
+          )}
+
+          <div className="space-y-1">
+            <label htmlFor="packet-note" className="text-[11px] text-muted-foreground">
+              Комментарий аудитора — попадёт на лист как есть
+            </label>
+            <textarea id="packet-note" value={note} onChange={(e) => setNote(e.target.value)}
+              rows={3} placeholder="Что вы хотите сказать этими цифрами"
+              className="w-full rounded-md border bg-background px-2.5 py-2 text-sm" />
+          </div>
+
+          <div className="flex justify-end">
+            <ExportButton onClick={() => exportTable('Пакет за период', [
+              { header: 'Показатель', key: 'label', width: 34 },
+              { header: 'Сумма', key: 'amount', width: 18, money: true },
+              { header: 'К выручке, %', key: 'share', width: 14 },
+            ], KEY_LINES.map((l) => ({
+              label: l.label,
+              amount: t[l.key] as number,
+              share: t.net ? Number((((t[l.key] as number) / t.net) * 100).toFixed(1)) : null,
+            })))} />
+          </div>
         </CardContent>
       </Card>
 
-      <Card>
-        <CardContent className="p-4 space-y-2">
-          <div className="text-base font-medium">Долг покупателей</div>
-          {!aging.data ? (
-            <div className="text-sm text-muted-foreground">Считаем…</div>
-          ) : (
-            <>
-              <table className="w-full text-sm">
-                <tbody>
-                  {aging.data.buckets.filter((b) => b.count).map((b) => (
-                    <tr key={b.key} className="border-b last:border-0">
-                      <td className="py-1.5">{b.label}</td>
-                      <td className="py-1.5 text-right tabular-nums text-muted-foreground w-20">
-                        {b.count} шт.
-                      </td>
-                      <td className="py-1.5 text-right tabular-nums whitespace-nowrap">
-                        {money.format(b.amount)} ₽
-                      </td>
-                    </tr>
-                  ))}
-                  <tr className="font-medium">
-                    <td className="py-1.5">Ожидаемые потери</td>
-                    <td />
+      {/* Сам лист */}
+      {blocks.headline && ins.data?.headline && (
+        <Card>
+          <CardContent className="p-4">
+            <div className="text-base font-medium">Главное</div>
+            <p className="text-sm mt-1">{ins.data.headline}</p>
+          </CardContent>
+        </Card>
+      )}
+
+      {note.trim() && (
+        <Card>
+          <CardContent className="p-4">
+            <div className="text-base font-medium">Комментарий</div>
+            <p className="text-sm mt-1 whitespace-pre-wrap">{note}</p>
+          </CardContent>
+        </Card>
+      )}
+
+      {blocks.pnl && (
+        <Card>
+          <CardContent className="p-4 space-y-3">
+            <div>
+              <div className="text-base font-medium">Финансовый результат</div>
+              <div className="text-[11px] text-muted-foreground tabular-nums">
+                {periodLabel(period)}
+              </div>
+            </div>
+            <table className="w-full text-sm">
+              <tbody>
+                {KEY_LINES.map((l) => (
+                  <tr key={l.key} className={cn('border-b last:border-0',
+                    l.strong ? 'font-medium' : '')}>
+                    <td className="py-1.5">{l.label}</td>
                     <td className="py-1.5 text-right tabular-nums whitespace-nowrap">
-                      {money.format(aging.data.risk)} ₽
+                      {money.format(t[l.key] as number)} ₽
+                    </td>
+                    <td className="py-1.5 text-right tabular-nums text-muted-foreground w-24">
+                      {t.net ? `${(((t[l.key] as number) / t.net) * 100).toFixed(1)} %` : '—'}
                     </td>
                   </tr>
-                </tbody>
-              </table>
-              <p className="text-[11px] text-muted-foreground">
-                Долг считается по счетам с известной оплатой; ещё{' '}
-                {num.format(aging.data.unknownCount)} счетов регистр не свёл с платежами.
-                Возраст — от даты счёта, ставки риска экспертные.
-              </p>
-            </>
-          )}
-        </CardContent>
-      </Card>
+                ))}
+              </tbody>
+            </table>
+            <p className="text-[11px] text-muted-foreground">
+              Рентабельность: валовая {t.grossPct ?? '—'} %, операционная{' '}
+              {t.operatingPct ?? '—'} %, чистая {t.profitPct ?? '—'} %. Закрыто на
+              нераспределённую прибыль {money.format(d.closedToRetained)} ₽.
+            </p>
+          </CardContent>
+        </Card>
+      )}
 
-      <Card>
-        <CardContent className="p-4 space-y-2">
-          <div className="text-base font-medium">Что требует решения</div>
-          {!att.data ? (
-            <div className="text-sm text-muted-foreground">Считаем…</div>
-          ) : att.data.signals.length === 0 ? (
-            <div className="text-sm text-muted-foreground">Сигналов нет.</div>
-          ) : (
-            <ul className="space-y-1.5 text-sm">
-              {att.data.signals.map((sg) => (
-                <li key={sg.key} className="flex items-start gap-2">
-                  <span className={cn('mt-1.5 h-1.5 w-1.5 rounded-full shrink-0',
-                    sg.level === 'danger' ? 'bg-rose-500' : 'bg-amber-500')} />
-                  <span>
-                    <b>{sg.title}</b> — {sg.value}.{' '}
-                    <span className="text-muted-foreground">{sg.why}</span>
-                  </span>
+      {blocks.debt && (
+        <Card>
+          <CardContent className="p-4 space-y-2">
+            <div className="text-base font-medium">Долг покупателей</div>
+            {!aging.data ? (
+              <div className="text-sm text-muted-foreground">Считаем…</div>
+            ) : (
+              <>
+                <table className="w-full text-sm">
+                  <tbody>
+                    {aging.data.buckets.filter((b) => b.count).map((b) => (
+                      <tr key={b.key} className="border-b last:border-0">
+                        <td className="py-1.5">{b.label}</td>
+                        <td className="py-1.5 text-right tabular-nums text-muted-foreground w-20">
+                          {b.count} шт.
+                        </td>
+                        <td className="py-1.5 text-right tabular-nums whitespace-nowrap">
+                          {money.format(b.amount)} ₽
+                        </td>
+                      </tr>
+                    ))}
+                    <tr className="font-medium">
+                      <td className="py-1.5">Ожидаемые потери</td>
+                      <td />
+                      <td className="py-1.5 text-right tabular-nums whitespace-nowrap">
+                        {money.format(aging.data.risk)} ₽
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+                <p className="text-[11px] text-muted-foreground">
+                  Долг считается по счетам с известной оплатой; ещё{' '}
+                  {num.format(aging.data.unknownCount)} счетов регистр не свёл с
+                  платежами. Возраст — от даты счёта, ставки риска экспертные.
+                </p>
+              </>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {chosen.length > 0 && (
+        <Card>
+          <CardContent className="p-4 space-y-2">
+            <div className="text-base font-medium">Наблюдения</div>
+            <ul className="space-y-2 text-sm">
+              {chosen.map((i) => (
+                <li key={i.key}>
+                  <b>{i.title}.</b> {i.text}
+                  <ul className="text-[11px] text-muted-foreground mt-0.5">
+                    {i.facts.map((f, n) => <li key={n} className="tabular-nums">· {f}</li>)}
+                  </ul>
                 </li>
               ))}
             </ul>
-          )}
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      )}
 
       <p className="text-[11px] text-muted-foreground">
-        Данные приезжают выгрузкой из бухгалтерии компании; закрытый месяц в ней
-        неизменяем и служит эталоном. Цифры этого листа сходятся с оборотами регистра:
-        любую строку отчёта можно раскрыть до проводок на экране «Отчёт о результате».
+        Цифры взяты из бухгалтерии компании за {periodLabel(period)}; закрытый месяц в
+        ней неизменяем. Любую строку результата можно раскрыть до проводок на экране
+        «Отчёт о результате».
       </p>
     </div>
   )
