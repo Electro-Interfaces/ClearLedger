@@ -22,7 +22,10 @@ import { DeliveryDetailModal } from '@/components/shift-reports/DeliveryDetailMo
 import { ShiftDetailsDialog } from '@/components/fuel/ShiftDetailsDialog'
 import { ReceiptDetailsModal } from '@/components/fuel/ReceiptDetailsModal'
 import type { FsNode } from './raw-panel-types'
+import type { DocRow } from '@/services/booksService'
 import { cn } from '@/lib/utils'
+
+const money = new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 2 })
 
 /* ── иконки файлов по типу документа ── */
 function fileIcon(node: FsNode) {
@@ -35,7 +38,7 @@ function fileIcon(node: FsNode) {
 
 function typeLabel(node: FsNode): string {
   if (node.type === 'folder') return 'Папка с файлами'
-  return docTypeLabel(node.doc?.docType ?? '')
+  return node.typeText ?? docTypeLabel(node.doc?.docType ?? '')
 }
 
 /* ── командная панель (Win11 command bar) ── */
@@ -198,6 +201,8 @@ function PreviewPane({ node }: { node: FsNode | null }) {
     )
   }
   const { Icon, cls } = node.type === 'folder' ? { Icon: Folder, cls: 'text-amber-400' } : fileIcon(node)
+  // Шапка документа учёта: у него в `data` лежит строка реестра бухгалтерии.
+  const book = node.typeText ? (node.doc?.data as DocRow | undefined) : undefined
   return (
     <div className="hidden md:flex w-72 shrink-0 bg-card border-l border-border flex-col p-4 gap-3 overflow-y-auto scroll-thin">
       <div className="flex flex-col items-center gap-2 py-4">
@@ -208,8 +213,16 @@ function PreviewPane({ node }: { node: FsNode | null }) {
       <div className="space-y-1.5 text-xs">
         <Row k="Дата изменения" v={node.date ?? '—'} />
         {node.status && <Row k="Статус" v={node.status} />}
+        {book && <>
+          <Row k="Номер" v={book.number || 'б/н'} />
+          <Row k="Контрагент" v={book.counterparty || '—'} />
+          <Row k="Сумма" v={money.format(book.amount)} />
+          {book.vat > 0 && <Row k="в т.ч. НДС" v={money.format(book.vat)} />}
+          {book.operation && <Row k="Назначение" v={book.operation} />}
+          <Row k="Строк в составе" v={book.lines ? String(book.lines) : 'только шапка'} />
+        </>}
         {node.doc?.channelId && <Row k="Канал" v={node.doc.channelId} />}
-        {node.stationId != null && <Row k="Станция" v={String(node.stationId)} />}
+        {node.stationId != null && !book && <Row k="Станция" v={String(node.stationId)} />}
         <Row k="Путь" v={'/' + node.path.replace(/\/#[^/]+$/, '')} />
       </div>
     </div>

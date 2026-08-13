@@ -4,9 +4,11 @@
  * Источники (по убыванию приоритета):
  *  1. API + fuel-профиль — реальные документы БД: смены (/api/fuel/shifts)
  *     и ТТН (/api/fuel/receipts).
- *  2. API + прочие профили — реальные загрузки: каналы компании и история
+ *  2. API + office-профиль — первичка из бухгалтерии (/api/books/docs):
+ *     у компании без объектов документы приезжают не сменами, а учётом.
+ *  3. API + прочие профили — реальные загрузки: каналы компании и история
  *     их прогонов (/api/channels + /channels/{id}/runs).
- *  3. Без API — localStorage-прототип (`getAllLoadedDocs`).
+ *  4. Без API — localStorage-прототип (`getAllLoadedDocs`).
  * У каждого документа готовый путь `catalog` (напр. `/Нефтепродукты АЗС/Смены/
  * {станция}/{год}-{месяц}/`). Дерево строится РОВНО по этим путям — папки =
  * сегменты пути, листья = документы.
@@ -23,6 +25,7 @@ import {
   type LoadedShift, type LoadedReceipt,
 } from '@/services/fuel/fuelMappingService'
 import { loadChannels, getChannelRuns, type ChannelRun } from '@/services/channelService'
+import { getAllDocs, type DocRow } from '@/services/booksService'
 import type { Channel } from '@/types/channel'
 import { format } from 'date-fns'
 import type { ShiftRecord } from '@/services/fuel/types'
@@ -114,13 +117,49 @@ const RUN_STATUS_LABEL: Record<string, string> = {
   success: 'Успешно', partial: 'Частично', error: 'Ошибка', running: 'Идёт…',
 }
 
+/**
+ * Документ бухгалтерии в узел проводника. Раскладка утверждена МАГом:
+ * участок учёта → вид документа → год → месяц. Ключ пути включает порядковый
+ * номер: пара «номер + дата» в 1С не уникальна (два документа №1-2212 от 22.12.2023).
+ */
+const MONTHS = ['январь', 'февраль', 'март', 'апрель', 'май', 'июнь',
+  'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь']
+
+function bookDocToDoc(row: DocRow, sectionTitle: string, i: number): LoadedDocument {
+  const d = new Date(row.date)
+  const ok = !Number.isNaN(d.getTime())
+  const period = ok ? `${d.getFullYear()}/${MONTHS[d.getMonth()]}` : 'Без даты'
+  const who = row.counterparty?.trim() || 'Без контрагента'
+  return {
+    id: `${row.type}-${i}`,
+    channelId: '', streamId: '', docType: row.type, origin: 'api',
+    fingerprint: `${row.type}|${row.date}|${row.number}|${row.inn ?? ''}`,
+    title: `№ ${row.number || 'б/н'} от ${ok ? format(d, 'dd.MM.yyyy') : '—'} — ${who}`,
+    stationId: 0,
+    date: row.date, data: row,
+    catalog: `${sectionTitle}/${row.label}/${period}`,
+    loadedAt: row.date,
+  }
+}
+
+/** Статус документа учёта: как в 1С («Проведён»/«Не проведён») плюс замок закрытого месяца. */
+function bookDocStatus(row: DocRow): string {
+  return row.periodStatus === 'closed' ? `${row.status} 🔒` : row.status
+}
+
 /** «Размер» документа в терминах предметной области (литры/записи). */
 function docSize(doc: LoadedDocument): string {
   if (doc.origin !== 'api') return '—'
   if (doc.docType === 'shift_report') return `${fmtInt((doc.data as LoadedShift).total_liters)} л`
   if (doc.docType === 'receipt') return `${fmtInt((doc.data as LoadedReceipt).doc_volume_liters)} л`
   if (doc.docType === 'channel_run') return `${fmtInt((doc.data as ChannelRun).loaded)} зап.`
+  if (isBookDoc(doc)) return `${fmtInt((doc.data as DocRow).amount)} ₽`
   return '—'
+}
+
+/** Документ учёта (шапка из бухгалтерии) — у него в `data` лежит строка реестра. */
+function isBookDoc(doc: LoadedDocument): boolean {
+  return doc.origin === 'api' && !!(doc.data as DocRow)?.label && !!(doc.data as DocRow)?.status
 }
 
 /** Метка статуса файла-узла (превью/колонка «Статус»). */
@@ -130,6 +169,7 @@ function docStatus(doc: LoadedDocument): string | undefined {
     return (doc.data as ShiftRecord)?.status === 'closed' ? 'Закрыта' : 'Открыта'
   }
   if (doc.docType === 'channel_run') return RUN_STATUS_LABEL[(doc.data as ChannelRun).status] ?? (doc.data as ChannelRun).status
+  if (isBookDoc(doc)) return bookDocStatus(doc.data as DocRow)
   return undefined
 }
 
@@ -146,7 +186,9 @@ export function useRawPanelTree(filters: RawPanelFilters, sortConfig: SortConfig
 
   const apiMode = isApiEnabled()
   const apiFuel = apiMode && company.profileId === 'fuel'
-  const apiRuns = apiMode && !apiFuel
+  // Компания без объектов: первичка приезжает из бухгалтерии, а не сменами и ТТН.
+  const apiBooks = apiMode && company.profileId === 'office'
+  const apiRuns = apiMode && !apiFuel && !apiBooks
 
   // Без API — localStorage-прототип (перечитать при монтировании: данные
   // могли пополниться в другом разделе).
@@ -170,6 +212,16 @@ export function useRawPanelTree(filters: RawPanelFilters, sortConfig: SortConfig
     queryKey: ['raw-docs-receipts', company.id],
     enabled: apiFuel,
     queryFn: () => getLoadedReceipts(20000),
+    staleTime: 60_000,
+  })
+  const booksQ = useQuery({
+    queryKey: ['raw-docs-books', company.id],
+    enabled: apiBooks,
+    queryFn: async () => {
+      const { rows, sections } = await getAllDocs(company.id)
+      const title = new Map(sections.map((s) => [s.code, s.title]))
+      return rows.map((r, i) => bookDocToDoc(r, title.get(r.section ?? '') ?? 'Прочее', i))
+    },
     staleTime: 60_000,
   })
   const runsQ = useQuery({
@@ -196,9 +248,10 @@ export function useRawPanelTree(filters: RawPanelFilters, sortConfig: SortConfig
         ...(receiptsQ.data ?? []).map(receiptToDoc),
       ]
     }
+    if (apiBooks) return booksQ.data ?? []
     if (apiRuns) return runsQ.data ?? []
     return localDocs
-  }, [apiFuel, apiRuns, shiftsQ.data, receiptsQ.data, runsQ.data, localDocs])
+  }, [apiFuel, apiBooks, apiRuns, shiftsQ.data, receiptsQ.data, booksQ.data, runsQ.data, localDocs])
 
   const fsTree = useMemo(() => {
     const tree = new Map<string, FsNode[]>()
@@ -245,6 +298,7 @@ export function useRawPanelTree(filters: RawPanelFilters, sortConfig: SortConfig
         date: safeFmt(doc.date || doc.loadedAt),
         status: docStatus(doc),
         size: docSize(doc),
+        typeText: isBookDoc(doc) ? (doc.data as DocRow).label : undefined,
       }
       const files = tree.get(parentKey) ?? []
       files.push(fileNode)
@@ -292,6 +346,7 @@ export function useRawPanelTree(filters: RawPanelFilters, sortConfig: SortConfig
     if (apiMode) {
       queryClient.invalidateQueries({ queryKey: ['raw-docs-shifts'] })
       queryClient.invalidateQueries({ queryKey: ['raw-docs-receipts'] })
+      queryClient.invalidateQueries({ queryKey: ['raw-docs-books'] })
       queryClient.invalidateQueries({ queryKey: ['raw-docs-runs'] })
     } else {
       queryClient.invalidateQueries({ queryKey: ['sts-shifts'] })
@@ -304,8 +359,10 @@ export function useRawPanelTree(filters: RawPanelFilters, sortConfig: SortConfig
   return {
     fsTree,
     flatFiles,
-    isLoading: apiFuel ? (shiftsQ.isLoading || receiptsQ.isLoading) : apiRuns ? runsQ.isLoading : false,
-    isFetching: apiFuel ? (shiftsQ.isFetching || receiptsQ.isFetching) : apiRuns ? runsQ.isFetching : false,
+    isLoading: apiFuel ? (shiftsQ.isLoading || receiptsQ.isLoading)
+      : apiBooks ? booksQ.isLoading : apiRuns ? runsQ.isLoading : false,
+    isFetching: apiFuel ? (shiftsQ.isFetching || receiptsQ.isFetching)
+      : apiBooks ? booksQ.isFetching : apiRuns ? runsQ.isFetching : false,
     totalItemCount,
     dataUpdatedAt,
     handleRefresh,

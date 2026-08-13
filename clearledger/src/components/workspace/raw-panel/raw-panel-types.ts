@@ -22,6 +22,8 @@ export interface FsNode {
   size?: string
   /** Document type for icon selection */
   docType?: 'shift' | 'delivery'
+  /** Имя вида документа, когда оно приходит с сервера (словарь видов там один). */
+  typeText?: string
   /** Delivery record ref (for TTN files) */
   deliveryRecord?: DeliveryRecord
   /** Shift record ref (for loaded shift files) */
