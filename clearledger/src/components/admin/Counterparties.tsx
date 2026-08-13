@@ -168,7 +168,7 @@ export function Counterparties({ companyId, canManage }: { companyId: string; ca
 }
 
 /** Строка реквизита: пустые не показываем — в карточке из бухгалтерии заполнено не всё. */
-function Req({ label, value }: { label: string; value?: string | null }) {
+export function Req({ label, value }: { label: string; value?: string | null }) {
   if (!value) return null
   return (
     <div className="space-y-0.5">

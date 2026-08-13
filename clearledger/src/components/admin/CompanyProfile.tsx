@@ -4,9 +4,9 @@
  * каркас переехал в `AdminLayout` (разделы = маршруты), карточки — сюда.
  */
 import { useState } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Building2, Loader2, Plus, Users } from 'lucide-react'
+import { Building2, Landmark, Loader2, Plus, Users } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -19,7 +19,9 @@ import {
 } from '@/components/ui/dialog'
 import * as userService from '@/services/userService'
 import type { OrgProfile } from '@/services/userService'
+import * as referenceService from '@/services/referenceService'
 import { PROFILES } from '@/config/companyProfiles'
+import { Req } from '@/components/admin/Counterparties'
 
 export function CompanyProfileCard({ company, canEdit }: { company: OrgProfile; canEdit: boolean }) {
   const qc = useQueryClient()
@@ -76,6 +78,71 @@ export function CompanyProfileCard({ company, canEdit }: { company: OrgProfile; 
         )}
       </CardContent>
     </Card>
+  )
+}
+
+/**
+ * Карточка собственной организации — та, от чьего имени ведётся учёт.
+ * Компания пространства (выше) — это разрез доступа, а здесь юрлицо со всеми
+ * реквизитами из бухгалтерии: регистрация, налоговый орган, фонды, банк, адреса.
+ */
+export function OwnOrganizationCard({ companyId }: { companyId: string }) {
+  const orgsQ = useQuery({
+    queryKey: ['own-organizations', companyId],
+    queryFn: () => referenceService.getOrganizations(companyId),
+  })
+  const orgs = orgsQ.data ?? []
+  if (orgsQ.isLoading || orgs.length === 0) return null
+
+  return (
+    <>
+      {orgs.map((o) => {
+        const bank = [o.bankAccount, o.bankBik && `БИК ${o.bankBik}`].filter(Boolean).join(' · ')
+        const ifns = [o.ifnsName, o.ifnsCode && `код ${o.ifnsCode}`].filter(Boolean).join(' · ')
+        return (
+          <Card key={o.id}>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Landmark className="h-5 w-5" /> {o.name}
+              </CardTitle>
+              <CardDescription>
+                {o.fullName && o.fullName !== o.name ? o.fullName : 'Организация, от имени которой ведётся учёт'}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-5">
+              <div className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
+                <Req label="ИНН" value={o.inn} />
+                <Req label="КПП" value={o.kpp} />
+                <Req label="ОГРН" value={o.ogrn} />
+                <Req label="ОКПО" value={o.okpo} />
+                <Req label="Вид" value={o.vid} />
+                <Req label="Дата регистрации" value={o.regDate} />
+                <Req label="ОКВЭД" value={o.okved} />
+                <Req label="Префикс" value={o.prefix} />
+              </div>
+              <div className="space-y-3">
+                <Req label="Юридический адрес" value={o.legalAddress} />
+                <Req label="Фактический адрес"
+                  value={o.actualAddress && o.actualAddress !== o.legalAddress ? o.actualAddress : null} />
+                <Req label="Почтовый адрес"
+                  value={o.postalAddress && o.postalAddress !== o.legalAddress ? o.postalAddress : null} />
+                <Req label="Телефон" value={o.phone} />
+                <Req label="Почта" value={o.email} />
+              </div>
+              <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
+                <Req label="Банк" value={bank || null} />
+                <Req label="Налоговый орган" value={ifns || null} />
+                <Req label="Регистрация в ПФР" value={o.pfrRegNumber} />
+                <Req label="Регистрация в ФСС" value={o.fssRegNumber} />
+                <Req label="Руководитель"
+                  value={[o.directorPosition, o.directorName].filter(Boolean).join(' · ') || null} />
+                <Req label="Главный бухгалтер" value={o.accountantName} />
+              </div>
+            </CardContent>
+          </Card>
+        )
+      })}
+    </>
   )
 }
 

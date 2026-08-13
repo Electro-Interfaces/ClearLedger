@@ -13,7 +13,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { InvitationsCard, MembersCard, RolesAccessTab } from '@/components/admin/CompanyTeam'
 import { AuditLog } from '@/components/admin/AuditLog'
 import { Counterparties } from '@/components/admin/Counterparties'
-import { CompanyProfileCard } from '@/components/admin/CompanyProfile'
+import { CompanyProfileCard, OwnOrganizationCard } from '@/components/admin/CompanyProfile'
 import { CoreOverview } from '@/components/admin/CoreOverview'
 import { CoreSettings } from '@/components/admin/CoreSettings'
 import { EcosystemCompanies } from '@/components/admin/EcosystemCompanies'
@@ -65,7 +65,14 @@ function CompanyScreen({ code }: { code: string }) {
     case 'refs': return <SpaceRefs companyId={company.id} canManage={canManage} />
     // Одна карта на оба охвата — переключатель внутри, как в журнале.
     case 'map': return <SpaceMap companyId={company.id} isSuperadmin={!!user?.is_superadmin} />
-    case 'profile': return <CompanyProfileCard company={company} canEdit={canManage} />
+    // Две карточки: компания пространства (разрез доступа) и юрлицо, от чьего имени
+    // ведётся учёт — его реквизиты приезжают из бухгалтерии и правятся не здесь.
+    case 'profile': return (
+      <div className="space-y-4">
+        <CompanyProfileCard company={company} canEdit={canManage} />
+        <OwnOrganizationCard companyId={company.id} />
+      </div>
+    )
     // Приглашения и журнал — действия администратора организации, не наблюдателя.
     case 'invites': return canManage ? <InvitationsCard companyId={company.id} /> : <Empty text="Раздел доступен администратору организации" />
     // Один журнал на оба охвата: у суперадмина внутри переключатель «организация /
