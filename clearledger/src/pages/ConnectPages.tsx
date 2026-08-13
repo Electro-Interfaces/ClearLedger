@@ -16,22 +16,7 @@ import { Connections } from '@/components/admin/Connections'
 import { InboundKeysCard } from '@/components/channels/InboundKeysCard'
 import { Notifications } from '@/components/admin/Notifications'
 import { CompanyApps } from '@/components/admin/CompanyApps'
-import { useAuth } from '@/contexts/AuthContext'
-import { useCompany } from '@/contexts/CompanyContext'
-
-/**
- * Право править настройку связи = администрирование открытой организации. Тот же
- * расчёт, что в `AdminLayout`: суперадмин контейнера или админ этой организации.
- */
-function useCanManage() {
-  const { user } = useAuth()
-  const { companyId } = useCompany()
-  return {
-    companyId,
-    isSuperadmin: !!user?.is_superadmin,
-    canManage: !!user?.is_superadmin || (user?.companies ?? []).some((c) => c.id === companyId && c.role === 'admin'),
-  }
-}
+import { useCanManage } from '@/hooks/useCanManage'
 
 function Page({ icon: Icon, title, hint, children }: {
   icon: React.ComponentType<{ className?: string }>

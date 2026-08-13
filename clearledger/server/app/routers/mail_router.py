@@ -15,7 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import log_audit
-from app.auth import assert_company_member, get_current_user
+from app.auth import assert_company_member, assert_company_product, get_current_user
 from app.routers.users_router import require_company_admin
 from app.database import get_db
 from app.models import (
@@ -25,6 +25,16 @@ from app.models import (
 from app.services import mail_intake, mail_secrets, mail_send
 
 router = APIRouter(prefix="/mail", tags=["Почта пространства"])
+
+
+async def _mail_scope(company_id: str, user: User, db: AsyncSession):
+    """Компания запроса + право на продукт «Подключения».
+
+    Членства мало: в переписке компании лежат договоры во вложениях, реквизиты и
+    ответы контрагентов, а участником пространства бывает и внешний подрядчик.
+    Суперадмин, админ организации и роль без ограничений проходят как раньше.
+    """
+    return await assert_company_product(company_id, user, db, "connect")
 
 
 class AccountIn(BaseModel):
@@ -90,7 +100,7 @@ async def accounts(
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Ящики компании с их назначением и состоянием опроса."""
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await _mail_scope(company_id, current_user, db)
     rows = (await db.execute(select(MailAccount).where(
         MailAccount.company_id == cid).order_by(MailAccount.address))).scalars().all()
     return {"rows": [_account(a) for a in rows]}
@@ -192,7 +202,7 @@ async def threads(
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Переписка нитями — свежие сверху."""
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await _mail_scope(company_id, current_user, db)
     query = select(MailThread).where(MailThread.company_id == cid)
     if q:
         query = query.where(MailThread.subject.ilike(f"%{q}%"))
@@ -257,7 +267,7 @@ async def attachment(
     current_user: User = Depends(get_current_user),
 ):
     """Отдать вложение как файл."""
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await _mail_scope(company_id, current_user, db)
     a = (await db.execute(select(MailAttachment).where(
         MailAttachment.company_id == cid,
         MailAttachment.id == attachment_id))).scalar_one_or_none()
@@ -466,7 +476,7 @@ async def by_counterparty(
     История общения должна лежать там же, где документы и долг: вопрос «о чём мы
     с ним говорили» задают ровно в тот момент, когда смотрят на его карточку.
     """
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await _mail_scope(company_id, current_user, db)
     rows = (await db.execute(select(MailThread).where(
         MailThread.company_id == cid,
         MailThread.counterparty_id == counterparty_id)
@@ -492,7 +502,7 @@ async def quarantine(
     Карантин без разбора — та же корзина, поэтому здесь не список «мусора», а
     очередь решений: принять, отклонить или запомнить адрес.
     """
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await _mail_scope(company_id, current_user, db)
     rows = (await db.execute(select(MailMessage).where(
         MailMessage.company_id == cid,
         MailMessage.status.in_(["quarantine", "rejected"]))

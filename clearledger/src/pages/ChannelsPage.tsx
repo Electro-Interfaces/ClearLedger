@@ -12,6 +12,7 @@ import { getChannels, loadChannels, deleteChannel } from '@/services/channelServ
 import { getSources, loadSources } from '@/services/sourceService'
 import { isApiEnabled } from '@/services/apiClient'
 import { useCompany } from '@/contexts/CompanyContext'
+import { useCanManage } from '@/hooks/useCanManage'
 import { isFuelProfile } from '@/config/profiles'
 import { getChannelSourceIds } from '@/types/channel'
 import type { Channel } from '@/types/channel'
@@ -106,6 +107,9 @@ export function ChannelsPage() {
   const [scheduleOpen, setScheduleOpen] = useState(false)
   const { companyId, company } = useCompany()
   const profileId = company.profileId
+  // Настройка подключений — право администратора организации (так же на сервере).
+  // Кнопки, которые всё равно вернут 403, показывать нельзя.
+  const { canManage } = useCanManage()
   const [searchParams, setSearchParams] = useSearchParams()
 
   function refresh() { setChannels(getChannels()) }
@@ -159,10 +163,12 @@ export function ChannelsPage() {
               Расписание
             </Button>
           </AdvancedOnly>
-          <Button size="sm" className="gap-1.5" onClick={() => setWizardOpen(true)}>
-            <Plus className="h-4 w-4" />
-            Создать коннектор
-          </Button>
+          {canManage && (
+            <Button size="sm" className="gap-1.5" onClick={() => setWizardOpen(true)}>
+              <Plus className="h-4 w-4" />
+              Создать коннектор
+            </Button>
+          )}
         </div>
       </div>
 

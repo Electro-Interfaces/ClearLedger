@@ -6,6 +6,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
+import { useCanManage } from '@/hooks/useCanManage'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -661,6 +662,8 @@ export function SourcesPage() {
   const [newType, setNewType] = useState<string>('')
   const [focusId, setFocusId] = useState<string | null>(null)
   const { companyId } = useCompany()
+  // Реквизиты доступа правит администратор организации — так же гейтит сервер.
+  const { canManage } = useCanManage()
   const [searchParams, setSearchParams] = useSearchParams()
 
   function refresh() { setSources(getSources()) }
@@ -716,12 +719,14 @@ export function SourcesPage() {
           </p>
         </div>
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-          <DialogTrigger asChild>
-            <Button size="sm" className="gap-1.5">
-              <Plus className="h-4 w-4" />
-              Добавить источник
-            </Button>
-          </DialogTrigger>
+          {canManage && (
+            <DialogTrigger asChild>
+              <Button size="sm" className="gap-1.5">
+                <Plus className="h-4 w-4" />
+                Добавить источник
+              </Button>
+            </DialogTrigger>
+          )}
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Новый источник</DialogTitle>
@@ -762,9 +767,11 @@ export function SourcesPage() {
               Сам он ничего не грузит: данные носит коннектор, собранный поверх него.
               Тип выбирается в «Каталоге типов».
             </p>
-            <Button variant="outline" size="sm" onClick={() => setDialogOpen(true)}>
-              Добавить первый источник
-            </Button>
+            {canManage && (
+              <Button variant="outline" size="sm" onClick={() => setDialogOpen(true)}>
+                Добавить первый источник
+              </Button>
+            )}
           </CardContent>
         </Card>
       ) : (
