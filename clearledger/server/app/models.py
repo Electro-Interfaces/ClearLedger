@@ -1616,6 +1616,109 @@ class InvoicePayment(Base):
     )
 
 
+class ExportAdjustment(Base):
+    """Корректировка документа перед выгрузкой в бухгалтерию.
+
+    Нормализованный слой — это то, ЧТО ЕСТЬ: копия учёта клиента. Выгрузка — то, что
+    мы предлагаем провести. Это разные вещи, и они обязаны жить раздельно: правка
+    прямо в слое стёрла бы исходник, и через месяц никто не отличил бы данные 1С от
+    нашей интерпретации.
+
+    Поэтому корректировка не меняет документ, а лежит рядом: было → стало, причина,
+    автор, период. Выгрузка собирается как «слой плюс утверждённые корректировки»,
+    и в любой момент видно, чем она отличается от источника.
+
+    Корректировка ВСЕГДА адресная: у неё есть документ, поле и обоснование. Массовых
+    правок «поднять все расходы на 10 %» здесь нет и не будет — это уже не учёт.
+    """
+
+    __tablename__ = "export_adjustments"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
+    )
+    period: Mapped[str] = mapped_column(String(7), nullable=False)      # ГГГГ-ММ
+    doc_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("accounting_docs.id", ondelete="CASCADE"), nullable=True
+    )
+    # Что правим: amount, vat_amount, date, contract, cost_account, article,
+    # counterparty, status — имя поля документа или строки.
+    field: Mapped[str] = mapped_column(String(50), nullable=False)
+    old_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    new_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Зачем: без причины корректировка неотличима от ошибки, и через квартал её
+    # никто не защитит перед проверяющим.
+    reason: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    # draft — черновик, approved — утверждена к выгрузке, exported — ушла в 1С,
+    # rejected — отклонена (оставляем след, а не удаляем).
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft")
+    rule_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("export_rules.id", ondelete="SET NULL"), nullable=True
+    )
+    created_by: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    approved_by: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    exported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        Index("idx_export_adj_period", "company_id", "period", "status"),
+        Index("idx_export_adj_doc", "company_id", "doc_id"),
+    )
+
+
+class ExportRule(Base):
+    """Правило, по которому корректировка повторяется в следующих периодах.
+
+    Разовая правка — это работа руками каждый месяц. Если основание постоянное
+    («аренда всегда на 26 счёт, а не на 44»), решение принимается один раз и дальше
+    применяется само — но КАЖДОЕ применение видно отдельной корректировкой, а не
+    молча вшито в выгрузку.
+
+    Правило предлагает, человек утверждает. Иначе через полгода в выгрузке живут
+    решения, которых никто не помнит.
+    """
+
+    __tablename__ = "export_rules"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(300), nullable=False)
+    # Условие отбора документов: вид, контрагент, статья, счёт — что задано, то и
+    # проверяется. Пустое поле означает «любой».
+    doc_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    counterparty_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("counterparties.id", ondelete="CASCADE"), nullable=True
+    )
+    match_text: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    field: Mapped[str] = mapped_column(String(50), nullable=False)
+    new_value: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    reason: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # С какого периода действует: правило не должно задним числом переписывать то,
+    # что уже выгружено.
+    valid_from: Mapped[str | None] = mapped_column(String(7), nullable=True)
+    created_by: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("idx_export_rules_company", "company_id", "active"),
+    )
+
+
 class DocRequest(Base):
     """Требование документа: что ждём от контрагента и что уже делали, чтобы получить.
 

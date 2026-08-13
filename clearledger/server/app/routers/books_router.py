@@ -23,8 +23,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import assert_company_member, get_current_user
 from app.database import get_db
 from app.models import (
-    AccountingDoc, Contract, Counterparty, DocRequest, GlAccount, GlBalance, GlEntry,
-    GlReference,
+    AccountingDoc, Contract, Counterparty, DocRequest, ExportAdjustment, ExportRule,
+    GlAccount, GlBalance, GlEntry, GlReference,
     GlTurnover, InvoicePayment, NomenclatureItem, Period, User, ReferenceSnapshot,
     SourceFile, VatEntry,
 )
@@ -4868,3 +4868,290 @@ async def tax_forecast(
         "disclaimer": "Оценка по данным пространства. Декларацию формирует бухгалтерия: "
                       "здесь оперативный минимум, чтобы понимать порядок суммы заранее.",
     }
+
+
+# ── Слой выгрузки: чем то, что уйдёт в 1С, отличается от слоя ────────────────
+# Нормализованный слой — копия учёта клиента, «что есть». Выгрузка — «что мы
+# предлагаем провести». Разделены намеренно: правка прямо в слое стёрла бы
+# исходник, и через месяц данные 1С стало бы не отличить от нашей интерпретации.
+
+_ADJ_FIELDS = {
+    "amount": "Сумма документа",
+    "vat_amount": "НДС документа",
+    "date": "Дата документа",
+    "cost_account": "Счёт затрат",
+    "article": "Статья затрат",
+    "contract": "Договор",
+    "counterparty": "Контрагент",
+    "status": "Проведение",
+}
+_ADJ_STATUS = {"draft": "Черновик", "approved": "Утверждена",
+               "exported": "Выгружена", "rejected": "Отклонена"}
+
+
+@router.get("/export-layer")
+async def export_layer(
+    company_id: str,
+    period: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Что уйдёт в бухгалтерию и чем это отличается от слоя.
+
+    Отдаёт корректировки с документами, их эффект на суммы и налог, а также правила,
+    по которым корректировки повторяются в следующих периодах.
+    """
+    cid = await assert_company_member(company_id, current_user, db)
+    p: dict[str, Any] = {"cid": str(cid), "period": period}
+
+    q = select(ExportAdjustment).where(ExportAdjustment.company_id == cid)
+    if period:
+        q = q.where(ExportAdjustment.period == period)
+    adjustments = (await db.execute(
+        q.order_by(ExportAdjustment.created_at.desc()))).scalars().all()
+
+    doc_ids = [a.doc_id for a in adjustments if a.doc_id]
+    docs = {d.id: d for d in (await db.execute(select(AccountingDoc).where(
+        AccountingDoc.id.in_(doc_ids)))).scalars()} if doc_ids else {}
+
+    def num_or_none(v: str | None) -> float | None:
+        try:
+            return float(v) if v not in (None, "") else None
+        except ValueError:
+            return None
+
+    items = []
+    delta_amount = delta_vat = 0.0
+    for a in adjustments:
+        doc = docs.get(a.doc_id) if a.doc_id else None
+        old_n, new_n = num_or_none(a.old_value), num_or_none(a.new_value)
+        # Эффект считаем только по утверждённым: черновик — это предложение, и
+        # налог по нему считать нельзя, иначе прогноз поедет от чужих раздумий.
+        if a.status == "approved" and old_n is not None and new_n is not None:
+            if a.field == "amount":
+                delta_amount += new_n - old_n
+            elif a.field == "vat_amount":
+                delta_vat += new_n - old_n
+        items.append({
+            "id": str(a.id), "period": a.period, "field": a.field,
+            "fieldLabel": _ADJ_FIELDS.get(a.field, a.field),
+            "oldValue": a.old_value, "newValue": a.new_value,
+            "reason": a.reason, "status": a.status,
+            "statusLabel": _ADJ_STATUS.get(a.status, a.status),
+            "createdBy": a.created_by, "approvedBy": a.approved_by,
+            "ruleId": str(a.rule_id) if a.rule_id else None,
+            "doc": ({"id": str(doc.id), "type": doc.doc_type,
+                     "label": DOC_LABELS.get(doc.doc_type, doc.doc_type),
+                     "number": doc.number, "date": doc.date,
+                     "counterparty": doc.counterparty_name,
+                     "amount": _num(doc.amount), "vat": _num(doc.vat_amount)}
+                    if doc else None),
+        })
+
+    rules = [{
+        "id": str(r.id), "name": r.name, "docType": r.doc_type,
+        "docTypeLabel": DOC_LABELS.get(r.doc_type or "", r.doc_type or "любой"),
+        "matchText": r.match_text, "field": r.field,
+        "fieldLabel": _ADJ_FIELDS.get(r.field, r.field),
+        "newValue": r.new_value, "reason": r.reason,
+        "active": r.active, "validFrom": r.valid_from,
+        "applied": 0,
+    } for r in (await db.execute(select(ExportRule).where(
+        ExportRule.company_id == cid).order_by(ExportRule.created_at.desc()))).scalars()]
+
+    for r in rules:
+        r["applied"] = sum(1 for a in adjustments if a.rule_id and str(a.rule_id) == r["id"])
+
+    by_status: dict[str, int] = {}
+    for it in items:
+        by_status[it["status"]] = by_status.get(it["status"], 0) + 1
+
+    return {
+        "period": period,
+        "adjustments": items,
+        "rules": rules,
+        "byStatus": [{"status": k, "label": _ADJ_STATUS.get(k, k), "count": v}
+                     for k, v in sorted(by_status.items())],
+        "effect": {
+            # Что изменится в выгрузке против слоя, если провести утверждённое.
+            "amount": round(delta_amount, 2),
+            "vat": round(delta_vat, 2),
+            "profitTax": round(-delta_amount * _PROFIT_RATE, 2),
+            "docs": len({i["doc"]["id"] for i in items if i["doc"]}),
+        },
+    }
+
+
+@router.post("/export-layer/adjustments")
+async def create_adjustment(
+    company_id: str,
+    doc_id: str,
+    field: str,
+    new_value: str,
+    reason: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Завести корректировку к документу. Слой при этом не меняется."""
+    cid = await assert_company_member(company_id, current_user, db)
+    if field not in _ADJ_FIELDS:
+        raise HTTPException(status_code=400, detail="Это поле не корректируется")
+    if not reason.strip():
+        # Без причины корректировка неотличима от ошибки — и защитить её перед
+        # проверяющим будет нечем.
+        raise HTTPException(status_code=400, detail="Нужна причина корректировки")
+    try:
+        uid = uuid.UUID(doc_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Документ не найден")
+
+    doc = (await db.execute(select(AccountingDoc).where(
+        AccountingDoc.company_id == cid, AccountingDoc.id == uid))).scalar_one_or_none()
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Документ не найден")
+
+    old = {"amount": str(_num(doc.amount)), "vat_amount": str(_num(doc.vat_amount)),
+           "date": doc.date, "status": doc.status_1c,
+           "counterparty": doc.counterparty_name,
+           "cost_account": (doc.details or {}).get("Счёт затрат"),
+           "article": (doc.details or {}).get("Статья затрат"),
+           "contract": (doc.details or {}).get("Договор")}.get(field)
+
+    row = ExportAdjustment(
+        company_id=cid, period=(doc.date or "")[:7], doc_id=doc.id, field=field,
+        old_value=old, new_value=new_value, reason=reason.strip(),
+        status="draft", created_by=current_user.email)
+    db.add(row)
+    await db.commit()
+    return {"id": str(row.id), "period": row.period, "field": field,
+            "oldValue": old, "newValue": new_value, "status": "draft"}
+
+
+@router.patch("/export-layer/adjustments/{adj_id}")
+async def update_adjustment(
+    adj_id: str,
+    company_id: str,
+    status: str | None = None,
+    new_value: str | None = None,
+    reason: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Утвердить, отклонить или поправить корректировку."""
+    cid = await assert_company_member(company_id, current_user, db)
+    try:
+        uid = uuid.UUID(adj_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Корректировка не найдена")
+    a = (await db.execute(select(ExportAdjustment).where(
+        ExportAdjustment.company_id == cid, ExportAdjustment.id == uid))).scalar_one_or_none()
+    if a is None:
+        raise HTTPException(status_code=404, detail="Корректировка не найдена")
+    if a.status == "exported":
+        # Выгруженное не переписывается: изменение делается новой корректировкой,
+        # иначе история того, что ушло в бухгалтерию, поедет задним числом.
+        raise HTTPException(status_code=409, detail="Корректировка уже выгружена")
+
+    if status:
+        if status not in _ADJ_STATUS:
+            raise HTTPException(status_code=400, detail="Неизвестный статус")
+        a.status = status
+        if status == "approved":
+            a.approved_by = current_user.email
+    if new_value is not None:
+        a.new_value = new_value
+    if reason is not None:
+        a.reason = reason
+
+    await db.commit()
+    return {"id": str(a.id), "status": a.status,
+            "statusLabel": _ADJ_STATUS.get(a.status, a.status)}
+
+
+@router.post("/export-layer/rules")
+async def create_rule(
+    company_id: str,
+    name: str,
+    field: str,
+    new_value: str,
+    reason: str,
+    doc_type: str | None = None,
+    match_text: str | None = None,
+    valid_from: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Запомнить решение на будущие периоды.
+
+    Правило только ПРЕДЛАГАЕТ корректировки — утверждает их человек. Иначе через
+    полгода в выгрузке живут решения, которых никто не помнит.
+    """
+    cid = await assert_company_member(company_id, current_user, db)
+    if field not in _ADJ_FIELDS:
+        raise HTTPException(status_code=400, detail="Это поле не корректируется")
+    row = ExportRule(
+        company_id=cid, name=name, doc_type=doc_type or None,
+        match_text=match_text or None, field=field, new_value=new_value,
+        reason=reason, valid_from=valid_from or None, created_by=current_user.email)
+    db.add(row)
+    await db.commit()
+    return {"id": str(row.id), "name": row.name}
+
+
+@router.post("/export-layer/apply-rules")
+async def apply_rules(
+    company_id: str,
+    period: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Применить правила к периоду: завести корректировки-черновики.
+
+    Черновики, а не готовые правки: решение прошлого квартала может не подойти
+    этому, и человек обязан его увидеть до выгрузки.
+    """
+    cid = await assert_company_member(company_id, current_user, db)
+    rules = (await db.execute(select(ExportRule).where(
+        ExportRule.company_id == cid, ExportRule.active.is_(True)))).scalars().all()
+    if not rules:
+        return {"created": 0, "rules": 0}
+
+    docs = (await db.execute(select(AccountingDoc).where(
+        AccountingDoc.company_id == cid,
+        func.substr(AccountingDoc.date, 1, 7) == period))).scalars().all()
+    known = {(str(a.doc_id), a.field) for a in (await db.execute(select(ExportAdjustment).where(
+        ExportAdjustment.company_id == cid, ExportAdjustment.period == period))).scalars()}
+
+    created = 0
+    for rule in rules:
+        if rule.valid_from and period < rule.valid_from:
+            continue
+        for doc in docs:
+            if rule.doc_type and doc.doc_type != rule.doc_type:
+                continue
+            if rule.counterparty_id and doc.counterparty_id != rule.counterparty_id:
+                continue
+            if rule.match_text:
+                hay = " ".join(filter(None, [doc.counterparty_name, doc.number,
+                                             doc.operation_type or ""])).lower()
+                if rule.match_text.lower() not in hay:
+                    continue
+            if (str(doc.id), rule.field) in known:
+                continue
+            old = {"amount": str(_num(doc.amount)), "vat_amount": str(_num(doc.vat_amount)),
+                   "date": doc.date, "status": doc.status_1c,
+                   "counterparty": doc.counterparty_name,
+                   "cost_account": (doc.details or {}).get("Счёт затрат"),
+                   "article": (doc.details or {}).get("Статья затрат"),
+                   "contract": (doc.details or {}).get("Договор")}.get(rule.field)
+            if old == rule.new_value:
+                continue      # уже такое, править нечего
+            db.add(ExportAdjustment(
+                company_id=cid, period=period, doc_id=doc.id, field=rule.field,
+                old_value=old, new_value=rule.new_value,
+                reason=f"{rule.reason} (правило «{rule.name}»)",
+                status="draft", rule_id=rule.id, created_by=current_user.email))
+            created += 1
+
+    await db.commit()
+    return {"created": created, "rules": len(rules), "period": period}
