@@ -21,6 +21,7 @@ from app.routers import (
     auth_router,
     books_router,
     intake_docs_router,
+    mail_router,
     dedup_ingest_router,
     edge_router,
     companies_router,
@@ -322,6 +323,7 @@ app.include_router(market_router.router, prefix=API_PREFIX)
 # закрытого периода, из которого растут остальные приложения такой компании.
 app.include_router(books_router.router, prefix=API_PREFIX)
 app.include_router(intake_docs_router.router, prefix=API_PREFIX)
+app.include_router(mail_router.router, prefix=API_PREFIX)
 
 
 @app.get("/api/health")

@@ -17,6 +17,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     Numeric,
     Sequence,
     String,
@@ -1688,6 +1689,169 @@ class PayrollEntry(Base):
 # ---------------------------------------------------------------------------
 # AccountingDoc (Учётные документы 1С)
 # ---------------------------------------------------------------------------
+class MailAccount(Base):
+    """Почтовый ящик компании (docs/MAIL.md).
+
+    Один коннектор «Почта компании» — много ящиков: info@, buh@, edo@, личный ящик
+    менеджера. Механика у них одна, различаются учётка, назначение и правила,
+    поэтому ящик — настройка коннектора, а не отдельный коннектор.
+
+    Пароль в базе НЕ хранится: здесь имя переменной окружения стека (`secret_env`),
+    значение живёт в `.env` рядом с остальными секретами — то же правило поставки,
+    что у прочих коннекторов пространства.
+    """
+
+    __tablename__ = "mail_accounts"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
+    )
+    address: Mapped[str] = mapped_column(String(320), nullable=False)
+    title: Mapped[str] = mapped_column(String(200), nullable=False, default="")
+    # Зачем этот ящик существует — человеческими словами. Без описания через месяц
+    # никто не помнит, чем info@ отличается от edo@ и какие письма туда идут.
+    purpose: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # in | out | both — только приём, только отправка или оба.
+    mode: Mapped[str] = mapped_column(String(10), nullable=False, default="both")
+    imap_host: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    imap_port: Mapped[int] = mapped_column(Integer, nullable=False, default=993)
+    imap_folder: Mapped[str] = mapped_column(String(100), nullable=False, default="INBOX")
+    login: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    secret_env: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    smtp_host: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    smtp_port: Mapped[int] = mapped_column(Integer, nullable=False, default=587)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Где остановились в прошлый раз. UIDVALIDITY обязателен: сервер вправе
+    # перенумеровать ящик, и тогда старый UID указывает на чужое письмо.
+    last_uid: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    uid_validity: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_sync_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("idx_mail_accounts_company", "company_id", "address"),
+    )
+
+
+class MailThread(Base):
+    """Нить переписки: письмо и все ответы на него.
+
+    Склейка идёт по In-Reply-To/References, а НЕ по теме: тему правят, переводят и
+    дописывают «Re:», и по ней одна переписка разваливается на пять.
+    """
+
+    __tablename__ = "mail_threads"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
+    )
+    account_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("mail_accounts.id", ondelete="SET NULL"), nullable=True)
+    subject: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # Корневой Message-ID: по нему нить находится, когда приходит ответ.
+    root_message_id: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    counterparty_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("counterparties.id", ondelete="SET NULL"), nullable=True)
+    participants: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    messages_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_message_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("idx_mail_threads_company", "company_id", "last_message_at"),
+        Index("idx_mail_threads_root", "company_id", "root_message_id"),
+    )
+
+
+class MailMessage(Base):
+    """Письмо: входящее из ящика или исходящее из пространства."""
+
+    __tablename__ = "mail_messages"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
+    )
+    account_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("mail_accounts.id", ondelete="SET NULL"), nullable=True)
+    thread_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("mail_threads.id", ondelete="CASCADE"), nullable=True)
+    direction: Mapped[str] = mapped_column(String(3), nullable=False, default="in")
+    uid: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    message_id: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    in_reply_to: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    subject: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    from_name: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    from_email: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    to_emails: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    body_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    body_html: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # new | accepted | quarantine | rejected — судьба письма по правилам.
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="new")
+    # Кто написал, если удалось опознать по адресу.
+    counterparty_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("counterparties.id", ondelete="SET NULL"), nullable=True)
+    # Заголовки целиком: проверки SPF/DKIM и разбор спорных случаев идут по ним.
+    headers: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    has_attachments: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("idx_mail_messages_thread", "company_id", "thread_id"),
+        Index("idx_mail_messages_msgid", "company_id", "message_id"),
+        Index("idx_mail_messages_account_uid", "account_id", "uid"),
+    )
+
+
+class MailAttachment(Base):
+    """Вложение письма. Дубли ловятся хешем: одно и то же приходит по три раза."""
+
+    __tablename__ = "mail_attachments"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
+    )
+    message_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("mail_messages.id", ondelete="CASCADE"), nullable=False)
+    file_name: Mapped[str] = mapped_column(String(500), nullable=False)
+    content_type: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    size: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    content: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    # Вложение, ставшее кандидатом приёмки первички (docs/INTAKE.md).
+    intake_batch_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("intake_batches.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("idx_mail_attach_message", "company_id", "message_id"),
+        Index("idx_mail_attach_hash", "company_id", "sha256"),
+    )
+
+
 class IntakeBatch(Base):
     """Пакет загрузки первички: один файл, одна выгрузка, одно письмо.
 

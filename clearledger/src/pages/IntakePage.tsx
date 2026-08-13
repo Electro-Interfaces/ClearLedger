@@ -23,11 +23,12 @@ import {
 } from '@/components/ui/select'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { IntakeDocs } from '@/components/books/IntakeDocs'
+import { MailConnector } from '@/components/books/MailConnector'
 import { AdvancedOnly, AdvancedHint } from '@/components/common/AdvancedOnly'
 import {
   Upload, FileText, Image, FileSpreadsheet, File, Trash2, Wand2, Radio,
   Play, Clock, CheckCircle2, AlertCircle, Pause, Loader2, Settings2, ExternalLink,
-  Database, Calendar, Table2, Sheet, FileCheck } from 'lucide-react'
+  Database, Calendar, Table2, Sheet, FileCheck, Mail } from 'lucide-react'
 import { toast } from 'sonner'
 import { nanoid } from 'nanoid'
 import { format } from 'date-fns'
@@ -757,6 +758,9 @@ export function IntakePage() {
           <TabsTrigger value="primary" className="flex-none gap-1.5 px-1 text-[13px]">
             <FileCheck className="h-3.5 w-3.5" /> Первичные документы
           </TabsTrigger>
+          <TabsTrigger value="mail" className="flex-none gap-1.5 px-1 text-[13px]">
+            <Mail className="h-3.5 w-3.5" /> Почта
+          </TabsTrigger>
           <TabsTrigger value="files" className="flex-none gap-1.5 px-1 text-[13px]">
             <Upload className="h-3.5 w-3.5" /> Загрузка файлов
           </TabsTrigger>
@@ -769,6 +773,9 @@ export function IntakePage() {
         </TabsList>
         <TabsContent value="primary" className="mt-4">
           <IntakeDocs />
+        </TabsContent>
+        <TabsContent value="mail" className="mt-4">
+          <MailConnector />
         </TabsContent>
         <TabsContent value="files" className="mt-4">
           <FilesUploadTab />
