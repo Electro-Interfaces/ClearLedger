@@ -452,6 +452,34 @@ export function CounterpartyWindow({ companyId, id, onClose }: {
                 tone={d.payable > 0 ? 'warning' : undefined} />
             </div>
 
+            {/* Прочие обязательства — отдельной строкой, а не в сумме с долгом: у ТСМ
+                ООО на счёте 76 висит больше, чем на 60, и без этой строки карточка
+                занижала обязательства вдвое. */}
+            {(d.otherDebit || d.otherCredit || d.loanOut || d.loanIn || d.accountable) ? (
+              <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
+                {d.otherCredit > 0 && (
+                  <MetricTile label="Прочие расчёты — мы должны"
+                    value={money.format(d.otherCredit) + ' ₽'} hint="сальдо 76" />
+                )}
+                {d.otherDebit > 0 && (
+                  <MetricTile label="Прочие расчёты — нам должны"
+                    value={money.format(d.otherDebit) + ' ₽'} hint="сальдо 76" />
+                )}
+                {d.loanOut > 0 && (
+                  <MetricTile label="Заём выдан" value={money.format(d.loanOut) + ' ₽'}
+                    hint="сальдо 58" />
+                )}
+                {d.loanIn > 0 && (
+                  <MetricTile label="Заём получен" value={money.format(d.loanIn) + ' ₽'}
+                    hint="сальдо 66/67" />
+                )}
+                {d.accountable !== 0 && (
+                  <MetricTile label="Подотчёт" value={money.format(d.accountable) + ' ₽'}
+                    hint="сальдо 71" />
+                )}
+              </div>
+            ) : null}
+
             <Card>
               <CardContent className="p-4 grid gap-x-6 gap-y-1.5 text-sm sm:grid-cols-2">
                 <Field label="Полное наименование" value={d.fullName} />

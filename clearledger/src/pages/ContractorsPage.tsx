@@ -154,6 +154,13 @@ function RawRequisites({ raw, hide }: { raw?: Record<string, unknown>; hide?: st
 }
 
 /** Поле «ярлык + значение» (скрывается, если значения нет). */
+/** Контакт из сырых данных 1С: тип лежит в `contacts[].kind`, значение — в `value`. */
+function contactOf(raw: Record<string, unknown>, kind: string): string | undefined {
+  const list = (raw?.contacts ?? []) as { kind?: string; type?: string; value?: string }[]
+  const hit = list.find((c) => (c.kind ?? c.type ?? '').toLowerCase().includes(kind.toLowerCase()))
+  return hit?.value || undefined
+}
+
 function Req({ label, value, span }: { label: string; value?: React.ReactNode; span?: boolean }) {
   if (value === undefined || value === null || value === '') return null
   return (
@@ -340,7 +347,11 @@ const docTypeLabel = (t: string, label?: string | null) => label || t
 function CounterpartyStatsLine({ st }: { st?: CounterpartyStats }) {
   if (!st) return null
   const turnover = st.sales + st.purchases
-  const debt = st.receivable || st.payable
+  // Прочие расчёты (76), займы и подотчёт — тоже обязательства: без них строка врала.
+  // У ТСМ ООО «мы должны» показывало 295 800 при фактических 673 625.
+  const other = st.otherCredit + st.loanIn + st.accountable
+  const advance = st.advanceIn + st.advanceOut
+  const debt = st.receivable || st.payable || other || advance
   if (!turnover && !debt && !st.docs) return null
   return (
     <div className="mt-0.5 flex items-center gap-2 text-[10px] tabular-nums text-muted-foreground">
@@ -353,6 +364,15 @@ function CounterpartyStatsLine({ st }: { st?: CounterpartyStats }) {
       {st.payable > 0 && (
         <span className="text-sky-600 dark:text-sky-400">
           мы {fmtShort(st.payable)}
+        </span>
+      )}
+      {/* Аванс не сворачиваем с долгом: покупатель с предоплатой не «ничего не должен». */}
+      {st.advanceIn > 0 && <span title="аванс от покупателя">ав. {fmtShort(st.advanceIn)}</span>}
+      {st.advanceOut > 0 && <span title="наш аванс поставщику">ав. мы {fmtShort(st.advanceOut)}</span>}
+      {other > 0 && (
+        <span className="text-violet-600 dark:text-violet-400"
+          title="прочие расчёты (76), займы, подотчёт">
+          проч. {fmtShort(other)}
         </span>
       )}
       {st.lastDoc && <span className="ml-auto">{st.lastDoc}</span>}
@@ -520,7 +540,10 @@ function ContractorDetail({ cp, all }: { cp: Counterparty; all: Counterparty[] }
           <Req label="Расчётный счёт" value={cp.bankAccount} />
           <Req label="БИК" value={cp.bankBik} />
           <Req label="Банк" value={cp.bankName} span />
-          <Req label="Комментарий" value={raw.Комментарий as string} span />
+          {/* В `raw` лежат только контакты: почтовый адрес есть у 43 карточек, факс у
+              одной — их не показывал никто, а «Комментария» в raw нет вовсе. */}
+          <Req label="Почтовый адрес" value={contactOf(raw, 'Почтовый адрес')} span />
+          <Req label="Факс" value={contactOf(raw, 'Факс')} />
         </div>
       </details>
 
@@ -1254,7 +1277,9 @@ export function ContractorsPage() {
     const list = counterparties.filter((c) => {
       if (roleFilter !== 'all' && !(c.aliases ?? []).includes(roleFilter)) return false
       const st = stats.get(c.id)
-      if (flag === 'debt' && !(st && (st.receivable > 0 || st.payable > 0))) return false
+      if (flag === 'debt' && !(st && (st.receivable > 0 || st.payable > 0
+        || st.otherCredit > 0 || st.otherDebit > 0 || st.loanIn > 0 || st.loanOut > 0
+        || st.accountable > 0))) return false
       if (flag === 'advance' && !(st && st.paidIn > 0 && !st.sales)) return false
       if (flag === 'noinn' && (c.inn ?? '').trim()) return false
       if (flag === 'nodocs' && (st?.docs ?? 0) > 0) return false

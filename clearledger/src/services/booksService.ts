@@ -175,6 +175,34 @@ export async function getAllDocs(
   }
 }
 
+/**
+ * Все документы вида за период — с дочитыванием страниц.
+ *
+ * `getDocs` отдаёт максимум 500 строк, а экраны «Счета», «Воронка» и «Реализации»
+ * считают по полученному массиву ИТОГИ. Пока счетов меньше пятисот, разницы нет; на
+ * шестистах экран молча покажет заниженную сумму и ложную конверсию воронки. Поэтому
+ * там, где из строк выводится цифра, набираем множество целиком.
+ */
+export async function getDocsAll(
+  companyId: string, docType: string, period?: PeriodOpts, lineKind?: string,
+): Promise<{ rows: DocRow[]; total: number; paidKnown: number }> {
+  const first = await getDocs(companyId, docType, period, undefined, 0, lineKind)
+  const rows = [...first.rows]
+  let paidKnown = first.paidKnown ?? 0
+  while (rows.length < first.total) {
+    const next = await getDocs(companyId, docType, period, undefined, rows.length, lineKind)
+    if (!next.rows.length) break            // страховка от бесконечного цикла
+    rows.push(...next.rows)
+    paidKnown += next.paidKnown ?? 0
+  }
+  const seen = new Set<string>()
+  return {
+    rows: rows.filter((r) => (r.id && seen.has(r.id) ? false : (seen.add(r.id), true))),
+    total: first.total,
+    paidKnown,
+  }
+}
+
 /** Разрез реализации: всё целиком, только товары или только услуги. Ответ один. */
 export type RevKind = 'all' | 'goods' | 'service'
 
@@ -222,7 +250,7 @@ export interface AssortmentRow {
 export const getAssortment = (
   companyId: string, by: 'item' | 'client', period?: PeriodOpts,
 ) =>
-  get<{ by: string; rows: AssortmentRow[]; cost: number | null }>(
+  get<{ by: string; rows: AssortmentRow[]; cost: number | null; costBasis?: string }>(
     `/api/books/assortment?company_id=${companyId}&by=${by}` + periodQuery(period))
 
 /** Остатки по номенклатуре: приход − расход по строкам документов. */
@@ -291,13 +319,20 @@ export interface PaymentTerms {
   rows: {
     id: string; number: string; date: string; paidAt: string
     counterparty: string; counterpartyId: string | null; amount: number; days: number
+    /** Сколько платежей закрыло счёт: срок считается по последнему. */
+    payments: number
   }[]
   buckets: { key: string; label: string; count: number; amount: number }[]
   clients: {
     id: string | null; name: string; invoices: number; amount: number
     avgDays: number; maxDays: number
   }[]
+  /** Счетов с оплатой (не платежей — счёт может быть закрыт несколькими). */
   total: number
+  payments: number
+  /** Платежи, ссылающиеся на документ, которого в выгрузке нет. */
+  orphanPayments: number
+  orphanAmount: number
   avgDays: number | null
   medianDays: number
   amount: number
@@ -328,11 +363,17 @@ export const getCashflow = (companyId: string) =>
 export interface ContractSales {
   rows: {
     id: string | null; number: string | null; date: string | null
-    kind: string | null; settlementKind: string | null; counterparty: string
+    kind: string | null; settlementKind: string | null
+    /** null у строки «без договора»: там контрагент не один. */
+    counterparty: string | null
+    counterparties: number
     sales: number; salesDocs: number; invoices: number; invoiceDocs: number
     first: string | null; last: string | null
   }[]
+  /** Договоры, по которым были ОТГРУЗКИ. */
   withContract: number
+  /** Договоры, по которым есть только счета. */
+  withInvoicesOnly: number
   salesWithContract: number
   salesTotal: number
 }
@@ -432,6 +473,11 @@ export interface CounterpartyCard {
   /** Аванс — не «отрицательный долг»: он лежит на другой стороне того же счёта. */
   advanceIn: number
   advanceOut: number
+  otherDebit: number
+  otherCredit: number
+  loanOut: number
+  loanIn: number
+  accountable: number
   debtAsOf: string | null
   byType: Record<string, { docs: number; amount: number }>
   months: { month: string; sales: number; purchases: number; paid: number }[]
@@ -465,8 +511,17 @@ export interface CounterpartyStats {
   paidOut: number
   docs: number
   lastDoc: string | null
+  /** Долг БРУТТО: аванс отдельно, потому что это другое обязательство. */
   receivable: number
   payable: number
+  advanceIn: number
+  advanceOut: number
+  /** Прочие расчёты (76), займы (58 и 66/67), подотчёт (71) — их не смотрели вовсе. */
+  otherDebit: number
+  otherCredit: number
+  loanOut: number
+  loanIn: number
+  accountable: number
   contracts: number
 }
 

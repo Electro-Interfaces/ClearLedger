@@ -560,6 +560,22 @@ async def periods(
     return {"rows": rows}
 
 
+def _doc_amounts(doc, line_kind: str | None) -> dict[str, float]:
+    """Сумма и НДС документа под выбранным разрезом строк.
+
+    Без разреза — из шапки (она и есть выручка, сходящаяся с 90.01.1). С разрезом —
+    сумма своих строк: документ несёт и товар, и услугу, и показывать его целиком в
+    списке «услуги» значит завышать разрез на стоимость товара.
+    """
+    if not line_kind:
+        return {"amount": _num(doc.amount), "vat": _num(doc.vat_amount)}
+    picked = [l for l in (doc.lines or []) if (l.get("kind") or "goods") == line_kind]
+    return {
+        "amount": round(sum(_num(l.get("amount")) for l in picked), 2),
+        "vat": round(sum(_num(l.get("vat")) for l in picked), 2),
+    }
+
+
 @router.get("/docs")
 async def docs(
     company_id: str,
@@ -590,8 +606,10 @@ async def docs(
         q = q.where(AccountingDoc.date <= date_to)
 
     if line_kind:
+        # Тай-брейкер по id нужен и здесь: без него страницы разреза перекрываются
+        # ровно так же, как перекрывались в основной ветке.
         picked = [d for d in (await db.execute(
-            q.order_by(AccountingDoc.date.desc()))).scalars()
+            q.order_by(AccountingDoc.date.desc(), AccountingDoc.id))).scalars()
             if any((l.get("kind") or "goods") == line_kind for l in (d.lines or []))]
         total = len(picked)
         rows = picked[offset:offset + limit]
@@ -660,7 +678,11 @@ async def docs(
             # выписывает его имя, чтобы найти в справочнике. null — документ ещё
             # не сведён (регламентные операции контрагента не имеют вовсе).
             "counterpartyId": str(d.counterparty_id) if d.counterparty_id else None,
-            "amount": _num(d.amount), "vat": _num(d.vat_amount),
+            # В разрезе «товары»/«услуги» сумма считается ПО СТРОКАМ разреза, а не
+            # берётся из шапки: раньше реестр показывал полную сумму документа, и
+            # «Обзор» с «Документами» по одному и тому же множеству давали разные
+            # цифры — завышенная уходила ещё и в Excel.
+            **_doc_amounts(d, line_kind),
             # Назначение платежа и вид операции: без них банковская строка — только сумма.
             "operation": d.operation_type,
             "status": d.status_1c,
@@ -862,13 +884,24 @@ async def assortment(
         "soldNet": _num(r[10]), "boughtNet": _num(r[11]),
     } for r in (await db.execute(text(f"""
         WITH l AS (
+          -- Период режет ПРОДАЖИ, но не закупки: товар, купленный в декабре и
+          -- проданный в январе, при окне «январь» оставался без себестоимости и
+          -- выпадал из маржи — чем короче период, тем меньше позиций в итоге.
           SELECT d.id doc, d.doc_type, d.date, jsonb_array_elements(d.lines) ln
             FROM accounting_docs d
-           WHERE d.company_id = :cid AND d.doc_type IN ('sale', 'purchase'){where_date}
+           WHERE d.company_id = :cid
+             AND (d.doc_type = 'purchase'
+                  OR (d.doc_type = 'sale'{where_date}))
         ), x AS (
           SELECT doc, doc_type, date, btrim(ln->>'code') code, ln->>'name' name,
                  (ln->>'qty')::numeric qty, (ln->>'amount')::numeric amount,
-                 coalesce((ln->>'amount_raw')::numeric, (ln->>'amount')::numeric) net
+                 -- Без НДС — это сумма МИНУС налог строки. `amount_raw` для этого не
+                 -- годится: при `vat_included = true` (523 строки продаж из 530 на
+                 -- пилоте) он равен `amount`, то есть содержит налог. Прошлая версия
+                 -- брала его и завышала «продано без НДС» на 3,68 млн ₽, а маржу на
+                 -- 4,7 п.п. Проверка методики: расчётная себестоимость даёт 101 % от
+                 -- оборота 90.02.1 ↔ 41.01, то есть считаем правильно.
+                 ((ln->>'amount')::numeric - coalesce((ln->>'vat')::numeric, 0)) net
             FROM l WHERE coalesce(btrim(ln->>'code'), '') <> ''
         ), m AS (
           SELECT code, max(name) name, substr(date, 1, 7) AS month,
@@ -892,11 +925,30 @@ async def assortment(
          ORDER BY sum(sold_amount) DESC NULLS LAST LIMIT :limit
     """), p)).all()]
 
+    # Эталон для маржи — ТОВАРНАЯ себестоимость: оборот 90.02.1 в корреспонденции
+    # со счётом товаров (41). Полный оборот 90.02.1 включает списания с 26 счёта
+    # (на пилоте 954 295 ₽ из 15 017 984 ₽), которых в позиционном расчёте нет по
+    # определению, — сравнение с ним занижало сходимость. Период тот же, что у строк:
+    # раньше знаменатель брался за всю историю, и при фильтре «месяц» экран показывал
+    # «8 % от регистра» — катастрофу, которой нет.
+    cost_sql = """
+        SELECT coalesce(sum(amount), 0) FROM gl_entries
+         WHERE company_id = :cid AND account_dt = :dt AND account_kt LIKE :kt
+    """
+    cost_p = {"cid": str(cid), "dt": COST_DT, "kt": f"{STOCK_ACCOUNT}%"}
+    if date_from:
+        cost_sql += " AND entry_date >= :df"
+        cost_p["df"] = date_from
+    if date_to:
+        cost_sql += " AND entry_date <= :dt2"
+        cost_p["dt2"] = date_to
+
     return {
         "by": by,
         "rows": _with_stability(rows),
-        # Себестоимость реализации по регистру — чем проверяется маржа по позициям.
-        "cost": await _turnover(db, cid, dt=COST_DT),
+        # Товарная себестоимость по регистру — чем проверяется маржа по позициям.
+        "cost": _num((await db.execute(text(cost_sql), cost_p)).scalar_one()),
+        "costBasis": "90.02.1 ↔ 41",
     }
 
 
@@ -1031,7 +1083,9 @@ async def stock(
         ), x AS (
           SELECT doc_type, date, btrim(ln->>'code') code, ln->>'name' name,
                  (ln->>'qty')::numeric qty,
-                 coalesce((ln->>'amount_raw')::numeric, (ln->>'amount')::numeric) amount
+                 -- Оценка остатка — по суммам БЕЗ НДС (сумма минус налог строки):
+                 -- на счёте 41 товар лежит без налога.
+                 ((ln->>'amount')::numeric - coalesce((ln->>'vat')::numeric, 0)) amount
             FROM l
            WHERE coalesce(btrim(ln->>'code'), '') <> ''
              -- Только товарные строки: у услуги остатка не бывает по природе.
@@ -1096,11 +1150,19 @@ async def stock(
     # для себя, «неликвидом» не бывает: её и не собирались продавать.
     idle = [r for r in goods if (r["idleDays"] or 0) > 180]
 
+    # Сальдо счёта: если в снимке есть субсчета (41.01, 41.04), берём ТОЛЬКО их —
+    # иначе свёрнутая строка «41» сложится со своими же субсчетами и удвоит контроль.
     balance = (await db.execute(text("""
-        SELECT sum(debit - credit) FROM gl_balances
-         WHERE company_id = :cid AND account LIKE :acc
-           AND as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid)
-    """), {"cid": str(cid), "acc": f"{STOCK_ACCOUNT}%"})).scalar_one_or_none()
+        WITH snap AS (
+          SELECT account, debit, credit FROM gl_balances
+           WHERE company_id = :cid AND account LIKE :acc
+             AND as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid)
+        )
+        SELECT coalesce(sum(debit - credit), 0) FROM snap
+         WHERE CASE WHEN EXISTS (SELECT 1 FROM snap WHERE account LIKE :sub)
+                    THEN account LIKE :sub ELSE true END
+    """), {"cid": str(cid), "acc": f"{STOCK_ACCOUNT}%",
+            "sub": f"{STOCK_ACCOUNT}.%"})).scalar_one_or_none()
 
     intake = (await db.execute(text("""
         SELECT sum(amount) FROM gl_entries
@@ -1147,18 +1209,35 @@ async def suppliers(
         where += " AND d.date <= :dt"
         p["dt"] = date_to
 
+    # Суммы и число документов считаются ДО разворота строк. Раньше здесь стоял
+    # `LEFT JOIN LATERAL jsonb_array_elements(d.lines)`, и `sum(d.amount)` складывал
+    # сумму шапки столько раз, сколько в документе позиций: закупки показывались как
+    # 44,8 млн вместо 19,9 млн, доля крупнейшего поставщика — 42,9 % вместо 34,6 %,
+    # причём завышение неравномерное (сильнее у тех, кто возит многострочные накладные).
     rows = [{
         "id": r[0], "name": r[1], "inn": r[2], "amount": _num(r[3]), "docs": r[4],
         "positions": r[5], "first": r[6], "last": r[7],
     } for r in (await db.execute(text(f"""
-        SELECT max(d.counterparty_id::text), coalesce(d.counterparty_name, '—'),
-               max(d.counterparty_inn), sum(d.amount), count(*),
-               count(DISTINCT btrim(ln.value->>'code')), min(d.date), max(d.date)
-          FROM accounting_docs d
-          LEFT JOIN LATERAL jsonb_array_elements(d.lines) ln ON true
-         WHERE d.company_id = :cid AND d.doc_type = 'purchase'{where}
-         GROUP BY d.counterparty_name
-         ORDER BY sum(d.amount) DESC
+        WITH d AS (
+          SELECT id, counterparty_id, counterparty_name, counterparty_inn, amount, date, lines
+            FROM accounting_docs
+           WHERE company_id = :cid AND doc_type = 'purchase'{where}
+        ), agg AS (
+          SELECT coalesce(counterparty_name, '—') nm,
+                 max(counterparty_id::text) id, max(counterparty_inn) inn,
+                 sum(amount) amount, count(*) docs, min(date) first, max(date) last
+            FROM d GROUP BY 1
+        ), pos AS (
+          SELECT coalesce(d.counterparty_name, '—') nm,
+                 count(DISTINCT btrim(ln.value->>'code')) positions
+            FROM d, jsonb_array_elements(d.lines) ln
+           WHERE coalesce(btrim(ln.value->>'code'), '') <> ''
+           GROUP BY 1
+        )
+        SELECT agg.id, agg.nm, agg.inn, agg.amount, agg.docs,
+               coalesce(pos.positions, 0), agg.first, agg.last
+          FROM agg LEFT JOIN pos ON pos.nm = agg.nm
+         ORDER BY agg.amount DESC
     """), p)).all()]
 
     # Разброс цены на одну позицию у разных поставщиков — то, ради чего экран и
@@ -1185,7 +1264,10 @@ async def suppliers(
                  sum((ln.value->>'amount')::numeric) amount
             FROM accounting_docs d, jsonb_array_elements(d.lines) ln
            WHERE d.company_id = :cid AND d.doc_type = 'purchase'
-             AND coalesce(btrim(ln.value->>'code'), '') <> ''{where}
+             AND coalesce(btrim(ln.value->>'code'), '') <> ''
+             -- Только товар: «цена за единицу» у консультации или рейса не имеет
+             -- смысла, а список «где мы переплачиваем» такие строки возглавляли.
+             AND coalesce(ln.value->>'kind', 'goods') = 'goods'{where}
            GROUP BY 1, 2, 3
           HAVING sum((ln.value->>'qty')::numeric) > 0
         ), pr AS (
@@ -1234,9 +1316,12 @@ async def revenue_quality(
             "key": "no_lines", "title": "Реализации без строк",
             "why": "сумма документа есть, а что продано — неизвестно: позиция не попадёт "
                    "ни в номенклатуру, ни в маржу",
+            # jsonb_array_length падает, если `lines` приехал не массивом, — проверка
+            # качества данных обязана переживать плохие данные, ради которых она и есть.
             "count": await one("""SELECT count(*) FROM accounting_docs
                                    WHERE company_id = :cid AND doc_type = 'sale'
-                                     AND coalesce(jsonb_array_length(lines), 0) = 0"""),
+                                     AND coalesce(CASE WHEN jsonb_typeof(lines) = 'array'
+                                                       THEN jsonb_array_length(lines) END, 0) = 0"""),
         },
         {
             "key": "no_counterparty", "title": "Реализации без контрагента",
@@ -1284,6 +1369,9 @@ async def revenue_quality(
             "count": await one("""
                 SELECT count(*) FROM accounting_docs d
                  LEFT JOIN periods p ON p.company_id = d.company_id
+                       -- Каст только там, где дата похожа на дату: пустая строка в
+                       -- `date` роняла весь экран качества с 500-й ошибкой.
+                       AND d.date ~ '^\\d{4}-\\d{2}'
                        AND p.year = substr(d.date, 1, 4)::int
                        AND p.month = substr(d.date, 6, 2)::int
                  WHERE d.company_id = :cid AND d.doc_type = 'sale'
@@ -1384,18 +1472,37 @@ async def payment_terms(
         where += " AND d.date <= :dt"
         p["dt"] = date_to
 
+    # Единица счёта — СЧЁТ, а не платёж. Раньше запрос шёл от `invoice_payments`, и
+    # счёт, закрытый тремя траншами, давал три строки: три попадания в корзины, тройной
+    # вес клиента и срок, посчитанный по частичным платежам. На пилоте 113 платежей
+    # приходятся на 108 счетов, а плитка называлась «Счетов с оплатой».
+    #
+    # Срок считаем по ПОСЛЕДНЕМУ платежу: счёт закрыт тогда, когда пришли все деньги.
     rows = [{
         "id": str(r[0]), "number": r[1], "date": r[2], "paidAt": r[3],
         "counterparty": r[4], "counterpartyId": str(r[5]) if r[5] else None,
-        "amount": _num(r[6]), "days": int(r[7]),
+        "amount": _num(r[6]), "days": int(r[7]), "payments": r[8],
     } for r in (await db.execute(text(f"""
-        SELECT d.id, d.number, d.date, p.paid_at, d.counterparty_name, d.counterparty_id,
-               p.amount, (p.paid_at::date - d.date::date) AS days
+        SELECT d.id, max(d.number), max(d.date), max(p.paid_at),
+               max(d.counterparty_name), max(d.counterparty_id::text),
+               sum(p.amount), (max(p.paid_at)::date - max(d.date)::date) AS days,
+               count(*)
           FROM invoice_payments p
           JOIN accounting_docs d ON d.id = p.invoice_doc_id
-         WHERE p.company_id = :cid AND p.paid_at IS NOT NULL{where}
+         WHERE p.company_id = :cid AND p.paid_at IS NOT NULL
+           AND coalesce(d.date, '') <> ''{where}
+         GROUP BY d.id
          ORDER BY days DESC
     """), p)).all()]
+
+    # Платежи, ссылающиеся на документ, которого в выгрузке нет: молча выпадают из
+    # всех расчётов, поэтому их число возвращаем отдельно (на пилоте 2 на 345 758 ₽).
+    orphans = (await db.execute(text("""
+        SELECT count(*), coalesce(sum(amount), 0) FROM invoice_payments p
+         WHERE p.company_id = :cid
+           AND (p.invoice_doc_id IS NULL
+                OR NOT EXISTS (SELECT 1 FROM accounting_docs d WHERE d.id = p.invoice_doc_id))
+    """), {"cid": str(cid)})).one()
 
     buckets = [{
         "key": key, "label": label,
@@ -1428,10 +1535,15 @@ async def payment_terms(
         key=lambda c: -c["avgDays"])
 
     return {
-        "rows": rows[:500],
+        # Строки отдаём все: корзины считаются по этому же множеству, и обрезание
+        # рассыпало бы отбор по клику (в полосе «55», в таблице «3»).
+        "rows": rows,
         "buckets": buckets,
         "clients": clients,
         "total": len(rows),
+        "payments": sum(r["payments"] for r in rows),
+        "orphanPayments": orphans[0],
+        "orphanAmount": _num(orphans[1]),
         "avgDays": round(sum(r["days"] for r in rows) / len(rows), 1) if rows else None,
         "medianDays": median,
         "amount": round(sum(r["amount"] for r in rows), 2),
@@ -1501,8 +1613,16 @@ async def cashflow(
         "inflow": round(sum(m["inflow"] for m in months), 2),
         "outflow": round(sum(m["outflow"] for m in months), 2),
         # Контроль по регистру: обороты счёта 51 за всю историю.
-        "registerIn": await _turnover(db, cid, dt="51"),
-        "registerOut": await _turnover(db, cid, kt="51"),
+        # LIKE, а не равенство: появится 51.01 в плане счетов — точное сравнение
+        # молча покажет ноль и «расхождение на весь оборот».
+        "registerIn": _num((await db.execute(text(
+            "SELECT coalesce(sum(amount), 0) FROM gl_entries "
+            "WHERE company_id = :cid AND (account_dt = '51' OR account_dt LIKE '51.%')"),
+            {"cid": str(cid)})).scalar_one()),
+        "registerOut": _num((await db.execute(text(
+            "SELECT coalesce(sum(amount), 0) FROM gl_entries "
+            "WHERE company_id = :cid AND (account_kt = '51' OR account_kt LIKE '51.%')"),
+            {"cid": str(cid)})).scalar_one()),
     }
 
 
@@ -1534,7 +1654,11 @@ async def contract_sales(
     rows = [{
         "id": str(r[0]) if r[0] else None,
         "number": r[1], "date": r[2], "kind": r[3], "settlementKind": r[4],
-        "counterparty": r[5],
+        # У группы «без договора» контрагент не один: `max(name)` выбирал случайное
+        # имя из сотен, и строка читалась как «этот покупатель отгрузился на N млн
+        # без договора». Для неё отдаём число контрагентов вместо имени.
+        "counterparty": r[5] if r[0] else None,
+        "counterparties": r[12],
         "sales": _num(r[6]), "salesDocs": r[7],
         "invoices": _num(r[8]), "invoiceDocs": r[9],
         "first": r[10], "last": r[11],
@@ -1545,7 +1669,8 @@ async def contract_sales(
                count(*)      FILTER (WHERE d.doc_type = 'sale'),
                sum(d.amount) FILTER (WHERE d.doc_type = 'invoice_out'),
                count(*)      FILTER (WHERE d.doc_type = 'invoice_out'),
-               min(d.date), max(d.date)
+               min(d.date), max(d.date),
+               count(DISTINCT coalesce(d.counterparty_id::text, d.counterparty_name))
           FROM accounting_docs d
           LEFT JOIN contracts c ON c.id = d.contract_id
          WHERE d.company_id = :cid
@@ -1555,9 +1680,13 @@ async def contract_sales(
     """), p)).all()]
 
     linked = [r for r in rows if r["id"]]
+    # «Договоров с продажами» — именно с ОТГРУЗКАМИ. Раньше сюда попадали и договоры,
+    # по которым выставлены только счета: на пилоте 109 против фактических 56.
+    with_sales = [r for r in linked if r["salesDocs"]]
     return {
         "rows": rows,
-        "withContract": len(linked),
+        "withContract": len(with_sales),
+        "withInvoicesOnly": len(linked) - len(with_sales),
         "salesWithContract": round(sum(r["sales"] for r in linked), 2),
         "salesTotal": round(sum(r["sales"] for r in rows), 2),
     }
@@ -1765,7 +1894,15 @@ async def counterparty_card(
                sum(b.credit) FILTER (WHERE b.account LIKE '60%'),
                sum(b.credit) FILTER (WHERE b.account LIKE '62%'),
                sum(b.debit)  FILTER (WHERE b.account LIKE '60%'),
-               max(b.as_of)
+               max(b.as_of),
+               -- Прочие расчёты, займы и подотчёт: раньше карточка их не смотрела,
+               -- и у ТСМ ООО «мы должны» показывало 295 800 вместо 673 625 — разница
+               -- висела на 76.09. Складывать их с долгом нельзя: другое обязательство.
+               sum(b.debit)  FILTER (WHERE b.account LIKE '76%'),
+               sum(b.credit) FILTER (WHERE b.account LIKE '76%'),
+               sum(b.debit)  FILTER (WHERE b.account LIKE '58%'),
+               sum(b.credit) FILTER (WHERE b.account LIKE '66%' OR b.account LIKE '67%'),
+               sum(b.credit - b.debit) FILTER (WHERE b.account LIKE '71%')
           FROM gl_balances b
          WHERE b.company_id = :cid AND b.counterparty_id::text = :kid
            AND b.as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid)
@@ -1789,6 +1926,8 @@ async def counterparty_card(
         # Аванс — не «отрицательный долг»: покупатель заплатил вперёд, поставщику
         # заплатили вперёд мы. Это разные вопросы, поэтому и цифры разные.
         "advanceIn": _num(debt[2]), "advanceOut": _num(debt[3]),
+        "otherDebit": _num(debt[5]), "otherCredit": _num(debt[6]),
+        "loanOut": _num(debt[7]), "loanIn": _num(debt[8]), "accountable": _num(debt[9]),
         "debtAsOf": debt[4].isoformat() if debt[4] else None,
         "byType": by_type, "months": months, "items": items,
         "contracts": contracts, "docs": docs,
