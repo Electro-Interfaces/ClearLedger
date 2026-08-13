@@ -972,3 +972,25 @@ export interface PayrollData {
 
 export const getPayroll = (companyId: string) =>
   get<PayrollData>(`/api/books/payroll?company_id=${companyId}`)
+
+// ── Закрытие периода ────────────────────────────────────────────────────────
+
+export interface ClosingData {
+  period: string | null
+  months: {
+    month: string; status: string; docs: number; amount: number
+    entries: number; turnover: number
+    closedAt: string | null; closureSource: string | null
+  }[]
+  /** Находки: чего не хватает, чтобы закрывать месяц спокойно. */
+  gaps: {
+    key: string; title: string; why: string; count: number; amount: number
+    rows: { id: string; date: string; number: string; counterparty: string; amount: number; period: string }[]
+  }[]
+  /** Тот же список, свёрнутый по контрагенту: документы просят у людей. */
+  byCounterparty: { counterparty: string; count: number; amount: number; kinds: string[] }[]
+}
+
+export const getClosing = (companyId: string, period?: string | null) =>
+  get<ClosingData>(`/api/books/closing?company_id=${companyId}`
+    + (period ? `&period=${period}` : ''))

@@ -30,7 +30,7 @@ import {
   getNomenclatureCard, getPeriods,
   type BalanceTotals, type BooksOverview, type SettlementKind, type VatKind,
 } from '@/services/booksService'
-import { BooksPayroll, BooksSettlements, BooksVat } from './OfficeSettlements'
+import { BooksClosing, BooksPayroll, BooksSettlements, BooksVat } from './OfficeSettlements'
 import { getMailByCounterparty } from '@/services/mailService'
 import { useWorkspaceSections } from './workspaceSections'
 
@@ -112,6 +112,7 @@ export function BooksPanel() {
         {sub === 'bk_docs' && <BooksDocs companyId={companyId} />}
         {sub === 'bk_vat' && <BooksVat companyId={companyId} kind={vatKind} onKind={setVatKind} />}
         {sub === 'bk_periods' && <BooksPeriods companyId={companyId} />}
+        {sub === 'bk_closing' && <BooksClosing companyId={companyId} />}
       </ScrollArea>
     </div>
   )

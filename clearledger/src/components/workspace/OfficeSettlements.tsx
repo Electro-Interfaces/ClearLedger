@@ -12,6 +12,7 @@
  * Числа приходят посчитанными с бэкенда — фронт не пересчитывает ничего, иначе
  * «Взаиморасчёты» разойдутся с оборотками на копейках округления.
  */
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 
 import { QueryError } from '@/components/common/QueryError'
@@ -19,7 +20,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { MetricTile } from '@/components/ui/metric-tile'
 import { cn } from '@/lib/utils'
 import {
-  getPayroll, getSettlements, getVat,
+  getClosing, getPayroll, getSettlements, getVat,
   type SettlementKind, type SettlementsData, type VatData, type VatKind,
 } from '@/services/booksService'
 
@@ -342,4 +343,171 @@ export function BooksPayroll({ companyId }: { companyId: string }) {
 const KIND_LABEL: Record<string, string> = {
   accrual: 'Начислено', ndfl: 'НДФЛ', contribution: 'Взносы',
   payment: 'Выплата', deduction: 'Удержано',
+}
+
+
+/* ──────────────────────────── Закрытие периода ────────────────────────────── */
+
+/**
+ * «Бухгалтерия» → «Закрытие периода»: что собрано, чего не хватает, кто должен.
+ *
+ * Приложение стоит между нормализованным слоем и выгрузкой в 1С, и главный его
+ * вопрос — можно ли закрывать месяц. Правило то же, что у закрытия месяца в
+ * «Эксплуатации»: период закрывается тем, что есть, но «не пришло» обязано быть
+ * отличимо от «не смотрели» — поимённо, с суммой и с тем, кто на той стороне.
+ */
+export function BooksClosing({ companyId }: { companyId: string }) {
+  const [period, setPeriod] = useState<string | null>(null)
+  const [openGap, setOpenGap] = useState<string | null>(null)
+  const q = useQuery({
+    queryKey: ['books', 'closing', companyId, period],
+    queryFn: () => getClosing(companyId, period),
+  })
+  if (q.isError) {
+    return <div className="p-4"><QueryError message="Не удалось загрузить состояние периодов" onRetry={() => q.refetch()} /></div>
+  }
+  if (!q.data) return <div className="p-6 text-sm text-muted-foreground">Загрузка…</div>
+  const d = q.data
+  // Месяцы без единого движения не показываем: пустая строка не несёт вопроса.
+  const months = d.months.filter((m) => m.docs || m.entries)
+  const totalGaps = d.gaps.reduce((s, g) => s + g.count, 0)
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="grid gap-3 sm:grid-cols-4">
+        <MetricTile label="Закрыто месяцев"
+          value={`${months.filter((m) => m.status === 'closed').length} из ${months.length}`} />
+        <MetricTile label="Открытых" value={String(months.filter((m) => m.status !== 'closed').length)}
+          hint="в них ещё можно править" />
+        <MetricTile label="Требует внимания" value={String(totalGaps)}
+          hint={period ? `за ${monthLabel(period)}` : 'за всю историю'}
+          tone={totalGaps ? 'warning' : undefined} />
+        <MetricTile label="Ждём документов на"
+          value={`${money.format(d.gaps.filter((g) => g.key !== 'not_posted')
+            .reduce((s, g) => s + g.amount, 0))} ₽`} />
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs text-muted-foreground">Период:</span>
+        <button onClick={() => setPeriod(null)}
+          className={cn('rounded-md px-2.5 py-1 text-xs',
+            !period ? 'bg-muted font-medium' : 'text-muted-foreground hover:bg-muted/50')}>
+          вся история
+        </button>
+        {months.slice(0, 14).map((m) => (
+          <button key={m.month} onClick={() => setPeriod(m.month)}
+            className={cn('rounded-md px-2.5 py-1 text-xs',
+              period === m.month ? 'bg-muted font-medium' : 'text-muted-foreground hover:bg-muted/50')}>
+            {monthLabel(m.month)}
+            {m.status === 'closed' && <span className="ml-1 opacity-60">🔒</span>}
+          </button>
+        ))}
+      </div>
+
+      {/* Находки: сначала что мешает, потом уже реестр месяцев */}
+      <div className="space-y-2">
+        {d.gaps.filter((g) => g.count > 0).map((g) => (
+          <Card key={g.key}>
+            <CardContent className="p-0">
+              <button onClick={() => setOpenGap(openGap === g.key ? null : g.key)}
+                className="flex w-full items-center gap-3 px-3 py-2.5 text-left hover:bg-muted/40">
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-medium">{g.title}</div>
+                  <div className="text-[11px] text-muted-foreground">{g.why}</div>
+                </div>
+                <div className="shrink-0 text-right">
+                  <div className="text-sm tabular-nums">{g.count}</div>
+                  <div className="text-[11px] text-muted-foreground tabular-nums">
+                    {money.format(g.amount)} ₽
+                  </div>
+                </div>
+              </button>
+              {openGap === g.key && (
+                <div className="overflow-x-auto border-t">
+                  <table className="w-full text-sm">
+                    <thead className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                      <tr className="border-b">
+                        <Th>Дата</Th><Th>Номер</Th><Th>Контрагент</Th><Th right>Сумма</Th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {g.rows.map((r) => (
+                        <tr key={r.id} className="border-b last:border-0 hover:bg-muted/40">
+                          <td className="px-3 py-1.5 tabular-nums whitespace-nowrap">
+                            {r.date.split('-').reverse().join('.')}
+                          </td>
+                          <td className="px-3 py-1.5 tabular-nums">{r.number || 'б/н'}</td>
+                          <td className="px-3 py-1.5 max-w-[280px] truncate">{r.counterparty || '—'}</td>
+                          <td className="px-3 py-1.5 text-right tabular-nums">{money.format(r.amount)}</td>
+                        </tr>
+                      ))}
+                      {g.count > g.rows.length && (
+                        <tr><td colSpan={4} className="px-3 py-2 text-[11px] text-muted-foreground">
+                          Показаны {g.rows.length} из {g.count} — сузьте период.
+                        </td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        ))}
+        {totalGaps === 0 && (
+          <Card><CardContent className="py-8 text-center text-sm text-muted-foreground">
+            За выбранный период всё собрано: документы на месте и проведены.
+          </CardContent></Card>
+        )}
+      </div>
+
+      {d.byCounterparty.length > 0 && (
+        <TableCard note="С кем разговаривать: тот же список, свёрнутый по контрагенту — документы просят у людей, а не у документов"
+          head={<><Th>Контрагент</Th><Th>Чего ждём</Th><Th right>Документов</Th><Th right>Сумма</Th></>}>
+          {d.byCounterparty.map((c, i) => (
+            <tr key={i} className="border-b last:border-0 hover:bg-muted/40">
+              <td className="px-3 py-1.5 max-w-[280px] truncate">{c.counterparty}</td>
+              <td className="px-3 py-1.5 max-w-[320px] truncate text-muted-foreground">
+                {c.kinds.join(' · ')}
+              </td>
+              <td className="px-3 py-1.5 text-right tabular-nums">{c.count}</td>
+              <td className="px-3 py-1.5 text-right tabular-nums">{money.format(c.amount)}</td>
+            </tr>
+          ))}
+        </TableCard>
+      )}
+
+      <TableCard note="Реестр периодов: закрытый месяц не переписывается — опоздавший документ идёт корректировкой в текущий"
+        head={<><Th>Месяц</Th><Th>Состояние</Th><Th right>Документов</Th><Th right>Проводок</Th>
+          <Th right>Оборот</Th><Th>Закрыт</Th></>}>
+        {months.map((m) => (
+          <tr key={m.month}
+            onClick={() => setPeriod(m.month === period ? null : m.month)}
+            className={cn('border-b last:border-0 cursor-pointer hover:bg-accent/40',
+              period === m.month && 'bg-primary/10')}>
+            <td className="px-3 py-1.5">{monthLabel(m.month)}</td>
+            <td className="px-3 py-1.5">
+              {m.status === 'closed'
+                ? <span className="text-muted-foreground">закрыт 🔒</span>
+                : <span className="text-amber-600">открыт</span>}
+            </td>
+            <td className="px-3 py-1.5 text-right tabular-nums">{m.docs || '—'}</td>
+            <td className="px-3 py-1.5 text-right tabular-nums">{m.entries || '—'}</td>
+            <td className="px-3 py-1.5 text-right tabular-nums">{money.format(m.turnover)}</td>
+            <td className="px-3 py-1.5 text-muted-foreground text-[11px]">
+              {m.closedAt ? `${m.closedAt.slice(0, 10).split('-').reverse().join('.')}${
+                m.closureSource ? ` · ${CLOSURE_LABEL[m.closureSource] ?? m.closureSource}` : ''}` : '—'}
+            </td>
+          </tr>
+        ))}
+      </TableCard>
+    </div>
+  )
+}
+
+/** Чем закрыт месяц: регламентными операциями или датой запрета изменений. */
+const CLOSURE_LABEL: Record<string, string> = {
+  from_bp: 'по данным бухгалтерии',
+  regламент: 'регламентные операции',
+  lock: 'запрет изменения данных',
+  closing_ops: 'регламентные операции',
 }

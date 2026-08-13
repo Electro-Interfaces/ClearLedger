@@ -1786,6 +1786,287 @@ async def suppliers(
     }
 
 
+# ── «Экономика»: результат, расходы, налоги ─────────────────────────────────
+# Пространство до сих пор показывало правую половину отчёта: сколько продали и когда
+# заплатят. Куда компания тратит и сколько зарабатывает, не отвечал никто, хотя
+# проводки для этого лежат с первой выгрузки.
+#
+# Считаем по ОБОРОТАМ счетов результата, а не по документам: внутренние закрытия
+# (90.09 ↔ 90.xx, 91.09 ↔ 91.xx, 99 ↔ 90.09) в расчёт не берутся — иначе выручка
+# удвоится на строке закрытия месяца.
+
+REVENUE_ACCS = ("90.01",)      # выручка (кредит)
+VAT_SALES_ACC = "90.03"        # НДС с продаж (дебет)
+COGS_ACC = "90.02"             # себестоимость продаж (дебет)
+COMMERCIAL_ACC = "90.07"       # коммерческие расходы (дебет)
+ADMIN_ACC = "90.08"            # управленческие расходы (дебет), у пилота пусты
+OTHER_INCOME_ACC = "91.01"     # прочие доходы (кредит)
+OTHER_EXPENSE_ACC = "91.02"    # прочие расходы (дебет)
+PROFIT_TAX_ACC = "68.04"       # налог на прибыль (кредит с 99)
+
+
+async def _pnl_rows(db: AsyncSession, cid, date_from: str | None, date_to: str | None
+                    ) -> list[dict[str, Any]]:
+    """Помесячные обороты счетов результата — основа отчёта."""
+    p: dict[str, Any] = {"cid": str(cid)}
+    where = ""
+    if date_from:
+        where += " AND entry_date >= :df"
+        p["df"] = date_from
+    if date_to:
+        where += " AND entry_date <= :dt"
+        p["dt"] = date_to
+
+    return [{
+        "month": r[0],
+        "revenue": _num(r[1]), "vat": _num(r[2]), "cogs": _num(r[3]),
+        "commercial": _num(r[4]), "admin": _num(r[5]),
+        "otherIncome": _num(r[6]), "otherExpense": _num(r[7]), "tax": _num(r[8]),
+    } for r in (await db.execute(text(f"""
+        SELECT to_char(entry_date, 'YYYY-MM') AS month,
+               -- Выручка: кредит 90.01 в корреспонденции с расчётами, но НЕ со своим
+               -- же субсчётом закрытия (90.09) — это перенос, а не продажа.
+               coalesce(sum(amount) FILTER (
+                 WHERE account_kt LIKE '90.01%' AND account_dt NOT LIKE '90.%'), 0),
+               coalesce(sum(amount) FILTER (
+                 WHERE account_dt LIKE '90.03%' AND account_kt NOT LIKE '90.%'), 0),
+               coalesce(sum(amount) FILTER (
+                 WHERE account_dt LIKE '90.02%' AND account_kt NOT LIKE '90.%'), 0),
+               coalesce(sum(amount) FILTER (
+                 WHERE account_dt LIKE '90.07%' AND account_kt NOT LIKE '90.%'), 0),
+               coalesce(sum(amount) FILTER (
+                 WHERE account_dt LIKE '90.08%' AND account_kt NOT LIKE '90.%'), 0),
+               coalesce(sum(amount) FILTER (
+                 WHERE account_kt LIKE '91.01%' AND account_dt NOT LIKE '91.%'), 0),
+               coalesce(sum(amount) FILTER (
+                 WHERE account_dt LIKE '91.02%' AND account_kt NOT LIKE '91.%'), 0),
+               coalesce(sum(amount) FILTER (
+                 WHERE account_dt LIKE '99%' AND account_kt LIKE '68.04%'), 0)
+          FROM gl_entries
+         WHERE company_id = :cid{where}
+         GROUP BY 1 ORDER BY 1
+    """), p)).all()]
+
+
+def _pnl_totals(rows: list[dict[str, Any]]) -> dict[str, float]:
+    """Свод отчёта: от выручки до чистой прибыли."""
+    t = {k: round(sum(r[k] for r in rows), 2) for k in
+         ("revenue", "vat", "cogs", "commercial", "admin", "otherIncome", "otherExpense", "tax")}
+    t["net"] = round(t["revenue"] - t["vat"], 2)
+    t["gross"] = round(t["net"] - t["cogs"], 2)
+    t["operating"] = round(t["gross"] - t["commercial"] - t["admin"], 2)
+    t["beforeTax"] = round(t["operating"] + t["otherIncome"] - t["otherExpense"], 2)
+    t["profit"] = round(t["beforeTax"] - t["tax"], 2)
+    # Рентабельность считаем от выручки БЕЗ НДС: налог собирается в пользу бюджета и
+    # доходом компании не является.
+    t["grossPct"] = round(t["gross"] / t["net"] * 100, 1) if t["net"] else None
+    t["operatingPct"] = round(t["operating"] / t["net"] * 100, 1) if t["net"] else None
+    t["profitPct"] = round(t["profit"] / t["net"] * 100, 1) if t["net"] else None
+    return t
+
+
+@router.get("/pnl")
+async def pnl(
+    company_id: str,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Отчёт о финансовых результатах: от выручки до чистой прибыли, помесячно.
+
+    Сверка честная: рядом с расчётной прибылью стоит то, что бухгалтерия закрыла на
+    84 счёт (реформация баланса). Расхождение обычно означает, что часть периода не
+    закрыта — это ответ, а не ошибка витрины.
+    """
+    cid = await assert_company_member(company_id, current_user, db)
+    rows = await _pnl_rows(db, cid, date_from, date_to)
+
+    for r in rows:
+        r["net"] = round(r["revenue"] - r["vat"], 2)
+        r["gross"] = round(r["net"] - r["cogs"], 2)
+        r["operating"] = round(r["gross"] - r["commercial"] - r["admin"], 2)
+        r["profit"] = round(r["operating"] + r["otherIncome"] - r["otherExpense"] - r["tax"], 2)
+
+    years: dict[str, list[dict[str, Any]]] = {}
+    for r in rows:
+        years.setdefault(r["month"][:4], []).append(r)
+
+    p: dict[str, Any] = {"cid": str(cid)}
+    where = ""
+    if date_from:
+        where += " AND entry_date >= :df"
+        p["df"] = date_from
+    if date_to:
+        where += " AND entry_date <= :dt"
+        p["dt"] = date_to
+    # Реформация: прибыль (Дт 99 Кт 84) минус убыток (Дт 84 Кт 99).
+    closed = (await db.execute(text(f"""
+        SELECT coalesce(sum(amount) FILTER (
+                 WHERE account_dt LIKE '99%' AND account_kt LIKE '84%'), 0)
+             - coalesce(sum(amount) FILTER (
+                 WHERE account_dt LIKE '84%' AND account_kt LIKE '99%'), 0)
+          FROM gl_entries WHERE company_id = :cid{where}
+    """), p)).scalar_one()
+
+    return {
+        "months": rows,
+        "totals": _pnl_totals(rows),
+        "years": [{"year": y, **_pnl_totals(rs)} for y, rs in sorted(years.items())],
+        "closedToRetained": _num(closed),
+    }
+
+
+@router.get("/expenses")
+async def expenses(
+    company_id: str,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Из чего сложились затраты: счёт затрат × источник × помесячно.
+
+    Смотрим на ДЕБЕТ затратных счетов (26, 44, 20, 91.02) в корреспонденции с тем,
+    откуда затрата пришла: поставщик (60), зарплата (70), взносы (69), подотчёт (71),
+    амортизация (02). Это и есть ответ «куда уходят деньги» на языке учёта, а не
+    догадка по назначению платежа.
+    """
+    cid = await assert_company_member(company_id, current_user, db)
+    p: dict[str, Any] = {"cid": str(cid)}
+    where = ""
+    if date_from:
+        where += " AND e.entry_date >= :df"
+        p["df"] = date_from
+    if date_to:
+        where += " AND e.entry_date <= :dt"
+        p["dt"] = date_to
+
+    rows = [{
+        "account": r[0], "accountName": r[1], "source": r[2], "sourceName": r[3],
+        "amount": _num(r[4]), "entries": r[5],
+    } for r in (await db.execute(text(f"""
+        SELECT e.account_dt, max(ad.name), e.account_kt, max(ak.name),
+               sum(e.amount), count(*)
+          FROM gl_entries e
+          LEFT JOIN gl_accounts ad ON ad.company_id = e.company_id AND ad.code = e.account_dt
+          LEFT JOIN gl_accounts ak ON ak.company_id = e.company_id AND ak.code = e.account_kt
+         WHERE e.company_id = :cid
+           AND (e.account_dt LIKE '20%' OR e.account_dt LIKE '25%' OR e.account_dt LIKE '26%'
+                OR e.account_dt LIKE '44%' OR e.account_dt LIKE '91.02%')
+           AND e.account_kt NOT LIKE '90%'{where}
+         GROUP BY e.account_dt, e.account_kt
+         ORDER BY sum(e.amount) DESC
+    """), p)).all()]
+
+    months = [{
+        "month": r[0], "amount": _num(r[1]),
+    } for r in (await db.execute(text(f"""
+        SELECT to_char(e.entry_date, 'YYYY-MM'), sum(e.amount)
+          FROM gl_entries e
+         WHERE e.company_id = :cid
+           AND (e.account_dt LIKE '20%' OR e.account_dt LIKE '25%' OR e.account_dt LIKE '26%'
+                OR e.account_dt LIKE '44%' OR e.account_dt LIKE '91.02%')
+           AND e.account_kt NOT LIKE '90%'{where}
+         GROUP BY 1 ORDER BY 1
+    """), p)).all()]
+
+    by_account: dict[str, dict[str, Any]] = {}
+    for r in rows:
+        a = by_account.setdefault(r["account"], {
+            "account": r["account"], "name": r["accountName"], "amount": 0.0, "sources": [],
+        })
+        a["amount"] += r["amount"]
+        a["sources"].append(r)
+    accounts = sorted(by_account.values(), key=lambda a: -a["amount"])
+
+    return {
+        "accounts": accounts,
+        "rows": rows,
+        "months": months,
+        "total": round(sum(r["amount"] for r in rows), 2),
+    }
+
+
+@router.get("/taxes")
+async def taxes(
+    company_id: str,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Налоги и взносы: начислено, уплачено, задолженность и нагрузка на выручку."""
+    cid = await assert_company_member(company_id, current_user, db)
+    p: dict[str, Any] = {"cid": str(cid)}
+    where = ""
+    if date_from:
+        where += " AND e.entry_date >= :df"
+        p["df"] = date_from
+    if date_to:
+        where += " AND e.entry_date <= :dt"
+        p["dt"] = date_to
+
+    rows = [{
+        "account": r[0], "name": r[1] or r[0],
+        "accrued": _num(r[2]), "paid": _num(r[3]), "entries": r[4],
+    } for r in (await db.execute(text(f"""
+        SELECT coalesce(e.account_kt, e.account_dt) AS acc, max(a.name),
+               -- Начислено — кредит счёта расчётов с бюджетом; уплачено — его дебет
+               -- в корреспонденции с деньгами.
+               coalesce(sum(e.amount) FILTER (
+                 WHERE e.account_kt LIKE '68%' OR e.account_kt LIKE '69%'), 0),
+               0, count(*)
+          FROM gl_entries e
+          LEFT JOIN gl_accounts a ON a.company_id = e.company_id AND a.code = e.account_kt
+         WHERE e.company_id = :cid
+           AND (e.account_kt LIKE '68%' OR e.account_kt LIKE '69%'){where}
+         GROUP BY 1 ORDER BY 3 DESC
+    """), p)).all()]
+
+    paid = {r[0]: _num(r[1]) for r in (await db.execute(text(f"""
+        SELECT e.account_dt, sum(e.amount)
+          FROM gl_entries e
+         WHERE e.company_id = :cid
+           AND (e.account_dt LIKE '68%' OR e.account_dt LIKE '69%')
+           AND (e.account_kt LIKE '51%' OR e.account_kt LIKE '50%'){where}
+         GROUP BY 1
+    """), p)).all()}
+    for r in rows:
+        r["paid"] = paid.get(r["account"], 0.0)
+        r["rest"] = round(r["accrued"] - r["paid"], 2)
+
+    months = [{
+        "month": r[0], "accrued": _num(r[1]), "paid": _num(r[2]),
+    } for r in (await db.execute(text(f"""
+        SELECT to_char(e.entry_date, 'YYYY-MM'),
+               coalesce(sum(e.amount) FILTER (
+                 WHERE (e.account_kt LIKE '68%' OR e.account_kt LIKE '69%')), 0),
+               coalesce(sum(e.amount) FILTER (
+                 WHERE (e.account_dt LIKE '68%' OR e.account_dt LIKE '69%')
+                   AND (e.account_kt LIKE '51%' OR e.account_kt LIKE '50%')), 0)
+          FROM gl_entries e
+         WHERE e.company_id = :cid
+           AND (e.account_kt LIKE '68%' OR e.account_kt LIKE '69%'
+                OR e.account_dt LIKE '68%' OR e.account_dt LIKE '69%'){where}
+         GROUP BY 1 ORDER BY 1
+    """), p)).all()]
+
+    pnl_rows = await _pnl_rows(db, cid, date_from, date_to)
+    totals = _pnl_totals(pnl_rows)
+    accrued = round(sum(r["accrued"] for r in rows), 2)
+    # НДС к уплате — это разница начисленного с продаж и принятого к вычету, поэтому
+    # «нагрузка» по обороту 68.02 завышена: тот же счёт кредитуется и при покупках.
+    return {
+        "rows": rows,
+        "months": months,
+        "accrued": accrued,
+        "paid": round(sum(r["paid"] for r in rows), 2),
+        "revenueNet": totals["net"],
+        "loadPct": round(accrued / totals["net"] * 100, 1) if totals["net"] else None,
+    }
+
+
 # ── Качество данных продукта ─────────────────────────────────────────────────
 # Волна 5. Отдельно от «Данных» пространства: там качество слоя целиком, здесь —
 # ровно то, что портит цифры «Реализации». Проверка = вопрос заказчику, поэтому
@@ -3690,4 +3971,167 @@ async def payroll(
             "advance": advance,
         },
         "months": months, "employees": employees, "kinds": kinds, "docs": docs,
+    }
+
+
+# ── Закрытие периода: что собрано и чего не хватает ──────────────────────────
+# Ядро приложения-прослойки. Правила те же, что у закрытия месяца в «Эксплуатации»
+# (`services/ops_closing.py`): период закрывается тем, что есть, закрытый месяц не
+# переписывается, а недостающее видно поимённо — иначе «не пришло» неотличимо от
+# «не смотрели».
+
+# Чего ждём, если операция была. Правило → как читать находку.
+_GAP_RULES = [
+    ("purchase_no_vat_invoice", "Поступление без счёта-фактуры",
+     "Вычет НДС заявить нечем: поставщик документ не прислал или он не проведён"),
+    ("sale_no_vat_invoice", "Реализация без счёта-фактуры",
+     "Покупателю не выставлен счёт-фактура — он не примет НДС к вычету и попросит"),
+    ("payment_no_document", "Оплата без закрывающего документа",
+     "Деньги ушли поставщику, поступления в периоде нет: аванс висит на 60.02"),
+    ("invoice_paid_no_sale", "Счёт оплачен, отгрузки нет",
+     "Покупатель заплатил, реализации нет: аванс на 62.02 и НДС с аванса"),
+    ("not_posted", "Документ не проведён",
+     "Документ есть, но в учёт не попал: в обороты и в книгу он не входит"),
+]
+
+
+@router.get("/closing")
+async def closing(
+    company_id: str,
+    period: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Состояние периодов и недостающие документы.
+
+    `period` — «ГГГГ-ММ»; без него отдаётся сводка по всем месяцам, с ним — разбор
+    одного: чего не хватает, по кому и на какую сумму.
+    """
+    cid = await assert_company_member(company_id, current_user, db)
+    p: dict[str, Any] = {"cid": str(cid), "period": period}
+
+    months = [{
+        "month": r[0], "status": r[1], "docs": r[2], "amount": _num(r[3]),
+        "entries": r[4], "turnover": _num(r[5]),
+        "closedAt": r[6].isoformat() if r[6] else None, "closureSource": r[7],
+    } for r in (await db.execute(text("""
+        WITH d AS (
+          SELECT substr(date, 1, 7) AS m, count(*) AS docs, sum(amount) AS amount
+            FROM accounting_docs WHERE company_id = :cid GROUP BY 1
+        ), e AS (
+          SELECT to_char(entry_date, 'YYYY-MM') AS m, count(*) AS cnt, sum(amount) AS turnover
+            FROM gl_entries WHERE company_id = :cid GROUP BY 1
+        )
+        SELECT coalesce(d.m, e.m) AS m,
+               coalesce(p.status, 'open'), coalesce(d.docs, 0), coalesce(d.amount, 0),
+               coalesce(e.cnt, 0), coalesce(e.turnover, 0), p.closed_at, p.closure_source
+          FROM d
+          FULL JOIN e ON e.m = d.m
+          LEFT JOIN periods p ON p.company_id = :cid
+               AND p.year = substr(coalesce(d.m, e.m), 1, 4)::int
+               AND p.month = substr(coalesce(d.m, e.m), 6, 2)::int
+         WHERE coalesce(d.m, e.m) IS NOT NULL
+         ORDER BY 1 DESC"""), p)).all()]
+
+    where_period = "AND substr(d.date, 1, 7) = :period" if period else ""
+    gaps: list[dict[str, Any]] = []
+
+    async def collect(key: str, sql: str) -> None:
+        rows = (await db.execute(text(sql), p)).all()
+        title, why = next((t, w) for k, t, w in _GAP_RULES if k == key)
+        gaps.append({
+            "key": key, "title": title, "why": why,
+            "count": len(rows), "amount": round(sum(_num(r[4]) for r in rows), 2),
+            "rows": [{"id": str(r[0]), "date": r[1], "number": r[2],
+                      "counterparty": r[3], "amount": _num(r[4]),
+                      "period": (r[1] or "")[:7]} for r in rows[:200]],
+        })
+
+    # 1. Поступление, у которого нет счёта-фактуры того же контрагента в ±31 день.
+    await collect("purchase_no_vat_invoice", """
+        SELECT d.id, d.date, d.number, d.counterparty_name, d.amount
+          FROM accounting_docs d
+         WHERE d.company_id = :cid AND d.doc_type = 'purchase' """ + where_period + """
+           AND coalesce(d.vat_amount, 0) > 0
+           AND NOT EXISTS (
+             SELECT 1 FROM accounting_docs v
+              WHERE v.company_id = d.company_id AND v.doc_type = 'vat_invoice_in'
+                AND coalesce(v.counterparty_inn, '') = coalesce(d.counterparty_inn, '')
+                AND abs(v.date::date - d.date::date) <= 31)
+         ORDER BY d.date DESC""")
+
+    # 2. Реализация без выданного счёта-фактуры.
+    await collect("sale_no_vat_invoice", """
+        SELECT d.id, d.date, d.number, d.counterparty_name, d.amount
+          FROM accounting_docs d
+         WHERE d.company_id = :cid AND d.doc_type = 'sale' """ + where_period + """
+           AND coalesce(d.vat_amount, 0) > 0
+           AND NOT EXISTS (
+             SELECT 1 FROM accounting_docs v
+              WHERE v.company_id = d.company_id AND v.doc_type = 'vat_invoice_out'
+                AND coalesce(v.counterparty_inn, '') = coalesce(d.counterparty_inn, '')
+                AND abs(v.date::date - d.date::date) <= 31)
+         ORDER BY d.date DESC""")
+
+    # 3. Заплатили поставщику, а поступления в том же месяце нет. Налоги, зарплату и
+    #    займы исключаем: там закрывающего документа не бывает по природе.
+    await collect("payment_no_document", """
+        SELECT d.id, d.date, d.number, d.counterparty_name, d.amount
+          FROM accounting_docs d
+         WHERE d.company_id = :cid AND d.doc_type = 'bank_out' """ + where_period + """
+           AND coalesce(d.counterparty_inn, '') <> ''
+           AND NOT EXISTS (
+             SELECT 1 FROM accounting_docs x
+              WHERE x.company_id = d.company_id
+                AND x.doc_type IN ('purchase', 'advance_report', 'invoice_in')
+                AND x.counterparty_inn = d.counterparty_inn
+                AND substr(x.date, 1, 7) = substr(d.date, 1, 7))
+           AND NOT EXISTS (
+             SELECT 1 FROM gl_entries g
+              WHERE g.doc_id = d.id
+                AND (g.account_dt LIKE '68%' OR g.account_dt LIKE '69%'
+                     OR g.account_dt LIKE '70%' OR g.account_dt LIKE '66%'
+                     OR g.account_dt LIKE '67%' OR g.account_dt LIKE '58%'))
+         ORDER BY d.date DESC""")
+
+    # 4. Счёт покупателю оплачен, отгрузки нет.
+    await collect("invoice_paid_no_sale", """
+        SELECT d.id, d.date, d.number, d.counterparty_name, d.amount
+          FROM accounting_docs d
+         WHERE d.company_id = :cid AND d.doc_type = 'invoice_out' """ + where_period + """
+           AND EXISTS (SELECT 1 FROM invoice_payments ip WHERE ip.invoice_doc_id = d.id)
+           AND NOT EXISTS (
+             SELECT 1 FROM accounting_docs s
+              WHERE s.company_id = d.company_id AND s.doc_type = 'sale'
+                AND s.counterparty_inn = d.counterparty_inn
+                AND s.date >= d.date)
+         ORDER BY d.date DESC""")
+
+    # 5. Непроведённые документы: записаны, но в учёт не попали.
+    await collect("not_posted", """
+        SELECT d.id, d.date, d.number, d.counterparty_name, d.amount
+          FROM accounting_docs d
+         WHERE d.company_id = :cid AND d.status_1c = 'Не проведён' """ + where_period + """
+         ORDER BY d.date DESC""")
+
+    # Кто задолжал документы — тот же список, свёрнутый по контрагенту: работа идёт
+    # не с документом, а с человеком на той стороне.
+    by_party: dict[str, dict[str, Any]] = {}
+    for gap in gaps:
+        if gap["key"] == "not_posted":
+            continue      # это наш недочёт, а не долг контрагента
+        for row in gap["rows"]:
+            name = row["counterparty"] or "—"
+            slot = by_party.setdefault(name, {"counterparty": name, "count": 0,
+                                              "amount": 0.0, "kinds": []})
+            slot["count"] += 1
+            slot["amount"] = round(slot["amount"] + row["amount"], 2)
+            if gap["title"] not in slot["kinds"]:
+                slot["kinds"].append(gap["title"])
+
+    return {
+        "period": period,
+        "months": months,
+        "gaps": gaps,
+        "byCounterparty": sorted(by_party.values(), key=lambda x: -x["amount"])[:100],
     }

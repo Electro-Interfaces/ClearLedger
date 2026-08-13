@@ -444,4 +444,6 @@ export const BOOKS_PRIMARY_MENU: CentralMenuItem[] = [
   { key: 'bk_docs',     label: 'Документы' },
   { key: 'bk_vat',      label: 'Счета-фактуры' },
   { key: 'bk_periods',  label: 'Периоды' },
+  // Ядро приложения-прослойки: можно ли закрывать месяц и чего для этого не хватает.
+  { key: 'bk_closing',  label: 'Закрытие периода' },
 ]
