@@ -86,6 +86,18 @@ export async function downloadAttachment(path: string, name?: string): Promise<v
   a.remove()
 }
 
+/**
+ * Размер вложения в человеческих единицах: килобайты у документа, мегабайты у
+ * архива. Раньше всё делилось на 1024 и округлялось до целого — файл на 900 байт
+ * показывался как «1 КБ», а архив на 40 МБ как «40960 КБ».
+ */
+export function humanSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} Б`
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} КБ`
+  const mb = bytes / (1024 * 1024)
+  return `${mb < 10 ? mb.toFixed(1) : Math.round(mb)} МБ`
+}
+
 /** Чип файла-вложения (не изображение/видео): имя, размер, скачивание. */
 export function AuthFileChip({ path, name, size, mine }: {
   path: string; name?: string | null; size?: number | null; mine?: boolean
@@ -94,11 +106,17 @@ export function AuthFileChip({ path, name, size, mine }: {
     <button
       type="button"
       onClick={() => downloadAttachment(path, name || undefined)}
-      className={`mt-1 flex items-center gap-1.5 text-[11px] hover:underline ${mine ? 'text-primary-foreground/90' : 'text-primary'}`}
+      className={`mt-1 flex items-center gap-1.5 text-xs hover:underline ${mine ? 'text-primary-foreground' : 'text-primary'}`}
     >
-      <FileText className="size-3.5 shrink-0" />
-      <span className="truncate max-w-[200px]">{name || 'Файл'}</span>
-      {size ? <span className="opacity-70">({(size / 1024).toFixed(0)} КБ)</span> : null}
+      <FileText className="size-4 shrink-0" />
+      <span className="truncate max-w-[220px]">{name || 'Файл'}</span>
+      {/* Размер не сжимаем и не приглушаем: на своём сообщении (насыщенная заливка)
+          мелкий полупрозрачный текст сливался с фоном и читался как каша. */}
+      {size ? (
+        <span className="shrink-0 whitespace-nowrap tabular-nums opacity-90">
+          · {humanSize(size)}
+        </span>
+      ) : null}
     </button>
   )
 }

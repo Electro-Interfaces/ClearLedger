@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/button'
 import { startMeeting } from '@/services/conferenceService'
 import { useSupportContext } from '@/contexts/SupportContext'
 import { useTasksApp } from '@/hooks/useTasksApp'
+import { useCompany } from '@/contexts/CompanyContext'
 
 /** Пилюля-кнопка: синий акцент, активное состояние — как у остальных кнопок шапки. */
 const btnCls = (active: boolean) =>
@@ -33,6 +34,11 @@ function Badge({ count }: { count: number }) {
 }
 
 export function HeaderInteractionButtons({ conference = false }: { conference?: boolean }) {
+  // Решение МАГа 13.08.2026: чат и «Инфо» сквозные, их видит каждый, кого пустили в
+  // пространство (без них человек нем и слеп). Конференция и поддержка поставщика -
+  // обычные продукты реестра и показываются только при праве на них: раньше кнопки
+  // стояли у всех, и человек с одним выданным приложением видел в шапке четыре чужих.
+  const { canApp } = useCompany()
   const { interactionSection, toggleInteraction, unreadCounts } = useSupportContext()
   const [confBusy, setConfBusy] = useState(false)
   const tasksOn = useTasksApp()
@@ -58,7 +64,7 @@ export function HeaderInteractionButtons({ conference = false }: { conference?: 
     // оставалась одна кнопка чата.
     <div className="flex items-center gap-1.5 pl-1 md:gap-2">
       <div className="hidden h-6 w-px bg-border/50 md:block" />
-      {conference && (
+      {conference && canApp('conf') && (
         <Button variant="outline" size="sm" onClick={startConference} disabled={confBusy} className={btnCls(false)} title="Видеоконференция">
           <Video className="h-4 w-4" />
           <span className="hidden lg:inline">Конференция</span>
@@ -88,6 +94,7 @@ export function HeaderInteractionButtons({ conference = false }: { conference?: 
       </Button>
       {/* Поддержка поставщика программы — иконкой, в одном ряду с лампочкой и
           режимом работы: обращение редкое, а место в шапке дорогое. */}
+      {canApp('support') && (
       <Button
         variant="ghost"
         size="icon"
@@ -99,6 +106,7 @@ export function HeaderInteractionButtons({ conference = false }: { conference?: 
         <LifeBuoy className="h-[18px] w-[18px]" />
         <Badge count={unreadCounts.tickets} />
       </Button>
+      )}
     </div>
   )
 }

@@ -46,7 +46,7 @@ import {
   getUserColor, getDateLabel, formatTime, computeGrouping, bubbleRadius,
   type GroupingInfo,
 } from './telegram-helpers'
-import { AuthImage, AuthVideo, AuthFileChip, useAuthBlobUrl, downloadAttachment } from './AuthMedia'
+import { AuthImage, AuthVideo, AuthFileChip, useAuthBlobUrl, downloadAttachment, humanSize } from './AuthMedia'
 import { RegionCapture } from './RegionCapture'
 import { ensurePushSubscription, pushPreview, pushSupported, requestPushPermission, setPushPreview } from '@/lib/chatPush'
 import * as chat from '@/services/chatService'
@@ -244,7 +244,7 @@ function RoomMediaDialog({ roomId, onClose, onImageClick }: {
                     <div className="truncate text-xs">{i.fileName || 'файл'}</div>
                     <div className="text-[10px] text-muted-foreground">
                       {i.userName || ''} · {fmtAge(i.createdAt)}
-                      {i.fileSize ? ` · ${Math.max(1, Math.round(i.fileSize / 1024))} КБ` : ''}
+                      {i.fileSize ? ` · ${humanSize(i.fileSize)}` : ''}
                     </div>
                   </div>
                   <button type="button" title="Скачать"

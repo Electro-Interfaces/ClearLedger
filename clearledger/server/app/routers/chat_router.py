@@ -626,7 +626,11 @@ async def list_rooms(
             directPeerId=peer_id, createdBy=str(room.created_by) if room.created_by else None,
             # Обрезаем: список чатов грузится у всех и постоянно, а одно длинное
             # сообщение утяжеляло бы ответ каждому участнику навсегда.
-            lastMessage=((last.content or "")[:200] if last else None),
+            # У вложения текст пуст, и список показывал «Нет сообщений» там, где файл
+            # уже отправлен. Правило то же, что у закреплённого сообщения выше.
+            lastMessage=(None if last is None else
+                         ((last.content if last.type == "text"
+                           else (last.file_name or f"[{last.type}]")) or "")[:200]),
             lastMessageAt=(last.created_at.isoformat() if last else None),
             pinnedMessage=pinned,
             myRole=my_role,
