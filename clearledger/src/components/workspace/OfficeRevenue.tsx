@@ -29,8 +29,8 @@ import { Card, CardContent } from '@/components/ui/card'
 import { MetricTile } from '@/components/ui/metric-tile'
 import { cn } from '@/lib/utils'
 import {
-  getArAging, getAssortment, getBacklog, getCashflow, getCashflowItems, getCashForecast,
-  getCollectionCurve,
+  getArAging, getAssortment, getAttention, getBacklog, getCashflow, getCashflowItems,
+  getCashForecast, getCollectionCurve,
   getConcentration, getContractSales, getDeals, getDocsAll, getPaymentTerms,
   getRevenue, getRevenueCheck, getRevenueQuality, getStock, getSuppliers,
   type DocRow, type RevKind,
@@ -268,7 +268,7 @@ const FIXED_KIND: Record<string, RevKind> = {
 const NO_KIND = ['rev_invoices', 'rev_funnel', 'rev_recon', 'rev_abc', 'rev_abc_items',
   'rev_margin', 'rev_terms', 'rev_cashflow', 'rev_contracts', 'rev_stock', 'rev_suppliers',
   'rev_prices', 'rev_quality', 'rev_deals', 'rev_conc', 'rev_aging', 'rev_collect',
-  'rev_backlog', 'rev_forecast', 'rev_cfitems']
+  'rev_backlog', 'rev_forecast', 'rev_cfitems', 'rev_attention']
 
 export function RevenuePanel() {
   const { coreMode } = useWorkspace()
@@ -340,6 +340,7 @@ export function RevenuePanel() {
       case 'rev_collect':    return <RevCollection companyId={companyId} />
       case 'rev_forecast':   return <RevForecast companyId={companyId} />
       case 'rev_cfitems':    return <RevCashflowItems companyId={companyId} period={period} />
+      case 'rev_attention':  return <RevAttention companyId={companyId} period={period} />
       case 'rev_backlog':    return <RevBacklog companyId={companyId} />
       default:               return <RevOverview companyId={companyId} kind={shown} period={period} />
     }
@@ -2584,13 +2585,18 @@ function RevAging({ companyId }: { companyId: string }) {
         <MetricTile label="Сальдо 62 по регистру"
           value={money.format(d.registerDebit) + ' ₽'}
           hint={`аванс покупателей ${money.format(d.registerCredit)} ₽`} />
+        <MetricTile label="Ожидаемые потери" value={money.format(d.risk) + ' ₽'}
+          hint="долг, взвешенный вероятностью невозврата по возрасту"
+          tone={d.risk > d.openAmount / 2 ? 'danger' : undefined} />
         <MetricTile label="Оплата неизвестна" value={num.format(d.unknownCount)}
           hint={`${money.format(d.unknownAmount)} ₽ вне расчёта`} />
       </div>
 
       <p className="text-[11px] text-muted-foreground">
         Возраст считается от даты счёта: срока оплаты по договору в выгрузке нет, и
-        отделить отсрочку от просрочки нечем. Сальдо 62 рядом — эталон из регистра: он
+        отделить отсрочку от просрочки нечем. Ставки риска экспертные и намеренно
+        грубые: точность здесь была бы мнимой, а порядок величины рабочий.
+        Сальдо 62 рядом — эталон из регистра: он
         знает зачёты авансов и оплаты, которых нет в регистре «Оплата счетов», поэтому
         совпадать цифры не обязаны. Снимок на {d.asOf}.
       </p>
@@ -2607,7 +2613,15 @@ function RevAging({ companyId }: { companyId: string }) {
                 !b.count ? 'opacity-40' : bucket === b.key ? 'bg-muted' : 'hover:bg-muted/50')}>
               <div className="flex justify-between text-sm">
                 <span>{b.label} <span className="text-muted-foreground">· {b.count} шт.</span></span>
-                <span className="tabular-nums">{money.format(b.amount)} ₽</span>
+                <span className="tabular-nums">
+                  {money.format(b.amount)} ₽
+                  {b.count > 0 && (
+                    <span className="ml-2 text-[11px] text-muted-foreground"
+                      title="ожидаемые потери: сумма бакета × вероятность невозврата">
+                      риск {b.riskPct} % · {money.format(b.risk)} ₽
+                    </span>
+                  )}
+                </span>
               </div>
               <div className="h-2 rounded bg-muted overflow-hidden">
                 <div className={cn('h-full',
@@ -3344,6 +3358,83 @@ function RevCashflowItems({ companyId, period }: { companyId: string; period: Pe
           </tr>
         ))}
       </TableCard>
+    </div>
+  )
+}
+
+/**
+ * Что требует внимания — единственный экран продукта, отвечающий на вопрос, который
+ * человек задать не догадался.
+ *
+ * Своих расчётов не заводит: собирает уже посчитанное другими экранами, иначе сигнал
+ * и экран, на который он ведёт, разошлись бы в цифрах. Каждый сигнал знает адрес —
+ * клик открывает тот экран, где с этим разбираются.
+ */
+function RevAttention({ companyId, period }: { companyId: string; period: Period }) {
+  const { setCoreMode } = useWorkspace()
+  const q = useQuery({
+    queryKey: ['books', 'attention', companyId, period.from, period.to],
+    queryFn: () => getAttention(companyId, period),
+    enabled: !!companyId,
+  })
+
+  if (q.isError) return <div className="p-4"><QueryError onRetry={() => q.refetch()} /></div>
+  if (!q.data) return <Loading />
+  const d = q.data
+
+  if (!d.signals.length) {
+    return (
+      <div className="p-6 text-sm text-muted-foreground">
+        Сигналов нет: долг в пределах срока, сходимость с бухгалтерией держится,
+        замечаний к данным не нашлось. Снимок на {d.asOf}.
+      </div>
+    )
+  }
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="grid gap-3 grid-cols-3">
+        <MetricTile label="Требуют решения" value={num.format(d.danger)}
+          hint="деньги или доверие к цифрам"
+          tone={d.danger ? 'danger' : 'success'} />
+        <MetricTile label="Стоит посмотреть" value={num.format(d.warn)}
+          hint="не срочно, но накапливается" />
+        <MetricTile label="Снимок" value={d.asOf}
+          hint="сигналы считаются на момент открытия" />
+      </div>
+
+      <div className="space-y-2">
+        {d.signals.map((sg) => (
+          <Card key={sg.key}>
+            <CardContent className="p-3">
+              <button onClick={() => setCoreMode(sg.mode as never, sg.sub)}
+                className="w-full text-left group">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className={cn('h-2 w-2 rounded-full shrink-0',
+                        sg.level === 'danger' ? 'bg-rose-500' : 'bg-amber-500')} />
+                      <span className="font-medium group-hover:text-primary">{sg.title}</span>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground mt-1 pl-4">{sg.why}</p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <div className="tabular-nums whitespace-nowrap">{sg.value}</div>
+                    <div className="text-[11px] text-muted-foreground group-hover:text-primary">
+                      разобрать →
+                    </div>
+                  </div>
+                </div>
+              </button>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      <p className="text-[11px] text-muted-foreground">
+        Сигналы собраны из тех же расчётов, что стоят за экранами продукта: своих цифр
+        здесь нет, иначе они разошлись бы с тем, что человек увидит, перейдя по ссылке.
+      </p>
     </div>
   )
 }

@@ -1057,6 +1057,10 @@ async def revenue_check(
 # По канону бакеты привязывают к условиям договора (при отсрочке 45 дней просрочка
 # начинается на 46-й) — как только реквизит приедет, пороги сдвинутся здесь.
 
+# Ожидаемая доля невозврата по возрасту долга, %. Ставки экспертные: точной модели
+# на 6 открытых счетах не построить, а порядок величины нужен уже сейчас.
+RISK_PCT = {"d30": 1, "d60": 3, "d90": 10, "d180": 25, "older": 50}
+
 AGING_BUCKETS: list[tuple[str, str, int, int]] = [
     ("d30", "До 30 дней", 0, 30),
     ("d60", "31–60 дней", 31, 60),
@@ -1114,6 +1118,13 @@ async def ar_aging(
         "key": key, "label": label,
         "count": sum(1 for r in open_rows if r["bucket"] == key),
         "amount": round(sum(r["rest"] for r in open_rows if r["bucket"] == key), 2),
+        # Ожидаемые потери по бакету. Ставки экспертные и намеренно грубые: точность
+        # здесь мнимая, а порядок величины — рабочий. Практика взыскания: после
+        # 90 дней вероятность возврата заметно падает, после полугода — примерно
+        # вдвое. Ставка видна на экране, чтобы её можно было оспорить.
+        "riskPct": RISK_PCT[key],
+        "risk": round(sum(r["rest"] for r in open_rows if r["bucket"] == key)
+                      * RISK_PCT[key] / 100, 2),
     } for key, label, _, _ in AGING_BUCKETS]
 
     by_client: dict[str, dict[str, Any]] = {}
@@ -1146,6 +1157,7 @@ async def ar_aging(
         "rows": sorted(open_rows, key=lambda r: -r["rest"]),
         "openAmount": round(sum(r["rest"] for r in open_rows), 2),
         "openCount": len(open_rows),
+        "risk": round(sum(b["risk"] for b in buckets), 2),
         "unknownCount": len(unknown),
         "unknownAmount": round(sum(r["amount"] for r in unknown), 2),
         "registerDebit": _num(saldo[0]),
@@ -2372,6 +2384,118 @@ async def cost_bridge(
     }
 
 
+# ── Что требует внимания ─────────────────────────────────────────────────────
+# Экраны отвечают на вопросы, которые человек задал. Этот отвечает на вопрос, который
+# он задать не догадался: «что сейчас не так». Своих расчётов не заводит — собирает
+# уже посчитанное в одном месте, иначе сигнал и экран разойдутся в цифрах.
+
+@router.get("/attention")
+async def attention(
+    company_id: str,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Сигналы по деньгам, продажам и данным — с адресом, куда идти разбираться."""
+    cid = await assert_company_member(company_id, current_user, db)
+    today = date.today()
+    signals: list[dict[str, Any]] = []
+
+    def add(key: str, level: str, title: str, value: str, why: str,
+            mode: str, sub: str, count: int | None = None) -> None:
+        signals.append({"key": key, "level": level, "title": title, "value": value,
+                        "why": why, "mode": mode, "sub": sub, "count": count})
+
+    # Долг старше 90 дней — по тому же множеству, что в реестре старения.
+    aging = await ar_aging(company_id, db, current_user)
+    old_amount = sum(b["amount"] for b in aging["buckets"] if b["key"] in ("d180", "older"))
+    old_count = sum(b["count"] for b in aging["buckets"] if b["key"] in ("d180", "older"))
+    if old_count:
+        top = aging["clients"][0] if aging["clients"] else None
+        add("debt_old", "danger", "Долг старше 90 дней",
+            f"{old_amount:,.2f} ₽".replace(",", " "),
+            (f"{old_count} счетов; крупнейший должник — {top['name']}, "
+             f"старшему счёту {top['maxAge']} дн." if top else f"{old_count} счетов"),
+            "rev_money", "rev_aging", old_count)
+    if aging["unknownCount"]:
+        add("debt_unknown", "warn", "Счета без сведённой оплаты",
+            f"{aging['unknownCount']} шт.",
+            "регистр «Оплата счетов» их не свёл — долг по ним неизвестен, а не равен нулю",
+            "rev_money", "rev_aging", aging["unknownCount"])
+
+    # Клиенты, замолчавшие дольше полугода, но с заметным оборотом.
+    silent = [{
+        "name": r[0], "amount": _num(r[1]), "last": r[2],
+        "days": (today - date.fromisoformat(r[2])).days,
+    } for r in (await db.execute(text(r"""
+        SELECT coalesce(counterparty_name, '—'), sum(amount), max(date)
+          FROM accounting_docs
+         WHERE company_id = :cid AND doc_type = 'sale'
+           AND date ~ '^\d{4}-\d{2}-\d{2}'
+         GROUP BY 1 HAVING max(date) < to_char(now() - interval '180 days', 'YYYY-MM-DD')
+         ORDER BY 2 DESC LIMIT 20
+    """), {"cid": str(cid)})).all()]
+    if silent:
+        add("clients_silent", "warn", "Молчащие покупатели",
+            f"{len(silent)} из тех, кто покупал",
+            f"крупнейший — {silent[0]['name']}, не покупает {silent[0]['days']} дн. "
+            f"при обороте {silent[0]['amount']:,.2f} ₽".replace(",", " "),
+            "rev_buyers", "rev_clients", len(silent))
+
+    # Клиенты со счетами и без единой отгрузки.
+    bl = await backlog(company_id, db, current_user)
+    if bl["silentCount"]:
+        add("backlog", "warn", "Счета без отгрузки",
+            f"{bl['silentAmount']:,.2f} ₽".replace(",", " "),
+            f"{bl['silentCount']} клиентов имеют счета и ноль реализаций — "
+            "незакрытые сделки или отменённые счета в базе",
+            "rev_papers", "rev_backlog", bl["silentCount"])
+
+    # Сделки с низкой маржой.
+    dl = await deals(company_id, date_from, date_to, db, current_user)
+    if dl["lowMargin"]:
+        add("deals_low", "warn", "Сделки с маржой ниже 30 %",
+            f"{dl['lowMargin']} из {dl['withMargin']}",
+            "порог, за которым проверяют цену и объём работ",
+            "rev_sales", "rev_deals", dl["lowMargin"])
+
+    # Концентрация за последний год.
+    conc = await concentration(company_id, db, current_user)
+    last = conc["years"][-1] if conc["years"] else None
+    if last and last.get("hhi") and last["hhi"] > conc["levels"]["high"]:
+        add("concentration", "danger", "Высокая концентрация выручки",
+            f"HHI {last['hhi']} за {last['year']}",
+            f"на первую тройку покупателей приходится {last['cr3']} % выручки",
+            "rev_sales", "rev_conc")
+
+    # Качество данных: сколько проверок с замечаниями.
+    qa = await revenue_quality(company_id, db, current_user)
+    if qa["problems"]:
+        worst = max(qa["checks"], key=lambda c: c["count"])
+        add("quality", "warn", "Замечания к данным",
+            f"{qa['problems']} из {len(qa['checks'])} проверок",
+            f"крупнейшее — «{worst['title']}»: {worst['count']}",
+            "rev_sales", "rev_quality", qa["problems"])
+
+    # Сходимость с бухгалтерией: если разошлась, остальное можно не смотреть.
+    chk = await revenue_check(company_id, db, current_user)
+    if chk["broken"]:
+        add("recon", "danger", "Витрина разошлась с регистром",
+            f"{len(chk['broken'])} месяцев",
+            "пока сходимость нарушена, цифрам продукта верить нельзя",
+            "rev_sales", "rev_recon", len(chk["broken"]))
+
+    order = {"danger": 0, "warn": 1, "info": 2}
+    signals.sort(key=lambda s: order.get(s["level"], 9))
+    return {
+        "signals": signals,
+        "danger": sum(1 for s in signals if s["level"] == "danger"),
+        "warn": sum(1 for s in signals if s["level"] == "warn"),
+        "asOf": today.isoformat(),
+    }
+
+
 # ── Качество данных продукта ─────────────────────────────────────────────────
 # Волна 5. Отдельно от «Данных» пространства: там качество слоя целиком, здесь —
 # ровно то, что портит цифры «Реализации». Проверка = вопрос заказчику, поэтому
@@ -2960,8 +3084,8 @@ async def counterparties(
                           THEN b.credit ELSE 0 END) AS adv_in,
                  sum(CASE WHEN b.account LIKE '60.02%' OR b.account LIKE '60.22%'
                           THEN b.debit ELSE 0 END) AS adv_out,
-                 sum(CASE WHEN b.account LIKE '76%' THEN b.debit ELSE 0 END) AS other_dt,
-                 sum(CASE WHEN b.account LIKE '76%' THEN b.credit ELSE 0 END) AS other_kt,
+                 sum(CASE WHEN b.account LIKE '76.0%' THEN b.debit ELSE 0 END) AS other_dt,
+                 sum(CASE WHEN b.account LIKE '76.0%' THEN b.credit ELSE 0 END) AS other_kt,
                  sum(CASE WHEN b.account LIKE '58%' THEN b.debit ELSE 0 END) AS loan_out,
                  sum(CASE WHEN b.account LIKE '66%' OR b.account LIKE '67%'
                           THEN b.credit ELSE 0 END) AS loan_in,
@@ -3090,8 +3214,8 @@ async def counterparty_card(
                -- Прочие расчёты, займы и подотчёт: раньше карточка их не смотрела,
                -- и у ТСМ ООО «мы должны» показывало 295 800 вместо 673 625 — разница
                -- висела на 76.09. Складывать их с долгом нельзя: другое обязательство.
-               sum(b.debit)  FILTER (WHERE b.account LIKE '76%'),
-               sum(b.credit) FILTER (WHERE b.account LIKE '76%'),
+               sum(b.debit)  FILTER (WHERE b.account LIKE '76.0%'),
+               sum(b.credit) FILTER (WHERE b.account LIKE '76.0%'),
                sum(b.debit)  FILTER (WHERE b.account LIKE '58%'),
                sum(b.credit) FILTER (WHERE b.account LIKE '66%' OR b.account LIKE '67%'),
                sum(b.credit - b.debit) FILTER (WHERE b.account LIKE '71%')
@@ -3705,7 +3829,7 @@ async def quality(
     head_vs_lines = await _count("""
         SELECT count(*) FROM accounting_docs d
          WHERE d.company_id = :cid AND jsonb_array_length(coalesce(d.lines,'[]'::jsonb)) > 0
-           AND d.doc_type <> 'payroll_accrual'
+           AND d.doc_type NOT IN ('payroll_accrual', 'act_recon')
            AND abs(d.amount - (SELECT coalesce(sum((l->>'amount')::numeric),0)
                                  FROM jsonb_array_elements(d.lines) l)) > 0.01""")
     add("head_vs_lines", "Шапка документа = сумма строк",
@@ -3721,7 +3845,7 @@ async def quality(
 
     not_posted = await _count("""
         SELECT count(*) FROM accounting_docs
-         WHERE company_id = :cid AND status_1c = 'Не проведён'""")
+         WHERE company_id = :cid AND coalesce(status_1c, '') NOT IN ('Проведён', '')""")
     add("not_posted", "Непроведённые документы", "info", not_posted,
         "Документ записан, но в учёт не попал: в книгу и в обороты он не входит")
 
@@ -4115,7 +4239,9 @@ async def settlements(
     авансов живут только там.
     """
     cid = await assert_company_member(company_id, current_user, db)
-    prefix = {"receivable": "62", "payable": "60", "other": "76"}[kind]
+    # 76.АВ и 76.ВА — это НДС с авансов, а не долг контрагента: в «прочих расчётах»
+    # они завышали дебет впятеро и показывали в карточке деньги, которых контрагент не должен.
+    prefix = {"receivable": "62", "payable": "60", "other": "76.0"}[kind]
 
     as_of = (await db.execute(
         select(func.max(GlBalance.as_of)).where(GlBalance.company_id == cid))).scalar_one_or_none()
@@ -4417,6 +4543,7 @@ _GAP_RULES = [
 async def closing(
     company_id: str,
     period: str | None = None,
+    full: bool = False,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
@@ -4462,7 +4589,8 @@ async def closing(
             "count": len(rows), "amount": round(sum(_num(r[4]) for r in rows), 2),
             "rows": [{"id": str(r[0]), "date": r[1], "number": r[2],
                       "counterparty": r[3], "amount": _num(r[4]),
-                      "period": (r[1] or "")[:7]} for r in rows[:200]],
+                      "period": (r[1] or "")[:7]}
+                     for r in (rows if full else rows[:200])],
         })
 
     # 1. Поступление, у которого нет счёта-фактуры того же контрагента в ±31 день.
@@ -4503,13 +4631,20 @@ async def closing(
               WHERE x.company_id = d.company_id
                 AND x.doc_type IN ('purchase', 'advance_report', 'invoice_in')
                 AND x.counterparty_inn = d.counterparty_inn
-                AND substr(x.date, 1, 7) = substr(d.date, 1, 7))
+                AND abs(x.date::date - d.date::date) <= 90)
            AND NOT EXISTS (
              SELECT 1 FROM gl_entries g
               WHERE g.doc_id = d.id
                 AND (g.account_dt LIKE '68%' OR g.account_dt LIKE '69%'
                      OR g.account_dt LIKE '70%' OR g.account_dt LIKE '66%'
-                     OR g.account_dt LIKE '67%' OR g.account_dt LIKE '58%'))
+                     OR g.account_dt LIKE '67%' OR g.account_dt LIKE '58%'
+                     -- Закрывающего документа не бывает по природе платежа:
+                     -- комиссия банка (91), расходы будущих периодов (97),
+                     -- перевод на свой спецсчёт (55), возврат покупателю (62),
+                     -- обеспечение и депозиты (76), выданный аванс (60.02).
+                     OR g.account_dt LIKE '91%' OR g.account_dt LIKE '97%'
+                     OR g.account_dt LIKE '55%' OR g.account_dt LIKE '62%'
+                     OR g.account_dt LIKE '76%' OR g.account_dt LIKE '60.02%'))
          ORDER BY d.date DESC""")
 
     # 4. Счёт покупателю оплачен, отгрузки нет.
@@ -4521,15 +4656,18 @@ async def closing(
            AND NOT EXISTS (
              SELECT 1 FROM accounting_docs s
               WHERE s.company_id = d.company_id AND s.doc_type = 'sale'
-                AND s.counterparty_inn = d.counterparty_inn
-                AND s.date >= d.date)
+                AND coalesce(s.counterparty_inn, '') = coalesce(d.counterparty_inn, '')
+                AND coalesce(s.counterparty_inn, '') <> ''
+                AND s.date >= d.date AND s.date::date - d.date::date <= 90)
          ORDER BY d.date DESC""")
 
     # 5. Непроведённые документы: записаны, но в учёт не попали.
     await collect("not_posted", """
         SELECT d.id, d.date, d.number, d.counterparty_name, d.amount
           FROM accounting_docs d
-         WHERE d.company_id = :cid AND d.status_1c = 'Не проведён' """ + where_period + """
+         WHERE d.company_id = :cid AND coalesce(d.status_1c, '') NOT IN ('Проведён', '')
+           AND d.doc_type NOT IN ('closing_op', 'act_recon', 'manual_entry')
+           AND NOT EXISTS (SELECT 1 FROM gl_entries e WHERE e.doc_id = d.id) """ + where_period + """
          ORDER BY d.date DESC""")
 
     # Кто задолжал документы — тот же список, свёрнутый по контрагенту: работа идёт
@@ -4601,6 +4739,21 @@ _CHECK_GROUPS = [
 
 # key, группа, заголовок, чем грозит, SQL списка нарушителей (5 колонок:
 # id, дата, номер, кто/что, сумма) либо None для проверок-сверок.
+# Правило политики живо ровно до тех пор, пока источник сообщает настройку, на
+# которой оно стоит: вид справочника и ключ в его `meta`.
+_POLICY_KEYS = {
+    "policy_pbu18": ("accounting_policy", "ПБУ 18/02"),
+    "policy_reserves": ("accounting_policy", "Резервы по сомнительным долгам"),
+    "policy_transit": ("accounting_policy", "Переводы в пути при перемещении денег"),
+    "policy_tax_mode": ("tax_mode", "Система налогообложения"),
+    "policy_vat_payer": ("tax_mode", "Плательщик НДС"),
+}
+
+
+def _policy_has(meta: dict[str, dict], kind: str, key: str) -> bool:
+    return bool((meta.get(kind) or {}).get(key))
+
+
 _CHECKS: list[tuple] = [
     ("policy_lock", "policy", "Дата запрета изменения данных установлена",
      "Без запрета закрытый период может быть переписан задним числом, и отчётность разъедется", """
@@ -4690,7 +4843,7 @@ _CHECKS: list[tuple] = [
           FROM accounting_docs
          WHERE company_id = :cid AND amount = 0
            AND doc_type NOT IN ('closing_op', 'manual_entry', 'act_recon', 'vat_book_in',
-                                'vat_book_out', 'tax_notice', 'payroll_accrual')
+                                'vat_book_out', 'tax_notice', 'payroll_accrual', 'demand_note')
          ORDER BY date DESC"""),
     ("no_counterparty", "books", "Документы без контрагента",
      "Контрагент не сведён со справочником: документ не попадёт в его карточку и в акт сверки", """
@@ -4698,7 +4851,87 @@ _CHECKS: list[tuple] = [
           FROM accounting_docs
          WHERE company_id = :cid AND counterparty_id IS NULL
            AND coalesce(counterparty_name, '') <> ''
+           -- Выплата зарплаты идёт сотруднику: контрагента у неё не бывает.
+           AND NOT EXISTS (SELECT 1 FROM gl_entries e
+                            WHERE e.doc_id = accounting_docs.id AND e.account_dt LIKE '70%')
          ORDER BY date DESC"""),
+
+    # ── НДС: то, что смотрят и в экспресс-проверке 1С, и при камеральной ────────
+    ("vat_rate_mismatch", "vat_out", "Ставка НДС не сходится с суммой документа",
+     "Налог в документе не равен ставке периода: либо ошибка ввода, либо смешанные ставки в одной строке", """
+        SELECT id::text, date, number, coalesce(counterparty_name, ''), amount
+          FROM accounting_docs
+         WHERE company_id = :cid AND doc_type IN ('sale', 'purchase')
+           AND coalesce(vat_amount, 0) > 0 AND amount > 0
+           AND abs(vat_amount - amount * (CASE WHEN date >= '2026-01-01'
+                                               THEN 22.0/122 ELSE 20.0/120 END)) > 1
+           AND jsonb_array_length(coalesce(lines, '[]'::jsonb)) <= 1
+         ORDER BY date DESC"""),
+    ("vat_invoice_late", "vat_out", "Счёт-фактура выставлен позже пяти дней",
+     "Пункт 3 статьи 168 НК: пять календарных дней от отгрузки. Позже — спор о вычете у покупателя", r"""
+        SELECT id::text, date, number, coalesce(counterparty_name, ''), amount
+          FROM accounting_docs
+         WHERE company_id = :cid AND doc_type = 'vat_invoice_out'
+           AND details->>'Основание' ~ '\d{2}\.\d{2}\.\d{4}'
+           AND date::date - to_date(substring(details->>'Основание'
+                                              from '(\d{2}\.\d{2}\.\d{4})'), 'DD.MM.YYYY') > 5
+         ORDER BY date DESC"""),
+    ("vat_19_stuck", "vat_in", "НДС на 19 счёте не принят к вычету",
+     "Предъявленный налог висит на 19 счёте: вычет не заявлен, деньги лежат в бюджете зря", """
+        SELECT min(id::text), max(entry_date)::text, account, 'не принят к вычету', sum(amt)
+          FROM (SELECT id, entry_date, account_dt AS account, amount AS amt
+                  FROM gl_entries WHERE company_id = :cid AND account_dt LIKE '19%'
+                 UNION ALL
+                SELECT id, entry_date, account_kt, -amount
+                  FROM gl_entries WHERE company_id = :cid AND account_kt LIKE '19%') t
+         GROUP BY account HAVING sum(amt) > 0.004"""),
+    ("advance_out_stuck", "vat_in", "Аванс поставщику висит без поставки",
+     "Деньги ушли, товара нет: либо поставка потерялась, либо аванс пора возвращать", """
+        SELECT id::text, as_of::text, account, coalesce(sub1, '') || ' · ' || coalesce(sub2, ''), debit
+          FROM gl_balances
+         WHERE company_id = :cid AND account LIKE '60.02%' AND debit > 1000
+           AND as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid)
+         ORDER BY debit DESC"""),
+    ("advance_vat_stuck", "vat_out", "НДС с полученного аванса не зачтён",
+     "76.АВ висит: отгрузки по авансу не было, налог начислен и не возвращён вычетом", """
+        SELECT id::text, as_of::text, account, coalesce(sub1, ''), debit
+          FROM gl_balances
+         WHERE company_id = :cid AND account LIKE '76.АВ%' AND debit > 0.004
+           AND as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid)
+         ORDER BY debit DESC"""),
+
+    # ── Первичка: то, что находит проверяющий раньше бухгалтера ────────────────
+    ("doc_duplicates", "books", "Похоже на дубль документа",
+     "Один контрагент, одна дата, одна сумма: обычно документ проведён дважды и расход задвоен", """
+        SELECT min(id::text), date, string_agg(number, ' / ' ORDER BY number),
+               coalesce(counterparty_name, ''), max(amount)
+          FROM accounting_docs
+         WHERE company_id = :cid AND doc_type IN ('sale', 'purchase') AND amount > 0
+         GROUP BY date, doc_type, coalesce(counterparty_inn, ''), counterparty_name, amount
+        HAVING count(*) > 1
+         ORDER BY max(amount) DESC"""),
+    ("big_no_contract", "books", "Крупный документ без договора",
+     "Основание сделки не указано: для расхода это первый вопрос проверяющего", """
+        SELECT id::text, date, number, coalesce(counterparty_name, ''), amount
+          FROM accounting_docs
+         WHERE company_id = :cid AND doc_type IN ('sale', 'purchase')
+           AND amount > 100000 AND contract_id IS NULL
+         ORDER BY amount DESC"""),
+    ("invoice_overpaid", "money", "Счёт оплачен больше, чем выставлен",
+     "Переплата: либо оплатили дважды, либо платёж привязан не к тому счёту", """
+        SELECT d.id::text, d.date, d.number, coalesce(d.counterparty_name, ''),
+               sum(ip.amount) - d.amount
+          FROM accounting_docs d JOIN invoice_payments ip ON ip.invoice_doc_id = d.id
+         WHERE d.company_id = :cid
+         GROUP BY d.id, d.date, d.number, d.counterparty_name, d.amount
+        HAVING sum(ip.amount) > d.amount + 0.01
+         ORDER BY sum(ip.amount) - d.amount DESC"""),
+    ("reversal_entries", "books", "Сторнирующие проводки",
+     "Отрицательная сумма — это исправление: смотреть, что именно правили и почему", """
+        SELECT id::text, entry_date::text, account_dt || '/' || account_kt,
+               coalesce(doc_title, ''), amount
+          FROM gl_entries WHERE company_id = :cid AND amount < 0
+         ORDER BY amount"""),
 
     ("payment_no_purpose", "money", "Платежи без назначения",
      "Назначение платежа — главный реквизит банковской операции: без него платёж не опознать", """
@@ -4765,16 +4998,31 @@ _CHECKS: list[tuple] = [
      "Списали больше, чем приняли: либо не хватает поступления, либо ошибка в количестве", """
         SELECT id::text, as_of::text, account, coalesce(sub1, ''), credit - debit
           FROM gl_balances
-         WHERE company_id = :cid AND account LIKE '41%' AND credit > debit
+         WHERE company_id = :cid AND (account LIKE '41%' OR account LIKE '10%'
+                                   OR account LIKE '43%') AND credit > debit
            AND as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid)"""),
+    # Остаток «не в свою сторону» — классика анализа состояния учёта: минус в дебете
+    # активного счёта не бывает физически, это всегда ошибка ввода или зачёта.
+    ("negative_balance", "books", "Отрицательное сальдо на счёте",
+     "Минусовой остаток не бывает в природе: обычно зачёт не туда или ошибка ввода", """
+        SELECT id::text, as_of::text, account, coalesce(sub1, ''), least(debit, credit)
+          FROM gl_balances
+         WHERE company_id = :cid AND (debit < 0 OR credit < 0)
+           AND as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid)
+         ORDER BY least(debit, credit)"""),
 
+    # Регламентные операции, акты сверки и ручные операции в 1С не проводятся по
+    # природе, а у документа с проводками статус в выгрузке просто врёт. Без этих
+    # двух условий проверка давала 514 «ошибок» из 514 и красила экран целиком.
     ("closed_not_posted", "periods", "Непроведённые документы в закрытом периоде",
      "Период закрыт, а документ в учёт не попал: его сумма нигде не участвует", """
         SELECT d.id::text, d.date, d.number, d.counterparty_name, d.amount
           FROM accounting_docs d
           JOIN periods p ON p.company_id = d.company_id
                AND p.year = substr(d.date,1,4)::int AND p.month = substr(d.date,6,2)::int
-         WHERE d.company_id = :cid AND d.status_1c = 'Не проведён' AND p.status = 'closed'
+         WHERE d.company_id = :cid AND coalesce(d.status_1c, '') NOT IN ('Проведён', '') AND p.status = 'closed'
+           AND d.doc_type NOT IN ('closing_op', 'act_recon', 'manual_entry')
+           AND NOT EXISTS (SELECT 1 FROM gl_entries e WHERE e.doc_id = d.id)
          ORDER BY d.date DESC"""),
     ("open_old", "periods", "Открытые периоды старше двух месяцев",
      "Месяц давно прошёл, а не закрыт: отчётность по нему ещё может поехать", """
@@ -4797,6 +5045,11 @@ async def checks(
     p = {"cid": str(cid)}
     out: list[dict[str, Any]] = []
 
+    policy_meta = {r[0]: (r[1] or {}) for r in (await db.execute(text("""
+        SELECT kind, meta FROM gl_references
+         WHERE company_id = :cid AND kind IN ('accounting_policy', 'tax_mode')"""),
+        p)).all()}
+
     for key, group, title, risk, sql in _CHECKS:
         rows: list[dict[str, Any]] = []
         count = 0
@@ -4809,20 +5062,22 @@ async def checks(
                      "subject": r[3], "amount": _num(r[4])} for r in found[:50]]
 
         # Проверки-сверки: у них не список нарушителей, а цифра из регистра.
-        if key == "payroll_unpaid":
+        if key in ("payroll_unpaid", "ndfl_debt"):
+            acct = "70" if key == "payroll_unpaid" else "68.01"
             amount = _num((await db.execute(text("""
-                SELECT coalesce(sum(credit - debit), 0) FROM gl_balances
-                 WHERE company_id = :cid AND account LIKE '70%'
-                   AND as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid)"""),
-                p)).scalar_one())
+                SELECT coalesce(sum(amount) FILTER (WHERE account_kt LIKE :acct), 0)
+                     - coalesce(sum(amount) FILTER (WHERE account_dt LIKE :acct), 0)
+                  FROM gl_entries WHERE company_id = :cid"""),
+                {**p, "acct": acct + "%"})).scalar_one())
             count = 1 if amount > 0.004 else 0
-        if key == "ndfl_debt":
-            amount = _num((await db.execute(text("""
-                SELECT coalesce(sum(credit - debit), 0) FROM gl_balances
-                 WHERE company_id = :cid AND account LIKE '68.01%'
-                   AND as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid)"""),
-                p)).scalar_one())
-            count = 1 if amount > 0.004 else 0
+
+        # Настройка, от которой зависит правило. Нет её — правило не выполнялось, и
+        # честный ответ «источник не сообщил», а не «в порядке».
+        if key in _POLICY_KEYS and not _policy_has(policy_meta, *_POLICY_KEYS[key]):
+            out.append({"key": key, "group": group, "title": title, "risk": risk,
+                        "status": "info", "count": 0, "amount": 0.0,
+                        "value": "нет настройки", "rows": []})
+            continue
 
         # Учётная политика: проверка на НАЛИЧИЕ, а не на отсутствие — там пусто плохо.
         if key in ("policy_lock", "policy_mpz"):
@@ -4954,7 +5209,10 @@ async def create_requests_from_gaps(
     иначе история обращений расщепилась бы между дублями.
     """
     cid = await assert_company_member(company_id, current_user, db)
-    data = await closing(company_id=company_id, period=period, db=db, current_user=current_user)
+    # Полный список: «взять под контроль» обязано брать все находки правила, иначе
+    # часть работы молча остаётся вне реестра.
+    data = await closing(company_id=company_id, period=period, full=True,
+                         db=db, current_user=current_user)
     gap = next((g for g in data["gaps"] if g["key"] == rule), None)
     if gap is None:
         raise HTTPException(status_code=404, detail="Правило не найдено")
@@ -4962,6 +5220,14 @@ async def create_requests_from_gaps(
     known = {str(r) for r in (await db.execute(
         select(DocRequest.source_doc_id).where(
             DocRequest.company_id == cid, DocRequest.rule == rule))).scalars() if r}
+
+    # Контрагент ссылкой, а не строкой: по ней требование закрывается тем же
+    # документом и по ней же берутся контакты для обращения.
+    parties = {r[0]: r[1] for r in (await db.execute(text("""
+        SELECT id::text, counterparty_id::text FROM accounting_docs
+         WHERE company_id = :cid AND id = ANY(CAST(:ids AS uuid[]))"""),
+        {"cid": str(cid), "ids": [r["id"] for r in gap["rows"]] or ["00000000-0000-0000-0000-000000000000"]}
+        )).all()}
 
     created = 0
     due = (date.today() + timedelta(days=due_days)).isoformat()
@@ -4971,6 +5237,8 @@ async def create_requests_from_gaps(
         db.add(DocRequest(
             company_id=cid, period=row["period"] or (period or ""), rule=rule,
             counterparty_name=row["counterparty"] or "",
+            counterparty_id=(uuid.UUID(parties[row["id"]])
+                             if parties.get(row["id"]) else None),
             source_doc_id=uuid.UUID(row["id"]),
             doc_kind=_RULE_DOC_KIND.get(rule, gap["title"]),
             amount=row["amount"], status="open", due_date=due,
@@ -5079,14 +5347,24 @@ async def resolve_requests(
             continue
         if not types:
             continue
+        # Закрываем ТЕМ ЖЕ документом, а не любым следующим от того же поставщика:
+        # сверяем контрагента (по ИНН, если он известен), период требования и сумму
+        # с допуском в рубль. Прежнее условие «имя совпало и дата не раньше» у
+        # поставщика с ежемесячными поставками закрывало прошлый месяц следующей
+        # накладной — реестр отчитывался о документах, которых не приходило.
         found = (await db.execute(text("""
             SELECT d.id FROM accounting_docs d
              WHERE d.company_id = :cid AND d.doc_type = ANY(:types)
-               AND substr(d.date, 1, 7) >= :period
-               AND lower(coalesce(d.counterparty_name, '')) = lower(:name)
+               AND substr(d.date, 1, 7) = :period
+               AND (CASE WHEN :party IS NOT NULL
+                         THEN d.counterparty_id = CAST(:party AS uuid)
+                         ELSE lower(coalesce(d.counterparty_name, '')) = lower(:name) END)
+               AND (:amount <= 0 OR abs(d.amount - :amount) <= 1.0)
              ORDER BY d.date LIMIT 1"""),
             {"cid": str(cid), "types": list(types), "period": r.period,
-             "name": r.counterparty_name})).scalar_one_or_none()
+             "name": r.counterparty_name,
+             "party": str(r.counterparty_id) if r.counterparty_id else None,
+             "amount": _num(r.amount)})).scalar_one_or_none()
         if found:
             r.status, r.resolved_at = "received", datetime.now(timezone.utc)
             r.resolved_doc_id = found
@@ -5105,8 +5383,31 @@ async def resolve_requests(
 # Считаем ПО НАШИМ ДАННЫМ и честно называем это оценкой: декларацию формирует
 # бухгалтерия, а здесь оперативный минимум, чтобы понимать порядок суммы.
 
-_PROFIT_RATE = 0.20      # ставка налога на прибыль
-_VAT_CALC = 20.0 / 120   # расчётная ставка НДС для сумм с налогом
+# Ставка налога на прибыль: 25 % с 2025 года, до этого 20 %. Сверено с учётом
+# клиента — проводка 99 → 68.04 за 2025 дала ровно 25 %.
+_PROFIT_RATES = ((2025, 0.25), (0, 0.20))
+
+
+def _profit_rate(period: str) -> float:
+    try:
+        year = int(str(period)[:4])
+    except (TypeError, ValueError):
+        return 0.25
+    return next(rate for since, rate in _PROFIT_RATES if year >= since)
+
+# Ставка НДС менялась и будет меняться: 18 % до 2019 года, 20 % с 2019-го, 22 % с
+# 2026-го. Зашитая константа означала бы, что прогноз врёт на всей истории клиента,
+# у которого документы старше текущей ставки, — а таких у нас все.
+_VAT_RATES = ((2026, 0.22), (2019, 0.20), (0, 0.18))
+
+
+def _vat_rate(period: str) -> float:
+    """Ставка НДС для периода «ГГГГ-…» или «ГГГГ-Qn»."""
+    try:
+        year = int(period[:4])
+    except (TypeError, ValueError):
+        return 0.20
+    return next(rate for since, rate in _VAT_RATES if year >= since)
 
 
 @router.get("/tax-forecast")
@@ -5120,9 +5421,23 @@ async def tax_forecast(
     cid = await assert_company_member(company_id, current_user, db)
     p: dict[str, Any] = {"cid": str(cid)}
 
-    # НДС по книгам: продажи — начисленный, покупки — вычет. Берём журнал учёта
-    # счетов-фактур, а не проводки: в декларацию идёт именно он.
+    # НДС считаем ПО СЧЁТУ 68.02, а не по журналу счетов-фактур. Журнал знает только
+    # выставленные и полученные СФ и не видит зачёт авансов (Дт 68.02 Кт 76.АВ) и
+    # вычет с выданных (Кт 76.ВА) — а это две трети вычета. Асимметрия убийственная:
+    # НДС с авансов начислялся, но не зачитывался, и налог завышался в разы.
+    # Из вычета исключаем уплату в бюджет (Кт 51) и перенос на ЕНС (Кт 68.90) —
+    # это движение денег, а не налога.
     vat_rows = (await db.execute(text("""
+        SELECT period_year || '-Q' || to_char(ceil(period_month::numeric / 3), 'FM9') AS q,
+               sum(amount) FILTER (WHERE account_kt LIKE '68.02%')                    AS accrued,
+               sum(amount) FILTER (WHERE account_dt LIKE '68.02%'
+                                     AND account_kt NOT LIKE '51%'
+                                     AND account_kt NOT LIKE '68.90%')                AS deducted
+          FROM gl_entries WHERE company_id = :cid
+         GROUP BY 1"""), p)).all()
+
+    # Книга — рядом, справкой: по ней сверяются с контрагентом и собирают декларацию.
+    book_rows = (await db.execute(text("""
         SELECT substr(doc_date, 1, 4) || '-Q' ||
                to_char(ceil(substr(doc_date, 6, 2)::numeric / 3), 'FM9') AS q,
                kind, sum(vat), count(*)
@@ -5135,18 +5450,24 @@ async def tax_forecast(
     def slot(q: str) -> dict[str, Any]:
         return quarters.setdefault(q, {
             "quarter": q, "vatOut": 0.0, "vatIn": 0.0, "vatDue": 0.0,
+            "bookOut": 0.0, "bookIn": 0.0,
             "income": 0.0, "expense": 0.0, "profit": 0.0, "profitTax": 0.0,
             "docsIssued": 0, "docsReceived": 0,
             "pendingVat": 0.0, "pendingExpense": 0.0,
         })
 
-    for q, kind, vat, cnt in vat_rows:
+    for q, accrued, deducted in vat_rows:
+        s = slot(q)
+        s["vatOut"] = round(_num(accrued), 2)
+        s["vatIn"] = round(_num(deducted), 2)
+
+    for q, kind, vat, cnt in book_rows:
         s = slot(q)
         if kind == "issued":
-            s["vatOut"] += _num(vat)
+            s["bookOut"] = round(s.get("bookOut", 0.0) + _num(vat), 2)
             s["docsIssued"] += cnt
         elif kind == "received":
-            s["vatIn"] += _num(vat)
+            s["bookIn"] = round(s.get("bookIn", 0.0) + _num(vat), 2)
             s["docsReceived"] += cnt
 
     # Прибыль: доходы без НДС против расходов — по оборотам регистра, а не по
@@ -5182,22 +5503,41 @@ async def tax_forecast(
 
     for q, rule, amount, cnt in pending:
         s = slot(q)
+        rate = _vat_rate(q)
         if rule == "purchase_no_vat_invoice":
             # Документ на руках, счёта-фактуры нет: придёт — появится вычет.
-            s["pendingVat"] += round(_num(amount) * _VAT_CALC, 2)
+            s["pendingVat"] += round(_num(amount) * rate / (1 + rate), 2)
         elif rule == "payment_no_document":
             # Оплата без закрывающего: придёт — вырастут расходы и появится вычет.
-            s["pendingExpense"] += round(_num(amount) / 1.2, 2)
-            s["pendingVat"] += round(_num(amount) * _VAT_CALC, 2)
+            s["pendingExpense"] += round(_num(amount) / (1 + rate), 2)
+            s["pendingVat"] += round(_num(amount) * rate / (1 + rate), 2)
 
-    for s in quarters.values():
+    # Налог на прибыль считается НАРАСТАЮЩИМ ИТОГОМ с начала года, а платёж за
+    # квартал — это разница с уже начисленным. Поквартально через max(прибыль, 0)
+    # убыточный квартал внутри прибыльного года просто исчезал, и налог получался
+    # завышенным: убыток внутри года уменьшает базу, это прямая норма НК.
+    ytd: dict[int, dict[str, float]] = {}
+    for s in sorted(quarters.values(), key=lambda x: x["quarter"]):
+        year = int(s["quarter"][:4])
+        acc = ytd.setdefault(year, {"profit": 0.0, "tax": 0.0,
+                                    "profitIf": 0.0, "taxIf": 0.0})
         s["vatDue"] = round(s["vatOut"] - s["vatIn"], 2)
         s["profit"] = round(s["income"] - s["expense"], 2)
-        s["profitTax"] = round(max(s["profit"], 0) * _PROFIT_RATE, 2)
+
+        acc["profit"] += s["profit"]
+        tax_ytd = max(acc["profit"], 0) * _profit_rate(s["quarter"])
+        s["profitTax"] = round(tax_ytd - acc["tax"], 2)
+        acc["tax"] = tax_ytd
+
         # Сценарий «документы собраны»: вычет растёт, расходы растут, налог падает.
         s["vatDueIfCollected"] = round(s["vatDue"] - s["pendingVat"], 2)
         s["profitIfCollected"] = round(s["profit"] - s["pendingExpense"], 2)
-        s["profitTaxIfCollected"] = round(max(s["profitIfCollected"], 0) * _PROFIT_RATE, 2)
+        acc["profitIf"] += s["profitIfCollected"]
+        tax_if_ytd = max(acc["profitIf"], 0) * _profit_rate(s["quarter"])
+        s["profitTaxIfCollected"] = round(tax_if_ytd - acc["taxIf"], 2)
+        acc["taxIf"] = tax_if_ytd
+
+        s["profitYtd"] = round(acc["profit"], 2)
         s["saving"] = round((s["vatDue"] - s["vatDueIfCollected"])
                             + (s["profitTax"] - s["profitTaxIfCollected"]), 2)
 
@@ -5250,9 +5590,10 @@ _ADJ_FIELDS = {
     "cost_account": "Счёт затрат",
     "article": "Статья затрат",
     "contract": "Договор",
-    "counterparty": "Контрагент",
-    "status": "Проведение",
 }
+# `counterparty` и `status` намеренно НЕ корректируются: смена ИНН меняет книгу
+# покупок и договор, а «провести» чужой документ — это правка в источнике, а не
+# в выгрузке. Такие вещи идут заявкой на исправление в 1С, а не корректировкой.
 _ADJ_STATUS = {"draft": "Черновик", "approved": "Утверждена",
                "exported": "Выгружена", "rejected": "Отклонена"}
 
@@ -5296,10 +5637,15 @@ async def export_layer(
         # Эффект считаем только по утверждённым: черновик — это предложение, и
         # налог по нему считать нельзя, иначе прогноз поедет от чужих раздумий.
         if a.status == "approved" and old_n is not None and new_n is not None:
+            # Знак зависит от того, что за документ. Рост суммы поступления — это
+            # рост расхода и МЕНЬШЕ налога; рост суммы реализации — рост выручки и
+            # БОЛЬШЕ налога. Один знак на оба случая давал прямо обратный ответ.
+            sign = -1.0 if (doc and doc.doc_type in ("sale", "vat_invoice_out",
+                                                     "invoice_out")) else 1.0
             if a.field == "amount":
-                delta_amount += new_n - old_n
+                delta_amount += (new_n - old_n) * sign
             elif a.field == "vat_amount":
-                delta_vat += new_n - old_n
+                delta_vat += (new_n - old_n) * (-sign)
         items.append({
             "id": str(a.id), "period": a.period, "field": a.field,
             "fieldLabel": _ADJ_FIELDS.get(a.field, a.field),
@@ -5344,7 +5690,7 @@ async def export_layer(
             # Что изменится в выгрузке против слоя, если провести утверждённое.
             "amount": round(delta_amount, 2),
             "vat": round(delta_vat, 2),
-            "profitTax": round(-delta_amount * _PROFIT_RATE, 2),
+            "profitTax": round(-delta_amount * _profit_rate(period or "2026"), 2),
             "docs": len({i["doc"]["id"] for i in items if i["doc"]}),
         },
     }
@@ -5552,7 +5898,15 @@ async def trends(
                  sum(amount) FILTER (WHERE account_kt LIKE '90.01%')
                - sum(amount) FILTER (WHERE account_dt LIKE '90.03%') AS revenue,
                  sum(amount) FILTER (WHERE account_dt LIKE '90.02%') AS cost,
-                 sum(amount) FILTER (WHERE account_dt LIKE '44%' OR account_dt LIKE '26%') AS expense
+                 -- Расход берём ТОЛЬКО тот, что не ушёл в себестоимость: 26-й и 44-й
+                 -- закрываются на 90.02, и складывая их с ней, мы считали одни и те
+                 -- же деньги дважды — на пилоте это превращало прибыль 157 тыс. в
+                 -- убыток 430 тыс.
+                 sum(amount) FILTER (WHERE (account_dt LIKE '44%' OR account_dt LIKE '26%')
+                                       AND account_kt NOT LIKE '90%')
+               - sum(amount) FILTER (WHERE account_dt LIKE '90.02%'
+                                       AND (account_kt LIKE '44%' OR account_kt LIKE '26%'))
+                 AS expense
             FROM gl_entries WHERE company_id = :cid GROUP BY 1
         ), d AS (
           SELECT substr(date, 1, 7) AS m, count(*) AS docs
@@ -5562,6 +5916,13 @@ async def trends(
                coalesce(d.docs, 0)
           FROM e LEFT JOIN d ON d.m = e.m
          ORDER BY e.m"""), p)).all()]
+
+    # Масштаб клиента: средняя выручка месяца с оборотом. Все пороги ниже — доли от
+    # неё, поэтому правила одинаково работают и на микрокомпании, и на сети.
+    active = [m for m in months if m["revenue"] > 0]
+    scale = (sum(m["revenue"] for m in active) / len(active)) if active else 0.0
+    big = max(50_000.0, round(scale * 0.30, -3))      # «крупно» для одного контрагента
+    notable = max(20_000.0, round(scale * 0.10, -3))  # «заметно» для одной суммы
 
     findings: list[dict[str, Any]] = []
 
@@ -5579,7 +5940,7 @@ async def trends(
         if len(base) < 3:
             continue
         avg = sum(base) / len(base)
-        if avg > 0 and m["expense"] > avg * 2 and m["expense"] - avg > 50_000:
+        if avg > 0 and m["expense"] > avg * 2 and m["expense"] - avg > notable:
             jumps.append({"period": m["month"], "subject": "Расходы периода",
                           "amount": m["expense"],
                           "note": f"среднее за три месяца до этого {avg:,.0f} ₽".replace(",", " ")})
@@ -5611,8 +5972,8 @@ async def trends(
           FROM accounting_docs
          WHERE company_id = :cid AND doc_type IN ('purchase', 'invoice_in')
            AND coalesce(counterparty_name, '') <> ''
-         GROUP BY 1 HAVING count(*) <= 2 AND sum(amount) > 300000
-         ORDER BY 2 DESC LIMIT 50"""), p)).all()]
+         GROUP BY 1 HAVING count(*) <= 2 AND sum(amount) > :big
+         ORDER BY 2 DESC LIMIT 50"""), {**p, "big": big})).all()]
     add("one_off_supplier", "Разовый поставщик на крупную сумму",
         "Одна-две операции на сотни тысяч — обычный повод показать договор и деловую цель",
         once)
@@ -5626,8 +5987,8 @@ async def trends(
         SELECT amount, date, number, doc_type, coalesce(counterparty_name, '')
           FROM accounting_docs
          WHERE company_id = :cid AND doc_type IN ('purchase', 'invoice_in')
-           AND amount >= 100000 AND amount = round(amount) AND (amount::numeric % 10000) = 0
-         ORDER BY amount DESC LIMIT 50"""), p)).all()]
+           AND amount >= :notable AND amount = round(amount) AND (amount::numeric % 10000) = 0
+         ORDER BY amount DESC LIMIT 50"""), {**p, "notable": notable})).all()]
     add("round_amounts", "Круглые суммы в расходах",
         "Само по себе не нарушение, но проверяющий смотрит на них первыми — держите обоснование",
         round_docs)
@@ -5652,7 +6013,7 @@ async def trends(
     # 6. Месяцы, где расход есть, а выручки нет вовсе.
     idle = [{"period": m["month"], "subject": "Месяц без выручки",
              "amount": m["expense"], "note": "расходы есть, продаж нет"}
-            for m in months if m["expense"] > 50_000 and m["revenue"] <= 0]
+            for m in months if m["expense"] > notable and m["revenue"] <= 0]
     add("expense_no_revenue", "Расходы без выручки в месяце",
         "Для налоговой это повод спросить о деловой цели: расход есть, дохода нет",
         idle)
@@ -5664,5 +6025,7 @@ async def trends(
             "months": len(months),
             "findings": sum(f["count"] for f in findings),
             "kinds": len(findings),
+            "scale": round(scale, 2),
+            "thresholds": {"big": big, "notable": notable},
         },
     }

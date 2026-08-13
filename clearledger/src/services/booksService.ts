@@ -412,9 +412,30 @@ export interface TaxesData {
 export const getTaxes = (companyId: string, period?: PeriodOpts) =>
   get<TaxesData>(`/api/books/taxes?company_id=${companyId}` + periodQuery(period))
 
+/** Сигналы продукта: что сейчас не так и куда идти разбираться. */
+export interface Attention {
+  signals: {
+    key: string; level: 'danger' | 'warn' | 'info'
+    title: string; value: string; why: string
+    /** Куда ведёт сигнал: раздел рельсы и пункт второй панели. */
+    mode: string; sub: string
+    count: number | null
+  }[]
+  danger: number
+  warn: number
+  asOf: string
+}
+
+export const getAttention = (companyId: string, period?: PeriodOpts) =>
+  get<Attention>(`/api/books/attention?company_id=${companyId}` + periodQuery(period))
+
 /** Реестр старения долга: сколько, чьё и сколько дней. */
 export interface ArAging {
-  buckets: { key: string; label: string; count: number; amount: number }[]
+  buckets: {
+    key: string; label: string; count: number; amount: number
+    /** Ожидаемая доля невозврата по возрасту, % — ставка экспертная. */
+    riskPct: number; risk: number
+  }[]
   clients: {
     id: string | null; name: string; invoices: number; rest: number
     maxAge: number; oldest: string | null
@@ -426,6 +447,8 @@ export interface ArAging {
   }[]
   openAmount: number
   openCount: number
+  /** Ожидаемые потери по долгу: сумма бакетов, взвешенных ставкой риска. */
+  risk: number
   unknownCount: number
   unknownAmount: number
   registerDebit: number

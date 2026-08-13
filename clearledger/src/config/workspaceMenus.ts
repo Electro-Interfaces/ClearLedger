@@ -351,6 +351,9 @@ export const MARKET_KEYS = MARKET_MENU.map((m) => m.key)
  * дважды, и общей выручки компании не показывал ни один из них.
  */
 export const REV_SALES_MENU: CentralMenuItem[] = [
+  // Первым пунктом: экраны отвечают на заданный вопрос, а этот — на вопрос, который
+  // человек задать не догадался («что сейчас не так»).
+  { key: 'rev_attention', label: 'Требует внимания' },
   { key: 'rev_overview', label: 'Обзор' },
   { key: 'rev_trend',    label: 'Динамика и YoY' },
   { key: 'rev_compare',  label: 'Сравнение периодов' },
