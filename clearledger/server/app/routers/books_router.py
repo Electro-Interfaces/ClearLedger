@@ -23,7 +23,7 @@ from app.auth import assert_company_member, get_current_user
 from app.database import get_db
 from app.models import (
     AccountingDoc, Counterparty, GlAccount, GlEntry, GlReference,
-    NomenclatureItem, Period, User,
+    NomenclatureItem, Period, User, ReferenceSnapshot, SourceFile,
 )
 
 router = APIRouter(prefix="/books", tags=["Бухгалтерия пространства"])
@@ -883,23 +883,31 @@ async def model(
         select(func.min(GlEntry.entry_date), func.max(GlEntry.entry_date))
         .where(GlEntry.company_id == cid))).one()
 
+    # L1 и L4 материальны: приём выгрузки и снимок эталона закрытого месяца.
+    intakes = (await db.execute(select(func.count()).select_from(SourceFile)
+                                .where(SourceFile.company_id == cid))).scalar_one()
+    snapshots = (await db.execute(select(func.count()).select_from(ReferenceSnapshot)
+                                  .where(ReferenceSnapshot.company_id == cid))).scalar_one()
+
     layers = [
         # L1 у офиса ПОКА НЕ МАТЕРИАЛИЗОВАН: данные залиты скриптом снаружи, записи о
         # приёме (SourceFile / RawBatchRecord) в базе нет. Рисовать здесь «1 выгрузку»
         # значило бы показывать то, чего нет: сетевые в такой ситуации честно ставят
         # `status: direct` (см. analytics_service.charge_model).
         {"key": "l1", "code": "L1 · RAW", "title": "Приём выгрузки",
-         "desc": "файл .dt разобран вне продукта — записи о приёме в базе нет",
-         "records": 0, "unit": "выгрузок", "tone": "raw", "status": "direct"},
+         "desc": "файл бухгалтерии с отпечатком: что и когда приняли",
+         "records": intakes, "unit": "приёмов", "tone": "raw",
+         **({"status": "direct"} if not intakes else {})},
         {"key": "l2", "code": "L2 · CLEAN", "title": "Нормализованный слой",
          "desc": "проводки, документы, справочники",
          "records": entries + docs + accounts + refs, "unit": "записей", "tone": "clean"},
         {"key": "l3", "code": "L3 · EXPORT", "title": "Обороты и разрезы",
          "desc": "оборотка, продажи, услуги, периоды",
          "records": None, "unit": "", "tone": "export"},
-        {"key": "l4", "code": "L4 · 1C_REF", "title": "Закрытые периоды",
-         "desc": "месяц, который бухгалтерия больше не меняет",
-         "records": closed, "unit": "месяцев", "tone": "ref"},
+        {"key": "l4", "code": "L4 · 1C_REF", "title": "Снимки закрытых периодов",
+         "desc": "состав и контрольная сумма месяца, который бухгалтерия не меняет",
+         "records": snapshots, "unit": "снимков", "tone": "ref",
+         **({"status": "planned"} if not snapshots else {})},
     ]
 
     async def dimension(key, label, field, column, canonical, grain=None):
@@ -927,7 +935,32 @@ async def model(
                         GlEntry.doc_kind, False, "регистратор проводки"),
         await dimension("period_year", "Год периода", "gl_entries.period_year",
                         GlEntry.period_year, True, "год"),
+        await dimension("period_month", "Месяц периода", "gl_entries.period_month",
+                        GlEntry.period_month, True, "месяц"),
     ]
+
+    # Контрагент — измерение ЧЕРЕЗ ДОКУМЕНТ: в самом регистре его нет (субконто
+    # недоступно), но проводка теперь знает свой документ, а документ — контрагента.
+    linked = (await db.execute(
+        select(func.count()).select_from(GlEntry)
+        .where(GlEntry.company_id == cid, GlEntry.doc_id.is_not(None)))).scalar_one()
+    if linked:
+        top_cp = (await db.execute(
+            select(AccountingDoc.counterparty_name, func.count())
+            .join(GlEntry, GlEntry.doc_id == AccountingDoc.id)
+            .where(GlEntry.company_id == cid, AccountingDoc.counterparty_name != "")
+            .group_by(AccountingDoc.counterparty_name)
+            .order_by(func.count().desc()).limit(5))).all()
+        cp_card = (await db.execute(
+            select(func.count(func.distinct(AccountingDoc.counterparty_inn)))
+            .join(GlEntry, GlEntry.doc_id == AccountingDoc.id)
+            .where(GlEntry.company_id == cid))).scalar_one()
+        dimensions.append({
+            "key": "counterparty", "label": "Контрагент",
+            "field": "accounting_docs.counterparty_inn", "cardinality": cp_card,
+            "fill_pct": round(linked * 100 / entries, 1) if entries else 0,
+            "canonical": True, "grain": "через документ проводки",
+            "members": [{"label": v, "count": n} for v, n in top_cp]})
 
     total = await _turnover(db, cid)
     revenue = await _turnover(db, cid, kt=REVENUE_KT)

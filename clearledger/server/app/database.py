@@ -1232,6 +1232,11 @@ async def create_all() -> None:
             # Реквизиты документа, за которыми не заводят колонку: время проведения,
             # автор, договор, комментарий. Нужны срезу компании из бухгалтерии.
             "ALTER TABLE accounting_docs ADD COLUMN IF NOT EXISTS doc_meta JSONB",
+            # Проводка → первичный документ: корень измерений «контрагент»,
+            # «организация», «номенклатура» и разворота оборотки до первички.
+            "ALTER TABLE gl_entries ADD COLUMN IF NOT EXISTS doc_id UUID "
+            "REFERENCES accounting_docs(id) ON DELETE SET NULL",
+            "CREATE INDEX IF NOT EXISTS idx_gl_entries_doc ON gl_entries(company_id, doc_id)",
             # v2.5: универсальные справочники — raw-снимок всех реквизитов 1С + промо.
             "ALTER TABLE counterparties ADD COLUMN IF NOT EXISTS raw JSONB",
             "ALTER TABLE counterparties ADD COLUMN IF NOT EXISTS full_name VARCHAR(1000)",

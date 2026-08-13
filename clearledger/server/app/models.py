@@ -1395,6 +1395,13 @@ class GlEntry(Base):
     # представление — по ним видно, чем порождена проводка.
     doc_kind: Mapped[str | None] = mapped_column(String(200), nullable=True)
     doc_title: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # Ссылка на первичный документ. Без неё проводка знает документ только СТРОКОЙ
+    # (`doc_title`), и от этого зависело сразу четыре измерения: контрагент,
+    # организация, номенклатура и подразделение известны на уровне документа.
+    # Разворот оборотки до первички тоже упирался сюда.
+    doc_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("accounting_docs.id", ondelete="SET NULL"), nullable=True
+    )
     account_dt: Mapped[str | None] = mapped_column(String(20), nullable=True)
     account_kt: Mapped[str | None] = mapped_column(String(20), nullable=True)
     amount: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False, default=0)
@@ -1409,6 +1416,7 @@ class GlEntry(Base):
 
     __table_args__ = (
         Index("idx_gl_entries_period", "company_id", "period_year", "period_month"),
+        Index("idx_gl_entries_doc", "company_id", "doc_id"),
         Index("idx_gl_entries_accounts", "company_id", "account_dt", "account_kt"),
         Index("uq_gl_entry_external", "company_id", "external_key", unique=True),
     )
