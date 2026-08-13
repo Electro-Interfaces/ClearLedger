@@ -2022,6 +2022,12 @@ class MailAccount(Base):
     uid_validity: Mapped[int | None] = mapped_column(Integer, nullable=True)
     last_sync_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True)
+    # Когда почта РЕАЛЬНО приходила. `last_sync_at` — «когда пытались»: по нему
+    # считается расписание, и он обновляется даже когда сервер отбил пароль. На
+    # витрине подключений это выглядело свежим обменом у ящика, который месяцами
+    # не принимает ни письма.
+    last_ok_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

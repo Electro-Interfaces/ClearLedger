@@ -986,6 +986,11 @@ async def create_all() -> None:
             "ALTER TABLE mail_accounts ADD COLUMN IF NOT EXISTS signature TEXT",
             "ALTER TABLE mail_accounts ADD COLUMN IF NOT EXISTS poll_interval_min INTEGER "
             "NOT NULL DEFAULT 15",
+            # Когда почта реально приходила: `last_sync_at` — «когда пытались», он
+            # обновляется и при неудачном заходе, и витрина показывала свежий обмен
+            # у ящика с неверным паролем.
+            "ALTER TABLE mail_accounts ADD COLUMN IF NOT EXISTS last_ok_at "
+            "TIMESTAMP WITH TIME ZONE",
             # Оригинал письма: разбор — наша интерпретация, спор решается исходником.
             "ALTER TABLE mail_messages ADD COLUMN IF NOT EXISTS raw_eml BYTEA",
             # Куда правило доставляет письмо: комната чата и объект для заявки.

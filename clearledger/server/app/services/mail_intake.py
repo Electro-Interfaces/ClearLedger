@@ -32,9 +32,10 @@ from email.message import Message
 from email.utils import parsedate_to_datetime, parseaddr, getaddresses
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.net_guard import assert_external_host
 from app.models import (
     Counterparty, CounterpartyEmail, IntakeBatch, MailAccount, MailAttachment,
     MailMessage, MailRule, MailThread, Task,
@@ -137,13 +138,22 @@ def _refs(msg: Message) -> list[str]:
     return re.findall(r"<[^>]+>", raw)
 
 
+# Сокет без таймаута ждёт вечно: хост, который принимает TCP и молчит (файрвол
+# с DROP, зависший почтовик), намертво вешал поток опроса — и весь приём почты
+# останавливался беззвучно. У SMTP в этом же файле таймаут был, у IMAP не было.
+IMAP_TIMEOUT = 20
+
+
 def _connect_imap(account: dict[str, Any], password: str):
     """Соединение с ящиком. Обычный порт 143 без шифрования встречается только во
     внутренних почтовиках, но встречается — поэтому режим выбирается настройкой."""
+    assert_external_host(account["imap_host"])
     if account.get("imap_security") == "none":
-        conn = imaplib.IMAP4(account["imap_host"], account["imap_port"])
+        conn = imaplib.IMAP4(account["imap_host"], account["imap_port"],
+                             timeout=IMAP_TIMEOUT)
     else:
-        conn = imaplib.IMAP4_SSL(account["imap_host"], account["imap_port"])
+        conn = imaplib.IMAP4_SSL(account["imap_host"], account["imap_port"],
+                                 timeout=IMAP_TIMEOUT)
     # Пароль с кириллицей или знаками юникода валит login на кодировке ascii —
     # imaplib отдаёт строку как есть. Отправляем байтами: сервер ждёт utf-8.
     conn.login(account["login"], password.encode("utf-8") if password else "")
@@ -280,6 +290,11 @@ async def poll_account(db: AsyncSession, account: MailAccount) -> dict[str, Any]
 
     account.last_sync_at = datetime.now(timezone.utc)
     account.last_error = error
+    if not error:
+        # Когда почта РЕАЛЬНО приходила. `last_sync_at` — это «когда пытались», по
+        # нему считается расписание, и на витрине он врал: неудачная попытка
+        # выглядела свежим обменом.
+        account.last_ok_at = account.last_sync_at
     if validity:
         account.uid_validity = validity
     if error:
@@ -292,6 +307,12 @@ async def poll_account(db: AsyncSession, account: MailAccount) -> dict[str, Any]
             if await _save_message(db, account, uid, raw):
                 saved += 1
         except Exception as e:  # noqa: BLE001 — одно кривое письмо не рвёт приём
+            # Откат обязателен: ошибка от БД (слишком длинный Message-ID и т.п.)
+            # отравляет сессию, и дальше падает ВСЁ, включая сохранение last_uid.
+            # Без него ящик застревал на одном письме и сыпал трейсбеком в лог
+            # каждую минуту, а остальные ящики компании в этот тик не опрашивались.
+            await db.rollback()
+            account = await db.merge(account)
             logger.exception("письмо uid=%s не сохранено: %s", uid, e)
         account.last_uid = max(account.last_uid or 0, uid)
     await db.commit()
@@ -301,6 +322,10 @@ async def poll_account(db: AsyncSession, account: MailAccount) -> dict[str, Any]
 # Сколько писем от одного адреса принимаем за сутки: сорвавшийся автоответчик
 # или рассылка иначе заполняют ленту за час.
 DAILY_LIMIT_PER_SENDER = 200
+
+# Пространство имён блокировки опроса: своё, чтобы не пересечься с
+# планировщиками задач и каналов.
+POLL_LOCK_NS = 4711
 
 
 async def _save_message(db: AsyncSession, account: MailAccount, uid: int,
@@ -648,10 +673,15 @@ async def poll_due(db: AsyncSession) -> dict[str, Any]:
                or (now - a.last_sync_at).total_seconds() >= a.poll_interval_min * 60)
         if not due:
             continue
+        got = await db.scalar(text("SELECT pg_try_advisory_xact_lock(:ns, :key)"),
+                              {"ns": POLL_LOCK_NS, "key": a.id.int % (2 ** 31)})
+        if not got:
+            continue
         try:
             await poll_account(db, a)
             done += 1
         except Exception as e:  # noqa: BLE001 — один ящик не роняет остальные
+            await db.rollback()
             logger.exception("опрос ящика %s не удался: %s", a.address, e)
     return {"polled": done, "checked": len(accounts)}
 

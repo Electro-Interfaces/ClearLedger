@@ -9,12 +9,13 @@ import os
 from typing import Any
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import assert_company_member, get_current_user
+from app.routers.users_router import require_company_admin
 from app.database import get_db
 from app.models import (
     Counterparty, CounterpartyEmail, MailAccount, MailAttachment, MailMessage,
@@ -47,6 +48,19 @@ class AccountIn(BaseModel):
     signature: str | None = None
     poll_interval_min: int = 15
     is_active: bool = True
+
+
+def _check_secret_env(name: str | None) -> None:
+    """Имя переменной окружения приходит из формы, а читаем мы её из окружения
+    контейнера. Без ограничения в это поле можно было вписать `SECRET_KEY` или
+    `DATABASE_URL`, указать свой IMAP-сервер без шифрования — и бэкенд отправил бы
+    значение наружу командой LOGIN. Пароли ящиков живут под префиксом `MAIL_`.
+    """
+    if name and not mail_secrets.secret_env_allowed(name):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Переменная с паролем ящика должна начинаться с MAIL_ "
+            "(и не быть служебной переменной почты платформы)")
 
 
 def _account(a: MailAccount) -> dict[str, Any]:
@@ -88,9 +102,10 @@ async def create_account(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await require_company_admin(company_id, current_user, db)
     data = body.model_dump()
     password = data.pop("password", None)
+    _check_secret_env(data.get("secret_env"))
     a = MailAccount(company_id=cid, **data)
     if password:
         a.password_enc = mail_secrets.encrypt(password)
@@ -107,13 +122,14 @@ async def update_account(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await require_company_admin(company_id, current_user, db)
     a = (await db.execute(select(MailAccount).where(
         MailAccount.company_id == cid, MailAccount.id == account_id))).scalar_one_or_none()
     if a is None:
         return {"error": "not_found"}
     data = body.model_dump()
     password = data.pop("password", None)
+    _check_secret_env(data.get("secret_env"))
     for k, v in data.items():
         setattr(a, k, v)
     # Пустое поле пароля — «оставить как было»: правка подписи не должна стирать
@@ -131,7 +147,7 @@ async def delete_account(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await require_company_admin(company_id, current_user, db)
     a = (await db.execute(select(MailAccount).where(
         MailAccount.company_id == cid, MailAccount.id == account_id))).scalar_one_or_none()
     if a is not None:
@@ -301,7 +317,7 @@ async def create_rule(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await require_company_admin(company_id, current_user, db)
     r = MailRule(company_id=cid, **body.model_dump())
     db.add(r)
     await db.commit()
@@ -316,7 +332,7 @@ async def update_rule(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await require_company_admin(company_id, current_user, db)
     r = (await db.execute(select(MailRule).where(
         MailRule.company_id == cid, MailRule.id == rule_id))).scalar_one_or_none()
     if r is None:
@@ -334,7 +350,7 @@ async def delete_rule(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await require_company_admin(company_id, current_user, db)
     r = (await db.execute(select(MailRule).where(
         MailRule.company_id == cid, MailRule.id == rule_id))).scalar_one_or_none()
     if r is not None:
@@ -519,7 +535,7 @@ async def test_account(
     Сотрудник должен увидеть результат сразу — «сервер не принял пароль» здесь и
     сейчас, а не пустая лента через час и догадки, что пошло не так.
     """
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await require_company_admin(company_id, current_user, db)
     a = (await db.execute(select(MailAccount).where(
         MailAccount.company_id == cid, MailAccount.id == account_id))).scalar_one_or_none()
     if a is None:
