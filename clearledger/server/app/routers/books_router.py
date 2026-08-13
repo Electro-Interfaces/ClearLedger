@@ -66,7 +66,7 @@ DOC_LABELS = {
 # счёт-фактура по одной сделке лежат в одной папке, потому что вопрос к ним общий
 # («чем закрыт этот счёт»), а не «где хранятся счета-фактуры».
 DOC_SECTIONS = [
-    ("sales", "Продажи", ["invoice_out", "sale_goods", "sale_services", "vat_invoice_out"]),
+    ("sales", "Продажи", ["invoice_out", "sale", "vat_invoice_out"]),
     ("purchases", "Закупки", ["purchase", "vat_invoice_in", "purchase_correction", "proxy"]),
     ("money", "Деньги", ["bank_in", "bank_out", "payment_order",
                          "cash_in", "cash_out", "advance_report"]),
@@ -788,7 +788,7 @@ async def quality(
     sales_total = _num((await db.execute(
         select(func.coalesce(func.sum(AccountingDoc.amount), 0))
         .where(AccountingDoc.company_id == cid,
-               AccountingDoc.doc_type.in_(("sale_goods", "sale_services"))))).scalar_one())
+               AccountingDoc.doc_type == "sale"))).scalar_one())
     diff = round(revenue - sales_total, 2)
     add("revenue_match", "Выручка документов = оборот 90.01.1",
         "ok" if abs(diff) < 0.02 else "error",
@@ -798,7 +798,7 @@ async def quality(
     # Считаем только те виды, у которых контрагент есть по природе: у регламентной
     # операции закрытия и операции вручную его не бывает вовсе, и без этого условия
     # проверка показывала полтысячи «нарушений», которых нет.
-    WITH_COUNTERPARTY = ("sale_goods", "sale_services", "purchase", "invoice_out",
+    WITH_COUNTERPARTY = ("sale", "purchase", "invoice_out",
                          "vat_invoice_out", "vat_invoice_in", "invoice_in",
                          "purchase_services", "act_recon")
     no_inn = (await db.execute(
