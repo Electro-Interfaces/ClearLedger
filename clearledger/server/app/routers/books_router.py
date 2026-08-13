@@ -6117,6 +6117,119 @@ async def apply_rules(
 # их надо именно так, иначе экран превращается в генератор ложных тревог.
 
 
+def _plus_days(day: str, days: int) -> str:
+    return (date.fromisoformat(day) + timedelta(days=days)).isoformat()
+
+
+# ── Сроки и бюджет: что горит, что сдано, сколько должны ─────────────────────
+# Все четыре набора приезжают из 1С в слой: календарь бухгалтера, начисления на
+# ЕНС, уведомления об исчисленных суммах и сданная отчётность. Раздел не считает
+# ничего своего — он показывает то, что уже известно, в одном месте и по сроку.
+# Смысл прослойки ровно в этом: бухгалтер видит горящее, не открывая 1С.
+
+
+@router.get("/calendar")
+async def tax_calendar(
+    company_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Календарь сроков, начисления на ЕНС, уведомления и сданная отчётность."""
+    cid = await assert_company_member(company_id, current_user, db)
+    p: dict[str, Any] = {"cid": str(cid)}
+    today = date.today().isoformat()
+
+    # Задачи бухгалтера: срок, период события, статус. Архивные не показываем —
+    # это закрытая история прошлых лет, её место в отчётности, а не в сроках.
+    def task_state(due: str | None, status: str | None) -> str:
+        # Отметку о выполнении бухгалтер в 1С ведёт не всегда: у пилота статус есть
+        # лишь у 111 задач из 463. Поэтому прошедший срок — это «срок прошёл», а не
+        # «просрочено»: утверждать, что работа не сделана, мы не можем.
+        if status == "Сдано":
+            return "сдано"
+        if not due:
+            return "без срока"
+        if due < today:
+            return "срок прошёл"
+        return "на этой неделе" if due <= _plus_days(today, 7) else "впереди"
+
+    tasks = [{
+        "due": r[0], "title": r[1],
+        "period": (r[2] or {}).get("Период события"),
+        "rule": (r[2] or {}).get("Правило"),
+        "period_kind": (r[2] or {}).get("Периодичность"),
+        "status": (r[2] or {}).get("Статус") or None,
+        "state": task_state(r[0], (r[2] or {}).get("Статус")),
+    } for r in (await db.execute(text("""
+        SELECT code, name, meta FROM gl_references
+         WHERE company_id = :cid AND kind = 'tax_calendar'
+           AND coalesce(meta->>'В архиве', 'false') <> 'true'
+           AND code >= :from_date
+         ORDER BY code LIMIT 60"""), {**p, "from_date": _plus_days(today, -45)})).all()]
+
+    # Начисления на ЕНС: сколько налога начислено и к какому сроку. Сальдо ЕНС
+    # берём с бухгалтерского счёта 68.90 — это то же обязательство, но проверяемое.
+    enp = [{
+        "period": r[0], "title": r[1],
+        "tax": (r[2] or {}).get("Налог"), "due": (r[2] or {}).get("Срок уплаты"),
+        "amount": _num((r[2] or {}).get("Начислено") or (r[2] or {}).get("Сумма налога")),
+        "advance": bool((r[2] or {}).get("Авансовый платёж")),
+    } for r in (await db.execute(text("""
+        SELECT code, name, meta FROM gl_references
+         WHERE company_id = :cid AND kind = 'enp_accrual'
+         ORDER BY code DESC LIMIT 40"""), p)).all()]
+
+    enp_balance = _num((await db.execute(text("""
+        SELECT coalesce(sum(amount) FILTER (WHERE account_kt LIKE '68.90%'), 0)
+             - coalesce(sum(amount) FILTER (WHERE account_dt LIKE '68.90%'), 0)
+          FROM gl_entries WHERE company_id = :cid"""), p)).scalar_one())
+
+    # Долг перед бюджетом по каждому налогу: кредит минус дебет счёта 68/69.
+    debts = [{"account": r[0], "name": r[1] or r[0], "amount": _num(r[2])}
+             for r in (await db.execute(text("""
+        SELECT account, max(account_name), sum(credit) - sum(debit)
+          FROM gl_balances
+         WHERE company_id = :cid AND (account LIKE '68%' OR account LIKE '69%')
+           AND as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid)
+         GROUP BY account HAVING abs(sum(credit) - sum(debit)) > 0.004
+         ORDER BY 3 DESC"""), p)).all()]
+
+    notices = [{
+        "number": r[0], "date": r[1], "amount": _num(r[2]),
+        "taxes": (r[3] or {}).get("Налоги"), "due": (r[3] or {}).get("Срок уплаты"),
+        "lines": r[4] or [],
+    } for r in (await db.execute(text("""
+        SELECT number, date, amount, details, lines
+          FROM accounting_docs
+         WHERE company_id = :cid AND doc_type = 'tax_notice'
+         ORDER BY date DESC LIMIT 24"""), p)).all()]
+
+    filed = [{"date": r[0], "title": r[1],
+              "period": (r[2] or {}).get("Период"),
+              "signed": (r[2] or {}).get("Дата подписи")}
+             for r in (await db.execute(text("""
+        SELECT code, name, meta FROM gl_references
+         WHERE company_id = :cid AND kind = 'reports_filed' AND NOT is_deleted
+         ORDER BY code DESC LIMIT 40"""), p)).all()]
+
+    overdue = sum(1 for t in tasks if t["state"] == "срок прошёл")
+    soon = sum(1 for t in tasks if t["state"] == "на этой неделе")
+    return {
+        "today": today,
+        "tasks": tasks, "enp": enp, "notices": notices, "filed": filed,
+        "debts": debts,
+        "note": ("Сроки и отметки берутся из 1С как есть. Отметку о выполнении там ведут "
+                 "не всегда, поэтому прошедший срок показан как «срок прошёл», а не как "
+                 "нарушение: часть работы могла быть сделана без отметки."),
+        "summary": {
+            "overdue": overdue, "soon": soon,
+            "enpBalance": round(enp_balance, 2),
+            "budgetDebt": round(sum(d["amount"] for d in debts if d["amount"] > 0), 2),
+            "filed": len(filed),
+        },
+    }
+
+
 @router.get("/trends")
 async def trends(
     company_id: str,

@@ -1361,3 +1361,22 @@ export interface TrendsData {
 
 export const getTrends = (companyId: string) =>
   get<TrendsData>(`/api/books/trends?company_id=${companyId}`)
+
+/** Сроки и бюджет: календарь 1С, ЕНС, уведомления и сданная отчётность. */
+export interface TaxCalendarData {
+  today: string
+  note: string
+  tasks: { due: string; title: string; period: string | null; rule: string | null
+    period_kind: string | null; status: string | null; state: string }[]
+  enp: { period: string; title: string; tax: string | null; due: string | null
+    amount: number; advance: boolean }[]
+  notices: { number: string; date: string; amount: number; taxes: string | null
+    due: string | null; lines: unknown[] }[]
+  filed: { date: string; title: string; period: string | null; signed: string | null }[]
+  debts: { account: string; name: string; amount: number }[]
+  summary: { overdue: number; soon: number; enpBalance: number
+    budgetDebt: number; filed: number }
+}
+
+export const getTaxCalendar = (companyId: string) =>
+  get<TaxCalendarData>(`/api/books/calendar?company_id=${companyId}`)

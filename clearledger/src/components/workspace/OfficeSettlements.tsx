@@ -22,7 +22,7 @@ import { MetricTile } from '@/components/ui/metric-tile'
 import { cn } from '@/lib/utils'
 import {
   applyExportRules, createRequestsFromGaps, getChecks, getClosing, getExportLayer,
-  getPayroll, getRequests, getTrends,
+  getPayroll, getRequests, getTaxCalendar, getTrends,
   getSettlements, getTaxForecast, getVat, resolveRequests, updateAdjustment,
   updateRequest,
   type SettlementKind, type SettlementsData, type VatData, type VatKind,
@@ -1235,6 +1235,152 @@ export function BooksTrends({ companyId }: { companyId: string }) {
           Ничего необычного: расходы ровные, разовых поставщиков нет, встречных
           операций тоже. Экран заполнится, когда цифра начнёт выделяться.
         </CardContent></Card>
+      )}
+    </div>
+  )
+}
+
+
+/* ──────────────────────────── Сроки и бюджет ──────────────────────────────── */
+
+const TASK_TONE: Record<string, string> = {
+  'срок прошёл': 'text-amber-600 dark:text-amber-500',
+  'на этой неделе': 'text-foreground font-medium',
+  'сдано': 'text-muted-foreground',
+}
+
+/**
+ * «Бухгалтерия» → «Сроки и бюджет»: что горит, что сдано, сколько должны.
+ *
+ * Раздел не считает ничего своего. Календарь бухгалтера, начисления на ЕНС,
+ * уведомления и сданная отчётность приезжают из 1С в слой — здесь они собраны в
+ * одном месте и упорядочены по сроку. Смысл прослойки в том, чтобы бухгалтер
+ * видел горящее, не открывая 1С.
+ */
+export function BooksCalendar({ companyId }: { companyId: string }) {
+  const [tab, setTab] = useState<'tasks' | 'enp' | 'filed'>('tasks')
+  const q = useQuery({
+    queryKey: ['books', 'calendar', companyId],
+    queryFn: () => getTaxCalendar(companyId),
+  })
+
+  if (q.isError) {
+    return <div className="p-4"><QueryError message="Не удалось загрузить сроки" onRetry={() => q.refetch()} /></div>
+  }
+  if (!q.data) return <div className="p-6 text-sm text-muted-foreground">Загрузка…</div>
+  const d = q.data
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="grid gap-3 sm:grid-cols-4">
+        <MetricTile label="Срок прошёл" value={String(d.summary.overdue)}
+          tone={d.summary.overdue ? 'warning' : undefined} hint="без отметки о сдаче" />
+        <MetricTile label="На этой неделе" value={String(d.summary.soon)} />
+        <MetricTile label="Долг перед бюджетом"
+          value={`${money.format(d.summary.budgetDebt)} ₽`}
+          tone={d.summary.budgetDebt > 0 ? 'warning' : undefined} hint="счета 68 и 69" />
+        <MetricTile label="Сальдо ЕНС" value={`${money.format(d.summary.enpBalance)} ₽`}
+          hint="счёт 68.90" />
+      </div>
+
+      <p className="text-[11px] text-muted-foreground">{d.note}</p>
+
+      <div className="flex gap-1">
+        {([['tasks', 'Календарь'], ['enp', 'ЕНС и уведомления'],
+           ['filed', 'Сдано']] as const).map(([k, label]) => (
+          <button key={k} onClick={() => setTab(k)}
+            className={cn('rounded-md px-2.5 py-1 text-xs',
+              tab === k ? 'bg-muted font-medium' : 'text-muted-foreground hover:bg-muted/50')}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'tasks' && (
+        <TableCard note="Задачи бухгалтера из 1С: полтора месяца назад и всё, что впереди"
+          head={<><Th>Срок</Th><Th>Что сделать</Th><Th>Период</Th><Th>Состояние</Th></>}>
+          {d.tasks.map((t, i) => (
+            <tr key={`${t.due}-${i}`} className="border-b last:border-0 hover:bg-muted/40">
+              <td className="px-3 py-1.5 whitespace-nowrap tabular-nums">{t.due || '—'}</td>
+              <td className="px-3 py-1.5">{t.title}</td>
+              <td className="px-3 py-1.5 text-muted-foreground whitespace-nowrap">
+                {t.period_kind || '—'}
+              </td>
+              <td className={cn('px-3 py-1.5 whitespace-nowrap text-[13px]',
+                TASK_TONE[t.state] ?? 'text-muted-foreground')}>
+                {t.state}{t.status && t.status !== 'Сдано' ? ` · ${t.status}` : ''}
+              </td>
+            </tr>
+          ))}
+        </TableCard>
+      )}
+
+      {tab === 'enp' && (
+        <div className="space-y-4">
+          {d.debts.length > 0 && (
+            <TableCard note="Сальдо счетов расчётов с бюджетом и фондами на последнюю дату"
+              head={<><Th>Счёт</Th><Th>Налог</Th><Th right>Должны</Th></>}>
+              {d.debts.map((x) => (
+                <tr key={x.account} className="border-b last:border-0">
+                  <td className="px-3 py-1.5 tabular-nums whitespace-nowrap">{x.account}</td>
+                  <td className="px-3 py-1.5">{x.name}</td>
+                  <td className={cn('px-3 py-1.5 text-right tabular-nums',
+                    x.amount > 0 && 'font-medium')}>{money.format(x.amount)} ₽</td>
+                </tr>
+              ))}
+            </TableCard>
+          )}
+
+          {d.notices.length > 0 && (
+            <TableCard note="Уведомления об исчисленных суммах: состав и срок уплаты"
+              head={<><Th>Дата</Th><Th>Номер</Th><Th>Налоги</Th><Th>Срок уплаты</Th>
+                <Th right>Сумма</Th></>}>
+              {d.notices.map((n) => (
+                <tr key={`${n.number}-${n.date}`} className="border-b last:border-0">
+                  <td className="px-3 py-1.5 whitespace-nowrap tabular-nums">{n.date}</td>
+                  <td className="px-3 py-1.5 whitespace-nowrap">{n.number}</td>
+                  <td className="px-3 py-1.5">{n.taxes || '—'}</td>
+                  <td className="px-3 py-1.5 whitespace-nowrap tabular-nums">{n.due || '—'}</td>
+                  <td className="px-3 py-1.5 text-right tabular-nums">{money.format(n.amount)} ₽</td>
+                </tr>
+              ))}
+            </TableCard>
+          )}
+
+          {d.enp.length > 0 && (
+            <TableCard note="Начисления налогов на единый налоговый счёт"
+              head={<><Th>Период</Th><Th>Налог</Th><Th>Срок уплаты</Th><Th right>Начислено</Th></>}>
+              {d.enp.map((e, i) => (
+                <tr key={`${e.period}-${i}`} className="border-b last:border-0">
+                  <td className="px-3 py-1.5 whitespace-nowrap tabular-nums">{e.period}</td>
+                  <td className="px-3 py-1.5">
+                    {e.tax || '—'}{e.advance ? ' · аванс' : ''}
+                  </td>
+                  <td className="px-3 py-1.5 whitespace-nowrap tabular-nums">{e.due || '—'}</td>
+                  <td className="px-3 py-1.5 text-right tabular-nums">{money.format(e.amount)} ₽</td>
+                </tr>
+              ))}
+            </TableCard>
+          )}
+        </div>
+      )}
+
+      {tab === 'filed' && (
+        <TableCard note="Сданная отчётность: чем период закрыт перед государством"
+          head={<><Th>Дата</Th><Th>Отчёт</Th><Th>Период</Th><Th>Подписан</Th></>}>
+          {d.filed.map((f, i) => (
+            <tr key={`${f.date}-${i}`} className="border-b last:border-0 hover:bg-muted/40">
+              <td className="px-3 py-1.5 whitespace-nowrap tabular-nums">{f.date}</td>
+              <td className="px-3 py-1.5">{f.title}</td>
+              <td className="px-3 py-1.5 text-muted-foreground whitespace-nowrap">
+                {f.period || '—'}
+              </td>
+              <td className="px-3 py-1.5 whitespace-nowrap tabular-nums text-muted-foreground">
+                {f.signed || '—'}
+              </td>
+            </tr>
+          ))}
+        </TableCard>
       )}
     </div>
   )

@@ -519,4 +519,6 @@ export const BOOKS_PRIMARY_MENU: CentralMenuItem[] = [
   { key: 'bk_requests', label: 'Требования' },
   // Что уйдёт в 1С и чем это отличается от слоя: корректировки с обоснованием.
   { key: 'bk_export',   label: 'Слой выгрузки' },
+  // Сроки, ЕНС и сданная отчётность — всё из 1С, собранное по дате.
+  { key: 'bk_calendar', label: 'Сроки и бюджет' },
 ]
