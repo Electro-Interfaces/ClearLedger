@@ -44,8 +44,11 @@ CATEGORIES: list[NotifyCategory] = [
     NotifyCategory(
         code="space",
         label="Объекты и справочники",
-        description="Общие сущности пространства: объекты, контрагенты, договоры, "
-                    "оборудование — создание и изменение.",
+        # Перечень намеренно от общего к частному: у компании без объектов (профиль
+        # office) станций и оборудования нет вовсе, и подписка, обещающая их первыми,
+        # выглядит чужой.
+        description="Общие сущности пространства: контрагенты, договоры, справочники, "
+                    "а у сетевых компаний — объекты и оборудование.",
         prefixes=("space.",),
         default_on=False,
     ),
@@ -100,6 +103,21 @@ def category_for(action: str) -> str:
         if c.prefixes and any(act.startswith(p) for p in c.prefixes):
             return c.code
     return "other"
+
+
+def probe_action(code: str) -> str:
+    """Действие для проверочного оповещения — из префиксов самой категории.
+
+    Раньше карта проб была ручной и покрывала три категории из семи: «Сбои
+    загрузок», «Загрузки», «Входы» и «Прочее» проверялись действием
+    `test.delivery`, которое относится к «Прочим событиям». Кнопка «Проверить»
+    отвечала «доставлено» про другую подписку.
+    """
+    c = _BY_CODE.get(code)
+    if c and c.prefixes:
+        p = c.prefixes[0]
+        return p + "test" if p.endswith(".") else p
+    return "test.delivery"
 
 
 def is_known(code: str) -> bool:

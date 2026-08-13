@@ -54,11 +54,14 @@ function getSchedule(ch: Channel): ScheduleConfig {
   return ch.schedule
 }
 
+// Та же шкала, что в витрине подключений и на «Коннекторах»: одно приложение —
+// одна палитра статусов. Раньше здесь были сырые green/yellow/red, различимые
+// от соседних экранов.
 const STATUS_COLORS: Record<string, string> = {
-  active: 'text-green-500',
+  active: 'text-emerald-500',
   draft: 'text-muted-foreground',
-  paused: 'text-yellow-500',
-  error: 'text-red-500',
+  paused: 'text-amber-500',
+  error: 'text-destructive',
 }
 const STATUS_ICONS: Record<string, typeof CheckCircle2> = {
   active: CheckCircle2,
@@ -173,7 +176,9 @@ function ChannelCard({
 
               <ArrowRight className="h-4 w-4 text-muted-foreground/40 mt-2 shrink-0" />
 
-              {/* Stations */}
+              {/* Станции: колонка про объекты сети. У компании без объектов
+                  (профиль office) станций не бывает вовсе, и плашка «Все станции»
+                  с топливной иконкой рассказывает про чужую жизнь. */}
               <div className="flex flex-col gap-1">
                 {stations.length > 0 ? (
                   stations.map((st) => (

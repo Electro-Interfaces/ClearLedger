@@ -47,15 +47,17 @@ import {
 
 // ── Продуктовая доступность типа (не про компанию) ──────────────────
 const STATUS: Record<string, { label: string; dot: string; text: string }> = {
-  available: { label: 'доступен', dot: 'bg-emerald-400', text: 'text-emerald-300/80' },
-  imperative: { label: 'обязательный', dot: 'bg-emerald-400', text: 'text-emerald-300/80' },
-  partial: { label: 'частично', dot: 'bg-amber-400', text: 'text-amber-300/80' },
-  planned: { label: 'план', dot: 'bg-zinc-500', text: 'text-zinc-400' },
-  active: { label: 'рабочий', dot: 'bg-emerald-400', text: 'text-emerald-300/80' },
-  demo: { label: 'демо', dot: 'bg-sky-400', text: 'text-sky-300/80' },
+  // Пары «светлая / тёмная»: раньше стоял только светлый текст (emerald-300/80),
+  // и в дневной теме статус читался светло-зелёным по белому.
+  available: { label: 'доступен', dot: 'bg-emerald-500', text: 'text-emerald-700 dark:text-emerald-400' },
+  imperative: { label: 'обязательный', dot: 'bg-emerald-500', text: 'text-emerald-700 dark:text-emerald-400' },
+  partial: { label: 'частично', dot: 'bg-amber-500', text: 'text-amber-700 dark:text-amber-400' },
+  planned: { label: 'план', dot: 'bg-muted-foreground/50', text: 'text-muted-foreground' },
+  active: { label: 'рабочий', dot: 'bg-emerald-500', text: 'text-emerald-700 dark:text-emerald-400' },
+  demo: { label: 'демо', dot: 'bg-sky-500', text: 'text-sky-700 dark:text-sky-400' },
 }
 function statusMeta(s: string) {
-  return STATUS[s] ?? { label: s, dot: 'bg-zinc-500', text: 'text-zinc-400' }
+  return STATUS[s] ?? { label: s, dot: 'bg-muted-foreground/50', text: 'text-muted-foreground' }
 }
 
 // Модули разрезов сверки → читаемые ярлыки
@@ -462,8 +464,13 @@ function ModuleConfigContent({
       if (c.kind === 'specialized') setComponentEnabled(companyId, module.id, c.id, comps[c.id] ?? false)
     }
     onSaved()
+    // Настройка хранится в браузере (services/moduleConnectionService), а не в
+    // реестре Ядра. Соседний экран того же приложения про реестр говорит прямо, и
+    // прежний текст «сохранены под «<организация>»» обещал ровно обратное тому, что
+    // происходит: на другом компьютере этой сборки не будет.
     toast.success(`Модуль «${module.label}» ${connected ? 'подключён' : 'отключён'}`, {
-      description: `Сборка и параметры сохранены под «${org}»`,
+      description: `Вид сохранён в этом браузере для «${org}». Состав продуктов
+        организации — в «Приложениях и модулях»`,
     })
     onClose()
   }

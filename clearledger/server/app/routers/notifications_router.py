@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import get_current_user
 from app.database import get_db
 from app.models import NotificationRule, User
-from app.notify_catalog import is_known, list_categories
+from app.notify_catalog import probe_action, is_known, list_categories
 from app.routers.users_router import require_company_admin
 from app.services import notify
 
@@ -103,10 +103,10 @@ async def test_delivery(
     cid = await require_company_admin(company_id, current_user, db)
     if not is_known(category):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Неизвестная категория")
-    # Действие выбрано так, чтобы попасть в проверяемую категорию: у каждой свои префиксы,
-    # поэтому берём префикс первой подходящей записи каталога.
-    probe = {"people": "user.test", "access": "role.test", "space": "space.test"}.get(
-        category, "test.delivery")
+    # Действие берётся из префиксов самой категории (`notify_catalog.probe_action`):
+    # ручная карта покрывала три категории из семи, а остальные проверялись действием
+    # из «Прочих событий» — кнопка отвечала «доставлено» про чужую подписку.
+    probe = probe_action(category)
     result = await notify.dispatch(
         db, cid, probe, who=current_user.name,
         details="Проверка доставки оповещений из «Управления»")

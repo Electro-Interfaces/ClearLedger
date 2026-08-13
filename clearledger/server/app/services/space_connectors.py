@@ -354,8 +354,9 @@ async def list_connectors(db: AsyncSession, company_id: uuid.UUID) -> dict[str, 
             "provider": "cloud_api_key",
             "kind": "Входящий API-ключ",
             "label": "Приём данных по ключу пространства",
-            "brings": "Внешние узлы толкают данные сами (дедуп-нода, аудитор Поддержки). "
-                      "Ключ один на всех потребителей — именные ключи с ротацией: В2",
+            "brings": "Общий ключ компании: по нему ходят узлы, заведённые до именных "
+                      "ключей. Новым потребителям выдавайте именной — его видно поимённо "
+                      "и можно отозвать",
             "direction": "in", "status": "active", "enabled": True,
             "last_sync_at": None, "last_error": None, "records": None, "files": 0,
             "initiator": "them",
@@ -392,6 +393,157 @@ async def list_connectors(db: AsyncSession, company_id: uuid.UUID) -> dict[str, 
     )).scalars().all()
     for src in sources:
         items.append(_source_entry(src))
+
+    # ── Классы подключений, которых витрина не знала вовсе ──────────────────
+    #
+    # Каждый из них живёт своей моделью и своим экраном, поэтому на вопрос «что
+    # вообще подключено у компании» список отвечал неполно: у пилота ГИГ мимо него
+    # проходили агенты станций и обмен с 1С, а счётчик «Работают: N из M» занижал
+    # состав. Владелец записи остаётся прежним — здесь только показать и увести.
+    from app.models import (
+        Connector, EdgeAgent, MarkingIntegration, MetrikaConnection,
+        OneCConnection, SpaceInboundKey,
+    )
+
+    # Именные входящие ключи: кто подключён К НАМ. Легаси-ключ компании витрина
+    # показывала одной строкой с обещанием «именные ключи: В2» — а они уже сделаны,
+    # со своим экраном и отзывом.
+    for k in (await db.execute(select(SpaceInboundKey).where(
+            SpaceInboundKey.company_id == company_id)
+            .order_by(SpaceInboundKey.consumer))).scalars().all():
+        revoked = k.revoked_at is not None
+        items.append({
+            "key": f"core:inbound:{k.id}",
+            "app": "core", "app_name": "Ядро",
+            "provider": "inbound_key",
+            "kind": "Входящий ключ",
+            "label": f"{k.consumer} · {k.key_prefix}…",
+            "brings": "Внешняя система присылает данные сама, ключом пространства"
+                      + (f"; станция {k.station_id}" if k.station_id else ""),
+            "direction": "in",
+            "status": "off" if revoked else ("active" if k.last_used_at else "configured"),
+            "enabled": not revoked,
+            "last_sync_at": k.last_used_at.isoformat() if k.last_used_at else None,
+            "last_error": "ключ отозван" if revoked else None,
+            "records": None, "files": 0,
+            "initiator": "them",
+            "settings_route": "/connect?mode=connect&sub=connections",
+        })
+
+    # Агенты станций: собственный канал данных объекта. «Свежий last_seen» — это
+    # «агент на связи», а не «данные идут», поэтому очередь показываем отдельно.
+    for a in (await db.execute(select(EdgeAgent).where(
+            EdgeAgent.company_id == company_id)
+            .order_by(EdgeAgent.station_id))).scalars().all():
+        items.append({
+            "key": f"core:edge:{a.station_id}",
+            "app": "core", "app_name": "Ядро",
+            "provider": "edge_agent",
+            "kind": "Агент станции",
+            "label": f"Станция {a.station_id}" + (f" · версия {a.version}" if a.version else ""),
+            "brings": "Смены, продажи и остатки прямо со станции"
+                      + (f"; в очереди {a.queue_pending}" if a.queue_pending else ""),
+            "direction": "in",
+            "status": "active",
+            "enabled": True,
+            "last_sync_at": a.last_seen.isoformat() if a.last_seen else None,
+            "last_error": None,
+            "records": a.queue_sent or None, "files": 0,
+            "initiator": "them",
+            "settings_route": None,
+        })
+
+    # Обмен с 1С: отдельная модель со своим экраном подключения.
+    for c in (await db.execute(select(OneCConnection).where(
+            OneCConnection.company_id == company_id)
+            .order_by(OneCConnection.name))).scalars().all():
+        items.append({
+            "key": f"core:onec:{c.id}",
+            "app": "core", "app_name": "Ядро",
+            "provider": "onec",
+            "kind": "Обмен с 1С",
+            "label": c.name,
+            "brings": ("Документы и справочники живой базы 1С"
+                       + (" (COM)" if c.mode == "com" else " (OData)")),
+            "direction": "both",
+            "status": "active" if c.status == "active" else (
+                "error" if c.status == "error" else "configured"),
+            "enabled": c.status != "disabled",
+            "last_sync_at": c.last_sync_at.isoformat() if c.last_sync_at else None,
+            "last_error": None,
+            "records": None, "files": 0,
+            "initiator": "us",
+            "settings_route": "/1c/connection",
+        })
+
+    # Яндекс.Метрика: у модели статус и ошибка ровно в контракте витрины.
+    for m in (await db.execute(select(MetrikaConnection).where(
+            MetrikaConnection.company_id == company_id))).scalars().all():
+        items.append({
+            "key": f"core:metrika:{m.id}",
+            "app": "core", "app_name": "Ядро",
+            "provider": "metrika",
+            "kind": "Веб-аналитика",
+            "label": m.counter_name or "Яндекс.Метрика",
+            "brings": "Посещаемость и источники трафика сайта компании",
+            "direction": "in",
+            "status": ("error" if m.status == "error" else
+                       "active" if m.status == "ok" else "unknown"),
+            "enabled": bool(m.enabled),
+            "last_sync_at": None,
+            "last_error": m.last_error,
+            "records": None, "files": 0,
+            "initiator": "us",
+            "settings_route": "/metrika",
+        })
+
+    # Маркировка и фискальные системы: ГИС МТ, ОФД, ЕГАИС, «Меркурий».
+    _MARK_LABEL = {"gismt": "Честный знак (ГИС МТ)", "ofd": "ОФД",
+                   "nk": "Национальный каталог", "egais": "ЕГАИС",
+                   "mercury": "Меркурий", "local_module": "Локальный модуль"}
+    for mi in (await db.execute(select(MarkingIntegration).where(
+            MarkingIntegration.company_id == company_id)
+            .order_by(MarkingIntegration.system))).scalars().all():
+        items.append({
+            "key": f"core:marking:{mi.id}",
+            "app": "core", "app_name": "Ядро",
+            "provider": f"marking_{mi.system}",
+            "kind": "Маркировка и фискальные",
+            "label": _MARK_LABEL.get(mi.system, mi.system),
+            "brings": "Обороты маркированного товара и фискальные данные",
+            "direction": "both",
+            "status": ("off" if not mi.enabled else
+                       "active" if mi.last_check_ok else
+                       "error" if mi.last_check_ok is False else "configured"),
+            "enabled": bool(mi.enabled),
+            "last_sync_at": mi.last_check_at.isoformat() if mi.last_check_at else None,
+            "last_error": None if mi.last_check_ok is not False else (mi.last_check_note or "проверка не прошла"),
+            "records": None, "files": 0,
+            "initiator": "us",
+            "settings_route": None,
+        })
+
+    # Таблица `connectors` — отдельная от каналов модель, ею живут 1С-коннекторы
+    # офисного профиля.
+    for cn in (await db.execute(select(Connector).where(
+            Connector.company_id == company_id).order_by(Connector.name))).scalars().all():
+        items.append({
+            "key": f"core:connector:{cn.id}",
+            "app": "core", "app_name": "Ядро",
+            "provider": cn.type,
+            "kind": "Коннектор",
+            "label": cn.name,
+            "brings": cn.url or "",
+            "direction": "in",
+            "status": ("error" if cn.status == "error" else
+                       "off" if cn.status == "disabled" else "active"),
+            "enabled": cn.status != "disabled",
+            "last_sync_at": cn.last_sync_at.isoformat() if cn.last_sync_at else None,
+            "last_error": None,
+            "records": cn.records_count or None, "files": 0,
+            "initiator": "us",
+            "settings_route": "/connect?mode=connect&sub=connectors",
+        })
 
     # Приложения-разрезы: спрашиваем только те, что подключены компании и знают её.
     rows = (await db.execute(

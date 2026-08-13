@@ -756,8 +756,12 @@ export function SourcesPage() {
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12 gap-3">
             <Server className="h-10 w-10 text-muted-foreground/30" />
-            <p className="text-sm text-muted-foreground">Нет настроенных источников</p>
-            <p className="text-xs text-muted-foreground">Добавьте источник чтобы начать загрузку данных</p>
+            <p className="text-sm font-medium">Источников пока нет</p>
+            <p className="max-w-md text-center text-xs text-muted-foreground">
+              Источник — это реквизиты доступа к внешней системе: адрес, учётка, ключи.
+              Сам он ничего не грузит: данные носит коннектор, собранный поверх него.
+              Тип выбирается в «Каталоге типов».
+            </p>
             <Button variant="outline" size="sm" onClick={() => setDialogOpen(true)}>
               Добавить первый источник
             </Button>

@@ -86,7 +86,13 @@ export function CompanyApps({ companyId, canManage, isSuperadmin = false }: {
         />
       ))}
       {apps.length === 0 && (
-        <Card><CardContent className="py-10 text-center text-muted-foreground">Нет приложений</CardContent></Card>
+        <Card><CardContent className="py-10 text-center">
+          <p className="text-sm font-medium">Организации не подключено ни одного продукта</p>
+          <p className="mx-auto mt-1 max-w-md text-xs text-muted-foreground">
+            Состав поставки задаётся при развёртывании стека и здесь же меняется.
+            Пока список пуст, у людей организации нет ни одной плитки на рабочем столе.
+          </p>
+        </CardContent></Card>
       )}
       {/* Каталог платформы — ниже подключённых: сперва «что у этой организации», потом
           «что вообще есть». Владельцу контейнера, эндпоинты каталога и так гейтятся. */}
