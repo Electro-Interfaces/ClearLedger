@@ -1636,6 +1636,11 @@ class AccountingDoc(Base):
     match_status: Mapped[str] = mapped_column(String(30), nullable=False, default="pending")
     match_details: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     warehouse_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # Реквизиты, обязательные для СВОЕГО вида и бессмысленные для прочих: у платежа
+    # назначение и счёт организации, у поступления входящий документ, у счёта-фактуры
+    # основание и код операции, у акта сверки период. Колонка на каждый такой реквизит
+    # дала бы полтора десятка полей, из которых у любого документа заполнены два.
+    details: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     # Реквизиты входящего документа поставщика (ТТН №+дата).
     # Композитный ключ сверки ТТН-файл ↔ ПТУ —
     # (counterparty_inn + external_number + external_date + amount).
