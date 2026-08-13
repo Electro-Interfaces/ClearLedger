@@ -579,6 +579,29 @@ export interface CashflowData {
 export const getCashflow = (companyId: string) =>
   get<CashflowData>(`/api/books/cashflow?company_id=${companyId}`)
 
+/** Движение денег по статьям: за что платили и от кого получали. */
+export interface CashflowItems {
+  rows: {
+    item: string; kind: string
+    inflow: number; outflow: number; net: number
+    inDocs: number; outDocs: number
+    first: string | null; last: string | null
+  }[]
+  months: { month: string; inflow: number; outflow: number }[]
+  kinds: {
+    kind: string; label: string
+    inflow: number; outflow: number; net: number; items: number
+  }[]
+  inflow: number
+  outflow: number
+  /** Документы без статьи: пока их много, разрез неполон. */
+  noItemDocs: number
+  noItemAmount: number
+}
+
+export const getCashflowItems = (companyId: string, period?: PeriodOpts) =>
+  get<CashflowItems>(`/api/books/cashflow-items?company_id=${companyId}` + periodQuery(period))
+
 /** Продажи в разрезе договоров; строка с id === null — документы без договора. */
 export interface ContractSales {
   rows: {

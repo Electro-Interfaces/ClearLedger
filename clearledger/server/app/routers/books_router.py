@@ -2709,6 +2709,115 @@ async def cashflow(
     }
 
 
+# ── Движение денег по статьям ────────────────────────────────────────────────
+# «Денежный поток» отвечает, сколько пришло и ушло. Этот экран — за что: статья
+# движения размечена в самих документах (`details->'Статья ДДС'`), справочник статей
+# приехал вместе с выгрузкой.
+#
+# Деление на три вида деятельности — канон отчёта о движении денежных средств:
+# операционная (текущая) даёт понять, кормит ли себя бизнес; инвестиционная — во что
+# вкладывается; финансовая — чем закрывает разрыв. Сумма всех трёх равна изменению
+# остатка денег, и это единственная проверка, которую здесь можно сделать честно.
+
+# Отнесение статьи к виду деятельности. Ключ — фрагмент названия статьи в нижнем
+# регистре: справочник 1С у каждой компании свой, и жёсткий список кодов не подойдёт.
+CF_KINDS: list[tuple[str, tuple[str, ...]]] = [
+    ("investing", ("приобретение основных", "приобретение внеоборот", "покупка оборудован",
+                   "капитальн", "приобретение нематериальн")),
+    ("financing", ("кредит", "заём", "заем", "займ", "дивиденд", "вклад в уставный",
+                   "лизинг")),
+]
+
+
+def _cf_kind(item: str) -> str:
+    """Вид деятельности по названию статьи; всё неопознанное — операционная."""
+    low = (item or "").lower()
+    for kind, keys in CF_KINDS:
+        if any(k in low for k in keys):
+            return kind
+    return "operating"
+
+
+CF_KIND_LABEL = {
+    "operating": "Текущая деятельность",
+    "investing": "Инвестиционная",
+    "financing": "Финансовая",
+}
+
+
+@router.get("/cashflow-items")
+async def cashflow_items(
+    company_id: str,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Куда и откуда двигались деньги: статьи, виды деятельности, помесячно."""
+    cid = await assert_company_member(company_id, current_user, db)
+    p: dict[str, Any] = {"cid": str(cid)}
+    where = ""
+    if date_from:
+        where += " AND date >= :df"
+        p["df"] = date_from
+    if date_to:
+        where += " AND date <= :dt"
+        p["dt"] = date_to
+
+    rows = [{
+        "item": r[0] or "Без статьи",
+        "inflow": _num(r[1]), "outflow": _num(r[2]),
+        "inDocs": r[3], "outDocs": r[4],
+        "first": r[5], "last": r[6],
+    } for r in (await db.execute(text(f"""
+        SELECT coalesce(nullif(details->>'Статья ДДС', ''), 'Без статьи') AS item,
+               coalesce(sum(amount) FILTER (WHERE doc_type = 'bank_in'), 0),
+               coalesce(sum(amount) FILTER (WHERE doc_type = 'bank_out'), 0),
+               count(*) FILTER (WHERE doc_type = 'bank_in'),
+               count(*) FILTER (WHERE doc_type = 'bank_out'),
+               min(date), max(date)
+          FROM accounting_docs
+         WHERE company_id = :cid AND doc_type IN ('bank_in', 'bank_out'){where}
+         GROUP BY 1 ORDER BY 2 + 3 DESC
+    """), p)).all()]
+
+    for r in rows:
+        r["kind"] = _cf_kind(r["item"])
+        r["net"] = round(r["inflow"] - r["outflow"], 2)
+
+    months = [{
+        "month": r[0], "inflow": _num(r[1]), "outflow": _num(r[2]),
+    } for r in (await db.execute(text(f"""
+        SELECT substr(date, 1, 7) AS month,
+               coalesce(sum(amount) FILTER (WHERE doc_type = 'bank_in'), 0),
+               coalesce(sum(amount) FILTER (WHERE doc_type = 'bank_out'), 0)
+          FROM accounting_docs
+         WHERE company_id = :cid AND doc_type IN ('bank_in', 'bank_out'){where}
+         GROUP BY 1 ORDER BY 1
+    """), p)).all()]
+
+    kinds = [{
+        "kind": k, "label": CF_KIND_LABEL[k],
+        "inflow": round(sum(r["inflow"] for r in rows if r["kind"] == k), 2),
+        "outflow": round(sum(r["outflow"] for r in rows if r["kind"] == k), 2),
+        "net": round(sum(r["net"] for r in rows if r["kind"] == k), 2),
+        "items": sum(1 for r in rows if r["kind"] == k),
+    } for k in ("operating", "investing", "financing")]
+
+    no_item = next((r for r in rows if r["item"] == "Без статьи"), None)
+    return {
+        "rows": rows,
+        "months": months,
+        "kinds": kinds,
+        "inflow": round(sum(r["inflow"] for r in rows), 2),
+        "outflow": round(sum(r["outflow"] for r in rows), 2),
+        # Документы без статьи: они не попадают ни в один вид деятельности, и пока их
+        # много, разрез неполон — это вопрос к бухгалтерии, а не к витрине.
+        "noItemDocs": (no_item["inDocs"] + no_item["outDocs"]) if no_item else 0,
+        "noItemAmount": round((no_item["inflow"] + no_item["outflow"]) if no_item else 0, 2),
+    }
+
+
 @router.get("/contract-sales")
 async def contract_sales(
     company_id: str,

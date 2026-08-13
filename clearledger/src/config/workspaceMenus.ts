@@ -415,6 +415,9 @@ export const REV_MONEY_MENU: CentralMenuItem[] = [
   { key: 'rev_forecast', label: 'Прогноз поступлений' },
   { key: 'rev_terms',    label: 'Сроки оплаты' },
   { key: 'rev_cashflow', label: 'Денежный поток' },
+  // Поток отвечает «сколько пришло и ушло», статьи — «за что». Разметка приезжает
+  // в самих документах, справочник статей — вместе с выгрузкой.
+  { key: 'rev_cfitems',  label: 'Статьи движения' },
   { key: 'rev_contracts', label: 'Договоры' },
 ]
 export const REV_DOCS_MENU: CentralMenuItem[] = [

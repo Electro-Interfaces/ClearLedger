@@ -29,7 +29,8 @@ import { Card, CardContent } from '@/components/ui/card'
 import { MetricTile } from '@/components/ui/metric-tile'
 import { cn } from '@/lib/utils'
 import {
-  getArAging, getAssortment, getBacklog, getCashflow, getCashForecast, getCollectionCurve,
+  getArAging, getAssortment, getBacklog, getCashflow, getCashflowItems, getCashForecast,
+  getCollectionCurve,
   getConcentration, getContractSales, getDeals, getDocsAll, getPaymentTerms,
   getRevenue, getRevenueCheck, getRevenueQuality, getStock, getSuppliers,
   type DocRow, type RevKind,
@@ -267,7 +268,7 @@ const FIXED_KIND: Record<string, RevKind> = {
 const NO_KIND = ['rev_invoices', 'rev_funnel', 'rev_recon', 'rev_abc', 'rev_abc_items',
   'rev_margin', 'rev_terms', 'rev_cashflow', 'rev_contracts', 'rev_stock', 'rev_suppliers',
   'rev_prices', 'rev_quality', 'rev_deals', 'rev_conc', 'rev_aging', 'rev_collect',
-  'rev_backlog', 'rev_forecast']
+  'rev_backlog', 'rev_forecast', 'rev_cfitems']
 
 export function RevenuePanel() {
   const { coreMode } = useWorkspace()
@@ -338,6 +339,7 @@ export function RevenuePanel() {
       case 'rev_aging':      return <RevAging companyId={companyId} />
       case 'rev_collect':    return <RevCollection companyId={companyId} />
       case 'rev_forecast':   return <RevForecast companyId={companyId} />
+      case 'rev_cfitems':    return <RevCashflowItems companyId={companyId} period={period} />
       case 'rev_backlog':    return <RevBacklog companyId={companyId} />
       default:               return <RevOverview companyId={companyId} kind={shown} period={period} />
     }
@@ -3225,6 +3227,123 @@ function RevForecast({ companyId }: { companyId: string }) {
         ))}
       </TableCard>
       {card && <CounterpartyWindow companyId={companyId} id={card} onClose={() => setCard(null)} />}
+    </div>
+  )
+}
+
+/**
+ * Движение денег по статьям — «за что платим», в дополнение к «сколько».
+ *
+ * Статья размечена в самом документе, поэтому разрез честный: это не догадка по
+ * назначению платежа. Деление на текущую, инвестиционную и финансовую деятельность —
+ * канон отчёта о движении денежных средств: первая показывает, кормит ли бизнес сам
+ * себя, вторая — во что вкладывается, третья — чем закрывается разрыв.
+ *
+ * Документы без статьи вынесены отдельно: пока их много, разрез неполон, и это вопрос
+ * к бухгалтерии компании, а не к витрине.
+ */
+function RevCashflowItems({ companyId, period }: { companyId: string; period: Period }) {
+  const q = useQuery({
+    queryKey: ['books', 'cashflow-items', companyId, period.from, period.to],
+    queryFn: () => getCashflowItems(companyId, period),
+    enabled: !!companyId,
+  })
+  const [side, setSide] = useState<'all' | 'in' | 'out'>('all')
+
+  if (q.isError) return <div className="p-4"><QueryError onRetry={() => q.refetch()} /></div>
+  if (!q.data) return <Loading />
+  const d = q.data
+  if (!d.rows.length) {
+    return (
+      <div className="p-6 text-sm text-muted-foreground">
+        За выбранный период банковских документов нет.
+      </div>
+    )
+  }
+
+  const rows = d.rows.filter((r) =>
+    side === 'all' ? true : side === 'in' ? r.inflow > 0 : r.outflow > 0)
+  const max = Math.max(...d.rows.map((r) => Math.max(r.inflow, r.outflow)), 1)
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
+        {d.kinds.map((k) => (
+          <MetricTile key={k.kind} label={k.label}
+            value={money.format(k.net) + ' ₽'}
+            hint={`пришло ${money.format(k.inflow)} · ушло ${money.format(k.outflow)}`}
+            tone={k.kind === 'operating' ? (k.net >= 0 ? 'success' : 'danger') : undefined} />
+        ))}
+        <MetricTile label="Итог движения"
+          value={money.format(d.inflow - d.outflow) + ' ₽'}
+          hint={`${num.format(d.rows.length)} статей за период`} />
+      </div>
+
+      {d.noItemDocs > 0 && (
+        <p className="text-[11px] text-amber-600 dark:text-amber-400">
+          У {num.format(d.noItemDocs)} документов на {money.format(d.noItemAmount)} ₽ статья
+          движения не заполнена — они попадают в строку «Без статьи» и в вид деятельности
+          не относятся. Разбирается в бухгалтерии компании.
+        </p>
+      )}
+
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <Tabs value={side} onChange={setSide} label="Направление движения" items={[
+          { key: 'all' as const, label: 'Все статьи' },
+          { key: 'in' as const, label: 'Поступления' },
+          { key: 'out' as const, label: 'Платежи' },
+        ]} />
+        <ExportButton onClick={() => exportTable('Статьи движения денег', [
+          { header: 'Статья', key: 'item', width: 40 },
+          { header: 'Вид деятельности', key: 'kindLabel', width: 22 },
+          { header: 'Поступило', key: 'inflow', width: 18, money: true },
+          { header: 'Ушло', key: 'outflow', width: 18, money: true },
+          { header: 'Итог', key: 'net', width: 18, money: true },
+        ], rows.map((r) => ({
+          ...r,
+          kindLabel: d.kinds.find((k) => k.kind === r.kind)?.label ?? r.kind,
+        })))} />
+      </div>
+
+      <TableCard note="Статья движения размечена в самом документе, а не выведена из назначения платежа"
+        head={<><Th>Статья</Th><Th>Вид</Th><Th right>Поступило</Th><Th right>Ушло</Th>
+          <Th right>Итог</Th><Th>Период</Th></>}>
+        {rows.map((r) => (
+          <tr key={r.item} className="border-b last:border-0 hover:bg-muted/40">
+            <td className="px-3 py-1.5 max-w-[320px] truncate" title={r.item}>
+              {r.item}
+              <div className="mt-0.5 h-1 w-24 rounded bg-muted overflow-hidden">
+                <div className={cn('h-full', r.inflow >= r.outflow
+                  ? 'bg-emerald-500/60' : 'bg-rose-500/60')}
+                  style={{ width: `${(Math.max(r.inflow, r.outflow) / max) * 100}%` }} />
+              </div>
+            </td>
+            <td className="px-3 py-1.5 text-[11px] text-muted-foreground">
+              {d.kinds.find((k) => k.kind === r.kind)?.label ?? r.kind}
+            </td>
+            <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">
+              {r.inflow ? `${money.format(r.inflow)} ₽` : '—'}
+              {r.inDocs > 0 && (
+                <span className="ml-1 text-[11px] text-muted-foreground">{r.inDocs}</span>
+              )}
+            </td>
+            <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">
+              {r.outflow ? `${money.format(r.outflow)} ₽` : '—'}
+              {r.outDocs > 0 && (
+                <span className="ml-1 text-[11px] text-muted-foreground">{r.outDocs}</span>
+              )}
+            </td>
+            <td className={cn('px-3 py-1.5 text-right tabular-nums whitespace-nowrap',
+              r.net >= 0 ? 'text-emerald-600 dark:text-emerald-400'
+                : 'text-rose-600 dark:text-rose-400')}>
+              {money.format(r.net)} ₽
+            </td>
+            <td className="px-3 py-1.5 text-[11px] text-muted-foreground tabular-nums whitespace-nowrap">
+              {r.first} — {r.last}
+            </td>
+          </tr>
+        ))}
+      </TableCard>
     </div>
   )
 }
