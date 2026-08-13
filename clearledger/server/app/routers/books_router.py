@@ -2489,6 +2489,55 @@ async def quality(
     def add(key, label, status, value, hint, detail=None):
         checks.append({"key": key, "label": label, "status": status,
                        "value": value, "hint": hint, "detail": detail})
+    # Проверки, которых экрану не хватало: эти дефекты ревизия нашла запросами, а
+    # экран качества их не ловил — значит в следующий раз найдёт снова человек.
+    async def _count(sql: str) -> int:
+        return int((await db.execute(text(sql), {"cid": str(cid)})).scalar_one() or 0)
+
+    dup_inn = await _count("""
+        SELECT count(*) FROM (SELECT inn FROM counterparties
+         WHERE company_id = :cid AND coalesce(inn,'') <> '' AND NOT is_group
+         GROUP BY inn HAVING count(*) > 1) t""")
+    add("dup_counterparty_inn", "Один ИНН — одна карточка",
+        "ok" if not dup_inn else "error", dup_inn,
+        "Дубль режет историю юрлица: документы на одной карточке, договоры на другой")
+
+    dup_code = await _count("""
+        SELECT count(*) FROM (SELECT external_ref FROM nomenclature
+         WHERE company_id = :cid AND external_ref IS NOT NULL
+         GROUP BY external_ref HAVING count(*) > 1) t""")
+    add("dup_nomenclature_code", "Код номенклатуры уникален",
+        "ok" if not dup_code else "warn", dup_code,
+        "Один код на две позиции: сопоставление строк документов промахнётся")
+
+    head_vs_lines = await _count("""
+        SELECT count(*) FROM accounting_docs d
+         WHERE d.company_id = :cid AND jsonb_array_length(coalesce(d.lines,'[]'::jsonb)) > 0
+           AND d.doc_type <> 'payroll_accrual'
+           AND abs(d.amount - (SELECT coalesce(sum((l->>'amount')::numeric),0)
+                                 FROM jsonb_array_elements(d.lines) l)) > 0.01""")
+    add("head_vs_lines", "Шапка документа = сумма строк",
+        "ok" if not head_vs_lines else "warn", head_vs_lines,
+        "Расхождение бывает дефектом источника: НДС начислен сверху, а шапка без налога")
+
+    bad_inn = await _count("""
+        SELECT count(*) FROM counterparties
+         WHERE company_id = :cid AND coalesce(inn,'') <> ''
+           AND inn !~ '^[0-9]{10}$' AND inn !~ '^[0-9]{12}$'""")
+    add("inn_format", "ИНН правильной длины", "ok" if not bad_inn else "warn", bad_inn,
+        "10 цифр у юрлица, 12 у предпринимателя — иначе карточка не сверится с реестром")
+
+    not_posted = await _count("""
+        SELECT count(*) FROM accounting_docs
+         WHERE company_id = :cid AND status_1c = 'Не проведён'""")
+    add("not_posted", "Непроведённые документы", "info", not_posted,
+        "Документ записан, но в учёт не попал: в книгу и в обороты он не входит")
+
+    orphan = await _count("""
+        SELECT count(*) FROM gl_entries WHERE company_id = :cid AND doc_id IS NULL""")
+    add("entries_without_doc", "Проводки без документа",
+        "ok" if not orphan else "warn", orphan,
+        "Проводка есть, первички под ней нет: документ не загружен или не сведён")
 
     revenue = await _turnover(db, cid, kt=REVENUE_KT)
     sales_total = _num((await db.execute(
