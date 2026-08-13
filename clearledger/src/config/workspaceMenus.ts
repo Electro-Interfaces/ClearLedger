@@ -458,6 +458,8 @@ export const BOOKS_LEDGER_MENU: CentralMenuItem[] = [
   // Расчёт с персоналом: свой предмет (человек, а не сделка), свои счета (70, 68.01,
   // 69) и персональные данные. Стоит в «Регистре» — это расчёт, а не первичка.
   { key: 'bk_payroll',  label: 'Зарплата' },
+  // Экспресс-проверка в нашем исполнении: что не так в самом учёте.
+  { key: 'bk_checks',   label: 'Проверки учёта' },
 ]
 export const BOOKS_PRIMARY_MENU: CentralMenuItem[] = [
   { key: 'bk_docs',     label: 'Документы' },

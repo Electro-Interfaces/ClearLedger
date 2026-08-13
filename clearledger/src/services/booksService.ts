@@ -1046,3 +1046,29 @@ export interface ClosingData {
 export const getClosing = (companyId: string, period?: string | null) =>
   get<ClosingData>(`/api/books/closing?company_id=${companyId}`
     + (period ? `&period=${period}` : ''))
+
+// ── Проверки учёта ──────────────────────────────────────────────────────────
+// Не о загрузке (это `/quality`), а о самом учёте: что в нём не так.
+
+export interface CheckItem {
+  key: string
+  group: string
+  title: string
+  /** Чем грозит — показывается только у сработавших проверок. */
+  risk: string
+  status: 'ok' | 'warn' | 'error' | 'info'
+  count: number
+  amount: number
+  value: string
+  rows: { id: string; date: string; number: string; subject: string; amount: number }[]
+}
+
+export interface ChecksData {
+  groups: { key: string; title: string; checks: CheckItem[]; errors: number; warnings: number }[]
+  errors: number
+  warnings: number
+  ok: number
+}
+
+export const getChecks = (companyId: string) =>
+  get<ChecksData>(`/api/books/checks?company_id=${companyId}`)

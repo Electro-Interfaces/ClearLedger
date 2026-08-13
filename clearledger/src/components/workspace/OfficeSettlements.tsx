@@ -20,7 +20,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { MetricTile } from '@/components/ui/metric-tile'
 import { cn } from '@/lib/utils'
 import {
-  getClosing, getPayroll, getSettlements, getVat,
+  getChecks, getClosing, getPayroll, getSettlements, getVat,
   type SettlementKind, type SettlementsData, type VatData, type VatKind,
 } from '@/services/booksService'
 
@@ -510,4 +510,127 @@ const CLOSURE_LABEL: Record<string, string> = {
   regламент: 'регламентные операции',
   lock: 'запрет изменения данных',
   closing_ops: 'регламентные операции',
+}
+
+
+/* ──────────────────────────── Проверки учёта ──────────────────────────────── */
+
+const CHECK_TONE: Record<string, string> = {
+  error: 'text-red-600 dark:text-red-400',
+  warn: 'text-amber-600 dark:text-amber-400',
+  info: 'text-sky-600 dark:text-sky-400',
+  ok: 'text-emerald-600 dark:text-emerald-400',
+}
+const CHECK_MARK: Record<string, string> = { error: '●', warn: '●', info: '●', ok: '✓' }
+
+/**
+ * «Бухгалтерия» → «Проверки учёта»: жанр, который бухгалтер знает по 1С.
+ *
+ * Отличие от «Качества данных» в «Данных»: там про загрузку — доехали ли цифры;
+ * здесь про сам учёт — что в нём не так, независимо от того, как он к нам попал.
+ *
+ * Каждая проверка обязана показать НАРУШИТЕЛЕЙ: правило без списка документов
+ * человек всё равно пойдёт проверять руками, и смысл проверки теряется.
+ */
+export function BooksChecks({ companyId }: { companyId: string }) {
+  const [open, setOpen] = useState<string | null>(null)
+  const q = useQuery({
+    queryKey: ['books', 'checks', companyId],
+    queryFn: () => getChecks(companyId),
+  })
+  if (q.isError) {
+    return <div className="p-4"><QueryError message="Не удалось выполнить проверки" onRetry={() => q.refetch()} /></div>
+  }
+  if (!q.data) return <div className="p-6 text-sm text-muted-foreground">Проверяем…</div>
+  const d = q.data
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="grid gap-3 sm:grid-cols-3">
+        <MetricTile label="Требует исправления" value={String(d.errors)}
+          tone={d.errors ? 'danger' : undefined} hint="учёт считается неверным" />
+        <MetricTile label="Стоит посмотреть" value={String(d.warnings)}
+          tone={d.warnings ? 'warning' : undefined} hint="не ошибка, но объяснимо не всё" />
+        <MetricTile label="В порядке" value={String(d.ok)} />
+      </div>
+
+      {d.groups.filter((g) => g.checks.length).map((g) => (
+        <div key={g.key} className="space-y-2">
+          <div className="flex items-baseline gap-2">
+            <h4 className="text-sm font-medium">{g.title}</h4>
+            {(g.errors > 0 || g.warnings > 0) && (
+              <span className="text-[11px] text-muted-foreground">
+                {g.errors > 0 && <span className={CHECK_TONE.error}>ошибок {g.errors}</span>}
+                {g.errors > 0 && g.warnings > 0 && ' · '}
+                {g.warnings > 0 && <span className={CHECK_TONE.warn}>внимание {g.warnings}</span>}
+              </span>
+            )}
+          </div>
+          <Card>
+            <CardContent className="p-0">
+              {g.checks.map((c, i) => (
+                <div key={c.key} className={cn(i > 0 && 'border-t')}>
+                  <button
+                    onClick={() => setOpen(open === c.key ? null : c.key)}
+                    disabled={!c.rows.length}
+                    className={cn('flex w-full items-center gap-3 px-3 py-2 text-left',
+                      c.rows.length ? 'hover:bg-muted/40' : 'cursor-default')}>
+                    <span className={cn('shrink-0 text-xs', CHECK_TONE[c.status])}>
+                      {CHECK_MARK[c.status] ?? '●'}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm">{c.title}</div>
+                      {c.status !== 'ok' && (
+                        <div className="text-[11px] text-muted-foreground">{c.risk}</div>
+                      )}
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <div className={cn('text-sm tabular-nums', CHECK_TONE[c.status])}>{c.value}</div>
+                      {c.amount > 0 && c.count > 1 && (
+                        <div className="text-[11px] text-muted-foreground tabular-nums">
+                          {money.format(c.amount)} ₽
+                        </div>
+                      )}
+                    </div>
+                  </button>
+                  {open === c.key && c.rows.length > 0 && (
+                    <div className="overflow-x-auto border-t bg-muted/20">
+                      <table className="w-full text-sm">
+                        <thead className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                          <tr className="border-b">
+                            <Th>Дата</Th><Th>Номер</Th><Th>Что именно</Th><Th right>Сумма</Th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {c.rows.map((r, k) => (
+                            <tr key={k} className="border-b last:border-0">
+                              <td className="px-3 py-1.5 tabular-nums whitespace-nowrap">
+                                {r.date ? r.date.slice(0, 10).split('-').reverse().join('.') : '—'}
+                              </td>
+                              <td className="px-3 py-1.5 tabular-nums">{r.number || '—'}</td>
+                              <td className="px-3 py-1.5 max-w-[420px] truncate" title={r.subject}>
+                                {r.subject || '—'}
+                              </td>
+                              <td className="px-3 py-1.5 text-right tabular-nums">
+                                {r.amount ? money.format(r.amount) : '—'}
+                              </td>
+                            </tr>
+                          ))}
+                          {c.count > c.rows.length && (
+                            <tr><td colSpan={4} className="px-3 py-2 text-[11px] text-muted-foreground">
+                              Показаны {c.rows.length} из {c.count}.
+                            </td></tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        </div>
+      ))}
+    </div>
+  )
 }

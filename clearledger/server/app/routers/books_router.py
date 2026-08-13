@@ -937,10 +937,10 @@ async def assortment(
     """
     cost_p = {"cid": str(cid), "dt": COST_DT, "kt": f"{STOCK_ACCOUNT}%"}
     if date_from:
-        cost_sql += " AND entry_date >= :df"
+        cost_sql += " AND entry_date >= CAST(:df AS date)"
         cost_p["df"] = date_from
     if date_to:
-        cost_sql += " AND entry_date <= :dt2"
+        cost_sql += " AND entry_date <= CAST(:dt2 AS date)"
         cost_p["dt2"] = date_to
 
     return {
@@ -1807,14 +1807,20 @@ PROFIT_TAX_ACC = "68.04"       # налог на прибыль (кредит с
 
 async def _pnl_rows(db: AsyncSession, cid, date_from: str | None, date_to: str | None
                     ) -> list[dict[str, Any]]:
-    """Помесячные обороты счетов результата — основа отчёта."""
+    """Помесячные обороты счетов результата — основа отчёта.
+
+    Даты приводятся явно (`CAST(:df AS date)`): `gl_entries.entry_date` — колонка типа
+    date, а период приезжает строкой, и драйвер сравнивать их отказывается. В
+    `accounting_docs` дата хранится строкой, поэтому там та же запись работает — из-за
+    этой разницы ошибка и не всплыла на соседних экранах.
+    """
     p: dict[str, Any] = {"cid": str(cid)}
     where = ""
     if date_from:
-        where += " AND entry_date >= :df"
+        where += " AND entry_date >= CAST(:df AS date)"
         p["df"] = date_from
     if date_to:
-        where += " AND entry_date <= :dt"
+        where += " AND entry_date <= CAST(:dt AS date)"
         p["dt"] = date_to
 
     return [{
@@ -1895,10 +1901,10 @@ async def pnl(
     p: dict[str, Any] = {"cid": str(cid)}
     where = ""
     if date_from:
-        where += " AND entry_date >= :df"
+        where += " AND entry_date >= CAST(:df AS date)"
         p["df"] = date_from
     if date_to:
-        where += " AND entry_date <= :dt"
+        where += " AND entry_date <= CAST(:dt AS date)"
         p["dt"] = date_to
     # Реформация: прибыль (Дт 99 Кт 84) минус убыток (Дт 84 Кт 99).
     closed = (await db.execute(text(f"""
@@ -1936,10 +1942,10 @@ async def expenses(
     p: dict[str, Any] = {"cid": str(cid)}
     where = ""
     if date_from:
-        where += " AND e.entry_date >= :df"
+        where += " AND e.entry_date >= CAST(:df AS date)"
         p["df"] = date_from
     if date_to:
-        where += " AND e.entry_date <= :dt"
+        where += " AND e.entry_date <= CAST(:dt AS date)"
         p["dt"] = date_to
 
     rows = [{
@@ -2001,10 +2007,10 @@ async def taxes(
     p: dict[str, Any] = {"cid": str(cid)}
     where = ""
     if date_from:
-        where += " AND e.entry_date >= :df"
+        where += " AND e.entry_date >= CAST(:df AS date)"
         p["df"] = date_from
     if date_to:
-        where += " AND e.entry_date <= :dt"
+        where += " AND e.entry_date <= CAST(:dt AS date)"
         p["dt"] = date_to
 
     rows = [{
@@ -4137,4 +4143,223 @@ async def closing(
         "months": months,
         "gaps": gaps,
         "byCounterparty": sorted(by_party.values(), key=lambda x: -x["amount"])[:100],
+    }
+
+
+# ── Проверки учёта: аналог экспресс-проверки 1С на наших данных ──────────────
+# Бухгалтер знает этот жанр: правила сгруппированы по разделам учёта, у каждого
+# понятно, что нашли и где смотреть. Отличие от `/quality` (там про КАЧЕСТВО
+# ЗАГРУЗКИ — доехали ли данные) в том, что здесь про САМ УЧЁТ: что в нём не так,
+# независимо от того, как он к нам попал.
+#
+# Каждая проверка обязана отвечать на три вопроса: что нашли, чем это грозит и
+# какие именно документы смотреть. Проверка без списка нарушителей бесполезна —
+# человек всё равно пойдёт искать их руками.
+
+_CHECK_GROUPS = [
+    ("policy", "Учётная политика"),
+    ("books", "Состояние учёта"),
+    ("money", "Касса и банк"),
+    ("vat_out", "Книга продаж"),
+    ("vat_in", "Книга покупок"),
+    ("payroll", "Расчёты с персоналом"),
+    ("goods", "Номенклатура и склад"),
+    ("periods", "Периоды и закрытие"),
+]
+
+# key, группа, заголовок, чем грозит, SQL списка нарушителей (5 колонок:
+# id, дата, номер, кто/что, сумма) либо None для проверок-сверок.
+_CHECKS: list[tuple] = [
+    ("policy_lock", "policy", "Дата запрета изменения данных установлена",
+     "Без запрета закрытый период может быть переписан задним числом, и отчётность разъедется", """
+        SELECT id::text, '', code, name, 0 FROM gl_references
+         WHERE company_id = :cid AND kind = 'period_locks'"""),
+    ("policy_mpz", "policy", "Метод оценки МПЗ задан",
+     "От метода зависит себестоимость: без него нечем обосновать списание", """
+        SELECT id::text, '', kind, name, 0 FROM gl_references
+         WHERE company_id = :cid AND kind = 'accounting_policy'"""),
+
+    ("entries_no_doc", "books", "Проводки без первичного документа",
+     "Проводка есть, документа под ней нет: обосновать запись нечем", """
+        SELECT id::text, entry_date::text, coalesce(doc_kind, ''), coalesce(doc_title, ''), amount
+          FROM gl_entries WHERE company_id = :cid AND doc_id IS NULL
+         ORDER BY entry_date DESC"""),
+    ("head_vs_lines", "books", "Сумма документа не сходится со строками",
+     "Итог документа расходится с его же составом: обычно НДС начислен сверху", """
+        SELECT d.id::text, d.date, d.number, d.counterparty_name, d.amount
+          FROM accounting_docs d
+         WHERE d.company_id = :cid AND jsonb_array_length(coalesce(d.lines,'[]'::jsonb)) > 0
+           AND d.doc_type <> 'payroll_accrual'
+           AND abs(d.amount - (SELECT coalesce(sum((l->>'amount')::numeric),0)
+                                 FROM jsonb_array_elements(d.lines) l)) > 0.01
+         ORDER BY d.date DESC"""),
+    ("zero_amount", "books", "Документы с нулевой суммой",
+     "Нулевая сумма у первички — обычно недозаполненный документ", """
+        SELECT id::text, date, number, counterparty_name, amount
+          FROM accounting_docs
+         WHERE company_id = :cid AND amount = 0
+           AND doc_type NOT IN ('closing_op', 'manual_entry', 'act_recon', 'vat_book_in',
+                                'vat_book_out', 'tax_notice', 'payroll_accrual')
+         ORDER BY date DESC"""),
+    ("no_counterparty", "books", "Документы без контрагента",
+     "Контрагент не сведён со справочником: документ не попадёт в его карточку и в акт сверки", """
+        SELECT id::text, date, number, coalesce(counterparty_name, ''), amount
+          FROM accounting_docs
+         WHERE company_id = :cid AND counterparty_id IS NULL
+           AND coalesce(counterparty_name, '') <> ''
+         ORDER BY date DESC"""),
+
+    ("payment_no_purpose", "money", "Платежи без назначения",
+     "Назначение платежа — главный реквизит банковской операции: без него платёж не опознать", """
+        SELECT id::text, date, number, counterparty_name, amount
+          FROM accounting_docs
+         WHERE company_id = :cid AND doc_type IN ('bank_in', 'bank_out')
+           AND coalesce(details->>'Назначение платежа', '') = ''
+         ORDER BY date DESC"""),
+    ("bank_no_article", "money", "Платежи без статьи движения денежных средств",
+     "Без статьи ДДС платёж не встанет ни в один отчёт о движении денег", """
+        SELECT id::text, date, number, counterparty_name, amount
+          FROM accounting_docs
+         WHERE company_id = :cid AND doc_type IN ('bank_in', 'bank_out')
+           AND coalesce(details->>'Статья ДДС', '') = ''
+         ORDER BY date DESC"""),
+
+    ("sale_no_sf", "vat_out", "Реализация без счёта-фактуры",
+     "Покупатель не получит вычет и потребует документ; у нас — риск по книге продаж", """
+        SELECT d.id::text, d.date, d.number, d.counterparty_name, d.amount
+          FROM accounting_docs d
+         WHERE d.company_id = :cid AND d.doc_type = 'sale' AND coalesce(d.vat_amount,0) > 0
+           AND NOT EXISTS (SELECT 1 FROM accounting_docs v
+                 WHERE v.company_id = d.company_id AND v.doc_type = 'vat_invoice_out'
+                   AND coalesce(v.counterparty_inn,'') = coalesce(d.counterparty_inn,'')
+                   AND abs(v.date::date - d.date::date) <= 31)
+         ORDER BY d.date DESC"""),
+    ("sf_out_no_base", "vat_out", "Счёт-фактура без документа-основания",
+     "Не видно, чем подтверждена отгрузка: счёт-фактура сам по себе не первичка", """
+        SELECT id::text, date, number, counterparty_name, amount
+          FROM accounting_docs
+         WHERE company_id = :cid AND doc_type = 'vat_invoice_out'
+           AND coalesce(details->>'Основание', '') = ''
+         ORDER BY date DESC"""),
+
+    ("purchase_no_sf", "vat_in", "Поступление без счёта-фактуры поставщика",
+     "Вычет НДС заявить нечем — налог придётся заплатить полностью", """
+        SELECT d.id::text, d.date, d.number, d.counterparty_name, d.amount
+          FROM accounting_docs d
+         WHERE d.company_id = :cid AND d.doc_type = 'purchase' AND coalesce(d.vat_amount,0) > 0
+           AND NOT EXISTS (SELECT 1 FROM accounting_docs v
+                 WHERE v.company_id = d.company_id AND v.doc_type = 'vat_invoice_in'
+                   AND coalesce(v.counterparty_inn,'') = coalesce(d.counterparty_inn,'')
+                   AND abs(v.date::date - d.date::date) <= 31)
+         ORDER BY d.date DESC"""),
+    ("sf_in_no_number", "vat_in", "Счёт-фактура поставщика без входящего номера",
+     "В книге покупок нужен номер продавца, а не наш внутренний", """
+        SELECT id::text, date, number, counterparty_name, amount
+          FROM accounting_docs
+         WHERE company_id = :cid AND doc_type = 'vat_invoice_in'
+           AND coalesce(external_number, '') = ''
+         ORDER BY date DESC"""),
+
+    ("payroll_unpaid", "payroll", "Начислено, но не выплачено",
+     "Долг перед сотрудниками: сальдо 70 кредитом", None),
+    ("ndfl_debt", "payroll", "НДФЛ удержан, но не перечислен",
+     "Сальдо 68.01 кредитом — налог удержали у людей, в бюджет не отправили", None),
+
+    ("nomenclature_dup", "goods", "Один код номенклатуры на две позиции",
+     "Сопоставление строк документов промахнётся: код перестал быть ключом", """
+        SELECT min(id::text), '', external_ref, string_agg(name, ' / '), 0
+          FROM nomenclature WHERE company_id = :cid AND external_ref IS NOT NULL
+         GROUP BY external_ref HAVING count(*) > 1"""),
+    ("negative_stock", "goods", "Отрицательный остаток на складе",
+     "Списали больше, чем приняли: либо не хватает поступления, либо ошибка в количестве", """
+        SELECT id::text, as_of::text, account, coalesce(sub1, ''), credit - debit
+          FROM gl_balances
+         WHERE company_id = :cid AND account LIKE '41%' AND credit > debit
+           AND as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid)"""),
+
+    ("closed_not_posted", "periods", "Непроведённые документы в закрытом периоде",
+     "Период закрыт, а документ в учёт не попал: его сумма нигде не участвует", """
+        SELECT d.id::text, d.date, d.number, d.counterparty_name, d.amount
+          FROM accounting_docs d
+          JOIN periods p ON p.company_id = d.company_id
+               AND p.year = substr(d.date,1,4)::int AND p.month = substr(d.date,6,2)::int
+         WHERE d.company_id = :cid AND d.status_1c = 'Не проведён' AND p.status = 'closed'
+         ORDER BY d.date DESC"""),
+    ("open_old", "periods", "Открытые периоды старше двух месяцев",
+     "Месяц давно прошёл, а не закрыт: отчётность по нему ещё может поехать", """
+        SELECT id::text, make_date(year, month, 1)::text, '', status, 0
+          FROM periods
+         WHERE company_id = :cid AND status <> 'closed'
+           AND make_date(year, month, 1) < (CURRENT_DATE - INTERVAL '2 months')
+         ORDER BY year DESC, month DESC"""),
+]
+
+
+@router.get("/checks")
+async def checks(
+    company_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Проверки состояния учёта, сгруппированные как экспресс-проверка в 1С."""
+    cid = await assert_company_member(company_id, current_user, db)
+    p = {"cid": str(cid)}
+    out: list[dict[str, Any]] = []
+
+    for key, group, title, risk, sql in _CHECKS:
+        rows: list[dict[str, Any]] = []
+        count = 0
+        amount = 0.0
+        if sql:
+            found = (await db.execute(text(sql), p)).all()
+            count = len(found)
+            amount = round(sum(_num(r[4]) for r in found), 2)
+            rows = [{"id": r[0], "date": r[1], "number": r[2],
+                     "subject": r[3], "amount": _num(r[4])} for r in found[:50]]
+
+        # Проверки-сверки: у них не список нарушителей, а цифра из регистра.
+        if key == "payroll_unpaid":
+            amount = _num((await db.execute(text("""
+                SELECT coalesce(sum(credit - debit), 0) FROM gl_balances
+                 WHERE company_id = :cid AND account LIKE '70%'
+                   AND as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid)"""),
+                p)).scalar_one())
+            count = 1 if amount > 0.004 else 0
+        if key == "ndfl_debt":
+            amount = _num((await db.execute(text("""
+                SELECT coalesce(sum(credit - debit), 0) FROM gl_balances
+                 WHERE company_id = :cid AND account LIKE '68.01%'
+                   AND as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid)"""),
+                p)).scalar_one())
+            count = 1 if amount > 0.004 else 0
+
+        # Учётная политика: проверка на НАЛИЧИЕ, а не на отсутствие — там пусто плохо.
+        if key in ("policy_lock", "policy_mpz"):
+            status = "ok" if count else "warn"
+            value = f"{count} записей" if count else "не задано"
+        elif key in ("payroll_unpaid", "ndfl_debt"):
+            status = "ok" if not count else "info"
+            value = f"{amount:,.2f} ₽".replace(",", " ") if count else "нет долга"
+        else:
+            status = "ok" if not count else ("error" if key in (
+                "purchase_no_sf", "sale_no_sf", "closed_not_posted", "negative_stock")
+                else "warn")
+            value = str(count) if count else "нет"
+
+        out.append({"key": key, "group": group, "title": title, "risk": risk,
+                    "status": status, "count": count, "amount": amount,
+                    "value": value, "rows": rows})
+
+    groups = [{
+        "key": g, "title": t,
+        "checks": [c for c in out if c["group"] == g],
+        "errors": sum(1 for c in out if c["group"] == g and c["status"] == "error"),
+        "warnings": sum(1 for c in out if c["group"] == g and c["status"] == "warn"),
+    } for g, t in _CHECK_GROUPS]
+
+    return {
+        "groups": groups,
+        "errors": sum(1 for c in out if c["status"] == "error"),
+        "warnings": sum(1 for c in out if c["status"] == "warn"),
+        "ok": sum(1 for c in out if c["status"] == "ok"),
     }
