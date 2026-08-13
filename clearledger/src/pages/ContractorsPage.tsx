@@ -9,6 +9,9 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { DocumentWindow } from '@/components/books/DocumentWindow'
 import {
+  exportAct, exportCounterparties, exportCounterpartyDocs,
+} from '@/services/booksExport'
+import {
   getCounterpartyStats, type CounterpartyStats,
 } from '@/services/booksService'
 import { Card, CardContent } from '@/components/ui/card'
@@ -32,7 +35,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Sheet, SheetContent, SheetTitle, SheetDescription } from '@/components/ui/sheet'
 import { useMaxWidth } from '@/hooks/use-mobile'
-import { Search, Building2, MapPin, Loader2, Database, FileText, Plus, Pencil, Trash2, ChevronDown, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react'
+import { Search, Building2, MapPin, Loader2, Database, FileText, FileSpreadsheet, Plus, Pencil, Trash2, ChevronDown, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react'
 import { useCompany } from '@/contexts/CompanyContext'
 import {
   useCounterparties, useContracts, useCounterpartyLocations, useCounterpartyActivity,
@@ -376,6 +379,20 @@ function ActivityBlock({ cp }: { cp: Counterparty }) {
         <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/70">
           Документы в учёте ({data.docs})
         </p>
+        {/* «Пришлите сверку» — самая частая просьба от контрагента, поэтому кнопка
+            стоит здесь, а не в отдельном разделе отчётов. */}
+        <Button variant="outline" size="sm" className="h-6 px-2 text-[11px]"
+          onClick={() => exportAct(companyId, cp.id)
+            .catch(() => toast.error('Не удалось собрать акт сверки'))}>
+          <FileSpreadsheet className="size-3 mr-1" /> Акт сверки
+        </Button>
+        <Button variant="outline" size="sm" className="h-6 px-2 text-[11px]"
+          onClick={() => exportCounterpartyDocs(cp.name, data.recent.map((d) => ({
+            date: d.date, label: d.label ?? d.docType, number: d.number,
+            amount: d.amount, vat: 0,
+          }))).catch(() => toast.error('Не удалось выгрузить документы'))}>
+          <FileSpreadsheet className="size-3 mr-1" /> Документы
+        </Button>
         <Badge variant="outline" className="text-[11px]">
           {Math.round(data.amount).toLocaleString('ru-RU')} ₽
         </Badge>
@@ -1344,7 +1361,27 @@ export function ContractorsPage() {
 
             {/* Счётчик + сортировка */}
             <div className="flex items-center justify-between text-[11px] text-muted-foreground px-0.5">
-              <span>Найдено: {filtered.length}{filtered.length !== counterparties.length && ` из ${counterparties.length}`}</span>
+              <span className="flex items-center gap-2">
+                Найдено: {filtered.length}{filtered.length !== counterparties.length && ` из ${counterparties.length}`}
+                {hasStats && filtered.length > 0 && (
+                  // Выгружается ТО, ЧТО НА ЭКРАНЕ: после отборов и в текущем порядке.
+                  // Файл «всё из базы» не совпадает с экраном, и ему перестают верить.
+                  <button
+                    onClick={() => exportCounterparties(filtered.map((c) => {
+                      const st = stats.get(c.id)
+                      return {
+                        name: c.name, inn: c.inn, kpp: c.kpp, contracts: cpContracts(c),
+                        sales: st?.sales ?? 0, purchases: st?.purchases ?? 0,
+                        receivable: st?.receivable ?? 0, payable: st?.payable ?? 0,
+                        docs: st?.docs ?? 0, lastDoc: st?.lastDoc ?? null,
+                      }
+                    })).catch(() => toast.error('Не удалось выгрузить список'))}
+                    className="hover:text-foreground transition-colors underline decoration-dotted"
+                    title="Выгрузить список в Excel — как на экране, с учётом отборов">
+                    в Excel
+                  </button>
+                )}
+              </span>
               <button
                 onClick={() => setSortBy((cur) => {
                   const order = hasStats ? CP_SORTS : CP_SORTS.filter(

@@ -308,30 +308,34 @@ export interface DocumentCard {
 export const getDocumentCard = (companyId: string, docId: string) =>
   get<DocumentCard>(`/api/books/document?company_id=${companyId}&doc_id=${docId}`)
 
-/** Строка акта сверки: движение по расчётам с нарастающим сальдо. */
-export interface ActRow {
-  date: string
-  docId: string
-  docType: string
-  docLabel: string
-  docNumber: string
-  docDate: string
-  account: string | null
+/** Месяц акта сверки: обороты по субконто и сальдо нарастающим итогом. */
+export interface ActMonth {
+  month: string
   debit: number
   credit: number
   saldo: number
-  content: string | null
+}
+
+export interface ActSection {
+  /** Сторона расчётов: `receivable` — счёт 62 (нам должны), `payable` — 60 (мы должны). */
+  kind: 'receivable' | 'payable'
+  account: string
+  title: string
+  opening: number
+  closing: number
+  debitTotal: number
+  creditTotal: number
+  months: ActMonth[]
+  /** Документы за период — расшифровка, а не источник итогов. */
+  docs: { id: string; date: string; type: string; label: string; number: string; amount: number }[]
 }
 
 export interface ActData {
   counterparty: { id: string; name: string; inn: string | null; kpp: string | null }
   periodFrom: string | null
   periodTo: string | null
-  opening: number
-  closing: number
-  debitTotal: number
-  creditTotal: number
-  rows: ActRow[]
+  sections: ActSection[]
+  note: string
 }
 
 /** Акт сверки: из чего сложился долг, а не только «сколько должен». */

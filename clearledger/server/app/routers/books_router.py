@@ -943,10 +943,33 @@ async def counterparty_card(
 
 
 # ── Акт сверки взаиморасчётов ────────────────────────────────────────────────
-# Документ, который просят чаще любого другого: «пришлите сверку». Собирается из
-# движения по счетам расчётов (62 — покупатель, 60 — поставщик) с нарастающим
-# сальдо, каждая строка привязана к своему документу. Это ответ не «сколько
-# должен», а «из чего этот долг сложился» — с ним идут к контрагенту спорить.
+# Документ, который просят чаще любого другого: «пришлите сверку».
+#
+# ⚠ Итоги считаются ПО СУБКОНТО (`gl_turnovers`), а не по проводкам документов.
+# Субконто в основной таблице регистра через COM недоступно, и «проводки
+# документов контрагента» — это не то же самое, что «обороты по его расчётам»:
+# зачёт аванса 62.02 → 62.01 идёт внутри счёта и в обороте по контрагенту
+# схлопывается, а в перечне проводок считается дважды. На ТСМ ООО такой акт
+# показывал 2 026 576,32 ₽ вместо 625 373,12 ₽ дебиторки.
+#
+# Обороты по субконто сходятся с сальдо среза (`gl_balances`) копейка в копейку —
+# это тот же источник, на котором стоят «Взаиморасчёты». Документы остаются
+# РАСШИФРОВКОЙ строк, а расхождение расшифровки с итогом показывается отдельной
+# строкой «прочие движения», а не прячется.
+#
+# ⚠ Субконто приходит ПРЕДСТАВЛЕНИЕМ (имя контрагента), ссылки в нём нет — отсюда
+# сопоставление по имени карточки.
+
+# Виды документов своей стороны: в расшифровку расчётов с покупателем не должны
+# попадать наши закупки у него же, иначе «162 документа на 32,7 млн» стоят под
+# обеими секциями и расшифровкой быть перестают.
+_ACT_SIDES = [
+    ("receivable", "62", "Расчёты с покупателем (счёт 62)",
+     ("sale", "invoice_out", "vat_invoice_out", "bank_in", "act_recon")),
+    ("payable", "60", "Расчёты с поставщиком (счёт 60)",
+     ("purchase", "invoice_in", "vat_invoice_in", "bank_out", "purchase_correction")),
+]
+
 
 @router.get("/act")
 async def reconciliation_act(
@@ -957,9 +980,8 @@ async def reconciliation_act(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
-    """Акт сверки: движение по расчётам с нарастающим сальдо за период."""
+    """Акт сверки: обороты по расчётам с нарастающим сальдо и расшифровкой."""
     cid = await assert_company_member(company_id, current_user, db)
-    day_from, day_to = _day(date_from), _day(date_to)
 
     k = (await db.execute(select(Counterparty).where(
         Counterparty.company_id == cid,
@@ -967,64 +989,81 @@ async def reconciliation_act(
     if k is None:
         return {"error": "not_found"}
 
-    # Счета расчётов: и покупательские, и поставщицкие — контрагент бывает обеими
-    # сторонами сразу, и «две сверки» на одно юрлицо человеку не нужны.
-    acc_match = "(e.account_dt LIKE '62%' OR e.account_kt LIKE '62%' "                 "OR e.account_dt LIKE '60%' OR e.account_kt LIKE '60%')"
-    base = f"""
-        FROM gl_entries e
-        JOIN accounting_docs d ON d.id = e.doc_id
-       WHERE e.company_id = :cid AND d.counterparty_id::text = :kid AND {acc_match}
-    """
-    params: dict[str, Any] = {"cid": str(cid), "kid": counterparty_id,
-                              "df": day_from, "dt": day_to}
+    # Границы периода в месяцах: обороты приходят свёрнутыми по месяцу, и день
+    # внутри месяца в них не различить (ограничение источника, а не решение).
+    def ym(iso: str | None) -> tuple[int, int] | None:
+        d = _day(iso)
+        return (d.year, d.month) if d else None
 
-    opening = 0.0
-    if day_from:
-        opening = _num((await db.execute(text(f"""
-            SELECT coalesce(sum(CASE WHEN e.account_dt LIKE '62%' OR e.account_dt LIKE '60%'
-                                     THEN e.amount ELSE -e.amount END), 0)
-            {base} AND e.entry_date < :df
-        """), params)).scalar_one())
+    m_from, m_to = ym(date_from), ym(date_to)
 
-    rows = (await db.execute(text(f"""
-        SELECT e.entry_date, d.id, d.doc_type, d.number, d.date, e.account_dt, e.account_kt,
-               e.amount, e.content
-        {base}
-          AND (CAST(:df AS date) IS NULL OR e.entry_date >= :df)
-          AND (CAST(:dt AS date) IS NULL OR e.entry_date <= :dt)
-        ORDER BY e.entry_date, d.date, e.id
-    """), params)).all()
+    sections = []
+    for kind, prefix, title, doc_types in _ACT_SIDES:
+        params: dict[str, Any] = {"cid": str(cid), "name": k.name, "p": f"{prefix}%"}
+        rows = (await db.execute(text("""
+            SELECT period_year, period_month,
+                   coalesce(sum(amount) FILTER (WHERE account_dt LIKE :p AND dt1 = :name), 0) dt,
+                   coalesce(sum(amount) FILTER (WHERE account_kt LIKE :p AND kt1 = :name), 0) kt
+              FROM gl_turnovers
+             WHERE company_id = :cid
+               AND ((account_dt LIKE :p AND dt1 = :name) OR (account_kt LIKE :p AND kt1 = :name))
+             GROUP BY 1, 2 ORDER BY 1, 2
+        """), params)).all()
+        if not rows:
+            continue
 
-    out, saldo = [], opening
-    debit_total = credit_total = 0.0
-    for r in rows:
-        # Дебет счёта расчётов — «отгрузили / оплатили мы», кредит — «оплатил он /
-        # получили от него». Знак сальдо: плюс — долг в нашу пользу.
-        is_debit = (r[5] or "").startswith(("62", "60"))
-        amount = _num(r[7])
-        saldo += amount if is_debit else -amount
-        debit_total += amount if is_debit else 0.0
-        credit_total += 0.0 if is_debit else amount
-        out.append({
-            "date": r[0].isoformat(),
-            "docId": str(r[1]),
-            "docType": r[2], "docLabel": DOC_LABELS.get(r[2], r[2]),
-            "docNumber": r[3], "docDate": r[4],
-            "account": r[5] if is_debit else r[6],
-            "debit": amount if is_debit else 0.0,
-            "credit": 0.0 if is_debit else amount,
-            "saldo": round(saldo, 2),
-            "content": r[8],
+        sign = 1 if prefix == "62" else -1
+        opening = 0.0
+        months, saldo = [], 0.0
+        debit_total = credit_total = 0.0
+        for y, mm, dt, kt in rows:
+            before = m_from is not None and (y, mm) < m_from
+            after = m_to is not None and (y, mm) > m_to
+            move = sign * (_num(dt) - _num(kt))
+            if before:
+                opening += move
+                saldo = opening
+                continue
+            if after:
+                continue
+            saldo += move
+            debit_total += _num(dt)
+            credit_total += _num(kt)
+            months.append({"month": f"{y}-{mm:02d}", "debit": _num(dt), "credit": _num(kt),
+                           "saldo": round(saldo, 2)})
+
+        # Расшифровка: документы контрагента за тот же период. Она может не покрыть
+        # оборот целиком (зачёты и корректировки приходят проводками без документа) —
+        # разницу показываем строкой, а не подгоняем.
+        docs = [{
+            "id": str(r[0]), "date": r[1], "type": r[2],
+            "label": DOC_LABELS.get(r[2], r[2]), "number": r[3], "amount": _num(r[4]),
+        } for r in (await db.execute(text("""
+            SELECT d.id, d.date, d.doc_type, d.number, d.amount
+              FROM accounting_docs d
+             WHERE d.company_id = :cid AND d.counterparty_id::text = :kid
+               AND d.doc_type = ANY(:types)
+               AND (CAST(:df AS text) IS NULL OR d.date >= :df)
+               AND (CAST(:dt AS text) IS NULL OR d.date <= :dt)
+             ORDER BY d.date
+        """), {"cid": str(cid), "kid": counterparty_id, "types": list(doc_types),
+               "df": date_from, "dt": date_to})).all()]
+
+        sections.append({
+            "kind": kind, "account": prefix, "title": title,
+            "opening": round(opening, 2), "closing": round(saldo, 2),
+            "debitTotal": round(debit_total, 2), "creditTotal": round(credit_total, 2),
+            "months": months, "docs": docs,
         })
 
     return {
         "counterparty": {"id": str(k.id), "name": k.name, "inn": k.inn, "kpp": k.kpp},
         "periodFrom": date_from, "periodTo": date_to,
-        "opening": round(opening, 2),
-        "closing": round(saldo, 2),
-        "debitTotal": round(debit_total, 2),
-        "creditTotal": round(credit_total, 2),
-        "rows": out,
+        "sections": sections,
+        # Честная подпись под документом: откуда цифры и почему день внутри месяца
+        # в оборотах не различается.
+        "note": "Итоги — по оборотам с субконто из бухгалтерии (свёрнуты по месяцам); "
+                "документы приведены как расшифровка.",
     }
 
 
