@@ -74,12 +74,16 @@ async def send_message(db: AsyncSession, cid, *, account_id, to: list[str],
         import aiosmtplib
         from app.services.mail_secrets import password_of
         password = password_of(account)
-        # Сертификат внутреннего релея самоподписанный и выписан не на имя
-        # контейнера: проверять его бессмысленно — связь идёт внутри стека, а не
-        # через интернет. Та же ситуация уже разобрана в services/email_service.
+        # Сертификат ВНУТРЕННЕГО релея самоподписанный и выписан не на имя
+        # контейнера — его проверять бессмысленно, связь идёт внутри стека. А вот
+        # ящик у провайдера (Яндекс, почта заказчика) — это интернет, и раньше
+        # пароль от него уходил по каналу с непроверенным сертификатом: MITM на
+        # любом промежуточном узле снимал его молча.
+        internal = "." not in host
         kwargs: dict[str, Any] = {
             "hostname": host, "port": port, "timeout": 20,
-            "tls_context": ssl._create_unverified_context(),
+            "tls_context": (ssl._create_unverified_context() if internal
+                            else ssl.create_default_context()),
         }
         if account.smtp_security == "ssl":
             kwargs["use_tls"] = True

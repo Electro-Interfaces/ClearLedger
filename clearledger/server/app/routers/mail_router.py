@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.audit import log_audit
 from app.auth import assert_company_member, get_current_user
 from app.routers.users_router import require_company_admin
 from app.database import get_db
@@ -110,6 +111,9 @@ async def create_account(
     if password:
         a.password_enc = mail_secrets.encrypt(password)
     db.add(a)
+    await db.flush()
+    await log_audit(db, actor=current_user, company_id=cid, action="mail.account.create",
+                    target=a.address, details={"imap": a.imap_host, "mode": a.mode})
     await db.commit()
     return _account(a)
 
@@ -136,6 +140,9 @@ async def update_account(
     # доступ к ящику.
     if password:
         a.password_enc = mail_secrets.encrypt(password)
+    await log_audit(db, actor=current_user, company_id=cid, action="mail.account.update",
+                    target=a.address, details={"imap": a.imap_host, "mode": a.mode,
+                                               "password_changed": bool(password)})
     await db.commit()
     return _account(a)
 
@@ -151,6 +158,8 @@ async def delete_account(
     a = (await db.execute(select(MailAccount).where(
         MailAccount.company_id == cid, MailAccount.id == account_id))).scalar_one_or_none()
     if a is not None:
+        await log_audit(db, actor=current_user, company_id=cid,
+                        action="mail.account.delete", target=a.address)
         await db.delete(a)
         await db.commit()
     return {"deleted": bool(a)}

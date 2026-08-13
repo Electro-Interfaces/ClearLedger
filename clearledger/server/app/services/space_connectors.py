@@ -83,7 +83,7 @@ def _channel_entry(ch: Channel) -> dict[str, Any]:
         # Маршрута /data/connectors не существует — кнопка настройки у каждого
         # файлового канала вела на страницу «не найдено». У ГИГ и РусГидро это
         # большинство строк витрины.
-        "settings_route": f"/connectors/{ch.id}",
+        "settings_route": f"/connectors/{ch.id}",  # карточка канала — отдельный экран
     }
 
 
@@ -267,9 +267,9 @@ def _source_entry(src: Source) -> dict[str, Any]:
         "records": None,
         "files": 0,
         "initiator": "us",
-        # Настройка источника живёт на своём экране: /connectors — это сама
-        # витрина, и кнопка возвращала человека туда, где он уже стоит.
-        "settings_route": "/sources",
+        # Внутрь приложения, а не на голый маршрут: страницы «Подключений» больше
+        # не числятся в карте продукта, и прямой /sources открылся бы с чужим меню.
+        "settings_route": "/connect?mode=connect&sub=sources",
     }
 
 
@@ -317,7 +317,7 @@ async def list_connectors(db: AsyncSession, company_id: uuid.UUID) -> dict[str, 
             "direction": "both", "status": "off", "enabled": False,
             "last_sync_at": None, "last_error": None, "records": None, "files": 0,
             "initiator": "both",
-            "settings_route": "/connectors",
+            "settings_route": "/connect?mode=connect&sub=connectors",
         })
     for a in accounts:
         ready = bool(a.imap_host) and bool(a.password_enc or a.secret_env)
@@ -341,7 +341,7 @@ async def list_connectors(db: AsyncSession, company_id: uuid.UUID) -> dict[str, 
             # Настройка живёт там, где заводят все подключения пространства
             # (решение МАГа 13.08.2026): «Подключения» → «Коннекторы» → «Почта
             # компании». В «Загрузке» осталась только работа с самими письмами.
-            "settings_route": "/connectors",
+            "settings_route": "/connect?mode=connect&sub=connectors",
         })
 
     # ВХОДЯЩИЕ: кто подключён к нам. До В1 этот класс не показывался нигде —
@@ -360,7 +360,7 @@ async def list_connectors(db: AsyncSession, company_id: uuid.UUID) -> dict[str, 
             "last_sync_at": None, "last_error": None, "records": None, "files": 0,
             "initiator": "them",
             # Именные ключи с отзывом живут на «Состоянии» — там же карточка.
-            "settings_route": "/connections",
+            "settings_route": "/connect?mode=connect&sub=connections",
         })
     # HubEx в Ядре подключён глобальным токеном мимо модели источников — до В2
     # хотя бы показываем его как подключение, а не прячем.

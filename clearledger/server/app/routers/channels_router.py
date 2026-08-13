@@ -19,6 +19,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import assert_company_member, get_current_user
+from app.routers.users_router import require_company_admin
 from app.channel_catalog import get_channel_template
 from app.database import async_session_factory, get_db
 from app.deps import CompanyDep, get_owned
@@ -144,7 +145,9 @@ async def create_channel(
     current_user: User = Depends(get_current_user),
 ):
     """Создать канал (из шаблона справочника или пустой) и привязать к компании."""
-    cid = await assert_company_member(payload.company_id, current_user, db)
+    # Коннектор носит данные компании и ходит во внешние системы её реквизитами:
+    # заводит его администратор организации, а не любой участник.
+    cid = await require_company_admin(payload.company_id, current_user, db)
     tpl = get_channel_template(payload.template_id) if payload.template_id else None
     if payload.template_id and not tpl:
         raise HTTPException(404, f"Шаблон канала '{payload.template_id}' не найден")
@@ -222,6 +225,7 @@ async def update_channel(
     current_user: User = Depends(get_current_user),
 ):
     ch = await get_owned(Channel, channel_id, current_user, db)
+    await require_company_admin(str(ch.company_id), current_user, db)
     if payload.name is not None:
         ch.name = payload.name
     if payload.description is not None:
@@ -247,6 +251,7 @@ async def delete_channel(
     current_user: User = Depends(get_current_user),
 ):
     ch = await get_owned(Channel, channel_id, current_user, db)
+    await require_company_admin(str(ch.company_id), current_user, db)
     await db.delete(ch)   # streams/stages каскадом (FK ondelete=CASCADE)
     return {"deleted": str(channel_id)}
 

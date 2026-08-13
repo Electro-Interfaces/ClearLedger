@@ -222,7 +222,13 @@ def _test_sync(account: dict[str, Any], password: str) -> dict[str, Any]:
                 srv = smtplib.SMTP(account["smtp_host"], account["smtp_port"], timeout=15)
                 if account["smtp_security"] == "starttls":
                     import ssl as _ssl
-                    srv.starttls(context=_ssl._create_unverified_context())
+                    # Сертификат не проверяем только у внутреннего релея стека:
+                    # при проверке ящика провайдера пароль уходит наружу, и канал
+                    # без проверки сертификата отдаёт его первому, кто встал в
+                    # середину.
+                    internal = "." not in (account["smtp_host"] or "")
+                    srv.starttls(context=(_ssl._create_unverified_context() if internal
+                                          else _ssl.create_default_context()))
             # На внутреннем релее аутентификации нет вовсе: попытка войти даёт
             # отказ и выглядит как «неверный пароль», хотя пароль тут ни при чём.
             if password and account["login"] and account["smtp_security"] != "none":
@@ -428,13 +434,21 @@ async def _save_message(db: AsyncSession, account: MailAccount, uid: int,
     # Доставка: плюс-адрес (ответ почтового участника в комнату или задачу) или
     # правило (в комнату, в заявку). Ошибка доставки не рвёт приём — письмо уже
     # сохранено, и потерять его из-за удалённой комнаты было бы хуже.
-    try:
-        from app.services import mail_routing
-        routed = await mail_routing.route(db, account.company_id, row, rule)
-        if routed:
-            row.routed_to = routed
-    except Exception as e:  # noqa: BLE001
-        logger.exception("письмо %s не доставлено по маршруту: %s", row.id, e)
+    # Карантин ОСТАНАВЛИВАЕТ доставку. Раньше письмо с провалившейся проверкой
+    # подлинности пряталось из ленты, но всё равно уезжало сообщением в комнату
+    # чата, дописывалось в задачу и заводило заявку — то есть ровно то, ради чего
+    # карантин и делался (подделанное письмо «от контрагента» с новыми реквизитами
+    # оплаты), доезжало до людей другим путём.
+    if row.status in ("quarantine", "rejected"):
+        logger.info("письмо %s не доставляется: статус %s", row.id, row.status)
+    else:
+        try:
+            from app.services import mail_routing
+            routed = await mail_routing.route(db, account.company_id, row, rule)
+            if routed:
+                row.routed_to = routed
+        except Exception as e:  # noqa: BLE001
+            logger.exception("письмо %s не доставлено по маршруту: %s", row.id, e)
 
     # Правило сказало «в задачу» — заводим НОВУЮ задачу из письма. Ответ в
     # существующую задачу приходит плюс-адресом и обработан выше.
