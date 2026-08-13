@@ -2208,6 +2208,156 @@ async def taxes(
     }
 
 
+# ── Провал из строки отчёта в проводки ───────────────────────────────────────
+# «Себестоимость 15 млн» — это ответ, из которого нельзя проверить. Экран обязан
+# доводить до проводок, иначе цифре верят или не верят, но не разбирают.
+
+# Что стоит за строкой отчёта: пара «дебет / кредит» в терминах префиксов счетов.
+PNL_DRILL: dict[str, dict[str, Any]] = {
+    "revenue":      {"kt": ("90.01",), "not_dt": ("90",), "label": "Выручка"},
+    "vat":          {"dt": ("90.03",), "not_kt": ("90",), "label": "НДС с продаж"},
+    "cogs":         {"dt": ("90.02",), "kt": ("41", "43", "45", "20", "21", "23"),
+                     "label": "Себестоимость товаров и продукции"},
+    "cogsOther":    {"dt": ("90.02",), "not_kt": ("41", "43", "45", "20", "21", "23",
+                                                  "25", "26", "44", "90"),
+                     "label": "Прочая себестоимость"},
+    "commercial":   {"dt": ("90.07",), "not_kt": ("90",), "label": "Коммерческие расходы"},
+    "admin":        {"dt": ("90.08", "90.02"), "kt": ("25", "26"),
+                     "label": "Управленческие расходы"},
+    "otherIncome":  {"kt": ("91.01",), "not_dt": ("91",), "label": "Прочие доходы"},
+    "otherExpense": {"dt": ("91.02",), "not_kt": ("91", "66", "67"), "label": "Прочие расходы"},
+    "interest":     {"dt": ("91.02",), "kt": ("66", "67"), "label": "Проценты к уплате"},
+    "tax":          {"dt": ("99",), "kt": ("68",), "label": "Налог"},
+}
+
+
+@router.get("/pnl-entries")
+async def pnl_entries(
+    company_id: str,
+    line: str,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    limit: int = Query(200, ge=1, le=1000),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Проводки, из которых сложилась строка отчёта о результате."""
+    cid = await assert_company_member(company_id, current_user, db)
+    rule = PNL_DRILL.get(line)
+    if rule is None:
+        raise HTTPException(404, f"Строка отчёта «{line}» не раскрывается")
+
+    conds = []
+    if rule.get("dt"):
+        conds.append(_acc_any("e.account_dt", rule["dt"]))
+    if rule.get("kt"):
+        conds.append(_acc_any("e.account_kt", rule["kt"]))
+    if rule.get("not_dt"):
+        conds.append("NOT " + _acc_any("e.account_dt", rule["not_dt"]))
+    if rule.get("not_kt"):
+        conds.append("NOT " + _acc_any("e.account_kt", rule["not_kt"]))
+    where = " AND ".join(conds)
+
+    p: dict[str, Any] = {"cid": str(cid), "lim": limit}
+    if date_from:
+        where += " AND e.entry_date >= :df"
+        p["df"] = _day(date_from)
+    if date_to:
+        where += " AND e.entry_date <= :dt"
+        p["dt"] = _day(date_to)
+
+    total, count = (await db.execute(text(f"""
+        SELECT coalesce(sum(e.amount), 0), count(*)
+          FROM gl_entries e WHERE e.company_id = :cid AND {where}
+    """), p)).one()
+
+    rows = [{
+        "date": r[0].isoformat() if r[0] else None,
+        "accountDt": r[1], "accountKt": r[2], "amount": _num(r[3]),
+        "docKind": r[4], "docTitle": r[5], "content": r[6],
+    } for r in (await db.execute(text(f"""
+        SELECT e.entry_date, e.account_dt, e.account_kt, e.amount,
+               e.doc_kind, e.doc_title, e.content
+          FROM gl_entries e WHERE e.company_id = :cid AND {where}
+         ORDER BY e.entry_date DESC, e.id LIMIT :lim
+    """), p)).all()]
+
+    return {
+        "line": line, "label": rule["label"],
+        "rows": rows, "total": _num(total), "count": count, "shown": len(rows),
+    }
+
+
+# ── Мост «затраты → отчёт» ───────────────────────────────────────────────────
+# Раздел «Расходы» показывает затраты в момент НАЧИСЛЕНИЯ на счетах учёта, отчёт —
+# в момент СПИСАНИЯ на 90 и 91. Это две разные цифры по построению, и без моста между
+# ними человек считает, что одна из них ошибка.
+
+@router.get("/cost-bridge")
+async def cost_bridge(
+    company_id: str,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Сколько затрат начислено, сколько списано в результат и что осталось."""
+    cid = await assert_company_member(company_id, current_user, db)
+    p: dict[str, Any] = {"cid": str(cid)}
+    where = ""
+    if date_from:
+        where += " AND e.entry_date >= :df"
+        p["df"] = _day(date_from)
+    if date_to:
+        where += " AND e.entry_date <= :dt"
+        p["dt"] = _day(date_to)
+
+    COST_ACCS = INDIRECT_ACCS + SELLING_ACCS + ("20", "23", "28", "29")
+    cost_dt = _acc_any("e.account_dt", COST_ACCS)
+    cost_kt = _acc_any("e.account_kt", COST_ACCS)
+    result_kt = f"({_acc('e.account_kt', '90')} OR {_acc('e.account_kt', '91')})"
+    result_dt = f"({_acc('e.account_dt', '90')} OR {_acc('e.account_dt', '91')})"
+
+    rows = [{
+        "account": r[0], "name": r[1],
+        "accrued": _num(r[2]), "written": _num(r[3]), "moved": _num(r[4]),
+    } for r in (await db.execute(text(f"""
+        SELECT acc.code, max(acc.name),
+               -- начислено: пришло на затратный счёт извне контура
+               coalesce(sum(e.amount) FILTER (
+                 WHERE e.account_dt = acc.code AND NOT {cost_kt} AND NOT {result_kt}), 0),
+               -- списано в результат: ушло на 90 или 91
+               coalesce(sum(e.amount) FILTER (
+                 WHERE e.account_kt = acc.code AND {result_dt}), 0),
+               -- перенесено внутри контура затрат (26 → 44 и подобное)
+               coalesce(sum(e.amount) FILTER (
+                 WHERE e.account_kt = acc.code AND {cost_dt}), 0)
+          FROM gl_accounts acc
+          LEFT JOIN gl_entries e ON e.company_id = acc.company_id
+               AND (e.account_dt = acc.code OR e.account_kt = acc.code){where}
+         WHERE acc.company_id = :cid AND {_acc_any('acc.code', COST_ACCS)}
+         GROUP BY acc.code
+        HAVING coalesce(sum(e.amount), 0) <> 0
+         ORDER BY 3 DESC
+    """), p)).all()]
+
+    for r in rows:
+        # Остаток на счёте: начислено минус списанное и перенесённое. У 44 и 26 он
+        # обычно нулевой (закрываются каждый месяц), у 20 — это незавершёнка.
+        r["rest"] = round(r["accrued"] - r["written"] - r["moved"], 2)
+
+    pnl_rows = await _pnl_rows(db, cid, date_from, date_to)
+    t = _pnl_totals(pnl_rows)
+    return {
+        "rows": rows,
+        "accrued": round(sum(r["accrued"] for r in rows), 2),
+        "written": round(sum(r["written"] for r in rows), 2),
+        "rest": round(sum(r["rest"] for r in rows), 2),
+        # Что из этого попало в отчёт: коммерческие плюс управленческие.
+        "inPnl": round(t["commercial"] + t["admin"], 2),
+    }
+
+
 # ── Качество данных продукта ─────────────────────────────────────────────────
 # Волна 5. Отдельно от «Данных» пространства: там качество слоя целиком, здесь —
 # ровно то, что портит цифры «Реализации». Проверка = вопрос заказчику, поэтому
@@ -5155,3 +5305,146 @@ async def apply_rules(
 
     await db.commit()
     return {"created": created, "rules": len(rules), "period": period}
+
+
+# ── Тенденции: на что бухгалтеру посмотреть ──────────────────────────────────
+# Проверки ловят нарушенное правило. Здесь другое: правило не нарушено, но цифра
+# ведёт себя необычно — расход вырос вдвое, документ проведён задним числом,
+# контрагент появился и исчез. Это не ошибки, это поводы посмотреть, и подавать
+# их надо именно так, иначе экран превращается в генератор ложных тревог.
+
+
+@router.get("/trends")
+async def trends(
+    company_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Динамика по месяцам и находки, которые стоит объяснить."""
+    cid = await assert_company_member(company_id, current_user, db)
+    p: dict[str, Any] = {"cid": str(cid)}
+
+    months = [{
+        "month": r[0], "revenue": _num(r[1]), "cost": _num(r[2]),
+        "expense": _num(r[3]), "profit": round(_num(r[1]) - _num(r[2]) - _num(r[3]), 2),
+        "docs": r[4],
+    } for r in (await db.execute(text("""
+        WITH e AS (
+          SELECT period_year || '-' || lpad(period_month::text, 2, '0') AS m,
+                 sum(amount) FILTER (WHERE account_kt LIKE '90.01%')
+               - sum(amount) FILTER (WHERE account_dt LIKE '90.03%') AS revenue,
+                 sum(amount) FILTER (WHERE account_dt LIKE '90.02%') AS cost,
+                 sum(amount) FILTER (WHERE account_dt LIKE '44%' OR account_dt LIKE '26%') AS expense
+            FROM gl_entries WHERE company_id = :cid GROUP BY 1
+        ), d AS (
+          SELECT substr(date, 1, 7) AS m, count(*) AS docs
+            FROM accounting_docs WHERE company_id = :cid GROUP BY 1
+        )
+        SELECT e.m, coalesce(e.revenue, 0), coalesce(e.cost, 0), coalesce(e.expense, 0),
+               coalesce(d.docs, 0)
+          FROM e LEFT JOIN d ON d.m = e.m
+         ORDER BY e.m"""), p)).all()]
+
+    findings: list[dict[str, Any]] = []
+
+    def add(key: str, title: str, why: str, rows: list[dict[str, Any]]) -> None:
+        if rows:
+            findings.append({"key": key, "title": title, "why": why,
+                             "count": len(rows), "rows": rows[:30]})
+
+    # 1. Резкий скачок расходов против среднего за три предыдущих месяца.
+    jumps = []
+    for i, m in enumerate(months):
+        if i < 3:
+            continue
+        base = [x["expense"] for x in months[i - 3:i] if x["expense"]]
+        if len(base) < 3:
+            continue
+        avg = sum(base) / len(base)
+        if avg > 0 and m["expense"] > avg * 2 and m["expense"] - avg > 50_000:
+            jumps.append({"period": m["month"], "subject": "Расходы периода",
+                          "amount": m["expense"],
+                          "note": f"среднее за три месяца до этого {avg:,.0f} ₽".replace(",", " ")})
+    add("expense_jump", "Расходы выросли вдвое к среднему",
+        "Не ошибка, но такой скачок объясняют: разовая закупка, годовая оплата или чужой документ",
+        jumps)
+
+    # 2. Документы, датированные будущим. Проверка «изменён после закрытия периода»
+    #    невозможна: `created_at` — это время НАШЕЙ загрузки, а не правки в 1С, и
+    #    сравнение с закрытием периода дало бы сто ложных тревог подряд.
+    future = [{"period": (r[1] or "")[:7],
+               "subject": f"{DOC_LABELS.get(r[2], r[2])} № {r[3]} · {r[4]}",
+               "amount": _num(r[0]), "note": f"дата документа {r[1]}"}
+              for r in (await db.execute(text("""
+        SELECT amount, date, doc_type, number, coalesce(counterparty_name, '')
+          FROM accounting_docs
+         WHERE company_id = :cid AND date > to_char(CURRENT_DATE, 'YYYY-MM-DD')
+         ORDER BY date DESC LIMIT 50"""), p)).all()]
+    add("future_dated", "Документы датированы будущим",
+        "Дата позже сегодняшней: обычно опечатка в дате, но в закрытом периоде это уже расхождение",
+        future)
+
+    # 3. Контрагент с одной-двумя операциями на крупную сумму: разовые поставщики —
+    #    первое, что смотрят при проверке обоснованности расходов.
+    once = [{"period": r[2], "subject": r[0], "amount": _num(r[1]),
+             "note": f"операций всего {r[3]}"}
+            for r in (await db.execute(text("""
+        SELECT counterparty_name, sum(amount), max(substr(date, 1, 7)), count(*)
+          FROM accounting_docs
+         WHERE company_id = :cid AND doc_type IN ('purchase', 'invoice_in')
+           AND coalesce(counterparty_name, '') <> ''
+         GROUP BY 1 HAVING count(*) <= 2 AND sum(amount) > 300000
+         ORDER BY 2 DESC LIMIT 50"""), p)).all()]
+    add("one_off_supplier", "Разовый поставщик на крупную сумму",
+        "Одна-две операции на сотни тысяч — обычный повод показать договор и деловую цель",
+        once)
+
+    # 4. Круглые суммы у расходных документов: не нарушение, но признак, на который
+    #    смотрит проверяющий.
+    round_docs = [{"period": (r[1] or "")[:7],
+                   "subject": f"{DOC_LABELS.get(r[3], r[3])} № {r[2]} · {r[4]}",
+                   "amount": _num(r[0]), "note": "сумма без копеек и кратна 10 000"}
+                  for r in (await db.execute(text("""
+        SELECT amount, date, number, doc_type, coalesce(counterparty_name, '')
+          FROM accounting_docs
+         WHERE company_id = :cid AND doc_type IN ('purchase', 'invoice_in')
+           AND amount >= 100000 AND amount = round(amount) AND (amount::numeric % 10000) = 0
+         ORDER BY amount DESC LIMIT 50"""), p)).all()]
+    add("round_amounts", "Круглые суммы в расходах",
+        "Само по себе не нарушение, но проверяющий смотрит на них первыми — держите обоснование",
+        round_docs)
+
+    # 5. Контрагенты, у которых мы покупаем и которым продаём одновременно.
+    both = [{"period": "", "subject": r[0], "amount": _num(r[1]) + _num(r[2]),
+             "note": f"продали на {_num(r[1]):,.0f}, купили на {_num(r[2]):,.0f}".replace(",", " ")}
+            for r in (await db.execute(text("""
+        SELECT counterparty_name,
+               sum(amount) FILTER (WHERE doc_type = 'sale'),
+               sum(amount) FILTER (WHERE doc_type = 'purchase')
+          FROM accounting_docs
+         WHERE company_id = :cid AND coalesce(counterparty_name, '') <> ''
+         GROUP BY 1
+        HAVING sum(amount) FILTER (WHERE doc_type = 'sale') > 0
+           AND sum(amount) FILTER (WHERE doc_type = 'purchase') > 0
+         ORDER BY 2 DESC LIMIT 30"""), p)).all()]
+    add("mutual_trade", "И покупаем, и продаём одному контрагенту",
+        "Встречные операции — нормальная практика, но взаимозачёт и НДС по ним проверяют внимательнее",
+        both)
+
+    # 6. Месяцы, где расход есть, а выручки нет вовсе.
+    idle = [{"period": m["month"], "subject": "Месяц без выручки",
+             "amount": m["expense"], "note": "расходы есть, продаж нет"}
+            for m in months if m["expense"] > 50_000 and m["revenue"] <= 0]
+    add("expense_no_revenue", "Расходы без выручки в месяце",
+        "Для налоговой это повод спросить о деловой цели: расход есть, дохода нет",
+        idle)
+
+    return {
+        "months": months[-36:],
+        "findings": findings,
+        "summary": {
+            "months": len(months),
+            "findings": sum(f["count"] for f in findings),
+            "kinds": len(findings),
+        },
+    }

@@ -138,7 +138,7 @@ export const SPACE_PRODUCTS: SpaceProduct[] = [
     // налоги и то, что осталось. Разделы по вопросу: «Результат» (ОФР и
     // рентабельность), «Расходы» (куда уходят деньги), «Налоги» (сколько отдаём).
     code: 'econ', route: '/economy', label: 'Экономика',
-    modes: ['econ_result', 'econ_costs', 'econ_taxes'], paths: [],
+    modes: ['econ_result', 'econ_costs', 'econ_taxes', 'econ_help'], paths: [],
   },
   {
     // Данные — служебная кухня: откуда берутся цифры и как приводятся к общему виду.

@@ -46,7 +46,7 @@ const RevenuePanel = lazy(() => import('./OfficeRevenue').then((m) => ({ default
 const REVENUE_MODES: CoreMode[] = ['rev_sales', 'rev_buyers', 'rev_catalog', 'rev_papers',
   'rev_money', 'rev_stock', 'rev_help']
 const EconomyPanel = lazy(() => import('./OfficeEconomy').then((m) => ({ default: m.EconomyPanel })))
-const ECONOMY_MODES: CoreMode[] = ['econ_result', 'econ_costs', 'econ_taxes']
+const ECONOMY_MODES: CoreMode[] = ['econ_result', 'econ_costs', 'econ_taxes', 'econ_help']
 const BooksPanel = lazy(() => import('./OfficePanels').then((m) => ({ default: m.BooksPanel })))
 
 /**

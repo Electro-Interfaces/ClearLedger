@@ -12,7 +12,7 @@ import { ACCOUNTING_MENU } from './moduleComponents'
 import {
   REV_SALES_MENU, REV_CLIENTS_MENU, REV_ITEMS_MENU, REV_DOCS_MENU, REV_MONEY_MENU,
   REV_STOCK_MENU, REV_HELP_MENU,
-  ECON_RESULT_MENU, ECON_COSTS_MENU, ECON_TAXES_MENU,
+  ECON_RESULT_MENU, ECON_COSTS_MENU, ECON_TAXES_MENU, ECON_HELP_MENU,
   BOOKS_LEDGER_MENU, BOOKS_PRIMARY_MENU,
 } from './workspaceMenus'
 
@@ -79,6 +79,7 @@ export const MODE_LABELS: Record<CoreMode, string> = {
   econ_result: 'Экономика · Результат',
   econ_costs: 'Экономика · Расходы',
   econ_taxes: 'Экономика · Налоги',
+  econ_help: 'Экономика · Помощь',
   books_ledger: 'Бухгалтерия · Регистр',
   books_primary: 'Бухгалтерия · Документы',
 }
@@ -194,6 +195,7 @@ const SUB_LABELS: Partial<Record<CoreMode, Record<string, string>>> = {
   econ_result: Object.fromEntries(ECON_RESULT_MENU.map((m) => [m.key, m.label])),
   econ_costs: Object.fromEntries(ECON_COSTS_MENU.map((m) => [m.key, m.label])),
   econ_taxes: Object.fromEntries(ECON_TAXES_MENU.map((m) => [m.key, m.label])),
+  econ_help: Object.fromEntries(ECON_HELP_MENU.map((m) => [m.key, m.label])),
   books_ledger: Object.fromEntries(BOOKS_LEDGER_MENU.map((m) => [m.key, m.label])),
   books_primary: Object.fromEntries(BOOKS_PRIMARY_MENU.map((m) => [m.key, m.label])),
 }

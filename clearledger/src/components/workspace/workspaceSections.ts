@@ -33,7 +33,7 @@ import {
   MARKET_MENU, MARKET_KEYS,
   REV_SALES_MENU, REV_CLIENTS_MENU, REV_ITEMS_MENU, REV_DOCS_MENU, REV_MONEY_MENU,
   REV_STOCK_MENU, REV_HELP_MENU,
-  ECON_RESULT_MENU, ECON_COSTS_MENU, ECON_TAXES_MENU,
+  ECON_RESULT_MENU, ECON_COSTS_MENU, ECON_TAXES_MENU, ECON_HELP_MENU,
   BOOKS_LEDGER_MENU, BOOKS_PRIMARY_MENU,
 } from '@/config/workspaceMenus'
 // CHARGE_SESSIONS_MENU здесь не используется — общий список нужен карте прав и роутеру
@@ -55,7 +55,7 @@ export {
   MARKET_MENU, MARKET_KEYS,
   REV_SALES_MENU, REV_CLIENTS_MENU, REV_ITEMS_MENU, REV_DOCS_MENU, REV_MONEY_MENU,
   REV_STOCK_MENU, REV_HELP_MENU,
-  ECON_RESULT_MENU, ECON_COSTS_MENU, ECON_TAXES_MENU,
+  ECON_RESULT_MENU, ECON_COSTS_MENU, ECON_TAXES_MENU, ECON_HELP_MENU,
   BOOKS_LEDGER_MENU, BOOKS_PRIMARY_MENU,
 }
 
@@ -220,6 +220,8 @@ export function useWorkspaceSections(): WorkspaceSection[] {
     items: isOffice ? ECON_COSTS_MENU : [], connected: isOffice }
   const econTaxes: WorkspaceSection = { mode: 'econ_taxes', label: 'Налоги', icon: Landmark,
     items: isOffice ? ECON_TAXES_MENU : [], connected: isOffice }
+  const econHelp: WorkspaceSection = { mode: 'econ_help', label: 'Помощь', icon: BookOpen,
+    items: isOffice ? ECON_HELP_MENU : [], connected: isOffice }
   const booksLedger: WorkspaceSection = { mode: 'books_ledger', label: 'Регистр', icon: Scale,
     items: isOffice ? BOOKS_LEDGER_MENU : [], connected: isOffice }
   const booksPrimary: WorkspaceSection = { mode: 'books_primary', label: 'Документы', icon: FileText,
@@ -242,7 +244,7 @@ export function useWorkspaceSections(): WorkspaceSection[] {
   // (пустыми, «неподключёнными») значило бы показывать рельсу про чужую жизнь.
   const all = isOffice
     ? [revSales, revBuyers, revCatalog, revPapers, revMoney, revStock, revHelp,
-       econResult, econCosts, econTaxes, booksLedger, booksPrimary, normalize]
+       econResult, econCosts, econTaxes, econHelp, booksLedger, booksPrimary, normalize]
     : isEnergy
     ? [sales, salesSessions, salesCommerce, corporate, marketing,
        projects, projectsAnalytics, ops, opsEquipment, opsEconomy,

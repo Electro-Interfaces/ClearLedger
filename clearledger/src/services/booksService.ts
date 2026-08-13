@@ -342,6 +342,40 @@ export interface PnlData {
 export const getPnl = (companyId: string, period?: PeriodOpts) =>
   get<PnlData>(`/api/books/pnl?company_id=${companyId}` + periodQuery(period))
 
+/** Проводки, из которых сложилась строка отчёта о результате. */
+export interface PnlEntries {
+  line: string
+  label: string
+  rows: {
+    date: string | null; accountDt: string | null; accountKt: string | null
+    amount: number; docKind: string | null; docTitle: string | null; content: string | null
+  }[]
+  total: number
+  count: number
+  shown: number
+}
+
+export const getPnlEntries = (
+  companyId: string, line: string, period?: PeriodOpts,
+) =>
+  get<PnlEntries>(`/api/books/pnl-entries?company_id=${companyId}&line=${line}`
+    + periodQuery(period))
+
+/** Мост «затраты → отчёт»: начислено на счетах учёта против списанного в результат. */
+export interface CostBridge {
+  rows: {
+    account: string; name: string | null
+    accrued: number; written: number; moved: number; rest: number
+  }[]
+  accrued: number
+  written: number
+  rest: number
+  inPnl: number
+}
+
+export const getCostBridge = (companyId: string, period?: PeriodOpts) =>
+  get<CostBridge>(`/api/books/cost-bridge?company_id=${companyId}` + periodQuery(period))
+
 export interface ExpensesData {
   accounts: {
     account: string; name: string | null; amount: number
@@ -1234,3 +1268,15 @@ export const updateAdjustment = (
 export const applyExportRules = (companyId: string, period: string) =>
   post<{ created: number; rules: number; period: string }>(
     `/api/books/export-layer/apply-rules?company_id=${companyId}&period=${period}`, {})
+
+/** Помесячная динамика и находки-поводы: правило не нарушено, но цифра выделяется. */
+export interface TrendsData {
+  months: { month: string; revenue: number; cost: number; expense: number
+    profit: number; docs: number }[]
+  findings: { key: string; title: string; why: string; count: number
+    rows: { period: string; subject: string; amount: number; note: string }[] }[]
+  summary: { months: number; findings: number; kinds: number }
+}
+
+export const getTrends = (companyId: string) =>
+  get<TrendsData>(`/api/books/trends?company_id=${companyId}`)

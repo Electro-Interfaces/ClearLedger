@@ -118,3 +118,12 @@ export const REVENUE_HELP_SLICES: Record<string, HelpSlice> = {
     kinds: ['lnd'],
   },
 }
+
+/** «Экономика»: продукт, где каждая цифра требует оговорки. */
+export const ECONOMY_HELP_SLICES: Record<string, HelpSlice> = {
+  'help-start': {
+    title: 'Как это устроено',
+    hint: 'Образование результата, затраты, налоги и разрезы периода',
+    categories: ['Экономика компании'],
+  },
+}

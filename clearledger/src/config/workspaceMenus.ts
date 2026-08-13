@@ -443,6 +443,12 @@ export const ECON_COSTS_MENU: CentralMenuItem[] = [
   { key: 'ec_items',      label: 'По статьям' },
   { key: 'ec_costs',      label: 'По счетам' },
   { key: 'ec_costs_time', label: 'Помесячно' },
+  // Раздел «Расходы» считает затраты в момент начисления, отчёт — в момент списания.
+  // Без моста между ними две цифры выглядят как ошибка одной из них.
+  { key: 'ec_bridge_cost', label: 'Затраты и отчёт' },
+]
+export const ECON_HELP_MENU: CentralMenuItem[] = [
+  { key: 'help-start', label: 'Как это устроено' },
 ]
 export const ECON_TAXES_MENU: CentralMenuItem[] = [
   { key: 'ec_taxes',      label: 'Начислено и уплачено' },
@@ -468,6 +474,8 @@ export const BOOKS_LEDGER_MENU: CentralMenuItem[] = [
   { key: 'bk_checks',   label: 'Проверки учёта' },
   // Прогноз, а не факт: сколько заплатим, если закрыть период как есть.
   { key: 'bk_forecast', label: 'Налоги заранее' },
+  // Не ошибки, а поводы посмотреть: где цифра ведёт себя необычно.
+  { key: 'bk_trends',   label: 'Тенденции' },
 ]
 export const BOOKS_PRIMARY_MENU: CentralMenuItem[] = [
   { key: 'bk_docs',     label: 'Документы' },

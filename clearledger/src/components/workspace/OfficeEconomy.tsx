@@ -27,12 +27,26 @@ import { Card, CardContent } from '@/components/ui/card'
 import { MetricTile } from '@/components/ui/metric-tile'
 import { cn } from '@/lib/utils'
 import {
-  getExpenses, getPnl, getRevenue, getTaxes,
+  getCostBridge, getExpenses, getPnl, getPnlEntries, getRevenue, getTaxes,
   type PnlData, type PnlTotals,
 } from '@/services/booksService'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { exportTable } from '@/services/booksExport'
 import { Loading, NoCompany, TableCard, Th } from './OfficePanels'
+import { ProductHelpPanel } from './ProductHelpPanel'
+import { ECONOMY_HELP_SLICES } from './helpSlices'
+import {
+  ECON_RESULT_MENU, ECON_COSTS_MENU, ECON_TAXES_MENU,
+} from '@/config/workspaceMenus'
 import { useWorkspaceSections } from './workspaceSections'
+
+/** Все пункты продукта — по ним статья находит подпись экрана и кнопку перехода. */
+const ECON_MENU_FOR_HELP = [...ECON_RESULT_MENU, ...ECON_COSTS_MENU, ...ECON_TAXES_MENU]
+
+const modeForHelpKey = (key: string): string =>
+  ECON_COSTS_MENU.some((m) => m.key === key) ? 'econ_costs'
+  : ECON_TAXES_MENU.some((m) => m.key === key) ? 'econ_taxes'
+  : 'econ_result'
 
 const money = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 const money2 = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -164,6 +178,14 @@ export function EconomyPanel() {
     )
   }
 
+  // Помощь — общий компонент пространства: тот же свод «Инфо», суженный до продукта.
+  if (coreMode === 'econ_help') {
+    return (
+      <ProductHelpPanel companyId={companyId} section={sub} appCode="econ"
+        slices={ECONOMY_HELP_SLICES} menu={ECON_MENU_FOR_HELP} modeForKey={modeForHelpKey} />
+    )
+  }
+
   const view = (() => {
     switch (sub) {
       case 'ec_pnl':        return <EconPnl companyId={companyId} period={period} />
@@ -173,6 +195,7 @@ export function EconomyPanel() {
       case 'ec_items':      return <EconCosts companyId={companyId} period={period} view="items" />
       case 'ec_costs':      return <EconCosts companyId={companyId} period={period} view="structure" />
       case 'ec_costs_time': return <EconCosts companyId={companyId} period={period} view="months" />
+      case 'ec_bridge_cost': return <EconCostBridge companyId={companyId} period={period} />
       case 'ec_taxes':      return <EconTaxes companyId={companyId} period={period} view="list" />
       case 'ec_load':       return <EconTaxes companyId={companyId} period={period} view="load" />
       default:              return <EconBridge companyId={companyId} period={period} />
@@ -336,9 +359,14 @@ const PNL_LINES: { key: keyof PnlTotals; label: string; strong?: boolean; minus?
  * рядом со своей строкой — вертикальный и горизонтальный анализ разом, и это дешевле
  * любого графика.
  */
+/** Строки, за которыми стоит однозначная пара счетов (см. PNL_DRILL на бэкенде). */
+const DRILLABLE = new Set<keyof PnlTotals>(['revenue', 'vat', 'cogs', 'cogsOther',
+  'commercial', 'admin', 'otherIncome', 'otherExpense', 'interest', 'tax'])
+
 function EconPnl({ companyId, period }: { companyId: string; period: Period }) {
   const q = usePnl(companyId, period)
   const [base, setBase] = useState<'prev' | 'year'>('prev')
+  const [drill, setDrill] = useState<string | null>(null)
   const other = base === 'prev' ? prevPeriod(period) : yearAgo(period)
   const b = usePnl(companyId, other)
 
@@ -401,7 +429,12 @@ function EconPnl({ companyId, period }: { companyId: string; period: Period }) {
               l.strong ? 'font-medium bg-muted/30' : '')}>
               <td className="px-3 py-1.5">
                 {l.minus && <span className="text-muted-foreground mr-1">−</span>}
-                {l.label}
+                {/* Строка раскрывается до проводок: цифра, которую нельзя проверить,
+                    остаётся предметом веры, а не разбора. */}
+                {DRILLABLE.has(l.key) ? (
+                  <button onClick={() => setDrill(l.key)}
+                    className="text-left hover:text-primary hover:underline">{l.label}</button>
+                ) : l.label}
               </td>
               <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">
                 {money.format(v)} ₽
@@ -419,6 +452,11 @@ function EconPnl({ companyId, period }: { companyId: string; period: Period }) {
           )
         })}
       </TableCard>
+
+      {drill && (
+        <PnlEntriesWindow companyId={companyId} period={period} line={drill}
+          onClose={() => setDrill(null)} />
+      )}
 
       <Card>
         <CardContent className="p-4 space-y-1">
@@ -1233,6 +1271,158 @@ function EconTaxes({ companyId, period, view }: {
           </p>
         </CardContent>
       </Card>
+    </div>
+  )
+}
+
+/**
+ * Проводки строки отчёта — окном поверх экрана, как принято в пространстве.
+ *
+ * Сумма окна обязана совпадать со строкой: если разошлась, ошибка в правиле разбора,
+ * а не в данных. Поэтому итог показан прямо в шапке.
+ */
+function PnlEntriesWindow({ companyId, period, line, onClose }: {
+  companyId: string; period: Period; line: string; onClose: () => void
+}) {
+  const q = useQuery({
+    queryKey: ['books', 'pnl-entries', companyId, line, period.from, period.to],
+    queryFn: () => getPnlEntries(companyId, line, period),
+  })
+  const d = q.data
+
+  return (
+    <Dialog open onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-w-5xl max-h-[85vh] overflow-hidden flex flex-col">
+        <DialogHeader>
+          <DialogTitle className="text-base">
+            {d?.label ?? 'Проводки'}
+            {d && (
+              <span className="ml-2 font-normal text-muted-foreground tabular-nums">
+                {money.format(d.total)} ₽ · {num.format(d.count)} проводок
+              </span>
+            )}
+          </DialogTitle>
+        </DialogHeader>
+        {q.isError && <QueryError onRetry={() => q.refetch()} />}
+        {!d ? <Loading /> : (
+          <div className="flex-1 min-h-0 overflow-y-auto pr-1">
+            {d.shown < d.count && (
+              <p className="text-[11px] text-muted-foreground pb-2">
+                Показаны {num.format(d.shown)} последних из {num.format(d.count)} — итог в
+                шапке посчитан по всем.
+              </p>
+            )}
+            <TableCard head={<><Th>Дата</Th><Th>Дт</Th><Th>Кт</Th><Th right>Сумма</Th>
+              <Th>Документ</Th></>}>
+              {d.rows.map((r, i) => (
+                <tr key={i} className="border-b last:border-0 hover:bg-muted/40">
+                  <td className="px-3 py-1.5 tabular-nums whitespace-nowrap">{r.date}</td>
+                  <td className="px-3 py-1.5 tabular-nums">{r.accountDt ?? '—'}</td>
+                  <td className="px-3 py-1.5 tabular-nums">{r.accountKt ?? '—'}</td>
+                  <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">
+                    {money2.format(r.amount)} ₽
+                  </td>
+                  <td className="px-3 py-1.5 max-w-[380px] truncate"
+                    title={`${r.docKind ?? ''} ${r.docTitle ?? ''} ${r.content ?? ''}`.trim()}>
+                    <span className="text-muted-foreground">{r.docKind ?? ''}</span>{' '}
+                    {r.docTitle ?? r.content ?? '—'}
+                  </td>
+                </tr>
+              ))}
+            </TableCard>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/**
+ * Мост «затраты → отчёт».
+ *
+ * Раздел «Расходы» считает затраты в момент НАЧИСЛЕНИЯ на счетах учёта, отчёт — в
+ * момент СПИСАНИЯ на 90 и 91. Совпадают они только когда всё начисленное закрыто в
+ * том же периоде; разница — это остаток на затратных счетах (у 20 — незавершённое
+ * производство, у 44 — расходы, распределяемые на будущие периоды). Без этой таблицы
+ * два числа выглядят как ошибка одного из них.
+ */
+function EconCostBridge({ companyId, period }: { companyId: string; period: Period }) {
+  const q = useQuery({
+    queryKey: ['books', 'cost-bridge', companyId, period.from, period.to],
+    queryFn: () => getCostBridge(companyId, period),
+    enabled: !!companyId,
+  })
+
+  if (q.isError) return <div className="p-4"><QueryError onRetry={() => q.refetch()} /></div>
+  if (!q.data) return <Loading />
+  const d = q.data
+  if (!d.accrued && !d.written) {
+    return (
+      <div className="p-6 text-sm text-muted-foreground">
+        За выбранный период оборотов по затратным счетам нет.
+      </div>
+    )
+  }
+  const gap = Math.round((d.written - d.inPnl) * 100) / 100
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
+        <MetricTile label="Начислено затрат" value={money.format(d.accrued) + ' ₽'}
+          hint="пришло на счета учёта извне: поставщики, зарплата, взносы" />
+        <MetricTile label="Списано в результат" value={money.format(d.written) + ' ₽'}
+          hint="ушло на счета 90 и 91 — это и есть расходы отчёта" />
+        <MetricTile label="Осталось на счетах" value={money.format(d.rest) + ' ₽'}
+          hint="незавершёнка и расходы, распределяемые на будущие периоды" />
+        <MetricTile label="В отчёте о результате" value={money.format(d.inPnl) + ' ₽'}
+          hint={Math.abs(gap) < 1 ? 'сходится со списанным'
+            : `расхождение со списанным ${money.format(gap)} ₽`}
+          tone={Math.abs(gap) < 1 ? 'success' : undefined} />
+      </div>
+
+      <p className="text-[11px] text-muted-foreground">
+        Затраты попадают в отчёт не тогда, когда начислены, а когда списаны на счета
+        продаж и прочих операций. Поэтому «Структура затрат» и строки «Коммерческие» и
+        «Управленческие» в отчёте совпадают только при полном закрытии периода. Разница
+        — это остаток на затратных счетах, а не потеря данных.
+      </p>
+
+      <div className="flex justify-end">
+        <ExportButton onClick={() => exportTable('Затраты и отчёт', [
+          { header: 'Счёт', key: 'account', width: 12 },
+          { header: 'Наименование', key: 'name', width: 40 },
+          { header: 'Начислено', key: 'accrued', width: 18, money: true },
+          { header: 'Списано в результат', key: 'written', width: 20, money: true },
+          { header: 'Перенесено на другие счета', key: 'moved', width: 24, money: true },
+          { header: 'Остаток', key: 'rest', width: 18, money: true },
+        ], d.rows)} />
+      </div>
+
+      <TableCard note="По каждому затратному счёту: пришло, ушло в результат, осталось"
+        head={<><Th>Счёт</Th><Th>Наименование</Th><Th right>Начислено</Th>
+          <Th right>Списано</Th><Th right>Перенесено</Th><Th right>Остаток</Th></>}>
+        {d.rows.map((r) => (
+          <tr key={r.account} className="border-b last:border-0 hover:bg-muted/40">
+            <td className="px-3 py-1.5 tabular-nums">{r.account}</td>
+            <td className="px-3 py-1.5 max-w-[320px] truncate" title={r.name ?? ''}>
+              {r.name ?? '—'}
+            </td>
+            <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">
+              {money.format(r.accrued)} ₽
+            </td>
+            <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">
+              {money.format(r.written)} ₽
+            </td>
+            <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground whitespace-nowrap">
+              {r.moved ? `${money.format(r.moved)} ₽` : '—'}
+            </td>
+            <td className={cn('px-3 py-1.5 text-right tabular-nums whitespace-nowrap',
+              Math.abs(r.rest) > 1 ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground')}>
+              {money.format(r.rest)} ₽
+            </td>
+          </tr>
+        ))}
+      </TableCard>
     </div>
   )
 }
