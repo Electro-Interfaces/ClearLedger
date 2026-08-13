@@ -12,18 +12,20 @@
 """
 from __future__ import annotations
 
+import uuid
 from datetime import date
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import assert_company_member, get_current_user
 from app.database import get_db
 from app.models import (
-    AccountingDoc, Counterparty, GlAccount, GlEntry, GlReference,
-    NomenclatureItem, Period, User, ReferenceSnapshot, SourceFile,
+    AccountingDoc, Counterparty, GlAccount, GlBalance, GlEntry, GlReference,
+    InvoicePayment, NomenclatureItem, Period, User, ReferenceSnapshot, SourceFile,
+    VatEntry,
 )
 
 router = APIRouter(prefix="/books", tags=["Бухгалтерия пространства"])
@@ -585,6 +587,18 @@ async def docs(
         "kinds": [k for k in kinds if k["type"] in codes],
     } for code, title, codes in DOC_SECTIONS]
 
+    # Оплата счёта — из регистра «Оплата счетов»: в самой первичке связи «счёт ↔
+    # платёж» нет, реквизиты документов её не несут. Спрашиваем только по
+    # показанным строкам, иначе тянули бы весь регистр ради страницы реестра.
+    paid: dict[uuid.UUID, float] = {}
+    doc_ids = [d.id for d in rows if d.doc_type == "invoice_out"]
+    if doc_ids:
+        paid = {r[0]: _num(r[1]) for r in (await db.execute(
+            select(InvoicePayment.invoice_doc_id, func.sum(InvoicePayment.amount))
+            .where(InvoicePayment.company_id == cid,
+                   InvoicePayment.invoice_doc_id.in_(doc_ids))
+            .group_by(InvoicePayment.invoice_doc_id))).all()}
+
     return {
         "total": total,
         "kinds": kinds,
@@ -601,6 +615,8 @@ async def docs(
             # Закрытый период — половина ответа аудитору: документ уже не переписать.
             "periodStatus": d.period_status,
             "lines": len(d.lines or []),
+            # Только у счетов покупателям: null — вопрос неприменим, 0 — не оплачен.
+            "paid": paid.get(d.id) if d.doc_type == "invoice_out" else None,
         } for d in rows],
     }
 
@@ -645,8 +661,13 @@ async def _slice(db: AsyncSession, cid, doc_type: str, top: int,
         m["amount"] += amount
         m["docs"] += 1
 
-        c = by_client.setdefault(d.counterparty_name or "—",
-                                 {"name": d.counterparty_name or "—", "inn": d.counterparty_inn,
+        # Ключ покупателя — ССЫЛКА на карточку, а не имя: одно юрлицо приезжает в
+        # документах в разном написании и по имени разваливалось на две строки
+        # разреза. Имя остаётся подписью, id — тем, по чему открывается карточка.
+        ckey = str(d.counterparty_id) if d.counterparty_id else (d.counterparty_name or "—")
+        c = by_client.setdefault(ckey,
+                                 {"id": str(d.counterparty_id) if d.counterparty_id else None,
+                                  "name": d.counterparty_name or "—", "inn": d.counterparty_inn,
                                   "amount": 0.0, "docs": 0})
         c["amount"] += amount
         c["docs"] += 1
@@ -655,8 +676,12 @@ async def _slice(db: AsyncSession, cid, doc_type: str, top: int,
             # Разрез по типу строки: один документ несёт и товары, и услуги.
             if line_kind and (ln.get('kind') or 'goods') != line_kind:
                 continue
-            it = by_item.setdefault(ln.get("name") or "—",
-                                    {"name": ln.get("name") or "—", "amount": 0.0, "qty": 0.0})
+            # Позиция — по КОДУ номенклатуры: имя в строке документа пишется как
+            # угодно, а код тот же, что в справочнике, и по нему открывается карточка.
+            ikey = ln.get("code") or ln.get("name") or "—"
+            it = by_item.setdefault(ikey,
+                                    {"code": ln.get("code"),
+                                     "name": ln.get("name") or "—", "amount": 0.0, "qty": 0.0})
             it["amount"] += _num(ln.get("amount"))
             it["qty"] += _num(ln.get("qty"))
 
@@ -700,6 +725,201 @@ async def services(
     """Услуги: динамика, заказчики, виды услуг."""
     cid = await assert_company_member(company_id, current_user, db)
     return await _slice(db, cid, "sale", top, date_from, date_to, line_kind="service")
+
+
+# ── Нормализованный слой: карточка контрагента ───────────────────────────────
+# Разрезы отвечают «сколько всего». Работа же идёт вокруг КЛИЕНТА: с ним говорят,
+# ему выставляют, от него ждут денег. Карточка собирает всё, что о нём знает
+# пространство, — из справочника, документов, договоров и регистра сразу.
+#
+# Ключ — ссылка (`counterparty_id`), а не имя: пока сводили по строке, у одного и
+# того же юрлица «его документы» и «его долг» считались по разным множествам.
+
+@router.post("/relink")
+async def relink_docs(
+    company_id: str,
+    reset: bool = False,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Свести документы со справочниками (контрагент, договор). Идемпотентно."""
+    cid = await assert_company_member(company_id, current_user, db)
+    from app.services.books_links import relink
+    return await relink(db, cid, reset=reset)
+
+
+@router.get("/counterparties")
+async def counterparties(
+    company_id: str,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    q: str | None = None,
+    limit: int = Query(200, ge=1, le=1000),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Контрагенты пространства с их оборотами и долгом за период.
+
+    Долг считается по регистру: проводки документов контрагента на счетах расчётов
+    (62 — покупатели, 60 — поставщики). Сальдо, а не «сумма неоплаченных счетов»:
+    зачёты авансов и корректировки живут только в регистре.
+    """
+    cid = await assert_company_member(company_id, current_user, db)
+    params: dict[str, Any] = {"cid": str(cid), "df": date_from, "dt": date_to,
+                              "q": f"%{q.lower()}%" if q else None, "lim": limit}
+    rows = (await db.execute(text("""
+        WITH doc AS (
+          SELECT d.id, d.counterparty_id, d.doc_type, d.amount, d.date
+            FROM accounting_docs d
+           WHERE d.company_id = :cid AND d.counterparty_id IS NOT NULL
+             AND (CAST(:df AS text) IS NULL OR d.date >= :df)
+             AND (CAST(:dt AS text) IS NULL OR d.date <= :dt)
+        ), agg AS (
+          SELECT counterparty_id,
+                 sum(amount) FILTER (WHERE doc_type = 'sale')     AS sales,
+                 sum(amount) FILTER (WHERE doc_type = 'purchase') AS purchases,
+                 sum(amount) FILTER (WHERE doc_type = 'bank_in')  AS paid_in,
+                 sum(amount) FILTER (WHERE doc_type = 'bank_out') AS paid_out,
+                 count(*)                                          AS docs,
+                 max(date)                                         AS last_doc
+            FROM doc GROUP BY 1
+        ), debt AS (
+          SELECT d.counterparty_id,
+                 sum(CASE WHEN e.account_dt LIKE '62%' THEN e.amount ELSE 0 END)
+               - sum(CASE WHEN e.account_kt LIKE '62%' THEN e.amount ELSE 0 END) AS ar,
+                 sum(CASE WHEN e.account_kt LIKE '60%' THEN e.amount ELSE 0 END)
+               - sum(CASE WHEN e.account_dt LIKE '60%' THEN e.amount ELSE 0 END) AS ap
+            FROM gl_entries e
+            JOIN accounting_docs d ON d.id = e.doc_id
+           WHERE e.company_id = :cid AND d.counterparty_id IS NOT NULL
+             AND (e.account_dt LIKE '62%' OR e.account_kt LIKE '62%'
+                  OR e.account_dt LIKE '60%' OR e.account_kt LIKE '60%')
+           GROUP BY 1
+        )
+        SELECT k.id, k.name, k.inn, k.kind,
+               coalesce(a.sales, 0), coalesce(a.purchases, 0),
+               coalesce(a.paid_in, 0), coalesce(a.paid_out, 0),
+               coalesce(a.docs, 0), a.last_doc,
+               coalesce(b.ar, 0), coalesce(b.ap, 0),
+               (SELECT count(*) FROM contracts c
+                 WHERE c.company_id = :cid AND c.counterparty_id::text = k.id::text)
+          FROM counterparties k
+          LEFT JOIN agg  a ON a.counterparty_id = k.id
+          LEFT JOIN debt b ON b.counterparty_id = k.id
+         WHERE k.company_id = :cid
+           AND (CAST(:q AS text) IS NULL OR lower(k.name) LIKE :q OR coalesce(k.inn,'') LIKE :q)
+           AND (a.docs IS NOT NULL OR b.ar IS NOT NULL)
+         ORDER BY coalesce(a.sales, 0) + coalesce(a.purchases, 0) DESC
+         LIMIT :lim
+    """), params)).all()
+
+    return {"rows": [{
+        "id": str(r[0]), "name": r[1], "inn": r[2], "kind": r[3],
+        "sales": _num(r[4]), "purchases": _num(r[5]),
+        "paidIn": _num(r[6]), "paidOut": _num(r[7]),
+        "docs": r[8], "lastDoc": r[9],
+        "receivable": _num(r[10]), "payable": _num(r[11]),
+        "contracts": r[12],
+    } for r in rows]}
+
+
+@router.get("/counterparty")
+async def counterparty_card(
+    company_id: str,
+    counterparty_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Карточка контрагента: реквизиты, договоры, документы, долг, помесячно."""
+    cid = await assert_company_member(company_id, current_user, db)
+    params = {"cid": str(cid), "kid": counterparty_id}
+
+    k = (await db.execute(select(Counterparty).where(
+        Counterparty.company_id == cid,
+        Counterparty.id == counterparty_id))).scalar_one_or_none()
+    if k is None:
+        return {"error": "not_found"}
+
+    docs = [{
+        "id": str(r[0]), "date": r[1], "type": r[2], "label": DOC_LABELS.get(r[2], r[2]),
+        "number": r[3], "amount": _num(r[4]), "vat": _num(r[5]),
+        "contract": r[6], "periodStatus": r[7],
+    } for r in (await db.execute(text("""
+        SELECT d.id, d.date, d.doc_type, d.number, d.amount, d.vat_amount,
+               c.type, d.period_status
+          FROM accounting_docs d
+          LEFT JOIN contracts c ON c.id = d.contract_id
+         WHERE d.company_id = :cid AND d.counterparty_id::text = :kid
+         ORDER BY d.date DESC LIMIT 300
+    """), params)).all()]
+
+    by_type = {r[0]: {"docs": r[1], "amount": _num(r[2])} for r in (await db.execute(text("""
+        SELECT doc_type, count(*), sum(amount) FROM accounting_docs
+         WHERE company_id = :cid AND counterparty_id::text = :kid GROUP BY 1
+    """), params)).all()}
+
+    months = [{"month": r[0], "sales": _num(r[1]), "purchases": _num(r[2]),
+               "paid": _num(r[3])} for r in (await db.execute(text("""
+        SELECT substr(date, 1, 7) m,
+               sum(amount) FILTER (WHERE doc_type = 'sale'),
+               sum(amount) FILTER (WHERE doc_type = 'purchase'),
+               sum(amount) FILTER (WHERE doc_type IN ('bank_in', 'bank_out'))
+          FROM accounting_docs
+         WHERE company_id = :cid AND counterparty_id::text = :kid
+         GROUP BY 1 ORDER BY 1
+    """), params)).all()]
+
+    # Что покупает (или что покупаем у него) — по строкам его документов реализации
+    # и поступления. Позиция берётся из строки; справочник номенклатуры даёт единицу.
+    items = [{"code": r[0], "name": r[1], "qty": _num(r[2]), "amount": _num(r[3]),
+              "docs": r[4], "unit": r[5]} for r in (await db.execute(text("""
+        WITH l AS (
+          SELECT d.id doc, jsonb_array_elements(d.lines) ln
+            FROM accounting_docs d
+           WHERE d.company_id = :cid AND d.counterparty_id::text = :kid
+             AND d.doc_type IN ('sale', 'purchase')
+        ), x AS (
+          -- Разворачивать JSONB и агрегировать в одном запросе Postgres не даёт:
+          -- «subquery uses ungrouped column». Строки сначала становятся колонками,
+          -- и лишь потом группируются; единица приезжает джойном справочника.
+          SELECT doc, ln->>'code' code, ln->>'name' name,
+                 (ln->>'qty')::numeric qty, (ln->>'amount')::numeric amount
+            FROM l
+        )
+        SELECT x.code, max(x.name), sum(x.qty), sum(x.amount), count(DISTINCT x.doc),
+               max(n.unit_label)
+          FROM x LEFT JOIN nomenclature n
+            ON n.company_id = :cid AND n.code = x.code
+         GROUP BY x.code ORDER BY 4 DESC LIMIT 50
+    """), params)).all()]
+
+    debt = (await db.execute(text("""
+        SELECT sum(CASE WHEN e.account_dt LIKE '62%' THEN e.amount ELSE 0 END)
+             - sum(CASE WHEN e.account_kt LIKE '62%' THEN e.amount ELSE 0 END),
+               sum(CASE WHEN e.account_kt LIKE '60%' THEN e.amount ELSE 0 END)
+             - sum(CASE WHEN e.account_dt LIKE '60%' THEN e.amount ELSE 0 END)
+          FROM gl_entries e JOIN accounting_docs d ON d.id = e.doc_id
+         WHERE e.company_id = :cid AND d.counterparty_id::text = :kid
+    """), params)).one()
+
+    contracts = [{"id": str(r[0]), "number": r[1], "date": r[2], "type": r[3],
+                  "kind": r[4], "closed": r[5], "docs": r[6]} for r in (await db.execute(text("""
+        SELECT c.id, c.number, c.date, c.type, c.kind, c.is_closed,
+               (SELECT count(*) FROM accounting_docs d WHERE d.contract_id = c.id)
+          FROM contracts c
+         WHERE c.company_id = :cid AND c.counterparty_id::text = :kid
+         ORDER BY c.date DESC NULLS LAST
+    """), params)).all()]
+
+    return {
+        "id": str(k.id), "name": k.name, "inn": k.inn, "kpp": k.kpp, "ogrn": k.ogrn,
+        "kind": k.kind, "fullName": k.full_name, "address": k.legal_address,
+        "phone": k.phone, "email": k.email, "director": k.director_name,
+        "bankAccount": k.bank_account, "bankName": k.bank_name, "okved": k.okved,
+        "receivable": _num(debt[0]), "payable": _num(debt[1]),
+        "byType": by_type, "months": months, "items": items,
+        "contracts": contracts, "docs": docs,
+    }
 
 
 # ── «Данные»: источники и качество ───────────────────────────────────────────
@@ -1141,3 +1361,123 @@ async def dataset(
 
     return {"key": key, "label": label, "table": model.__tablename__, "records": total,
             "link": link, "period": period, "fields": fields, "top": top}
+
+
+# ── Взаиморасчёты и налог: аналитический слой ────────────────────────────────
+# Проводка не знает, ЧЕЙ долг: субконто в основной таблице регистра через COM
+# недоступно. Аналитика приезжает отдельными наборами — сальдо счёта с субконто
+# (`gl_balances`) и обороты Дт-Кт с субконто помесячно (`gl_turnovers`), — и
+# отвечает на вопросы, которых у слоя раньше не было вовсе.
+
+
+@router.get("/settlements")
+async def settlements(
+    company_id: str,
+    kind: str = Query("receivable", pattern="^(receivable|payable|other)$"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Кто сколько должен: сальдо расчётов по контрагентам и договорам.
+
+    Берётся ИЗ САЛЬДО источника, а не считается из наших проводок: остаток
+    накоплен всей историей регистра, включая периоды до выгрузки, и зачёты
+    авансов живут только там.
+    """
+    cid = await assert_company_member(company_id, current_user, db)
+    prefix = {"receivable": "62", "payable": "60", "other": "76"}[kind]
+
+    as_of = (await db.execute(
+        select(func.max(GlBalance.as_of)).where(GlBalance.company_id == cid))).scalar_one_or_none()
+    if as_of is None:
+        return {"asOf": None, "rows": [], "totals": {"debit": 0, "credit": 0}, "months": []}
+
+    rows = (await db.execute(
+        select(GlBalance.account, GlBalance.account_name, GlBalance.sub1, GlBalance.sub2,
+               GlBalance.debit, GlBalance.credit)
+        .where(GlBalance.company_id == cid, GlBalance.as_of == as_of,
+               GlBalance.account.like(f"{prefix}%"))
+        .order_by((GlBalance.debit + GlBalance.credit).desc()))).all()
+
+    # Динамика расчётов помесячно: обе стороны корреспонденции, потому что долг
+    # растёт по дебету счёта расчётов и гасится по кредиту.
+    months = (await db.execute(text("""
+        SELECT period_year, period_month,
+               sum(amount) FILTER (WHERE account_dt LIKE :p) AS grew,
+               sum(amount) FILTER (WHERE account_kt LIKE :p) AS closed
+          FROM gl_turnovers
+         WHERE company_id = :cid AND (account_dt LIKE :p OR account_kt LIKE :p)
+         GROUP BY 1, 2 ORDER BY 1, 2
+    """), {"cid": str(cid), "p": f"{prefix}%"})).all()
+
+    return {
+        "asOf": as_of.isoformat(),
+        "rows": [{
+            "account": r[0], "accountName": r[1],
+            "counterparty": r[2], "contract": r[3],
+            "debit": _num(r[4]), "credit": _num(r[5]),
+            "net": _num(r[4]) - _num(r[5]),
+        } for r in rows],
+        "totals": {"debit": sum(_num(r[4]) for r in rows),
+                   "credit": sum(_num(r[5]) for r in rows)},
+        "months": [{"month": f"{m[0]}-{m[1]:02d}", "grew": _num(m[2]), "closed": _num(m[3])}
+                   for m in months],
+    }
+
+
+@router.get("/vat")
+async def vat(
+    company_id: str,
+    kind: str = Query("issued", pattern="^(issued|received|claimed)$"),
+    date_from: str | None = None,
+    date_to: str | None = None,
+    limit: int = Query(500, ge=1, le=2000),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Книга продаж, книга покупок и предъявленный НДС.
+
+    Три набора одной таблицы: счета-фактуры выданные и полученные — журнал учёта,
+    `claimed` — движение налога, предъявленного поставщиком. Суммы журнала ВЫШЕ
+    выручки продаж: туда входят авансовые счета-фактуры, у которых отгрузки ещё нет.
+    """
+    cid = await assert_company_member(company_id, current_user, db)
+
+    q = select(VatEntry).where(VatEntry.company_id == cid, VatEntry.kind == kind)
+    if date_from:
+        q = q.where(VatEntry.doc_date >= date_from)
+    if date_to:
+        q = q.where(VatEntry.doc_date <= date_to)
+
+    total, amount, tax = (await db.execute(
+        select(func.count(), func.sum(VatEntry.amount), func.sum(VatEntry.vat))
+        .select_from(q.subquery()))).one()
+
+    rows = (await db.execute(q.order_by(VatEntry.doc_date.desc()).limit(limit))).scalars().all()
+
+    # Помесячно — как в декларации: налог по периодам, а не одной цифрой за всё.
+    months = (await db.execute(
+        select(func.substr(VatEntry.doc_date, 1, 7), func.count(),
+               func.sum(VatEntry.amount), func.sum(VatEntry.vat))
+        .where(VatEntry.company_id == cid, VatEntry.kind == kind,
+               VatEntry.doc_date.isnot(None))
+        .group_by(func.substr(VatEntry.doc_date, 1, 7))
+        .order_by(func.substr(VatEntry.doc_date, 1, 7)))).all()
+
+    kinds = dict((k, (n, _num(a), _num(v))) for k, n, a, v in (await db.execute(
+        select(VatEntry.kind, func.count(), func.sum(VatEntry.amount), func.sum(VatEntry.vat))
+        .where(VatEntry.company_id == cid).group_by(VatEntry.kind))).all())
+
+    return {
+        "total": total, "amount": _num(amount), "vat": _num(tax),
+        "kinds": [{"kind": k, "count": v[0], "amount": v[1], "vat": v[2]}
+                  for k, v in sorted(kinds.items())],
+        "months": [{"month": m[0], "count": m[1], "amount": _num(m[2]), "vat": _num(m[3])}
+                   for m in months],
+        "rows": [{
+            "date": e.doc_date, "number": e.number,
+            "counterparty": e.counterparty_name, "inn": e.counterparty_inn,
+            "kpp": e.counterparty_kpp, "amount": _num(e.amount), "vat": _num(e.vat),
+            "rate": e.rate, "invoice": e.invoice_title, "registrar": e.registrar,
+            "operationCode": e.operation_code,
+        } for e in rows],
+    }

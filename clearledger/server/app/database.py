@@ -946,6 +946,19 @@ async def create_all() -> None:
             "ALTER TABLE accounting_docs ADD COLUMN IF NOT EXISTS discrepancy_details JSONB",
             "CREATE INDEX IF NOT EXISTS idx_accdoc_period_status ON accounting_docs(company_id, period_status)",
             "CREATE INDEX IF NOT EXISTS idx_accdoc_discrepancy_status ON accounting_docs(company_id, discrepancy_status)",
+            # Документ ↔ нормализованный слой: контрагент и договор ССЫЛКАМИ, а не
+            # текстом. Пока покупатель хранится строкой, «его документы», «его долг» и
+            # «его договоры» — три списка, которые между собой не сходятся: одно юрлицо
+            # приезжает то с кавычками, то без, а платёж вообще приходит без ИНН.
+            # Заполняет идемпотентное сведение (services/books_links.py), не загрузка.
+            "ALTER TABLE accounting_docs ADD COLUMN IF NOT EXISTS counterparty_id UUID "
+            "REFERENCES counterparties(id) ON DELETE SET NULL",
+            "ALTER TABLE accounting_docs ADD COLUMN IF NOT EXISTS contract_id UUID "
+            "REFERENCES contracts(id) ON DELETE SET NULL",
+            "CREATE INDEX IF NOT EXISTS idx_accdoc_counterparty "
+            "ON accounting_docs(company_id, counterparty_id)",
+            "CREATE INDEX IF NOT EXISTS idx_accdoc_contract "
+            "ON accounting_docs(company_id, contract_id)",
             # v0.9: индекс по target (обратный поиск). Уникальность маппингов —
             # частичные индексы в v1.9 (с учётом channel_id).
             "CREATE INDEX IF NOT EXISTS idx_reconcile_mappings_target ON reconcile_mappings(company_id, kind, target_ref)",

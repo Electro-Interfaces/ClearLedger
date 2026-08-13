@@ -29,7 +29,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { MetricTile } from '@/components/ui/metric-tile'
 import { cn } from '@/lib/utils'
 import {
-  getAccountCard, getBalance, getBooksOverview, getDocs, getEntries, getPeriods, getSlice,
+  getAccountCard, getBalance, getBooksOverview, getCounterpartyCard, getDocs, getEntries,
+  getPeriods, getSlice,
   type BalanceTotals, type BooksOverview, type SliceData,
 } from '@/services/booksService'
 import { useWorkspaceSections } from './workspaceSections'
@@ -186,19 +187,37 @@ function RevOverview({ data, clientsLabel }: { data: SliceData; clientsLabel: st
   )
 }
 
+/**
+ * Покупатели разреза. Строка ведёт в КАРТОЧКУ контрагента — то же юрлицо, о котором
+ * пространство знает всё: реквизиты, договоры, долг, что покупает. Раньше разрез
+ * заканчивался именем в таблице, и дальше человек шёл искать это имя глазами в
+ * реестре документов.
+ *
+ * Кнопкой становится только сведённый со справочником (`id`): у части платежей ИНН
+ * не приезжает вовсе, карточки у них нет, и ссылка вела бы в пустоту.
+ */
 function RevClients({ data, title }: { data: SliceData; title: string }) {
   const total = data.total || 1
+  const { companyId } = useCompany()
+  const [card, setCard] = useState<string | null>(null)
+  const unlinked = data.topClients.filter((c) => !c.id).length
   return (
     <div className="p-4">
       <TableCard
-        note={`${title}: ${num.format(data.clients)} — по обороту за период`}
+        note={`${title}: ${num.format(data.clients)} — по обороту за период`
+          + (unlinked ? ` · ${unlinked} без карточки в справочнике` : '')}
         head={<>
           <Th>{title}</Th><Th>ИНН</Th><Th right>Документов</Th>
           <Th right>Оборот</Th><Th right>Доля</Th>
         </>}>
         {data.topClients.map((c) => (
-          <tr key={c.name} className="border-b last:border-0 hover:bg-muted/40">
-            <td className="px-3 py-1.5 max-w-[320px] truncate" title={c.name}>{c.name}</td>
+          <tr key={c.id ?? c.name} className="border-b last:border-0 hover:bg-muted/40">
+            <td className="px-3 py-1.5 max-w-[320px] truncate" title={c.name}>
+              {c.id ? (
+                <button onClick={() => setCard(c.id)}
+                  className="text-left hover:text-primary hover:underline">{c.name}</button>
+              ) : c.name}
+            </td>
             <td className="px-3 py-1.5 tabular-nums text-muted-foreground">{c.inn ?? '—'}</td>
             <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{c.docs}</td>
             <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">
@@ -210,6 +229,9 @@ function RevClients({ data, title }: { data: SliceData; title: string }) {
           </tr>
         ))}
       </TableCard>
+      {card && (
+        <CounterpartyWindow companyId={companyId} id={card} onClose={() => setCard(null)} />
+      )}
     </div>
   )
 }
@@ -591,6 +613,131 @@ function AccountCardWindow({ companyId, code, onClose }: {
         )}
       </DialogContent>
     </Dialog>
+  )
+}
+
+/**
+ * Карточка контрагента окном: реквизиты справочника, долг из регистра, договоры,
+ * что покупает и его документы. Собирается одним ответом сервера по ССЫЛКЕ на
+ * карточку, а не по имени, — поэтому «его документы» и «его долг» считаются по
+ * одному и тому же множеству, а не по двум похожим.
+ */
+function CounterpartyWindow({ companyId, id, onClose }: {
+  companyId: string; id: string; onClose: () => void
+}) {
+  const q = useQuery({
+    queryKey: ['books', 'counterparty', companyId, id],
+    queryFn: () => getCounterpartyCard(companyId, id),
+  })
+  const d = q.data
+  return (
+    <Dialog open onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-w-6xl max-h-[85vh] overflow-hidden flex flex-col">
+        <DialogHeader>
+          <DialogTitle className="text-base">
+            {d?.name ?? 'Контрагент'}
+            {d?.inn && <span className="ml-2 font-normal text-muted-foreground">ИНН {d.inn}</span>}
+          </DialogTitle>
+        </DialogHeader>
+        {q.isError && <QueryError onRetry={() => q.refetch()} />}
+        {!d ? <Loading /> : (
+          <div className="flex-1 min-h-0 overflow-y-auto space-y-3 pr-1">
+            <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
+              <MetricTile label="Продали ему"
+                value={money.format(d.byType.sale?.amount ?? 0) + ' ₽'}
+                hint={`${d.byType.sale?.docs ?? 0} документов`} />
+              <MetricTile label="Купили у него"
+                value={money.format(d.byType.purchase?.amount ?? 0) + ' ₽'}
+                hint={`${d.byType.purchase?.docs ?? 0} документов`} />
+              <MetricTile label="Нам должен" value={money.format(d.receivable) + ' ₽'}
+                hint="сальдо 62 по его документам"
+                tone={d.receivable > 0 ? 'warning' : undefined} />
+              <MetricTile label="Мы должны" value={money.format(d.payable) + ' ₽'}
+                hint="сальдо 60 по его документам"
+                tone={d.payable > 0 ? 'warning' : undefined} />
+            </div>
+
+            <Card>
+              <CardContent className="p-4 grid gap-x-6 gap-y-1.5 text-sm sm:grid-cols-2">
+                <Field label="Полное наименование" value={d.fullName} />
+                <Field label="КПП / ОГРН" value={[d.kpp, d.ogrn].filter(Boolean).join(' / ')} />
+                <Field label="Адрес" value={d.address} />
+                <Field label="ОКВЭД" value={d.okved} />
+                <Field label="Руководитель" value={d.director} />
+                <Field label="Телефон · почта"
+                  value={[d.phone, d.email].filter(Boolean).join(' · ')} />
+                <Field label="Счёт" value={d.bankAccount} />
+                <Field label="Банк" value={d.bankName} />
+              </CardContent>
+            </Card>
+
+            {d.contracts.length > 0 && (
+              <TableCard note="Договоры"
+                head={<>
+                  <Th>Договор</Th><Th>Номер</Th><Th>Дата</Th><Th>Вид</Th><Th right>Документов</Th>
+                </>}>
+                {d.contracts.map((c) => (
+                  <tr key={c.id} className="border-b last:border-0 hover:bg-muted/40">
+                    <td className="px-3 py-1.5 max-w-[360px] truncate" title={c.type}>{c.type}</td>
+                    <td className="px-3 py-1.5">{c.number}</td>
+                    <td className="px-3 py-1.5 tabular-nums">{c.date || '—'}</td>
+                    <td className="px-3 py-1.5 text-muted-foreground">{c.kind ?? '—'}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+                      {c.docs}
+                    </td>
+                  </tr>
+                ))}
+              </TableCard>
+            )}
+
+            {d.items.length > 0 && (
+              <TableCard note="Что покупает и что покупаем у него"
+                head={<>
+                  <Th>Позиция</Th><Th right>Количество</Th><Th right>Сумма</Th><Th right>Документов</Th>
+                </>}>
+                {d.items.slice(0, 20).map((it) => (
+                  <tr key={it.code} className="border-b last:border-0 hover:bg-muted/40">
+                    <td className="px-3 py-1.5 max-w-[420px] truncate" title={it.name}>{it.name}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+                      {it.qty ? `${qty.format(it.qty)} ${it.unit ?? ''}` : '—'}
+                    </td>
+                    <Money v={it.amount} />
+                    <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+                      {it.docs}
+                    </td>
+                  </tr>
+                ))}
+              </TableCard>
+            )}
+
+            <TableCard note={`Документы — ${num.format(d.docs.length)}`}
+              head={<>
+                <Th>Дата</Th><Th>Вид</Th><Th>Номер</Th><Th>Договор</Th><Th right>Сумма</Th>
+              </>}>
+              {d.docs.map((doc) => (
+                <tr key={doc.id} className="border-b last:border-0 hover:bg-muted/40">
+                  <td className="px-3 py-1.5 tabular-nums whitespace-nowrap">{doc.date}</td>
+                  <td className="px-3 py-1.5 text-muted-foreground">{doc.label}</td>
+                  <td className="px-3 py-1.5 tabular-nums">{doc.number}</td>
+                  <td className="px-3 py-1.5 text-muted-foreground max-w-[240px] truncate"
+                    title={doc.contract ?? ''}>{doc.contract ?? '—'}</td>
+                  <Money v={doc.amount} />
+                </tr>
+              ))}
+            </TableCard>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function Field({ label, value }: { label: string; value?: string | null }) {
+  return (
+    <div className="flex gap-2">
+      <span className="w-44 shrink-0 text-muted-foreground">{label}</span>
+      <span className="min-w-0 break-words">{value || '—'}</span>
+    </div>
   )
 }
 

@@ -92,8 +92,9 @@ export interface SliceData {
   docs: number
   clients: number
   months: { month: string; amount: number; docs: number }[]
-  topClients: { name: string; inn: string | null; amount: number; docs: number }[]
-  topItems: { name: string; amount: number; qty: number }[]
+  /** id — ссылка на карточку контрагента; null у документов, что не свелись. */
+  topClients: { id: string | null; name: string; inn: string | null; amount: number; docs: number }[]
+  topItems: { code: string | null; name: string; amount: number; qty: number }[]
 }
 
 export const getBooksOverview = (companyId: string) =>
@@ -204,6 +205,49 @@ export const getBalance = (companyId: string, period?: PeriodOpts) =>
 export const getAccountCard = (companyId: string, code: string, period?: PeriodOpts) =>
   get<AccountCard>(`/api/books/account?company_id=${companyId}`
     + `&code=${encodeURIComponent(code)}` + periodQuery(period))
+
+/**
+ * Карточка контрагента — всё, что пространство знает о клиенте, одним ответом:
+ * реквизиты справочника, договоры, документы, долг из регистра и что он покупает.
+ * Ключ — ссылка на карточку, а не имя: по имени одно юрлицо разваливается на два.
+ */
+export interface CounterpartyCard {
+  id: string
+  name: string
+  inn: string | null
+  kpp: string | null
+  ogrn: string | null
+  kind: string | null
+  fullName: string | null
+  address: string | null
+  phone: string | null
+  email: string | null
+  director: string | null
+  bankAccount: string | null
+  bankName: string | null
+  okved: string | null
+  /** Сальдо расчётов из регистра: 62 — нам должны, 60 — должны мы. */
+  receivable: number
+  payable: number
+  byType: Record<string, { docs: number; amount: number }>
+  months: { month: string; sales: number; purchases: number; paid: number }[]
+  items: {
+    code: string; name: string; qty: number; amount: number
+    docs: number; unit: string | null
+  }[]
+  contracts: {
+    id: string; number: string; date: string | null; type: string
+    kind: string | null; closed: boolean; docs: number
+  }[]
+  docs: {
+    id: string; date: string; type: string; label: string; number: string
+    amount: number; vat: number; contract: string | null; periodStatus: string
+  }[]
+}
+
+export const getCounterpartyCard = (companyId: string, counterpartyId: string) =>
+  get<CounterpartyCard>(`/api/books/counterparty?company_id=${companyId}`
+    + `&counterparty_id=${counterpartyId}`)
 
 export interface SourceInfo {
   kind: string
