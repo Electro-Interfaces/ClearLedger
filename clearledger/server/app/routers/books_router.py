@@ -24,8 +24,8 @@ from app.auth import assert_company_member, get_current_user
 from app.database import get_db
 from app.models import (
     AccountingDoc, Counterparty, GlAccount, GlBalance, GlEntry, GlReference,
-    InvoicePayment, NomenclatureItem, Period, User, ReferenceSnapshot, SourceFile,
-    VatEntry,
+    GlTurnover, InvoicePayment, NomenclatureItem, Period, User, ReferenceSnapshot,
+    SourceFile, VatEntry,
 )
 
 router = APIRouter(prefix="/books", tags=["Бухгалтерия пространства"])
@@ -970,6 +970,15 @@ async def sources(
     loaded = (await db.execute(
         select(func.max(GlEntry.created_at)).where(GlEntry.company_id == cid))).scalar_one()
 
+    async def count_of(model) -> int:
+        return (await db.execute(select(func.count()).select_from(model)
+                                 .where(model.company_id == cid))).scalar_one()
+
+    turnovers_n = await count_of(GlTurnover)
+    balances_n = await count_of(GlBalance)
+    vat_n = await count_of(VatEntry)
+    payments_n = await count_of(InvoicePayment)
+
     return {
         # Источник пока один — разовая выгрузка бухгалтерии. Дальше здесь появится
         # коннектор к живой базе, и признак `kind` станет различать их.
@@ -983,6 +992,12 @@ async def sources(
                 {"key": "gl_accounts", "label": "План счетов", "records": accounts_n},
                 {"key": "gl_entries", "label": "Проводки", "records": entries_n},
                 {"key": "periods", "label": "Периоды", "records": periods_n},
+                # Аналитика: приезжает виртуальными таблицами регистра, поэтому
+                # отдельными наборами, а не колонками проводки.
+                {"key": "gl_turnovers", "label": "Обороты с аналитикой", "records": turnovers_n},
+                {"key": "gl_balances", "label": "Сальдо счетов", "records": balances_n},
+                {"key": "vat_entries", "label": "Счета-фактуры и НДС", "records": vat_n},
+                {"key": "invoice_payments", "label": "Оплата счетов", "records": payments_n},
             ],
             "documents": [
                 {"key": k, "label": DOC_LABELS.get(k, k), "records": n}
@@ -1137,6 +1152,10 @@ async def model(
                                 .where(SourceFile.company_id == cid))).scalar_one()
     snapshots = (await db.execute(select(func.count()).select_from(ReferenceSnapshot)
                                   .where(ReferenceSnapshot.company_id == cid))).scalar_one()
+    analytics = 0
+    for m in (GlTurnover, GlBalance, VatEntry, InvoicePayment):
+        analytics += (await db.execute(select(func.count()).select_from(m)
+                                       .where(m.company_id == cid))).scalar_one()
 
     layers = [
         # L1 у офиса ПОКА НЕ МАТЕРИАЛИЗОВАН: данные залиты скриптом снаружи, записи о
@@ -1150,8 +1169,14 @@ async def model(
         {"key": "l2", "code": "L2 · CLEAN", "title": "Нормализованный слой",
          "desc": "проводки, документы, справочники",
          "records": entries + docs + accounts + refs, "unit": "записей", "tone": "clean"},
+        # Аналитика — свой слой: гранулярность у неё не проводки, а месяц и субконто,
+        # и приезжает она отдельными наборами (виртуальные таблицы регистра).
+        {"key": "l2a", "code": "L2 · ANALYTIC", "title": "Аналитика расчётов и налога",
+         "desc": "обороты с субконто, сальдо счетов, счета-фактуры, оплата счетов",
+         "records": analytics, "unit": "записей", "tone": "clean",
+         **({"status": "planned"} if not analytics else {})},
         {"key": "l3", "code": "L3 · EXPORT", "title": "Обороты и разрезы",
-         "desc": "оборотка, продажи, услуги, периоды",
+         "desc": "оборотка, продажи, услуги, периоды, взаиморасчёты",
          "records": None, "unit": "", "tone": "export"},
         {"key": "l4", "code": "L4 · 1C_REF", "title": "Снимки закрытых периодов",
          "desc": "состав и контрольная сумма месяца, который бухгалтерия не меняет",
