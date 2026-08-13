@@ -203,6 +203,11 @@ export function InvitationsCard({ companyId }: { companyId: string }) {
                       всё пространство
                     </Badge>
                   )}
+                  {i.company_id && i.company_id !== companyId && i.company_name && (
+                    <span className="block text-[10px] text-muted-foreground">
+                      выпущено в «{i.company_name}»
+                    </span>
+                  )}
                 </TableCell>
                 <TableCell className="text-xs text-muted-foreground">
                   {new Date(i.created_at).toLocaleDateString('ru')}
@@ -211,6 +216,14 @@ export function InvitationsCard({ companyId }: { companyId: string }) {
                   </span>
                 </TableCell>
                 <TableCell>
+                  {/* Распоряжаться приглашением вправе админ ТОЙ организации, где оно
+                      выпущено. Приглашение в пространство видно из любой, поэтому у
+                      чужого действия скрыты: кнопка, дающая 403, хуже её отсутствия. */}
+                  {i.company_id && i.company_id !== companyId ? (
+                    <div className="text-right text-xs text-muted-foreground">
+                      управляется в «{i.company_name ?? 'другой организации'}»
+                    </div>
+                  ) : (
                   <div className="flex items-center justify-end gap-1">
                     {/* Явная кнопка, а не иконка: письмо теряется в спаме, и
                         «взять ссылку и переслать» — самое частое действие в этой
@@ -231,6 +244,7 @@ export function InvitationsCard({ companyId }: { companyId: string }) {
                       <X className="h-3.5 w-3.5" />
                     </Button>
                   </div>
+                  )}
                 </TableCell>
               </TableRow>
             ))}

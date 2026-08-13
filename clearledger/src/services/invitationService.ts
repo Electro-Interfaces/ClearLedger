@@ -24,6 +24,10 @@ export interface Invitation {
   organization_name?: string | null
   /** Куда позвали: в одну организацию или в пространство целиком. */
   scope?: InviteScope
+  /** Организация, от имени которой выпущено приглашение: распоряжаться им вправе
+   *  только её админ, хотя видно оно из любой (при scope=space). */
+  company_id?: string | null
+  company_name?: string | null
 }
 
 /**

@@ -285,6 +285,11 @@ class InvitationResponse(BaseModel):
     # интерфейс рапортовал «отправлено» даже когда почта не настроена.
     email_sent: bool | None = None
     scope: str = "company"
+    # Организация, от имени которой выпущено приглашение. Нужна списку: приглашение в
+    # пространство видно из любой организации, но распоряжаться им вправе админ той,
+    # где оно выпущено, — без этого поля интерфейс показывал бы кнопки, дающие 403.
+    company_id: str | None = None
+    company_name: str | None = None
 
 
 class AcceptPreview(BaseModel):

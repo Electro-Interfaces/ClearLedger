@@ -45,6 +45,7 @@ def _resp(
     raw_token: str | None = None,
     email_sent: bool | None = None,
     org_name: str | None = None,
+    company_name: str | None = None,
 ) -> InvitationResponse:
     """Ответ по приглашению.
 
@@ -64,6 +65,8 @@ def _resp(
         invite_url=email_service.invite_link(raw_token) if raw_token else None,
         email_sent=email_sent,
         scope=getattr(inv, "scope", None) or "company",
+        company_id=str(inv.company_id),
+        company_name=company_name,
     )
 
 
@@ -183,7 +186,14 @@ async def list_invitations(
             .order_by(Invitation.created_at.desc())
         )
     ).scalars().all()
-    # Имена организаций — одним запросом на весь список, а не по строке.
+    # Имена организаций пространства — для пометки «выпущено в …» у приглашений,
+    # пришедших из другой организации (scope=space).
+    companies = {
+        c_id: nm for c_id, nm in (await db.execute(
+            select(Company.id, Company.name)
+            .where(Company.id.in_({i.company_id for i in rows})))).all()
+    }
+    # Имена компаний-партнёров — одним запросом на весь список, а не по строке.
     org_ids = {i.organization_id for i in rows if i.organization_id}
     names: dict[uuid.UUID, str] = {}
     if org_ids:
@@ -191,7 +201,8 @@ async def list_invitations(
                 Counterparty.id, Counterparty.name, Counterparty.short_name)
                 .where(Counterparty.id.in_(org_ids)))).all():
             names[oid] = short or nm
-    return [_resp(i, org_name=names.get(i.organization_id) if i.organization_id else None)
+    return [_resp(i, org_name=names.get(i.organization_id) if i.organization_id else None,
+                  company_name=companies.get(i.company_id))
             for i in rows]
 
 
