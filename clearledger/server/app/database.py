@@ -1223,6 +1223,12 @@ async def create_all() -> None:
             "NOT NULL DEFAULT 'internal'",
             "ALTER TABLE invitations ADD COLUMN IF NOT EXISTS organization_id UUID "
             "REFERENCES counterparties(id) ON DELETE SET NULL",
+            # Куда зовут: в одну организацию или в пространство целиком. В контейнере
+            # на одну компанию разницы нет, но в пространстве с несколькими (своя
+            # практика + обслуживаемые организации) это два разных приглашения, и
+            # человек обязан видеть, какое принимает.
+            "ALTER TABLE invitations ADD COLUMN IF NOT EXISTS scope VARCHAR(10) "
+            "NOT NULL DEFAULT 'company'",
             # v2.5: универсальные справочники — raw-снимок всех реквизитов 1С + промо.
             "ALTER TABLE counterparties ADD COLUMN IF NOT EXISTS raw JSONB",
             "ALTER TABLE counterparties ADD COLUMN IF NOT EXISTS full_name VARCHAR(1000)",

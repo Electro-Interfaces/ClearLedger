@@ -308,6 +308,15 @@ class Invitation(Base):
     party_type: Mapped[str] = mapped_column(
         String(20), nullable=False, default="internal", server_default=text("'internal'")
     )
+    # Куда зовут: `company` — в одну организацию, `space` — в пространство целиком, то
+    # есть во все его организации сразу. В контейнере на одну компанию разницы нет, но
+    # в пространстве вроде «Аудита» (своя практика + обслуживаемые организации) это два
+    # РАЗНЫХ приглашения, и человек обязан видеть, какое из них принимает: «Аудит» —
+    # имя пространства, а не компании, и «вас приглашают в компанию Аудит» вводило в
+    # заблуждение. `company_id` при `space` — организация, от имени которой позвали.
+    scope: Mapped[str] = mapped_column(
+        String(10), nullable=False, default="company", server_default=text("'company'")
+    )
     organization_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("counterparties.id", ondelete="SET NULL"), nullable=True
     )

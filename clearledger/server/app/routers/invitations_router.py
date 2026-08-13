@@ -16,6 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import create_access_token, get_current_user, hash_password
+from app.config import get_settings
 from app.database import get_db
 from app.models import Company, Counterparty, Invitation, User, UserCompany
 from app.routers.users_router import require_company_admin, _is_member
@@ -62,7 +63,20 @@ def _resp(
         organization_name=org_name,
         invite_url=email_service.invite_link(raw_token) if raw_token else None,
         email_sent=email_sent,
+        scope=getattr(inv, "scope", None) or "company",
     )
+
+
+async def _accept_targets(inv: Invitation, db: AsyncSession) -> list[uuid.UUID]:
+    """В какие организации заводить членство при принятии приглашения.
+
+    `scope=company` — в одну (как было). `scope=space` — во все организации
+    пространства: приглашение в пространство именно это и означает.
+    """
+    if (getattr(inv, "scope", None) or "company") != "space":
+        return [inv.company_id]
+    ids = [i for (i,) in (await db.execute(select(Company.id))).all()]
+    return ids or [inv.company_id]
 
 
 async def _org_name(inv: Invitation, db: AsyncSession) -> str | None:
@@ -132,7 +146,7 @@ async def create_invitation(
             id=uuid.uuid4(), company_id=cid, email=email, role=payload.role,
             position=payload.position, token_hash=_hash(raw), status="pending",
             invited_by=current_user.id, expires_at=now + INVITE_TTL,
-            party_type=party, organization_id=org_id,
+            party_type=party, organization_id=org_id, scope=payload.scope,
         )
         db.add(inv)
     else:
@@ -143,6 +157,7 @@ async def create_invitation(
         inv.invited_by = current_user.id
         inv.party_type = party
         inv.organization_id = org_id
+        inv.scope = payload.scope
     await db.flush()
 
     company = await _company(cid, db)
@@ -256,9 +271,21 @@ async def preview_invite(token: str, db: AsyncSession = Depends(get_db)):
     user_exists = (
         await db.execute(select(User.id).where(User.email == inv.email))
     ).scalar_one_or_none() is not None
+    # Пространство и организация — разные вещи, и человек обязан видеть, что именно
+    # принимает: «Аудит» это ИМЯ ПРОСТРАНСТВА, внутри которого своя практика и
+    # обслуживаемые организации. Приглашение в пространство даёт доступ ко всем.
+    scope = getattr(inv, "scope", None) or "company"
+    space_companies: list[str] = []
+    if scope == "space":
+        space_companies = [
+            n for (n,) in (await db.execute(
+                select(Company.name).order_by(Company.name))).all()
+        ]
     return AcceptPreview(
         email=inv.email, company_name=company.name, role=inv.role, user_exists=user_exists,
         position=inv.position, expires_at=inv.expires_at,
+        scope=scope, space_name=get_settings().ecosystem_brand,
+        space_companies=space_companies,
     )
 
 
@@ -273,6 +300,10 @@ async def accept_invite(
     # Должность приглашённый может уточнить сам — админ при приглашении часто
     # пишет её наугад. Зафиксирован только email: он и есть приглашение.
     position = (payload.position or "").strip() or inv.position
+    # Приглашение в ПРОСТРАНСТВО заводит членство во всех его организациях: доступ
+    # ко всему пространству — это и есть «во все компании», а не «в одну, а дальше
+    # как-нибудь». Организации, появившиеся позже, добавляются администратором.
+    targets = await _accept_targets(inv, db)
 
     user = (
         await db.execute(select(User).where(User.email == inv.email))
@@ -280,11 +311,12 @@ async def accept_invite(
 
     if user is not None:
         # Существующий — добавляем членство с ролью/должностью, без автологина.
-        if not await _is_member(user.id, cid, db):
-            db.add(UserCompany(user_id=user.id, company_id=cid,
-                               role=inv.role, position=position,
-                               party_type=getattr(inv, "party_type", None) or "internal",
-                               organization_id=inv.organization_id))
+        for target in targets:
+            if not await _is_member(user.id, target, db):
+                db.add(UserCompany(user_id=user.id, company_id=target,
+                                   role=inv.role, position=position,
+                                   party_type=getattr(inv, "party_type", None) or "internal",
+                                   organization_id=inv.organization_id))
         inv.status = "accepted"
         inv.accepted_at = datetime.now(timezone.utc)
         await db.flush()
@@ -299,10 +331,11 @@ async def accept_invite(
     )
     db.add(user)
     await db.flush()
-    db.add(UserCompany(user_id=user.id, company_id=cid,
-                       role=inv.role, position=position,
-                       party_type=getattr(inv, "party_type", None) or "internal",
-                       organization_id=inv.organization_id))
+    for target in targets:
+        db.add(UserCompany(user_id=user.id, company_id=target,
+                           role=inv.role, position=position,
+                           party_type=getattr(inv, "party_type", None) or "internal",
+                           organization_id=inv.organization_id))
     inv.status = "accepted"
     inv.accepted_at = datetime.now(timezone.utc)
     await db.flush()

@@ -79,7 +79,12 @@ export function AcceptInvitePage() {
           <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground">
             <FileText className="h-6 w-6" />
           </div>
-          <h1 className="text-2xl font-bold">{preview?.company_name ?? 'Рабочее пространство'}</h1>
+          {/* В шапке — ПРОСТРАНСТВО: человек входит в него, а организаций внутри
+              может быть несколько. Пока имя пространства не приезжало, «Аудит» в
+              заголовке читался названием компании, хотя это имя пространства. */}
+          <h1 className="text-2xl font-bold">
+            {preview?.space_name ?? preview?.company_name ?? 'Рабочее пространство'}
+          </h1>
         </div>
 
         {loading && (
@@ -96,7 +101,12 @@ export function AcceptInvitePage() {
         {!loading && joined && (
           <div className="space-y-4 text-center">
             <CheckCircle2 className="h-10 w-10 text-emerald-500 mx-auto" />
-            <p className="text-sm">Готово! Вы добавлены в компанию «{preview?.company_name}». Войдите в систему.</p>
+            <p className="text-sm">
+              Готово! Вы добавлены{' '}
+              {preview?.scope === 'space'
+                ? `в пространство «${preview?.space_name ?? preview?.company_name}» — доступны все его организации`
+                : `в организацию «${preview?.company_name}»`}. Войдите в систему.
+            </p>
             <button className="inline-flex h-10 items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90"
               onClick={() => navigate('/login')}>Войти</button>
           </div>
@@ -105,7 +115,31 @@ export function AcceptInvitePage() {
         {!loading && !loadError && !joined && preview && (
           <form onSubmit={handleAccept} className="space-y-4">
             <div className="rounded-lg border border-border/50 p-3 text-sm">
-              <p>Вас приглашают в компанию <b>«{preview.company_name}»</b></p>
+              {/* Куда именно зовут — пространство целиком или одна организация.
+                  Раньше писали «в компанию «Аудит»», хотя «Аудит» это пространство,
+                  а компаний в нём несколько: объём доступа читался неверно. */}
+              {preview.scope === 'space' ? (
+                <>
+                  <p>
+                    Вас приглашают в пространство{' '}
+                    <b>«{preview.space_name ?? preview.company_name}»</b> — целиком
+                  </p>
+                  {preview.space_companies && preview.space_companies.length > 0 && (
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      Доступ ко всем организациям: {preview.space_companies.join(' · ')}
+                    </p>
+                  )}
+                </>
+              ) : (
+                <>
+                  <p>Вас приглашают в организацию <b>«{preview.company_name}»</b></p>
+                  {preview.space_name && preview.space_name !== preview.company_name && (
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      Пространство «{preview.space_name}» · доступ только к этой организации
+                    </p>
+                  )}
+                </>
+              )}
               <p className="text-muted-foreground">Email: {preview.email} · Роль: {ROLE_LABEL[preview.role] ?? preview.role}</p>
               {validUntil && (
                 <p className="mt-0.5 text-xs text-muted-foreground">Ссылка действует до {validUntil}.</p>

@@ -23,6 +23,7 @@ import {
 } from 'lucide-react'
 import * as userService from '@/services/userService'
 import * as invitationService from '@/services/invitationService'
+import { useCompany } from '@/contexts/CompanyContext'
 import { InviteLinkPanel } from './InviteLinkPanel'
 import * as roleService from '@/services/roleService'
 import type { CompanyRole } from '@/services/roleService'
@@ -260,15 +261,27 @@ function InviteDialog({ companyId, party = 'internal', orgs = [] }: {
   // Какую компанию представляет приглашаемый. Хранится в приглашении: иначе принявший
   // его партнёр попадает в раздел сотрудников организации и ждёт ручной пометки.
   const [orgId, setOrgId] = useState('')
+  // Куда зовём: в эту организацию или в пространство целиком. Пространство и
+  // организация — разные вещи: «Аудит» это имя ПРОСТРАНСТВА, внутри которого своя
+  // практика и обслуживаемые организации. Выбор показываем только там, где он есть,
+  // то есть когда организаций больше одной.
+  const [scope, setScope] = useState<invitationService.InviteScope>('company')
+  const { companies } = useCompany()
+  const multiCompany = companies.length > 1
   // Созданное приглашение со ссылкой. Диалог после успеха НЕ закрывается:
   // ссылку отдают один раз, закрыть его до копирования — потерять её.
   const [created, setCreated] = useState<invitationService.Invitation | null>(null)
 
-  const reset = () => { setEmail(''); setPosition(''); setRole('user'); setOrgId(''); setCreated(null) }
+  const reset = () => {
+    setEmail(''); setPosition(''); setRole('user'); setOrgId('')
+    setScope('company'); setCreated(null)
+  }
 
   const invite = useMutation({
     mutationFn: () => invitationService.createInvitation(companyId, email, role, position,
-      external ? { partyType: 'partner', organizationId: orgId } : undefined),
+      external
+        ? { partyType: 'partner', organizationId: orgId, scope }
+        : { scope }),
     onSuccess: (inv) => {
       setCreated(inv)
       qc.invalidateQueries({ queryKey: ['team-invites', companyId] })
@@ -319,6 +332,26 @@ function InviteDialog({ companyId, party = 'internal', orgs = [] }: {
                 <p className="text-xs text-muted-foreground">
                   Компании берутся из контрагентов пространства («Справочники»). Ею человек
                   будет подписан в чатах и заявках.
+                </p>
+              </div>
+            )}
+            {multiCompany && (
+              <div className="space-y-2">
+                <Label>Куда приглашаем</Label>
+                <Select value={scope}
+                  onValueChange={(v) => setScope(v as invitationService.InviteScope)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="company">Только в эту организацию</SelectItem>
+                    <SelectItem value="space">
+                      Во всё пространство — {companies.length} организации
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  {scope === 'space'
+                    ? 'Человек получит доступ ко всем организациям пространства, включая их данные.'
+                    : 'Доступ только к данным этой организации. Остальные пространства человек не увидит.'}
                 </p>
               </div>
             )}

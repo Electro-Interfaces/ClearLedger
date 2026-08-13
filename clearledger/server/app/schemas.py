@@ -261,6 +261,9 @@ class InvitationCreate(BaseModel):
     # переносится в членство при принятии приглашения.
     party_type: Literal["internal", "partner", "vendor"] | None = None
     organization_id: str | None = None
+    # Куда зовём: в одну организацию или в пространство целиком (все его организации).
+    # По умолчанию — организация: доступ ко всему пространству выдаётся осознанно.
+    scope: Literal["company", "space"] = "company"
 
 
 class InvitationResponse(BaseModel):
@@ -281,6 +284,7 @@ class InvitationResponse(BaseModel):
     # Честный признак: ушло письмо или SMTP не сконфигурирован. Без него
     # интерфейс рапортовал «отправлено» даже когда почта не настроена.
     email_sent: bool | None = None
+    scope: str = "company"
 
 
 class AcceptPreview(BaseModel):
@@ -293,6 +297,15 @@ class AcceptPreview(BaseModel):
     position: str | None = None
     # Срок действия ссылки: страница обязана его показывать, а не молчать до истечения.
     expires_at: datetime | None = None
+    # Куда зовут: `company` — в одну организацию, `space` — в пространство целиком.
+    # Страница обязана это различать: имя пространства и имя организации совпадать не
+    # обязаны («Аудит» — пространство, внутри него своя практика и ПРОМИЗОЛ СПБ), а
+    # объём доступа отличается радикально.
+    scope: str = "company"
+    space_name: str | None = None
+    # Организации пространства при `scope=space`: человек видит, куда именно получит
+    # доступ, а не верит на слово.
+    space_companies: list[str] = Field(default_factory=list)
 
 
 class AcceptInvite(BaseModel):

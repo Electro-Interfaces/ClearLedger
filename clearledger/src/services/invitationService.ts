@@ -22,7 +22,16 @@ export interface Invitation {
   party_type?: 'internal' | 'partner' | 'vendor'
   organization_id?: string | null
   organization_name?: string | null
+  /** Куда позвали: в одну организацию или в пространство целиком. */
+  scope?: InviteScope
 }
+
+/**
+ * Пространство и организация — разные вещи. «Аудит» это ИМЯ ПРОСТРАНСТВА, внутри
+ * которого живут своя практика и обслуживаемые организации; позвать можно и во всё
+ * пространство (доступ ко всем организациям), и в одну — чаще нужно второе.
+ */
+export type InviteScope = 'company' | 'space'
 
 export interface AcceptPreview {
   email: string
@@ -33,6 +42,11 @@ export interface AcceptPreview {
   position?: string | null
   /** До какого момента действует ссылка — страница показывает срок явно. */
   expires_at?: string | null
+  scope?: InviteScope
+  /** Имя пространства (бренд контейнера) — может не совпадать с именем организации. */
+  space_name?: string | null
+  /** Организации пространства при scope=space: куда именно откроется доступ. */
+  space_companies?: string[]
 }
 
 export async function listInvitations(companyId: string): Promise<Invitation[]> {
@@ -41,12 +55,17 @@ export async function listInvitations(companyId: string): Promise<Invitation[]> 
 
 export async function createInvitation(
   companyId: string, email: string, role: 'user' | 'admin', position?: string,
-  party?: { partyType?: 'internal' | 'partner' | 'vendor'; organizationId?: string },
+  party?: {
+    partyType?: 'internal' | 'partner' | 'vendor'
+    organizationId?: string
+    scope?: InviteScope
+  },
 ): Promise<Invitation> {
   return post<Invitation>('/api/invitations', {
     company_id: companyId, email, role, position: position || undefined,
     party_type: party?.partyType,
     organization_id: party?.organizationId || undefined,
+    scope: party?.scope ?? 'company',
   })
 }
 
