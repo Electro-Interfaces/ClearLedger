@@ -59,6 +59,8 @@ DOC_LABELS = {
     "demand_note": "Требование-накладная",
     "proxy": "Доверенность",
     "purchase_correction": "Корректировка поступления",
+    "payroll_accrual": "Начисление зарплаты",
+    "payroll_payment": "Ведомость на выплату",
 }
 
 # Папки реестра — УЧАСТКИ УЧЁТА, а не виды документов: счёт, накладная и
@@ -72,6 +74,9 @@ DOC_SECTIONS = [
                          "cash_in", "cash_out", "advance_report"]),
     ("warehouse", "Склад", ["demand_note"]),
     ("recon", "Сверка", ["act_recon"]),
+    # Зарплата — свой участок: у него другой предмет (человек, а не сделка), другие
+    # счета учёта (70, 68.01, 69) и другой режим доступа — это персональные данные.
+    ("payroll", "Зарплата", ["payroll_accrual", "payroll_payment"]),
     # Служебные документы отдельно: пять сотен регламентных операций в общем списке
     # хоронят первичку, ради которой реестр и открывают.
     ("closing", "Закрытие периода", ["closing_op", "manual_entry"]),
@@ -685,9 +690,15 @@ async def _slice(db: AsyncSession, cid, doc_type: str, top: int,
         c = by_client.setdefault(ckey,
                                  {"id": str(d.counterparty_id) if d.counterparty_id else None,
                                   "name": d.counterparty_name or "—", "inn": d.counterparty_inn,
-                                  "amount": 0.0, "docs": 0})
+                                  "amount": 0.0, "docs": 0, "first": None, "last": None})
         c["amount"] += amount
         c["docs"] += 1
+        # Крайние даты покупателя: по ним видно молчащих — тех, кто из списка не
+        # исчез, но последний раз покупал полгода назад. Без даты «молчащий» и
+        # «активный» в реестре выглядят одинаково.
+        if d.date:
+            c["first"] = d.date if not c["first"] else min(c["first"], d.date)
+            c["last"] = d.date if not c["last"] else max(c["last"], d.date)
 
         for ln in (d.lines or []):
             # Разрез по типу строки: один документ несёт и товары, и услуги.
@@ -739,6 +750,188 @@ async def revenue(
     cid = await assert_company_member(company_id, current_user, db)
     return await _slice(db, cid, "sale", top, date_from, date_to,
                         line_kind=None if kind == "all" else kind)
+
+
+# ── Ассортимент: маржа и стабильность спроса ─────────────────────────────────
+# Разрезы отвечают «сколько продали». Следующие два вопроса коммерсанта — «сколько
+# на этом заработали» и «на что можно рассчитывать»: первое требует себестоимости,
+# второе — помесячного ряда, чтобы отличить ровный спрос от случайного всплеска.
+#
+# Себестоимость берём из строк ПОСТУПЛЕНИЙ по тому же коду номенклатуры (198 кодов
+# пилота и продаются, и закупаются), а не из 90.02.1: в регистре себестоимость
+# свёрнута по счёту, разложить её обратно по позициям нечем. Контроль — итог по
+# 90.02.1 в ответе, чтобы расхождение было видно, а не спрятано.
+
+@router.get("/assortment")
+async def assortment(
+    company_id: str,
+    by: str = Query("item", pattern="^(item|client)$"),
+    date_from: str | None = None,
+    date_to: str | None = None,
+    limit: int = Query(500, ge=1, le=2000),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Ассортимент или клиентская база с помесячным рядом и (для позиций) маржой."""
+    cid = await assert_company_member(company_id, current_user, db)
+    p: dict[str, Any] = {"cid": str(cid), "limit": limit}
+    where_date = ""
+    if date_from:
+        where_date += " AND d.date >= :df"
+        p["df"] = date_from
+    if date_to:
+        where_date += " AND d.date <= :dt"
+        p["dt"] = date_to
+
+    if by == "client":
+        # У покупателя себестоимости нет — считаем оборот и его ряд по месяцам.
+        rows = [{
+            "key": str(r[0]) if r[0] else r[1], "id": str(r[0]) if r[0] else None,
+            "name": r[1], "amount": _num(r[2]), "docs": r[3],
+            "first": r[4], "last": r[5],
+            "months": [{"month": m, "amount": _num(a)} for m, a in (r[6] or [])],
+        } for r in (await db.execute(text(f"""
+            WITH m AS (
+              SELECT coalesce(d.counterparty_id::text, d.counterparty_name) k,
+                     max(d.counterparty_id::text) id, max(d.counterparty_name) name,
+                     substr(d.date, 1, 7) AS month, sum(d.amount) amount, count(*) docs,
+                     -- `AS` обязателен: без него `) month` разбирается как
+                     -- квалификатор интервала (`'1' month`), и запрос падает.
+                     min(d.date) first, max(d.date) last
+                FROM accounting_docs d
+               WHERE d.company_id = :cid AND d.doc_type = 'sale'{where_date}
+               GROUP BY 1, 4
+            )
+            SELECT max(id), max(name), sum(amount), sum(docs), min(first), max(last),
+                   array_agg(ARRAY[month, amount::text] ORDER BY month)
+              FROM m GROUP BY k ORDER BY sum(amount) DESC LIMIT :limit
+        """), p)).all()]
+        return {"by": by, "rows": _with_stability(rows), "cost": None}
+
+    # Позиции: продажи и закупки по коду номенклатуры одной выборкой.
+    rows = [{
+        "key": r[0], "code": r[0], "name": r[1],
+        "soldQty": _num(r[2]), "soldAmount": _num(r[3]), "docs": r[4],
+        "boughtQty": _num(r[5]), "boughtAmount": _num(r[6]),
+        "first": r[7], "last": r[8],
+        "months": [{"month": m, "amount": _num(a)} for m, a in (r[9] or [])],
+    } for r in (await db.execute(text(f"""
+        WITH l AS (
+          SELECT d.id doc, d.doc_type, d.date, jsonb_array_elements(d.lines) ln
+            FROM accounting_docs d
+           WHERE d.company_id = :cid AND d.doc_type IN ('sale', 'purchase'){where_date}
+        ), x AS (
+          SELECT doc, doc_type, date, btrim(ln->>'code') code, ln->>'name' name,
+                 (ln->>'qty')::numeric qty, (ln->>'amount')::numeric amount
+            FROM l WHERE coalesce(btrim(ln->>'code'), '') <> ''
+        ), m AS (
+          SELECT code, max(name) name, substr(date, 1, 7) AS month,
+                 sum(qty)    FILTER (WHERE doc_type = 'sale')     sold_qty,
+                 sum(amount) FILTER (WHERE doc_type = 'sale')     sold_amount,
+                 count(DISTINCT doc) FILTER (WHERE doc_type = 'sale') docs,
+                 sum(qty)    FILTER (WHERE doc_type = 'purchase') bought_qty,
+                 sum(amount) FILTER (WHERE doc_type = 'purchase') bought_amount,
+                 min(date) FILTER (WHERE doc_type = 'sale') first,
+                 max(date) FILTER (WHERE doc_type = 'sale') last
+            FROM x GROUP BY code, 3
+        )
+        SELECT code, max(name), sum(sold_qty), sum(sold_amount), sum(docs),
+               sum(bought_qty), sum(bought_amount), min(first), max(last),
+               array_agg(ARRAY[month, coalesce(sold_amount, 0)::text] ORDER BY month)
+          FROM m GROUP BY code
+         HAVING coalesce(sum(sold_amount), 0) <> 0
+         ORDER BY sum(sold_amount) DESC NULLS LAST LIMIT :limit
+    """), p)).all()]
+
+    return {
+        "by": by,
+        "rows": _with_stability(rows),
+        # Себестоимость реализации по регистру — чем проверяется маржа по позициям.
+        "cost": await _turnover(db, cid, dt=COST_DT),
+    }
+
+
+def _with_stability(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Добавить каждой строке класс XYZ по её помесячному ряду.
+
+    Формулу свою не пишем: стабильность считает `fuel_network_analytics._stability`,
+    пороги там же (`_xyz`). Она уже прошла разбор на данных сети — разброс мерится по
+    ОСТАТКАМ линейного тренда (иначе растущая позиция уезжает в «рваные»), ряд идёт от
+    первой продажи (иначе нули до появления позиции раздувают CV), а короткая история
+    получает честное «—», а не худший класс автоматически.
+    """
+    from app.services.fuel_network_analytics import _stability, _xyz
+
+    grid = [f"{m}-01" for m in sorted({m["month"] for r in rows for m in r["months"]})]
+    for r in rows:
+        by_bucket = {f"{m['month']}-01": m["amount"] for m in r["months"] if m["amount"]}
+        st = _stability(by_bucket, grid, "month")
+        r["cv"] = st["cv"]
+        r["xyz"] = _xyz(st["cv"])
+        r["trend"] = st["trend"]
+        r["trendPct"] = st["trend_pct"]
+        r["monthsLive"] = st["life"]
+    return rows
+
+
+# ── Сверка «Реализации» с бухгалтерией ───────────────────────────────────────
+
+@router.get("/revenue-check")
+async def revenue_check(
+    company_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Сумма документов реализации против оборота 90.01.1 — помесячно.
+
+    Смысл продукта — сходимость с бухгалтерией, и она обязана быть видимой: пока
+    расхождение не показано на экране, «Реализация» и «Бухгалтерия» расходятся тихо
+    и обнаруживаются у заказчика. Эталон здесь регистр (оборот по кредиту 90.01.1),
+    документы — то, что мы показываем; разница помесячно и есть предмет разбора.
+    """
+    cid = await assert_company_member(company_id, current_user, db)
+    p = {"cid": str(cid), "kt": REVENUE_KT}
+
+    docs = {r[0]: (_num(r[1]), r[2]) for r in (await db.execute(text("""
+        SELECT substr(date, 1, 7), sum(amount), count(*)
+          FROM accounting_docs
+         WHERE company_id = :cid AND doc_type = 'sale' GROUP BY 1
+    """), p)).all()}
+
+    # Регистр даёт выручку С НДС только вместе с 90.03: по кредиту 90.01.1 лежит
+    # сумма с налогом, поэтому сравнение идёт с суммой документа как есть.
+    reg = {r[0]: _num(r[1]) for r in (await db.execute(text("""
+        SELECT to_char(entry_date, 'YYYY-MM'), sum(amount)
+          FROM gl_entries
+         WHERE company_id = :cid AND account_kt = :kt GROUP BY 1
+    """), p)).all()}
+
+    status = {r[0]: r[1] for r in (await db.execute(text("""
+        SELECT to_char(make_date(year, month, 1), 'YYYY-MM'), status
+          FROM periods WHERE company_id = :cid
+    """), {"cid": str(cid)})).all()}
+
+    months = []
+    for m in sorted(set(docs) | set(reg)):
+        d_amount, d_count = docs.get(m, (0.0, 0))
+        r_amount = reg.get(m, 0.0)
+        months.append({
+            "month": m, "docs": d_amount, "docsCount": d_count, "register": r_amount,
+            "diff": round(d_amount - r_amount, 2),
+            "periodStatus": status.get(m, "open"),
+        })
+
+    total_docs = sum(m["docs"] for m in months)
+    total_reg = sum(m["register"] for m in months)
+    return {
+        "months": months,
+        "totalDocs": round(total_docs, 2),
+        "totalRegister": round(total_reg, 2),
+        "diff": round(total_docs - total_reg, 2),
+        # Месяцы, где сходимость нарушена больше рубля: округление копеек не повод
+        # звать бухгалтера, расхождение в тысячу — повод.
+        "broken": [m["month"] for m in months if abs(m["diff"]) > 1],
+    }
 
 
 # ── Нормализованный слой: карточка контрагента ───────────────────────────────

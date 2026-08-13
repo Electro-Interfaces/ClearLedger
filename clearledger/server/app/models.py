@@ -1598,9 +1598,190 @@ class InvoicePayment(Base):
     )
 
 
+class Employee(Base):
+    """Сотрудник компании клиента: тот, кому начисляют и платят.
+
+    Отдельная сущность, а не контрагент: у сотрудника другой набор реквизитов
+    (СНИЛС, дата рождения), другие счета учёта (70, 68.01, 69) и другой режим
+    доступа — это персональные данные, и роль «Коммерсант» их видеть не должна.
+
+    ⚠ ПДн. Таблица содержит ФИО, ИНН и СНИЛС физических лиц. Заводится по прямому
+    решению МАГа 13.08.2026: без зарплатного блока 86 проводок оставались без
+    документа, а расходы не разворачивались до первички.
+    """
+
+    __tablename__ = "employees"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(300), nullable=False)
+    inn: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    snils: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    birth_date: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    department: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    source: Mapped[str] = mapped_column(String(30), nullable=False, default="1c_dt")
+    external_key: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("uq_employee_external", "company_id", "external_key", unique=True),
+    )
+
+
+class PayrollEntry(Base):
+    """Строка расчёта: начислено, удержано, НДФЛ или выплачено — по сотруднику и месяцу.
+
+    Одна таблица на четыре вида (`kind`) по той же причине, что и `vat_entries`:
+    поля совпадают, а вопрос один — «что человеку начислили и что он получил».
+    Разводить по четырём таблицам значило бы четырежды повторить сотрудника, месяц
+    и сумму.
+
+    Месяц — это МЕСЯЦ НАЧИСЛЕНИЯ, а не дата документа: зарплату за декабрь считают
+    в декабре, а платят в январе, и по дате документа расчёт разъезжается с периодом.
+    """
+
+    __tablename__ = "payroll_entries"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
+    )
+    # accrual — начислено, deduction — удержано, ndfl — налог, payment — выплачено.
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    doc_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("accounting_docs.id", ondelete="SET NULL"), nullable=True
+    )
+    employee_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("employees.id", ondelete="SET NULL"), nullable=True
+    )
+    employee_name: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    # Вид начисления или удержания как в 1С («Оплата по окладу», «НДФЛ»).
+    name: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    period_month: Mapped[str | None] = mapped_column(String(7), nullable=True)   # ГГГГ-ММ
+    doc_date: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    amount: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False, default=0)
+    days: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
+    hours: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
+    department: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    source: Mapped[str] = mapped_column(String(30), nullable=False, default="1c_dt")
+    external_key: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("idx_payroll_kind", "company_id", "kind", "period_month"),
+        Index("idx_payroll_employee", "company_id", "employee_id"),
+        Index("uq_payroll_external", "company_id", "external_key", unique=True),
+    )
+
+
 # ---------------------------------------------------------------------------
 # AccountingDoc (Учётные документы 1С)
 # ---------------------------------------------------------------------------
+class IntakeBatch(Base):
+    """Пакет загрузки первички: один файл, одна выгрузка, одно письмо.
+
+    Приём в пространство идёт не «файлами в папку», а пакетами: у пакета есть
+    источник, автор, время и судьба каждой строки. Без этого нельзя ответить на
+    два вопроса, которые задают всегда: «откуда взялся этот документ» и «что
+    именно я загрузил в прошлый вторник».
+    """
+
+    __tablename__ = "intake_batches"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
+    )
+    # file | onec | edo | email | messenger — откуда пришёл пакет. Экран разбора
+    # один на все источники: меняется способ доставки, а не работа с документом.
+    source: Mapped[str] = mapped_column(String(20), nullable=False, default="file")
+    file_name: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # Что человек сказал про содержимое при загрузке («это реализации»). Пустое —
+    # вид определяется по самим строкам.
+    declared_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    uploaded_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="parsed")
+    stats: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("idx_intake_batches_company", "company_id", "created_at"),
+    )
+
+
+class IntakeItem(Base):
+    """Документ-кандидат из пакета: распознан, сопоставлен, проверен — но ещё не принят.
+
+    Между «файл прочитан» и «документ в учёте» лежит работа, которую нельзя
+    пропускать: сопоставить контрагента и договор с уже заведёнными, сверить с
+    ранее загруженным (дубль? тот же номер?), убедиться, что месяц не закрыт, что
+    сумма сходится со строками. Результат этих проверок живёт здесь, а не гибнет
+    в логе разбора: человек принимает решение, глядя на них.
+    """
+
+    __tablename__ = "intake_items"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
+    )
+    batch_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("intake_batches.id", ondelete="CASCADE"), nullable=False
+    )
+    row_no: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    doc_type: Mapped[str] = mapped_column(String(50), nullable=False, default="sale")
+    number: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    date: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    counterparty_name: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    counterparty_inn: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    counterparty_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("counterparties.id", ondelete="SET NULL"), nullable=True)
+    contract_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("contracts.id", ondelete="SET NULL"), nullable=True)
+    contract_name: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    amount: Mapped[float] = mapped_column(Float, nullable=False, default=0)
+    vat_amount: Mapped[float | None] = mapped_column(Float, nullable=True)
+    lines: Mapped[dict] = mapped_column(JSONB, nullable=False, default=list)
+    # Исходная строка файла — чтобы человек видел, из чего распознали, и мог
+    # спорить с разбором, а не с системой.
+    raw: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # Отпечаток документа (вид+номер+дата+ИНН+сумма): им ловится повторная
+    # загрузка того же файла и совпадение с уже принятым документом.
+    fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # new | ready | warning | duplicate | accepted | rejected
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="new")
+    checks: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    accounting_doc_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("accounting_docs.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("idx_intake_items_batch", "company_id", "batch_id"),
+        Index("idx_intake_items_status", "company_id", "status"),
+        Index("idx_intake_items_fingerprint", "company_id", "fingerprint"),
+    )
+
+
 class AccountingDoc(Base):
     __tablename__ = "accounting_docs"
 
