@@ -1104,32 +1104,38 @@ async def suppliers(
     # Разброс цены на одну позицию у разных поставщиков — то, ради чего экран и
     # открывают: где мы платим больше, чем могли бы. Берём только позиции, которые
     # покупали минимум у двоих.
+    # Ключ сравнения — код И наименование, а не код: в выгрузке код переиспользован
+    # (у пилота два кода из 204 несут разные товары — «Вилатерм» по 7,66 ₽ и «Сальник»
+    # по 1580 ₽ под одним кодом). По коду такие строки сравнивались между собой и
+    # выдавали разрыв цены в 32 664 %, то есть первое место в списке занимал мусор.
     spread = [{
         "code": r[0], "name": r[1], "suppliers": r[2],
         "minPrice": _num(r[3]), "maxPrice": _num(r[4]), "avgPrice": _num(r[5]),
         "qty": _num(r[6]),
         "minName": r[7], "maxName": r[8],
+        # Разрыв больше пятикратного почти всегда означает разные единицы измерения
+        # (штука против упаковки) или ошибку в документе. Не прячем, но помечаем:
+        # у пилота так вскрылись лопаты по 1 ₽ против 150 ₽ при том же количестве.
+        "suspicious": _num(r[3]) > 0 and _num(r[4]) / _num(r[3]) > 5,
     } for r in (await db.execute(text(f"""
         WITH x AS (
           SELECT coalesce(d.counterparty_name, '—') supplier,
-                 btrim(ln.value->>'code') code, max(ln.value->>'name') name,
+                 btrim(ln.value->>'code') code, ln.value->>'name' name,
                  sum((ln.value->>'qty')::numeric) qty,
                  sum((ln.value->>'amount')::numeric) amount
             FROM accounting_docs d, jsonb_array_elements(d.lines) ln
            WHERE d.company_id = :cid AND d.doc_type = 'purchase'
              AND coalesce(btrim(ln.value->>'code'), '') <> ''{where}
-           GROUP BY 1, 2
+           GROUP BY 1, 2, 3
           HAVING sum((ln.value->>'qty')::numeric) > 0
         ), pr AS (
-          -- Без агрегата: `x` уже свёрнут по паре «поставщик × позиция», и max(name)
-          -- здесь потребовал бы GROUP BY по всем остальным колонкам.
           SELECT code, name, supplier, qty, amount, amount / qty price FROM x
         )
-        SELECT code, max(name), count(*), min(price), max(price),
+        SELECT code, name, count(*), min(price), max(price),
                sum(amount) / sum(qty), sum(qty),
                (array_agg(supplier ORDER BY price))[1],
                (array_agg(supplier ORDER BY price DESC))[1]
-          FROM pr GROUP BY code HAVING count(*) > 1
+          FROM pr GROUP BY code, name HAVING count(*) > 1
          ORDER BY (max(price) - min(price)) * sum(qty) DESC
          LIMIT 100
     """), p)).all()]
@@ -1212,9 +1218,28 @@ async def revenue_quality(
         {
             "key": "open_period", "title": "Реализации в незакрытом периоде",
             "why": "период ещё может измениться в 1С — цифры этих месяцев не окончательные",
-            "count": await one("""SELECT count(*) FROM accounting_docs d
-                                   WHERE d.company_id = :cid AND d.doc_type = 'sale'
-                                     AND coalesce(d.period_status, 'open') <> 'closed'"""),
+            # Статус берём из РЕГИСТРА периодов, а не из поля документа: у пилота
+            # `period_status` заполнен у 99 документов из 3256, и проверка по нему
+            # объявляла незакрытыми все 218 реализаций при 61 закрытом месяце.
+            "count": await one("""
+                SELECT count(*) FROM accounting_docs d
+                 LEFT JOIN periods p ON p.company_id = d.company_id
+                       AND p.year = substr(d.date, 1, 4)::int
+                       AND p.month = substr(d.date, 6, 2)::int
+                 WHERE d.company_id = :cid AND d.doc_type = 'sale'
+                   AND coalesce(p.status, 'open') <> 'closed'"""),
+        },
+        {
+            "key": "code_reuse", "title": "Коды номенклатуры с разными наименованиями",
+            "why": "под одним кодом лежат разные товары: остатки, маржа и сравнение цен "
+                   "по такому коду складывают несравнимое",
+            "count": await one("""
+                SELECT count(*) FROM (
+                  SELECT btrim(ln->>'code') code
+                    FROM accounting_docs d, jsonb_array_elements(d.lines) ln
+                   WHERE d.company_id = :cid AND d.doc_type IN ('sale', 'purchase')
+                     AND coalesce(btrim(ln->>'code'), '') <> ''
+                   GROUP BY 1 HAVING count(DISTINCT ln->>'name') > 1) z"""),
         },
         {
             "key": "no_purchase", "title": "Проданные позиции без закупки",

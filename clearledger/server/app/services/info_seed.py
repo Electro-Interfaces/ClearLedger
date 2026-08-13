@@ -27,6 +27,9 @@ from app.services.info_seed_shop import ARTICLES as SHOP_ARTICLES
 from app.services.info_seed_shop import CATEGORIES as SHOP_CATEGORIES
 from app.services.info_seed_station import ARTICLES as STATION_ARTICLES
 from app.services.info_seed_station import CATEGORIES as STATION_CATEGORIES
+from app.services.info_seed_office import ARTICLES as OFFICE_ARTICLES
+from app.services.info_seed_office import CATEGORIES as OFFICE_CATEGORIES
+from app.services.info_seed_office import PROFILE as OFFICE_PROFILE
 
 PROFILE = "energy"
 
@@ -779,6 +782,10 @@ async def seed_info(db: AsyncSession) -> dict[str, int]:
         (FUEL_PROFILE,
          FUEL_CATEGORIES + SHOP_CATEGORIES + STATION_CATEGORIES,
          FUEL_ARTICLES + SHOP_ARTICLES + STATION_ARTICLES),
+        # Компания без объектов: знание по «Реализации». Пакет свой — вопросы у неё
+        # другие: не «как принять топливо», а «откуда эта сумма и чему она равна в
+        # бухгалтерии».
+        (OFFICE_PROFILE, OFFICE_CATEGORIES, OFFICE_ARTICLES),
     ]
     for profile, cats, arts in packs:
         res = await _seed_pack(db, profile, cats, arts)

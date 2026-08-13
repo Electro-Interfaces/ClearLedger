@@ -214,6 +214,61 @@ export const getAssortment = (
   get<{ by: string; rows: AssortmentRow[]; cost: number | null }>(
     `/api/books/assortment?company_id=${companyId}&by=${by}` + periodQuery(period))
 
+/** Остатки по номенклатуре: приход − расход по строкам документов. */
+export interface StockData {
+  rows: {
+    code: string; name: string
+    boughtQty: number; boughtAmount: number; soldQty: number; soldAmount: number
+    restQty: number; restAmount: number; avgBuy: number
+    daysOfSupply: number | null
+    firstBuy: string | null; lastBuy: string | null; lastSale: string | null
+    lastMove: string | null; idleDays: number | null
+  }[]
+  restAmount: number
+  positions: number
+  negative: number
+  negativeQty: number
+  idle: number
+  idleAmount: number
+  /** Сальдо счёта 41 — контроль расчётного остатка. */
+  register: number
+}
+
+export const getStock = (companyId: string) =>
+  get<StockData>(`/api/books/stock?company_id=${companyId}`)
+
+/** Поставщики: объём, зависимость и разброс цен на одну позицию. */
+export interface SuppliersData {
+  rows: {
+    id: string | null; name: string; inn: string | null
+    amount: number; docs: number; positions: number
+    first: string | null; last: string | null
+  }[]
+  spread: {
+    code: string; name: string; suppliers: number
+    minPrice: number; maxPrice: number; avgPrice: number; qty: number
+    minName: string; maxName: string
+    /** Разрыв больше пятикратного: обычно разные единицы измерения, а не переплата. */
+    suspicious: boolean
+  }[]
+  total: number
+  topShare: number
+  top3Share: number
+}
+
+export const getSuppliers = (companyId: string, period?: PeriodOpts) =>
+  get<SuppliersData>(`/api/books/suppliers?company_id=${companyId}` + periodQuery(period))
+
+/** Проверки качества данных, от которых зависят цифры «Реализации». */
+export interface RevenueQuality {
+  checks: { key: string; title: string; why: string; count: number }[]
+  salesDocs: number
+  problems: number
+}
+
+export const getRevenueQuality = (companyId: string) =>
+  get<RevenueQuality>(`/api/books/revenue-quality?company_id=${companyId}`)
+
 /** Сроки оплаты счетов: связка «счёт ↔ платёж» из регистра «Оплата счетов». */
 export interface PaymentTerms {
   rows: {

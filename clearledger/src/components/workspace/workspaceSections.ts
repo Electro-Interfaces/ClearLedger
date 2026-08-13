@@ -32,6 +32,7 @@ import {
   FUEL_HELP_MENU,
   MARKET_MENU, MARKET_KEYS,
   REV_SALES_MENU, REV_CLIENTS_MENU, REV_ITEMS_MENU, REV_DOCS_MENU, REV_MONEY_MENU,
+  REV_STOCK_MENU, REV_HELP_MENU,
   BOOKS_LEDGER_MENU, BOOKS_PRIMARY_MENU,
 } from '@/config/workspaceMenus'
 // CHARGE_SESSIONS_MENU здесь не используется — общий список нужен карте прав и роутеру
@@ -52,6 +53,7 @@ export {
   FUEL_NETWORK_MENU, FUEL_ANALYTICS_MENU, FUEL_COMMERCE_MENU, FUEL_GOODS_MENU,
   MARKET_MENU, MARKET_KEYS,
   REV_SALES_MENU, REV_CLIENTS_MENU, REV_ITEMS_MENU, REV_DOCS_MENU, REV_MONEY_MENU,
+  REV_STOCK_MENU, REV_HELP_MENU,
   BOOKS_LEDGER_MENU, BOOKS_PRIMARY_MENU,
 }
 
@@ -206,6 +208,10 @@ export function useWorkspaceSections(): WorkspaceSection[] {
     items: isOffice ? REV_DOCS_MENU : [], connected: isOffice }
   const revMoney: WorkspaceSection = { mode: 'rev_money', label: 'Деньги', icon: Wallet,
     items: isOffice ? REV_MONEY_MENU : [], connected: isOffice }
+  const revStock: WorkspaceSection = { mode: 'rev_stock', label: 'Закупки', icon: Truck,
+    items: isOffice ? REV_STOCK_MENU : [], connected: isOffice }
+  const revHelp: WorkspaceSection = { mode: 'rev_help', label: 'Помощь', icon: BookOpen,
+    items: isOffice ? REV_HELP_MENU : [], connected: isOffice }
   const booksLedger: WorkspaceSection = { mode: 'books_ledger', label: 'Регистр', icon: Scale,
     items: isOffice ? BOOKS_LEDGER_MENU : [], connected: isOffice }
   const booksPrimary: WorkspaceSection = { mode: 'books_primary', label: 'Документы', icon: FileText,
@@ -227,7 +233,8 @@ export function useWorkspaceSections(): WorkspaceSection[] {
   // Офис — свой короткий список: сетевых разделов у него нет вовсе, и подмешивать их
   // (пустыми, «неподключёнными») значило бы показывать рельсу про чужую жизнь.
   const all = isOffice
-    ? [revSales, revBuyers, revCatalog, revPapers, revMoney, booksLedger, booksPrimary, normalize]
+    ? [revSales, revBuyers, revCatalog, revPapers, revMoney, revStock, revHelp,
+       booksLedger, booksPrimary, normalize]
     : isEnergy
     ? [sales, salesSessions, salesCommerce, corporate, marketing,
        projects, projectsAnalytics, ops, opsEquipment, opsEconomy,

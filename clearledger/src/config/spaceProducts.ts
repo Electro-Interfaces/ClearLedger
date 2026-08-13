@@ -129,7 +129,8 @@ export const SPACE_PRODUCTS: SpaceProduct[] = [
     // были два раздела с одинаковым набором пунктов, и общей выручки компании не
     // показывал ни один (состав согласован МАГом 13.08.2026).
     code: 'revenue', route: '/revenue', label: 'Реализация',
-    modes: ['rev_sales', 'rev_buyers', 'rev_catalog', 'rev_papers', 'rev_money'], paths: [],
+    modes: ['rev_sales', 'rev_buyers', 'rev_catalog', 'rev_papers', 'rev_money',
+            'rev_stock', 'rev_help'], paths: [],
   },
   {
     // Данные — служебная кухня: откуда берутся цифры и как приводятся к общему виду.

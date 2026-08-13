@@ -18,7 +18,7 @@
  */
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Download } from 'lucide-react'
+import { Download, Printer } from 'lucide-react'
 
 import { useCompany } from '@/contexts/CompanyContext'
 import { useFilters, type Period } from '@/contexts/FilterContext'
@@ -30,7 +30,7 @@ import { MetricTile } from '@/components/ui/metric-tile'
 import { cn } from '@/lib/utils'
 import {
   getAssortment, getCashflow, getContractSales, getDocs, getPaymentTerms, getRevenue,
-  getRevenueCheck,
+  getRevenueCheck, getRevenueQuality, getStock, getSuppliers,
   type DocRow, type RevKind,
 } from '@/services/booksService'
 import { exportTable } from '@/services/booksExport'
@@ -39,6 +39,12 @@ import {
   CounterpartyWindow, Loading, NoCompany, NomenclatureWindow, TableCard, Th,
 } from './OfficePanels'
 import { useWorkspaceSections } from './workspaceSections'
+import { ProductHelpPanel } from './ProductHelpPanel'
+import { REVENUE_HELP_SLICES } from './helpSlices'
+import {
+  REV_SALES_MENU, REV_CLIENTS_MENU, REV_ITEMS_MENU, REV_DOCS_MENU,
+  REV_MONEY_MENU, REV_STOCK_MENU,
+} from '@/config/workspaceMenus'
 
 const money = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 const num = new Intl.NumberFormat('ru-RU')
@@ -146,14 +152,26 @@ const inRange = (v: number, from: string, to: string) => {
 const daysSince = (iso: string | null) =>
   iso ? Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 86400000)) : null
 
-/** Кнопка выгрузки — по канону отчётности пространства: выгружается видимое. */
+/**
+ * Выгрузка экрана — по канону отчётности пространства: уходит видимое после фильтров.
+ *
+ * PDF делаем печатью браузера, а не генерацией на сервере: печать даёт правильную
+ * кириллицу без шрифтовых пакетов в образе, а на выходе тот же PDF («Сохранить как
+ * PDF» в диалоге печати). Печатные стили прячут меню и рельсы — на лист уходит только
+ * рабочая область (`index.css`, `@media print`).
+ */
 function ExportButton({ onClick, label = 'Excel' }: { onClick: () => void; label?: string }) {
+  const cls = 'inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs '
+    + 'text-muted-foreground hover:bg-muted/50'
   return (
-    <button onClick={onClick}
-      className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs
-                 text-muted-foreground hover:bg-muted/50">
-      <Download className="h-3.5 w-3.5" />{label}
-    </button>
+    <div className="inline-flex items-center gap-1 no-print">
+      <button onClick={onClick} className={cls}>
+        <Download className="h-3.5 w-3.5" />{label}
+      </button>
+      <button onClick={() => window.print()} className={cls} title="Печать или сохранение в PDF">
+        <Printer className="h-3.5 w-3.5" />PDF
+      </button>
+    </div>
   )
 }
 
@@ -232,6 +250,24 @@ const clientKey = (c: { id: string | null; name: string }) => c.id ?? c.name
 /*                            Панель                              */
 /* ────────────────────────────────────────────────────────────── */
 
+/**
+ * Все пункты продукта одним списком — по ним статья помощи находит подпись экрана и
+ * строит кнопку перехода. Раздел, которому пункт принадлежит, считает `modeForHelpKey`:
+ * без него кнопка «открыть экран» вела бы в первый раздел.
+ */
+const REV_MENU_FOR_HELP = [
+  ...REV_SALES_MENU, ...REV_CLIENTS_MENU, ...REV_ITEMS_MENU, ...REV_DOCS_MENU,
+  ...REV_MONEY_MENU, ...REV_STOCK_MENU,
+]
+
+const modeForHelpKey = (key: string): string =>
+  REV_CLIENTS_MENU.some((m) => m.key === key) ? 'rev_buyers'
+  : REV_ITEMS_MENU.some((m) => m.key === key) ? 'rev_catalog'
+  : REV_DOCS_MENU.some((m) => m.key === key) ? 'rev_papers'
+  : REV_MONEY_MENU.some((m) => m.key === key) ? 'rev_money'
+  : REV_STOCK_MENU.some((m) => m.key === key) ? 'rev_stock'
+  : 'rev_sales'
+
 /** Разрез задаётся пунктом там, где он и есть предмет пункта. */
 const FIXED_KIND: Record<string, RevKind> = {
   rev_nomen: 'goods',
@@ -242,7 +278,8 @@ const FIXED_KIND: Record<string, RevKind> = {
 
 /** Экраны, у которых своя ручка и разрез над ними не имеет смысла. */
 const NO_KIND = ['rev_invoices', 'rev_funnel', 'rev_recon', 'rev_abc', 'rev_abc_items',
-  'rev_margin', 'rev_terms', 'rev_cashflow', 'rev_contracts']
+  'rev_margin', 'rev_terms', 'rev_cashflow', 'rev_contracts', 'rev_stock', 'rev_suppliers',
+  'rev_prices', 'rev_quality']
 
 export function RevenuePanel() {
   const { coreMode } = useWorkspace()
@@ -257,6 +294,15 @@ export function RevenuePanel() {
   const shown = FIXED_KIND[sub] ?? kind
 
   if (!companyId) return <NoCompany />
+
+  // Помощь — общий компонент пространства: тот же свод «Инфо», суженный до продукта.
+  // Своей копии этого экрана не заводим, иначе она разойдётся с подсказкой рельсы.
+  if (coreMode === 'rev_help') {
+    return (
+      <ProductHelpPanel companyId={companyId} section={sub} appCode="revenue"
+        slices={REVENUE_HELP_SLICES} menu={REV_MENU_FOR_HELP} modeForKey={modeForHelpKey} />
+    )
+  }
 
   const view = (() => {
     switch (sub) {
@@ -277,6 +323,10 @@ export function RevenuePanel() {
       case 'rev_terms':      return <RevTerms companyId={companyId} period={period} />
       case 'rev_cashflow':   return <RevCashflow companyId={companyId} />
       case 'rev_contracts':  return <RevContracts companyId={companyId} period={period} />
+      case 'rev_stock':      return <RevStock companyId={companyId} />
+      case 'rev_suppliers':  return <RevSuppliers companyId={companyId} period={period} view="list" />
+      case 'rev_prices':     return <RevSuppliers companyId={companyId} period={period} view="prices" />
+      case 'rev_quality':    return <RevQuality companyId={companyId} />
       default:               return <RevOverview companyId={companyId} kind={shown} period={period} />
     }
   })()
@@ -2009,6 +2059,330 @@ function RevContracts({ companyId, period }: { companyId: string; period: Period
             <td className="px-3 py-1.5 tabular-nums text-[11px] text-muted-foreground whitespace-nowrap">
               {r.first} — {r.last}
             </td>
+          </tr>
+        ))}
+      </TableCard>
+    </div>
+  )
+}
+
+/* ────────────────────────────────────────────────────────────── */
+/*                     Закупки и склад                            */
+/* ────────────────────────────────────────────────────────────── */
+
+/**
+ * Остатки: приход минус расход по строкам документов.
+ *
+ * Складского учёта в выгрузке нет вовсе, поэтому способ грубый: остаток в деньгах
+ * считается по средней цене закупки, партий и себестоимости списания в данных не
+ * существует. Рядом стоит сальдо счёта 41 — расхождение видно на самом экране, а не
+ * всплывает у заказчика.
+ *
+ * Отрицательный остаток тут не «минус на складе», а признак данных: продали то, чего
+ * в выгрузке не покупали — товар лежал до начала выгруженного периода. Такие позиции
+ * вынесены отдельным счётчиком, потому что они портят и оценку запаса, и маржу.
+ */
+function RevStock({ companyId }: { companyId: string }) {
+  const q = useQuery({
+    queryKey: ['books', 'stock', companyId],
+    queryFn: () => getStock(companyId),
+    enabled: !!companyId,
+  })
+  const [tab, setTab] = useState<'rest' | 'idle' | 'negative'>('rest')
+  const [search, setSearch] = useState('')
+  const [card, setCard] = useState<string | null>(null)
+
+  if (q.isError) return <div className="p-4"><QueryError onRetry={() => q.refetch()} /></div>
+  if (!q.data) return <Loading />
+  const d = q.data
+  const rows = d.rows
+    .filter((r) => tab === 'rest' ? r.restQty > 0
+      : tab === 'idle' ? r.restQty > 0 && (r.idleDays ?? 0) > 180
+      : r.restQty < 0)
+    .filter((r) => !search || r.name.toLowerCase().includes(search.toLowerCase())
+      || r.code.toLowerCase().includes(search.toLowerCase()))
+  const diff = d.restAmount - d.register
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
+        <MetricTile label="Расчётный остаток" value={money.format(d.restAmount) + ' ₽'}
+          hint={`${num.format(d.positions)} позиций в плюсе`} />
+        <MetricTile label="Сальдо счёта 41" value={money.format(d.register) + ' ₽'}
+          hint={Math.abs(diff) < 1 ? 'сходится' : `расчёт больше на ${money.format(diff)} ₽`} />
+        <MetricTile label="Лежит без движения" value={money.format(d.idleAmount) + ' ₽'}
+          hint={`${num.format(d.idle)} позиций не двигались полгода`}
+          tone={d.idle > 0 ? 'danger' : undefined} />
+        <MetricTile label="Отрицательный остаток" value={num.format(d.negative)}
+          hint="продали то, чего в выгрузке не покупали" />
+      </div>
+
+      <p className="text-[11px] text-muted-foreground">
+        Складского учёта в выгрузке нет: остаток = приход − расход по строкам документов,
+        оценка — по средней цене закупки. Партий и себестоимости списания в данных не
+        существует, поэтому сальдо 41 стоит рядом как контроль.
+      </p>
+
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-3 flex-wrap">
+          <Tabs value={tab} onChange={setTab} items={[
+            { key: 'rest' as const, label: 'Остаток' },
+            { key: 'idle' as const, label: 'Неликвиды' },
+            { key: 'negative' as const, label: 'Отрицательные' },
+          ]} />
+          <input value={search} onChange={(e) => setSearch(e.target.value)}
+            placeholder="Наименование или код"
+            className="h-8 w-56 rounded-md border bg-background px-2.5 text-sm" />
+        </div>
+        <ExportButton onClick={() => exportTable('Остатки по номенклатуре', [
+          { header: 'Код', key: 'code', width: 14 },
+          { header: 'Позиция', key: 'name', width: 44 },
+          { header: 'Куплено', key: 'boughtQty', width: 12 },
+          { header: 'Продано', key: 'soldQty', width: 12 },
+          { header: 'Остаток', key: 'restQty', width: 12 },
+          { header: 'Оценка остатка', key: 'restAmount', width: 16, money: true },
+          { header: 'Запас, дней', key: 'daysOfSupply', width: 12 },
+          { header: 'Последнее движение', key: 'lastMove', width: 18 },
+        ], rows)} />
+      </div>
+
+      <TableCard
+        note={tab === 'idle'
+          ? 'Остаток есть, продаж больше полугода нет — деньги стоят на полке'
+          : tab === 'negative'
+          ? 'Списали больше, чем приходовали: закупка была до начала выгрузки'
+          : `${num.format(rows.length)} позиций с положительным остатком`}
+        head={<><Th>Позиция</Th><Th right>Куплено</Th><Th right>Продано</Th>
+          <Th right>Остаток</Th><Th right>Оценка</Th><Th right>Запас</Th>
+          <Th>Последнее движение</Th></>}>
+        {rows.map((r) => (
+          <tr key={r.code} className="border-b last:border-0 hover:bg-muted/40">
+            <td className="px-3 py-1.5 max-w-[340px] truncate" title={r.name}>
+              <button onClick={() => setCard(r.code)}
+                className="text-left hover:text-primary hover:underline">{r.name}</button>
+            </td>
+            <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+              {qty.format(r.boughtQty)}
+            </td>
+            <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+              {qty.format(r.soldQty)}
+            </td>
+            <td className={cn('px-3 py-1.5 text-right tabular-nums',
+              r.restQty < 0 ? 'text-rose-600' : '')}>
+              {qty.format(r.restQty)}
+            </td>
+            <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">
+              {money.format(r.restAmount)} ₽
+            </td>
+            <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+              {r.daysOfSupply === null ? '—' : `${num.format(r.daysOfSupply)} дн.`}
+            </td>
+            <td className={cn('px-3 py-1.5 tabular-nums whitespace-nowrap',
+              (r.idleDays ?? 0) > 365 ? 'text-rose-600'
+              : (r.idleDays ?? 0) > 180 ? 'text-amber-600' : 'text-muted-foreground')}>
+              {r.lastMove ?? '—'}
+              {r.idleDays !== null && <span className="ml-1 text-[11px]">{r.idleDays} дн. назад</span>}
+            </td>
+          </tr>
+        ))}
+      </TableCard>
+      {card && <NomenclatureWindow companyId={companyId} code={card} onClose={() => setCard(null)} />}
+    </div>
+  )
+}
+
+/**
+ * Поставщики и цены закупки — один запрос, два взгляда.
+ *
+ * `list` отвечает «от кого мы зависим»: доля крупнейшего поставщика и первой тройки.
+ * `prices` — «где мы переплачиваем»: одна и та же позиция у разных поставщиков, строки
+ * отсортированы по деньгам, которые стоят за разрывом цены (разница × объём), а не по
+ * проценту: 40 % на позиции за триста рублей не стоят разговора.
+ */
+function RevSuppliers({ companyId, period, view }: {
+  companyId: string; period: Period; view: 'list' | 'prices'
+}) {
+  const q = useQuery({
+    queryKey: ['books', 'suppliers', companyId, period.from, period.to],
+    queryFn: () => getSuppliers(companyId, period),
+    enabled: !!companyId,
+  })
+  const [search, setSearch] = useState('')
+  const [card, setCard] = useState<string | null>(null)
+
+  if (q.isError) return <div className="p-4"><QueryError onRetry={() => q.refetch()} /></div>
+  if (!q.data) return <Loading />
+  const d = q.data
+
+  if (view === 'prices') {
+    const rows = d.spread.filter((r) => !search
+      || r.name.toLowerCase().includes(search.toLowerCase())
+      || r.code.toLowerCase().includes(search.toLowerCase()))
+    return (
+      <div className="p-4 space-y-3">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <input value={search} onChange={(e) => setSearch(e.target.value)}
+            placeholder="Наименование или код"
+            className="h-8 w-56 rounded-md border bg-background px-2.5 text-sm" />
+          <ExportButton onClick={() => exportTable('Цены закупки', [
+            { header: 'Код', key: 'code', width: 14 },
+            { header: 'Позиция', key: 'name', width: 40 },
+            { header: 'Поставщиков', key: 'suppliers', width: 12 },
+            { header: 'Мин. цена', key: 'minPrice', width: 14, money: true },
+            { header: 'Макс. цена', key: 'maxPrice', width: 14, money: true },
+            { header: 'Средняя', key: 'avgPrice', width: 14, money: true },
+            { header: 'Дешевле у', key: 'minName', width: 30 },
+            { header: 'Дороже у', key: 'maxName', width: 30 },
+          ], rows)} />
+        </div>
+        <TableCard
+          note="Позиции у двух и более поставщиков — по сумме разрыва цены. Сравнение идёт
+                по коду И наименованию: в выгрузке один код может нести разные товары"
+          head={<><Th>Позиция</Th><Th right>Поставщиков</Th><Th right>Мин.</Th>
+            <Th right>Макс.</Th><Th right>Разница</Th><Th>Дешевле у</Th></>}>
+          {rows.map((r) => (
+            <tr key={r.code} className="border-b last:border-0 hover:bg-muted/40">
+              <td className="px-3 py-1.5 max-w-[300px] truncate" title={r.name}>
+                <button onClick={() => setCard(r.code)}
+                  className="text-left hover:text-primary hover:underline">{r.name}</button>
+              </td>
+              <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+                {r.suppliers}
+              </td>
+              <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">
+                {money.format(r.minPrice)}
+              </td>
+              <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">
+                {money.format(r.maxPrice)}
+              </td>
+              <td className={cn('px-3 py-1.5 text-right tabular-nums whitespace-nowrap',
+                r.suspicious ? 'text-muted-foreground' : 'text-amber-600')}>
+                {r.minPrice ? `+${((r.maxPrice / r.minPrice - 1) * 100).toFixed(0)}%` : '—'}
+                <span className="ml-1 text-[11px] text-muted-foreground">
+                  {money.format((r.maxPrice - r.minPrice) * r.qty)} ₽
+                </span>
+                {/* Разрыв больше пятикратного — почти всегда разные единицы измерения
+                    (штука против упаковки), а не переплата. Строку не прячем: у пилота
+                    так вскрылись лопаты по 1 ₽ против 150 ₽ при том же количестве. */}
+                {r.suspicious && (
+                  <span className="ml-1.5 rounded bg-muted px-1 py-0.5 text-[10px]"
+                    title="Разрыв больше чем в пять раз: проверьте единицы измерения в документах">
+                    проверить ед.
+                  </span>
+                )}
+              </td>
+              <td className="px-3 py-1.5 max-w-[240px] truncate text-[11px] text-muted-foreground"
+                title={`дешевле: ${r.minName} · дороже: ${r.maxName}`}>
+                {r.minName}
+              </td>
+            </tr>
+          ))}
+        </TableCard>
+        {card && <NomenclatureWindow companyId={companyId} code={card} onClose={() => setCard(null)} />}
+      </div>
+    )
+  }
+
+  const rows = d.rows.filter((r) => !search || r.name.toLowerCase().includes(search.toLowerCase()))
+  return (
+    <div className="p-4 space-y-4">
+      <div className="grid gap-3 grid-cols-3">
+        <MetricTile label="Закупки за период" value={money.format(d.total) + ' ₽'}
+          hint={`${num.format(d.rows.length)} поставщиков`} />
+        <MetricTile label="Доля крупнейшего" value={`${d.topShare} %`}
+          hint={d.rows[0]?.name ?? '—'}
+          tone={d.topShare > 50 ? 'danger' : undefined} />
+        <MetricTile label="Доля первой тройки" value={`${d.top3Share} %`}
+          hint="чем выше, тем сильнее зависимость от нескольких поставщиков" />
+      </div>
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <input value={search} onChange={(e) => setSearch(e.target.value)}
+          placeholder="Поставщик"
+          className="h-8 w-56 rounded-md border bg-background px-2.5 text-sm" />
+        <ExportButton onClick={() => exportTable('Поставщики', [
+          { header: 'Поставщик', key: 'name', width: 44 },
+          { header: 'ИНН', key: 'inn', width: 14 },
+          { header: 'Закупки', key: 'amount', width: 18, money: true },
+          { header: 'Документов', key: 'docs', width: 12 },
+          { header: 'Позиций', key: 'positions', width: 10 },
+          { header: 'Последняя', key: 'last', width: 14 },
+        ], rows)} />
+      </div>
+      <TableCard note={`${num.format(rows.length)} поставщиков по объёму закупок`}
+        head={<><Th>Поставщик</Th><Th>ИНН</Th><Th right>Закупки</Th><Th right>Доля</Th>
+          <Th right>Документов</Th><Th right>Позиций</Th><Th>Последняя</Th></>}>
+        {rows.map((r) => (
+          <tr key={r.name} className="border-b last:border-0 hover:bg-muted/40">
+            <td className="px-3 py-1.5 max-w-[300px] truncate" title={r.name}>
+              {r.id ? (
+                <button onClick={() => setCard(r.id)}
+                  className="text-left hover:text-primary hover:underline">{r.name}</button>
+              ) : r.name}
+            </td>
+            <td className="px-3 py-1.5 tabular-nums text-muted-foreground">{r.inn ?? '—'}</td>
+            <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">
+              {money.format(r.amount)} ₽
+            </td>
+            <td className="px-3 py-1.5"><Share value={r.amount} of={d.total} /></td>
+            <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{r.docs}</td>
+            <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+              {r.positions}
+            </td>
+            <td className="px-3 py-1.5 tabular-nums text-muted-foreground">{r.last ?? '—'}</td>
+          </tr>
+        ))}
+      </TableCard>
+      {card && <CounterpartyWindow companyId={companyId} id={card} onClose={() => setCard(null)} />}
+    </div>
+  )
+}
+
+/**
+ * Качество данных продукта: что именно может врать в его цифрах.
+ *
+ * Отдельно от «Качества данных» пространства: там проверяется слой целиком, здесь —
+ * ровно то, от чего зависят экраны «Реализации». Рядом с числом стоит объяснение, чем
+ * это грозит: проверка без последствия читается как придирка и её игнорируют.
+ */
+function RevQuality({ companyId }: { companyId: string }) {
+  const q = useQuery({
+    queryKey: ['books', 'revenue-quality', companyId],
+    queryFn: () => getRevenueQuality(companyId),
+    enabled: !!companyId,
+  })
+
+  if (q.isError) return <div className="p-4"><QueryError onRetry={() => q.refetch()} /></div>
+  if (!q.data) return <Loading />
+  const d = q.data
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="grid gap-3 grid-cols-3">
+        <MetricTile label="Проверок" value={num.format(d.checks.length)}
+          hint="гоняются при каждом открытии экрана" />
+        <MetricTile label="Есть замечания" value={num.format(d.problems)}
+          tone={d.problems ? 'danger' : 'success'}
+          hint={d.problems ? 'разобрать с бухгалтерией компании' : 'данные чистые'} />
+        <MetricTile label="Реализаций всего" value={num.format(d.salesDocs)}
+          hint="на этом множестве считаются все цифры продукта" />
+      </div>
+      <div className="flex justify-end">
+        <ExportButton label="Excel" onClick={() => exportTable('Качество данных · Реализация', [
+          { header: 'Проверка', key: 'title', width: 44 },
+          { header: 'Найдено', key: 'count', width: 12 },
+          { header: 'Чем грозит', key: 'why', width: 70 },
+        ], d.checks)} />
+      </div>
+      <TableCard note="Проверка без последствия читается как придирка — поэтому рядом стоит «чем грозит»"
+        head={<><Th>Проверка</Th><Th right>Найдено</Th><Th>Чем это грозит</Th></>}>
+        {d.checks.map((c) => (
+          <tr key={c.key} className="border-b last:border-0 hover:bg-muted/40">
+            <td className="px-3 py-1.5">{c.title}</td>
+            <td className={cn('px-3 py-1.5 text-right tabular-nums',
+              c.count ? 'text-amber-600 font-medium' : 'text-muted-foreground')}>
+              {c.count ? num.format(c.count) : 'нет'}
+            </td>
+            <td className="px-3 py-1.5 text-[11px] text-muted-foreground">{c.why}</td>
           </tr>
         ))}
       </TableCard>

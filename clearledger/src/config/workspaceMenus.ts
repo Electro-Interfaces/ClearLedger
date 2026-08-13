@@ -358,6 +358,10 @@ export const REV_SALES_MENU: CentralMenuItem[] = [
   // Сходимость с бухгалтерией — смысл продукта, и она обязана быть видимой: пока
   // расхождение не показано, витрина и регистр расходятся тихо.
   { key: 'rev_recon',    label: 'Сверка с бухгалтерией' },
+  // Качество данных стоит рядом со сверкой: оба пункта про доверие к цифрам.
+  // Это НЕ дубль «Данных» пространства — там качество слоя целиком, здесь ровно
+  // то, что портит цифры этого продукта.
+  { key: 'rev_quality',  label: 'Качество данных' },
 ]
 export const REV_CLIENTS_MENU: CentralMenuItem[] = [
   { key: 'rev_clients',  label: 'Реестр' },
@@ -381,6 +385,23 @@ export const REV_ITEMS_MENU: CentralMenuItem[] = [
  * («Регистр → Взаиморасчёты»), оно берётся из регистра источника, и вторая копия
  * той же цифры в соседнем продукте разошлась бы с первой.
  */
+/**
+ * «Закупки» — обратная сторона продажи (волна 4). Складского учёта в выгрузке нет,
+ * остаток считается как приход минус расход по строкам, поэтому на экране рядом
+ * стоит сальдо 41: способ грубый, и расхождение видно сразу.
+ */
+export const REV_HELP_MENU: CentralMenuItem[] = [
+  { key: 'help-start',   label: 'Как работать' },
+  { key: 'help-money',   label: 'Деньги и договоры' },
+  { key: 'help-goods',   label: 'Товар и закупки' },
+  { key: 'help-data',    label: 'Откуда цифры' },
+  { key: 'help-docs',    label: 'Документы компании' },
+]
+export const REV_STOCK_MENU: CentralMenuItem[] = [
+  { key: 'rev_stock',     label: 'Остатки и оборачиваемость' },
+  { key: 'rev_suppliers', label: 'Поставщики' },
+  { key: 'rev_prices',    label: 'Цены закупки' },
+]
 export const REV_MONEY_MENU: CentralMenuItem[] = [
   { key: 'rev_terms',    label: 'Сроки оплаты' },
   { key: 'rev_cashflow', label: 'Денежный поток' },

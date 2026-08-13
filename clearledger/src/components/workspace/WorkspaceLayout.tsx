@@ -43,7 +43,8 @@ const StoreWindow = lazy(() => import('./StoreWindow').then((m) => ({ default: m
 const ExportLayerPanel = lazy(() => import('./ExportLayerPanel').then((m) => ({ default: m.ExportLayerPanel })))
 // Рабочие места компании без объектов: «Реализация» и «Бухгалтерия».
 const RevenuePanel = lazy(() => import('./OfficeRevenue').then((m) => ({ default: m.RevenuePanel })))
-const REVENUE_MODES: CoreMode[] = ['rev_sales', 'rev_buyers', 'rev_catalog', 'rev_papers', 'rev_money']
+const REVENUE_MODES: CoreMode[] = ['rev_sales', 'rev_buyers', 'rev_catalog', 'rev_papers',
+  'rev_money', 'rev_stock', 'rev_help']
 const BooksPanel = lazy(() => import('./OfficePanels').then((m) => ({ default: m.BooksPanel })))
 
 /**
