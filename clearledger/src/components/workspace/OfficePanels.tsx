@@ -651,6 +651,13 @@ function CounterpartyWindow({ companyId, id, onClose }: {
         {q.isError && <QueryError onRetry={() => q.refetch()} />}
         {!d ? <Loading /> : (
           <div className="flex-1 min-h-0 overflow-y-auto space-y-3 pr-1">
+            {/* Дата сальдо обязана быть видна рядом с долгом: остаток снят на
+                момент выгрузки, а документы в карточке идут по сегодняшний день. */}
+            {d.debtAsOf && (
+              <p className="text-[11px] text-muted-foreground">
+                Долг и авансы — по сальдо источника на {d.debtAsOf}; документы ниже — за всю историю.
+              </p>
+            )}
             <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
               <MetricTile label="Продали ему"
                 value={money.format(d.byType.sale?.amount ?? 0) + ' ₽'}
@@ -659,10 +666,10 @@ function CounterpartyWindow({ companyId, id, onClose }: {
                 value={money.format(d.byType.purchase?.amount ?? 0) + ' ₽'}
                 hint={`${d.byType.purchase?.docs ?? 0} документов`} />
               <MetricTile label="Нам должен" value={money.format(d.receivable) + ' ₽'}
-                hint="сальдо 62 по его документам"
+                hint={d.advanceIn ? `аванс от него ${money.format(d.advanceIn)} ₽` : 'сальдо 62'}
                 tone={d.receivable > 0 ? 'warning' : undefined} />
               <MetricTile label="Мы должны" value={money.format(d.payable) + ' ₽'}
-                hint="сальдо 60 по его документам"
+                hint={d.advanceOut ? `аванс ему ${money.format(d.advanceOut)} ₽` : 'сальдо 60'}
                 tone={d.payable > 0 ? 'warning' : undefined} />
             </div>
 

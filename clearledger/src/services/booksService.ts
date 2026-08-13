@@ -50,6 +50,8 @@ export interface PeriodRow {
 }
 
 export interface DocRow {
+  /** id документа — по паре «номер + дата» его не найти, она не уникальна. */
+  id: string
   date: string
   number: string
   type: string
@@ -66,6 +68,8 @@ export interface DocRow {
   /** closed — месяц закрыт в бухгалтерии, документ уже не переписать. */
   periodStatus: string
   lines: number
+  /** Оплата счёта покупателю: null — вопрос неприменим, 0 — не оплачен. */
+  paid: number | null
 }
 
 export interface DocKind {
@@ -226,9 +230,13 @@ export interface CounterpartyCard {
   bankAccount: string | null
   bankName: string | null
   okved: string | null
-  /** Сальдо расчётов из регистра: 62 — нам должны, 60 — должны мы. */
+  /** Сальдо расчётов из САЛЬДО ИСТОЧНИКА с субконто: 62 — нам должны, 60 — должны мы. */
   receivable: number
   payable: number
+  /** Аванс — не «отрицательный долг»: он лежит на другой стороне того же счёта. */
+  advanceIn: number
+  advanceOut: number
+  debtAsOf: string | null
   byType: Record<string, { docs: number; amount: number }>
   months: { month: string; sales: number; purchases: number; paid: number }[]
   items: {
@@ -373,3 +381,38 @@ export type VatKind = 'issued' | 'received' | 'claimed'
 
 export const getVat = (companyId: string, kind: VatKind, period?: PeriodOpts) =>
   get<VatData>(`/api/books/vat?company_id=${companyId}&kind=${kind}` + periodQuery(period))
+
+// ── Карточка документа ──────────────────────────────────────────────────────
+
+export interface DocLine {
+  [key: string]: unknown
+}
+
+export interface DocCard {
+  id: string
+  type: string
+  label: string
+  section: string | null
+  number: string
+  date: string
+  counterparty: string | null
+  inn: string | null
+  counterpartyId: string | null
+  contract: { number: string; date: string; type: string | null } | null
+  organization: string | null
+  amount: number
+  vat: number
+  operation: string | null
+  status: string
+  periodStatus: string
+  externalId: string
+  warehouse: string | null
+  /** Строки как приехали из 1С: набор полей у видов разный. */
+  lines: DocLine[]
+  payments: { date: string | null; title: string | null; amount: number; vat: number }[]
+  paid: number
+  entries: { date: string | null; accountDt: string | null; accountKt: string | null; amount: number; content: string | null }[]
+}
+
+export const getDocCard = (companyId: string, docId: string) =>
+  get<DocCard>(`/api/books/doc?company_id=${companyId}&doc_id=${docId}`)

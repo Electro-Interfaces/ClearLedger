@@ -16,14 +16,14 @@ import uuid
 from datetime import date
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import assert_company_member, get_current_user
 from app.database import get_db
 from app.models import (
-    AccountingDoc, Counterparty, GlAccount, GlBalance, GlEntry, GlReference,
+    AccountingDoc, Contract, Counterparty, GlAccount, GlBalance, GlEntry, GlReference,
     GlTurnover, InvoicePayment, NomenclatureItem, Period, User, ReferenceSnapshot,
     SourceFile, VatEntry,
 )
@@ -604,6 +604,9 @@ async def docs(
         "kinds": kinds,
         "sections": sections,
         "rows": [{
+            # id нужен просмотрщику: по номеру с датой документ не найти —
+            # пара не уникальна (два разных №1-2212 от 22.12.2023).
+            "id": str(d.id),
             "date": d.date, "number": d.number, "type": d.doc_type,
             "label": DOC_LABELS.get(d.doc_type, d.doc_type),
             "section": SECTION_OF.get(d.doc_type),
@@ -895,13 +898,20 @@ async def counterparty_card(
          GROUP BY x.code ORDER BY 4 DESC LIMIT 50
     """), params)).all()]
 
+    # Долг и авансы — ИЗ САЛЬДО ИСТОЧНИКА с субконто (тот же источник, что у
+    # «Взаиморасчётов», см. `/books/settlements`). Расчёт по нашим проводкам врал
+    # дважды: остаток накоплен всей историей регистра, включая периоды до выгрузки,
+    # а долг и аванс схлопывались в одну разницу — у покупателя с предоплатой
+    # получался «минусовой долг», которого в сальдо нет.
     debt = (await db.execute(text("""
-        SELECT sum(CASE WHEN e.account_dt LIKE '62%' THEN e.amount ELSE 0 END)
-             - sum(CASE WHEN e.account_kt LIKE '62%' THEN e.amount ELSE 0 END),
-               sum(CASE WHEN e.account_kt LIKE '60%' THEN e.amount ELSE 0 END)
-             - sum(CASE WHEN e.account_dt LIKE '60%' THEN e.amount ELSE 0 END)
-          FROM gl_entries e JOIN accounting_docs d ON d.id = e.doc_id
-         WHERE e.company_id = :cid AND d.counterparty_id::text = :kid
+        SELECT sum(b.debit)  FILTER (WHERE b.account LIKE '62%'),
+               sum(b.credit) FILTER (WHERE b.account LIKE '60%'),
+               sum(b.credit) FILTER (WHERE b.account LIKE '62%'),
+               sum(b.debit)  FILTER (WHERE b.account LIKE '60%'),
+               max(b.as_of)
+          FROM gl_balances b
+         WHERE b.company_id = :cid AND b.counterparty_id::text = :kid
+           AND b.as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid)
     """), params)).one()
 
     contracts = [{"id": str(r[0]), "number": r[1], "date": r[2], "type": r[3],
@@ -919,6 +929,10 @@ async def counterparty_card(
         "phone": k.phone, "email": k.email, "director": k.director_name,
         "bankAccount": k.bank_account, "bankName": k.bank_name, "okved": k.okved,
         "receivable": _num(debt[0]), "payable": _num(debt[1]),
+        # Аванс — не «отрицательный долг»: покупатель заплатил вперёд, поставщику
+        # заплатили вперёд мы. Это разные вопросы, поэтому и цифры разные.
+        "advanceIn": _num(debt[2]), "advanceOut": _num(debt[3]),
+        "debtAsOf": debt[4].isoformat() if debt[4] else None,
         "byType": by_type, "months": months, "items": items,
         "contracts": contracts, "docs": docs,
     }
@@ -1514,4 +1528,74 @@ async def vat(
             "rate": e.rate, "invoice": e.invoice_title, "registrar": e.registrar,
             "operationCode": e.operation_code,
         } for e in rows],
+    }
+
+
+@router.get("/doc")
+async def doc_card(
+    company_id: str,
+    doc_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Документ целиком: шапка, состав, чем оплачен и какие проводки породил.
+
+    Реестр отвечает «что есть», а вопрос аудитора всегда следующий — «что внутри
+    и чем подтверждено». Всё, что для этого нужно, уже лежит в слое: строки — в
+    самом документе, оплата — в регистре оплат, проводки — в регистре бухгалтерии
+    (связь `doc_id` проставляет `books_links`).
+    """
+    cid = await assert_company_member(company_id, current_user, db)
+    try:
+        uid = uuid.UUID(doc_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Документ не найден")
+
+    d = (await db.execute(select(AccountingDoc).where(
+        AccountingDoc.company_id == cid, AccountingDoc.id == uid))).scalar_one_or_none()
+    if d is None:
+        raise HTTPException(status_code=404, detail="Документ не найден")
+
+    payments = (await db.execute(
+        select(InvoicePayment.paid_at, InvoicePayment.payment_title,
+               InvoicePayment.amount, InvoicePayment.vat)
+        .where(InvoicePayment.company_id == cid, InvoicePayment.invoice_doc_id == uid)
+        .order_by(InvoicePayment.paid_at))).all()
+
+    entries = (await db.execute(
+        select(GlEntry.entry_date, GlEntry.account_dt, GlEntry.account_kt,
+               GlEntry.amount, GlEntry.content)
+        .where(GlEntry.company_id == cid, GlEntry.doc_id == uid)
+        .order_by(GlEntry.entry_date))).all()
+
+    contract = None
+    if d.contract_id:
+        contract = (await db.execute(
+            select(Contract.number, Contract.date, Contract.kind)
+            .where(Contract.id == d.contract_id))).first()
+
+    return {
+        "id": str(d.id),
+        "type": d.doc_type, "label": DOC_LABELS.get(d.doc_type, d.doc_type),
+        "section": SECTION_OF.get(d.doc_type),
+        "number": d.number, "date": d.date,
+        "counterparty": d.counterparty_name, "inn": d.counterparty_inn,
+        "counterpartyId": str(d.counterparty_id) if d.counterparty_id else None,
+        "contract": ({"number": contract[0], "date": contract[1], "type": contract[2]}
+                     if contract else None),
+        "organization": d.organization_name,
+        "amount": _num(d.amount), "vat": _num(d.vat_amount),
+        "operation": d.operation_type, "status": d.status_1c,
+        "periodStatus": d.period_status,
+        "externalId": d.external_id,
+        "warehouse": d.warehouse_code,
+        # Строки как они приехали: у разных видов свой набор полей, поэтому отдаём
+        # как есть — просмотрщик показывает то, что в строке действительно было.
+        "lines": d.lines or [],
+        "payments": [{"date": p[0], "title": p[1], "amount": _num(p[2]), "vat": _num(p[3])}
+                     for p in payments],
+        "paid": sum(_num(p[2]) for p in payments) if payments else 0.0,
+        "entries": [{"date": e[0].isoformat() if e[0] else None,
+                     "accountDt": e[1], "accountKt": e[2],
+                     "amount": _num(e[3]), "content": e[4]} for e in entries],
     }
