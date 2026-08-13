@@ -192,7 +192,18 @@ export function InvitationsCard({ companyId }: { companyId: string }) {
                   {i.email}
                   {i.position && <span className="block text-xs text-muted-foreground">{i.position}</span>}
                 </TableCell>
-                <TableCell><Badge variant="secondary" className="text-[10px]">{ROLE_LABEL[i.role] ?? i.role}</Badge></TableCell>
+                <TableCell className="space-y-1">
+                  <Badge variant="secondary" className="text-[10px]">{ROLE_LABEL[i.role] ?? i.role}</Badge>
+                  {/* Охват виден в списке: приглашение в пространство касается всех
+                      организаций и показывается в каждой из них — без пометки было бы
+                      непонятно, почему чужое приглашение стоит в этом списке. */}
+                  {i.scope === 'space' && (
+                    <Badge variant="outline"
+                      className="block w-fit text-[10px] border-blue-500/40 bg-blue-500/5">
+                      всё пространство
+                    </Badge>
+                  )}
+                </TableCell>
                 <TableCell className="text-xs text-muted-foreground">
                   {new Date(i.created_at).toLocaleDateString('ru')}
                   <span className="block">

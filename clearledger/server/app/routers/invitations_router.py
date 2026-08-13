@@ -172,10 +172,14 @@ async def list_invitations(
     current_user: User = Depends(get_current_user),
 ):
     cid = await require_company_admin(company_id, current_user, db)
+    # Приглашения этой организации ПЛЮС приглашения в пространство целиком: последние
+    # висят на организации, от имени которой позвали, но касаются всех. Без этого
+    # список выглядел пустым у всех организаций, кроме одной, — а человек уже позван.
     rows = (
         await db.execute(
             select(Invitation)
-            .where(Invitation.company_id == cid, Invitation.status == "pending")
+            .where(Invitation.status == "pending",
+                   (Invitation.company_id == cid) | (Invitation.scope == "space"))
             .order_by(Invitation.created_at.desc())
         )
     ).scalars().all()
