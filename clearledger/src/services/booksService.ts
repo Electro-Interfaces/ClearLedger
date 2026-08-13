@@ -6,7 +6,7 @@
  * выручке на копейки округления — а именно сходимость с бухгалтерией здесь и есть
  * смысл продукта.
  */
-import { get } from './apiClient'
+import { get, post } from './apiClient'
 
 export interface BooksOverview {
   revenue: number
@@ -344,6 +344,32 @@ export const getAct = (
 ) =>
   get<ActData>(`/api/books/act?company_id=${companyId}`
     + `&counterparty_id=${counterpartyId}` + periodQuery(period))
+
+/** Болезни справочника контрагентов: дубли, карточки без ИНН, несведённые документы. */
+export interface CpQuality {
+  duplicatesByInn: { key: string; cards: { id: string; name: string; kpp: string | null; docs: number; contracts: number }[] }[]
+  duplicatesByName: { key: string; cards: { id: string; name: string; inn: string | null; docs: number }[] }[]
+  withoutInn: { id: string; name: string; docs: number; amount: number }[]
+  /** Документы, не нашедшие карточку: имя из документа и предложенный кандидат. */
+  unlinkedDocs: {
+    name: string; inn: string | null; docs: number; amount: number
+    candidateId: string | null; candidateName: string | null
+  }[]
+  emptyCards: number
+  docsWithName: number
+  docsLinked: number
+}
+
+export const getCounterpartyQuality = (companyId: string) =>
+  get<CpQuality>(`/api/books/counterparty-quality?company_id=${companyId}`)
+
+/** Привязать несведённые документы с таким именем к выбранной карточке. */
+export const linkDocsToCounterparty = (
+  companyId: string, counterpartyId: string, name: string,
+) =>
+  post<{ linked: number }>(
+    `/api/books/link-docs?company_id=${companyId}&counterparty_id=${counterpartyId}`
+    + `&name=${encodeURIComponent(name)}`, {})
 
 export const getCounterpartyStats = (companyId: string) =>
   get<{ rows: CounterpartyStats[] }>(

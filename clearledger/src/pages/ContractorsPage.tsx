@@ -8,6 +8,7 @@ import { useState, useMemo, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { DocumentWindow } from '@/components/books/DocumentWindow'
+import { CounterpartyQuality } from '@/components/books/CounterpartyQuality'
 import {
   exportAct, exportCounterparties, exportCounterpartyDocs,
 } from '@/services/booksExport'
@@ -1187,7 +1188,7 @@ export function ContractorsPage() {
   const isEnergy = company.profileId === 'energy'
   const { data: counterparties = [], isLoading } = useCounterparties()
   const { data: allContracts = [] } = useContracts()
-  const [view, setView] = useState<'counterparties' | 'contracts' | 'corp'>('counterparties')
+  const [view, setView] = useState<'counterparties' | 'contracts' | 'corp' | 'quality'>('counterparties')
   // <1024 (порог грида lg): мастер-деталь — карточка шторкой поверх списка.
   const isNarrow = useMaxWidth(1024)
   const [search, setSearch] = useState('')
@@ -1310,9 +1311,20 @@ export function ContractorsPage() {
             Покупатели (корп.)
           </button>
         )}
+        {/* «Качество» — там, где есть чем мерить: проверки стоят на документах
+            бухгалтерии. У компаний без неё вкладка ответила бы пустотой. */}
+        {hasStats && (
+          <button onClick={() => setView('quality')}
+            className={`px-3 py-1.5 rounded-md text-sm transition-colors ${view === 'quality' ? 'bg-background shadow-sm font-medium' : 'text-muted-foreground hover:text-foreground'}`}>
+            Качество
+          </button>
+        )}
       </div>
 
-      {view === 'corp' ? (
+      {view === 'quality' ? (
+        // Из проверки — сразу в карточку: болезнь показана, чтобы её пошли лечить.
+        <CounterpartyQuality onOpen={(id) => { setSelectedId(id); setView('counterparties') }} />
+      ) : view === 'corp' ? (
         <CorpClientsView />
       ) : view === 'contracts' ? (
         <AllContractsView counterparties={counterparties} />

@@ -648,6 +648,12 @@ async def _slice(db: AsyncSession, cid, doc_type: str, top: int,
     by_month: dict[str, dict[str, float]] = {}
     by_client: dict[str, dict[str, Any]] = {}
     by_item: dict[str, dict[str, float]] = {}
+    # Товар и услуга — РАЗРЕЗ одного продукта, а не два продукта: доля услуг в выручке
+    # нужна на общем обзоре, и считать её вторым запросом с `line_kind` значило бы
+    # гонять ту же выборку дважды. Суммы берутся по строкам, поэтому с итогом по
+    # шапкам сходятся не до копейки — у части документов шапка и состав разошлись
+    # (см. НДС «сверху» в docs/REVENUE.md).
+    by_kind: dict[str, float] = {"goods": 0.0, "service": 0.0}
     total = vat = 0.0
     picked_docs = 0
 
@@ -681,8 +687,10 @@ async def _slice(db: AsyncSession, cid, doc_type: str, top: int,
 
         for ln in (d.lines or []):
             # Разрез по типу строки: один документ несёт и товары, и услуги.
-            if line_kind and (ln.get('kind') or 'goods') != line_kind:
+            lkind = ln.get('kind') or 'goods'
+            if line_kind and lkind != line_kind:
                 continue
+            by_kind[lkind if lkind in by_kind else 'goods'] += _num(ln.get('amount'))
             # Позиция — по КОДУ номенклатуры: имя в строке документа пишется как
             # угодно, а код тот же, что в справочнике, и по нему открывается карточка.
             ikey = (ln.get("code") or "").strip() or ln.get("name") or "—"
@@ -701,37 +709,32 @@ async def _slice(db: AsyncSession, cid, doc_type: str, top: int,
         "docs": picked_docs,
         "clients": len(clients),
         "months": [{"month": k, **v} for k, v in sorted(by_month.items())],
+        "byKind": by_kind,
         "topClients": clients[:top],
         "topItems": items[:top],
     }
 
 
-@router.get("/sales")
-async def sales(
+@router.get("/revenue")
+async def revenue(
     company_id: str,
+    kind: str = Query("all", pattern="^(all|goods|service)$"),
     top: int = Query(15, ge=1, le=500),
     date_from: str | None = None,
     date_to: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
-    """Продажи товаров: динамика, покупатели, товары."""
-    cid = await assert_company_member(company_id, current_user, db)
-    return await _slice(db, cid, "sale", top, date_from, date_to, line_kind="goods")
+    """Реализация: динамика, покупатели, что продаём.
 
-
-@router.get("/services")
-async def services(
-    company_id: str,
-    top: int = Query(15, ge=1, le=500),
-    date_from: str | None = None,
-    date_to: str | None = None,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-) -> dict[str, Any]:
-    """Услуги: динамика, заказчики, виды услуг."""
+    `kind` — разрез, а не отдельная витрина: `all` считает документ целиком (это и
+    есть выручка, сходящаяся с 90.01.1), `goods`/`service` — только свои строки.
+    Раньше на это было два маршрута (`/sales`, `/services`), и вопрос «сколько мы
+    всего продали» не имел ответа ни на одном из них.
+    """
     cid = await assert_company_member(company_id, current_user, db)
-    return await _slice(db, cid, "sale", top, date_from, date_to, line_kind="service")
+    return await _slice(db, cid, "sale", top, date_from, date_to,
+                        line_kind=None if kind == "all" else kind)
 
 
 # ── Нормализованный слой: карточка контрагента ───────────────────────────────
@@ -1065,6 +1068,151 @@ async def reconciliation_act(
         "note": "Итоги — по оборотам с субконто из бухгалтерии (свёрнуты по месяцам); "
                 "документы приведены как расшифровка.",
     }
+
+
+# ── Качество справочника контрагентов ───────────────────────────────────────
+# Справочник приезжает из 1С как есть, со всеми его болезнями: одно юрлицо двумя
+# карточками, карточка без ИНН, документы, которые ни с кем не связались. Пока это
+# не показано, цифры разреза тихо делятся между дублями, а «его документы» находят
+# половину. Экран отвечает не «всё плохо», а «вот конкретные строки и что с ними
+# делать»: сведение документов — здесь же, одной кнопкой.
+
+@router.get("/counterparty-quality")
+async def counterparty_quality(
+    company_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Болезни справочника: дубли, карточки без ИНН, несведённые документы."""
+    cid = await assert_company_member(company_id, current_user, db)
+    p = {"cid": str(cid)}
+
+    # Дубли по ИНН — самый жёсткий случай: это заведомо одно юрлицо, и обороты
+    # разделены между карточками пополам.
+    by_inn = [{
+        "key": r[0], "cards": r[1],
+    } for r in (await db.execute(text("""
+        SELECT k.inn, json_agg(json_build_object(
+                 'id', k.id, 'name', k.name, 'kpp', k.kpp,
+                 'docs', (SELECT count(*) FROM accounting_docs d
+                           WHERE d.company_id = :cid AND d.counterparty_id = k.id),
+                 'contracts', (SELECT count(*) FROM contracts c
+                                WHERE c.company_id = :cid AND c.counterparty_id::text = k.id::text))
+               ORDER BY k.name)
+          FROM counterparties k
+         WHERE k.company_id = :cid AND coalesce(k.inn, '') <> ''
+         GROUP BY k.inn HAVING count(*) > 1
+         ORDER BY count(*) DESC
+    """), p)).all()]
+
+    # Дубли по имени — та же нормализация, что при сведении документов: «ООО
+    # «Ромашка»» и «Ромашка ООО» это одна карточка, а ИНН у одной из них может
+    # не быть вовсе.
+    norm = (r"lower(regexp_replace(regexp_replace(k.name, '[«»\"''`]', '', 'g'), "
+            r"'\s+', ' ', 'g'))")
+    by_name = [{
+        "key": r[0], "cards": r[1],
+    } for r in (await db.execute(text(rf"""
+        SELECT {norm} nm, json_agg(json_build_object(
+                 'id', k.id, 'name', k.name, 'inn', k.inn,
+                 'docs', (SELECT count(*) FROM accounting_docs d
+                           WHERE d.company_id = :cid AND d.counterparty_id = k.id))
+               ORDER BY k.name)
+          FROM counterparties k
+         WHERE k.company_id = :cid
+         GROUP BY {norm} HAVING count(*) > 1
+         ORDER BY count(*) DESC LIMIT 100
+    """), p)).all()]
+
+    no_inn = [{
+        "id": str(r[0]), "name": r[1], "docs": r[2], "amount": _num(r[3]),
+    } for r in (await db.execute(text("""
+        SELECT k.id, k.name,
+               (SELECT count(*) FROM accounting_docs d
+                 WHERE d.company_id = :cid AND d.counterparty_id = k.id),
+               (SELECT coalesce(sum(d.amount), 0) FROM accounting_docs d
+                 WHERE d.company_id = :cid AND d.counterparty_id = k.id)
+          FROM counterparties k
+         WHERE k.company_id = :cid AND coalesce(k.inn, '') = ''
+         ORDER BY 3 DESC LIMIT 200
+    """), p)).all()]
+
+    # Несведённые документы: группируем по тому, как контрагент назван в документе,
+    # и сразу ищем кандидата — карточку с тем же ИНН или похожим именем.
+    unlinked = [{
+        "name": r[0], "inn": r[1], "docs": r[2], "amount": _num(r[3]),
+        "candidateId": str(r[4]) if r[4] else None, "candidateName": r[5],
+    } for r in (await db.execute(text(rf"""
+        WITH u AS (
+          SELECT d.counterparty_name nm, d.counterparty_inn inn,
+                 count(*) n, sum(d.amount) amt
+            FROM accounting_docs d
+           WHERE d.company_id = :cid AND d.counterparty_id IS NULL
+             AND coalesce(d.counterparty_name, '') <> ''
+           GROUP BY 1, 2
+        )
+        SELECT u.nm, u.inn, u.n, u.amt, k.id, k.name
+          FROM u
+          LEFT JOIN LATERAL (
+            SELECT k.id, k.name FROM counterparties k
+             WHERE k.company_id = :cid
+               AND (
+                 (coalesce(u.inn, '') <> '' AND k.inn = u.inn)
+                 OR {norm} = lower(regexp_replace(regexp_replace(u.nm, '[«»\"''`]', '', 'g'), '\s+', ' ', 'g'))
+               )
+             LIMIT 1
+          ) k ON true
+         ORDER BY u.n DESC LIMIT 100
+    """), p)).all()]
+
+    # Карточки-пустышки: ни документов, ни договоров. Их не удаляют вслепую —
+    # справочник ведут в 1С, — но знать про них надо: это шум в поиске.
+    empty = (await db.execute(text("""
+        SELECT count(*) FROM counterparties k
+         WHERE k.company_id = :cid
+           AND NOT EXISTS (SELECT 1 FROM accounting_docs d
+                            WHERE d.company_id = :cid AND d.counterparty_id = k.id)
+           AND NOT EXISTS (SELECT 1 FROM contracts c
+                            WHERE c.company_id = :cid AND c.counterparty_id::text = k.id::text)
+    """), p)).scalar_one()
+
+    total, linked = (await db.execute(text("""
+        SELECT count(*), count(counterparty_id) FROM accounting_docs
+         WHERE company_id = :cid AND coalesce(counterparty_name, '') <> ''
+    """), p)).one()
+
+    return {
+        "duplicatesByInn": by_inn,
+        "duplicatesByName": by_name,
+        "withoutInn": no_inn,
+        "unlinkedDocs": unlinked,
+        "emptyCards": empty,
+        "docsWithName": total,
+        "docsLinked": linked,
+    }
+
+
+@router.post("/link-docs")
+async def link_docs(
+    company_id: str,
+    counterparty_id: str,
+    name: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Привязать несведённые документы с таким именем к выбранной карточке.
+
+    Ручное решение там, где машинное не сработало: имя в документе написано иначе,
+    ИНН не приехал. Трогаем только документы БЕЗ ссылки — уже сведённые остаются
+    как есть, поэтому повторный вызов безопасен.
+    """
+    cid = await assert_company_member(company_id, current_user, db)
+    res = await db.execute(text("""
+        UPDATE accounting_docs SET counterparty_id = CAST(:kid AS uuid)
+         WHERE company_id = :cid AND counterparty_id IS NULL AND counterparty_name = :name
+    """), {"cid": str(cid), "kid": counterparty_id, "name": name})
+    await db.commit()
+    return {"linked": res.rowcount or 0}
 
 
 # ── Просмотрщик документа ────────────────────────────────────────────────────
