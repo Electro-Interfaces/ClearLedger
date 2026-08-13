@@ -60,6 +60,8 @@ export interface MailMessageRow {
   html: string | null
   status: string
   counterpartyId: string | null
+  /** Куда письмо уехало: chat | task | ticket | intake. */
+  routedTo?: string | null
   attachments: {
     id: string; name: string; size: number; contentType: string | null
     /** Пакет приёмки, в который вложение уже разобрано. */
@@ -127,6 +129,10 @@ export interface MailRule {
   action: 'intake' | 'ticket' | 'chat' | 'task' | 'archive' | 'quarantine' | 'reject'
   setCounterpartyId: string | null
   setContractId: string | null
+  /** Куда доставить: комната чата для действия «в чат». */
+  setRoomId: string | null
+  /** Объект для действия «в заявку»: заявка всегда про объект. */
+  setObjectId: string | null
   isActive: boolean
   /** Сколько раз сработало: правило без срабатываний — мусор в списке. */
   hits: number
@@ -140,6 +146,7 @@ const ruleBody = (r: MailRuleInput) => ({
   subject_like: r.subjectLike || null, has_attachment: r.hasAttachment,
   unknown_sender: r.unknownSender, action: r.action,
   set_counterparty_id: r.setCounterpartyId, set_contract_id: r.setContractId,
+  set_room_id: r.setRoomId, set_object_id: r.setObjectId || null,
   is_active: r.isActive,
 })
 

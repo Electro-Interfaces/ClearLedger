@@ -988,6 +988,12 @@ async def create_all() -> None:
             "NOT NULL DEFAULT 15",
             # Оригинал письма: разбор — наша интерпретация, спор решается исходником.
             "ALTER TABLE mail_messages ADD COLUMN IF NOT EXISTS raw_eml BYTEA",
+            # Куда правило доставляет письмо: комната чата и объект для заявки.
+            "ALTER TABLE mail_rules ADD COLUMN IF NOT EXISTS set_room_id UUID "
+            "REFERENCES chat_rooms(id) ON DELETE SET NULL",
+            "ALTER TABLE mail_rules ADD COLUMN IF NOT EXISTS set_object_id VARCHAR(100)",
+            # Куда письмо доехало по факту: комната, задача, заявка.
+            "ALTER TABLE mail_messages ADD COLUMN IF NOT EXISTS routed_to VARCHAR(20)",
             # v0.9: индекс по target (обратный поиск). Уникальность маппингов —
             # частичные индексы в v1.9 (с учётом channel_id).
             "CREATE INDEX IF NOT EXISTS idx_reconcile_mappings_target ON reconcile_mappings(company_id, kind, target_ref)",

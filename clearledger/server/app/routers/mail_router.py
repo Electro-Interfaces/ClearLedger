@@ -218,6 +218,8 @@ async def thread(
         "sentAt": m.sent_at.isoformat() if m.sent_at else None,
         "text": m.body_text, "html": m.body_html, "status": m.status,
         "counterpartyId": str(m.counterparty_id) if m.counterparty_id else None,
+        # Куда письмо уехало: в комнату, задачу, заявку или приёмку.
+        "routedTo": m.routed_to,
         "attachments": atts.get(m.id, []),
     } for m in msgs]}
 
@@ -259,6 +261,8 @@ class RuleIn(BaseModel):
     action: str = "archive"
     set_counterparty_id: str | None = None
     set_contract_id: str | None = None
+    set_room_id: str | None = None
+    set_object_id: str | None = None
     is_active: bool = True
 
 
@@ -271,6 +275,8 @@ def _rule(r: MailRule) -> dict[str, Any]:
         "unknownSender": r.unknown_sender, "action": r.action,
         "setCounterpartyId": str(r.set_counterparty_id) if r.set_counterparty_id else None,
         "setContractId": str(r.set_contract_id) if r.set_contract_id else None,
+        "setRoomId": str(r.set_room_id) if r.set_room_id else None,
+        "setObjectId": r.set_object_id,
         "isActive": r.is_active, "hits": r.hits,
     }
 

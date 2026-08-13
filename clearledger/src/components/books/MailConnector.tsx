@@ -32,6 +32,7 @@ import {
   type MailAccount, type MailAccountInput, type MailRule, type MailRuleInput,
 } from '@/services/mailService'
 import { useCounterparties } from '@/hooks/useReferences'
+import { get } from '@/services/apiClient'
 
 const EMPTY: MailAccountInput = {
   address: '', title: '', purpose: '', mode: 'both',
@@ -70,6 +71,15 @@ export function MailConnector() {
   // Кого учим: адрес, по которому человек говорит «это письмо от такого-то».
   const [learning, setLearning] = useState<string | null>(null)
   const { data: counterparties = [] } = useCounterparties()
+  // Комнаты нужны правилу «в чат»: письмо кладётся в конкретную комнату, а не
+  // «куда-нибудь в чат».
+  const { data: roomsResp } = useQuery({
+    queryKey: ['chat', 'rooms-for-mail', companyId],
+    queryFn: () => get<{ rooms?: { id: string; name: string }[] }>(
+      `/api/chat/rooms?company_id=${companyId}`),
+    enabled: !!companyId,
+  })
+  const rooms = roomsResp?.rooms ?? []
 
   const accounts = useQuery({
     queryKey: ['mail', 'accounts', companyId],
@@ -376,7 +386,7 @@ export function MailConnector() {
                 name: '', accountId: null, sort: 100, fromEmail: null, fromDomain: null,
                 subjectLike: null, hasAttachment: null, unknownSender: null,
                 action: 'archive', setCounterpartyId: null, setContractId: null,
-                isActive: true,
+                setRoomId: null, setObjectId: null, isActive: true,
               })}>
               <Plus className="size-4 mr-1.5" /> Правило
             </Button>
@@ -435,6 +445,26 @@ export function MailConnector() {
                     ))}
                   </div>
                 </Field>
+                {ruleForm.action === 'chat' && (
+                  <Field label="Комната чата" hint="куда положить письмо">
+                    <select className="w-full rounded-md border bg-background px-2 py-1.5 text-sm"
+                      value={ruleForm.setRoomId ?? ''}
+                      onChange={(e) => setRuleForm({ ...ruleForm,
+                        setRoomId: e.target.value || null })}>
+                      <option value="">— выберите комнату —</option>
+                      {(rooms ?? []).map((r) => (
+                        <option key={r.id} value={r.id}>{r.name}</option>
+                      ))}
+                    </select>
+                  </Field>
+                )}
+                {ruleForm.action === 'ticket' && (
+                  <Field label="Объект" hint="заявка всегда про объект">
+                    <Input value={ruleForm.setObjectId ?? ''} placeholder="код объекта"
+                      onChange={(e) => setRuleForm({ ...ruleForm,
+                        setObjectId: e.target.value })} />
+                  </Field>
+                )}
                 <Field label="Проставить контрагента" hint="кому относится письмо">
                   <select className="w-full rounded-md border bg-background px-2 py-1.5 text-sm"
                     value={ruleForm.setCounterpartyId ?? ''}
@@ -615,6 +645,13 @@ export function MailConnector() {
               {(thread.data?.rows ?? []).map((m) => (
                 <div key={m.id} className="px-3 py-2 space-y-1">
                   <div className="flex flex-wrap items-baseline gap-2 text-sm">
+                    {m.routedTo && (
+                      <span className="rounded border border-emerald-500/40 px-1 text-[10px] text-emerald-600 dark:text-emerald-400">
+                        {({ chat: 'в чат', task: 'в задачу', ticket: 'в заявку',
+                            intake: 'в приёмку' } as Record<string, string>)[m.routedTo]
+                          ?? m.routedTo}
+                      </span>
+                    )}
                     {m.direction === 'out' && (
                       <span className="rounded border border-primary/40 px-1 text-[10px] text-primary">
                         мы
@@ -789,6 +826,10 @@ function RuleRow({ r, counterparties, onEdit, onDelete }: {
         {ACTIONS.find((a) => a.key === r.action)?.label ?? r.action}
       </span>
       {cp && <span className="text-[11px] text-muted-foreground">→ {cp.name}</span>}
+      {r.setRoomId && <span className="text-[11px] text-muted-foreground">→ в комнату</span>}
+      {r.setObjectId && (
+        <span className="text-[11px] text-muted-foreground">→ объект {r.setObjectId}</span>
+      )}
       <span className="ml-auto text-[11px] text-muted-foreground tabular-nums">
         сработало {r.hits}
       </span>

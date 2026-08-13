@@ -400,12 +400,23 @@ async def _save_message(db: AsyncSession, account: MailAccount, uid: int,
         db.add(att)
         saved_atts.append(att)
 
-    # Правило сказало «в задачу» — заводим её из письма. Письмо, требующее работы,
-    # иначе живёт только в почтовой ленте: там его видит один человек и ровно до
-    # тех пор, пока помнит. Задача — место, где у работы есть срок и ответственный.
-    if rule is not None and rule.action == "task":
+    # Доставка: плюс-адрес (ответ почтового участника в комнату или задачу) или
+    # правило (в комнату, в заявку). Ошибка доставки не рвёт приём — письмо уже
+    # сохранено, и потерять его из-за удалённой комнаты было бы хуже.
+    try:
+        from app.services import mail_routing
+        routed = await mail_routing.route(db, account.company_id, row, rule)
+        if routed:
+            row.routed_to = routed
+    except Exception as e:  # noqa: BLE001
+        logger.exception("письмо %s не доставлено по маршруту: %s", row.id, e)
+
+    # Правило сказало «в задачу» — заводим НОВУЮ задачу из письма. Ответ в
+    # существующую задачу приходит плюс-адресом и обработан выше.
+    if rule is not None and rule.action == "task" and row.routed_to is None:
         try:
             await _task_from_message(db, account.company_id, row)
+            row.routed_to = "task"
         except Exception as e:  # noqa: BLE001 — задача не заводится, письмо остаётся
             logger.exception("задача из письма %s не создана: %s", row.id, e)
 
@@ -416,6 +427,7 @@ async def _save_message(db: AsyncSession, account: MailAccount, uid: int,
         await db.flush()
         try:
             await attachments_to_intake(db, account.company_id, row, saved_atts)
+            row.routed_to = "intake"
         except Exception as e:  # noqa: BLE001 — разбор не должен рвать приём почты
             logger.exception("вложения письма %s не разобраны: %s", row.id, e)
 

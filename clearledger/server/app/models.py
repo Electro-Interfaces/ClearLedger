@@ -1773,6 +1773,11 @@ class MailRule(Base):
         UUID(as_uuid=True), ForeignKey("counterparties.id", ondelete="SET NULL"), nullable=True)
     set_contract_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("contracts.id", ondelete="SET NULL"), nullable=True)
+    # Куда доставить: комната чата для действия `chat`, объект для `ticket`.
+    # Заявка всегда про объект — это устройство разреза поддержки, а не ограничение.
+    set_room_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("chat_rooms.id", ondelete="SET NULL"), nullable=True)
+    set_object_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     # Сколько раз сработало: правило, которое не срабатывает, — мусор в списке.
     hits: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -1924,6 +1929,8 @@ class MailMessage(Base):
     # Письмо целиком, как пришло. Тело и заголовки разобраны в колонках выше, но
     # спор «что именно было в письме» решается оригиналом, а не нашим разбором.
     raw_eml: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    # Куда письмо доехало: chat | task | ticket | intake. Пусто — осталось в переписке.
+    routed_to: Mapped[str | None] = mapped_column(String(20), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
