@@ -20,6 +20,7 @@ from app.routers import (
     audit_router,
     auth_router,
     books_router,
+    intake_docs_router,
     dedup_ingest_router,
     edge_router,
     companies_router,
@@ -320,6 +321,7 @@ app.include_router(market_router.router, prefix=API_PREFIX)
 # Бухгалтерия офисного пространства и её разрезы («Продажи», «Услуги»): эталон
 # закрытого периода, из которого растут остальные приложения такой компании.
 app.include_router(books_router.router, prefix=API_PREFIX)
+app.include_router(intake_docs_router.router, prefix=API_PREFIX)
 
 
 @app.get("/api/health")

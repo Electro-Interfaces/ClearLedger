@@ -963,6 +963,13 @@ async def create_all() -> None:
             "ON accounting_docs(company_id, counterparty_id)",
             "CREATE INDEX IF NOT EXISTS idx_accdoc_contract "
             "ON accounting_docs(company_id, contract_id)",
+            # Приём первички: пакет загрузки и его кандидаты (services/intake_docs.py).
+            # Таблицы заводит create_all; здесь — индексы разбора, по которым экран
+            # ищет свои строки, и они же нужны на уже развёрнутых стендах.
+            "CREATE INDEX IF NOT EXISTS idx_intake_items_batch "
+            "ON intake_items(company_id, batch_id)",
+            "CREATE INDEX IF NOT EXISTS idx_intake_items_fp "
+            "ON intake_items(company_id, fingerprint)",
             # v0.9: индекс по target (обратный поиск). Уникальность маппингов —
             # частичные индексы в v1.9 (с учётом channel_id).
             "CREATE INDEX IF NOT EXISTS idx_reconcile_mappings_target ON reconcile_mappings(company_id, kind, target_ref)",

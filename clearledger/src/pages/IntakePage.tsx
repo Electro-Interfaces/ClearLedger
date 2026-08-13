@@ -22,12 +22,12 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+import { IntakeDocs } from '@/components/books/IntakeDocs'
 import { AdvancedOnly, AdvancedHint } from '@/components/common/AdvancedOnly'
 import {
   Upload, FileText, Image, FileSpreadsheet, File, Trash2, Wand2, Radio,
   Play, Clock, CheckCircle2, AlertCircle, Pause, Loader2, Settings2, ExternalLink,
-  Database, Calendar, Table2, Sheet,
-} from 'lucide-react'
+  Database, Calendar, Table2, Sheet, FileCheck } from 'lucide-react'
 import { toast } from 'sonner'
 import { nanoid } from 'nanoid'
 import { format } from 'date-fns'
@@ -741,17 +741,22 @@ function ChannelsScheduleTab() {
 
 export function IntakePage() {
   return (
-    <div className="space-y-4 max-w-5xl">
+    <div className="space-y-4 max-w-6xl">
       <div>
         <h1 className="text-xl font-semibold tracking-tight">Загрузка</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Портал приёма данных: ручная загрузка документов и таблиц с диска, управление
-          каналами и расписанием, ручной запуск обновления.
+          Приём данных в пространство: первичные документы с разбором и проверками,
+          загрузка файлов и таблиц с диска, каналы и расписание обновления.
         </p>
       </div>
 
-      <Tabs defaultValue="files">
+      <Tabs defaultValue="primary">
         <TabsList variant="line" className="w-full justify-start gap-5 rounded-none border-b border-border/50 px-0 h-10">
+          {/* Первичка — главный вход раздела: документы в учёт принимаются здесь,
+              с разбором и проверками. Остальные вкладки — вспомогательный контур. */}
+          <TabsTrigger value="primary" className="flex-none gap-1.5 px-1 text-[13px]">
+            <FileCheck className="h-3.5 w-3.5" /> Первичные документы
+          </TabsTrigger>
           <TabsTrigger value="files" className="flex-none gap-1.5 px-1 text-[13px]">
             <Upload className="h-3.5 w-3.5" /> Загрузка файлов
           </TabsTrigger>
@@ -762,6 +767,9 @@ export function IntakePage() {
             <Radio className="h-3.5 w-3.5" /> Каналы и расписание
           </TabsTrigger>
         </TabsList>
+        <TabsContent value="primary" className="mt-4">
+          <IntakeDocs />
+        </TabsContent>
         <TabsContent value="files" className="mt-4">
           <FilesUploadTab />
         </TabsContent>
