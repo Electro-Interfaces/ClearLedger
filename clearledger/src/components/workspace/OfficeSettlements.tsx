@@ -19,7 +19,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { MetricTile } from '@/components/ui/metric-tile'
 import { cn } from '@/lib/utils'
 import {
-  getSettlements, getVat,
+  getPayroll, getSettlements, getVat,
   type SettlementKind, type SettlementsData, type VatData, type VatKind,
 } from '@/services/booksService'
 
@@ -217,4 +217,129 @@ function VatView({ data, kind, onKind }: { data: VatData; kind: VatKind; onKind:
       </TableCard>
     </div>
   )
+}
+
+/* ──────────────────────────── Расчёт с персоналом ─────────────────────────── */
+
+/**
+ * «Бухгалтерия» → «Зарплата»: начислено, удержано, взносы, выплачено.
+ *
+ * Считается по строкам расчёта, а не по документам: месяц расчёта и дата документа
+ * расходятся — за декабрь считают в декабре, платят в январе.
+ *
+ * ⚠ Экран показывает персональные данные сотрудников клиента (ФИО, ИНН, СНИЛС).
+ */
+export function BooksPayroll({ companyId }: { companyId: string }) {
+  const q = useQuery({
+    queryKey: ['books', 'payroll', companyId],
+    queryFn: () => getPayroll(companyId),
+  })
+  if (q.isError) {
+    return <div className="p-4"><QueryError message="Не удалось загрузить расчёт" onRetry={() => q.refetch()} /></div>
+  }
+  if (!q.data) return <div className="p-6 text-sm text-muted-foreground">Загрузка…</div>
+  const d = q.data
+  const t = d.totals
+  if (!t.employees && !d.docs.length) {
+    return (
+      <div className="p-6 text-sm text-muted-foreground">
+        Зарплатный блок не загружен: в срезе компании нет ни начислений, ни ведомостей.
+      </div>
+    )
+  }
+  // «Начислено» включает аванс за первую половину месяца, а он проводок не делает —
+  // без этой оговорки экран расходится с оборотами регистра, и человек ищет ошибку.
+  const posted = t.accrued - t.advance
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-5">
+        <MetricTile label="Начислено" value={`${money.format(t.accrued)} ₽`}
+          hint={t.advance ? `в т. ч. аванс ${money.format(t.advance)} ₽` : undefined} />
+        <MetricTile label="НДФЛ" value={`${money.format(t.ndfl)} ₽`} hint="удержано" />
+        <MetricTile label="Страховые взносы" value={`${money.format(t.contributions)} ₽`} />
+        <MetricTile label="Выплачено" value={`${money.format(t.paid)} ₽`} hint="по ведомостям" />
+        <MetricTile label="Долг перед людьми" value={`${money.format(t.debt)} ₽`}
+          hint="сальдо 70" tone={t.debt > 0 ? 'warning' : undefined} />
+      </div>
+
+      {t.advance > 0 && (
+        <p className="text-[11px] text-muted-foreground">
+          Аванс за первую половину месяца входит в начисления, но проводок не делает:
+          в регистре бухгалтерии отражено {money.format(posted)} ₽.
+        </p>
+      )}
+
+      <TableCard note="По месяцу начисления, а не по дате документа: за декабрь считают в декабре, платят в январе"
+        head={<><Th>Месяц</Th><Th right>Начислено</Th><Th right>НДФЛ</Th>
+          <Th right>Взносы</Th><Th right>Выплачено</Th></>}>
+        {d.months.map((m) => (
+          <tr key={m.month} className="border-b last:border-0 hover:bg-muted/40">
+            <td className="px-3 py-1.5">{monthLabel(m.month)}</td>
+            <td className="px-3 py-1.5 text-right tabular-nums">{m.accrued ? money.format(m.accrued) : '—'}</td>
+            <td className="px-3 py-1.5 text-right tabular-nums">{m.ndfl ? money.format(m.ndfl) : '—'}</td>
+            <td className="px-3 py-1.5 text-right tabular-nums">{m.contributions ? money.format(m.contributions) : '—'}</td>
+            <td className="px-3 py-1.5 text-right tabular-nums">{m.paid ? money.format(m.paid) : '—'}</td>
+          </tr>
+        ))}
+      </TableCard>
+
+      <TableCard note={`Сотрудников: ${d.employees.length}. Персональные данные — не для общего доступа`}
+        head={<><Th>Сотрудник</Th><Th>ИНН</Th><Th right>Начислено</Th><Th right>НДФЛ</Th>
+          <Th right>Взносы</Th><Th right>Выплачено</Th><Th right>Месяцев</Th></>}>
+        {d.employees.map((e, i) => (
+          <tr key={e.id ?? i} className="border-b last:border-0 hover:bg-muted/40">
+            <td className="px-3 py-1.5 max-w-[280px] truncate" title={e.snils ? `СНИЛС ${e.snils}` : ''}>
+              {e.name || '—'}
+            </td>
+            <td className="px-3 py-1.5 tabular-nums text-muted-foreground">{e.inn || '—'}</td>
+            <td className="px-3 py-1.5 text-right tabular-nums">{money.format(e.accrued)}</td>
+            <td className="px-3 py-1.5 text-right tabular-nums">{money.format(e.ndfl)}</td>
+            <td className="px-3 py-1.5 text-right tabular-nums">{money.format(e.contributions)}</td>
+            <td className="px-3 py-1.5 text-right tabular-nums">{money.format(e.paid)}</td>
+            <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{e.months}</td>
+          </tr>
+        ))}
+      </TableCard>
+
+      <TableCard note="Из чего сложилась сумма: виды начислений, удержаний и взносов"
+        head={<><Th>Вид</Th><Th>Что это</Th><Th right>Сумма</Th><Th right>Строк</Th></>}>
+        {d.kinds.map((k, i) => (
+          <tr key={i} className="border-b last:border-0 hover:bg-muted/40">
+            <td className="px-3 py-1.5 text-muted-foreground">{KIND_LABEL[k.kind] ?? k.kind}</td>
+            <td className="px-3 py-1.5 max-w-[320px] truncate" title={k.name}>{k.name}</td>
+            <td className="px-3 py-1.5 text-right tabular-nums">{money.format(k.amount)}</td>
+            <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{k.rows}</td>
+          </tr>
+        ))}
+      </TableCard>
+
+      <TableCard note={`Документы блока: ${d.docs.length}`}
+        head={<><Th>Дата</Th><Th>Документ</Th><Th>Номер</Th><Th>Месяц</Th>
+          <Th right>Сумма</Th><Th>Статус</Th></>}>
+        {d.docs.map((doc) => (
+          <tr key={doc.id} className="border-b last:border-0 hover:bg-muted/40">
+            <td className="px-3 py-1.5 tabular-nums whitespace-nowrap">
+              {doc.date.split('-').reverse().join('.')}
+            </td>
+            <td className="px-3 py-1.5 text-muted-foreground">
+              {doc.label}
+              {doc.advance && <span className="ml-1.5 text-[10px] text-amber-600">аванс</span>}
+            </td>
+            <td className="px-3 py-1.5 tabular-nums">{doc.number}</td>
+            <td className="px-3 py-1.5 text-muted-foreground">{doc.month ? monthLabel(doc.month) : '—'}</td>
+            <td className="px-3 py-1.5 text-right tabular-nums">{money.format(doc.amount)}</td>
+            <td className={cn('px-3 py-1.5 whitespace-nowrap',
+              doc.status !== 'Проведён' && 'text-amber-600')}>{doc.status}</td>
+          </tr>
+        ))}
+      </TableCard>
+    </div>
+  )
+}
+
+/** Виды строк расчёта — человеческими словами. */
+const KIND_LABEL: Record<string, string> = {
+  accrual: 'Начислено', ndfl: 'НДФЛ', contribution: 'Взносы',
+  payment: 'Выплата', deduction: 'Удержано',
 }

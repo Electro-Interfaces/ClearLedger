@@ -355,6 +355,30 @@ export interface CollectionCurve {
 export const getCollectionCurve = (companyId: string) =>
   get<CollectionCurve>(`/api/books/collection-curve?company_id=${companyId}`)
 
+/** Прогноз поступлений от открытого долга по исторической кривой инкассации. */
+export interface CashForecast {
+  rows: {
+    id: string; number: string; date: string; counterparty: string
+    counterpartyId: string | null; amount: number; paid: number
+    rest: number; age: number
+    expected: number; expectedPct: number; in30: number; in90: number
+  }[]
+  openAmount: number
+  openCount: number
+  expected: number
+  windows: { days: number; label: string; amount: number }[]
+  curve: { days: number; pct: number }[]
+  totalSharePct: number
+  historyInvoices: number
+  historyBilled: number
+  unknownCount: number
+  unknownAmount: number
+  asOf: string
+}
+
+export const getCashForecast = (companyId: string) =>
+  get<CashForecast>(`/api/books/cash-forecast?company_id=${companyId}`)
+
 /** Реализации как сделки: сумма без НДС, себестоимость по строкам, маржа. */
 export interface DealsData {
   rows: {
@@ -918,3 +942,33 @@ export interface DocCard {
 
 export const getDocCard = (companyId: string, docId: string) =>
   get<DocCard>(`/api/books/doc?company_id=${companyId}&doc_id=${docId}`)
+
+// ── Расчёт с персоналом ─────────────────────────────────────────────────────
+// ⚠ ПДн: ответ содержит ФИО, ИНН и СНИЛС сотрудников клиента.
+
+export interface PayrollData {
+  totals: {
+    accrued: number
+    ndfl: number
+    contributions: number
+    paid: number
+    employees: number
+    /** Долг перед сотрудниками — сальдо 70, а не «начислено минус выплачено». */
+    debt: number
+    /** Аванс за первую половину месяца: входит в начисления, но проводок не делает. */
+    advance: number
+  }
+  months: { month: string; accrued: number; ndfl: number; contributions: number; paid: number }[]
+  employees: {
+    id: string | null; name: string; inn: string | null; snils: string | null
+    accrued: number; ndfl: number; paid: number; contributions: number; months: number
+  }[]
+  kinds: { kind: string; name: string; amount: number; rows: number }[]
+  docs: {
+    id: string; type: string; label: string; number: string; date: string
+    amount: number; status: string; advance: boolean; month: string | null
+  }[]
+}
+
+export const getPayroll = (companyId: string) =>
+  get<PayrollData>(`/api/books/payroll?company_id=${companyId}`)

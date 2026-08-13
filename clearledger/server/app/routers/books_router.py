@@ -1216,6 +1216,150 @@ async def collection_curve(
     }
 
 
+@router.get("/cash-forecast")
+async def cash_forecast(
+    company_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Сколько денег придёт от текущего долга и когда.
+
+    Метод — условная вероятность досбора по исторической кривой инкассации, а не
+    «всё придёт по сроку договора». Логика: по закрытым счетам известно, какая доля
+    выставленного собирается к дню t (F(t)) и какая собирается вообще (F_итог). Для
+    счёта, дожившего до возраста A и всё ещё открытого, ожидаемая доля досбора равна
+    (F_итог − F(A)) / (1 − F(A)): деньги, которые «должны были прийти» за прошедшие
+    A дней, уже не пришли, и это меняет ожидание.
+
+    Отсюда же и разбивка по окнам: прирост кривой между A и A+Δ, отнесённый к
+    непришедшей части. Счета без записи в регистре оплат в прогноз не берутся вовсе —
+    у них неизвестна не дата, а сам факт оплаты.
+    """
+    cid = await assert_company_member(company_id, current_user, db)
+    today = date.today()
+    GRID = [0, 30, 60, 90, 120, 180, 270, 360, 540, 720]
+
+    # Историческая кривая: доля выставленного, собранная к дню t. Считается по счетам,
+    # которые регистр свёл с платежами, — других мы просто не видим.
+    hist = (await db.execute(text(r"""
+        WITH inv AS (
+          SELECT d.id, d.date, d.amount
+            FROM accounting_docs d
+           WHERE d.company_id = :cid AND d.doc_type = 'invoice_out'
+             AND d.date ~ '^\d{4}-\d{2}-\d{2}'
+             AND EXISTS (SELECT 1 FROM invoice_payments p
+                          WHERE p.invoice_doc_id = d.id AND p.paid_at IS NOT NULL)
+        )
+        SELECT coalesce(sum(i.amount), 0) AS billed,
+               count(*) AS invoices,
+               coalesce(sum(p.amount), 0) AS paid,
+               coalesce(sum(p.amount) FILTER (WHERE p.days <= 0), 0),
+               coalesce(sum(p.amount) FILTER (WHERE p.days <= 30), 0),
+               coalesce(sum(p.amount) FILTER (WHERE p.days <= 60), 0),
+               coalesce(sum(p.amount) FILTER (WHERE p.days <= 90), 0),
+               coalesce(sum(p.amount) FILTER (WHERE p.days <= 120), 0),
+               coalesce(sum(p.amount) FILTER (WHERE p.days <= 180), 0),
+               coalesce(sum(p.amount) FILTER (WHERE p.days <= 270), 0),
+               coalesce(sum(p.amount) FILTER (WHERE p.days <= 360), 0),
+               coalesce(sum(p.amount) FILTER (WHERE p.days <= 540), 0),
+               coalesce(sum(p.amount) FILTER (WHERE p.days <= 720), 0)
+          FROM inv i
+          LEFT JOIN LATERAL (
+            SELECT pp.amount, (pp.paid_at::date - i.date::date) AS days
+              FROM invoice_payments pp
+             WHERE pp.invoice_doc_id = i.id AND pp.paid_at IS NOT NULL
+          ) p ON true
+    """), {"cid": str(cid)})).one()
+
+    billed = _num(hist[0])
+    curve = {g: (_num(hist[3 + n]) / billed if billed else 0.0)
+             for n, g in enumerate(GRID)}
+    total_share = _num(hist[2]) / billed if billed else 0.0
+
+    def f_at(days: int) -> float:
+        """Кривая в произвольной точке — линейно между узлами сетки."""
+        if days <= GRID[0]:
+            return curve[GRID[0]]
+        if days >= GRID[-1]:
+            return total_share
+        for a, b in zip(GRID, GRID[1:]):
+            if a <= days <= b:
+                if b == a:
+                    return curve[a]
+                k = (days - a) / (b - a)
+                return curve[a] + (curve[b] - curve[a]) * k
+        return total_share
+
+    # Открытые счета с известной оплатой — то же множество, что в реестре старения.
+    open_rows = [{
+        "id": str(r[0]), "number": r[1], "date": r[2], "counterparty": r[3],
+        "counterpartyId": str(r[4]) if r[4] else None,
+        "amount": _num(r[5]), "paid": _num(r[6]),
+    } for r in (await db.execute(text(r"""
+        SELECT d.id, d.number, d.date, d.counterparty_name, d.counterparty_id,
+               d.amount, coalesce(p.paid, 0)
+          FROM accounting_docs d
+          JOIN (SELECT invoice_doc_id, sum(amount) paid FROM invoice_payments
+                 WHERE company_id = :cid GROUP BY invoice_doc_id) p
+            ON p.invoice_doc_id = d.id
+         WHERE d.company_id = :cid AND d.doc_type = 'invoice_out'
+           AND d.date ~ '^\d{4}-\d{2}-\d{2}' AND d.amount - coalesce(p.paid, 0) > 0.01
+    """), {"cid": str(cid)})).all()]
+
+    WINDOWS = [(30, "30 дней"), (60, "60 дней"), (90, "90 дней"), (180, "180 дней")]
+    windows = {w: 0.0 for w, _ in WINDOWS}
+    expected_total = 0.0
+    rows = []
+    for r in open_rows:
+        rest = round(r["amount"] - r["paid"], 2)
+        age = (today - date.fromisoformat(r["date"])).days
+        f_now = f_at(age)
+        # Ниже единицы по построению: F не превышает total_share.
+        left = 1.0 - f_now
+        if left <= 0.0001:
+            share_total = 0.0
+            per_window = {w: 0.0 for w, _ in WINDOWS}
+        else:
+            share_total = max(0.0, (total_share - f_now) / left)
+            per_window = {w: max(0.0, (f_at(age + w) - f_now) / left) for w, _ in WINDOWS}
+        exp = round(rest * share_total, 2)
+        expected_total += exp
+        for w, _ in WINDOWS:
+            windows[w] += rest * per_window[w]
+        rows.append({
+            **r, "rest": rest, "age": age,
+            "expected": exp,
+            "expectedPct": round(share_total * 100, 1),
+            "in30": round(rest * per_window[30], 2),
+            "in90": round(rest * per_window[90], 2),
+        })
+    rows.sort(key=lambda r: -r["rest"])
+
+    unknown = (await db.execute(text("""
+        SELECT count(*), coalesce(sum(d.amount), 0) FROM accounting_docs d
+         WHERE d.company_id = :cid AND d.doc_type = 'invoice_out'
+           AND NOT EXISTS (SELECT 1 FROM invoice_payments p WHERE p.invoice_doc_id = d.id)
+    """), {"cid": str(cid)})).one()
+
+    return {
+        "rows": rows,
+        "openAmount": round(sum(r["rest"] for r in rows), 2),
+        "openCount": len(rows),
+        "expected": round(expected_total, 2),
+        "windows": [{"days": w, "label": label, "amount": round(windows[w], 2)}
+                    for w, label in WINDOWS],
+        # Кривая, по которой сделан прогноз, — чтобы цифра не выглядела гаданием.
+        "curve": [{"days": g, "pct": round(curve[g] * 100, 1)} for g in GRID],
+        "totalSharePct": round(total_share * 100, 1),
+        "historyInvoices": hist[1],
+        "historyBilled": round(billed, 2),
+        # Счета вне прогноза: у них нет записи в регистре оплат вовсе.
+        "unknownCount": unknown[0],
+        "unknownAmount": _num(unknown[1]),
+        "asOf": today.isoformat(),
+    }
+
+
 # ── Сделки и незакрытые счета ────────────────────────────────────────────────
 # Канон профессиональных услуг: единица анализа — СДЕЛКА, а не позиция и не месяц.
 # У компании 218 реализаций за пять лет; список сделок с маржой отвечает на вопросы,
@@ -3447,4 +3591,103 @@ async def doc_card(
         "entries": [{"date": e[0].isoformat() if e[0] else None,
                      "accountDt": e[1], "accountKt": e[2],
                      "amount": _num(e[3]), "content": e[4]} for e in entries],
+    }
+
+
+@router.get("/payroll")
+async def payroll(
+    company_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Расчёт с персоналом: начислено, удержано, взносы, выплачено — по месяцам и людям.
+
+    Считается по `payroll_entries`, а не по документам: месяц расчёта и дата документа
+    расходятся (зарплату за декабрь считают в декабре, платят в январе), и по дате
+    документа картина съезжает на месяц.
+
+    ⚠ Персональные данные: экран показывает ФИО сотрудников клиента.
+    """
+    cid = await assert_company_member(company_id, current_user, db)
+    p = {"cid": str(cid)}
+
+    totals = (await db.execute(text("""
+        SELECT
+          coalesce(sum(amount) FILTER (WHERE kind = 'accrual'), 0),
+          coalesce(sum(amount) FILTER (WHERE kind = 'ndfl'), 0),
+          coalesce(sum(amount) FILTER (WHERE kind = 'contribution'), 0),
+          coalesce(sum(amount) FILTER (WHERE kind = 'payment'), 0),
+          count(DISTINCT employee_id)
+          FROM payroll_entries WHERE company_id = :cid"""), p)).one()
+
+    # Долг перед сотрудниками — сальдо 70, а не «начислено минус выплачено»: в
+    # разнице не учтён НДФЛ, который удержан, но сотруднику не причитается.
+    debt = _num((await db.execute(text("""
+        SELECT coalesce(sum(credit - debit), 0) FROM gl_balances
+         WHERE company_id = :cid AND account LIKE '70%'
+           AND as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid)"""),
+        p)).scalar_one())
+
+    months = [{
+        "month": r[0], "accrued": _num(r[1]), "ndfl": _num(r[2]),
+        "contributions": _num(r[3]), "paid": _num(r[4]),
+    } for r in (await db.execute(text("""
+        SELECT period_month,
+               coalesce(sum(amount) FILTER (WHERE kind = 'accrual'), 0),
+               coalesce(sum(amount) FILTER (WHERE kind = 'ndfl'), 0),
+               coalesce(sum(amount) FILTER (WHERE kind = 'contribution'), 0),
+               coalesce(sum(amount) FILTER (WHERE kind = 'payment'), 0)
+          FROM payroll_entries
+         WHERE company_id = :cid AND period_month IS NOT NULL
+         GROUP BY 1 ORDER BY 1"""), p)).all()]
+
+    employees = [{
+        "id": str(r[0]) if r[0] else None, "name": r[1], "inn": r[2], "snils": r[3],
+        "accrued": _num(r[4]), "ndfl": _num(r[5]), "paid": _num(r[6]),
+        "contributions": _num(r[7]), "months": r[8],
+    } for r in (await db.execute(text("""
+        SELECT e.id, coalesce(e.name, p.employee_name), e.inn, e.snils,
+               coalesce(sum(p.amount) FILTER (WHERE p.kind = 'accrual'), 0),
+               coalesce(sum(p.amount) FILTER (WHERE p.kind = 'ndfl'), 0),
+               coalesce(sum(p.amount) FILTER (WHERE p.kind = 'payment'), 0),
+               coalesce(sum(p.amount) FILTER (WHERE p.kind = 'contribution'), 0),
+               count(DISTINCT p.period_month)
+          FROM payroll_entries p
+          LEFT JOIN employees e ON e.id = p.employee_id
+         WHERE p.company_id = :cid
+         GROUP BY 1, 2, 3, 4 ORDER BY 5 DESC"""), p)).all()]
+
+    # Виды начислений и удержаний: «из чего сложилась сумма» — первый вопрос к расчёту.
+    kinds = [{"kind": r[0], "name": r[1], "amount": _num(r[2]), "rows": r[3]}
+             for r in (await db.execute(text("""
+        SELECT kind, coalesce(name, '—'), sum(amount), count(*)
+          FROM payroll_entries WHERE company_id = :cid
+         GROUP BY 1, 2 ORDER BY 3 DESC"""), p)).all()]
+
+    # Документы блока: аванс за первую половину месяца проводок не делает, и без
+    # пометки его сумма читается как расхождение с регистром.
+    docs = [{
+        "id": str(r[0]), "type": r[1], "label": DOC_LABELS.get(r[1], r[1]),
+        "number": r[2], "date": r[3], "amount": _num(r[4]), "status": r[5],
+        "advance": bool(r[6]), "month": r[7],
+    } for r in (await db.execute(text("""
+        SELECT id, doc_type, number, date, amount, status_1c,
+               (details->>'Расчёт') IS NOT NULL, details->>'Месяц начисления'
+          FROM accounting_docs
+         WHERE company_id = :cid AND doc_type IN ('payroll_accrual', 'payroll_payment')
+         ORDER BY date DESC"""), p)).all()]
+
+    advance = sum(d["amount"] for d in docs
+                  if d["advance"] and d["type"] == "payroll_accrual")
+
+    return {
+        "totals": {
+            "accrued": _num(totals[0]), "ndfl": _num(totals[1]),
+            "contributions": _num(totals[2]), "paid": _num(totals[3]),
+            "employees": totals[4], "debt": debt,
+            # Аванс отдельной цифрой: он входит в «начислено», но проводок не делает,
+            # и без пояснения экран расходится с оборотами регистра.
+            "advance": advance,
+        },
+        "months": months, "employees": employees, "kinds": kinds, "docs": docs,
     }

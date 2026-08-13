@@ -412,6 +412,7 @@ export const REV_MONEY_MENU: CentralMenuItem[] = [
   // отвечает ни на то, ни на другое.
   { key: 'rev_aging',    label: 'Старение долга' },
   { key: 'rev_collect',  label: 'Инкассация' },
+  { key: 'rev_forecast', label: 'Прогноз поступлений' },
   { key: 'rev_terms',    label: 'Сроки оплаты' },
   { key: 'rev_cashflow', label: 'Денежный поток' },
   { key: 'rev_contracts', label: 'Договоры' },
@@ -435,6 +436,9 @@ export const BOOKS_LEDGER_MENU: CentralMenuItem[] = [
   // Кто кому должен. Стоит в «Регистре», а не в «Документах»: долг — это сальдо
   // счетов расчётов, он гасится зачётом, которого в первичке не видно.
   { key: 'bk_settle',   label: 'Взаиморасчёты' },
+  // Расчёт с персоналом: свой предмет (человек, а не сделка), свои счета (70, 68.01,
+  // 69) и персональные данные. Стоит в «Регистре» — это расчёт, а не первичка.
+  { key: 'bk_payroll',  label: 'Зарплата' },
 ]
 export const BOOKS_PRIMARY_MENU: CentralMenuItem[] = [
   { key: 'bk_docs',     label: 'Документы' },
