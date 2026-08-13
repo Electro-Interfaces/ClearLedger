@@ -8,7 +8,7 @@
  */
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
-import { AlertTriangle, ArrowDownToLine, CheckCircle2, CircleOff, Loader2, PauseCircle, Settings2 } from 'lucide-react'
+import { AlertTriangle, ArrowDownToLine, CheckCircle2, CircleOff, HelpCircle, Loader2, PauseCircle, Settings2 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -18,14 +18,35 @@ import { useOpenApp } from '@/hooks/useOpenApp'
 import { listSpaceConnectors, type SpaceConnector } from '@/services/spaceConnectorsService'
 import { listSsoApps } from '@/services/ssoService'
 
+/**
+ * Состояние подключения одним словом.
+ *
+ * Порядок веток — не косметика. Ошибка проверяется ПЕРВОЙ и по обоим признакам:
+ * раньше сломанный канал (`status: 'error'`, текста ошибки у каналов нет вовсе)
+ * проваливался в ветку «не включён» и показывался «Выключен», а упавший Matrix
+ * и коннектор приложения со `status: 'unknown'` доходили до конца и красились
+ * зелёным «Работает» — то есть живая проверка делалась и терялась здесь.
+ */
 function statusView(c: SpaceConnector) {
-  if (c.last_error) return { label: 'Ошибка', cls: 'text-destructive', Icon: AlertTriangle }
-  if (!c.enabled || c.status === 'off') return { label: 'Выключен', cls: 'text-muted-foreground', Icon: CircleOff }
+  if (c.last_error || c.status === 'error') {
+    return { label: 'Ошибка', cls: 'text-destructive', Icon: AlertTriangle }
+  }
   if (c.status === 'paused') return { label: 'Пауза', cls: 'text-amber-500', Icon: PauseCircle }
   if (c.status === 'draft') return { label: 'Черновик', cls: 'text-muted-foreground', Icon: PauseCircle }
   // Заведён, но работать не может: у почтового ящика нет сервера или пароля. Без
   // этой ветки такой ящик показывался «Работает» — витрина обещала приём, которого нет.
   if (c.status === 'setup') return { label: 'Не настроен', cls: 'text-amber-500', Icon: Settings2 }
+  if (!c.enabled || c.status === 'off') {
+    return { label: 'Выключен', cls: 'text-muted-foreground', Icon: CircleOff }
+  }
+  // Состояние неизвестно — так и говорим. Зелёная галочка по умолчанию обещала
+  // работу там, где её никто не проверял.
+  if (c.status === 'unknown') {
+    return { label: 'Состояние неизвестно', cls: 'text-muted-foreground', Icon: HelpCircle }
+  }
+  if (c.status === 'configured') {
+    return { label: 'Настроен', cls: 'text-muted-foreground', Icon: Settings2 }
+  }
   return { label: 'Работает', cls: 'text-emerald-500', Icon: CheckCircle2 }
 }
 
@@ -87,8 +108,9 @@ export function SpaceConnectors() {
 
   const items = q.data?.connectors ?? []
   const problems = q.data?.problems ?? []
-  const live = items.filter((c) => c.enabled && !c.last_error).length
-  const failing = items.filter((c) => c.last_error).length
+  const failing = items.filter((c) => c.last_error || c.status === 'error').length
+  const live = items.filter(
+    (c) => c.enabled && !c.last_error && c.status !== 'error' && c.status !== 'off').length
   // Две стороны обмена (docs/CONNECT.md): наши подключения — мы ходим во внешние
   // системы; входящие — внешний мир стучится к нам. До В1 входящие не были видны
   // нигде, и ответа «кто подключён к нам» у администратора не существовало.
@@ -125,7 +147,16 @@ export function SpaceConnectors() {
             </span>
           </TableCell>
           <TableCell className="text-sm text-muted-foreground">
-            {sinceLabel(c.last_sync_at)}
+            {/* У источника обмена нет: его ведут каналы поверх. Раньше в эту клетку
+                подставлялась дата ручной проверки — витрина выдавала проверку за
+                обмен данными у всех живых интеграций. */}
+            {c.last_sync_at
+              ? sinceLabel(c.last_sync_at)
+              : c.last_test_at
+                ? <span title="Обмена ещё не было — это время последней проверки подключения">
+                    проверен {sinceLabel(c.last_test_at)}
+                  </span>
+                : '—'}
             {c.records != null && c.records > 0 && (
               <div className="text-xs">{c.records.toLocaleString('ru-RU')} записей</div>
             )}

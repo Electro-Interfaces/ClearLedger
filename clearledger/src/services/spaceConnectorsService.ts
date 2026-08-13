@@ -25,6 +25,9 @@ export interface SpaceConnector {
   status: string
   enabled: boolean
   last_sync_at: string | null
+  /** Когда подключение последний раз ПРОВЕРЯЛИ. Не то же, что обмен: у источника
+   *  обмен ведут каналы поверх него, и подменять одно другим витрине нельзя. */
+  last_test_at?: string | null
   last_error: string | null
   records: number | null
   files: number

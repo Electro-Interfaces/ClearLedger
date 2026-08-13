@@ -16,20 +16,22 @@
 """
 from __future__ import annotations
 
+import asyncio
+import logging
 import uuid
-from datetime import datetime
 from typing import Any
 
 import httpx
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.models import App, AppCompanyLink, Channel, Company, Source, SourceSync
+from app.models import App, AppCompanyLink, Channel, Company, Source
 from app.services import sso
 from app.services.space_projection import _internal_base_url
 
 settings = get_settings()
+logger = logging.getLogger("clearledger.connectors")
 
 # Кто инициирует обмен: 'us' — мы ходим во внешнюю систему, 'them' — внешняя
 # система стучится к нам (вебхуки, входящие API-ключи). Это ДРУГАЯ ось, чем
@@ -69,13 +71,19 @@ def _channel_entry(ch: Channel) -> dict[str, Any]:
         "brings": _brings(ch.description),
         "direction": "in",
         "status": ch.status,
-        "enabled": ch.status == "active",
+        # `enabled` — «включён ли», а не «здоров ли»: канал в ошибке или на паузе
+        # включён. Раньше здесь стояло `status == "active"`, и три разных состояния
+        # канала схлопывались на витрине в одно «Выключен».
+        "enabled": ch.status != "draft",
         "last_sync_at": ch.last_sync_at.isoformat() if ch.last_sync_at else None,
-        "last_error": None,
+        "last_error": ch.last_error if getattr(ch, "last_error", None) else None,
         "records": ch.docs_loaded or 0,
         "files": len(uploads) if isinstance(uploads, dict) else 0,
         "initiator": "us",
-        "settings_route": "/data/connectors",
+        # Маршрута /data/connectors не существует — кнопка настройки у каждого
+        # файлового канала вела на страницу «не найдено». У ГИГ и РусГидро это
+        # большинство строк витрины.
+        "settings_route": f"/connectors/{ch.id}",
     }
 
 
@@ -98,7 +106,10 @@ def _service_entry(code: str, name: str, brings: str, enabled: bool,
         "records": None,
         "files": 0,
         "initiator": "both",
-        "settings_route": "/admin/eco/overview",
+        # Настройка платформенных сервисов живёт на уровне контейнера и открыта
+        # только суперадмину — администратора компании прежняя кнопка молча
+        # выбрасывала на чужой раздел. Компания их и не настраивает.
+        "settings_route": None,
     }
 
 
@@ -137,7 +148,10 @@ async def _app_connectors(
                 headers={"Authorization": f"Bearer {token}"},
             )
     except httpx.HTTPError as e:
-        return [], f"приложение недоступно: {e}"
+        logger.warning("коннекторы %s не получены: %s", app_code, e)
+        # Текст исключения httpx несёт внутренний адрес сервиса
+        # (`http://support:3003/...`) — топология стека не дело участника компании.
+        return [], "приложение не ответило"
 
     if resp.status_code == 404:
         # Старая версия приложения: маршрута ещё нет — это не ошибка компании.
@@ -145,7 +159,12 @@ async def _app_connectors(
     if resp.status_code >= 400:
         return [], f"приложение вернуло HTTP {resp.status_code}"
 
-    items = (resp.json() or {}).get("connectors") or []
+    try:
+        items = (resp.json() or {}).get("connectors") or []
+    except ValueError:
+        # Приложение за кромкой отдало HTML с кодом 200. Раньше это исключение
+        # уходило наружу, и администратор не видел НИ ОДНОГО подключения компании.
+        return [], "приложение ответило не по контракту (не JSON)"
     out: list[dict[str, Any]] = []
     for it in items:
         out.append({
@@ -220,7 +239,7 @@ _SOURCE_STATUS: dict[str, str] = {
 }
 
 
-def _source_entry(src: Source, last_sync: datetime | None, records: int | None) -> dict[str, Any]:
+def _source_entry(src: Source) -> dict[str, Any]:
     """Живая интеграция как запись витрины.
 
     Раньше витрина показывала только файловые каналы и платформенные сервисы, и
@@ -238,15 +257,19 @@ def _source_entry(src: Source, last_sync: datetime | None, records: int | None) 
         "brings": _brings(src.description) or _SOURCE_BRINGS.get(src.source_type, "Данные внешней системы"),
         "direction": "in",
         "status": _SOURCE_STATUS.get(src.status, "configured"),
-        "enabled": src.status == "connected",
-        "last_sync_at": last_sync.isoformat() if last_sync else (
-            src.last_test_at.isoformat() if src.last_test_at else None),
+        # «Подключён» у источника означает «реквизиты приняты проверкой», а не
+        # «данные идут»: обмен ведут каналы поверх него. Поэтому обмена нет, а
+        # проверка — отдельным полем, со своей подписью на витрине.
+        "enabled": src.status != "disconnected",
+        "last_sync_at": None,
+        "last_test_at": src.last_test_at.isoformat() if src.last_test_at else None,
         "last_error": src.error_message,
-        "records": records,
+        "records": None,
         "files": 0,
         "initiator": "us",
-        # Настройка живёт в продукте «Данные» — там же, где заводят коннектор.
-        "settings_route": "/connectors",
+        # Настройка источника живёт на своём экране: /connectors — это сама
+        # витрина, и кнопка возвращала человека туда, где он уже стоит.
+        "settings_route": "/sources",
     }
 
 
@@ -336,7 +359,8 @@ async def list_connectors(db: AsyncSession, company_id: uuid.UUID) -> dict[str, 
             "direction": "in", "status": "active", "enabled": True,
             "last_sync_at": None, "last_error": None, "records": None, "files": 0,
             "initiator": "them",
-            "settings_route": None,
+            # Именные ключи с отзывом живут на «Состоянии» — там же карточка.
+            "settings_route": "/connections",
         })
     # HubEx в Ядре подключён глобальным токеном мимо модели источников — до В2
     # хотя бы показываем его как подключение, а не прячем.
@@ -355,27 +379,19 @@ async def list_connectors(db: AsyncSession, company_id: uuid.UUID) -> dict[str, 
             "settings_route": None,
         })
 
-    # Настроенные подключения к внешним системам. Когда синхронизировались и сколько
-    # принесли — из журнала синков, иначе витрина показывает подключение «мёртвым».
+    # Настроенные подключения к внешним системам.
+    #
+    # Журнал синхронизаций (`SourceSync`) здесь раньше читался, но писать его
+    # некому: конструктора этой модели нет во всём сервере, а ключи не сходятся по
+    # построению — в журнале `catalogs|closed_periods|full`, у источника
+    # `sts|onec_dt`. Поэтому «Последний обмен» ВСЕГДА показывал `last_test_at` —
+    # момент, когда инженер нажал «Проверить подключение», — выдавая проверку за
+    # обмен данными. Проверку показываем отдельным полем и отдельными словами.
     sources = (await db.execute(
         select(Source).where(Source.company_id == company_id).order_by(Source.name)
     )).scalars().all()
-    # Журнал синков ведётся по ТИПУ синхронизации, а не по источнику, поэтому
-    # сопоставляем по типу: грубее, чем хотелось бы, но честнее, чем показывать
-    # живое подключение вообще без отметки о работе.
-    sync_by_type: dict[str, tuple[datetime | None, int | None]] = {}
-    if sources:
-        for stype, finished, processed in (await db.execute(
-            select(SourceSync.sync_type, func.max(SourceSync.finished_at),
-                   func.sum(SourceSync.items_processed))
-            .where(SourceSync.company_id == company_id)
-            .group_by(SourceSync.sync_type)
-        )).all():
-            sync_by_type[str(stype)] = (
-                finished, int(processed) if processed is not None else None)
     for src in sources:
-        last_sync, records = sync_by_type.get(src.source_type, (None, None))
-        items.append(_source_entry(src, last_sync, records))
+        items.append(_source_entry(src))
 
     # Приложения-разрезы: спрашиваем только те, что подключены компании и знают её.
     rows = (await db.execute(
@@ -384,12 +400,18 @@ async def list_connectors(db: AsyncSession, company_id: uuid.UUID) -> dict[str, 
         .where(AppCompanyLink.company_id == company_id)
     )).all()
 
+    # Приложения опрашиваем разом: последовательный цикл складывал таймауты, и два
+    # молчащих приложения плюс мёртвый Matrix держали ответ витрины 15 секунд —
+    # всё это время занята сессия БД, а фронт перезапрашивает список раз в минуту.
     problems: list[dict[str, str]] = []
-    for app_row, link in rows:
-        entries, err = await _app_connectors(app_row, link, app_row.code, app_row.name)
-        items.extend(entries)
-        if err:
-            problems.append({"app": app_row.code, "app_name": app_row.name, "error": err})
+    if rows:
+        got = await asyncio.gather(*[
+            _app_connectors(a, l, a.code, a.name) for a, l in rows])
+        for (app_row, _), (entries, err) in zip(rows, got):
+            items.extend(entries)
+            if err:
+                problems.append({"app": app_row.code, "app_name": app_row.name,
+                                 "error": err})
 
     return {"connectors": items, "problems": problems}
 

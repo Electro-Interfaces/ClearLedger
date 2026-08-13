@@ -56,11 +56,15 @@ export function Connections() {
     retry: false,
   })
 
+  // Плитки должны делить список, а не пересекаться: сломанный источник считался и
+  // «с ошибкой», и «выключен», и сумма плиток превышала число подключений.
   const items = q.data?.connectors ?? []
   const failing = items.filter((c) => c.last_error || c.status === 'error')
-  const off = items.filter((c) => !c.enabled || c.status === 'off')
-  const silent = items.filter(isSilent)
-  const live = items.filter((c) => c.enabled && !c.last_error && c.status !== 'error')
+  const off = items.filter(
+    (c) => !failing.includes(c) && (!c.enabled || c.status === 'off'))
+  const rest = items.filter((c) => !failing.includes(c) && !off.includes(c))
+  const silent = rest.filter(isSilent)
+  const live = rest
 
   return (
     <div className="space-y-6">
