@@ -35,6 +35,8 @@ const WORKSPACE_PATHS = new Set<string>([
   // пути перечислены руками. Без них `KeepAliveOutlet` кладёт поверх собственной
   // раскладки второй паддинг и второй `overflow-y-auto`.
   '/tasks', '/tasks/company', '/tasks/overview', '/tasks/setup',
+  // «Аудитор» — две колонки со своим скроллом внутри: разговор и каталог навыков.
+  '/auditor',
   ...SPACE_PRODUCTS.map((p) => p.route),
   // Та же страница под адресом продукта (`/finance/files`) — и раскладка та же.
   ...SPACE_PRODUCTS.map((p) => `${p.route}/files`),

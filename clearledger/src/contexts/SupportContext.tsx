@@ -16,7 +16,10 @@ import { listTasks } from '@/services/tasksService'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useTasksApp } from '@/hooks/useTasksApp'
 
-export type InteractionSection = 'chat' | 'tasks' | 'tickets' | 'help'
+// «Аудитор» здесь же, а не отдельным механизмом: он сквозной ровно как чат — его
+// зовут из любого экрана, и он должен знать, откуда позвали (`openInteraction`
+// передаёт контекст, панель добирает маршрут и продукт сама).
+export type InteractionSection = 'chat' | 'tasks' | 'tickets' | 'help' | 'auditor'
 export type InteractionMode = 'modal' | 'dock'
 
 interface InteractionState {

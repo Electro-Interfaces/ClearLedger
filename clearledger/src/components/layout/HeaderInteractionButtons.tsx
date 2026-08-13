@@ -8,7 +8,7 @@
  * из шапки — окном, из рейла — доком. Оба состояния живут в `SupportContext`.
  */
 import { useState } from 'react'
-import { HelpCircle, LifeBuoy, ListChecks, MessageCircle, Video } from 'lucide-react'
+import { Bot, HelpCircle, LifeBuoy, ListChecks, MessageCircle, Video } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { startMeeting } from '@/services/conferenceService'
@@ -84,6 +84,15 @@ export function HeaderInteractionButtons({ conference = false }: { conference?: 
           <ListChecks className="h-4 w-4" />
           <span className="hidden lg:inline">Задачи</span>
           <Badge count={unreadCounts.tasks} />
+        </Button>
+      )}
+      {/* «Аудитор» — тот же жест, что чат: кнопка открывает окно, где спрашивают про
+          текущий экран. Показывается только там, где продукт включён компании: иначе
+          человек звал бы агента, которого в стеке нет. */}
+      {canApp('auditor') && (
+        <Button variant="outline" size="sm" onClick={() => toggleInteraction('auditor')} className={btnCls(interactionSection === 'auditor')} title="Аудитор: спросить про этот экран">
+          <Bot className="h-4 w-4" />
+          <span className="hidden lg:inline">Аудитор</span>
         </Button>
       )}
       {/* «Инфо» — четвёртая кнопка, на телефоне уже теснит имя экрана. Справка

@@ -13,7 +13,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useLocation } from 'react-router-dom'
-import { MessageCircle, LifeBuoy, ListChecks, HelpCircle, X, Maximize2 } from 'lucide-react'
+import { MessageCircle, LifeBuoy, ListChecks, HelpCircle, Bot, X, Maximize2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useMaxWidth } from '@/hooks/use-mobile'
 import { useSupportContext, type InteractionSection } from '@/contexts/SupportContext'
@@ -24,6 +24,7 @@ import { productForPath } from '@/config/spaceProducts'
 import { TicketsPanel } from './InteractionPanels'
 import { TasksQuickPanel } from '@/components/tasks/TasksQuickPanel'
 import { InfoContextPanel } from '@/components/info/InfoContextPanel'
+import { AuditorPanel } from '@/components/auditor/AuditorPanel'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useTasksApp } from '@/hooks/useTasksApp'
 
@@ -31,6 +32,9 @@ type Tab = { key: InteractionSection; label: string; icon: typeof MessageCircle 
 const TABS: Tab[] = [
   { key: 'chat', label: 'Чат', icon: MessageCircle },
   { key: 'tasks', label: 'Задачи', icon: ListChecks },
+  // «Аудитор» стоит рядом с «Инфо» осознанно: и то, и другое отвечает на вопрос
+  // «что здесь происходит», только справка знает продукт, а аудитор — данные.
+  { key: 'auditor', label: 'Аудитор', icon: Bot },
   { key: 'tickets', label: 'Поддержка', icon: LifeBuoy },
   { key: 'help', label: 'Инфо', icon: HelpCircle },
 ]
@@ -80,8 +84,11 @@ export function RightDock() {
         : key === 'tickets' ? unreadCounts.tickets : 0
 
   // «Задачи» в рейле — по тому же праву, что и маршрут: иначе вкладка вела бы в 403.
+  // «Аудитор» — по включённости продукта: пространство без него не должно показывать
+  // вкладку, которая ответит «сервис не настроен».
   const tasksOn = useTasksApp()
-  const tabs = tasksOn ? TABS : TABS.filter((t) => t.key !== 'tasks')
+  const { canApp } = useCompany()
+  const tabs = TABS.filter((t) => (t.key !== 'tasks' || tasksOn) && (t.key !== 'auditor' || canApp('auditor')))
 
   const dockOpen = !!section && mode === 'dock'
 
@@ -203,6 +210,9 @@ function DockBody({ section }: { section: InteractionSection }) {
     <div className="min-h-0 flex-1 overflow-hidden">
       {section === 'chat' && <ChatPanel compact scopeProduct={product} />}
       {section === 'tasks' && <TasksQuickPanel />}
+      {/* Аудитор берёт контекст сам (маршрут и параметры адреса) — доку не нужно
+          ничего ему передавать, и та же панель работает из шапки. */}
+      {section === 'auditor' && <AuditorPanel />}
       {section === 'tickets' && <TicketsPanel />}
       {/* «Инфо» — знание пространства под открытую рабочую область, а не статичный
           текст про один продукт (docs/INFO.md). */}

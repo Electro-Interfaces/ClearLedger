@@ -47,7 +47,10 @@ INTERNAL_ROUTES = {"admin": "/admin", "ledger": "/workspace", "chat": "/messages
                    # Рабочие места компании без объектов (профиль `office`): бухгалтерия-
                    # эталон и «Реализация» (товары и услуги — её разделы). Маршруты обязаны
                    # совпадать с фронтовой картой `config/spaceProducts.ts` — сверяет тест.
-                   "books": "/books", "revenue": "/revenue", "econ": "/economy"}
+                   "books": "/books", "revenue": "/revenue", "econ": "/economy",
+                   # Аудитор: панель сквозная (шапка и правый док), а плитка ведёт на
+                   # его страницу — каталог навыков и разговор во всю ширину.
+                   "auditor": "/auditor"}
 # Слой рабочего стола: управление пространством и служебная кухня стоят отдельно от
 # прикладных продуктов. «Данные» — служебное: ошибка там ломает все продукты сразу.
 INTERNAL_LAYERS = {"admin": "admin", "data": "admin", "info": "admin", "connect": "admin",
@@ -56,13 +59,16 @@ INTERNAL_LAYERS = {"admin": "admin", "data": "admin", "info": "admin", "connect"
                    "ledger": "app", "projects": "app", "ops": "app",
                    "sales": "app", "corp": "app", "shop": "app", "marketing": "app",
                    "finance": "app", "netlink": "app", "accounting": "app", "diag": "admin",
-                   "books": "app", "revenue": "app"}
+                   # Аудитор — сервис контейнера, как чат: не рабочее место с витринами,
+                   # а способ спросить про то, что уже открыто в других продуктах.
+                   "books": "app", "revenue": "app", "auditor": "service"}
 # Порядок в списке: сначала управление, потом приложения, сервисы — в конце.
 INTERNAL_SORT = {"admin": 5, "pulse": 8, "ledger": 10, "projects": 12, "ops": 14, "sales": 16,
                  "corp": 17, "shop": 18, "marketing": 19, "support": 20, "netlink": 22,
                  "finance": 25, "accounting": 26,
                  "books": 20, "revenue": 21,
-                 "chat": 30, "plan": 40, "conf": 50, "connect": 59, "data": 60, "diag": 61, "info": 62}
+                 "chat": 30, "auditor": 31, "plan": 40, "conf": 50, "connect": 59, "data": 60,
+                 "diag": 61, "info": 62}
 
 
 @router.get("/apps")

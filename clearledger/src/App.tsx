@@ -51,6 +51,7 @@ const PulseTeamPage = lazy(() => import('@/pulse/PulseSections').then((m) => ({ 
 const PulseWeekPage = lazy(() => import('@/pulse/PulseSections').then((m) => ({ default: m.PulseWeekPage })))
 const PulseLayout = lazy(() => import('@/pulse/PulseLayout').then((m) => ({ default: m.PulseLayout })))
 const InfoPage = lazy(() => import('@/pages/InfoPage').then((m) => ({ default: m.InfoPage })))
+const AuditorPage = lazy(() => import('@/pages/AuditorPage').then((m) => ({ default: m.AuditorPage })))
 const ConnectionPage = lazy(() => import('@/pages/oneC/ConnectionPage').then((m) => ({ default: m.ConnectionPage })))
 const SyncPage = lazy(() => import('@/pages/oneC/SyncPage').then((m) => ({ default: m.SyncPage })))
 const ReferencesPage = lazy(() => import('@/pages/oneC/ReferencesPage').then((m) => ({ default: m.ReferencesPage })))
@@ -272,6 +273,13 @@ const router = createBrowserRouter([
           // «Инфо» — знание пространства: то же приложение, что открывается
           // подсказкой в рабочей области, только целиком (docs/INFO.md).
           { path: '/info', element: <LazyPage><InfoPage /></LazyPage> },
+          // «Аудитор» — та же панель, что справа, но во всю ширину и с каталогом
+          // навыков рядом. Гард по продукту: агент отвечает по данным учёта, и
+          // прямая ссылка не должна обходить право, как у «Пульса».
+          {
+            path: '/auditor',
+            element: <RequireApp code="auditor"><LazyPage><AuditorPage /></LazyPage></RequireApp>,
+          },
           { path: '/intake', element: <LazyPage><IntakePage /></LazyPage> },
           { path: '/connectors', element: <LazyPage><ChannelsPage /></LazyPage> },
           { path: '/metrika', element: <LazyPage><MetrikaPage /></LazyPage> },
