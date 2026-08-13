@@ -317,11 +317,13 @@ export const getRevenueQuality = (companyId: string) =>
 /* ── «Экономика»: результат, расходы, налоги ─────────────────────────────── */
 
 export interface PnlTotals {
-  revenue: number; vat: number; net: number
-  cogs: number; gross: number
+  revenue: number; vat: number; excise: number; net: number
+  /** Себестоимость товара и та её часть, у которой источник не опознан. */
+  cogs: number; cogsOther: number; cogsTotal: number
+  gross: number
   commercial: number; admin: number; operating: number
-  otherIncome: number; otherExpense: number; beforeTax: number
-  tax: number; profit: number
+  otherIncome: number; otherExpense: number; interest: number
+  beforeTax: number; tax: number; profit: number
   grossPct: number | null; operatingPct: number | null; profitPct: number | null
 }
 
@@ -331,6 +333,10 @@ export interface PnlData {
   years: (PnlTotals & { year: string })[]
   /** Что бухгалтерия закрыла на 84 счёт — эталон рядом с расчётом. */
   closedToRetained: number
+  /** Проводок по счёту 90: ноль значит «план счетов другой», а не «продаж не было». */
+  salesEntries: number
+  /** Управленческие расходы закрываются через себестоимость (директ-костинг выключен). */
+  adminInCogs: boolean
 }
 
 export const getPnl = (companyId: string, period?: PeriodOpts) =>
@@ -346,21 +352,27 @@ export interface ExpensesData {
     source: string; sourceName: string | null; amount: number; entries: number
   }[]
   months: { month: string; amount: number }[]
+  /** Статьи затрат из субконто оборотов — то, за что платим, а не кому. */
+  items: { item: string; account: string; amount: number; months: number }[]
   total: number
+  itemsTotal: number
 }
 
 export const getExpenses = (companyId: string, period?: PeriodOpts) =>
   get<ExpensesData>(`/api/books/expenses?company_id=${companyId}` + periodQuery(period))
 
 export interface TaxesData {
-  rows: { account: string; name: string; accrued: number; paid: number; rest: number }[]
+  rows: { account: string; name: string; accrued: number; entries: number }[]
   months: { month: string; accrued: number; paid: number }[]
   accrued: number
   paid: number
   revenueNet: number
   /** Нагрузка от УПЛАЧЕННОГО — так её считает и налоговая служба. */
   loadPct: number | null
-  accruedPct: number | null
+  /** Раскладка по смыслу: что строка отчёта, что транзит, что удержание. */
+  groups: { profitTax: number; vat: number; ndfl: number; contributions: number }
+  /** Эффективная ставка — только при положительной прибыли до налога. */
+  etrPct: number | null
 }
 
 export const getTaxes = (companyId: string, period?: PeriodOpts) =>
@@ -1133,3 +1145,33 @@ export const updateRequest = (
 export const resolveRequests = (companyId: string) =>
   post<{ checked: number; resolved: number }>(
     `/api/books/requests/resolve?company_id=${companyId}`, {})
+
+// ── Налоги заранее ──────────────────────────────────────────────────────────
+// Не факт (это `getTaxes` — начислено и уплачено), а ПРОГНОЗ: сколько заплатим,
+// если закрыть период как есть, и сколько станет, когда документы соберут.
+
+export interface TaxForecastQuarter {
+  quarter: string
+  vatOut: number; vatIn: number; vatDue: number
+  income: number; expense: number; profit: number; profitTax: number
+  docsIssued: number; docsReceived: number
+  /** Что даст сбор документов, взятых под контроль в «Требованиях». */
+  pendingVat: number; pendingExpense: number
+  vatDueIfCollected: number; profitIfCollected: number; profitTaxIfCollected: number
+  saving: number
+}
+
+export interface TaxForecast {
+  quarters: TaxForecastQuarter[]
+  totals: {
+    vatDue: number; vatDueIfCollected: number
+    profitTax: number; profitTaxIfCollected: number
+    saving: number; ndfl: number; contributions: number
+  }
+  budget: { account: string; name: string; debt: number }[]
+  disclaimer: string
+}
+
+export const getTaxForecast = (companyId: string, year?: number) =>
+  get<TaxForecast>(`/api/books/tax-forecast?company_id=${companyId}`
+    + (year ? `&year=${year}` : ''))

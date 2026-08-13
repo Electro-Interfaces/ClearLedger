@@ -1796,28 +1796,53 @@ async def suppliers(
 # заплатят. Куда компания тратит и сколько зарабатывает, не отвечал никто, хотя
 # проводки для этого лежат с первой выгрузки.
 #
-# Считаем по ОБОРОТАМ счетов результата, а не по документам: внутренние закрытия
-# (90.09 ↔ 90.xx, 91.09 ↔ 91.xx, 99 ↔ 90.09) в расчёт не берутся — иначе выручка
-# удвоится на строке закрытия месяца.
+# Три вещи, которые здесь сделаны иначе, чем «сложить обороты счетов»:
+#
+# 1. СЕБЕСТОИМОСТЬ РАЗЛОЖЕНА ПО ИСТОЧНИКУ. Учётная политика решает, куда закрывается
+#    счёт 26: при директ-костинге на 90.08 («управленческие»), без него — на 90.02
+#    («себестоимость»). У пилота директ-костинг выключен, и отчёт по счетам показывал
+#    управленческие расходы нулём, а себестоимость раздутой на 954 295 ₽. Поэтому
+#    дебет 90.02 разбирается по КРЕДИТУ: товар (41/43/45/20) — это себестоимость,
+#    25/26 — управленческие, 44 — коммерческие. Форма перестаёт зависеть от политики.
+#
+# 2. ОБОРОТ ДВУСТОРОННИЙ. Возврат покупателю, оформленный обратной записью
+#    (Дт 90.01 Кт 62), а не сторно, раньше не вычитался — выручка завышалась на всю
+#    сумму возврата. Теперь каждая строка считается как «своя сторона минус обратная».
+#
+# 3. НАЛОГ БЕЗ ПРИВЯЗКИ К ОДНОМУ СУБСЧЁТУ. Ловим любой Дт 99 → Кт 68 (прибыль, УСН,
+#    ЕСХН, штрафы в бюджет) минус обратную ногу Кт 99 ← Дт 68 (условный доход при
+#    убытке, корректировки ПБУ 18/02). Привязка к 68.04 давала компании на УСН строку
+#    «Налог» всегда нулём.
 
-REVENUE_ACCS = ("90.01",)      # выручка (кредит)
-VAT_SALES_ACC = "90.03"        # НДС с продаж (дебет)
-COGS_ACC = "90.02"             # себестоимость продаж (дебет)
-COMMERCIAL_ACC = "90.07"       # коммерческие расходы (дебет)
-ADMIN_ACC = "90.08"            # управленческие расходы (дебет), у пилота пусты
-OTHER_INCOME_ACC = "91.01"     # прочие доходы (кредит)
-OTHER_EXPENSE_ACC = "91.02"    # прочие расходы (дебет)
-PROFIT_TAX_ACC = "68.04"       # налог на прибыль (кредит с 99)
+# Счета результата. Сравнение идёт по префиксу с точкой ИЛИ точным равенством:
+# «90.01.1» и «90.01» ловятся, а «901» из самописного плана — нет, и это честнее
+# молчаливого нуля (см. `_pnl_plan_ok`).
+SALES_ACC = "90"            # продажи: 90.01 выручка, 90.02 себестоимость, 90.03 НДС…
+OTHER_ACC = "91"            # прочие доходы и расходы
+RESULT_ACC = "99"           # прибыли и убытки
+GOODS_ACCS = ("41", "43", "45", "20", "21", "23")   # товар, продукция, производство
+INDIRECT_ACCS = ("25", "26")                        # управленческие
+SELLING_ACCS = ("44",)                              # коммерческие
+BUDGET_ACCS = ("68", "69")                          # расчёты с бюджетом и фондами
+LOAN_ACCS = ("66", "67")                            # кредиты и займы — проценты
+
+
+def _acc(col: str, prefix: str) -> str:
+    """Условие «счёт равен префиксу или начинается с него через точку»."""
+    return f"({col} = '{prefix}' OR {col} LIKE '{prefix}.%')"
+
+
+def _acc_any(col: str, prefixes: tuple[str, ...]) -> str:
+    return "(" + " OR ".join(_acc(col, p) for p in prefixes) + ")"
 
 
 async def _pnl_rows(db: AsyncSession, cid, date_from: str | None, date_to: str | None
                     ) -> list[dict[str, Any]]:
     """Помесячные обороты счетов результата — основа отчёта.
 
-    Даты приводятся явно (`CAST(:df AS date)`): `gl_entries.entry_date` — колонка типа
-    date, а период приезжает строкой, и драйвер сравнивать их отказывается. В
-    `accounting_docs` дата хранится строкой, поэтому там та же запись работает — из-за
-    этой разницы ошибка и не всплыла на соседних экранах.
+    Даты приводятся объектом `date` (утилита `_day`): `gl_entries.entry_date` — колонка
+    типа date, а период приезжает строкой, и драйвер сравнивать их отказывается. В
+    `accounting_docs` дата хранится строкой, поэтому там та же запись работает.
     """
     p: dict[str, Any] = {"cid": str(cid)}
     where = ""
@@ -1828,51 +1853,84 @@ async def _pnl_rows(db: AsyncSession, cid, date_from: str | None, date_to: str |
         where += " AND entry_date <= :dt"
         p["dt"] = _day(date_to)
 
-    return [{
-        "month": r[0],
-        "revenue": _num(r[1]), "vat": _num(r[2]), "cogs": _num(r[3]),
-        "commercial": _num(r[4]), "admin": _num(r[5]),
-        "otherIncome": _num(r[6]), "otherExpense": _num(r[7]), "tax": _num(r[8]),
-    } for r in (await db.execute(text(f"""
+    sales_dt, sales_kt = _acc("account_dt", SALES_ACC), _acc("account_kt", SALES_ACC)
+    other_dt, other_kt = _acc("account_dt", OTHER_ACC), _acc("account_kt", OTHER_ACC)
+    res_dt, res_kt = _acc("account_dt", RESULT_ACC), _acc("account_kt", RESULT_ACC)
+    budget_kt, budget_dt = _acc_any("account_kt", BUDGET_ACCS), _acc_any("account_dt", BUDGET_ACCS)
+
+    def pair(side_dt: str, side_kt: str) -> str:
+        """Оборот «прямой минус обратный» одной строкой SQL."""
+        return (f"coalesce(sum(amount) FILTER (WHERE {side_dt}), 0)"
+                f" - coalesce(sum(amount) FILTER (WHERE {side_kt}), 0)")
+
+    sql = f"""
         SELECT to_char(entry_date, 'YYYY-MM') AS month,
-               -- Выручка: кредит 90.01 в корреспонденции с расчётами, но НЕ со своим
-               -- же субсчётом закрытия (90.09) — это перенос, а не продажа.
-               coalesce(sum(amount) FILTER (
-                 WHERE account_kt LIKE '90.01%' AND account_dt NOT LIKE '90.%'), 0),
-               coalesce(sum(amount) FILTER (
-                 WHERE account_dt LIKE '90.03%' AND account_kt NOT LIKE '90.%'), 0),
-               coalesce(sum(amount) FILTER (
-                 WHERE account_dt LIKE '90.02%' AND account_kt NOT LIKE '90.%'), 0),
-               coalesce(sum(amount) FILTER (
-                 WHERE account_dt LIKE '90.07%' AND account_kt NOT LIKE '90.%'), 0),
-               coalesce(sum(amount) FILTER (
-                 WHERE account_dt LIKE '90.08%' AND account_kt NOT LIKE '90.%'), 0),
-               coalesce(sum(amount) FILTER (
-                 WHERE account_kt LIKE '91.01%' AND account_dt NOT LIKE '91.%'), 0),
-               coalesce(sum(amount) FILTER (
-                 WHERE account_dt LIKE '91.02%' AND account_kt NOT LIKE '91.%'), 0),
-               coalesce(sum(amount) FILTER (
-                 WHERE account_dt LIKE '99%' AND account_kt LIKE '68.04%'), 0)
+               -- Выручка: кредит 90.01 минус обратные записи (возвраты), закрытие
+               -- на 90.09 не в счёт.
+               {pair(f"{_acc('account_kt', '90.01')} AND NOT {sales_dt}",
+                     f"{_acc('account_dt', '90.01')} AND NOT {sales_kt}")},
+               {pair(f"{_acc('account_dt', '90.03')} AND NOT {sales_kt}",
+                     f"{_acc('account_kt', '90.03')} AND NOT {sales_dt}")},
+               -- Акцизы и экспортные пошлины — тоже вычет из выручки.
+               {pair(f"({_acc('account_dt', '90.04')} OR {_acc('account_dt', '90.05')}) AND NOT {sales_kt}",
+                     f"({_acc('account_kt', '90.04')} OR {_acc('account_kt', '90.05')}) AND NOT {sales_dt}")},
+               -- Себестоимость ТОВАРНАЯ: 90.02 с кредита запасов и производства.
+               {pair(f"{_acc('account_dt', '90.02')} AND {_acc_any('account_kt', GOODS_ACCS)}",
+                     f"{_acc('account_kt', '90.02')} AND {_acc_any('account_dt', GOODS_ACCS)}")},
+               -- Коммерческие: 90.07 и та часть 90.02, что пришла с 44.
+               {pair(f"({_acc('account_dt', '90.07')} OR ({_acc('account_dt', '90.02')} AND {_acc_any('account_kt', SELLING_ACCS)})) AND NOT {sales_kt}",
+                     f"({_acc('account_kt', '90.07')}) AND NOT {sales_dt}")},
+               -- Управленческие: 90.08 и та часть 90.02, что пришла с 25/26 (у
+               -- компании без директ-костинга это единственный путь).
+               {pair(f"({_acc('account_dt', '90.08')} OR ({_acc('account_dt', '90.02')} AND {_acc_any('account_kt', INDIRECT_ACCS)})) AND NOT {sales_kt}",
+                     f"({_acc('account_kt', '90.08')}) AND NOT {sales_dt}")},
+               -- Прочие доходы и расходы; проценты по займам выделяются отдельно.
+               {pair(f"{_acc('account_kt', '91.01')} AND NOT {other_dt}",
+                     f"{_acc('account_dt', '91.01')} AND NOT {other_kt}")},
+               {pair(f"{_acc('account_dt', '91.02')} AND NOT {other_kt} AND NOT {_acc_any('account_kt', LOAN_ACCS)}",
+                     f"{_acc('account_kt', '91.02')} AND NOT {other_dt} AND NOT {_acc_any('account_dt', LOAN_ACCS)}")},
+               {pair(f"{_acc('account_dt', '91.02')} AND {_acc_any('account_kt', LOAN_ACCS)}",
+                     f"{_acc('account_kt', '91.02')} AND {_acc_any('account_dt', LOAN_ACCS)}")},
+               -- Налог: любой Дт 99 → Кт 68 минус обратная нога.
+               {pair(f"{res_dt} AND {budget_kt}", f"{res_kt} AND {budget_dt}")},
+               -- Себестоимость, у которой источник не опознан: услуги, списанные
+               -- сразу на 90.02 минуя запасы и затратные счета.
+               {pair(f"{_acc('account_dt', '90.02')} AND NOT {_acc_any('account_kt', GOODS_ACCS)}"
+                     f" AND NOT {_acc_any('account_kt', INDIRECT_ACCS)}"
+                     f" AND NOT {_acc_any('account_kt', SELLING_ACCS)} AND NOT {sales_kt}",
+                     f"{_acc('account_kt', '90.02')} AND NOT {_acc_any('account_dt', GOODS_ACCS)}"
+                     f" AND NOT {_acc_any('account_dt', INDIRECT_ACCS)}"
+                     f" AND NOT {_acc_any('account_dt', SELLING_ACCS)} AND NOT {sales_dt}")}
           FROM gl_entries
          WHERE company_id = :cid{where}
          GROUP BY 1 ORDER BY 1
-    """), p)).all()]
+    """
+    return [{
+        "month": r[0],
+        "revenue": _num(r[1]), "vat": _num(r[2]), "excise": _num(r[3]),
+        "cogs": _num(r[4]), "commercial": _num(r[5]), "admin": _num(r[6]),
+        "otherIncome": _num(r[7]), "otherExpense": _num(r[8]), "interest": _num(r[9]),
+        "tax": _num(r[10]), "cogsOther": _num(r[11]),
+    } for r in (await db.execute(text(sql), p)).all()]
 
 
-def _pnl_totals(rows: list[dict[str, Any]]) -> dict[str, float]:
+def _pnl_totals(rows: list[dict[str, Any]]) -> dict[str, Any]:
     """Свод отчёта: от выручки до чистой прибыли."""
-    t = {k: round(sum(r[k] for r in rows), 2) for k in
-         ("revenue", "vat", "cogs", "commercial", "admin", "otherIncome", "otherExpense", "tax")}
-    t["net"] = round(t["revenue"] - t["vat"], 2)
-    t["gross"] = round(t["net"] - t["cogs"], 2)
+    keys = ("revenue", "vat", "excise", "cogs", "cogsOther", "commercial", "admin",
+            "otherIncome", "otherExpense", "interest", "tax")
+    t: dict[str, Any] = {k: round(sum(r[k] for r in rows), 2) for k in keys}
+    t["net"] = round(t["revenue"] - t["vat"] - t["excise"], 2)
+    t["cogsTotal"] = round(t["cogs"] + t["cogsOther"], 2)
+    t["gross"] = round(t["net"] - t["cogsTotal"], 2)
     t["operating"] = round(t["gross"] - t["commercial"] - t["admin"], 2)
-    t["beforeTax"] = round(t["operating"] + t["otherIncome"] - t["otherExpense"], 2)
+    t["beforeTax"] = round(
+        t["operating"] + t["otherIncome"] - t["otherExpense"] - t["interest"], 2)
     t["profit"] = round(t["beforeTax"] - t["tax"], 2)
     # Рентабельность считаем от выручки БЕЗ НДС: налог собирается в пользу бюджета и
     # доходом компании не является.
-    t["grossPct"] = round(t["gross"] / t["net"] * 100, 1) if t["net"] else None
-    t["operatingPct"] = round(t["operating"] / t["net"] * 100, 1) if t["net"] else None
-    t["profitPct"] = round(t["profit"] / t["net"] * 100, 1) if t["net"] else None
+    for name, val in (("grossPct", t["gross"]), ("operatingPct", t["operating"]),
+                      ("profitPct", t["profit"])):
+        t[name] = round(val / t["net"] * 100, 1) if t["net"] else None
     return t
 
 
@@ -1887,17 +1945,16 @@ async def pnl(
     """Отчёт о финансовых результатах: от выручки до чистой прибыли, помесячно.
 
     Сверка честная: рядом с расчётной прибылью стоит то, что бухгалтерия закрыла на
-    84 счёт (реформация баланса). Расхождение обычно означает, что часть периода не
-    закрыта — это ответ, а не ошибка витрины.
+    84 счёт (реформация баланса), и перечислены три причины расхождения — незакрытый
+    период, обороты 99 мимо наших строк, нетиповой план счетов.
     """
     cid = await assert_company_member(company_id, current_user, db)
     rows = await _pnl_rows(db, cid, date_from, date_to)
 
     for r in rows:
-        r["net"] = round(r["revenue"] - r["vat"], 2)
-        r["gross"] = round(r["net"] - r["cogs"], 2)
-        r["operating"] = round(r["gross"] - r["commercial"] - r["admin"], 2)
-        r["profit"] = round(r["operating"] + r["otherIncome"] - r["otherExpense"] - r["tax"], 2)
+        t = _pnl_totals([r])
+        r.update({k: t[k] for k in ("net", "cogsTotal", "gross", "operating",
+                                    "beforeTax", "profit")})
 
     years: dict[str, list[dict[str, Any]]] = {}
     for r in rows:
@@ -1911,20 +1968,36 @@ async def pnl(
     if date_to:
         where += " AND entry_date <= :dt"
         p["dt"] = _day(date_to)
-    # Реформация: прибыль (Дт 99 Кт 84) минус убыток (Дт 84 Кт 99).
     closed = (await db.execute(text(f"""
         SELECT coalesce(sum(amount) FILTER (
-                 WHERE account_dt LIKE '99%' AND account_kt LIKE '84%'), 0)
+                 WHERE {_acc('account_dt', '99')} AND {_acc('account_kt', '84')}), 0)
              - coalesce(sum(amount) FILTER (
-                 WHERE account_dt LIKE '84%' AND account_kt LIKE '99%'), 0)
+                 WHERE {_acc('account_dt', '84')} AND {_acc('account_kt', '99')}), 0)
           FROM gl_entries WHERE company_id = :cid{where}
     """), p)).scalar_one()
 
+    # Признак «план счетов опознан»: если оборотов по 90 нет вовсе, отчёт покажет
+    # нули — и это должно читаться как «счета другие», а не «продаж не было».
+    plan_ok = (await db.execute(text(f"""
+        SELECT count(*) FROM gl_entries
+         WHERE company_id = :cid
+           AND ({_acc('account_dt', '90')} OR {_acc('account_kt', '90')}){where}
+    """), p)).scalar_one()
+
+    totals = _pnl_totals(rows)
     return {
         "months": rows,
-        "totals": _pnl_totals(rows),
+        "totals": totals,
         "years": [{"year": y, **_pnl_totals(rs)} for y, rs in sorted(years.items())],
         "closedToRetained": _num(closed),
+        "salesEntries": plan_ok,
+        # Директ-костинг: закрывается ли 26 напрямую на 90.08. Экран поясняет, почему
+        # управленческие расходы могли «сидеть» в себестоимости.
+        "adminInCogs": totals["admin"] > 0 and (await db.execute(text(f"""
+            SELECT count(*) FROM gl_entries
+             WHERE company_id = :cid AND {_acc('account_dt', '90.02')}
+               AND {_acc_any('account_kt', INDIRECT_ACCS)}{where}
+        """), p)).scalar_one() > 0,
     }
 
 
@@ -1936,12 +2009,16 @@ async def expenses(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
-    """Из чего сложились затраты: счёт затрат × источник × помесячно.
+    """Из чего сложились затраты: статья, счёт и источник.
 
-    Смотрим на ДЕБЕТ затратных счетов (26, 44, 20, 91.02) в корреспонденции с тем,
-    откуда затрата пришла: поставщик (60), зарплата (70), взносы (69), подотчёт (71),
-    амортизация (02). Это и есть ответ «куда уходят деньги» на языке учёта, а не
-    догадка по назначению платежа.
+    Статья берётся из СУБКОНТО оборотов (`gl_turnovers`), а не из имени
+    корреспондирующего счёта: по счёту ответ на «за что платим» звучит как «поставщику»,
+    и аренда, связь, реклама и ГСМ не различаются. Гранулярность субконто — месяц,
+    для этого экрана достаточно.
+
+    Из выборки исключены взаимные закрытия затратных счетов (Дт 44 Кт 26, Дт 20 Кт 25):
+    иначе одна и та же затрата считается дважды — сперва при начислении, потом при
+    переносе. Списание на 90/91 тоже не в счёт — это уже признание расхода.
     """
     cid = await assert_company_member(company_id, current_user, db)
     p: dict[str, Any] = {"cid": str(cid)}
@@ -1953,6 +2030,14 @@ async def expenses(
         where += " AND e.entry_date <= :dt"
         p["dt"] = _day(date_to)
 
+    COST_ACCS = INDIRECT_ACCS + SELLING_ACCS + ("20", "23", "28", "29")
+    cost_dt = _acc_any("e.account_dt", COST_ACCS)
+    cost_kt = _acc_any("e.account_kt", COST_ACCS)
+    # Расход, признанный сразу на 90.02/91.02 минуя затратные счета, тоже затрата.
+    direct_dt = f"({_acc('e.account_dt', '91.02')})"
+    outer_kt = (f"NOT {cost_kt} AND NOT {_acc('e.account_kt', '90')}"
+                f" AND NOT {_acc('e.account_kt', '91')}")
+
     rows = [{
         "account": r[0], "accountName": r[1], "source": r[2], "sourceName": r[3],
         "amount": _num(r[4]), "entries": r[5],
@@ -1962,10 +2047,7 @@ async def expenses(
           FROM gl_entries e
           LEFT JOIN gl_accounts ad ON ad.company_id = e.company_id AND ad.code = e.account_dt
           LEFT JOIN gl_accounts ak ON ak.company_id = e.company_id AND ak.code = e.account_kt
-         WHERE e.company_id = :cid
-           AND (e.account_dt LIKE '20%' OR e.account_dt LIKE '25%' OR e.account_dt LIKE '26%'
-                OR e.account_dt LIKE '44%' OR e.account_dt LIKE '91.02%')
-           AND e.account_kt NOT LIKE '90%'{where}
+         WHERE e.company_id = :cid AND ({cost_dt} OR {direct_dt}) AND {outer_kt}{where}
          GROUP BY e.account_dt, e.account_kt
          ORDER BY sum(e.amount) DESC
     """), p)).all()]
@@ -1975,12 +2057,33 @@ async def expenses(
     } for r in (await db.execute(text(f"""
         SELECT to_char(e.entry_date, 'YYYY-MM'), sum(e.amount)
           FROM gl_entries e
-         WHERE e.company_id = :cid
-           AND (e.account_dt LIKE '20%' OR e.account_dt LIKE '25%' OR e.account_dt LIKE '26%'
-                OR e.account_dt LIKE '44%' OR e.account_dt LIKE '91.02%')
-           AND e.account_kt NOT LIKE '90%'{where}
+         WHERE e.company_id = :cid AND ({cost_dt} OR {direct_dt}) AND {outer_kt}{where}
          GROUP BY 1 ORDER BY 1
     """), p)).all()]
+
+    # Статьи затрат из субконто. `dt1` у затратных счетов и есть статья, `dt2` пуст.
+    # Период у оборотов — год и месяц числами, а не датой: сравниваем по паре.
+    pt: dict[str, Any] = {"cid": str(cid)}
+    twhere = ""
+    if date_from:
+        twhere += " AND (t.period_year, t.period_month) >= (:fy, :fm)"
+        pt["fy"], pt["fm"] = int(date_from[:4]), int(date_from[5:7])
+    if date_to:
+        twhere += " AND (t.period_year, t.period_month) <= (:ty, :tm)"
+        pt["ty"], pt["tm"] = int(date_to[:4]), int(date_to[5:7])
+    items = [{
+        "item": r[0] or "Без статьи", "account": r[1],
+        "amount": _num(r[2]), "months": r[3],
+    } for r in (await db.execute(text(f"""
+        SELECT t.dt1, t.account_dt, sum(t.amount),
+               count(DISTINCT (t.period_year, t.period_month))
+          FROM gl_turnovers t
+         WHERE t.company_id = :cid
+           AND {_acc_any('t.account_dt', COST_ACCS)}
+           AND NOT {_acc_any('t.account_kt', COST_ACCS)}
+           AND NOT {_acc('t.account_kt', '90')} AND NOT {_acc('t.account_kt', '91')}{twhere}
+         GROUP BY 1, 2 ORDER BY 3 DESC
+    """), pt)).all()]
 
     by_account: dict[str, dict[str, Any]] = {}
     for r in rows:
@@ -1994,8 +2097,10 @@ async def expenses(
     return {
         "accounts": accounts,
         "rows": rows,
+        "items": items,
         "months": months,
         "total": round(sum(r["amount"] for r in rows), 2),
+        "itemsTotal": round(sum(i["amount"] for i in items), 2),
     }
 
 
@@ -2007,7 +2112,17 @@ async def taxes(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
-    """Налоги и взносы: начислено, уплачено, задолженность и нагрузка на выручку."""
+    """Налоги и взносы: начислено, уплачено, нагрузка.
+
+    Три ловушки единого налогового счёта, из-за которых прежний расчёт врал:
+
+    1. Перенос на ЕНС (Дт 68.02 Кт 68.90) — это тоже кредит 68, и суммирование всего
+       кредита считало начисление дважды. Внутренние переносы 68↔68 и 69→68 исключены.
+    2. С 2023 года ВСЕ платежи идут Дт 68.90 Кт 51, поэтому «уплачено» по конкретному
+       налогу нулевое, а разница показывала всю начисленную сумму как долг. Уплату
+       считаем по ЕНС отдельной строкой, а не размазываем по видам налогов.
+    3. Возврат из бюджета (Дт 51 Кт 68) — не начисление, поэтому оборот двусторонний.
+    """
     cid = await assert_company_member(company_id, current_user, db)
     p: dict[str, Any] = {"cid": str(cid)}
     where = ""
@@ -2018,66 +2133,78 @@ async def taxes(
         where += " AND e.entry_date <= :dt"
         p["dt"] = _day(date_to)
 
+    budget_kt = _acc_any("e.account_kt", BUDGET_ACCS)
+    budget_dt = _acc_any("e.account_dt", BUDGET_ACCS)
+    money_kt = "(" + " OR ".join(_acc("e.account_kt", a) for a in ("50", "51", "52", "55")) + ")"
+
     rows = [{
-        "account": r[0], "name": r[1] or r[0],
-        "accrued": _num(r[2]), "paid": _num(r[3]), "entries": r[4],
+        "account": r[0], "name": r[1] or r[0], "accrued": _num(r[2]), "entries": r[3],
     } for r in (await db.execute(text(f"""
-        SELECT coalesce(e.account_kt, e.account_dt) AS acc, max(a.name),
-               -- Начислено — кредит счёта расчётов с бюджетом; уплачено — его дебет
-               -- в корреспонденции с деньгами.
-               coalesce(sum(e.amount) FILTER (
-                 WHERE e.account_kt LIKE '68%' OR e.account_kt LIKE '69%'), 0),
-               0, count(*)
+        SELECT e.account_kt, max(a.name),
+               sum(e.amount) - coalesce((
+                 SELECT sum(x.amount) FROM gl_entries x
+                  WHERE x.company_id = e.company_id AND x.account_dt = e.account_kt
+                    AND {_acc_any('x.account_kt', BUDGET_ACCS)}), 0),
+               count(*)
           FROM gl_entries e
           LEFT JOIN gl_accounts a ON a.company_id = e.company_id AND a.code = e.account_kt
-         WHERE e.company_id = :cid
-           AND (e.account_kt LIKE '68%' OR e.account_kt LIKE '69%'){where}
-         GROUP BY 1 ORDER BY 3 DESC
+         WHERE e.company_id = :cid AND {budget_kt} AND NOT {budget_dt}{where}
+         GROUP BY e.account_kt, e.company_id ORDER BY 3 DESC
     """), p)).all()]
 
-    paid = {r[0]: _num(r[1]) for r in (await db.execute(text(f"""
-        SELECT e.account_dt, sum(e.amount)
+    paid = _num((await db.execute(text(f"""
+        SELECT coalesce(sum(e.amount), 0) - coalesce((
+                 SELECT sum(x.amount) FROM gl_entries x
+                  WHERE x.company_id = :cid AND {_acc_any('x.account_kt', BUDGET_ACCS)}
+                    AND ({_acc('x.account_dt', '51')} OR {_acc('x.account_dt', '50')})), 0)
           FROM gl_entries e
-         WHERE e.company_id = :cid
-           AND (e.account_dt LIKE '68%' OR e.account_dt LIKE '69%')
-           AND (e.account_kt LIKE '51%' OR e.account_kt LIKE '50%'){where}
-         GROUP BY 1
-    """), p)).all()}
-    for r in rows:
-        r["paid"] = paid.get(r["account"], 0.0)
-        r["rest"] = round(r["accrued"] - r["paid"], 2)
+         WHERE e.company_id = :cid AND {budget_dt} AND {money_kt}{where}
+    """), p)).scalar_one())
 
     months = [{
         "month": r[0], "accrued": _num(r[1]), "paid": _num(r[2]),
     } for r in (await db.execute(text(f"""
         SELECT to_char(e.entry_date, 'YYYY-MM'),
-               coalesce(sum(e.amount) FILTER (
-                 WHERE (e.account_kt LIKE '68%' OR e.account_kt LIKE '69%')), 0),
-               coalesce(sum(e.amount) FILTER (
-                 WHERE (e.account_dt LIKE '68%' OR e.account_dt LIKE '69%')
-                   AND (e.account_kt LIKE '51%' OR e.account_kt LIKE '50%')), 0)
+               coalesce(sum(e.amount) FILTER (WHERE {budget_kt} AND NOT {budget_dt}), 0),
+               coalesce(sum(e.amount) FILTER (WHERE {budget_dt} AND {money_kt}), 0)
           FROM gl_entries e
          WHERE e.company_id = :cid
-           AND (e.account_kt LIKE '68%' OR e.account_kt LIKE '69%'
-                OR e.account_dt LIKE '68%' OR e.account_dt LIKE '69%'){where}
+           AND ({budget_kt} OR {budget_dt}){where}
          GROUP BY 1 ORDER BY 1
     """), p)).all()]
 
     pnl_rows = await _pnl_rows(db, cid, date_from, date_to)
     totals = _pnl_totals(pnl_rows)
     accrued = round(sum(r["accrued"] for r in rows), 2)
-    paid_total = round(sum(r["paid"] for r in rows), 2)
-    # Нагрузка считается от УПЛАЧЕННОГО — так её определяет и ФНС. По начислениям она
-    # завышена вдвое: кредит 68.02 несёт весь НДС с продаж, тогда как в бюджет уходит
-    # разница с вычетами по покупкам (их дебет того же счёта).
+
+    # Раскладка по смыслу: что в отчёте о результате, что транзит, что удержание.
+    def match(prefixes: tuple[str, ...]) -> float:
+        return round(sum(r["accrued"] for r in rows
+                         if any(r["account"] == a or r["account"].startswith(a + ".")
+                                for a in prefixes)), 2)
+
+    vat = match(("68.02",))
+    ndfl = match(("68.01",))
+    contributions = match(("69",))
+    profit_tax = totals["tax"]
     return {
         "rows": rows,
         "months": months,
         "accrued": accrued,
-        "paid": paid_total,
+        "paid": paid,
         "revenueNet": totals["net"],
-        "loadPct": round(paid_total / totals["net"] * 100, 1) if totals["net"] else None,
-        "accruedPct": round(accrued / totals["net"] * 100, 1) if totals["net"] else None,
+        # Нагрузка по методике ФНС: уплаченные налоги (с НДФЛ агента, без страховых
+        # взносов) к выручке без НДС.
+        "loadPct": round(paid / totals["net"] * 100, 1) if totals["net"] else None,
+        "groups": {
+            "profitTax": profit_tax,     # строка отчёта о результате
+            "vat": vat,                  # транзитный: не расход компании
+            "ndfl": ndfl,                # удержание у работника
+            "contributions": contributions,  # часть затрат на персонал
+        },
+        # Эффективная ставка имеет смысл только на ОСНО и при положительной прибыли.
+        "etrPct": (round(profit_tax / totals["beforeTax"] * 100, 1)
+                   if totals["beforeTax"] > 0 else None),
     }
 
 
@@ -4599,3 +4726,145 @@ async def resolve_requests(
 
     await db.commit()
     return {"checked": len(rows), "resolved": resolved}
+
+
+# ── Налоги заранее: сколько заплатим, если закрыть период как есть ───────────
+# Смысл раздела в том, что цифра нужна ДО закрытия, пока документы ещё можно
+# собрать. Поэтому рядом с «как есть» всегда стоит второй сценарий: сколько
+# станет, если недостающие документы придут. Разница между ними — цена работы
+# по сбору первички, и она измеряется в рублях налога, а не в числе строк.
+#
+# Считаем ПО НАШИМ ДАННЫМ и честно называем это оценкой: декларацию формирует
+# бухгалтерия, а здесь оперативный минимум, чтобы понимать порядок суммы.
+
+_PROFIT_RATE = 0.20      # ставка налога на прибыль
+_VAT_CALC = 20.0 / 120   # расчётная ставка НДС для сумм с налогом
+
+
+@router.get("/tax-forecast")
+async def tax_forecast(
+    company_id: str,
+    year: int | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Оценка НДС и налога на прибыль по кварталам плюс сценарий сбора документов."""
+    cid = await assert_company_member(company_id, current_user, db)
+    p: dict[str, Any] = {"cid": str(cid)}
+
+    # НДС по книгам: продажи — начисленный, покупки — вычет. Берём журнал учёта
+    # счетов-фактур, а не проводки: в декларацию идёт именно он.
+    vat_rows = (await db.execute(text("""
+        SELECT substr(doc_date, 1, 4) || '-Q' ||
+               to_char(ceil(substr(doc_date, 6, 2)::numeric / 3), 'FM9') AS q,
+               kind, sum(vat), count(*)
+          FROM vat_entries
+         WHERE company_id = :cid AND doc_date IS NOT NULL
+         GROUP BY 1, 2"""), p)).all()
+
+    quarters: dict[str, dict[str, Any]] = {}
+
+    def slot(q: str) -> dict[str, Any]:
+        return quarters.setdefault(q, {
+            "quarter": q, "vatOut": 0.0, "vatIn": 0.0, "vatDue": 0.0,
+            "income": 0.0, "expense": 0.0, "profit": 0.0, "profitTax": 0.0,
+            "docsIssued": 0, "docsReceived": 0,
+            "pendingVat": 0.0, "pendingExpense": 0.0,
+        })
+
+    for q, kind, vat, cnt in vat_rows:
+        s = slot(q)
+        if kind == "issued":
+            s["vatOut"] += _num(vat)
+            s["docsIssued"] += cnt
+        elif kind == "received":
+            s["vatIn"] += _num(vat)
+            s["docsReceived"] += cnt
+
+    # Прибыль: доходы без НДС против расходов — по оборотам регистра, а не по
+    # документам: в расходы входит и то, у чего документа-первички нет (амортизация,
+    # начисления), и брать их из документов было бы неверно.
+    pl_rows = (await db.execute(text("""
+        SELECT period_year || '-Q' || to_char(ceil(period_month::numeric / 3), 'FM9') AS q,
+               sum(amount) FILTER (WHERE account_kt LIKE '90.01%')                       AS revenue,
+               sum(amount) FILTER (WHERE account_dt LIKE '90.03%' OR account_dt LIKE '90.04%') AS vat_sales,
+               sum(amount) FILTER (WHERE account_dt LIKE '90.02%' OR account_dt LIKE '90.07%'
+                                      OR account_dt LIKE '90.08%')                       AS cost,
+               sum(amount) FILTER (WHERE account_kt LIKE '91.01%')                       AS other_income,
+               sum(amount) FILTER (WHERE account_dt LIKE '91.02%')                       AS other_expense
+          FROM gl_entries WHERE company_id = :cid
+         GROUP BY 1"""), p)).all()
+
+    for q, revenue, vat_sales, cost, oth_in, oth_exp in pl_rows:
+        s = slot(q)
+        # Выручка приходит с НДС: налог с продаж списывается отдельной проводкой на
+        # 90.03, поэтому вычитаем именно её, а не считаем расчётную ставку.
+        s["income"] = round(_num(revenue) - _num(vat_sales) + _num(oth_in), 2)
+        s["expense"] = round(_num(cost) + _num(oth_exp), 2)
+
+    # Что даст сбор недостающих документов. Требования в работе — это будущие вычеты
+    # (счёт-фактура поставщика) и будущие расходы (закрывающий документ по оплате).
+    pending = (await db.execute(text("""
+        SELECT substr(period, 1, 4) || '-Q' ||
+               to_char(ceil(substr(period, 6, 2)::numeric / 3), 'FM9') AS q,
+               rule, sum(amount), count(*)
+          FROM doc_requests
+         WHERE company_id = :cid AND status IN ('open', 'requested', 'promised')
+         GROUP BY 1, 2"""), p)).all()
+
+    for q, rule, amount, cnt in pending:
+        s = slot(q)
+        if rule == "purchase_no_vat_invoice":
+            # Документ на руках, счёта-фактуры нет: придёт — появится вычет.
+            s["pendingVat"] += round(_num(amount) * _VAT_CALC, 2)
+        elif rule == "payment_no_document":
+            # Оплата без закрывающего: придёт — вырастут расходы и появится вычет.
+            s["pendingExpense"] += round(_num(amount) / 1.2, 2)
+            s["pendingVat"] += round(_num(amount) * _VAT_CALC, 2)
+
+    for s in quarters.values():
+        s["vatDue"] = round(s["vatOut"] - s["vatIn"], 2)
+        s["profit"] = round(s["income"] - s["expense"], 2)
+        s["profitTax"] = round(max(s["profit"], 0) * _PROFIT_RATE, 2)
+        # Сценарий «документы собраны»: вычет растёт, расходы растут, налог падает.
+        s["vatDueIfCollected"] = round(s["vatDue"] - s["pendingVat"], 2)
+        s["profitIfCollected"] = round(s["profit"] - s["pendingExpense"], 2)
+        s["profitTaxIfCollected"] = round(max(s["profitIfCollected"], 0) * _PROFIT_RATE, 2)
+        s["saving"] = round((s["vatDue"] - s["vatDueIfCollected"])
+                            + (s["profitTax"] - s["profitTaxIfCollected"]), 2)
+
+    rows = sorted(quarters.values(), key=lambda x: x["quarter"], reverse=True)
+    if year:
+        rows = [r for r in rows if r["quarter"].startswith(str(year))]
+
+    # Налоги с зарплаты — оперативная справка: НДФЛ удержан и взносы начислены.
+    payroll = (await db.execute(text("""
+        SELECT coalesce(sum(amount) FILTER (WHERE kind = 'ndfl'), 0),
+               coalesce(sum(amount) FILTER (WHERE kind = 'contribution'), 0)
+          FROM payroll_entries WHERE company_id = :cid"""), p)).one()
+
+    # Долги перед бюджетом на дату среза: что уже начислено и не уплачено.
+    budget = [{"account": r[0], "name": r[1], "debt": _num(r[2])}
+              for r in (await db.execute(text("""
+        SELECT account, max(coalesce(account_name, '')), sum(credit - debit)
+          FROM gl_balances
+         WHERE company_id = :cid AND (account LIKE '68%' OR account LIKE '69%')
+           AND as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid)
+         GROUP BY account HAVING abs(sum(credit - debit)) > 0.004
+         ORDER BY 3 DESC"""), p)).all()]
+
+    return {
+        "quarters": rows,
+        "totals": {
+            "vatDue": round(sum(r["vatDue"] for r in rows), 2),
+            "vatDueIfCollected": round(sum(r["vatDueIfCollected"] for r in rows), 2),
+            "profitTax": round(sum(r["profitTax"] for r in rows), 2),
+            "profitTaxIfCollected": round(sum(r["profitTaxIfCollected"] for r in rows), 2),
+            "saving": round(sum(r["saving"] for r in rows), 2),
+            "ndfl": _num(payroll[0]), "contributions": _num(payroll[1]),
+        },
+        "budget": budget,
+        # Оценка, а не декларация: считаем по своим данным и говорим об этом прямо.
+        "disclaimer": "Оценка по данным пространства. Декларацию формирует бухгалтерия: "
+                      "здесь оперативный минимум, чтобы понимать порядок суммы заранее.",
+    }

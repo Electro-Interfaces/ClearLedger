@@ -430,12 +430,18 @@ export const REV_DOCS_MENU: CentralMenuItem[] = [
  * пунктом: это единственный экран, который отвечает на вопрос собственника целиком.
  */
 export const ECON_RESULT_MENU: CentralMenuItem[] = [
-  { key: 'ec_pnl',        label: 'Финансовый результат' },
+  // Мост первым пунктом: на вопрос «как образуется результат» отвечает каскад, а не
+  // таблица. Таблица рядом — для тех, кому нужны сами цифры и доли.
+  { key: 'ec_bridge',     label: 'Как образуется результат' },
+  { key: 'ec_pnl',        label: 'Отчёт о результате' },
+  { key: 'ec_income',     label: 'Доходы' },
   { key: 'ec_dynamics',   label: 'Динамика и рентабельность' },
   { key: 'ec_breakeven',  label: 'Точка безубыточности' },
 ]
 export const ECON_COSTS_MENU: CentralMenuItem[] = [
-  { key: 'ec_costs',      label: 'Структура затрат' },
+  // Статья отвечает «за что платим», счёт — «куда отнесли». Первое человеку нужнее.
+  { key: 'ec_items',      label: 'По статьям' },
+  { key: 'ec_costs',      label: 'По счетам' },
   { key: 'ec_costs_time', label: 'Помесячно' },
 ]
 export const ECON_TAXES_MENU: CentralMenuItem[] = [
@@ -460,6 +466,8 @@ export const BOOKS_LEDGER_MENU: CentralMenuItem[] = [
   { key: 'bk_payroll',  label: 'Зарплата' },
   // Экспресс-проверка в нашем исполнении: что не так в самом учёте.
   { key: 'bk_checks',   label: 'Проверки учёта' },
+  // Прогноз, а не факт: сколько заплатим, если закрыть период как есть.
+  { key: 'bk_forecast', label: 'Налоги заранее' },
 ]
 export const BOOKS_PRIMARY_MENU: CentralMenuItem[] = [
   { key: 'bk_docs',     label: 'Документы' },

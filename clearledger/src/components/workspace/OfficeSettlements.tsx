@@ -22,7 +22,7 @@ import { MetricTile } from '@/components/ui/metric-tile'
 import { cn } from '@/lib/utils'
 import {
   createRequestsFromGaps, getChecks, getClosing, getPayroll, getRequests,
-  getSettlements, getVat, resolveRequests, updateRequest,
+  getSettlements, getTaxForecast, getVat, resolveRequests, updateRequest,
   type SettlementKind, type SettlementsData, type VatData, type VatKind,
 } from '@/services/booksService'
 
@@ -815,4 +815,102 @@ export function BooksRequests({ companyId }: { companyId: string }) {
 const REQ_STATUS_LABEL: Record<string, string> = {
   open: 'На контроле', requested: 'Запрошен', promised: 'Обещан',
   received: 'Получен', disputed: 'Спорный', dropped: 'Не ждём',
+}
+
+
+/* ─────────────────────────── Налоги заранее ───────────────────────────────── */
+
+/**
+ * «Бухгалтерия» → «Налоги заранее»: сколько заплатим, если закрыть период как есть.
+ *
+ * Отличие от «Налогов» в «Экономике»: там факт — начислено и уплачено. Здесь
+ * ПРОГНОЗ и цена работы: рядом с «как есть» стоит сценарий «если недостающие
+ * документы придут», и разница между ними — рубли, ради которых собирают первичку.
+ *
+ * Это оценка по нашим данным, а не декларация, и на экране так и написано:
+ * подменять бухгалтерию нельзя, а дать порядок суммы заранее — можно.
+ */
+export function BooksForecast({ companyId }: { companyId: string }) {
+  const q = useQuery({
+    queryKey: ['books', 'tax-forecast', companyId],
+    queryFn: () => getTaxForecast(companyId),
+  })
+  if (q.isError) {
+    return <div className="p-4"><QueryError message="Не удалось посчитать прогноз" onRetry={() => q.refetch()} /></div>
+  }
+  if (!q.data) return <div className="p-6 text-sm text-muted-foreground">Считаем…</div>
+  const d = q.data
+  const t = d.totals
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <MetricTile label="НДС к уплате" value={`${money.format(t.vatDue)} ₽`}
+          hint="книга продаж минус книга покупок" />
+        <MetricTile label="Налог на прибыль" value={`${money.format(t.profitTax)} ₽`}
+          hint="20 % от прибыли по данным периода" />
+        <MetricTile label="Если собрать документы"
+          value={`${money.format(t.vatDueIfCollected + t.profitTaxIfCollected)} ₽`}
+          hint="оба налога вместе" />
+        <MetricTile label="Цена сбора первички" value={`${money.format(t.saving)} ₽`}
+          tone={t.saving > 0 ? 'warning' : undefined}
+          hint="столько переплатим, если документы не дойдут" />
+      </div>
+
+      <p className="text-[11px] text-muted-foreground">{d.disclaimer}</p>
+
+      <TableCard note="По кварталам: слева как есть, справа — если недостающие документы придут"
+        head={<><Th>Квартал</Th><Th right>НДС начислен</Th><Th right>Вычет</Th>
+          <Th right>НДС к уплате</Th><Th right>Прибыль</Th><Th right>Налог</Th>
+          <Th right>Ждём документов</Th><Th right>Станет налога</Th></>}>
+        {d.quarters.map((r) => {
+          const after = r.vatDueIfCollected + r.profitTaxIfCollected
+          const now = r.vatDue + r.profitTax
+          return (
+            <tr key={r.quarter} className="border-b last:border-0 hover:bg-muted/40">
+              <td className="px-3 py-1.5 whitespace-nowrap">{r.quarter.replace('-Q', ' кв. ')}</td>
+              <td className="px-3 py-1.5 text-right tabular-nums">{money.format(r.vatOut)}</td>
+              <td className="px-3 py-1.5 text-right tabular-nums">{money.format(r.vatIn)}</td>
+              <td className="px-3 py-1.5 text-right tabular-nums font-medium">{money.format(r.vatDue)}</td>
+              <td className="px-3 py-1.5 text-right tabular-nums">{money.format(r.profit)}</td>
+              <td className="px-3 py-1.5 text-right tabular-nums">{money.format(r.profitTax)}</td>
+              <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+                {r.pendingExpense || r.pendingVat
+                  ? money.format(r.pendingExpense + r.pendingVat) : '—'}
+              </td>
+              <td className={cn('px-3 py-1.5 text-right tabular-nums',
+                after < now && 'text-emerald-600 dark:text-emerald-400')}>
+                {money.format(after)}
+              </td>
+            </tr>
+          )
+        })}
+      </TableCard>
+
+      <div className="grid gap-3 lg:grid-cols-2">
+        <TableCard note="Долг перед бюджетом на дату среза: начислено и не уплачено"
+          head={<><Th>Счёт</Th><Th>Налог</Th><Th right>Долг</Th></>}>
+          {d.budget.map((b) => (
+            <tr key={b.account} className="border-b last:border-0 hover:bg-muted/40">
+              <td className="px-3 py-1.5 tabular-nums">{b.account}</td>
+              <td className="px-3 py-1.5 max-w-[280px] truncate">{b.name}</td>
+              <td className="px-3 py-1.5 text-right tabular-nums">{money.format(b.debt)}</td>
+            </tr>
+          ))}
+        </TableCard>
+
+        <TableCard note="Зарплатные налоги за всю историю"
+          head={<><Th>Показатель</Th><Th right>Сумма</Th></>}>
+          <tr className="border-b">
+            <td className="px-3 py-1.5">НДФЛ удержан</td>
+            <td className="px-3 py-1.5 text-right tabular-nums">{money.format(t.ndfl)}</td>
+          </tr>
+          <tr>
+            <td className="px-3 py-1.5">Страховые взносы начислены</td>
+            <td className="px-3 py-1.5 text-right tabular-nums">{money.format(t.contributions)}</td>
+          </tr>
+        </TableCard>
+      </div>
+    </div>
+  )
 }
