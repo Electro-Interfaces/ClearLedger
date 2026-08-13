@@ -355,16 +355,22 @@ export const REV_SALES_MENU: CentralMenuItem[] = [
   { key: 'rev_trend',    label: 'Динамика и YoY' },
   { key: 'rev_compare',  label: 'Сравнение периодов' },
   { key: 'rev_slices',   label: 'Разрезы' },
+  // Сходимость с бухгалтерией — смысл продукта, и она обязана быть видимой: пока
+  // расхождение не показано, витрина и регистр расходятся тихо.
+  { key: 'rev_recon',    label: 'Сверка с бухгалтерией' },
 ]
 export const REV_CLIENTS_MENU: CentralMenuItem[] = [
   { key: 'rev_clients',  label: 'Реестр' },
-  { key: 'rev_abc',      label: 'ABC и концентрация' },
+  { key: 'rev_abc',      label: 'ABC и повторяемость' },
   { key: 'rev_churn',    label: 'Новые и ушедшие' },
 ]
 export const REV_ITEMS_MENU: CentralMenuItem[] = [
   { key: 'rev_nomen',    label: 'Номенклатура' },
   { key: 'rev_svc',      label: 'Услуги' },
   { key: 'rev_abc_items', label: 'ABC товаров' },
+  // Маржа стоит здесь, а не в «Продажах»: вопрос про ассортимент — «на чём мы
+  // зарабатываем», а не «сколько выручили».
+  { key: 'rev_margin',   label: 'Маржа' },
 ]
 export const REV_DOCS_MENU: CentralMenuItem[] = [
   { key: 'rev_sale_docs', label: 'Реализации' },

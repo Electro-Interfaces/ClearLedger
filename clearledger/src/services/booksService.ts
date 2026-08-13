@@ -101,7 +101,11 @@ export interface SliceData {
   /** Доля товаров и услуг внутри разреза — по строкам документов. */
   byKind: { goods: number; service: number }
   /** id — ссылка на карточку контрагента; null у документов, что не свелись. */
-  topClients: { id: string | null; name: string; inn: string | null; amount: number; docs: number }[]
+  topClients: {
+    id: string | null; name: string; inn: string | null; amount: number; docs: number
+    /** Крайние даты покупок — по ним видно молчащих. */
+    first: string | null; last: string | null
+  }[]
   topItems: { code: string | null; name: string; amount: number; qty: number }[]
 }
 
@@ -171,6 +175,59 @@ export const getRevenue = (
 ) =>
   get<SliceData>(`/api/books/revenue?company_id=${companyId}&kind=${kind}`
     + `&top=${opts.top ?? 15}` + periodQuery(opts))
+
+/**
+ * Ассортимент (или клиентская база) с помесячным рядом: из ряда считается XYZ —
+ * стабильность спроса, а у позиций рядом лежат закупки, то есть себестоимость.
+ */
+export interface AssortmentRow {
+  key: string
+  /** Только у позиций. */
+  code?: string
+  /** Только у клиентов; null — документ не сведён со справочником. */
+  id?: string | null
+  name: string
+  /** Оборот: у клиента — `amount`, у позиции — `soldAmount`. */
+  amount?: number
+  soldQty?: number
+  soldAmount?: number
+  boughtQty?: number
+  boughtAmount?: number
+  docs: number
+  first: string | null
+  last: string | null
+  months: { month: string; amount: number }[]
+  /** Стабильность спроса — считается по канону пространства (пороги как у сети). */
+  cv: number | null
+  xyz: 'X' | 'Y' | 'Z' | '—'
+  trend: 'up' | 'down' | 'flat'
+  trendPct: number | null
+  monthsLive: number
+  /** Месяцев, в которых была продажа, и класс частоты — вторая ось матрицы. */
+  saleMonths: number
+  freq: 'once' | 'few' | 'regular'
+}
+
+export const getAssortment = (
+  companyId: string, by: 'item' | 'client', period?: PeriodOpts,
+) =>
+  get<{ by: string; rows: AssortmentRow[]; cost: number | null }>(
+    `/api/books/assortment?company_id=${companyId}&by=${by}` + periodQuery(period))
+
+/** Сверка «Реализации» с регистром: документы против оборота 90.01.1 помесячно. */
+export interface RevenueCheck {
+  months: {
+    month: string; docs: number; docsCount: number; register: number
+    diff: number; periodStatus: string
+  }[]
+  totalDocs: number
+  totalRegister: number
+  diff: number
+  broken: string[]
+}
+
+export const getRevenueCheck = (companyId: string) =>
+  get<RevenueCheck>(`/api/books/revenue-check?company_id=${companyId}`)
 
 export interface BalanceRow {
   code: string

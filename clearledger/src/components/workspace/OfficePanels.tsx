@@ -572,6 +572,13 @@ export function NomenclatureWindow({ companyId, code, onClose }: {
                 tone={d.markupPct !== null && d.markupPct > 0 ? 'success' : undefined} />
             </div>
 
+            {/* История цены — то, ради чего карточку и открывают перед сделкой:
+                «за сколько мы это продавали раньше и куда цена идёт». Список цен
+                по датам ниже отвечает точно, а помесячная средняя — видом сверху.
+                Средняя = сумма / количество: строка на сто штук весит столько же,
+                сколько строка на одну, и «среднее из средних» врёт. */}
+            {d.months.some((m) => m.soldQty) && <PriceHistory months={d.months} unit={d.unit} />}
+
             {d.clients.length > 0 && (
               <TableCard note="Кто покупает"
                 head={<>
@@ -827,5 +834,77 @@ function BooksDocs({ companyId }: { companyId: string }) {
         ))}
       </TableCard>
     </div>
+  )
+}
+
+/**
+ * Помесячная цена и объём позиции. Столбик — проданное количество, точка — средняя
+ * цена продажи; закупочная цена идёт второй линией, если позицию закупали. Разные
+ * шкалы (штуки и рубли) в один график не сводим — обе нормируются к своему максимуму,
+ * поэтому подписи дают абсолютные значения, а картинка — форму.
+ */
+function PriceHistory({ months, unit }: {
+  months: { month: string; soldQty: number; soldAmount: number
+            boughtQty: number; boughtAmount: number }[]
+  unit: string | null
+}) {
+  const rows = months.map((m) => ({
+    month: m.month,
+    qty: m.soldQty ?? 0,
+    sale: m.soldQty ? m.soldAmount / m.soldQty : null,
+    buy: m.boughtQty ? m.boughtAmount / m.boughtQty : null,
+  }))
+  const maxQty = Math.max(...rows.map((r) => r.qty), 1)
+  const maxPrice = Math.max(...rows.map((r) => Math.max(r.sale ?? 0, r.buy ?? 0)), 1)
+  const H = 96
+
+  return (
+    <Card>
+      <CardContent className="p-4">
+        <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-3">
+          Цена и объём по месяцам — продажа против закупки
+        </div>
+        <div className="flex items-end gap-1 overflow-x-auto" style={{ height: H + 34 }}>
+          {rows.map((r) => (
+            <div key={r.month} className="relative flex flex-col items-center gap-1 min-w-[26px] flex-1"
+              title={`${r.month}: ${qty.format(r.qty)} ${unit ?? ''}`
+                + (r.sale ? `, продажа ${money.format(r.sale)} ₽` : '')
+                + (r.buy ? `, закупка ${money.format(r.buy)} ₽` : '')}>
+              <div className="relative w-full" style={{ height: H }}>
+                <div className="absolute bottom-0 w-full rounded-t bg-primary/25"
+                  style={{ height: `${Math.max(2, (r.qty / maxQty) * H)}px` }} />
+                {r.sale !== null && (
+                  <div className="absolute w-full flex justify-center"
+                    style={{ bottom: `${(r.sale / maxPrice) * H}px` }}>
+                    <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+                  </div>
+                )}
+                {r.buy !== null && (
+                  <div className="absolute w-full flex justify-center"
+                    style={{ bottom: `${(r.buy / maxPrice) * H}px` }}>
+                    <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                  </div>
+                )}
+              </div>
+              <div className="text-[9px] text-muted-foreground rotate-45 origin-left h-6 whitespace-nowrap">
+                {r.month.slice(2)}
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="flex gap-4 text-[11px] text-muted-foreground pt-1">
+          <span className="flex items-center gap-1">
+            <span className="h-1.5 w-1.5 rounded-full bg-primary" /> цена продажи
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="h-1.5 w-1.5 rounded-full bg-amber-500" /> цена закупки
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="h-2 w-3 rounded-sm bg-primary/25" /> продано, {unit ?? 'кол-во'}
+          </span>
+          <span>шкалы независимые — точные значения в подсказке столбца</span>
+        </div>
+      </CardContent>
+    </Card>
   )
 }

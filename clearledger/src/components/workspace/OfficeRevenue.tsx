@@ -29,7 +29,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { MetricTile } from '@/components/ui/metric-tile'
 import { cn } from '@/lib/utils'
 import {
-  getDocs, getRevenue,
+  getAssortment, getDocs, getRevenue, getRevenueCheck,
   type DocRow, type RevKind,
 } from '@/services/booksService'
 import { exportTable } from '@/services/booksExport'
@@ -111,6 +111,39 @@ function Tabs<T extends string>({ value, onChange, items }: {
     </div>
   )
 }
+
+/**
+ * Фильтр «сумма от / до». Стоит рядом с поиском во всех реестрах: вопрос «покажи
+ * сделки крупнее миллиона» задают чаще, чем ищут конкретное имя, а до этого его
+ * приходилось решать выгрузкой в Excel и фильтром уже там.
+ */
+function AmountRange({ from, to, onChange }: {
+  from: string; to: string; onChange: (from: string, to: string) => void
+}) {
+  const cls = 'h-8 w-28 rounded-md border bg-background px-2.5 text-sm tabular-nums'
+  return (
+    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+      <span>сумма</span>
+      <input value={from} onChange={(e) => onChange(e.target.value, to)}
+        placeholder="от" inputMode="numeric" className={cls} />
+      <input value={to} onChange={(e) => onChange(from, e.target.value)}
+        placeholder="до" inputMode="numeric" className={cls} />
+    </div>
+  )
+}
+
+/** Пустая строка = граница не задана; мусор в поле = граница не задана (не ноль). */
+const inRange = (v: number, from: string, to: string) => {
+  const a = Number(from.replace(/\s/g, '').replace(',', '.'))
+  const b = Number(to.replace(/\s/g, '').replace(',', '.'))
+  if (from.trim() && Number.isFinite(a) && v < a) return false
+  if (to.trim() && Number.isFinite(b) && v > b) return false
+  return true
+}
+
+/** Сколько дней назад была последняя покупка — им меряются молчащие. */
+const daysSince = (iso: string | null) =>
+  iso ? Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 86400000)) : null
 
 /** Кнопка выгрузки — по канону отчётности пространства: выгружается видимое. */
 function ExportButton({ onClick, label = 'Excel' }: { onClick: () => void; label?: string }) {
@@ -203,7 +236,11 @@ const FIXED_KIND: Record<string, RevKind> = {
   rev_nomen: 'goods',
   rev_svc: 'service',
   rev_abc_items: 'goods',
+  rev_margin: 'goods',
 }
+
+/** Экраны, у которых своя ручка и разрез над ними не имеет смысла. */
+const NO_KIND = ['rev_invoices', 'rev_funnel', 'rev_recon', 'rev_abc', 'rev_abc_items', 'rev_margin']
 
 export function RevenuePanel() {
   const { coreMode } = useWorkspace()
@@ -225,14 +262,16 @@ export function RevenuePanel() {
       case 'rev_compare':    return <RevCompare companyId={companyId} kind={shown} period={period} />
       case 'rev_slices':     return <RevSlices companyId={companyId} kind={shown} period={period} />
       case 'rev_clients':    return <RevClients companyId={companyId} kind={shown} period={period} />
-      case 'rev_abc':        return <RevAbc companyId={companyId} kind={shown} period={period} of="clients" />
+      case 'rev_abc':        return <RevAbc companyId={companyId} period={period} of="clients" />
       case 'rev_churn':      return <RevChurn companyId={companyId} kind={shown} period={period} />
       case 'rev_nomen':      return <RevItems companyId={companyId} kind="goods" period={period} title="Номенклатура" />
       case 'rev_svc':        return <RevItems companyId={companyId} kind="service" period={period} title="Услуги" />
-      case 'rev_abc_items':  return <RevAbc companyId={companyId} kind="goods" period={period} of="items" />
+      case 'rev_abc_items':  return <RevAbc companyId={companyId} period={period} of="items" />
       case 'rev_sale_docs':  return <RevSaleDocs companyId={companyId} kind={shown} period={period} />
       case 'rev_invoices':   return <RevInvoices companyId={companyId} period={period} />
       case 'rev_funnel':     return <RevFunnel companyId={companyId} period={period} />
+      case 'rev_recon':      return <RevRecon companyId={companyId} />
+      case 'rev_margin':     return <RevMargin companyId={companyId} period={period} />
       default:               return <RevOverview companyId={companyId} kind={shown} period={period} />
     }
   })()
@@ -241,7 +280,7 @@ export function RevenuePanel() {
     <div className="h-full flex flex-col">
       {/* Разрез не показываем там, где он предмет пункта («Номенклатура» — это уже
           товары) и где вопрос не про строки документа (счета, воронка). */}
-      {!FIXED_KIND[sub] && !['rev_invoices', 'rev_funnel'].includes(sub) && (
+      {!FIXED_KIND[sub] && !NO_KIND.includes(sub) && (
         <div className="px-4 pt-3">
           <Tabs value={kind} onChange={setKind} items={KIND_TABS} />
         </div>
@@ -649,6 +688,10 @@ function RevSlices({ companyId, kind, period }: {
  * пространство знает всё: реквизиты, договоры, долг, что покупает. Кнопкой становится
  * только сведённый со справочником (`id`): у части документов ИНН не приезжает вовсе,
  * карточки у них нет, и ссылка вела бы в пустоту.
+ *
+ * «Молчит» — дней с последней покупки. Молчащий покупатель из реестра не исчезает и
+ * выглядит как активный: оборот у него есть, просто накоплен полгода назад. Отсюда
+ * колонка и отбор «молчат 90+ дней» — это и есть «молчащие покупатели» второй волны.
  */
 function RevClients({ companyId, kind, period }: {
   companyId: string; kind: RevKind; period: Period
@@ -656,25 +699,37 @@ function RevClients({ companyId, kind, period }: {
   const q = useRevenue(companyId, kind, period)
   const [card, setCard] = useState<string | null>(null)
   const [search, setSearch] = useState('')
+  const [amount, setAmount] = useState({ from: '', to: '' })
+  const [silent, setSilent] = useState(false)
 
   if (q.isError) return <div className="p-4"><QueryError onRetry={() => q.refetch()} /></div>
   if (!q.data) return <Loading />
   const d = q.data
   const found = d.topClients.filter((c) =>
-    !search || c.name.toLowerCase().includes(search.toLowerCase()) || (c.inn ?? '').includes(search))
+    (!search || c.name.toLowerCase().includes(search.toLowerCase()) || (c.inn ?? '').includes(search))
+    && inRange(c.amount, amount.from, amount.to)
+    && (!silent || (daysSince(c.last) ?? 0) > 90))
   const unlinked = d.topClients.filter((c) => !c.id).length
 
   return (
     <div className="p-4 space-y-3">
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        <input value={search} onChange={(e) => setSearch(e.target.value)}
-          placeholder="Покупатель или ИНН"
-          className="h-8 w-64 rounded-md border bg-background px-2.5 text-sm" />
+        <div className="flex items-center gap-3 flex-wrap">
+          <input value={search} onChange={(e) => setSearch(e.target.value)}
+            placeholder="Покупатель или ИНН"
+            className="h-8 w-56 rounded-md border bg-background px-2.5 text-sm" />
+          <AmountRange from={amount.from} to={amount.to}
+            onChange={(from, to) => setAmount({ from, to })} />
+          <Tabs value={silent ? 'silent' : 'all'} onChange={(v) => setSilent(v === 'silent')}
+            items={[{ key: 'all', label: 'Все' }, { key: 'silent', label: 'Молчат 90+ дней' }]} />
+        </div>
         <ExportButton onClick={() => exportTable('Покупатели', [
           { header: 'Покупатель', key: 'name', width: 42 },
           { header: 'ИНН', key: 'inn', width: 14 },
           { header: 'Документов', key: 'docs', width: 12 },
           { header: 'Оборот', key: 'amount', width: 16, money: true },
+          { header: 'Первая покупка', key: 'first', width: 14 },
+          { header: 'Последняя покупка', key: 'last', width: 16 },
         ], found)} />
       </div>
       <TableCard
@@ -682,94 +737,216 @@ function RevClients({ companyId, kind, period }: {
           + (unlinked ? ` · ${unlinked} без карточки в справочнике` : '')}
         head={<>
           <Th>Покупатель</Th><Th>ИНН</Th><Th right>Документов</Th>
-          <Th right>Оборот</Th><Th right>Доля</Th>
+          <Th right>Оборот</Th><Th right>Доля</Th><Th>Последняя</Th><Th right>Молчит</Th>
         </>}>
-        {found.map((c) => (
-          <tr key={clientKey(c)} className="border-b last:border-0 hover:bg-muted/40">
-            <td className="px-3 py-1.5 max-w-[320px] truncate" title={c.name}>
-              {c.id ? (
-                <button onClick={() => setCard(c.id)}
-                  className="text-left hover:text-primary hover:underline">{c.name}</button>
-              ) : c.name}
-            </td>
-            <td className="px-3 py-1.5 tabular-nums text-muted-foreground">{c.inn ?? '—'}</td>
-            <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{c.docs}</td>
-            <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">
-              {money.format(c.amount)} ₽
-            </td>
-            <td className="px-3 py-1.5"><Share value={c.amount} of={d.total || 1} /></td>
-          </tr>
-        ))}
+        {found.map((c) => {
+          const days = daysSince(c.last)
+          return (
+            <tr key={clientKey(c)} className="border-b last:border-0 hover:bg-muted/40">
+              <td className="px-3 py-1.5 max-w-[300px] truncate" title={c.name}>
+                {c.id ? (
+                  <button onClick={() => setCard(c.id)}
+                    className="text-left hover:text-primary hover:underline">{c.name}</button>
+                ) : c.name}
+              </td>
+              <td className="px-3 py-1.5 tabular-nums text-muted-foreground">{c.inn ?? '—'}</td>
+              <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{c.docs}</td>
+              <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">
+                {money.format(c.amount)} ₽
+              </td>
+              <td className="px-3 py-1.5"><Share value={c.amount} of={d.total || 1} /></td>
+              <td className="px-3 py-1.5 tabular-nums text-muted-foreground whitespace-nowrap">
+                {c.last ?? '—'}
+              </td>
+              <td className={cn('px-3 py-1.5 text-right tabular-nums whitespace-nowrap',
+                days !== null && days > 180 ? 'text-rose-600'
+                : days !== null && days > 90 ? 'text-amber-600' : 'text-muted-foreground')}>
+                {days === null ? '—' : `${num.format(days)} дн.`}
+              </td>
+            </tr>
+          )
+        })}
       </TableCard>
       {card && <CounterpartyWindow companyId={companyId} id={card} onClose={() => setCard(null)} />}
     </div>
   )
 }
 
+/* ── ABC × частота ──────────────────────────────────────────────────────── */
+
+const FREQ: { key: 'once' | 'few' | 'regular'; label: string; hint: string }[] = [
+  { key: 'regular', label: 'Регулярные', hint: 'покупали 6+ месяцев' },
+  { key: 'few', label: 'Эпизодические', hint: '2–5 месяцев' },
+  { key: 'once', label: 'Разовые', hint: 'один месяц' },
+]
+
+const CELL_HINT: Record<string, string> = {
+  'A/regular': 'Ядро: большой оборот и постоянные покупки — на этом компания и держится.',
+  'A/few': 'Крупные, но приходят наездами — вопрос, чем занят промежуток.',
+  'A/once': 'Крупная разовая сделка. Выручка была, повторяемости нет — на неё нельзя планировать.',
+  'B/regular': 'Крепкий середняк с постоянными покупками — опора выручки.',
+  'B/few': 'Середняк наездами — потенциал роста, если сделать регулярным.',
+  'B/once': 'Разовый середняк — проверить, была ли попытка вернуть.',
+  'C/regular': 'Малый оборот, но ходят постоянно — устойчивая мелочь.',
+  'C/few': 'Малые и редкие — наблюдать.',
+  'C/once': 'Хвост из разовых — основная масса строк; ими меряется, насколько бизнес проектный.',
+}
+
 /**
- * ABC — приём из «Топлива»: строки по убыванию вклада, границы групп по накопленной
- * доле (A — до 80 %, B — до 95 %, дальше C). Отвечает на вопрос «на скольких клиентах
- * держится компания»: если оборот дают трое, это риск, а не успех.
+ * ABC × частота покупок: вклад в оборот против того, повторяются ли покупки.
+ *
+ * Второй осью задумывался классический XYZ (стабильность спроса, канон пространства
+ * — та же формула, что у сети ЭЗС). На данных офисной компании он молчит: 153 позиции
+ * из 201 продавались ровно в ОДНОМ месяце, 23 покупателя из 43 покупали один раз, и
+ * 95 % строк получали «мало данных». Это не дефект расчёта, а профиль бизнеса —
+ * поставки проектные. Поэтому осью стала ЧАСТОТА, а разброс (CV и класс XYZ) остался
+ * колонкой там, где ряд действительно есть.
+ *
+ * Главный ответ экрана на таких данных: какая доля выручки держится на разовых
+ * сделках. Клетка матрицы — отбор: нажали «A · Разовые» — остались крупные разовые.
  */
-function RevAbc({ companyId, kind, period, of }: {
-  companyId: string; kind: RevKind; period: Period; of: 'clients' | 'items'
+function RevAbc({ companyId, period, of }: {
+  companyId: string; period: Period; of: 'clients' | 'items'
 }) {
-  const q = useRevenue(companyId, kind, period)
+  const q = useQuery({
+    queryKey: ['books', 'assortment', companyId, of, period.from, period.to],
+    queryFn: () => getAssortment(companyId, of === 'clients' ? 'client' : 'item', period),
+    enabled: !!companyId,
+  })
+  const [cell, setCell] = useState<string | null>(null)
+  const [card, setCard] = useState<string | null>(null)
+
   const rows = useMemo(() => {
-    const d = q.data
-    if (!d) return []
-    const src = of === 'clients'
-      ? d.topClients.map((c) => ({ label: c.name, amount: c.amount, id: c.id }))
-      : d.topItems.map((i) => ({ label: i.name, amount: i.amount, id: null as string | null }))
-    const total = src.reduce((s, r) => s + r.amount, 0) || 1
+    const src = (q.data?.rows ?? []).map((r) => ({ ...r, value: r.amount ?? r.soldAmount ?? 0 }))
+    const total = src.reduce((s, r) => s + r.value, 0) || 1
     let acc = 0
     return src.map((r) => {
-      acc += r.amount
+      acc += r.value
       const cum = (acc / total) * 100
-      return { ...r, share: (r.amount / total) * 100, cum, group: cum <= 80 ? 'A' : cum <= 95 ? 'B' : 'C' }
+      return { ...r, share: (r.value / total) * 100, cum, abc: cum <= 80 ? 'A' : cum <= 95 ? 'B' : 'C' }
     })
-  }, [q.data, of])
-  const [card, setCard] = useState<string | null>(null)
+  }, [q.data])
 
   if (q.isError) return <div className="p-4"><QueryError onRetry={() => q.refetch()} /></div>
   if (!q.data) return <Loading />
 
-  const groups = (['A', 'B', 'C'] as const).map((g) => {
-    const part = rows.filter((r) => r.group === g)
-    return { g, count: part.length, amount: part.reduce((s, r) => s + r.amount, 0) }
-  })
-  const total = rows.reduce((s, r) => s + r.amount, 0) || 1
   const what = of === 'clients' ? 'покупателей' : 'позиций'
+  const total = rows.reduce((s, r) => s + r.value, 0) || 1
+  const shown = cell ? rows.filter((r) => `${r.abc}/${r.freq}` === cell) : rows
+  const once = rows.filter((r) => r.freq === 'once')
+  const onceSum = once.reduce((s, r) => s + r.value, 0)
 
   return (
     <div className="p-4 space-y-4">
       <div className="grid gap-3 grid-cols-3">
-        {groups.map((g) => (
-          <MetricTile key={g.g} label={`Группа ${g.g}`}
-            value={`${num.format(g.count)} ${what}`}
-            hint={`${money.format(g.amount)} ₽ · ${((g.amount / total) * 100).toFixed(1)}% оборота`} />
-        ))}
+        {FREQ.map((f) => {
+          const part = rows.filter((r) => r.freq === f.key)
+          const sum = part.reduce((s, r) => s + r.value, 0)
+          return (
+            <MetricTile key={f.key} label={f.label}
+              value={`${num.format(part.length)} ${what}`}
+              hint={`${money.format(sum)} ₽ · ${((sum / total) * 100).toFixed(1)}% оборота · ${f.hint}`} />
+          )
+        })}
       </div>
+
+      <Card>
+        <CardContent className="p-4 space-y-2 overflow-x-auto">
+          <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
+            Вклад в оборот × частота покупок — клетка отбирает строки
+          </div>
+          <table className="text-sm">
+            <thead className="text-[11px] uppercase tracking-wider text-muted-foreground">
+              <tr>
+                <th className="px-2 py-1 text-left font-normal" />
+                {FREQ.map((f) => (
+                  <th key={f.key} className="px-2 py-1 text-left font-normal">
+                    {f.label} <span className="normal-case opacity-70">· {f.hint}</span>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {(['A', 'B', 'C'] as const).map((abc) => (
+                <tr key={abc}>
+                  <td className="px-2 py-1 text-muted-foreground">{abc}</td>
+                  {FREQ.map((f) => {
+                    const part = rows.filter((r) => r.abc === abc && r.freq === f.key)
+                    const sum = part.reduce((s, r) => s + r.value, 0)
+                    const key = `${abc}/${f.key}`
+                    return (
+                      <td key={key} className="px-1 py-1">
+                        <button disabled={!part.length} onClick={() => setCell(cell === key ? null : key)}
+                          title={CELL_HINT[key] ?? ''}
+                          className={cn('w-44 rounded-md border px-2 py-1.5 text-left',
+                            !part.length ? 'opacity-40'
+                            : cell === key ? 'border-primary bg-primary/10'
+                            : 'hover:bg-muted/50')}>
+                          <div className="tabular-nums">{part.length}</div>
+                          <div className="text-[11px] text-muted-foreground tabular-nums">
+                            {money.format(sum)} ₽ · {((sum / total) * 100).toFixed(1)}%
+                          </div>
+                        </button>
+                      </td>
+                    )
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="text-[11px] text-muted-foreground">
+            {cell
+              ? CELL_HINT[cell]
+              : `A — первые 80 % оборота, B — следующие 15 %, C — остальные 5 %. `
+                + `На разовые приходится ${((onceSum / total) * 100).toFixed(1)} % оборота: `
+                + `настолько бизнес зависит от неповторяющихся сделок.`}
+          </p>
+        </CardContent>
+      </Card>
+
+      <div className="flex justify-end">
+        <ExportButton onClick={() => exportTable(
+          of === 'clients' ? 'ABC покупателей' : 'ABC товаров', [
+            { header: 'Группа', key: 'group', width: 10 },
+            { header: of === 'clients' ? 'Покупатель' : 'Позиция', key: 'name', width: 44 },
+            { header: 'Оборот', key: 'value', width: 16, money: true },
+            { header: 'Доля, %', key: 'share', width: 10 },
+            { header: 'Накоплено, %', key: 'cum', width: 12 },
+            { header: 'Месяцев с покупкой', key: 'saleMonths', width: 16 },
+            { header: 'Разброс (CV)', key: 'cv', width: 12 },
+            { header: 'Тренд, %', key: 'trendPct', width: 10 },
+          ], shown.map((r) => ({ ...r, group: `${r.abc} · ${FREQ.find((f) => f.key === r.freq)?.label}` })))} />
+      </div>
+
       <TableCard
-        note="A — первые 80 % оборота, B — следующие 15 %, C — остальные 5 %"
+        note={cell
+          ? `Отбор ${cell.replace('/', ' · ')}: ${num.format(shown.length)} ${what}`
+          : `${num.format(rows.length)} ${what} по убыванию вклада в оборот`}
         head={<><Th>Группа</Th><Th>{of === 'clients' ? 'Покупатель' : 'Позиция'}</Th>
-          <Th right>Оборот</Th><Th right>Доля</Th><Th right>Накоплено</Th></>}>
-        {rows.map((r) => (
-          <tr key={r.label} className="border-b last:border-0 hover:bg-muted/40">
-            <td className="px-3 py-1.5">
+          <Th right>Оборот</Th><Th right>Доля</Th><Th right>Накоплено</Th>
+          <Th right>Месяцев</Th><Th right>Разброс</Th><Th right>Тренд</Th></>}>
+        {shown.map((r) => (
+          <tr key={r.key} className="border-b last:border-0 hover:bg-muted/40">
+            <td className="px-3 py-1.5 whitespace-nowrap">
               <span className={cn('rounded px-1.5 py-0.5 text-[11px] font-medium',
-                r.group === 'A' ? 'bg-emerald-500/15 text-emerald-600'
-                : r.group === 'B' ? 'bg-amber-500/15 text-amber-600'
-                : 'bg-muted text-muted-foreground')}>{r.group}</span>
+                r.abc === 'A' ? 'bg-emerald-500/15 text-emerald-600'
+                : r.abc === 'B' ? 'bg-amber-500/15 text-amber-600'
+                : 'bg-muted text-muted-foreground')}>{r.abc}</span>
+              <span className="ml-1.5 text-[11px] text-muted-foreground">
+                {r.freq === 'once' ? 'разовый' : r.freq === 'few' ? 'эпизод.' : 'регуляр.'}
+              </span>
             </td>
-            <td className="px-3 py-1.5 max-w-[380px] truncate" title={r.label}>
-              {r.id ? (
-                <button onClick={() => setCard(r.id)}
-                  className="text-left hover:text-primary hover:underline">{r.label}</button>
-              ) : r.label}
+            <td className="px-3 py-1.5 max-w-[340px] truncate" title={r.name}>
+              {of === 'clients' && r.id ? (
+                <button onClick={() => setCard(r.id!)}
+                  className="text-left hover:text-primary hover:underline">{r.name}</button>
+              ) : of === 'items' && r.code ? (
+                <button onClick={() => setCard(r.code!)}
+                  className="text-left hover:text-primary hover:underline">{r.name}</button>
+              ) : r.name}
             </td>
             <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">
-              {money.format(r.amount)} ₽
+              {money.format(r.value)} ₽
             </td>
             <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
               {r.share.toFixed(1)}%
@@ -777,10 +954,27 @@ function RevAbc({ companyId, kind, period, of }: {
             <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
               {r.cum.toFixed(1)}%
             </td>
+            <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+              {r.saleMonths}
+            </td>
+            <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground"
+              title={r.cv === null ? 'ряда для расчёта не хватает' : `класс ${r.xyz}`}>
+              {r.cv === null ? '—' : `${r.cv.toFixed(2)} · ${r.xyz}`}
+            </td>
+            <td className={cn('px-3 py-1.5 text-right tabular-nums',
+              r.trend === 'up' ? 'text-emerald-600'
+              : r.trend === 'down' ? 'text-rose-600' : 'text-muted-foreground')}>
+              {r.trendPct === null ? '—' : `${r.trendPct > 0 ? '+' : ''}${r.trendPct.toFixed(0)}%`}
+            </td>
           </tr>
         ))}
       </TableCard>
-      {card && <CounterpartyWindow companyId={companyId} id={card} onClose={() => setCard(null)} />}
+      {card && of === 'clients' && (
+        <CounterpartyWindow companyId={companyId} id={card} onClose={() => setCard(null)} />
+      )}
+      {card && of === 'items' && (
+        <NomenclatureWindow companyId={companyId} code={card} onClose={() => setCard(null)} />
+      )}
     </div>
   )
 }
@@ -863,19 +1057,25 @@ function RevItems({ companyId, kind, period, title }: {
   const q = useRevenue(companyId, kind, period)
   const [card, setCard] = useState<string | null>(null)
   const [search, setSearch] = useState('')
+  const [amount, setAmount] = useState({ from: '', to: '' })
 
   if (q.isError) return <div className="p-4"><QueryError onRetry={() => q.refetch()} /></div>
   if (!q.data) return <Loading />
   const found = q.data.topItems.filter((i) =>
-    !search || i.name.toLowerCase().includes(search.toLowerCase())
-    || (i.code ?? '').toLowerCase().includes(search.toLowerCase()))
+    (!search || i.name.toLowerCase().includes(search.toLowerCase())
+      || (i.code ?? '').toLowerCase().includes(search.toLowerCase()))
+    && inRange(i.amount, amount.from, amount.to))
 
   return (
     <div className="p-4 space-y-3">
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        <input value={search} onChange={(e) => setSearch(e.target.value)}
-          placeholder="Наименование или код"
-          className="h-8 w-64 rounded-md border bg-background px-2.5 text-sm" />
+        <div className="flex items-center gap-3 flex-wrap">
+          <input value={search} onChange={(e) => setSearch(e.target.value)}
+            placeholder="Наименование или код"
+            className="h-8 w-56 rounded-md border bg-background px-2.5 text-sm" />
+          <AmountRange from={amount.from} to={amount.to}
+            onChange={(from, to) => setAmount({ from, to })} />
+        </div>
         <ExportButton onClick={() => exportTable(title, [
           { header: 'Код', key: 'code', width: 14 },
           { header: 'Наименование', key: 'name', width: 48 },
@@ -928,28 +1128,41 @@ function RevSaleDocs({ companyId, kind, period }: {
   const q = useDocs(companyId, 'sale', period, kind === 'all' ? undefined : kind)
   const [card, setCard] = useState<string | null>(null)
   const [docId, setDocId] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
+  const [amount, setAmount] = useState({ from: '', to: '' })
 
   if (q.isError) return <div className="p-4"><QueryError onRetry={() => q.refetch()} /></div>
   if (!q.data) return <Loading />
+  const rows = q.data.rows.filter((r) =>
+    (!search || r.counterparty.toLowerCase().includes(search.toLowerCase())
+      || r.number.toLowerCase().includes(search.toLowerCase()))
+    && inRange(r.amount, amount.from, amount.to))
 
   return (
     <div className="p-4 space-y-3">
-      <div className="flex justify-end">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-3 flex-wrap">
+          <input value={search} onChange={(e) => setSearch(e.target.value)}
+            placeholder="Контрагент или номер"
+            className="h-8 w-56 rounded-md border bg-background px-2.5 text-sm" />
+          <AmountRange from={amount.from} to={amount.to}
+            onChange={(from, to) => setAmount({ from, to })} />
+        </div>
         <ExportButton onClick={() => exportTable('Реализации', [
           { header: 'Дата', key: 'date', width: 12 },
           { header: 'Номер', key: 'number', width: 16 },
           { header: 'Контрагент', key: 'counterparty', width: 42 },
           { header: 'Сумма', key: 'amount', width: 16, money: true },
           { header: 'НДС', key: 'vat', width: 14, money: true },
-        ], q.data.rows)} />
+        ], rows)} />
       </div>
       <TableCard
-        note={`Документы реализации за период — ${num.format(q.data.total)} шт.`}
+        note={`Документы реализации: ${num.format(rows.length)} из ${num.format(q.data.total)}`}
         head={<>
           <Th>Дата</Th><Th>Номер</Th><Th>Контрагент</Th>
           <Th right>Сумма</Th><Th right>НДС</Th><Th right>Строк</Th>
         </>}>
-        {q.data.rows.map((r) => (
+        {rows.map((r) => (
           <tr key={r.id} className="border-b last:border-0 hover:bg-muted/40">
             <td className="px-3 py-1.5 tabular-nums whitespace-nowrap">{r.date}</td>
             <td className="px-3 py-1.5 tabular-nums">
@@ -984,13 +1197,15 @@ function RevSaleDocs({ companyId, kind, period }: {
 function RevInvoices({ companyId, period }: { companyId: string; period: Period }) {
   const q = useDocs(companyId, 'invoice_out', period)
   const [onlyDebt, setOnlyDebt] = useState(false)
+  const [amount, setAmount] = useState({ from: '', to: '' })
   const [card, setCard] = useState<string | null>(null)
   const [docId, setDocId] = useState<string | null>(null)
 
   if (q.isError) return <div className="p-4"><QueryError onRetry={() => q.refetch()} /></div>
   if (!q.data) return <Loading />
 
-  const rows = q.data.rows.filter((r) => !onlyDebt || (r.amount - (r.paid ?? 0)) > 0.01)
+  const rows = q.data.rows.filter((r) =>
+    (!onlyDebt || (r.amount - (r.paid ?? 0)) > 0.01) && inRange(r.amount, amount.from, amount.to))
   const billed = q.data.rows.reduce((s, r) => s + r.amount, 0)
   const paid = q.data.rows.reduce((s, r) => s + (r.paid ?? 0), 0)
 
@@ -1004,8 +1219,12 @@ function RevInvoices({ companyId, period }: { companyId: string; period: Period 
         <MetricTile label="Не оплачено" value={money.format(billed - paid) + ' ₽'} />
       </div>
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        <Tabs value={onlyDebt ? 'debt' : 'all'} onChange={(v) => setOnlyDebt(v === 'debt')}
-          items={[{ key: 'all', label: 'Все счета' }, { key: 'debt', label: 'Только неоплаченные' }]} />
+        <div className="flex items-center gap-3 flex-wrap">
+          <Tabs value={onlyDebt ? 'debt' : 'all'} onChange={(v) => setOnlyDebt(v === 'debt')}
+            items={[{ key: 'all', label: 'Все счета' }, { key: 'debt', label: 'Только неоплаченные' }]} />
+          <AmountRange from={amount.from} to={amount.to}
+            onChange={(from, to) => setAmount({ from, to })} />
+        </div>
         <ExportButton onClick={() => exportTable('Счета покупателю', [
           { header: 'Дата', key: 'date', width: 12 },
           { header: 'Номер', key: 'number', width: 16 },
@@ -1195,5 +1414,235 @@ function UnpaidInvoices({ rows, companyId }: { rows: DocRow[]; companyId: string
       </TableCard>
       {card && <CounterpartyWindow companyId={companyId} id={card} onClose={() => setCard(null)} />}
     </>
+  )
+}
+
+/* ────────────────────────────────────────────────────────────── */
+/*                    Маржа и сверка                              */
+/* ────────────────────────────────────────────────────────────── */
+
+/**
+ * Маржа по позициям: цена продажи против цены закупки того же кода номенклатуры.
+ *
+ * Себестоимость берётся из строк ПОСТУПЛЕНИЙ, а не из 90.02.1: в регистре она
+ * свёрнута по счёту, и разложить её обратно по позициям нечем. Способ приблизительный
+ * — средневзвешенная цена закупки за период, без партий и FIFO, — поэтому итог рядом
+ * сверяется с 90.02.1: расхождение видно, а не спрятано.
+ *
+ * Позиции, которых компания не закупала (услуги, работы, товар со старых остатков),
+ * попадают в отдельный счётчик: у них себестоимости нет вовсе, и молча считать её
+ * нулём значило бы показать маржу 100 %.
+ */
+function RevMargin({ companyId, period }: { companyId: string; period: Period }) {
+  const q = useQuery({
+    queryKey: ['books', 'assortment', companyId, 'item', period.from, period.to],
+    queryFn: () => getAssortment(companyId, 'item', period),
+    enabled: !!companyId,
+  })
+  const [search, setSearch] = useState('')
+  const [amount, setAmount] = useState({ from: '', to: '' })
+  const [onlyKnown, setOnlyKnown] = useState(true)
+  const [card, setCard] = useState<string | null>(null)
+
+  const rows = useMemo(() => (q.data?.rows ?? []).map((r) => {
+    const soldQty = r.soldQty ?? 0
+    const sold = r.soldAmount ?? 0
+    const boughtQty = r.boughtQty ?? 0
+    const bought = r.boughtAmount ?? 0
+    // Средняя цена — сумма / количество, а не среднее из цен строк: строка на сто
+    // штук весит столько же, сколько строка на одну, и «среднее из средних» врёт.
+    const avgSale = soldQty ? sold / soldQty : 0
+    const avgBuy = boughtQty ? bought / boughtQty : 0
+    const cost = avgBuy ? avgBuy * soldQty : null
+    return {
+      ...r, sold, soldQty, avgSale, avgBuy,
+      cost,
+      margin: cost === null ? null : sold - cost,
+      marginPct: cost === null || !sold ? null : ((sold - cost) / sold) * 100,
+      markupPct: avgBuy ? (avgSale / avgBuy - 1) * 100 : null,
+    }
+  }), [q.data])
+
+  if (q.isError) return <div className="p-4"><QueryError onRetry={() => q.refetch()} /></div>
+  if (!q.data) return <Loading />
+
+  const shown = rows.filter((r) =>
+    (!search || r.name.toLowerCase().includes(search.toLowerCase())
+      || (r.code ?? '').toLowerCase().includes(search.toLowerCase()))
+    && inRange(r.sold, amount.from, amount.to)
+    && (!onlyKnown || r.cost !== null))
+
+  const known = rows.filter((r) => r.cost !== null)
+  const soldKnown = known.reduce((s, r) => s + r.sold, 0)
+  const costKnown = known.reduce((s, r) => s + (r.cost ?? 0), 0)
+  const noCost = rows.length - known.length
+  const registerCost = q.data.cost ?? 0
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
+        <MetricTile label="Продано (с известной закупкой)"
+          value={money.format(soldKnown) + ' ₽'}
+          hint={`${num.format(known.length)} позиций из ${num.format(rows.length)}`} />
+        <MetricTile label="Себестоимость (расчётная)" value={money.format(costKnown) + ' ₽'}
+          hint="средняя цена закупки × проданное количество" />
+        <MetricTile label="Маржа" value={money.format(soldKnown - costKnown) + ' ₽'}
+          hint={soldKnown ? `${(((soldKnown - costKnown) / soldKnown) * 100).toFixed(1)}% от продаж` : '—'}
+          tone={soldKnown - costKnown > 0 ? 'success' : undefined} />
+        <MetricTile label="Себестоимость по 90.02.1" value={money.format(registerCost) + ' ₽'}
+          hint={`расчёт ${registerCost ? ((costKnown / registerCost) * 100).toFixed(0) : '—'}% от регистра`} />
+      </div>
+
+      <p className="text-[11px] text-muted-foreground">
+        Себестоимость считается по строкам поступлений (средневзвешенная цена закупки за
+        период), партии и FIFO не учитываются — поэтому рядом стоит оборот 90.02.1 как
+        контроль. {noCost > 0 && `У ${num.format(noCost)} позиций закупки в периоде нет —
+        услуги, работы и товар со старых остатков; их маржа не считается.`}
+      </p>
+
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-3 flex-wrap">
+          <input value={search} onChange={(e) => setSearch(e.target.value)}
+            placeholder="Наименование или код"
+            className="h-8 w-56 rounded-md border bg-background px-2.5 text-sm" />
+          <AmountRange from={amount.from} to={amount.to}
+            onChange={(from, to) => setAmount({ from, to })} />
+          <Tabs value={onlyKnown ? 'known' : 'all'} onChange={(v) => setOnlyKnown(v === 'known')}
+            items={[{ key: 'known', label: 'С известной закупкой' }, { key: 'all', label: 'Все позиции' }]} />
+        </div>
+        <ExportButton onClick={() => exportTable('Маржа по позициям', [
+          { header: 'Код', key: 'code', width: 14 },
+          { header: 'Позиция', key: 'name', width: 44 },
+          { header: 'Продано, кол-во', key: 'soldQty', width: 14 },
+          { header: 'Продажи', key: 'sold', width: 16, money: true },
+          { header: 'Цена продажи', key: 'avgSale', width: 14, money: true },
+          { header: 'Цена закупки', key: 'avgBuy', width: 14, money: true },
+          { header: 'Себестоимость', key: 'cost', width: 16, money: true },
+          { header: 'Маржа', key: 'margin', width: 16, money: true },
+          { header: 'Маржа, %', key: 'marginPct', width: 10 },
+        ], shown)} />
+      </div>
+
+      <TableCard note={`${num.format(shown.length)} позиций — по сумме продаж`}
+        head={<><Th>Позиция</Th><Th right>Продано</Th><Th right>Продажи</Th>
+          <Th right>Цена продажи</Th><Th right>Цена закупки</Th>
+          <Th right>Маржа</Th><Th right>Маржа, %</Th><Th right>Наценка</Th></>}>
+        {shown.map((r) => (
+          <tr key={r.key} className="border-b last:border-0 hover:bg-muted/40">
+            <td className="px-3 py-1.5 max-w-[320px] truncate" title={r.name}>
+              {r.code ? (
+                <button onClick={() => setCard(r.code!)}
+                  className="text-left hover:text-primary hover:underline">{r.name}</button>
+              ) : r.name}
+            </td>
+            <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+              {qty.format(r.soldQty)}
+            </td>
+            <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">
+              {money.format(r.sold)} ₽
+            </td>
+            <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+              {money.format(r.avgSale)}
+            </td>
+            <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+              {r.avgBuy ? money.format(r.avgBuy) : '—'}
+            </td>
+            <td className={cn('px-3 py-1.5 text-right tabular-nums whitespace-nowrap',
+              r.margin === null ? 'text-muted-foreground'
+              : r.margin >= 0 ? 'text-emerald-600' : 'text-rose-600')}>
+              {r.margin === null ? '—' : `${money.format(r.margin)} ₽`}
+            </td>
+            <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+              {r.marginPct === null ? '—' : `${r.marginPct.toFixed(1)}%`}
+            </td>
+            <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+              {r.markupPct === null ? '—' : `${r.markupPct.toFixed(0)}%`}
+            </td>
+          </tr>
+        ))}
+      </TableCard>
+      {card && <NomenclatureWindow companyId={companyId} code={card} onClose={() => setCard(null)} />}
+    </div>
+  )
+}
+
+/**
+ * Сверка с бухгалтерией: сумма документов реализации против оборота 90.01.1.
+ *
+ * Сходимость с регистром — смысл продукта, и она обязана быть видимой: пока
+ * расхождение не показано на экране, витрина и бухгалтерия расходятся тихо, а
+ * обнаруживается это у заказчика. Эталон — регистр; документы — то, что мы
+ * показываем. Период здесь общий (вся история), а не из фильтра: сверяют не
+ * «за выбранное», а «всё ли сошлось».
+ */
+function RevRecon({ companyId }: { companyId: string }) {
+  const q = useQuery({
+    queryKey: ['books', 'revenue-check', companyId],
+    queryFn: () => getRevenueCheck(companyId),
+    enabled: !!companyId,
+  })
+  const [onlyBroken, setOnlyBroken] = useState(false)
+
+  if (q.isError) return <div className="p-4"><QueryError onRetry={() => q.refetch()} /></div>
+  if (!q.data) return <Loading />
+  const d = q.data
+  const months = onlyBroken ? d.months.filter((m) => Math.abs(m.diff) > 1) : d.months
+  const ok = Math.abs(d.diff) <= 1
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="grid gap-3 grid-cols-3">
+        <MetricTile label="По документам" value={money.format(d.totalDocs) + ' ₽'}
+          hint="сумма реализаций за всю историю" />
+        <MetricTile label="По регистру (90.01.1)" value={money.format(d.totalRegister) + ' ₽'}
+          hint="оборот по кредиту счёта выручки" />
+        <MetricTile label="Расхождение" value={money.format(d.diff) + ' ₽'}
+          hint={ok ? 'сходится до рубля' : `${d.broken.length} месяцев с расхождением`}
+          tone={ok ? 'success' : 'danger'} />
+      </div>
+
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <Tabs value={onlyBroken ? 'broken' : 'all'} onChange={(v) => setOnlyBroken(v === 'broken')}
+          items={[{ key: 'all', label: 'Все месяцы' }, { key: 'broken', label: 'Только расхождения' }]} />
+        <ExportButton onClick={() => exportTable('Сверка реализации с регистром', [
+          { header: 'Месяц', key: 'month', width: 12 },
+          { header: 'По документам', key: 'docs', width: 18, money: true },
+          { header: 'Документов', key: 'docsCount', width: 12 },
+          { header: 'По регистру', key: 'register', width: 18, money: true },
+          { header: 'Расхождение', key: 'diff', width: 16, money: true },
+          { header: 'Период', key: 'periodStatus', width: 10 },
+        ], months)} />
+      </div>
+
+      <TableCard
+        note={ok
+          ? 'Витрина и регистр сходятся: расхождение меньше рубля — это округление копеек'
+          : 'Эталон — регистр. Расхождение разбирается по месяцу: документ вне периода, ' +
+            'проводка без документа или сумма, разошедшаяся с составом'}
+        head={<><Th>Месяц</Th><Th right>По документам</Th><Th right>Документов</Th>
+          <Th right>По регистру</Th><Th right>Расхождение</Th><Th>Период</Th></>}>
+        {months.map((m) => (
+          <tr key={m.month} className="border-b last:border-0 hover:bg-muted/40">
+            <td className="px-3 py-1.5">{monthLabel(m.month)}</td>
+            <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">
+              {money.format(m.docs)} ₽
+            </td>
+            <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+              {m.docsCount}
+            </td>
+            <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">
+              {money.format(m.register)} ₽
+            </td>
+            <td className={cn('px-3 py-1.5 text-right tabular-nums whitespace-nowrap',
+              Math.abs(m.diff) > 1 ? 'text-rose-600' : 'text-muted-foreground')}>
+              {money.format(m.diff)} ₽
+            </td>
+            <td className="px-3 py-1.5 text-[11px] text-muted-foreground">
+              {m.periodStatus === 'closed' ? 'закрыт' : 'открыт'}
+            </td>
+          </tr>
+        ))}
+      </TableCard>
+    </div>
   )
 }
