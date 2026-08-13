@@ -91,3 +91,56 @@ export const getMailThread = (companyId: string, threadId: string) =>
 
 export const mailAttachmentUrl = (companyId: string, attachmentId: string) =>
   `/api/mail/attachment?company_id=${companyId}&attachment_id=${attachmentId}`
+
+
+/** Правило обработки письма: первое сработавшее решает его судьбу. */
+export interface MailRule {
+  id: string
+  name: string
+  sort: number
+  accountId: string | null
+  fromEmail: string | null
+  fromDomain: string | null
+  subjectLike: string | null
+  hasAttachment: boolean | null
+  unknownSender: boolean | null
+  action: 'intake' | 'ticket' | 'chat' | 'task' | 'archive' | 'quarantine' | 'reject'
+  setCounterpartyId: string | null
+  setContractId: string | null
+  isActive: boolean
+  /** Сколько раз сработало: правило без срабатываний — мусор в списке. */
+  hits: number
+}
+
+export type MailRuleInput = Omit<MailRule, 'id' | 'hits'>
+
+const ruleBody = (r: MailRuleInput) => ({
+  name: r.name, account_id: r.accountId, sort: r.sort,
+  from_email: r.fromEmail || null, from_domain: r.fromDomain || null,
+  subject_like: r.subjectLike || null, has_attachment: r.hasAttachment,
+  unknown_sender: r.unknownSender, action: r.action,
+  set_counterparty_id: r.setCounterpartyId, set_contract_id: r.setContractId,
+  is_active: r.isActive,
+})
+
+export const getMailRules = (companyId: string) =>
+  get<{ rows: MailRule[] }>(`/api/mail/rules?company_id=${companyId}`)
+
+export const createMailRule = (companyId: string, r: MailRuleInput) =>
+  post<MailRule>(`/api/mail/rules?company_id=${companyId}`, ruleBody(r))
+
+export const updateMailRule = (companyId: string, id: string, r: MailRuleInput) =>
+  put<MailRule>(`/api/mail/rules/${id}?company_id=${companyId}`, ruleBody(r))
+
+export const deleteMailRule = (companyId: string, id: string) =>
+  del<{ deleted: boolean }>(`/api/mail/rules/${id}?company_id=${companyId}`)
+
+/** «Это письмо от такого-то»: запомнить адрес и применить к прошлой переписке. */
+export const learnMailAddress = (companyId: string, address: string, counterpartyId: string) =>
+  post<{ address: string; messages: number; threads: number }>(
+    `/api/mail/learn-address?company_id=${companyId}`,
+    { address, counterparty_id: counterpartyId })
+
+export const getMailAddresses = (companyId: string) =>
+  get<{ rows: { id: string; address: string; source: string; counterpartyId: string; counterpartyName: string }[] }>(
+    `/api/mail/addresses?company_id=${companyId}`)

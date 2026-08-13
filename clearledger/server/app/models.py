@@ -1689,6 +1689,85 @@ class PayrollEntry(Base):
 # ---------------------------------------------------------------------------
 # AccountingDoc (Учётные документы 1С)
 # ---------------------------------------------------------------------------
+class CounterpartyEmail(Base):
+    """Почтовый адрес контрагента — ответ на вопрос «кто это написал».
+
+    Один контрагент пишет с нескольких адресов: `sales@`, бухгалтер лично, ЭДО-робот.
+    Адреса берутся из карточки, из правил и — главное — ОБУЧЕНИЕМ: человек один раз
+    сказал «это письмо от ТСМ», и дальше все письма с этого адреса опознаются сами,
+    включая уже полученные.
+    """
+
+    __tablename__ = "counterparty_emails"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
+    )
+    counterparty_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("counterparties.id", ondelete="CASCADE"), nullable=False)
+    address: Mapped[str] = mapped_column(String(320), nullable=False)
+    # card | learned | rule — откуда узнали. Обученное человеком сильнее домена.
+    source: Mapped[str] = mapped_column(String(20), nullable=False, default="learned")
+    created_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint("company_id", "address", name="uq_cp_email_company_address"),
+        Index("idx_cp_email_cp", "company_id", "counterparty_id"),
+    )
+
+
+class MailRule(Base):
+    """Правило обработки письма (docs/MAIL.md).
+
+    Правила читаются по порядку, первое сработавшее решает судьбу письма. Условия
+    пустые = «подходит всем»: правило без условий в конце списка — это политика по
+    умолчанию, а не ошибка.
+    """
+
+    __tablename__ = "mail_rules"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
+    )
+    # Пусто — правило применяется ко всем ящикам компании.
+    account_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("mail_accounts.id", ondelete="CASCADE"), nullable=True)
+    sort: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
+    name: Mapped[str] = mapped_column(String(200), nullable=False, default="")
+    # Условия. Любое пустое поле условием не является.
+    from_email: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    from_domain: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    subject_like: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    has_attachment: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    unknown_sender: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # Действие: intake | ticket | chat | task | archive | quarantine | reject.
+    action: Mapped[str] = mapped_column(String(20), nullable=False, default="archive")
+    # Что правило проставляет письму помимо действия: контрагента и договор.
+    set_counterparty_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("counterparties.id", ondelete="SET NULL"), nullable=True)
+    set_contract_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("contracts.id", ondelete="SET NULL"), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Сколько раз сработало: правило, которое не срабатывает, — мусор в списке.
+    hits: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("idx_mail_rules_company", "company_id", "sort"),
+    )
+
+
 class MailAccount(Base):
     """Почтовый ящик компании (docs/MAIL.md).
 

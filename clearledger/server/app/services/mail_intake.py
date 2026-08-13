@@ -36,7 +36,8 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
-    Counterparty, MailAccount, MailAttachment, MailMessage, MailThread,
+    Counterparty, CounterpartyEmail, MailAccount, MailAttachment, MailMessage,
+    MailRule, MailThread,
 )
 
 logger = logging.getLogger("clearledger.mail")
@@ -232,6 +233,18 @@ async def _save_message(db: AsyncSession, account: MailAccount, uid: int,
         has_attachments=bool(atts),
         status="new",
     )
+
+    # Правила: первое сработавшее решает судьбу письма и может сразу проставить
+    # контрагента и договор — это и есть ответ «что, кому и куда отнести».
+    rule = await apply_rules(db, account, row, bool(atts))
+    if rule is not None:
+        row.status = {"reject": "rejected", "quarantine": "quarantine"}.get(
+            rule.action, "accepted")
+        if rule.set_counterparty_id and not row.counterparty_id:
+            row.counterparty_id = rule.set_counterparty_id
+            cp_id = rule.set_counterparty_id
+        rule.hits = (rule.hits or 0) + 1
+
     db.add(row)
     await db.flush()
 
@@ -283,11 +296,21 @@ async def _thread_for(db: AsyncSession, account: MailAccount, msg: Message,
 
 
 async def _guess_counterparty(db: AsyncSession, cid, from_email: str | None):
-    """Опознать отправителя по адресу: точное совпадение, затем домен."""
+    """Опознать отправителя: выученный адрес → адрес карточки → домен.
+
+    Выученное человеком стоит первым и намеренно: он знает, что «бухгалтер Ирина
+    с личной почты» — это ТСМ, а справочник об этом не догадается никогда.
+    """
     if not from_email or "@" not in from_email:
         return None
     addr = from_email.lower().strip()
     domain = addr.split("@")[-1]
+
+    learned = (await db.execute(select(CounterpartyEmail.counterparty_id).where(
+        CounterpartyEmail.company_id == cid,
+        func.lower(CounterpartyEmail.address) == addr))).scalars().first()
+    if learned:
+        return learned
 
     exact = (await db.execute(select(Counterparty.id).where(
         Counterparty.company_id == cid,
@@ -301,6 +324,66 @@ async def _guess_counterparty(db: AsyncSession, cid, from_email: str | None):
         Counterparty.company_id == cid,
         func.lower(Counterparty.email).like(f"%@{domain}")))).scalars().all()
     return same[0] if len(same) == 1 else None
+
+
+async def apply_rules(db: AsyncSession, account: MailAccount, row: MailMessage,
+                      has_attachments: bool) -> MailRule | None:
+    """Найти первое подходящее правило. Пустое условие условием не считается."""
+    rules = (await db.execute(select(MailRule).where(
+        MailRule.company_id == account.company_id,
+        MailRule.is_active.is_(True)).order_by(MailRule.sort))).scalars().all()
+
+    sender = (row.from_email or "").lower()
+    domain = sender.split("@")[-1] if "@" in sender else ""
+    subject = (row.subject or "").lower()
+
+    for r in rules:
+        if r.account_id and r.account_id != account.id:
+            continue
+        if r.from_email and r.from_email.lower() != sender:
+            continue
+        if r.from_domain and r.from_domain.lower().lstrip("@") != domain:
+            continue
+        if r.subject_like and r.subject_like.lower() not in subject:
+            continue
+        if r.has_attachment is not None and r.has_attachment != has_attachments:
+            continue
+        if r.unknown_sender is not None and r.unknown_sender != (row.counterparty_id is None):
+            continue
+        return r
+    return None
+
+
+async def learn_address(db: AsyncSession, cid, address: str, counterparty_id,
+                        user: str | None = None) -> dict[str, Any]:
+    """Запомнить, чей это адрес, и применить знание к УЖЕ полученным письмам.
+
+    Обучение без обратной силы бесполезно: человек размечает адрес именно тогда,
+    когда смотрит на непонятое письмо, и ждёт, что вся переписка встанет на место.
+    """
+    addr = address.lower().strip()
+    exists = (await db.execute(select(CounterpartyEmail).where(
+        CounterpartyEmail.company_id == cid,
+        func.lower(CounterpartyEmail.address) == addr))).scalars().first()
+    if exists:
+        exists.counterparty_id = counterparty_id
+    else:
+        db.add(CounterpartyEmail(company_id=cid, counterparty_id=counterparty_id,
+                                 address=addr, source="learned", created_by=user))
+
+    msgs = (await db.execute(select(MailMessage).where(
+        MailMessage.company_id == cid,
+        func.lower(MailMessage.from_email) == addr))).scalars().all()
+    threads = set()
+    for m in msgs:
+        m.counterparty_id = counterparty_id
+        if m.thread_id:
+            threads.add(m.thread_id)
+    for t in (await db.execute(select(MailThread).where(
+        MailThread.company_id == cid, MailThread.id.in_(threads)))).scalars().all() if threads else []:
+        t.counterparty_id = counterparty_id
+    await db.commit()
+    return {"address": addr, "messages": len(msgs), "threads": len(threads)}
 
 
 async def poll_all(db: AsyncSession, company_id) -> dict[str, Any]:

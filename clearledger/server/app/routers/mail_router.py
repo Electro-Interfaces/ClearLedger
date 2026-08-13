@@ -16,7 +16,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import assert_company_member, get_current_user
 from app.database import get_db
-from app.models import Counterparty, MailAccount, MailAttachment, MailMessage, MailThread, User
+from app.models import (
+    Counterparty, CounterpartyEmail, MailAccount, MailAttachment, MailMessage,
+    MailRule, MailThread, User,
+)
 from app.services import mail_intake
 
 router = APIRouter(prefix="/mail", tags=["Почта пространства"])
@@ -214,3 +217,131 @@ async def attachment(
         headers={"Content-Disposition":
                  "attachment; filename*=UTF-8''" + quote(a.file_name)},
     )
+
+
+# ── Волна 2: опознание и правила ─────────────────────────────────────────────
+
+class RuleIn(BaseModel):
+    name: str = ""
+    account_id: str | None = None
+    sort: int = 100
+    from_email: str | None = None
+    from_domain: str | None = None
+    subject_like: str | None = None
+    has_attachment: bool | None = None
+    unknown_sender: bool | None = None
+    action: str = "archive"
+    set_counterparty_id: str | None = None
+    set_contract_id: str | None = None
+    is_active: bool = True
+
+
+def _rule(r: MailRule) -> dict[str, Any]:
+    return {
+        "id": str(r.id), "name": r.name, "sort": r.sort,
+        "accountId": str(r.account_id) if r.account_id else None,
+        "fromEmail": r.from_email, "fromDomain": r.from_domain,
+        "subjectLike": r.subject_like, "hasAttachment": r.has_attachment,
+        "unknownSender": r.unknown_sender, "action": r.action,
+        "setCounterpartyId": str(r.set_counterparty_id) if r.set_counterparty_id else None,
+        "setContractId": str(r.set_contract_id) if r.set_contract_id else None,
+        "isActive": r.is_active, "hits": r.hits,
+    }
+
+
+@router.get("/rules")
+async def rules(
+    company_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Правила по порядку: первое сработавшее решает судьбу письма."""
+    cid = await assert_company_member(company_id, current_user, db)
+    rows = (await db.execute(select(MailRule).where(
+        MailRule.company_id == cid).order_by(MailRule.sort))).scalars().all()
+    return {"rows": [_rule(r) for r in rows]}
+
+
+@router.post("/rules")
+async def create_rule(
+    company_id: str,
+    body: RuleIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    cid = await assert_company_member(company_id, current_user, db)
+    r = MailRule(company_id=cid, **body.model_dump())
+    db.add(r)
+    await db.commit()
+    return _rule(r)
+
+
+@router.put("/rules/{rule_id}")
+async def update_rule(
+    rule_id: str,
+    company_id: str,
+    body: RuleIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    cid = await assert_company_member(company_id, current_user, db)
+    r = (await db.execute(select(MailRule).where(
+        MailRule.company_id == cid, MailRule.id == rule_id))).scalar_one_or_none()
+    if r is None:
+        return {"error": "not_found"}
+    for k, v in body.model_dump().items():
+        setattr(r, k, v)
+    await db.commit()
+    return _rule(r)
+
+
+@router.delete("/rules/{rule_id}")
+async def delete_rule(
+    rule_id: str,
+    company_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    cid = await assert_company_member(company_id, current_user, db)
+    r = (await db.execute(select(MailRule).where(
+        MailRule.company_id == cid, MailRule.id == rule_id))).scalar_one_or_none()
+    if r is not None:
+        await db.delete(r)
+        await db.commit()
+    return {"deleted": bool(r)}
+
+
+class LearnIn(BaseModel):
+    address: str
+    counterparty_id: str
+
+
+@router.post("/learn-address")
+async def learn_address(
+    company_id: str,
+    body: LearnIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """«Это письмо от такого-то»: запомнить адрес и применить к прошлой переписке."""
+    cid = await assert_company_member(company_id, current_user, db)
+    return await mail_intake.learn_address(db, cid, body.address, body.counterparty_id,
+                                           current_user.email)
+
+
+@router.get("/addresses")
+async def addresses(
+    company_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Известные адреса контрагентов — что система уже знает о том, кто ей пишет."""
+    cid = await assert_company_member(company_id, current_user, db)
+    rows = (await db.execute(select(CounterpartyEmail, Counterparty.name)
+        .join(Counterparty, Counterparty.id == CounterpartyEmail.counterparty_id)
+        .where(CounterpartyEmail.company_id == cid)
+        .order_by(CounterpartyEmail.address))).all()
+    return {"rows": [{
+        "id": str(e.id), "address": e.address, "source": e.source,
+        "counterpartyId": str(e.counterparty_id), "counterpartyName": name,
+    } for e, name in rows]}
