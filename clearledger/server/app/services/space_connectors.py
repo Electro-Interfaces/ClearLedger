@@ -79,7 +79,8 @@ def _channel_entry(ch: Channel) -> dict[str, Any]:
     }
 
 
-def _service_entry(code: str, name: str, brings: str, enabled: bool) -> dict[str, Any]:
+def _service_entry(code: str, name: str, brings: str, enabled: bool,
+                   status: str | None = None) -> dict[str, Any]:
     """Платформенный сервис стека — тоже поставщик данных (сообщения, встречи, письма)."""
     return {
         "key": f"core:{code}",
@@ -90,7 +91,7 @@ def _service_entry(code: str, name: str, brings: str, enabled: bool) -> dict[str
         "label": name,
         "brings": brings,
         "direction": "both",
-        "status": "active" if enabled else "off",
+        "status": status or ("active" if enabled else "off"),
         "enabled": enabled,
         "last_sync_at": None,
         "last_error": None,
@@ -99,6 +100,24 @@ def _service_entry(code: str, name: str, brings: str, enabled: bool) -> dict[str
         "initiator": "both",
         "settings_route": "/admin/eco/overview",
     }
+
+
+async def _chat_alive() -> str | None:
+    """Живой ли Matrix: «настроен в стеке» и «отвечает» — разные ответы.
+
+    Проверку раньше делало только `/core/status`, а оно закрыто суперадмином:
+    администратор компании видел на «Состоянии» пустую карточку сервисов и решал,
+    что раздел показывает подключения выборочно. Витрине проверка нужнее — она
+    и так ходит по HTTP к приложениям.
+    """
+    if not settings.synapse_url:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT) as c:
+            r = await c.get(settings.synapse_url.rstrip("/") + "/health")
+            return "active" if r.status_code == 200 else "error"
+    except httpx.HTTPError:
+        return "error"
 
 
 async def _app_connectors(
@@ -241,7 +260,13 @@ async def list_connectors(db: AsyncSession, company_id: uuid.UUID) -> dict[str, 
     items.extend(_channel_entry(c) for c in channels)
 
     items.append(_service_entry(
-        "chat", "Чат (Matrix)", "Переписка и темы пространства", settings.chat_enabled))
+        "chat", "Чат (Matrix)", "Переписка и темы пространства", settings.chat_enabled,
+        status=await _chat_alive() if settings.chat_enabled else None))
+    # Конференции были только в карточке «Каналы связи пространства» и в витрину не
+    # попадали: на одном экране получалось два разных состава платформенных сервисов.
+    items.append(_service_entry(
+        "conf", "Конференции (Jitsi)", "Встречи в браузере: ссылка-приглашение без регистрации",
+        bool(getattr(settings, "jitsi_signing_key", None))))
     items.append(_service_entry(
         "mail", "Почта платформы (SMTP)", "Служебные письма: приглашения и уведомления",
         bool(settings.smtp_host)))
@@ -273,8 +298,10 @@ async def list_connectors(db: AsyncSession, company_id: uuid.UUID) -> dict[str, 
             "last_error": a.last_error,
             "records": None,
             "files": 0,
-            # Настройка живёт там, где ящик заводят: в разделе приёма данных.
-            "settings_route": "/intake",
+            # Настройка живёт там, где заводят все подключения пространства
+            # (решение МАГа 13.08.2026): «Подключения» → «Коннекторы» → «Почта
+            # компании». В «Загрузке» осталась только работа с самими письмами.
+            "settings_route": "/connectors",
         })
 
     # ВХОДЯЩИЕ: кто подключён к нам. До В1 этот класс не показывался нигде —

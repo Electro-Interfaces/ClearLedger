@@ -67,7 +67,20 @@ export function SpaceConnectors() {
       </div>
     )
   }
-  if (q.isError) return null
+  // Молча исчезнуть нельзя: на месте списка оставался чистый экран, и раздел читался
+  // как «подключений нет». Пустое место — это утверждение о составе, которого мы не
+  // проверяли; лучше сказать, что не ответило Ядро.
+  if (q.isError) {
+    return (
+      <Card>
+        <CardContent className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
+          <AlertTriangle className="h-4 w-4 text-amber-500" />
+          Список подключений сейчас не собрался — Ядро не ответило. Сами подключения при
+          этом работают: обновите страницу через минуту.
+        </CardContent>
+      </Card>
+    )
+  }
 
   const items = q.data?.connectors ?? []
   const problems = q.data?.problems ?? []
