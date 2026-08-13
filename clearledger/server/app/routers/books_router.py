@@ -1457,13 +1457,14 @@ async def vat(
     rows = (await db.execute(q.order_by(VatEntry.doc_date.desc()).limit(limit))).scalars().all()
 
     # Помесячно — как в декларации: налог по периодам, а не одной цифрой за всё.
+    # Группировка по позиции, а не по выражению: аргументы substr едут параметрами,
+    # и Postgres не признаёт GROUP BY substr($5,$6) тем же выражением, что в SELECT.
     months = (await db.execute(
         select(func.substr(VatEntry.doc_date, 1, 7), func.count(),
                func.sum(VatEntry.amount), func.sum(VatEntry.vat))
         .where(VatEntry.company_id == cid, VatEntry.kind == kind,
                VatEntry.doc_date.isnot(None))
-        .group_by(func.substr(VatEntry.doc_date, 1, 7))
-        .order_by(func.substr(VatEntry.doc_date, 1, 7)))).all()
+        .group_by(text("1")).order_by(text("1")))).all()
 
     kinds = dict((k, (n, _num(a), _num(v))) for k, n, a, v in (await db.execute(
         select(VatEntry.kind, func.count(), func.sum(VatEntry.amount), func.sum(VatEntry.vat))
