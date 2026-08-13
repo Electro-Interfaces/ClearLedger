@@ -1488,6 +1488,11 @@ class GlBalance(Base):
     as_of: Mapped[date_type] = mapped_column(Date, nullable=False)
     account: Mapped[str] = mapped_column(String(20), nullable=False)
     account_name: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # Первое субконто счетов расчётов — контрагент. Ссылку проставляет загрузка:
+    # сводить имя на лету нельзя, оно приходит представлением и в разном написании.
+    counterparty_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("counterparties.id", ondelete="SET NULL"), nullable=True
+    )
     sub1: Mapped[str | None] = mapped_column(String(500), nullable=True)
     sub2: Mapped[str | None] = mapped_column(String(500), nullable=True)
     sub3: Mapped[str | None] = mapped_column(String(500), nullable=True)

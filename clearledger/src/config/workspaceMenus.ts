@@ -371,8 +371,12 @@ export const BOOKS_LEDGER_MENU: CentralMenuItem[] = [
   { key: 'bk_summary',  label: 'Сводка' },
   { key: 'bk_turnover', label: 'Оборотка' },
   { key: 'bk_entries',  label: 'Проводки' },
+  // Кто кому должен. Стоит в «Регистре», а не в «Документах»: долг — это сальдо
+  // счетов расчётов, он гасится зачётом, которого в первичке не видно.
+  { key: 'bk_settle',   label: 'Взаиморасчёты' },
 ]
 export const BOOKS_PRIMARY_MENU: CentralMenuItem[] = [
   { key: 'bk_docs',     label: 'Документы' },
+  { key: 'bk_vat',      label: 'Счета-фактуры' },
   { key: 'bk_periods',  label: 'Периоды' },
 ]

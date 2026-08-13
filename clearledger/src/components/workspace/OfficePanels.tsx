@@ -31,8 +31,9 @@ import { cn } from '@/lib/utils'
 import {
   getAccountCard, getBalance, getBooksOverview, getCounterpartyCard, getDocs, getEntries,
   getPeriods, getSlice,
-  type BalanceTotals, type BooksOverview, type SliceData,
+  type BalanceTotals, type BooksOverview, type SettlementKind, type SliceData, type VatKind,
 } from '@/services/booksService'
+import { BooksSettlements, BooksVat } from './OfficeSettlements'
 import { useWorkspaceSections } from './workspaceSections'
 
 const money = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
@@ -312,6 +313,10 @@ export function BooksPanel() {
   const items = sections.find((s) => s.mode === coreMode)?.items ?? []
   const [sub] = useWorkspaceSubView(items[0]?.key ?? '', items.map((i) => i.key))
   const { companyId } = useCompany()
+  // Сторона расчётов и часть журнала НДС — разрезы внутри пункта, а не свои пункты:
+  // вопрос один («кто кому должен», «чем подтверждён налог»), меняется только сторона.
+  const [settleKind, setSettleKind] = useState<SettlementKind>('receivable')
+  const [vatKind, setVatKind] = useState<VatKind>('issued')
 
   if (!companyId) return <NoCompany />
 
@@ -321,7 +326,11 @@ export function BooksPanel() {
         {sub === 'bk_summary' && <BooksSummary companyId={companyId} />}
         {sub === 'bk_turnover' && <BooksBalance companyId={companyId} />}
         {sub === 'bk_entries' && <BooksEntries companyId={companyId} />}
+        {sub === 'bk_settle' && (
+          <BooksSettlements companyId={companyId} kind={settleKind} onKind={setSettleKind} />
+        )}
         {sub === 'bk_docs' && <BooksDocs companyId={companyId} />}
+        {sub === 'bk_vat' && <BooksVat companyId={companyId} kind={vatKind} onKind={setVatKind} />}
         {sub === 'bk_periods' && <BooksPeriods companyId={companyId} />}
       </ScrollArea>
     </div>

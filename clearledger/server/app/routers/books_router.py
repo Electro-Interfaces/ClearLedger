@@ -760,9 +760,13 @@ async def counterparties(
 ) -> dict[str, Any]:
     """Контрагенты пространства с их оборотами и долгом за период.
 
-    Долг считается по регистру: проводки документов контрагента на счетах расчётов
-    (62 — покупатели, 60 — поставщики). Сальдо, а не «сумма неоплаченных счетов»:
-    зачёты авансов и корректировки живут только в регистре.
+    Долг берётся ИЗ САЛЬДО источника (`gl_balances`), а не выводится из наших
+    проводок. Считать его по проводкам нельзя дважды: остаток накоплен всей
+    историей регистра, включая периоды до выгрузки, а проводка не знает, чей это
+    долг — субконто через COM недоступно, и привязка шла через документ. Разница
+    не теоретическая: расчёт по проводкам показывал аванс Полякова −196 540 ₽ и
+    Сферы −21 182,40 ₽, которых в сальдо нет вовсе, и терял двух контрагентов,
+    у кого долг и аванс лежат на разных субсчетах.
     """
     cid = await assert_company_member(company_id, current_user, db)
     params: dict[str, Any] = {"cid": str(cid), "df": date_from, "dt": date_to,
@@ -784,16 +788,14 @@ async def counterparties(
                  max(date)                                         AS last_doc
             FROM doc GROUP BY 1
         ), debt AS (
-          SELECT d.counterparty_id,
-                 sum(CASE WHEN e.account_dt LIKE '62%' THEN e.amount ELSE 0 END)
-               - sum(CASE WHEN e.account_kt LIKE '62%' THEN e.amount ELSE 0 END) AS ar,
-                 sum(CASE WHEN e.account_kt LIKE '60%' THEN e.amount ELSE 0 END)
-               - sum(CASE WHEN e.account_dt LIKE '60%' THEN e.amount ELSE 0 END) AS ap
-            FROM gl_entries e
-            JOIN accounting_docs d ON d.id = e.doc_id
-           WHERE e.company_id = :cid AND d.counterparty_id IS NOT NULL
-             AND (e.account_dt LIKE '62%' OR e.account_kt LIKE '62%'
-                  OR e.account_dt LIKE '60%' OR e.account_kt LIKE '60%')
+          -- Сальдо последнего среза: дебет 62 — нам должны, кредит 60 — должны мы.
+          SELECT b.counterparty_id,
+                 sum(CASE WHEN b.account LIKE '62%' THEN b.debit - b.credit ELSE 0 END) AS ar,
+                 sum(CASE WHEN b.account LIKE '60%' THEN b.credit - b.debit ELSE 0 END) AS ap
+            FROM gl_balances b
+           WHERE b.company_id = :cid AND b.counterparty_id IS NOT NULL
+             AND b.as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid)
+             AND (b.account LIKE '62%' OR b.account LIKE '60%')
            GROUP BY 1
         )
         SELECT k.id, k.name, k.inn, k.kind,

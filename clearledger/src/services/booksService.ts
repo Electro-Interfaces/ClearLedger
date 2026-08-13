@@ -317,3 +317,59 @@ export interface DatasetView {
 /** Витрина одного набора данных нормализованного слоя. */
 export const getDataset = (companyId: string, key: string) =>
   get<DatasetView>(`/api/books/dataset?company_id=${companyId}&key=${key}`)
+
+// ── Аналитический слой: взаиморасчёты и налог ───────────────────────────────
+// Считает бэкенд по сальдо и оборотам из 1С, а не наши проводки: субконто в
+// регистре через COM недоступно, у проводки нет стороны расчётов.
+
+export interface SettlementRow {
+  account: string
+  accountName: string | null
+  counterparty: string | null
+  contract: string | null
+  debit: number
+  credit: number
+  /** Дебет минус кредит: положительное — должны нам, отрицательное — аванс. */
+  net: number
+}
+
+export interface SettlementsData {
+  /** Дата среза сальдо: остаток не пересчитывается, он снят на этот день. */
+  asOf: string | null
+  rows: SettlementRow[]
+  totals: { debit: number; credit: number }
+  months: { month: string; grew: number; closed: number }[]
+}
+
+export type SettlementKind = 'receivable' | 'payable' | 'other'
+
+export const getSettlements = (companyId: string, kind: SettlementKind) =>
+  get<SettlementsData>(`/api/books/settlements?company_id=${companyId}&kind=${kind}`)
+
+export interface VatRow {
+  date: string | null
+  number: string | null
+  counterparty: string | null
+  inn: string | null
+  kpp: string | null
+  amount: number
+  vat: number
+  rate: string | null
+  invoice: string | null
+  registrar: string | null
+  operationCode: string | null
+}
+
+export interface VatData {
+  total: number
+  amount: number
+  vat: number
+  kinds: { kind: string; count: number; amount: number; vat: number }[]
+  months: { month: string; count: number; amount: number; vat: number }[]
+  rows: VatRow[]
+}
+
+export type VatKind = 'issued' | 'received' | 'claimed'
+
+export const getVat = (companyId: string, kind: VatKind, period?: PeriodOpts) =>
+  get<VatData>(`/api/books/vat?company_id=${companyId}&kind=${kind}` + periodQuery(period))
