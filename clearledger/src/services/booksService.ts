@@ -1116,6 +1116,9 @@ export const getDocCard = (companyId: string, docId: string) =>
 // ⚠ ПДн: ответ содержит ФИО, ИНН и СНИЛС сотрудников клиента.
 
 export interface PayrollData {
+  /** Регистры НДФЛ и взносов: из них собираются 6-НДФЛ и РСВ. */
+  taxRegisters: { period: string; income: number; ndflAccrued: number
+    ndflPaid: number; contribBase: number; contribAccrued: number }[]
   totals: {
     accrued: number
     ndfl: number
@@ -1175,19 +1178,23 @@ export interface CheckItem {
   title: string
   /** Чем грозит — показывается только у сработавших проверок. */
   risk: string
-  status: 'ok' | 'warn' | 'error' | 'info'
+  status: 'ok' | 'warn' | 'error' | 'info' | 'reviewed'
   count: number
   amount: number
+  /** Отметка «разобрано» на всей проверке. */
+  decision?: FindingDecision | null
   value: string
   rows: { id: string; date: string; number: string; subject: string; amount: number }[]
 }
 
 export interface ChecksData {
-  groups: { key: string; title: string; checks: CheckItem[]; errors: number; warnings: number }[]
+  groups: { key: string; title: string; checks: CheckItem[]
+    errors: number; warnings: number; reviewed: number }[]
   /** Настройки, с которыми сверяется учёт: учётная политика и налоговый режим. */
   policy: { kind: string; title: string; settings: Record<string, string> }[]
   errors: number
   warnings: number
+  reviewed: number
   ok: number
 }
 
@@ -1351,11 +1358,13 @@ export const applyExportRules = (companyId: string, period: string) =>
 export interface TrendsData {
   months: { month: string; revenue: number; cost: number; expense: number
     profit: number; docs: number }[]
-  findings: { key: string; title: string; why: string; count: number
-    rows: { period: string; subject: string; amount: number; note: string }[] }[]
+  findings: { key: string; title: string; why: string; count: number; open: number
+    decision: FindingDecision | null
+    rows: { period: string; subject: string; amount: number; note: string
+      rowKey: string; decision: FindingDecision | null }[] }[]
   /** Показатели, которые инспекция считает по той же отчётности (приказ ММ-3-06/333@). */
   fnsRisk: { title: string; value: string; status: string; note: string }[]
-  summary: { months: number; findings: number; kinds: number
+  summary: { months: number; findings: number; open: number; kinds: number
     scale: number; thresholds: { big: number; notable: number } }
 }
 
@@ -1374,9 +1383,47 @@ export interface TaxCalendarData {
     due: string | null; lines: unknown[] }[]
   filed: { date: string; title: string; period: string | null; signed: string | null }[]
   debts: { account: string; name: string; amount: number }[]
+  /** Долг перед бюджетом на конец каждого месяца — из помесячных срезов сальдо. */
+  debtMonths: { month: string; amount: number }[]
   summary: { overdue: number; soon: number; enpBalance: number
     budgetDebt: number; filed: number }
 }
 
 export const getTaxCalendar = (companyId: string) =>
   get<TaxCalendarData>(`/api/books/calendar?company_id=${companyId}`)
+
+/** Отметка «разобрано» у находки проверки или тенденции. */
+export interface FindingDecision {
+  decision: string; note: string; by?: string | null
+  at?: string | null; until?: string | null
+}
+
+export const decideFinding = (
+  companyId: string, scope: 'checks' | 'trends' | 'closing',
+  ruleKey: string, v: { rowKey?: string; decision: string; note?: string; until?: string },
+) => post<{ decision: string; note?: string; until?: string | null }>(
+  `/api/books/findings/decision?company_id=${companyId}&scope=${scope}`
+  + `&rule_key=${encodeURIComponent(ruleKey)}`
+  + `&row_key=${encodeURIComponent(v.rowKey ?? '')}`
+  + `&decision=${v.decision}`
+  + (v.note ? `&note=${encodeURIComponent(v.note)}` : '')
+  + (v.until ? `&valid_until=${v.until}` : ''), {})
+
+/** Заготовка письма контрагенту по требованию. */
+export interface RequestLetter {
+  to: string; counterparty: string; subject: string; body: string
+  mailbox: { id: string; address: string; title: string } | null
+  canSend: boolean; why: string | null
+  due: string | null; period: string
+  escalations: { at: string; by: string; kind: string; to?: string; subject?: string }[]
+}
+
+export const getRequestLetter = (companyId: string, id: string) =>
+  get<RequestLetter>(`/api/books/requests/${id}/letter?company_id=${companyId}`)
+
+export const sendRequestLetter = (
+  companyId: string, id: string, v: { to: string; subject: string; body: string },
+) => post<{ sent: boolean; status: string; escalations: number }>(
+  `/api/books/requests/${id}/send?company_id=${companyId}`
+  + `&to=${encodeURIComponent(v.to)}&subject=${encodeURIComponent(v.subject)}`
+  + `&body=${encodeURIComponent(v.body)}`, {})

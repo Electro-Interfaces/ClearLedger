@@ -24,7 +24,7 @@ from app.auth import assert_company_member, get_current_user
 from app.database import get_db
 from app.models import (
     AccountingDoc, Contract, Counterparty, DocRequest, ExportAdjustment, ExportRule,
-    GlAccount, GlBalance, GlEntry, GlReference,
+    FindingDecision, GlAccount, GlBalance, GlEntry, GlReference,
     GlTurnover, InvoicePayment, NomenclatureItem, Period, User, ReferenceSnapshot,
     SourceFile, VatEntry,
 )
@@ -1148,7 +1148,7 @@ async def ar_aging(
         SELECT coalesce(sum(debit), 0), coalesce(sum(credit), 0)
           FROM gl_balances
          WHERE company_id = :cid AND account LIKE '62%'
-           AND as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid)
+           AND as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid AND source <> 'monthly')
     """), {"cid": str(cid)})).one()
 
     return {
@@ -1662,7 +1662,7 @@ async def stock(
         WITH snap AS (
           SELECT account, debit, credit FROM gl_balances
            WHERE company_id = :cid AND account LIKE :acc
-             AND as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid)
+             AND as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid AND source <> 'monthly')
         )
         SELECT coalesce(sum(debit - credit), 0) FROM snap
          WHERE CASE WHEN EXISTS (SELECT 1 FROM snap WHERE account LIKE :sub)
@@ -3281,7 +3281,7 @@ async def counterparties(
                  sum(CASE WHEN b.account LIKE '71%' THEN b.credit - b.debit ELSE 0 END) AS accountable
             FROM gl_balances b
            WHERE b.company_id = :cid AND b.counterparty_id IS NOT NULL
-             AND b.as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid)
+             AND b.as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid AND source <> 'monthly')
            GROUP BY 1
         )
         SELECT k.id, k.name, k.inn, k.kind,
@@ -3410,7 +3410,7 @@ async def counterparty_card(
                sum(b.credit - b.debit) FILTER (WHERE b.account LIKE '71%')
           FROM gl_balances b
          WHERE b.company_id = :cid AND b.counterparty_id::text = :kid
-           AND b.as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid)
+           AND b.as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid AND source <> 'monthly')
     """), params)).one()
 
     contracts = [{"id": str(r[0]), "number": r[1], "date": r[2], "type": r[3],
@@ -4432,8 +4432,11 @@ async def settlements(
     # они завышали дебет впятеро и показывали в карточке деньги, которых контрагент не должен.
     prefix = {"receivable": "62", "payable": "60", "other": "76.0"}[kind]
 
+    # Берём детальный срез с аналитикой, а не помесячные сводные остатки: в них нет
+    # разреза по контрагентам, и «Взаиморасчёты» опустели бы.
     as_of = (await db.execute(
-        select(func.max(GlBalance.as_of)).where(GlBalance.company_id == cid))).scalar_one_or_none()
+        select(func.max(GlBalance.as_of)).where(
+            GlBalance.company_id == cid, GlBalance.source != "monthly"))).scalar_one_or_none()
     if as_of is None:
         return {"asOf": None, "rows": [], "totals": {"debit": 0, "credit": 0}, "months": []}
 
@@ -4639,7 +4642,7 @@ async def payroll(
     debt = _num((await db.execute(text("""
         SELECT coalesce(sum(credit - debit), 0) FROM gl_balances
          WHERE company_id = :cid AND account LIKE '70%'
-           AND as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid)"""),
+           AND as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid AND source <> 'monthly')"""),
         p)).scalar_one())
 
     months = [{
@@ -4704,6 +4707,26 @@ async def payroll(
             "advance": advance,
         },
         "months": months, "employees": employees, "kinds": kinds, "docs": docs,
+        # Налоговые регистры зарплаты: из них собираются 6-НДФЛ и РСВ. Регистр
+        # расчётов с бюджетом по НДФЛ остаточный: приход — исчислено, расход —
+        # перечислено, и складывать их нельзя (иначе налог удваивается).
+        "taxRegisters": [{
+            "period": r[0],
+            "income": _num(r[1]), "deduction": _num(r[2]),
+            "ndflAccrued": _num(r[3]), "ndflPaid": _num(r[4]),
+            "contribBase": _num(r[5]), "contribAccrued": _num(r[6]),
+        } for r in (await db.execute(text("""
+            SELECT period_month,
+                   coalesce(sum(amount) FILTER (WHERE kind = 'ndfl_income'), 0),
+                   0,
+                   coalesce(sum(amount) FILTER (WHERE kind = 'ndfl_tax'), 0),
+                   coalesce(sum(amount) FILTER (WHERE kind = 'ndfl_paid'), 0),
+                   coalesce(sum(amount) FILTER (WHERE kind = 'contrib_base'), 0),
+                   coalesce(sum(amount) FILTER (WHERE kind = 'contrib_tax'), 0)
+              FROM payroll_entries
+             WHERE company_id = :cid
+               AND kind IN ('ndfl_income','ndfl_tax','ndfl_paid','contrib_base','contrib_tax')
+             GROUP BY 1 ORDER BY 1 DESC LIMIT 36"""), p)).all()],
     }
 
 
@@ -4905,6 +4928,62 @@ async def closing(
     }
 
 
+async def _decisions(db: AsyncSession, cid, scope: str) -> dict[tuple[str, str], dict]:
+    """Разобранные находки: «правило + строка» → решение.
+
+    Просроченные решения (`valid_until` в прошлом) не возвращаем: смысл срока в том,
+    чтобы в новом периоде посмотреть заново, а не унаследовать прошлогоднее «ок».
+    """
+    today = date.today().isoformat()
+    rows = (await db.execute(select(FindingDecision).where(
+        FindingDecision.company_id == cid, FindingDecision.scope == scope))).scalars()
+    return {(r.rule_key, r.row_key): {
+        "decision": r.decision, "note": r.note, "by": r.created_by,
+        "at": r.created_at.isoformat() if r.created_at else None,
+        "until": r.valid_until,
+    } for r in rows if not r.valid_until or r.valid_until >= today}
+
+
+@router.post("/findings/decision")
+async def decide_finding(
+    company_id: str,
+    scope: str,
+    rule_key: str,
+    row_key: str = "",
+    decision: str = "reviewed",
+    note: str = "",
+    valid_until: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Отметить находку разобранной. Повторный вызов обновляет решение."""
+    cid = await assert_company_member(company_id, current_user, db)
+    if scope not in ("checks", "trends", "closing"):
+        raise HTTPException(status_code=400, detail="Неизвестный раздел находок")
+    if decision not in ("reviewed", "accepted", "ignored", "open"):
+        raise HTTPException(status_code=400, detail="Неизвестное решение")
+
+    row = (await db.execute(select(FindingDecision).where(
+        FindingDecision.company_id == cid, FindingDecision.scope == scope,
+        FindingDecision.rule_key == rule_key,
+        FindingDecision.row_key == row_key))).scalar_one_or_none()
+
+    if decision == "open":
+        # Снять отметку: находка возвращается в работу.
+        if row is not None:
+            await db.delete(row)
+            await db.commit()
+        return {"decision": "open"}
+
+    if row is None:
+        row = FindingDecision(company_id=cid, scope=scope, rule_key=rule_key,
+                              row_key=row_key, created_by=current_user.email)
+        db.add(row)
+    row.decision, row.note, row.valid_until = decision, note, valid_until or None
+    await db.commit()
+    return {"decision": row.decision, "note": row.note, "until": row.valid_until}
+
+
 # ── Проверки учёта: аналог экспресс-проверки 1С на наших данных ──────────────
 # Бухгалтер знает этот жанр: правила сгруппированы по разделам учёта, у каждого
 # понятно, что нашли и где смотреть. Отличие от `/quality` (там про КАЧЕСТВО
@@ -5095,14 +5174,14 @@ _CHECKS: list[tuple] = [
         SELECT id::text, as_of::text, account, coalesce(sub1, '') || ' · ' || coalesce(sub2, ''), debit
           FROM gl_balances
          WHERE company_id = :cid AND account LIKE '60.02%' AND debit > 1000
-           AND as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid)
+           AND as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid AND source <> 'monthly')
          ORDER BY debit DESC"""),
     ("advance_vat_stuck", "vat_out", "НДС с полученного аванса не зачтён",
      "76.АВ висит: отгрузки по авансу не было, налог начислен и не возвращён вычетом", """
         SELECT id::text, as_of::text, account, coalesce(sub1, ''), debit
           FROM gl_balances
          WHERE company_id = :cid AND account LIKE '76.АВ%' AND debit > 0.004
-           AND as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid)
+           AND as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid AND source <> 'monthly')
          ORDER BY debit DESC"""),
 
     # ── Первичка: то, что находит проверяющий раньше бухгалтера ────────────────
@@ -5137,6 +5216,27 @@ _CHECKS: list[tuple] = [
                coalesce(doc_title, ''), amount
           FROM gl_entries WHERE company_id = :cid AND amount < 0
          ORDER BY amount"""),
+
+    ("ndfl_reg_vs_acct", "payroll", "Регистр НДФЛ расходится с 68.01",
+     "6-НДФЛ собирается по регистру, баланс по счёту: расхождение увидит инспекция", """
+        SELECT gen_random_uuid()::text, '', 'регистр/счёт',
+               'регистр ' || round(r.reg, 2) || ' · счёт ' || round(a.acct, 2),
+               round(r.reg - a.acct, 2)
+          FROM (SELECT coalesce(sum(amount) FILTER (WHERE kind = 'ndfl_tax'), 0) AS reg
+                  FROM payroll_entries WHERE company_id = :cid) r,
+               (SELECT coalesce(sum(amount) FILTER (WHERE account_kt LIKE '68.01%'), 0) AS acct
+                  FROM gl_entries WHERE company_id = :cid) a
+         WHERE abs(r.reg - a.acct) > 1 AND r.reg > 0"""),
+    ("contrib_reg_vs_acct", "payroll", "Регистр взносов расходится с 69",
+     "РСВ собирается по регистру взносов: расхождение с оборотами счёта надо объяснить", """
+        SELECT gen_random_uuid()::text, '', 'регистр/счёт',
+               'регистр ' || round(r.reg, 2) || ' · счёт ' || round(a.acct, 2),
+               round(r.reg - a.acct, 2)
+          FROM (SELECT coalesce(sum(amount) FILTER (WHERE kind = 'contrib_tax'), 0) AS reg
+                  FROM payroll_entries WHERE company_id = :cid) r,
+               (SELECT coalesce(sum(amount) FILTER (WHERE account_kt LIKE '69%'), 0) AS acct
+                  FROM gl_entries WHERE company_id = :cid) a
+         WHERE abs(r.reg - a.acct) > 100 AND r.reg > 0"""),
 
     ("payment_no_purpose", "money", "Платежи без назначения",
      "Назначение платежа — главный реквизит банковской операции: без него платёж не опознать", """
@@ -5205,7 +5305,7 @@ _CHECKS: list[tuple] = [
           FROM gl_balances
          WHERE company_id = :cid AND (account LIKE '41%' OR account LIKE '10%'
                                    OR account LIKE '43%') AND credit > debit
-           AND as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid)"""),
+           AND as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid AND source <> 'monthly')"""),
     # Остаток «не в свою сторону» — классика анализа состояния учёта: минус в дебете
     # активного счёта не бывает физически, это всегда ошибка ввода или зачёта.
     ("negative_balance", "books", "Отрицательное сальдо на счёте",
@@ -5213,7 +5313,7 @@ _CHECKS: list[tuple] = [
         SELECT id::text, as_of::text, account, coalesce(sub1, ''), least(debit, credit)
           FROM gl_balances
          WHERE company_id = :cid AND (debit < 0 OR credit < 0)
-           AND as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid)
+           AND as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid AND source <> 'monthly')
          ORDER BY least(debit, credit)"""),
 
     # Регламентные операции, акты сверки и ручные операции в 1С не проводятся по
@@ -5255,16 +5355,28 @@ async def checks(
          WHERE company_id = :cid AND kind IN ('accounting_policy', 'tax_mode')"""),
         p)).all()}
 
+    # Разобранные находки: правило целиком или отдельные строки. Экран по умолчанию
+    # показывает всё, но считает «требует внимания» только неразобранное — иначе
+    # объяснённый однажды случай навсегда остаётся красным.
+    seen = await _decisions(db, cid, "checks")
+
     for key, group, title, risk, sql in _CHECKS:
         rows: list[dict[str, Any]] = []
         count = 0
         amount = 0.0
+        done: dict[str, Any] | None = None
         if sql:
             found = (await db.execute(text(sql), p)).all()
             count = len(found)
             amount = round(sum(_num(r[4]) for r in found), 2)
             rows = [{"id": r[0], "date": r[1], "number": r[2],
-                     "subject": r[3], "amount": _num(r[4])} for r in found[:50]]
+                     "subject": r[3], "amount": _num(r[4]),
+                     "decision": seen.get((key, str(r[0])))} for r in found[:50]]
+            # Разобрана либо вся проверка (пустой ключ строки), либо каждая строка.
+            done = seen.get((key, ""))
+            if done is None and count and rows:
+                done = ({"decision": "reviewed", "note": "все строки разобраны"}
+                        if all(r["decision"] for r in rows) and count <= 50 else None)
 
         # Проверки-сверки: у них не список нарушителей, а цифра из регистра.
         if key in ("payroll_unpaid", "ndfl_debt"):
@@ -5297,15 +5409,18 @@ async def checks(
                 else "warn")
             value = str(count) if count else "нет"
 
+        if count and done:
+            status = "reviewed"
         out.append({"key": key, "group": group, "title": title, "risk": risk,
                     "status": status, "count": count, "amount": amount,
-                    "value": value, "rows": rows})
+                    "value": value, "rows": rows, "decision": done if count else None})
 
     groups = [{
         "key": g, "title": t,
         "checks": [c for c in out if c["group"] == g],
         "errors": sum(1 for c in out if c["group"] == g and c["status"] == "error"),
         "warnings": sum(1 for c in out if c["group"] == g and c["status"] == "warn"),
+        "reviewed": sum(1 for c in out if c["group"] == g and c["status"] == "reviewed"),
     } for g, t in _CHECK_GROUPS]
 
     # Сама политика — рядом с проверками: сверять учёт с ней, не показывая её,
@@ -5321,6 +5436,7 @@ async def checks(
         "policy": policy,
         "errors": sum(1 for c in out if c["status"] == "error"),
         "warnings": sum(1 for c in out if c["status"] == "warn"),
+        "reviewed": sum(1 for c in out if c["status"] == "reviewed"),
         "ok": sum(1 for c in out if c["status"] == "ok"),
     }
 
@@ -5531,6 +5647,138 @@ async def update_request(
     return {"id": str(r.id), "status": r.status,
             "statusLabel": _REQUEST_STATUS.get(r.status, r.status),
             "escalations": r.escalations or []}
+
+
+
+
+# ── Обращение к контрагенту: реестр требований умеет писать ──────────────────
+# Требование без письма — это список, который кто-то должен отработать «в другом
+# месте». Адрес берём из карточки контрагента (руками его никто вводить не станет),
+# письмо уходит с ящика компании, а факт обращения остаётся в ленте требования:
+# без него спор «просили или нет» решается по памяти.
+
+
+@router.get("/requests/{request_id}/letter")
+async def request_letter(
+    request_id: str,
+    company_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Заготовка письма: кому, о чём и к какому сроку."""
+    cid = await assert_company_member(company_id, current_user, db)
+    try:
+        uid = uuid.UUID(request_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Требование не найдено")
+    r = (await db.execute(select(DocRequest).where(
+        DocRequest.company_id == cid, DocRequest.id == uid))).scalar_one_or_none()
+    if r is None:
+        raise HTTPException(status_code=404, detail="Требование не найдено")
+
+    # Адреса контрагента лежат отдельной таблицей: у одного поставщика их несколько,
+    # и письма бухгалтерии уходят не на общий ящик.
+    to = r.contact or ""
+    if not to and r.counterparty_id:
+        row = (await db.execute(text("""
+            SELECT address FROM counterparty_emails
+             WHERE company_id = :cid AND counterparty_id = CAST(:party AS uuid)
+             ORDER BY created_at LIMIT 1"""),
+            {"cid": str(cid), "party": str(r.counterparty_id)})).first()
+        to = row[0] if row else ""
+
+    box = (await db.execute(text("""
+        SELECT id::text, address, title FROM mail_accounts
+         WHERE company_id = :cid AND mode <> 'in' AND is_active
+         ORDER BY created_at LIMIT 1"""), {"cid": str(cid)})).first()
+
+    doc = None
+    if r.source_doc_id:
+        doc = (await db.execute(select(AccountingDoc).where(
+            AccountingDoc.id == r.source_doc_id))).scalar_one_or_none()
+
+    what = _RULE_DOC_KIND.get(r.rule, r.doc_kind or "документ")
+    basis = ""
+    if doc is not None:
+        basis = " по операции %s № %s от %s" % (
+            DOC_LABELS.get(doc.doc_type, doc.doc_type), doc.number, doc.date)
+    money_part = ""
+    if r.amount:
+        money_part = " на сумму %s ₽" % ("%.2f" % _num(r.amount)).replace(",", " ")
+    due_part = ""
+    if r.due_date:
+        due_part = ("Документ нужен до %s — он входит в отчётность за период %s."
+                    % (r.due_date, r.period))
+
+    # Пустые строки — это абзацы письма, и отфильтровывать их вместе с незаполненным
+    # сроком нельзя. Название документа не понижаем: «упд» строчными читается как
+    # опечатка, а не как вежливость.
+    parts = ["Здравствуйте!", "",
+             "Просим передать %s%s%s." % (what, basis, money_part), ""]
+    if due_part:
+        parts += [due_part, ""]
+    parts += ["Если документ уже направлен, сообщите, пожалуйста, дату и способ отправки.",
+              "", "С уважением,", "бухгалтерия"]
+    body = chr(10).join(parts)
+    return {
+        "to": to, "counterparty": r.counterparty_name,
+        "subject": "%s за %s" % (what, r.period), "body": body,
+        "mailbox": ({"id": box[0], "address": box[1], "title": box[2]} if box else None),
+        "canSend": bool(box),
+        "why": (None if box else
+                "У компании нет ящика для отправки: заведите его в «Подключениях», "
+                "иначе письмо уйти не сможет"),
+        "due": r.due_date, "period": r.period,
+        "escalations": r.escalations or [],
+    }
+
+
+@router.post("/requests/{request_id}/send")
+async def send_request_letter(
+    request_id: str,
+    company_id: str,
+    to: str,
+    subject: str,
+    body: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Отправить письмо по требованию и записать обращение в его ленту."""
+    cid = await assert_company_member(company_id, current_user, db)
+    try:
+        uid = uuid.UUID(request_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Требование не найдено")
+    r = (await db.execute(select(DocRequest).where(
+        DocRequest.company_id == cid, DocRequest.id == uid))).scalar_one_or_none()
+    if r is None:
+        raise HTTPException(status_code=404, detail="Требование не найдено")
+
+    box = (await db.execute(text("""
+        SELECT id::text FROM mail_accounts
+         WHERE company_id = :cid AND mode <> 'in' AND is_active
+         ORDER BY created_at LIMIT 1"""), {"cid": str(cid)})).first()
+    if not box:
+        raise HTTPException(status_code=400, detail="У компании нет ящика для отправки")
+
+    from ..services.mail_send import send_message
+    res = await send_message(db, cid, account_id=uuid.UUID(box[0]), to=[to],
+                             subject=subject, body=body, author=current_user.email)
+    if res.get("error"):
+        raise HTTPException(status_code=400, detail=res["error"])
+
+    r.escalations = list(r.escalations or []) + [{
+        "at": datetime.now(timezone.utc).isoformat(), "by": current_user.email,
+        "kind": "письмо", "to": to, "subject": subject,
+        "threadId": str(res.get("threadId") or "") or None,
+    }]
+    # Обращение состоялось — требование переходит из «нашли» в «попросили».
+    if r.status == "open":
+        r.status = "requested"
+    if not r.contact:
+        r.contact = to
+    await db.commit()
+    return {"sent": True, "status": r.status, "escalations": len(r.escalations)}
 
 
 @router.post("/requests/resolve")
@@ -5783,7 +6031,7 @@ async def tax_forecast(
         SELECT account, max(coalesce(account_name, '')), sum(credit - debit)
           FROM gl_balances
          WHERE company_id = :cid AND (account LIKE '68%' OR account LIKE '69%')
-           AND as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid)
+           AND as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid AND source <> 'monthly')
          GROUP BY account HAVING abs(sum(credit - debit)) > 0.004
          ORDER BY 3 DESC"""), p)).all()]
 
@@ -6190,9 +6438,20 @@ async def tax_calendar(
         SELECT account, max(account_name), sum(credit) - sum(debit)
           FROM gl_balances
          WHERE company_id = :cid AND (account LIKE '68%' OR account LIKE '69%')
-           AND as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid)
+           AND as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid AND source <> 'monthly')
          GROUP BY account HAVING abs(sum(credit) - sum(debit)) > 0.004
          ORDER BY 3 DESC"""), p)).all()]
+
+    # Долг перед бюджетом по месяцам: помесячные срезы сальдо приезжают из 1С
+    # (`source = 'monthly'`), поэтому «сколько были должны в марте» — вопрос к данным,
+    # а не к памяти бухгалтера.
+    debt_months = [{"month": r[0][:7], "amount": _num(r[1])}
+                   for r in (await db.execute(text("""
+        SELECT as_of::text, sum(credit) - sum(debit)
+          FROM gl_balances
+         WHERE company_id = :cid AND source = 'monthly'
+           AND (account LIKE '68%' OR account LIKE '69%')
+         GROUP BY as_of ORDER BY as_of DESC LIMIT 24"""), p)).all()]
 
     notices = [{
         "number": r[0], "date": r[1], "amount": _num(r[2]),
@@ -6217,7 +6476,7 @@ async def tax_calendar(
     return {
         "today": today,
         "tasks": tasks, "enp": enp, "notices": notices, "filed": filed,
-        "debts": debts,
+        "debts": debts, "debtMonths": debt_months,
         "note": ("Сроки и отметки берутся из 1С как есть. Отметку о выполнении там ведут "
                  "не всегда, поэтому прошедший срок показан как «срок прошёл», а не как "
                  "нарушение: часть работы могла быть сделана без отметки."),
@@ -6277,11 +6536,21 @@ async def trends(
     notable = max(20_000.0, round(scale * 0.10, -3))  # «заметно» для одной суммы
 
     findings: list[dict[str, Any]] = []
+    seen = await _decisions(db, cid, "trends")
 
     def add(key: str, title: str, why: str, rows: list[dict[str, Any]]) -> None:
-        if rows:
-            findings.append({"key": key, "title": title, "why": why,
-                             "count": len(rows), "rows": rows[:30]})
+        if not rows:
+            return
+        # Ключ строки тенденции — период и предмет: id у сводной находки нет, а эта
+        # пара опознаёт её и после перезаливки данных.
+        for r in rows:
+            r["rowKey"] = f"{r.get('period', '')}|{r.get('subject', '')}"[:300]
+            r["decision"] = seen.get((key, r["rowKey"]))
+        open_rows = [r for r in rows if not r["decision"]]
+        findings.append({"key": key, "title": title, "why": why,
+                         "count": len(rows), "open": len(open_rows),
+                         "decision": seen.get((key, "")),
+                         "rows": rows[:30]})
 
     # 1. Резкий скачок расходов против среднего за три предыдущих месяца.
     jumps = []
@@ -6479,6 +6748,7 @@ async def trends(
         "summary": {
             "months": len(months),
             "findings": sum(f["count"] for f in findings),
+            "open": sum(f["open"] for f in findings if not f["decision"]),
             "kinds": len(findings),
             "scale": round(scale, 2),
             "thresholds": {"big": big, "notable": notable},

@@ -12,17 +12,20 @@
  * Числа приходят посчитанными с бэкенда — фронт не пересчитывает ничего, иначе
  * «Взаиморасчёты» разойдутся с оборотками на копейках округления.
  */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 
 import { QueryError } from '@/components/common/QueryError'
 import { Card, CardContent } from '@/components/ui/card'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { MetricTile } from '@/components/ui/metric-tile'
 import { cn } from '@/lib/utils'
 import {
-  applyExportRules, createRequestsFromGaps, getChecks, getClosing, getExportLayer,
-  getPayroll, getRequests, getTaxCalendar, getTrends,
+  applyExportRules, createRequestsFromGaps, decideFinding, getChecks, getClosing,
+  getExportLayer,
+  getPayroll, getRequestLetter, getRequests, getTaxCalendar, getTrends,
+  sendRequestLetter,
   getSettlements, getTaxForecast, getVat, resolveRequests, updateAdjustment,
   updateRequest,
   type SettlementKind, type SettlementsData, type VatData, type VatKind,
@@ -339,6 +342,27 @@ export function BooksPayroll({ companyId }: { companyId: string }) {
           </tr>
         ))}
       </TableCard>
+
+      {d.taxRegisters?.length > 0 && (
+        <TableCard note="Налоговые регистры зарплаты из 1С: из них собираются 6-НДФЛ и РСВ"
+          head={<><Th>Месяц</Th><Th right>Доход</Th><Th right>НДФЛ начислен</Th>
+            <Th right>НДФЛ перечислен</Th><Th right>База взносов</Th>
+            <Th right>Взносы</Th></>}>
+          {d.taxRegisters.map((r) => (
+            <tr key={r.period} className="border-b last:border-0 hover:bg-muted/40">
+              <td className="px-3 py-1.5 whitespace-nowrap">{monthLabel(r.period)}</td>
+              <td className="px-3 py-1.5 text-right tabular-nums">{money.format(r.income)}</td>
+              <td className="px-3 py-1.5 text-right tabular-nums">{money.format(r.ndflAccrued)}</td>
+              <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+                {money.format(r.ndflPaid)}
+              </td>
+              <td className="px-3 py-1.5 text-right tabular-nums">{money.format(r.contribBase)}</td>
+              <td className="px-3 py-1.5 text-right tabular-nums">{money.format(r.contribAccrued)}</td>
+            </tr>
+          ))}
+        </TableCard>
+      )}
+
     </div>
   )
 }
@@ -552,8 +576,11 @@ const CHECK_TONE: Record<string, string> = {
   warn: 'text-amber-600 dark:text-amber-400',
   info: 'text-sky-600 dark:text-sky-400',
   ok: 'text-emerald-600 dark:text-emerald-400',
+  reviewed: 'text-muted-foreground',
 }
-const CHECK_MARK: Record<string, string> = { error: '●', warn: '●', info: '●', ok: '✓' }
+const CHECK_MARK: Record<string, string> = {
+  error: '●', warn: '●', info: '●', ok: '✓', reviewed: '✓',
+}
 
 /**
  * «Бухгалтерия» → «Проверки учёта»: жанр, который бухгалтер знает по 1С.
@@ -583,7 +610,8 @@ export function BooksChecks({ companyId }: { companyId: string }) {
           tone={d.errors ? 'danger' : undefined} hint="учёт считается неверным" />
         <MetricTile label="Стоит посмотреть" value={String(d.warnings)}
           tone={d.warnings ? 'warning' : undefined} hint="не ошибка, но объяснимо не всё" />
-        <MetricTile label="В порядке" value={String(d.ok)} />
+        <MetricTile label="В порядке" value={String(d.ok)}
+          hint={d.reviewed ? `плюс ${d.reviewed} разобрано` : undefined} />
       </div>
 
       {/* Настройки, с которыми сверяется учёт. Проверка без показанной
@@ -655,6 +683,12 @@ export function BooksChecks({ companyId }: { companyId: string }) {
                       )}
                     </div>
                   </button>
+                  {c.count > 0 && (
+                    <div className="px-3 pb-1.5 -mt-1 text-right">
+                      <ReviewButton companyId={companyId} scope="checks" ruleKey={c.key}
+                        decision={c.decision} onDone={() => q.refetch()} />
+                    </div>
+                  )}
                   {open === c.key && c.rows.length > 0 && (
                     <div className="overflow-x-auto border-t bg-muted/20">
                       <table className="w-full text-sm">
@@ -713,6 +747,7 @@ const REQ_STATUSES = ['open', 'requested', 'promised', 'received', 'disputed', '
 export function BooksRequests({ companyId }: { companyId: string }) {
   const [status, setStatus] = useState<string>('')
   const [openRow, setOpenRow] = useState<string | null>(null)
+  const [letterFor, setLetterFor] = useState<string | null>(null)
   const [text, setText] = useState('')
   const qc = useQueryClient()
   const q = useQuery({
@@ -785,7 +820,7 @@ export function BooksRequests({ companyId }: { companyId: string }) {
 
       <TableCard note="Требование закрывается появлением документа в слое, а не отметкой «сделано»"
         head={<><Th>Период</Th><Th>Контрагент</Th><Th>Чего ждём</Th><Th right>Сумма</Th>
-          <Th>Срок</Th><Th>Состояние</Th></>}>
+          <Th>Срок</Th><Th>Состояние</Th><Th /></>}>
         {d.items.map((r) => (
           <>
             <tr key={r.id} onClick={() => setOpenRow(openRow === r.id ? null : r.id)}
@@ -807,10 +842,16 @@ export function BooksRequests({ companyId }: { companyId: string }) {
                   </span>
                 )}
               </td>
+              <td className="px-3 py-1.5 text-right whitespace-nowrap">
+                <button onClick={(e) => { e.stopPropagation(); setLetterFor(r.id) }}
+                  className="rounded-md px-2 py-0.5 text-[12px] text-muted-foreground hover:bg-accent">
+                  написать
+                </button>
+              </td>
             </tr>
             {openRow === r.id && (
               <tr key={`${r.id}-open`} className="border-b bg-muted/20">
-                <td colSpan={6} className="px-3 py-3 space-y-3">
+                <td colSpan={7} className="px-3 py-3 space-y-3">
                   {r.escalations.length > 0 && (
                     <div className="space-y-1">
                       {r.escalations.map((e, i) => (
@@ -844,6 +885,11 @@ export function BooksRequests({ companyId }: { companyId: string }) {
           </>
         ))}
       </TableCard>
+
+      {letterFor && (
+        <RequestLetterDialog companyId={companyId} requestId={letterFor}
+          onClose={() => setLetterFor(null)} onSent={() => q.refetch()} />
+      )}
     </div>
   )
 }
@@ -961,6 +1007,39 @@ export function BooksForecast({ companyId }: { companyId: string }) {
   )
 }
 
+
+
+/**
+ * Отметка «разобрано» у находки. Проверки и тенденции пересчитываются каждый раз,
+ * поэтому решение хранится отдельно и цепляется ключом «правило + строка»: иначе
+ * объяснённый однажды случай остаётся красным навсегда.
+ */
+function ReviewButton({ companyId, scope, ruleKey, rowKey, decision, onDone }: {
+  companyId: string; scope: 'checks' | 'trends'; ruleKey: string; rowKey?: string
+  decision?: { decision: string; note?: string } | null; onDone: () => void
+}) {
+  const m = useMutation({
+    mutationFn: (v: string) => decideFinding(companyId, scope, ruleKey,
+      { rowKey, decision: v, note: v === 'ignored' ? 'правило шумит на этих данных' : '' }),
+    onSuccess: onDone,
+    onError: (e) => toast.error(`Не вышло: ${(e as Error).message}`),
+  })
+  if (decision) {
+    return (
+      <button onClick={() => m.mutate('open')} disabled={m.isPending}
+        title={decision.note || undefined}
+        className="rounded-md px-2 py-0.5 text-[12px] text-muted-foreground hover:bg-accent">
+        разобрано ✓
+      </button>
+    )
+  }
+  return (
+    <button onClick={() => m.mutate('reviewed')} disabled={m.isPending}
+      className="rounded-md px-2 py-0.5 text-[12px] text-muted-foreground hover:bg-accent">
+      разобрать
+    </button>
+  )
+}
 
 /* ───────────────────────────── Слой выгрузки ──────────────────────────────── */
 
@@ -1126,9 +1205,9 @@ export function BooksTrends({ companyId }: { companyId: string }) {
     <div className="p-4 space-y-4">
       <div className="grid gap-3 sm:grid-cols-3">
         <MetricTile label="Месяцев с оборотом" value={String(shown.length)} />
-        <MetricTile label="Поводов посмотреть" value={String(d.summary.findings)}
-          tone={d.summary.findings ? 'warning' : undefined}
-          hint={`в ${d.summary.kinds} направлениях`} />
+        <MetricTile label="Поводов посмотреть" value={String(d.summary.open)}
+          tone={d.summary.open ? 'warning' : undefined}
+          hint={`не разобрано из ${d.summary.findings}`} />
         <MetricTile label="Прибыль за год"
           value={`${money.format(shown.slice(-12).reduce((s, m) => s + m.profit, 0))} ₽`}
           hint="последние 12 месяцев с оборотом" />
@@ -1190,22 +1269,30 @@ export function BooksTrends({ companyId }: { companyId: string }) {
       {d.findings.map((f) => (
         <Card key={f.key}>
           <CardContent className="p-0">
-            <button onClick={() => setOpen(open === f.key ? null : f.key)}
-              className="w-full flex items-start gap-3 px-3 py-2.5 text-left hover:bg-muted/40">
-              <span className="mt-0.5 text-muted-foreground text-xs">
-                {open === f.key ? '▾' : '▸'}
+            <div className={cn('w-full flex items-start gap-3 px-3 py-2.5',
+              f.decision && 'opacity-60')}>
+              <button onClick={() => setOpen(open === f.key ? null : f.key)}
+                className="flex flex-1 items-start gap-3 text-left">
+                <span className="mt-0.5 text-muted-foreground text-xs">
+                  {open === f.key ? '▾' : '▸'}
+                </span>
+                <span className="flex-1">
+                  <span className="text-sm font-medium">{f.title}</span>
+                  <span className="block text-[11px] text-muted-foreground mt-0.5">{f.why}</span>
+                </span>
+              </button>
+              <span className="text-sm tabular-nums text-muted-foreground">
+                {f.decision ? f.count : `${f.open} из ${f.count}`}
               </span>
-              <span className="flex-1">
-                <span className="text-sm font-medium">{f.title}</span>
-                <span className="block text-[11px] text-muted-foreground mt-0.5">{f.why}</span>
-              </span>
-              <span className="text-sm tabular-nums text-muted-foreground">{f.count}</span>
-            </button>
+              <ReviewButton companyId={companyId} scope="trends" ruleKey={f.key}
+                decision={f.decision} onDone={() => q.refetch()} />
+            </div>
             {open === f.key && (
               <table className="w-full text-sm border-t">
                 <tbody>
                   {f.rows.map((r, i) => (
-                    <tr key={i} className="border-b last:border-0">
+                    <tr key={i} className={cn('border-b last:border-0',
+                      r.decision && 'opacity-50')}>
                       <td className="px-3 py-1.5 w-28 whitespace-nowrap text-muted-foreground">
                         {r.period ? monthLabel(r.period) : '—'}
                       </td>
@@ -1213,13 +1300,18 @@ export function BooksTrends({ companyId }: { companyId: string }) {
                       <td className="px-3 py-1.5 w-32 text-right tabular-nums whitespace-nowrap">
                         {r.amount ? `${money.format(r.amount)} ₽` : ''}
                       </td>
-                      <td className="px-3 py-1.5 w-64 text-[11px] text-muted-foreground">
+                      <td className="px-3 py-1.5 w-56 text-[11px] text-muted-foreground">
                         {r.note}
+                      </td>
+                      <td className="px-3 py-1.5 w-24 text-right whitespace-nowrap">
+                        <ReviewButton companyId={companyId} scope="trends" ruleKey={f.key}
+                          rowKey={r.rowKey} decision={r.decision}
+                          onDone={() => q.refetch()} />
                       </td>
                     </tr>
                   ))}
                   {f.count > f.rows.length && (
-                    <tr><td colSpan={4} className="px-3 py-1.5 text-[11px] text-muted-foreground">
+                    <tr><td colSpan={5} className="px-3 py-1.5 text-[11px] text-muted-foreground">
                       показаны первые {f.rows.length} из {f.count}
                     </td></tr>
                   )}
@@ -1317,6 +1409,18 @@ export function BooksCalendar({ companyId }: { companyId: string }) {
 
       {tab === 'enp' && (
         <div className="space-y-4">
+          {d.debtMonths?.length > 0 && (
+            <TableCard note="Долг перед бюджетом на конец месяца — из помесячных срезов сальдо"
+              head={<><Th>Месяц</Th><Th right>Должны на конец</Th></>}>
+              {d.debtMonths.map((m) => (
+                <tr key={m.month} className="border-b last:border-0">
+                  <td className="px-3 py-1.5 whitespace-nowrap">{monthLabel(m.month)}</td>
+                  <td className="px-3 py-1.5 text-right tabular-nums">{money.format(m.amount)} ₽</td>
+                </tr>
+              ))}
+            </TableCard>
+          )}
+
           {d.debts.length > 0 && (
             <TableCard note="Сальдо счетов расчётов с бюджетом и фондами на последнюю дату"
               head={<><Th>Счёт</Th><Th>Налог</Th><Th right>Должны</Th></>}>
@@ -1383,5 +1487,111 @@ export function BooksCalendar({ companyId }: { companyId: string }) {
         </TableCard>
       )}
     </div>
+  )
+}
+
+
+/**
+ * Письмо контрагенту по требованию: заготовка с адресом, темой и текстом.
+ *
+ * Реестр без письма — это список, который кто-то должен отработать «в другом
+ * месте». Текст готовит бэкенд из самого требования (что просим, по какому
+ * документу, к какому сроку), человек правит и отправляет. Факт обращения
+ * остаётся в ленте требования.
+ */
+export function RequestLetterDialog({ companyId, requestId, onClose, onSent }: {
+  companyId: string; requestId: string; onClose: () => void; onSent: () => void
+}) {
+  const [to, setTo] = useState('')
+  const [subject, setSubject] = useState('')
+  const [body, setBody] = useState('')
+  const q = useQuery({
+    queryKey: ['books', 'request-letter', companyId, requestId],
+    queryFn: () => getRequestLetter(companyId, requestId),
+  })
+  useEffect(() => {
+    if (q.data) {
+      setTo(q.data.to)
+      setSubject(q.data.subject)
+      setBody(q.data.body)
+    }
+  }, [q.data])
+
+  const send = useMutation({
+    mutationFn: () => sendRequestLetter(companyId, requestId, { to, subject, body }),
+    onSuccess: () => { toast.success('Письмо отправлено'); onSent(); onClose() },
+    onError: (e) => toast.error(`Не отправилось: ${(e as Error).message}`),
+  })
+
+  const d = q.data
+  return (
+    <Dialog open onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle className="text-base">
+            Письмо контрагенту{d?.counterparty ? ` · ${d.counterparty}` : ''}
+          </DialogTitle>
+        </DialogHeader>
+        {!d ? (
+          <div className="py-6 text-sm text-muted-foreground">Готовим письмо…</div>
+        ) : (
+          <div className="space-y-3">
+            {!d.canSend && (
+              <div className="rounded-md border border-amber-500/40 bg-amber-500/5 px-3 py-2
+                              text-[12px] text-amber-700 dark:text-amber-500">
+                {d.why}
+              </div>
+            )}
+            <div className="grid gap-2 sm:grid-cols-2">
+              <label className="text-[12px] text-muted-foreground">
+                Кому
+                <input value={to} onChange={(e) => setTo(e.target.value)}
+                  placeholder="адрес контрагента"
+                  className="mt-1 h-8 w-full rounded-md border border-border bg-background
+                             px-2.5 text-[13px] text-foreground outline-none" />
+              </label>
+              <label className="text-[12px] text-muted-foreground">
+                От кого
+                <input value={d.mailbox?.address ?? 'ящик не настроен'} readOnly
+                  className="mt-1 h-8 w-full rounded-md border border-border bg-muted/40
+                             px-2.5 text-[13px] text-muted-foreground outline-none" />
+              </label>
+            </div>
+            <label className="block text-[12px] text-muted-foreground">
+              Тема
+              <input value={subject} onChange={(e) => setSubject(e.target.value)}
+                className="mt-1 h-8 w-full rounded-md border border-border bg-background
+                           px-2.5 text-[13px] text-foreground outline-none" />
+            </label>
+            <label className="block text-[12px] text-muted-foreground">
+              Текст
+              <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={11}
+                className="mt-1 w-full rounded-md border border-border bg-background
+                           px-2.5 py-2 text-[13px] text-foreground outline-none" />
+            </label>
+
+            {d.escalations.length > 0 && (
+              <div className="text-[11px] text-muted-foreground">
+                Уже обращались: {d.escalations.length} раз ·
+                последнее {d.escalations[d.escalations.length - 1].at.slice(0, 10)}
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2 pt-1">
+              <button onClick={onClose}
+                className="h-8 rounded-md border border-border px-3 text-[13px] hover:bg-accent">
+                Отмена
+              </button>
+              <button onClick={() => send.mutate()}
+                disabled={!d.canSend || !to.trim() || send.isPending}
+                className="h-8 rounded-md bg-primary px-3 text-[13px] text-primary-foreground
+                           hover:bg-primary/90 disabled:opacity-40">
+                {send.isPending ? 'Отправляем…' : 'Отправить'}
+              </button>
+            </div>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
   )
 }

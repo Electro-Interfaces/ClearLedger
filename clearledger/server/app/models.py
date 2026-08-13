@@ -1724,6 +1724,51 @@ class ExportRule(Base):
     )
 
 
+class FindingDecision(Base):
+    """Решение человека по находке проверки или тенденции.
+
+    Проверки и тенденции пересчитываются с нуля при каждом открытии — иначе они
+    отстанут от данных. Но у находки есть вторая жизнь: её один раз разобрали и
+    объяснили. Без следа этого разбора объяснённый разовый поставщик 2022 года
+    висит вечно, и к третьей неделе экран перестают открывать.
+
+    Поэтому решение живёт отдельно от находки и цепляется к ней ключом
+    «правило + строка». Находка исчезла — решение осталось; вернулась (данные
+    перезалили) — решение снова к ней применится.
+
+    `valid_until` для повторяющихся сюжетов: «в этом квартале объяснили, в новом
+    посмотрим заново». Пусто — решение бессрочно.
+    """
+
+    __tablename__ = "finding_decisions"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
+    )
+    # Откуда находка: checks — проверки учёта, trends — тенденции, closing — дыры.
+    scope: Mapped[str] = mapped_column(String(20), nullable=False, default="checks")
+    rule_key: Mapped[str] = mapped_column(String(60), nullable=False)
+    # Что именно разобрали: id документа, либо «период|предмет» для сводных строк.
+    row_key: Mapped[str] = mapped_column(String(300), nullable=False, default="")
+    # reviewed — посмотрели и вопросов нет, accepted — так и должно быть,
+    # ignored — не наш случай (правило шумит на этих данных).
+    decision: Mapped[str] = mapped_column(String(20), nullable=False, default="reviewed")
+    note: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    valid_until: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    created_by: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("uq_finding_decision", "company_id", "scope", "rule_key", "row_key",
+              unique=True),
+    )
+
+
 class DocRequest(Base):
     """Требование документа: что ждём от контрагента и что уже делали, чтобы получить.
 
