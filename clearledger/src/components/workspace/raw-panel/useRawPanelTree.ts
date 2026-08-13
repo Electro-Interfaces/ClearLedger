@@ -133,7 +133,8 @@ function bookDocToDoc(row: DocRow, sectionTitle: string, i: number): LoadedDocum
   const shown = m ? `${m[3]}.${m[2]}.${m[1]}` : '—'
   const who = row.counterparty?.trim() || 'Без контрагента'
   return {
-    id: `${row.type}-${i}`,
+    // id документа, а не порядковый: по нему просмотрщик берёт карточку.
+    id: row.id || `${row.type}-${i}`,
     channelId: '', streamId: '', docType: row.type, origin: 'api',
     fingerprint: `${row.type}|${row.date}|${row.number}|${row.inn ?? ''}`,
     title: `№ ${row.number || 'б/н'} от ${shown} — ${who}`,

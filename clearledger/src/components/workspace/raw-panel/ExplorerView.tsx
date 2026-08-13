@@ -23,6 +23,9 @@ import { ShiftDetailsDialog } from '@/components/fuel/ShiftDetailsDialog'
 import { ReceiptDetailsModal } from '@/components/fuel/ReceiptDetailsModal'
 import type { FsNode } from './raw-panel-types'
 import type { DocRow } from '@/services/booksService'
+import { useCompany } from '@/contexts/CompanyContext'
+import { BookDocDialog } from './BookDocDialog'
+import { FlatDocsView } from './FlatDocsView'
 import { cn } from '@/lib/utils'
 
 const money = new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 2 })
@@ -242,6 +245,14 @@ export function ExplorerView() {
   const state = useRawPanelState()
   const tree = useRawPanelTree(state.filters, state.sortConfig)
   const [previewOpen, setPreviewOpen] = useState(true)
+  const { companyId } = useCompany()
+  // Просмотрщик документа учёта: у смен и ТТН свои модалки, у первички из
+  // бухгалтерии не было никакой — документ открывался только в самой 1С.
+  const [viewingDocId, setViewingDocId] = useState<string | null>(null)
+  // Список вместо дерева осмыслен там, где у файлов есть строка реестра: колонки
+  // отбора берутся из неё. У смен и прогонов каналов её нет — там только дерево.
+  const listable = tree.flatFiles.some((n) => !!n.typeText)
+  const asList = listable && state.viewMode === 'list'
 
   const currentKey = state.currentPath.join('/')
   const rawItems = tree.fsTree.get(currentKey) ?? []
@@ -270,9 +281,15 @@ export function ExplorerView() {
     if (n.type === 'folder') {
       state.navigateTo(n.path.split('/'))
       state.setSelectedNode(null)
-    } else {
-      state.openFile(n)
+      return
     }
+    // Документ учёта открывается своим просмотрщиком: шапка, состав, оплата, проводки.
+    if (n.typeText && n.doc?.id) {
+      state.setSelectedNode(n)
+      setViewingDocId(n.doc.id)
+      return
+    }
+    state.openFile(n)
   }
 
   const canBack = state.currentPath.length > 0
@@ -340,7 +357,9 @@ export function ExplorerView() {
         <Sep />
         <CmdButton icon={ArrowUpDown} label="Сортировать" chevron
           onClick={() => state.toggleSort(state.sortConfig.column === 'name' ? 'date' : 'name')} />
-        <CmdButton icon={LayoutList} label="Просмотреть" chevron disabled />
+        <CmdButton icon={LayoutList} label={asList ? 'Папками' : 'Списком'}
+          disabled={!listable}
+          onClick={() => state.setViewMode(asList ? 'tree' : 'list')} />
         <CmdButton icon={MoreHorizontal} />
         <div className="ml-auto" />
         <CmdButton icon={PanelRight} label="Просмотр" onClick={() => setPreviewOpen((v) => !v)} />
@@ -349,6 +368,11 @@ export function ExplorerView() {
       {/* Тело: дерево | таблица | превью. Дерево на мобиле скрыто —
           навигация по папкам через крошки и открытие папок в списке. */}
       <div className="flex-1 flex min-h-0">
+        {asList ? (
+          <FlatDocsView files={tree.flatFiles} sortConfig={state.sortConfig}
+            onSort={state.toggleSort} onOpen={openNode} />
+        ) : (
+        <>
         <div className="hidden md:block w-64 shrink-0 bg-sidebar border-r border-border overflow-y-auto scroll-thin">
           {/* Быстрый доступ */}
           <div className="py-1">
@@ -378,6 +402,8 @@ export function ExplorerView() {
         />
 
         {previewOpen && <PreviewPane node={selected} />}
+        </>
+        )}
       </div>
 
       {/* Статус-бар */}
@@ -402,6 +428,7 @@ export function ExplorerView() {
         open={!!state.viewingApiReceipt}
         onClose={() => state.setViewingApiReceipt(null)}
       />
+      <BookDocDialog companyId={companyId} docId={viewingDocId} onClose={() => setViewingDocId(null)} />
     </div>
   )
 }
