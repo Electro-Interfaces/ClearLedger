@@ -30,7 +30,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { MetricTile } from '@/components/ui/metric-tile'
 import { cn } from '@/lib/utils'
 import {
-  getArAging, getAssortment, getBacklog, getCashflow, getCollectionCurve,
+  getArAging, getAssortment, getBacklog, getCashflow, getCashForecast, getCollectionCurve,
   getConcentration, getContractSales, getDeals, getDocsAll, getPaymentTerms,
   getRevenue, getRevenueCheck, getRevenueQuality, getStock, getSuppliers,
   type DocRow, type RevKind,
@@ -291,7 +291,7 @@ const FIXED_KIND: Record<string, RevKind> = {
 const NO_KIND = ['rev_invoices', 'rev_funnel', 'rev_recon', 'rev_abc', 'rev_abc_items',
   'rev_margin', 'rev_terms', 'rev_cashflow', 'rev_contracts', 'rev_stock', 'rev_suppliers',
   'rev_prices', 'rev_quality', 'rev_deals', 'rev_conc', 'rev_aging', 'rev_collect',
-  'rev_backlog']
+  'rev_backlog', 'rev_forecast']
 
 export function RevenuePanel() {
   const { coreMode } = useWorkspace()
@@ -361,6 +361,7 @@ export function RevenuePanel() {
       case 'rev_conc':       return <RevConcentration companyId={companyId} />
       case 'rev_aging':      return <RevAging companyId={companyId} />
       case 'rev_collect':    return <RevCollection companyId={companyId} />
+      case 'rev_forecast':   return <RevForecast companyId={companyId} />
       case 'rev_backlog':    return <RevBacklog companyId={companyId} />
       default:               return <RevOverview companyId={companyId} kind={shown} period={period} />
     }
@@ -3066,6 +3067,146 @@ function RevBacklog({ companyId }: { companyId: string }) {
               {r.daysSinceLast !== null && (
                 <span className="ml-1 text-[11px]">{num.format(r.daysSinceLast)} дн. назад</span>
               )}
+            </td>
+          </tr>
+        ))}
+      </TableCard>
+      {card && <CounterpartyWindow companyId={companyId} id={card} onClose={() => setCard(null)} />}
+    </div>
+  )
+}
+
+/**
+ * Прогноз поступлений от открытого долга.
+ *
+ * Считается не «по сроку договора», а по исторической кривой инкассации: деньги,
+ * которые должны были прийти за прошедшие дни жизни счёта, уже не пришли, и это
+ * меняет ожидание. Для счёта возраста A ожидаемая доля досбора равна
+ * (F_итог − F(A)) / (1 − F(A)) — условная вероятность на том, что до сих пор не
+ * оплачено. Поэтому свежий счёт даёт 45 %, а зависший на четыре года — ноль.
+ *
+ * Цифра консервативна дважды: кривая построена по счетам, которые регистр «Оплата
+ * счетов» свёл (остальные не видны вовсе), и её потолок — историческая доля сбора,
+ * а не сто процентов.
+ */
+function RevForecast({ companyId }: { companyId: string }) {
+  const q = useQuery({
+    queryKey: ['books', 'cash-forecast', companyId],
+    queryFn: () => getCashForecast(companyId),
+    enabled: !!companyId,
+  })
+  const [card, setCard] = useState<string | null>(null)
+
+  if (q.isError) return <div className="p-4"><QueryError onRetry={() => q.refetch()} /></div>
+  if (!q.data) return <Loading />
+  const d = q.data
+  if (!d.openCount) {
+    return (
+      <div className="p-6 text-sm text-muted-foreground">
+        Открытых счетов с известной оплатой нет — прогнозировать нечего.
+        {d.unknownCount > 0 && ` Ещё ${num.format(d.unknownCount)} счетов вне расчёта:
+        регистр «Оплата счетов» их не свёл.`}
+      </div>
+    )
+  }
+  const maxWindow = Math.max(...d.windows.map((w) => w.amount), 1)
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
+        <MetricTile label="Открытый долг" value={money.format(d.openAmount) + ' ₽'}
+          hint={`${num.format(d.openCount)} счетов с известной оплатой`} />
+        <MetricTile label="Ожидаем получить" value={money.format(d.expected) + ' ₽'}
+          hint={`${((d.expected / d.openAmount) * 100).toFixed(1)} % открытого долга`}
+          tone={d.expected / d.openAmount > 0.5 ? 'success' : 'danger'} />
+        <MetricTile label="Из них в ближайшие 90 дней"
+          value={money.format(d.windows.find((w) => w.days === 90)?.amount ?? 0) + ' ₽'} />
+        <MetricTile label="Вне прогноза" value={num.format(d.unknownCount)}
+          hint={`${money.format(d.unknownAmount)} ₽: оплата неизвестна`} />
+      </div>
+
+      <Card>
+        <CardContent className="p-4 space-y-3">
+          <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
+            Ожидаемые поступления накопительно — снимок на {d.asOf}
+          </div>
+          {d.windows.map((w) => (
+            <div key={w.days} className="space-y-1">
+              <div className="flex justify-between text-sm">
+                <span>В ближайшие {w.label}</span>
+                <span className="tabular-nums">{money.format(w.amount)} ₽</span>
+              </div>
+              <div className="h-2.5 rounded bg-muted overflow-hidden">
+                <div className="h-full bg-primary/60"
+                  style={{ width: `${(w.amount / maxWindow) * 100}%` }} />
+              </div>
+            </div>
+          ))}
+          <p className="text-[11px] text-muted-foreground pt-1">
+            Прогноз идёт по исторической кривой: из выставленного собирается{' '}
+            {d.totalSharePct} % (по {num.format(d.historyInvoices)} счетам на{' '}
+            {money.format(d.historyBilled)} ₽). Для счёта, дожившего до своего возраста
+            и не оплаченного, ожидание считается от НЕПРИШЕДШЕЙ части — поэтому свежий
+            счёт даёт заметную долю, а зависший на годы почти ноль. Цифра консервативна:
+            счета, которых регистр не свёл с платежами, в кривую не входят.
+          </p>
+        </CardContent>
+      </Card>
+
+      <TableCard note="Историческая кривая инкассации: доля собранного к дню"
+        head={<>{d.curve.map((c) => <Th key={c.days} right>{c.days} дн.</Th>)}</>}>
+        <tr>
+          {d.curve.map((c) => (
+            <td key={c.days} className="px-3 py-1.5 text-right tabular-nums">{c.pct} %</td>
+          ))}
+        </tr>
+      </TableCard>
+
+      <div className="flex justify-end">
+        <ExportButton onClick={() => exportTable('Прогноз поступлений', [
+          { header: 'Счёт', key: 'number', width: 16 },
+          { header: 'Дата', key: 'date', width: 12 },
+          { header: 'Покупатель', key: 'counterparty', width: 40 },
+          { header: 'Долг', key: 'rest', width: 18, money: true },
+          { header: 'Возраст, дней', key: 'age', width: 14 },
+          { header: 'Ожидаем', key: 'expected', width: 18, money: true },
+          { header: 'Доля, %', key: 'expectedPct', width: 10 },
+          { header: 'В 30 дней', key: 'in30', width: 16, money: true },
+        ], d.rows)} />
+      </div>
+
+      <TableCard note="По каждому открытому счёту: сколько ждём и как скоро"
+        head={<><Th>Счёт</Th><Th>Покупатель</Th><Th right>Долг</Th><Th right>Возраст</Th>
+          <Th right>Ожидаем</Th><Th right>Доля</Th><Th right>В 30 дней</Th></>}>
+        {d.rows.map((r) => (
+          <tr key={r.id} className="border-b last:border-0 hover:bg-muted/40">
+            <td className="px-3 py-1.5 tabular-nums whitespace-nowrap">
+              {r.number}
+              <span className="ml-1 text-[11px] text-muted-foreground">{r.date}</span>
+            </td>
+            <td className="px-3 py-1.5 max-w-[260px] truncate" title={r.counterparty}>
+              {r.counterpartyId ? (
+                <button onClick={() => setCard(r.counterpartyId)}
+                  className="text-left hover:text-primary hover:underline">{r.counterparty}</button>
+              ) : r.counterparty}
+            </td>
+            <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">
+              {money.format(r.rest)} ₽
+            </td>
+            <td className={cn('px-3 py-1.5 text-right tabular-nums',
+              r.age > 180 ? 'text-rose-600 dark:text-rose-400' : 'text-muted-foreground')}>
+              {num.format(r.age)} дн.
+            </td>
+            <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">
+              {money.format(r.expected)} ₽
+            </td>
+            <td className={cn('px-3 py-1.5 text-right tabular-nums',
+              r.expectedPct >= 40 ? 'text-emerald-600 dark:text-emerald-400'
+              : r.expectedPct < 10 ? 'text-rose-600 dark:text-rose-400' : 'text-muted-foreground')}>
+              {r.expectedPct} %
+            </td>
+            <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground whitespace-nowrap">
+              {money.format(r.in30)} ₽
             </td>
           </tr>
         ))}
