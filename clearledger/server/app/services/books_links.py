@@ -131,7 +131,9 @@ _ENTRY_LINK_SQL = """
              SELECT 1 FROM accounting_docs x
               WHERE x.company_id = d.company_id AND x.doc_type = d.doc_type
                 AND x.number = d.number AND x.date = d.date AND x.id <> d.id)
-            OR position(substring(e.doc_title from '\d{2}:\d{2}:\d{2}') in d.external_id) > 0)
+            -- Время документа лежит в реквизитах: в ключе его нет у половины видов.
+            OR d.details->>'Время документа' =
+               substring(e.doc_title from '\d{2}:\d{2}:\d{2}'))
 """
 
 _ENTRY_UNLINK_SQL = """
