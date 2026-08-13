@@ -70,7 +70,11 @@ export interface DocRow {
   /** closed — месяц закрыт в бухгалтерии, документ уже не переписать. */
   periodStatus: string
   lines: number
-  /** Оплата счёта покупателю: null — вопрос неприменим, 0 — не оплачен. */
+  /**
+   * Оплата счёта покупателю. null — оплата НЕИЗВЕСТНА (у не-счетов вопрос
+   * неприменим, у счёта нет записи в регистре «Оплата счетов»), 0 — регистр знает
+   * счёт и оплаты по нему нет.
+   */
   paid: number | null
 }
 
@@ -136,7 +140,11 @@ export const getDocs = (
   companyId: string, docType?: string, period?: PeriodOpts, section?: string, offset = 0,
   lineKind?: string,
 ) =>
-  get<{ rows: DocRow[]; total: number; kinds: DocKind[]; sections: DocSection[] }>(
+  get<{
+    rows: DocRow[]; total: number; kinds: DocKind[]; sections: DocSection[]
+    /** Покрытие регистра оплат: у скольких показанных счетов связь вообще есть. */
+    paidKnown?: number; paidTotal?: number
+  }>(
     `/api/books/docs?company_id=${companyId}${docType ? `&doc_type=${docType}` : ''}`
     + (section && !docType ? `&section=${section}` : '')
     + (lineKind ? `&line_kind=${lineKind}` : '')
@@ -193,6 +201,9 @@ export interface AssortmentRow {
   soldAmount?: number
   boughtQty?: number
   boughtAmount?: number
+  /** Те же суммы БЕЗ НДС — маржа считается по ним: на 90.02.1 налога нет. */
+  soldNet?: number
+  boughtNet?: number
   docs: number
   first: string | null
   last: string | null
@@ -223,9 +234,15 @@ export interface StockData {
     daysOfSupply: number | null
     firstBuy: string | null; lastBuy: string | null; lastSale: string | null
     lastMove: string | null; idleDays: number | null
+    /** Позицию хоть раз продавали — этим товар отличается от закупки для себя. */
+    everSold: boolean
   }[]
   restAmount: number
   positions: number
+  goodsAmount: number
+  goodsPositions: number
+  boughtTotal: number
+  registerIntake: number
   negative: number
   negativeQty: number
   idle: number

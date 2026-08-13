@@ -1032,7 +1032,13 @@ async def stock(
           SELECT doc_type, date, btrim(ln->>'code') code, ln->>'name' name,
                  (ln->>'qty')::numeric qty,
                  coalesce((ln->>'amount_raw')::numeric, (ln->>'amount')::numeric) amount
-            FROM l WHERE coalesce(btrim(ln->>'code'), '') <> ''
+            FROM l
+           WHERE coalesce(btrim(ln->>'code'), '') <> ''
+             -- Только товарные строки: у услуги остатка не бывает по природе.
+             -- Без этого фильтра в «остаток» попадали консультации, аренда и
+             -- транспорт — 2,37 млн ₽ из 2,54 млн на пилоте, то есть экран про
+             -- склад показывал почти целиком услуги.
+             AND coalesce(ln->>'kind', 'goods') = 'goods'
         )
         SELECT code, name,
                sum(qty)    FILTER (WHERE doc_type = 'purchase'),

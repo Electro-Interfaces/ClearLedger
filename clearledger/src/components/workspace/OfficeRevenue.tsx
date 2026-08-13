@@ -1259,19 +1259,29 @@ function RevInvoices({ companyId, period }: { companyId: string; period: Period 
   if (q.isError) return <div className="p-4"><QueryError onRetry={() => q.refetch()} /></div>
   if (!q.data) return <Loading />
 
+  // «Оплата неизвестна» и «не оплачен» — разные ответы. Регистр «Оплата счетов»
+  // покрывает часть счетов; у остальных данных нет, и записывать их в долг нельзя.
+  const known = q.data.rows.filter((r) => r.paid !== null)
+  const unknown = q.data.rows.length - known.length
   const rows = q.data.rows.filter((r) =>
-    (!onlyDebt || (r.amount - (r.paid ?? 0)) > 0.01) && inRange(r.amount, amount.from, amount.to))
+    (!onlyDebt || (r.paid !== null && r.amount - r.paid > 0.01))
+    && inRange(r.amount, amount.from, amount.to))
   const billed = q.data.rows.reduce((s, r) => s + r.amount, 0)
-  const paid = q.data.rows.reduce((s, r) => s + (r.paid ?? 0), 0)
+  const billedKnown = known.reduce((s, r) => s + r.amount, 0)
+  const paid = known.reduce((s, r) => s + (r.paid ?? 0), 0)
 
   return (
     <div className="p-4 space-y-3">
-      <div className="grid gap-3 grid-cols-3">
+      <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
         <MetricTile label="Выставлено" value={money.format(billed) + ' ₽'}
           hint={`${num.format(q.data.rows.length)} счетов`} />
         <MetricTile label="Оплачено" value={money.format(paid) + ' ₽'}
-          hint={billed ? `${((paid / billed) * 100).toFixed(1)}% суммы счетов` : '—'} />
-        <MetricTile label="Не оплачено" value={money.format(billed - paid) + ' ₽'} />
+          hint={billedKnown ? `${((paid / billedKnown) * 100).toFixed(1)}% от счетов с известной оплатой` : '—'} />
+        <MetricTile label="Не оплачено" value={money.format(billedKnown - paid) + ' ₽'}
+          hint={`по ${num.format(known.length)} счетам, где оплата известна`} />
+        <MetricTile label="Оплата неизвестна" value={num.format(unknown)}
+          hint="нет записи в регистре «Оплата счетов»"
+          tone={unknown ? 'danger' : undefined} />
       </div>
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-3 flex-wrap">
@@ -1288,13 +1298,14 @@ function RevInvoices({ companyId, period }: { companyId: string; period: Period 
           { header: 'Оплачено', key: 'paid', width: 16, money: true },
         ], rows)} />
       </div>
-      <TableCard note={`${num.format(rows.length)} счетов за период`}
+      <TableCard note={`${num.format(rows.length)} счетов за период`
+        + (unknown ? ` · у ${num.format(unknown)} оплата неизвестна: регистр «Оплата счетов» их не свёл` : '')}
         head={<>
           <Th>Дата</Th><Th>Номер</Th><Th>Покупатель</Th>
           <Th right>Сумма</Th><Th right>Оплачено</Th><Th right>Остаток</Th>
         </>}>
         {rows.map((r) => {
-          const rest = r.amount - (r.paid ?? 0)
+          const rest = r.paid === null ? null : r.amount - r.paid
           return (
             <tr key={r.id} className="border-b last:border-0 hover:bg-muted/40">
               <td className="px-3 py-1.5 tabular-nums whitespace-nowrap">{r.date}</td>
@@ -1310,11 +1321,11 @@ function RevInvoices({ companyId, period }: { companyId: string; period: Period 
               </td>
               <td className="px-3 py-1.5 text-right tabular-nums">{money.format(r.amount)}</td>
               <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
-                {r.paid == null ? '—' : money.format(r.paid)}
+                {r.paid === null ? '—' : money.format(r.paid)}
               </td>
               <td className={cn('px-3 py-1.5 text-right tabular-nums',
-                rest > 0.01 ? 'text-rose-600' : 'text-muted-foreground')}>
-                {money.format(rest)}
+                rest !== null && rest > 0.01 ? 'text-rose-600' : 'text-muted-foreground')}>
+                {rest === null ? 'нет данных' : money.format(rest)}
               </td>
             </tr>
           )
@@ -1342,16 +1353,18 @@ function RevFunnel({ companyId, period }: { companyId: string; period: Period })
   const sale = useDocs(companyId, 'sale', period)
 
   const months = useMemo(() => {
-    const by = new Map<string, { billed: number; shipped: number; paid: number }>()
+    const by = new Map<string, { billed: number; shipped: number; paid: number; unknown: number }>()
     const cell = (m: string) => {
-      const c = by.get(m) ?? { billed: 0, shipped: 0, paid: 0 }
+      const c = by.get(m) ?? { billed: 0, shipped: 0, paid: 0, unknown: 0 }
       by.set(m, c)
       return c
     }
     for (const r of inv.data?.rows ?? []) {
       const c = cell(r.date.slice(0, 7))
       c.billed += r.amount
+      // Только известная оплата: отсутствие записи в регистре это не ноль.
       c.paid += r.paid ?? 0
+      if (r.paid === null) c.unknown += r.amount
     }
     for (const r of sale.data?.rows ?? []) cell(r.date.slice(0, 7)).shipped += r.amount
     return [...by.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([month, v]) => ({ month, ...v }))
@@ -1366,7 +1379,11 @@ function RevFunnel({ companyId, period }: { companyId: string; period: Period })
   const stages: { label: string; value: number; note: string }[] = [
     { label: 'Выставлено счетов', value: billed, note: `${num.format(inv.data.rows.length)} документов` },
     { label: 'Отгружено', value: shipped, note: `${num.format(sale.data.rows.length)} реализаций` },
-    { label: 'Оплачено по счетам', value: paid, note: 'из регистра «Оплата счетов»' },
+    {
+      label: 'Оплачено по счетам', value: paid,
+      note: `известно по ${num.format(inv.data.rows.filter((r) => r.paid !== null).length)}`
+        + ` счетам из ${num.format(inv.data.rows.length)}`,
+    },
   ]
   const max = Math.max(billed, shipped, paid, 1)
 
@@ -1395,8 +1412,9 @@ function RevFunnel({ companyId, period }: { companyId: string; period: Period })
           ))}
           <p className="text-[11px] text-muted-foreground pt-1">
             Стадии сопоставлены по периоду: ссылки «счёт → реализация» выгрузка 1С не
-            несёт, документ-основание в ней не заполнено. Оплата — только по счетам,
-            попавшим в период.
+            несёт, документ-основание в ней не заполнено. Оплата считается только по
+            счетам, которые регистр «Оплата счетов» свёл с платежами — у остальных её
+            не «ноль», а неизвестно, и в долг они не записываются.
           </p>
         </CardContent>
       </Card>
@@ -1432,20 +1450,25 @@ function RevFunnel({ companyId, period }: { companyId: string; period: Period })
 function UnpaidInvoices({ rows, companyId }: { rows: DocRow[]; companyId: string }) {
   const [card, setCard] = useState<string | null>(null)
   const today = new Date().toISOString().slice(0, 10)
+  // Только счета с ИЗВЕСТНОЙ оплатой: без записи в регистре «не оплачен» — догадка,
+  // а список для звонков из догадок не составляют.
   const unpaid = rows
+    .filter((r) => r.paid !== null)
     .map((r) => ({ ...r, rest: r.amount - (r.paid ?? 0) }))
     .filter((r) => r.rest > 0.01)
     .sort((a, b) => b.rest - a.rest)
+  const unknown = rows.filter((r) => r.paid === null).length
 
   return (
     <>
       <TableCard note={`Счета без полной оплаты: ${num.format(unpaid.length)} на `
-        + `${money.format(unpaid.reduce((s, r) => s + r.rest, 0))} ₽`}
+        + `${money.format(unpaid.reduce((s, r) => s + r.rest, 0))} ₽`
+        + (unknown ? ` · ещё у ${num.format(unknown)} оплата неизвестна` : '')}
         head={<><Th>Дата</Th><Th>Номер</Th><Th>Покупатель</Th>
           <Th right>Сумма</Th><Th right>Не оплачено</Th><Th right>Дней</Th></>}>
         {unpaid.length === 0 ? (
           <tr><td colSpan={6} className="px-3 py-3 text-sm text-muted-foreground">
-            Все счета периода оплачены
+            Среди счетов с известной оплатой неоплаченных нет
           </td></tr>
         ) : unpaid.map((r) => (
           <tr key={r.id} className="border-b last:border-0 hover:bg-muted/40">
@@ -1501,9 +1524,13 @@ function RevMargin({ companyId, period }: { companyId: string; period: Period })
 
   const rows = useMemo(() => (q.data?.rows ?? []).map((r) => {
     const soldQty = r.soldQty ?? 0
-    const sold = r.soldAmount ?? 0
+    // Маржа считается БЕЗ НДС: на 90.02.1 себестоимость лежит без налога, и с
+    // суммами «как в документе» сверка расходилась ровно на ставку — первый прогон
+    // дал 112 % регистра. Выручка с НДС остаётся на других экранах: там она сходится
+    // с 90.01.1, где налог сидит внутри.
+    const sold = r.soldNet ?? r.soldAmount ?? 0
     const boughtQty = r.boughtQty ?? 0
-    const bought = r.boughtAmount ?? 0
+    const bought = r.boughtNet ?? r.boughtAmount ?? 0
     // Средняя цена — сумма / количество, а не среднее из цен строк: строка на сто
     // штук весит столько же, сколько строка на одну, и «среднее из средних» врёт.
     const avgSale = soldQty ? sold / soldQty : 0
@@ -1536,9 +1563,9 @@ function RevMargin({ companyId, period }: { companyId: string; period: Period })
   return (
     <div className="p-4 space-y-4">
       <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
-        <MetricTile label="Продано (с известной закупкой)"
+        <MetricTile label="Продано без НДС"
           value={money.format(soldKnown) + ' ₽'}
-          hint={`${num.format(known.length)} позиций из ${num.format(rows.length)}`} />
+          hint={`${num.format(known.length)} позиций с известной закупкой из ${num.format(rows.length)}`} />
         <MetricTile label="Себестоимость (расчётная)" value={money.format(costKnown) + ' ₽'}
           hint="средняя цена закупки × проданное количество" />
         <MetricTile label="Маржа" value={money.format(soldKnown - costKnown) + ' ₽'}
@@ -1549,9 +1576,10 @@ function RevMargin({ companyId, period }: { companyId: string; period: Period })
       </div>
 
       <p className="text-[11px] text-muted-foreground">
-        Себестоимость считается по строкам поступлений (средневзвешенная цена закупки за
-        период), партии и FIFO не учитываются — поэтому рядом стоит оборот 90.02.1 как
-        контроль. {noCost > 0 && `У ${num.format(noCost)} позиций закупки в периоде нет —
+        Суммы здесь БЕЗ НДС — иначе сравнение с оборотом 90.02.1 завышено на ставку
+        налога. Себестоимость считается по строкам поступлений (средневзвешенная цена
+        закупки за период), партии и FIFO не учитываются — поэтому оборот 90.02.1 стоит
+        рядом как контроль. {noCost > 0 && `У ${num.format(noCost)} позиций закупки в периоде нет —
         услуги, работы и товар со старых остатков; их маржа не считается.`}
       </p>
 
@@ -2088,7 +2116,7 @@ function RevStock({ companyId }: { companyId: string }) {
     queryFn: () => getStock(companyId),
     enabled: !!companyId,
   })
-  const [tab, setTab] = useState<'rest' | 'idle' | 'negative'>('rest')
+  const [tab, setTab] = useState<'rest' | 'own' | 'idle' | 'negative'>('rest')
   const [search, setSearch] = useState('')
   const [card, setCard] = useState<string | null>(null)
 
@@ -2096,37 +2124,44 @@ function RevStock({ companyId }: { companyId: string }) {
   if (!q.data) return <Loading />
   const d = q.data
   const rows = d.rows
-    .filter((r) => tab === 'rest' ? r.restQty > 0
-      : tab === 'idle' ? r.restQty > 0 && (r.idleDays ?? 0) > 180
+    .filter((r) => tab === 'rest' ? r.restQty > 0 && r.everSold
+      : tab === 'own' ? r.restQty > 0 && !r.everSold
+      : tab === 'idle' ? r.restQty > 0 && r.everSold && (r.idleDays ?? 0) > 180
       : r.restQty < 0)
     .filter((r) => !search || r.name.toLowerCase().includes(search.toLowerCase())
       || r.code.toLowerCase().includes(search.toLowerCase()))
-  const diff = d.restAmount - d.register
 
   return (
     <div className="p-4 space-y-4">
       <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
-        <MetricTile label="Расчётный остаток" value={money.format(d.restAmount) + ' ₽'}
-          hint={`${num.format(d.positions)} позиций в плюсе`} />
-        <MetricTile label="Сальдо счёта 41" value={money.format(d.register) + ' ₽'}
-          hint={Math.abs(diff) < 1 ? 'сходится' : `расчёт больше на ${money.format(diff)} ₽`} />
+        <MetricTile label="Товар: куплено и не продано"
+          value={money.format(d.goodsAmount) + ' ₽'}
+          hint={`${num.format(d.goodsPositions)} позиций, которые компания продаёт`} />
+        <MetricTile label="Куплено для себя"
+          value={money.format(d.restAmount - d.goodsAmount) + ' ₽'}
+          hint={`${num.format(d.positions - d.goodsPositions)} позиций: техника, материалы, канцелярия`} />
         <MetricTile label="Лежит без движения" value={money.format(d.idleAmount) + ' ₽'}
-          hint={`${num.format(d.idle)} позиций не двигались полгода`}
+          hint={`${num.format(d.idle)} товарных позиций не двигались полгода`}
           tone={d.idle > 0 ? 'danger' : undefined} />
-        <MetricTile label="Отрицательный остаток" value={num.format(d.negative)}
-          hint="продали то, чего в выгрузке не покупали" />
+        <MetricTile label="Сальдо счёта 41" value={money.format(d.register) + ' ₽'}
+          hint="товарный остаток по бухгалтерии на дату среза" />
       </div>
 
       <p className="text-[11px] text-muted-foreground">
-        Складского учёта в выгрузке нет: остаток = приход − расход по строкам документов,
-        оценка — по средней цене закупки. Партий и себестоимости списания в данных не
-        существует, поэтому сальдо 41 стоит рядом как контроль.
+        Складского учёта в выгрузке нет: считается «куплено минус продано» по строкам
+        документов, оценка — по средней цене закупки без НДС. Это НЕ складской остаток:
+        сюда попадает и то, что компания купила себе (техника, материалы под работы) —
+        оно списано в затраты, а не лежит товаром. Поэтому колонки разделены, а сальдо
+        41 показывает товарный остаток по бухгалтерии.
+        {' '}Закуплено по строкам {money.format(d.boughtTotal)} ₽, на счёт 41 попало{' '}
+        {money.format(d.registerIntake)} ₽ — разница и есть закупки мимо товарного счёта.
       </p>
 
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-3 flex-wrap">
           <Tabs value={tab} onChange={setTab} items={[
-            { key: 'rest' as const, label: 'Остаток' },
+            { key: 'rest' as const, label: 'Товар' },
+            { key: 'own' as const, label: 'Куплено для себя' },
             { key: 'idle' as const, label: 'Неликвиды' },
             { key: 'negative' as const, label: 'Отрицательные' },
           ]} />
@@ -2148,10 +2183,12 @@ function RevStock({ companyId }: { companyId: string }) {
 
       <TableCard
         note={tab === 'idle'
-          ? 'Остаток есть, продаж больше полугода нет — деньги стоят на полке'
+          ? 'Товар есть, продаж больше полугода нет — деньги стоят на полке'
           : tab === 'negative'
-          ? 'Списали больше, чем приходовали: закупка была до начала выгрузки'
-          : `${num.format(rows.length)} позиций с положительным остатком`}
+          ? 'Продали больше, чем приходовали: закупка была до начала выгрузки'
+          : tab === 'own'
+          ? 'Куплено, но никогда не продавалось: закупки для собственных нужд'
+          : `${num.format(rows.length)} товарных позиций, купленных и не проданных`}
         head={<><Th>Позиция</Th><Th right>Куплено</Th><Th right>Продано</Th>
           <Th right>Остаток</Th><Th right>Оценка</Th><Th right>Запас</Th>
           <Th>Последнее движение</Th></>}>
