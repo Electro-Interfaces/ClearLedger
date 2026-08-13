@@ -34,8 +34,10 @@ export type CoreMode = 'normalize' | 'reconcile' | 'management' | 'sales_session
   // «Данные» компании без объектов: источник один — бухгалтерия клиента, и разделы
   // идут от неё, а не от каналов приёма файлов.
   | 'data_sources' | 'data_model' | 'data_quality'
+  // «Подключения»: один раздел, его пункты — во второй колонке.
+  | 'connect'
 
-const VALID_MODES: CoreMode[] = ['normalize', 'reconcile', 'management', 'sales_sessions', 'sales_commerce', 'sales_goods', 'sales_help', 'operations', 'ops_equipment', 'ops_economy', 'projects', 'projects_analytics', 'store', 'store_documents', 'store_catering', 'store_stock', 'store_cash', 'store_catalog', 'store_marking', 'store_network', 'store_1c', 'store_reports', 'store_help', 'corporate', 'marketing', 'financial', 'accounting', 'acc_period', 'acc_store', 'acc_food', 'acc_recon', 'acc_docs', 'acc_results', 'tax', 'export', 'data_sources', 'data_model', 'data_quality',
+const VALID_MODES: CoreMode[] = ['normalize', 'reconcile', 'management', 'sales_sessions', 'sales_commerce', 'sales_goods', 'sales_help', 'operations', 'ops_equipment', 'ops_economy', 'projects', 'projects_analytics', 'store', 'store_documents', 'store_catering', 'store_stock', 'store_cash', 'store_catalog', 'store_marking', 'store_network', 'store_1c', 'store_reports', 'store_help', 'corporate', 'marketing', 'financial', 'accounting', 'acc_period', 'acc_store', 'acc_food', 'acc_recon', 'acc_docs', 'acc_results', 'tax', 'export', 'data_sources', 'data_model', 'data_quality', 'connect',
   'rev_goods', 'rev_services', 'books_ledger', 'books_primary']
 function readMode(sp: URLSearchParams): CoreMode {
   const m = sp.get('mode')

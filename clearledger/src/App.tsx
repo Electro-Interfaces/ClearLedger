@@ -176,6 +176,8 @@ const SPACE_PAGE_ELEMENTS: Record<string, React.ReactNode> = {
   '/contractors': <LazyPage><ContractorsPage /></LazyPage>,
 }
 
+const ConnectView = lazy(() => import('@/components/workspace/ConnectView').then((m) => ({ default: m.ConnectView })))
+
 const router = createBrowserRouter([
   {
     element: <Providers />,
@@ -210,7 +212,10 @@ const router = createBrowserRouter([
           })),
           // «Подключения» собраны из страниц, рабочей области у них нет — корень ведёт
           // на первую страницу приложения.
-          { path: '/connect', element: <Navigate to="/connections" replace /> },
+          // Вход в «Подключения» — раздел рабочей области с пунктами во второй
+          // колонке. Прежний редирект на /connections уводил сразу на страницу,
+          // и раздела с пунктами человек не видел вовсе.
+          { path: '/connect', element: <LazyPage><ConnectView /></LazyPage> },
           // Функции Ядра открыты из КАЖДОГО рабочего места — под его адресом
           // (`/finance/objects`): экран один, но видно, откуда смотрят, и от этого
           // зависят права (`finance:objects`).

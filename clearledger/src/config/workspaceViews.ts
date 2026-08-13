@@ -19,6 +19,7 @@ const ACC_SUBS = Object.fromEntries(ACCOUNTING_MENU.map((m) => [m.key, m.label])
 export const MODE_LABELS: Record<CoreMode, string> = {
   // «Данные» компании без объектов: разделы идут от источника (бухгалтерия клиента),
   // а не от каналов приёма файлов.
+  connect: 'Подключения',
   data_sources: 'Источники',
   data_model: 'База пространства',
   data_quality: 'Качество данных',
