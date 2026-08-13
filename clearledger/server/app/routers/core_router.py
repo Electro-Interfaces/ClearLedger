@@ -68,7 +68,11 @@ async def core_status(
         {"code": "conf", "name": "Конференции (Jitsi)",
          "configured": bool(settings.jitsi_signing_key),
          "status": "configured" if settings.jitsi_signing_key else "not_configured"},
-        {"code": "mail", "name": "Почта (SMTP)",
+        # Это ПЛАТФОРМЕННЫЙ релей: им уходят приглашения, уведомления и письма
+        # почтовым участникам чатов и задач. Почтовые ящики КОМПАНИИ — другое
+        # (docs/MAIL.md): деловая переписка с контрагентами, приём по IMAP, правила.
+        # Пока обе назывались «Почта», их регулярно принимали одну за другую.
+        {"code": "mail", "name": "Почта платформы (SMTP)",
          "configured": bool(settings.smtp_host),
          "status": "configured" if settings.smtp_host else "not_configured"},
     ]
