@@ -646,6 +646,15 @@ function RevCompare({ companyId, kind, period }: {
   }
   const clients = [...byClient.values()].sort((x, y) => (y.now - y.was) - (x.now - x.was))
 
+  // Сопоставимая база: только те покупатели, что были в ОБОИХ периодах. Отделяет
+  // «мы выросли» от «пришёл один большой проект» — для компании с проектными
+  // поставками это разные новости, а общий итог их смешивает.
+  const both = clients.filter((c) => c.now > 0 && c.was > 0)
+  const lflNow = both.reduce((sum, c) => sum + c.now, 0)
+  const lflWas = both.reduce((sum, c) => sum + c.was, 0)
+  const arrived = clients.filter((c) => c.now > 0 && c.was === 0)
+  const left = clients.filter((c) => c.now === 0 && c.was > 0)
+
   return (
     <div className="p-4 space-y-4">
       <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -678,6 +687,55 @@ function RevCompare({ companyId, kind, period }: {
           </tr>
         ))}
       </TableCard>
+
+      <Card>
+        <CardContent className="p-4 space-y-2">
+          <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
+            Сопоставимая база — покупатели, которые были в обоих периодах
+          </div>
+          <table className="w-full text-sm">
+            <tbody>
+              <tr className="border-b">
+                <td className="py-1.5 text-muted-foreground">
+                  Сопоставимые ({num.format(both.length)} покупателей)
+                </td>
+                <td className="py-1.5 text-right tabular-nums">{money.format(lflNow)} ₽</td>
+                <td className="py-1.5 text-right tabular-nums text-muted-foreground w-32">
+                  было {money.format(lflWas)} ₽
+                </td>
+                <td className="py-1.5 text-right w-24"><Delta now={lflNow} was={lflWas} /></td>
+              </tr>
+              <tr className="border-b">
+                <td className="py-1.5 text-muted-foreground">
+                  Пришли впервые ({num.format(arrived.length)})
+                </td>
+                <td className="py-1.5 text-right tabular-nums">
+                  {money.format(arrived.reduce((sum, c) => sum + c.now, 0))} ₽
+                </td>
+                <td colSpan={2} className="py-1.5 text-right text-[11px] text-muted-foreground">
+                  весь этот оборот — прирост, но не повторяемый
+                </td>
+              </tr>
+              <tr>
+                <td className="py-1.5 text-muted-foreground">
+                  Перестали покупать ({num.format(left.length)})
+                </td>
+                <td className="py-1.5 text-right tabular-nums text-muted-foreground">
+                  {money.format(left.reduce((sum, c) => sum + c.was, 0))} ₽
+                </td>
+                <td colSpan={2} className="py-1.5 text-right text-[11px] text-muted-foreground">
+                  столько выручки ушло вместе с ними
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <p className="text-[11px] text-muted-foreground">
+            Сопоставимая база отвечает на вопрос, выросли ли мы на своих клиентах.
+            Общий итог его смешивает: один пришедший проект способен перекрыть падение
+            по всем остальным, и рост будет выглядеть как успех работы с базой.
+          </p>
+        </CardContent>
+      </Card>
 
       <TableCard note="Покупатели обоих периодов — отсортированы по приросту оборота"
         head={<><Th>Покупатель</Th><Th right>Период</Th><Th right>Сравнение</Th>

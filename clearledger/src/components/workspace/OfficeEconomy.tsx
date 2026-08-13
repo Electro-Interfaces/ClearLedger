@@ -808,9 +808,101 @@ function EconBreakeven({ companyId, period }: { companyId: string; period: Perio
               </p>
             </CardContent>
           </Card>
+
+          {/* Вторая оценка той же разметки — по данным, а не по смыслу статьи. */}
+          <CostScatter months={q.data.months} />
         </>
       )}
     </div>
+  )
+}
+
+/**
+ * Диаграмма рассеяния «выручка × затраты» с линией по методу наименьших квадратов.
+ *
+ * Зачем: разметка затрат на постоянные и переменные сделана экспертно, и её нужно чем-то
+ * проверять. Регрессия по месяцам даёт вторую оценку — наклон это переменная часть на
+ * рубль выручки, свободный член постоянная часть за месяц.
+ *
+ * Почему она НЕ заменяет разметку: у компании структура затрат менялась режимами, и
+ * коэффициент детерминации это честно покажет. Если R² низкий или свободный член
+ * отрицательный (постоянные расходы «минус двести тысяч» — экономическая
+ * бессмыслица), экран говорит «модель не применима» вместо того, чтобы печатать
+ * красивое число.
+ */
+function CostScatter({ months }: { months: PnlData['months'] }) {
+  const pts = months
+    .map((m) => ({ x: m.net, y: m.commercial + m.admin, label: m.month }))
+    .filter((p) => p.x > 0 || p.y > 0)
+  if (pts.length < 6) {
+    return (
+      <p className="text-[11px] text-muted-foreground">
+        Для оценки нужно хотя бы шесть месяцев с оборотами — в выбранном периоде их
+        {' '}{pts.length}.
+      </p>
+    )
+  }
+
+  const n = pts.length
+  const mx = pts.reduce((s, p) => s + p.x, 0) / n
+  const my = pts.reduce((s, p) => s + p.y, 0) / n
+  const sxx = pts.reduce((s, p) => s + (p.x - mx) ** 2, 0)
+  const sxy = pts.reduce((s, p) => s + (p.x - mx) * (p.y - my), 0)
+  const slope = sxx ? sxy / sxx : 0
+  const intercept = my - slope * mx
+  const ssTot = pts.reduce((s, p) => s + (p.y - my) ** 2, 0)
+  const ssRes = pts.reduce((s, p) => s + (p.y - (intercept + slope * p.x)) ** 2, 0)
+  const r2 = ssTot ? 1 - ssRes / ssTot : 0
+
+  const usable = intercept > 0 && r2 >= 0.4
+  const maxX = Math.max(...pts.map((p) => p.x), 1)
+  const maxY = Math.max(...pts.map((p) => p.y), 1)
+  const W = 320
+  const H = 180
+
+  return (
+    <Card>
+      <CardContent className="p-4 space-y-3">
+        <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
+          Проверка разметки: выручка против затрат по месяцам
+        </div>
+        <svg viewBox={`0 0 ${W} ${H}`} className="w-full max-w-lg" role="img"
+          aria-label="Диаграмма рассеяния: выручка месяца по горизонтали, затраты по вертикали">
+          <line x1="0" y1={H - 1} x2={W} y2={H - 1} className="stroke-border" strokeWidth="1" />
+          <line x1="1" y1="0" x2="1" y2={H} className="stroke-border" strokeWidth="1" />
+          {usable && (
+            <line x1="1" y1={H - (intercept / maxY) * H}
+              x2={W} y2={H - ((intercept + slope * maxX) / maxY) * H}
+              className="stroke-primary" strokeWidth="1.5" strokeDasharray="4 3" />
+          )}
+          {pts.map((p) => (
+            <circle key={p.label} cx={(p.x / maxX) * W} cy={H - (p.y / maxY) * H} r="3"
+              className="fill-primary/60">
+              <title>{`${monthLabel(p.label)}: выручка ${money.format(p.x)} ₽, `
+                + `затраты ${money.format(p.y)} ₽`}</title>
+            </circle>
+          ))}
+        </svg>
+
+        {usable ? (
+          <p className="text-sm">
+            По {n} месяцам: постоянная часть{' '}
+            <b className="tabular-nums">{money.format(intercept)} ₽</b> в месяц, переменная{' '}
+            <b className="tabular-nums">{(slope * 100).toFixed(1)} копеек</b> на рубль выручки.
+            Точность модели R² = {r2.toFixed(2)}.
+          </p>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Модель не применима: {intercept <= 0
+              ? `свободный член отрицательный (${money.format(intercept)} ₽) — постоянных `
+                + 'расходов «минус» не бывает'
+              : `связь слабая, R² = ${r2.toFixed(2)}`}. Это не сбой расчёта, а свойство
+            данных: у компании структура затрат менялась режимами, и одной прямой она не
+            описывается. Разметка по смыслу статьи остаётся единственной рабочей.
+          </p>
+        )}
+      </CardContent>
+    </Card>
   )
 }
 
