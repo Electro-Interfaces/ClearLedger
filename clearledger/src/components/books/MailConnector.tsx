@@ -14,7 +14,8 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
-  AlertTriangle, CheckCircle2, FileCheck, Inbox, Mail, Paperclip, Plus, RefreshCw, Trash2,
+  AlertTriangle, CheckCircle2, FileCheck, Inbox, Mail, Paperclip, Plus, RefreshCw,
+  Send, Trash2,
 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -26,7 +27,7 @@ import { cn } from '@/lib/utils'
 import {
   createMailAccount, createMailRule, deleteMailAccount, deleteMailRule, getMailAccounts,
   getMailAddresses, getMailRules, getMailThread, getMailThreads, learnMailAddress,
-  mailAttachmentUrl, mailToIntake, pollMail, updateMailAccount, updateMailRule,
+  mailAttachmentUrl, mailToIntake, pollMail, sendMail, updateMailAccount, updateMailRule,
   type MailAccount, type MailAccountInput, type MailRule, type MailRuleInput,
 } from '@/services/mailService'
 import { useCounterparties } from '@/hooks/useReferences'
@@ -118,6 +119,25 @@ export function MailConnector() {
     mutationFn: (id: string) => deleteMailRule(companyId, id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['mail'] }),
   })
+  // Ответ пишется в той же ленте, где читают письмо: уходить в почтовый клиент,
+  // чтобы ответить на письмо, которое ты открыл здесь, — это разрыв работы.
+  const [reply, setReply] = useState<{ to: string; subject: string; body: string } | null>(null)
+  const send = useMutation({
+    mutationFn: (v: { accountId: string; to: string[]; subject: string; body: string
+                      threadId?: string | null; replyTo?: string | null }) =>
+      sendMail(companyId, {
+        account_id: v.accountId, to: v.to, subject: v.subject, body: v.body,
+        thread_id: v.threadId ?? null, reply_to_message_id: v.replyTo ?? null,
+      }),
+    onSuccess: (r) => {
+      if (r.error) { toast.error(r.error); return }
+      setReply(null)
+      qc.invalidateQueries({ queryKey: ['mail'] })
+      toast.success('Письмо отправлено')
+    },
+    onError: () => toast.error('Письмо не ушло'),
+  })
+
   const toIntake = useMutation({
     mutationFn: (messageId: string) => mailToIntake(companyId, messageId),
     onSuccess: (r) => {
@@ -392,9 +412,60 @@ export function MailConnector() {
                   Выберите переписку слева
                 </div>
               )}
+              {threadId && (thread.data?.rows ?? []).length > 0 && (
+                <div className="px-3 py-2 bg-muted/20 space-y-2">
+                  {!reply ? (
+                    <Button size="sm" variant="outline"
+                      onClick={() => {
+                        const last = thread.data!.rows[thread.data!.rows.length - 1]
+                        setReply({
+                          to: last.direction === 'in' ? (last.fromEmail ?? '') : (last.to[0] ?? ''),
+                          subject: last.subject?.startsWith('Re:')
+                            ? last.subject : `Re: ${last.subject ?? ''}`,
+                          body: '',
+                        })
+                      }}>
+                      <Send className="size-4 mr-1.5" /> Ответить
+                    </Button>
+                  ) : (
+                    <div className="space-y-2">
+                      <Input value={reply.to} placeholder="кому"
+                        onChange={(e) => setReply({ ...reply, to: e.target.value })} />
+                      <Input value={reply.subject} placeholder="тема"
+                        onChange={(e) => setReply({ ...reply, subject: e.target.value })} />
+                      <Textarea rows={4} value={reply.body} placeholder="текст письма"
+                        onChange={(e) => setReply({ ...reply, body: e.target.value })} />
+                      <div className="flex gap-2">
+                        <Button size="sm" disabled={send.isPending || !reply.to || !reply.body}
+                          onClick={() => {
+                            const rows = thread.data!.rows
+                            const last = rows[rows.length - 1]
+                            const acc = (accounts.data?.rows ?? []).find(
+                              (a) => a.mode !== 'in') ?? (accounts.data?.rows ?? [])[0]
+                            if (!acc) { toast.error('Нет ящика для отправки'); return }
+                            send.mutate({
+                              accountId: acc.id, to: [reply.to], subject: reply.subject,
+                              body: reply.body, threadId, replyTo: last.id,
+                            })
+                          }}>
+                          Отправить
+                        </Button>
+                        <Button size="sm" variant="ghost" onClick={() => setReply(null)}>
+                          Отмена
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
               {(thread.data?.rows ?? []).map((m) => (
                 <div key={m.id} className="px-3 py-2 space-y-1">
                   <div className="flex flex-wrap items-baseline gap-2 text-sm">
+                    {m.direction === 'out' && (
+                      <span className="rounded border border-primary/40 px-1 text-[10px] text-primary">
+                        мы
+                      </span>
+                    )}
                     <span className="font-medium">{m.fromName || m.fromEmail}</span>
                     <span className="text-[11px] text-muted-foreground">{m.fromEmail}</span>
                     <span className="ml-auto text-[11px] text-muted-foreground tabular-nums">

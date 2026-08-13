@@ -20,7 +20,7 @@ from app.models import (
     Counterparty, CounterpartyEmail, MailAccount, MailAttachment, MailMessage,
     MailRule, MailThread, User,
 )
-from app.services import mail_intake
+from app.services import mail_intake, mail_send
 
 router = APIRouter(prefix="/mail", tags=["Почта пространства"])
 
@@ -371,3 +371,53 @@ async def to_intake(
     res = await mail_intake.attachments_to_intake(db, cid, msg, atts)
     await db.commit()
     return res
+
+
+# ── Волна 4: ответы из пространства и история общения ────────────────────────
+
+class SendIn(BaseModel):
+    account_id: str
+    to: list[str]
+    subject: str
+    body: str
+    thread_id: str | None = None
+    reply_to_message_id: str | None = None
+
+
+@router.post("/send")
+async def send(
+    company_id: str,
+    body: SendIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Написать или ответить — с того же ящика, в ту же нить."""
+    cid = await assert_company_member(company_id, current_user, db)
+    return await mail_send.send_message(
+        db, cid, account_id=body.account_id, to=body.to, subject=body.subject,
+        body=body.body, thread_id=body.thread_id,
+        reply_to_message_id=body.reply_to_message_id, author=current_user.email)
+
+
+@router.get("/by-counterparty")
+async def by_counterparty(
+    company_id: str,
+    counterparty_id: str,
+    limit: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Переписка с контрагентом — для его карточки.
+
+    История общения должна лежать там же, где документы и долг: вопрос «о чём мы
+    с ним говорили» задают ровно в тот момент, когда смотрят на его карточку.
+    """
+    cid = await assert_company_member(company_id, current_user, db)
+    rows = (await db.execute(select(MailThread).where(
+        MailThread.company_id == cid,
+        MailThread.counterparty_id == counterparty_id)
+        .order_by(MailThread.last_message_at.desc()).limit(limit))).scalars().all()
+    return {"rows": [{
+        "id": str(t.id), "subject": t.subject, "messages": t.messages_count,
+        "lastAt": t.last_message_at.isoformat() if t.last_message_at else None,
+    } for t in rows]}

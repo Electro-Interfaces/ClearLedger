@@ -31,6 +31,7 @@ import {
   type BalanceTotals, type BooksOverview, type SettlementKind, type VatKind,
 } from '@/services/booksService'
 import { BooksSettlements, BooksVat } from './OfficeSettlements'
+import { getMailByCounterparty } from '@/services/mailService'
 import { useWorkspaceSections } from './workspaceSections'
 
 const money = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
@@ -504,6 +505,8 @@ export function CounterpartyWindow({ companyId, id, onClose }: {
               </TableCard>
             )}
 
+            <CounterpartyMail companyId={companyId} id={id} />
+
             <TableCard note={`Документы — ${num.format(d.docs.length)}`}
               head={<>
                 <Th>Дата</Th><Th>Вид</Th><Th>Номер</Th><Th>Договор</Th><Th right>Сумма</Th>
@@ -648,6 +651,38 @@ export function NomenclatureWindow({ companyId, code, onClose }: {
         )}
       </DialogContent>
     </Dialog>
+  )
+}
+
+/**
+ * Переписка с контрагентом в его карточке: вопрос «о чём мы с ним говорили»
+ * задают ровно тогда, когда смотрят на его долг и документы, — значит и ответ
+ * должен лежать здесь, а не в отдельном почтовом разделе.
+ */
+function CounterpartyMail({ companyId, id }: { companyId: string; id: string }) {
+  const q = useQuery({
+    queryKey: ['mail', 'by-counterparty', companyId, id],
+    queryFn: () => getMailByCounterparty(companyId, id),
+  })
+  const rows = q.data?.rows ?? []
+  if (!rows.length) return null
+  return (
+    <TableCard note={`Переписка — ${rows.length}`}
+      head={<><Th>Тема</Th><Th right>Писем</Th><Th right>Последнее</Th></>}>
+      {rows.map((t) => (
+        <tr key={t.id} className="border-b last:border-0 hover:bg-muted/40">
+          <td className="px-3 py-1.5 max-w-[420px] truncate" title={t.subject ?? ''}>
+            {t.subject || '(без темы)'}
+          </td>
+          <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+            {t.messages}
+          </td>
+          <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+            {t.lastAt?.slice(0, 10)}
+          </td>
+        </tr>
+      ))}
+    </TableCard>
   )
 }
 

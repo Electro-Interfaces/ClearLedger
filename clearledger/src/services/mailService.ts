@@ -154,3 +154,16 @@ export const getMailAddresses = (companyId: string) =>
 export const mailToIntake = (companyId: string, messageId: string) =>
   post<{ batches: number; items: number }>(
     `/api/mail/to-intake?company_id=${companyId}&message_id=${messageId}`, {})
+
+
+/** Ответить в нить или написать заново — с того же ящика. */
+export const sendMail = (companyId: string, body: {
+  account_id: string; to: string[]; subject: string; body: string
+  thread_id?: string | null; reply_to_message_id?: string | null
+}) => post<{ sent?: boolean; error?: string; threadId?: string }>(
+  `/api/mail/send?company_id=${companyId}`, body)
+
+/** Переписка с контрагентом — для его карточки. */
+export const getMailByCounterparty = (companyId: string, counterpartyId: string) =>
+  get<{ rows: { id: string; subject: string | null; messages: number; lastAt: string | null }[] }>(
+    `/api/mail/by-counterparty?company_id=${companyId}&counterparty_id=${counterpartyId}`)
