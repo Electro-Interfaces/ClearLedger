@@ -126,15 +126,17 @@ const MONTHS = ['январь', 'февраль', 'март', 'апрель', '�
   'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь']
 
 function bookDocToDoc(row: DocRow, sectionTitle: string, i: number): LoadedDocument {
-  const d = new Date(row.date)
-  const ok = !Number.isNaN(d.getTime())
-  const period = ok ? `${d.getFullYear()}/${MONTHS[d.getMonth()]}` : 'Без даты'
+  // Дата приходит строкой `ГГГГ-ММ-ДД` — разбираем её как строку, а не через Date:
+  // разбор датой у отрицательных часовых поясов уводит первое число в прошлый месяц.
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(row.date ?? '')
+  const period = m ? `${m[1]}/${MONTHS[Number(m[2]) - 1]}` : 'Без даты'
+  const shown = m ? `${m[3]}.${m[2]}.${m[1]}` : '—'
   const who = row.counterparty?.trim() || 'Без контрагента'
   return {
     id: `${row.type}-${i}`,
     channelId: '', streamId: '', docType: row.type, origin: 'api',
     fingerprint: `${row.type}|${row.date}|${row.number}|${row.inn ?? ''}`,
-    title: `№ ${row.number || 'б/н'} от ${ok ? format(d, 'dd.MM.yyyy') : '—'} — ${who}`,
+    title: `№ ${row.number || 'б/н'} от ${shown} — ${who}`,
     stationId: 0,
     date: row.date, data: row,
     catalog: `${sectionTitle}/${row.label}/${period}`,
