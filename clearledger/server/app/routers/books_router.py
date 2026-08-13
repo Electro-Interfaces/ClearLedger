@@ -1450,9 +1450,12 @@ async def vat(
     if date_to:
         q = q.where(VatEntry.doc_date <= date_to)
 
+    # Считаем по колонкам ПОДЗАПРОСА: суммы по самой таблице тянут её в FROM рядом
+    # с подзапросом, и вместо 295 счетов-фактур приезжает их произведение на 1429.
+    sub = q.subquery()
     total, amount, tax = (await db.execute(
-        select(func.count(), func.sum(VatEntry.amount), func.sum(VatEntry.vat))
-        .select_from(q.subquery()))).one()
+        select(func.count(), func.sum(sub.c.amount), func.sum(sub.c.vat))
+        .select_from(sub))).one()
 
     rows = (await db.execute(q.order_by(VatEntry.doc_date.desc()).limit(limit))).scalars().all()
 
