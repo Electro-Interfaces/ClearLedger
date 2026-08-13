@@ -899,6 +899,7 @@ async def get_counterparty_activity(
         byType=[CounterpartyDocGroup(docType=t, label=_doc_label(t), count=n, amount=round(a, 2))
                 for t, n, a in groups],
         recent=[CounterpartyDocBrief(
+            id=str(d.id),
             docType=d.doc_type, label=_doc_label(d.doc_type), number=d.number, date=d.date,
             amount=d.amount, operationType=d.operation_type,
         ) for d in recent],

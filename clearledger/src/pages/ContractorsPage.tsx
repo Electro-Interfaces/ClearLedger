@@ -7,6 +7,7 @@
 import { useState, useMemo, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
+import { DocumentWindow } from '@/components/books/DocumentWindow'
 import {
   getCounterpartyStats, type CounterpartyStats,
 } from '@/services/booksService'
@@ -363,7 +364,11 @@ function fmtShort(v: number): string {
 }
 
 function ActivityBlock({ cp }: { cp: Counterparty }) {
+  const { companyId } = useCompany()
   const { data } = useCounterpartyActivity(cp.id)
+  // Документ открывается окном поверх карточки: человек смотрит его, чтобы понять
+  // СТРОКУ карточки, и должен вернуться в неё, а не оказаться на чужом экране.
+  const [docId, setDocId] = useState<string | null>(null)
   if (!data || data.docs === 0) return null
   return (
     <div>
@@ -397,7 +402,9 @@ function ActivityBlock({ cp }: { cp: Counterparty }) {
           </TableHeader>
           <TableBody>
             {data.recent.map((d, i) => (
-              <TableRow key={`${d.number}-${i}`}>
+              <TableRow key={`${d.number}-${i}`}
+                className={d.id ? 'cursor-pointer hover:bg-muted/40' : undefined}
+                onClick={() => d.id && setDocId(d.id)}>
                 <TableCell className="text-sm">{docTypeLabel(d.docType, d.label)}</TableCell>
                 <TableCell className="font-mono text-sm">{d.number}</TableCell>
                 <TableCell className="text-sm whitespace-nowrap">{d.date}</TableCell>
@@ -410,8 +417,11 @@ function ActivityBlock({ cp }: { cp: Counterparty }) {
         </Table>
       </div>
       <p className="mt-1.5 text-[11px] text-muted-foreground">
-        Последние 10 документов, сведённых с карточкой контрагента.
+        Последние 10 документов, сведённых с карточкой контрагента. Строка открывает документ.
       </p>
+      {docId && (
+        <DocumentWindow companyId={companyId} docId={docId} onClose={() => setDocId(null)} />
+      )}
     </div>
   )
 }

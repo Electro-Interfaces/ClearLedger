@@ -491,6 +491,8 @@ export interface CounterpartyDocGroup {
   docType: string; label?: string | null; count: number; amount: number
 }
 export interface CounterpartyDocBrief {
+  /** id документа — для просмотрщика: номер с датой не уникальны. */
+  id?: string | null
   docType: string; label?: string | null
   number: string; date: string; amount: number; operationType?: string | null
 }

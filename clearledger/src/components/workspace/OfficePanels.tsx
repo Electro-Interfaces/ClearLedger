@@ -34,6 +34,7 @@ import {
   type BalanceTotals, type BooksOverview, type SettlementKind, type SliceData, type VatKind,
 } from '@/services/booksService'
 import { BooksSettlements, BooksVat } from './OfficeSettlements'
+import { DocumentWindow } from '@/components/books/DocumentWindow'
 import { useWorkspaceSections } from './workspaceSections'
 
 const money = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
@@ -274,6 +275,7 @@ function RevDocs({ companyId, docType, lineKind, note }: {
 }) {
   const { period } = useFilters()
   const [card, setCard] = useState<string | null>(null)
+  const [docId, setDocId] = useState<string | null>(null)
   const q = useQuery({
     queryKey: ['books', 'docs', companyId, docType, lineKind, period.from, period.to],
     queryFn: () => getDocs(companyId, docType, { from: period.from, to: period.to },
@@ -293,7 +295,11 @@ function RevDocs({ companyId, docType, lineKind, note }: {
         {q.data.rows.map((r, i) => (
           <tr key={i} className="border-b last:border-0 hover:bg-muted/40">
             <td className="px-3 py-1.5 tabular-nums whitespace-nowrap">{r.date}</td>
-            <td className="px-3 py-1.5 tabular-nums">{r.number}</td>
+            <td className="px-3 py-1.5 tabular-nums">
+              {/* Номер — вход в сам документ: строки и проводки. */}
+              <button onClick={() => setDocId(r.id)}
+                className="hover:text-primary hover:underline">{r.number}</button>
+            </td>
             <td className="px-3 py-1.5 max-w-[320px] truncate" title={r.counterparty}>
               {r.counterpartyId ? (
                 <button onClick={() => setCard(r.counterpartyId)}
@@ -310,6 +316,9 @@ function RevDocs({ companyId, docType, lineKind, note }: {
       </TableCard>
       {card && (
         <CounterpartyWindow companyId={companyId} id={card} onClose={() => setCard(null)} />
+      )}
+      {docId && (
+        <DocumentWindow companyId={companyId} docId={docId} onClose={() => setDocId(null)} />
       )}
     </div>
   )

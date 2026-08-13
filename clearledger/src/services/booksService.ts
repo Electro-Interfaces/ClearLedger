@@ -276,6 +276,38 @@ export interface CounterpartyStats {
   contracts: number
 }
 
+/** Документ целиком: шапка, строки и его проводки — для просмотрщика. */
+export interface DocumentCard {
+  id: string
+  type: string
+  label: string
+  number: string
+  date: string
+  amount: number
+  vat: number
+  status: string
+  periodStatus: string
+  operation: string | null
+  counterpartyName: string
+  counterpartyInn: string | null
+  counterparty: { id: string; name: string; inn: string | null } | null
+  contract: { number: string; date: string | null; type: string } | null
+  externalNumber: string | null
+  externalDate: string | null
+  lines: {
+    code: string | null; name: string; kind: string
+    qty: number; price: number; amount: number; vat: number
+  }[]
+  entries: {
+    date: string; accountDt: string | null; accountKt: string | null
+    amount: number; content: string | null
+  }[]
+  meta: Record<string, unknown>
+}
+
+export const getDocumentCard = (companyId: string, docId: string) =>
+  get<DocumentCard>(`/api/books/document?company_id=${companyId}&doc_id=${docId}`)
+
 export const getCounterpartyStats = (companyId: string) =>
   get<{ rows: CounterpartyStats[] }>(
     `/api/books/counterparties?company_id=${companyId}&limit=1000`)

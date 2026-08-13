@@ -942,6 +942,72 @@ async def counterparty_card(
     }
 
 
+# ── Просмотрщик документа ────────────────────────────────────────────────────
+# Реестр отвечает «какие документы есть», карточка контрагента — «что у нас с
+# ним». Оба заканчиваются строкой таблицы, а дальше человеку нужен САМ документ:
+# из чего сложилась сумма и какими проводками он лёг в учёт. Иначе следующий шаг —
+# открыть 1С и искать документ там.
+
+@router.get("/document")
+async def document_card(
+    company_id: str,
+    doc_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Документ целиком: шапка, строки и его проводки."""
+    cid = await assert_company_member(company_id, current_user, db)
+
+    d = (await db.execute(select(AccountingDoc).where(
+        AccountingDoc.company_id == cid,
+        AccountingDoc.id == doc_id))).scalar_one_or_none()
+    if d is None:
+        return {"error": "not_found"}
+
+    entries = [{
+        "date": e.entry_date.isoformat(), "accountDt": e.account_dt,
+        "accountKt": e.account_kt, "amount": _num(e.amount), "content": e.content,
+    } for e in (await db.execute(select(GlEntry).where(
+        GlEntry.company_id == cid, GlEntry.doc_id == d.id)
+        .order_by(GlEntry.entry_date, GlEntry.id))).scalars().all()]
+
+    counterparty = None
+    if d.counterparty_id:
+        k = (await db.execute(select(Counterparty).where(
+            Counterparty.id == d.counterparty_id))).scalar_one_or_none()
+        if k:
+            counterparty = {"id": str(k.id), "name": k.name, "inn": k.inn}
+
+    contract = None
+    if d.contract_id:
+        c = (await db.execute(text(
+            "SELECT number, date, type FROM contracts WHERE id = :id"),
+            {"id": str(d.contract_id)})).first()
+        if c:
+            contract = {"number": c[0], "date": c[1], "type": c[2]}
+
+    # Реквизиты, за которыми не заводят колонку (время, автор, назначение платежа,
+    # комментарий): для документа они и есть ответ на «что это было».
+    meta = {k: v for k, v in (d.doc_meta or {}).items() if v not in (None, "", [], {})}
+    return {
+        "id": str(d.id), "type": d.doc_type, "label": DOC_LABELS.get(d.doc_type, d.doc_type),
+        "number": d.number, "date": d.date, "amount": _num(d.amount),
+        "vat": _num(d.vat_amount), "status": d.status_1c,
+        "periodStatus": d.period_status, "operation": d.operation_type,
+        "counterpartyName": d.counterparty_name, "counterpartyInn": d.counterparty_inn,
+        "counterparty": counterparty, "contract": contract,
+        "externalNumber": d.external_number, "externalDate": d.external_date,
+        "lines": [{
+            "code": (ln.get("code") or "").strip() or None,
+            "name": ln.get("name"), "kind": ln.get("kind") or "goods",
+            "qty": _num(ln.get("qty")), "price": _num(ln.get("price")),
+            "amount": _num(ln.get("amount")), "vat": _num(ln.get("vat")),
+        } for ln in (d.lines or [])],
+        "entries": entries,
+        "meta": meta,
+    }
+
+
 # ── Нормализованный слой: карточка позиции ───────────────────────────────────
 # Разрез отвечает «что продаём», карточка — «что с этой позицией»: по какой цене
 # уходит и приходит, сколько на ней зарабатываем, кто её берёт и когда брали в
