@@ -29,7 +29,8 @@ import { Card, CardContent } from '@/components/ui/card'
 import { MetricTile } from '@/components/ui/metric-tile'
 import { cn } from '@/lib/utils'
 import {
-  getAssortment, getDocs, getRevenue, getRevenueCheck,
+  getAssortment, getCashflow, getContractSales, getDocs, getPaymentTerms, getRevenue,
+  getRevenueCheck,
   type DocRow, type RevKind,
 } from '@/services/booksService'
 import { exportTable } from '@/services/booksExport'
@@ -240,7 +241,8 @@ const FIXED_KIND: Record<string, RevKind> = {
 }
 
 /** Экраны, у которых своя ручка и разрез над ними не имеет смысла. */
-const NO_KIND = ['rev_invoices', 'rev_funnel', 'rev_recon', 'rev_abc', 'rev_abc_items', 'rev_margin']
+const NO_KIND = ['rev_invoices', 'rev_funnel', 'rev_recon', 'rev_abc', 'rev_abc_items',
+  'rev_margin', 'rev_terms', 'rev_cashflow', 'rev_contracts']
 
 export function RevenuePanel() {
   const { coreMode } = useWorkspace()
@@ -272,6 +274,9 @@ export function RevenuePanel() {
       case 'rev_funnel':     return <RevFunnel companyId={companyId} period={period} />
       case 'rev_recon':      return <RevRecon companyId={companyId} />
       case 'rev_margin':     return <RevMargin companyId={companyId} period={period} />
+      case 'rev_terms':      return <RevTerms companyId={companyId} period={period} />
+      case 'rev_cashflow':   return <RevCashflow companyId={companyId} />
+      case 'rev_contracts':  return <RevContracts companyId={companyId} period={period} />
       default:               return <RevOverview companyId={companyId} kind={shown} period={period} />
     }
   })()
@@ -1639,6 +1644,370 @@ function RevRecon({ companyId }: { companyId: string }) {
             </td>
             <td className="px-3 py-1.5 text-[11px] text-muted-foreground">
               {m.periodStatus === 'closed' ? 'закрыт' : 'открыт'}
+            </td>
+          </tr>
+        ))}
+      </TableCard>
+    </div>
+  )
+}
+
+/* ────────────────────────────────────────────────────────────── */
+/*                          Деньги                                */
+/* ────────────────────────────────────────────────────────────── */
+
+/**
+ * Сроки оплаты: через сколько дней после счёта приходят деньги.
+ *
+ * Медиана стоит рядом со средним не для полноты: у пилота средний срок 160 дней при
+ * медиане втрое меньше — среднее тянут единичные счета, висящие больше двух лет. По
+ * среднему нельзя договариваться об отсрочке, по медиане — можно.
+ *
+ * Экран видит ровно те счета, которые регистр «Оплата счетов» свёл с платежами: по
+ * суммам и датам связь не восстановить — один платёж закрывает несколько счетов.
+ */
+function RevTerms({ companyId, period }: { companyId: string; period: Period }) {
+  const q = useQuery({
+    queryKey: ['books', 'payment-terms', companyId, period.from, period.to],
+    queryFn: () => getPaymentTerms(companyId, period),
+    enabled: !!companyId,
+  })
+  const [bucket, setBucket] = useState<string | null>(null)
+  const [card, setCard] = useState<string | null>(null)
+
+  if (q.isError) return <div className="p-4"><QueryError onRetry={() => q.refetch()} /></div>
+  if (!q.data) return <Loading />
+  const d = q.data
+  if (!d.total) {
+    return (
+      <div className="p-6 text-sm text-muted-foreground">
+        За выбранный период нет счетов, сведённых с платежами. Связь «счёт ↔ платёж»
+        приходит из регистра «Оплата счетов» — если его в выгрузке нет, экран пуст.
+      </div>
+    )
+  }
+
+  const maxBucket = Math.max(...d.buckets.map((b) => b.amount), 1)
+  const rows = bucket
+    ? d.rows.filter((r) => {
+        const b = d.buckets.find((x) => x.key === bucket)
+        return b && bucketOf(r.days) === b.key
+      })
+    : d.rows
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
+        <MetricTile label="Средний срок оплаты"
+          value={d.avgDays === null ? '—' : `${d.avgDays} дн.`}
+          hint="от даты счёта до даты платежа" />
+        <MetricTile label="Медиана" value={`${d.medianDays} дн.`}
+          hint="половина счетов оплачена быстрее" />
+        <MetricTile label="Счетов с оплатой" value={num.format(d.total)}
+          hint={`${money.format(d.amount)} ₽`} />
+        <MetricTile label="Дольше 90 дней"
+          value={num.format(d.buckets.find((b) => b.key === 'overdue')?.count ?? 0)}
+          hint={`${money.format(d.buckets.find((b) => b.key === 'overdue')?.amount ?? 0)} ₽`}
+          tone={(d.buckets.find((b) => b.key === 'overdue')?.count ?? 0) > 0 ? 'danger' : undefined} />
+      </div>
+
+      <Card>
+        <CardContent className="p-4 space-y-2">
+          <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
+            Распределение по сроку — полоса отбирает счета
+          </div>
+          {d.buckets.map((b) => (
+            <button key={b.key} onClick={() => setBucket(bucket === b.key ? null : b.key)}
+              disabled={!b.count}
+              className={cn('w-full text-left space-y-1 rounded-md px-2 py-1',
+                !b.count ? 'opacity-40' : bucket === b.key ? 'bg-muted' : 'hover:bg-muted/50')}>
+              <div className="flex justify-between text-sm">
+                <span>{b.label} <span className="text-muted-foreground">· {b.count} шт.</span></span>
+                <span className="tabular-nums">{money.format(b.amount)} ₽</span>
+              </div>
+              <div className="h-2 rounded bg-muted overflow-hidden">
+                <div className={cn('h-full', b.key === 'overdue' ? 'bg-rose-500/60'
+                  : b.key === 'advance' ? 'bg-emerald-500/60' : 'bg-primary/60')}
+                  style={{ width: `${(b.amount / maxBucket) * 100}%` }} />
+              </div>
+            </button>
+          ))}
+        </CardContent>
+      </Card>
+
+      <TableCard note="Покупатели по среднему сроку оплаты — с кем говорить об отсрочке"
+        head={<><Th>Покупатель</Th><Th right>Счетов</Th><Th right>Сумма</Th>
+          <Th right>Средний срок</Th><Th right>Худший</Th></>}>
+        {d.clients.map((c) => (
+          <tr key={c.id ?? c.name} className="border-b last:border-0 hover:bg-muted/40">
+            <td className="px-3 py-1.5 max-w-[320px] truncate" title={c.name}>
+              {c.id ? (
+                <button onClick={() => setCard(c.id)}
+                  className="text-left hover:text-primary hover:underline">{c.name}</button>
+              ) : c.name}
+            </td>
+            <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{c.invoices}</td>
+            <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">
+              {money.format(c.amount)} ₽
+            </td>
+            <td className={cn('px-3 py-1.5 text-right tabular-nums',
+              c.avgDays > 90 ? 'text-rose-600' : c.avgDays > 30 ? 'text-amber-600' : 'text-emerald-600')}>
+              {c.avgDays} дн.
+            </td>
+            <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+              {c.maxDays} дн.
+            </td>
+          </tr>
+        ))}
+      </TableCard>
+
+      <TableCard
+        note={bucket
+          ? `${d.buckets.find((b) => b.key === bucket)?.label}: ${num.format(rows.length)} счетов`
+          : `Счета с оплатой — ${num.format(rows.length)}, по убыванию срока`}
+        head={<><Th>Счёт</Th><Th>Дата</Th><Th>Оплачен</Th><Th>Покупатель</Th>
+          <Th right>Сумма</Th><Th right>Дней</Th></>}>
+        {rows.map((r) => (
+          <tr key={r.id + r.paidAt} className="border-b last:border-0 hover:bg-muted/40">
+            <td className="px-3 py-1.5 tabular-nums">{r.number}</td>
+            <td className="px-3 py-1.5 tabular-nums whitespace-nowrap">{r.date}</td>
+            <td className="px-3 py-1.5 tabular-nums whitespace-nowrap">{r.paidAt}</td>
+            <td className="px-3 py-1.5 max-w-[280px] truncate" title={r.counterparty}>
+              {r.counterparty}
+            </td>
+            <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">
+              {money.format(r.amount)} ₽
+            </td>
+            <td className={cn('px-3 py-1.5 text-right tabular-nums',
+              r.days > 90 ? 'text-rose-600' : r.days < 0 ? 'text-emerald-600' : 'text-muted-foreground')}>
+              {r.days}
+            </td>
+          </tr>
+        ))}
+      </TableCard>
+      {card && <CounterpartyWindow companyId={companyId} id={card} onClose={() => setCard(null)} />}
+    </div>
+  )
+}
+
+/** Корзина срока — те же границы, что на сервере (PAY_BUCKETS). */
+function bucketOf(days: number): string {
+  if (days < 0) return 'advance'
+  if (days <= 7) return 'week'
+  if (days <= 30) return 'month'
+  if (days <= 60) return 'q'
+  if (days <= 90) return 'late'
+  return 'overdue'
+}
+
+/**
+ * Денежный поток: пришло, ушло, накопленный остаток по месяцам.
+ *
+ * Считается по банковским документам, а не по обороту 51 счёта: у документа есть
+ * контрагент, и рядом с суммой сразу видно, кто платит и кому уходит. Оборот 51 стоит
+ * контролем — расхождение означает движение без документа (перевод между своими
+ * счетами, эквайринг, инкассация), и это вопрос к выгрузке, а не к экрану.
+ */
+function RevCashflow({ companyId }: { companyId: string }) {
+  const q = useQuery({
+    queryKey: ['books', 'cashflow', companyId],
+    queryFn: () => getCashflow(companyId),
+    enabled: !!companyId,
+  })
+  const [side, setSide] = useState<'in' | 'out'>('in')
+
+  if (q.isError) return <div className="p-4"><QueryError onRetry={() => q.refetch()} /></div>
+  if (!q.data) return <Loading />
+  const d = q.data
+  const maxFlow = Math.max(...d.months.map((m) => Math.max(m.inflow, m.outflow)), 1)
+  const diffIn = d.inflow - d.registerIn
+  const diffOut = d.outflow - d.registerOut
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
+        <MetricTile label="Пришло" value={money.format(d.inflow) + ' ₽'}
+          hint={`${num.format(d.months.reduce((s, m) => s + m.inDocs, 0))} поступлений`} />
+        <MetricTile label="Ушло" value={money.format(d.outflow) + ' ₽'}
+          hint={`${num.format(d.months.reduce((s, m) => s + m.outDocs, 0))} списаний`} />
+        <MetricTile label="Итог за историю" value={money.format(d.inflow - d.outflow) + ' ₽'}
+          tone={d.inflow - d.outflow >= 0 ? 'success' : 'danger'}
+          hint="приход минус расход по документам" />
+        <MetricTile label="Контроль по счёту 51"
+          value={Math.abs(diffIn) + Math.abs(diffOut) < 1 ? 'сходится' : 'расхождение'}
+          hint={Math.abs(diffIn) + Math.abs(diffOut) < 1
+            ? 'документы = обороты регистра'
+            : `приход ${money.format(diffIn)} ₽, расход ${money.format(diffOut)} ₽`}
+          tone={Math.abs(diffIn) + Math.abs(diffOut) < 1 ? 'success' : undefined} />
+      </div>
+
+      <Card>
+        <CardContent className="p-4">
+          <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-3">
+            Помесячно: приход вверх, расход вниз
+          </div>
+          <div className="flex items-center gap-1 overflow-x-auto" style={{ height: 200 }}>
+            {d.months.map((m) => (
+              <div key={m.month} className="flex flex-col items-center min-w-[26px] flex-1"
+                title={`${monthLabel(m.month)}: пришло ${money.format(m.inflow)} ₽, `
+                  + `ушло ${money.format(m.outflow)} ₽, остаток ${money.format(m.balance)} ₽`}>
+                <div className="w-full flex flex-col justify-end" style={{ height: 78 }}>
+                  <div className="w-full rounded-t bg-emerald-500/60"
+                    style={{ height: `${Math.max(1, (m.inflow / maxFlow) * 76)}px` }} />
+                </div>
+                <div className="w-full" style={{ height: 78 }}>
+                  <div className="w-full rounded-b bg-rose-500/60"
+                    style={{ height: `${Math.max(1, (m.outflow / maxFlow) * 76)}px` }} />
+                </div>
+                <div className="text-[9px] text-muted-foreground rotate-45 origin-left h-6 whitespace-nowrap">
+                  {m.month.slice(2)}
+                </div>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      <TableCard note="Месяц: приход, расход, разница и накопленный остаток"
+        head={<><Th>Месяц</Th><Th right>Пришло</Th><Th right>Ушло</Th>
+          <Th right>Разница</Th><Th right>Накоплено</Th></>}>
+        {[...d.months].reverse().map((m) => (
+          <tr key={m.month} className="border-b last:border-0 hover:bg-muted/40">
+            <td className="px-3 py-1.5">{monthLabel(m.month)}</td>
+            <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap text-emerald-600">
+              {money.format(m.inflow)} ₽
+            </td>
+            <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap text-rose-600">
+              {money.format(m.outflow)} ₽
+            </td>
+            <td className={cn('px-3 py-1.5 text-right tabular-nums whitespace-nowrap',
+              m.net >= 0 ? '' : 'text-rose-600')}>
+              {m.net >= 0 ? '+' : ''}{money.format(m.net)} ₽
+            </td>
+            <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground whitespace-nowrap">
+              {money.format(m.balance)} ₽
+            </td>
+          </tr>
+        ))}
+      </TableCard>
+
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <Tabs value={side} onChange={setSide} items={[
+          { key: 'in' as const, label: 'Кто платит нам' },
+          { key: 'out' as const, label: 'Кому платим мы' },
+        ]} />
+        <ExportButton onClick={() => exportTable(
+          side === 'in' ? 'Поступления по контрагентам' : 'Списания по контрагентам', [
+            { header: 'Контрагент', key: 'name', width: 44 },
+            { header: 'Сумма', key: side === 'in' ? 'inflow' : 'outflow', width: 18, money: true },
+            { header: 'Документов', key: 'docs', width: 12 },
+            { header: 'Последний', key: 'last', width: 14 },
+          ], side === 'in' ? d.payers : d.payees)} />
+      </div>
+
+      <TableCard
+        note={side === 'in' ? 'Откуда приходят деньги' : 'Куда уходят деньги'}
+        head={<><Th>Контрагент</Th><Th right>Сумма</Th><Th right>Документов</Th>
+          <Th>Последний</Th></>}>
+        {(side === 'in' ? d.payers : d.payees).map((c) => (
+          <tr key={c.name} className="border-b last:border-0 hover:bg-muted/40">
+            <td className="px-3 py-1.5 max-w-[420px] truncate" title={c.name}>{c.name}</td>
+            <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">
+              {money.format(side === 'in' ? (c as { inflow: number }).inflow
+                : (c as { outflow: number }).outflow)} ₽
+            </td>
+            <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{c.docs}</td>
+            <td className="px-3 py-1.5 tabular-nums text-muted-foreground">{c.last}</td>
+          </tr>
+        ))}
+      </TableCard>
+    </div>
+  )
+}
+
+/**
+ * Продажи в разрезе договоров. Договор — основание сделки, но до сих пор ни один
+ * экран по нему не собирал: ссылка у документа появилась, разреза не было.
+ *
+ * Документы без договора идут отдельной строкой и не прячутся: их больше половины, и
+ * это факт о данных, а не пустая клетка. Отсюда же и первая цифра экрана — какая доля
+ * выручки вообще опирается на договор.
+ */
+function RevContracts({ companyId, period }: { companyId: string; period: Period }) {
+  const q = useQuery({
+    queryKey: ['books', 'contract-sales', companyId, period.from, period.to],
+    queryFn: () => getContractSales(companyId, period),
+    enabled: !!companyId,
+  })
+  const [search, setSearch] = useState('')
+  const [onlyLinked, setOnlyLinked] = useState(false)
+
+  if (q.isError) return <div className="p-4"><QueryError onRetry={() => q.refetch()} /></div>
+  if (!q.data) return <Loading />
+  const d = q.data
+  const rows = d.rows.filter((r) =>
+    (!onlyLinked || r.id)
+    && (!search || (r.number ?? '').toLowerCase().includes(search.toLowerCase())
+      || r.counterparty.toLowerCase().includes(search.toLowerCase())))
+  const share = d.salesTotal ? (d.salesWithContract / d.salesTotal) * 100 : 0
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="grid gap-3 grid-cols-3">
+        <MetricTile label="Договоров с продажами" value={num.format(d.withContract)}
+          hint="документы сведены по ссылке, а не по названию" />
+        <MetricTile label="Продажи по договорам" value={money.format(d.salesWithContract) + ' ₽'}
+          hint={`${share.toFixed(1)}% выручки периода`} />
+        <MetricTile label="Без договора"
+          value={money.format(d.salesTotal - d.salesWithContract) + ' ₽'}
+          hint="документ не сослался на договор в 1С" />
+      </div>
+
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-3 flex-wrap">
+          <input value={search} onChange={(e) => setSearch(e.target.value)}
+            placeholder="Договор или контрагент"
+            className="h-8 w-56 rounded-md border bg-background px-2.5 text-sm" />
+          <Tabs value={onlyLinked ? 'linked' : 'all'} onChange={(v) => setOnlyLinked(v === 'linked')}
+            items={[{ key: 'all', label: 'Все' }, { key: 'linked', label: 'Только с договором' }]} />
+        </div>
+        <ExportButton onClick={() => exportTable('Продажи по договорам', [
+          { header: 'Договор', key: 'number', width: 24 },
+          { header: 'Дата', key: 'date', width: 12 },
+          { header: 'Контрагент', key: 'counterparty', width: 40 },
+          { header: 'Вид', key: 'kind', width: 20 },
+          { header: 'Расчёты', key: 'settlementKind', width: 24 },
+          { header: 'Отгрузки', key: 'sales', width: 16, money: true },
+          { header: 'Счета', key: 'invoices', width: 16, money: true },
+        ], rows)} />
+      </div>
+
+      <TableCard note={`${num.format(rows.length)} строк — отгрузки и счета по основанию`}
+        head={<><Th>Договор</Th><Th>Контрагент</Th><Th>Вид расчётов</Th>
+          <Th right>Отгружено</Th><Th right>Выставлено</Th><Th>Период работы</Th></>}>
+        {rows.map((r) => (
+          <tr key={r.id ?? 'none'} className="border-b last:border-0 hover:bg-muted/40">
+            <td className="px-3 py-1.5 max-w-[240px] truncate"
+              title={r.number ? `${r.number} от ${r.date}` : 'документы без ссылки на договор'}>
+              {r.number ?? <span className="text-muted-foreground">без договора</span>}
+            </td>
+            <td className="px-3 py-1.5 max-w-[260px] truncate" title={r.counterparty}>
+              {r.counterparty}
+            </td>
+            <td className="px-3 py-1.5 text-[11px] text-muted-foreground max-w-[200px] truncate"
+              title={r.settlementKind ?? ''}>
+              {r.settlementKind ?? '—'}
+            </td>
+            <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">
+              {money.format(r.sales)} ₽
+              <span className="ml-1 text-[11px] text-muted-foreground">{r.salesDocs}</span>
+            </td>
+            <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap text-muted-foreground">
+              {money.format(r.invoices)} ₽
+              <span className="ml-1 text-[11px]">{r.invoiceDocs}</span>
+            </td>
+            <td className="px-3 py-1.5 tabular-nums text-[11px] text-muted-foreground whitespace-nowrap">
+              {r.first} — {r.last}
             </td>
           </tr>
         ))}

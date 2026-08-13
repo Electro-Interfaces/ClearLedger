@@ -10,7 +10,7 @@ import type { CoreMode } from '@/contexts/WorkspaceContext'
 import { STORE_MENU, storeMenu } from './storeCatalog'
 import { ACCOUNTING_MENU } from './moduleComponents'
 import {
-  REV_SALES_MENU, REV_CLIENTS_MENU, REV_ITEMS_MENU, REV_DOCS_MENU,
+  REV_SALES_MENU, REV_CLIENTS_MENU, REV_ITEMS_MENU, REV_DOCS_MENU, REV_MONEY_MENU,
   BOOKS_LEDGER_MENU, BOOKS_PRIMARY_MENU,
 } from './workspaceMenus'
 
@@ -71,6 +71,7 @@ export const MODE_LABELS: Record<CoreMode, string> = {
   rev_buyers: 'Реализация · Покупатели',
   rev_catalog: 'Реализация · Что продаём',
   rev_papers: 'Реализация · Документы',
+  rev_money: 'Реализация · Деньги',
   books_ledger: 'Бухгалтерия · Регистр',
   books_primary: 'Бухгалтерия · Документы',
 }
@@ -180,6 +181,7 @@ const SUB_LABELS: Partial<Record<CoreMode, Record<string, string>>> = {
   rev_buyers: Object.fromEntries(REV_CLIENTS_MENU.map((m) => [m.key, m.label])),
   rev_catalog: Object.fromEntries(REV_ITEMS_MENU.map((m) => [m.key, m.label])),
   rev_papers: Object.fromEntries(REV_DOCS_MENU.map((m) => [m.key, m.label])),
+  rev_money: Object.fromEntries(REV_MONEY_MENU.map((m) => [m.key, m.label])),
   books_ledger: Object.fromEntries(BOOKS_LEDGER_MENU.map((m) => [m.key, m.label])),
   books_primary: Object.fromEntries(BOOKS_PRIMARY_MENU.map((m) => [m.key, m.label])),
 }

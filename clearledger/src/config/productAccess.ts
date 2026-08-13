@@ -22,7 +22,7 @@ import {
   ENERGY_MGMT, EQUIPMENT_MENU, OPS_MONITOR_MENU, SITES_MENU,
   SALES_NETWORK_MENU, SALES_SESSIONS_MENU, SALES_COMMERCE_MENU, MARKET_MENU,
   FUEL_NETWORK_MENU, FUEL_ANALYTICS_MENU, FUEL_COMMERCE_MENU, FUEL_GOODS_MENU, FUEL_HELP_MENU,
-  REV_SALES_MENU, REV_CLIENTS_MENU, REV_ITEMS_MENU, REV_DOCS_MENU,
+  REV_SALES_MENU, REV_CLIENTS_MENU, REV_ITEMS_MENU, REV_DOCS_MENU, REV_MONEY_MENU,
   BOOKS_LEDGER_MENU, BOOKS_PRIMARY_MENU,
 } from './workspaceMenus'
 import { storeMenu, STORE_HELP_MENU } from './storeCatalog'
@@ -131,6 +131,7 @@ export const PRODUCT_MODULES: Record<string, ProductModuleDef[]> = {
     ...items(REV_CLIENTS_MENU, 'Покупатели'),
     ...items(REV_ITEMS_MENU, 'Что продаём'),
     ...items(REV_DOCS_MENU, 'Документы'),
+    ...items(REV_MONEY_MENU, 'Деньги'),
   ],
   books: [
     ...items(BOOKS_LEDGER_MENU, 'Регистр'),

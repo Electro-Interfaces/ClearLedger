@@ -945,6 +945,230 @@ async def revenue_check(
     }
 
 
+# ── Деньги: сроки оплаты, поток и договоры ───────────────────────────────────
+# Волна 3. Выручка отвечает «сколько продали», деньги — «когда за это заплатили».
+# Дебиторку заново не считаем: сальдо расчётов уже отдаёт `/settlements` (оно взято
+# из регистра источника, а не выведено из наших проводок — зачёты авансов живут
+# только там). Здесь то, чего в пространстве нет: срок оплаты, движение по счёту и
+# разрез по договорам.
+
+# Корзины срока оплаты. Границы выбраны по обороту документов: аванс и оплата в
+# течение недели — «сразу», месяц — типовая отсрочка, дальше начинается разговор
+# с покупателем. Пороги стоят одним списком: сдвинуть их — здесь, а не в трёх
+# выборках.
+PAY_BUCKETS: list[tuple[str, str, int, int]] = [
+    ("advance", "Аванс (до отгрузки)", -100000, -1),
+    ("week", "До 7 дней", 0, 7),
+    ("month", "8–30 дней", 8, 30),
+    ("q", "31–60 дней", 31, 60),
+    ("late", "61–90 дней", 61, 90),
+    ("overdue", "Больше 90 дней", 91, 100000),
+]
+
+
+@router.get("/payment-terms")
+async def payment_terms(
+    company_id: str,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Через сколько дней платят по счетам: распределение, средний срок, покупатели.
+
+    Связь «счёт ↔ платёж» есть только в регистре «Оплата счетов» (`invoice_payments`):
+    по суммам и датам её не восстановить — один платёж закрывает несколько счетов и
+    наоборот. Отсюда и ограничение экрана: он видит ровно те счета, что регистр свёл.
+    """
+    cid = await assert_company_member(company_id, current_user, db)
+    p: dict[str, Any] = {"cid": str(cid)}
+    where = ""
+    if date_from:
+        where += " AND d.date >= :df"
+        p["df"] = date_from
+    if date_to:
+        where += " AND d.date <= :dt"
+        p["dt"] = date_to
+
+    rows = [{
+        "id": str(r[0]), "number": r[1], "date": r[2], "paidAt": r[3],
+        "counterparty": r[4], "counterpartyId": str(r[5]) if r[5] else None,
+        "amount": _num(r[6]), "days": int(r[7]),
+    } for r in (await db.execute(text(f"""
+        SELECT d.id, d.number, d.date, p.paid_at, d.counterparty_name, d.counterparty_id,
+               p.amount, (p.paid_at::date - d.date::date) AS days
+          FROM invoice_payments p
+          JOIN accounting_docs d ON d.id = p.invoice_doc_id
+         WHERE p.company_id = :cid AND p.paid_at IS NOT NULL{where}
+         ORDER BY days DESC
+    """), p)).all()]
+
+    buckets = [{
+        "key": key, "label": label,
+        "count": sum(1 for r in rows if lo <= r["days"] <= hi),
+        "amount": round(sum(r["amount"] for r in rows if lo <= r["days"] <= hi), 2),
+    } for key, label, lo, hi in PAY_BUCKETS]
+
+    # Медиана рядом со средним не для красоты: у пилота средний срок 160 дней при
+    # медиане втрое меньше — среднее тянут единичные счета, висящие больше года, и
+    # по нему нельзя договариваться об отсрочке.
+    days = sorted(r["days"] for r in rows)
+    median = 0.0
+    if days:
+        mid = len(days) // 2
+        median = float(days[mid]) if len(days) % 2 else (days[mid - 1] + days[mid]) / 2
+
+    by_client: dict[str, dict[str, Any]] = {}
+    for r in rows:
+        key = r["counterpartyId"] or r["counterparty"]
+        c = by_client.setdefault(key, {
+            "id": r["counterpartyId"], "name": r["counterparty"],
+            "invoices": 0, "amount": 0.0, "sumDays": 0, "maxDays": r["days"],
+        })
+        c["invoices"] += 1
+        c["amount"] += r["amount"]
+        c["sumDays"] += r["days"]
+        c["maxDays"] = max(c["maxDays"], r["days"])
+    clients = sorted(
+        ({**c, "avgDays": round(c["sumDays"] / c["invoices"], 1)} for c in by_client.values()),
+        key=lambda c: -c["avgDays"])
+
+    return {
+        "rows": rows[:500],
+        "buckets": buckets,
+        "clients": clients,
+        "total": len(rows),
+        "avgDays": round(sum(r["days"] for r in rows) / len(rows), 1) if rows else None,
+        "medianDays": median,
+        "amount": round(sum(r["amount"] for r in rows), 2),
+    }
+
+
+@router.get("/cashflow")
+async def cashflow(
+    company_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Движение денег помесячно: пришло, ушло, накопленный остаток.
+
+    Считается по банковским ДОКУМЕНТАМ (`bank_in`/`bank_out`), а не по обороту 51
+    счёта: у документа есть контрагент, и рядом с суммой сразу видно, кто заплатил и
+    кому ушло. Оборот по 51 идёт контролем — расхождение означает движение без
+    документа (перевод между своими счетами, эквайринг, инкассация).
+    """
+    cid = await assert_company_member(company_id, current_user, db)
+    p = {"cid": str(cid)}
+
+    months = [{
+        "month": r[0], "inflow": _num(r[1]), "outflow": _num(r[2]),
+        "inDocs": r[3], "outDocs": r[4],
+    } for r in (await db.execute(text("""
+        SELECT substr(date, 1, 7) AS month,
+               sum(amount) FILTER (WHERE doc_type = 'bank_in')  inflow,
+               sum(amount) FILTER (WHERE doc_type = 'bank_out') outflow,
+               count(*)    FILTER (WHERE doc_type = 'bank_in')  in_docs,
+               count(*)    FILTER (WHERE doc_type = 'bank_out') out_docs
+          FROM accounting_docs
+         WHERE company_id = :cid AND doc_type IN ('bank_in', 'bank_out')
+         GROUP BY 1 ORDER BY 1
+    """), p)).all()]
+
+    balance = 0.0
+    for m in months:
+        balance += m["inflow"] - m["outflow"]
+        m["net"] = round(m["inflow"] - m["outflow"], 2)
+        m["balance"] = round(balance, 2)
+
+    payers = [{
+        "name": r[0], "id": r[1], "inflow": _num(r[2]), "docs": r[3], "last": r[4],
+    } for r in (await db.execute(text("""
+        SELECT coalesce(counterparty_name, '—'), max(counterparty_id::text), sum(amount),
+               count(*), max(date)
+          FROM accounting_docs
+         WHERE company_id = :cid AND doc_type = 'bank_in'
+         GROUP BY 1 ORDER BY 3 DESC LIMIT 50
+    """), p)).all()]
+
+    payees = [{
+        "name": r[0], "id": r[1], "outflow": _num(r[2]), "docs": r[3], "last": r[4],
+    } for r in (await db.execute(text("""
+        SELECT coalesce(counterparty_name, '—'), max(counterparty_id::text), sum(amount),
+               count(*), max(date)
+          FROM accounting_docs
+         WHERE company_id = :cid AND doc_type = 'bank_out'
+         GROUP BY 1 ORDER BY 3 DESC LIMIT 50
+    """), p)).all()]
+
+    return {
+        "months": months,
+        "payers": payers,
+        "payees": payees,
+        "inflow": round(sum(m["inflow"] for m in months), 2),
+        "outflow": round(sum(m["outflow"] for m in months), 2),
+        # Контроль по регистру: обороты счёта 51 за всю историю.
+        "registerIn": await _turnover(db, cid, dt="51"),
+        "registerOut": await _turnover(db, cid, kt="51"),
+    }
+
+
+@router.get("/contract-sales")
+async def contract_sales(
+    company_id: str,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Продажи в разрезе договоров: отгрузки, счета, условия расчётов.
+
+    Договор — основание сделки, и вопрос «сколько прошло по этому договору» до сих
+    пор не имел ответа: документ ссылку на него получил (`contract_id`), но ни один
+    экран по ней не собирал. Документы без договора идут отдельной строкой — их
+    больше половины, и прятать это нельзя.
+    """
+    cid = await assert_company_member(company_id, current_user, db)
+    p: dict[str, Any] = {"cid": str(cid)}
+    where = ""
+    if date_from:
+        where += " AND d.date >= :df"
+        p["df"] = date_from
+    if date_to:
+        where += " AND d.date <= :dt"
+        p["dt"] = date_to
+
+    rows = [{
+        "id": str(r[0]) if r[0] else None,
+        "number": r[1], "date": r[2], "kind": r[3], "settlementKind": r[4],
+        "counterparty": r[5],
+        "sales": _num(r[6]), "salesDocs": r[7],
+        "invoices": _num(r[8]), "invoiceDocs": r[9],
+        "first": r[10], "last": r[11],
+    } for r in (await db.execute(text(f"""
+        SELECT d.contract_id, max(c.number), max(c.date), max(c.type),
+               max(c.settlement_kind), max(d.counterparty_name),
+               sum(d.amount) FILTER (WHERE d.doc_type = 'sale'),
+               count(*)      FILTER (WHERE d.doc_type = 'sale'),
+               sum(d.amount) FILTER (WHERE d.doc_type = 'invoice_out'),
+               count(*)      FILTER (WHERE d.doc_type = 'invoice_out'),
+               min(d.date), max(d.date)
+          FROM accounting_docs d
+          LEFT JOIN contracts c ON c.id = d.contract_id
+         WHERE d.company_id = :cid
+           AND d.doc_type IN ('sale', 'invoice_out'){where}
+         GROUP BY d.contract_id
+         ORDER BY sum(d.amount) FILTER (WHERE d.doc_type = 'sale') DESC NULLS LAST
+    """), p)).all()]
+
+    linked = [r for r in rows if r["id"]]
+    return {
+        "rows": rows,
+        "withContract": len(linked),
+        "salesWithContract": round(sum(r["sales"] for r in linked), 2),
+        "salesTotal": round(sum(r["sales"] for r in rows), 2),
+    }
+
+
 # ── Нормализованный слой: карточка контрагента ───────────────────────────────
 # Разрезы отвечают «сколько всего». Работа же идёт вокруг КЛИЕНТА: с ним говорят,
 # ему выставляют, от него ждут денег. Карточка собирает всё, что о нём знает

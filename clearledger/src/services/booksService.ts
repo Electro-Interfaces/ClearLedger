@@ -214,6 +214,60 @@ export const getAssortment = (
   get<{ by: string; rows: AssortmentRow[]; cost: number | null }>(
     `/api/books/assortment?company_id=${companyId}&by=${by}` + periodQuery(period))
 
+/** Сроки оплаты счетов: связка «счёт ↔ платёж» из регистра «Оплата счетов». */
+export interface PaymentTerms {
+  rows: {
+    id: string; number: string; date: string; paidAt: string
+    counterparty: string; counterpartyId: string | null; amount: number; days: number
+  }[]
+  buckets: { key: string; label: string; count: number; amount: number }[]
+  clients: {
+    id: string | null; name: string; invoices: number; amount: number
+    avgDays: number; maxDays: number
+  }[]
+  total: number
+  avgDays: number | null
+  medianDays: number
+  amount: number
+}
+
+export const getPaymentTerms = (companyId: string, period?: PeriodOpts) =>
+  get<PaymentTerms>(`/api/books/payment-terms?company_id=${companyId}` + periodQuery(period))
+
+/** Движение денег по банковским документам: приход, расход, накопленный остаток. */
+export interface CashflowData {
+  months: {
+    month: string; inflow: number; outflow: number
+    inDocs: number; outDocs: number; net: number; balance: number
+  }[]
+  payers: { name: string; id: string | null; inflow: number; docs: number; last: string }[]
+  payees: { name: string; id: string | null; outflow: number; docs: number; last: string }[]
+  inflow: number
+  outflow: number
+  /** Обороты счёта 51 — контроль: расхождение = движение без документа. */
+  registerIn: number
+  registerOut: number
+}
+
+export const getCashflow = (companyId: string) =>
+  get<CashflowData>(`/api/books/cashflow?company_id=${companyId}`)
+
+/** Продажи в разрезе договоров; строка с id === null — документы без договора. */
+export interface ContractSales {
+  rows: {
+    id: string | null; number: string | null; date: string | null
+    kind: string | null; settlementKind: string | null; counterparty: string
+    sales: number; salesDocs: number; invoices: number; invoiceDocs: number
+    first: string | null; last: string | null
+  }[]
+  withContract: number
+  salesWithContract: number
+  salesTotal: number
+}
+
+export const getContractSales = (companyId: string, period?: PeriodOpts) =>
+  get<ContractSales>(`/api/books/contract-sales?company_id=${companyId}` + periodQuery(period))
+
 /** Сверка «Реализации» с регистром: документы против оборота 90.01.1 помесячно. */
 export interface RevenueCheck {
   months: {
