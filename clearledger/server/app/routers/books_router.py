@@ -39,6 +39,7 @@ COST_DT = "90.02.1"
 # же словарь нужен и выгрузкам, а дублировать его во фронте — расходиться при первом
 # же новом виде.
 DOC_LABELS = {
+    "sale": "Реализация (товары и услуги)",
     "sale_goods": "Реализация товаров",
     "sale_services": "Оказание услуг",
     "purchase": "Поступление товаров и услуг",
@@ -602,7 +603,7 @@ async def docs(
 # кто покупает, что покупает и как это менялось по месяцам.
 
 async def _slice(db: AsyncSession, cid, doc_type: str, top: int,
-                 date_from: str | None = None, date_to: str | None = None) -> dict[str, Any]:
+                 date_from: str | None = None, date_to: str | None = None, *, line_kind: str | None = None) -> dict[str, Any]:
     docs_q = select(AccountingDoc).where(
         AccountingDoc.company_id == cid, AccountingDoc.doc_type == doc_type)
     # Период приходит из общего фильтра рабочей области. Дата документа хранится
@@ -620,7 +621,14 @@ async def _slice(db: AsyncSession, cid, doc_type: str, top: int,
     total = vat = 0.0
 
     for d in rows:
-        amount, dvat = _num(d.amount), _num(d.vat_amount)
+        if line_kind:
+            picked = [l for l in (d.lines or []) if (l.get('kind') or 'goods') == line_kind]
+            if not picked:
+                continue
+            amount = sum(_num(l.get('amount')) for l in picked)
+            dvat = sum(_num(l.get('vat')) for l in picked)
+        else:
+            amount, dvat = _num(d.amount), _num(d.vat_amount)
         total += amount
         vat += dvat
         month = (d.date or "")[:7]
@@ -635,6 +643,9 @@ async def _slice(db: AsyncSession, cid, doc_type: str, top: int,
         c["docs"] += 1
 
         for ln in (d.lines or []):
+            # Разрез по типу строки: один документ несёт и товары, и услуги.
+            if line_kind and (ln.get('kind') or 'goods') != line_kind:
+                continue
             it = by_item.setdefault(ln.get("name") or "—",
                                     {"name": ln.get("name") or "—", "amount": 0.0, "qty": 0.0})
             it["amount"] += _num(ln.get("amount"))
@@ -665,7 +676,7 @@ async def sales(
 ) -> dict[str, Any]:
     """Продажи товаров: динамика, покупатели, товары."""
     cid = await assert_company_member(company_id, current_user, db)
-    return await _slice(db, cid, "sale_goods", top, date_from, date_to)
+    return await _slice(db, cid, "sale", top, date_from, date_to, line_kind="goods")
 
 
 @router.get("/services")
@@ -679,7 +690,7 @@ async def services(
 ) -> dict[str, Any]:
     """Услуги: динамика, заказчики, виды услуг."""
     cid = await assert_company_member(company_id, current_user, db)
-    return await _slice(db, cid, "sale_services", top, date_from, date_to)
+    return await _slice(db, cid, "sale", top, date_from, date_to, line_kind="service")
 
 
 # ── «Данные»: источники и качество ───────────────────────────────────────────
