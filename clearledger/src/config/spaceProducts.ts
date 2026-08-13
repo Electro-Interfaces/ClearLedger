@@ -145,7 +145,10 @@ export const SPACE_PRODUCTS: SpaceProduct[] = [
     // топливного профиля. `/sources` в меню нет вовсе (нет записи в `navigation.ts`),
     // настройка подключения встраивается в коннектор.
     code: 'data', route: '/data', label: 'Данные',
-    modes: ['normalize', 'reconcile'],
+    // Офисный профиль показывает свои разделы (источники, база, качество),
+    // сетевые — привычные «Нормализацию» и «Сверку». Состав рельсы решает
+    // `workspaceSections`, здесь перечислены все режимы продукта.
+    modes: ['normalize', 'reconcile', 'data_sources', 'data_model', 'data_quality'],
     paths: [],
   },
   {

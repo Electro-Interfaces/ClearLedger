@@ -12,7 +12,6 @@
  *   База пространства — какие сущности живут в нормализованном слое и где разрывы;
  *   Качество — сходятся ли данные сами с собой и что требует решения.
  */
-import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { AlertTriangle, CheckCircle2, Database, FileStack, Info, Network, XCircle } from 'lucide-react'
 
@@ -23,15 +22,8 @@ import { MetricTile } from '@/components/ui/metric-tile'
 import { getQuality, getSources, type QualityCheck } from '@/services/booksService'
 import { getSpaceDataModel } from '@/services/spaceObjectsService'
 import { cn } from '@/lib/utils'
-import { CentralPanelLayout, type CentralMenuItem } from './CentralPanelLayout'
 
 const num = new Intl.NumberFormat('ru-RU')
-
-const MENU: CentralMenuItem[] = [
-  { key: 'sources', label: 'Источники' },
-  { key: 'model', label: 'База пространства' },
-  { key: 'quality', label: 'Качество' },
-]
 
 const STATUS: Record<QualityCheck['status'], { icon: typeof CheckCircle2; cls: string; label: string }> = {
   ok: { icon: CheckCircle2, cls: 'border-emerald-500/40 bg-emerald-500/5 text-emerald-700 dark:text-emerald-400', label: 'сходится' },
@@ -40,16 +32,21 @@ const STATUS: Record<QualityCheck['status'], { icon: typeof CheckCircle2; cls: s
   info: { icon: Info, cls: 'border-blue-500/40 bg-blue-500/5 text-blue-700 dark:text-blue-400', label: 'к сведению' },
 }
 
-export function OfficeDataView() {
-  const [tab, setTab] = useState('sources')
+export type OfficeDataTab = 'sources' | 'model' | 'quality'
+
+/**
+ * Раздел выбирается РЕЛЬСОЙ приложения, а не вкладками внутри: у компании без
+ * объектов «Источники», «База пространства» и «Качество» — самостоятельные разделы
+ * продукта «Данные», как «Регистр» и «Документы» у «Бухгалтерии». Своя полоса
+ * вкладок внутри рабочей области делала бы это место единственным устроенным иначе.
+ */
+export function OfficeDataView({ tab }: { tab: OfficeDataTab }) {
   return (
-    <CentralPanelLayout items={MENU} activeKey={tab} onSelect={setTab}>
-      <div className="h-full overflow-y-auto p-4">
-        {tab === 'sources' && <SourcesTab />}
-        {tab === 'model' && <ModelTab />}
-        {tab === 'quality' && <QualityTab />}
-      </div>
-    </CentralPanelLayout>
+    <div className="h-full overflow-y-auto p-4">
+      {tab === 'sources' && <SourcesTab />}
+      {tab === 'model' && <ModelTab />}
+      {tab === 'quality' && <QualityTab />}
+    </div>
   )
 }
 

@@ -32,6 +32,7 @@ import { useVisibleSections } from './workspaceSections'
  * открывает один раздел за раз — остальные приезжают по мере переключения.
  */
 const NormalizationPanel = lazy(() => import('./NormalizationPanel').then((m) => ({ default: m.NormalizationPanel })))
+const OfficeDataView = lazy(() => import('./OfficeDataView').then((m) => ({ default: m.OfficeDataView })))
 const ReconciliationPanel = lazy(() => import('./ReconciliationPanel').then((m) => ({ default: m.ReconciliationPanel })))
 const ManagementPanel = lazy(() => import('./AccountingPanels').then((m) => ({ default: m.ManagementPanel })))
 const FinancialPanel = lazy(() => import('./AccountingPanels').then((m) => ({ default: m.FinancialPanel })))
@@ -132,6 +133,11 @@ function ModePanel() {
         <Loader2 className="size-5 animate-spin text-muted-foreground" />
       </div>
     }>
+      {/* «Данные» компании без объектов: три раздела рельсы, содержимое — одно
+          на все три, вкладку задаёт режим. */}
+      {coreMode === 'data_sources' && <OfficeDataView tab="sources" />}
+      {coreMode === 'data_model' && <OfficeDataView tab="model" />}
+      {coreMode === 'data_quality' && <OfficeDataView tab="quality" />}
       {coreMode === 'normalize' && <NormalizationPanel />}
       {coreMode === 'reconcile' && <ReconciliationPanel />}
       {coreMode === 'management' && <ManagementPanel />}
