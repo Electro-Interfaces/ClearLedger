@@ -1,15 +1,12 @@
 /**
- * Рабочие места компании без объектов (профиль `office`): «Реализация» и «Бухгалтерия».
+ * «Бухгалтерия» компании без объектов (профиль `office`) — эталон учёта пространства.
  *
- * Устроены как остальные продукты пространства: раздел выбирается в рельсе приложения,
- * его экраны — во второй панели, содержимое рисует эта панель по `?sub=`. Раньше оба
- * жили страницами с самодельной полосой вкладок внутри — единственные рабочие места
- * пространства, устроенные не как все (13.08.2026).
+ * Устроена как остальные продукты: раздел выбирается в рельсе приложения, его экраны —
+ * во второй панели, содержимое рисует эта панель по `?sub=`. Раньше это была страница
+ * с самодельной полосой вкладок внутри (13.08.2026).
  *
- * «Продажи» и «Услуги» — два раздела ОДНОГО продукта: своих чисел они не заводят,
- * читают те же документы бухгалтерии (`accounting_docs`) под своим углом. Экран у них
- * общий с параметром: две копии разошлись бы в первую же правку, а расхождение цифр
- * между соседними витринами — причина, по которой такие витрины бросают.
+ * Здесь же живут окна карточек — контрагента, счёта, позиции: их открывает и
+ * «Реализация» (`OfficeRevenue.tsx`), поэтому они экспортируются, а не копируются.
  *
  * Числа приходят посчитанными с бэкенда (`/api/books/*`): фронт не пересчитывает
  * ничего, иначе «Реализация» и «Бухгалтерия» разошлись бы на копейках округления —
@@ -30,11 +27,10 @@ import { MetricTile } from '@/components/ui/metric-tile'
 import { cn } from '@/lib/utils'
 import {
   getAccountCard, getBalance, getBooksOverview, getCounterpartyCard, getDocs, getEntries,
-  getNomenclatureCard, getPeriods, getSlice,
-  type BalanceTotals, type BooksOverview, type SettlementKind, type SliceData, type VatKind,
+  getNomenclatureCard, getPeriods,
+  type BalanceTotals, type BooksOverview, type SettlementKind, type VatKind,
 } from '@/services/booksService'
 import { BooksSettlements, BooksVat } from './OfficeSettlements'
-import { DocumentWindow } from '@/components/books/DocumentWindow'
 import { useWorkspaceSections } from './workspaceSections'
 
 const money = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
@@ -47,25 +43,22 @@ const DOC_LABEL: Record<string, string> = {
   purchase: 'Поступление',
 }
 
-/** Полный список, а не топ-15: экран разреза и есть его реестр. */
-const FULL = 500
-
-function Loading() {
+export function Loading() {
   return <div className="p-6 text-sm text-muted-foreground">Загрузка…</div>
 }
 
-function NoCompany() {
+export function NoCompany() {
   return <div className="p-6 text-sm text-muted-foreground">Не выбрана организация.</div>
 }
 
 /** Шапка таблицы — одинаковая во всех разрезах пространства. */
-function Th({ children, right }: { children: React.ReactNode; right?: boolean }) {
+export function Th({ children, right }: { children: React.ReactNode; right?: boolean }) {
   return (
     <th className={cn('font-normal px-3 py-2', right ? 'text-right' : 'text-left')}>{children}</th>
   )
 }
 
-function TableCard({ note, head, children }: {
+export function TableCard({ note, head, children }: {
   note?: string; head: React.ReactNode; children: React.ReactNode
 }) {
   return (
@@ -80,247 +73,6 @@ function TableCard({ note, head, children }: {
         </table>
       </CardContent>
     </Card>
-  )
-}
-
-/* ────────────────────────────────────────────────────────────── */
-/*                          Реализация                            */
-/* ────────────────────────────────────────────────────────────── */
-
-const REV_COPY = {
-  sales: {
-    docType: 'sale',
-    lineKind: 'goods',
-    clients: 'Покупатели',
-    items: 'Номенклатура',
-    itemsHint: 'по сумме отгрузок',
-    docsNote: 'Документы реализации товаров за выбранный период',
-  },
-  services: {
-    docType: 'sale',
-    lineKind: 'service',
-    clients: 'Заказчики',
-    items: 'Виды услуг',
-    itemsHint: 'по сумме актов',
-    docsNote: 'Акты оказанных услуг за выбранный период',
-  },
-} as const
-
-type RevKind = keyof typeof REV_COPY
-
-export function RevenuePanel() {
-  const { coreMode } = useWorkspace()
-  const kind: RevKind = coreMode === 'rev_services' ? 'services' : 'sales'
-  const sections = useWorkspaceSections()
-  const items = sections.find((s) => s.mode === coreMode)?.items ?? []
-  const [sub] = useWorkspaceSubView(items[0]?.key ?? '', items.map((i) => i.key))
-  const { companyId } = useCompany()
-  const { period } = useFilters()
-  const copy = REV_COPY[kind]
-
-  const q = useQuery({
-    queryKey: ['books', kind, companyId, period.from, period.to],
-    queryFn: () => getSlice(companyId, kind, { top: FULL, from: period.from, to: period.to }),
-    enabled: !!companyId,
-  })
-
-  if (!companyId) return <NoCompany />
-  // Реестр документов ходит своей ручкой — разрез его не считает.
-  const view = sub.endsWith('_docs')
-    ? <RevDocs companyId={companyId} docType={copy.docType} lineKind={copy.lineKind} note={copy.docsNote} />
-    : q.isError ? <div className="p-4"><QueryError onRetry={() => q.refetch()} /></div>
-    : !q.data ? <Loading />
-    : sub.endsWith('_clients') ? <RevClients data={q.data} title={copy.clients} />
-    : sub.endsWith('_items') ? <RevItems data={q.data} title={copy.items} hint={copy.itemsHint} />
-    : <RevOverview data={q.data} clientsLabel={copy.clients} />
-
-  return (
-    <div className="h-full flex flex-col">
-      <ScrollArea className="flex-1 min-h-0">{view}</ScrollArea>
-    </div>
-  )
-}
-
-function RevOverview({ data, clientsLabel }: { data: SliceData; clientsLabel: string }) {
-  const avg = data.docs ? data.total / data.docs : 0
-  const maxMonth = Math.max(...data.months.map((m) => m.amount), 1)
-  // Последние два года: полная история за пять лет в столбик не читается.
-  const months = data.months.slice(-24)
-
-  return (
-    <div className="p-4 space-y-4">
-      <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
-        <MetricTile label="Оборот с НДС" value={money.format(data.total) + ' ₽'}
-          hint={`без НДС ${money.format(data.net)} ₽`} />
-        <MetricTile label="Документов" value={num.format(data.docs)}
-          hint={`средний ${money.format(avg)} ₽`} />
-        <MetricTile label={clientsLabel} value={num.format(data.clients)} />
-        <MetricTile label="НДС" value={money.format(data.vat) + ' ₽'} />
-      </div>
-
-      <Card>
-        <CardContent className="p-4">
-          <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-3">
-            Помесячно {months.length ? `(последние ${months.length} мес.)` : ''}
-          </div>
-          {months.length === 0 ? (
-            <div className="py-6 text-center text-sm text-muted-foreground">
-              За выбранный период документов нет
-            </div>
-          ) : (
-            /* Высота столбца — в пикселях: проценты внутри flex без своей высоты
-               разворачиваются в ноль, и график становится пустой полосой. */
-            <div className="flex items-end gap-1 h-40 overflow-x-auto">
-              {months.map((m) => (
-                <div key={m.month} className="flex flex-col items-center gap-1 min-w-[26px] flex-1"
-                  title={`${m.month}: ${money.format(m.amount)} ₽, документов ${m.docs}`}>
-                  <div className="w-full rounded-t bg-primary/70"
-                    style={{ height: `${Math.max(2, (m.amount / maxMonth) * 128)}px` }} />
-                  <div className="text-[9px] text-muted-foreground rotate-45 origin-left h-6 whitespace-nowrap">
-                    {m.month.slice(2)}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-    </div>
-  )
-}
-
-/**
- * Покупатели разреза. Строка ведёт в КАРТОЧКУ контрагента — то же юрлицо, о котором
- * пространство знает всё: реквизиты, договоры, долг, что покупает. Раньше разрез
- * заканчивался именем в таблице, и дальше человек шёл искать это имя глазами в
- * реестре документов.
- *
- * Кнопкой становится только сведённый со справочником (`id`): у части платежей ИНН
- * не приезжает вовсе, карточки у них нет, и ссылка вела бы в пустоту.
- */
-function RevClients({ data, title }: { data: SliceData; title: string }) {
-  const total = data.total || 1
-  const { companyId } = useCompany()
-  const [card, setCard] = useState<string | null>(null)
-  const unlinked = data.topClients.filter((c) => !c.id).length
-  return (
-    <div className="p-4">
-      <TableCard
-        note={`${title}: ${num.format(data.clients)} — по обороту за период`
-          + (unlinked ? ` · ${unlinked} без карточки в справочнике` : '')}
-        head={<>
-          <Th>{title}</Th><Th>ИНН</Th><Th right>Документов</Th>
-          <Th right>Оборот</Th><Th right>Доля</Th>
-        </>}>
-        {data.topClients.map((c) => (
-          <tr key={c.id ?? c.name} className="border-b last:border-0 hover:bg-muted/40">
-            <td className="px-3 py-1.5 max-w-[320px] truncate" title={c.name}>
-              {c.id ? (
-                <button onClick={() => setCard(c.id)}
-                  className="text-left hover:text-primary hover:underline">{c.name}</button>
-              ) : c.name}
-            </td>
-            <td className="px-3 py-1.5 tabular-nums text-muted-foreground">{c.inn ?? '—'}</td>
-            <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{c.docs}</td>
-            <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">
-              {money.format(c.amount)} ₽
-            </td>
-            <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
-              {((c.amount / total) * 100).toFixed(1)}%
-            </td>
-          </tr>
-        ))}
-      </TableCard>
-      {card && (
-        <CounterpartyWindow companyId={companyId} id={card} onClose={() => setCard(null)} />
-      )}
-    </div>
-  )
-}
-
-function RevItems({ data, title, hint }: { data: SliceData; title: string; hint: string }) {
-  const { companyId } = useCompany()
-  const [card, setCard] = useState<string | null>(null)
-  return (
-    <div className="p-4">
-      <TableCard
-        note={`${title} — ${hint}`}
-        head={<><Th>{title}</Th><Th right>Количество</Th><Th right>Сумма</Th></>}>
-        {data.topItems.map((it) => (
-          <tr key={it.code ?? it.name} className="border-b last:border-0 hover:bg-muted/40">
-            <td className="px-3 py-1.5 max-w-[420px] truncate" title={it.name}>
-              {it.code ? (
-                <button onClick={() => setCard(it.code)}
-                  className="text-left hover:text-primary hover:underline">{it.name}</button>
-              ) : it.name}
-            </td>
-            <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
-              {it.qty ? qty.format(it.qty) : '—'}
-            </td>
-            <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">
-              {money.format(it.amount)} ₽
-            </td>
-          </tr>
-        ))}
-      </TableCard>
-      {card && (
-        <NomenclatureWindow companyId={companyId} code={card} onClose={() => setCard(null)} />
-      )}
-    </div>
-  )
-}
-
-function RevDocs({ companyId, docType, lineKind, note }: {
-  companyId: string; docType: string; lineKind?: string; note: string
-}) {
-  const { period } = useFilters()
-  const [card, setCard] = useState<string | null>(null)
-  const [docId, setDocId] = useState<string | null>(null)
-  const q = useQuery({
-    queryKey: ['books', 'docs', companyId, docType, lineKind, period.from, period.to],
-    queryFn: () => getDocs(companyId, docType, { from: period.from, to: period.to },
-                           undefined, 0, lineKind),
-  })
-  if (q.isError) return <div className="p-4"><QueryError onRetry={() => q.refetch()} /></div>
-  if (!q.data) return <Loading />
-
-  return (
-    <div className="p-4">
-      <TableCard
-        note={`${note} — ${num.format(q.data.total)} шт.`}
-        head={<>
-          <Th>Дата</Th><Th>Номер</Th><Th>Контрагент</Th>
-          <Th right>Сумма</Th><Th right>НДС</Th><Th right>Строк</Th>
-        </>}>
-        {q.data.rows.map((r, i) => (
-          <tr key={i} className="border-b last:border-0 hover:bg-muted/40">
-            <td className="px-3 py-1.5 tabular-nums whitespace-nowrap">{r.date}</td>
-            <td className="px-3 py-1.5 tabular-nums">
-              {/* Номер — вход в сам документ: строки и проводки. */}
-              <button onClick={() => setDocId(r.id)}
-                className="hover:text-primary hover:underline">{r.number}</button>
-            </td>
-            <td className="px-3 py-1.5 max-w-[320px] truncate" title={r.counterparty}>
-              {r.counterpartyId ? (
-                <button onClick={() => setCard(r.counterpartyId)}
-                  className="text-left hover:text-primary hover:underline">{r.counterparty}</button>
-              ) : r.counterparty}
-            </td>
-            <td className="px-3 py-1.5 text-right tabular-nums">{money.format(r.amount)}</td>
-            <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
-              {money.format(r.vat)}
-            </td>
-            <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{r.lines}</td>
-          </tr>
-        ))}
-      </TableCard>
-      {card && (
-        <CounterpartyWindow companyId={companyId} id={card} onClose={() => setCard(null)} />
-      )}
-      {docId && (
-        <DocumentWindow companyId={companyId} docId={docId} onClose={() => setDocId(null)} />
-      )}
-    </div>
   )
 }
 
@@ -657,7 +409,7 @@ function AccountCardWindow({ companyId, code, onClose }: {
  * карточку, а не по имени, — поэтому «его документы» и «его долг» считаются по
  * одному и тому же множеству, а не по двум похожим.
  */
-function CounterpartyWindow({ companyId, id, onClose }: {
+export function CounterpartyWindow({ companyId, id, onClose }: {
   companyId: string; id: string; onClose: () => void
 }) {
   const q = useQuery({
@@ -779,7 +531,7 @@ function CounterpartyWindow({ companyId, id, onClose }: {
  * зарабатываем, кто берёт и у кого покупаем. Позиция — тот же код, что в
  * справочнике 1С, поэтому продажи и закупки сходятся в одной строке.
  */
-function NomenclatureWindow({ companyId, code, onClose }: {
+export function NomenclatureWindow({ companyId, code, onClose }: {
   companyId: string; code: string; onClose: () => void
 }) {
   const q = useQuery({

@@ -345,21 +345,31 @@ export const MARKET_KEYS = MARKET_MENU.map((m) => m.key)
  * одним и тем же экраном: человек ходил между плитками, чтобы задать один вопрос —
  * что компания продала за период (решение МАГа 13.08.2026).
  *
- * Ключи разведены (`sale_*` / `svc_*`), хотя экраны одинаковые: код пункта — это ещё и
- * ключ права (`revenue:sale_clients`), и общий ключ на два раздела означал бы, что
- * закрыть коммерсанту услуги, оставив товары, нечем.
+ * Состав согласован МАГом 13.08.2026: разделы — по ВОПРОСУ («сколько продали», «кому»,
+ * «что», «какими бумагами»), а товар против услуги стал разрезом внутри экрана.
+ * Прежнее деление (`rev_goods` / `rev_services`) повторяло одни и те же четыре пункта
+ * дважды, и общей выручки компании не показывал ни один из них.
  */
-export const REV_GOODS_MENU: CentralMenuItem[] = [
-  { key: 'sale_overview', label: 'Обзор' },
-  { key: 'sale_clients',  label: 'Покупатели' },
-  { key: 'sale_items',    label: 'Номенклатура' },
-  { key: 'sale_docs',     label: 'Документы' },
+export const REV_SALES_MENU: CentralMenuItem[] = [
+  { key: 'rev_overview', label: 'Обзор' },
+  { key: 'rev_trend',    label: 'Динамика и YoY' },
+  { key: 'rev_compare',  label: 'Сравнение периодов' },
+  { key: 'rev_slices',   label: 'Разрезы' },
 ]
-export const REV_SERVICES_MENU: CentralMenuItem[] = [
-  { key: 'svc_overview',  label: 'Обзор' },
-  { key: 'svc_clients',   label: 'Заказчики' },
-  { key: 'svc_items',     label: 'Виды услуг' },
-  { key: 'svc_docs',      label: 'Документы' },
+export const REV_CLIENTS_MENU: CentralMenuItem[] = [
+  { key: 'rev_clients',  label: 'Реестр' },
+  { key: 'rev_abc',      label: 'ABC и концентрация' },
+  { key: 'rev_churn',    label: 'Новые и ушедшие' },
+]
+export const REV_ITEMS_MENU: CentralMenuItem[] = [
+  { key: 'rev_nomen',    label: 'Номенклатура' },
+  { key: 'rev_svc',      label: 'Услуги' },
+  { key: 'rev_abc_items', label: 'ABC товаров' },
+]
+export const REV_DOCS_MENU: CentralMenuItem[] = [
+  { key: 'rev_sale_docs', label: 'Реализации' },
+  { key: 'rev_invoices',  label: 'Счета покупателю' },
+  { key: 'rev_funnel',    label: 'Воронка' },
 ]
 
 /**

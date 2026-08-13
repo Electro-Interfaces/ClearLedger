@@ -10,7 +10,8 @@ import type { CoreMode } from '@/contexts/WorkspaceContext'
 import { STORE_MENU, storeMenu } from './storeCatalog'
 import { ACCOUNTING_MENU } from './moduleComponents'
 import {
-  REV_GOODS_MENU, REV_SERVICES_MENU, BOOKS_LEDGER_MENU, BOOKS_PRIMARY_MENU,
+  REV_SALES_MENU, REV_CLIENTS_MENU, REV_ITEMS_MENU, REV_DOCS_MENU,
+  BOOKS_LEDGER_MENU, BOOKS_PRIMARY_MENU,
 } from './workspaceMenus'
 
 /** Пункты «Бухгалтерии» одной картой: разделы делят общий словарь подписей. */
@@ -66,8 +67,10 @@ export const MODE_LABELS: Record<CoreMode, string> = {
   normalize: 'Нормализация',
   reconcile: 'Сверка',
   // Разделы продуктов компании без объектов: «Реализация» и «Бухгалтерия».
-  rev_goods: 'Реализация · Продажи',
-  rev_services: 'Реализация · Услуги',
+  rev_sales: 'Реализация · Продажи',
+  rev_buyers: 'Реализация · Покупатели',
+  rev_catalog: 'Реализация · Что продаём',
+  rev_papers: 'Реализация · Документы',
   books_ledger: 'Бухгалтерия · Регистр',
   books_primary: 'Бухгалтерия · Документы',
 }
@@ -173,8 +176,10 @@ const SUB_LABELS: Partial<Record<CoreMode, Record<string, string>>> = {
     vat: 'НДС', profit: 'Налог на прибыль', compliance: 'Соответствие',
   },
   // Пункты офисных продуктов — из тех же списков, что рисуют меню.
-  rev_goods: Object.fromEntries(REV_GOODS_MENU.map((m) => [m.key, m.label])),
-  rev_services: Object.fromEntries(REV_SERVICES_MENU.map((m) => [m.key, m.label])),
+  rev_sales: Object.fromEntries(REV_SALES_MENU.map((m) => [m.key, m.label])),
+  rev_buyers: Object.fromEntries(REV_CLIENTS_MENU.map((m) => [m.key, m.label])),
+  rev_catalog: Object.fromEntries(REV_ITEMS_MENU.map((m) => [m.key, m.label])),
+  rev_papers: Object.fromEntries(REV_DOCS_MENU.map((m) => [m.key, m.label])),
   books_ledger: Object.fromEntries(BOOKS_LEDGER_MENU.map((m) => [m.key, m.label])),
   books_primary: Object.fromEntries(BOOKS_PRIMARY_MENU.map((m) => [m.key, m.label])),
 }

@@ -10,7 +10,7 @@
  */
 
 import type { ComponentType } from 'react'
-import { BarChart3, Gauge, BookOpen, FileOutput, HardHat, Building2, Megaphone, Sparkles, GitCompare, Activity, Wallet, Boxes, Receipt, Truck, Briefcase, Scale, FileText } from 'lucide-react'
+import { BarChart3, Gauge, BookOpen, FileOutput, HardHat, Building2, Megaphone, Sparkles, GitCompare, Activity, Wallet, Boxes, Receipt, Truck, Scale, FileText, Users, Package } from 'lucide-react'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useWorkspace, type CoreMode } from '@/contexts/WorkspaceContext'
 import { modeAllowed } from '@/config/accessModules'
@@ -31,7 +31,8 @@ import {
   FUEL_NETWORK_MENU, FUEL_ANALYTICS_MENU, FUEL_COMMERCE_MENU, FUEL_GOODS_MENU,
   FUEL_HELP_MENU,
   MARKET_MENU, MARKET_KEYS,
-  REV_GOODS_MENU, REV_SERVICES_MENU, BOOKS_LEDGER_MENU, BOOKS_PRIMARY_MENU,
+  REV_SALES_MENU, REV_CLIENTS_MENU, REV_ITEMS_MENU, REV_DOCS_MENU,
+  BOOKS_LEDGER_MENU, BOOKS_PRIMARY_MENU,
 } from '@/config/workspaceMenus'
 // CHARGE_SESSIONS_MENU здесь не используется — общий список нужен карте прав и роутеру
 // панелей; секции собираются из трёх меню разделов.
@@ -50,7 +51,8 @@ export {
   SALES_NETWORK_MENU, SALES_SESSIONS_MENU, SALES_COMMERCE_MENU,
   FUEL_NETWORK_MENU, FUEL_ANALYTICS_MENU, FUEL_COMMERCE_MENU, FUEL_GOODS_MENU,
   MARKET_MENU, MARKET_KEYS,
-  REV_GOODS_MENU, REV_SERVICES_MENU, BOOKS_LEDGER_MENU, BOOKS_PRIMARY_MENU,
+  REV_SALES_MENU, REV_CLIENTS_MENU, REV_ITEMS_MENU, REV_DOCS_MENU,
+  BOOKS_LEDGER_MENU, BOOKS_PRIMARY_MENU,
 }
 
 // Меню бухгалтерского (mode=accounting) собирается из включённых компонентов модуля
@@ -194,10 +196,14 @@ export function useWorkspaceSections(): WorkspaceSection[] {
   // во второй панели. Подключение проверять нечем и незачем: данные приезжают из
   // бухгалтерии компании, модулей-коннекторов у этих продуктов нет.
   const isOffice = company.profileId === 'office'
-  const revGoods: WorkspaceSection = { mode: 'rev_goods', label: 'Продажи', icon: BarChart3,
-    items: isOffice ? REV_GOODS_MENU : [], connected: isOffice }
-  const revServices: WorkspaceSection = { mode: 'rev_services', label: 'Услуги', icon: Briefcase,
-    items: isOffice ? REV_SERVICES_MENU : [], connected: isOffice }
+  const revSales: WorkspaceSection = { mode: 'rev_sales', label: 'Продажи', icon: BarChart3,
+    items: isOffice ? REV_SALES_MENU : [], connected: isOffice }
+  const revBuyers: WorkspaceSection = { mode: 'rev_buyers', label: 'Покупатели', icon: Users,
+    items: isOffice ? REV_CLIENTS_MENU : [], connected: isOffice }
+  const revCatalog: WorkspaceSection = { mode: 'rev_catalog', label: 'Что продаём', icon: Package,
+    items: isOffice ? REV_ITEMS_MENU : [], connected: isOffice }
+  const revPapers: WorkspaceSection = { mode: 'rev_papers', label: 'Документы', icon: Receipt,
+    items: isOffice ? REV_DOCS_MENU : [], connected: isOffice }
   const booksLedger: WorkspaceSection = { mode: 'books_ledger', label: 'Регистр', icon: Scale,
     items: isOffice ? BOOKS_LEDGER_MENU : [], connected: isOffice }
   const booksPrimary: WorkspaceSection = { mode: 'books_primary', label: 'Документы', icon: FileText,
@@ -219,7 +225,7 @@ export function useWorkspaceSections(): WorkspaceSection[] {
   // Офис — свой короткий список: сетевых разделов у него нет вовсе, и подмешивать их
   // (пустыми, «неподключёнными») значило бы показывать рельсу про чужую жизнь.
   const all = isOffice
-    ? [revGoods, revServices, booksLedger, booksPrimary, normalize]
+    ? [revSales, revBuyers, revCatalog, revPapers, booksLedger, booksPrimary, normalize]
     : isEnergy
     ? [sales, salesSessions, salesCommerce, corporate, marketing,
        projects, projectsAnalytics, ops, opsEquipment, opsEconomy,

@@ -234,8 +234,8 @@ const router = createBrowserRouter([
           // (`SPACE_PRODUCTS`). Здесь остались старые адреса двух бывших приложений:
           // «Продажи» и «Услуги» слились в «Реализацию», и закладка на них обязана
           // приводить в её раздел, а не в «страница не найдена».
-          { path: '/trade', element: <Navigate to="/revenue?mode=rev_goods" replace /> },
-          { path: '/services', element: <Navigate to="/revenue?mode=rev_services" replace /> },
+          { path: '/trade', element: <Navigate to="/revenue?mode=rev_sales" replace /> },
+          { path: '/services', element: <Navigate to="/revenue?mode=rev_catalog&sub=rev_svc" replace /> },
           { path: '/objects', element: <LazyPage><LocationsPage cockpitVariant="full" /></LazyPage> },
           { path: '/files', element: <LazyPage><FilesPage /></LazyPage> },
           { path: '/messages', element: <LazyPage><MessagesPage /></LazyPage> },

@@ -10,7 +10,7 @@
  */
 import { saveAs } from 'file-saver'
 
-import { getAct, getDocs, getCounterpartyStats, type DocRow } from './booksService'
+import { getAct, getCounterpartyStats, type DocRow } from './booksService'
 
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 const MONEY = '#,##0.00'
@@ -198,5 +198,25 @@ export async function exportDocsRegistry(rows: DocRow[], title = 'Реестр �
     periodStatus: r.periodStatus === 'closed' ? 'закрыт' : 'открыт',
   }))
   ;['amount', 'vat', 'paid'].forEach((k) => { ws.getColumn(k).numFmt = MONEY })
+  await save(wb, title)
+}
+
+/**
+ * Выгрузка любой таблицы разреза «Реализации»: колонки описывает вызывающий экран.
+ *
+ * Отдельных функций на каждый разрез не заводим — они отличались бы только списком
+ * колонок, а расходились бы в оформлении. Денежный формат помечается флагом у
+ * колонки: без него Excel показывает копейки как есть и складывать неудобно.
+ */
+export async function exportTable(
+  title: string,
+  columns: { header: string; key: string; width: number; money?: boolean }[],
+  rows: object[],
+) {
+  const wb = await workbook()
+  const ws = wb.addWorksheet(title.slice(0, 31))
+  head(ws, columns.map(({ header, key, width }) => ({ header, key, width })))
+  rows.forEach((r) => ws.addRow(r))
+  columns.filter((c) => c.money).forEach((c) => { ws.getColumn(c.key).numFmt = MONEY })
   await save(wb, title)
 }
