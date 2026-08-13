@@ -164,10 +164,21 @@ async def _audit_foreign_access(room: ChatRoom, user: User, db: AsyncSession) ->
 
 
 async def _assert_participant(room_id: uuid.UUID, user: User, db: AsyncSession) -> ChatRoom:
-    """Комната существует, активна, и юзер в ней участник — иначе 404 (не палим чужое)."""
+    """Комната существует, активна, юзер в ней участник и она принадлежит ВЫБРАННОЙ
+    организации — иначе 404 (не палим чужое).
+
+    Организации пространства строго изолированы: у мультиорганизационного человека
+    (наш сотрудник, состоящий во всех) работа идёт в одной организации за раз, и
+    комната соседней недоступна, пока он в неё не переключился. Без этой сверки
+    членства хватало, чтобы прямым запросом достать чат другой организации.
+    """
     room = await db.get(ChatRoom, room_id)
     if room is None or not room.is_active:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Чат не найден")
+    # Личные чаты компании не принадлежат — их изолирует состав участников.
+    if room.company_id is not None and room.type != "direct":
+        if room.company_id != await _company_of(user, db):
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Чат не найден")
     p = (await db.execute(select(ChatParticipant.id).where(
         ChatParticipant.room_id == room_id, ChatParticipant.user_id == user.id))).scalar_one_or_none()
     if p is None and not user.is_superadmin:
