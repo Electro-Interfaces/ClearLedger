@@ -25,13 +25,14 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
-    AccountingDoc, Channel, ChargePayment, ChargeSession, Contract, ContractLocation,
-    CorporateClient, Counterparty, EzsCustomer, EzsEquipmentUnit, EzsReference,
-    EzsRfidCard, EzsSite, EzsSiteCost, EzsSiteDoc, EzsSiteEquipment, EzsTariff,
-    EzsSiteEvent, EzsTechConnection, ExportPacket, FuelExportDoc, FuelReceipt, FuelShift,
-    HubexAsset, HubexTask, LocationTypeDef, OnlineOrder, RawBatchRecord,
-    Region, ServiceLocation, SourceFile, StationContractSettlement, StationDispensePeriod,
-    StationEnergyPeriod, UserCompany,
+    AccountingDoc, Channel, ChargePayment, ChargeSession, Company, Contract,
+    ContractLocation, CorporateClient, Counterparty, EzsCustomer, EzsEquipmentUnit,
+    EzsReference, EzsRfidCard, EzsSite, EzsSiteCost, EzsSiteDoc, EzsSiteEquipment,
+    EzsTariff, EzsSiteEvent, EzsTechConnection, ExportPacket, FuelExportDoc, FuelReceipt,
+    FuelShift, GlAccount, GlEntry, HubexAsset, HubexTask, LocationTypeDef,
+    NomenclatureItem, OnlineOrder, Period, RawBatchRecord, Region, ServiceLocation,
+    SourceFile, StationContractSettlement, StationDispensePeriod, StationEnergyPeriod,
+    UserCompany,
 )
 from app.services.space_links import any_unlinked, unlinked
 
@@ -189,7 +190,55 @@ _ENTITIES: list[tuple[str, str, list[tuple]]] = [
         ("raw_batches", "Сырые записи", RawBatchRecord,
          "Разбор файлов", "нормализация (L1 → L2)", "файл → строка", None, None),
     ]),
+    # ── Компания без объектов (профиль `office`) ────────────────────────────────
+    # У неё нормализованный слой растёт не от объекта сети, а от БУХГАЛТЕРИИ: она и
+    # есть источник эталона, всё остальное сверяется с ним. Первый заход — выгрузка
+    # .dt, дальше коннектор к живой базе.
+    ("books", "Бухгалтерия-эталон", [
+        ("gl_accounts", "План счетов", GlAccount,
+         "Выгрузка бухгалтерии клиента", "оборотка · журнал проводок",
+         "код счёта", None, None),
+        ("gl_entries", "Проводки", GlEntry,
+         "Регистр бухгалтерии (.dt → коннектор)", "обороты · периоды · продажи · услуги",
+         "дата + корреспонденция счетов",
+         # Долг схемы, а не ошибка загрузки: документ-регистратор записан СТРОКОЙ.
+         # Пока это текст, проводку нельзя открыть карточкой документа, а аналитику
+         # (субконто) не свести — через COM она недоступна вовсе.
+         GlEntry.doc_title.is_not(None), "документ строкой, не ссылкой"),
+        ("accounting_docs", "Первичные документы", AccountingDoc,
+         "Реализации, услуги и поступления из бухгалтерии", "продажи · услуги · сверка",
+         "вид + номер + дата + контрагент",
+         AccountingDoc.counterparty_inn.is_(None), "контрагент без ИНН — не свести"),
+        ("periods", "Периоды", Period,
+         "Регламентные операции закрытия месяца", "бухгалтерия · сверка первички",
+         "год + месяц", Period.status == "open", "не закрыт — цифры ещё поедут"),
+        ("nomenclature", "Номенклатура", NomenclatureItem,
+         "Справочник бухгалтерии", "продажи · услуги", "код номенклатуры", None, None),
+    ]),
 ]
+
+# Какие домены карты показывать профилю компании. Без фильтра офисная компания видела
+# бы четыре десятка пустых сущностей сети ЭЗС и решила, что её база не заполнена, а
+# сеть — домен «Бухгалтерия-эталон», которого у неё нет. Профиля в карте нет — значит
+# показываем всё, кроме доменов, привязанных к чужому профилю.
+_DOMAINS_BY_PROFILE: dict[str, set[str]] = {
+    "office": {"books", "core"},
+}
+_PROFILE_ONLY_DOMAINS = {"books"}
+
+# Сущности общего слоя, которых у профиля нет по определению. У компании без объектов
+# опора пространства — это люди, контрагенты и договоры; объекты, оборудование, регионы
+# и типы объектов пустуют не потому, что база не заполнена, а потому что сети нет.
+_HIDDEN_ENTITIES_BY_PROFILE: dict[str, set[str]] = {
+    "office": {"objects", "equipment", "regions", "location_types", "contract_locations"},
+}
+
+# Разрывы, которые для профиля разрывами не являются. «Охват договора не задан» —
+# долг схемы там, где договор обязан указывать на объекты сети; у компании без
+# объектов охват задавать нечем, и красный счётчик на всех договорах врал бы.
+_GAPS_OFF_BY_PROFILE: dict[str, set[str]] = {
+    "office": {"contracts"},
+}
 
 
 async def data_model(db: AsyncSession, company_id: uuid.UUID) -> dict[str, Any]:
@@ -197,13 +246,26 @@ async def data_model(db: AsyncSession, company_id: uuid.UUID) -> dict[str, Any]:
     domains: list[dict[str, Any]] = []
     total_records = total_gaps = total_entities = 0
 
+    profile_id = (await db.execute(
+        select(Company.profile_id).where(Company.id == company_id))).scalar_one_or_none()
+    allowed = _DOMAINS_BY_PROFILE.get(profile_id or "")
+    hidden = _HIDDEN_ENTITIES_BY_PROFILE.get(profile_id or "", set())
+    gaps_off = _GAPS_OFF_BY_PROFILE.get(profile_id or "", set())
+
     for dkey, dlabel, items in _ENTITIES:
+        if allowed is not None:
+            if dkey not in allowed:
+                continue
+        elif dkey in _PROFILE_ONLY_DOMAINS:
+            continue
         entities: list[dict[str, Any]] = []
         for key, label, model, sources, consumers, link, gap_cond, gap_label in items:
+            if key in hidden:
+                continue
             records = (await db.execute(select(func.count()).select_from(model)
                                         .where(model.company_id == company_id))).scalar() or 0
             gap = None
-            if gap_cond is not None and records:
+            if gap_cond is not None and records and key not in gaps_off:
                 gap = (await db.execute(select(func.count()).select_from(model)
                                         .where(model.company_id == company_id, gap_cond))).scalar() or 0
             entities.append({
