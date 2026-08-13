@@ -201,8 +201,14 @@ async def list_organizations(
         "kpp": c.kpp,
         "type": c.type,
         "legalAddress": getattr(c, "legal_address", None),
+        "actualAddress": getattr(c, "actual_address", None),
         "phone": getattr(c, "phone", None),
         "email": getattr(c, "email", None),
+        "fullName": getattr(c, "full_name", None),
+        "okpo": getattr(c, "okpo", None),
+        "bankAccount": getattr(c, "bank_account", None),
+        "bankName": getattr(c, "bank_name", None),
+        "bankBik": getattr(c, "bank_bik", None),
     } for c in res.scalars().all()]
 
 

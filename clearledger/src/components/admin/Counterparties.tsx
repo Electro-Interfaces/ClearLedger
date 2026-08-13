@@ -21,15 +21,24 @@ import { Building2, Handshake, Loader2, Search, Share2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { listSpaceOrganizations, projectSpaceEntity } from '@/services/spaceObjectsService'
+import type { SpaceContract, SpaceOrganization } from '@/services/spaceObjectsService'
+import { listSpaceContracts, listSpaceOrganizations, projectSpaceEntity } from '@/services/spaceObjectsService'
 import * as userService from '@/services/userService'
 
 export function Counterparties({ companyId, canManage }: { companyId: string; canManage: boolean }) {
   const [search, setSearch] = useState('')
+  const [openId, setOpenId] = useState<string | null>(null)
   const orgsQ = useQuery({
     queryKey: ['space-orgs', companyId],
     queryFn: () => listSpaceOrganizations(companyId),
+  })
+  // Договоры нужны карточке: контрагент без своих договоров — половина ответа на
+  // вопрос «кто это». Запрос один на раздел, фильтр по стороне идёт на клиенте.
+  const contractsQ = useQuery({
+    queryKey: ['space-contracts', companyId],
+    queryFn: () => listSpaceContracts(companyId),
   })
   // Кто из контрагентов заодно допущен в пространство: их люди помечены этой карточкой.
   // Без этого признака два раздела выглядели бы несвязанными списками одних и тех же имён.
@@ -58,6 +67,7 @@ export function Counterparties({ companyId, canManage }: { companyId: string; ca
     return map
   }, [membersQ.data])
 
+  const open = orgs.find((o) => o.id === openId)
   const q = search.trim().toLowerCase()
   const rows = q
     ? orgs.filter((o) => `${o.name} ${o.shortName ?? ''} ${o.inn ?? ''}`.toLowerCase().includes(q))
@@ -111,7 +121,7 @@ export function Counterparties({ companyId, canManage }: { companyId: string; ca
               {rows.map((o) => {
                 const people = peopleByOrg.get(o.id) ?? 0
                 return (
-                  <TableRow key={o.id}>
+                  <TableRow key={o.id} className="cursor-pointer" onClick={() => setOpenId(o.id)}>
                     <TableCell className="font-medium">{o.shortName || o.name}</TableCell>
                     <TableCell className="font-mono text-xs">{o.inn}</TableCell>
                     <TableCell className="font-mono text-xs">{o.kpp || '—'}</TableCell>
@@ -143,6 +153,85 @@ export function Counterparties({ companyId, canManage }: { companyId: string; ca
         {rows.length !== orgs.length ? ` · показано ${rows.length}` : ''}
         {' '}· договоры по ним — в разделе «Договоры и оборудование»
       </p>
+
+      <Sheet open={!!open} onOpenChange={(v) => { if (!v) setOpenId(null) }}>
+        <SheetContent side="right" className="w-full sm:max-w-lg p-0">
+          <SheetTitle className="sr-only">Карточка контрагента</SheetTitle>
+          <SheetDescription className="sr-only">Реквизиты и договоры контрагента</SheetDescription>
+          <div className="h-full overflow-y-auto p-5">
+            {open && <CounterpartyCard org={open} contracts={contractsQ.data ?? []} />}
+          </div>
+        </SheetContent>
+      </Sheet>
+    </div>
+  )
+}
+
+/** Строка реквизита: пустые не показываем — в карточке из бухгалтерии заполнено не всё. */
+function Req({ label, value }: { label: string; value?: string | null }) {
+  if (!value) return null
+  return (
+    <div className="space-y-0.5">
+      <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</div>
+      <div className="text-sm break-words">{value}</div>
+    </div>
+  )
+}
+
+function CounterpartyCard(
+  { org, contracts }: { org: SpaceOrganization; contracts: SpaceContract[] },
+) {
+  const own = contracts.filter((c) => c.counterpartyId === org.id)
+  const bank = [org.bankName, org.bankAccount, org.bankBik && `БИК ${org.bankBik}`]
+    .filter(Boolean).join(' · ')
+  return (
+    <div className="space-y-5">
+      <div className="flex items-start gap-2">
+        <Building2 className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
+        <div className="min-w-0">
+          <h3 className="text-base font-semibold leading-tight">{org.shortName || org.name}</h3>
+          {org.fullName && org.fullName !== org.name && (
+            <p className="mt-1 text-xs text-muted-foreground">{org.fullName}</p>
+          )}
+        </div>
+        <Badge variant="secondary" className="ml-auto text-[10px]">{org.type}</Badge>
+      </div>
+
+      <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+        <Req label="ИНН" value={org.inn} />
+        <Req label="КПП" value={org.kpp} />
+        <Req label="ОКПО" value={org.okpo} />
+      </div>
+      <div className="space-y-3">
+        <Req label="Юридический адрес" value={org.legalAddress} />
+        <Req label="Фактический адрес"
+          value={org.actualAddress && org.actualAddress !== org.legalAddress ? org.actualAddress : null} />
+        <Req label="Телефон" value={org.phone} />
+        <Req label="Почта" value={org.email} />
+        <Req label="Банк" value={bank || null} />
+      </div>
+
+      <div className="space-y-2">
+        <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
+          Договоры ({own.length})
+        </div>
+        {own.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Договоров с этим контрагентом нет.</p>
+        ) : own.map((c) => (
+          <div key={c.id} className="rounded-lg border border-border px-3 py-2 text-sm">
+            <div className="flex items-baseline justify-between gap-2">
+              <span className="font-medium">№ {c.number}</span>
+              <span className="text-xs text-muted-foreground">{c.date}</span>
+            </div>
+            <div className="mt-0.5 text-xs text-muted-foreground">
+              {c.type}
+              {' · '}
+              {c.direction === 'in' ? 'мы платим' : c.direction === 'out' ? 'платят нам' : 'сторона не задана'}
+              {c.validUntil ? ` · до ${c.validUntil}` : ''}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }

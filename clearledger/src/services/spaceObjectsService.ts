@@ -116,8 +116,14 @@ export interface SpaceOrganization {
   kpp?: string | null
   type: string
   legalAddress?: string | null
+  actualAddress?: string | null
   phone?: string | null
   email?: string | null
+  fullName?: string | null
+  okpo?: string | null
+  bankAccount?: string | null
+  bankName?: string | null
+  bankBik?: string | null
 }
 
 export interface SpaceEquipmentUnit {
