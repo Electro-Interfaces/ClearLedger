@@ -81,6 +81,9 @@ REF_LABELS = {
     "persons": "Физические лица",
     "banks": "Банки",
     "bank_accounts": "Банковские счета",
+    "period_locks": "Даты запрета изменения",
+    "accounting_policy": "Учётная политика",
+    "org_contacts": "Контакты организации",
 }
 
 
@@ -765,9 +768,15 @@ async def quality(
         "%.2f ₽" % diff if diff else "сходится",
         "Расхождение означает, что часть документов посчитана по другому правилу НДС")
 
+    # Считаем только те виды, у которых контрагент есть по природе: у регламентной
+    # операции закрытия и операции вручную его не бывает вовсе, и без этого условия
+    # проверка показывала полтысячи «нарушений», которых нет.
+    WITH_COUNTERPARTY = ("sale_goods", "sale_services", "purchase", "invoice_out",
+                         "vat_invoice_out", "vat_invoice_in")
     no_inn = (await db.execute(
         select(func.count()).select_from(AccountingDoc)
         .where(AccountingDoc.company_id == cid,
+               AccountingDoc.doc_type.in_(WITH_COUNTERPARTY),
                (AccountingDoc.counterparty_inn.is_(None))
                | (AccountingDoc.counterparty_inn == "")))).scalar_one()
     add("docs_without_inn", "Документы без ИНН контрагента",
@@ -806,6 +815,21 @@ async def quality(
         .where(GlEntry.company_id == cid, GlEntry.doc_title.is_not(None)))).scalar_one()
     add("entries_doc_as_text", "Документ в проводке записан строкой", "info", unlinked,
         "Долг схемы: пока это текст, из проводки нельзя открыть карточку документа")
+
+    lock = (await db.execute(
+        select(func.max(GlReference.code))
+        .where(GlReference.company_id == cid, GlReference.kind == "period_locks"))).scalar_one()
+    if lock:
+        # Месяцы, закрытые у нас позже даты запрета: в бухгалтерии их ещё могут править,
+        # значит эталоном они пока не являются.
+        y, m = int(lock[:4]), int(lock[5:7])
+        late = (await db.execute(
+            select(func.count()).select_from(Period).where(
+                Period.company_id == cid, Period.status == "closed",
+                (Period.year > y) | ((Period.year == y) & (Period.month > m)))))            .scalar_one()
+        add("lock_vs_closed", "Закрыто позже даты запрета (%s)" % lock,
+            "ok" if not late else "warn", late,
+            "После даты запрета бухгалтерия правки не принимает — до неё месяц ещё может измениться")
 
     errors = sum(1 for c in checks if c["status"] == "error")
     warns = sum(1 for c in checks if c["status"] == "warn")
