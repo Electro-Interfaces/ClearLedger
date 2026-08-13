@@ -443,6 +443,9 @@ export const ECON_RESULT_MENU: CentralMenuItem[] = [
   { key: 'ec_income',     label: 'Доходы' },
   { key: 'ec_dynamics',   label: 'Динамика и рентабельность' },
   { key: 'ec_breakeven',  label: 'Точка безубыточности' },
+  // Пакет под печать: цифры те же, но собраны в один лист для разговора с
+  // собственником или банком, где листать экраны неудобно.
+  { key: 'ec_packet',     label: 'Пакет за период' },
 ]
 export const ECON_COSTS_MENU: CentralMenuItem[] = [
   // Статья отвечает «за что платим», счёт — «куда отнесли». Первое человеку нужнее.

@@ -26,7 +26,8 @@ import { Card, CardContent } from '@/components/ui/card'
 import { MetricTile } from '@/components/ui/metric-tile'
 import { cn } from '@/lib/utils'
 import {
-  getCostBridge, getExpenses, getPnl, getPnlEntries, getRevenue, getTaxes,
+  getArAging, getAttention, getCostBridge, getExpenses, getPnl, getPnlEntries,
+  getRevenue, getTaxes,
   type PnlData, type PnlTotals,
 } from '@/services/booksService'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -153,6 +154,7 @@ export function EconomyPanel() {
       case 'ec_income':     return <EconIncome companyId={companyId} period={period} />
       case 'ec_dynamics':   return <EconDynamics companyId={companyId} period={period} />
       case 'ec_breakeven':  return <EconBreakeven companyId={companyId} period={period} />
+      case 'ec_packet':     return <EconPacket companyId={companyId} period={period} />
       case 'ec_items':      return <EconCosts companyId={companyId} period={period} view="items" />
       case 'ec_costs':      return <EconCosts companyId={companyId} period={period} view="structure" />
       case 'ec_costs_time': return <EconCosts companyId={companyId} period={period} view="months" />
@@ -1476,6 +1478,168 @@ function EconCostBridge({ companyId, period }: { companyId: string; period: Peri
           </tr>
         ))}
       </TableCard>
+    </div>
+  )
+}
+
+/**
+ * Пакет за период — то, что распечатывают и приносят на разговор.
+ *
+ * Своих цифр не заводит: собирает уже посчитанное отчётом, реестром старения и
+ * сигналами. Смысл не в новых данных, а в компоновке — на одном листе видно, сколько
+ * заработали, чем это обеспечено и что требует решения. Листать пять экранов при
+ * собственнике или в банке неудобно.
+ *
+ * Печать — браузерная (`@media print` прячет рельсы и меню), поэтому вёрстка здесь
+ * плоская: карточки идут одна под другой и не рвутся между страницами.
+ */
+function EconPacket({ companyId, period }: { companyId: string; period: Period }) {
+  const q = usePnl(companyId, period)
+  const aging = useQuery({
+    queryKey: ['books', 'ar-aging', companyId],
+    queryFn: () => getArAging(companyId),
+    enabled: !!companyId,
+  })
+  const att = useQuery({
+    queryKey: ['books', 'attention', companyId, period.from, period.to],
+    queryFn: () => getAttention(companyId, period),
+    enabled: !!companyId,
+  })
+
+  if (q.isError) return <div className="p-4"><QueryError onRetry={() => q.refetch()} /></div>
+  if (!q.data) return <Loading />
+  const d = q.data
+  const t = d.totals
+  if (!t.net && !t.revenue) return <NoData salesEntries={d.salesEntries} />
+
+  const KEY_LINES: { key: keyof PnlTotals; label: string; strong?: boolean }[] = [
+    { key: 'net', label: 'Выручка без НДС', strong: true },
+    { key: 'cogsTotal', label: 'Себестоимость' },
+    { key: 'gross', label: 'Валовая прибыль', strong: true },
+    { key: 'commercial', label: 'Коммерческие расходы' },
+    { key: 'admin', label: 'Управленческие расходы' },
+    { key: 'operating', label: 'Прибыль от продаж', strong: true },
+    { key: 'tax', label: 'Налог' },
+    { key: 'profit', label: 'Чистая прибыль', strong: true },
+  ]
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="flex items-center justify-between gap-3 flex-wrap no-print">
+        <div className="text-sm text-muted-foreground">
+          Лист для печати: цифры те же, что на экранах продукта, собраны в один свод.
+        </div>
+        <ExportButton onClick={() => exportTable('Пакет за период', [
+          { header: 'Показатель', key: 'label', width: 34 },
+          { header: 'Сумма', key: 'amount', width: 18, money: true },
+          { header: 'К выручке, %', key: 'share', width: 14 },
+        ], KEY_LINES.map((l) => ({
+          label: l.label,
+          amount: t[l.key] as number,
+          share: t.net ? Number((((t[l.key] as number) / t.net) * 100).toFixed(1)) : null,
+        })))} />
+      </div>
+
+      <Card>
+        <CardContent className="p-4 space-y-3">
+          <div>
+            <div className="text-base font-medium">Финансовый результат</div>
+            <div className="text-[11px] text-muted-foreground tabular-nums">
+              {periodLabel(period)}
+            </div>
+          </div>
+          <table className="w-full text-sm">
+            <tbody>
+              {KEY_LINES.map((l) => (
+                <tr key={l.key} className={cn('border-b last:border-0',
+                  l.strong ? 'font-medium' : '')}>
+                  <td className="py-1.5">{l.label}</td>
+                  <td className="py-1.5 text-right tabular-nums whitespace-nowrap">
+                    {money.format(t[l.key] as number)} ₽
+                  </td>
+                  <td className="py-1.5 text-right tabular-nums text-muted-foreground w-24">
+                    {t.net ? `${(((t[l.key] as number) / t.net) * 100).toFixed(1)} %` : '—'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="text-[11px] text-muted-foreground">
+            Рентабельность: валовая {t.grossPct ?? '—'} %, операционная{' '}
+            {t.operatingPct ?? '—'} %, чистая {t.profitPct ?? '—'} %. Закрыто на
+            нераспределённую прибыль {money.format(d.closedToRetained)} ₽.
+          </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent className="p-4 space-y-2">
+          <div className="text-base font-medium">Долг покупателей</div>
+          {!aging.data ? (
+            <div className="text-sm text-muted-foreground">Считаем…</div>
+          ) : (
+            <>
+              <table className="w-full text-sm">
+                <tbody>
+                  {aging.data.buckets.filter((b) => b.count).map((b) => (
+                    <tr key={b.key} className="border-b last:border-0">
+                      <td className="py-1.5">{b.label}</td>
+                      <td className="py-1.5 text-right tabular-nums text-muted-foreground w-20">
+                        {b.count} шт.
+                      </td>
+                      <td className="py-1.5 text-right tabular-nums whitespace-nowrap">
+                        {money.format(b.amount)} ₽
+                      </td>
+                    </tr>
+                  ))}
+                  <tr className="font-medium">
+                    <td className="py-1.5">Ожидаемые потери</td>
+                    <td />
+                    <td className="py-1.5 text-right tabular-nums whitespace-nowrap">
+                      {money.format(aging.data.risk)} ₽
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+              <p className="text-[11px] text-muted-foreground">
+                Долг считается по счетам с известной оплатой; ещё{' '}
+                {num.format(aging.data.unknownCount)} счетов регистр не свёл с платежами.
+                Возраст — от даты счёта, ставки риска экспертные.
+              </p>
+            </>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent className="p-4 space-y-2">
+          <div className="text-base font-medium">Что требует решения</div>
+          {!att.data ? (
+            <div className="text-sm text-muted-foreground">Считаем…</div>
+          ) : att.data.signals.length === 0 ? (
+            <div className="text-sm text-muted-foreground">Сигналов нет.</div>
+          ) : (
+            <ul className="space-y-1.5 text-sm">
+              {att.data.signals.map((sg) => (
+                <li key={sg.key} className="flex items-start gap-2">
+                  <span className={cn('mt-1.5 h-1.5 w-1.5 rounded-full shrink-0',
+                    sg.level === 'danger' ? 'bg-rose-500' : 'bg-amber-500')} />
+                  <span>
+                    <b>{sg.title}</b> — {sg.value}.{' '}
+                    <span className="text-muted-foreground">{sg.why}</span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
+
+      <p className="text-[11px] text-muted-foreground">
+        Данные приезжают выгрузкой из бухгалтерии компании; закрытый месяц в ней
+        неизменяем и служит эталоном. Цифры этого листа сходятся с оборотами регистра:
+        любую строку отчёта можно раскрыть до проводок на экране «Отчёт о результате».
+      </p>
     </div>
   )
 }
