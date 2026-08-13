@@ -314,6 +314,102 @@ export interface RevenueQuality {
 export const getRevenueQuality = (companyId: string) =>
   get<RevenueQuality>(`/api/books/revenue-quality?company_id=${companyId}`)
 
+/** Реестр старения долга: сколько, чьё и сколько дней. */
+export interface ArAging {
+  buckets: { key: string; label: string; count: number; amount: number }[]
+  clients: {
+    id: string | null; name: string; invoices: number; rest: number
+    maxAge: number; oldest: string | null
+  }[]
+  rows: {
+    id: string; number: string; date: string; counterparty: string
+    counterpartyId: string | null; amount: number; paid: number | null
+    lastPaidAt: string | null; rest: number; age: number; bucket: string
+  }[]
+  openAmount: number
+  openCount: number
+  unknownCount: number
+  unknownAmount: number
+  registerDebit: number
+  registerCredit: number
+  asOf: string
+  ageBasis: string
+}
+
+export const getArAging = (companyId: string) =>
+  get<ArAging>(`/api/books/ar-aging?company_id=${companyId}`)
+
+/** Кривая инкассации: доля счетов месяца, собранная к дню 30/60/90/180. */
+export interface CollectionCurve {
+  months: {
+    month: string; billed: number; invoices: number
+    d30: number; d60: number; d90: number; d180: number
+    pct30: number | null; pct60: number | null; pct90: number | null; pct180: number | null
+    /** Меньше пяти счетов в месяце: доля по такому числу — не статистика. */
+    thin: boolean
+  }[]
+  avg30: number; avg60: number; avg90: number; avg180: number
+  billed: number
+}
+
+export const getCollectionCurve = (companyId: string) =>
+  get<CollectionCurve>(`/api/books/collection-curve?company_id=${companyId}`)
+
+/** Реализации как сделки: сумма без НДС, себестоимость по строкам, маржа. */
+export interface DealsData {
+  rows: {
+    id: string; number: string; date: string; counterparty: string
+    counterpartyId: string | null; amount: number; net: number
+    cost: number | null; lines: number; unknownLines: number
+    margin: number | null; marginPct: number | null
+  }[]
+  count: number
+  net: number
+  withMargin: number
+  marginTotal: number
+  netWithMargin: number
+  lowMargin: number
+}
+
+export const getDeals = (companyId: string, period?: PeriodOpts) =>
+  get<DealsData>(`/api/books/deals?company_id=${companyId}` + periodQuery(period))
+
+/** Счета, за которыми не пошла отгрузка. */
+export interface BacklogData {
+  rows: {
+    counterparty: string; counterpartyId: string | null
+    invoices: number; invoiced: number; sales: number; shipped: number
+    firstInvoice: string | null; lastInvoice: string | null
+    gap: number; shippedPct: number | null; daysSinceLast: number | null
+  }[]
+  invoiced: number
+  shipped: number
+  silentCount: number
+  silentAmount: number
+}
+
+export const getBacklog = (companyId: string) =>
+  get<BacklogData>(`/api/books/backlog?company_id=${companyId}`)
+
+/** Концентрация выручки: HHI и доли лидеров, по годам. */
+export interface ConcentrationStats {
+  clients: number
+  hhi: number | null
+  cr1: number | null
+  cr3: number | null
+  cr5: number | null
+  amount?: number
+}
+
+export interface ConcentrationData {
+  total: ConcentrationStats
+  years: (ConcentrationStats & { year: string })[]
+  levels: { low: number; high: number }
+}
+
+export const getConcentration = (companyId: string) =>
+  get<ConcentrationData>(`/api/books/concentration?company_id=${companyId}`)
+
 /** Сроки оплаты счетов: связка «счёт ↔ платёж» из регистра «Оплата счетов». */
 export interface PaymentTerms {
   rows: {

@@ -1046,6 +1046,355 @@ async def revenue_check(
     }
 
 
+# ── Долг: старение и инкассация ──────────────────────────────────────────────
+# Волна 6, приёмы взяты из канона управления дебиторкой (реестр старения + кривая
+# инкассации). Средний срок оплаты отвечает «как платят вообще», а работать надо с
+# конкретным долгом: чей он, сколько ему дней и сколько мы соберём к концу месяца.
+#
+# Ограничение, которое честно выносится на экран: срока оплаты по договору в выгрузке
+# НЕТ, поэтому возраст считается от даты счёта, а не от наступления срока платежа.
+# По канону бакеты привязывают к условиям договора (при отсрочке 45 дней просрочка
+# начинается на 46-й) — как только реквизит приедет, пороги сдвинутся здесь.
+
+AGING_BUCKETS: list[tuple[str, str, int, int]] = [
+    ("d30", "До 30 дней", 0, 30),
+    ("d60", "31–60 дней", 31, 60),
+    ("d90", "61–90 дней", 61, 90),
+    ("d180", "91–180 дней", 91, 180),
+    ("older", "Больше 180 дней", 181, 100000),
+]
+
+
+@router.get("/ar-aging")
+async def ar_aging(
+    company_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Реестр старения долга по счетам покупателям: сколько, чьё и сколько дней.
+
+    Считается по счетам с ИЗВЕСТНОЙ оплатой (регистр «Оплата счетов»). Счета, которых
+    регистр не свёл, идут отдельной строкой «оплата неизвестна» и в долг не
+    записываются: ноль вместо отсутствующих данных — та ошибка, из-за которой витрина
+    показывала долг в 123 млн ₽.
+    """
+    cid = await assert_company_member(company_id, current_user, db)
+    today = date.today()
+
+    rows = [{
+        "id": str(r[0]), "number": r[1], "date": r[2],
+        "counterparty": r[3], "counterpartyId": str(r[4]) if r[4] else None,
+        "amount": _num(r[5]), "paid": None if r[6] is None else _num(r[6]),
+        "lastPaidAt": r[7],
+    } for r in (await db.execute(text(r"""
+        SELECT d.id, d.number, d.date, d.counterparty_name, d.counterparty_id,
+               d.amount, p.paid, p.last_paid
+          FROM accounting_docs d
+          LEFT JOIN (SELECT invoice_doc_id, sum(amount) paid, max(paid_at) last_paid
+                       FROM invoice_payments WHERE company_id = :cid
+                      GROUP BY invoice_doc_id) p ON p.invoice_doc_id = d.id
+         WHERE d.company_id = :cid AND d.doc_type = 'invoice_out'
+           AND d.date ~ '^\d{4}-\d{2}-\d{2}'
+    """), {"cid": str(cid)})).all()]
+
+    open_rows, unknown = [], []
+    for r in rows:
+        if r["paid"] is None:
+            unknown.append(r)
+            continue
+        rest = round(r["amount"] - r["paid"], 2)
+        if rest <= 0.01:
+            continue
+        age = (today - date.fromisoformat(r["date"])).days
+        bucket = next(k for k, _, lo, hi in AGING_BUCKETS if lo <= age <= hi)
+        open_rows.append({**r, "rest": rest, "age": age, "bucket": bucket})
+
+    buckets = [{
+        "key": key, "label": label,
+        "count": sum(1 for r in open_rows if r["bucket"] == key),
+        "amount": round(sum(r["rest"] for r in open_rows if r["bucket"] == key), 2),
+    } for key, label, _, _ in AGING_BUCKETS]
+
+    by_client: dict[str, dict[str, Any]] = {}
+    for r in open_rows:
+        key = r["counterpartyId"] or r["counterparty"]
+        c = by_client.setdefault(key, {
+            "id": r["counterpartyId"], "name": r["counterparty"],
+            "invoices": 0, "rest": 0.0, "maxAge": 0, "oldest": None,
+        })
+        c["invoices"] += 1
+        c["rest"] += r["rest"]
+        if r["age"] > c["maxAge"]:
+            c["maxAge"] = r["age"]
+            c["oldest"] = r["date"]
+    clients = sorted(by_client.values(), key=lambda c: -c["rest"])
+
+    # Сальдо 62 из регистра — эталон рядом с нашим расчётом. Развёрнуто: долг
+    # покупателя (дебет) и его аванс (кредит) — разные обязательства, свёрнутое
+    # сальдо прячет и то и другое.
+    saldo = (await db.execute(text("""
+        SELECT coalesce(sum(debit), 0), coalesce(sum(credit), 0)
+          FROM gl_balances
+         WHERE company_id = :cid AND account LIKE '62%'
+           AND as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid)
+    """), {"cid": str(cid)})).one()
+
+    return {
+        "buckets": buckets,
+        "clients": clients,
+        "rows": sorted(open_rows, key=lambda r: -r["rest"]),
+        "openAmount": round(sum(r["rest"] for r in open_rows), 2),
+        "openCount": len(open_rows),
+        "unknownCount": len(unknown),
+        "unknownAmount": round(sum(r["amount"] for r in unknown), 2),
+        "registerDebit": _num(saldo[0]),
+        "registerCredit": _num(saldo[1]),
+        "asOf": today.isoformat(),
+        # Срока по договору в данных нет — возраст считается от даты счёта.
+        "ageBasis": "invoice_date",
+    }
+
+
+@router.get("/collection-curve")
+async def collection_curve(
+    company_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Кривая инкассации: какая доля счетов месяца собрана к дню 30/60/90/180.
+
+    Отвечает на вопрос, на который средний срок ответить не может: «сколько денег из
+    выставленного в этом месяце мы получим к концу следующего». Строки месяцев с
+    малым числом счетов помечены: доля по двум счетам — не статистика.
+    """
+    cid = await assert_company_member(company_id, current_user, db)
+
+    rows = [(r[0], _num(r[1]), r[2], _num(r[3]), _num(r[4]), _num(r[5]), _num(r[6]))
+            for r in (await db.execute(text(r"""
+        WITH inv AS (
+          SELECT d.id, substr(d.date, 1, 7) AS month, d.date, d.amount
+            FROM accounting_docs d
+           WHERE d.company_id = :cid AND d.doc_type = 'invoice_out'
+             AND d.date ~ '^\d{4}-\d{2}-\d{2}'
+             AND EXISTS (SELECT 1 FROM invoice_payments p WHERE p.invoice_doc_id = d.id)
+        ), pay AS (
+          SELECT i.id, i.month, i.amount,
+                 sum(p.amount) FILTER (WHERE p.paid_at::date - i.date::date <= 30)  d30,
+                 sum(p.amount) FILTER (WHERE p.paid_at::date - i.date::date <= 60)  d60,
+                 sum(p.amount) FILTER (WHERE p.paid_at::date - i.date::date <= 90)  d90,
+                 sum(p.amount) FILTER (WHERE p.paid_at::date - i.date::date <= 180) d180
+            FROM inv i JOIN invoice_payments p ON p.invoice_doc_id = i.id
+           WHERE p.paid_at IS NOT NULL
+           GROUP BY i.id, i.month, i.amount
+        )
+        SELECT month, sum(amount), count(*),
+               coalesce(sum(d30), 0), coalesce(sum(d60), 0),
+               coalesce(sum(d90), 0), coalesce(sum(d180), 0)
+          FROM pay GROUP BY month ORDER BY month
+    """), {"cid": str(cid)})).all()]
+
+    months = [{
+        "month": m, "billed": billed, "invoices": n,
+        "d30": d30, "d60": d60, "d90": d90, "d180": d180,
+        "pct30": round(d30 / billed * 100, 1) if billed else None,
+        "pct60": round(d60 / billed * 100, 1) if billed else None,
+        "pct90": round(d90 / billed * 100, 1) if billed else None,
+        "pct180": round(d180 / billed * 100, 1) if billed else None,
+        # Порог из практики статистики малых чисел: доля по двум-трём счетам
+        # публикуется как абсолютное число, а не как процент.
+        "thin": n < 5,
+    } for m, billed, n, d30, d60, d90, d180 in rows]
+
+    total = sum(m["billed"] for m in months) or 1.0
+    return {
+        "months": months,
+        "avg30": round(sum(m["d30"] for m in months) / total * 100, 1),
+        "avg60": round(sum(m["d60"] for m in months) / total * 100, 1),
+        "avg90": round(sum(m["d90"] for m in months) / total * 100, 1),
+        "avg180": round(sum(m["d180"] for m in months) / total * 100, 1),
+        "billed": round(total, 2),
+    }
+
+
+# ── Сделки и незакрытые счета ────────────────────────────────────────────────
+# Канон профессиональных услуг: единица анализа — СДЕЛКА, а не позиция и не месяц.
+# У компании 218 реализаций за пять лет; список сделок с маржой отвечает на вопросы,
+# которых распределения не берут: какая сделка убыточна и почему.
+
+@router.get("/deals")
+async def deals(
+    company_id: str,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Реализации как сделки: сумма без НДС, себестоимость по строкам, маржа."""
+    cid = await assert_company_member(company_id, current_user, db)
+    p: dict[str, Any] = {"cid": str(cid)}
+    where = ""
+    if date_from:
+        where += " AND d.date >= :df"
+        p["df"] = date_from
+    if date_to:
+        where += " AND d.date <= :dt"
+        p["dt"] = date_to
+
+    rows = [{
+        "id": str(r[0]), "number": r[1], "date": r[2],
+        "counterparty": r[3], "counterpartyId": str(r[4]) if r[4] else None,
+        "amount": _num(r[5]), "net": _num(r[6]), "cost": None if r[7] is None else _num(r[7]),
+        "lines": r[8], "unknownLines": r[9],
+    } for r in (await db.execute(text(f"""
+        WITH buy AS (
+          -- Средняя цена закупки по коду за всю историю: себестоимость сделки не
+          -- зависит от того, каким окном человек смотрит на продажи.
+          SELECT btrim(ln->>'code') code,
+                 sum((ln->>'amount')::numeric - coalesce((ln->>'vat')::numeric, 0))
+                   / nullif(sum((ln->>'qty')::numeric), 0) price
+            FROM accounting_docs d, jsonb_array_elements(d.lines) ln
+           WHERE d.company_id = :cid AND d.doc_type = 'purchase'
+             AND coalesce(btrim(ln->>'code'), '') <> ''
+           GROUP BY 1
+        ), sale AS (
+          SELECT d.id, d.number, d.date, d.counterparty_name, d.counterparty_id, d.amount,
+                 jsonb_array_elements(d.lines) ln
+            FROM accounting_docs d
+           WHERE d.company_id = :cid AND d.doc_type = 'sale'
+             AND jsonb_typeof(d.lines) = 'array'{where}
+        )
+        SELECT s.id, max(s.number), max(s.date), max(s.counterparty_name),
+               max(s.counterparty_id::text), max(s.amount),
+               sum((s.ln->>'amount')::numeric - coalesce((s.ln->>'vat')::numeric, 0)),
+               sum(buy.price * (s.ln->>'qty')::numeric),
+               count(*),
+               count(*) FILTER (WHERE buy.price IS NULL)
+          FROM sale s
+          LEFT JOIN buy ON buy.code = btrim(s.ln->>'code')
+         GROUP BY s.id
+         ORDER BY max(s.date) DESC
+    """), p)).all()]
+
+    for r in rows:
+        # Маржа считается только когда себестоимость известна ПО ВСЕМ строкам сделки:
+        # частичная себестоимость даёт завышенную маржу, а выглядит как настоящая.
+        full = r["cost"] is not None and r["unknownLines"] == 0
+        r["margin"] = round(r["net"] - r["cost"], 2) if full else None
+        r["marginPct"] = (round((r["net"] - r["cost"]) / r["net"] * 100, 1)
+                          if full and r["net"] else None)
+
+    known = [r for r in rows if r["margin"] is not None]
+    return {
+        "rows": rows,
+        "count": len(rows),
+        "net": round(sum(r["net"] for r in rows), 2),
+        "withMargin": len(known),
+        "marginTotal": round(sum(r["margin"] for r in known), 2),
+        "netWithMargin": round(sum(r["net"] for r in known), 2),
+        # Порог тревоги из практики проектных поставок: сделка ниже 30 % маржи —
+        # повод проверить цену и объём работ, а не статистическая аномалия.
+        "lowMargin": sum(1 for r in known if (r["marginPct"] or 0) < 30),
+    }
+
+
+@router.get("/backlog")
+async def backlog(
+    company_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Счета, за которыми не пошла отгрузка: возраст, клиент, сумма.
+
+    Ссылки «счёт → реализация» в выгрузке нет, поэтому сопоставление идёт по
+    КОНТРАГЕНТУ: клиент, у которого есть счета и ни одной реализации, — это либо
+    незакрытая сделка, либо мусор в базе. И то и другое требует ответа заказчика.
+    """
+    cid = await assert_company_member(company_id, current_user, db)
+    today = date.today()
+
+    rows = [{
+        "counterparty": r[0], "counterpartyId": str(r[1]) if r[1] else None,
+        "invoices": r[2], "invoiced": _num(r[3]),
+        "sales": r[4], "shipped": _num(r[5]),
+        "firstInvoice": r[6], "lastInvoice": r[7],
+    } for r in (await db.execute(text("""
+        SELECT coalesce(counterparty_name, '—'), max(counterparty_id::text),
+               count(*) FILTER (WHERE doc_type = 'invoice_out'),
+               coalesce(sum(amount) FILTER (WHERE doc_type = 'invoice_out'), 0),
+               count(*) FILTER (WHERE doc_type = 'sale'),
+               coalesce(sum(amount) FILTER (WHERE doc_type = 'sale'), 0),
+               min(date) FILTER (WHERE doc_type = 'invoice_out'),
+               max(date) FILTER (WHERE doc_type = 'invoice_out')
+          FROM accounting_docs
+         WHERE company_id = :cid AND doc_type IN ('invoice_out', 'sale')
+         GROUP BY 1 HAVING count(*) FILTER (WHERE doc_type = 'invoice_out') > 0
+         ORDER BY 4 DESC
+    """), {"cid": str(cid)})).all()]
+
+    for r in rows:
+        r["gap"] = round(r["invoiced"] - r["shipped"], 2)
+        r["shippedPct"] = round(r["shipped"] / r["invoiced"] * 100, 1) if r["invoiced"] else None
+        r["daysSinceLast"] = ((today - date.fromisoformat(r["lastInvoice"])).days
+                              if r["lastInvoice"] and len(r["lastInvoice"]) == 10 else None)
+
+    silent = [r for r in rows if not r["sales"]]
+    return {
+        "rows": rows,
+        "invoiced": round(sum(r["invoiced"] for r in rows), 2),
+        "shipped": round(sum(r["shipped"] for r in rows), 2),
+        "silentCount": len(silent),
+        "silentAmount": round(sum(r["invoiced"] for r in silent), 2),
+    }
+
+
+@router.get("/concentration")
+async def concentration(
+    company_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Насколько выручка держится на нескольких клиентах: HHI и доли лидеров по годам.
+
+    HHI — сумма квадратов долей в процентах (0–10 000). Пороги антимонопольной
+    практики: до 1000 — низкая концентрация, 1000–2000 — умеренная, выше 2000 —
+    высокая. Для поставщика это зеркало: высокий HHI значит, что уход одного
+    покупателя уносит заметную часть выручки.
+    """
+    cid = await assert_company_member(company_id, current_user, db)
+
+    raw = [(r[0], r[1], _num(r[2])) for r in (await db.execute(text(r"""
+        SELECT substr(date, 1, 4) AS year,
+               coalesce(counterparty_id::text, counterparty_name) AS client,
+               sum(amount)
+          FROM accounting_docs
+         WHERE company_id = :cid AND doc_type = 'sale' AND date ~ '^\d{4}'
+         GROUP BY 1, 2
+    """), {"cid": str(cid)})).all()]
+
+    def stats(pairs: list[tuple[str, float]]) -> dict[str, Any]:
+        total = sum(a for _, a in pairs)
+        if total <= 0:
+            return {"clients": 0, "hhi": None, "cr1": None, "cr3": None, "cr5": None}
+        shares = sorted((a / total * 100 for _, a in pairs), reverse=True)
+        return {
+            "clients": len(shares),
+            "hhi": round(sum(x * x for x in shares)),
+            "cr1": round(shares[0], 1),
+            "cr3": round(sum(shares[:3]), 1),
+            "cr5": round(sum(shares[:5]), 1),
+            "amount": round(total, 2),
+        }
+
+    years = sorted({y for y, _, _ in raw})
+    by_year = [{"year": y, **stats([(c, a) for yy, c, a in raw if yy == y])} for y in years]
+    return {
+        "total": stats([(c, a) for _, c, a in raw]),
+        "years": by_year,
+        # Границы, по которым читается число: без них HHI это просто «2731».
+        "levels": {"low": 1000, "high": 2000},
+    }
+
+
 # ── Склад и закупки ──────────────────────────────────────────────────────────
 # Волна 4. Складского учёта в выгрузке нет: остатки считаются как приход минус
 # расход по строкам документов. Способ грубый (партий и себестоимости списания в

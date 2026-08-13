@@ -30,7 +30,8 @@ import { Card, CardContent } from '@/components/ui/card'
 import { MetricTile } from '@/components/ui/metric-tile'
 import { cn } from '@/lib/utils'
 import {
-  getAssortment, getCashflow, getContractSales, getDocsAll, getPaymentTerms,
+  getArAging, getAssortment, getBacklog, getCashflow, getCollectionCurve,
+  getConcentration, getContractSales, getDeals, getDocsAll, getPaymentTerms,
   getRevenue, getRevenueCheck, getRevenueQuality, getStock, getSuppliers,
   type DocRow, type RevKind,
 } from '@/services/booksService'
@@ -289,7 +290,8 @@ const FIXED_KIND: Record<string, RevKind> = {
 /** Экраны, у которых своя ручка и разрез над ними не имеет смысла. */
 const NO_KIND = ['rev_invoices', 'rev_funnel', 'rev_recon', 'rev_abc', 'rev_abc_items',
   'rev_margin', 'rev_terms', 'rev_cashflow', 'rev_contracts', 'rev_stock', 'rev_suppliers',
-  'rev_prices', 'rev_quality']
+  'rev_prices', 'rev_quality', 'rev_deals', 'rev_conc', 'rev_aging', 'rev_collect',
+  'rev_backlog']
 
 export function RevenuePanel() {
   const { coreMode } = useWorkspace()
@@ -355,6 +357,11 @@ export function RevenuePanel() {
       case 'rev_suppliers':  return <RevSuppliers companyId={companyId} period={period} view="list" />
       case 'rev_prices':     return <RevSuppliers companyId={companyId} period={period} view="prices" />
       case 'rev_quality':    return <RevQuality companyId={companyId} />
+      case 'rev_deals':      return <RevDeals companyId={companyId} period={period} />
+      case 'rev_conc':       return <RevConcentration companyId={companyId} />
+      case 'rev_aging':      return <RevAging companyId={companyId} />
+      case 'rev_collect':    return <RevCollection companyId={companyId} />
+      case 'rev_backlog':    return <RevBacklog companyId={companyId} />
       default:               return <RevOverview companyId={companyId} kind={shown} period={period} />
     }
   })()
@@ -2514,6 +2521,556 @@ function RevQuality({ companyId }: { companyId: string }) {
           </tr>
         ))}
       </TableCard>
+    </div>
+  )
+}
+
+/* ────────────────────────────────────────────────────────────── */
+/*                  Долг, сделки, концентрация                    */
+/* ────────────────────────────────────────────────────────────── */
+
+/**
+ * Реестр старения долга. Средний срок оплаты отвечает «как платят вообще», а работа
+ * идёт с конкретным долгом: чей он и сколько ему дней.
+ *
+ * ⚠ Срока оплаты по договору в выгрузке нет, поэтому возраст считается от даты счёта,
+ * а не от наступления срока платежа. По канону бакеты привязывают к условиям договора
+ * (при отсрочке 45 дней просрочка начинается на 46-й) — как приедет реквизит, пороги
+ * сдвинутся. Рядом стоит сальдо 62 из регистра: оно знает зачёты и оплаты, которых в
+ * регистре «Оплата счетов» нет, поэтому цифры не обязаны совпадать.
+ */
+function RevAging({ companyId }: { companyId: string }) {
+  const q = useQuery({
+    queryKey: ['books', 'ar-aging', companyId],
+    queryFn: () => getArAging(companyId),
+    enabled: !!companyId,
+  })
+  const [bucket, setBucket] = useState<string | null>(null)
+  const [card, setCard] = useState<string | null>(null)
+
+  if (q.isError) return <div className="p-4"><QueryError onRetry={() => q.refetch()} /></div>
+  if (!q.data) return <Loading />
+  const d = q.data
+  const rows = bucket ? d.rows.filter((r) => r.bucket === bucket) : d.rows
+  const maxBucket = Math.max(...d.buckets.map((b) => b.amount), 1)
+  const old = d.buckets.filter((b) => b.key === 'd180' || b.key === 'older')
+    .reduce((s, b) => s + b.amount, 0)
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
+        <MetricTile label="Открытый долг" value={money.format(d.openAmount) + ' ₽'}
+          hint={`${num.format(d.openCount)} счетов с известной оплатой`} />
+        <MetricTile label="Старше 90 дней" value={money.format(old) + ' ₽'}
+          hint={d.openAmount ? `${((old / d.openAmount) * 100).toFixed(0)}% открытого долга` : '—'}
+          tone={old > 0 ? 'danger' : 'success'} />
+        <MetricTile label="Сальдо 62 по регистру"
+          value={money.format(d.registerDebit) + ' ₽'}
+          hint={`аванс покупателей ${money.format(d.registerCredit)} ₽`} />
+        <MetricTile label="Оплата неизвестна" value={num.format(d.unknownCount)}
+          hint={`${money.format(d.unknownAmount)} ₽ вне расчёта`} />
+      </div>
+
+      <p className="text-[11px] text-muted-foreground">
+        Возраст считается от даты счёта: срока оплаты по договору в выгрузке нет, и
+        отделить отсрочку от просрочки нечем. Сальдо 62 рядом — эталон из регистра: он
+        знает зачёты авансов и оплаты, которых нет в регистре «Оплата счетов», поэтому
+        совпадать цифры не обязаны. Снимок на {d.asOf}.
+      </p>
+
+      <Card>
+        <CardContent className="p-4 space-y-2">
+          <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
+            По возрасту долга — полоса отбирает счета
+          </div>
+          {d.buckets.map((b) => (
+            <button key={b.key} onClick={() => setBucket(bucket === b.key ? null : b.key)}
+              disabled={!b.count}
+              className={cn('w-full text-left space-y-1 rounded-md px-2 py-1',
+                !b.count ? 'opacity-40' : bucket === b.key ? 'bg-muted' : 'hover:bg-muted/50')}>
+              <div className="flex justify-between text-sm">
+                <span>{b.label} <span className="text-muted-foreground">· {b.count} шт.</span></span>
+                <span className="tabular-nums">{money.format(b.amount)} ₽</span>
+              </div>
+              <div className="h-2 rounded bg-muted overflow-hidden">
+                <div className={cn('h-full',
+                  b.key === 'older' || b.key === 'd180' ? 'bg-rose-500/60' : 'bg-primary/60')}
+                  style={{ width: `${(b.amount / maxBucket) * 100}%` }} />
+              </div>
+            </button>
+          ))}
+        </CardContent>
+      </Card>
+
+      <div className="flex justify-end">
+        <ExportButton onClick={() => exportTable('Старение долга', [
+          { header: 'Покупатель', key: 'name', width: 42 },
+          { header: 'Счетов', key: 'invoices', width: 10 },
+          { header: 'Долг', key: 'rest', width: 18, money: true },
+          { header: 'Дней старшему', key: 'maxAge', width: 14 },
+        ], d.clients)} />
+      </div>
+
+      <TableCard note="Должники по сумме открытого долга"
+        head={<><Th>Покупатель</Th><Th right>Счетов</Th><Th right>Долг</Th>
+          <Th right>Старшему счёту</Th><Th>С какой даты</Th></>}>
+        {d.clients.length === 0 ? (
+          <tr><td colSpan={5} className="px-3 py-3 text-sm text-muted-foreground">
+            Среди счетов с известной оплатой открытого долга нет
+          </td></tr>
+        ) : d.clients.map((c) => (
+          <tr key={c.id ?? c.name} className="border-b last:border-0 hover:bg-muted/40">
+            <td className="px-3 py-1.5 max-w-[320px] truncate" title={c.name}>
+              {c.id ? (
+                <button onClick={() => setCard(c.id)}
+                  className="text-left hover:text-primary hover:underline">{c.name}</button>
+              ) : c.name}
+            </td>
+            <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+              {c.invoices}
+            </td>
+            <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">
+              {money.format(c.rest)} ₽
+            </td>
+            <td className={cn('px-3 py-1.5 text-right tabular-nums',
+              c.maxAge > 180 ? 'text-rose-600 dark:text-rose-400'
+              : c.maxAge > 90 ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground')}>
+              {num.format(c.maxAge)} дн.
+            </td>
+            <td className="px-3 py-1.5 tabular-nums text-muted-foreground">{c.oldest ?? '—'}</td>
+          </tr>
+        ))}
+      </TableCard>
+
+      <TableCard
+        note={bucket
+          ? `${d.buckets.find((b) => b.key === bucket)?.label}: ${num.format(rows.length)} счетов`
+          : `Открытые счета — ${num.format(rows.length)}`}
+        head={<><Th>Счёт</Th><Th>Дата</Th><Th>Покупатель</Th><Th right>Сумма</Th>
+          <Th right>Оплачено</Th><Th right>Долг</Th><Th right>Дней</Th></>}>
+        {rows.map((r) => (
+          <tr key={r.id} className="border-b last:border-0 hover:bg-muted/40">
+            <td className="px-3 py-1.5 tabular-nums">{r.number}</td>
+            <td className="px-3 py-1.5 tabular-nums whitespace-nowrap">{r.date}</td>
+            <td className="px-3 py-1.5 max-w-[280px] truncate" title={r.counterparty}>
+              {r.counterparty}
+            </td>
+            <td className="px-3 py-1.5 text-right tabular-nums">{money.format(r.amount)}</td>
+            <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+              {money.format(r.paid ?? 0)}
+            </td>
+            <td className="px-3 py-1.5 text-right tabular-nums text-rose-600 dark:text-rose-400">
+              {money.format(r.rest)}
+            </td>
+            <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+              {num.format(r.age)}
+            </td>
+          </tr>
+        ))}
+      </TableCard>
+      {card && <CounterpartyWindow companyId={companyId} id={card} onClose={() => setCard(null)} />}
+    </div>
+  )
+}
+
+/**
+ * Кривая инкассации: какая доля выставленного в месяце собрана к дню 30/60/90/180.
+ *
+ * Это ответ на вопрос, который средний срок оплаты дать не может: сколько денег из
+ * счетов месяца придёт к концу следующего. Месяцы, где счетов меньше пяти, помечены —
+ * доля по двум счетам не статистика, а совпадение.
+ */
+function RevCollection({ companyId }: { companyId: string }) {
+  const q = useQuery({
+    queryKey: ['books', 'collection-curve', companyId],
+    queryFn: () => getCollectionCurve(companyId),
+    enabled: !!companyId,
+  })
+
+  if (q.isError) return <div className="p-4"><QueryError onRetry={() => q.refetch()} /></div>
+  if (!q.data) return <Loading />
+  const d = q.data
+  if (!d.months.length) {
+    return (
+      <div className="p-6 text-sm text-muted-foreground">
+        Нет счетов, которые регистр «Оплата счетов» свёл с платежами, — строить кривую
+        не из чего.
+      </div>
+    )
+  }
+
+  const steps = [
+    { label: 'к 30 дням', pct: d.avg30 },
+    { label: 'к 60 дням', pct: d.avg60 },
+    { label: 'к 90 дням', pct: d.avg90 },
+    { label: 'к 180 дням', pct: d.avg180 },
+  ]
+
+  return (
+    <div className="p-4 space-y-4">
+      <Card>
+        <CardContent className="p-4 space-y-3">
+          <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
+            В среднем по всем счетам с оплатой — {money.format(d.billed)} ₽
+          </div>
+          {steps.map((st) => (
+            <div key={st.label} className="space-y-1">
+              <div className="flex justify-between text-sm">
+                <span>Собрано {st.label}</span>
+                <span className="tabular-nums">{st.pct} %</span>
+              </div>
+              <div className="h-2.5 rounded bg-muted overflow-hidden">
+                <div className="h-full bg-primary/60" style={{ width: `${st.pct}%` }} />
+              </div>
+            </div>
+          ))}
+          <p className="text-[11px] text-muted-foreground pt-1">
+            Хвост после 180 дней — {(100 - d.avg180).toFixed(1)} % выставленного: эти
+            деньги приходят позже полугода или не приходят вовсе. По этой кривой
+            считается ожидаемое поступление от текущей задолженности.
+          </p>
+        </CardContent>
+      </Card>
+
+      <div className="flex justify-end">
+        <ExportButton onClick={() => exportTable('Инкассация по месяцам', [
+          { header: 'Месяц', key: 'month', width: 12 },
+          { header: 'Счетов', key: 'invoices', width: 10 },
+          { header: 'Выставлено', key: 'billed', width: 18, money: true },
+          { header: 'К 30 дн., %', key: 'pct30', width: 12 },
+          { header: 'К 60 дн., %', key: 'pct60', width: 12 },
+          { header: 'К 90 дн., %', key: 'pct90', width: 12 },
+          { header: 'К 180 дн., %', key: 'pct180', width: 12 },
+        ], d.months)} />
+      </div>
+
+      <TableCard note="Месяц выставления счёта → сколько собрано к сроку"
+        head={<><Th>Месяц</Th><Th right>Счетов</Th><Th right>Выставлено</Th>
+          <Th right>30 дн.</Th><Th right>60 дн.</Th><Th right>90 дн.</Th><Th right>180 дн.</Th></>}>
+        {[...d.months].reverse().map((m) => (
+          <tr key={m.month} className="border-b last:border-0 hover:bg-muted/40">
+            <td className="px-3 py-1.5">
+              {monthLabel(m.month)}
+              {m.thin && (
+                <span className="ml-1.5 rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground"
+                  title="меньше пяти счетов: доли по такому числу показывают случайность">
+                  мало
+                </span>
+              )}
+            </td>
+            <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+              {m.invoices}
+            </td>
+            <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">
+              {money.format(m.billed)} ₽
+            </td>
+            {([m.pct30, m.pct60, m.pct90, m.pct180]).map((pct, i) => (
+              <td key={i} className={cn('px-3 py-1.5 text-right tabular-nums',
+                m.thin ? 'text-muted-foreground'
+                : (pct ?? 0) >= 80 ? 'text-emerald-600 dark:text-emerald-400'
+                : (pct ?? 0) < 30 ? 'text-rose-600 dark:text-rose-400' : '')}>
+                {pct === null ? '—' : `${pct} %`}
+              </td>
+            ))}
+          </tr>
+        ))}
+      </TableCard>
+    </div>
+  )
+}
+
+/**
+ * Сделки: реализация целиком, а не позиция и не месяц.
+ *
+ * Единица анализа проектной компании — сделка: 218 реализаций за пять лет, и вопрос
+ * «какая из них убыточна» распределения не берут. Маржа считается только когда
+ * себестоимость известна ПО ВСЕМ строкам: частичная выглядит как настоящая, но
+ * завышена на непокрытые позиции.
+ */
+function RevDeals({ companyId, period }: { companyId: string; period: Period }) {
+  const q = useQuery({
+    queryKey: ['books', 'deals', companyId, period.from, period.to],
+    queryFn: () => getDeals(companyId, period),
+    enabled: !!companyId,
+  })
+  const [search, setSearch] = useState('')
+  const [only, setOnly] = useState<'all' | 'low' | 'loss'>('all')
+  const [docId, setDocId] = useState<string | null>(null)
+  const [card, setCard] = useState<string | null>(null)
+
+  if (q.isError) return <div className="p-4"><QueryError onRetry={() => q.refetch()} /></div>
+  if (!q.data) return <Loading />
+  const d = q.data
+  const rows = d.rows.filter((r) =>
+    (!search || r.counterparty.toLowerCase().includes(search.toLowerCase())
+      || r.number.toLowerCase().includes(search.toLowerCase()))
+    && (only === 'all'
+      || (only === 'low' && r.marginPct !== null && r.marginPct < 30)
+      || (only === 'loss' && r.margin !== null && r.margin < 0)))
+  const avgPct = d.netWithMargin ? (d.marginTotal / d.netWithMargin) * 100 : 0
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
+        <MetricTile label="Сделок за период" value={num.format(d.count)}
+          hint={`${money.format(d.net)} ₽ без НДС`} />
+        <MetricTile label="Маржа по сделкам" value={money.format(d.marginTotal) + ' ₽'}
+          hint={`${avgPct.toFixed(1)} % от суммы сделок с известной себестоимостью`} />
+        <MetricTile label="Себестоимость известна" value={num.format(d.withMargin)}
+          hint={`из ${num.format(d.count)} сделок`} />
+        <MetricTile label="Маржа ниже 30 %" value={num.format(d.lowMargin)}
+          hint="порог, за которым проверяют цену и объём работ"
+          tone={d.lowMargin > d.withMargin / 2 ? 'danger' : undefined} />
+      </div>
+
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-3 flex-wrap">
+          <input value={search} onChange={(e) => setSearch(e.target.value)}
+            placeholder="Покупатель или номер"
+            className="h-8 w-56 rounded-md border bg-background px-2.5 text-sm" />
+          <Tabs value={only} onChange={setOnly} items={[
+            { key: 'all' as const, label: 'Все' },
+            { key: 'low' as const, label: 'Маржа ниже 30 %' },
+            { key: 'loss' as const, label: 'В убыток' },
+          ]} />
+        </div>
+        <ExportButton onClick={() => exportTable('Сделки', [
+          { header: 'Дата', key: 'date', width: 12 },
+          { header: 'Номер', key: 'number', width: 16 },
+          { header: 'Покупатель', key: 'counterparty', width: 40 },
+          { header: 'Сумма без НДС', key: 'net', width: 18, money: true },
+          { header: 'Себестоимость', key: 'cost', width: 18, money: true },
+          { header: 'Маржа', key: 'margin', width: 16, money: true },
+          { header: 'Маржа, %', key: 'marginPct', width: 10 },
+        ], rows)} />
+      </div>
+
+      <TableCard note={`${num.format(rows.length)} сделок из ${num.format(d.count)}`}
+        head={<><Th>Дата</Th><Th>Номер</Th><Th>Покупатель</Th><Th right>Без НДС</Th>
+          <Th right>Себестоимость</Th><Th right>Маржа</Th><Th right>%</Th></>}>
+        {rows.map((r) => (
+          <tr key={r.id} className="border-b last:border-0 hover:bg-muted/40">
+            <td className="px-3 py-1.5 tabular-nums whitespace-nowrap">{r.date}</td>
+            <td className="px-3 py-1.5 tabular-nums">
+              <button onClick={() => setDocId(r.id)}
+                className="hover:text-primary hover:underline">{r.number}</button>
+            </td>
+            <td className="px-3 py-1.5 max-w-[280px] truncate" title={r.counterparty}>
+              {r.counterpartyId ? (
+                <button onClick={() => setCard(r.counterpartyId)}
+                  className="text-left hover:text-primary hover:underline">{r.counterparty}</button>
+              ) : r.counterparty}
+            </td>
+            <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">
+              {money.format(r.net)} ₽
+            </td>
+            <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+              {r.cost === null || r.unknownLines ? '—' : money.format(r.cost)}
+            </td>
+            <td className={cn('px-3 py-1.5 text-right tabular-nums whitespace-nowrap',
+              r.margin === null ? 'text-muted-foreground'
+              : r.margin < 0 ? 'text-rose-600 dark:text-rose-400'
+              : 'text-emerald-600 dark:text-emerald-400')}>
+              {r.margin === null ? 'нет данных' : `${money.format(r.margin)} ₽`}
+            </td>
+            <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+              {r.marginPct === null ? '—' : `${r.marginPct.toFixed(1)} %`}
+            </td>
+          </tr>
+        ))}
+      </TableCard>
+      {docId && <DocumentWindow companyId={companyId} docId={docId} onClose={() => setDocId(null)} />}
+      {card && <CounterpartyWindow companyId={companyId} id={card} onClose={() => setCard(null)} />}
+    </div>
+  )
+}
+
+/**
+ * Концентрация: насколько выручка держится на нескольких клиентах.
+ *
+ * HHI — сумма квадратов долей в процентах. До 1000 концентрация низкая, 1000–2000
+ * умеренная, выше 2000 высокая. Для поставщика это зеркало антимонопольной метрики:
+ * высокий индекс значит, что уход одного покупателя уносит заметную часть выручки.
+ * Смотреть надо по годам: за всю историю индекс размывается теми, кто давно ушёл.
+ */
+function RevConcentration({ companyId }: { companyId: string }) {
+  const q = useQuery({
+    queryKey: ['books', 'concentration', companyId],
+    queryFn: () => getConcentration(companyId),
+    enabled: !!companyId,
+  })
+
+  if (q.isError) return <div className="p-4"><QueryError onRetry={() => q.refetch()} /></div>
+  if (!q.data) return <Loading />
+  const d = q.data
+  const level = (hhi: number | null) =>
+    hhi === null ? '—'
+    : hhi > d.levels.high ? 'высокая'
+    : hhi > d.levels.low ? 'умеренная' : 'низкая'
+  const tone = (hhi: number | null) =>
+    hhi === null ? undefined
+    : hhi > d.levels.high ? 'danger' as const
+    : hhi > d.levels.low ? undefined : 'success' as const
+  const last = d.years[d.years.length - 1]
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
+        <MetricTile label="HHI за всю историю" value={String(d.total.hhi ?? '—')}
+          hint={`${level(d.total.hhi)} концентрация · ${num.format(d.total.clients)} покупателей`}
+          tone={tone(d.total.hhi)} />
+        <MetricTile label={`HHI за ${last?.year ?? '—'}`} value={String(last?.hhi ?? '—')}
+          hint={`${level(last?.hhi ?? null)} концентрация · ${num.format(last?.clients ?? 0)} покупателей`}
+          tone={tone(last?.hhi ?? null)} />
+        <MetricTile label="Доля крупнейшего" value={`${last?.cr1 ?? '—'} %`}
+          hint="в последнем году" />
+        <MetricTile label="Доля первой тройки" value={`${last?.cr3 ?? '—'} %`}
+          hint="в последнем году" />
+      </div>
+
+      <p className="text-[11px] text-muted-foreground">
+        HHI — сумма квадратов долей покупателей в процентах: до {num.format(d.levels.low)} концентрация
+        низкая, до {num.format(d.levels.high)} умеренная, выше — высокая. За всю историю индекс
+        размывается теми, кто давно перестал покупать, поэтому решение принимают по годам.
+      </p>
+
+      <div className="flex justify-end">
+        <ExportButton onClick={() => exportTable('Концентрация выручки', [
+          { header: 'Год', key: 'year', width: 8 },
+          { header: 'Покупателей', key: 'clients', width: 12 },
+          { header: 'Выручка', key: 'amount', width: 18, money: true },
+          { header: 'HHI', key: 'hhi', width: 10 },
+          { header: 'CR1, %', key: 'cr1', width: 10 },
+          { header: 'CR3, %', key: 'cr3', width: 10 },
+          { header: 'CR5, %', key: 'cr5', width: 10 },
+        ], d.years)} />
+      </div>
+
+      <TableCard note="По годам: чем выше индекс, тем сильнее выручка зависит от нескольких клиентов"
+        head={<><Th>Год</Th><Th right>Покупателей</Th><Th right>Выручка</Th><Th right>HHI</Th>
+          <Th>Уровень</Th><Th right>CR1</Th><Th right>CR3</Th><Th right>CR5</Th></>}>
+        {[...d.years].reverse().map((y) => (
+          <tr key={y.year} className="border-b last:border-0 hover:bg-muted/40">
+            <td className="px-3 py-1.5 tabular-nums">{y.year}</td>
+            <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+              {num.format(y.clients)}
+            </td>
+            <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">
+              {money.format(y.amount ?? 0)} ₽
+            </td>
+            <td className="px-3 py-1.5 text-right tabular-nums">{y.hhi ?? '—'}</td>
+            <td className={cn('px-3 py-1.5 text-[11px]',
+              (y.hhi ?? 0) > d.levels.high ? 'text-rose-600 dark:text-rose-400'
+              : (y.hhi ?? 0) > d.levels.low ? 'text-amber-600 dark:text-amber-400'
+              : 'text-muted-foreground')}>
+              {level(y.hhi)}
+            </td>
+            <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+              {y.cr1 ?? '—'} %
+            </td>
+            <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+              {y.cr3 ?? '—'} %
+            </td>
+            <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+              {y.cr5 ?? '—'} %
+            </td>
+          </tr>
+        ))}
+      </TableCard>
+    </div>
+  )
+}
+
+/**
+ * Счета, за которыми не пошла отгрузка.
+ *
+ * Ссылки «счёт → реализация» в выгрузке нет, поэтому сопоставление идёт по клиенту:
+ * тот, у кого есть счета и ни одной реализации, — это либо незакрытая сделка, либо
+ * мусор в базе. Экран не решает, какое из двух: он показывает список, с которым идут
+ * к заказчику.
+ */
+function RevBacklog({ companyId }: { companyId: string }) {
+  const q = useQuery({
+    queryKey: ['books', 'backlog', companyId],
+    queryFn: () => getBacklog(companyId),
+    enabled: !!companyId,
+  })
+  const [only, setOnly] = useState<'all' | 'silent'>('silent')
+  const [card, setCard] = useState<string | null>(null)
+
+  if (q.isError) return <div className="p-4"><QueryError onRetry={() => q.refetch()} /></div>
+  if (!q.data) return <Loading />
+  const d = q.data
+  const rows = only === 'silent' ? d.rows.filter((r) => !r.sales) : d.rows
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="grid gap-3 grid-cols-3">
+        <MetricTile label="Выставлено всего" value={money.format(d.invoiced) + ' ₽'} />
+        <MetricTile label="Отгружено" value={money.format(d.shipped) + ' ₽'}
+          hint={d.invoiced ? `${((d.shipped / d.invoiced) * 100).toFixed(1)} % выставленного` : '—'} />
+        <MetricTile label="Клиентов без единой отгрузки" value={num.format(d.silentCount)}
+          hint={`счетов на ${money.format(d.silentAmount)} ₽`}
+          tone={d.silentCount ? 'danger' : 'success'} />
+      </div>
+
+      <p className="text-[11px] text-muted-foreground">
+        Сопоставление идёт по клиенту, а не по документу: основания «счёт → реализация»
+        выгрузка 1С не несёт. Клиент со счетами и нулём отгрузок — это либо незакрытая
+        сделка, либо отменённые счета, оставшиеся в базе. Разбирается с бухгалтерией
+        компании: до ответа любая конверсия воронки условна.
+      </p>
+
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <Tabs value={only} onChange={setOnly} items={[
+          { key: 'silent' as const, label: 'Без отгрузок' },
+          { key: 'all' as const, label: 'Все клиенты' },
+        ]} />
+        <ExportButton onClick={() => exportTable('Счета без отгрузки', [
+          { header: 'Покупатель', key: 'counterparty', width: 42 },
+          { header: 'Счетов', key: 'invoices', width: 10 },
+          { header: 'Выставлено', key: 'invoiced', width: 18, money: true },
+          { header: 'Реализаций', key: 'sales', width: 12 },
+          { header: 'Отгружено', key: 'shipped', width: 18, money: true },
+          { header: 'Разрыв', key: 'gap', width: 18, money: true },
+          { header: 'Последний счёт', key: 'lastInvoice', width: 14 },
+        ], rows)} />
+      </div>
+
+      <TableCard note={`${num.format(rows.length)} клиентов`}
+        head={<><Th>Покупатель</Th><Th right>Счетов</Th><Th right>Выставлено</Th>
+          <Th right>Отгружено</Th><Th right>Разрыв</Th><Th>Последний счёт</Th></>}>
+        {rows.map((r) => (
+          <tr key={r.counterparty} className="border-b last:border-0 hover:bg-muted/40">
+            <td className="px-3 py-1.5 max-w-[320px] truncate" title={r.counterparty}>
+              {r.counterpartyId ? (
+                <button onClick={() => setCard(r.counterpartyId)}
+                  className="text-left hover:text-primary hover:underline">{r.counterparty}</button>
+              ) : r.counterparty}
+            </td>
+            <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+              {r.invoices}
+            </td>
+            <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">
+              {money.format(r.invoiced)} ₽
+            </td>
+            <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">
+              {r.sales ? `${money.format(r.shipped)} ₽` : <span className="text-muted-foreground">нет</span>}
+            </td>
+            <td className={cn('px-3 py-1.5 text-right tabular-nums whitespace-nowrap',
+              r.gap > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground')}>
+              {money.format(r.gap)} ₽
+            </td>
+            <td className="px-3 py-1.5 tabular-nums text-muted-foreground whitespace-nowrap">
+              {r.lastInvoice ?? '—'}
+              {r.daysSinceLast !== null && (
+                <span className="ml-1 text-[11px]">{num.format(r.daysSinceLast)} дн. назад</span>
+              )}
+            </td>
+          </tr>
+        ))}
+      </TableCard>
+      {card && <CounterpartyWindow companyId={companyId} id={card} onClose={() => setCard(null)} />}
     </div>
   )
 }

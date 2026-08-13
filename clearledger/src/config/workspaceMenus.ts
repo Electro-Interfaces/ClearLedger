@@ -355,6 +355,10 @@ export const REV_SALES_MENU: CentralMenuItem[] = [
   { key: 'rev_trend',    label: 'Динамика и YoY' },
   { key: 'rev_compare',  label: 'Сравнение периодов' },
   { key: 'rev_slices',   label: 'Разрезы' },
+  // Сделка — единица анализа проектной компании: 218 реализаций за пять лет, и
+  // ответ «какая сделка убыточна» распределения не дают.
+  { key: 'rev_deals',    label: 'Сделки и маржа' },
+  { key: 'rev_conc',     label: 'Концентрация' },
   // Сходимость с бухгалтерией — смысл продукта, и она обязана быть видимой: пока
   // расхождение не показано, витрина и регистр расходятся тихо.
   { key: 'rev_recon',    label: 'Сверка с бухгалтерией' },
@@ -403,6 +407,11 @@ export const REV_STOCK_MENU: CentralMenuItem[] = [
   { key: 'rev_prices',    label: 'Цены закупки' },
 ]
 export const REV_MONEY_MENU: CentralMenuItem[] = [
+  // Старение и инкассация — рабочий контур долга: первое отвечает «чей долг и сколько
+  // ему дней», второе «сколько соберём к концу месяца». Средний срок оплаты не
+  // отвечает ни на то, ни на другое.
+  { key: 'rev_aging',    label: 'Старение долга' },
+  { key: 'rev_collect',  label: 'Инкассация' },
   { key: 'rev_terms',    label: 'Сроки оплаты' },
   { key: 'rev_cashflow', label: 'Денежный поток' },
   { key: 'rev_contracts', label: 'Договоры' },
@@ -411,6 +420,7 @@ export const REV_DOCS_MENU: CentralMenuItem[] = [
   { key: 'rev_sale_docs', label: 'Реализации' },
   { key: 'rev_invoices',  label: 'Счета покупателю' },
   { key: 'rev_funnel',    label: 'Воронка' },
+  { key: 'rev_backlog',   label: 'Счета без отгрузки' },
 ]
 
 /**
