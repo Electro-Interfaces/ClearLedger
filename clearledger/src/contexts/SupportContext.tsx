@@ -73,9 +73,14 @@ export function SupportProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  // Живой счётчик непрочитанных чата (общий кеш с ChatPanel: ключ ['chat-rooms', false]).
+  const { companyId } = useCompany()
+
+  // Живой счётчик непрочитанных чата. Ключ ОБЯЗАН совпадать с тем, которым панель
+  // берёт полный список (`['chat-rooms', companyId, false, 'all']`): пока ключи
+  // расходились, шапка и список чатов держали разные ответы сервера — в шапке
+  // горела единица, а в списке ни одного непрочитанного (замечание МАГа 13.08.2026).
   const { data: rooms } = useQuery({
-    queryKey: ['chat-rooms', false],
+    queryKey: ['chat-rooms', companyId, false, 'all'],
     queryFn: () => getRooms(false),
     enabled: isApiEnabled() && !!getToken(),
     refetchInterval: 60000,
@@ -87,7 +92,6 @@ export function SupportProvider({ children }: { children: ReactNode }) {
   // Задачи: на кнопке — только ПРОСРОЧЕННЫЕ. «Сколько всего на мне» в шапке ничего
   // не решает и горит у всех постоянно; красная цифра должна значить «уже опоздали».
   // Ключ и запрос те же, что у быстрой панели, — один кеш на кнопку и на её окно.
-  const { companyId } = useCompany()
   const tasksOn = useTasksApp()
   const { data: myTasks } = useQuery({
     queryKey: ['tasks', companyId, 'mine', '', '', ''],

@@ -45,11 +45,21 @@ CHECKS: list[Check] = [
           "select count(*) from service_locations where company_id=:cid and type='ev_charging' "
           "and status='closed' and decommissioned_on is null",
           "Станция выведена, а когда — неизвестно. Для учёта ОС дата обязательна."),
-    Check("obj_no_inventory", "Станции без инвентарного номера", "Объекты",
+    Check("obj_no_inventory", "Станции, не поставленные на учёт", "Объекты",
           "select count(*) from service_locations where company_id=:cid and type='ev_charging' "
           "and status<>'closed' and (inventory_number is null or inventory_number='')",
-          "Мост к бухгалтерскому учёту: без инвентарного номера станцию нельзя связать "
-          "с объектом основных средств."),
+          "Инвентарный номер присваивает 1С при постановке ЭЗС на учёт в бухгалтерии "
+          "(ответ ПА РусГидро 13.08.2026): пустое поле — не пробел в данных, а станция, "
+          "которой на балансе ещё нет. Смотреть вместе со следующей строкой: часть из "
+          "них уже принимает заезды."),
+    Check("obj_earning_no_inventory", "Зарабатывают, но не на балансе", "Объекты",
+          "select count(*) from service_locations l where l.company_id=:cid "
+          "and l.type='ev_charging' and not l.is_test and l.status='active' "
+          "and (l.inventory_number is null or l.inventory_number='') "
+          "and exists (select 1 from charge_sessions s where s.location_id=l.id)",
+          "Станция отпускает энергию и приносит выручку, но в бухгалтерии на учёт не "
+          "поставлена — основного средства под этой выручкой нет. Список нужен "
+          "бухгалтерии для постановки на баланс."),
     Check("obj_no_contract", "Станции без договора", "Объекты",
           "select count(*) from service_locations l where l.company_id=:cid and l.type='ev_charging' "
           "and l.status<>'closed' and not exists (select 1 from contract_locations cl "

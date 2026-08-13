@@ -2104,6 +2104,8 @@ export function ChatPanel({ compact, scopeProduct }: {
     switch (e.type) {
       case 'chat:message':
         qc.invalidateQueries({ queryKey: ['chat-messages', selectedRoom] })
+        // Ключ без параметров накрывает и список панели, и запрос счётчика в шапке:
+        // раньше они расходились и показывали разное число непрочитанных.
         qc.invalidateQueries({ queryKey: ['chat-rooms'] })
         // Появление участника приезжает служебной записью ленты — по ней и
         // обновляем состав. Раньше он обновлялся только у того, кто добавлял:
@@ -2154,7 +2156,15 @@ export function ChatPanel({ compact, scopeProduct }: {
     }
   }, [qc, selectedRoom, user?.id])
 
-  const channels = useMemo(() => (selectedRoom ? [`chat:${selectedRoom}`] : []), [selectedRoom])
+  // Подписываемся на ВСЕ свои комнаты, а не только на открытую. Иначе панель
+  // узнаёт о чужом сообщении лишь на минутном опросе: в шапке единица уже горит
+  // (её счётчик обновляется своим таймером), а в списке ни одного непрочитанного —
+  // человек ищет сообщение и не находит (замечание МАГа 13.08.2026).
+  const channels = useMemo(() => {
+    const all = rooms.map((r) => `chat:${r.id}`)
+    return selectedRoom && !all.includes(`chat:${selectedRoom}`)
+      ? [...all, `chat:${selectedRoom}`] : all
+  }, [rooms, selectedRoom])
   const onReconnect = useCallback(() => {
     // Пока связи не было, сообщения не доезжали. Дёргаем и ленту, и список: иначе
     // человек видит переписку такой, какой она была до обрыва, и не знает об этом.
