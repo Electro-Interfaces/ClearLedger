@@ -893,7 +893,17 @@ export function BooksForecast({ companyId }: { companyId: string }) {
           hint="столько переплатим, если документы не дойдут" />
       </div>
 
-      <p className="text-[11px] text-muted-foreground">{d.disclaimer}</p>
+      <div className="rounded-lg border border-border px-3 py-2">
+        <p className="text-[11px] text-muted-foreground">{d.disclaimer}</p>
+        {d.notIncluded?.length > 0 && (
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            <span className="font-medium">В расчёт НЕ входит:</span>{' '}
+            {d.notIncluded.join(' · ')}. Ставки периода: НДС{' '}
+            {Math.round((d.rates?.vat ?? 0.22) * 100)} %, прибыль{' '}
+            {Math.round((d.rates?.profit ?? 0.25) * 100)} %.
+          </p>
+        )}
+      </div>
 
       <TableCard note="По кварталам: слева как есть, справа — если недостающие документы придут"
         head={<><Th>Квартал</Th><Th right>НДС начислен</Th><Th right>Вычет</Th>
@@ -1150,6 +1160,32 @@ export function BooksTrends({ companyId }: { companyId: string }) {
           </div>
         </CardContent>
       </Card>
+
+      {/* Приказ ФНС ММ-3-06/333@: те же показатели инспекция считает по нашей же
+          отчётности. Увидеть их до неё — весь смысл раздела. */}
+      {d.fnsRisk?.length > 0 && (
+        <Card>
+          <CardContent className="p-0">
+            <div className="px-3 py-2 text-[11px] text-muted-foreground border-b">
+              Как компанию видит налоговая — критерии самостоятельной оценки рисков
+            </div>
+            <table className="w-full text-sm">
+              <tbody>
+                {d.fnsRisk.map((r) => (
+                  <tr key={r.title} className="border-b last:border-0">
+                    <td className="px-3 py-1.5 w-64">{r.title}</td>
+                    <td className={cn('px-3 py-1.5 w-48 tabular-nums font-medium',
+                      r.status === 'warn' && 'text-amber-600 dark:text-amber-500')}>
+                      {r.value}
+                    </td>
+                    <td className="px-3 py-1.5 text-[11px] text-muted-foreground">{r.note}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </CardContent>
+        </Card>
+      )}
 
       {d.findings.map((f) => (
         <Card key={f.key}>

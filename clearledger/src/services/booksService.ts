@@ -1256,6 +1256,9 @@ export interface TaxForecast {
   }
   budget: { account: string; name: string; debt: number }[]
   disclaimer: string
+  /** Чего в расчёте нет: без этого списка оценку примут за декларацию. */
+  notIncluded: string[]
+  rates: { vat: number; profit: number }
 }
 
 export const getTaxForecast = (companyId: string, year?: number) =>
@@ -1327,7 +1330,10 @@ export interface TrendsData {
     profit: number; docs: number }[]
   findings: { key: string; title: string; why: string; count: number
     rows: { period: string; subject: string; amount: number; note: string }[] }[]
-  summary: { months: number; findings: number; kinds: number }
+  /** Показатели, которые инспекция считает по той же отчётности (приказ ММ-3-06/333@). */
+  fnsRisk: { title: string; value: string; status: string; note: string }[]
+  summary: { months: number; findings: number; kinds: number
+    scale: number; thresholds: { big: number; notable: number } }
 }
 
 export const getTrends = (companyId: string) =>

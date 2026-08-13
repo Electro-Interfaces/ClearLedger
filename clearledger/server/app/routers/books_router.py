@@ -5231,6 +5231,24 @@ async def create_requests_from_gaps(
 
     created = 0
     due = (date.today() + timedelta(days=due_days)).isoformat()
+
+    def deadline(period_str: str) -> str:
+        """Срок по отчётности периода, а не «две недели от нажатия кнопки».
+
+        Настоящий дедлайн документа — это дата, к которой он должен попасть в
+        отчётность: счёт-фактура нужен к декларации по НДС (25-е число месяца после
+        квартала), закрывающий документ — к закрытию месяца (25-е следующего).
+        Срок в прошлом остаётся в прошлом: требование сразу видно просроченным, и
+        это правда, а не повод рисовать бодрый плюс-две-недели.
+        """
+        try:
+            y, m = int(period_str[:4]), int(period_str[5:7])
+        except (ValueError, IndexError):
+            return due
+        if rule in ("purchase_no_vat_invoice", "sale_no_vat_invoice"):
+            m = ((m - 1) // 3 + 1) * 3           # конец квартала
+        m, y = (1, y + 1) if m == 12 else (m + 1, y)
+        return f"{y:04d}-{m:02d}-25"
     for row in gap["rows"]:
         if row["id"] in known:
             continue
@@ -5241,7 +5259,8 @@ async def create_requests_from_gaps(
                              if parties.get(row["id"]) else None),
             source_doc_id=uuid.UUID(row["id"]),
             doc_kind=_RULE_DOC_KIND.get(rule, gap["title"]),
-            amount=row["amount"], status="open", due_date=due,
+            amount=row["amount"], status="open",
+            due_date=deadline(row["period"] or period or ""),
             created_by=current_user.email,
         ))
         created += 1
@@ -5575,6 +5594,19 @@ async def tax_forecast(
         # Оценка, а не декларация: считаем по своим данным и говорим об этом прямо.
         "disclaimer": "Оценка по данным пространства. Декларацию формирует бухгалтерия: "
                       "здесь оперативный минимум, чтобы понимать порядок суммы заранее.",
+        # Оговорка, не называющая исключений, читается как «почти декларация».
+        # Перечисляем то, чего в расчёте НЕТ, — иначе цифру примут за окончательную.
+        "notIncluded": [
+            "нормируемые расходы (реклама, представительские, проценты по займам)",
+            "убытки прошлых лет, переносимые на текущую базу",
+            "постоянные и временные разницы, ПБУ 18/02",
+            "раздельный учёт НДС и правило 5 %",
+            "ставки НДС кроме основной: 10 %, 0 %, без НДС",
+            "восстановление НДС и налоговый агент",
+            "обособленные подразделения и региональные льготы",
+        ],
+        "rates": {"vat": _vat_rate(str(date.today().year)),
+                  "profit": _profit_rate(str(date.today().year))},
     }
 
 
@@ -5898,14 +5930,14 @@ async def trends(
                  sum(amount) FILTER (WHERE account_kt LIKE '90.01%')
                - sum(amount) FILTER (WHERE account_dt LIKE '90.03%') AS revenue,
                  sum(amount) FILTER (WHERE account_dt LIKE '90.02%') AS cost,
-                 -- Расход берём ТОЛЬКО тот, что не ушёл в себестоимость: 26-й и 44-й
-                 -- закрываются на 90.02, и складывая их с ней, мы считали одни и те
-                 -- же деньги дважды — на пилоте это превращало прибыль 157 тыс. в
-                 -- убыток 430 тыс.
-                 sum(amount) FILTER (WHERE (account_dt LIKE '44%' OR account_dt LIKE '26%')
-                                       AND account_kt NOT LIKE '90%')
-               - sum(amount) FILTER (WHERE account_dt LIKE '90.02%'
-                                       AND (account_kt LIKE '44%' OR account_kt LIKE '26%'))
+                 -- Расход берём ТОЛЬКО тот, что списан на финрезультат: 26-й закрывается
+                 -- на 90.02, 44-й на 90.07, и складывать их с себестоимостью значило
+                 -- считать одни деньги дважды. По этой формуле год сходится с 1С до
+                 -- копейки: 2022 — 136 614,98, 2024 — 125 683,33.
+                 coalesce(sum(amount) FILTER (WHERE account_dt LIKE '90.07%'
+                                                 OR account_dt LIKE '90.08%'), 0)
+               + coalesce(sum(amount) FILTER (WHERE account_dt LIKE '91.02%'), 0)
+               - coalesce(sum(amount) FILTER (WHERE account_kt LIKE '91.01%'), 0)
                  AS expense
             FROM gl_entries WHERE company_id = :cid GROUP BY 1
         ), d AS (
@@ -5968,11 +6000,13 @@ async def trends(
     once = [{"period": r[2], "subject": r[0], "amount": _num(r[1]),
              "note": f"операций всего {r[3]}"}
             for r in (await db.execute(text("""
-        SELECT counterparty_name, sum(amount), max(substr(date, 1, 7)), count(*)
+        SELECT coalesce(max(counterparty_name), ''), sum(amount),
+               max(substr(date, 1, 7)), count(*)
           FROM accounting_docs
-         WHERE company_id = :cid AND doc_type IN ('purchase', 'invoice_in')
+         WHERE company_id = :cid AND doc_type = 'purchase'
            AND coalesce(counterparty_name, '') <> ''
-         GROUP BY 1 HAVING count(*) <= 2 AND sum(amount) > :big
+         GROUP BY coalesce(counterparty_id::text, lower(counterparty_name))
+        HAVING count(*) <= 2 AND sum(amount) > :big
          ORDER BY 2 DESC LIMIT 50"""), {**p, "big": big})).all()]
     add("one_off_supplier", "Разовый поставщик на крупную сумму",
         "Одна-две операции на сотни тысяч — обычный повод показать договор и деловую цель",
@@ -5986,8 +6020,14 @@ async def trends(
                   for r in (await db.execute(text("""
         SELECT amount, date, number, doc_type, coalesce(counterparty_name, '')
           FROM accounting_docs
-         WHERE company_id = :cid AND doc_type IN ('purchase', 'invoice_in')
+         WHERE company_id = :cid AND doc_type = 'purchase'
            AND amount >= :notable AND amount = round(amount) AND (amount::numeric % 10000) = 0
+           AND NOT EXISTS (
+             SELECT 1 FROM accounting_docs x
+              WHERE x.company_id = accounting_docs.company_id
+                AND x.counterparty_id = accounting_docs.counterparty_id
+                AND x.amount = accounting_docs.amount AND x.id <> accounting_docs.id
+              HAVING count(*) >= 2)      -- три и больше одинаковых = договор
          ORDER BY amount DESC LIMIT 50"""), {**p, "notable": notable})).all()]
     add("round_amounts", "Круглые суммы в расходах",
         "Само по себе не нарушение, но проверяющий смотрит на них первыми — держите обоснование",
@@ -5997,12 +6037,12 @@ async def trends(
     both = [{"period": "", "subject": r[0], "amount": _num(r[1]) + _num(r[2]),
              "note": f"продали на {_num(r[1]):,.0f}, купили на {_num(r[2]):,.0f}".replace(",", " ")}
             for r in (await db.execute(text("""
-        SELECT counterparty_name,
+        SELECT coalesce(max(counterparty_name), ''),
                sum(amount) FILTER (WHERE doc_type = 'sale'),
                sum(amount) FILTER (WHERE doc_type = 'purchase')
           FROM accounting_docs
          WHERE company_id = :cid AND coalesce(counterparty_name, '') <> ''
-         GROUP BY 1
+         GROUP BY coalesce(counterparty_id::text, lower(counterparty_name))
         HAVING sum(amount) FILTER (WHERE doc_type = 'sale') > 0
            AND sum(amount) FILTER (WHERE doc_type = 'purchase') > 0
          ORDER BY 2 DESC LIMIT 30"""), p)).all()]
@@ -6018,9 +6058,104 @@ async def trends(
         "Для налоговой это повод спросить о деловой цели: расход есть, дохода нет",
         idle)
 
+
+    # ── Как компанию видит налоговая ────────────────────────────────────────────
+    # Приказ ФНС от 30.05.2007 № ММ-3-06/333@ — 12 критериев самостоятельной оценки
+    # рисков. Половина из них считается ровно по тем данным, что у нас уже есть, и
+    # считать их ПОСЛЕ выездной проверки поздно. Среднеотраслевые значения зависят от
+    # ОКВЭД и региона, поэтому там, где сравнивать не с чем, показываем свою цифру и
+    # прямо говорим, с чем её сверять, — а не выдумываем норматив.
+    year_now = max((m["month"][:4] for m in months), default="")
+    fns: list[dict[str, Any]] = []
+
+    def risk(title: str, value: str, status: str, note: str) -> None:
+        fns.append({"title": title, "value": value, "status": status, "note": note})
+
+    # 1. Доля вычетов НДС. Порог 89 % за 12 месяцев — единственный критерий с точной
+    #    цифрой в самом приказе, и первый, по которому вызывают на комиссию.
+    vat_acc, vat_ded = (await db.execute(text("""
+        SELECT coalesce(sum(amount) FILTER (WHERE account_kt LIKE '68.02%'), 0),
+               coalesce(sum(amount) FILTER (WHERE account_dt LIKE '68.02%'
+                                              AND account_kt NOT LIKE '51%'
+                                              AND account_kt NOT LIKE '68.90%'), 0)
+          FROM gl_entries
+         WHERE company_id = :cid AND period_year >= :y"""),
+        {**p, "y": int(year_now[:4] or 0) - 1})).one()
+    if _num(vat_acc) > 0:
+        share = _num(vat_ded) / _num(vat_acc) * 100
+        risk("Доля вычетов по НДС", f"{share:.1f} %",
+             "warn" if share >= 89 else "ok",
+             "Порог приказа ФНС — 89 % за 12 месяцев: выше начинается разговор с инспекцией")
+
+    # 2. Налоговая нагрузка: уплачено налогов к выручке без НДС.
+    paid = _num((await db.execute(text("""
+        SELECT coalesce(sum(amount), 0) FROM gl_entries
+         WHERE company_id = :cid AND period_year >= :y
+           AND (account_dt LIKE '68%' OR account_dt LIKE '69%')
+           AND (account_kt LIKE '51%' OR account_kt LIKE '50%')"""),
+        {**p, "y": int(year_now[:4] or 0) - 1})).scalar_one())
+    rev_2y = sum(m["revenue"] for m in months if m["month"][:4] >= str(int(year_now[:4] or 0) - 1))
+    if rev_2y > 0:
+        load = paid / rev_2y * 100
+        risk("Налоговая нагрузка", f"{load:.1f} %",
+             "warn" if load < 3 else "ok",
+             "Сравнивать со среднеотраслевой по своему ОКВЭД (приложение 3 к приказу): "
+             "ниже неё — первый критерий отбора на проверку")
+
+    # 3. Убыток два года подряд — второй критерий, самый механический.
+    by_year: dict[str, float] = {}
+    for m in months:
+        by_year[m["month"][:4]] = by_year.get(m["month"][:4], 0.0) + m["profit"]
+    losses = sorted(y for y, v in by_year.items() if v < 0)
+    streak = max((sum(1 for i in range(len(losses))
+                      if int(losses[i]) - int(losses[0]) == i) for _ in [0]), default=0) if losses else 0
+    risk("Убыточные годы", f"{len(losses)} из {len(by_year)}",
+         "warn" if streak >= 2 else "ok",
+         "Убыток два и более года подряд — прямой критерий отбора"
+         + (f": {', '.join(losses)}" if losses else ""))
+
+    # 4. Расходы растут быстрее доходов — критерий 4.
+    yrs = sorted(y for y in by_year if y < year_now)
+    if len(yrs) >= 2:
+        a, b = yrs[-2], yrs[-1]
+        inc = {y: sum(m["revenue"] for m in months if m["month"][:4] == y) for y in (a, b)}
+        exp = {y: sum(m["cost"] + m["expense"] for m in months if m["month"][:4] == y)
+               for y in (a, b)}
+        if inc[a] > 0 and exp[a] > 0:
+            d_inc = (inc[b] / inc[a] - 1) * 100
+            d_exp = (exp[b] / exp[a] - 1) * 100
+            risk("Темп роста расходов против доходов",
+                 f"расходы {d_exp:+.1f} % · доходы {d_inc:+.1f} %",
+                 "warn" if d_exp > d_inc + 1 else "ok",
+                 f"За {b} год к {a}: опережающий рост расходов — критерий 4")
+
+    # 5. Рентабельность продаж — критерий 11 (отклонение вниз на 10 % и более).
+    cost_all = sum(m["cost"] + m["expense"] for m in months)
+    prof_all = sum(m["profit"] for m in months)
+    if cost_all > 0:
+        rent = prof_all / cost_all * 100
+        risk("Рентабельность продаж", f"{rent:.1f} %",
+             "warn" if rent < 1 else "ok",
+             "Сравнивать со среднеотраслевой (приложение 4): отклонение вниз на 10 % "
+             "и более — критерий 11")
+
+    # 6. Зарплата на человека — критерий 5. Считаем из зарплатного контура.
+    fot, heads, mons = (await db.execute(text("""
+        SELECT coalesce(sum(amount) FILTER (WHERE kind = 'accrual'), 0),
+               count(DISTINCT employee_id),
+               count(DISTINCT period_month)
+          FROM payroll_entries WHERE company_id = :cid"""), p)).one()
+    if heads and mons and _num(fot) > 0:
+        avg = _num(fot) / heads / mons
+        risk("Зарплата на человека в месяц", f"{avg:,.0f} ₽".replace(",", " "),
+             "warn" if avg < 30000 else "ok",
+             "Сравнивать со среднеотраслевой по региону (Росстат) и с МРОТ: "
+             "ниже — критерий 5 и вызов на зарплатную комиссию")
+
     return {
         "months": months[-36:],
         "findings": findings,
+        "fnsRisk": fns,
         "summary": {
             "months": len(months),
             "findings": sum(f["count"] for f in findings),
