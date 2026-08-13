@@ -616,7 +616,7 @@ async def docs(
             "periodStatus": d.period_status,
             "lines": len(d.lines or []),
             # Только у счетов покупателям: null — вопрос неприменим, 0 — не оплачен.
-            "paid": paid.get(d.id) if d.doc_type == "invoice_out" else None,
+            "paid": (paid.get(d.id) or 0.0) if d.doc_type == "invoice_out" else None,
         } for d in rows],
     }
 
