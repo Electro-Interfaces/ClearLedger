@@ -10,7 +10,7 @@
  */
 import { saveAs } from 'file-saver'
 
-import { getAct, getDocs, getCounterpartyStats } from './booksService'
+import { getAct, getDocs, getCounterpartyStats, type DocRow } from './booksService'
 
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 const MONEY = '#,##0.00'
@@ -160,24 +160,43 @@ export async function exportCounterpartyDocs(
   await save(wb, `Документы · ${counterpartyName}`)
 }
 
-/** Реестр документов пространства за период — общий, с фильтрами вызывающего экрана. */
-export async function exportDocsRegistry(
-  companyId: string, period?: { from?: string; to?: string }, docType?: string,
-) {
-  const { rows } = await getDocs(companyId, docType, period)
+/**
+ * Реестр документов — ровно те строки, что отобраны на экране.
+ *
+ * Принимает строки, а не фильтры: отбор в «Документах» считается на клиенте (участок,
+ * вид, статус, оплата, период, поиск), и повторить его запросом к API нельзя — выгрузка
+ * разошлась бы с тем, что человек видит, а именно ради неё выгрузку и открывают.
+ */
+export async function exportDocsRegistry(rows: DocRow[], title = 'Реестр документов') {
   const wb = await workbook()
   const ws = wb.addWorksheet('Реестр')
   head(ws, [
     { header: 'Дата', key: 'date', width: 12 },
+    { header: 'Участок', key: 'section', width: 18 },
     { header: 'Вид документа', key: 'label', width: 32 },
     { header: 'Номер', key: 'number', width: 18 },
     { header: 'Контрагент', key: 'counterparty', width: 40 },
     { header: 'ИНН', key: 'inn', width: 14 },
+    { header: 'Назначение', key: 'operation', width: 44 },
     { header: 'Сумма', key: 'amount', width: 16 },
     { header: 'НДС', key: 'vat', width: 14 },
+    { header: 'Оплачено', key: 'paid', width: 14 },
+    { header: 'Статус', key: 'status', width: 16 },
+    { header: 'Период', key: 'periodStatus', width: 12 },
     { header: 'Строк', key: 'lines', width: 8 },
   ])
-  rows.forEach((r) => ws.addRow(r))
-  ;['amount', 'vat'].forEach((k) => { ws.getColumn(k).numFmt = MONEY })
-  await save(wb, 'Реестр документов')
+  const SECTION: Record<string, string> = {
+    sales: 'Продажи', purchases: 'Закупки', money: 'Деньги',
+    warehouse: 'Склад', closing: 'Закрытие периода',
+  }
+  rows.forEach((r) => ws.addRow({
+    ...r,
+    section: r.section ? (SECTION[r.section] ?? r.section) : '',
+    operation: r.operation ?? '',
+    // Пусто там, где вопрос неприменим: у платежа оплаты не спрашивают.
+    paid: r.paid === null || r.paid === undefined ? '' : r.paid,
+    periodStatus: r.periodStatus === 'closed' ? 'закрыт' : 'открыт',
+  }))
+  ;['amount', 'vat', 'paid'].forEach((k) => { ws.getColumn(k).numFmt = MONEY })
+  await save(wb, title)
 }

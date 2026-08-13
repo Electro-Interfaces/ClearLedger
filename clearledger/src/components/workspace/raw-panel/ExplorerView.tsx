@@ -120,7 +120,7 @@ function NavTree({
 
 /* ── таблица содержимого (Details view) ── */
 function DetailsList({
-  items, selectedPath, onSelect, onOpen, sortConfig, onSort,
+  items, selectedPath, onSelect, onOpen, sortConfig, onSort, loading, failed, onRetry,
 }: {
   items: FsNode[]
   selectedPath: string | null
@@ -128,6 +128,9 @@ function DetailsList({
   onOpen: (n: FsNode) => void
   sortConfig: { column: string; direction: 'asc' | 'desc' }
   onSort: (col: 'name' | 'date' | 'status') => void
+  loading: boolean
+  failed: boolean
+  onRetry: () => void
 }) {
   const Head = ({ col, label, className }: { col?: 'name' | 'date' | 'status'; label: string; className?: string }) => (
     <button
@@ -152,11 +155,28 @@ function DetailsList({
       </div>
       {/* строки */}
       <div className="flex-1 overflow-y-auto scroll-thin">
+        {/* Три РАЗНЫХ ответа. Раньше был один: «Эта папка пуста» — и во время загрузки
+            трёх тысяч документов, и когда запрос упал. Аудитор делал вывод «данных нет». */}
         {items.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-full gap-2 text-muted-foreground/60 py-16">
-            <Folder className="h-9 w-9 opacity-30" />
-            <p className="text-sm">Эта папка пуста</p>
-          </div>
+          loading ? (
+            <div className="flex flex-col items-center justify-center h-full gap-2 text-muted-foreground py-16">
+              <RotateCw className="h-6 w-6 animate-spin opacity-40" />
+              <p className="text-sm">Загружаем документы…</p>
+            </div>
+          ) : failed ? (
+            <div className="flex flex-col items-center justify-center h-full gap-3 py-16">
+              <p className="text-sm text-muted-foreground">Не удалось загрузить документы</p>
+              <button onClick={onRetry}
+                className="h-8 rounded-md border border-border px-3 text-[13px] hover:bg-accent">
+                Повторить
+              </button>
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center h-full gap-2 text-muted-foreground/60 py-16">
+              <Folder className="h-9 w-9 opacity-30" />
+              <p className="text-sm">Эта папка пуста</p>
+            </div>
+          )
         )}
         {items.map((n) => {
           const selected = n.path === selectedPath
@@ -251,7 +271,9 @@ export function ExplorerView() {
   const [viewingDocId, setViewingDocId] = useState<string | null>(null)
   // Список вместо дерева осмыслен там, где у файлов есть строка реестра: колонки
   // отбора берутся из неё. У смен и прогонов каналов её нет — там только дерево.
-  const listable = tree.flatFiles.some((n) => !!n.typeText)
+  // Считается ДО фильтров: иначе поиск без совпадений выбрасывал из списка в дерево
+  // вместе со всем настроенным отбором, и допечатать запрос было уже некуда.
+  const listable = tree.hasBookDocs
   // Во время поиска дерево бесполезно: найденные документы лежат в РАЗНЫХ ветках, а
   // папка показывает только своё содержимое — человек видел пустоту или одну подпапку
   // вместо результатов. Поиск переводит проводник в плоский результат по всему каталогу.
@@ -410,6 +432,9 @@ export function ExplorerView() {
           onOpen={openNode}
           sortConfig={state.sortConfig}
           onSort={state.toggleSort}
+          loading={tree.isLoading || tree.isFetching}
+          failed={tree.isError}
+          onRetry={tree.refetch}
         />
 
         {previewOpen && <PreviewPane node={selected} />}

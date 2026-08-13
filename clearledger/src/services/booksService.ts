@@ -98,6 +98,8 @@ export interface SliceData {
   docs: number
   clients: number
   months: { month: string; amount: number; docs: number }[]
+  /** Доля товаров и услуг внутри разреза — по строкам документов. */
+  byKind: { goods: number; service: number }
   /** id — ссылка на карточку контрагента; null у документов, что не свелись. */
   topClients: { id: string | null; name: string; inn: string | null; amount: number; docs: number }[]
   topItems: { code: string | null; name: string; amount: number; qty: number }[]
@@ -151,15 +153,24 @@ export async function getAllDocs(
     if (next.rows.length === 0) break   // страховка от бесконечного цикла
     rows.push(...next.rows)
   }
-  return { rows, sections: first.sections }
+  // Дедуп по id: страницы режутся внутри дня, и стоит серверу отдать строки в другом
+  // порядке — один документ приедет дважды, а другой не приедет. Сумма отбора при
+  // дубле завышается молча, поэтому страховка здесь, а не только в сортировке.
+  const seen = new Set<string>()
+  return {
+    rows: rows.filter((r) => (r.id && seen.has(r.id) ? false : (seen.add(r.id), true))),
+    sections: first.sections,
+  }
 }
 
-/** Разрез: `sales` — товары, `services` — услуги. Форма ответа одна. */
-export const getSlice = (
-  companyId: string, kind: 'sales' | 'services', opts: PeriodOpts & { top?: number } = {},
+/** Разрез реализации: всё целиком, только товары или только услуги. Ответ один. */
+export type RevKind = 'all' | 'goods' | 'service'
+
+export const getRevenue = (
+  companyId: string, kind: RevKind, opts: PeriodOpts & { top?: number } = {},
 ) =>
-  get<SliceData>(`/api/books/${kind}?company_id=${companyId}&top=${opts.top ?? 15}`
-    + periodQuery(opts))
+  get<SliceData>(`/api/books/revenue?company_id=${companyId}&kind=${kind}`
+    + `&top=${opts.top ?? 15}` + periodQuery(opts))
 
 export interface BalanceRow {
   code: string

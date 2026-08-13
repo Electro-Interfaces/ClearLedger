@@ -33,6 +33,11 @@ import type { FsNode, RawPanelFilters, SortConfig } from './raw-panel-types'
 
 function safeFmt(iso: string | undefined, withTime = true): string {
   if (!iso) return '—'
+  // Чистая дата `ГГГГ-ММ-ДД` — разбираем строкой: `new Date` даёт полночь UTC, и
+  // колонка показывала бы время 03:00, которого в данных нет, а западнее Гринвича
+  // ещё и вчерашнее число — расходясь с папкой месяца, построенной по той же строке.
+  const plain = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso)
+  if (plain) return `${plain[3]}.${plain[2]}.${plain[1]}`
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return '—'
   return format(d, withTime ? 'dd.MM.yyyy HH:mm' : 'dd.MM.yyyy')
@@ -355,6 +360,10 @@ export function useRawPanelTree(filters: RawPanelFilters, sortConfig: SortConfig
 
   const totalItemCount = useMemo(() => flatFiles.length, [flatFiles])
 
+  // Есть ли вообще документы учёта — считается ДО фильтров: иначе поиск, не давший
+  // совпадений, выбрасывал из режима списка обратно в дерево вместе со всем отбором.
+  const hasBookDocs = useMemo(() => docs.some(isBookDoc), [docs])
+
   const handleRefresh = useCallback(() => {
     if (apiMode) {
       queryClient.invalidateQueries({ queryKey: ['raw-docs-shifts'] })
@@ -372,10 +381,16 @@ export function useRawPanelTree(filters: RawPanelFilters, sortConfig: SortConfig
   return {
     fsTree,
     flatFiles,
+    hasBookDocs,
     isLoading: apiFuel ? (shiftsQ.isLoading || receiptsQ.isLoading)
       : apiBooks ? booksQ.isLoading : apiRuns ? runsQ.isLoading : false,
     isFetching: apiFuel ? (shiftsQ.isFetching || receiptsQ.isFetching)
       : apiBooks ? booksQ.isFetching : apiRuns ? runsQ.isFetching : false,
+    // Без этого экран показывает «Эта папка пуста» и на ошибке загрузки: человек
+    // делает вывод «данных нет», хотя данные есть, а упал запрос.
+    isError: apiFuel ? (shiftsQ.isError || receiptsQ.isError)
+      : apiBooks ? booksQ.isError : apiRuns ? runsQ.isError : false,
+    refetch: () => { void booksQ.refetch(); void shiftsQ.refetch(); void receiptsQ.refetch(); void runsQ.refetch() },
     totalItemCount,
     dataUpdatedAt,
     handleRefresh,

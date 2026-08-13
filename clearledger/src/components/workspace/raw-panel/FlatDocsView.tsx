@@ -9,7 +9,9 @@
  * нему дерево), и лишний круг к API только добавил бы задержку на каждое нажатие.
  */
 import { useMemo, useState } from 'react'
-import { Search, X } from 'lucide-react'
+import { Download, Search, X } from 'lucide-react'
+
+import { exportDocsRegistry } from '@/services/booksExport'
 
 import { cn } from '@/lib/utils'
 import type { DocRow } from '@/services/booksService'
@@ -21,9 +23,14 @@ function ru(date?: string | null) {
   return date ? date.slice(0, 10).split('-').reverse().join('.') : '—'
 }
 
+/**
+ * Имена участков приходят с сервера в `sections[].title` — здесь только запасной
+ * словарь на случай, если строка приехала без него. Копия быстро разъезжается:
+ * «Сверка» на сервере появилась, а в списке показывалась кодом `recon`.
+ */
 const SECTION_LABEL: Record<string, string> = {
   sales: 'Продажи', purchases: 'Закупки', money: 'Деньги',
-  warehouse: 'Склад', closing: 'Закрытие периода',
+  warehouse: 'Склад', closing: 'Закрытие периода', recon: 'Сверка',
 }
 
 type Paid = 'all' | 'paid' | 'unpaid'
@@ -63,6 +70,7 @@ export function FlatDocsView({ files, sortConfig, onSort, onOpen, query, onQuery
   onQuery: (v: string) => void
 }) {
   const [f, setF] = useState<Filters>(EMPTY)
+  const [saving, setSaving] = useState(false)
   const set = <K extends keyof Filters>(k: K, v: Filters[K]) => setF((p) => ({ ...p, [k]: v }))
 
   // Строка реестра лежит в узле — она и есть источник всех колонок и отборов.
@@ -96,10 +104,13 @@ export function FlatDocsView({ files, sortConfig, onSort, onOpen, query, onQuery
       if (f.from && (doc.date || '') < f.from) return false
       if (f.to && (doc.date || '') > f.to) return false
       // Оплата спрашивается только у счетов покупателям — у прочих поле не заполняется.
+      // Закрытым считается счёт, у которого не осталось долга: частичная оплата — это
+      // ещё не оплачен, иначе счёт на 100 000 с платежом 5 000 исчезает из должников.
       if (f.paid !== 'all') {
         if (doc.paid === null || doc.paid === undefined) return false
-        if (f.paid === 'paid' && doc.paid <= 0) return false
-        if (f.paid === 'unpaid' && doc.paid > 0) return false
+        const closed = doc.amount - doc.paid <= 0.004
+        if (f.paid === 'paid' && !closed) return false
+        if (f.paid === 'unpaid' && closed) return false
       }
       return true
     })
@@ -171,6 +182,15 @@ export function FlatDocsView({ files, sortConfig, onSort, onOpen, query, onQuery
             <X className="h-3.5 w-3.5" /> Сбросить
           </button>
         )}
+        {/* Выгружается ровно отобранное: собрать выборку на экране и переписывать её
+            руками в таблицу — то, ради чего выгрузку и открывают. */}
+        <button onClick={() => { setSaving(true); exportDocsRegistry(
+          sorted.map((r) => r.doc!), 'Документы · отбор')
+          .finally(() => setSaving(false)) }}
+          disabled={saving || sorted.length === 0}
+          className="ml-auto inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-[13px] hover:bg-accent disabled:opacity-40">
+          <Download className="h-3.5 w-3.5" /> {saving ? 'Готовим…' : 'В Excel'}
+        </button>
       </div>
 
       {/* Итог отбора — рядом с таблицей, а не в статус-баре: он и есть ответ на отбор */}
@@ -225,8 +245,17 @@ export function FlatDocsView({ files, sortConfig, onSort, onOpen, query, onQuery
                   doc!.status !== 'Проведён' && 'text-amber-600')}>{doc!.status}</td>
                 <td className="px-3 py-1.5 text-right tabular-nums">
                   {doc!.paid === null || doc!.paid === undefined ? '—'
-                    : doc!.paid > 0 ? money.format(doc!.paid)
-                    : <span className="text-muted-foreground">не оплачен</span>}
+                    : doc!.paid <= 0 ? <span className="text-muted-foreground">не оплачен</span>
+                    : doc!.amount - doc!.paid > 0.004 ? (
+                      // Частичная оплата — самостоятельный ответ: видно и сколько дали,
+                      // и сколько ещё должны.
+                      <span title={`осталось ${money.format(doc!.amount - doc!.paid)} ₽`}>
+                        {money.format(doc!.paid)}
+                        <span className="ml-1 text-[11px] text-amber-600">
+                          −{money.format(doc!.amount - doc!.paid)}
+                        </span>
+                      </span>
+                    ) : money.format(doc!.paid)}
                 </td>
                 <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
                   {doc!.lines || '—'}

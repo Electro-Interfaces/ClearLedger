@@ -562,8 +562,12 @@ async def docs(
         rows = picked[offset:offset + limit]
     else:
         total = (await db.execute(select(func.count()).select_from(q.subquery()))).scalar_one()
+        # Тай-брейкер по id обязателен: дата хранится без времени, в одном дне бывает
+        # два десятка документов, и без него страницы перекрываются — на пилоте два
+        # документа приезжали дважды, а два не приезжали вовсе.
         rows = (await db.execute(
-            q.order_by(AccountingDoc.date.desc()).limit(limit).offset(offset))).scalars().all()
+            q.order_by(AccountingDoc.date.desc(), AccountingDoc.id)
+            .limit(limit).offset(offset))).scalars().all()
 
     # Счётчики видов — по ТОМУ ЖЕ периоду, что и список: иначе кнопка «Реализация
     # товаров · 431» стоит рядом с реестром на десяток строк, и человек считает,
@@ -850,7 +854,7 @@ async def counterparty_card(
         Counterparty.company_id == cid,
         Counterparty.id == counterparty_id))).scalar_one_or_none()
     if k is None:
-        return {"error": "not_found"}
+        raise HTTPException(status_code=404, detail="Контрагент не найден")
 
     docs = [{
         "id": str(r[0]), "date": r[1], "type": r[2], "label": DOC_LABELS.get(r[2], r[2]),
@@ -990,7 +994,7 @@ async def reconciliation_act(
         Counterparty.company_id == cid,
         Counterparty.id == counterparty_id))).scalar_one_or_none()
     if k is None:
-        return {"error": "not_found"}
+        raise HTTPException(status_code=404, detail="Контрагент не найден")
 
     # Границы периода в месяцах: обороты приходят свёрнутыми по месяцу, и день
     # внутри месяца в них не различить (ограничение источника, а не решение).
@@ -1235,7 +1239,7 @@ async def document_card(
         AccountingDoc.company_id == cid,
         AccountingDoc.id == doc_id))).scalar_one_or_none()
     if d is None:
-        return {"error": "not_found"}
+        raise HTTPException(status_code=404, detail="Документ не найден")
 
     entries = [{
         "date": e.entry_date.isoformat(), "accountDt": e.account_dt,
