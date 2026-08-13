@@ -2121,6 +2121,13 @@ class AccountingDoc(Base):
 # несколько target-документов в 1С (агрегация смен в один ОРП, разделение
 # ТТН на ПТУ+ПКО и т.п.). См. docs/sverka-spec.md §0.
 
+    __table_args__ = (
+        # Ключ идемпотентности: этим набором срез ОБНОВЛЯЮТ, и без него второй заход
+        # из выгрузки удвоил бы реестр, выручку и обороты — молча.
+        Index("uq_accounting_doc_external", "company_id", "external_id", unique=True),
+        Index("idx_accounting_docs_date", "company_id", "date"),
+    )
+
 class ExportPacket(Base):
     __tablename__ = "export_packets"
 

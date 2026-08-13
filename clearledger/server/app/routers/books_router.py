@@ -126,6 +126,28 @@ async def _turnover(db: AsyncSession, cid, dt: str | None = None, kt: str | None
     return _num((await db.execute(q)).scalar_one())
 
 
+async def _closed_months(db: AsyncSession, cid) -> set[tuple[int, int]]:
+    """Закрытые месяцы компании.
+
+    `accounting_docs.period_status` — кэш НА МОМЕНТ ЗАГРУЗКИ: месяц закрывают позже, и
+    у 3143 документов пилота в колонке стояло «открыт», хотя период давно закрыт.
+    Признак неизменяемости обязан считаться от реестра периодов.
+    """
+    rows = (await db.execute(
+        select(Period.year, Period.month)
+        .where(Period.company_id == cid, Period.status == "closed"))).all()
+    return {(y, m) for y, m in rows}
+
+
+def _period_status(date: str | None, closed: set[tuple[int, int]]) -> str:
+    if not date or len(date) < 7:
+        return "open"
+    try:
+        return "closed" if (int(date[:4]), int(date[5:7])) in closed else "open"
+    except ValueError:
+        return "open"
+
+
 @router.get("/overview")
 async def overview(
     company_id: str,
@@ -596,6 +618,8 @@ async def docs(
         "kinds": [k for k in kinds if k["type"] in codes],
     } for code, title, codes in DOC_SECTIONS]
 
+    closed_months = await _closed_months(db, cid)
+
     # Оплата счёта — из регистра «Оплата счетов»: в самой первичке связи «счёт ↔
     # платёж» нет, реквизиты документов её не несут. Спрашиваем только по
     # показанным строкам, иначе тянули бы весь регистр ради страницы реестра.
@@ -629,7 +653,7 @@ async def docs(
             "operation": d.operation_type,
             "status": d.status_1c,
             # Закрытый период — половина ответа аудитору: документ уже не переписать.
-            "periodStatus": d.period_status,
+            "periodStatus": _period_status(d.date, closed_months),
             "lines": len(d.lines or []),
             # Только у счетов покупателям: null — вопрос неприменим, 0 — не оплачен.
             "paid": (paid.get(d.id) or 0.0) if d.doc_type == "invoice_out" else None,
@@ -942,6 +966,291 @@ async def revenue_check(
         # Месяцы, где сходимость нарушена больше рубля: округление копеек не повод
         # звать бухгалтера, расхождение в тысячу — повод.
         "broken": [m["month"] for m in months if abs(m["diff"]) > 1],
+    }
+
+
+# ── Склад и закупки ──────────────────────────────────────────────────────────
+# Волна 4. Складского учёта в выгрузке нет: остатки считаются как приход минус
+# расход по строкам документов. Способ грубый (партий и себестоимости списания в
+# данных нет), поэтому итог в деньгах сверяется с сальдо 41 — расхождение видно на
+# самом экране, а не всплывает у заказчика.
+
+STOCK_ACCOUNT = "41"
+
+
+@router.get("/stock")
+async def stock(
+    company_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Остатки по номенклатуре: приход − расход, запас в днях, неликвиды."""
+    cid = await assert_company_member(company_id, current_user, db)
+    p = {"cid": str(cid)}
+
+    rows = [{
+        "code": r[0], "name": r[1],
+        "boughtQty": _num(r[2]), "boughtAmount": _num(r[3]),
+        "soldQty": _num(r[4]), "soldAmount": _num(r[5]),
+        "firstBuy": r[6], "lastBuy": r[7], "lastSale": r[8],
+        "saleMonths": r[9],
+    } for r in (await db.execute(text("""
+        WITH l AS (
+          SELECT d.doc_type, d.date, jsonb_array_elements(d.lines) ln
+            FROM accounting_docs d
+           WHERE d.company_id = :cid AND d.doc_type IN ('sale', 'purchase')
+        ), x AS (
+          SELECT doc_type, date, btrim(ln->>'code') code, ln->>'name' name,
+                 (ln->>'qty')::numeric qty, (ln->>'amount')::numeric amount
+            FROM l WHERE coalesce(btrim(ln->>'code'), '') <> ''
+        )
+        SELECT code, max(name),
+               sum(qty)    FILTER (WHERE doc_type = 'purchase'),
+               sum(amount) FILTER (WHERE doc_type = 'purchase'),
+               sum(qty)    FILTER (WHERE doc_type = 'sale'),
+               sum(amount) FILTER (WHERE doc_type = 'sale'),
+               min(date)   FILTER (WHERE doc_type = 'purchase'),
+               max(date)   FILTER (WHERE doc_type = 'purchase'),
+               max(date)   FILTER (WHERE doc_type = 'sale'),
+               count(DISTINCT substr(date, 1, 7)) FILTER (WHERE doc_type = 'sale')
+          FROM x GROUP BY code
+    """), p)).all()]
+
+    today = date.today()
+    out = []
+    for r in rows:
+        rest_qty = r["boughtQty"] - r["soldQty"]
+        # Средняя цена закупки — по ней и оценивается остаток: себестоимости
+        # списания в данных нет, партий тоже.
+        avg_buy = r["boughtAmount"] / r["boughtQty"] if r["boughtQty"] else 0.0
+        # Расход в месяц — по месяцам, в которых были продажи, а не по всей истории:
+        # позиция, проданная раз в 2022-м, иначе получает «запас на 40 лет» и уезжает
+        # в неликвиды формально, хотя её просто больше не возят.
+        per_month = r["soldQty"] / r["saleMonths"] if r["saleMonths"] else 0.0
+        days = None
+        if per_month > 0 and rest_qty > 0:
+            days = round(rest_qty / per_month * 30)
+        last_move = max([d for d in (r["lastBuy"], r["lastSale"]) if d], default=None)
+        idle = (today - date.fromisoformat(last_move)).days if last_move else None
+        out.append({
+            **r,
+            "restQty": round(rest_qty, 3),
+            "restAmount": round(rest_qty * avg_buy, 2) if rest_qty > 0 else 0.0,
+            "avgBuy": round(avg_buy, 2),
+            "daysOfSupply": days,
+            "lastMove": last_move,
+            "idleDays": idle,
+        })
+    out.sort(key=lambda r: -r["restAmount"])
+
+    positive = [r for r in out if r["restQty"] > 0.0001]
+    negative = [r for r in out if r["restQty"] < -0.0001]
+    # Неликвид — лежит и не движется: остаток есть, продаж больше полугода нет.
+    idle = [r for r in positive if (r["idleDays"] or 0) > 180]
+
+    balance = (await db.execute(text("""
+        SELECT sum(debit - credit) FROM gl_balances
+         WHERE company_id = :cid AND account LIKE :acc
+           AND as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid)
+    """), {"cid": str(cid), "acc": f"{STOCK_ACCOUNT}%"})).scalar_one_or_none()
+
+    return {
+        "rows": out,
+        "restAmount": round(sum(r["restAmount"] for r in positive), 2),
+        "positions": len(positive),
+        # Отрицательный остаток — не «минус на складе», а признак данных: продали
+        # то, чего в выгрузке не покупали (старые остатки до периода выгрузки).
+        "negative": len(negative),
+        "negativeQty": round(sum(r["restQty"] for r in negative), 3),
+        "idle": len(idle),
+        "idleAmount": round(sum(r["restAmount"] for r in idle), 2),
+        "register": _num(balance),
+    }
+
+
+@router.get("/suppliers")
+async def suppliers(
+    company_id: str,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Поставщики: объём закупок, зависимость и разброс цен на одну позицию."""
+    cid = await assert_company_member(company_id, current_user, db)
+    p: dict[str, Any] = {"cid": str(cid)}
+    where = ""
+    if date_from:
+        where += " AND d.date >= :df"
+        p["df"] = date_from
+    if date_to:
+        where += " AND d.date <= :dt"
+        p["dt"] = date_to
+
+    rows = [{
+        "id": r[0], "name": r[1], "inn": r[2], "amount": _num(r[3]), "docs": r[4],
+        "positions": r[5], "first": r[6], "last": r[7],
+    } for r in (await db.execute(text(f"""
+        SELECT max(d.counterparty_id::text), coalesce(d.counterparty_name, '—'),
+               max(d.counterparty_inn), sum(d.amount), count(*),
+               count(DISTINCT btrim(ln.value->>'code')), min(d.date), max(d.date)
+          FROM accounting_docs d
+          LEFT JOIN LATERAL jsonb_array_elements(d.lines) ln ON true
+         WHERE d.company_id = :cid AND d.doc_type = 'purchase'{where}
+         GROUP BY d.counterparty_name
+         ORDER BY sum(d.amount) DESC
+    """), p)).all()]
+
+    # Разброс цены на одну позицию у разных поставщиков — то, ради чего экран и
+    # открывают: где мы платим больше, чем могли бы. Берём только позиции, которые
+    # покупали минимум у двоих.
+    spread = [{
+        "code": r[0], "name": r[1], "suppliers": r[2],
+        "minPrice": _num(r[3]), "maxPrice": _num(r[4]), "avgPrice": _num(r[5]),
+        "qty": _num(r[6]),
+        "minName": r[7], "maxName": r[8],
+    } for r in (await db.execute(text(f"""
+        WITH x AS (
+          SELECT coalesce(d.counterparty_name, '—') supplier,
+                 btrim(ln.value->>'code') code, max(ln.value->>'name') name,
+                 sum((ln.value->>'qty')::numeric) qty,
+                 sum((ln.value->>'amount')::numeric) amount
+            FROM accounting_docs d, jsonb_array_elements(d.lines) ln
+           WHERE d.company_id = :cid AND d.doc_type = 'purchase'
+             AND coalesce(btrim(ln.value->>'code'), '') <> ''{where}
+           GROUP BY 1, 2
+          HAVING sum((ln.value->>'qty')::numeric) > 0
+        ), pr AS (
+          -- Без агрегата: `x` уже свёрнут по паре «поставщик × позиция», и max(name)
+          -- здесь потребовал бы GROUP BY по всем остальным колонкам.
+          SELECT code, name, supplier, qty, amount, amount / qty price FROM x
+        )
+        SELECT code, max(name), count(*), min(price), max(price),
+               sum(amount) / sum(qty), sum(qty),
+               (array_agg(supplier ORDER BY price))[1],
+               (array_agg(supplier ORDER BY price DESC))[1]
+          FROM pr GROUP BY code HAVING count(*) > 1
+         ORDER BY (max(price) - min(price)) * sum(qty) DESC
+         LIMIT 100
+    """), p)).all()]
+
+    total = sum(r["amount"] for r in rows) or 1.0
+    return {
+        "rows": rows,
+        "spread": spread,
+        "total": round(total, 2),
+        # Зависимость от одного поставщика: доля крупнейшего и первых трёх.
+        "topShare": round(rows[0]["amount"] / total * 100, 1) if rows else 0.0,
+        "top3Share": round(sum(r["amount"] for r in rows[:3]) / total * 100, 1) if rows else 0.0,
+    }
+
+
+# ── Качество данных продукта ─────────────────────────────────────────────────
+# Волна 5. Отдельно от «Данных» пространства: там качество слоя целиком, здесь —
+# ровно то, что портит цифры «Реализации». Проверка = вопрос заказчику, поэтому
+# рядом с числом лежит объяснение, чем это грозит.
+
+@router.get("/revenue-quality")
+async def revenue_quality(
+    company_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Проверки, от которых зависят цифры продукта: что и почему может врать."""
+    cid = await assert_company_member(company_id, current_user, db)
+    p = {"cid": str(cid)}
+
+    async def one(sql: str) -> int:
+        return int((await db.execute(text(sql), p)).scalar_one() or 0)
+
+    checks = [
+        {
+            "key": "no_lines", "title": "Реализации без строк",
+            "why": "сумма документа есть, а что продано — неизвестно: позиция не попадёт "
+                   "ни в номенклатуру, ни в маржу",
+            "count": await one("""SELECT count(*) FROM accounting_docs
+                                   WHERE company_id = :cid AND doc_type = 'sale'
+                                     AND coalesce(jsonb_array_length(lines), 0) = 0"""),
+        },
+        {
+            "key": "no_counterparty", "title": "Реализации без контрагента",
+            "why": "документ не попадёт ни в одного покупателя, разрез по клиентам занижен",
+            "count": await one("""SELECT count(*) FROM accounting_docs
+                                   WHERE company_id = :cid AND doc_type = 'sale'
+                                     AND counterparty_id IS NULL"""),
+        },
+        {
+            "key": "no_contract", "title": "Реализации без договора",
+            "why": "не попадут в разрез по договорам; в 1С основание не заполнено",
+            "count": await one("""SELECT count(*) FROM accounting_docs
+                                   WHERE company_id = :cid AND doc_type = 'sale'
+                                     AND contract_id IS NULL"""),
+        },
+        {
+            "key": "no_code", "title": "Строки без кода номенклатуры",
+            "why": "позиция не сводится со справочником и с закупкой: ни ABC, ни маржи",
+            "count": await one("""SELECT count(*) FROM accounting_docs d,
+                                       jsonb_array_elements(d.lines) ln
+                                   WHERE d.company_id = :cid AND d.doc_type = 'sale'
+                                     AND coalesce(btrim(ln->>'code'), '') = ''"""),
+        },
+        {
+            "key": "no_price", "title": "Строки без цены",
+            "why": "нет цены — нет истории цены и наценки по позиции",
+            "count": await one("""SELECT count(*) FROM accounting_docs d,
+                                       jsonb_array_elements(d.lines) ln
+                                   WHERE d.company_id = :cid AND d.doc_type = 'sale'
+                                     AND ln->>'price' IS NULL"""),
+        },
+        {
+            "key": "negative", "title": "Реализации с отрицательной суммой",
+            "why": "скорее всего возврат, проведённый реализацией: выручка занижена или задвоена",
+            "count": await one("""SELECT count(*) FROM accounting_docs
+                                   WHERE company_id = :cid AND doc_type = 'sale'
+                                     AND amount < 0"""),
+        },
+        {
+            "key": "open_period", "title": "Реализации в незакрытом периоде",
+            "why": "период ещё может измениться в 1С — цифры этих месяцев не окончательные",
+            "count": await one("""SELECT count(*) FROM accounting_docs d
+                                   WHERE d.company_id = :cid AND d.doc_type = 'sale'
+                                     AND coalesce(d.period_status, 'open') <> 'closed'"""),
+        },
+        {
+            "key": "no_purchase", "title": "Проданные позиции без закупки",
+            "why": "себестоимость неизвестна, маржа по ним не считается",
+            "count": await one("""
+                WITH l AS (
+                  SELECT d.doc_type, jsonb_array_elements(d.lines) ln
+                    FROM accounting_docs d
+                   WHERE d.company_id = :cid AND d.doc_type IN ('sale', 'purchase')
+                ), x AS (
+                  SELECT doc_type, btrim(ln->>'code') code FROM l
+                   WHERE coalesce(btrim(ln->>'code'), '') <> ''
+                )
+                SELECT count(*) FROM (
+                  SELECT code FROM x GROUP BY code
+                   HAVING count(*) FILTER (WHERE doc_type = 'sale') > 0
+                      AND count(*) FILTER (WHERE doc_type = 'purchase') = 0) z"""),
+        },
+        {
+            "key": "invoice_unpaid_old", "title": "Счета старше года без оплаты",
+            "why": "либо деньги не пришли, либо оплата не сведена регистром — воронка врёт",
+            "count": await one("""
+                SELECT count(*) FROM accounting_docs d
+                 WHERE d.company_id = :cid AND d.doc_type = 'invoice_out'
+                   AND d.date < to_char(now() - interval '1 year', 'YYYY-MM-DD')
+                   AND NOT EXISTS (SELECT 1 FROM invoice_payments p
+                                    WHERE p.invoice_doc_id = d.id)"""),
+        },
+    ]
+
+    total_sales = await one("""SELECT count(*) FROM accounting_docs
+                                WHERE company_id = :cid AND doc_type = 'sale'""")
+    return {
+        "checks": checks,
+        "salesDocs": total_sales,
+        "problems": sum(1 for c in checks if c["count"] > 0),
     }
 
 
@@ -1698,7 +2007,7 @@ async def document_card(
         "id": str(d.id), "type": d.doc_type, "label": DOC_LABELS.get(d.doc_type, d.doc_type),
         "number": d.number, "date": d.date, "amount": _num(d.amount),
         "vat": _num(d.vat_amount), "status": d.status_1c,
-        "periodStatus": d.period_status, "operation": d.operation_type,
+        "periodStatus": _period_status(d.date, await _closed_months(db, cid)), "operation": d.operation_type,
         "counterpartyName": d.counterparty_name, "counterpartyInn": d.counterparty_inn,
         "counterparty": counterparty, "contract": contract,
         "externalNumber": d.external_number, "externalDate": d.external_date,
@@ -2475,7 +2784,7 @@ async def doc_card(
         "organization": d.organization_name,
         "amount": _num(d.amount), "vat": _num(d.vat_amount),
         "operation": d.operation_type, "status": d.status_1c,
-        "periodStatus": d.period_status,
+        "periodStatus": _period_status(d.date, await _closed_months(db, cid)),
         "externalId": d.external_id,
         "warehouse": d.warehouse_code,
         # Входящий документ поставщика и реквизиты, обязательные для вида: у платежа
