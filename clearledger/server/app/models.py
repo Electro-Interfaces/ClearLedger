@@ -1422,6 +1422,174 @@ class GlEntry(Base):
     )
 
 
+class GlTurnover(Base):
+    """Оборот Дт-Кт с аналитикой за месяц.
+
+    Проводка (`gl_entries`) знает только корреспонденцию и сумму: субконто в
+    основной таблице регистра бухгалтерии через COM недоступно — обращение к
+    `СубконтоДт1` роняет выборку. Аналитика достаётся ТОЛЬКО из виртуальной
+    таблицы оборотов и приходит уже свёрнутой по месяцу. Поэтому это отдельная
+    сущность, а не колонки в проводке: гранулярность другая.
+
+    На ней стоят взаиморасчёты («сколько должен покупатель и по какому договору»)
+    и любой разрез, где нужен контрагент со стороны счёта.
+    """
+
+    __tablename__ = "gl_turnovers"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
+    )
+    period_year: Mapped[int] = mapped_column(Integer, nullable=False)
+    period_month: Mapped[int] = mapped_column(Integer, nullable=False)
+    account_dt: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    account_kt: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Субконто приходят представлениями — имя контрагента, договора, статьи.
+    dt1: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    dt2: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    kt1: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    kt2: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    amount: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False, default=0)
+    qty_dt: Mapped[float | None] = mapped_column(Numeric(18, 3), nullable=True)
+    qty_kt: Mapped[float | None] = mapped_column(Numeric(18, 3), nullable=True)
+    source: Mapped[str] = mapped_column(String(30), nullable=False, default="1c_dt")
+    external_key: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("idx_gl_turnovers_period", "company_id", "period_year", "period_month"),
+        Index("idx_gl_turnovers_accounts", "company_id", "account_dt", "account_kt"),
+        Index("uq_gl_turnover_external", "company_id", "external_key", unique=True),
+    )
+
+
+class GlBalance(Base):
+    """Сальдо счёта с аналитикой на дату среза.
+
+    Снимок, а не расчёт: остаток считается по всей истории регистра, включая
+    периоды до начала выгрузки, поэтому вывести его из наших проводок нельзя.
+    Хранится с датой среза, чтобы старый снимок не выдавал себя за сегодняшний
+    остаток.
+    """
+
+    __tablename__ = "gl_balances"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
+    )
+    as_of: Mapped[date_type] = mapped_column(Date, nullable=False)
+    account: Mapped[str] = mapped_column(String(20), nullable=False)
+    account_name: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    sub1: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    sub2: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    sub3: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    debit: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False, default=0)
+    credit: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False, default=0)
+    qty_debit: Mapped[float | None] = mapped_column(Numeric(18, 3), nullable=True)
+    qty_credit: Mapped[float | None] = mapped_column(Numeric(18, 3), nullable=True)
+    source: Mapped[str] = mapped_column(String(30), nullable=False, default="1c_dt")
+    external_key: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("idx_gl_balances_account", "company_id", "as_of", "account"),
+        Index("uq_gl_balance_external", "company_id", "as_of", "external_key", unique=True),
+    )
+
+
+class VatEntry(Base):
+    """Запись НДС: счёт-фактура журнала или предъявленный поставщиком налог.
+
+    Одна таблица на три родственных набора (`kind`) — по той же причине, что и
+    `gl_references`: поля совпадают на три четверти, а вопрос у них один — «чем
+    подтверждён налог».
+    """
+
+    __tablename__ = "vat_entries"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
+    )
+    # issued — выставленный покупателю, received — полученный от поставщика,
+    # claimed — НДС, предъявленный поставщиком (движение вычета).
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    doc_date: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    number: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    counterparty_name: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    counterparty_inn: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    counterparty_kpp: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    counterparty_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("counterparties.id", ondelete="SET NULL"), nullable=True
+    )
+    amount: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False, default=0)
+    vat: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False, default=0)
+    rate: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Представление самого счёта-фактуры и документа-регистратора движения.
+    invoice_title: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    registrar: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    operation_code: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    source: Mapped[str] = mapped_column(String(30), nullable=False, default="1c_dt")
+    external_key: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("idx_vat_entries_kind", "company_id", "kind", "doc_date"),
+        Index("uq_vat_entry_external", "company_id", "external_key", unique=True),
+    )
+
+
+class InvoicePayment(Base):
+    """Оплата счёта покупателю: чем и когда закрыт выставленный счёт.
+
+    Главный вопрос аудита по счёту — «оплачен ли», и в самой первичке ответа нет:
+    счёт и платёж связывает регистр «Оплата счетов», а не реквизиты документов.
+    """
+
+    __tablename__ = "invoice_payments"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
+    )
+    # Представление счёта на оплату и платёжного документа — как в источнике.
+    invoice_title: Mapped[str] = mapped_column(String(500), nullable=False)
+    payment_title: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # Связь со счётом в нашем реестре документов, когда его удалось опознать.
+    invoice_doc_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("accounting_docs.id", ondelete="SET NULL"), nullable=True
+    )
+    paid_at: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    amount: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False, default=0)
+    vat: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False, default=0)
+    source: Mapped[str] = mapped_column(String(30), nullable=False, default="1c_dt")
+    external_key: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("idx_invoice_payments_doc", "company_id", "invoice_doc_id"),
+        Index("uq_invoice_payment_external", "company_id", "external_key", unique=True),
+    )
+
+
 # ---------------------------------------------------------------------------
 # AccountingDoc (Учётные документы 1С)
 # ---------------------------------------------------------------------------
@@ -1440,6 +1608,15 @@ class AccountingDoc(Base):
     date: Mapped[str] = mapped_column(String(20), nullable=False)
     counterparty_name: Mapped[str] = mapped_column(String(500), nullable=False, default="")
     counterparty_inn: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Ссылки в нормализованный слой. Текст выше остаётся исходником — как приехало из
+    # 1С, — а вопросы «все документы этого покупателя», «его долг», «по какому договору»
+    # отвечает связь: сводить строку на лету нельзя, имя приходит в разном написании,
+    # а у платежей ИНН нет вовсе. Заполняет `services/books_links.py`.
+    counterparty_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("counterparties.id", ondelete="SET NULL"),
+        nullable=True)
+    contract_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("contracts.id", ondelete="SET NULL"), nullable=True)
     organization_name: Mapped[str | None] = mapped_column(String(500), nullable=True)
     amount: Mapped[float] = mapped_column(Float, nullable=False, default=0)
     vat_amount: Mapped[float | None] = mapped_column(Float, nullable=True)
