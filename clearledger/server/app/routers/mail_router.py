@@ -421,3 +421,58 @@ async def by_counterparty(
         "id": str(t.id), "subject": t.subject, "messages": t.messages_count,
         "lastAt": t.last_message_at.isoformat() if t.last_message_at else None,
     } for t in rows]}
+
+
+# ── Волна 5: карантин и гигиена ──────────────────────────────────────────────
+
+@router.get("/quarantine")
+async def quarantine(
+    company_id: str,
+    limit: int = Query(100, ge=1, le=500),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Письма, отложенные до решения человека: неизвестный отправитель, отказ
+    проверки подлинности, правило «в карантин».
+
+    Карантин без разбора — та же корзина, поэтому здесь не список «мусора», а
+    очередь решений: принять, отклонить или запомнить адрес.
+    """
+    cid = await assert_company_member(company_id, current_user, db)
+    rows = (await db.execute(select(MailMessage).where(
+        MailMessage.company_id == cid,
+        MailMessage.status.in_(["quarantine", "rejected"]))
+        .order_by(MailMessage.sent_at.desc()).limit(limit))).scalars().all()
+    return {"rows": [{
+        "id": str(m.id), "status": m.status, "subject": m.subject,
+        "fromEmail": m.from_email, "fromName": m.from_name,
+        "sentAt": m.sent_at.isoformat() if m.sent_at else None,
+        "threadId": str(m.thread_id) if m.thread_id else None,
+        "hasAttachments": m.has_attachments,
+        # Почему отложено: вердикт сервера о подлинности, если он был.
+        "authVerdict": (m.headers or {}).get("_auth_verdict"),
+    } for m in rows]}
+
+
+class DecisionIn(BaseModel):
+    message_ids: list[str]
+    decision: str   # accept | reject
+
+
+@router.post("/quarantine/decide")
+async def decide(
+    company_id: str,
+    body: DecisionIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Решение по карантину: принять письма в работу или отклонить."""
+    cid = await assert_company_member(company_id, current_user, db)
+    rows = (await db.execute(select(MailMessage).where(
+        MailMessage.company_id == cid,
+        MailMessage.id.in_(body.message_ids)))).scalars().all()
+    status = "accepted" if body.decision == "accept" else "rejected"
+    for m in rows:
+        m.status = status
+    await db.commit()
+    return {"updated": len(rows), "status": status}

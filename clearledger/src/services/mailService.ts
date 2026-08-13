@@ -167,3 +167,26 @@ export const sendMail = (companyId: string, body: {
 export const getMailByCounterparty = (companyId: string, counterpartyId: string) =>
   get<{ rows: { id: string; subject: string | null; messages: number; lastAt: string | null }[] }>(
     `/api/mail/by-counterparty?company_id=${companyId}&counterparty_id=${counterpartyId}`)
+
+
+/** Письмо, отложенное до решения человека. */
+export interface MailQuarantineRow {
+  id: string
+  status: 'quarantine' | 'rejected'
+  subject: string | null
+  fromEmail: string | null
+  fromName: string | null
+  sentAt: string | null
+  threadId: string | null
+  hasAttachments: boolean
+  /** Вердикт почтового сервера о подлинности, если он был. */
+  authVerdict: string | null
+}
+
+export const getMailQuarantine = (companyId: string) =>
+  get<{ rows: MailQuarantineRow[] }>(`/api/mail/quarantine?company_id=${companyId}`)
+
+export const decideMailQuarantine = (
+  companyId: string, messageIds: string[], decision: 'accept' | 'reject',
+) => post<{ updated: number }>(`/api/mail/quarantine/decide?company_id=${companyId}`,
+  { message_ids: messageIds, decision })

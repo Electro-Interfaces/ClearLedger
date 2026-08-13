@@ -110,6 +110,27 @@ def _attachments(msg: Message) -> list[dict[str, Any]]:
     return out
 
 
+def auth_verdict(msg: Message) -> tuple[str, str | None]:
+    """Что почтовый сервер сказал о подлинности письма.
+
+    Проверять SPF/DKIM самим нечем и незачем: их уже проверил принимающий сервер и
+    записал результат в `Authentication-Results`. Наше дело — прочитать вердикт и
+    не пускать в ленту то, что не прошло: подделать адрес отправителя проще, чем
+    кажется, а письмо «от контрагента» с реквизитами для оплаты — классика.
+
+    Возвращает `pass` | `fail` | `unknown` и текст вердикта.
+    """
+    raw = " ".join(v for k, v in msg.items() if k.lower() == "authentication-results")
+    if not raw:
+        return "unknown", None
+    low = raw.lower()
+    if "dkim=fail" in low or "spf=fail" in low or "dmarc=fail" in low:
+        return "fail", raw[:300]
+    if "dkim=pass" in low or "spf=pass" in low or "dmarc=pass" in low:
+        return "pass", raw[:300]
+    return "unknown", raw[:300]
+
+
 def _refs(msg: Message) -> list[str]:
     """Цепочка предков письма: `References` + `In-Reply-To`."""
     raw = " ".join(filter(None, [msg.get("References", ""), msg.get("In-Reply-To", "")]))
@@ -188,6 +209,11 @@ async def poll_account(db: AsyncSession, account: MailAccount) -> dict[str, Any]
     return {"fetched": len(letters), "saved": saved}
 
 
+# Сколько писем от одного адреса принимаем за сутки: сорвавшийся автоответчик
+# или рассылка иначе заполняют ленту за час.
+DAILY_LIMIT_PER_SENDER = 200
+
+
 async def _save_message(db: AsyncSession, account: MailAccount, uid: int,
                         raw: bytes) -> bool:
     msg = email.message_from_bytes(raw)
@@ -203,6 +229,19 @@ async def _save_message(db: AsyncSession, account: MailAccount, uid: int,
             return False
 
     from_name, from_email = parseaddr(_decode(msg.get("From")))
+
+    # Потолок на отправителя: лента — рабочий инструмент, и залить её рассылкой
+    # не должно быть возможно. Письма сверх лимита не теряются — они просто не
+    # принимаются, и это видно в журнале ящика.
+    if from_email:
+        today = datetime.now(timezone.utc).date()
+        seen = (await db.execute(select(func.count()).select_from(MailMessage).where(
+            MailMessage.company_id == account.company_id,
+            func.lower(MailMessage.from_email) == from_email.lower(),
+            func.date(MailMessage.created_at) == today))).scalar_one()
+        if seen >= DAILY_LIMIT_PER_SENDER:
+            logger.warning("лимит писем от %s за сутки исчерпан (%s)", from_email, seen)
+            return False
     to_all = [addr for _, addr in getaddresses([_decode(msg.get("To") or ""),
                                                 _decode(msg.get("Cc") or "")]) if addr]
     subject = _decode(msg.get("Subject"))[:500]
@@ -234,12 +273,24 @@ async def _save_message(db: AsyncSession, account: MailAccount, uid: int,
         status="new",
     )
 
+    # Подлинность: письмо, не прошедшее проверку сервера, в ленту не идёт — оно
+    # ложится в карантин, даже если правило говорит «принять». Подделать адрес
+    # отправителя несложно, а письмо «от контрагента» с новыми реквизитами для
+    # оплаты — самая частая схема обмана в деловой переписке.
+    verdict, auth_text = auth_verdict(msg)
+    if verdict == "fail":
+        row.status = "quarantine"
+        row.headers = {**(row.headers or {}), "_auth_verdict": auth_text or "fail"}
+
     # Правила: первое сработавшее решает судьбу письма и может сразу проставить
     # контрагента и договор — это и есть ответ «что, кому и куда отнести».
     rule = await apply_rules(db, account, row, bool(atts))
     if rule is not None:
-        row.status = {"reject": "rejected", "quarantine": "quarantine"}.get(
+        decided = {"reject": "rejected", "quarantine": "quarantine"}.get(
             rule.action, "accepted")
+        # Карантин по подлинности правило не отменяет: оно знает про отправителя
+        # то, что написано в письме, а вердикт — то, что проверил сервер.
+        row.status = "quarantine" if verdict == "fail" else decided
         if rule.set_counterparty_id and not row.counterparty_id:
             row.counterparty_id = rule.set_counterparty_id
             cp_id = rule.set_counterparty_id

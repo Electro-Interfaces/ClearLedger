@@ -27,7 +27,8 @@ import { cn } from '@/lib/utils'
 import {
   createMailAccount, createMailRule, deleteMailAccount, deleteMailRule, getMailAccounts,
   getMailAddresses, getMailRules, getMailThread, getMailThreads, learnMailAddress,
-  mailAttachmentUrl, mailToIntake, pollMail, sendMail, updateMailAccount, updateMailRule,
+  decideMailQuarantine, getMailQuarantine, mailAttachmentUrl, mailToIntake, pollMail,
+  sendMail, updateMailAccount, updateMailRule,
   type MailAccount, type MailAccountInput, type MailRule, type MailRuleInput,
 } from '@/services/mailService'
 import { useCounterparties } from '@/hooks/useReferences'
@@ -136,6 +137,20 @@ export function MailConnector() {
       toast.success('Письмо отправлено')
     },
     onError: () => toast.error('Письмо не ушло'),
+  })
+
+  const quarantine = useQuery({
+    queryKey: ['mail', 'quarantine', companyId],
+    queryFn: () => getMailQuarantine(companyId),
+    enabled: !!companyId,
+  })
+  const decide = useMutation({
+    mutationFn: (v: { ids: string[]; decision: 'accept' | 'reject' }) =>
+      decideMailQuarantine(companyId, v.ids, v.decision),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['mail'] })
+      toast.success('Решение принято')
+    },
   })
 
   const toIntake = useMutation({
@@ -371,6 +386,61 @@ export function MailConnector() {
           )}
         </CardContent>
       </Card>
+
+      {(quarantine.data?.rows ?? []).length > 0 && (
+        <Card>
+          <CardContent className="p-0">
+            <div className="px-3 py-2 border-b">
+              <div className="text-sm font-medium">
+                Карантин — {quarantine.data!.rows.length}
+              </div>
+              <div className="text-[11px] text-muted-foreground">
+                Отложено до решения: неизвестный отправитель, отказ проверки подлинности
+                или правило. Карантин без разбора — та же корзина, поэтому это очередь
+                решений, а не список мусора.
+              </div>
+            </div>
+            <table className="w-full text-sm">
+              <tbody>
+                {quarantine.data!.rows.map((m) => (
+                  <tr key={m.id} className="border-b last:border-0 hover:bg-muted/40">
+                    <td className="px-3 py-1.5 w-[92px]">
+                      <span className={cn('rounded border px-1.5 py-0.5 text-[11px]',
+                        m.status === 'quarantine'
+                          ? 'border-amber-500/40 text-amber-700 dark:text-amber-400'
+                          : 'border-border text-muted-foreground')}>
+                        {m.status === 'quarantine' ? 'карантин' : 'отклонено'}
+                      </span>
+                    </td>
+                    <td className="px-3 py-1.5 max-w-[280px] truncate" title={m.subject ?? ''}>
+                      {m.subject || '(без темы)'}
+                    </td>
+                    <td className="px-3 py-1.5 text-muted-foreground">{m.fromEmail}</td>
+                    <td className="px-3 py-1.5 text-[11px] text-muted-foreground max-w-[220px] truncate"
+                      title={m.authVerdict ?? ''}>
+                      {m.authVerdict ? 'не прошло проверку подлинности' : ''}
+                    </td>
+                    <td className="px-3 py-1.5 text-right whitespace-nowrap">
+                      {m.status === 'quarantine' && (
+                        <>
+                          <Button size="sm" variant="ghost" className="h-6 px-2 text-[11px]"
+                            onClick={() => decide.mutate({ ids: [m.id], decision: 'accept' })}>
+                            принять
+                          </Button>
+                          <Button size="sm" variant="ghost" className="h-6 px-2 text-[11px]"
+                            onClick={() => decide.mutate({ ids: [m.id], decision: 'reject' })}>
+                            отклонить
+                          </Button>
+                        </>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid gap-4 lg:grid-cols-[minmax(280px,380px)_1fr]">
         <Card>
