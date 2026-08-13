@@ -243,9 +243,16 @@ async def match_and_verify(db: AsyncSession, cid, items: list[IntakeItem]) -> No
 
         # 1. Контрагент: ИНН → нормализованное имя. Новый контрагент — не ошибка,
         # но его надо завести в 1С, иначе документ повиснет без карточки.
-        cp = by_inn.get((it.counterparty_inn or "").strip()) if it.counterparty_inn else None
-        if cp is None and it.counterparty_name:
-            cp = by_name.get(_normname(it.counterparty_name))
+        #
+        # Ссылка могла быть проставлена ДО проверок — письмом, из вложения которого
+        # приехал файл: в таблице контрагента нет, а отправитель известен. Такой
+        # кандидат уже опознан, и предупреждать «нет в справочнике» о нём нельзя.
+        if it.counterparty_id is not None:
+            cp = next((c for c in cps if c.id == it.counterparty_id), None)
+        else:
+            cp = by_inn.get((it.counterparty_inn or "").strip()) if it.counterparty_inn else None
+            if cp is None and it.counterparty_name:
+                cp = by_name.get(_normname(it.counterparty_name))
         if cp is not None:
             it.counterparty_id = cp.id
             if it.counterparty_inn and cp.inn and it.counterparty_inn != cp.inn:

@@ -185,6 +185,9 @@ async def thread(
             atts.setdefault(a.message_id, []).append({
                 "id": str(a.id), "name": a.file_name, "size": a.size,
                 "contentType": a.content_type,
+                # Разобранное вложение помечено пакетом приёмки: видно, что
+                # документы из письма уже поехали в разбор.
+                "intakeBatchId": str(a.intake_batch_id) if a.intake_batch_id else None,
             })
     return {"rows": [{
         "id": str(m.id), "direction": m.direction, "subject": m.subject,
@@ -345,3 +348,26 @@ async def addresses(
         "id": str(e.id), "address": e.address, "source": e.source,
         "counterpartyId": str(e.counterparty_id), "counterpartyName": name,
     } for e, name in rows]}
+
+
+# ── Волна 3: вложения письма в приёмку первички ──────────────────────────────
+
+@router.post("/to-intake")
+async def to_intake(
+    company_id: str,
+    message_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Разобрать вложения письма как документы. Приём в учёт — отдельным шагом."""
+    cid = await assert_company_member(company_id, current_user, db)
+    msg = (await db.execute(select(MailMessage).where(
+        MailMessage.company_id == cid, MailMessage.id == message_id))).scalar_one_or_none()
+    if msg is None:
+        return {"error": "not_found"}
+    atts = (await db.execute(select(MailAttachment).where(
+        MailAttachment.company_id == cid,
+        MailAttachment.message_id == msg.id))).scalars().all()
+    res = await mail_intake.attachments_to_intake(db, cid, msg, atts)
+    await db.commit()
+    return res

@@ -14,7 +14,7 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
-  AlertTriangle, CheckCircle2, Inbox, Mail, Paperclip, Plus, RefreshCw, Trash2,
+  AlertTriangle, CheckCircle2, FileCheck, Inbox, Mail, Paperclip, Plus, RefreshCw, Trash2,
 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -26,7 +26,7 @@ import { cn } from '@/lib/utils'
 import {
   createMailAccount, createMailRule, deleteMailAccount, deleteMailRule, getMailAccounts,
   getMailAddresses, getMailRules, getMailThread, getMailThreads, learnMailAddress,
-  mailAttachmentUrl, pollMail, updateMailAccount, updateMailRule,
+  mailAttachmentUrl, mailToIntake, pollMail, updateMailAccount, updateMailRule,
   type MailAccount, type MailAccountInput, type MailRule, type MailRuleInput,
 } from '@/services/mailService'
 import { useCounterparties } from '@/hooks/useReferences'
@@ -118,6 +118,18 @@ export function MailConnector() {
     mutationFn: (id: string) => deleteMailRule(companyId, id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['mail'] }),
   })
+  const toIntake = useMutation({
+    mutationFn: (messageId: string) => mailToIntake(companyId, messageId),
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ['mail'] })
+      qc.invalidateQueries({ queryKey: ['intake-docs'] })
+      toast.success(r.items
+        ? `Разобрано документов: ${r.items} — смотрите вкладку «Первичные документы»`
+        : 'В письме нет таблиц для разбора')
+    },
+    onError: () => toast.error('Не удалось разобрать вложения'),
+  })
+
   const learn = useMutation({
     mutationFn: (v: { address: string; cpId: string }) =>
       learnMailAddress(companyId, v.address, v.cpId),
@@ -419,7 +431,7 @@ export function MailConnector() {
                     </pre>
                   )}
                   {m.attachments.length > 0 && (
-                    <div className="flex flex-wrap gap-2 pt-1">
+                    <div className="flex flex-wrap items-center gap-2 pt-1">
                       {m.attachments.map((a) => (
                         <a key={a.id} href={mailAttachmentUrl(companyId, a.id)}
                           className="inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[11px] hover:border-primary/50">
@@ -430,6 +442,15 @@ export function MailConnector() {
                           </span>
                         </a>
                       ))}
+                      {/* Вложение-таблица — это документы: разбор идёт тем же
+                          кодом, что файл с диска, и попадает на тот же экран. */}
+                      {m.attachments.some((a) => /\.(xlsx|xlsm|csv)$/i.test(a.name)) && (
+                        <Button size="sm" variant="outline" className="h-6 px-2 text-[11px]"
+                          disabled={toIntake.isPending}
+                          onClick={() => toIntake.mutate(m.id)}>
+                          <FileCheck className="size-3 mr-1" /> Разобрать как документы
+                        </Button>
+                      )}
                     </div>
                   )}
                 </div>

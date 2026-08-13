@@ -50,7 +50,11 @@ export interface MailMessageRow {
   html: string | null
   status: string
   counterpartyId: string | null
-  attachments: { id: string; name: string; size: number; contentType: string | null }[]
+  attachments: {
+    id: string; name: string; size: number; contentType: string | null
+    /** Пакет приёмки, в который вложение уже разобрано. */
+    intakeBatchId?: string | null
+  }[]
 }
 
 export const getMailAccounts = (companyId: string) =>
@@ -144,3 +148,9 @@ export const learnMailAddress = (companyId: string, address: string, counterpart
 export const getMailAddresses = (companyId: string) =>
   get<{ rows: { id: string; address: string; source: string; counterpartyId: string; counterpartyName: string }[] }>(
     `/api/mail/addresses?company_id=${companyId}`)
+
+
+/** Разобрать вложения письма как документы приёмки (в учёт — отдельным шагом). */
+export const mailToIntake = (companyId: string, messageId: string) =>
+  post<{ batches: number; items: number }>(
+    `/api/mail/to-intake?company_id=${companyId}&message_id=${messageId}`, {})

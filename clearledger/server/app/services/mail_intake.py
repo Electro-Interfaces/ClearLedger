@@ -36,8 +36,8 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
-    Counterparty, CounterpartyEmail, MailAccount, MailAttachment, MailMessage,
-    MailRule, MailThread,
+    Counterparty, CounterpartyEmail, IntakeBatch, MailAccount, MailAttachment,
+    MailMessage, MailRule, MailThread,
 )
 
 logger = logging.getLogger("clearledger.mail")
@@ -248,12 +248,25 @@ async def _save_message(db: AsyncSession, account: MailAccount, uid: int,
     db.add(row)
     await db.flush()
 
+    saved_atts = []
     for a in atts:
-        db.add(MailAttachment(
+        att = MailAttachment(
             company_id=account.company_id, message_id=row.id,
             file_name=a["name"][:500], content_type=a["content_type"],
             size=a["size"], sha256=a["sha256"], content=a["content"],
-        ))
+        )
+        db.add(att)
+        saved_atts.append(att)
+
+    # Правило сказало «в приёмку» — вложения сразу становятся кандидатами. В учёт
+    # они не попадают: приём документа остаётся отдельным решением человека
+    # (docs/INTAKE.md), а письмо остаётся его основанием.
+    if rule is not None and rule.action == "intake" and saved_atts:
+        await db.flush()
+        try:
+            await attachments_to_intake(db, account.company_id, row, saved_atts)
+        except Exception as e:  # noqa: BLE001 — разбор не должен рвать приём почты
+            logger.exception("вложения письма %s не разобраны: %s", row.id, e)
 
     thread.messages_count = (thread.messages_count or 0) + 1
     thread.last_message_at = sent_at or datetime.now(timezone.utc)
@@ -324,6 +337,55 @@ async def _guess_counterparty(db: AsyncSession, cid, from_email: str | None):
         Counterparty.company_id == cid,
         func.lower(Counterparty.email).like(f"%@{domain}")))).scalars().all()
     return same[0] if len(same) == 1 else None
+
+
+async def attachments_to_intake(db: AsyncSession, cid, message: MailMessage,
+                                attachments: list[MailAttachment]) -> dict[str, Any]:
+    """Разобрать вложения письма как пакет приёмки первички.
+
+    Письмо — законный источник документов наравне с файлом с диска, поэтому разбор
+    идёт тем же кодом (`services/intake_docs`) и попадает на тот же экран. Разница
+    одна и она в пользу почты: контрагент уже известен из письма, и кандидатам,
+    в чьих таблицах его нет, он проставляется сразу.
+    """
+    from app.services import intake_docs
+
+    table_atts = [a for a in attachments
+                  if a.file_name.lower().endswith((".xlsx", ".xlsm", ".csv"))]
+    if not table_atts:
+        return {"batches": 0, "items": 0}
+
+    made = items_total = 0
+    for att in table_atts:
+        rows, columns = intake_docs.parse_table(att.content or b"", att.file_name)
+        if not rows:
+            continue
+        batch = IntakeBatch(
+            company_id=cid, source="email", file_name=att.file_name,
+            uploaded_by=message.from_email, status="parsed",
+            stats={"rows": len(rows), "columns": columns},
+            note=f"Письмо «{message.subject or ''}» от {message.from_email or ''}",
+        )
+        db.add(batch)
+        await db.flush()
+
+        items = await intake_docs.build_items(db, cid, batch.id, rows, None)
+        # Контрагент письма — подсказка для строк, где его не написали: в таблице
+        # часто нет ни имени, ни ИНН, зато письмо пришло от конкретного юрлица.
+        if message.counterparty_id:
+            for it in items:
+                if not it.counterparty_name and not it.counterparty_inn:
+                    it.counterparty_id = message.counterparty_id
+        await intake_docs.match_and_verify(db, cid, items)
+        for it in items:
+            db.add(it)
+        batch.stats = {**(batch.stats or {}), "items": len(items)}
+        att.intake_batch_id = batch.id
+        made += 1
+        items_total += len(items)
+
+    await db.flush()
+    return {"batches": made, "items": items_total}
 
 
 async def apply_rules(db: AsyncSession, account: MailAccount, row: MailMessage,
