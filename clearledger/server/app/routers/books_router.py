@@ -1070,6 +1070,10 @@ async def stock(
             "daysOfSupply": days,
             "lastMove": last_move,
             "idleDays": idle,
+            # Продавалась ли позиция хоть раз — этим товар отличается от того, что
+            # компания купила себе: ноутбук, канцелярия, материалы для работ. Второе
+            # списано в затраты, а не лежит на складе, и в товарный остаток не идёт.
+            "everSold": r["soldQty"] > 0,
         })
     out.sort(key=lambda r: -r["restAmount"])
     # Приход по строкам против прихода на 41: разница — это то, что закуплено, но на
@@ -1078,8 +1082,13 @@ async def stock(
 
     positive = [r for r in out if r["restQty"] > 0.0001]
     negative = [r for r in out if r["restQty"] < -0.0001]
-    # Неликвид — лежит и не движется: остаток есть, продаж больше полугода нет.
-    idle = [r for r in positive if (r["idleDays"] or 0) > 180]
+    # Товарный остаток — только то, что компания ПРОДАЁТ. Разница с общим счётом это
+    # закупки для себя (техника, канцелярия, материалы под работы): они списаны в
+    # затраты, а не лежат товаром, и попадать в оценку склада не должны.
+    goods = [r for r in positive if r["everSold"]]
+    # Неликвид — товар, который продавали, но давно не двигали. Позиция, купленная
+    # для себя, «неликвидом» не бывает: её и не собирались продавать.
+    idle = [r for r in goods if (r["idleDays"] or 0) > 180]
 
     balance = (await db.execute(text("""
         SELECT sum(debit - credit) FROM gl_balances
@@ -1094,8 +1103,12 @@ async def stock(
 
     return {
         "rows": out,
+        # «Закуплено и не продано» — всё, включая закупки для себя.
         "restAmount": round(sum(r["restAmount"] for r in positive), 2),
         "positions": len(positive),
+        # Товарная часть того же: только позиции, которые компания продаёт.
+        "goodsAmount": round(sum(r["restAmount"] for r in goods), 2),
+        "goodsPositions": len(goods),
         # Сколько всего закуплено по строкам и сколько из этого попало на 41.
         "boughtTotal": round(sum(r["boughtAmount"] for r in out), 2),
         "registerIntake": _num(intake),
@@ -1605,14 +1618,30 @@ async def counterparties(
                  max(date)                                         AS last_doc
             FROM doc GROUP BY 1
         ), debt AS (
-          -- Сальдо последнего среза: дебет 62 — нам должны, кредит 60 — должны мы.
+          -- Одна формула на все экраны: долг БРУТТО, аванс отдельной цифрой.
+          -- Свёртка «дебет минус кредит» прятала покупателя, у которого есть и долг,
+          -- и предоплата: в списке он выглядел ничего не должным, а в своей карточке
+          -- должен. Аванс — не отрицательный долг, это другое обязательство.
+          -- Счета 76, 58, 66/67 и 71 раньше не смотрели вовсе: у ТСМ ООО «мы должны»
+          -- показывало 295 800 при фактических 673 625.
           SELECT b.counterparty_id,
-                 sum(CASE WHEN b.account LIKE '62%' THEN b.debit - b.credit ELSE 0 END) AS ar,
-                 sum(CASE WHEN b.account LIKE '60%' THEN b.credit - b.debit ELSE 0 END) AS ap
+                 sum(CASE WHEN b.account LIKE '62.01%' OR b.account LIKE '62.21%'
+                          THEN b.debit ELSE 0 END) AS ar,
+                 sum(CASE WHEN b.account LIKE '60.01%' OR b.account LIKE '60.21%'
+                          THEN b.credit ELSE 0 END) AS ap,
+                 sum(CASE WHEN b.account LIKE '62.02%' OR b.account LIKE '62.22%'
+                          THEN b.credit ELSE 0 END) AS adv_in,
+                 sum(CASE WHEN b.account LIKE '60.02%' OR b.account LIKE '60.22%'
+                          THEN b.debit ELSE 0 END) AS adv_out,
+                 sum(CASE WHEN b.account LIKE '76%' THEN b.debit ELSE 0 END) AS other_dt,
+                 sum(CASE WHEN b.account LIKE '76%' THEN b.credit ELSE 0 END) AS other_kt,
+                 sum(CASE WHEN b.account LIKE '58%' THEN b.debit ELSE 0 END) AS loan_out,
+                 sum(CASE WHEN b.account LIKE '66%' OR b.account LIKE '67%'
+                          THEN b.credit ELSE 0 END) AS loan_in,
+                 sum(CASE WHEN b.account LIKE '71%' THEN b.credit - b.debit ELSE 0 END) AS accountable
             FROM gl_balances b
            WHERE b.company_id = :cid AND b.counterparty_id IS NOT NULL
              AND b.as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid)
-             AND (b.account LIKE '62%' OR b.account LIKE '60%')
            GROUP BY 1
         )
         SELECT k.id, k.name, k.inn, k.kind,
@@ -1620,6 +1649,9 @@ async def counterparties(
                coalesce(a.paid_in, 0), coalesce(a.paid_out, 0),
                coalesce(a.docs, 0), a.last_doc,
                coalesce(b.ar, 0), coalesce(b.ap, 0),
+               coalesce(b.adv_in, 0), coalesce(b.adv_out, 0),
+               coalesce(b.other_dt, 0), coalesce(b.other_kt, 0),
+               coalesce(b.loan_out, 0), coalesce(b.loan_in, 0), coalesce(b.accountable, 0),
                (SELECT count(*) FROM contracts c
                  WHERE c.company_id = :cid AND c.counterparty_id::text = k.id::text)
           FROM counterparties k
@@ -1638,7 +1670,12 @@ async def counterparties(
         "paidIn": _num(r[6]), "paidOut": _num(r[7]),
         "docs": r[8], "lastDoc": r[9],
         "receivable": _num(r[10]), "payable": _num(r[11]),
-        "contracts": r[12],
+        "advanceIn": _num(r[12]), "advanceOut": _num(r[13]),
+        # Прочие расчёты и займы: складывать их с долгом нельзя — это разные
+        # обязательства, но и молчать о них нельзя, они меняют картину вдвое.
+        "otherDebit": _num(r[14]), "otherCredit": _num(r[15]),
+        "loanOut": _num(r[16]), "loanIn": _num(r[17]), "accountable": _num(r[18]),
+        "contracts": r[19],
     } for r in rows]}
 
 
