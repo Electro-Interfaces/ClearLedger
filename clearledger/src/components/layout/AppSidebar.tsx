@@ -394,7 +394,7 @@ function SidebarNavBody({ collapsed = false, onNavigate }: {
     const oneCPages = allItems.filter((i) => isOneCPath(i.to))
     // Функции Ядра — одни на все рабочие места (`SPACE_PAGES`), поэтому отдельным блоком
     // ниже разделов и страниц продукта: сверху то, чем человек занят, ниже — пространство.
-    const spaceItems = spaceNav(product, allowedPage)
+    const spaceItems = spaceNav(product, allowedPage, company.profileId)
     const links = SPACE_LINKS.filter(
       (l) => canApp(l.app) && productModuleAllowed(l.app, l.module, canModule, company.profileId))
     return (

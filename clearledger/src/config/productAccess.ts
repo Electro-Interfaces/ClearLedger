@@ -22,6 +22,7 @@ import {
   ENERGY_MGMT, EQUIPMENT_MENU, OPS_MONITOR_MENU, SITES_MENU,
   SALES_NETWORK_MENU, SALES_SESSIONS_MENU, SALES_COMMERCE_MENU, MARKET_MENU,
   FUEL_NETWORK_MENU, FUEL_ANALYTICS_MENU, FUEL_COMMERCE_MENU, FUEL_GOODS_MENU, FUEL_HELP_MENU,
+  REV_GOODS_MENU, REV_SERVICES_MENU, BOOKS_LEDGER_MENU, BOOKS_PRIMARY_MENU,
 } from './workspaceMenus'
 import { storeMenu, STORE_HELP_MENU } from './storeCatalog'
 import { MODULE_COMPONENTS, ACCOUNTING_SECTIONS, componentSection } from './moduleComponents'
@@ -122,6 +123,16 @@ export const PRODUCT_MODULES: Record<string, ProductModuleDef[]> = {
   ],
   // «Подключения» — приложение из одних страниц: каждая и есть модуль права.
   connect: pages(['/connections', '/connectors', '/catalog', '/notifications', '/apps']),
+  // Компания без объектов: право выдаётся на пункт, потому что разрезы адресованы
+  // разным людям — коммерсанту нужны покупатели, но не журнал проводок.
+  revenue: [
+    ...items(REV_GOODS_MENU, 'Продажи'),
+    ...items(REV_SERVICES_MENU, 'Услуги'),
+  ],
+  books: [
+    ...items(BOOKS_LEDGER_MENU, 'Регистр'),
+    ...items(BOOKS_PRIMARY_MENU, 'Документы'),
+  ],
 }
 
 /**

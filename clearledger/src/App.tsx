@@ -50,10 +50,6 @@ const PulseTeamPage = lazy(() => import('@/pulse/PulseSections').then((m) => ({ 
 const PulseWeekPage = lazy(() => import('@/pulse/PulseSections').then((m) => ({ default: m.PulseWeekPage })))
 const PulseLayout = lazy(() => import('@/pulse/PulseLayout').then((m) => ({ default: m.PulseLayout })))
 const InfoPage = lazy(() => import('@/pages/InfoPage').then((m) => ({ default: m.InfoPage })))
-// Рабочие места компании без объектов: бухгалтерия-эталон и её разрезы.
-const BooksPage = lazy(() => import('@/pages/BooksPage').then((m) => ({ default: m.BooksPage })))
-const TradePage = lazy(() => import('@/pages/SlicePage').then((m) => ({ default: m.TradePage })))
-const ServicesSlicePage = lazy(() => import('@/pages/SlicePage').then((m) => ({ default: m.ServicesSlicePage })))
 const ConnectionPage = lazy(() => import('@/pages/oneC/ConnectionPage').then((m) => ({ default: m.ConnectionPage })))
 const SyncPage = lazy(() => import('@/pages/oneC/SyncPage').then((m) => ({ default: m.SyncPage })))
 const ReferencesPage = lazy(() => import('@/pages/oneC/ReferencesPage').then((m) => ({ default: m.ReferencesPage })))
@@ -228,12 +224,13 @@ const router = createBrowserRouter([
           { path: '/netlink', element: <RequireApp code="netlink"><ProductStub code="netlink" /></RequireApp> },
           { path: '/accounting', element: <RequireApp code="accounting"><ProductStub code="accounting" /></RequireApp> },
           { path: '/diagnostics', element: <RequireApp code="diag"><ProductStub code="diag" /></RequireApp> },
-          // Рабочие места компании без объектов (профиль `office`): бухгалтерия-эталон и
-          // два её разреза. Маршруты совпадают с реестром (`sso_router.INTERNAL_ROUTES`),
-          // иначе плитка со стола ведёт в 404.
-          { path: '/books', element: <RequireApp code="books"><LazyPage><BooksPage /></LazyPage></RequireApp> },
-          { path: '/trade', element: <RequireApp code="trade"><LazyPage><TradePage /></LazyPage></RequireApp> },
-          { path: '/services', element: <RequireApp code="svc"><LazyPage><ServicesSlicePage /></LazyPage></RequireApp> },
+          // Рабочие места компании без объектов (профиль `office`) стали продуктами
+          // пространства со своими разделами — маршруты им строит карта выше
+          // (`SPACE_PRODUCTS`). Здесь остались старые адреса двух бывших приложений:
+          // «Продажи» и «Услуги» слились в «Реализацию», и закладка на них обязана
+          // приводить в её раздел, а не в «страница не найдена».
+          { path: '/trade', element: <Navigate to="/revenue?mode=rev_goods" replace /> },
+          { path: '/services', element: <Navigate to="/revenue?mode=rev_services" replace /> },
           { path: '/objects', element: <LazyPage><LocationsPage cockpitVariant="full" /></LazyPage> },
           { path: '/files', element: <LazyPage><FilesPage /></LazyPage> },
           { path: '/messages', element: <LazyPage><MessagesPage /></LazyPage> },

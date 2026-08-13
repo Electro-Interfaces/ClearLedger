@@ -10,7 +10,7 @@
  */
 
 import type { ComponentType } from 'react'
-import { BarChart3, Gauge, BookOpen, FileOutput, HardHat, Building2, Megaphone, Sparkles, GitCompare, Activity, Wallet, Boxes, Receipt, Truck } from 'lucide-react'
+import { BarChart3, Gauge, BookOpen, FileOutput, HardHat, Building2, Megaphone, Sparkles, GitCompare, Activity, Wallet, Boxes, Receipt, Truck, Briefcase, Scale, FileText } from 'lucide-react'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useWorkspace, type CoreMode } from '@/contexts/WorkspaceContext'
 import { modeAllowed } from '@/config/accessModules'
@@ -31,6 +31,7 @@ import {
   FUEL_NETWORK_MENU, FUEL_ANALYTICS_MENU, FUEL_COMMERCE_MENU, FUEL_GOODS_MENU,
   FUEL_HELP_MENU,
   MARKET_MENU, MARKET_KEYS,
+  REV_GOODS_MENU, REV_SERVICES_MENU, BOOKS_LEDGER_MENU, BOOKS_PRIMARY_MENU,
 } from '@/config/workspaceMenus'
 // CHARGE_SESSIONS_MENU здесь не используется — общий список нужен карте прав и роутеру
 // панелей; секции собираются из трёх меню разделов.
@@ -49,6 +50,7 @@ export {
   SALES_NETWORK_MENU, SALES_SESSIONS_MENU, SALES_COMMERCE_MENU,
   FUEL_NETWORK_MENU, FUEL_ANALYTICS_MENU, FUEL_COMMERCE_MENU, FUEL_GOODS_MENU,
   MARKET_MENU, MARKET_KEYS,
+  REV_GOODS_MENU, REV_SERVICES_MENU, BOOKS_LEDGER_MENU, BOOKS_PRIMARY_MENU,
 }
 
 // Меню бухгалтерского (mode=accounting) собирается из включённых компонентов модуля
@@ -187,6 +189,19 @@ export function useWorkspaceSections(): WorkspaceSection[] {
         return { mode: sec.mode, label: sec.label, icon: sec.icon, items, connected: accOn && items.length > 0 }
       }).filter((s) => s.items.length > 0 || s.mode === 'accounting')
   const exp: WorkspaceSection   = { mode: 'export',     label: 'Выгрузка',       icon: FileOutput,   items: [], connected: true }
+  // Компания без объектов (профиль `office`): «Реализация» и «Бухгалтерия». Разделы
+  // строятся по тому же правилу, что у «Топлива» — крупный угол в рельсе, его экраны
+  // во второй панели. Подключение проверять нечем и незачем: данные приезжают из
+  // бухгалтерии компании, модулей-коннекторов у этих продуктов нет.
+  const isOffice = company.profileId === 'office'
+  const revGoods: WorkspaceSection = { mode: 'rev_goods', label: 'Продажи', icon: BarChart3,
+    items: isOffice ? REV_GOODS_MENU : [], connected: isOffice }
+  const revServices: WorkspaceSection = { mode: 'rev_services', label: 'Услуги', icon: Briefcase,
+    items: isOffice ? REV_SERVICES_MENU : [], connected: isOffice }
+  const booksLedger: WorkspaceSection = { mode: 'books_ledger', label: 'Регистр', icon: Scale,
+    items: isOffice ? BOOKS_LEDGER_MENU : [], connected: isOffice }
+  const booksPrimary: WorkspaceSection = { mode: 'books_primary', label: 'Документы', icon: FileText,
+    items: isOffice ? BOOKS_PRIMARY_MENU : [], connected: isOffice }
   // Разделы продукта «Данные» — у ОБОИХ профилей: без них рабочее место открывается
   // панелью нормализации, которой нет в меню, а право `data:normalize` указывает в
   // пустоту. Под-меню у обеих панелей своё (каналы/разрезы) — items здесь не нужны.
@@ -201,7 +216,11 @@ export function useWorkspaceSections(): WorkspaceSection[] {
   // «Выгрузка» отдельным разделом осталась только у energy: у топливного профиля
   // выгрузка — стадия внутри потока («Пакет в БП», «Контроль загрузки в 1С»), а не
   // самостоятельное место (04.08.2026).
-  const all = isEnergy
+  // Офис — свой короткий список: сетевых разделов у него нет вовсе, и подмешивать их
+  // (пустыми, «неподключёнными») значило бы показывать рельсу про чужую жизнь.
+  const all = isOffice
+    ? [revGoods, revServices, booksLedger, booksPrimary, normalize, reconcile]
+    : isEnergy
     ? [sales, salesSessions, salesCommerce, corporate, marketing,
        projects, projectsAnalytics, ops, opsEquipment, opsEconomy,
        storeSections[0], ...accSections, exp, normalize, reconcile]

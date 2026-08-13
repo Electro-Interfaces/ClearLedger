@@ -336,3 +336,43 @@ export const MARKET_MENU: CentralMenuItem[] = [
   { key: 'mk_observations', label: 'Наблюдения' },
 ]
 export const MARKET_KEYS = MARKET_MENU.map((m) => m.key)
+
+/**
+ * Компания без объектов (профиль `office`) — «Реализация» и «Бухгалтерия».
+ *
+ * Разделы устроены как у «Топлива»: крупный угол выбирается в рельсе приложения, его
+ * экраны — во второй панели. «Продажи» и «Услуги» раньше были ДВУМЯ приложениями с
+ * одним и тем же экраном: человек ходил между плитками, чтобы задать один вопрос —
+ * что компания продала за период (решение МАГа 13.08.2026).
+ *
+ * Ключи разведены (`sale_*` / `svc_*`), хотя экраны одинаковые: код пункта — это ещё и
+ * ключ права (`revenue:sale_clients`), и общий ключ на два раздела означал бы, что
+ * закрыть коммерсанту услуги, оставив товары, нечем.
+ */
+export const REV_GOODS_MENU: CentralMenuItem[] = [
+  { key: 'sale_overview', label: 'Обзор' },
+  { key: 'sale_clients',  label: 'Покупатели' },
+  { key: 'sale_items',    label: 'Номенклатура' },
+  { key: 'sale_docs',     label: 'Документы' },
+]
+export const REV_SERVICES_MENU: CentralMenuItem[] = [
+  { key: 'svc_overview',  label: 'Обзор' },
+  { key: 'svc_clients',   label: 'Заказчики' },
+  { key: 'svc_items',     label: 'Виды услуг' },
+  { key: 'svc_docs',      label: 'Документы' },
+]
+
+/**
+ * «Бухгалтерия» офисной компании — два раздела вместо самодельной полосы вкладок
+ * внутри страницы: «Регистр» (эталон: сводка, обороты, проводки) и «Документы»
+ * (первичка и закрытые периоды).
+ */
+export const BOOKS_LEDGER_MENU: CentralMenuItem[] = [
+  { key: 'bk_summary',  label: 'Сводка' },
+  { key: 'bk_turnover', label: 'Оборотка' },
+  { key: 'bk_entries',  label: 'Проводки' },
+]
+export const BOOKS_PRIMARY_MENU: CentralMenuItem[] = [
+  { key: 'bk_docs',     label: 'Документы' },
+  { key: 'bk_periods',  label: 'Периоды' },
+]

@@ -9,6 +9,9 @@
 import type { CoreMode } from '@/contexts/WorkspaceContext'
 import { STORE_MENU, storeMenu } from './storeCatalog'
 import { ACCOUNTING_MENU } from './moduleComponents'
+import {
+  REV_GOODS_MENU, REV_SERVICES_MENU, BOOKS_LEDGER_MENU, BOOKS_PRIMARY_MENU,
+} from './workspaceMenus'
 
 /** Пункты «Бухгалтерии» одной картой: разделы делят общий словарь подписей. */
 const ACC_SUBS = Object.fromEntries(ACCOUNTING_MENU.map((m) => [m.key, m.label]))
@@ -56,6 +59,11 @@ export const MODE_LABELS: Record<CoreMode, string> = {
   export: 'Выгрузка',
   normalize: 'Нормализация',
   reconcile: 'Сверка',
+  // Разделы продуктов компании без объектов: «Реализация» и «Бухгалтерия».
+  rev_goods: 'Реализация · Продажи',
+  rev_services: 'Реализация · Услуги',
+  books_ledger: 'Бухгалтерия · Регистр',
+  books_primary: 'Бухгалтерия · Документы',
 }
 
 // Подписи под-разделов по режимам (ключ = ключ под-вида в панели).
@@ -158,6 +166,11 @@ const SUB_LABELS: Partial<Record<CoreMode, Record<string, string>>> = {
   tax: {
     vat: 'НДС', profit: 'Налог на прибыль', compliance: 'Соответствие',
   },
+  // Пункты офисных продуктов — из тех же списков, что рисуют меню.
+  rev_goods: Object.fromEntries(REV_GOODS_MENU.map((m) => [m.key, m.label])),
+  rev_services: Object.fromEntries(REV_SERVICES_MENU.map((m) => [m.key, m.label])),
+  books_ledger: Object.fromEntries(BOOKS_LEDGER_MENU.map((m) => [m.key, m.label])),
+  books_primary: Object.fromEntries(BOOKS_PRIMARY_MENU.map((m) => [m.key, m.label])),
 }
 
 const VALID_MODES = new Set(Object.keys(MODE_LABELS))

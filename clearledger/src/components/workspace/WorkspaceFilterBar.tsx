@@ -348,7 +348,11 @@ export function WorkspaceFilterBar() {
   const filters = useFilters()
   const { stationCode, clearAll } = filters
   const { company } = useCompany()
-  const isEnergy = company.profileId === 'energy'
+  // Контур STS (вид нефтепродукта, источник загрузки, обновление смен) есть только у
+  // розницы нефтепродуктов. Раньше признаком служило «не энергетика», и компания без
+  // объектов получала в фильтре вопросы про топливо и станции, которых у неё нет.
+  const isFuel = company.profileId === 'fuel'
+  const isOffice = company.profileId === 'office'
   const stations = getStsStationsFromLocations()
   const queryClient = useQueryClient()
   const [open, setOpen] = useState(false)
@@ -385,17 +389,17 @@ export function WorkspaceFilterBar() {
 
       <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto scrollbar-hide">
         <PeriodControl />
-        <WorkspaceScopeControl />
+        {isOffice ? null : <WorkspaceScopeControl />}
         {/* Вид нефтепродукта — третье измерение общего контура рядом с периодом и
             областью: у топливного профиля он меняет ответ на любом экране. */}
-        {!isEnergy ? <FuelKindControl /> : null}
+        {isFuel ? <FuelKindControl /> : null}
         {/* Технический источник загрузки смен: в простом режиме убран — как и
             одноимённая секция внутри модалки фильтра. Период и область учёта
             рядом остаются всегда: это ежедневный контур.
             Исключение: если источник СУЖЕН (выбрана конкретная станция), чип
             виден в любом режиме — иначе цифры на экране молча считались бы по
             одной станции, а признака этого не было бы. */}
-        {!isEnergy ? (
+        {isFuel ? (
           stationCode !== 'all' ? (
             <SummaryControl
               icon={Database}
@@ -432,7 +436,7 @@ export function WorkspaceFilterBar() {
           </Button>
         ) : null}
         <ViewHistoryMenu />
-        {!isEnergy ? (
+        {isFuel ? (
           <Button
             variant="ghost"
             size="icon-sm"

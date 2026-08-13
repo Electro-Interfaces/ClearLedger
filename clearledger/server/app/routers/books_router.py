@@ -205,6 +205,8 @@ async def periods(
 async def docs(
     company_id: str,
     doc_type: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
@@ -216,15 +218,28 @@ async def docs(
     q = select(AccountingDoc).where(AccountingDoc.company_id == cid)
     if doc_type:
         q = q.where(AccountingDoc.doc_type == doc_type)
+    # Тот же период, что и у разрезов реализации: реестр под графиком обязан
+    # показывать те же документы, из которых посчитаны цифры сверху.
+    if date_from:
+        q = q.where(AccountingDoc.date >= date_from)
+    if date_to:
+        q = q.where(AccountingDoc.date <= date_to)
 
     total = (await db.execute(select(func.count()).select_from(q.subquery()))).scalar_one()
     rows = (await db.execute(
         q.order_by(AccountingDoc.date.desc()).limit(limit).offset(offset))).scalars().all()
 
-    kinds = [{"type": t, "count": n, "amount": _num(a)} for t, n, a in (await db.execute(
-        select(AccountingDoc.doc_type, func.count(), func.sum(AccountingDoc.amount))
-        .where(AccountingDoc.company_id == cid)
-        .group_by(AccountingDoc.doc_type))).all()]
+    # Счётчики видов — по ТОМУ ЖЕ периоду, что и список: иначе кнопка «Реализация
+    # товаров · 431» стоит рядом с реестром на десяток строк, и человек считает,
+    # что реестр обрезан ошибкой.
+    kinds_q = (select(AccountingDoc.doc_type, func.count(), func.sum(AccountingDoc.amount))
+               .where(AccountingDoc.company_id == cid).group_by(AccountingDoc.doc_type))
+    if date_from:
+        kinds_q = kinds_q.where(AccountingDoc.date >= date_from)
+    if date_to:
+        kinds_q = kinds_q.where(AccountingDoc.date <= date_to)
+    kinds = [{"type": t, "count": n, "amount": _num(a)}
+             for t, n, a in (await db.execute(kinds_q)).all()]
 
     return {
         "total": total,
@@ -242,9 +257,17 @@ async def docs(
 # Своих чисел не заводят: тот же `accounting_docs`, только вопрос другой —
 # кто покупает, что покупает и как это менялось по месяцам.
 
-async def _slice(db: AsyncSession, cid, doc_type: str, top: int) -> dict[str, Any]:
+async def _slice(db: AsyncSession, cid, doc_type: str, top: int,
+                 date_from: str | None = None, date_to: str | None = None) -> dict[str, Any]:
     docs_q = select(AccountingDoc).where(
         AccountingDoc.company_id == cid, AccountingDoc.doc_type == doc_type)
+    # Период приходит из общего фильтра рабочей области. Дата документа хранится
+    # строкой ISO (`YYYY-MM-DD`), поэтому сравнение лексикографическое — оно же
+    # хронологическое; приводить к date незачем.
+    if date_from:
+        docs_q = docs_q.where(AccountingDoc.date >= date_from)
+    if date_to:
+        docs_q = docs_q.where(AccountingDoc.date <= date_to)
     rows = (await db.execute(docs_q)).scalars().all()
 
     by_month: dict[str, dict[str, float]] = {}
@@ -290,22 +313,26 @@ async def _slice(db: AsyncSession, cid, doc_type: str, top: int) -> dict[str, An
 @router.get("/sales")
 async def sales(
     company_id: str,
-    top: int = Query(15, ge=1, le=100),
+    top: int = Query(15, ge=1, le=500),
+    date_from: str | None = None,
+    date_to: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Продажи товаров: динамика, покупатели, товары."""
     cid = await assert_company_member(company_id, current_user, db)
-    return await _slice(db, cid, "sale_goods", top)
+    return await _slice(db, cid, "sale_goods", top, date_from, date_to)
 
 
 @router.get("/services")
 async def services(
     company_id: str,
-    top: int = Query(15, ge=1, le=100),
+    top: int = Query(15, ge=1, le=500),
+    date_from: str | None = None,
+    date_to: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Услуги: динамика, заказчики, виды услуг."""
     cid = await assert_company_member(company_id, current_user, db)
-    return await _slice(db, cid, "sale_services", top)
+    return await _slice(db, cid, "sale_services", top, date_from, date_to)

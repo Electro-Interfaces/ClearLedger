@@ -88,10 +88,20 @@ export const getEntries = (companyId: string, opts: { year?: number; account?: s
 export const getPeriods = (companyId: string) =>
   get<{ rows: PeriodRow[] }>(`/api/books/periods?company_id=${companyId}`)
 
-export const getDocs = (companyId: string, docType?: string) =>
+/** Период — общий фильтр рабочей области; без него ручка отдаёт всю историю. */
+interface PeriodOpts { from?: string; to?: string }
+
+const periodQuery = (o: PeriodOpts = {}) =>
+  (o.from ? `&date_from=${o.from}` : '') + (o.to ? `&date_to=${o.to}` : '')
+
+export const getDocs = (companyId: string, docType?: string, period?: PeriodOpts) =>
   get<{ rows: DocRow[]; total: number; kinds: { type: string; count: number; amount: number }[] }>(
-    `/api/books/docs?company_id=${companyId}${docType ? `&doc_type=${docType}` : ''}`)
+    `/api/books/docs?company_id=${companyId}${docType ? `&doc_type=${docType}` : ''}`
+    + periodQuery(period) + '&limit=500')
 
 /** Разрез: `sales` — товары, `services` — услуги. Форма ответа одна. */
-export const getSlice = (companyId: string, kind: 'sales' | 'services') =>
-  get<SliceData>(`/api/books/${kind}?company_id=${companyId}&top=15`)
+export const getSlice = (
+  companyId: string, kind: 'sales' | 'services', opts: PeriodOpts & { top?: number } = {},
+) =>
+  get<SliceData>(`/api/books/${kind}?company_id=${companyId}&top=${opts.top ?? 15}`
+    + periodQuery(opts))

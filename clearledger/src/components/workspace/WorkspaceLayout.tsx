@@ -41,6 +41,9 @@ const StorePanel = lazy(() => import('./StorePanel').then((m) => ({ default: m.S
 const StoreHelpPanel = lazy(() => import('./StorePanel').then((m) => ({ default: m.StoreHelpPanel })))
 const StoreWindow = lazy(() => import('./StoreWindow').then((m) => ({ default: m.StoreWindow })))
 const ExportLayerPanel = lazy(() => import('./ExportLayerPanel').then((m) => ({ default: m.ExportLayerPanel })))
+// Рабочие места компании без объектов: «Реализация» и «Бухгалтерия».
+const RevenuePanel = lazy(() => import('./OfficePanels').then((m) => ({ default: m.RevenuePanel })))
+const BooksPanel = lazy(() => import('./OfficePanels').then((m) => ({ default: m.BooksPanel })))
 
 /**
  * Продукт в подключении: рабочего места ещё нет, меню тоже — только заставка.
@@ -164,6 +167,10 @@ function ModePanel() {
       {ACCOUNTING_MODES.includes(coreMode) && <AccountingPanel />}
       {coreMode === 'tax' && <TaxPanel />}
       {coreMode === 'export' && <ExportLayerPanel />}
+      {/* Компания без объектов: «Продажи» и «Услуги» — разделы одного продукта,
+          панель одна и различается вопросом к тем же документам бухгалтерии. */}
+      {(coreMode === 'rev_goods' || coreMode === 'rev_services') && <RevenuePanel />}
+      {(coreMode === 'books_ledger' || coreMode === 'books_primary') && <BooksPanel />}
     </Suspense>
   )
 }
