@@ -25,6 +25,7 @@ ponytail: три UPDATE ... FROM на компанию вместо постро
 """
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from sqlalchemy import text
@@ -73,8 +74,38 @@ _CONTRACT_SQL = """
        AND d.counterparty_id IS NOT NULL
        AND c.company_id = d.company_id
        AND c.counterparty_id::text = d.counterparty_id::text
-       AND coalesce(d.doc_meta->>'Договор', '') <> ''
-       AND c.type = d.doc_meta->>'Договор'
+       AND coalesce(d.details->>'Договор', d.doc_meta->>'Договор', '') <> ''
+       AND c.type = coalesce(d.details->>'Договор', d.doc_meta->>'Договор')
+"""
+
+# Проводка знает свой документ только строкой вида и номера («Начисление зарплаты
+# ПИБП-000006 от 31.03.2023»). Нумераторы 1С сквозные по префиксу, поэтому ключ
+# «номер + дата» без ВИДА ставит проводку на чужой документ: зарплата садилась на
+# поступление ПИБП-000006, книга покупок — на поступление ПИБП-000001 (24 проводки
+# пилота). Здесь связь только СНИМАЕТСЯ: ставит её загрузка, а проверить вид дёшево
+# и обязательно — карточка документа иначе показывает чужие деньги.
+#
+# Карта «вид регистратора в 1С → наш вид документа». Регистратора, которого в слое
+# нет вовсе (зарплата, книга покупок, корректировки), в карте нет — проводка такого
+# вида обязана остаться без документа, пока сам документ не загружен.
+_KIND_TO_TYPE = {
+    "Реализация (акт, накладная, УПД)": "sale",
+    "Поступление (акт, накладная, УПД)": "purchase",
+    "Списание с расчетного счета": "bank_out",
+    "Поступление на расчетный счет": "bank_in",
+    "Счет-фактура выданный": "vat_invoice_out",
+    "Счет-фактура полученный": "vat_invoice_in",
+    "Регламентная операция": "closing_op",
+    "Операция": "manual_entry",
+    "Акт сверки взаиморасчетов": "act_recon",
+}
+
+_ENTRY_UNLINK_SQL = """
+    UPDATE gl_entries e SET doc_id = NULL
+      FROM accounting_docs d
+     WHERE e.company_id = :cid AND e.doc_id = d.id
+       AND coalesce(e.doc_kind, '') <> ''
+       AND d.doc_type IS DISTINCT FROM (:kinds::jsonb ->> e.doc_kind)
 """
 
 
@@ -96,6 +127,9 @@ async def relink(db: AsyncSession, company_id, *, reset: bool = False) -> dict[s
         matched[label] = res.rowcount or 0
     res = await db.execute(text(_CONTRACT_SQL), params)
     matched["договор по названию"] = res.rowcount or 0
+    res = await db.execute(text(_ENTRY_UNLINK_SQL),
+                           {**params, "kinds": json.dumps(_KIND_TO_TYPE, ensure_ascii=False)})
+    matched["снято ложных связей проводок"] = res.rowcount or 0
     await db.commit()
 
     total, linked, with_contract, no_name = (await db.execute(text("""
