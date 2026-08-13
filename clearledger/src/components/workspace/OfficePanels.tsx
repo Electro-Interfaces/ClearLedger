@@ -669,52 +669,100 @@ function BooksPeriods({ companyId }: { companyId: string }) {
   )
 }
 
-/** Первичка целиком — все виды документов, включая поступления. */
+/**
+ * Реестр документов: папки — УЧАСТКИ УЧЁТА, внутри них виды документов.
+ *
+ * Плоский список видов не годился — их пятнадцать, и «Счёт покупателю» стоял рядом
+ * с «Регламентной операцией», хотя вопросы к ним разные. Аудитор идёт от участка
+ * («что с деньгами», «чем закрыт счёт»), вид документа — уточнение внутри. Состав
+ * папок задан на сервере (`books_router.DOC_SECTIONS`): один словарь на экран,
+ * выгрузки и витрину «Данные».
+ */
 function BooksDocs({ companyId }: { companyId: string }) {
   const { period } = useFilters()
+  const [section, setSection] = useState<string | undefined>()
   const [type, setType] = useState<string | undefined>()
   const q = useQuery({
-    queryKey: ['books', 'docs', companyId, type, period.from, period.to],
-    queryFn: () => getDocs(companyId, type, { from: period.from, to: period.to }),
+    queryKey: ['books', 'docs', companyId, section, type, period.from, period.to],
+    queryFn: () => getDocs(companyId, type, { from: period.from, to: period.to }, section),
   })
   if (q.isError) return <div className="p-4"><QueryError onRetry={() => q.refetch()} /></div>
   if (!q.data) return <Loading />
 
+  const sections = q.data.sections ?? []
+  const open = sections.find((s) => s.code === section)
+  const pick = (code?: string) => { setSection(code); setType(undefined) }
+
   return (
     <div className="p-4 space-y-3">
       <div className="flex flex-wrap gap-2">
-        <button onClick={() => setType(undefined)}
+        <button onClick={() => pick(undefined)}
           className={cn('rounded-md border px-3 py-1.5 text-sm',
-            !type ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground')}>
-          Все
+            !section ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground')}>
+          Все документы
+          <span className="ml-1.5 text-[11px] tabular-nums opacity-70">
+            {sections.reduce((n, s) => n + s.count, 0)}
+          </span>
         </button>
-        {q.data.kinds.map((k) => (
-          <button key={k.type} onClick={() => setType(k.type)}
-            className={cn('rounded-md border px-3 py-1.5 text-sm',
-              type === k.type ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground')}>
-            {DOC_LABEL[k.type] ?? k.type}
-            <span className="ml-1.5 text-[11px] tabular-nums opacity-70">{k.count}</span>
+        {sections.map((s) => (
+          <button key={s.code} onClick={() => pick(s.code)} disabled={!s.count}
+            className={cn('rounded-md border px-3 py-1.5 text-sm disabled:opacity-40',
+              section === s.code ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground')}>
+            {s.title}
+            <span className="ml-1.5 text-[11px] tabular-nums opacity-70">{s.count}</span>
           </button>
         ))}
       </div>
 
-      <TableCard head={<>
-        <Th>Дата</Th><Th>Номер</Th><Th>Вид</Th><Th>Контрагент</Th>
-        <Th right>Сумма</Th><Th right>НДС</Th><Th right>Строк</Th>
-      </>}>
+      {/* Виды — второй уровень, только внутри выбранного участка. */}
+      {open && open.kinds.filter((k) => k.count).length > 1 && (
+        <div className="flex flex-wrap gap-1.5">
+          <button onClick={() => setType(undefined)}
+            className={cn('rounded-md px-2 py-1 text-xs',
+              !type ? 'bg-muted font-medium' : 'text-muted-foreground hover:bg-muted/50')}>
+            весь участок
+          </button>
+          {open.kinds.filter((k) => k.count).map((k) => (
+            <button key={k.type} onClick={() => setType(k.type)}
+              className={cn('rounded-md px-2 py-1 text-xs',
+                type === k.type ? 'bg-muted font-medium' : 'text-muted-foreground hover:bg-muted/50')}>
+              {k.label}
+              <span className="ml-1 tabular-nums opacity-70">{k.count}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      <TableCard note={q.data.total > q.data.rows.length
+        ? `Показаны ${q.data.rows.length} из ${q.data.total} — сузьте период или участок.`
+        : undefined}
+        head={<>
+          <Th>Дата</Th><Th>Номер</Th><Th>Вид</Th><Th>Контрагент</Th><Th>Назначение</Th>
+          <Th right>Сумма</Th><Th right>Строк</Th>
+        </>}>
         {q.data.rows.map((r, i) => (
           <tr key={i} className="border-b last:border-0 hover:bg-muted/40">
-            <td className="px-3 py-1.5 tabular-nums whitespace-nowrap">{r.date}</td>
-            <td className="px-3 py-1.5 tabular-nums">{r.number}</td>
-            <td className="px-3 py-1.5 text-muted-foreground">{DOC_LABEL[r.type] ?? r.type}</td>
-            <td className="px-3 py-1.5 max-w-[280px] truncate" title={r.counterparty}>
-              {r.counterparty}
+            <td className="px-3 py-1.5 tabular-nums whitespace-nowrap">
+              {r.date}
+              {/* Закрытый месяц: документ в источнике уже не переписать. */}
+              {r.periodStatus === 'closed' && (
+                <span className="ml-1.5 text-[10px] text-muted-foreground" title="период закрыт">🔒</span>
+              )}
             </td>
+            <td className="px-3 py-1.5 tabular-nums">{r.number}</td>
+            <td className="px-3 py-1.5 text-muted-foreground">{r.label || DOC_LABEL[r.type] || r.type}</td>
+            <td className="px-3 py-1.5 max-w-[240px] truncate" title={r.counterparty}>
+              {r.counterparty}
+              {r.status && r.status !== 'Проведён' && (
+                <span className="ml-1.5 text-[10px] text-amber-600">{r.status}</span>
+              )}
+            </td>
+            <td className="px-3 py-1.5 max-w-[260px] truncate text-muted-foreground"
+              title={r.operation ?? ''}>{r.operation || '—'}</td>
             <td className="px-3 py-1.5 text-right tabular-nums">{money.format(r.amount)}</td>
             <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
-              {money.format(r.vat)}
+              {r.lines || '—'}
             </td>
-            <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{r.lines}</td>
           </tr>
         ))}
       </TableCard>
