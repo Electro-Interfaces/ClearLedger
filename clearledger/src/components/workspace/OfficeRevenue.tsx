@@ -17,6 +17,7 @@
  * (период к периоду) и накопленную долю для ABC.
  */
 import { useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { Download, Printer } from 'lucide-react'
 
@@ -29,8 +30,8 @@ import { Card, CardContent } from '@/components/ui/card'
 import { MetricTile } from '@/components/ui/metric-tile'
 import { cn } from '@/lib/utils'
 import {
-  getAssortment, getCashflow, getContractSales, getDocs, getPaymentTerms, getRevenue,
-  getRevenueCheck, getRevenueQuality, getStock, getSuppliers,
+  getAssortment, getCashflow, getContractSales, getDocsAll, getPaymentTerms,
+  getRevenue, getRevenueCheck, getRevenueQuality, getStock, getSuppliers,
   type DocRow, type RevKind,
 } from '@/services/booksService'
 import { exportTable } from '@/services/booksExport'
@@ -67,24 +68,33 @@ const monthLabel = (m: string) => {
 // день назад, и «август» превращается в «31 июля — 30 августа». Проверка —
 // `scripts/period-check.mjs`.
 
+/** Пустая или битая дата в фильтре роняла `toISOString()` белым экраном. */
+const isDate = (iso: string | undefined | null): iso is string =>
+  !!iso && /^\d{4}-\d{2}-\d{2}$/.test(iso)
+
 const shiftDays = (iso: string, days: number) => {
+  if (!isDate(iso)) return iso ?? ''
   const d = new Date(`${iso}T00:00:00Z`)
   d.setUTCDate(d.getUTCDate() + days)
   return d.toISOString().slice(0, 10)
 }
 
 const shiftYears = (iso: string, years: number) => {
+  if (!isDate(iso)) return iso ?? ''
   const d = new Date(`${iso}T00:00:00Z`)
   d.setUTCFullYear(d.getUTCFullYear() + years)
   return d.toISOString().slice(0, 10)
 }
 
 const lengthDays = (p: Period) =>
-  Math.round((Date.parse(p.to) - Date.parse(p.from)) / 86400000) + 1
+  isDate(p.from) && isDate(p.to)
+    ? Math.round((Date.parse(p.to) - Date.parse(p.from)) / 86400000) + 1
+    : 0
 
 /** Предыдущий период той же длины — «месяц к месяцу». */
 const prevPeriod = (p: Period): Period => {
   const len = lengthDays(p)
+  if (!len) return p            // период не задан — сравнивать не с чем
   return { from: shiftDays(p.from, -len), to: shiftDays(p.to, -len) }
 }
 
@@ -184,7 +194,7 @@ function Delta({ now, was }: { now: number; was: number }) {
   const pct = ((now - was) / Math.abs(was)) * 100
   const up = pct >= 0
   return (
-    <span className={cn('tabular-nums', up ? 'text-emerald-600' : 'text-rose-600')}>
+    <span className={cn('tabular-nums', up ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400')}>
       {up ? '+' : ''}{pct.toFixed(1)} %
     </span>
   )
@@ -288,12 +298,30 @@ export function RevenuePanel() {
   const [sub] = useWorkspaceSubView(items[0]?.key ?? '', items.map((i) => i.key))
   const { companyId } = useCompany()
   const { period } = useFilters()
-  // Разрез живёт в панели, а не в экране: человек выбрал «услуги» и ходит с этим
-  // взглядом по разделам, а не переключает его заново на каждом пункте.
-  const [kind, setKind] = useState<RevKind>('all')
+  // Разрез живёт в АДРЕСЕ: человек выбрал «услуги» и ходит с этим взглядом по
+  // разделам, ссылкой делится, возврат из другого продукта его не сбрасывает.
+  const [params, setParams] = useSearchParams()
+  const kind = (['all', 'goods', 'service'].includes(params.get('kind') ?? '')
+    ? params.get('kind') : 'all') as RevKind
+  const setKind = (v: RevKind) => setParams((prev) => {
+    const next = new URLSearchParams(prev)
+    if (v === 'all') next.delete('kind')
+    else next.set('kind', v)
+    return next
+  }, { replace: true })
   const shown = FIXED_KIND[sub] ?? kind
 
   if (!companyId) return <NoCompany />
+  // Роль могла закрыть ВСЕ пункты раздела. Тогда `sub` пуст, и `switch` уходил в
+  // ветку по умолчанию — раздел «Покупатели» без прав показывал «Обзор» с выручкой
+  // компании. Рельса такой раздел прячет, но прямой адрес открывался.
+  if (!items.length) {
+    return (
+      <div className="p-6 text-sm text-muted-foreground">
+        В этом разделе нет доступных вам экранов. Права выдаются в «Управлении».
+      </div>
+    )
+  }
 
   // Помощь — общий компонент пространства: тот же свод «Инфо», суженный до продукта.
   // Своей копии этого экрана не заводим, иначе она разойдётся с подсказкой рельсы.
@@ -386,7 +414,9 @@ function RevOverview({ companyId, kind, period }: {
           <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
             К прошлому периоду ({periodLabel(prevPeriod(period))})
           </div>
-          {!p ? <div className="text-sm text-muted-foreground">Считаем…</div> : (
+          {prev.isError ? (
+            <QueryError onRetry={() => prev.refetch()} />
+          ) : !p ? <div className="text-sm text-muted-foreground">Считаем…</div> : (
             <table className="w-full text-sm">
               <tbody>
                 {[
@@ -582,7 +612,11 @@ function RevCompare({ companyId, kind, period }: {
   const a = useRevenue(companyId, kind, period)
   const b = useRevenue(companyId, kind, other)
 
-  if (a.isError) return <div className="p-4"><QueryError onRetry={() => a.refetch()} /></div>
+  // Ошибку обязаны показать оба запроса: раньше падение второго оставляло экран
+  // в «Загрузка…» навсегда, без кнопки «Повторить».
+  if (a.isError || b.isError) {
+    return <div className="p-4"><QueryError onRetry={() => { a.refetch(); b.refetch() }} /></div>
+  }
   if (!a.data || !b.data) return <Loading />
 
   const rows = [
@@ -650,7 +684,7 @@ function RevCompare({ companyId, kind, period }: {
               {money.format(c.was)} ₽
             </td>
             <td className={cn('px-3 py-1.5 text-right tabular-nums whitespace-nowrap',
-              c.now - c.was >= 0 ? 'text-emerald-600' : 'text-rose-600')}>
+              c.now - c.was >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400')}>
               {c.now - c.was >= 0 ? '+' : ''}{money.format(c.now - c.was)} ₽
             </td>
           </tr>
@@ -814,8 +848,8 @@ function RevClients({ companyId, kind, period }: {
                 {c.last ?? '—'}
               </td>
               <td className={cn('px-3 py-1.5 text-right tabular-nums whitespace-nowrap',
-                days !== null && days > 180 ? 'text-rose-600'
-                : days !== null && days > 90 ? 'text-amber-600' : 'text-muted-foreground')}>
+                days !== null && days > 180 ? 'text-rose-600 dark:text-rose-400'
+                : days !== null && days > 90 ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground')}>
                 {days === null ? '—' : `${num.format(days)} дн.`}
               </td>
             </tr>
@@ -864,7 +898,10 @@ function RevAbc({ companyId, period, of }: {
   companyId: string; period: Period; of: 'clients' | 'items'
 }) {
   const q = useQuery({
-    queryKey: ['books', 'assortment', companyId, of, period.from, period.to],
+    // Ключ по ТОМУ ЖЕ значению, что уходит в запрос: раньше «ABC товаров» и «Маржа»
+    // тянули один и тот же тяжёлый ответ под разными ключами ('items' и 'item').
+    queryKey: ['books', 'assortment', companyId, of === 'clients' ? 'client' : 'item',
+               period.from, period.to],
     queryFn: () => getAssortment(companyId, of === 'clients' ? 'client' : 'item', period),
     enabled: !!companyId,
   })
@@ -886,6 +923,13 @@ function RevAbc({ companyId, period, of }: {
   if (!q.data) return <Loading />
 
   const what = of === 'clients' ? 'покупателей' : 'позиций'
+  if (!rows.length) {
+    return (
+      <div className="p-6 text-sm text-muted-foreground">
+        За выбранный период продаж нет — разбирать по вкладу и повторяемости нечего.
+      </div>
+    )
+  }
   const total = rows.reduce((s, r) => s + r.value, 0) || 1
   const shown = cell ? rows.filter((r) => `${r.abc}/${r.freq}` === cell) : rows
   const once = rows.filter((r) => r.freq === 'once')
@@ -984,8 +1028,8 @@ function RevAbc({ companyId, period, of }: {
           <tr key={r.key} className="border-b last:border-0 hover:bg-muted/40">
             <td className="px-3 py-1.5 whitespace-nowrap">
               <span className={cn('rounded px-1.5 py-0.5 text-[11px] font-medium',
-                r.abc === 'A' ? 'bg-emerald-500/15 text-emerald-600'
-                : r.abc === 'B' ? 'bg-amber-500/15 text-amber-600'
+                r.abc === 'A' ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                : r.abc === 'B' ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
                 : 'bg-muted text-muted-foreground')}>{r.abc}</span>
               <span className="ml-1.5 text-[11px] text-muted-foreground">
                 {r.freq === 'once' ? 'разовый' : r.freq === 'few' ? 'эпизод.' : 'регуляр.'}
@@ -1017,8 +1061,8 @@ function RevAbc({ companyId, period, of }: {
               {r.cv === null ? '—' : `${r.cv.toFixed(2)} · ${r.xyz}`}
             </td>
             <td className={cn('px-3 py-1.5 text-right tabular-nums',
-              r.trend === 'up' ? 'text-emerald-600'
-              : r.trend === 'down' ? 'text-rose-600' : 'text-muted-foreground')}>
+              r.trend === 'up' ? 'text-emerald-600 dark:text-emerald-400'
+              : r.trend === 'down' ? 'text-rose-600 dark:text-rose-400' : 'text-muted-foreground')}>
               {r.trendPct === null ? '—' : `${r.trendPct > 0 ? '+' : ''}${r.trendPct.toFixed(0)}%`}
             </td>
           </tr>
@@ -1049,7 +1093,13 @@ function RevChurn({ companyId, kind, period }: {
   const prevQ = useRevenue(companyId, kind, prev)
   const [card, setCard] = useState<string | null>(null)
 
-  if (cur.isError) return <div className="p-4"><QueryError onRetry={() => cur.refetch()} /></div>
+  if (cur.isError || before.isError || prevQ.isError) {
+    return (
+      <div className="p-4">
+        <QueryError onRetry={() => { cur.refetch(); before.refetch(); prevQ.refetch() }} />
+      </div>
+    )
+  }
   if (!cur.data || !before.data || !prevQ.data) return <Loading />
 
   const beforeKeys = new Set(before.data.topClients.map(clientKey))
@@ -1139,7 +1189,10 @@ function RevItems({ companyId, kind, period, title }: {
         ], found)} />
       </div>
       <TableCard
-        note={`${title} — ${num.format(found.length)} позиций, ${money.format(q.data.total)} ₽`}
+        note={`${title} — ${num.format(found.length)} позиций, `
+          + `${money.format(found.reduce((sum, i) => sum + i.amount, 0))} ₽`
+          + (found.length !== q.data.topItems.length
+            ? ` (всего ${num.format(q.data.topItems.length)} на ${money.format(q.data.total)} ₽)` : '')}
         head={<><Th>{title}</Th><Th right>Количество</Th><Th right>Сумма</Th><Th right>Доля</Th></>}>
         {found.map((it) => (
           <tr key={it.code ?? it.name} className="border-b last:border-0 hover:bg-muted/40">
@@ -1168,11 +1221,17 @@ function RevItems({ companyId, kind, period, title }: {
 /*                       Документы                                */
 /* ────────────────────────────────────────────────────────────── */
 
+/**
+ * Документы вида за период — ЦЕЛИКОМ, а не первой страницей.
+ *
+ * Все три экрана, которые этим пользуются, считают по строкам итоги (суммы счетов,
+ * конверсию воронки, отбор по сумме). Пока документов меньше пятисот, разницы нет;
+ * дальше первая страница молча занижала бы каждую цифру.
+ */
 function useDocs(companyId: string, docType: string, period: Period, lineKind?: string) {
   return useQuery({
-    queryKey: ['books', 'docs', companyId, docType, lineKind, period.from, period.to],
-    queryFn: () => getDocs(companyId, docType, { from: period.from, to: period.to },
-                           undefined, 0, lineKind),
+    queryKey: ['books', 'docs-all', companyId, docType, lineKind, period.from, period.to],
+    queryFn: () => getDocsAll(companyId, docType, { from: period.from, to: period.to }, lineKind),
     enabled: !!companyId,
   })
 }
@@ -1324,7 +1383,7 @@ function RevInvoices({ companyId, period }: { companyId: string; period: Period 
                 {r.paid === null ? '—' : money.format(r.paid)}
               </td>
               <td className={cn('px-3 py-1.5 text-right tabular-nums',
-                rest !== null && rest > 0.01 ? 'text-rose-600' : 'text-muted-foreground')}>
+                rest !== null && rest > 0.01 ? 'text-rose-600 dark:text-rose-400' : 'text-muted-foreground')}>
                 {rest === null ? 'нет данных' : money.format(rest)}
               </td>
             </tr>
@@ -1370,7 +1429,13 @@ function RevFunnel({ companyId, period }: { companyId: string; period: Period })
     return [...by.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([month, v]) => ({ month, ...v }))
   }, [inv.data, sale.data])
 
-  if (inv.isError) return <div className="p-4"><QueryError onRetry={() => inv.refetch()} /></div>
+  if (inv.isError || sale.isError) {
+    return (
+      <div className="p-4">
+        <QueryError onRetry={() => { inv.refetch(); sale.refetch() }} />
+      </div>
+    )
+  }
   if (!inv.data || !sale.data) return <Loading />
 
   const billed = months.reduce((s, m) => s + m.billed, 0)
@@ -1481,7 +1546,7 @@ function UnpaidInvoices({ rows, companyId }: { rows: DocRow[]; companyId: string
               ) : r.counterparty}
             </td>
             <td className="px-3 py-1.5 text-right tabular-nums">{money.format(r.amount)}</td>
-            <td className="px-3 py-1.5 text-right tabular-nums text-rose-600">
+            <td className="px-3 py-1.5 text-right tabular-nums text-rose-600 dark:text-rose-400">
               {money.format(r.rest)}
             </td>
             <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
@@ -1535,7 +1600,10 @@ function RevMargin({ companyId, period }: { companyId: string; period: Period })
     // штук весит столько же, сколько строка на одну, и «среднее из средних» врёт.
     const avgSale = soldQty ? sold / soldQty : 0
     const avgBuy = boughtQty ? bought / boughtQty : 0
-    const cost = avgBuy ? avgBuy * soldQty : null
+    // Себестоимость неизвестна и когда закупки не было, и когда в строке продажи нет
+    // количества: `avgBuy × 0` давало ноль и «маржу 100 %», а позиция при этом
+    // попадала в итог «с известной закупкой» и раздувала его.
+    const cost = avgBuy && soldQty ? avgBuy * soldQty : null
     return {
       ...r, sold, soldQty, avgSale, avgBuy,
       cost,
@@ -1558,7 +1626,7 @@ function RevMargin({ companyId, period }: { companyId: string; period: Period })
   const soldKnown = known.reduce((s, r) => s + r.sold, 0)
   const costKnown = known.reduce((s, r) => s + (r.cost ?? 0), 0)
   const noCost = rows.length - known.length
-  const registerCost = q.data.cost ?? 0
+  const registerCost = q.data.cost
 
   return (
     <div className="p-4 space-y-4">
@@ -1571,8 +1639,11 @@ function RevMargin({ companyId, period }: { companyId: string; period: Period })
         <MetricTile label="Маржа" value={money.format(soldKnown - costKnown) + ' ₽'}
           hint={soldKnown ? `${(((soldKnown - costKnown) / soldKnown) * 100).toFixed(1)}% от продаж` : '—'}
           tone={soldKnown - costKnown > 0 ? 'success' : undefined} />
-        <MetricTile label="Себестоимость по 90.02.1" value={money.format(registerCost) + ' ₽'}
-          hint={`расчёт ${registerCost ? ((costKnown / registerCost) * 100).toFixed(0) : '—'}% от регистра`} />
+        <MetricTile label={`Себестоимость по ${q.data.costBasis ?? '90.02.1'}`}
+          value={registerCost === null ? 'нет данных' : money.format(registerCost) + ' ₽'}
+          hint={registerCost
+            ? `расчёт ${((costKnown / registerCost) * 100).toFixed(0)}% от регистра`
+            : 'оборот регистра не посчитан'} />
       </div>
 
       <p className="text-[11px] text-muted-foreground">
@@ -1632,7 +1703,7 @@ function RevMargin({ companyId, period }: { companyId: string; period: Period })
             </td>
             <td className={cn('px-3 py-1.5 text-right tabular-nums whitespace-nowrap',
               r.margin === null ? 'text-muted-foreground'
-              : r.margin >= 0 ? 'text-emerald-600' : 'text-rose-600')}>
+              : r.margin >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400')}>
               {r.margin === null ? '—' : `${money.format(r.margin)} ₽`}
             </td>
             <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
@@ -1717,7 +1788,7 @@ function RevRecon({ companyId }: { companyId: string }) {
               {money.format(m.register)} ₽
             </td>
             <td className={cn('px-3 py-1.5 text-right tabular-nums whitespace-nowrap',
-              Math.abs(m.diff) > 1 ? 'text-rose-600' : 'text-muted-foreground')}>
+              Math.abs(m.diff) > 1 ? 'text-rose-600 dark:text-rose-400' : 'text-muted-foreground')}>
               {money.format(m.diff)} ₽
             </td>
             <td className="px-3 py-1.5 text-[11px] text-muted-foreground">
@@ -1782,7 +1853,7 @@ function RevTerms({ companyId, period }: { companyId: string; period: Period }) 
         <MetricTile label="Медиана" value={`${d.medianDays} дн.`}
           hint="половина счетов оплачена быстрее" />
         <MetricTile label="Счетов с оплатой" value={num.format(d.total)}
-          hint={`${money.format(d.amount)} ₽`} />
+          hint={`${money.format(d.amount)} ₽ · ${num.format(d.payments)} платежей`} />
         <MetricTile label="Дольше 90 дней"
           value={num.format(d.buckets.find((b) => b.key === 'overdue')?.count ?? 0)}
           hint={`${money.format(d.buckets.find((b) => b.key === 'overdue')?.amount ?? 0)} ₽`}
@@ -1813,6 +1884,13 @@ function RevTerms({ companyId, period }: { companyId: string; period: Period }) 
         </CardContent>
       </Card>
 
+      {d.orphanPayments > 0 && (
+        <p className="text-[11px] text-amber-600 dark:text-amber-400">
+          {num.format(d.orphanPayments)} платежей на {money.format(d.orphanAmount)} ₽
+          ссылаются на документ, которого в выгрузке нет: они не попадают ни в один
+          расчёт этого экрана. Вопрос к выгрузке из 1С.
+        </p>
+      )}
       <TableCard note="Покупатели по среднему сроку оплаты — с кем говорить об отсрочке"
         head={<><Th>Покупатель</Th><Th right>Счетов</Th><Th right>Сумма</Th>
           <Th right>Средний срок</Th><Th right>Худший</Th></>}>
@@ -1829,7 +1907,7 @@ function RevTerms({ companyId, period }: { companyId: string; period: Period }) 
               {money.format(c.amount)} ₽
             </td>
             <td className={cn('px-3 py-1.5 text-right tabular-nums',
-              c.avgDays > 90 ? 'text-rose-600' : c.avgDays > 30 ? 'text-amber-600' : 'text-emerald-600')}>
+              c.avgDays > 90 ? 'text-rose-600 dark:text-rose-400' : c.avgDays > 30 ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400')}>
               {c.avgDays} дн.
             </td>
             <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
@@ -1846,10 +1924,18 @@ function RevTerms({ companyId, period }: { companyId: string; period: Period }) 
         head={<><Th>Счёт</Th><Th>Дата</Th><Th>Оплачен</Th><Th>Покупатель</Th>
           <Th right>Сумма</Th><Th right>Дней</Th></>}>
         {rows.map((r) => (
-          <tr key={r.id + r.paidAt} className="border-b last:border-0 hover:bg-muted/40">
+          <tr key={r.id} className="border-b last:border-0 hover:bg-muted/40">
             <td className="px-3 py-1.5 tabular-nums">{r.number}</td>
             <td className="px-3 py-1.5 tabular-nums whitespace-nowrap">{r.date}</td>
-            <td className="px-3 py-1.5 tabular-nums whitespace-nowrap">{r.paidAt}</td>
+            <td className="px-3 py-1.5 tabular-nums whitespace-nowrap">
+              {r.paidAt}
+              {r.payments > 1 && (
+                <span className="ml-1 text-[10px] text-muted-foreground"
+                  title="счёт закрыт несколькими платежами, срок считается по последнему">
+                  ×{r.payments}
+                </span>
+              )}
+            </td>
             <td className="px-3 py-1.5 max-w-[280px] truncate" title={r.counterparty}>
               {r.counterparty}
             </td>
@@ -1857,7 +1943,7 @@ function RevTerms({ companyId, period }: { companyId: string; period: Period }) 
               {money.format(r.amount)} ₽
             </td>
             <td className={cn('px-3 py-1.5 text-right tabular-nums',
-              r.days > 90 ? 'text-rose-600' : r.days < 0 ? 'text-emerald-600' : 'text-muted-foreground')}>
+              r.days > 90 ? 'text-rose-600 dark:text-rose-400' : r.days < 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground')}>
               {r.days}
             </td>
           </tr>
@@ -1910,13 +1996,13 @@ function RevCashflow({ companyId }: { companyId: string }) {
           hint={`${num.format(d.months.reduce((s, m) => s + m.outDocs, 0))} списаний`} />
         <MetricTile label="Итог за историю" value={money.format(d.inflow - d.outflow) + ' ₽'}
           tone={d.inflow - d.outflow >= 0 ? 'success' : 'danger'}
-          hint="приход минус расход по документам" />
+          hint="приход минус расход по документам выгрузки, не остаток на счёте" />
         <MetricTile label="Контроль по счёту 51"
           value={Math.abs(diffIn) + Math.abs(diffOut) < 1 ? 'сходится' : 'расхождение'}
           hint={Math.abs(diffIn) + Math.abs(diffOut) < 1
             ? 'документы = обороты регистра'
             : `приход ${money.format(diffIn)} ₽, расход ${money.format(diffOut)} ₽`}
-          tone={Math.abs(diffIn) + Math.abs(diffOut) < 1 ? 'success' : undefined} />
+          tone={Math.abs(diffIn) + Math.abs(diffOut) < 1 ? 'success' : 'danger'} />
       </div>
 
       <Card>
@@ -1948,18 +2034,18 @@ function RevCashflow({ companyId }: { companyId: string }) {
 
       <TableCard note="Месяц: приход, расход, разница и накопленный остаток"
         head={<><Th>Месяц</Th><Th right>Пришло</Th><Th right>Ушло</Th>
-          <Th right>Разница</Th><Th right>Накоплено</Th></>}>
+          <Th right>Разница</Th><Th right>Нарастающим</Th></>}>
         {[...d.months].reverse().map((m) => (
           <tr key={m.month} className="border-b last:border-0 hover:bg-muted/40">
             <td className="px-3 py-1.5">{monthLabel(m.month)}</td>
-            <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap text-emerald-600">
+            <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap text-emerald-600 dark:text-emerald-400">
               {money.format(m.inflow)} ₽
             </td>
-            <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap text-rose-600">
+            <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap text-rose-600 dark:text-rose-400">
               {money.format(m.outflow)} ₽
             </td>
             <td className={cn('px-3 py-1.5 text-right tabular-nums whitespace-nowrap',
-              m.net >= 0 ? '' : 'text-rose-600')}>
+              m.net >= 0 ? '' : 'text-rose-600 dark:text-rose-400')}>
               {m.net >= 0 ? '+' : ''}{money.format(m.net)} ₽
             </td>
             <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground whitespace-nowrap">
@@ -2026,14 +2112,14 @@ function RevContracts({ companyId, period }: { companyId: string; period: Period
   const rows = d.rows.filter((r) =>
     (!onlyLinked || r.id)
     && (!search || (r.number ?? '').toLowerCase().includes(search.toLowerCase())
-      || r.counterparty.toLowerCase().includes(search.toLowerCase())))
+      || (r.counterparty ?? '').toLowerCase().includes(search.toLowerCase())))
   const share = d.salesTotal ? (d.salesWithContract / d.salesTotal) * 100 : 0
 
   return (
     <div className="p-4 space-y-4">
       <div className="grid gap-3 grid-cols-3">
-        <MetricTile label="Договоров с продажами" value={num.format(d.withContract)}
-          hint="документы сведены по ссылке, а не по названию" />
+        <MetricTile label="Договоров с отгрузками" value={num.format(d.withContract)}
+          hint={`ещё ${num.format(d.withInvoicesOnly)} договоров только со счетами`} />
         <MetricTile label="Продажи по договорам" value={money.format(d.salesWithContract) + ' ₽'}
           hint={`${share.toFixed(1)}% выручки периода`} />
         <MetricTile label="Без договора"
@@ -2069,8 +2155,13 @@ function RevContracts({ companyId, period }: { companyId: string; period: Period
               title={r.number ? `${r.number} от ${r.date}` : 'документы без ссылки на договор'}>
               {r.number ?? <span className="text-muted-foreground">без договора</span>}
             </td>
-            <td className="px-3 py-1.5 max-w-[260px] truncate" title={r.counterparty}>
-              {r.counterparty}
+            <td className="px-3 py-1.5 max-w-[260px] truncate"
+              title={r.counterparty ?? `${r.counterparties} контрагентов`}>
+              {r.counterparty ?? (
+                <span className="text-muted-foreground">
+                  {num.format(r.counterparties)} контрагентов
+                </span>
+              )}
             </td>
             <td className="px-3 py-1.5 text-[11px] text-muted-foreground max-w-[200px] truncate"
               title={r.settlementKind ?? ''}>
@@ -2205,7 +2296,7 @@ function RevStock({ companyId }: { companyId: string }) {
               {qty.format(r.soldQty)}
             </td>
             <td className={cn('px-3 py-1.5 text-right tabular-nums',
-              r.restQty < 0 ? 'text-rose-600' : '')}>
+              r.restQty < 0 ? 'text-rose-600 dark:text-rose-400' : '')}>
               {qty.format(r.restQty)}
             </td>
             <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">
@@ -2215,8 +2306,8 @@ function RevStock({ companyId }: { companyId: string }) {
               {r.daysOfSupply === null ? '—' : `${num.format(r.daysOfSupply)} дн.`}
             </td>
             <td className={cn('px-3 py-1.5 tabular-nums whitespace-nowrap',
-              (r.idleDays ?? 0) > 365 ? 'text-rose-600'
-              : (r.idleDays ?? 0) > 180 ? 'text-amber-600' : 'text-muted-foreground')}>
+              (r.idleDays ?? 0) > 365 ? 'text-rose-600 dark:text-rose-400'
+              : (r.idleDays ?? 0) > 180 ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground')}>
               {r.lastMove ?? '—'}
               {r.idleDays !== null && <span className="ml-1 text-[11px]">{r.idleDays} дн. назад</span>}
             </td>
@@ -2293,7 +2384,7 @@ function RevSuppliers({ companyId, period, view }: {
                 {money.format(r.maxPrice)}
               </td>
               <td className={cn('px-3 py-1.5 text-right tabular-nums whitespace-nowrap',
-                r.suspicious ? 'text-muted-foreground' : 'text-amber-600')}>
+                r.suspicious ? 'text-muted-foreground' : 'text-amber-600 dark:text-amber-400')}>
                 {r.minPrice ? `+${((r.maxPrice / r.minPrice - 1) * 100).toFixed(0)}%` : '—'}
                 <span className="ml-1 text-[11px] text-muted-foreground">
                   {money.format((r.maxPrice - r.minPrice) * r.qty)} ₽
@@ -2416,7 +2507,7 @@ function RevQuality({ companyId }: { companyId: string }) {
           <tr key={c.key} className="border-b last:border-0 hover:bg-muted/40">
             <td className="px-3 py-1.5">{c.title}</td>
             <td className={cn('px-3 py-1.5 text-right tabular-nums',
-              c.count ? 'text-amber-600 font-medium' : 'text-muted-foreground')}>
+              c.count ? 'text-amber-600 dark:text-amber-400 font-medium' : 'text-muted-foreground')}>
               {c.count ? num.format(c.count) : 'нет'}
             </td>
             <td className="px-3 py-1.5 text-[11px] text-muted-foreground">{c.why}</td>
