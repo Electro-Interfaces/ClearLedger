@@ -21,8 +21,10 @@ import { Card, CardContent } from '@/components/ui/card'
 import { MetricTile } from '@/components/ui/metric-tile'
 import { cn } from '@/lib/utils'
 import {
-  createRequestsFromGaps, getChecks, getClosing, getPayroll, getRequests,
-  getSettlements, getTaxForecast, getVat, resolveRequests, updateRequest,
+  applyExportRules, createRequestsFromGaps, getChecks, getClosing, getExportLayer,
+  getPayroll, getRequests,
+  getSettlements, getTaxForecast, getVat, resolveRequests, updateAdjustment,
+  updateRequest,
   type SettlementKind, type SettlementsData, type VatData, type VatKind,
 } from '@/services/booksService'
 
@@ -911,6 +913,141 @@ export function BooksForecast({ companyId }: { companyId: string }) {
           </tr>
         </TableCard>
       </div>
+    </div>
+  )
+}
+
+
+/* ───────────────────────────── Слой выгрузки ──────────────────────────────── */
+
+/**
+ * «Бухгалтерия» → «Слой выгрузки»: чем то, что уйдёт в 1С, отличается от слоя.
+ *
+ * Слой — копия учёта клиента, «что есть». Выгрузка — «что мы предлагаем провести».
+ * Корректировка не меняет документ, а лежит рядом: было → стало, причина, автор.
+ * Утверждает человек; правила лишь предлагают, повторяя решение в новых периодах.
+ */
+export function BooksExportLayer({ companyId }: { companyId: string }) {
+  const [period, setPeriod] = useState<string>('')
+  const qc = useQueryClient()
+  const q = useQuery({
+    queryKey: ['books', 'export-layer', companyId, period],
+    queryFn: () => getExportLayer(companyId, period || undefined),
+  })
+  const refresh = () => qc.invalidateQueries({ queryKey: ['books', 'export-layer', companyId] })
+
+  const decide = useMutation({
+    mutationFn: (v: { id: string; status: string }) =>
+      updateAdjustment(companyId, v.id, { status: v.status }),
+    onSuccess: () => refresh(),
+    onError: (e) => toast.error(`Не вышло: ${(e as Error).message}`),
+  })
+  const apply = useMutation({
+    mutationFn: (pd: string) => applyExportRules(companyId, pd),
+    onSuccess: (r) => {
+      toast.success(r.created
+        ? `Правила предложили корректировок: ${r.created}`
+        : 'Правила ничего не предложили для этого периода')
+      refresh()
+    },
+  })
+
+  if (q.isError) {
+    return <div className="p-4"><QueryError message="Не удалось загрузить слой выгрузки" onRetry={() => q.refetch()} /></div>
+  }
+  if (!q.data) return <div className="p-6 text-sm text-muted-foreground">Загрузка…</div>
+  const d = q.data
+  const draft = d.adjustments.filter((a) => a.status === 'draft').length
+  const approved = d.adjustments.filter((a) => a.status === 'approved').length
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="grid gap-3 sm:grid-cols-4">
+        <MetricTile label="Черновики" value={String(draft)} hint="предложено, не утверждено" />
+        <MetricTile label="Утверждено к выгрузке" value={String(approved)}
+          tone={approved ? 'warning' : undefined} />
+        <MetricTile label="Изменится сумма" value={`${money.format(d.effect.amount)} ₽`}
+          hint="по утверждённым" />
+        <MetricTile label="Изменится НДС" value={`${money.format(d.effect.vat)} ₽`} />
+      </div>
+
+      <p className="text-[11px] text-muted-foreground">
+        Слой не меняется: корректировка лежит рядом с документом и уходит только в
+        выгрузку. Утверждённое не переписывается — поправить можно новой корректировкой.
+      </p>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <input value={period} onChange={(e) => setPeriod(e.target.value)}
+          placeholder="ГГГГ-ММ" maxLength={7}
+          className="h-8 w-28 rounded-md border border-border bg-background px-2.5 text-[13px] outline-none" />
+        <button onClick={() => period.length === 7 && apply.mutate(period)}
+          disabled={period.length !== 7 || apply.isPending}
+          className="h-8 rounded-md border border-border px-2.5 text-[13px] hover:bg-accent disabled:opacity-40">
+          {apply.isPending ? 'Применяем…' : 'Применить правила к периоду'}
+        </button>
+        <span className="text-[11px] text-muted-foreground">
+          правило заводит черновики — решение прошлого квартала может не подойти этому
+        </span>
+      </div>
+
+      {d.adjustments.length > 0 && (
+        <TableCard note="Каждая корректировка адресная: документ, поле и обоснование"
+          head={<><Th>Период</Th><Th>Документ</Th><Th>Что меняем</Th><Th>Было</Th><Th>Станет</Th>
+            <Th>Причина</Th><Th>Состояние</Th><Th>{''}</Th></>}>
+          {d.adjustments.map((a) => (
+            <tr key={a.id} className="border-b last:border-0 hover:bg-muted/40">
+              <td className="px-3 py-1.5 whitespace-nowrap">{monthLabel(a.period)}</td>
+              <td className="px-3 py-1.5 max-w-[220px] truncate">
+                {a.doc ? `${a.doc.label} № ${a.doc.number}` : '—'}
+              </td>
+              <td className="px-3 py-1.5 whitespace-nowrap">{a.fieldLabel}</td>
+              <td className="px-3 py-1.5 tabular-nums text-muted-foreground">{a.oldValue || '—'}</td>
+              <td className="px-3 py-1.5 tabular-nums font-medium">{a.newValue || '—'}</td>
+              <td className="px-3 py-1.5 max-w-[280px] truncate" title={a.reason}>{a.reason}</td>
+              <td className="px-3 py-1.5 whitespace-nowrap">{a.statusLabel}</td>
+              <td className="px-3 py-1.5 whitespace-nowrap text-right">
+                {a.status === 'draft' && (
+                  <>
+                    <button onClick={() => decide.mutate({ id: a.id, status: 'approved' })}
+                      className="rounded-md px-2 py-0.5 text-[12px] hover:bg-accent">
+                      утвердить
+                    </button>
+                    <button onClick={() => decide.mutate({ id: a.id, status: 'rejected' })}
+                      className="rounded-md px-2 py-0.5 text-[12px] text-muted-foreground hover:bg-accent">
+                      отклонить
+                    </button>
+                  </>
+                )}
+              </td>
+            </tr>
+          ))}
+        </TableCard>
+      )}
+
+      {d.rules.length > 0 && (
+        <TableCard note="Правила повторяют решение в новых периодах — но только предлагают"
+          head={<><Th>Правило</Th><Th>К чему применяется</Th><Th>Что ставит</Th>
+            <Th right>Применено</Th><Th>Действует с</Th></>}>
+          {d.rules.map((r) => (
+            <tr key={r.id} className="border-b last:border-0 hover:bg-muted/40">
+              <td className="px-3 py-1.5 max-w-[240px] truncate" title={r.reason}>{r.name}</td>
+              <td className="px-3 py-1.5 text-muted-foreground">
+                {r.docTypeLabel}{r.matchText ? ` · «${r.matchText}»` : ''}
+              </td>
+              <td className="px-3 py-1.5">{r.fieldLabel}: {r.newValue}</td>
+              <td className="px-3 py-1.5 text-right tabular-nums">{r.applied}</td>
+              <td className="px-3 py-1.5 text-muted-foreground">{r.validFrom || '—'}</td>
+            </tr>
+          ))}
+        </TableCard>
+      )}
+
+      {!d.adjustments.length && (
+        <Card><CardContent className="py-8 text-center text-sm text-muted-foreground">
+          Корректировок нет: выгрузка совпадает со слоем. Заводятся они из карточки
+          документа или правилом, когда решение повторяется каждый период.
+        </CardContent></Card>
+      )}
     </div>
   )
 }

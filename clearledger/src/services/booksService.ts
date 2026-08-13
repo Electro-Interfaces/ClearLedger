@@ -1175,3 +1175,62 @@ export interface TaxForecast {
 export const getTaxForecast = (companyId: string, year?: number) =>
   get<TaxForecast>(`/api/books/tax-forecast?company_id=${companyId}`
     + (year ? `&year=${year}` : ''))
+
+// ── Слой выгрузки ───────────────────────────────────────────────────────────
+// Слой — «что есть», выгрузка — «что предлагаем провести». Корректировка лежит
+// рядом с документом и не трогает исходник.
+
+export interface ExportAdjustmentItem {
+  id: string
+  period: string
+  field: string
+  fieldLabel: string
+  oldValue: string | null
+  newValue: string | null
+  reason: string
+  status: string
+  statusLabel: string
+  createdBy: string | null
+  approvedBy: string | null
+  ruleId: string | null
+  doc: {
+    id: string; type: string; label: string; number: string; date: string
+    counterparty: string; amount: number; vat: number
+  } | null
+}
+
+export interface ExportLayerData {
+  period: string | null
+  adjustments: ExportAdjustmentItem[]
+  rules: {
+    id: string; name: string; docType: string | null; docTypeLabel: string
+    matchText: string | null; field: string; fieldLabel: string; newValue: string
+    reason: string; active: boolean; validFrom: string | null; applied: number
+  }[]
+  byStatus: { status: string; label: string; count: number }[]
+  /** Что изменится в выгрузке против слоя — по утверждённым корректировкам. */
+  effect: { amount: number; vat: number; profitTax: number; docs: number }
+}
+
+export const getExportLayer = (companyId: string, period?: string) =>
+  get<ExportLayerData>(`/api/books/export-layer?company_id=${companyId}`
+    + (period ? `&period=${period}` : ''))
+
+export const createAdjustment = (
+  companyId: string, docId: string, field: string, newValue: string, reason: string,
+) => post<{ id: string; status: string }>(
+  `/api/books/export-layer/adjustments?company_id=${companyId}&doc_id=${docId}`
+  + `&field=${field}&new_value=${encodeURIComponent(newValue)}`
+  + `&reason=${encodeURIComponent(reason)}`, {})
+
+export const updateAdjustment = (
+  companyId: string, id: string, v: { status?: string; newValue?: string; reason?: string },
+) => patch<{ id: string; status: string; statusLabel: string }>(
+  `/api/books/export-layer/adjustments/${id}?company_id=${companyId}`
+  + (v.status ? `&status=${v.status}` : '')
+  + (v.newValue ? `&new_value=${encodeURIComponent(v.newValue)}` : '')
+  + (v.reason ? `&reason=${encodeURIComponent(v.reason)}` : ''), {})
+
+export const applyExportRules = (companyId: string, period: string) =>
+  post<{ created: number; rules: number; period: string }>(
+    `/api/books/export-layer/apply-rules?company_id=${companyId}&period=${period}`, {})
