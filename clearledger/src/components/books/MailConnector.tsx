@@ -18,8 +18,8 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
-  AlertTriangle, CheckCircle2, FileCheck, Inbox, Mail, Paperclip, Plus, RefreshCw,
-  Send, Trash2,
+  AlertTriangle, CheckCircle2, ChevronDown, FileCheck, Inbox, Loader2, Mail, Paperclip,
+  PlugZap, Plus, RefreshCw, Send, Trash2,
 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -264,9 +264,18 @@ export function MailConnector({ mode = 'all' }: { mode?: 'setup' | 'work' | 'all
                 onDelete={() => remove.mutate(a.id)} />
             ))}
             {(accounts.data?.rows ?? []).length === 0 && (
-              <div className="text-sm text-muted-foreground">
-                Ящиков пока нет. Заведите первый — например, тот, куда контрагенты
-                присылают закрывающие документы.
+              // Пустое состояние учит работе: что завести первым и что случится
+              // дальше. «Ящиков пока нет» сообщает факт и оставляет человека одного.
+              <div className="rounded-lg border border-dashed p-4">
+                <div className="text-sm font-medium">Ящиков пока нет</div>
+                <p className="mt-1 max-w-prose text-[13px] leading-relaxed text-muted-foreground">
+                  Начните с того, куда контрагенты присылают закрывающие документы.
+                  После проверки подключения письма начнут приходить сами, а вложения
+                  можно будет разбирать в документы — на вкладке «Загрузка».
+                </p>
+                <Button size="sm" className="mt-3" onClick={() => setForm({ ...EMPTY })}>
+                  <Plus className="size-4 mr-1.5" /> Завести ящик
+                </Button>
               </div>
             )}
           </div>
@@ -276,113 +285,160 @@ export function MailConnector({ mode = 'all' }: { mode?: 'setup' | 'work' | 'all
 
       {showSetup && form && (
         <Card>
-          <CardContent className="p-4 space-y-3">
-            <div className="text-sm font-medium">
-              {form.id ? 'Ящик' : 'Новый ящик'}
+          <CardContent className="p-0">
+            {/* Действия у заголовка, а не под простынёй полей: форма длинная, и
+                кнопка «Сохранить» на её дне заставляет прокручивать туда-обратно
+                при каждой правке. Проверка подключения стоит рядом — это часть
+                настройки, а не отдельный поход в список. */}
+            <div className="flex flex-wrap items-center gap-2 border-b px-4 py-3">
+              <span className="text-sm font-medium">
+                {form.id ? form.address || 'Ящик' : 'Новый ящик'}
+              </span>
+              {form.id && (
+                <span className="text-[11px] text-muted-foreground">{form.title}</span>
+              )}
+              <div className="ml-auto flex items-center gap-2">
+                {form.id && (
+                  <Button size="sm" variant="outline" disabled={test.isPending}
+                    onClick={() => test.mutate(form.id!)}>
+                    {test.isPending
+                      ? <Loader2 className="size-4 mr-1.5 animate-spin" />
+                      : <PlugZap className="size-4 mr-1.5" />}
+                    Проверить подключение
+                  </Button>
+                )}
+                <Button size="sm" variant="ghost" onClick={() => setForm(null)}>Отмена</Button>
+                <Button size="sm" onClick={() => save.mutate(form)}
+                  disabled={!form.address || save.isPending}>
+                  {save.isPending && <Loader2 className="size-4 mr-1.5 animate-spin" />}
+                  Сохранить
+                </Button>
+              </div>
             </div>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Адрес" hint="то, что видит контрагент">
-                <Input value={form.address} placeholder="buh@company.ru"
-                  onChange={(e) => setForm({ ...form, address: e.target.value })} />
-              </Field>
-              <Field label="Название" hint="как называть в пространстве">
-                <Input value={form.title} placeholder="Бухгалтерия"
-                  onChange={(e) => setForm({ ...form, title: e.target.value })} />
-              </Field>
-              <Field label="Назначение" hint="что сюда приходит и что с этим делать" span>
-                <Textarea rows={2} value={form.purpose ?? ''}
-                  placeholder="Контрагенты присылают закрывающие документы и счета"
-                  onChange={(e) => setForm({ ...form, purpose: e.target.value })} />
-              </Field>
-              <Field label="Режим">
-                <div className="flex gap-1">
-                  {MODES.map((m) => (
-                    <button key={m.key} onClick={() => setForm({ ...form, mode: m.key })}
-                      className={cn('rounded-md border px-2.5 py-1 text-xs',
-                        form.mode === m.key
-                          ? 'border-primary bg-primary/10 text-primary'
-                          : 'text-muted-foreground hover:bg-muted')}>
-                      {m.label}
-                    </button>
-                  ))}
+
+            <div className="divide-y">
+              <Section title="Ящик" note="как он называется и что с ним делает пространство">
+                <Field label="Адрес" hint="то, что видит контрагент">
+                  <Input value={form.address} placeholder="buh@company.ru"
+                    onChange={(e) => setForm({ ...form, address: e.target.value })} />
+                </Field>
+                <Field label="Название" hint="как называть в пространстве">
+                  <Input value={form.title} placeholder="Бухгалтерия"
+                    onChange={(e) => setForm({ ...form, title: e.target.value })} />
+                </Field>
+                <Field label="Назначение" span
+                  hint="что сюда приходит и что с этим делать — через месяц это единственное, по чему ящик узнают">
+                  <Textarea rows={2} value={form.purpose ?? ''}
+                    placeholder="Контрагенты присылают закрывающие документы и счета"
+                    onChange={(e) => setForm({ ...form, purpose: e.target.value })} />
+                </Field>
+                <Field label="Режим" span>
+                  <div className="flex flex-wrap gap-1">
+                    {MODES.map((m) => (
+                      <Toggle key={m.key} on={form.mode === m.key} label={m.label}
+                        onClick={() => setForm({ ...form, mode: m.key })} />
+                    ))}
+                  </div>
+                </Field>
+              </Section>
+
+              {form.mode !== 'out' && (
+                <Section title="Приём" note="откуда забираем письма и как часто">
+                  <Field label="Почтовый сервис" span
+                    hint="подставит серверы, порты и шифрование — остальное можно не трогать">
+                    <div className="flex flex-wrap gap-1">
+                      {PRESETS.map((p) => (
+                        <Toggle key={p.label} on={form.imapHost === p.imapHost} label={p.label}
+                          onClick={() => setForm({
+                            ...form, imapHost: p.imapHost, smtpHost: p.smtpHost,
+                            imapPort: 993, smtpPort: 587,
+                            imapSecurity: 'ssl', smtpSecurity: 'starttls',
+                          })} />
+                      ))}
+                    </div>
+                  </Field>
+                  <Field label="Сервер (IMAP)">
+                    <Input value={form.imapHost ?? ''} placeholder="imap.company.ru"
+                      onChange={(e) => setForm({ ...form, imapHost: e.target.value })} />
+                  </Field>
+                  <Field label="Порт и шифрование">
+                    <div className="flex flex-wrap items-center gap-1">
+                      <Input className="w-20" type="number" value={form.imapPort}
+                        onChange={(e) => setForm({ ...form, imapPort: Number(e.target.value) })} />
+                      {SECURITY.map((x) => (
+                        <Toggle key={x.key} on={form.imapSecurity === x.key} label={x.label}
+                          onClick={() => setForm({ ...form, imapSecurity: x.key })} />
+                      ))}
+                    </div>
+                  </Field>
+                  <Field label="Логин">
+                    <Input value={form.login ?? ''} placeholder="buh@company.ru"
+                      onChange={(e) => setForm({ ...form, login: e.target.value })} />
+                  </Field>
+                  <Field label="Пароль"
+                    hint={form.id ? 'пусто — оставить прежний' : 'хранится в базе под шифром'}>
+                    <Input type="password" value={form.password ?? ''} placeholder="••••••••"
+                      onChange={(e) => setForm({ ...form, password: e.target.value })} />
+                  </Field>
+                  <Field label="Папка">
+                    <Input value={form.imapFolder} placeholder="INBOX"
+                      onChange={(e) => setForm({ ...form, imapFolder: e.target.value })} />
+                  </Field>
+                  <Field label="Забирать почту" hint="0 — только вручную">
+                    <div className="flex items-center gap-2">
+                      <Input className="w-20" type="number" value={form.pollIntervalMin}
+                        onChange={(e) => setForm({ ...form,
+                          pollIntervalMin: Number(e.target.value) })} />
+                      <span className="text-xs text-muted-foreground">минут</span>
+                    </div>
+                  </Field>
+                </Section>
+              )}
+
+              {form.mode !== 'in' && (
+                <Section title="Отправка" note="с этого адреса уходят ответы из пространства">
+                  <Field label="Сервер (SMTP)">
+                    <Input value={form.smtpHost ?? ''} placeholder="smtp.company.ru"
+                      onChange={(e) => setForm({ ...form, smtpHost: e.target.value })} />
+                  </Field>
+                  <Field label="Порт и шифрование">
+                    <div className="flex flex-wrap items-center gap-1">
+                      <Input className="w-20" type="number" value={form.smtpPort}
+                        onChange={(e) => setForm({ ...form, smtpPort: Number(e.target.value) })} />
+                      {SECURITY.map((x) => (
+                        <Toggle key={x.key} on={form.smtpSecurity === x.key} label={x.label}
+                          onClick={() => setForm({ ...form, smtpSecurity: x.key })} />
+                      ))}
+                    </div>
+                  </Field>
+                  <Field label="Имя отправителя" hint="что видит контрагент в поле «От кого»">
+                    <Input value={form.displayName ?? ''} placeholder="Бухгалтерия ПРОМИЗОЛ"
+                      onChange={(e) => setForm({ ...form, displayName: e.target.value })} />
+                  </Field>
+                  <Field label="Подпись" hint="приклеивается к каждому письму" span>
+                    <Textarea rows={2} value={form.signature ?? ''}
+                      placeholder="С уважением, бухгалтерия ООО «ПРОМИЗОЛ СПБ», +7 812 …"
+                      onChange={(e) => setForm({ ...form, signature: e.target.value })} />
+                  </Field>
+                </Section>
+              )}
+
+              {/* Путь внедренца: секрет в окружении стека вместо пароля в базе.
+                  Сотруднику он не нужен ни разу, поэтому свёрнут — но и прятать
+                  его некуда: без него нельзя настроить ящик, чей пароль в .env. */}
+              <details className="group">
+                <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-3 text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/70 hover:text-muted-foreground">
+                  <ChevronDown className="size-3.5 transition-transform group-open:rotate-180" />
+                  Пароль в окружении стека
+                </summary>
+                <div className="grid gap-4 px-4 pb-4 sm:grid-cols-2">
+                  <Field label="Переменная с паролем" span
+                    hint="для ящиков, которые настраивает внедренец: значение живёт в .env стека, в базу не попадает">
+                    <Input value={form.secretEnv ?? ''} placeholder="MAIL_BUH_PASSWORD"
+                      onChange={(e) => setForm({ ...form, secretEnv: e.target.value })} />
+                  </Field>
                 </div>
-              </Field>
-              <Field label="Почтовый сервис" hint="подставит адреса серверов" span>
-                <div className="flex flex-wrap gap-1">
-                  {PRESETS.map((p) => (
-                    <Toggle key={p.label} on={form.imapHost === p.imapHost} label={p.label}
-                      onClick={() => setForm({ ...form, imapHost: p.imapHost,
-                        smtpHost: p.smtpHost, imapPort: 993, smtpPort: 587 })} />
-                  ))}
-                </div>
-              </Field>
-              <Field label="Сервер приёма (IMAP)">
-                <Input value={form.imapHost ?? ''} placeholder="imap.company.ru"
-                  onChange={(e) => setForm({ ...form, imapHost: e.target.value })} />
-              </Field>
-              <Field label="Порт и шифрование приёма">
-                <div className="flex gap-1 items-center">
-                  <Input className="w-24" type="number" value={form.imapPort}
-                    onChange={(e) => setForm({ ...form, imapPort: Number(e.target.value) })} />
-                  {SECURITY.map((x) => (
-                    <Toggle key={x.key} on={form.imapSecurity === x.key} label={x.label}
-                      onClick={() => setForm({ ...form, imapSecurity: x.key })} />
-                  ))}
-                </div>
-              </Field>
-              <Field label="Логин">
-                <Input value={form.login ?? ''} placeholder="buh@company.ru"
-                  onChange={(e) => setForm({ ...form, login: e.target.value })} />
-              </Field>
-              <Field label="Пароль"
-                hint={form.id ? 'пусто — оставить прежний' : 'хранится в базе под шифром'}>
-                <Input type="password" value={form.password ?? ''} placeholder="••••••••"
-                  onChange={(e) => setForm({ ...form, password: e.target.value })} />
-              </Field>
-              <Field label="Папка">
-                <Input value={form.imapFolder} placeholder="INBOX"
-                  onChange={(e) => setForm({ ...form, imapFolder: e.target.value })} />
-              </Field>
-              <Field label="Забирать почту" hint="0 — только вручную">
-                <div className="flex items-center gap-2">
-                  <Input className="w-24" type="number" value={form.pollIntervalMin}
-                    onChange={(e) => setForm({ ...form,
-                      pollIntervalMin: Number(e.target.value) })} />
-                  <span className="text-[11px] text-muted-foreground">минут</span>
-                </div>
-              </Field>
-              <Field label="Сервер отправки (SMTP)" hint="для ответов из пространства">
-                <Input value={form.smtpHost ?? ''} placeholder="smtp.company.ru"
-                  onChange={(e) => setForm({ ...form, smtpHost: e.target.value })} />
-              </Field>
-              <Field label="Порт и шифрование отправки">
-                <div className="flex gap-1 items-center">
-                  <Input className="w-24" type="number" value={form.smtpPort}
-                    onChange={(e) => setForm({ ...form, smtpPort: Number(e.target.value) })} />
-                  {SECURITY.map((x) => (
-                    <Toggle key={x.key} on={form.smtpSecurity === x.key} label={x.label}
-                      onClick={() => setForm({ ...form, smtpSecurity: x.key })} />
-                  ))}
-                </div>
-              </Field>
-              <Field label="Имя отправителя" hint="что видит контрагент в поле «От кого»">
-                <Input value={form.displayName ?? ''} placeholder="Бухгалтерия ПРОМИЗОЛ"
-                  onChange={(e) => setForm({ ...form, displayName: e.target.value })} />
-              </Field>
-              <Field label="Подпись" hint="приклеивается к каждому письму" span>
-                <Textarea rows={2} value={form.signature ?? ''}
-                  placeholder="С уважением, бухгалтерия ООО «ПРОМИЗОЛ СПБ», +7 812 ..."
-                  onChange={(e) => setForm({ ...form, signature: e.target.value })} />
-              </Field>
-              <Field label="Переменная с паролем" hint="альтернатива: секрет в .env стека">
-                <Input value={form.secretEnv ?? ''} placeholder="MAIL_BUH_PASSWORD"
-                  onChange={(e) => setForm({ ...form, secretEnv: e.target.value })} />
-              </Field>
-            </div>
-            <div className="flex gap-2">
-              <Button size="sm" onClick={() => save.mutate(form)}
-                disabled={!form.address || save.isPending}>Сохранить</Button>
-              <Button size="sm" variant="ghost" onClick={() => setForm(null)}>Отмена</Button>
+              </details>
             </div>
           </CardContent>
         </Card>
@@ -391,10 +447,10 @@ export function MailConnector({ mode = 'all' }: { mode?: 'setup' | 'work' | 'all
       {showSetup && (
       <Card>
         <CardContent className="p-4 space-y-3">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-medium">Правила</span>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-medium">Правила разбора</span>
             <span className="text-[11px] text-muted-foreground">
-              читаются по порядку, первое подходящее решает судьбу письма
+              читаются по порядку — первое подходящее решает судьбу письма
             </span>
             <Button size="sm" variant="outline" className="ml-auto"
               onClick={() => setRuleForm({
@@ -413,10 +469,14 @@ export function MailConnector({ mode = 'all' }: { mode?: 'setup' | 'work' | 'all
               onDelete={() => removeRule.mutate(r.id)} />
           ))}
           {(rules.data?.rows ?? []).length === 0 && (
-            <p className="text-sm text-muted-foreground">
-              Правил нет — письма просто складываются в переписку. Заведите первое:
-              например, «письма с домена контрагента с вложением — в приёмку документов».
-            </p>
+            <div className="rounded-lg border border-dashed p-4">
+              <div className="text-sm font-medium">Правил нет</div>
+              <p className="mt-1 max-w-prose text-[13px] leading-relaxed text-muted-foreground">
+                Письма складываются в переписку и ждут человека. Правило делает за него
+                первый шаг: «с домена контрагента с вложением — в приёмку документов»,
+                «со словом „счёт“ — в задачу», «от незнакомых — в карантин».
+              </p>
+            </div>
           )}
 
           {ruleForm && (
@@ -751,16 +811,18 @@ function AccountRow({ a, onEdit, onPoll, onTest, onDelete }: {
   // задан переменной окружения.
   const ready = !!a.imapHost && (a.passwordSet || a.secretPresent)
   return (
-    <div className="rounded-md border p-2.5">
+    <div className="group rounded-lg border p-3 transition-colors hover:border-border">
       <div className="flex flex-wrap items-center gap-2">
-        <Inbox className="size-4 text-muted-foreground" />
+        <Inbox className="size-4 shrink-0 text-muted-foreground" />
         <button onClick={onEdit} className="text-sm font-medium hover:text-primary">
           {a.address}
         </button>
-        {a.title && <span className="text-[11px] text-muted-foreground">{a.title}</span>}
-        <span className={cn('rounded border px-1.5 py-0.5 text-[10px]',
+        {a.title && <span className="text-xs text-muted-foreground">{a.title}</span>}
+        {/* Состояние словом, а не только цветом: цвет — второй носитель, не первый. */}
+        <span className={cn('inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px]',
           ready ? 'border-emerald-500/40 text-emerald-600 dark:text-emerald-400'
                 : 'border-amber-500/40 text-amber-700 dark:text-amber-400')}>
+          {ready ? <CheckCircle2 className="size-3" /> : <AlertTriangle className="size-3" />}
           {ready ? 'настроен' : !a.imapHost ? 'нет сервера' : 'нет пароля'}
         </span>
         <div className="ml-auto flex items-center gap-1">
@@ -858,15 +920,38 @@ function RuleRow({ r, counterparties, onEdit, onDelete }: {
   )
 }
 
+/**
+ * Поле формы: имя сверху, подсказка ПОД полем.
+ *
+ * Подсказка в одной строке с именем («Порт и шифрование приёма — для ответов из
+ * пространства») делает лейбл длиннее самого поля, и глаз перестаёт находить
+ * начало строки. Снизу она читается как пояснение к тому, что уже введено.
+ */
 function Field({ label, hint, span, children }: {
   label: string; hint?: string; span?: boolean; children: React.ReactNode
 }) {
   return (
-    <label className={cn('block space-y-1', span && 'sm:col-span-2')}>
-      <span className="text-[11px] text-muted-foreground">
-        {label}{hint && <span className="ml-1 opacity-70">— {hint}</span>}
-      </span>
+    <label className={cn('block', span && 'sm:col-span-2')}>
+      <span className="mb-1 block text-xs font-medium text-foreground/80">{label}</span>
       {children}
+      {hint && <span className="mt-1 block text-[11px] text-muted-foreground">{hint}</span>}
     </label>
+  )
+}
+
+/** Секция настройки: заголовок с пояснением и сетка полей под ним. */
+function Section({ title, note, children }: {
+  title: string; note?: string; children: React.ReactNode
+}) {
+  return (
+    <div className="px-4 py-4">
+      <div className="mb-3">
+        <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/70">
+          {title}
+        </div>
+        {note && <div className="mt-0.5 text-[11px] text-muted-foreground">{note}</div>}
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2">{children}</div>
+    </div>
   )
 }
