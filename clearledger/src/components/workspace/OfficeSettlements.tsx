@@ -13,14 +13,16 @@
  * «Взаиморасчёты» разойдутся с оборотками на копейках округления.
  */
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 
 import { QueryError } from '@/components/common/QueryError'
 import { Card, CardContent } from '@/components/ui/card'
 import { MetricTile } from '@/components/ui/metric-tile'
 import { cn } from '@/lib/utils'
 import {
-  getChecks, getClosing, getPayroll, getSettlements, getVat,
+  createRequestsFromGaps, getChecks, getClosing, getPayroll, getRequests,
+  getSettlements, getVat, resolveRequests, updateRequest,
   type SettlementKind, type SettlementsData, type VatData, type VatKind,
 } from '@/services/booksService'
 
@@ -359,6 +361,18 @@ const KIND_LABEL: Record<string, string> = {
 export function BooksClosing({ companyId }: { companyId: string }) {
   const [period, setPeriod] = useState<string | null>(null)
   const [openGap, setOpenGap] = useState<string | null>(null)
+  const qc = useQueryClient()
+  const takeControl = useMutation({
+    mutationFn: (v: { rule: string; title: string }) =>
+      createRequestsFromGaps(companyId, v.rule, period),
+    onSuccess: (r) => {
+      toast.success(r.created
+        ? `Взято под контроль: ${r.created}, срок до ${r.dueDate.split('-').reverse().join('.')}`
+        : 'Всё уже на контроле — новых требований не появилось')
+      qc.invalidateQueries({ queryKey: ['books', 'requests', companyId] })
+    },
+    onError: (e) => toast.error(`Не вышло: ${(e as Error).message}`),
+  })
   const q = useQuery({
     queryKey: ['books', 'closing', companyId, period],
     queryFn: () => getClosing(companyId, period),
@@ -422,6 +436,18 @@ export function BooksClosing({ companyId }: { companyId: string }) {
                   </div>
                 </div>
               </button>
+              {/* Находка живёт до перезагрузки данных — под контроль её берёт человек. */}
+              <div className="flex items-center gap-2 border-t px-3 py-1.5">
+                <button
+                  onClick={() => takeControl.mutate({ rule: g.key, title: g.title })}
+                  disabled={takeControl.isPending}
+                  className="rounded-md border border-border px-2.5 py-1 text-[12px] hover:bg-accent disabled:opacity-40">
+                  Взять под контроль
+                </button>
+                <span className="text-[11px] text-muted-foreground">
+                  заведёт требования по каждому документу со сроком две недели
+                </span>
+              </div>
               {openGap === g.key && (
                 <div className="overflow-x-auto border-t">
                   <table className="w-full text-sm">
@@ -633,4 +659,160 @@ export function BooksChecks({ companyId }: { companyId: string }) {
       ))}
     </div>
   )
+}
+
+
+/* ───────────────────────────── Требования документов ──────────────────────── */
+
+const REQ_STATUSES = ['open', 'requested', 'promised', 'received', 'disputed', 'dropped'] as const
+
+/**
+ * «Бухгалтерия» → «Требования»: что ждём от контрагентов и что для этого делали.
+ *
+ * Находка из «Закрытия периода» живёт до перезагрузки данных; требование — та же
+ * находка, взятая под контроль: со сроком, ответственным и лентой обращений.
+ * Закрывается оно появлением документа в слое, а не кнопкой «сделано» — иначе
+ * реестр расходится с учётом.
+ */
+export function BooksRequests({ companyId }: { companyId: string }) {
+  const [status, setStatus] = useState<string>('')
+  const [openRow, setOpenRow] = useState<string | null>(null)
+  const [text, setText] = useState('')
+  const qc = useQueryClient()
+  const q = useQuery({
+    queryKey: ['books', 'requests', companyId, status],
+    queryFn: () => getRequests(companyId, { status: status || undefined }),
+  })
+  const refresh = () => qc.invalidateQueries({ queryKey: ['books', 'requests', companyId] })
+
+  const check = useMutation({
+    mutationFn: () => resolveRequests(companyId),
+    onSuccess: (r) => {
+      toast.success(r.resolved
+        ? `Документы нашлись у ${r.resolved} требований`
+        : 'Новых документов пока нет')
+      refresh()
+    },
+  })
+  const patch = useMutation({
+    mutationFn: (v: { id: string; status?: string; escalation?: string }) =>
+      updateRequest(companyId, v.id, v),
+    onSuccess: () => { setText(''); refresh() },
+    onError: (e) => toast.error(`Не вышло: ${(e as Error).message}`),
+  })
+
+  if (q.isError) {
+    return <div className="p-4"><QueryError message="Не удалось загрузить требования" onRetry={() => q.refetch()} /></div>
+  }
+  if (!q.data) return <div className="p-6 text-sm text-muted-foreground">Загрузка…</div>
+  const d = q.data
+
+  if (!d.total) {
+    return (
+      <div className="p-6 space-y-2">
+        <p className="text-sm text-muted-foreground">
+          Реестр пуст. Требования заводятся из «Закрытия периода»: там видно, чего не
+          хватает, и находку можно взять под контроль.
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="grid gap-3 sm:grid-cols-4">
+        <MetricTile label="В работе" value={String(d.open)} hint="ждём документ" />
+        <MetricTile label="Просрочено" value={String(d.overdue)}
+          tone={d.overdue ? 'warning' : undefined} hint="срок прошёл" />
+        <MetricTile label="Ждём документов на" value={`${money.format(d.amount)} ₽`} />
+        <MetricTile label="Всего в реестре" value={String(d.total)} />
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <button onClick={() => setStatus('')}
+          className={cn('rounded-md px-2.5 py-1 text-xs',
+            !status ? 'bg-muted font-medium' : 'text-muted-foreground hover:bg-muted/50')}>
+          все
+        </button>
+        {d.byStatus.map((s) => (
+          <button key={s.status} onClick={() => setStatus(s.status)}
+            className={cn('rounded-md px-2.5 py-1 text-xs',
+              status === s.status ? 'bg-muted font-medium' : 'text-muted-foreground hover:bg-muted/50')}>
+            {s.label} <span className="ml-1 tabular-nums opacity-70">{s.count}</span>
+          </button>
+        ))}
+        <button onClick={() => check.mutate()} disabled={check.isPending}
+          className="ml-auto rounded-md border border-border px-2.5 py-1 text-xs hover:bg-accent disabled:opacity-40">
+          {check.isPending ? 'Проверяем…' : 'Проверить, не пришли ли'}
+        </button>
+      </div>
+
+      <TableCard note="Требование закрывается появлением документа в слое, а не отметкой «сделано»"
+        head={<><Th>Период</Th><Th>Контрагент</Th><Th>Чего ждём</Th><Th right>Сумма</Th>
+          <Th>Срок</Th><Th>Состояние</Th></>}>
+        {d.items.map((r) => (
+          <>
+            <tr key={r.id} onClick={() => setOpenRow(openRow === r.id ? null : r.id)}
+              className="border-b last:border-0 hover:bg-accent/40 cursor-pointer">
+              <td className="px-3 py-1.5 whitespace-nowrap">{monthLabel(r.period)}</td>
+              <td className="px-3 py-1.5 max-w-[240px] truncate">{r.counterparty || '—'}</td>
+              <td className="px-3 py-1.5 max-w-[280px] truncate text-muted-foreground">{r.docKind}</td>
+              <td className="px-3 py-1.5 text-right tabular-nums">{money.format(r.amount)}</td>
+              <td className={cn('px-3 py-1.5 tabular-nums whitespace-nowrap',
+                r.overdue && 'text-amber-600')}>
+                {r.dueDate ? r.dueDate.split('-').reverse().join('.') : '—'}
+                {r.overdue && ' просрочено'}
+              </td>
+              <td className="px-3 py-1.5 whitespace-nowrap">
+                {r.statusLabel}
+                {r.escalations.length > 0 && (
+                  <span className="ml-1.5 text-[10px] text-muted-foreground">
+                    обращений {r.escalations.length}
+                  </span>
+                )}
+              </td>
+            </tr>
+            {openRow === r.id && (
+              <tr key={`${r.id}-open`} className="border-b bg-muted/20">
+                <td colSpan={6} className="px-3 py-3 space-y-3">
+                  {r.escalations.length > 0 && (
+                    <div className="space-y-1">
+                      {r.escalations.map((e, i) => (
+                        <div key={i} className="text-[11px] text-muted-foreground">
+                          {e.at.slice(0, 16).replace('T', ' ')} · {e.who}
+                          {e.channel ? ` · ${e.channel}` : ''} — {e.text}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input value={text} onChange={(ev) => setText(ev.target.value)}
+                      placeholder="Что сделали: написали, позвонили, обещали к пятнице"
+                      className="h-8 min-w-[280px] flex-1 rounded-md border border-border bg-background px-2.5 text-[13px] outline-none" />
+                    <button
+                      onClick={() => text.trim() && patch.mutate({ id: r.id, escalation: text.trim() })}
+                      disabled={!text.trim() || patch.isPending}
+                      className="h-8 rounded-md border border-border px-2.5 text-[13px] hover:bg-accent disabled:opacity-40">
+                      Записать обращение
+                    </button>
+                    {REQ_STATUSES.filter((s) => s !== r.status).map((s) => (
+                      <button key={s} onClick={() => patch.mutate({ id: r.id, status: s })}
+                        className="h-8 rounded-md px-2.5 text-[13px] text-muted-foreground hover:bg-accent">
+                        {REQ_STATUS_LABEL[s]}
+                      </button>
+                    ))}
+                  </div>
+                </td>
+              </tr>
+            )}
+          </>
+        ))}
+      </TableCard>
+    </div>
+  )
+}
+
+const REQ_STATUS_LABEL: Record<string, string> = {
+  open: 'На контроле', requested: 'Запрошен', promised: 'Обещан',
+  received: 'Получен', disputed: 'Спорный', dropped: 'Не ждём',
 }

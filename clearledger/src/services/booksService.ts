@@ -6,7 +6,7 @@
  * выручке на копейки округления — а именно сходимость с бухгалтерией здесь и есть
  * смысл продукта.
  */
-import { get, post } from './apiClient'
+import { get, patch, post } from './apiClient'
 
 export interface BooksOverview {
   revenue: number
@@ -1072,3 +1072,64 @@ export interface ChecksData {
 
 export const getChecks = (companyId: string) =>
   get<ChecksData>(`/api/books/checks?company_id=${companyId}`)
+
+// ── Требования документов ───────────────────────────────────────────────────
+// Находка, взятая под контроль: срок, ответственный, лента обращений, итог.
+
+export interface DocRequestItem {
+  id: string
+  period: string
+  rule: string
+  counterparty: string
+  counterpartyId: string | null
+  docKind: string
+  amount: number
+  status: string
+  statusLabel: string
+  channel: string | null
+  dueDate: string | null
+  assignee: string | null
+  contact: string | null
+  note: string | null
+  escalations: { at: string; who: string; channel: string; text: string }[]
+  /** Просрочка — состояние срока, а не статус: статус говорит, что сделали. */
+  overdue: boolean
+  sourceDocId: string | null
+  resolvedAt: string | null
+}
+
+export interface RequestsData {
+  items: DocRequestItem[]
+  total: number
+  open: number
+  overdue: number
+  amount: number
+  byStatus: { status: string; label: string; count: number }[]
+}
+
+export const getRequests = (companyId: string, opts: { period?: string; status?: string } = {}) =>
+  get<RequestsData>(`/api/books/requests?company_id=${companyId}`
+    + (opts.period ? `&period=${opts.period}` : '')
+    + (opts.status ? `&status=${opts.status}` : ''))
+
+/** Поставить находки правила на контроль. Повторный вызов дублей не заводит. */
+export const createRequestsFromGaps = (
+  companyId: string, rule: string, period?: string | null,
+) => post<{ created: number; skipped: number; title: string; dueDate: string }>(
+  `/api/books/requests/from-gaps?company_id=${companyId}&rule=${rule}`
+  + (period ? `&period=${period}` : ''), {})
+
+export const updateRequest = (
+  companyId: string, id: string,
+  v: { status?: string; escalation?: string; dueDate?: string; assignee?: string },
+) => patch<{ id: string; status: string; statusLabel: string }>(
+  `/api/books/requests/${id}?company_id=${companyId}`
+  + (v.status ? `&status=${v.status}` : '')
+  + (v.escalation ? `&escalation=${encodeURIComponent(v.escalation)}` : '')
+  + (v.dueDate ? `&due_date=${v.dueDate}` : '')
+  + (v.assignee ? `&assignee=${encodeURIComponent(v.assignee)}` : ''), {})
+
+/** Закрыть требования, по которым документ уже появился в слое. */
+export const resolveRequests = (companyId: string) =>
+  post<{ checked: number; resolved: number }>(
+    `/api/books/requests/resolve?company_id=${companyId}`, {})
