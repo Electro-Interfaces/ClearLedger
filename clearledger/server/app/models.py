@@ -1567,6 +1567,11 @@ class VatEntry(Base):
     invoice_title: Mapped[str | None] = mapped_column(String(500), nullable=True)
     registrar: Mapped[str | None] = mapped_column(String(500), nullable=True)
     operation_code: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Реквизиты книги покупок и продаж: событие, дата счёта-фактуры, документ оплаты,
+    # договор, дополнительный лист и корректируемый период. Из них собирается
+    # декларация и сверка с контрагентом; своих колонок они не заслуживают —
+    # у журнала счетов-фактур этих полей нет вовсе.
+    meta: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     source: Mapped[str] = mapped_column(String(30), nullable=False, default="1c_dt")
     external_key: Mapped[str | None] = mapped_column(String(300), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
