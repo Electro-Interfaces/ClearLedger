@@ -64,10 +64,12 @@ DOC_LABELS = {
 # («чем закрыт этот счёт»), а не «где хранятся счета-фактуры».
 DOC_SECTIONS = [
     ("sales", "Продажи", ["invoice_out", "sale", "vat_invoice_out"]),
-    ("purchases", "Закупки", ["purchase", "vat_invoice_in", "purchase_correction", "proxy"]),
+    ("purchases", "Закупки", ["purchase", "invoice_in", "vat_invoice_in",
+                              "purchase_correction", "proxy"]),
     ("money", "Деньги", ["bank_in", "bank_out", "payment_order",
                          "cash_in", "cash_out", "advance_report"]),
     ("warehouse", "Склад", ["demand_note"]),
+    ("recon", "Сверка", ["act_recon"]),
     # Служебные документы отдельно: пять сотен регламентных операций в общем списке
     # хоронят первичку, ради которой реестр и открывают.
     ("closing", "Закрытие периода", ["closing_op", "manual_entry"]),
@@ -526,6 +528,7 @@ async def docs(
     company_id: str,
     doc_type: str | None = None,
     section: str | None = Query(None, description="участок учёта: sales, purchases, money…"),
+    line_kind: str | None = Query(None, description="разрез по типу строки: goods | service"),
     date_from: str | None = None,
     date_to: str | None = None,
     limit: int = Query(100, ge=1, le=500),
@@ -549,9 +552,16 @@ async def docs(
     if date_to:
         q = q.where(AccountingDoc.date <= date_to)
 
-    total = (await db.execute(select(func.count()).select_from(q.subquery()))).scalar_one()
-    rows = (await db.execute(
-        q.order_by(AccountingDoc.date.desc()).limit(limit).offset(offset))).scalars().all()
+    if line_kind:
+        picked = [d for d in (await db.execute(
+            q.order_by(AccountingDoc.date.desc()))).scalars()
+            if any((l.get("kind") or "goods") == line_kind for l in (d.lines or []))]
+        total = len(picked)
+        rows = picked[offset:offset + limit]
+    else:
+        total = (await db.execute(select(func.count()).select_from(q.subquery()))).scalar_one()
+        rows = (await db.execute(
+            q.order_by(AccountingDoc.date.desc()).limit(limit).offset(offset))).scalars().all()
 
     # Счётчики видов — по ТОМУ ЖЕ периоду, что и список: иначе кнопка «Реализация
     # товаров · 431» стоит рядом с реестром на десяток строк, и человек считает,
@@ -970,10 +980,16 @@ async def model(
             select(func.count(func.distinct(AccountingDoc.counterparty_inn)))
             .join(GlEntry, GlEntry.doc_id == AccountingDoc.id)
             .where(GlEntry.company_id == cid))).scalar_one()
+        cp_filled = (await db.execute(
+            select(func.count()).select_from(GlEntry)
+            .join(AccountingDoc, GlEntry.doc_id == AccountingDoc.id)
+            .where(GlEntry.company_id == cid,
+                   AccountingDoc.counterparty_inn.is_not(None),
+                   AccountingDoc.counterparty_inn != ""))).scalar_one()
         dimensions.append({
             "key": "counterparty", "label": "Контрагент",
             "field": "accounting_docs.counterparty_inn", "cardinality": cp_card,
-            "fill_pct": round(linked * 100 / entries, 1) if entries else 0,
+            "fill_pct": round(cp_filled * 100 / entries, 1) if entries else 0,
             "canonical": True, "grain": "через документ проводки",
             "members": [{"label": v, "count": n} for v, n in top_cp]})
 
@@ -1039,7 +1055,7 @@ async def model(
         ],
     }
 
-    return {"rows": entries, "l1_files": 0, "layers": layers, "fact": fact,
+    return {"rows": entries, "l1_files": intakes, "layers": layers, "fact": fact,
             "dimensions": dimensions, "quality": quality}
 
 

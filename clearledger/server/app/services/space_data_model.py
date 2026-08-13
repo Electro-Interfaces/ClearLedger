@@ -21,7 +21,7 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
@@ -46,11 +46,11 @@ _ENTITIES: list[tuple[str, str, list[tuple]]] = [
          "ось: код объекта",
          ServiceLocation.region_id.is_(None), "без региона"),
         ("counterparties", "Контрагенты", Counterparty,
-         "Реестры аренды и э/э · корпоративная зарядка · Финансы", "договоры · корпоратив · закупка",
+         "Выгрузка бухгалтерии клиента", "документы · договоры · продажи",
          "ИНН + нормализованное имя",
          or_(Counterparty.inn.is_(None), Counterparty.inn == ""), "без ИНН — сведение по имени"),
         ("contracts", "Договоры", Contract,
-         "Реестры аренды и э/э · корпоративная зарядка · руками", "эксплуатация · корпоратив · финансы",
+         "Выгрузка бухгалтерии клиента", "документы · расчёты · сверка",
          "контрагент → договор → объекты",
          Contract.scope_type == "unassigned", "охват не задан"),
         ("contract_locations", "Охват договоров", ContractLocation,
@@ -204,11 +204,19 @@ _ENTITIES: list[tuple[str, str, list[tuple]]] = [
          # Долг схемы, а не ошибка загрузки: документ-регистратор записан СТРОКОЙ.
          # Пока это текст, проводку нельзя открыть карточкой документа, а аналитику
          # (субконто) не свести — через COM она недоступна вовсе.
-         GlEntry.doc_title.is_not(None), "документ строкой, не ссылкой"),
+         GlEntry.doc_id.is_(None), "документ не найден в первичке"),
         ("accounting_docs", "Первичные документы", AccountingDoc,
          "Реализации, услуги и поступления из бухгалтерии", "продажи · услуги · сверка",
          "вид + номер + дата + контрагент",
-         AccountingDoc.counterparty_inn.is_(None), "контрагент без ИНН — не свести"),
+         # Разрыв — только у видов, где контрагент бывает по природе: у регламентной
+         # операции и операции вручную его нет вовсе, и без этого условия экран
+         # показывал 511 «разрывов» при шести настоящих.
+         and_(AccountingDoc.doc_type.in_(
+             ("sale", "purchase", "invoice_out", "invoice_in",
+              "vat_invoice_out", "vat_invoice_in", "act_recon", "bank_in", "bank_out")),
+             or_(AccountingDoc.counterparty_inn.is_(None),
+                 AccountingDoc.counterparty_inn == "")),
+         "контрагент без ИНН — не свести"),
         ("periods", "Периоды", Period,
          "Регламентные операции закрытия месяца", "бухгалтерия · сверка первички",
          "год + месяц", Period.status == "open", "не закрыт — цифры ещё поедут"),

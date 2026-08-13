@@ -41,8 +41,6 @@ const MONTHS = ['', 'январь', 'февраль', 'март', 'апрель'
   'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь']
 
 const DOC_LABEL: Record<string, string> = {
-  sale_goods: 'Реализация товаров',
-  sale_services: 'Оказание услуг',
   purchase: 'Поступление',
 }
 
@@ -88,14 +86,16 @@ function TableCard({ note, head, children }: {
 
 const REV_COPY = {
   sales: {
-    docType: 'sale_goods',
+    docType: 'sale',
+    lineKind: 'goods',
     clients: 'Покупатели',
     items: 'Номенклатура',
     itemsHint: 'по сумме отгрузок',
     docsNote: 'Документы реализации товаров за выбранный период',
   },
   services: {
-    docType: 'sale_services',
+    docType: 'sale',
+    lineKind: 'service',
     clients: 'Заказчики',
     items: 'Виды услуг',
     itemsHint: 'по сумме актов',
@@ -124,7 +124,7 @@ export function RevenuePanel() {
   if (!companyId) return <NoCompany />
   // Реестр документов ходит своей ручкой — разрез его не считает.
   const view = sub.endsWith('_docs')
-    ? <RevDocs companyId={companyId} docType={copy.docType} note={copy.docsNote} />
+    ? <RevDocs companyId={companyId} docType={copy.docType} lineKind={copy.lineKind} note={copy.docsNote} />
     : q.isError ? <div className="p-4"><QueryError onRetry={() => q.refetch()} /></div>
     : !q.data ? <Loading />
     : sub.endsWith('_clients') ? <RevClients data={q.data} title={copy.clients} />
@@ -236,13 +236,14 @@ function RevItems({ data, title, hint }: { data: SliceData; title: string; hint:
   )
 }
 
-function RevDocs({ companyId, docType, note }: {
-  companyId: string; docType: string; note: string
+function RevDocs({ companyId, docType, lineKind, note }: {
+  companyId: string; docType: string; lineKind?: string; note: string
 }) {
   const { period } = useFilters()
   const q = useQuery({
-    queryKey: ['books', 'docs', companyId, docType, period.from, period.to],
-    queryFn: () => getDocs(companyId, docType, { from: period.from, to: period.to }),
+    queryKey: ['books', 'docs', companyId, docType, lineKind, period.from, period.to],
+    queryFn: () => getDocs(companyId, docType, { from: period.from, to: period.to },
+                           undefined, 0, lineKind),
   })
   if (q.isError) return <div className="p-4"><QueryError onRetry={() => q.refetch()} /></div>
   if (!q.data) return <Loading />

@@ -121,10 +121,12 @@ const periodQuery = (o: PeriodOpts = {}) =>
 
 export const getDocs = (
   companyId: string, docType?: string, period?: PeriodOpts, section?: string, offset = 0,
+  lineKind?: string,
 ) =>
   get<{ rows: DocRow[]; total: number; kinds: DocKind[]; sections: DocSection[] }>(
     `/api/books/docs?company_id=${companyId}${docType ? `&doc_type=${docType}` : ''}`
     + (section && !docType ? `&section=${section}` : '')
+    + (lineKind ? `&line_kind=${lineKind}` : '')
     + periodQuery(period) + `&limit=500&offset=${offset}`)
 
 /**
