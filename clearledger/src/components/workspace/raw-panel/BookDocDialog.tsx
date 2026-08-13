@@ -131,10 +131,21 @@ function DocBody({ d }: { d: DocCard }) {
           <span className={cn(d.status !== 'Проведён' && 'text-amber-600')}>{d.status}</span>
         } />
         <Field label="Период" value={d.periodStatus === 'closed' ? 'закрыт 🔒' : 'открыт'} />
-        <Field label="Договор" value={d.contract ? `№ ${d.contract.number} от ${ru(d.contract.date)}` : null} wide />
-        <Field label="Назначение" value={d.operation} wide />
+        <Field label="Договор" value={d.contract
+          ? `№ ${d.contract.number}${d.contract.date ? ` от ${ru(d.contract.date)}` : ''}`
+          : d.details['Договор']} wide />
+        {/* Входящий документ поставщика — реквизит, по которому поступление сверяют
+            с накладной: наш номер к его накладной отношения не имеет. */}
+        <Field label="Документ поставщика" value={d.externalNumber
+          ? `№ ${d.externalNumber}${d.externalDate ? ` от ${ru(d.externalDate)}` : ''}` : null} wide />
+        <Field label="Назначение платежа" value={d.operation} wide />
         <Field label="Склад" value={d.warehouse} />
         <Field label="Организация" value={d.organization} wide />
+        {/* Прочие реквизиты вида: счёт организации, статья ДДС, основание счёта-фактуры,
+            период акта сверки. Договор уже показан выше — не дублируем. */}
+        {Object.entries(d.details)
+          .filter(([k]) => k !== 'Договор' && k !== 'Организация')
+          .map(([k, v]) => <Field key={k} label={k} value={v} wide={k === 'Основание'} />)}
       </div>
 
       {isInvoice && (

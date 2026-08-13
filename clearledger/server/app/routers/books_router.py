@@ -942,6 +942,92 @@ async def counterparty_card(
     }
 
 
+# ── Акт сверки взаиморасчётов ────────────────────────────────────────────────
+# Документ, который просят чаще любого другого: «пришлите сверку». Собирается из
+# движения по счетам расчётов (62 — покупатель, 60 — поставщик) с нарастающим
+# сальдо, каждая строка привязана к своему документу. Это ответ не «сколько
+# должен», а «из чего этот долг сложился» — с ним идут к контрагенту спорить.
+
+@router.get("/act")
+async def reconciliation_act(
+    company_id: str,
+    counterparty_id: str,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Акт сверки: движение по расчётам с нарастающим сальдо за период."""
+    cid = await assert_company_member(company_id, current_user, db)
+    day_from, day_to = _day(date_from), _day(date_to)
+
+    k = (await db.execute(select(Counterparty).where(
+        Counterparty.company_id == cid,
+        Counterparty.id == counterparty_id))).scalar_one_or_none()
+    if k is None:
+        return {"error": "not_found"}
+
+    # Счета расчётов: и покупательские, и поставщицкие — контрагент бывает обеими
+    # сторонами сразу, и «две сверки» на одно юрлицо человеку не нужны.
+    acc_match = "(e.account_dt LIKE '62%' OR e.account_kt LIKE '62%' "                 "OR e.account_dt LIKE '60%' OR e.account_kt LIKE '60%')"
+    base = f"""
+        FROM gl_entries e
+        JOIN accounting_docs d ON d.id = e.doc_id
+       WHERE e.company_id = :cid AND d.counterparty_id::text = :kid AND {acc_match}
+    """
+    params: dict[str, Any] = {"cid": str(cid), "kid": counterparty_id,
+                              "df": day_from, "dt": day_to}
+
+    opening = 0.0
+    if day_from:
+        opening = _num((await db.execute(text(f"""
+            SELECT coalesce(sum(CASE WHEN e.account_dt LIKE '62%' OR e.account_dt LIKE '60%'
+                                     THEN e.amount ELSE -e.amount END), 0)
+            {base} AND e.entry_date < :df
+        """), params)).scalar_one())
+
+    rows = (await db.execute(text(f"""
+        SELECT e.entry_date, d.id, d.doc_type, d.number, d.date, e.account_dt, e.account_kt,
+               e.amount, e.content
+        {base}
+          AND (CAST(:df AS date) IS NULL OR e.entry_date >= :df)
+          AND (CAST(:dt AS date) IS NULL OR e.entry_date <= :dt)
+        ORDER BY e.entry_date, d.date, e.id
+    """), params)).all()
+
+    out, saldo = [], opening
+    debit_total = credit_total = 0.0
+    for r in rows:
+        # Дебет счёта расчётов — «отгрузили / оплатили мы», кредит — «оплатил он /
+        # получили от него». Знак сальдо: плюс — долг в нашу пользу.
+        is_debit = (r[5] or "").startswith(("62", "60"))
+        amount = _num(r[7])
+        saldo += amount if is_debit else -amount
+        debit_total += amount if is_debit else 0.0
+        credit_total += 0.0 if is_debit else amount
+        out.append({
+            "date": r[0].isoformat(),
+            "docId": str(r[1]),
+            "docType": r[2], "docLabel": DOC_LABELS.get(r[2], r[2]),
+            "docNumber": r[3], "docDate": r[4],
+            "account": r[5] if is_debit else r[6],
+            "debit": amount if is_debit else 0.0,
+            "credit": 0.0 if is_debit else amount,
+            "saldo": round(saldo, 2),
+            "content": r[8],
+        })
+
+    return {
+        "counterparty": {"id": str(k.id), "name": k.name, "inn": k.inn, "kpp": k.kpp},
+        "periodFrom": date_from, "periodTo": date_to,
+        "opening": round(opening, 2),
+        "closing": round(saldo, 2),
+        "debitTotal": round(debit_total, 2),
+        "creditTotal": round(credit_total, 2),
+        "rows": out,
+    }
+
+
 # ── Просмотрщик документа ────────────────────────────────────────────────────
 # Реестр отвечает «какие документы есть», карточка контрагента — «что у нас с
 # ним». Оба заканчиваются строкой таблицы, а дальше человеку нужен САМ документ:
@@ -1773,6 +1859,11 @@ async def doc_card(
         "periodStatus": d.period_status,
         "externalId": d.external_id,
         "warehouse": d.warehouse_code,
+        # Входящий документ поставщика и реквизиты, обязательные для вида: у платежа
+        # назначение и счёт организации, у счёта-фактуры основание и код операции.
+        "externalNumber": d.external_number,
+        "externalDate": d.external_date,
+        "details": d.details or {},
         # Строки как они приехали: у разных видов свой набор полей, поэтому отдаём
         # как есть — просмотрщик показывает то, что в строке действительно было.
         "lines": d.lines or [],

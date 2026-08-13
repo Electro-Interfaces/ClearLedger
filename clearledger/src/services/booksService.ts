@@ -308,6 +308,39 @@ export interface DocumentCard {
 export const getDocumentCard = (companyId: string, docId: string) =>
   get<DocumentCard>(`/api/books/document?company_id=${companyId}&doc_id=${docId}`)
 
+/** Строка акта сверки: движение по расчётам с нарастающим сальдо. */
+export interface ActRow {
+  date: string
+  docId: string
+  docType: string
+  docLabel: string
+  docNumber: string
+  docDate: string
+  account: string | null
+  debit: number
+  credit: number
+  saldo: number
+  content: string | null
+}
+
+export interface ActData {
+  counterparty: { id: string; name: string; inn: string | null; kpp: string | null }
+  periodFrom: string | null
+  periodTo: string | null
+  opening: number
+  closing: number
+  debitTotal: number
+  creditTotal: number
+  rows: ActRow[]
+}
+
+/** Акт сверки: из чего сложился долг, а не только «сколько должен». */
+export const getAct = (
+  companyId: string, counterpartyId: string, period?: PeriodOpts,
+) =>
+  get<ActData>(`/api/books/act?company_id=${companyId}`
+    + `&counterparty_id=${counterpartyId}` + periodQuery(period))
+
 export const getCounterpartyStats = (companyId: string) =>
   get<{ rows: CounterpartyStats[] }>(
     `/api/books/counterparties?company_id=${companyId}&limit=1000`)
@@ -496,6 +529,11 @@ export interface DocCard {
   periodStatus: string
   externalId: string
   warehouse: string | null
+  /** Входящий документ поставщика: № и дата ЕГО накладной, а не нашей. */
+  externalNumber: string | null
+  externalDate: string | null
+  /** Реквизиты, обязательные для вида: счёт организации, статья ДДС, основание, период. */
+  details: Record<string, string>
   /** Строки как приехали из 1С: набор полей у видов разный. */
   lines: DocLine[]
   payments: { date: string | null; title: string | null; amount: number; vat: number }[]
