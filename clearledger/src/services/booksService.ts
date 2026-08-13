@@ -255,6 +255,31 @@ export interface CounterpartyCard {
   }[]
 }
 
+/**
+ * Строка списка контрагентов с цифрами: обороты, оплаты, долг, последний документ.
+ * Считается по документам и сальдо источника — тем же, чем живут карточка и
+ * «Взаиморасчёты», поэтому цифра в списке и в карточке всегда одна.
+ */
+export interface CounterpartyStats {
+  id: string
+  name: string
+  inn: string | null
+  kind: string | null
+  sales: number
+  purchases: number
+  paidIn: number
+  paidOut: number
+  docs: number
+  lastDoc: string | null
+  receivable: number
+  payable: number
+  contracts: number
+}
+
+export const getCounterpartyStats = (companyId: string) =>
+  get<{ rows: CounterpartyStats[] }>(
+    `/api/books/counterparties?company_id=${companyId}&limit=1000`)
+
 export const getCounterpartyCard = (companyId: string, counterpartyId: string) =>
   get<CounterpartyCard>(`/api/books/counterparty?company_id=${companyId}`
     + `&counterparty_id=${counterpartyId}`)

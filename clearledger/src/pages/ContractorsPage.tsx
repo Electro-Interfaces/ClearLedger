@@ -7,6 +7,9 @@
 import { useState, useMemo, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
+import {
+  getCounterpartyStats, type CounterpartyStats,
+} from '@/services/booksService'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -327,6 +330,37 @@ function SettlementsBlock({ cp }: { cp: Counterparty }) {
 // и эту карточку. Пока список видов держал фронт, он знал только коды ГИГ (ПТУ, ОРП),
 // и офисная компания видела в карточке технические `bank_out` и `vat_invoice_in`.
 const docTypeLabel = (t: string, label?: string | null) => label || t
+
+/** Цифры контрагента в строке списка: оборот, долг и дата последней операции. */
+function CounterpartyStatsLine({ st }: { st?: CounterpartyStats }) {
+  if (!st) return null
+  const turnover = st.sales + st.purchases
+  const debt = st.receivable || st.payable
+  if (!turnover && !debt && !st.docs) return null
+  return (
+    <div className="mt-0.5 flex items-center gap-2 text-[10px] tabular-nums text-muted-foreground">
+      {turnover > 0 && <span>{fmtShort(turnover)} ₽</span>}
+      {st.receivable > 0 && (
+        <span className="text-amber-600 dark:text-amber-400">
+          должен {fmtShort(st.receivable)}
+        </span>
+      )}
+      {st.payable > 0 && (
+        <span className="text-sky-600 dark:text-sky-400">
+          мы {fmtShort(st.payable)}
+        </span>
+      )}
+      {st.lastDoc && <span className="ml-auto">{st.lastDoc}</span>}
+    </div>
+  )
+}
+
+/** Короткая сумма для строки списка: 3 830 837 ₽ не помещается рядом с именем. */
+function fmtShort(v: number): string {
+  if (Math.abs(v) >= 1_000_000) return `${(v / 1_000_000).toFixed(1)} млн`
+  if (Math.abs(v) >= 1_000) return `${Math.round(v / 1_000)} тыс`
+  return String(Math.round(v))
+}
 
 function ActivityBlock({ cp }: { cp: Counterparty }) {
   const { data } = useCounterpartyActivity(cp.id)
@@ -1096,8 +1130,33 @@ function CorpClientsView() {
   )
 }
 
+/**
+ * Как отсортирован список. Алфавит отвечает на «где НУЖНЫЙ контрагент», а работа с
+ * массивом начинается с других вопросов: кто больше всех должен, с кем самый большой
+ * оборот, кто давно не появлялся. Поэтому сортировка — циклическая кнопка, а не
+ * единственный алфавит.
+ */
+const CP_SORTS = [
+  { key: 'name', label: 'по имени' },
+  { key: 'turnover', label: 'по обороту' },
+  { key: 'debt', label: 'по долгу' },
+  { key: 'last', label: 'по последней операции' },
+  { key: 'contracts', label: 'по договорам' },
+] as const
+type CpSort = (typeof CP_SORTS)[number]['key']
+
+/** Быстрые отборы поверх ролей — вопросы, с которыми открывают справочник. */
+const CP_FLAGS = [
+  { key: 'debt', label: 'С долгом' },
+  { key: 'advance', label: 'С авансом' },
+  { key: 'noinn', label: 'Без ИНН' },
+  { key: 'nodocs', label: 'Без документов' },
+  { key: 'nocontract', label: 'Без договора' },
+] as const
+type CpFlag = (typeof CP_FLAGS)[number]['key']
+
 export function ContractorsPage() {
-  const { company } = useCompany()
+  const { company, companyId } = useCompany()
   const isEnergy = company.profileId === 'energy'
   const { data: counterparties = [], isLoading } = useCounterparties()
   const { data: allContracts = [] } = useContracts()
@@ -1106,8 +1165,25 @@ export function ContractorsPage() {
   const isNarrow = useMaxWidth(1024)
   const [search, setSearch] = useState('')
   const [roleFilter, setRoleFilter] = useState<string>('all')
-  const [sortBy, setSortBy] = useState<'name' | 'contracts'>('name')
+  const [flag, setFlag] = useState<CpFlag | null>(null)
+  const [sortBy, setSortBy] = useState<CpSort>('name')
   const [selectedId, setSelectedId] = useState<string | null>(null)
+
+  // Цифры по контрагентам: обороты, долг, дата последней операции. Считает сервер
+  // по документам и сальдо источника — тем же, чем живут карточка и «Взаиморасчёты».
+  // У компаний без бухгалтерии в пространстве ответ пуст, и список выглядит как
+  // раньше: колонок с цифрами и отборов по долгу просто нет.
+  const { data: statsResp } = useQuery({
+    queryKey: ['books', 'cp-stats', companyId],
+    queryFn: () => getCounterpartyStats(companyId),
+    enabled: !!companyId,
+  })
+  const stats = useMemo(() => {
+    const m = new Map<string, CounterpartyStats>()
+    for (const r of statsResp?.rows ?? []) m.set(r.id, r)
+    return m
+  }, [statsResp])
+  const hasStats = stats.size > 0
 
   // Число договоров на контрагента (ключ = externalRef из 1С или наш id).
   const contractCount = useMemo(() => {
@@ -1121,6 +1197,22 @@ export function ContractorsPage() {
   const cpContracts = (c: Counterparty) =>
     (c.externalRef ? contractCount.get(c.externalRef) ?? 0 : 0) + (contractCount.get(c.id) ?? 0)
 
+  // Номера договоров контрагента — чтобы его можно было найти по бумажке договора.
+  const contractsByCp = useMemo(() => {
+    const m = new Map<string, string[]>()
+    for (const c of allContracts) {
+      if (!c.counterpartyId) continue
+      const list = m.get(c.counterpartyId) ?? []
+      list.push(`${c.number ?? ''} ${c.type ?? ''}`)
+      m.set(c.counterpartyId, list)
+    }
+    return m
+  }, [allContracts])
+  const contractNumbers = (c: Counterparty) => [
+    ...(c.externalRef ? contractsByCp.get(c.externalRef) ?? [] : []),
+    ...(contractsByCp.get(c.id) ?? []),
+  ]
+
   // Счётчики по ролям (для чипсов-фильтров).
   const roleCounts = useMemo(() => {
     const m = new Map<string, number>()
@@ -1133,13 +1225,32 @@ export function ContractorsPage() {
     const q = search.trim().toLowerCase()
     const list = counterparties.filter((c) => {
       if (roleFilter !== 'all' && !(c.aliases ?? []).includes(roleFilter)) return false
+      const st = stats.get(c.id)
+      if (flag === 'debt' && !(st && (st.receivable > 0 || st.payable > 0))) return false
+      if (flag === 'advance' && !(st && st.paidIn > 0 && !st.sales)) return false
+      if (flag === 'noinn' && (c.inn ?? '').trim()) return false
+      if (flag === 'nodocs' && (st?.docs ?? 0) > 0) return false
+      if (flag === 'nocontract' && cpContracts(c) > 0) return false
       if (!q) return true
-      return c.name.toLowerCase().includes(q) || (c.inn ?? '').includes(q)
+      // Ищем по всему, что бывает написано на бумажке перед глазами: имя,
+      // ИНН, КПП, ОГРН и номер договора этого контрагента.
+      const hay = [c.name, c.fullName, c.inn, c.kpp, c.ogrn].filter(Boolean).join(' ').toLowerCase()
+      if (hay.includes(q)) return true
+      return contractNumbers(c).some((n) => n.toLowerCase().includes(q))
     })
-    if (sortBy === 'contracts')
-      return [...list].sort((a, b) => cpContracts(b) - cpContracts(a))
-    return list
-  }, [counterparties, search, roleFilter, sortBy, contractCount])
+    const st = (c: Counterparty) => stats.get(c.id)
+    const byNum = (f: (c: Counterparty) => number) =>
+      [...list].sort((a, b) => f(b) - f(a))
+    switch (sortBy) {
+      case 'contracts': return byNum(cpContracts)
+      case 'turnover': return byNum((c) => (st(c)?.sales ?? 0) + (st(c)?.purchases ?? 0))
+      case 'debt': return byNum((c) => Math.max(st(c)?.receivable ?? 0, st(c)?.payable ?? 0))
+      // Без операций — в конец: пустая дата не должна конкурировать со свежей.
+      case 'last': return [...list].sort((a, b) =>
+        (st(b)?.lastDoc ?? '').localeCompare(st(a)?.lastDoc ?? ''))
+      default: return list
+    }
+  }, [counterparties, search, roleFilter, flag, sortBy, contractCount, stats])
 
   const selected = counterparties.find((c) => c.id === selectedId) ?? null
   const chip = chipCls
@@ -1187,7 +1298,7 @@ export function ContractorsPage() {
           <CardContent className="p-3 flex flex-col gap-2.5 min-h-0">
             <div className="relative">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-              <Input placeholder="Поиск по имени или ИНН..." value={search}
+              <Input placeholder="Имя, ИНН, КПП, ОГРН или номер договора…" value={search}
                 onChange={(e) => setSearch(e.target.value)} className="pl-8 h-9" />
             </div>
 
@@ -1203,6 +1314,20 @@ export function ContractorsPage() {
               ))}
             </div>
 
+            {/* Быстрые отборы. Показываем там, где есть чем отбирать: без цифр
+                бухгалтерии «с долгом» и «без документов» ответили бы пустотой. */}
+            {hasStats && (
+              <div className="flex flex-wrap gap-1">
+                {CP_FLAGS.map((f) => (
+                  <button key={f.key}
+                    onClick={() => setFlag((cur) => (cur === f.key ? null : f.key))}
+                    className={chip(flag === f.key)}>
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+            )}
+
             <CounterpartyFormDialog>
               <Button size="sm" variant="outline" className="w-full"><Plus className="size-4 mr-2" /> Добавить контрагента</Button>
             </CounterpartyFormDialog>
@@ -1211,11 +1336,16 @@ export function ContractorsPage() {
             <div className="flex items-center justify-between text-[11px] text-muted-foreground px-0.5">
               <span>Найдено: {filtered.length}{filtered.length !== counterparties.length && ` из ${counterparties.length}`}</span>
               <button
-                onClick={() => setSortBy((s) => (s === 'name' ? 'contracts' : 'name'))}
+                onClick={() => setSortBy((cur) => {
+                  const order = hasStats ? CP_SORTS : CP_SORTS.filter(
+                    (x) => x.key === 'name' || x.key === 'contracts')
+                  const i = order.findIndex((x) => x.key === cur)
+                  return order[(i + 1) % order.length].key
+                })}
                 className="hover:text-foreground transition-colors"
                 title="Переключить сортировку"
               >
-                сортировка: {sortBy === 'name' ? 'по имени' : 'по договорам'}
+                сортировка: {CP_SORTS.find((x) => x.key === sortBy)?.label}
               </button>
             </div>
 
@@ -1256,6 +1386,11 @@ export function ContractorsPage() {
                           </span>
                         )}
                     </div>
+                    {/* Цифры под именем: с кем работаем, сколько он должен и когда
+                        был последний документ. Строка справочника без них отвечает
+                        только «такой контрагент есть» — по ней нельзя ни выбрать,
+                        ни отсортировать. */}
+                    <CounterpartyStatsLine st={stats.get(c.id)} />
                   </button>
                 )
               })}
