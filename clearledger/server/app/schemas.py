@@ -1044,6 +1044,10 @@ class CounterpartyLocationsResponse(BaseModel):
 class CounterpartyDocGroup(BaseModel):
     """Группа документов БП контрагента по виду документа."""
     docType: str
+    # Человеческое имя вида — с СЕРВЕРА: словарь один на выгрузки, реестр документов
+    # и эту карточку. Пока имя собирал фронт, у офисной компании в карточке стояли
+    # технические коды (`bank_out`, `vat_invoice_in`): её виды в словаре ГИГ не значились.
+    label: str | None = None
     count: int
     amount: float
 
@@ -1051,6 +1055,7 @@ class CounterpartyDocGroup(BaseModel):
 class CounterpartyDocBrief(BaseModel):
     """Последний документ БП контрагента (для карточки в «Контрагентах»)."""
     docType: str
+    label: str | None = None
     number: str
     date: str
     amount: float

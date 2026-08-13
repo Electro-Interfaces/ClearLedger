@@ -321,16 +321,12 @@ function SettlementsBlock({ cp }: { cp: Counterparty }) {
   )
 }
 
-// ─── Блок «Документы в учёте» (fuel: документы БП по ИНН контрагента) ────────
-const DOC_TYPE_LABELS: Record<string, string> = {
-  'ПТУ': 'Поступление (ПТУ)',
-  'ОРП': 'Розничные продажи (ОРП)',
-  'ОПЗС': 'Производство за смену (ОПЗС)',
-  'ПеремещениеТоваров': 'Перемещение товаров',
-  'СписаниеТоваров': 'Списание товаров',
-  'КорректировкаПоступления': 'Корректировка поступления',
-}
-const docTypeLabel = (t: string) => DOC_TYPE_LABELS[t] ?? t
+// ─── Блок «Документы в учёте»: документы контрагента, сведённые с его карточкой ──
+//
+// Имя вида приходит С СЕРВЕРА (`label`): словарь один на реестр документов, выгрузки
+// и эту карточку. Пока список видов держал фронт, он знал только коды ГИГ (ПТУ, ОРП),
+// и офисная компания видела в карточке технические `bank_out` и `vat_invoice_in`.
+const docTypeLabel = (t: string, label?: string | null) => label || t
 
 function ActivityBlock({ cp }: { cp: Counterparty }) {
   const { data } = useCounterpartyActivity(cp.id)
@@ -351,7 +347,7 @@ function ActivityBlock({ cp }: { cp: Counterparty }) {
       <div className="flex flex-wrap gap-1 mb-2">
         {data.byType.map((g) => (
           <Badge key={g.docType} variant="outline" className="text-[11px] text-muted-foreground">
-            {docTypeLabel(g.docType)}: {g.count}
+            {docTypeLabel(g.docType, g.label)}: {g.count}
           </Badge>
         ))}
       </div>
@@ -368,7 +364,7 @@ function ActivityBlock({ cp }: { cp: Counterparty }) {
           <TableBody>
             {data.recent.map((d, i) => (
               <TableRow key={`${d.number}-${i}`}>
-                <TableCell className="text-sm">{docTypeLabel(d.docType)}</TableCell>
+                <TableCell className="text-sm">{docTypeLabel(d.docType, d.label)}</TableCell>
                 <TableCell className="font-mono text-sm">{d.number}</TableCell>
                 <TableCell className="text-sm whitespace-nowrap">{d.date}</TableCell>
                 <TableCell className="text-right text-sm tabular-nums">
@@ -380,7 +376,7 @@ function ActivityBlock({ cp }: { cp: Counterparty }) {
         </Table>
       </div>
       <p className="mt-1.5 text-[11px] text-muted-foreground">
-        Последние 10 документов БП, сопоставление по ИНН.
+        Последние 10 документов, сведённых с карточкой контрагента.
       </p>
     </div>
   )

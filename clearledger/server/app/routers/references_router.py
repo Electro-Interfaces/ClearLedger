@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import assert_company_member, get_current_user
@@ -831,27 +831,51 @@ async def get_counterparty_locations(
     )
 
 
+# Имя вида документа — из общего словаря бухгалтерии плюс коды ГИГ (документы БП
+# приезжают русскими именами объектов 1С). Держим на сервере: тот же словарь нужен
+# реестру документов, выгрузкам и карточке контрагента, а копия во фронте
+# расходится при первом же новом виде.
+_FUEL_DOC_LABELS = {
+    "ПТУ": "Поступление (ПТУ)",
+    "ОРП": "Розничные продажи (ОРП)",
+    "ОПЗС": "Производство за смену (ОПЗС)",
+    "ПеремещениеТоваров": "Перемещение товаров",
+    "СписаниеТоваров": "Списание товаров",
+    "КорректировкаПоступления": "Корректировка поступления",
+}
+
+
+def _doc_label(doc_type: str) -> str:
+    from app.routers.books_router import DOC_LABELS
+    return DOC_LABELS.get(doc_type) or _FUEL_DOC_LABELS.get(doc_type) or doc_type
+
+
 @router.get("/counterparties/{item_id}/activity", response_model=CounterpartyActivityResponse)
 async def get_counterparty_activity(
     item_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Активность контрагента в учёте (fuel/ГИГ): документы БП по ИНН —
-    сколько, на какую сумму, каких видов, последние 10 (для карточки контрагента)."""
+    """Активность контрагента в учёте: его документы — сколько, на какую сумму,
+    каких видов, последние 10 (для карточки контрагента).
+
+    Отбор идёт по СВЯЗИ (`accounting_docs.counterparty_id`), а ИНН остаётся
+    запасным ключом для документов, которые ещё не сведены со справочником
+    (`services/books_links.py`). Пока ключом был только ИНН, у контрагента без
+    него карточка выглядела пустой, хотя документы в учёте есть.
+    """
     uid = _parse_uuid(item_id)
     cp = (await db.execute(select(Counterparty).where(Counterparty.id == uid))).scalar_one_or_none()
     if not cp:
         raise HTTPException(status_code=404, detail="Контрагент не найден")
     await assert_company_member(str(cp.company_id), current_user, db)
     inn = (cp.inn or "").strip()
-    if not inn:
-        return CounterpartyActivityResponse()
 
-    base = (
-        AccountingDoc.company_id == cp.company_id,
-        AccountingDoc.counterparty_inn == inn,
-    )
+    match = AccountingDoc.counterparty_id == cp.id
+    if inn:
+        match = or_(match, and_(AccountingDoc.counterparty_id.is_(None),
+                                AccountingDoc.counterparty_inn == inn))
+    base = (AccountingDoc.company_id == cp.company_id, match)
     groups = (await db.execute(
         select(AccountingDoc.doc_type, func.count(), func.coalesce(func.sum(AccountingDoc.amount), 0.0))
         .where(*base).group_by(AccountingDoc.doc_type)
@@ -872,9 +896,10 @@ async def get_counterparty_activity(
         docs=sum(n for _, n, _ in groups),
         amount=round(sum(a for _, _, a in groups), 2),
         lastDate=last_date,
-        byType=[CounterpartyDocGroup(docType=t, count=n, amount=round(a, 2)) for t, n, a in groups],
+        byType=[CounterpartyDocGroup(docType=t, label=_doc_label(t), count=n, amount=round(a, 2))
+                for t, n, a in groups],
         recent=[CounterpartyDocBrief(
-            docType=d.doc_type, number=d.number, date=d.date,
+            docType=d.doc_type, label=_doc_label(d.doc_type), number=d.number, date=d.date,
             amount=d.amount, operationType=d.operation_type,
         ) for d in recent],
     )

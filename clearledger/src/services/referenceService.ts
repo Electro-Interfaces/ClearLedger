@@ -484,11 +484,15 @@ export async function getLocationContracts(locationId: string): Promise<Location
   return get<LocationContracts>(`/api/references/locations/${locationId}/contracts`)
 }
 
-// ---- Активность контрагента в учёте (fuel/ГИГ: документы БП по ИНН) ----
+// ---- Активность контрагента в учёте (его документы: по связи, ИНН — запасной ключ) ----
 
-export interface CounterpartyDocGroup { docType: string; count: number; amount: number }
+/** `label` — имя вида с сервера: словарь один на реестр документов, выгрузки и карточку. */
+export interface CounterpartyDocGroup {
+  docType: string; label?: string | null; count: number; amount: number
+}
 export interface CounterpartyDocBrief {
-  docType: string; number: string; date: string; amount: number; operationType?: string | null
+  docType: string; label?: string | null
+  number: string; date: string; amount: number; operationType?: string | null
 }
 export interface CounterpartyActivity {
   docs: number
@@ -498,7 +502,7 @@ export interface CounterpartyActivity {
   recent: CounterpartyDocBrief[]
 }
 
-/** Документы БП контрагента (сопоставление по ИНН) — для карточки в «Контрагентах». */
+/** Документы контрагента (по связи с карточкой) — для блока в «Контрагентах». */
 export async function getCounterpartyActivity(counterpartyId: string): Promise<CounterpartyActivity> {
   if (!isApiEnabled()) return { docs: 0, amount: 0, lastDate: null, byType: [], recent: [] }
   return get<CounterpartyActivity>(`/api/references/counterparties/${counterpartyId}/activity`)
