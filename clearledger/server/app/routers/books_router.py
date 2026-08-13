@@ -22,7 +22,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import assert_company_member, get_current_user
 from app.database import get_db
 from app.models import (
-    AccountingDoc, Counterparty, GlAccount, GlEntry, GlReference, Period, User,
+    AccountingDoc, Counterparty, GlAccount, GlEntry, GlReference,
+    NomenclatureItem, Period, User,
 )
 
 router = APIRouter(prefix="/books", tags=["Бухгалтерия пространства"])
@@ -958,3 +959,85 @@ async def model(
 
     return {"rows": entries, "l1_files": 1, "layers": layers, "fact": fact,
             "dimensions": dimensions, "quality": quality}
+
+
+# Наборы данных нормализованного слоя: у сетевых профилей пункт меню на канал приёма,
+# у офиса — на набор, приехавший из бухгалтерии. Для каждого витрина одинаковая:
+# объём, период, ключ связи, заполнение полей, топ-значения.
+DATASETS = {
+    "entries": ("Проводки", GlEntry, "дата + корреспонденция счетов"),
+    "docs": ("Документы", AccountingDoc, "вид + номер + дата + контрагент"),
+    "counterparties": ("Контрагенты", Counterparty, "ИНН"),
+    "nomenclature": ("Номенклатура", NomenclatureItem, "код номенклатуры"),
+    "refs": ("Справочники учёта", GlReference, "вид + наименование"),
+}
+
+
+@router.get("/dataset")
+async def dataset(
+    company_id: str,
+    key: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Витрина одного набора данных: сколько, за какой период, чем связан, чем полон."""
+    cid = await assert_company_member(company_id, current_user, db)
+    if key not in DATASETS:
+        return {"error": "неизвестный набор"}
+    label, model, link = DATASETS[key]
+
+    total = (await db.execute(select(func.count()).select_from(model)
+                              .where(model.company_id == cid))).scalar_one()
+
+    # Поля, по которым осмысленно смотреть заполнение и разброс значений.
+    FIELDS: dict[str, list[tuple]] = {
+        "entries": [(GlEntry.account_dt, "Счёт дебета"), (GlEntry.account_kt, "Счёт кредита"),
+                    (GlEntry.doc_kind, "Вид документа"), (GlEntry.content, "Содержание")],
+        "docs": [(AccountingDoc.doc_type, "Вид документа"),
+                 (AccountingDoc.counterparty_inn, "ИНН контрагента"),
+                 (AccountingDoc.number, "Номер"), (AccountingDoc.date, "Дата")],
+        "counterparties": [(Counterparty.inn, "ИНН"), (Counterparty.kpp, "КПП"),
+                           (Counterparty.legal_address, "Юридический адрес"),
+                           (Counterparty.phone, "Телефон"), (Counterparty.email, "Почта")],
+        "nomenclature": [(NomenclatureItem.code, "Код"), (NomenclatureItem.unit, "Единица"),
+                         (NomenclatureItem.unit_label, "Вид номенклатуры")],
+        "refs": [(GlReference.kind, "Вид справочника"), (GlReference.code, "Код")],
+    }
+
+    fields = []
+    for column, flabel in FIELDS[key]:
+        filled = (await db.execute(
+            select(func.count()).select_from(model)
+            .where(model.company_id == cid, column.is_not(None), column != ""))).scalar_one()
+        distinct = (await db.execute(
+            select(func.count(func.distinct(column))).where(model.company_id == cid))).scalar_one()
+        fields.append({
+            "field": str(column).split(".")[-1], "label": flabel,
+            "fill_pct": round(filled * 100 / total, 1) if total else 0,
+            "distinct": distinct,
+        })
+
+    # Разбивка: по чему набор делится в первую очередь.
+    GROUP = {"entries": GlEntry.doc_kind, "docs": AccountingDoc.doc_type,
+             "counterparties": Counterparty.type, "nomenclature": NomenclatureItem.unit_label,
+             "refs": GlReference.kind}
+    top = [
+        {"label": DOC_LABELS.get(str(v), REF_LABELS.get(str(v), str(v) if v else "—")),
+         "count": n}
+        for v, n in (await db.execute(
+            select(GROUP[key], func.count()).where(model.company_id == cid)
+            .group_by(GROUP[key]).order_by(func.count().desc()).limit(12))).all()
+    ]
+
+    period = {"from": None, "to": None}
+    if key == "entries":
+        f, t = (await db.execute(select(func.min(GlEntry.entry_date), func.max(GlEntry.entry_date))
+                                 .where(GlEntry.company_id == cid))).one()
+        period = {"from": f.isoformat() if f else None, "to": t.isoformat() if t else None}
+    elif key == "docs":
+        f, t = (await db.execute(select(func.min(AccountingDoc.date), func.max(AccountingDoc.date))
+                                 .where(AccountingDoc.company_id == cid))).one()
+        period = {"from": f, "to": t}
+
+    return {"key": key, "label": label, "table": model.__tablename__, "records": total,
+            "link": link, "period": period, "fields": fields, "top": top}

@@ -10,7 +10,7 @@
  */
 
 import type { ComponentType } from 'react'
-import { BarChart3, Gauge, BookOpen, FileOutput, HardHat, Building2, Megaphone, Sparkles, GitCompare, Activity, Wallet, Boxes, Receipt, Truck, Briefcase, Scale, FileText, Database, Network, ShieldCheck } from 'lucide-react'
+import { BarChart3, Gauge, BookOpen, FileOutput, HardHat, Building2, Megaphone, Sparkles, GitCompare, Activity, Wallet, Boxes, Receipt, Truck, Briefcase, Scale, FileText } from 'lucide-react'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useWorkspace, type CoreMode } from '@/contexts/WorkspaceContext'
 import { modeAllowed } from '@/config/accessModules'
@@ -208,11 +208,6 @@ export function useWorkspaceSections(): WorkspaceSection[] {
   // Раньше топливный профиль их не получал: считалось, что те же панели живут
   // страницами Учёта (`/normalization`, `/reconciliation`). После разреза Учёта у
   // розницы нет — страницы осиротели, а «Данные» открывались без единого раздела.
-  // Компания без объектов: «Нормализация» и «Сверка» — не её слова. Источник один
-  // (бухгалтерия клиента), и разделы идут от него: что приехало, во что легло, сходится ли.
-  const dataSources: WorkspaceSection = { mode: 'data_sources', label: 'Источники', icon: Database, items: [], connected: true }
-  const dataModel: WorkspaceSection = { mode: 'data_model', label: 'База пространства', icon: Network, items: [], connected: true }
-  const dataQuality: WorkspaceSection = { mode: 'data_quality', label: 'Качество', icon: ShieldCheck, items: [], connected: true }
   const normalize: WorkspaceSection = { mode: 'normalize', label: 'Нормализация', icon: Sparkles, items: [], connected: true }
   const reconcile: WorkspaceSection = { mode: 'reconcile', label: 'Сверка', icon: GitCompare, items: [], connected: true }
 
@@ -224,7 +219,7 @@ export function useWorkspaceSections(): WorkspaceSection[] {
   // Офис — свой короткий список: сетевых разделов у него нет вовсе, и подмешивать их
   // (пустыми, «неподключёнными») значило бы показывать рельсу про чужую жизнь.
   const all = isOffice
-    ? [revGoods, revServices, booksLedger, booksPrimary, dataSources, dataModel, dataQuality]
+    ? [revGoods, revServices, booksLedger, booksPrimary, normalize]
     : isEnergy
     ? [sales, salesSessions, salesCommerce, corporate, marketing,
        projects, projectsAnalytics, ops, opsEquipment, opsEconomy,

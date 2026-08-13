@@ -380,14 +380,39 @@ async def station_sales(
             "receipts": int(p.receipts or 0),
             "unpaidSessions": int(unpaid or 0),
         },
-        "byMonth": [{
-            "bucket": r.bucket,
-            "sessions": int(r.sessions), "kwh": float(r.kwh), "amount": float(r.amount),
-            "payments": int(getattr(by_month_pay.get(r.bucket), "payments", 0) or 0),
-            "paid": float(getattr(by_month_pay.get(r.bucket), "paid", 0) or 0),
-            "receipts": int(getattr(by_month_pay.get(r.bucket), "receipts", 0) or 0),
-        } for r in by_month],
+        "byMonth": _fill_months(by_month, by_month_pay),
     }
+
+
+def _fill_months(rows, pay_by_bucket) -> list[dict[str, Any]]:
+    """Помесячный ряд без дыр: месяц простоя показывается нулём, а не пропадает.
+
+    Раньше строки без сессий просто отсутствовали, и в таблице реализации рядом
+    вставали месяцы с разрывом в полгода — простой станции выглядел как отсутствие
+    данных (замечание И. Н. Ступина 13.08.2026)."""
+    have = {r.bucket: r for r in rows}
+    if not have:
+        return []
+    def _key(b: str) -> tuple[int, int]:
+        y, m = b.split("-")
+        return int(y), int(m)
+    (y, m), (ly, lm) = min(map(_key, have)), max(map(_key, have))
+    out: list[dict[str, Any]] = []
+    while (y, m) <= (ly, lm):
+        b = f"{y:04d}-{m:02d}"
+        r = have.get(b)
+        pay = pay_by_bucket.get(b)
+        out.append({
+            "bucket": b,
+            "sessions": int(r.sessions) if r else 0,
+            "kwh": float(r.kwh) if r else 0.0,
+            "amount": float(r.amount) if r else 0.0,
+            "payments": int(getattr(pay, "payments", 0) or 0),
+            "paid": float(getattr(pay, "paid", 0) or 0),
+            "receipts": int(getattr(pay, "receipts", 0) or 0),
+        })
+        y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+    return sorted(out, key=lambda x: x["bucket"], reverse=True)
 
 
 @router.get("/station-energy")
@@ -451,6 +476,25 @@ async def station_energy(
         func.coalesce(func.sum(S.energy_kwh), 0).label("kwh"),
     ).where(*scope).group_by(S.connector_no).order_by(func.sum(S.energy_kwh).desc()))).all()
 
+    # Ряд достраивается по КАЛЕНДАРЮ периода: месяц (или день) без единой зарядки
+    # обязан стоять нулём, а не выпадать. Пропуск тихо «сжимал» простой станции —
+    # на графике два соседних столбца оказывались с разрывом в полгода
+    # (замечание И. Н. Ступина 13.08.2026).
+    have = {r.bucket: r for r in series}
+    slots: list[str] = []
+    if by_day:
+        cur = dt_from.date()
+        while cur < dt_to.date():
+            slots.append(cur.isoformat())
+            cur += timedelta(days=1)
+    else:
+        y, m = dt_from.year, dt_from.month
+        last = (dt_to - timedelta(days=1)).date()
+        while (y, m) <= (last.year, last.month):
+            slots.append(f"{y:04d}-{m:02d}")
+            y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+    months = max(1, len({s[:7] for s in slots}))
+
     return {
         "bucket": "day" if by_day else "month",
         "totals": {
@@ -458,10 +502,17 @@ async def station_energy(
             "kwh": float(t.kwh or 0), "avgKwh": float(t.avg_kwh or 0),
             "avgMin": float(t.avg_min or 0), "clients": int(t.clients or 0),
             "visits": int(t.visits or 0), "visitsCharged": int(t.visits_charged or 0),
+            # Среднемесячный отпуск за выбранный период — по календарным месяцам,
+            # включая те, где станция молчала.
+            "avgMonthKwh": float(t.kwh or 0) / months, "months": months,
             "lastAt": t.last_at.isoformat() if t.last_at else None,
         },
-        "series": [{"bucket": r.bucket, "sessions": int(r.sessions),
-                    "charged": int(r.charged), "kwh": float(r.kwh)} for r in series],
+        "series": [{
+            "bucket": b,
+            "sessions": int(have[b].sessions) if b in have else 0,
+            "charged": int(have[b].charged) if b in have else 0,
+            "kwh": float(have[b].kwh) if b in have else 0.0,
+        } for b in slots],
         "byConnector": [{"no": r.no or "—", "type": r.type or "", "sessions": int(r.sessions),
                          "kwh": float(r.kwh)} for r in conns],
     }

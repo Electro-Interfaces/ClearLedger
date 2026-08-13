@@ -258,3 +258,14 @@ export interface DataModelResponse {
 /** Модель данных бухгалтерии: слои, звезда, качество — как «Нормализация» у сетевых. */
 export const getDataModel = (companyId: string) =>
   get<DataModelResponse>(`/api/books/model?company_id=${companyId}`)
+
+export interface DatasetView {
+  key: string; label: string; table: string; records: number; link: string
+  period: { from: string | null; to: string | null }
+  fields: { field: string; label: string; fill_pct: number; distinct: number }[]
+  top: { label: string; count: number }[]
+}
+
+/** Витрина одного набора данных нормализованного слоя. */
+export const getDataset = (companyId: string, key: string) =>
+  get<DatasetView>(`/api/books/dataset?company_id=${companyId}&key=${key}`)

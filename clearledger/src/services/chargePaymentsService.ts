@@ -105,6 +105,8 @@ export interface StationEnergy {
     clients: number
     visits: number
     visitsCharged: number  // визиты, закончившиеся зарядкой
+    avgMonthKwh: number    // среднемесячный отпуск за период (с учётом простоя)
+    months: number
     lastAt: string | null
   }
   series: { bucket: string; sessions: number; charged: number; kwh: number }[]

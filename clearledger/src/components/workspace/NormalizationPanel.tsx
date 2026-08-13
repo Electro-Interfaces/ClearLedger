@@ -8,6 +8,7 @@ import { useState } from 'react'
 import { useCompany } from '@/contexts/CompanyContext'
 import { EnergyNormalizationView } from './EnergyNormalizationView'
 import { FuelNormalizationView } from './FuelNormalizationView'
+import { OfficeDataView } from './OfficeDataView'
 import { CentralPanelLayout, type CentralMenuItem } from './CentralPanelLayout'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Badge } from '@/components/ui/badge'
@@ -468,6 +469,9 @@ export function NormalizationPanel() {
   // Топливный профиль (ГИГ): реальная нормализация по коннекторам — смены STS,
   // ТТН, сопутка/общепит ЦБ (та же логика витрин, что у energy).
   if (company.profileId === 'fuel') return <FuelNormalizationView />
+  // Компания без объектов: источник один (бухгалтерия клиента), пункты второй
+  // колонки идут от наборов данных, а не от каналов приёма файлов.
+  if (company.profileId === 'office') return <OfficeDataView />
 
   return (
     <CentralPanelLayout items={NORM_MENU} activeKey={tab} onSelect={(k) => setTab(k as NormTab)}>

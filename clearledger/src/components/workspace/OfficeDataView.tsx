@@ -1,17 +1,18 @@
 /**
- * «Данные» для компании без объектов (профиль `office`).
+ * «Данные» компании без объектов (профиль `office`).
  *
- * Данные — первый слой, с которого всё начинается: пока не видно, ОТКУДА цифры и
- * сходятся ли они между собой, витринам верить нельзя. До этого офисный профиль
- * попадал в общую панель нормализации и получал конвейер, правила и агентов из
- * топливного контура — с честной плашкой «демонстрационные данные», но всё равно
- * не про свою жизнь.
+ * Устроено как «Нормализация» сетевых пространств (`EnergyNormalizationView`): раздел
+ * приложения живёт в РЕЛЬСЕ, а его пункты — во ВТОРОЙ колонке. Порядок тот же:
+ *   • «База пространства» — модель данных и сущности нормализованного слоя;
+ *   • «Качество данных» — постоянный экран проверок, а не итог разбора;
+ *   • «Обзор источников» — что приехало (у сетевых это «Обзор каналов»);
+ *   • дальше пункт на КАЖДЫЙ набор данных — витрина его модели.
  *
- * Три вопроса, три раздела:
- *   Источники — что и когда приехало (сейчас выгрузка бухгалтерии, дальше коннектор);
- *   База пространства — какие сущности живут в нормализованном слое и где разрывы;
- *   Качество — сходятся ли данные сами с собой и что требует решения.
+ * Отличается предметная область: там каналы приёма файлов, здесь один источник
+ * (бухгалтерия клиента) и наборы, которые из него приехали.
  */
+
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { AlertTriangle, CheckCircle2, Database, FileStack, Info, Network, XCircle } from 'lucide-react'
 
@@ -19,8 +20,10 @@ import { useCompany } from '@/contexts/CompanyContext'
 import { QueryError } from '@/components/common/QueryError'
 import { Card, CardContent } from '@/components/ui/card'
 import { MetricTile } from '@/components/ui/metric-tile'
-import { getQuality, getSources, type QualityCheck } from '@/services/booksService'
+import { getDataset, getQuality, getSources, type QualityCheck } from '@/services/booksService'
 import { getSpaceDataModel } from '@/services/spaceObjectsService'
+import { CentralPanelLayout, type CentralMenuItem } from './CentralPanelLayout'
+import { ScrollArea } from '@/components/ui/scroll-area'
 import { OfficeDataModel } from './OfficeDataModel'
 import { cn } from '@/lib/utils'
 
@@ -33,25 +36,119 @@ const STATUS: Record<QualityCheck['status'], { icon: typeof CheckCircle2; cls: s
   info: { icon: Info, cls: 'border-blue-500/40 bg-blue-500/5 text-blue-700 dark:text-blue-400', label: 'к сведению' },
 }
 
-export type OfficeDataTab = 'sources' | 'model' | 'quality'
+// Наборы данных = пункты меню после общих трёх, как каналы приёма у сетевых профилей.
+const DATASETS: { key: string; label: string }[] = [
+  { key: 'entries', label: 'Проводки регистра' },
+  { key: 'docs', label: 'Первичные документы' },
+  { key: 'counterparties', label: 'Контрагенты' },
+  { key: 'nomenclature', label: 'Номенклатура' },
+  { key: 'refs', label: 'Справочники учёта' },
+]
 
-/**
- * Раздел выбирается РЕЛЬСОЙ приложения, а не вкладками внутри: у компании без
- * объектов «Источники», «База пространства» и «Качество» — самостоятельные разделы
- * продукта «Данные», как «Регистр» и «Документы» у «Бухгалтерии». Своя полоса
- * вкладок внутри рабочей области делала бы это место единственным устроенным иначе.
- */
-export function OfficeDataView({ tab }: { tab: OfficeDataTab }) {
+const MENU: CentralMenuItem[] = [
+  { key: 'base', label: 'База пространства' },
+  { key: 'quality', label: 'Качество данных' },
+  { key: 'overview', label: 'Обзор источников' },
+  ...DATASETS.map((d) => ({ key: d.key, label: d.label })),
+]
+
+export function OfficeDataView() {
+  const [tab, setTab] = useState('overview')
   return (
-    <div className="h-full overflow-y-auto p-4">
-      {tab === 'sources' && <SourcesTab />}
-      {tab === 'model' && <ModelTab />}
-      {tab === 'quality' && <QualityTab />}
+    <CentralPanelLayout items={MENU} activeKey={tab} onSelect={setTab}>
+      <ScrollArea className="h-full">
+        <div className="p-4">
+          {tab === 'overview' && <SourcesTab onOpen={setTab} />}
+          {tab === 'base' && <ModelTab />}
+          {tab === 'quality' && <QualityTab />}
+          {DATASETS.some((d) => d.key === tab) && <DatasetTab dsKey={tab} />}
+        </div>
+      </ScrollArea>
+    </CentralPanelLayout>
+  )
+}
+
+/** Витрина одного набора: объём, ключ связи, заполнение полей, из чего состоит. */
+function DatasetTab({ dsKey }: { dsKey: string }) {
+  const { companyId } = useCompany()
+  const q = useQuery({ queryKey: ['books', 'dataset', companyId, dsKey],
+    queryFn: () => getDataset(companyId, dsKey) })
+  if (q.isError) return <QueryError onRetry={() => q.refetch()} />
+  if (!q.data) return <div className="text-sm text-muted-foreground">Загрузка…</div>
+  const d = q.data
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 className="text-base font-medium">{d.label}</h2>
+        <p className="mt-1 text-xs text-muted-foreground">
+          <span className="font-mono">{d.table}</span> · ключ связи: {d.link}
+          {d.period.from && <> · период {d.period.from} — {d.period.to}</>}
+        </p>
+      </div>
+
+      <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
+        <MetricTile label="Записей в L2" value={num.format(d.records)} />
+        {d.fields.slice(0, 3).map((f) => (
+          <MetricTile key={f.field} label={f.label} value={`${f.fill_pct}%`}
+            hint={`${num.format(f.distinct)} значений`}
+            tone={f.fill_pct < 80 ? 'warning' : undefined} />
+        ))}
+      </div>
+
+      {/* Проводки — центр модели: у них полная витрина со слоями и звездой. */}
+      {dsKey === 'entries' && <OfficeDataModel />}
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card>
+          <CardContent className="p-0">
+            <div className="px-3 py-2 text-[11px] uppercase tracking-wider text-muted-foreground">
+              Заполнение полей
+            </div>
+            <div className="divide-y border-t">
+              {d.fields.map((f) => (
+                <div key={f.field} className="flex items-center justify-between gap-3 px-3 py-2">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm">{f.label}</div>
+                    <div className="font-mono text-[10px] text-muted-foreground">{f.field}</div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="h-1.5 w-24 overflow-hidden rounded-full bg-muted">
+                      <div className={cn('h-full rounded-full',
+                        f.fill_pct < 80 ? 'bg-amber-500/70' : 'bg-primary/70')}
+                        style={{ width: `${f.fill_pct}%` }} />
+                    </div>
+                    <span className="w-11 text-right text-xs tabular-nums text-muted-foreground">
+                      {f.fill_pct}%
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-0">
+            <div className="px-3 py-2 text-[11px] uppercase tracking-wider text-muted-foreground">
+              Из чего состоит
+            </div>
+            <div className="divide-y border-t">
+              {d.top.map((t) => (
+                <div key={t.label} className="flex items-baseline justify-between px-3 py-1.5 text-sm">
+                  <span className="truncate">{t.label}</span>
+                  <span className="tabular-nums text-muted-foreground">{num.format(t.count)}</span>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   )
 }
 
-function SourcesTab() {
+function SourcesTab({ onOpen }: { onOpen?: (key: string) => void }) {
   const { companyId } = useCompany()
   const q = useQuery({ queryKey: ['books', 'sources', companyId], queryFn: () => getSources(companyId) })
   if (q.isError) return <QueryError onRetry={() => q.refetch()} />
@@ -83,6 +180,19 @@ function SourcesTab() {
             {/* Документы и справочники — списком по видам, а не одним числом:
                 срез компании читается именно по составу («390 счетов покупателю,
                 485 регламентных операций»), а «1500 документов» не говорит ничего. */}
+            {/* Наборы данных — с переходом в витрину, как канал у сетевых. */}
+            {onOpen && (
+              <div className="rounded-lg border divide-y">
+                {DATASETS.map((d) => (
+                  <button key={d.key} onClick={() => onOpen(d.key)}
+                    className="flex w-full items-baseline justify-between px-3 py-2 text-left text-sm hover:bg-muted/40">
+                    <span>{d.label}</span>
+                    <span className="text-xs text-muted-foreground">открыть витрину →</span>
+                  </button>
+                ))}
+              </div>
+            )}
+
             {!!s.documents?.length && (
               <div>
                 <div className="mb-1.5 text-[11px] uppercase tracking-wider text-muted-foreground">

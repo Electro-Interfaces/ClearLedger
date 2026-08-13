@@ -22,6 +22,7 @@ import { fmtMoneyShort } from '@/services/analyticsService'
 import { useResetOnScopeChange } from '@/hooks/useScopeReset'
 import { useFilters } from '@/contexts/FilterContext'
 import { ApplyToScope } from './ApplyToScope'
+import { LocationCockpitModal } from '@/components/locations/LocationCockpitModal'
 
 const ALL = '__all__'
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
@@ -230,8 +231,11 @@ const successColor = (pct: number) => (pct >= 75 ? 'hsl(var(--success))' : pct >
  *  Против «каши» в плотных городах: halo-обводка цветом фона карты разделяет
  *  соприкасающиеся круги, полупрозрачная заливка показывает наложения, а z-order
  *  (крупные снизу, мелкие сверху) не даёт большим кругам «съедать» соседей. */
-function StationMarkers({ points, colorFn, sizeFn, metricMap, dark }: {
+function StationMarkers({ points, colorFn, sizeFn, metricMap, dark, onOpen }: {
   points: Pt[]; colorFn: (p: Pt) => string; sizeFn: (p: Pt) => number; metricMap: Map<string, StationMetric>; dark: boolean
+  /** Открыть карточку станции: с карты нужно проваливаться внутрь объекта
+   *  (замечание И. Н. Ступина 13.08.2026), а не только читать всплывающую подсказку. */
+  onOpen?: (id: string) => void
 }) {
   const map = useMap()
   const [zoom, setZoom] = useState(map.getZoom())
@@ -286,6 +290,12 @@ function StationMarkers({ points, colorFn, sizeFn, metricMap, dark }: {
                   <div className="border-t border-border/60 bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground">
                     Нет сессий за выбранный период
                   </div>
+                )}
+                {onOpen && (
+                  <button type="button" onClick={() => onOpen(p.id)}
+                    className="w-full border-t border-border/60 px-3 py-2 text-[12px] font-medium text-primary hover:bg-muted/40">
+                    Открыть станцию →
+                  </button>
                 )}
               </div>
             </Popup>
@@ -346,6 +356,9 @@ export function ChargeMapPanel({ companyId, dateFrom, dateTo }: {
   // Тестовые станции CPO на карту не пускаем: у них есть координаты (в том числе
   // в Гренландии) и мощность 1 200 кВт, из-за чего они ломали шкалу раскраски и
   // подсовывали в фильтры мусорные бренды и регионы.
+  // Карточка станции, открытая с карты (клик «Открыть станцию» в подсказке).
+  const [cockpitId, setCockpitId] = useState<string | null>(null)
+  const cockpit = useMemo(() => (data ?? []).find((l) => l.id === cockpitId) ?? null, [data, cockpitId])
   const allPoints = useMemo(() => (data ?? []).filter((l) => !isTestStation(l))
     .map(toPoint).filter((p): p is Pt => p !== null), [data])
   const uniq = (sel: (p: Pt) => string) => [...new Set(allPoints.map(sel))].filter((x) => x !== '—').sort((a, b) => a.localeCompare(b, 'ru'))
@@ -498,9 +511,12 @@ export function ChargeMapPanel({ companyId, dateFrom, dateTo }: {
             subdomains="abcd" maxZoom={19} />
           <FitBounds points={allPoints} />
           <MapInvalidate />
-          <StationMarkers points={points} colorFn={colorFn} sizeFn={sizeFn} metricMap={metricMap} dark={dark} />
+          <StationMarkers points={points} colorFn={colorFn} sizeFn={sizeFn} metricMap={metricMap}
+            dark={dark} onOpen={setCockpitId} />
         </MapContainer>
       </div>
+
+      <LocationCockpitModal location={cockpit} onClose={() => setCockpitId(null)} />
     </div>
   )
 }

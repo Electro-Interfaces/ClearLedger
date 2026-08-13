@@ -20,6 +20,7 @@ import type { ServiceLocation } from '@/types/location'
 import { SectionCard, Placeholder, ScrollTab, typeFlags } from './shared'
 import { MetricTile } from '@/components/ui/metric-tile'
 
+const RANGE_KEY = 'ezs-energy-range'
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 const nf1 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 })
 
@@ -39,7 +40,22 @@ const PRESETS: { label: string; range: () => [string, string] }[] = [
 
 export function EnergyTab({ location }: { location: ServiceLocation }) {
   const { companyId } = useCompany()
-  const [[from, to], setRange] = useState<[string, string]>(() => PRESETS[1].range())
+  // Период держим в сессии браузера: Radix размонтирует содержимое вкладки, и
+  // выбранные границы терялись при каждом уходе на «Паспорт» и обратно
+  // (замечание И. Н. Ступина 13.08.2026). Заодно он сохраняется при переходе к
+  // другой станции — сравнивать соседние объекты за один период удобнее.
+  const [[from, to], setRange] = useState<[string, string]>(() => {
+    const saved = sessionStorage.getItem(RANGE_KEY)
+    if (saved) {
+      const [f, t] = saved.split('|')
+      if (f && t) return [f, t]
+    }
+    return PRESETS[1].range()
+  })
+  const applyRange = (r: [string, string]) => {
+    sessionStorage.setItem(RANGE_KEY, r.join('|'))
+    setRange(r)
+  }
 
   const { data, isLoading, isError } = useQuery<StationEnergy>({
     queryKey: ['station-energy', companyId, location.id, from, to],
@@ -73,7 +89,7 @@ export function EnergyTab({ location }: { location: ServiceLocation }) {
           const [f, tt] = p.range()
           const on = f === from && tt === to
           return (
-            <button key={p.label} type="button" onClick={() => setRange([f, tt])}
+            <button key={p.label} type="button" onClick={() => applyRange([f, tt])}
               className={`h-7 rounded-md border px-2.5 text-xs transition-colors ${
                 on ? 'border-primary bg-primary text-primary-foreground'
                    : 'border-input text-muted-foreground hover:text-foreground'}`}>
@@ -82,10 +98,10 @@ export function EnergyTab({ location }: { location: ServiceLocation }) {
           )
         })}
         <span className="mx-1 h-5 w-px bg-border" />
-        <input type="date" value={from} max={to} onChange={(e) => setRange([e.target.value, to])}
+        <input type="date" value={from} max={to} onChange={(e) => applyRange([e.target.value, to])}
           className="h-7 rounded-md border border-input bg-background px-2 text-xs" />
         <span className="text-xs text-muted-foreground">—</span>
-        <input type="date" value={to} min={from} onChange={(e) => setRange([from, e.target.value])}
+        <input type="date" value={to} min={from} onChange={(e) => applyRange([from, e.target.value])}
           className="h-7 rounded-md border border-input bg-background px-2 text-xs" />
       </div>
 
@@ -101,7 +117,7 @@ export function EnergyTab({ location }: { location: ServiceLocation }) {
           text="По этой станции в выбранных границах зарядных сессий не было. Проверьте другой период или сопоставление станции с выгрузкой (вкладка «Интеграции»)." />
       ) : (
         <>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
             <MetricTile label="Отпущено" value={`${nf0.format(t.kwh)} кВт·ч`}
               hint={`за период ${new Date(from).toLocaleDateString('ru-RU')} — ${new Date(to).toLocaleDateString('ru-RU')}`} />
             <MetricTile label="Заправок" value={nf0.format(t.charged)}
@@ -110,6 +126,8 @@ export function EnergyTab({ location }: { location: ServiceLocation }) {
               hint={`${nf0.format(t.avgMin)} мин на состоявшуюся`} />
             <MetricTile label="Клиенты зарядились" value={`${nf1.format(visitPct)} %`}
               hint={`${nf0.format(t.visitsCharged)} из ${nf0.format(t.visits)} визитов`} />
+            <MetricTile label="В среднем за месяц" value={`${nf0.format(t.avgMonthKwh)} кВт·ч`}
+              hint={`по ${t.months} ${t.months === 1 ? 'месяцу' : 'месяцам'} периода, включая простой`} />
           </div>
 
           <Card>
