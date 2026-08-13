@@ -10,7 +10,7 @@
  */
 
 import type { ComponentType } from 'react'
-import { BarChart3, Gauge, BookOpen, FileOutput, HardHat, Building2, Megaphone, Sparkles, GitCompare, Activity, Wallet, Boxes, Receipt, Truck, Scale, FileText, Users, Package } from 'lucide-react'
+import { BarChart3, Gauge, BookOpen, FileOutput, HardHat, Building2, Megaphone, Sparkles, GitCompare, Activity, Wallet, Boxes, Receipt, Truck, Scale, FileText, Users, Package, TrendingUp, Landmark } from 'lucide-react'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useWorkspace, type CoreMode } from '@/contexts/WorkspaceContext'
 import { modeAllowed } from '@/config/accessModules'
@@ -33,6 +33,7 @@ import {
   MARKET_MENU, MARKET_KEYS,
   REV_SALES_MENU, REV_CLIENTS_MENU, REV_ITEMS_MENU, REV_DOCS_MENU, REV_MONEY_MENU,
   REV_STOCK_MENU, REV_HELP_MENU,
+  ECON_RESULT_MENU, ECON_COSTS_MENU, ECON_TAXES_MENU,
   BOOKS_LEDGER_MENU, BOOKS_PRIMARY_MENU,
 } from '@/config/workspaceMenus'
 // CHARGE_SESSIONS_MENU здесь не используется — общий список нужен карте прав и роутеру
@@ -54,6 +55,7 @@ export {
   MARKET_MENU, MARKET_KEYS,
   REV_SALES_MENU, REV_CLIENTS_MENU, REV_ITEMS_MENU, REV_DOCS_MENU, REV_MONEY_MENU,
   REV_STOCK_MENU, REV_HELP_MENU,
+  ECON_RESULT_MENU, ECON_COSTS_MENU, ECON_TAXES_MENU,
   BOOKS_LEDGER_MENU, BOOKS_PRIMARY_MENU,
 }
 
@@ -212,6 +214,12 @@ export function useWorkspaceSections(): WorkspaceSection[] {
     items: isOffice ? REV_STOCK_MENU : [], connected: isOffice }
   const revHelp: WorkspaceSection = { mode: 'rev_help', label: 'Помощь', icon: BookOpen,
     items: isOffice ? REV_HELP_MENU : [], connected: isOffice }
+  const econResult: WorkspaceSection = { mode: 'econ_result', label: 'Результат', icon: TrendingUp,
+    items: isOffice ? ECON_RESULT_MENU : [], connected: isOffice }
+  const econCosts: WorkspaceSection = { mode: 'econ_costs', label: 'Расходы', icon: Wallet,
+    items: isOffice ? ECON_COSTS_MENU : [], connected: isOffice }
+  const econTaxes: WorkspaceSection = { mode: 'econ_taxes', label: 'Налоги', icon: Landmark,
+    items: isOffice ? ECON_TAXES_MENU : [], connected: isOffice }
   const booksLedger: WorkspaceSection = { mode: 'books_ledger', label: 'Регистр', icon: Scale,
     items: isOffice ? BOOKS_LEDGER_MENU : [], connected: isOffice }
   const booksPrimary: WorkspaceSection = { mode: 'books_primary', label: 'Документы', icon: FileText,
@@ -234,7 +242,7 @@ export function useWorkspaceSections(): WorkspaceSection[] {
   // (пустыми, «неподключёнными») значило бы показывать рельсу про чужую жизнь.
   const all = isOffice
     ? [revSales, revBuyers, revCatalog, revPapers, revMoney, revStock, revHelp,
-       booksLedger, booksPrimary, normalize]
+       econResult, econCosts, econTaxes, booksLedger, booksPrimary, normalize]
     : isEnergy
     ? [sales, salesSessions, salesCommerce, corporate, marketing,
        projects, projectsAnalytics, ops, opsEquipment, opsEconomy,

@@ -314,6 +314,58 @@ export interface RevenueQuality {
 export const getRevenueQuality = (companyId: string) =>
   get<RevenueQuality>(`/api/books/revenue-quality?company_id=${companyId}`)
 
+/* ── «Экономика»: результат, расходы, налоги ─────────────────────────────── */
+
+export interface PnlTotals {
+  revenue: number; vat: number; net: number
+  cogs: number; gross: number
+  commercial: number; admin: number; operating: number
+  otherIncome: number; otherExpense: number; beforeTax: number
+  tax: number; profit: number
+  grossPct: number | null; operatingPct: number | null; profitPct: number | null
+}
+
+export interface PnlData {
+  months: (PnlTotals & { month: string })[]
+  totals: PnlTotals
+  years: (PnlTotals & { year: string })[]
+  /** Что бухгалтерия закрыла на 84 счёт — эталон рядом с расчётом. */
+  closedToRetained: number
+}
+
+export const getPnl = (companyId: string, period?: PeriodOpts) =>
+  get<PnlData>(`/api/books/pnl?company_id=${companyId}` + periodQuery(period))
+
+export interface ExpensesData {
+  accounts: {
+    account: string; name: string | null; amount: number
+    sources: { source: string; sourceName: string | null; amount: number; entries: number }[]
+  }[]
+  rows: {
+    account: string; accountName: string | null
+    source: string; sourceName: string | null; amount: number; entries: number
+  }[]
+  months: { month: string; amount: number }[]
+  total: number
+}
+
+export const getExpenses = (companyId: string, period?: PeriodOpts) =>
+  get<ExpensesData>(`/api/books/expenses?company_id=${companyId}` + periodQuery(period))
+
+export interface TaxesData {
+  rows: { account: string; name: string; accrued: number; paid: number; rest: number }[]
+  months: { month: string; accrued: number; paid: number }[]
+  accrued: number
+  paid: number
+  revenueNet: number
+  /** Нагрузка от УПЛАЧЕННОГО — так её считает и налоговая служба. */
+  loadPct: number | null
+  accruedPct: number | null
+}
+
+export const getTaxes = (companyId: string, period?: PeriodOpts) =>
+  get<TaxesData>(`/api/books/taxes?company_id=${companyId}` + periodQuery(period))
+
 /** Реестр старения долга: сколько, чьё и сколько дней. */
 export interface ArAging {
   buckets: { key: string; label: string; count: number; amount: number }[]

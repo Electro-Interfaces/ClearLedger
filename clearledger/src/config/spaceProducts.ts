@@ -133,6 +133,14 @@ export const SPACE_PRODUCTS: SpaceProduct[] = [
             'rev_stock', 'rev_help'], paths: [],
   },
   {
+    // «Экономика» — сколько компания заработала. «Реализация» отвечает за правую
+    // половину отчёта (выручка и деньги), здесь левая: себестоимость, расходы,
+    // налоги и то, что осталось. Разделы по вопросу: «Результат» (ОФР и
+    // рентабельность), «Расходы» (куда уходят деньги), «Налоги» (сколько отдаём).
+    code: 'econ', route: '/economy', label: 'Экономика',
+    modes: ['econ_result', 'econ_costs', 'econ_taxes'], paths: [],
+  },
+  {
     // Данные — служебная кухня: откуда берутся цифры и как приводятся к общему виду.
     // Ошибка здесь ломает все продукты сразу, поэтому доступ отдельный и узкий.
     // «Каталоги» — библиотека типов источников, каналов и разрезов сверки, то есть
@@ -198,7 +206,7 @@ export const PRODUCT_READINESS: Record<string, Readiness> = {
   projects: 'ready', ops: 'partial', sales: 'ready',
   // Рабочие места компании без объектов: данные приезжают из её бухгалтерии, экраны
   // построены на них целиком — заглушек в этих двух продуктах нет.
-  books: 'ready', revenue: 'ready',
+  books: 'ready', revenue: 'ready', econ: 'ready',
   corp: 'draft', shop: 'draft', marketing: 'partial',
   support: 'ready', finance: 'draft',
   netlink: 'draft', accounting: 'draft', diag: 'draft',

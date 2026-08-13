@@ -45,6 +45,8 @@ const ExportLayerPanel = lazy(() => import('./ExportLayerPanel').then((m) => ({ 
 const RevenuePanel = lazy(() => import('./OfficeRevenue').then((m) => ({ default: m.RevenuePanel })))
 const REVENUE_MODES: CoreMode[] = ['rev_sales', 'rev_buyers', 'rev_catalog', 'rev_papers',
   'rev_money', 'rev_stock', 'rev_help']
+const EconomyPanel = lazy(() => import('./OfficeEconomy').then((m) => ({ default: m.EconomyPanel })))
+const ECONOMY_MODES: CoreMode[] = ['econ_result', 'econ_costs', 'econ_taxes']
 const BooksPanel = lazy(() => import('./OfficePanels').then((m) => ({ default: m.BooksPanel })))
 
 /**
@@ -172,6 +174,7 @@ function ModePanel() {
       {/* Компания без объектов: четыре раздела «Реализации» — панель одна, различается
           вопросом к тем же документам бухгалтерии. */}
       {REVENUE_MODES.includes(coreMode) && <RevenuePanel />}
+      {ECONOMY_MODES.includes(coreMode) && <EconomyPanel />}
       {(coreMode === 'books_ledger' || coreMode === 'books_primary') && <BooksPanel />}
     </Suspense>
   )

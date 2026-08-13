@@ -2055,15 +2055,18 @@ async def taxes(
     pnl_rows = await _pnl_rows(db, cid, date_from, date_to)
     totals = _pnl_totals(pnl_rows)
     accrued = round(sum(r["accrued"] for r in rows), 2)
-    # НДС к уплате — это разница начисленного с продаж и принятого к вычету, поэтому
-    # «нагрузка» по обороту 68.02 завышена: тот же счёт кредитуется и при покупках.
+    paid_total = round(sum(r["paid"] for r in rows), 2)
+    # Нагрузка считается от УПЛАЧЕННОГО — так её определяет и ФНС. По начислениям она
+    # завышена вдвое: кредит 68.02 несёт весь НДС с продаж, тогда как в бюджет уходит
+    # разница с вычетами по покупкам (их дебет того же счёта).
     return {
         "rows": rows,
         "months": months,
         "accrued": accrued,
-        "paid": round(sum(r["paid"] for r in rows), 2),
+        "paid": paid_total,
         "revenueNet": totals["net"],
-        "loadPct": round(accrued / totals["net"] * 100, 1) if totals["net"] else None,
+        "loadPct": round(paid_total / totals["net"] * 100, 1) if totals["net"] else None,
+        "accruedPct": round(accrued / totals["net"] * 100, 1) if totals["net"] else None,
     }
 
 

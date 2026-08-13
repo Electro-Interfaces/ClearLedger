@@ -47,7 +47,7 @@ INTERNAL_ROUTES = {"admin": "/admin", "ledger": "/workspace", "chat": "/messages
                    # Рабочие места компании без объектов (профиль `office`): бухгалтерия-
                    # эталон и «Реализация» (товары и услуги — её разделы). Маршруты обязаны
                    # совпадать с фронтовой картой `config/spaceProducts.ts` — сверяет тест.
-                   "books": "/books", "revenue": "/revenue"}
+                   "books": "/books", "revenue": "/revenue", "econ": "/economy"}
 # Слой рабочего стола: управление пространством и служебная кухня стоят отдельно от
 # прикладных продуктов. «Данные» — служебное: ошибка там ломает все продукты сразу.
 INTERNAL_LAYERS = {"admin": "admin", "data": "admin", "info": "admin", "connect": "admin",

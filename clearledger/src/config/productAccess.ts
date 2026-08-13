@@ -24,6 +24,7 @@ import {
   FUEL_NETWORK_MENU, FUEL_ANALYTICS_MENU, FUEL_COMMERCE_MENU, FUEL_GOODS_MENU, FUEL_HELP_MENU,
   REV_SALES_MENU, REV_CLIENTS_MENU, REV_ITEMS_MENU, REV_DOCS_MENU, REV_MONEY_MENU,
   REV_STOCK_MENU, REV_HELP_MENU,
+  ECON_RESULT_MENU, ECON_COSTS_MENU, ECON_TAXES_MENU,
   BOOKS_LEDGER_MENU, BOOKS_PRIMARY_MENU,
 } from './workspaceMenus'
 import { storeMenu, STORE_HELP_MENU } from './storeCatalog'
@@ -135,6 +136,11 @@ export const PRODUCT_MODULES: Record<string, ProductModuleDef[]> = {
     ...items(REV_MONEY_MENU, 'Деньги'),
     ...items(REV_STOCK_MENU, 'Закупки'),
     ...items(REV_HELP_MENU, 'Помощь'),
+  ],
+  econ: [
+    ...items(ECON_RESULT_MENU, 'Результат'),
+    ...items(ECON_COSTS_MENU, 'Расходы'),
+    ...items(ECON_TAXES_MENU, 'Налоги'),
   ],
   books: [
     ...items(BOOKS_LEDGER_MENU, 'Регистр'),
