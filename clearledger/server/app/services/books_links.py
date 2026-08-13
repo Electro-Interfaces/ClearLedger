@@ -98,7 +98,27 @@ _KIND_TO_TYPE = {
     "Регламентная операция": "closing_op",
     "Операция": "manual_entry",
     "Акт сверки взаиморасчетов": "act_recon",
+    "Начисление зарплаты": "payroll_accrual",
+    "Ведомость на выплату зарплаты в банк": "payroll_payment",
+    "Ведомость в банк": "payroll_payment",
 }
+
+_ENTRY_LINK_SQL = """
+    UPDATE gl_entries e SET doc_id = d.id
+      FROM accounting_docs d
+     WHERE e.company_id = :cid AND e.doc_id IS NULL
+       AND coalesce(e.doc_kind, '') <> '' AND coalesce(e.doc_title, '') <> ''
+       AND d.company_id = e.company_id
+       AND d.doc_type = (cast(:kinds AS jsonb) ->> e.doc_kind)
+       AND d.number = substring(e.doc_title from '(\S+)\s+от\s+\d{2}\.\d{2}\.\d{4}')
+       AND d.date = to_char(to_date(
+             substring(e.doc_title from '(\d{2}\.\d{2}\.\d{4})'), 'DD.MM.YYYY'),
+             'YYYY-MM-DD')
+       AND NOT EXISTS (
+             SELECT 1 FROM accounting_docs x
+              WHERE x.company_id = d.company_id AND x.doc_type = d.doc_type
+                AND x.number = d.number AND x.date = d.date AND x.id <> d.id)
+"""
 
 _ENTRY_UNLINK_SQL = """
     UPDATE gl_entries e SET doc_id = NULL
@@ -129,9 +149,11 @@ async def relink(db: AsyncSession, company_id, *, reset: bool = False) -> dict[s
         matched[label] = res.rowcount or 0
     res = await db.execute(text(_CONTRACT_SQL), params)
     matched["договор по названию"] = res.rowcount or 0
-    res = await db.execute(text(_ENTRY_UNLINK_SQL),
-                           {**params, "kinds": json.dumps(_KIND_TO_TYPE, ensure_ascii=False)})
+    kinds = {**params, "kinds": json.dumps(_KIND_TO_TYPE, ensure_ascii=False)}
+    res = await db.execute(text(_ENTRY_UNLINK_SQL), kinds)
     matched["снято ложных связей проводок"] = res.rowcount or 0
+    res = await db.execute(text(_ENTRY_LINK_SQL), kinds)
+    matched["связано проводок с документом"] = res.rowcount or 0
     await db.commit()
 
     total, linked, with_contract, no_name = (await db.execute(text("""
