@@ -355,6 +355,18 @@ async def import_accounting_docs(
             errors.append(f"Документ {item.number}: {str(e)}")
 
     await db.flush()
+
+    # Сведение с нормализованным слоем — ЧАСТЬЮ загрузки, а не отдельной кнопкой.
+    # Ссылки на контрагента и договор проставляются только пустым (идемпотентно),
+    # поэтому повтор безопасен. Без этого шага каждая новая выгрузка приезжала
+    # «плоской»: карточки клиента, его долг и договор к документу переставали
+    # находиться, пока кто-нибудь не вспомнит про `POST /api/books/relink`.
+    try:
+        from app.services.books_links import relink
+        await relink(db, cid)
+    except Exception as e:  # noqa: BLE001 — приём данных важнее сведения
+        errors.append(f"Сведение со справочниками не выполнено: {e}")
+
     return AccountingDocImportResponse(
         total=len(body.docs),
         created=created,

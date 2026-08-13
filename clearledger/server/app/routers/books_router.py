@@ -611,6 +611,10 @@ async def docs(
             "label": DOC_LABELS.get(d.doc_type, d.doc_type),
             "section": SECTION_OF.get(d.doc_type),
             "counterparty": d.counterparty_name, "inn": d.counterparty_inn,
+            # Ссылка на карточку: из реестра человек идёт к контрагенту, а не
+            # выписывает его имя, чтобы найти в справочнике. null — документ ещё
+            # не сведён (регламентные операции контрагента не имеют вовсе).
+            "counterpartyId": str(d.counterparty_id) if d.counterparty_id else None,
             "amount": _num(d.amount), "vat": _num(d.vat_amount),
             # Назначение платежа и вид операции: без них банковская строка — только сумма.
             "operation": d.operation_type,
@@ -681,9 +685,9 @@ async def _slice(db: AsyncSession, cid, doc_type: str, top: int,
                 continue
             # Позиция — по КОДУ номенклатуры: имя в строке документа пишется как
             # угодно, а код тот же, что в справочнике, и по нему открывается карточка.
-            ikey = ln.get("code") or ln.get("name") or "—"
+            ikey = (ln.get("code") or "").strip() or ln.get("name") or "—"
             it = by_item.setdefault(ikey,
-                                    {"code": ln.get("code"),
+                                    {"code": (ln.get("code") or "").strip() or None,
                                      "name": ln.get("name") or "—", "amount": 0.0, "qty": 0.0})
             it["amount"] += _num(ln.get("amount"))
             it["qty"] += _num(ln.get("qty"))
@@ -887,14 +891,14 @@ async def counterparty_card(
           -- Разворачивать JSONB и агрегировать в одном запросе Postgres не даёт:
           -- «subquery uses ungrouped column». Строки сначала становятся колонками,
           -- и лишь потом группируются; единица приезжает джойном справочника.
-          SELECT doc, ln->>'code' code, ln->>'name' name,
+          SELECT doc, btrim(ln->>'code') code, ln->>'name' name,
                  (ln->>'qty')::numeric qty, (ln->>'amount')::numeric amount
             FROM l
         )
         SELECT x.code, max(x.name), sum(x.qty), sum(x.amount), count(DISTINCT x.doc),
                max(n.unit_label)
           FROM x LEFT JOIN nomenclature n
-            ON n.company_id = :cid AND n.code = x.code
+            ON n.company_id = :cid AND btrim(n.code) = x.code
          GROUP BY x.code ORDER BY 4 DESC LIMIT 50
     """), params)).all()]
 
@@ -935,6 +939,120 @@ async def counterparty_card(
         "debtAsOf": debt[4].isoformat() if debt[4] else None,
         "byType": by_type, "months": months, "items": items,
         "contracts": contracts, "docs": docs,
+    }
+
+
+# ── Нормализованный слой: карточка позиции ───────────────────────────────────
+# Разрез отвечает «что продаём», карточка — «что с этой позицией»: по какой цене
+# уходит и приходит, сколько на ней зарабатываем, кто её берёт и когда брали в
+# последний раз. Ключ — КОД номенклатуры: имя в строке документа пишется как
+# угодно, а код тот же, что в справочнике.
+
+@router.get("/nomenclature")
+async def nomenclature_card(
+    company_id: str,
+    code: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Карточка позиции: продажи и закупки, цены по датам, покупатели, наценка."""
+    cid = await assert_company_member(company_id, current_user, db)
+    # Код нормализуем на входе: и строки документов, и справочник сравниваются
+    # обрезанными — иначе «ТКС003498  » и «ТКС003498» это две разные позиции.
+    code = code.strip()
+    params = {"cid": str(cid), "code": code}
+
+    # Код из строки документа приезжает с хвостовыми пробелами («ТКС003498  »), а в
+    # справочнике лежит без них: без btrim карточка честно сообщает «кода нет в
+    # справочнике» о позиции, которая там есть.
+    item = (await db.execute(select(NomenclatureItem).where(
+        NomenclatureItem.company_id == cid,
+        func.btrim(NomenclatureItem.code) == code))).scalars().first()
+
+    # Одна выборка строк на всё: разворачиваем JSONB в колонки и дальше считаем
+    # по ней — и итоги, и цены, и покупателей (Postgres не даёт агрегировать
+    # `jsonb_array_elements` в том же запросе, где он вызван).
+    lines_cte = """
+        WITH l AS (
+          SELECT d.id doc, d.doc_type, d.date, d.counterparty_id, d.counterparty_name,
+                 jsonb_array_elements(d.lines) ln
+            FROM accounting_docs d
+           WHERE d.company_id = :cid AND d.doc_type IN ('sale', 'purchase')
+        ), x AS (
+          SELECT doc, doc_type, date, counterparty_id, counterparty_name,
+                 btrim(ln->>'code') code, ln->>'name' name, ln->>'kind' kind,
+                 (ln->>'qty')::numeric qty, (ln->>'amount')::numeric amount,
+                 (ln->>'price')::numeric price
+            FROM l
+        )
+    """
+
+    totals = (await db.execute(text(lines_cte + """
+        SELECT doc_type, count(DISTINCT doc), sum(qty), sum(amount),
+               min(date), max(date)
+          FROM x WHERE code = :code GROUP BY doc_type
+    """), params)).all()
+    agg = {r[0]: {"docs": r[1], "qty": _num(r[2]), "amount": _num(r[3]),
+                  "first": r[4], "last": r[5]} for r in totals}
+
+    prices = [{"date": r[0], "kind": r[1], "price": _num(r[2]), "qty": _num(r[3]),
+               "counterparty": r[4]} for r in (await db.execute(text(lines_cte + """
+        SELECT date, doc_type, price, qty, counterparty_name
+          FROM x WHERE code = :code AND price IS NOT NULL
+         ORDER BY date DESC LIMIT 100
+    """), params)).all()]
+
+    clients = [{"id": str(r[0]) if r[0] else None, "name": r[1], "qty": _num(r[2]),
+                "amount": _num(r[3]), "docs": r[4], "last": r[5]}
+               for r in (await db.execute(text(lines_cte + """
+        SELECT counterparty_id, max(counterparty_name), sum(qty), sum(amount),
+               count(DISTINCT doc), max(date)
+          FROM x WHERE code = :code AND doc_type = 'sale'
+         GROUP BY counterparty_id ORDER BY 4 DESC LIMIT 30
+    """), params)).all()]
+
+    suppliers = [{"id": str(r[0]) if r[0] else None, "name": r[1], "qty": _num(r[2]),
+                  "amount": _num(r[3]), "docs": r[4], "last": r[5]}
+                 for r in (await db.execute(text(lines_cte + """
+        SELECT counterparty_id, max(counterparty_name), sum(qty), sum(amount),
+               count(DISTINCT doc), max(date)
+          FROM x WHERE code = :code AND doc_type = 'purchase'
+         GROUP BY counterparty_id ORDER BY 4 DESC LIMIT 30
+    """), params)).all()]
+
+    months = [{"month": r[0], "soldQty": _num(r[1]), "soldAmount": _num(r[2]),
+               "boughtQty": _num(r[3]), "boughtAmount": _num(r[4])}
+              for r in (await db.execute(text(lines_cte + """
+        SELECT substr(date, 1, 7) m,
+               sum(qty)    FILTER (WHERE doc_type = 'sale'),
+               sum(amount) FILTER (WHERE doc_type = 'sale'),
+               sum(qty)    FILTER (WHERE doc_type = 'purchase'),
+               sum(amount) FILTER (WHERE doc_type = 'purchase')
+          FROM x WHERE code = :code GROUP BY 1 ORDER BY 1
+    """), params)).all()]
+
+    sale, purchase = agg.get("sale", {}), agg.get("purchase", {})
+    # Средняя цена — сумма / количество, а не среднее из цен строк: строка на 100
+    # штук весит столько же, сколько строка на одну, и «среднее из средних» врёт.
+    avg_sale = (sale.get("amount", 0) / sale["qty"]) if sale.get("qty") else 0.0
+    avg_buy = (purchase.get("amount", 0) / purchase["qty"]) if purchase.get("qty") else 0.0
+    # Имя берём из справочника; если карточки в нём нет (674 строки пилота ссылаются
+    # на коды, которых в номенклатуре не оказалось) — из самих строк документов.
+    doc_name = (await db.execute(text(lines_cte + """
+        SELECT max(name) FROM x WHERE code = :code
+    """), params)).scalar_one_or_none()
+    return {
+        "code": code,
+        "name": (item.name if item else None) or doc_name or code,
+        "unit": item.unit_label if item else None,
+        "vatRate": item.vat_rate if item else None,
+        "inCatalog": item is not None,
+        "sale": sale, "purchase": purchase,
+        "avgSalePrice": round(avg_sale, 2),
+        "avgBuyPrice": round(avg_buy, 2),
+        # Наценка — от закупочной цены: «сколько добавили к тому, за что купили».
+        "markupPct": round((avg_sale / avg_buy - 1) * 100, 1) if avg_buy else None,
+        "prices": prices, "clients": clients, "suppliers": suppliers, "months": months,
     }
 
 

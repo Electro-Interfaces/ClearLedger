@@ -30,7 +30,7 @@ import { MetricTile } from '@/components/ui/metric-tile'
 import { cn } from '@/lib/utils'
 import {
   getAccountCard, getBalance, getBooksOverview, getCounterpartyCard, getDocs, getEntries,
-  getPeriods, getSlice,
+  getNomenclatureCard, getPeriods, getSlice,
   type BalanceTotals, type BooksOverview, type SettlementKind, type SliceData, type VatKind,
 } from '@/services/booksService'
 import { BooksSettlements, BooksVat } from './OfficeSettlements'
@@ -238,14 +238,21 @@ function RevClients({ data, title }: { data: SliceData; title: string }) {
 }
 
 function RevItems({ data, title, hint }: { data: SliceData; title: string; hint: string }) {
+  const { companyId } = useCompany()
+  const [card, setCard] = useState<string | null>(null)
   return (
     <div className="p-4">
       <TableCard
         note={`${title} — ${hint}`}
         head={<><Th>{title}</Th><Th right>Количество</Th><Th right>Сумма</Th></>}>
         {data.topItems.map((it) => (
-          <tr key={it.name} className="border-b last:border-0 hover:bg-muted/40">
-            <td className="px-3 py-1.5 max-w-[420px] truncate" title={it.name}>{it.name}</td>
+          <tr key={it.code ?? it.name} className="border-b last:border-0 hover:bg-muted/40">
+            <td className="px-3 py-1.5 max-w-[420px] truncate" title={it.name}>
+              {it.code ? (
+                <button onClick={() => setCard(it.code)}
+                  className="text-left hover:text-primary hover:underline">{it.name}</button>
+              ) : it.name}
+            </td>
             <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
               {it.qty ? qty.format(it.qty) : '—'}
             </td>
@@ -255,6 +262,9 @@ function RevItems({ data, title, hint }: { data: SliceData; title: string; hint:
           </tr>
         ))}
       </TableCard>
+      {card && (
+        <NomenclatureWindow companyId={companyId} code={card} onClose={() => setCard(null)} />
+      )}
     </div>
   )
 }
@@ -263,6 +273,7 @@ function RevDocs({ companyId, docType, lineKind, note }: {
   companyId: string; docType: string; lineKind?: string; note: string
 }) {
   const { period } = useFilters()
+  const [card, setCard] = useState<string | null>(null)
   const q = useQuery({
     queryKey: ['books', 'docs', companyId, docType, lineKind, period.from, period.to],
     queryFn: () => getDocs(companyId, docType, { from: period.from, to: period.to },
@@ -284,7 +295,10 @@ function RevDocs({ companyId, docType, lineKind, note }: {
             <td className="px-3 py-1.5 tabular-nums whitespace-nowrap">{r.date}</td>
             <td className="px-3 py-1.5 tabular-nums">{r.number}</td>
             <td className="px-3 py-1.5 max-w-[320px] truncate" title={r.counterparty}>
-              {r.counterparty}
+              {r.counterpartyId ? (
+                <button onClick={() => setCard(r.counterpartyId)}
+                  className="text-left hover:text-primary hover:underline">{r.counterparty}</button>
+              ) : r.counterparty}
             </td>
             <td className="px-3 py-1.5 text-right tabular-nums">{money.format(r.amount)}</td>
             <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
@@ -294,6 +308,9 @@ function RevDocs({ companyId, docType, lineKind, note }: {
           </tr>
         ))}
       </TableCard>
+      {card && (
+        <CounterpartyWindow companyId={companyId} id={card} onClose={() => setCard(null)} />
+      )}
     </div>
   )
 }
@@ -738,6 +755,124 @@ function CounterpartyWindow({ companyId, id, onClose }: {
                   <td className="px-3 py-1.5 text-muted-foreground max-w-[240px] truncate"
                     title={doc.contract ?? ''}>{doc.contract ?? '—'}</td>
                   <Money v={doc.amount} />
+                </tr>
+              ))}
+            </TableCard>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/**
+ * Карточка позиции окном: по какой цене уходит и приходит, сколько на ней
+ * зарабатываем, кто берёт и у кого покупаем. Позиция — тот же код, что в
+ * справочнике 1С, поэтому продажи и закупки сходятся в одной строке.
+ */
+function NomenclatureWindow({ companyId, code, onClose }: {
+  companyId: string; code: string; onClose: () => void
+}) {
+  const q = useQuery({
+    queryKey: ['books', 'nomenclature', companyId, code],
+    queryFn: () => getNomenclatureCard(companyId, code),
+  })
+  const d = q.data
+  return (
+    <Dialog open onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-w-5xl max-h-[85vh] overflow-hidden flex flex-col">
+        <DialogHeader>
+          <DialogTitle className="text-base">
+            {d?.name ?? 'Позиция'}
+            <span className="ml-2 font-normal text-muted-foreground">код {code}</span>
+          </DialogTitle>
+        </DialogHeader>
+        {q.isError && <QueryError onRetry={() => q.refetch()} />}
+        {!d ? <Loading /> : (
+          <div className="flex-1 min-h-0 overflow-y-auto space-y-3 pr-1">
+            {!d.inCatalog && (
+              <p className="text-[11px] text-amber-600 dark:text-amber-400">
+                Кода нет в справочнике номенклатуры — имя взято из строк документов.
+              </p>
+            )}
+            <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
+              <MetricTile label="Продано"
+                value={`${qty.format(d.sale.qty ?? 0)} ${d.unit ?? ''}`}
+                hint={`${money.format(d.sale.amount ?? 0)} ₽ · ${d.sale.docs ?? 0} док.`} />
+              <MetricTile label="Куплено"
+                value={`${qty.format(d.purchase.qty ?? 0)} ${d.unit ?? ''}`}
+                hint={`${money.format(d.purchase.amount ?? 0)} ₽ · ${d.purchase.docs ?? 0} док.`} />
+              <MetricTile label="Средняя цена продажи"
+                value={money.format(d.avgSalePrice) + ' ₽'}
+                hint={d.avgBuyPrice ? `закупка ${money.format(d.avgBuyPrice)} ₽` : undefined} />
+              <MetricTile label="Наценка"
+                value={d.markupPct === null ? '—' : `${d.markupPct.toFixed(1)}%`}
+                hint={d.markupPct === null ? 'позицию не закупали' : 'к цене закупки'}
+                tone={d.markupPct !== null && d.markupPct > 0 ? 'success' : undefined} />
+            </div>
+
+            {d.clients.length > 0 && (
+              <TableCard note="Кто покупает"
+                head={<>
+                  <Th>Покупатель</Th><Th right>Количество</Th><Th right>Сумма</Th>
+                  <Th right>Документов</Th><Th>Последний</Th>
+                </>}>
+                {d.clients.map((c) => (
+                  <tr key={c.id ?? c.name} className="border-b last:border-0 hover:bg-muted/40">
+                    <td className="px-3 py-1.5 max-w-[320px] truncate" title={c.name}>{c.name}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+                      {qty.format(c.qty)}
+                    </td>
+                    <Money v={c.amount} />
+                    <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+                      {c.docs}
+                    </td>
+                    <td className="px-3 py-1.5 tabular-nums text-muted-foreground">{c.last}</td>
+                  </tr>
+                ))}
+              </TableCard>
+            )}
+
+            {d.suppliers.length > 0 && (
+              <TableCard note="У кого покупаем"
+                head={<>
+                  <Th>Поставщик</Th><Th right>Количество</Th><Th right>Сумма</Th>
+                  <Th right>Документов</Th><Th>Последний</Th>
+                </>}>
+                {d.suppliers.map((c) => (
+                  <tr key={c.id ?? c.name} className="border-b last:border-0 hover:bg-muted/40">
+                    <td className="px-3 py-1.5 max-w-[320px] truncate" title={c.name}>{c.name}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+                      {qty.format(c.qty)}
+                    </td>
+                    <Money v={c.amount} />
+                    <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+                      {c.docs}
+                    </td>
+                    <td className="px-3 py-1.5 tabular-nums text-muted-foreground">{c.last}</td>
+                  </tr>
+                ))}
+              </TableCard>
+            )}
+
+            <TableCard note="Цены по датам — продажа и закупка в одном списке"
+              head={<>
+                <Th>Дата</Th><Th>Операция</Th><Th>Контрагент</Th>
+                <Th right>Количество</Th><Th right>Цена</Th>
+              </>}>
+              {d.prices.slice(0, 40).map((p, i) => (
+                <tr key={i} className="border-b last:border-0 hover:bg-muted/40">
+                  <td className="px-3 py-1.5 tabular-nums whitespace-nowrap">{p.date}</td>
+                  <td className="px-3 py-1.5 text-muted-foreground">
+                    {p.kind === 'sale' ? 'продажа' : 'закупка'}
+                  </td>
+                  <td className="px-3 py-1.5 max-w-[280px] truncate" title={p.counterparty}>
+                    {p.counterparty}
+                  </td>
+                  <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+                    {qty.format(p.qty)}
+                  </td>
+                  <Money v={p.price} strong />
                 </tr>
               ))}
             </TableCard>

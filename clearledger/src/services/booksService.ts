@@ -61,6 +61,8 @@ export interface DocRow {
   section: string | null
   counterparty: string
   inn: string | null
+  /** Ссылка на карточку контрагента; null — документ не сведён со справочником. */
+  counterpartyId: string | null
   amount: number
   vat: number
   operation: string | null
@@ -256,6 +258,36 @@ export interface CounterpartyCard {
 export const getCounterpartyCard = (companyId: string, counterpartyId: string) =>
   get<CounterpartyCard>(`/api/books/counterparty?company_id=${companyId}`
     + `&counterparty_id=${counterpartyId}`)
+
+/**
+ * Карточка позиции: по какой цене уходит и приходит, сколько на ней зарабатываем,
+ * кто берёт. Ключ — КОД номенклатуры: имя в строке документа пишется как угодно.
+ */
+export interface NomenclatureCard {
+  code: string
+  name: string
+  unit: string | null
+  vatRate: number | null
+  /** false — кода нет в справочнике 1С, имя взято из строк документов. */
+  inCatalog: boolean
+  sale: { docs?: number; qty?: number; amount?: number; first?: string; last?: string }
+  purchase: { docs?: number; qty?: number; amount?: number; first?: string; last?: string }
+  avgSalePrice: number
+  avgBuyPrice: number
+  /** Наценка к закупочной цене, %. null — позицию не закупали. */
+  markupPct: number | null
+  prices: { date: string; kind: string; price: number; qty: number; counterparty: string }[]
+  clients: { id: string | null; name: string; qty: number; amount: number; docs: number; last: string }[]
+  suppliers: { id: string | null; name: string; qty: number; amount: number; docs: number; last: string }[]
+  months: {
+    month: string; soldQty: number; soldAmount: number
+    boughtQty: number; boughtAmount: number
+  }[]
+}
+
+export const getNomenclatureCard = (companyId: string, code: string) =>
+  get<NomenclatureCard>(`/api/books/nomenclature?company_id=${companyId}`
+    + `&code=${encodeURIComponent(code)}`)
 
 export interface SourceInfo {
   kind: string
