@@ -105,7 +105,9 @@ _ENTRY_UNLINK_SQL = """
       FROM accounting_docs d
      WHERE e.company_id = :cid AND e.doc_id = d.id
        AND coalesce(e.doc_kind, '') <> ''
-       AND d.doc_type IS DISTINCT FROM (:kinds::jsonb ->> e.doc_kind)
+       -- CAST, а не `:kinds::jsonb`: два двоеточия подряд после параметра
+       -- SQLAlchemy разбирает как второй параметр и роняет запрос синтаксисом.
+       AND d.doc_type IS DISTINCT FROM (cast(:kinds AS jsonb) ->> e.doc_kind)
 """
 
 
