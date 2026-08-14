@@ -91,7 +91,7 @@ async def get_settings(
     if row is None:
         # Записи нет — это НЕ ошибка: пространство просто ничего не меняло.
         return SettingsOut(disabled_skills=[], instructions=None, mode="normal",
-                           can_manage=can_manage, author_name=current_user.full_name)
+                           can_manage=can_manage, author_name=current_user.name)
     return SettingsOut(
         disabled_skills=row.disabled_skills or [],
         instructions=row.instructions,
@@ -100,7 +100,7 @@ async def get_settings(
         model_answer=row.model_answer,
         updated_at=row.updated_at,
         can_manage=can_manage,
-        author_name=current_user.full_name,
+        author_name=current_user.name,
     )
 
 
@@ -183,7 +183,7 @@ async def list_runs(
     """След разговоров: что спрашивали, куда смотрел, что нашёл."""
     cid = await assert_company_product(company_id, current_user, db, "auditor")
     rows = (await db.execute(
-        select(AuditorRun, User.full_name)
+        select(AuditorRun, User.name)
         .outerjoin(User, User.id == AuditorRun.user_id)
         .where(AuditorRun.company_id == cid)
         .order_by(AuditorRun.created_at.desc())
