@@ -11,6 +11,9 @@
  */
 import { useEffect, useRef, useState } from 'react'
 import { Loader2, TerminalSquare } from 'lucide-react'
+import { DictateButton } from './DictateButton'
+import { useQuery } from '@tanstack/react-query'
+import * as auditor from '@/services/spaceAuditorService'
 // Стили статикой, а не `import()`: rollup не резолвит CSS как динамический модуль и
 // роняет сборку целиком. Сам компонент ленивый, поэтому его CSS и так уедет в свой чанк.
 import '@xterm/xterm/css/xterm.css'
@@ -22,6 +25,13 @@ export function AuditorTerminal() {
   const hostRef = useRef<HTMLDivElement>(null)
   const [state, setState] = useState<'connecting' | 'open' | 'closed'>('connecting')
   const [error, setError] = useState('')
+  // Диктовка в терминал: текст ПЕЧАТАЕТСЯ в PTY, а не отправляется — человек видит его
+  // в приглашении и жмёт Enter сам. Отправлять за него нельзя: распознавание ошибается,
+  // а команда в мастерской может быть недешёвой.
+  const wsRef = useRef<WebSocket | null>(null)
+  const { data: health } = useQuery({
+    queryKey: ['auditor-health'], queryFn: auditor.getHealth, staleTime: 60_000, retry: false,
+  })
 
   useEffect(() => {
     if (!hostRef.current || !companyId) return
@@ -52,6 +62,7 @@ export function AuditorTerminal() {
 
       const proto = location.protocol === 'https:' ? 'wss' : 'ws'
       const ws = new WebSocket(`${proto}://${location.host}/auditor/ws/terminal`)
+      wsRef.current = ws
 
       ws.onopen = () => {
         setState('open')
@@ -89,6 +100,13 @@ export function AuditorTerminal() {
         <TerminalSquare className="size-3.5" />
         <span>Мастерская · Claude Code в <span className="text-foreground">/work</span></span>
         {state === 'connecting' && <Loader2 className="size-3.5 animate-spin" />}
+        {health?.dictation && state === 'open' && (
+          <span className="ml-2">
+            <DictateButton title="Продиктовать команду"
+              onText={(t) => wsRef.current?.readyState === WebSocket.OPEN
+                && wsRef.current.send(JSON.stringify({ type: 'data', data: t }))} />
+          </span>
+        )}
         {state === 'closed' && (
           <button type="button" onClick={() => location.reload()}
             className="ml-auto rounded-md border border-border/60 px-2 py-0.5 hover:bg-accent hover:text-foreground">

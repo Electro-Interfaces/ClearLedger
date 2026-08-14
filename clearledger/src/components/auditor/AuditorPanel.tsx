@@ -12,6 +12,7 @@ import { useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { Bot, CornerDownLeft, Loader2, Paperclip, RotateCcw, ShieldOff, Square, ThumbsDown, ThumbsUp, TriangleAlert } from 'lucide-react'
 import { toast } from 'sonner'
+import { DictateButton } from './DictateButton'
 import { Button } from '@/components/ui/button'
 import { Markdown } from '@/components/info/Markdown'
 import { useCompany } from '@/contexts/CompanyContext'
@@ -127,6 +128,11 @@ export function AuditorPanel() {
   const ctrlRef = useRef<AbortController | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
 
+
+  // Микрофон показываем, только если распознаватель в стеке поднят.
+  const { data: health } = useQuery({
+    queryKey: ['auditor-health'], queryFn: auditor.getHealth, staleTime: 60_000, retry: false,
+  })
 
   const product = productForPath(pathname)
   const context = useMemo<auditor.AuditorContext>(() => ({
@@ -300,6 +306,11 @@ export function AuditorPanel() {
           <input ref={fileRef} type="file" className="hidden"
             accept=".xlsx,.xlsm,.xls,.csv,.tsv,.pdf,.docx,.doc,.txt,.md,.json,.xml"
             onChange={(e) => attach(e.target.files?.[0])} />
+          {health?.dictation && (
+            <DictateButton disabled={busy}
+              onText={(t) => setInput((v) => (v ? `${v} ${t}` : t))}
+              title="Продиктовать вопрос" />
+          )}
           <Button size="icon" variant="outline" disabled={uploading || busy}
             onClick={() => fileRef.current?.click()}
             title="Приложить файл: выписку, реестр, акт">

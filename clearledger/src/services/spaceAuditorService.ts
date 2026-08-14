@@ -57,6 +57,8 @@ export interface AuditorHealth {
   auth: boolean
   skills: number
   workshop: boolean
+  /** Поднят ли распознаватель речи в стеке (профиль `asr`). */
+  dictation?: boolean
   authProblem?: string
 }
 
@@ -178,6 +180,24 @@ export async function reloadAgent() {
   const res = await fetch(`${BASE}/reload`, { method: 'POST' })
   if (!res.ok) throw new Error('Не удалось перезапустить агента')
   return res.json() as Promise<{ methods: number; knowledge: number }>
+}
+
+/**
+ * Диктовка: запись речи → текст. Считает распознаватель СТЕКА, запись не покидает
+ * контейнер компании. Профиль `asr` не включён — вернётся 503 с внятной причиной.
+ */
+export async function dictate(audio: Blob): Promise<string> {
+  const form = new FormData()
+  form.append('file', audio, 'voice.webm')
+  const res = await fetch(`${BASE}/dictate`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${getToken() ?? ''}` },
+    body: form,
+  })
+  if (!res.ok) {
+    throw new Error((await res.json().catch(() => null))?.error || `Не распозналось (${res.status})`)
+  }
+  return (await res.json()).text || ''
 }
 
 /** Каталог навыков — чем аудитор вообще умеет отвечать. */
