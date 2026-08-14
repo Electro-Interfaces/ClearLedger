@@ -46,6 +46,26 @@ export interface AuditorSettings {
   model_plan: string | null
   model_answer: string | null
   updated_at?: string | null
+  /** Админ пространства: может править настройки и входить в мастерскую. Считает сервер. */
+  can_manage?: boolean
+}
+
+/** Что умеет сервис аудитора в этом стеке. */
+export interface AuditorHealth {
+  ok: boolean
+  cli: boolean
+  auth: boolean
+  skills: number
+  workshop: boolean
+  authProblem?: string
+}
+
+export async function getHealth(): Promise<AuditorHealth> {
+  const res = await fetch('/auditor/health')
+  if (!res.ok || !res.headers.get('content-type')?.includes('application/json')) {
+    throw new Error('Аудитор в этом пространстве не подключён')
+  }
+  return res.json()
 }
 
 /** Оценка ответа: вход петли обучения, а не рейтинг для красоты. */
@@ -134,6 +154,7 @@ export function ask(
   history: { role: 'user' | 'assistant'; content: string }[],
   ev: AuditorEvents,
   files: string[] = [],
+  workshop = false,
 ): AbortController {
   const controller = new AbortController()
 
@@ -144,7 +165,7 @@ export function ask(
       Authorization: `Bearer ${getToken() ?? ''}`,
       'X-Company-Id': companyId,
     },
-    body: JSON.stringify({ question, context: ctx, history, files }),
+    body: JSON.stringify({ question, context: ctx, history, files, workshop }),
     signal: controller.signal,
   })
     .then(async (res) => {

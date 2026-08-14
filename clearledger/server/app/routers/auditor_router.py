@@ -54,6 +54,10 @@ class SettingsIn(BaseModel):
 
 class SettingsOut(SettingsIn):
     updated_at: datetime | None = None
+    # Может ли этот человек менять настройки и входить в мастерскую. Считает СЕРВЕР:
+    # сервис аудитора спрашивает его же ручкой и решает, пускать ли в режим с
+    # инструментами. Клиенту тут верить нельзя — он сам себе админом не назначается.
+    can_manage: bool = False
 
 
 class RunIn(BaseModel):
@@ -79,10 +83,11 @@ async def get_settings(
 ) -> SettingsOut:
     """Настройки агента. Читает их и сам сервис аудитора — токеном спросившего."""
     cid = await assert_company_product(company_id, current_user, db, "auditor")
+    can_manage = await _is_space_admin(current_user, cid, db)
     row = await _get_or_default(cid, db)
     if row is None:
         # Записи нет — это НЕ ошибка: пространство просто ничего не меняло.
-        return SettingsOut(disabled_skills=[], instructions=None, mode="normal")
+        return SettingsOut(disabled_skills=[], instructions=None, mode="normal", can_manage=can_manage)
     return SettingsOut(
         disabled_skills=row.disabled_skills or [],
         instructions=row.instructions,
@@ -90,6 +95,7 @@ async def get_settings(
         model_plan=row.model_plan,
         model_answer=row.model_answer,
         updated_at=row.updated_at,
+        can_manage=can_manage,
     )
 
 
@@ -122,7 +128,7 @@ async def put_settings(
     return SettingsOut(
         disabled_skills=row.disabled_skills or [], instructions=row.instructions,
         mode=row.mode, model_plan=row.model_plan, model_answer=row.model_answer,
-        updated_at=row.updated_at,
+        updated_at=row.updated_at, can_manage=True,   # сюда дошёл только админ
     )
 
 

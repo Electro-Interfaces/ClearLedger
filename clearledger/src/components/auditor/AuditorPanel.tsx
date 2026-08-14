@@ -9,7 +9,8 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
-import { Bot, CornerDownLeft, Loader2, Paperclip, ShieldOff, Square, ThumbsDown, ThumbsUp, TriangleAlert } from 'lucide-react'
+import { useQuery } from '@tanstack/react-query'
+import { Bot, CornerDownLeft, Loader2, Paperclip, ShieldOff, Square, ThumbsDown, ThumbsUp, TriangleAlert, Wrench } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Markdown } from '@/components/info/Markdown'
@@ -122,8 +123,21 @@ export function AuditorPanel() {
   const [files, setFiles] = useState<auditor.AuditorFile[]>([])
   const [uploading, setUploading] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
+  // Мастерская: тот же агент, но с инструментами и рабочей папкой /work. Переключатель
+  // показывается, только если режим включён в стеке И человек — админ пространства;
+  // проверяет это всё равно сервер, здесь лишь не показываем заведомо недоступное.
+  const [workshop, setWorkshop] = useState(false)
   const ctrlRef = useRef<AbortController | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
+
+  const { data: health } = useQuery({
+    queryKey: ['auditor-health'], queryFn: auditor.getHealth, staleTime: 5 * 60 * 1000, retry: false,
+  })
+  const { data: settings } = useQuery({
+    queryKey: ['auditor-settings', companyId],
+    queryFn: () => auditor.getSettings(companyId), enabled: !!companyId, retry: false,
+  })
+  const canWorkshop = !!health?.workshop && !!settings?.can_manage
 
   const product = productForPath(pathname)
   const context = useMemo<auditor.AuditorContext>(() => ({
@@ -197,7 +211,7 @@ export function AuditorPanel() {
       },
       onError: (message) => setError(message),
       onDone: () => { setBusy(false); setStatus('') },
-    }, ids)
+    }, ids, workshop)
   }
 
   function stop() {
@@ -213,8 +227,24 @@ export function AuditorPanel() {
       <div className="flex items-center gap-2 border-b border-border/60 px-4 py-2 text-xs text-muted-foreground">
         <Bot className="size-3.5 shrink-0" />
         <span className="truncate">
-          Смотрю вместе с вами{product ? <> · <span className="text-foreground">{product.label}</span></> : null}
+          {workshop
+            ? <>Мастерская · рабочая папка <span className="text-foreground">/work</span></>
+            : <>Смотрю вместе с вами{product ? <> · <span className="text-foreground">{product.label}</span></> : null}</>}
         </span>
+        {/* Переключатель — в шапке, а не у строки ввода: это не свойство вопроса, а
+            то, С КЕМ сейчас разговариваешь. Видит только админ и только там, где
+            режим включён в стеке. */}
+        {canWorkshop && (
+          <button type="button" onClick={() => setWorkshop((w) => !w)} disabled={busy}
+            title={workshop ? 'Вернуться к помощнику: навыки-вопросы, без инструментов' : 'Мастерская: инструменты, файлы, навыки из /work'}
+            className={cn('ml-auto inline-flex shrink-0 items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] transition-colors',
+              workshop
+                ? 'border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400'
+                : 'border-border/60 text-muted-foreground hover:bg-accent hover:text-foreground')}>
+            <Wrench className="size-3" />
+            {workshop ? 'Мастерская' : 'Помощник'}
+          </button>
+        )}
       </div>
 
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-3">
@@ -309,7 +339,7 @@ export function AuditorPanel() {
               if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(input) }
             }}
             rows={2}
-            placeholder="Спросите про этот экран…"
+            placeholder={workshop ? 'Задача для мастерской: разобрать, проверить, закрепить методом…' : 'Спросите про этот экран…'}
             className="min-h-[44px] flex-1 resize-none rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary"
           />
           {busy ? (
