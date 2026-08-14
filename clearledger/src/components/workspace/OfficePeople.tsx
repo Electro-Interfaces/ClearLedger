@@ -198,7 +198,9 @@ export function PerimeterPeopleScreen({ companyId }: { companyId: string }) {
                 )}
               </Td>
               <Td right>
-                <button className="text-muted-foreground hover:text-destructive"
+                <button className="text-muted-foreground hover:text-destructive
+                    disabled:opacity-40 disabled:hover:text-muted-foreground"
+                  disabled={!!p.operations}
                   title={p.operations
                     ? 'За человеком есть расчёты: снимите отметку «в работе»'
                     : 'Удалить из списка'}

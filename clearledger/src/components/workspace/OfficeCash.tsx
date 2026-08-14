@@ -10,11 +10,13 @@
  * выполненной работы долгом не становится, сколько её ни выдай. Должен человек ровно на
  * непогашенные займы, и возврат привязывается к своей выдаче, а не уменьшает общий счёт.
  */
-import { useMemo, useState } from 'react'
+import { Fragment, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChevronDown, ChevronRight, Plus, Trash2 } from 'lucide-react'
 
 import { useFilters } from '@/contexts/FilterContext'
+import { toast } from 'sonner'
+
 import { QueryError } from '@/components/common/QueryError'
 import { Card, CardContent } from '@/components/ui/card'
 import { MetricTile } from '@/components/ui/metric-tile'
@@ -101,6 +103,7 @@ export function CashJournalScreen({ companyId }: { companyId: string }) {
   const remove = useMutation({
     mutationFn: (id: string) => deleteCash(companyId, id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['perimeter'] }),
+    onError: (e: Error) => toast.error(e.message),
   })
 
   const rows = useMemo(() => {
@@ -168,7 +171,17 @@ export function CashJournalScreen({ companyId }: { companyId: string }) {
       {!d ? <Loading /> : !rows.length ? (
         <Card>
           <CardContent className="p-4 text-sm space-y-2">
-            <div className="font-medium">Записей нет</div>
+            <div className="font-medium">
+              {kind || search.trim()
+                ? 'Под отбор ничего не подходит'
+                : `За период ${period.from} — ${period.to} записей нет`}
+            </div>
+            {(kind || search.trim()) && (
+              <p className="text-muted-foreground">
+                Снимите отбор по виду или очистите поиск. Период рабочей области тоже
+                сужает список: операции более ранних месяцев видны при его смене.
+              </p>
+            )}
             <p className="text-muted-foreground">
               Здесь ведут расчёты, которых нет в кассе компании: оплату работ частных лиц,
               займы знакомым и от знакомых, покупки на личные деньги собственника,
@@ -215,7 +228,7 @@ export function CashJournalScreen({ companyId }: { companyId: string }) {
                   <div className="text-[11px] text-amber-600">ждёт документов</div>
                 ) : null}
               </Td>
-              <Td right className="whitespace-nowrap">
+              <Td right>
                 <span className={r.direction === 'in' ? 'text-emerald-600' : undefined}>
                   {r.direction === 'in' ? '+' : '−'}{money.format(r.amount)} ₽
                 </span>
@@ -290,6 +303,11 @@ const toCashForm = (r: CashMove): CashIn => ({
   purse: r.purse, parentId: r.parentId, recordId: r.recordId,
   commitmentId: r.commitmentId, dueOn: r.dueOn,
   note: r.note, counterpartyId: r.counterpartyId,
+  // Эти три поля терялись при правке: «кто это» сбрасывалось на частное лицо, а
+  // проведённая премия возвращалась в очередь на оформление. Форма отправляет весь
+  // объект целиком, поэтому пропущенное поле означает не «не менять», а «стереть».
+  personKind: r.personKind, formalized: r.formalized,
+  formalizedOn: r.formalizedOn, formalizedBy: r.formalizedBy,
 })
 
 function Field({ label, hint, children }: {
@@ -388,12 +406,22 @@ function CashDialog({
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Вид">
               <select className={inputCls} value={value.kind}
-                onChange={(e) => set({
-                  kind: e.target.value,
-                  // Срок бывает только у займа, привязка — только у возврата.
-                  dueOn: e.target.value === 'loan' ? value.dueOn : null,
-                  parentId: e.target.value === 'repayment' ? value.parentId : null,
-                })}>
+                onChange={(e) => {
+                  const k = e.target.value
+                  // Поля, которых у нового вида нет, сбрасываются вместе с ним:
+                  // скрытый флажок «проведено» иначе уходил на сервер незамеченным.
+                  set({
+                    kind: k,
+                    dueOn: ['loan', 'advance'].includes(k) ? value.dueOn : null,
+                    parentId: ['repayment', 'report'].includes(k) ? value.parentId : null,
+                    formalized: ['advance', 'travel', 'bonus'].includes(k)
+                      ? value.formalized : false,
+                    formalizedOn: ['advance', 'travel', 'bonus'].includes(k)
+                      ? value.formalizedOn : null,
+                    formalizedBy: ['advance', 'travel', 'bonus'].includes(k)
+                      ? value.formalizedBy : null,
+                  })
+                }}>
                 {dicts.kinds.map((k) => <option key={k.key} value={k.key}>{k.label}</option>)}
               </select>
             </Field>
@@ -413,7 +441,8 @@ function CashDialog({
                 <option value="">— выберите заём —</option>
                 {loans.map((l) => (
                   <option key={l.id} value={l.id}>
-                    {l.happenedOn} · {l.person} · осталось {l.rest} ₽
+                    {l.happenedOn} · {l.person} · осталось{' '}
+                    {money.format(l.rest ?? 0)} ₽
                   </option>
                 ))}
               </select>
@@ -449,7 +478,7 @@ function CashDialog({
                 {commitments.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.person} · {c.title}
-                    {c.amount ? ` · ${c.amount} ₽` : ''}
+                    {c.amount ? ` · ${money.format(c.amount)} ₽` : ''}
                   </option>
                 ))}
               </select>
@@ -667,8 +696,8 @@ export function CashLoansScreen({ companyId }: { companyId: string }) {
         head={<><Th>Дата</Th><Th>С кем и за что</Th><Th right>Сумма</Th>
           <Th right>Возвращено</Th><Th right>Остаток</Th><Th>Срок</Th></>}>
         {d.rows.map((l) => (
-          <>
-            <tr key={l.id} className={cn('border-b last:border-0',
+          <Fragment key={l.id}>
+            <tr className={cn('border-b last:border-0',
               l.overdue && 'bg-destructive/5')}>
               <Td>
                 <button className="flex items-center gap-1 hover:underline"
@@ -715,7 +744,7 @@ export function CashLoansScreen({ companyId }: { companyId: string }) {
                 <Td muted>—</Td>
               </tr>
             ))}
-          </>
+          </Fragment>
         ))}
       </TableCard>
     </div>

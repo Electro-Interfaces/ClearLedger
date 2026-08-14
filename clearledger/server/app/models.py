@@ -8918,6 +8918,10 @@ class OffLedgerCash(Base):
     commitment_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("off_ledger_commitments.id", ondelete="SET NULL"),
         nullable=True)
+    # За КАКОЙ период платим (первый день периода). Хранится у операции, а не выводится
+    # из даты: доплату за август выдают в сентябре. Без этого поля правка операции
+    # пересчитывала период заново и заводила вторую отметку.
+    commitment_period: Mapped[date_type | None] = mapped_column(Date, nullable=True)
     # Срок возврата — у займов и выдач под отчёт.
     due_on: Mapped[date_type | None] = mapped_column(Date, nullable=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -9044,6 +9048,9 @@ class OffLedgerCommitment(Base):
     # active — действует, paused — приостановлено, ended — прекращено.
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active",
                                         index=True)
+    # Когда приостановили. Без этой даты пауза не защищает от пропусков: исключать
+    # можно только текущий период, и через месяц пауза выглядит как забывчивость.
+    paused_on: Mapped[date_type | None] = mapped_column(Date, nullable=True)
     # Чем подтверждено — те же три ступени, что у договорённостей.
     confidence: Mapped[str] = mapped_column(String(20), nullable=False, default="spoken")
     note: Mapped[str | None] = mapped_column(Text, nullable=True)

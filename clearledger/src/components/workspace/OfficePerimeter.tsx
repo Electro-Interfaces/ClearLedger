@@ -20,6 +20,8 @@ import { Plus, Trash2 } from 'lucide-react'
 
 import { useCompany } from '@/contexts/CompanyContext'
 import { useWorkspace, useWorkspaceSubView } from '@/contexts/WorkspaceContext'
+import { toast } from 'sonner'
+
 import { QueryError } from '@/components/common/QueryError'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Card, CardContent } from '@/components/ui/card'
@@ -353,10 +355,16 @@ function PerimeterDue({ companyId }: { companyId: string }) {
     queryFn: () => getCashLoans(companyId),
     enabled: !!companyId,
   })
-  if (q.isError) {
-    return <div className="p-4"><QueryError onRetry={() => q.refetch()} /></div>
+  if (q.isError || loans.isError) {
+    return <div className="p-4">
+      <QueryError message="Не удалось собрать сроки" onRetry={() => {
+        q.refetch(); loans.refetch()
+      }} />
+    </div>
   }
-  if (!q.data) return <Loading />
+  // Пока вторая очередь не пришла, «сроков нет» показывать нельзя: сбой загрузки
+  // выглядел бы как порядок в делах.
+  if (!q.data || loans.isPending) return <Loading />
   const d = q.data
   const rows = [...d.overdue, ...d.soon]
   // Просроченные выдачи и пропущенные периоды — такие же сроки, как у договорённостей.
@@ -501,6 +509,7 @@ function PerimeterRegistry({ companyId }: { companyId: string }) {
   const remove = useMutation({
     mutationFn: (id: string) => deletePerimeterRecord(companyId, id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['perimeter'] }),
+    onError: (e: Error) => toast.error(e.message),
   })
 
   const rows = useMemo(() => {
@@ -550,7 +559,9 @@ function PerimeterRegistry({ companyId }: { companyId: string }) {
       {!q.data ? <Loading /> : !rows.length ? (
         <Card>
           <CardContent className="p-4 text-sm space-y-2">
-            <div className="font-medium">Записей пока нет</div>
+            <div className="font-medium">
+              {status ? 'Под отбор ничего не подходит' : 'Записей пока нет'}
+            </div>
             <p className="text-muted-foreground">
               Сюда заносят то, чего нет в документах: устные договорённости с клиентами и
               поставщиками, обещания сроков, решения собственника, поручительства «под
@@ -796,7 +807,8 @@ function PerimeterParties({ companyId }: { companyId: string }) {
       <div className="p-4">
         <Card>
           <CardContent className="p-4 text-sm text-muted-foreground">
-            Пока не с кем: реестр договорённостей пуст.
+            Ни у одной записи не указана вторая сторона. Она заполняется в карточке
+            договорённости полем «Вторая сторона» — по нему и строится этот разрез.
           </CardContent>
         </Card>
       </div>

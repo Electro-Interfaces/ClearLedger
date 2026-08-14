@@ -17,6 +17,8 @@ import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Plus, Trash2 } from 'lucide-react'
 
+import { toast } from 'sonner'
+
 import { QueryError } from '@/components/common/QueryError'
 import { Card, CardContent } from '@/components/ui/card'
 import { MetricTile } from '@/components/ui/metric-tile'
@@ -52,9 +54,21 @@ const inputCls = 'w-full rounded-md border bg-background px-2.5 py-1.5 text-sm'
 
 /** Цвет клетки периода: выполнено, сознательно пропущено, пропущено, текущее. */
 const PERIOD_TONE: Record<string, string> = {
-  done: 'bg-emerald-500/70',
-  skipped: 'bg-muted-foreground/40',
-  missed: 'bg-destructive/70',
+  done: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400',
+  skipped: 'bg-muted text-muted-foreground',
+  // Красное — только настоящий пропуск. Идущий период ждёт, а не провален.
+  missed: 'bg-destructive/15 text-destructive',
+  open: 'bg-muted/50 text-muted-foreground',
+  partial: 'bg-muted/50 text-muted-foreground',
+}
+
+/** Короткая подпись клетки: «авг», «Q3», «26» — по шагу, а не первым словом подряд. */
+const periodChip = (label: string, periodicity: string): string => {
+  if (periodicity === 'week') return label.replace('неделя с ', '').slice(0, 5)
+  if (periodicity === 'quarter') return `Q${label[0]}`
+  if (periodicity === 'halfyear') return `${label[0]}п`
+  if (periodicity === 'year') return label.slice(2, 4)
+  return label.slice(0, 3)
 }
 
 export function CommitmentsScreen({ companyId }: { companyId: string }) {
@@ -87,6 +101,7 @@ export function CommitmentsScreen({ companyId }: { companyId: string }) {
   const remove = useMutation({
     mutationFn: (id: string) => deleteCommitment(companyId, id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['perimeter'] }),
+    onError: (e: Error) => toast.error(e.message),
   })
   const doMark = useMutation({
     mutationFn: (v: {
@@ -99,6 +114,8 @@ export function CommitmentsScreen({ companyId }: { companyId: string }) {
       setMark(null)
       qc.invalidateQueries({ queryKey: ['perimeter'] })
     },
+    // Отметка периода — главное действие экрана: её отказ обязан быть виден.
+    onError: (e: Error) => toast.error(e.message),
   })
   const undoMark = useMutation({
     mutationFn: (v: { id: string; markId: string }) =>
@@ -107,6 +124,7 @@ export function CommitmentsScreen({ companyId }: { companyId: string }) {
       setMark(null)
       qc.invalidateQueries({ queryKey: ['perimeter'] })
     },
+    onError: (e: Error) => toast.error(e.message),
   })
 
   const rows = useMemo(() => {
@@ -230,14 +248,27 @@ export function CommitmentsScreen({ companyId }: { companyId: string }) {
                     <button key={p.periodStart} title={`${p.label}: ${
                       p.outcome === 'done' ? 'выполнено'
                       : p.outcome === 'skipped' ? 'пропущено сознательно'
+                      : p.outcome === 'partial' ? 'неполный первый период'
+                      : p.outcome === 'open' ? 'период идёт'
                       : 'не отмечено'}`}
                       onClick={() => setMark({ c, period: p.periodStart, label: p.label })}
-                      className={cn('h-6 min-w-6 px-1.5 rounded text-[10px] text-white',
+                      className={cn('h-6 min-w-8 px-1.5 rounded text-[10px] tabular-nums',
                         PERIOD_TONE[p.outcome] ?? 'bg-muted',
                         p.isCurrent && 'ring-2 ring-offset-1 ring-foreground/30')}>
-                      {p.label.split(' ')[0].slice(0, 3)}
+                      {periodChip(p.label, c.periodicity)}
                     </button>
                   ))}
+                </div>
+
+                <div className="flex flex-wrap gap-3 text-[11px] text-muted-foreground">
+                  {([['done', 'выполнено'], ['skipped', 'пропущено сознательно'],
+                     ['missed', 'не отмечено'], ['open', 'период идёт']] as const)
+                    .map(([key, label]) => (
+                      <span key={key} className="inline-flex items-center gap-1">
+                        <span className={cn('w-3 h-3 rounded', PERIOD_TONE[key])} />
+                        {label}
+                      </span>
+                    ))}
                 </div>
 
                 <div className="flex flex-wrap gap-x-6 gap-y-1 text-[11px] text-muted-foreground">
