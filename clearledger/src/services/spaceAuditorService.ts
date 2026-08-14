@@ -9,7 +9,7 @@
  * Запрос идёт токеном пользователя: аудитор своих прав не имеет и не покажет того,
  * чего человек не видит сам.
  */
-import { get, getToken, put } from './apiClient'
+import { get, getToken, post, put } from './apiClient'
 
 /** Где человек находился, когда позвал. Отсюда агент понимает, куда смотреть. */
 export interface AuditorContext {
@@ -30,6 +30,8 @@ export interface AuditorEvents {
   onSkills?: (ids: string[]) => void
   onText: (chunk: string) => void
   onFindings?: (findings: AuditorFinding[]) => void
+  /** id записи в журнале — по нему панель даёт оценить ответ. */
+  onRun?: (runId: string) => void
   onError?: (message: string) => void
   onDone?: () => void
 }
@@ -46,6 +48,9 @@ export interface AuditorSettings {
   updated_at?: string | null
 }
 
+/** Оценка ответа: вход петли обучения, а не рейтинг для красоты. */
+export type AuditorVerdict = 'ok' | 'wrong' | 'not_an_issue'
+
 export interface AuditorRun {
   id: string
   question: string
@@ -56,9 +61,35 @@ export interface AuditorRun {
   duration_ms: number | null
   created_at: string | null
   user: string | null
+  verdict: AuditorVerdict | null
+  feedback: string | null
 }
 
 const BASE = '/auditor/api'
+
+export interface AuditorFile { id: string; name: string; size: number }
+
+/**
+ * Приложить файл к разговору — выписку, реестр, акт.
+ *
+ * Файл уходит в СЕРВИС аудитора, а не в Ядро: он живёт в каталоге сессии внутри
+ * контейнера и в базу пространства не попадает. Агент читает его сам, инструменты
+ * включаются только на этот разговор.
+ */
+export async function uploadFile(companyId: string, file: File): Promise<AuditorFile> {
+  const form = new FormData()
+  form.append('file', file)
+  const res = await fetch(`${BASE}/upload`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${getToken() ?? ''}`, 'X-Company-Id': companyId },
+    body: form,
+  })
+  if (!res.ok) {
+    const d = await res.json().catch(() => null)
+    throw new Error(d?.error || `Не удалось загрузить файл (${res.status})`)
+  }
+  return res.json()
+}
 
 /** Каталог навыков — чем аудитор вообще умеет отвечать. */
 export async function getSkills(): Promise<AuditorSkill[]> {
@@ -84,6 +115,13 @@ export const saveSettings = (companyId: string, s: Omit<AuditorSettings, 'update
 export const getRuns = (companyId: string, limit = 50) =>
   get<{ runs: AuditorRun[] }>('/api/auditor/runs', { company_id: companyId, limit })
 
+/** Оценить ответ. Переоценка разрешена — человек часто меняет решение, разобравшись. */
+export const rateRun = (companyId: string, runId: string, verdict: AuditorVerdict, feedback?: string) =>
+  post<{ status: string }>(
+    `/api/auditor/runs/${runId}/rate?company_id=${encodeURIComponent(companyId)}`,
+    { verdict, feedback: feedback ?? null },
+  )
+
 /**
  * Задать вопрос. Ответ приходит потоком: сначала статусы («смотрю данные»), затем
  * текст кусками, в конце находки. Возвращает AbortController — уход со страницы или
@@ -95,6 +133,7 @@ export function ask(
   companyId: string,
   history: { role: 'user' | 'assistant'; content: string }[],
   ev: AuditorEvents,
+  files: string[] = [],
 ): AbortController {
   const controller = new AbortController()
 
@@ -105,7 +144,7 @@ export function ask(
       Authorization: `Bearer ${getToken() ?? ''}`,
       'X-Company-Id': companyId,
     },
-    body: JSON.stringify({ question, context: ctx, history }),
+    body: JSON.stringify({ question, context: ctx, history, files }),
     signal: controller.signal,
   })
     .then(async (res) => {
@@ -143,6 +182,7 @@ export function ask(
             else if (msg.type === 'status') ev.onStatus?.(msg.content)
             else if (msg.type === 'skills') ev.onSkills?.(msg.content)
             else if (msg.type === 'findings') ev.onFindings?.(msg.content)
+            else if (msg.type === 'run') ev.onRun?.(msg.content)
             else if (msg.type === 'error') ev.onError?.(msg.content)
           } catch { /* не наша строка потока */ }
         }

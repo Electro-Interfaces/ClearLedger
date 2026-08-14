@@ -16,7 +16,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -126,6 +126,42 @@ async def put_settings(
     )
 
 
+class RateIn(BaseModel):
+    verdict: str
+    feedback: str | None = None
+
+
+VERDICTS = {"ok", "wrong", "not_an_issue"}
+
+
+@router.post("/runs/{run_id}/rate")
+async def rate_run(
+    run_id: uuid.UUID,
+    payload: RateIn,
+    company_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, str]:
+    """Оценка ответа — вход петли обучения.
+
+    Переоценка разрешена: человек часто отмечает «неверно» сгоряча, а разобравшись,
+    меняет решение. Хранится последняя оценка и кто её поставил.
+    """
+    cid = await assert_company_product(company_id, current_user, db, "auditor")
+    if payload.verdict not in VERDICTS:
+        raise HTTPException(422, f"Оценка должна быть одной из: {', '.join(sorted(VERDICTS))}")
+    run = (await db.execute(select(AuditorRun).where(
+        AuditorRun.id == run_id, AuditorRun.company_id == cid))).scalar_one_or_none()
+    if run is None:
+        raise HTTPException(404, "Ответ не найден")
+    run.verdict = payload.verdict
+    run.feedback = (payload.feedback or "").strip() or None
+    run.rated_at = datetime.now(UTC)
+    run.rated_by = current_user.id
+    await db.commit()
+    return {"status": "ok"}
+
+
 @router.get("/runs")
 async def list_runs(
     company_id: str,
@@ -152,6 +188,8 @@ async def list_runs(
         "duration_ms": r.AuditorRun.duration_ms,
         "created_at": r.AuditorRun.created_at.isoformat() if r.AuditorRun.created_at else None,
         "user": r[1],
+        "verdict": r.AuditorRun.verdict,
+        "feedback": r.AuditorRun.feedback,
     } for r in rows]}
 
 

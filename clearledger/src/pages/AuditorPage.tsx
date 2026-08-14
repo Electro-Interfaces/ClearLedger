@@ -33,6 +33,13 @@ const VIEWS = [
   { key: 'runs', label: 'Журнал', icon: ClipboardList, hint: 'что спрашивали и что он нашёл' },
 ] as const
 
+/** Оценка ответа в журнале. Цвета альфа-шкалой — один класс на обе темы. */
+const VERDICTS: Record<auditor.AuditorVerdict, { label: string; cls: string }> = {
+  ok: { label: 'верно', cls: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' },
+  wrong: { label: 'неверно', cls: 'bg-red-500/10 text-red-600 dark:text-red-400' },
+  not_an_issue: { label: 'не ошибка', cls: 'bg-amber-500/10 text-amber-600 dark:text-amber-400' },
+}
+
 const MODES = [
   { key: 'careful', label: 'Осторожный', hint: 'только то, что прямо следует из данных: без догадок о причинах и без советов' },
   { key: 'normal', label: 'Обычный', hint: 'ответ на вопрос плюс находки, если они есть' },
@@ -298,6 +305,11 @@ function RunsView() {
           <details key={r.id} className="rounded-lg border border-border/60 bg-card px-3 py-2">
             <summary className="cursor-pointer text-sm">
               <span className="font-medium">{r.question}</span>
+              {r.verdict && (
+                <span className={cn('ml-2 rounded px-1.5 py-0.5 text-[11px]', VERDICTS[r.verdict].cls)}>
+                  {VERDICTS[r.verdict].label}
+                </span>
+              )}
               <span className="ml-2 text-xs text-muted-foreground">
                 {r.user ? `${r.user} · ` : ''}
                 {r.created_at ? new Date(r.created_at).toLocaleString('ru-RU') : ''}
@@ -312,6 +324,16 @@ function RunsView() {
                   {r.skills.map((s) => (
                     <span key={s} className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">{s}</span>
                   ))}
+                </div>
+              )}
+              {/* Объяснение оценки — то, ради чего журнал и ведётся: из него растёт
+                  правило исключения. Показываем выше ответа: разбирают именно его. */}
+              {r.feedback && (
+                <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 px-2.5 py-1.5">
+                  <div className="text-[11px] font-medium uppercase tracking-wide text-amber-600 dark:text-amber-400">
+                    Замечание человека
+                  </div>
+                  <div className="mt-0.5 text-sm">{r.feedback}</div>
                 </div>
               )}
               {r.answer && <div className="whitespace-pre-wrap text-muted-foreground">{r.answer}</div>}
