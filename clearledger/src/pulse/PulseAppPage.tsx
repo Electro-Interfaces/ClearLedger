@@ -41,13 +41,42 @@ function asOfLabel(asOf: string | null, staleDays: number | null): string {
   return `данные сети на ${d} (${staleDays} дн назад)`
 }
 
+import { ViewsView } from './ViewsView'
+import { ShowcaseView } from './ShowcaseView'
+
 export function PulseAppPage() {
   const view = usePulseView('/pulse')
   if (view === 'accepted') return <AcceptedView />
   if (view === 'sources') return <SourcesPage />
   if (view === 'targets') return <TargetsPage />
   if (view === 'visibility') return <VisibilityPage />
+  if (view === 'views') return <ViewsPage />
+  if (view === 'showcase') return <ShowcasePage />
   return <TodayView />
+}
+
+/** Витрины: что показываем наружу. Собирает администратор компании. */
+function ViewsPage() {
+  return (
+    <div className="space-y-5">
+      <div>
+        <h1 className="flex items-center gap-2 text-lg font-semibold">
+          <Eye className="h-5 w-5 text-primary" />Витрины
+        </h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          «Пульс», повёрнутый наружу: заказчику, владельцу и куратору со стороны нужна
+          картина по своей теме без погружения в приложения. Витрина собирается из тех же
+          блоков, что считает «Пульс», — второго набора цифр не заводим.
+        </p>
+      </div>
+      <ViewsView />
+    </div>
+  )
+}
+
+/** Моя витрина — то, что собрали для меня. */
+function ShowcasePage() {
+  return <ShowcaseView />
 }
 
 /** Кто что видит — отбор картины для роли (в первую очередь для куратора). */

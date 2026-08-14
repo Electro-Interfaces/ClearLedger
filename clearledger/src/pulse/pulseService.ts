@@ -3,7 +3,7 @@
  * Модуль намеренно обособлен: экран и клиент живут в src/pulse/, наружу —
  * только маршрут в App.tsx и код продукта в реестре.
  */
-import { get, post, put } from '@/services/apiClient'
+import { get, patch, post, put } from '@/services/apiClient'
 
 export interface PulseKpi {
   key: string
@@ -360,3 +360,69 @@ export interface PulseAccepted {
 
 export const getPulseAccepted = (companyId: string) =>
   get<{ items: PulseAccepted[] }>('/api/pulse/accepted', { company_id: companyId })
+
+/* ── Витрины: «Пульс», повёрнутый наружу ─────────────────────────────── */
+
+export interface PulseViewRow {
+  id: string; name: string; audience: string; period: string
+  owner: string | null; note: string; status: string
+  updatedAt: string | null; blocks: number; people: number
+}
+
+export interface PulseViewCard {
+  id: string; name: string; audience: string; period: string
+  owner: string | null; note: string; status: string
+  blocks: { key: string; title: string; originalTitle: string; hint: string | null }[]
+  people: { id: string; name: string; email: string }[]
+  canEdit: boolean; asOf: string
+}
+
+export interface PulseViewData {
+  id: string; name: string; audience: string; company: string | null
+  owner: string | null; note: string; status: string; asOf: string
+  blocks: {
+    key: string; title: string; hint: string | null
+    metrics: { label: string; value: string; tone?: string | null }[]
+    items: { title: string; detail?: string; amount?: string }[]
+    note: string | null
+  }[]
+}
+
+export const getPulseViews = (companyId: string) =>
+  get<{
+    views: PulseViewRow[]
+    catalog: { key: string; title: string; group: string }[]
+    periods: { key: string; title: string }[]
+  }>('/api/pulse/views', { company_id: companyId })
+
+export const getPulseView = (companyId: string, id: string) =>
+  get<PulseViewCard>(`/api/pulse/views/${id}`, { company_id: companyId })
+
+export const getPulseViewData = (companyId: string, id: string) =>
+  get<PulseViewData>(`/api/pulse/views/${id}/data`, { company_id: companyId })
+
+export const getPulseMyViews = (companyId: string) =>
+  get<{ views: { id: string; name: string; audience: string; owner: string | null }[] }>(
+    '/api/pulse/my-views', { company_id: companyId })
+
+export const createPulseView = (companyId: string, name: string) =>
+  post<{ id: string; name: string; status: string }>(
+    `/api/pulse/views?company_id=${companyId}&name=${encodeURIComponent(name)}`, {})
+
+export const updatePulseView = (
+  companyId: string, id: string,
+  v: { name?: string; audience?: string; owner_name?: string; note?: string; status?: string },
+) => patch<{ id: string; status: string }>(
+  `/api/pulse/views/${id}?company_id=${companyId}`
+  + Object.entries(v).filter(([, x]) => x !== undefined && x !== null)
+      .map(([k, x]) => `&${k}=${encodeURIComponent(String(x))}`).join(''), {})
+
+/** Состав приходит целиком: перетаскивание блоков — одно действие человека. */
+export const setPulseViewBlocks = (
+  companyId: string, id: string, blocks: { key: string; title?: string; hint?: string }[],
+) => put<{ blocks: number; skipped: number }>(
+  `/api/pulse/views/${id}/blocks?company_id=${companyId}`, { blocks })
+
+export const setPulseViewGrants = (companyId: string, id: string, users: string[]) =>
+  put<{ granted: number; skipped: number }>(
+    `/api/pulse/views/${id}/grants?company_id=${companyId}`, { users })
