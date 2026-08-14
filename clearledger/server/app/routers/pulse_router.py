@@ -21,14 +21,16 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import log_audit
 from app.auth import assert_company_product, get_current_user, resolve_member_modules
 from app.database import get_db
-from app.models import PulseAck, User, UserCompany
+from app.models import (
+    PulseAck, PulseView, PulseViewBlock, PulseViewGrant, User, UserCompany,
+)
 # Словарь стадий — общий с «Проектами»: «Проработка» не должна стать «dd»
 # только потому, что экран другой.
 from app.services.ezs_changes import STAGE_LABELS
@@ -2768,3 +2770,262 @@ async def ack_card(
                     details={"days": days} if days else None)
     await db.commit()
     return {"ok": True, "snooze_until": until.isoformat() if until else None}
+
+
+# ── Витрины: «Пульс», повёрнутый наружу ─────────────────────────────────────
+# Заказчику, владельцу сети, куратору со стороны холдинга нужна проверенная картина
+# по своей теме — без погружения в приложения — и канал, по которому им можно
+# адресовать просьбу. Витрина собирается из тех же блоков, что считает «Пульс»:
+# второго набора метрик не заводим, иначе цифра наружу разойдётся с цифрой внутри.
+
+
+@router.get("/views")
+async def pulse_views(
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Витрины компании и каталог блоков, из которых их собирают."""
+    cid = str(await assert_company_product(company_id, current_user, db, "pulse"))
+
+    rows = (await db.execute(text("""
+        SELECT v.id::text, v.name, v.audience, v.period, v.owner_name, v.note, v.status,
+               v.updated_at,
+               (SELECT count(*) FROM pulse_view_blocks b WHERE b.view_id = v.id) AS blocks,
+               (SELECT count(*) FROM pulse_view_grants g WHERE g.view_id = v.id) AS people
+          FROM pulse_views v
+         WHERE v.company_id = CAST(:cid AS uuid)
+         ORDER BY v.status, v.name"""), {"cid": cid})).all()
+
+    return {
+        "views": [{
+            "id": r[0], "name": r[1], "audience": r[2], "period": r[3],
+            "owner": r[4], "note": r[5], "status": r[6],
+            "updatedAt": r[7].isoformat() if r[7] else None,
+            "blocks": r[8], "people": r[9],
+        } for r in rows],
+        # Каталог — тот же список пунктов «Пульса»: витрина показывает готовые разрезы,
+        # а не свои. Группа нужна конструктору, чтобы блоки не шли одной кучей.
+        "catalog": [{"key": k, "title": t, "group": g} for k, t, g in PULSE_ITEMS],
+        "periods": [{"key": "week", "title": "Неделя"}, {"key": "month", "title": "Месяц"},
+                    {"key": "quarter", "title": "Квартал"}],
+    }
+
+
+@router.post("/views")
+async def pulse_view_create(
+    company_id: str = Query(...),
+    name: str = Query(...),
+    audience: str = "",
+    period: str = "month",
+    owner_name: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Завести витрину. Создаётся черновиком: показывать недособранное нельзя."""
+    cid = await assert_company_admin_product(company_id, current_user, db)
+    row = PulseView(company_id=cid, name=name.strip(), audience=audience.strip(),
+                    period=period, owner_name=(owner_name or "").strip() or None,
+                    created_by=current_user.email)
+    db.add(row)
+    await db.commit()
+    return {"id": str(row.id), "name": row.name, "status": row.status}
+
+
+@router.patch("/views/{view_id}")
+async def pulse_view_update(
+    view_id: str,
+    company_id: str = Query(...),
+    name: str | None = None,
+    audience: str | None = None,
+    period: str | None = None,
+    owner_name: str | None = None,
+    note: str | None = None,
+    status_: str | None = Query(None, alias="status"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Изменить витрину или опубликовать её."""
+    cid = await assert_company_admin_product(company_id, current_user, db)
+    v = await _view_or_404(db, cid, view_id)
+
+    if status_ is not None:
+        if status_ not in ("draft", "published"):
+            raise HTTPException(status_code=400, detail="Неизвестное состояние витрины")
+        if status_ == "published":
+            n = (await db.execute(text(
+                "SELECT count(*) FROM pulse_view_blocks WHERE view_id = CAST(:v AS uuid)"),
+                {"v": str(v.id)})).scalar_one()
+            if not n:
+                # Пустая витрина у получателя выглядит как поломка, а не как «ещё не
+                # собрали»: публиковать нечего.
+                raise HTTPException(status_code=400, detail="В витрине нет ни одного блока")
+        v.status = status_
+    for field, value in (("name", name), ("audience", audience), ("period", period),
+                         ("owner_name", owner_name), ("note", note)):
+        if value is not None:
+            setattr(v, field, value.strip() if isinstance(value, str) else value)
+    await db.commit()
+    return {"id": str(v.id), "status": v.status}
+
+
+@router.put("/views/{view_id}/blocks")
+async def pulse_view_blocks(
+    view_id: str,
+    payload: dict,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Состав витрины: какие блоки, в каком порядке и под какими заголовками.
+
+    Приходит целиком, а не по одному: перетаскивание блоков в конструкторе — это одно
+    действие человека, и половина сохранённого порядка хуже, чем несохранённый.
+    """
+    cid = await assert_company_admin_product(company_id, current_user, db)
+    v = await _view_or_404(db, cid, view_id)
+
+    items = payload.get("blocks") or []
+    known = {k for k, _, _ in PULSE_ITEMS}
+    clean = [b for b in items if isinstance(b, dict) and b.get("key") in known]
+
+    await db.execute(text("DELETE FROM pulse_view_blocks WHERE view_id = CAST(:v AS uuid)"),
+                     {"v": str(v.id)})
+    for i, b in enumerate(clean):
+        db.add(PulseViewBlock(
+            view_id=v.id, block_key=b["key"], sort=i,
+            title=(b.get("title") or "").strip() or None,
+            hint=(b.get("hint") or "").strip() or None))
+    await db.commit()
+    return {"blocks": len(clean), "skipped": len(items) - len(clean)}
+
+
+@router.put("/views/{view_id}/grants")
+async def pulse_view_grants(
+    view_id: str,
+    payload: dict,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Кому назначена витрина."""
+    cid = await assert_company_admin_product(company_id, current_user, db)
+    v = await _view_or_404(db, cid, view_id)
+
+    raw = payload.get("users") or []
+    ids: list[str] = []
+    for x in raw:
+        try:
+            ids.append(str(uuid.UUID(str(x))))
+        except ValueError:
+            continue
+    # Только участники этой компании: витрина не средство раздать доступ наружу
+    # в обход членства.
+    ours = [str(r[0]) for r in (await db.execute(text("""
+        SELECT user_id FROM user_companies
+         WHERE company_id = CAST(:cid AS uuid)
+           AND user_id = ANY(CAST(:ids AS uuid[]))"""),
+        {"cid": str(cid), "ids": ids or ["00000000-0000-0000-0000-000000000000"]})).all()]
+
+    await db.execute(text("DELETE FROM pulse_view_grants WHERE view_id = CAST(:v AS uuid)"),
+                     {"v": str(v.id)})
+    for uid in ours:
+        db.add(PulseViewGrant(view_id=v.id, user_id=uuid.UUID(uid)))
+    await db.commit()
+    return {"granted": len(ours), "skipped": len(raw) - len(ours)}
+
+
+@router.get("/views/{view_id}")
+async def pulse_view_card(
+    view_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Витрина целиком: состав, получатели и подпись.
+
+    Отдаётся и администратору (для конструктора), и получателю (для показа) — но
+    получателю только опубликованная и только своя.
+    """
+    cid = str(await assert_company_product(company_id, current_user, db, "pulse"))
+    v = await _view_or_404(db, cid, view_id)
+
+    mine = (await db.execute(text("""
+        SELECT 1 FROM pulse_view_grants
+         WHERE view_id = CAST(:v AS uuid) AND user_id = CAST(:u AS uuid)"""),
+        {"v": str(v.id), "u": str(current_user.id)})).first() is not None
+    is_admin = current_user.is_superadmin or await _is_company_admin(db, cid, current_user)
+    if not is_admin and not (mine and v.status == "published"):
+        raise HTTPException(status_code=404, detail="Витрина не найдена")
+
+    titles = {k: t for k, t, _ in PULSE_ITEMS}
+    blocks = [{
+        "key": r[0], "title": r[1] or titles.get(r[0], r[0]),
+        "originalTitle": titles.get(r[0], r[0]), "hint": r[2],
+    } for r in (await db.execute(text("""
+        SELECT block_key, title, hint FROM pulse_view_blocks
+         WHERE view_id = CAST(:v AS uuid) ORDER BY sort"""), {"v": str(v.id)})).all()]
+
+    people = [{"id": str(r[0]), "name": r[1], "email": r[2]}
+              for r in (await db.execute(text("""
+        SELECT u.id, u.name, u.email FROM pulse_view_grants g
+          JOIN users u ON u.id = g.user_id
+         WHERE g.view_id = CAST(:v AS uuid) ORDER BY u.name"""), {"v": str(v.id)})).all()]
+
+    return {
+        "id": str(v.id), "name": v.name, "audience": v.audience, "period": v.period,
+        "owner": v.owner_name, "note": v.note, "status": v.status,
+        "blocks": blocks, "people": people, "canEdit": is_admin,
+        # Дата, на которую верны цифры: витрина уходит наружу, и «когда-то посчитано»
+        # там не ответ.
+        "asOf": date.today().isoformat(),
+    }
+
+
+@router.get("/my-views")
+async def pulse_my_views(
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Витрины, назначенные мне. Для получателя это весь его «Пульс»."""
+    cid = str(await assert_company_product(company_id, current_user, db, "pulse"))
+    rows = (await db.execute(text("""
+        SELECT v.id::text, v.name, v.audience, v.owner_name, v.updated_at
+          FROM pulse_views v JOIN pulse_view_grants g ON g.view_id = v.id
+         WHERE v.company_id = CAST(:cid AS uuid) AND v.status = 'published'
+           AND g.user_id = CAST(:u AS uuid)
+         ORDER BY v.name"""), {"cid": cid, "u": str(current_user.id)})).all()
+    return {"views": [{"id": r[0], "name": r[1], "audience": r[2], "owner": r[3],
+                       "updatedAt": r[4].isoformat() if r[4] else None} for r in rows]}
+
+
+async def _view_or_404(db: AsyncSession, cid, view_id: str) -> PulseView:
+    try:
+        uid = uuid.UUID(view_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Витрина не найдена")
+    v = (await db.execute(select(PulseView).where(
+        PulseView.company_id == (cid if isinstance(cid, uuid.UUID) else uuid.UUID(str(cid))),
+        PulseView.id == uid))).scalar_one_or_none()
+    if v is None:
+        raise HTTPException(status_code=404, detail="Витрина не найдена")
+    return v
+
+
+async def _is_company_admin(db: AsyncSession, cid, user: User) -> bool:
+    if user.is_superadmin:
+        return True
+    r = (await db.execute(text("""
+        SELECT role FROM user_companies
+         WHERE company_id = CAST(:cid AS uuid) AND user_id = CAST(:u AS uuid)"""),
+        {"cid": str(cid), "u": str(user.id)})).scalar_one_or_none()
+    return r == "admin"
+
+
+async def assert_company_admin_product(company_id: str, user: User, db: AsyncSession):
+    """Собирать витрины может администратор компании: витрина уходит наружу."""
+    cid = await assert_company_product(company_id, user, db, "pulse")
+    if not await _is_company_admin(db, cid, user):
+        raise HTTPException(status_code=403, detail="Витрины настраивает администратор")
+    return cid
