@@ -16,7 +16,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { RefreshCw, XCircle, ArrowDownToLine } from 'lucide-react'
 import {
-  getStoreDownlink, resendStoreDownlink, cancelStoreDownlink,
+  getStoreDownlink, resendStoreDownlink, cancelStoreDownlink, resendStuckStoreDownlink,
   getStoreStations, type StoreDownlinkTask, type DownlinkState, type StoreStation,
 } from '@/services/storeService'
 import { useCompany } from '@/contexts/CompanyContext'
@@ -66,6 +66,15 @@ export function StoreDownlinkPanel() {
   const переотправить = useMutation({
     mutationFn: resendStoreDownlink,
     onSuccess: () => { toast.success('Задание уйдёт станции следующим тактом'); обновить() },
+    onError: (e: Error) => toast.error('Не удалось переотправить', { description: e.message }),
+  })
+  const переслатьЗависшие = useMutation({
+    mutationFn: (station: number | null) => resendStuckStoreDownlink(station),
+    onSuccess: (r) => {
+      if (r.resent === 0) toast.info('Зависших заданий нет — всё подтверждено станцией')
+      else toast.success(`Переотправлено заданий: ${r.resent}`)
+      обновить()
+    },
     onError: (e: Error) => toast.error('Не удалось переотправить', { description: e.message }),
   })
   const отменить = useMutation({
@@ -128,6 +137,17 @@ export function StoreDownlinkPanel() {
             )
           })}
         </div>
+
+        {/* После долгого обрыва зависших заданий бывает много, и разбирать их
+            поштучно — десятки нажатий. Кнопка трогает только доставленные без
+            подтверждения старше получаса: свежие не задеваются, станция могла
+            забрать задание минуту назад и как раз его применять. */}
+        <button type="button" disabled={занят || переслатьЗависшие.isPending}
+          onClick={() => переслатьЗависшие.mutate(станция)}
+          className="ml-auto rounded-md border border-border/60 px-2.5 py-1 text-xs
+                     text-muted-foreground hover:text-foreground disabled:opacity-50">
+          Переслать зависшие{станция ? ` · АЗС ${станция}` : ''}
+        </button>
       </div>
 
       {isLoading ? (

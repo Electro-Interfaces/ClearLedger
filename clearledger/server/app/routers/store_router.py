@@ -3354,6 +3354,44 @@ async def store_downlink_resend(
     return {"ok": True, "state": _downlink_state(row)}
 
 
+@router.post("/downlink/resend-stuck")
+async def store_downlink_resend_stuck(
+    station_id: int | None = Query(None, description="код АЗС; пусто — все станции"),
+    older_than_minutes: int = Query(30, ge=1, le=1440,
+                                    description="сколько задание уже висит доставленным"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Переслать разом всё, что зависло между доставкой и подтверждением.
+
+    Ночь 13.08.2026 на 208: канал лёг на девять часов, задания успели уйти
+    станции, но подтверждения не вернулись. Разбирать такое поштучно —
+    занятие на десятки нажатий, а ответ на вопрос «мы уверены, что дошло»
+    нужен сразу.
+
+    Берём только доставленные без подтверждения и старше порога: свежие
+    трогать нельзя — станция могла забрать задание минуту назад и как раз его
+    применять. Повтор безопасен, приёмная сторона идемпотентна.
+    """
+    cid: uuid.UUID = await scope_company_id(user, db)
+    рубеж = datetime.now(timezone.utc) - timedelta(minutes=older_than_minutes)
+    условия = [
+        EdgeDownlink.company_id == cid,
+        EdgeDownlink.delivered_at.isnot(None),
+        EdgeDownlink.delivered_at < рубеж,
+        EdgeDownlink.acked_at.is_(None),
+        EdgeDownlink.cancelled_at.is_(None),
+    ]
+    if station_id is not None:
+        условия.append(EdgeDownlink.station_id == station_id)
+    rows = (await db.execute(select(EdgeDownlink).where(*условия))).scalars().all()
+    for row in rows:
+        row.delivered_at = None
+    await db.commit()
+    return {"ok": True, "resent": len(rows),
+            "stations": sorted({r.station_id for r in rows})}
+
+
 @router.post("/downlink/{task_id}/cancel")
 async def store_downlink_cancel(
     task_id: uuid.UUID,

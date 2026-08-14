@@ -1602,6 +1602,11 @@ export const resendStoreDownlink = (id: string) =>
 export const cancelStoreDownlink = (id: string) =>
   post<{ ok: boolean; state: DownlinkState }>(`/api/store/downlink/${id}/cancel`, {})
 
+/** Переслать разом всё, что зависло доставленным без подтверждения. */
+export const resendStuckStoreDownlink = (stationId?: number | null) =>
+  post<{ ok: boolean; resent: number; stations: number[] }>(
+    `/api/store/downlink/resend-stuck${stationId ? `?station_id=${stationId}` : ''}`, {})
+
 /** Что на станции требует человека: касса, выгрузка, учёт и коды. */
 export interface StoreStationHealth {
   station_id: number
