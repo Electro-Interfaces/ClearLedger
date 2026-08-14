@@ -16,12 +16,13 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { BookOpen, Bot, CheckCircle2, ClipboardList, FlaskConical, GitCommitHorizontal, ListChecks, MessageSquare, Save, SlidersHorizontal, Wrench } from 'lucide-react'
+import { BookOpen, Bot, CheckCircle2, ClipboardList, FlaskConical, GitCommitHorizontal, ListChecks, MessageSquare, Save, SlidersHorizontal, TerminalSquare, Wrench } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { QueryError } from '@/components/common/QueryError'
 import { AuditorPanel } from '@/components/auditor/AuditorPanel'
+import { AuditorTerminal } from '@/components/auditor/AuditorTerminal'
 import { useCompany } from '@/contexts/CompanyContext'
 import { cn } from '@/lib/utils'
 import * as auditor from '@/services/spaceAuditorService'
@@ -35,6 +36,9 @@ const VIEWS = [
   { key: 'knowledge', label: 'Знание', icon: BookOpen, hint: 'что он знает об этой компании' },
   { key: 'setup', label: 'Настройка', icon: SlidersHorizontal, hint: 'режим, указания компании, модели' },
   { key: 'runs', label: 'Журнал', icon: ClipboardList, hint: 'что спрашивали и что он нашёл' },
+  // Мастерская — НАСТОЯЩИЙ Claude Code в терминале, без нашей прослойки. Отдельный
+  // раздел, а не тумблер в чате: это другой инструмент, а не другой режим ответа.
+  { key: 'workshop', label: 'Мастерская', icon: TerminalSquare, hint: 'Claude Code в рабочей папке агента', admin: true },
 ] as const
 
 /** Оценка ответа в журнале. Цвета альфа-шкалой — один класс на обе темы. */
@@ -51,8 +55,17 @@ const MODES = [
 ] as const
 
 export function AuditorPage() {
+  const { companyId } = useCompany()
   const [params, setParams] = useSearchParams()
-  const view = VIEWS.some((v) => v.key === params.get('view')) ? params.get('view')! : 'chat'
+  const { data: health } = useQuery({
+    queryKey: ['auditor-health'], queryFn: auditor.getHealth, staleTime: 5 * 60 * 1000, retry: false,
+  })
+  const { data: settings } = useQuery({
+    queryKey: ['auditor-settings', companyId],
+    queryFn: () => auditor.getSettings(companyId), enabled: !!companyId, retry: false,
+  })
+  const views = VIEWS.filter((v) => !('admin' in v && v.admin) || (health?.workshop && settings?.can_manage))
+  const view = views.some((v) => v.key === params.get('view')) ? params.get('view')! : 'chat'
   const open = (key: string) => setParams((p) => {
     const n = new URLSearchParams(p)
     n.set('view', key)
@@ -63,7 +76,7 @@ export function AuditorPage() {
     <div className="flex h-full min-h-0">
       <nav data-zone="Пункты раздела" data-zone-side
         className="flex w-52 shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-border bg-card px-2.5 py-3 max-lg:hidden">
-        {VIEWS.map((v) => (
+        {views.map((v) => (
           <button key={v.key} type="button" onClick={() => open(v.key)} title={v.hint}
             aria-current={v.key === view ? 'page' : undefined}
             className={cn('flex items-center gap-2 rounded-md px-3 py-1.5 text-left text-[13px] transition-colors',
@@ -79,7 +92,7 @@ export function AuditorPage() {
       {/* На узком экране пункты идут строкой сверху: колонка съела бы половину ширины. */}
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-border bg-card px-2 py-1.5 lg:hidden">
-          {VIEWS.map((v) => (
+          {views.map((v) => (
             <button key={v.key} type="button" onClick={() => open(v.key)}
               className={cn('min-h-10 shrink-0 whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs',
                 v.key === view ? 'bg-primary/10 font-medium text-primary' : 'text-muted-foreground')}>
@@ -94,6 +107,7 @@ export function AuditorPage() {
           {view === 'knowledge' && <KnowledgeView />}
           {view === 'setup' && <SetupView />}
           {view === 'runs' && <RunsView />}
+          {view === 'workshop' && <AuditorTerminal />}
         </div>
       </div>
     </div>
