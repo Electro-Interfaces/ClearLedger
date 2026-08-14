@@ -58,6 +58,9 @@ def head(rows, doc_type, *, party=None, inn=None, amount=None, details=None):
             'inn': s(r[inn]) if inn is not None else None,
             'amount': num(r[amount]) if amount is not None else 0.0,
             'details': {k: s(r[i]) for k, i in (details or {}).items() if s(r[i])},
+            # Организация — последняя колонка выгрузки (правило README): берём по r[-1],
+            # чтобы разбор пережил добавление полей в середину запроса.
+            'org': s(r[-1]) if r else None,
         })
 
 head(raw.get('vat_book_in', []), 'vat_book_in', details={'Организация': 4})
@@ -135,7 +138,7 @@ import gzip
 import json
 from collections import defaultdict
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, text
 
 from app.database import async_session_factory
 from app.models import AccountingDoc, Company, Counterparty, NomenclatureItem, Period
@@ -153,6 +156,8 @@ def num(v):
         return 0.0
 
 
+from resolve_org import org_id, org_map
+
 async def main():
     async with async_session_factory() as s:
         cid = (await s.execute(select(Company.id).where(Company.slug == 'promizol'))).scalar_one()
@@ -164,6 +169,10 @@ async def main():
             AccountingDoc.company_id == cid, AccountingDoc.doc_type.in_(NEW_TYPES)))
         await s.flush()
 
+        orgs = org_map((await s.execute(text(
+            "SELECT id::text, name, inn FROM organizations WHERE company_id = :c"),
+            {"c": str(cid)})).all())
+
         by_key = {}
         for doc in DATA['docs']:
             y, m = (int(doc['date'][:4]), int(doc['date'][5:7])) if doc['date'] else (0, 0)
@@ -172,7 +181,10 @@ async def main():
                 external_id='1c:%s:%s:%s' % (doc['type'], doc['number'], doc['date']),
                 doc_type=doc['type'], number=doc['number'] or '', date=doc['date'] or '',
                 counterparty_name=doc['party'] or '', counterparty_inn=doc['inn'],
-                organization_name='ООО "ПРОМИЗОЛ СПБ"',
+                # Имя организации приходит из 1С: зашитая строка у второго клиента
+                # подписала бы его документы чужим юрлицом.
+                organization_name=doc.get('org') or '',
+                organization_id=org_id(orgs, doc.get('org')),
                 amount=doc['amount'], vat_amount=0,
                 status_1c=('Помечен на удаление' if doc['deleted']
                            else 'Проведён' if doc['posted'] else 'Не проведён'),

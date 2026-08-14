@@ -11,6 +11,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.scope import current_organization, org_filter
 from app.models import AccountingDoc, User
 from app.schemas import (
     AccountingDocCreate,
@@ -90,7 +91,7 @@ async def list_accounting_docs(
     current_user: User = Depends(get_current_user),
 ):
     cid = await assert_company_member(company_id, current_user, db)
-    q = select(AccountingDoc).where(AccountingDoc.company_id == cid)
+    q = select(AccountingDoc).where(AccountingDoc.company_id == cid, org_filter(AccountingDoc.organization_id))
 
     if doc_type:
         q = q.where(AccountingDoc.doc_type == doc_type)
@@ -129,7 +130,7 @@ async def search_accounting_docs(
     current_user: User = Depends(get_current_user),
 ):
     cid = await assert_company_member(company_id, current_user, db)
-    base = select(AccountingDoc).where(AccountingDoc.company_id == cid)
+    base = select(AccountingDoc).where(AccountingDoc.company_id == cid, org_filter(AccountingDoc.organization_id))
 
     if doc_type:
         base = base.where(AccountingDoc.doc_type == doc_type)
@@ -181,16 +182,16 @@ async def accounting_docs_stats(
 ):
     cid = await assert_company_member(company_id, current_user, db)
     total = (await db.execute(
-        select(func.count(AccountingDoc.id)).where(AccountingDoc.company_id == cid)
+        select(func.count(AccountingDoc.id)).where(AccountingDoc.company_id == cid, org_filter(AccountingDoc.organization_id))
     )).scalar_one()
     by_type_rows = (await db.execute(
         select(AccountingDoc.doc_type, func.count(AccountingDoc.id))
-        .where(AccountingDoc.company_id == cid)
+        .where(AccountingDoc.company_id == cid, org_filter(AccountingDoc.organization_id))
         .group_by(AccountingDoc.doc_type)
     )).all()
     by_status_rows = (await db.execute(
         select(AccountingDoc.match_status, func.count(AccountingDoc.id))
-        .where(AccountingDoc.company_id == cid)
+        .where(AccountingDoc.company_id == cid, org_filter(AccountingDoc.organization_id))
         .group_by(AccountingDoc.match_status)
     )).all()
     return AccountingDocsStats(
@@ -218,7 +219,7 @@ async def get_related_docs(
     uid = _parse_uuid(doc_id)
     cid = await assert_company_member(company_id, current_user, db)
     doc = (await db.execute(
-        select(AccountingDoc).where(AccountingDoc.id == uid, AccountingDoc.company_id == cid)
+        select(AccountingDoc).where(AccountingDoc.id == uid, AccountingDoc.company_id == cid, org_filter(AccountingDoc.organization_id))
     )).scalar_one_or_none()
     if not doc:
         raise HTTPException(status_code=404, detail="Документ не найден")
@@ -228,7 +229,7 @@ async def get_related_docs(
     # date в AccountingDoc хранится как YYYY-MM-DD, warehouse_code — код 1С.
     candidates = (await db.execute(
         select(AccountingDoc).where(
-            AccountingDoc.company_id == cid,
+            AccountingDoc.company_id == cid, org_filter(AccountingDoc.organization_id),
             AccountingDoc.date == doc.date,
             AccountingDoc.warehouse_code == doc.warehouse_code,
             AccountingDoc.doc_type.in_(["ПеремещениеТоваров", "СписаниеТоваров"]),
@@ -247,7 +248,7 @@ async def get_accounting_doc(
     uid = _parse_uuid(doc_id)
     cid = await assert_company_member(company_id, current_user, db)
     result = await db.execute(
-        select(AccountingDoc).where(AccountingDoc.id == uid, AccountingDoc.company_id == cid)
+        select(AccountingDoc).where(AccountingDoc.id == uid, AccountingDoc.company_id == cid, org_filter(AccountingDoc.organization_id))
     )
     doc = result.scalar_one_or_none()
     if not doc:
@@ -308,7 +309,7 @@ async def import_accounting_docs(
     # Загружаем существующие external_id для upsert
     result = await db.execute(
         select(AccountingDoc.external_id, AccountingDoc.id)
-        .where(AccountingDoc.company_id == cid)
+        .where(AccountingDoc.company_id == cid, org_filter(AccountingDoc.organization_id))
     )
     existing = {row[0]: row[1] for row in result.all()}
 
@@ -390,7 +391,7 @@ async def update_accounting_doc(
     uid = _parse_uuid(doc_id)
     cid = await assert_company_member(company_id, current_user, db)
     result = await db.execute(
-        select(AccountingDoc).where(AccountingDoc.id == uid, AccountingDoc.company_id == cid)
+        select(AccountingDoc).where(AccountingDoc.id == uid, AccountingDoc.company_id == cid, org_filter(AccountingDoc.organization_id))
     )
     doc = result.scalar_one_or_none()
     if not doc:
@@ -421,7 +422,7 @@ async def delete_accounting_doc(
     uid = _parse_uuid(doc_id)
     cid = await assert_company_member(company_id, current_user, db)
     result = await db.execute(
-        select(AccountingDoc).where(AccountingDoc.id == uid, AccountingDoc.company_id == cid)
+        select(AccountingDoc).where(AccountingDoc.id == uid, AccountingDoc.company_id == cid, org_filter(AccountingDoc.organization_id))
     )
     doc = result.scalar_one_or_none()
     if not doc:

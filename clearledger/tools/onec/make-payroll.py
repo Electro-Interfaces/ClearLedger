@@ -198,7 +198,7 @@ import gzip
 import json
 from datetime import date
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, text
 
 from app.database import async_session_factory
 from app.models import AccountingDoc, Company, Employee, PayrollEntry, Period
@@ -206,6 +206,8 @@ from app.models import AccountingDoc, Company, Employee, PayrollEntry, Period
 DATA = json.loads(gzip.decompress(base64.b64decode(PACKED)).decode('utf-8'))
 SRC = '1c_dt'
 
+
+from resolve_org import org_id, org_map
 
 async def main():
     async with async_session_factory() as s:
@@ -234,6 +236,10 @@ async def main():
             s.add(row)
             emp_by_name[e['name']] = row
 
+        orgs = org_map((await s.execute(text(
+            "SELECT id::text, name, inn FROM organizations WHERE company_id = :c"),
+            {"c": str(cid)})).all())
+
         doc_by_key = {}
         for i, doc in enumerate(DATA['docs']):
             y, m = (int(doc['date'][:4]), int(doc['date'][5:7])) if doc['date'] else (0, 0)
@@ -241,7 +247,9 @@ async def main():
                 company_id=cid,
                 external_id='1c:%s:%s:%s' % (doc['type'], doc['number'], doc['date']),
                 doc_type=doc['type'], number=doc['number'] or '', date=doc['date'] or '',
-                counterparty_name='', organization_name='ПРОМИЗОЛ СПБ ООО',
+                counterparty_name='',
+                organization_name=doc.get('org') or '',
+                organization_id=org_id(orgs, doc.get('org')),
                 amount=doc['amount'], vat_amount=0,
                 # Помеченный на удаление и непроведённый документ обязан отличаться от
                 # действующего: иначе аудитор считает его нормальным.

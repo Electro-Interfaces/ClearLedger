@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import assert_company_member, get_current_user
 from app.database import get_db
 from app.deps import get_owned
+from app.scope import current_organization, org_filter
 from app.models import InventoryBatch, NomenclaturePrice, OneCPolicy, PostingTemplate, User
 
 router = APIRouter(tags=["1С политика и схема проводок"])
@@ -371,13 +372,14 @@ async def list_nomenclature_purchase_docs(
                counterparty_inn, organization_name, amount, lines
         FROM accounting_docs
         WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid))
           AND doc_type IN ('ПТУ', 'КорректировкаПоступления')
           AND lines->'tabular'->'Товары' @> CAST(:nom_filter AS jsonb)
         ORDER BY date DESC
         LIMIT :lim
     """)
     nom_filter = f'[{{"Номенклатура": "{nomenclature_ref}"}}]'
-    result = await db.execute(sql, {"cid": str(cid), "nom_filter": nom_filter, "lim": max(1, min(limit, 200))})
+    result = await db.execute(sql, {"cid": str(cid), "org": _org_param(), "nom_filter": nom_filter, "lim": max(1, min(limit, 200))})
     db_rows = result.fetchall()
     out: list[PurchaseDocRow] = []
     for r in db_rows:
@@ -433,7 +435,7 @@ async def list_nomenclature_purchase_docs(
     if refs:
         local_docs = (await db.execute(
             select(AccountingDoc.id, AccountingDoc.external_id).where(
-                AccountingDoc.company_id == cid,
+                AccountingDoc.company_id == cid, org_filter(AccountingDoc.organization_id),
                 AccountingDoc.external_id.in_(refs),
             )
         )).all()

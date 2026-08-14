@@ -412,12 +412,12 @@ export function MailConnector({ mode = 'all' }: { mode?: 'setup' | 'work' | 'all
                     </div>
                   </Field>
                   <Field label="Имя отправителя" hint="что видит контрагент в поле «От кого»">
-                    <Input value={form.displayName ?? ''} placeholder="Бухгалтерия ПРОМИЗОЛ"
+                    <Input value={form.displayName ?? ''} placeholder="Бухгалтерия компании"
                       onChange={(e) => setForm({ ...form, displayName: e.target.value })} />
                   </Field>
                   <Field label="Подпись" hint="приклеивается к каждому письму" span>
                     <Textarea rows={2} value={form.signature ?? ''}
-                      placeholder="С уважением, бухгалтерия ООО «ПРОМИЗОЛ СПБ», +7 812 …"
+                      placeholder="С уважением, бухгалтерия · телефон"
                       onChange={(e) => setForm({ ...form, signature: e.target.value })} />
                   </Field>
                 </Section>

@@ -22,7 +22,7 @@ import json
 import re
 from datetime import date
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, text
 
 from app.database import async_session_factory
 from app.models import (AccountingDoc, Company, Counterparty, GlBalance, GlTurnover,
@@ -44,6 +44,8 @@ def parse_title(t):
     return m.group('number'), '%s-%s-%s' % (yy, mm, dd)
 
 
+from resolve_org import org_id, org_map
+
 async def main():
     async with async_session_factory() as s:
         cid = (await s.execute(select(Company.id).where(Company.slug == 'promizol'))).scalar_one()
@@ -55,6 +57,13 @@ async def main():
         by_key = {}
         for did, number, ddate in docs:
             by_key.setdefault('%s|%s' % ((number or '').strip(), (ddate or '')[:10]), did)
+
+        # Организации компании: имя из 1С сводится к ссылке один раз на загрузку.
+        # Без этого ось юрлица заполняется только разовой простановкой задним числом,
+        # и первая же перезаливка слоя её обнуляет.
+        orgs = org_map((await s.execute(text(
+            "SELECT id::text, name, inn FROM organizations WHERE company_id = :c"),
+            {"c": str(cid)})).all())
 
         cps = (await s.execute(select(Counterparty.id, Counterparty.inn, Counterparty.name)
                                .where(Counterparty.company_id == cid))).all()
@@ -74,6 +83,7 @@ async def main():
                 account_dt=t['dt'], account_kt=t['kt'],
                 dt1=t['dt1'], dt2=t['dt2'], kt1=t['kt1'], kt2=t['kt2'],
                 amount=t['amount'], qty_dt=t['qty_dt'], qty_kt=t['qty_kt'], source=SRC,
+                organization_id=org_id(orgs, t.get('org')),
                 # Ключ по позиции в выгрузке: осмысленный ключ пришлось бы собирать из
                 # шести субконто, а идемпотентность и так держит перезалив своего source.
                 external_key='t|%d' % i,
@@ -90,6 +100,7 @@ async def main():
                 counterparty_id=pid,
                 sub1=b['sub1'], sub2=b['sub2'], sub3=b['sub3'],
                 debit=b['debit'], credit=b['credit'],
+                organization_id=org_id(orgs, b.get('org')),
                 qty_debit=b['qty_debit'], qty_credit=b['qty_credit'], source=SRC,
                 external_key='b|%d' % i,
             ))
@@ -104,6 +115,7 @@ async def main():
                 company_id=cid, invoice_title=p['invoice'], payment_title=p['payment'],
                 invoice_doc_id=doc_id, paid_at=p['paid_at'],
                 amount=p['amount'], vat=p['vat'], source=SRC,
+                organization_id=org_id(orgs, p.get('org')),
                 external_key='p|%d|%s' % (i, (p['invoice'] or '')[:120]),
             ))
 
@@ -123,11 +135,16 @@ async def main():
                 amount=v['amount'], vat=v['vat'], rate=v['rate'],
                 invoice_title=v['invoice_title'], registrar=v['registrar'],
                 operation_code=v['operation_code'], source=SRC,
+                organization_id=org_id(orgs, v.get('org')),
                 external_key='v|%s|%d' % (v['kind'], i),
             ))
 
         await s.commit()
 
+        with_org = sum(1 for grp in ('turnovers', 'balances', 'payments', 'vat')
+                       for x in DATA[grp] if org_id(orgs, x.get('org')))
+        total = sum(len(DATA[g]) for g in ('turnovers', 'balances', 'payments', 'vat'))
+        print('организация опознана у %d из %d записей' % (with_org, total))
         print('обороты   :', len(DATA['turnovers']))
         print('сальдо    :', len(DATA['balances']), '· контрагент опознан:', bal_linked)
         print('оплаты    :', len(DATA['payments']), '· связано со счетами:', linked)
