@@ -1,0 +1,197 @@
+{
+ "РегистрБухгалтерии.Хозрасчетный": [
+  "queries\\balances.txt",
+  "queries\\turnovers.txt",
+  "queries-balances\\monthly_balances.txt",
+  "queries-check\\entries_count.txt"
+ ],
+ "РегистрНакопления.ОплатаСчетов": [
+  "queries\\invoice_payments.txt"
+ ],
+ "РегистрНакопления.НДСПредъявленный": [
+  "queries\\vat_claimed.txt"
+ ],
+ "РегистрСведений.ЖурналУчетаСчетовФактур": [
+  "queries\\vat_invoices.txt"
+ ],
+ "РегистрНакопления.НДСЗаписиКнигиПокупок": [
+  "queries-books\\book_purchases.txt"
+ ],
+ "РегистрНакопления.НДСЗаписиКнигиПродаж": [
+  "queries-books\\book_sales.txt"
+ ],
+ "Справочник.Организации": [
+  "queries-check\\orgs.txt"
+ ],
+ "Справочник.ДоговорыКонтрагентов": [
+  "queries-contracts\\contracts.txt",
+  "queries-contracts\\t1.txt"
+ ],
+ "Документ.ПоступлениеТоваровУслуг": [
+  "queries-contracts\\doc_contract.txt",
+  "queries-contracts\\doc_contract_map.txt",
+  "queries-docs\\purchase.txt",
+  "queries-docs\\status.txt",
+  "queries-wave3\\purchase_services.txt"
+ ],
+ "Документ.РеализацияТоваровУслуг": [
+  "queries-contracts\\doc_contract.txt",
+  "queries-contracts\\doc_contract_map.txt",
+  "queries-docs\\sale.txt",
+  "queries-docs\\status.txt"
+ ],
+ "Документ.СписаниеСРасчетногоСчета": [
+  "queries-contracts\\doc_contract.txt",
+  "queries-contracts\\doc_contract_map.txt",
+  "queries-docs\\bank-head.txt",
+  "queries-docs\\bank-split.txt",
+  "queries-docs\\bank_out.txt",
+  "queries-docs\\status.txt"
+ ],
+ "Документ.ПоступлениеНаРасчетныйСчет": [
+  "queries-contracts\\doc_contract.txt",
+  "queries-contracts\\doc_contract_map.txt",
+  "queries-docs\\bank-head.txt",
+  "queries-docs\\bank-split.txt",
+  "queries-docs\\bank_in.txt",
+  "queries-docs\\status.txt"
+ ],
+ "Документ.СчетНаОплатуПокупателю": [
+  "queries-contracts\\doc_contract.txt",
+  "queries-contracts\\doc_contract_map.txt",
+  "queries-docs\\invoice_out.txt",
+  "queries-docs\\status.txt"
+ ],
+ "Документ.СчетНаОплатуПоставщика": [
+  "queries-contracts\\doc_contract.txt",
+  "queries-contracts\\doc_contract_map.txt",
+  "queries-docs\\invoice_in.txt",
+  "queries-docs\\status.txt"
+ ],
+ "Документ.СчетФактураПолученный": [
+  "queries-contracts\\doc_contract_map.txt",
+  "queries-docs\\sf-vat.txt",
+  "queries-docs\\status.txt",
+  "queries-docs\\vat_invoice_in.txt"
+ ],
+ "Документ.СчетФактураВыданный": [
+  "queries-contracts\\doc_contract_map.txt",
+  "queries-docs\\sf-vat.txt",
+  "queries-docs\\sf_out_rate.txt",
+  "queries-docs\\status.txt",
+  "queries-docs\\vat_invoice_out.txt"
+ ],
+ "Документ.АктСверкиВзаиморасчетов": [
+  "queries-docs\\act-head.txt",
+  "queries-docs\\act-lines.txt",
+  "queries-docs\\act_recon.txt",
+  "queries-docs\\status.txt"
+ ],
+ "Документ.РегламентнаяОперация": [
+  "queries-docs\\closing_op.txt",
+  "queries-docs\\status.txt"
+ ],
+ "Документ.ОперацияБух": [
+  "queries-docs\\status.txt"
+ ],
+ "Документ.ЭлектронныйДокументВходящийЭДО": [
+  "queries-edo\\edo_probe.txt"
+ ],
+ "Документ.ЭлектронныйДокументИсходящийЭДО": [
+  "queries-edo\\edo_probe.txt"
+ ],
+ "Документ.НачислениеЗарплаты": [
+  "queries-payroll\\accrual-hold.txt",
+  "queries-payroll\\accrual-lines.txt",
+  "queries-payroll\\accrual-ndfl.txt",
+  "queries-payroll\\accrual.txt",
+  "queries-payroll\\avans-doc.txt",
+  "queries-payroll\\vznosy.txt"
+ ],
+ "Справочник.Сотрудники": [
+  "queries-payroll\\employees.txt"
+ ],
+ "Документ.ВедомостьНаВыплатуЗарплатыВБанк": [
+  "queries-payroll\\payment-lines.txt",
+  "queries-payroll\\payment.txt"
+ ],
+ "Справочник.ФизическиеЛица": [
+  "queries-payroll\\persons.txt"
+ ],
+ "РегистрНакопления.РасчетыНалогоплательщиковСБюджетомПоНДФЛ": [
+  "queries-payroll\\reg-ndfl.txt",
+  "queries-payroll2\\ndfl_calc.txt"
+ ],
+ "РегистрНакопления.НачисленияУдержанияПоСотрудникам": [
+  "queries-payroll\\reg-nu.txt"
+ ],
+ "РегистрНакопления.ЗарплатаКВыплате": [
+  "queries-payroll\\reg-pay.txt"
+ ],
+ "РегистрНакопления.СведенияОДоходахСтраховыеВзносы": [
+  "queries-payroll2\\contrib_base.txt"
+ ],
+ "РегистрНакопления.СтраховыеВзносыПоФизическимЛицам": [
+  "queries-payroll2\\contrib_calc.txt"
+ ],
+ "РегистрНакопления.СведенияОДоходахНДФЛ": [
+  "queries-payroll2\\ndfl_income.txt"
+ ],
+ "РегистрСведений.УчетнаяПолитика": [
+  "queries-policy\\policy.txt"
+ ],
+ "РегистрСведений.НастройкиСистемыНалогообложения": [
+  "queries-policy\\tax_mode.txt"
+ ],
+ "РегистрСведений.РасчетНачисленияНалоговНаЕНС": [
+  "queries-tax\\enp_accrual.txt"
+ ],
+ "Документ.УведомлениеОбИсчисленныхСуммахНалогов": [
+  "queries-tax\\enp_notice.txt",
+  "queries-wave3\\tax_notice.txt"
+ ],
+ "Документ.РегламентированныйОтчет": [
+  "queries-tax\\reports_filed.txt"
+ ],
+ "РегистрСведений.ЗадачиБухгалтера": [
+  "queries-tax\\tax_calendar.txt"
+ ],
+ "Документ.АвансовыйОтчет": [
+  "queries-wave3\\advance_report.txt"
+ ],
+ "Документ.ПриходныйКассовыйОрдер": [
+  "queries-wave3\\cash_in.txt"
+ ],
+ "Документ.РасходныйКассовыйОрдер": [
+  "queries-wave3\\cash_out.txt"
+ ],
+ "Справочник.Контрагенты": [
+  "queries-wave3\\counterparties.txt"
+ ],
+ "Документ.КорректировкаДолга": [
+  "queries-wave3\\debt_correction.txt"
+ ],
+ "Документ.ТребованиеНакладная": [
+  "queries-wave3\\demand_note.txt",
+  "queries-wave3\\demand_note_lines.txt"
+ ],
+ "Документ.СписаниеТоваров": [
+  "queries-wave3\\goods_writeoff.txt",
+  "queries-wave3\\goods_writeoff_lines.txt"
+ ],
+ "Справочник.Номенклатура": [
+  "queries-wave3\\nomenclature.txt"
+ ],
+ "Документ.ПлатежноеПоручение": [
+  "queries-wave3\\payment_order.txt"
+ ],
+ "Документ.КорректировкаПоступления": [
+  "queries-wave3\\purchase_correction.txt"
+ ],
+ "Документ.ФормированиеЗаписейКнигиПокупок": [
+  "queries-wave3\\vat_book_in.txt"
+ ],
+ "Документ.ФормированиеЗаписейКнигиПродаж": [
+  "queries-wave3\\vat_book_out.txt"
+ ]
+}
