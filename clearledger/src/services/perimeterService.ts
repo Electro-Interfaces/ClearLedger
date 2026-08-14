@@ -70,6 +70,21 @@ export interface PerimeterOverview {
   withoutAmount: number
   activeCount: number
   totalCount: number
+  /** Деньги мимо кассы: не слой, а другой срез того же периметра. */
+  cash: {
+    out: number; in: number; ownerOut: number; count: number
+    noProof: number
+    awaitsPapers: number; awaitsPapersCount: number
+    openAdvances: number
+    loanGiven: number; loanTaken: number; loanOverdue: number
+  }
+  commitments: {
+    active: number; people: number; monthlyMoney: number; missedTotal: number
+    missed: {
+      id: string; person: string; title: string
+      missedCount: number; missedPeriods: string[]; missedAmount: number | null
+    }[]
+  }
 }
 
 export interface PerimeterParty {
@@ -122,6 +137,8 @@ export interface CashMove {
   purse: string; purseLabel: string
   parentId: string | null
   recordId: string | null
+  /** Регулярное обязательство, по которому платят: период закроется отметкой сам. */
+  commitmentId: string | null
   dueOn: string | null
   overdue: boolean
   note: string | null
@@ -157,6 +174,9 @@ export interface CashIn {
   purse: string
   parentId?: string | null
   recordId?: string | null
+  commitmentId?: string | null
+  /** За какой период платим: первый день периода. Пусто — период даты операции. */
+  commitmentPeriod?: string | null
   dueOn?: string | null
   note?: string | null
   counterpartyId?: string | null

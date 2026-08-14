@@ -34,6 +34,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.audit import log_audit
 from app.auth import assert_company_product, get_current_user
 from app.database import get_db
+# Календарная арифметика периодов живёт отдельным модулем: её гоняет
+# проверка `scripts/perimeter-periods-check.py` без базы и FastAPI.
+from app.services.perimeter_periods import (
+    PERIODICITY, _next_period, _period_label, _period_start, _periods,
+)
 from app.models import (
     Counterparty, OffLedgerCash, OffLedgerCommitment, OffLedgerCommitmentMark,
     OffLedgerPerson, OffLedgerRecord, User,
@@ -331,7 +336,12 @@ async def overview(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
-    """Картина периметра: три слоя рядом, но не смешанные.
+    """Картина периметра: все грани рядом, но не смешанные.
+
+    Три слоя обязательств плюс деньги, идущие мимо кассы, и регулярные обязательства.
+    Экран открывают, чтобы одним взглядом понять, что просрочено и что ждёт действия, —
+    поэтому здесь же собраны все хвосты: пропущенные периоды, незакрытый подотчёт,
+    очередь на оформление в бухгалтерии.
 
     Первые два слоя считает «Бухгалтерия» — здесь только берётся её результат. Своей
     арифметики у сводки нет намеренно: две реализации одной цифры расходятся молча.
@@ -371,6 +381,14 @@ async def overview(
     used_accounts = {a["code"] for a in off["accounts"]}
     to_formalize = [r for r in active if r.account and r.account not in used_accounts]
 
+    # Наличные и регулярные обязательства: те же ручки, что рисуют свои экраны.
+    cash = await list_cash(str(cid), None, None, None, None, db, current_user)
+    papers = await cash_papers(str(cid), db, current_user)
+    loans = await cash_loans(str(cid), db, current_user)
+    commitments = await list_commitments(str(cid), db, current_user)
+    missed = [c for c in commitments["rows"]
+              if c["status"] == "active" and c["missedCount"]]
+
     return {
         "layers": [
             {
@@ -401,6 +419,34 @@ async def overview(
                 "note": f"{len(rows) - len(active)} закрыто" if rows else "записей нет",
             },
         ],
+        # Деньги и регулярные обязательства — не четвёртый и пятый слои, а другой срез
+        # того же периметра: слои отвечают «что у нас есть и что мы должны», эти два —
+        # «что происходит и что надо сделать». Поэтому отдельным блоком, не в ряду слоёв.
+        "cash": {
+            "out": cash["out"], "in": cash["in"],
+            "ownerOut": cash["ownerOut"],
+            "count": cash["count"],
+            "noProof": cash["noProof"],
+            "awaitsPapers": papers["waitingAmount"],
+            "awaitsPapersCount": len(papers["waiting"]),
+            "openAdvances": len(papers["openAdvances"]),
+            "loanGiven": loans["givenRest"],
+            "loanTaken": loans["takenRest"],
+            "loanOverdue": loans["overdue"],
+        },
+        "commitments": {
+            "active": commitments["activeCount"],
+            "people": commitments["peopleCount"],
+            "monthlyMoney": commitments["monthlyMoney"],
+            "missedTotal": commitments["missedTotal"],
+            # Кого именно подводим: без имён цифра «пропущено 7» ничего не меняет.
+            "missed": [{
+                "id": c["id"], "person": c["person"], "title": c["title"],
+                "missedCount": c["missedCount"],
+                "missedPeriods": c["missedPeriods"],
+                "missedAmount": c["missedAmount"],
+            } for c in sorted(missed, key=lambda c: -c["missedCount"])[:10]],
+        },
         "byKind": [k for k in by_kind if k["count"]],
         "byConfidence": [c for c in by_confidence if c["count"]],
         "overdue": await _with_names(sorted(overdue, key=lambda r: r.due_on or today), db),
@@ -519,6 +565,11 @@ class CashIn(BaseModel):
     purse: str = "owner"
     parentId: str | None = None
     recordId: str | None = None
+    # Регулярное обязательство, по которому платят: отметка за период поставится сама.
+    commitmentId: str | None = None
+    # За какой период платим. Пусто — период даты операции, но чаще платят за
+    # прошедший: доплату за август выдают в сентябре, и отметка должна лечь на август.
+    commitmentPeriod: str | None = None
     dueOn: str | None = None
     note: str | None = None
     counterpartyId: str | None = None
@@ -541,6 +592,7 @@ def _cash_row(c: OffLedgerCash, repaid: float = 0.0) -> dict[str, Any]:
         "purse": c.purse, "purseLabel": CASH_PURSE.get(c.purse, c.purse),
         "parentId": str(c.parent_id) if c.parent_id else None,
         "recordId": str(c.record_id) if c.record_id else None,
+        "commitmentId": str(c.commitment_id) if c.commitment_id else None,
         "dueOn": c.due_on.isoformat() if c.due_on else None,
         "overdue": bool(c.kind in OPEN_KINDS and c.due_on and c.due_on < today
                         and (rest or 0) > 0.01),
@@ -708,10 +760,16 @@ async def create_cash(
         formalized_by=body.formalizedBy if body.formalized else None,
         parent_id=uuid.UUID(body.parentId) if body.parentId else None,
         record_id=uuid.UUID(body.recordId) if body.recordId else None,
+        commitment_id=uuid.UUID(body.commitmentId) if body.commitmentId else None,
         due_on=_day(body.dueOn), note=body.note, created_by=current_user.id,
     )
     db.add(c)
     await db.flush()
+    # Выплата по регулярному обязательству закрывает свой период сама: вводить одно и
+    # то же дважды — в журнал и в полосу периодов — человек не станет, и полоса
+    # останется красной при выплаченных деньгах.
+    if c.commitment_id:
+        await _mark_from_cash(cid, c, current_user, db, _day(body.commitmentPeriod))
     await log_audit(db, actor=current_user, company_id=cid,
                     action="perimeter.cash.create", target=str(c.id),
                     details={"person": c.person_name, "amount": float(c.amount),
@@ -759,7 +817,10 @@ async def update_cash(
         c.formalized, c.formalized_on, c.formalized_by = False, None, None
     c.parent_id = uuid.UUID(body.parentId) if body.parentId else None
     c.record_id = uuid.UUID(body.recordId) if body.recordId else None
+    c.commitment_id = uuid.UUID(body.commitmentId) if body.commitmentId else None
     c.due_on, c.note = _day(body.dueOn), body.note
+    if c.commitment_id:
+        await _mark_from_cash(cid, c, current_user, db, _day(body.commitmentPeriod))
     await log_audit(db, actor=current_user, company_id=cid,
                     action="perimeter.cash.update", target=str(c.id),
                     details={"person": c.person_name, "amount": float(c.amount)})
@@ -1197,13 +1258,6 @@ async def delete_person(
 # Форма исполнения не обязана быть денежной, поэтому сумма может отсутствовать, а
 # «выполнено» отмечается фактом, а не платежом.
 
-PERIODICITY: dict[str, str] = {
-    "week": "Каждую неделю",
-    "month": "Каждый месяц",
-    "quarter": "Каждый квартал",
-    "halfyear": "Раз в полгода",
-    "year": "Раз в год",
-}
 COMMITMENT_FORMS: dict[str, str] = {
     "money": "Выплата наличными",
     "service": "Работа или услуга",
@@ -1218,65 +1272,6 @@ COMMITMENT_STATUSES: dict[str, str] = {
 # Сколько дней в периоде — для недели и года считается точно, для месяца и квартала
 # шаг календарный (см. `_period_start`), а это число нужно лишь для оценки просрочки.
 PERIOD_DAYS = {"week": 7, "month": 30, "quarter": 91, "halfyear": 182, "year": 365}
-
-
-def _period_start(day: date, periodicity: str) -> date:
-    """Первый день периода, в который попадает дата.
-
-    Календарный шаг, а не арифметика в днях: «каждый месяц» это месяц, а не 30 суток,
-    иначе к декабрю период уезжает на неделю и отметки перестают попадать в свой месяц.
-    """
-    if periodicity == "week":
-        return day - timedelta(days=day.weekday())
-    if periodicity == "month":
-        return day.replace(day=1)
-    if periodicity == "quarter":
-        return date(day.year, 3 * ((day.month - 1) // 3) + 1, 1)
-    if periodicity == "halfyear":
-        return date(day.year, 1 if day.month <= 6 else 7, 1)
-    return date(day.year, 1, 1)
-
-
-def _next_period(start: date, periodicity: str) -> date:
-    if periodicity == "week":
-        return start + timedelta(days=7)
-    if periodicity == "month":
-        return date(start.year + start.month // 12, start.month % 12 + 1, 1)
-    if periodicity == "quarter":
-        m = start.month + 3
-        return date(start.year + (m - 1) // 12, (m - 1) % 12 + 1, 1)
-    if periodicity == "halfyear":
-        return date(start.year + 1, 1, 1) if start.month == 7 else date(start.year, 7, 1)
-    return date(start.year + 1, 1, 1)
-
-
-def _period_label(start: date, periodicity: str) -> str:
-    months = ("январь", "февраль", "март", "апрель", "май", "июнь", "июль",
-              "август", "сентябрь", "октябрь", "ноябрь", "декабрь")
-    if periodicity == "week":
-        return f"неделя с {start.strftime('%d.%m.%Y')}"
-    if periodicity == "month":
-        return f"{months[start.month - 1]} {start.year}"
-    if periodicity == "quarter":
-        return f"{(start.month - 1) // 3 + 1} квартал {start.year}"
-    if periodicity == "halfyear":
-        return f"{'1' if start.month == 1 else '2'} полугодие {start.year}"
-    return f"{start.year} год"
-
-
-def _periods(c: OffLedgerCommitment, until: date) -> list[date]:
-    """Все периоды обязательства от начала до указанной даты.
-
-    Ограничение сверху намеренное: у бессрочного обязательства с недельным шагом за
-    пять лет накопится 260 периодов, и показывать их целиком незачем.
-    """
-    out: list[date] = []
-    cur = _period_start(c.started_on, c.periodicity)
-    end = min(until, c.ends_on) if c.ends_on else until
-    while cur <= end and len(out) < 400:
-        out.append(cur)
-        cur = _next_period(cur, c.periodicity)
-    return out
 
 
 class CommitmentIn(BaseModel):
@@ -1611,3 +1606,43 @@ async def unmark_commitment(
                     details={"period": m.period_start.isoformat()})
     await db.commit()
     return {"deleted": True}
+
+
+async def _mark_from_cash(cid, c: OffLedgerCash, user: User, db: AsyncSession,
+                          period: date | None = None) -> None:
+    """Закрыть период регулярного обязательства выплатой из журнала.
+
+    За какой период платят, решает человек: доплату за август нередко выдают в
+    сентябре, и догадка по дате операции положила бы отметку на сентябрь — то есть
+    закрыла бы период, за который ещё не работали, оставив август красным. Если период
+    не назван, берётся тот, в который попадает дата операции.
+
+    Существующая отметка не переписывается суммой автоматически: за период могли
+    заплатить двумя частями, и вторая выплата не должна затирать первую. В таком случае
+    сумма отметки складывается — это и есть «сколько за период отдали».
+    """
+    com = await db.get(OffLedgerCommitment, c.commitment_id)
+    if com is None or com.company_id != cid:
+        return
+    start = _period_start(period or c.happened_on, com.periodicity)
+    mark = (await db.execute(
+        select(OffLedgerCommitmentMark).where(
+            OffLedgerCommitmentMark.commitment_id == com.id,
+            OffLedgerCommitmentMark.period_start == start))).scalar_one_or_none()
+    amount = float(c.amount)
+    if mark is None:
+        db.add(OffLedgerCommitmentMark(
+            company_id=cid, commitment_id=com.id, period_start=start,
+            done_on=c.happened_on, outcome="done", amount=amount,
+            cash_id=c.id, created_by=user.id,
+            note="отмечено выплатой из журнала наличных",
+        ))
+    elif mark.cash_id != c.id:
+        mark.outcome = "done"
+        mark.amount = round(float(mark.amount or 0) + amount, 2)
+        mark.done_on = max(mark.done_on, c.happened_on)
+    else:
+        # Та же операция, отредактированная: сумма заменяется, а не удваивается.
+        mark.amount = amount
+        mark.done_on = c.happened_on
+    await db.flush()

@@ -24,7 +24,7 @@ import { cn } from '@/lib/utils'
 import { exportTable } from '@/services/booksExport'
 import {
   createCash, deleteCash, getCashDicts, getCashJournal, getCashLoans, getCashPapers,
-  getCashPeople, getPerimeterPeople, updateCash,
+  getCashPeople, getCommitments, getPerimeterPeople, updateCash,
   type CashDicts, type CashIn, type CashMove,
 } from '@/services/perimeterService'
 import { Loading, TableCard, Th } from './OfficePanels'
@@ -82,6 +82,11 @@ export function CashJournalScreen({ companyId }: { companyId: string }) {
   const people = useQuery({
     queryKey: ['perimeter', 'people', companyId],
     queryFn: () => getPerimeterPeople(companyId),
+    enabled: !!companyId,
+  })
+  const commitments = useQuery({
+    queryKey: ['perimeter', 'commitments', companyId],
+    queryFn: () => getCommitments(companyId),
     enabled: !!companyId,
   })
 
@@ -266,6 +271,8 @@ export function CashJournalScreen({ companyId }: { companyId: string }) {
           dicts={dicts.data}
           loans={(loans.data?.rows ?? []).filter((l) => (l.rest ?? 0) > 0.01)}
           people={(people.data?.rows ?? []).filter((p) => p.isActive)}
+          commitments={(commitments.data?.rows ?? [])
+            .filter((c) => c.status === 'active' && c.form === 'money')}
           saving={save.isPending}
           error={save.error ? String((save.error as Error).message) : null}
           onChange={(body) => setEdit({ ...edit, body })}
@@ -280,7 +287,8 @@ export function CashJournalScreen({ companyId }: { companyId: string }) {
 const toCashForm = (r: CashMove): CashIn => ({
   personName: r.person, amount: r.amount, happenedOn: r.happenedOn,
   direction: r.direction, kind: r.kind, purpose: r.purpose, proof: r.proof,
-  purse: r.purse, parentId: r.parentId, recordId: r.recordId, dueOn: r.dueOn,
+  purse: r.purse, parentId: r.parentId, recordId: r.recordId,
+  commitmentId: r.commitmentId, dueOn: r.dueOn,
   note: r.note, counterpartyId: r.counterpartyId,
 })
 
@@ -299,7 +307,8 @@ function Field({ label, hint, children }: {
 const inputCls = 'w-full rounded-md border bg-background px-2.5 py-1.5 text-sm'
 
 function CashDialog({
-  value, isNew, dicts, loans, people, saving, error, onChange, onClose, onSave,
+  value, isNew, dicts, loans, people, commitments, saving, error, onChange, onClose,
+  onSave,
 }: {
   value: CashIn
   isNew: boolean
@@ -308,6 +317,11 @@ function CashDialog({
   loans: CashMove[]
   /** Кого уже знаем: подсказка, а не ограничение — новое имя вводится свободно. */
   people: { name: string; kindLabel: string; role: string | null }[]
+  /** Денежные регулярные обязательства: выплата по ним закроет период отметкой. */
+  commitments: {
+    id: string; person: string; title: string; amount: number | null
+    periods: { periodStart: string; label: string; outcome: string }[]
+  }[]
   saving: boolean
   error: string | null
   onChange: (v: CashIn) => void
@@ -411,6 +425,50 @@ function CashDialog({
               hint="Пусто, если договорились без срока">
               <input className={inputCls} type="date" value={value.dueOn ?? ''}
                 onChange={(e) => set({ dueOn: e.target.value || null })} />
+            </Field>
+          )}
+
+          {!!commitments.length && value.direction === 'out' && (
+            <Field label="По регулярному обязательству"
+              hint="Период закроется отметкой сам — по дате операции, а не по текущему месяцу">
+              <select className={inputCls} value={value.commitmentId ?? ''}
+                onChange={(e) => {
+                  const id = e.target.value || null
+                  const c = commitments.find((x) => x.id === id)
+                  // Подставляем ожидаемые имя, сумму и период: чаще всего платят как
+                  // договорились и за самый старый незакрытый период.
+                  const open = c?.periods.filter((p) => p.outcome !== 'done') ?? []
+                  set({
+                    commitmentId: id,
+                    commitmentPeriod: open[0]?.periodStart ?? null,
+                    personName: c && !value.personName ? c.person : value.personName,
+                    amount: c && !value.amount ? (c.amount ?? value.amount) : value.amount,
+                  })
+                }}>
+                <option value="">— разовая операция —</option>
+                {commitments.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.person} · {c.title}
+                    {c.amount ? ` · ${c.amount} ₽` : ''}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          )}
+
+          {!!value.commitmentId && (
+            <Field label="За какой период"
+              hint="Доплату за август обычно выдают в сентябре — период выбирают, а не берут по дате операции">
+              <select className={inputCls} value={value.commitmentPeriod ?? ''}
+                onChange={(e) => set({ commitmentPeriod: e.target.value || null })}>
+                <option value="">— период даты операции —</option>
+                {(commitments.find((c) => c.id === value.commitmentId)?.periods ?? [])
+                  .slice().reverse().map((p) => (
+                    <option key={p.periodStart} value={p.periodStart}>
+                      {p.label}{p.outcome === 'done' ? ' (уже закрыт)' : ''}
+                    </option>
+                  ))}
+              </select>
             </Field>
           )}
 

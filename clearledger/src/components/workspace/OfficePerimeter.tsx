@@ -29,8 +29,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { cn } from '@/lib/utils'
 import { exportTable } from '@/services/booksExport'
 import {
-  createPerimeterRecord, deletePerimeterRecord, getPerimeterDicts, getPerimeterOverview,
-  getPerimeterParties, getPerimeterRecords, updatePerimeterRecord,
+  createPerimeterRecord, deletePerimeterRecord, getCashLoans, getPerimeterDicts,
+  getPerimeterOverview, getPerimeterParties, getPerimeterRecords, updatePerimeterRecord,
   type PerimeterRecord, type PerimeterRecordIn,
 } from '@/services/perimeterService'
 import { Loading, NoCompany, TableCard, Th } from './OfficePanels'
@@ -200,6 +200,89 @@ function PerimeterLayers({ companyId }: { companyId: string }) {
           tone={d.toFormalize.length ? 'warning' : undefined} />
       </div>
 
+      {/* Деньги и регулярные обязательства: не слои, а другой срез того же
+          периметра — «что происходит и что надо сделать». */}
+      <div className="grid gap-3 lg:grid-cols-2">
+        <Card>
+          <CardContent className="p-4 space-y-2">
+            <div className="text-base font-medium">Наличные мимо кассы</div>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+              <span className="text-muted-foreground">Выдано за всё время</span>
+              <span className="text-right tabular-nums">{money.format(d.cash.out)} ₽</span>
+              <span className="text-muted-foreground">Из личных средств</span>
+              <span className="text-right tabular-nums">
+                {money.format(d.cash.ownerOut)} ₽
+              </span>
+              <span className="text-muted-foreground">За людьми (займы, подотчёт)</span>
+              <span className="text-right tabular-nums">
+                {money.format(d.cash.loanGiven)} ₽
+              </span>
+              {!!d.cash.loanTaken && (
+                <>
+                  <span className="text-muted-foreground">Должны мы</span>
+                  <span className="text-right tabular-nums">
+                    {money.format(d.cash.loanTaken)} ₽
+                  </span>
+                </>
+              )}
+              <span className="text-muted-foreground">Ждёт документов</span>
+              <span className={cn('text-right tabular-nums',
+                d.cash.awaitsPapersCount && 'text-amber-600')}>
+                {money.format(d.cash.awaitsPapers)} ₽
+              </span>
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              {d.cash.count
+                ? `${num.format(d.cash.count)} операций; без подтверждения `
+                  + `${money.format(d.cash.noProof)} ₽`
+                + (d.cash.openAdvances
+                    ? `; подотчёт не закрыт у ${num.format(d.cash.openAdvances)}` : '')
+                + (d.cash.loanOverdue
+                    ? `; просрочено выдач: ${num.format(d.cash.loanOverdue)}` : '')
+                : 'Операций пока нет'}
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-4 space-y-2">
+            <div className="text-base font-medium">Регулярные обязательства</div>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+              <span className="text-muted-foreground">Действует</span>
+              <span className="text-right tabular-nums">
+                {num.format(d.commitments.active)} перед{' '}
+                {num.format(d.commitments.people)} людьми
+              </span>
+              <span className="text-muted-foreground">В месяц деньгами</span>
+              <span className="text-right tabular-nums">
+                {money.format(d.commitments.monthlyMoney)} ₽
+              </span>
+              <span className="text-muted-foreground">Периодов пропущено</span>
+              <span className={cn('text-right tabular-nums',
+                d.commitments.missedTotal && 'text-destructive')}>
+                {num.format(d.commitments.missedTotal)}
+              </span>
+            </div>
+            {d.commitments.missed.length ? (
+              <ul className="text-[11px] text-muted-foreground space-y-0.5">
+                {d.commitments.missed.slice(0, 4).map((m) => (
+                  <li key={m.id}>
+                    <b>{m.person}</b> · {m.title}: {m.missedPeriods.join(', ')}
+                    {m.missedAmount ? ` — ${money.format(m.missedAmount)} ₽` : ''}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-[11px] text-muted-foreground">
+                {d.commitments.active
+                  ? 'Все периоды закрыты отметками'
+                  : 'Регулярных обязательств не заведено'}
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
       {!!d.byConfidence.length && (
         <TableCard note="Чем подтверждён третий слой. Записанное со слов проверяют первым: спорить с памятью нечем"
           head={<><Th>Подтверждение</Th><Th right>Записей</Th><Th right>Сумма</Th></>}>
@@ -265,21 +348,30 @@ function PerimeterDue({ companyId }: { companyId: string }) {
     queryFn: () => getPerimeterOverview(companyId),
     enabled: !!companyId,
   })
+  const loans = useQuery({
+    queryKey: ['perimeter', 'cash-loans', companyId],
+    queryFn: () => getCashLoans(companyId),
+    enabled: !!companyId,
+  })
   if (q.isError) {
     return <div className="p-4"><QueryError onRetry={() => q.refetch()} /></div>
   }
   if (!q.data) return <Loading />
   const d = q.data
   const rows = [...d.overdue, ...d.soon]
+  // Просроченные выдачи и пропущенные периоды — такие же сроки, как у договорённостей.
+  // Держать их на отдельных экранах значит требовать обхода четырёх мест вместо одного.
+  const overdueLoans = (loans.data?.rows ?? []).filter((l) => l.overdue)
+  const missed = d.commitments.missed
 
-  if (!rows.length) {
+  if (!rows.length && !overdueLoans.length && !missed.length) {
     return (
       <div className="p-4">
         <Card>
           <CardContent className="p-4 text-sm text-muted-foreground">
-            Ближайших сроков нет: ни одна действующая запись не просрочена и не наступает
-            в течение месяца. Срок ставится не у всех записей — «пока работаем, скидка
-            сохраняется» бессрочно по своей природе.
+            Ближайших сроков нет: ни одна запись не просрочена, выдачи закрыты,
+            периоды регулярных обязательств отмечены. Срок ставится не у всех записей —
+            «пока работаем, скидка сохраняется» бессрочно по своей природе.
           </CardContent>
         </Card>
       </div>
@@ -288,9 +380,45 @@ function PerimeterDue({ companyId }: { companyId: string }) {
 
   return (
     <div className="p-4 space-y-4">
+      {!!missed.length && (
+        <TableCard note="Регулярные обязательства с непроставленными отметками: либо выполнить, либо отметить пропуск"
+          head={<><Th>Перед кем</Th><Th>Что</Th><Th>Какие периоды</Th>
+            <Th right>Пропущено</Th><Th right>Ожидалось</Th></>}>
+          {missed.map((m) => (
+            <tr key={m.id} className="border-b last:border-0 bg-destructive/5">
+              <Td>{m.person}</Td>
+              <Td>{m.title}</Td>
+              <Td muted>{m.missedPeriods.join(', ')}</Td>
+              <Td right>{num.format(m.missedCount)}</Td>
+              <Td right>{m.missedAmount ? `${money.format(m.missedAmount)} ₽` : '—'}</Td>
+            </tr>
+          ))}
+        </TableCard>
+      )}
+
+      {!!overdueLoans.length && (
+        <TableCard note="Займы и выдачи под отчёт с прошедшим сроком"
+          head={<><Th>Срок</Th><Th>С кем и за что</Th><Th>Вид</Th>
+            <Th right>Выдано</Th><Th right>Осталось</Th></>}>
+          {overdueLoans.map((l) => (
+            <tr key={l.id} className="border-b last:border-0 bg-destructive/5">
+              <Td><span className="tabular-nums text-destructive">{l.dueOn}</span></Td>
+              <Td>
+                <div>{l.person}</div>
+                <div className="text-[11px] text-muted-foreground">{l.purpose ?? '—'}</div>
+              </Td>
+              <Td muted>{l.kindLabel}</Td>
+              <Td right muted>{money.format(l.amount)} ₽</Td>
+              <Td right>{money.format(l.rest ?? 0)} ₽</Td>
+            </tr>
+          ))}
+        </TableCard>
+      )}
+
+      {!!rows.length && (
       <div className="flex items-center justify-between">
         <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
-          Просроченное и ближайшее
+          Договорённости: просроченное и ближайшее
         </div>
         <ExportButton onClick={() => exportTable('Сроки периметра', [
           { header: 'Срок', key: 'dueOn', width: 14 },
@@ -301,6 +429,8 @@ function PerimeterDue({ companyId }: { companyId: string }) {
           { header: 'Сумма', key: 'amount', width: 16, money: true },
         ], rows)} />
       </div>
+      )}
+      {!!rows.length && (
       <TableCard note="Отрицательные дни — просрочка. Запись не исчезает по сроку: её закрывают руками, отметив, чем закончилось"
         head={<><Th>Срок</Th><Th>Что записано</Th><Th>Вторая сторона</Th>
           <Th>Подтверждение</Th><Th right>Сумма</Th></>}>
@@ -329,6 +459,7 @@ function PerimeterDue({ companyId }: { companyId: string }) {
           </tr>
         ))}
       </TableCard>
+      )}
     </div>
   )
 }
