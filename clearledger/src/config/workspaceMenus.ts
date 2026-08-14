@@ -518,6 +518,31 @@ export const CONNECT_MENU: CentralMenuItem[] = [
  * сопоставления двух счетов: самортизированное до нуля, списанное в затраты,
  * просроченный долг. Первое компания либо ведёт, либо нет; второе есть всегда.
  */
+/**
+ * «Периметр» — три слоя обязательств и имущества вне баланса.
+ *
+ * Разделы отвечают на разные вопросы, и порядок здесь смысловой: сначала общая
+ * картина, потом официальная часть (её же показывает «Бухгалтерия»), потом то, чего
+ * в учёте нет вовсе. Официальное и записанное со слов НЕ смешиваются в одном списке
+ * намеренно: доверие к ним разное, и различать их должен интерфейс, а не память.
+ */
+export const PER_PICTURE_MENU: CentralMenuItem[] = [
+  { key: 'pr_layers', label: 'Три слоя' },
+  // Ближайшее и просроченное: у договорённости срок есть чаще, чем сумма.
+  { key: 'pr_due', label: 'Сроки' },
+]
+export const PER_OFFICIAL_MENU: CentralMenuItem[] = [
+  { key: 'pr_accounts', label: 'Забалансовые счета' },
+  { key: 'pr_hidden', label: 'Не видно в балансе' },
+]
+export const PER_RECORDS_MENU: CentralMenuItem[] = [
+  { key: 'pr_registry', label: 'Реестр' },
+  { key: 'pr_parties', label: 'По второй стороне' },
+]
+export const PER_HELP_MENU: CentralMenuItem[] = [
+  { key: 'pr_help', label: 'Как это устроено' },
+]
+
 export const BOOKS_OFFBAL_MENU: CentralMenuItem[] = [
   { key: 'bk_off_accounts', label: 'Забалансовые счета' },
   { key: 'bk_off_hidden',   label: 'Не видно в балансе' },

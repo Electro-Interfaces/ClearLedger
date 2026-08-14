@@ -14,6 +14,7 @@ import {
   REV_STOCK_MENU, REV_HELP_MENU,
   ECON_RESULT_MENU, ECON_COSTS_MENU, ECON_TAXES_MENU, ECON_HELP_MENU,
   BOOKS_LEDGER_MENU, BOOKS_OFFBAL_MENU, BOOKS_PRIMARY_MENU,
+  PER_PICTURE_MENU, PER_OFFICIAL_MENU, PER_RECORDS_MENU, PER_HELP_MENU,
 } from './workspaceMenus'
 
 /** Пункты «Бухгалтерии» одной картой: разделы делят общий словарь подписей. */
@@ -199,6 +200,10 @@ const SUB_LABELS: Partial<Record<CoreMode, Record<string, string>>> = {
   books_ledger: Object.fromEntries(BOOKS_LEDGER_MENU.map((m) => [m.key, m.label])),
   books_primary: Object.fromEntries(BOOKS_PRIMARY_MENU.map((m) => [m.key, m.label])),
   books_offbal: Object.fromEntries(BOOKS_OFFBAL_MENU.map((m) => [m.key, m.label])),
+  per_picture: Object.fromEntries(PER_PICTURE_MENU.map((m) => [m.key, m.label])),
+  per_official: Object.fromEntries(PER_OFFICIAL_MENU.map((m) => [m.key, m.label])),
+  per_records: Object.fromEntries(PER_RECORDS_MENU.map((m) => [m.key, m.label])),
+  per_help: Object.fromEntries(PER_HELP_MENU.map((m) => [m.key, m.label])),
 }
 
 const VALID_MODES = new Set(Object.keys(MODE_LABELS))

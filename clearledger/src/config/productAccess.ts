@@ -27,6 +27,7 @@ import {
   REV_STOCK_MENU, REV_HELP_MENU,
   ECON_RESULT_MENU, ECON_COSTS_MENU, ECON_TAXES_MENU, ECON_HELP_MENU,
   BOOKS_LEDGER_MENU, BOOKS_OFFBAL_MENU, BOOKS_PRIMARY_MENU,
+  PER_PICTURE_MENU, PER_OFFICIAL_MENU, PER_RECORDS_MENU, PER_HELP_MENU,
 } from './workspaceMenus'
 import { storeMenu, STORE_HELP_MENU } from './storeCatalog'
 import { MODULE_COMPONENTS, ACCOUNTING_SECTIONS, componentSection } from './moduleComponents'
@@ -150,6 +151,12 @@ export const PRODUCT_MODULES: Record<string, ProductModuleDef[]> = {
     ...items(BOOKS_LEDGER_MENU, 'Регистр'),
     ...items(BOOKS_PRIMARY_MENU, 'Документы'),
     ...items(BOOKS_OFFBAL_MENU, 'За балансом'),
+  ],
+  perimeter: [
+    ...items(PER_PICTURE_MENU, 'Картина'),
+    ...items(PER_OFFICIAL_MENU, 'Официально'),
+    ...items(PER_RECORDS_MENU, 'Договорённости'),
+    ...items(PER_HELP_MENU, 'Помощь'),
   ],
 }
 

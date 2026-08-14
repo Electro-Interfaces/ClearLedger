@@ -127,3 +127,12 @@ export const ECONOMY_HELP_SLICES: Record<string, HelpSlice> = {
     categories: ['Экономика компании'],
   },
 }
+
+/** «Периметр»: один пласт — устройство трёх слоёв и правила работы с третьим. */
+export const PERIMETER_HELP_SLICES: Record<string, HelpSlice> = {
+  'pr_help': {
+    title: 'Как это устроено',
+    hint: 'Три слоя обязательств, чем они различаются и что записывать в третий',
+    categories: ['За балансом', 'Периметр компании'],
+  },
+}

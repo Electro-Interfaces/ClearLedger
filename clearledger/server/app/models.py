@@ -8748,3 +8748,87 @@ class AuditorRun(Base):
     rated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     rated_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# Периметр компании: третий слой — то, чего нет ни в балансе, ни на забалансе
+# ───────────────────────────────────────────────────────────────────────────
+# Первые два слоя приезжают из бухгалтерии: забалансовые счета (001–012, МЦ.*) и
+# имущество, видимое только сопоставлением счетов. Третий слой в учёт не попадает
+# вовсе, и источник у него один — человек.
+#
+# Это устные договорённости с клиентом, обещания «сделаем к сентябрю», решения
+# собственника, поручительства без бумаги, чужое имущество, принятое «по-соседски»,
+# и претензии, о которых пока никто не написал. Юридической силы у записи нет, но
+# деньги и репутация за ней стоят настоящие, и при передаче дел она теряется первой.
+#
+# Отдельная таблица, а не запись в учёте: смешивать документально подтверждённое с
+# записанным со слов нельзя ни в отчёте, ни на экране. У записи всегда видно, чем
+# она подтверждена (`confidence`), — от «сказали на встрече» до «есть подпись».
+class OffLedgerRecord(Base):
+    """Запись периметра: обязательство, право или имущество вне учёта."""
+
+    __tablename__ = "off_ledger_records"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=True)
+
+    # Что это: agreement — договорённость, promise — обещание, guarantee — гарантия
+    # или поручительство, decision — решение, property — чужое или наше имущество без
+    # документа, claim — претензия и спор, other — прочее.
+    kind: Mapped[str] = mapped_column(String(20), nullable=False, default="agreement")
+    # Куда смотрит: we_owe — должны мы, owed_to_us — должны нам, property — про вещь,
+    # info — просто важно знать. Без этой оси реестр превращается в свалку заметок.
+    direction: Mapped[str] = mapped_column(String(20), nullable=False, default="we_owe")
+    title: Mapped[str] = mapped_column(String(300), nullable=False)
+    details: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    counterparty_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("counterparties.id", ondelete="SET NULL"),
+        nullable=True)
+    # Вторая сторона, которой нет в справочнике: договорённость случается раньше
+    # первого документа, и требовать карточку контрагента значило бы не записать её.
+    counterparty_name: Mapped[str | None] = mapped_column(String(300), nullable=True)
+
+    # Сумма, если её вообще можно назвать. Отсутствие суммы — законное состояние:
+    # «починим бесплатно, если сломается» деньгами не меряется до поломки.
+    amount: Mapped[float | None] = mapped_column(Numeric(18, 2), nullable=True)
+    started_on: Mapped[date_type | None] = mapped_column(Date, nullable=True)
+    due_on: Mapped[date_type | None] = mapped_column(Date, nullable=True, index=True)
+
+    # active — действует, done — исполнено, cancelled — снято, formalized — оформлено
+    # документом и ушло в учёт. Последнее и есть цель половины записей: третий слой
+    # либо дозревает до первого, либо закрывается.
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="active",
+                                        index=True)
+    # Чем подтверждено: spoken — со слов, correspondence — письмо или чат,
+    # signed — есть подпись. Цена ошибки у этих трёх разная, и в реестре это видно.
+    confidence: Mapped[str] = mapped_column(String(20), nullable=False, default="spoken")
+    # Где зафиксировано: встреча, звонок, письмо, чат, совещание.
+    source: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # Ссылка на подтверждение: письмо, сообщение, файл. Хранится строкой намеренно —
+    # подтверждение живёт в чужой системе, и тащить его копию сюда незачем.
+    evidence: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # Что будет, если сработает. Записывается словами: «вернём предоплату 300 тыс.».
+    consequence: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Забалансовый счёт, на который это встало бы при оформлении (001, 008, 009…).
+    # Мост между третьим слоем и первым: по нему видно, что уже пора оформлять.
+    account: Mapped[str | None] = mapped_column(String(20), nullable=True)
+
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    closed_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (
+        Index("idx_off_ledger_company_status", "company_id", "status"),
+    )

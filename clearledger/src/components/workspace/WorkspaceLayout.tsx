@@ -49,6 +49,7 @@ const REVENUE_MODES: CoreMode[] = ['rev_sales', 'rev_buyers', 'rev_catalog', 're
 const EconomyPanel = lazy(() => import('./OfficeEconomy').then((m) => ({ default: m.EconomyPanel })))
 const ECONOMY_MODES: CoreMode[] = ['econ_result', 'econ_costs', 'econ_taxes', 'econ_help']
 const BooksPanel = lazy(() => import('./OfficePanels').then((m) => ({ default: m.BooksPanel })))
+const PerimeterPanel = lazy(() => import('./OfficePerimeter').then((m) => ({ default: m.PerimeterPanel })))
 
 /**
  * Продукт в подключении: рабочего места ещё нет, меню тоже — только заставка.
@@ -178,6 +179,7 @@ function ModePanel() {
       {ECONOMY_MODES.includes(coreMode) && <EconomyPanel />}
       {(coreMode === 'books_ledger' || coreMode === 'books_primary'
         || coreMode === 'books_offbal') && <BooksPanel />}
+      {coreMode.startsWith('per_') && <PerimeterPanel />}
       {/* «Подключения»: один раздел, его пункты — во второй колонке. Пока ветки не
           было, маршрут /connect (плитка стола, лаунчер) открывал рабочую область без
           содержимого. */}
