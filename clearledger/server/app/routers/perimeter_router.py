@@ -23,7 +23,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -35,7 +35,8 @@ from app.audit import log_audit
 from app.auth import assert_company_product, get_current_user
 from app.database import get_db
 from app.models import (
-    Counterparty, OffLedgerCash, OffLedgerPerson, OffLedgerRecord, User,
+    Counterparty, OffLedgerCash, OffLedgerCommitment, OffLedgerCommitmentMark,
+    OffLedgerPerson, OffLedgerRecord, User,
 )
 
 router = APIRouter(prefix="/perimeter", tags=["Периметр"])
@@ -56,6 +57,7 @@ async def ensure_perimeter_schema(db: AsyncSession) -> None:
         "ALTER TABLE off_ledger_cash ADD COLUMN IF NOT EXISTS formalized_on DATE",
         "ALTER TABLE off_ledger_cash ADD COLUMN IF NOT EXISTS formalized_by VARCHAR(300)",
         "ALTER TABLE off_ledger_cash ADD COLUMN IF NOT EXISTS person_id UUID",
+        "ALTER TABLE off_ledger_cash ADD COLUMN IF NOT EXISTS commitment_id UUID",
     ]
     for sql in stmts:
         try:
@@ -1183,5 +1185,429 @@ async def delete_person(
     await log_audit(db, actor=current_user, company_id=cid,
                     action="perimeter.person.delete", target=person_id,
                     details={"name": name})
+    await db.commit()
+    return {"deleted": True}
+
+
+# ── Регулярные обязательства ─────────────────────────────────────────────────
+# Разовую договорённость закрывают один раз, регулярную — каждый период, и вопрос к ней
+# другой: за какой период рассчитались, а какой пропустили. Доплата водителю каждый
+# месяц, компенсация аренды мастеру, обед бригаде по пятницам, обучение раз в квартал.
+#
+# Форма исполнения не обязана быть денежной, поэтому сумма может отсутствовать, а
+# «выполнено» отмечается фактом, а не платежом.
+
+PERIODICITY: dict[str, str] = {
+    "week": "Каждую неделю",
+    "month": "Каждый месяц",
+    "quarter": "Каждый квартал",
+    "halfyear": "Раз в полгода",
+    "year": "Раз в год",
+}
+COMMITMENT_FORMS: dict[str, str] = {
+    "money": "Выплата наличными",
+    "service": "Работа или услуга",
+    "goods": "Передача вещей",
+    "other": "Прочее",
+}
+COMMITMENT_STATUSES: dict[str, str] = {
+    "active": "Действует",
+    "paused": "Приостановлено",
+    "ended": "Прекращено",
+}
+# Сколько дней в периоде — для недели и года считается точно, для месяца и квартала
+# шаг календарный (см. `_period_start`), а это число нужно лишь для оценки просрочки.
+PERIOD_DAYS = {"week": 7, "month": 30, "quarter": 91, "halfyear": 182, "year": 365}
+
+
+def _period_start(day: date, periodicity: str) -> date:
+    """Первый день периода, в который попадает дата.
+
+    Календарный шаг, а не арифметика в днях: «каждый месяц» это месяц, а не 30 суток,
+    иначе к декабрю период уезжает на неделю и отметки перестают попадать в свой месяц.
+    """
+    if periodicity == "week":
+        return day - timedelta(days=day.weekday())
+    if periodicity == "month":
+        return day.replace(day=1)
+    if periodicity == "quarter":
+        return date(day.year, 3 * ((day.month - 1) // 3) + 1, 1)
+    if periodicity == "halfyear":
+        return date(day.year, 1 if day.month <= 6 else 7, 1)
+    return date(day.year, 1, 1)
+
+
+def _next_period(start: date, periodicity: str) -> date:
+    if periodicity == "week":
+        return start + timedelta(days=7)
+    if periodicity == "month":
+        return date(start.year + start.month // 12, start.month % 12 + 1, 1)
+    if periodicity == "quarter":
+        m = start.month + 3
+        return date(start.year + (m - 1) // 12, (m - 1) % 12 + 1, 1)
+    if periodicity == "halfyear":
+        return date(start.year + 1, 1, 1) if start.month == 7 else date(start.year, 7, 1)
+    return date(start.year + 1, 1, 1)
+
+
+def _period_label(start: date, periodicity: str) -> str:
+    months = ("январь", "февраль", "март", "апрель", "май", "июнь", "июль",
+              "август", "сентябрь", "октябрь", "ноябрь", "декабрь")
+    if periodicity == "week":
+        return f"неделя с {start.strftime('%d.%m.%Y')}"
+    if periodicity == "month":
+        return f"{months[start.month - 1]} {start.year}"
+    if periodicity == "quarter":
+        return f"{(start.month - 1) // 3 + 1} квартал {start.year}"
+    if periodicity == "halfyear":
+        return f"{'1' if start.month == 1 else '2'} полугодие {start.year}"
+    return f"{start.year} год"
+
+
+def _periods(c: OffLedgerCommitment, until: date) -> list[date]:
+    """Все периоды обязательства от начала до указанной даты.
+
+    Ограничение сверху намеренное: у бессрочного обязательства с недельным шагом за
+    пять лет накопится 260 периодов, и показывать их целиком незачем.
+    """
+    out: list[date] = []
+    cur = _period_start(c.started_on, c.periodicity)
+    end = min(until, c.ends_on) if c.ends_on else until
+    while cur <= end and len(out) < 400:
+        out.append(cur)
+        cur = _next_period(cur, c.periodicity)
+    return out
+
+
+class CommitmentIn(BaseModel):
+    """Регулярное обязательство. Периодичность по умолчанию — месяц."""
+
+    personName: str = Field(min_length=1, max_length=300)
+    title: str = Field(min_length=1, max_length=300)
+    startedOn: str
+    form: str = "money"
+    amount: float | None = None
+    periodicity: str = "month"
+    dueDay: int | None = None
+    endsOn: str | None = None
+    status: str = "active"
+    confidence: str = "spoken"
+    details: str | None = None
+    note: str | None = None
+    personKind: str = "individual"
+
+
+class MarkIn(BaseModel):
+    """Отметка за период: выполнено или сознательно пропущено."""
+
+    periodStart: str
+    doneOn: str | None = None
+    outcome: str = "done"
+    amount: float | None = None
+    cashId: str | None = None
+    note: str | None = None
+
+
+def _validate_commitment(body: CommitmentIn) -> None:
+    if body.periodicity not in PERIODICITY:
+        raise HTTPException(422, f"Неизвестная периодичность: {body.periodicity}")
+    if body.form not in COMMITMENT_FORMS:
+        raise HTTPException(422, f"Неизвестная форма: {body.form}")
+    if body.status not in COMMITMENT_STATUSES:
+        raise HTTPException(422, f"Неизвестный статус: {body.status}")
+    if body.confidence not in CONFIDENCE:
+        raise HTTPException(422, f"Неизвестное подтверждение: {body.confidence}")
+    if body.endsOn and body.endsOn < body.startedOn:
+        raise HTTPException(422, "Окончание раньше начала")
+    if body.dueDay is not None and not (1 <= body.dueDay <= 31):
+        raise HTTPException(422, "День исполнения — число от 1 до 31")
+
+
+def _commitment_row(c: OffLedgerCommitment, marks: list[OffLedgerCommitmentMark],
+                    today: date) -> dict[str, Any]:
+    """Обязательство вместе с расчётом периодов: что закрыто, что пропущено."""
+    by_period = {m.period_start: m for m in marks}
+    periods = _periods(c, today)
+    # Текущий период считается только с наступлением дня исполнения: пока срок не
+    # пришёл, невыполненное это не долг, а обычное ожидание.
+    current = _period_start(today, c.periodicity) if periods else None
+    due_now = True
+    if current and c.due_day:
+        due_now = today.day >= c.due_day or c.periodicity != "month"
+    missed = [p for p in periods
+              if p not in by_period and (p != current or (due_now and c.status == "active"))]
+    # Приостановленное и прекращённое обязательство долгов не копит: договорились, что
+    # пока не выполняем.
+    if c.status != "active":
+        missed = [p for p in missed if p != current]
+
+    rows = [{
+        "periodStart": p.isoformat(),
+        "label": _period_label(p, c.periodicity),
+        "outcome": by_period[p].outcome if p in by_period else "missed",
+        "doneOn": by_period[p].done_on.isoformat() if p in by_period else None,
+        "amount": float(by_period[p].amount) if p in by_period
+        and by_period[p].amount is not None else None,
+        "note": by_period[p].note if p in by_period else None,
+        "markId": str(by_period[p].id) if p in by_period else None,
+        "isCurrent": p == current,
+    } for p in periods]
+
+    done = [m for m in marks if m.outcome == "done"]
+    last = max((m.period_start for m in marks), default=None)
+    return {
+        "id": str(c.id),
+        "person": c.person_name,
+        "personId": str(c.person_id) if c.person_id else None,
+        "title": c.title, "details": c.details,
+        "form": c.form, "formLabel": COMMITMENT_FORMS.get(c.form, c.form),
+        "amount": float(c.amount) if c.amount is not None else None,
+        "periodicity": c.periodicity,
+        "periodicityLabel": PERIODICITY.get(c.periodicity, c.periodicity),
+        "dueDay": c.due_day,
+        "startedOn": c.started_on.isoformat(),
+        "endsOn": c.ends_on.isoformat() if c.ends_on else None,
+        "status": c.status,
+        "statusLabel": COMMITMENT_STATUSES.get(c.status, c.status),
+        "confidence": c.confidence,
+        "confidenceLabel": CONFIDENCE.get(c.confidence, c.confidence),
+        "note": c.note,
+        "periods": rows[-24:],
+        "periodsTotal": len(periods),
+        "doneCount": len(done),
+        "skippedCount": sum(1 for m in marks if m.outcome == "skipped"),
+        "missedCount": len(missed),
+        "missedPeriods": [_period_label(p, c.periodicity) for p in missed[-6:]],
+        # Сколько денег обязательство уже стоило: сумма отметок, а при их отсутствии —
+        # ожидаемая сумма за период. Форма может быть неденежной, тогда null.
+        "paidTotal": round(sum(float(m.amount) for m in done
+                               if m.amount is not None), 2) or None,
+        "lastPeriod": _period_label(last, c.periodicity) if last else None,
+        # Ожидаемая стоимость пропущенного: только для денежной формы и только если
+        # сумма названа. Иначе цифру пришлось бы выдумать.
+        "missedAmount": round(len(missed) * float(c.amount), 2)
+        if c.form == "money" and c.amount is not None and missed else None,
+        "nextPeriod": _period_label(_next_period(current, c.periodicity), c.periodicity)
+        if current and c.status == "active" else None,
+    }
+
+
+async def _commitments(cid, db: AsyncSession, only_active: bool = False
+                       ) -> list[dict[str, Any]]:
+    sel = select(OffLedgerCommitment).where(OffLedgerCommitment.company_id == cid)
+    if only_active:
+        sel = sel.where(OffLedgerCommitment.status == "active")
+    rows = list((await db.execute(sel.order_by(OffLedgerCommitment.person_name)))
+                .scalars().all())
+    marks = list((await db.execute(
+        select(OffLedgerCommitmentMark)
+        .where(OffLedgerCommitmentMark.company_id == cid)
+    )).scalars().all())
+    by_c: dict[uuid.UUID, list[OffLedgerCommitmentMark]] = {}
+    for m in marks:
+        by_c.setdefault(m.commitment_id, []).append(m)
+    today = date.today()
+    out = [_commitment_row(c, by_c.get(c.id, []), today) for c in rows]
+    # Впереди то, что пропущено: экран открывают ради этого.
+    out.sort(key=lambda r: (-r["missedCount"], r["person"]))
+    return out
+
+
+@router.get("/commitments")
+async def list_commitments(
+    company_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Регулярные обязательства с историей периодов."""
+    cid = await assert_company_product(company_id, current_user, db, PRODUCT)
+    rows = await _commitments(cid, db)
+    active = [r for r in rows if r["status"] == "active"]
+    return {
+        "rows": rows,
+        "dictionaries": {
+            "periodicity": [{"key": k, "label": v} for k, v in PERIODICITY.items()],
+            "forms": [{"key": k, "label": v} for k, v in COMMITMENT_FORMS.items()],
+            "statuses": [{"key": k, "label": v} for k, v in COMMITMENT_STATUSES.items()],
+            "confidence": [{"key": k, "label": v} for k, v in CONFIDENCE.items()],
+        },
+        "activeCount": len(active),
+        "missedTotal": sum(r["missedCount"] for r in active),
+        # Сколько денег в месяц компания обещала регулярно. Считается только по
+        # денежной форме с названной суммой и приводится к месяцу: сравнивать недельную
+        # доплату с годовой премией иначе нельзя.
+        "monthlyMoney": round(sum(
+            float(r["amount"]) * {"week": 4.0, "month": 1.0, "quarter": 1 / 3,
+                                  "halfyear": 1 / 6, "year": 1 / 12}[r["periodicity"]]
+            for r in active if r["form"] == "money" and r["amount"]), 2),
+        "peopleCount": len({r["person"] for r in active}),
+    }
+
+
+@router.post("/commitments")
+async def create_commitment(
+    company_id: str,
+    body: CommitmentIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    cid = await assert_company_product(company_id, current_user, db, PRODUCT)
+    _validate_commitment(body)
+    person = await _ensure_person(cid, body.personName, body.personKind,
+                                  current_user, db)
+    c = OffLedgerCommitment(
+        company_id=cid, person_name=body.personName.strip(), person_id=person.id,
+        title=body.title.strip(), details=body.details, form=body.form,
+        amount=body.amount, periodicity=body.periodicity, due_day=body.dueDay,
+        started_on=_day(body.startedOn) or date.today(), ends_on=_day(body.endsOn),
+        status=body.status, confidence=body.confidence, note=body.note,
+        created_by=current_user.id,
+    )
+    db.add(c)
+    await db.flush()
+    await log_audit(db, actor=current_user, company_id=cid,
+                    action="perimeter.commitment.create", target=str(c.id),
+                    details={"person": c.person_name, "title": c.title,
+                             "periodicity": c.periodicity})
+    await db.commit()
+    await db.refresh(c)
+    return _commitment_row(c, [], date.today())
+
+
+@router.put("/commitments/{commitment_id}")
+async def update_commitment(
+    company_id: str,
+    commitment_id: str,
+    body: CommitmentIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    cid = await assert_company_product(company_id, current_user, db, PRODUCT)
+    _validate_commitment(body)
+    c = await db.get(OffLedgerCommitment, uuid.UUID(commitment_id))
+    if c is None or c.company_id != cid:
+        raise HTTPException(404, "Обязательство не найдено")
+    # Периодичность у обязательства с отметками не меняется: отметки привязаны к первым
+    # дням своих периодов, и после смены шага они попадут мимо новых границ.
+    if c.periodicity != body.periodicity:
+        marks = (await db.execute(
+            select(func.count()).select_from(OffLedgerCommitmentMark)
+            .where(OffLedgerCommitmentMark.commitment_id == c.id))).scalar() or 0
+        if marks:
+            raise HTTPException(
+                422, "Есть отметки за периоды — периодичность менять нельзя. "
+                     "Прекратите это обязательство и заведите новое")
+    c.person_name = body.personName.strip()
+    c.person_id = (await _ensure_person(cid, body.personName, body.personKind,
+                                        current_user, db)).id
+    c.title, c.details = body.title.strip(), body.details
+    c.form, c.amount = body.form, body.amount
+    c.periodicity, c.due_day = body.periodicity, body.dueDay
+    c.started_on = _day(body.startedOn) or c.started_on
+    c.ends_on = _day(body.endsOn)
+    c.status, c.confidence, c.note = body.status, body.confidence, body.note
+    await log_audit(db, actor=current_user, company_id=cid,
+                    action="perimeter.commitment.update", target=str(c.id),
+                    details={"title": c.title, "status": c.status})
+    await db.commit()
+    await db.refresh(c)
+    marks = list((await db.execute(
+        select(OffLedgerCommitmentMark)
+        .where(OffLedgerCommitmentMark.commitment_id == c.id))).scalars().all())
+    return _commitment_row(c, marks, date.today())
+
+
+@router.delete("/commitments/{commitment_id}")
+async def delete_commitment(
+    company_id: str,
+    commitment_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, bool]:
+    """Удаление — для заведённых по ошибке. Отработавшее прекращают статусом."""
+    cid = await assert_company_product(company_id, current_user, db, PRODUCT)
+    c = await db.get(OffLedgerCommitment, uuid.UUID(commitment_id))
+    if c is None or c.company_id != cid:
+        raise HTTPException(404, "Обязательство не найдено")
+    title = c.title
+    await db.delete(c)
+    await log_audit(db, actor=current_user, company_id=cid,
+                    action="perimeter.commitment.delete", target=commitment_id,
+                    details={"title": title})
+    await db.commit()
+    return {"deleted": True}
+
+
+@router.post("/commitments/{commitment_id}/marks")
+async def mark_commitment(
+    company_id: str,
+    commitment_id: str,
+    body: MarkIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Отметить период выполненным или сознательно пропущенным."""
+    cid = await assert_company_product(company_id, current_user, db, PRODUCT)
+    c = await db.get(OffLedgerCommitment, uuid.UUID(commitment_id))
+    if c is None or c.company_id != cid:
+        raise HTTPException(404, "Обязательство не найдено")
+    if body.outcome not in ("done", "skipped"):
+        raise HTTPException(422, "Отметка бывает «выполнено» или «пропущено»")
+    start = _day(body.periodStart)
+    if start is None:
+        raise HTTPException(422, "Не указан период")
+    # Приводим к границе периода: с экрана приходит первый день, но руками могли
+    # передать любую дату внутри него.
+    start = _period_start(start, c.periodicity)
+    exists = (await db.execute(
+        select(OffLedgerCommitmentMark).where(
+            OffLedgerCommitmentMark.commitment_id == c.id,
+            OffLedgerCommitmentMark.period_start == start))).scalar_one_or_none()
+    if exists is not None:
+        # Повторная отметка не создаёт вторую запись, а исправляет первую: иначе один
+        # месяц выглядел бы выполненным дважды.
+        exists.outcome = body.outcome
+        exists.done_on = _day(body.doneOn) or date.today()
+        exists.amount = body.amount
+        exists.note = body.note
+        exists.cash_id = uuid.UUID(body.cashId) if body.cashId else None
+        mark = exists
+    else:
+        mark = OffLedgerCommitmentMark(
+            company_id=cid, commitment_id=c.id, period_start=start,
+            done_on=_day(body.doneOn) or date.today(), outcome=body.outcome,
+            amount=body.amount,
+            cash_id=uuid.UUID(body.cashId) if body.cashId else None,
+            note=body.note, created_by=current_user.id,
+        )
+        db.add(mark)
+    await db.flush()
+    await log_audit(db, actor=current_user, company_id=cid,
+                    action="perimeter.commitment.mark", target=str(c.id),
+                    details={"period": start.isoformat(), "outcome": body.outcome})
+    await db.commit()
+    marks = list((await db.execute(
+        select(OffLedgerCommitmentMark)
+        .where(OffLedgerCommitmentMark.commitment_id == c.id))).scalars().all())
+    return _commitment_row(c, marks, date.today())
+
+
+@router.delete("/commitments/{commitment_id}/marks/{mark_id}")
+async def unmark_commitment(
+    company_id: str,
+    commitment_id: str,
+    mark_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, bool]:
+    """Снять отметку: период снова считается незакрытым."""
+    cid = await assert_company_product(company_id, current_user, db, PRODUCT)
+    m = await db.get(OffLedgerCommitmentMark, uuid.UUID(mark_id))
+    if m is None or m.company_id != cid or str(m.commitment_id) != commitment_id:
+        raise HTTPException(404, "Отметка не найдена")
+    await db.delete(m)
+    await log_audit(db, actor=current_user, company_id=cid,
+                    action="perimeter.commitment.unmark", target=commitment_id,
+                    details={"period": m.period_start.isoformat()})
     await db.commit()
     return {"deleted": True}

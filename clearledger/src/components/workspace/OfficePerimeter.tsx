@@ -46,6 +46,7 @@ import {
   CashJournalScreen, CashLoansScreen, CashPapersScreen, CashPeopleScreen,
 } from './OfficeCash'
 import { PerimeterPeopleScreen } from './OfficePeople'
+import { CommitmentsScreen } from './OfficeCommitments'
 import { useWorkspaceSections } from './workspaceSections'
 
 const PER_MENU_FOR_HELP = [...PER_PICTURE_MENU, ...PER_OFFICIAL_MENU,
@@ -107,6 +108,7 @@ export function PerimeterPanel() {
       case 'pr_accounts': return <OffBalanceAccounts companyId={companyId} />
       case 'pr_hidden':   return <OffBalanceHiddenScreen companyId={companyId} />
       case 'pr_registry': return <PerimeterRegistry companyId={companyId} />
+      case 'pr_regular':  return <CommitmentsScreen companyId={companyId} />
       case 'pr_parties':  return <PerimeterParties companyId={companyId} />
       case 'pr_cash':        return <CashJournalScreen companyId={companyId} />
       case 'pr_cash_people': return <CashPeopleScreen companyId={companyId} />

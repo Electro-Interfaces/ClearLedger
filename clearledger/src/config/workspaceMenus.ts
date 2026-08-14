@@ -537,6 +537,9 @@ export const PER_OFFICIAL_MENU: CentralMenuItem[] = [
 ]
 export const PER_RECORDS_MENU: CentralMenuItem[] = [
   { key: 'pr_registry', label: 'Реестр' },
+  // Регулярные стоят отдельным пунктом, а не видом записи в реестре: у разовой
+  // договорённости вопрос «закрыта ли», у регулярной — «за какой период выполнили».
+  { key: 'pr_regular', label: 'Регулярные' },
   { key: 'pr_parties', label: 'По второй стороне' },
 ]
 /**

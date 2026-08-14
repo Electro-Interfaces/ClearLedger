@@ -8913,6 +8913,11 @@ class OffLedgerCash(Base):
     record_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("off_ledger_records.id", ondelete="SET NULL"),
         nullable=True)
+    # Каким регулярным обязательством вызвана выплата: ежемесячная доплата водителю,
+    # компенсация аренды. По этой ссылке считается, за какие периоды уже рассчитались.
+    commitment_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("off_ledger_commitments.id", ondelete="SET NULL"),
+        nullable=True)
     # Срок возврата — у займов и выдач под отчёт.
     due_on: Mapped[date_type | None] = mapped_column(Date, nullable=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -8988,4 +8993,202 @@ class OffLedgerPerson(Base):
 
     __table_args__ = (
         Index("uq_off_person_name", "company_id", "name", unique=True),
+    )
+
+
+# Регулярные обязательства перед людьми.
+#
+# Отличаются от разовой договорённости тем, что повторяются: доплата водителю каждый
+# месяц, компенсация аренды жилья мастеру, обед бригаде по пятницам, обучение раз в
+# квартал. Разовую запись закрывают один раз, регулярную — каждый период, и вопрос к
+# ней другой: за какой период рассчитались, а какой пропустили.
+#
+# Форма исполнения не обязана быть денежной. Часть обязательств выполняется деньгами
+# (тогда исполнение это операция журнала наличных), часть — действием, часть — вещами.
+# Поэтому форма хранится отдельным полем, а сумма может отсутствовать.
+class OffLedgerCommitment(Base):
+    """Обязательство, которое надо выполнять с некоторой периодичностью."""
+
+    __tablename__ = "off_ledger_commitments"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=True)
+
+    # Перед кем. Имя строкой всегда, ссылка на карточку — рядом (заводится сама).
+    person_name: Mapped[str] = mapped_column(String(300), nullable=False)
+    person_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("off_ledger_people.id", ondelete="SET NULL"),
+        nullable=True)
+
+    title: Mapped[str] = mapped_column(String(300), nullable=False)
+    details: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # money — выплата, service — работа или услуга с нашей стороны, goods — передача
+    # вещей, other — прочее. Не всё меряется деньгами, и подставлять ноль нельзя.
+    form: Mapped[str] = mapped_column(String(20), nullable=False, default="money")
+    amount: Mapped[float | None] = mapped_column(Numeric(18, 2), nullable=True)
+
+    # month по умолчанию: месяц — естественный шаг таких договорённостей.
+    periodicity: Mapped[str] = mapped_column(String(20), nullable=False, default="month")
+    # День месяца (или день недели для недельной периодичности), к которому ждут
+    # исполнения. Пусто — «в течение периода», без точной даты.
+    due_day: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    started_on: Mapped[date_type] = mapped_column(Date, nullable=False)
+    # Бессрочное обязательство — обычный случай: «пока работает у нас».
+    ends_on: Mapped[date_type | None] = mapped_column(Date, nullable=True)
+
+    # active — действует, paused — приостановлено, ended — прекращено.
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="active",
+                                        index=True)
+    # Чем подтверждено — те же три ступени, что у договорённостей.
+    confidence: Mapped[str] = mapped_column(String(20), nullable=False, default="spoken")
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        Index("idx_off_commitment_company_status", "company_id", "status"),
+    )
+
+
+class OffLedgerCommitmentMark(Base):
+    """Отметка исполнения обязательства за период.
+
+    Одна таблица на все формы исполнения намеренно: иначе «когда в последний раз
+    выполняли» пришлось бы собирать из двух источников и сверять между собой. Денежное
+    исполнение дополнительно ссылается на операцию журнала наличных — сумма живёт там,
+    здесь только факт закрытия периода.
+    """
+
+    __tablename__ = "off_ledger_commitment_marks"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    commitment_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("off_ledger_commitments.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    # Первый день закрываемого периода: по нему период и опознаётся. Хранить «август
+    # 2026» строкой значило бы разбирать её при каждом сравнении.
+    period_start: Mapped[date_type] = mapped_column(Date, nullable=False)
+    done_on: Mapped[date_type] = mapped_column(Date, nullable=False)
+    # done — выполнено, skipped — период пропущен сознательно (договорились, что в этом
+    # месяце не надо). Пропуск отмечают явно, иначе он неотличим от забытого.
+    outcome: Mapped[str] = mapped_column(String(20), nullable=False, default="done")
+    amount: Mapped[float | None] = mapped_column(Numeric(18, 2), nullable=True)
+    cash_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("off_ledger_cash.id", ondelete="SET NULL"),
+        nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        # Один период закрывается один раз: две отметки за август означают, что
+        # обязательство выполнили дважды, а на деле кто-то не увидел чужую отметку.
+        Index("uq_off_mark_period", "commitment_id", "period_start", unique=True),
+    )
+
+
+class PulseView(Base):
+    """Витрина «Пульса»: что и кому показываем наружу.
+
+    «Пульс» отвечает на вопрос своего руководителя. Витрина — тот же продукт,
+    повёрнутый наружу: заказчику, владельцу сети, куратору со стороны холдинга нужна
+    проверенная информация по своей теме без погружения в приложения.
+
+    Витрина — это ПОДАЧА готовых разрезов, а не новый источник правды: блоки берутся
+    из каталога `PULSE_ITEMS`, и второго набора метрик мы не заводим. Если цифра
+    неверна — чинится источник, а не витрина.
+
+    Почему не роль с правами на разделы: права отвечают «что открыто», витрина — «что
+    показать и в каком порядке». Категорий получателей много, состав меняется от
+    разговора к разговору, и менять его нужно за минуту — а права это медленный контур
+    с журналом и последствиями. Плюс витрина несёт обязательства: подпись
+    ответственного и дату актуальности, которых право не несёт.
+    """
+
+    __tablename__ = "pulse_views"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    # Для кого — словами человека, а не кодом роли: «Куратор со стороны РусГидро».
+    # Категорий получателей больше, чем ролей, и заводить роль под каждую значило бы
+    # плодить права, которые никому не дают доступа к работе.
+    audience: Mapped[str] = mapped_column(String(300), nullable=False, default="")
+    period: Mapped[str] = mapped_column(String(20), nullable=False, default="month")
+    # Кто отвечает за цифры. Витрина уходит наружу, и «данные из системы» там не ответ:
+    # у показанного числа должен быть человек.
+    owner_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    note: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    # draft — собирается, published — видна получателям.
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft")
+    created_by: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        Index("idx_pulse_views_company", "company_id", "status"),
+    )
+
+
+class PulseViewBlock(Base):
+    """Блок витрины: разрез «Пульса» под своим заголовком.
+
+    Заголовок «своими словами» обязателен по смыслу: на витрине заказчика «Продажи»
+    называются «Отпуск энергии», и переименование здесь дешевле, чем объяснение
+    на встрече, почему в системе это называется иначе.
+    """
+
+    __tablename__ = "pulse_view_blocks"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    view_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("pulse_views.id", ondelete="CASCADE"), nullable=False
+    )
+    block_key: Mapped[str] = mapped_column(String(60), nullable=False)
+    title: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    hint: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sort: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
+class PulseViewGrant(Base):
+    """Кому назначена витрина.
+
+    Внешний получатель входит в пространство участником с одной этой витриной и без
+    рабочих мест. Права на данные при этом продолжают действовать: витрина не может
+    показать то, чего человеку не положено видеть по скоупу объектов и юрлицу.
+    """
+
+    __tablename__ = "pulse_view_grants"
+
+    view_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("pulse_views.id", ondelete="CASCADE"), primary_key=True
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
     )

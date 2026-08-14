@@ -293,3 +293,101 @@ export const updatePerson = (companyId: string, id: string, body: PersonIn) =>
 
 export const deletePerson = (companyId: string, id: string) =>
   del<{ deleted: boolean }>(`/api/perimeter/people/${id}?company_id=${companyId}`)
+
+/* ── Регулярные обязательства ────────────────────────────────────────────── */
+
+/** Период обязательства: закрыт отметкой, пропущен сознательно или просто пропущен. */
+export interface CommitmentPeriod {
+  periodStart: string
+  label: string
+  outcome: string
+  doneOn: string | null
+  amount: number | null
+  note: string | null
+  markId: string | null
+  isCurrent: boolean
+}
+
+export interface Commitment {
+  id: string
+  person: string
+  personId: string | null
+  title: string
+  details: string | null
+  form: string; formLabel: string
+  /** Сумма за период; у неденежной формы её нет. */
+  amount: number | null
+  periodicity: string; periodicityLabel: string
+  dueDay: number | null
+  startedOn: string
+  endsOn: string | null
+  status: string; statusLabel: string
+  confidence: string; confidenceLabel: string
+  note: string | null
+  /** Последние 24 периода: у бессрочного недельного их накапливаются сотни. */
+  periods: CommitmentPeriod[]
+  periodsTotal: number
+  doneCount: number
+  skippedCount: number
+  missedCount: number
+  missedPeriods: string[]
+  paidTotal: number | null
+  lastPeriod: string | null
+  /** Во что обошлись пропуски — только для денежной формы с названной суммой. */
+  missedAmount: number | null
+  nextPeriod: string | null
+}
+
+export interface CommitmentIn {
+  personName: string
+  title: string
+  startedOn: string
+  form: string
+  amount?: number | null
+  periodicity: string
+  dueDay?: number | null
+  endsOn?: string | null
+  status: string
+  confidence: string
+  details?: string | null
+  note?: string | null
+  personKind: string
+}
+
+export interface CommitmentList {
+  rows: Commitment[]
+  dictionaries: {
+    periodicity: { key: string; label: string }[]
+    forms: { key: string; label: string }[]
+    statuses: { key: string; label: string }[]
+    confidence: { key: string; label: string }[]
+  }
+  activeCount: number
+  missedTotal: number
+  /** Регулярные выплаты, приведённые к месяцу: иначе недельное и годовое не сложить. */
+  monthlyMoney: number
+  peopleCount: number
+}
+
+export const getCommitments = (companyId: string) =>
+  get<CommitmentList>(`/api/perimeter/commitments?company_id=${companyId}`)
+
+export const createCommitment = (companyId: string, body: CommitmentIn) =>
+  post<Commitment>(`/api/perimeter/commitments?company_id=${companyId}`, body)
+
+export const updateCommitment = (companyId: string, id: string, body: CommitmentIn) =>
+  put<Commitment>(`/api/perimeter/commitments/${id}?company_id=${companyId}`, body)
+
+export const deleteCommitment = (companyId: string, id: string) =>
+  del<{ deleted: boolean }>(`/api/perimeter/commitments/${id}?company_id=${companyId}`)
+
+export const markCommitment = (
+  companyId: string, id: string,
+  body: { periodStart: string; outcome: string; doneOn?: string | null
+    amount?: number | null; note?: string | null },
+) => post<Commitment>(
+  `/api/perimeter/commitments/${id}/marks?company_id=${companyId}`, body)
+
+export const unmarkCommitment = (companyId: string, id: string, markId: string) =>
+  del<{ deleted: boolean }>(
+    `/api/perimeter/commitments/${id}/marks/${markId}?company_id=${companyId}`)
