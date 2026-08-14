@@ -16,7 +16,7 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Bot, ClipboardList, ListChecks, MessageSquare, Save, SlidersHorizontal } from 'lucide-react'
+import { BookOpen, Bot, CheckCircle2, ClipboardList, FlaskConical, GitCommitHorizontal, ListChecks, MessageSquare, Save, SlidersHorizontal, Wrench } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
@@ -29,6 +29,10 @@ import * as auditor from '@/services/spaceAuditorService'
 const VIEWS = [
   { key: 'chat', label: 'Разговор', icon: MessageSquare, hint: 'спросить про данные пространства' },
   { key: 'skills', label: 'Навыки', icon: ListChecks, hint: 'чем ему разрешено пользоваться' },
+  // Методы и знание — то, что агент НАЖИЛ, в отличие от навыков-ручек, которые приходят
+  // с образом. Их и надо видеть отдельно: по ним понятно, растёт он или стоит.
+  { key: 'methods', label: 'Методы', icon: Wrench, hint: 'чему научили: как отвечать на класс вопросов' },
+  { key: 'knowledge', label: 'Знание', icon: BookOpen, hint: 'что он знает об этой компании' },
   { key: 'setup', label: 'Настройка', icon: SlidersHorizontal, hint: 'режим, указания компании, модели' },
   { key: 'runs', label: 'Журнал', icon: ClipboardList, hint: 'что спрашивали и что он нашёл' },
 ] as const
@@ -86,6 +90,8 @@ export function AuditorPage() {
         <div className="min-h-0 flex-1">
           {view === 'chat' && <ChatView />}
           {view === 'skills' && <SkillsView />}
+          {view === 'methods' && <MethodsView />}
+          {view === 'knowledge' && <KnowledgeView />}
           {view === 'setup' && <SetupView />}
           {view === 'runs' && <RunsView />}
         </div>
@@ -184,6 +190,215 @@ function SkillsView() {
           </div>
         </section>
       ))}
+    </div>
+  )
+}
+
+/**
+ * Правка файла агента прямо в разделе.
+ *
+ * Текст показывается как есть — это markdown, который читает сам агент, и подменять его
+ * формой значило бы прятать то, что реально уходит в промпт. Сохранение доступно
+ * администратору; правка сразу коммитится в рабочую папку его именем.
+ */
+function FileEditor({ path, body, canEdit, onSaved }: {
+  path: string
+  body: string
+  canEdit: boolean
+  onSaved: () => void
+}) {
+  const { companyId } = useCompany()
+  const [draft, setDraft] = useState(body)
+  const [busy, setBusy] = useState(false)
+  useEffect(() => { setDraft(body) }, [body])
+
+  const dirty = draft !== body
+
+  async function save() {
+    setBusy(true)
+    try {
+      await auditor.saveAgentFile(companyId, path, draft)
+      toast.success('Сохранено — агент прочитает это со следующего вопроса')
+      onSaved()
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="mt-2">
+      <textarea
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        readOnly={!canEdit}
+        rows={Math.min(30, Math.max(8, draft.split('\n').length + 1))}
+        className={cn('w-full resize-y rounded-lg border border-border bg-background px-3 py-2 font-mono text-xs leading-relaxed outline-none',
+          canEdit ? 'focus:border-primary' : 'text-muted-foreground')}
+      />
+      <div className="mt-1.5 flex items-center gap-2">
+        {canEdit ? (
+          <>
+            <Button size="sm" onClick={save} disabled={!dirty || busy} className="gap-2">
+              <Save className="size-4" />{busy ? 'Сохраняю…' : 'Сохранить'}
+            </Button>
+            {dirty && <Button size="sm" variant="ghost" onClick={() => setDraft(body)}>Отменить</Button>}
+            <span className="text-xs text-muted-foreground">{path}</span>
+          </>
+        ) : (
+          <span className="text-xs text-muted-foreground">Править может администратор пространства · {path}</span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/** Методы: чему агента научили. Видно, что уже проверено, а что ещё гипотеза. */
+function MethodsView() {
+  const { companyId } = useCompany()
+  const qc = useQueryClient()
+  const { data: settings } = useQuery({
+    queryKey: ['auditor-settings', companyId],
+    queryFn: () => auditor.getSettings(companyId), enabled: !!companyId, retry: false,
+  })
+  const { data, isLoading, error, refetch } = useQuery({
+    queryKey: ['auditor-methods'], queryFn: auditor.getMethods, retry: false,
+  })
+  const [open, setOpen] = useState<string | null>(null)
+
+  if (error) return <div className="p-4"><QueryError message={(error as Error).message} onRetry={() => refetch()} /></div>
+
+  const methods = data ?? []
+  const verified = methods.filter((m) => m.verified).length
+
+  return (
+    <div className="h-full overflow-y-auto p-4">
+      <h1 className="text-lg font-semibold">Методы</h1>
+      <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
+        Чему агента научили: как отвечать на класс вопросов — что смотреть, в каком порядке,
+        что считать находкой. В отличие от навыков, методы не приходят с обновлением —
+        они наживаются здесь, в работе, и лежат файлами в рабочей папке под версиями.
+        {methods.length > 0 && <> Всего {methods.length}, проверено {verified}.</>}
+      </p>
+
+      {isLoading && <div className="mt-4 text-sm text-muted-foreground">Загружаю…</div>}
+      {!isLoading && !methods.length && (
+        <div className="mt-4 rounded-lg border border-border/60 bg-card/50 px-3 py-6 text-center text-sm text-muted-foreground">
+          Методов пока нет. Первый появится после разбора в мастерской.
+        </div>
+      )}
+
+      <div className="mt-4 space-y-2">
+        {methods.map((m) => (
+          <div key={m.id} className="rounded-lg border border-border/60 bg-card px-3 py-2">
+            <button type="button" onClick={() => setOpen(open === m.id ? null : m.id)}
+              className="flex w-full items-start gap-2 text-left">
+              {m.verified
+                ? <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                : <FlaskConical className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400" />}
+              <span className="min-w-0 flex-1">
+                <span className="font-medium">{m.name}</span>
+                <span className={cn('ml-2 rounded px-1.5 py-0.5 text-[11px]',
+                  m.verified
+                    ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                    : 'bg-amber-500/10 text-amber-600 dark:text-amber-400')}>
+                  {m.verified ? 'проверен' : 'черновик'}
+                </span>
+                <span className="mt-0.5 block text-xs leading-snug text-muted-foreground">{m.description}</span>
+              </span>
+            </button>
+            {open === m.id && (
+              <>
+                {m.proof && (
+                  <div className="mt-2 rounded-lg border border-emerald-500/40 bg-emerald-500/5 px-2.5 py-1.5">
+                    <div className="text-[11px] font-medium uppercase tracking-wide text-emerald-600 dark:text-emerald-400">
+                      Чем проверено
+                    </div>
+                    <div className="mt-0.5 whitespace-pre-wrap text-xs text-muted-foreground">{m.proof.slice(0, 600)}</div>
+                  </div>
+                )}
+                <FileEditor path={`.claude/skills/${m.id}/SKILL.md`} body={m.body}
+                  canEdit={!!settings?.can_manage}
+                  onSaved={() => qc.invalidateQueries({ queryKey: ['auditor-methods'] })} />
+              </>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/** Знание: что агент знает об этой компании, и как оно росло. */
+function KnowledgeView() {
+  const { companyId } = useCompany()
+  const qc = useQueryClient()
+  const { data: settings } = useQuery({
+    queryKey: ['auditor-settings', companyId],
+    queryFn: () => auditor.getSettings(companyId), enabled: !!companyId, retry: false,
+  })
+  const { data, isLoading, error, refetch } = useQuery({
+    queryKey: ['auditor-knowledge'], queryFn: auditor.getKnowledge, retry: false,
+  })
+  const { data: growth } = useQuery({
+    queryKey: ['auditor-growth'], queryFn: auditor.getGrowth, retry: false,
+  })
+  const [open, setOpen] = useState<string | null>(null)
+
+  if (error) return <div className="p-4"><QueryError message={(error as Error).message} onRetry={() => refetch()} /></div>
+
+  return (
+    <div className="h-full overflow-y-auto p-4">
+      <h1 className="text-lg font-semibold">Знание</h1>
+      <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
+        Что агент знает об этой компании: особенности учёта, которые не выводятся из данных,
+        и правила «это не ошибка, потому что…». Читается перед каждым ответом и стоит выше
+        общих правил — поэтому правка здесь меняет ответы сразу.
+      </p>
+
+      {isLoading && <div className="mt-4 text-sm text-muted-foreground">Загружаю…</div>}
+      <div className="mt-4 space-y-2">
+        {(data ?? []).map((k) => (
+          <div key={k.file} className="rounded-lg border border-border/60 bg-card px-3 py-2">
+            <button type="button" onClick={() => setOpen(open === k.file ? null : k.file)}
+              className="flex w-full items-center gap-2 text-left">
+              <BookOpen className="size-4 shrink-0 text-muted-foreground" />
+              <span className="font-medium">{k.title}</span>
+              <span className="ml-auto text-xs text-muted-foreground">
+                {new Date(k.updated).toLocaleDateString('ru-RU')}
+              </span>
+            </button>
+            {open === k.file && (
+              <FileEditor path={`knowledge/${k.file}`} body={k.body}
+                canEdit={!!settings?.can_manage}
+                onSaved={() => qc.invalidateQueries({ queryKey: ['auditor-knowledge'] })} />
+            )}
+          </div>
+        ))}
+      </div>
+
+      {!!growth?.length && (
+        <section className="mt-6 max-w-3xl">
+          <h2 className="text-sm font-semibold">Как рос</h2>
+          <p className="mt-1 text-xs text-muted-foreground">
+            История рабочей папки: что и когда менялось в знании и методах.
+          </p>
+          <ul className="mt-2 space-y-1">
+            {growth.map((g) => (
+              <li key={g.hash} className="flex items-start gap-2 text-sm">
+                <GitCommitHorizontal className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                <span className="min-w-0 flex-1">
+                  {g.subject}
+                  <span className="ml-2 text-xs text-muted-foreground">
+                    {g.author} · {new Date(g.date).toLocaleString('ru-RU')}
+                  </span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
     </div>
   )
 }

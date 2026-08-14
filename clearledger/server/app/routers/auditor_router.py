@@ -58,6 +58,9 @@ class SettingsOut(SettingsIn):
     # сервис аудитора спрашивает его же ручкой и решает, пускать ли в режим с
     # инструментами. Клиенту тут верить нельзя — он сам себе админом не назначается.
     can_manage: bool = False
+    # Имя правщика — уходит в автора коммита рабочей папки агента: по истории должно быть
+    # видно, кто менял знание, а не «кто-то через интерфейс».
+    author_name: str | None = None
 
 
 class RunIn(BaseModel):
@@ -87,7 +90,8 @@ async def get_settings(
     row = await _get_or_default(cid, db)
     if row is None:
         # Записи нет — это НЕ ошибка: пространство просто ничего не меняло.
-        return SettingsOut(disabled_skills=[], instructions=None, mode="normal", can_manage=can_manage)
+        return SettingsOut(disabled_skills=[], instructions=None, mode="normal",
+                           can_manage=can_manage, author_name=current_user.full_name)
     return SettingsOut(
         disabled_skills=row.disabled_skills or [],
         instructions=row.instructions,
@@ -96,6 +100,7 @@ async def get_settings(
         model_answer=row.model_answer,
         updated_at=row.updated_at,
         can_manage=can_manage,
+        author_name=current_user.full_name,
     )
 
 

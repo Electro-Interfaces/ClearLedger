@@ -111,6 +111,75 @@ export async function uploadFile(companyId: string, file: File): Promise<Auditor
   return res.json()
 }
 
+/** Метод — то, чему агента научили: файл в `/work/.claude/skills`. */
+export interface AuditorMethod {
+  id: string
+  name: string
+  description: string
+  /** Раздел «Чем проверено» заполнен — метод перестал быть гипотезой. */
+  verified: boolean
+  proof: string
+  body: string
+  updated: string
+}
+
+/** Файл знания о компании — то же, что едет в промпт каждого ответа. */
+export interface AuditorKnowledge {
+  file: string
+  title: string
+  body: string
+  updated: string
+}
+
+/** Коммит рабочей папки: как рос сам агент, а не что у него спрашивали. */
+export interface AuditorGrowth {
+  hash: string
+  date: string
+  author: string
+  subject: string
+}
+
+const readJson = async <T>(path: string, what: string): Promise<T> => {
+  const res = await fetch(`${BASE}${path}`)
+  if (!res.ok || !res.headers.get('content-type')?.includes('application/json')) {
+    throw new Error(`${what} недоступны: аудитор не подключён`)
+  }
+  return res.json()
+}
+
+export const getMethods = () => readJson<AuditorMethod[]>('/methods', 'Методы')
+export const getKnowledge = () => readJson<AuditorKnowledge[]>('/knowledge', 'Знание')
+export const getGrowth = () => readJson<AuditorGrowth[]>('/growth', 'История')
+
+/**
+ * Править знание или метод прямо из интерфейса. Только админ пространства; правка
+ * сразу коммитится в рабочую папку агента его именем.
+ */
+export async function saveAgentFile(companyId: string, path: string, body: string) {
+  const res = await fetch(`${BASE}/agent-file`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${getToken() ?? ''}`,
+      'X-Company-Id': companyId,
+    },
+    body: JSON.stringify({ path, body }),
+  })
+  if (!res.ok) throw new Error((await res.json().catch(() => null))?.error || `Не сохранилось (${res.status})`)
+  return res.json() as Promise<{ status: string }>
+}
+
+/**
+ * Перезапуск агента: сбросить кеш знания, чтобы следующий вопрос читал файлы заново.
+ * Контейнер не трогается и не должен — сессии у CLI нет, каждый вопрос это новый
+ * процесс, читающий навыки с диска.
+ */
+export async function reloadAgent() {
+  const res = await fetch(`${BASE}/reload`, { method: 'POST' })
+  if (!res.ok) throw new Error('Не удалось перезапустить агента')
+  return res.json() as Promise<{ methods: number; knowledge: number }>
+}
+
 /** Каталог навыков — чем аудитор вообще умеет отвечать. */
 export async function getSkills(): Promise<AuditorSkill[]> {
   const res = await fetch(`${BASE}/skills`)

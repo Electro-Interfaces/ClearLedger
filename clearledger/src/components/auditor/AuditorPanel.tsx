@@ -10,7 +10,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { Bot, CornerDownLeft, Loader2, Paperclip, ShieldOff, Square, ThumbsDown, ThumbsUp, TriangleAlert, Wrench } from 'lucide-react'
+import { Bot, CornerDownLeft, Loader2, Paperclip, RotateCcw, ShieldOff, Square, ThumbsDown, ThumbsUp, TriangleAlert, Wrench } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Markdown } from '@/components/info/Markdown'
@@ -127,6 +127,7 @@ export function AuditorPanel() {
   // показывается, только если режим включён в стеке И человек — админ пространства;
   // проверяет это всё равно сервер, здесь лишь не показываем заведомо недоступное.
   const [workshop, setWorkshop] = useState(false)
+  const [reloading, setReloading] = useState(false)
   const ctrlRef = useRef<AbortController | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
 
@@ -234,10 +235,32 @@ export function AuditorPanel() {
         {/* Переключатель — в шапке, а не у строки ввода: это не свойство вопроса, а
             то, С КЕМ сейчас разговариваешь. Видит только админ и только там, где
             режим включён в стеке. */}
+        {/* Начать заново: чистый разговор и перечитанные знание с методами. Полезно
+            сразу после правки правил — иначе непонятно, подхватились они или нет. */}
+        <button type="button" disabled={busy || reloading}
+          onClick={async () => {
+            setReloading(true)
+            try {
+              const r = await auditor.reloadAgent()
+              ctrlRef.current?.abort()
+              setMessages([]); setError(''); setStatus(''); setFiles([])
+              toast.success(`Начали заново · методов ${r.methods}, файлов знания ${r.knowledge}`)
+            } catch (e) {
+              toast.error((e as Error).message)
+            } finally {
+              setReloading(false)
+            }
+          }}
+          title="Начать заново: очистить разговор и перечитать знание и методы"
+          className={cn('ml-auto inline-flex shrink-0 items-center gap-1 rounded-md border border-border/60 px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground',
+            canWorkshop && 'ml-auto')}>
+          <RotateCcw className={cn('size-3', reloading && 'animate-spin')} />
+          Заново
+        </button>
         {canWorkshop && (
           <button type="button" onClick={() => setWorkshop((w) => !w)} disabled={busy}
             title={workshop ? 'Вернуться к помощнику: навыки-вопросы, без инструментов' : 'Мастерская: инструменты, файлы, навыки из /work'}
-            className={cn('ml-auto inline-flex shrink-0 items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] transition-colors',
+            className={cn('inline-flex shrink-0 items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] transition-colors',
               workshop
                 ? 'border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400'
                 : 'border-border/60 text-muted-foreground hover:bg-accent hover:text-foreground')}>
