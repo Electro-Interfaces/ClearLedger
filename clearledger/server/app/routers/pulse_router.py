@@ -2779,6 +2779,15 @@ async def ack_card(
 # второго набора метрик не заводим, иначе цифра наружу разойдётся с цифрой внутри.
 
 
+
+async def _catalog(db: AsyncSession, cid: str) -> list[tuple[str, str, str]]:
+    """Блоки, доступные компании: по профилю пространства."""
+    profile = (await db.execute(text(
+        "SELECT profile_id FROM companies WHERE id = CAST(:cid AS uuid)"),
+        {"cid": str(cid)})).scalar_one_or_none()
+    return OFFICE_BLOCKS if profile == "office" else PULSE_ITEMS
+
+
 @router.get("/views")
 async def pulse_views(
     company_id: str = Query(...),
@@ -2806,7 +2815,10 @@ async def pulse_views(
         } for r in rows],
         # Каталог — тот же список пунктов «Пульса»: витрина показывает готовые разрезы,
         # а не свои. Группа нужна конструктору, чтобы блоки не шли одной кучей.
-        "catalog": [{"key": k, "title": t, "group": g} for k, t, g in PULSE_ITEMS],
+        # Каталог зависит от профиля компании: блоки про заправки и объекты сети в
+        # пространстве бухгалтерского аутсорсера пусты, и предлагать их — обманывать
+        # того, кто собирает витрину.
+        "catalog": [{"key": k, "title": t, "group": g} for k, t, g in await _catalog(db, cid)],
         "periods": [{"key": "week", "title": "Неделя"}, {"key": "month", "title": "Месяц"},
                     {"key": "quarter", "title": "Квартал"}],
     }
@@ -2886,7 +2898,7 @@ async def pulse_view_blocks(
     v = await _view_or_404(db, cid, view_id)
 
     items = payload.get("blocks") or []
-    known = {k for k, _, _ in PULSE_ITEMS}
+    known = {k for k, _, _ in await _catalog(db, cid)}
     clean = [b for b in items if isinstance(b, dict) and b.get("key") in known]
 
     await db.execute(text("DELETE FROM pulse_view_blocks WHERE view_id = CAST(:v AS uuid)"),
@@ -2958,7 +2970,7 @@ async def pulse_view_card(
     if not is_admin and not (mine and v.status == "published"):
         raise HTTPException(status_code=404, detail="Витрина не найдена")
 
-    titles = {k: t for k, t, _ in PULSE_ITEMS}
+    titles = {k: t for k, t, _ in await _catalog(db, cid)}
     blocks = [{
         "key": r[0], "title": r[1] or titles.get(r[0], r[0]),
         "originalTitle": titles.get(r[0], r[0]), "hint": r[2],
@@ -2979,6 +2991,60 @@ async def pulse_view_card(
         # Дата, на которую верны цифры: витрина уходит наружу, и «когда-то посчитано»
         # там не ответ.
         "asOf": date.today().isoformat(),
+    }
+
+
+@router.get("/views/{view_id}/data")
+async def pulse_view_data(
+    view_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Витрина с данными — то, что видит получатель.
+
+    Блоки считаются по тем же таблицам, что и рабочие экраны: витрина показывает
+    состояние дела, а не свою версию цифр. Если блок в этом пространстве не
+    считается, он честно говорит об этом, а не показывает ноль — ноль читается как
+    «всё хорошо», и это худший способ соврать.
+    """
+    cid = str(await assert_company_product(company_id, current_user, db, "pulse"))
+    v = await _view_or_404(db, cid, view_id)
+
+    mine = (await db.execute(text("""
+        SELECT 1 FROM pulse_view_grants
+         WHERE view_id = CAST(:v AS uuid) AND user_id = CAST(:u AS uuid)"""),
+        {"v": str(v.id), "u": str(current_user.id)})).first() is not None
+    is_admin = current_user.is_superadmin or await _is_company_admin(db, cid, current_user)
+    if not is_admin and not (mine and v.status == "published"):
+        raise HTTPException(status_code=404, detail="Витрина не найдена")
+
+    catalog = {k: t for k, t, _ in await _catalog(db, cid)}
+    profile = (await db.execute(text(
+        "SELECT profile_id FROM companies WHERE id = CAST(:cid AS uuid)"),
+        {"cid": cid})).scalar_one_or_none()
+
+    blocks = []
+    for r in (await db.execute(text("""
+        SELECT block_key, title, hint FROM pulse_view_blocks
+         WHERE view_id = CAST(:v AS uuid) ORDER BY sort"""), {"v": str(v.id)})).all():
+        key, title, hint = r
+        data = (await _office_block_data(db, cid, key) if profile == "office"
+                else {"note": "Блок этого профиля пока не считается для витрины."})
+        blocks.append({
+            "key": key, "title": title or catalog.get(key, key), "hint": hint,
+            "metrics": data.get("metrics") or [], "items": data.get("items") or [],
+            "note": data.get("note"),
+        })
+
+    return {
+        "id": str(v.id), "name": v.name, "audience": v.audience,
+        "owner": v.owner_name, "note": v.note, "status": v.status,
+        "asOf": date.today().isoformat(),
+        "company": (await db.execute(text(
+            "SELECT name FROM companies WHERE id = CAST(:cid AS uuid)"),
+            {"cid": cid})).scalar_one_or_none(),
+        "blocks": blocks,
     }
 
 
@@ -3029,3 +3095,162 @@ async def assert_company_admin_product(company_id: str, user: User, db: AsyncSes
     if not await _is_company_admin(db, cid, user):
         raise HTTPException(status_code=403, detail="Витрины настраивает администратор")
     return cid
+
+# ── Блоки витрины для профиля «office» ──────────────────────────────────────
+# Каталог «Пульса» собран под сети: продажи ЭЗС, заправки, объекты, эксплуатация.
+# В пространстве бухгалтерского аутсорсера этих данных нет вовсе, зато есть учёт
+# клиента — и витрина наружу нужна именно по нему: заказчик хочет знать, в каком
+# состоянии его учёт, чего от него ждут и сколько будет налогов.
+#
+# Блоки считают ПО ТЕМ ЖЕ ручкам «Бухгалтерии», а не по своим запросам: разошедшаяся
+# цифра наружу — худшее, что может сделать витрина.
+
+OFFICE_BLOCKS: list[tuple[str, str, str]] = [
+    ("books.state", "Состояние учёта", "Учёт"),
+    ("books.closing", "Закрытие периода", "Учёт"),
+    ("books.requests", "Чего ждём от вас", "Учёт"),
+    ("books.taxes", "Налоги заранее", "Деньги"),
+    ("books.result", "Выручка и прибыль", "Деньги"),
+    ("books.settlements", "Взаиморасчёты", "Деньги"),
+    ("books.calendar", "Сроки и бюджет", "Сроки"),
+    ("books.trends", "На что посмотреть", "Сроки"),
+]
+
+
+async def _office_block_data(db: AsyncSession, cid: str, key: str) -> dict[str, Any]:
+    """Данные одного блока витрины для профиля «office».
+
+    Возвращает готовую к показу карточку: цифры, строка-объяснение и, если есть,
+    короткий список. Формат один на все блоки — витрина не должна знать, чем
+    отличается «Закрытие периода» от «Налогов»: разное здесь только содержание.
+    """
+    p = {"cid": cid, "org": None}
+
+    if key == "books.state":
+        docs, entries = (await db.execute(text("""
+            SELECT (SELECT count(*) FROM accounting_docs WHERE company_id = CAST(:cid AS uuid)),
+                   (SELECT count(*) FROM gl_entries WHERE company_id = CAST(:cid AS uuid))"""),
+            p)).one()
+        return {
+            "metrics": [{"label": "Документов в учёте", "value": f"{docs:,}".replace(",", " ")},
+                        {"label": "Проводок", "value": f"{entries:,}".replace(",", " ")}],
+            "note": "Учёт ведётся в вашей 1С; здесь он показан таким, каким доехал к нам.",
+        }
+
+    if key == "books.closing":
+        rows = (await db.execute(text("""
+            SELECT count(*), coalesce(sum(amount), 0)
+              FROM doc_requests
+             WHERE company_id = CAST(:cid AS uuid) AND status IN ('open','requested','promised')"""),
+            p)).one()
+        closed, total = (await db.execute(text("""
+            SELECT count(*) FILTER (WHERE status = 'closed'), count(*)
+              FROM periods WHERE company_id = CAST(:cid AS uuid)"""), p)).one()
+        return {
+            "metrics": [{"label": "Периодов закрыто", "value": f"{closed} из {total}"},
+                        {"label": "Ждём документов", "value": f"{rows[0]}"},
+                        {"label": "На сумму", "value": _money(rows[1])}],
+            "note": "Закрытый период не переписывается: опоздавший документ попадёт в текущий.",
+        }
+
+    if key == "books.requests":
+        items = [{"title": r[0] or "—", "detail": f"{r[1]} · до {r[2] or 'срок не задан'}",
+                  "amount": _money(r[3])}
+                 for r in (await db.execute(text("""
+            SELECT counterparty_name, doc_kind, due_date, amount
+              FROM doc_requests
+             WHERE company_id = CAST(:cid AS uuid)
+               AND status IN ('open','requested','promised')
+             ORDER BY due_date NULLS LAST LIMIT 12"""), p)).all()]
+        overdue = (await db.execute(text("""
+            SELECT count(*) FROM doc_requests
+             WHERE company_id = CAST(:cid AS uuid)
+               AND status IN ('open','requested','promised')
+               AND due_date IS NOT NULL AND due_date < to_char(CURRENT_DATE, 'YYYY-MM-DD')"""),
+            p)).scalar_one()
+        return {
+            "metrics": [{"label": "Ждём документов", "value": str(len(items))},
+                        {"label": "Срок прошёл", "value": str(overdue),
+                         "tone": "warning" if overdue else None}],
+            "items": items,
+            "note": "Это то, что нужно от вас, чтобы закрыть период и заявить вычет.",
+        }
+
+    if key == "books.taxes":
+        vat, profit = (await db.execute(text("""
+            SELECT coalesce(sum(amount) FILTER (WHERE account_kt LIKE '68.02%'), 0)
+                 - coalesce(sum(amount) FILTER (WHERE account_dt LIKE '68.02%'
+                                                  AND account_kt NOT LIKE '51%'
+                                                  AND account_kt NOT LIKE '68.90%'), 0),
+                   coalesce(sum(amount) FILTER (WHERE account_dt LIKE '99%'
+                                                  AND account_kt LIKE '68.04%'), 0)
+              FROM gl_entries
+             WHERE company_id = CAST(:cid AS uuid) AND period_year = :y"""),
+            {**p, "y": date.today().year})).one()
+        return {
+            "metrics": [{"label": "НДС к уплате за год", "value": _money(vat)},
+                        {"label": "Налог на прибыль", "value": _money(profit)}],
+            "note": "Оценка по данным учёта. Декларацию формирует бухгалтерия.",
+        }
+
+    if key == "books.result":
+        rows = [{"title": r[0], "detail": "выручка " + _money(r[1]),
+                 "amount": _money(r[2])}
+                for r in (await db.execute(text("""
+            SELECT period_year || '-' || lpad(period_month::text, 2, '0'),
+                   coalesce(sum(amount) FILTER (WHERE account_kt LIKE '90.01%'), 0)
+                 - coalesce(sum(amount) FILTER (WHERE account_dt LIKE '90.03%'), 0),
+                   coalesce(sum(amount) FILTER (WHERE account_dt LIKE '90.09%'
+                                                  AND account_kt LIKE '99%'), 0)
+                 - coalesce(sum(amount) FILTER (WHERE account_dt LIKE '99%'
+                                                  AND account_kt LIKE '90.09%'), 0)
+              FROM gl_entries WHERE company_id = CAST(:cid AS uuid)
+             GROUP BY 1 ORDER BY 1 DESC LIMIT 6"""), p)).all()]
+        return {"items": rows, "note": "Выручка без НДС и финансовый результат по месяцам."}
+
+    if key == "books.settlements":
+        dt, kt = (await db.execute(text("""
+            SELECT coalesce(sum(debit), 0), coalesce(sum(credit), 0)
+              FROM gl_balances
+             WHERE company_id = CAST(:cid AS uuid) AND source <> 'monthly'
+               AND (account LIKE '62%' OR account LIKE '60%')"""), p)).one()
+        return {
+            "metrics": [{"label": "Должны вам", "value": _money(dt)},
+                        {"label": "Должны вы", "value": _money(kt)}],
+            "note": "Сальдо расчётов с покупателями и поставщиками на последнюю дату.",
+        }
+
+    if key == "books.calendar":
+        soon = [{"title": r[1], "detail": r[0] or "срок не задан", "amount": ""}
+                for r in (await db.execute(text("""
+            SELECT code, name FROM gl_references
+             WHERE company_id = CAST(:cid AS uuid) AND kind = 'tax_calendar'
+               AND code >= to_char(CURRENT_DATE - 30, 'YYYY-MM-DD')
+             ORDER BY code LIMIT 10"""), p)).all()]
+        debt = (await db.execute(text("""
+            SELECT coalesce(sum(credit) - sum(debit), 0) FROM gl_balances
+             WHERE company_id = CAST(:cid AS uuid) AND source <> 'monthly'
+               AND (account LIKE '68%' OR account LIKE '69%')"""), p)).scalar_one()
+        return {
+            "metrics": [{"label": "Долг перед бюджетом", "value": _money(debt)}],
+            "items": soon,
+            "note": "Сроки берутся из вашей 1С — календарь бухгалтера.",
+        }
+
+    if key == "books.trends":
+        items = [{"title": r[0], "detail": r[1] or "", "amount": ""}
+                 for r in (await db.execute(text("""
+            SELECT name, meta->>'Период' FROM gl_references
+             WHERE company_id = CAST(:cid AS uuid) AND kind = 'reports_filed'
+             ORDER BY code DESC LIMIT 8"""), p)).all()]
+        return {"items": items, "note": "Последняя сданная отчётность по данным 1С."}
+
+    return {"note": "Блок не рассчитывается в этом пространстве."}
+
+
+def _money(v) -> str:
+    """Сумма для витрины: без копеек и с пробелами — её читают глазами, а не сверяют."""
+    try:
+        return f"{float(v or 0):,.0f} ₽".replace(",", " ")
+    except (TypeError, ValueError):
+        return "—"
