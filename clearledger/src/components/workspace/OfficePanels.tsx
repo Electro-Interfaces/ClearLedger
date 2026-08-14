@@ -32,9 +32,10 @@ import {
 } from '@/services/booksService'
 import {
   BooksChecks, BooksClosing, BooksExportLayer, BooksForecast, BooksPayroll, BooksRequests,
-  BooksTrends,
+  BooksTrends, BooksCalendar,
   BooksSettlements, BooksVat,
 } from './OfficeSettlements'
+import { OffBalanceAccounts, OffBalanceHiddenScreen } from './OfficeOffBalance'
 import { getMailByCounterparty } from '@/services/mailService'
 import { useWorkspaceSections } from './workspaceSections'
 
@@ -116,12 +117,15 @@ export function BooksPanel() {
         {sub === 'bk_checks' && <BooksChecks companyId={companyId} />}
         {sub === 'bk_forecast' && <BooksForecast companyId={companyId} />}
         {sub === 'bk_trends' && <BooksTrends companyId={companyId} />}
+        {sub === 'bk_calendar' && <BooksCalendar companyId={companyId} />}
         {sub === 'bk_docs' && <BooksDocs companyId={companyId} />}
         {sub === 'bk_vat' && <BooksVat companyId={companyId} kind={vatKind} onKind={setVatKind} />}
         {sub === 'bk_periods' && <BooksPeriods companyId={companyId} />}
         {sub === 'bk_closing' && <BooksClosing companyId={companyId} />}
         {sub === 'bk_requests' && <BooksRequests companyId={companyId} />}
         {sub === 'bk_export' && <BooksExportLayer companyId={companyId} />}
+        {sub === 'bk_off_accounts' && <OffBalanceAccounts companyId={companyId} />}
+        {sub === 'bk_off_hidden' && <OffBalanceHiddenScreen companyId={companyId} />}
       </ScrollArea>
     </div>
   )

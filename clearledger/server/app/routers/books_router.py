@@ -2642,13 +2642,13 @@ async def off_balance(
         SELECT code, side, sum(amount), count(*), min(entry_date), max(entry_date) FROM (
           SELECT e.account_dt AS code, 'dt' AS side, e.amount, e.entry_date
             FROM gl_entries e
-           WHERE e.company_id = :cid AND {org} AND e.account_dt IS NOT NULL{period}
+           WHERE e.company_id = :cid AND {_ORG_E} AND e.account_dt IS NOT NULL{period}
           UNION ALL
           SELECT e.account_kt, 'kt', e.amount, e.entry_date
             FROM gl_entries e
-           WHERE e.company_id = :cid AND {org} AND e.account_kt IS NOT NULL{period}
+           WHERE e.company_id = :cid AND {_ORG_E} AND e.account_kt IS NOT NULL{period}
         ) x GROUP BY code, side
-    """.replace("{org}", _ORG_E)), p)).all():
+    """), p)).all():
         if r[0] not in codes:
             continue
         cur = turn.setdefault(r[0], {"debit": 0.0, "credit": 0.0, "entries": 0,
@@ -2764,7 +2764,8 @@ async def off_balance_hidden(
     # сальдо честнее оборотов — имущество куплено до начала выгрузки.
     as_of = (await db.execute(text(
         "SELECT max(as_of) FROM gl_balances WHERE company_id = :cid"
-        f" AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND source <> 'monthly'"), p)).scalar()
+        " AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL"
+        " OR organization_id = CAST(:org AS uuid)) AND source <> 'monthly'"), p)).scalar()
     fixed: list[dict[str, Any]] = []
     cost = wear = 0.0
     if as_of:

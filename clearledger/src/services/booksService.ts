@@ -1427,3 +1427,52 @@ export const sendRequestLetter = (
   `/api/books/requests/${id}/send?company_id=${companyId}`
   + `&to=${encodeURIComponent(v.to)}&subject=${encodeURIComponent(v.subject)}`
   + `&body=${encodeURIComponent(v.body)}`, {})
+
+/* ── За балансом ─────────────────────────────────────────────────────────── */
+
+export interface OffBalance {
+  /** Дата снимка сальдо, из которого взят остаток; null — снимков нет. */
+  asOf: string | null
+  groups: {
+    key: string; label: string; hint: string
+    accounts: number; rest: number; restQty: number
+    debit: number; credit: number; entries: number
+  }[]
+  /** Только счета с движением или остатком: весь план из 58 строк здесь не нужен. */
+  accounts: {
+    code: string; name: string; kind: string | null; quantitative: boolean
+    group: string; debit: number; credit: number; entries: number
+    first: string | null; last: string | null; rest: number; restQty: number
+  }[]
+  planCount: number
+  subs: {
+    account: string; name: string | null
+    sub1: string | null; sub2: string | null; sub3: string | null
+    amount: number; qty: number
+  }[]
+  entries: number
+  /** Итог по имуществу и обязательствам — без служебных счетов налогового учёта. */
+  propertyRest: number
+  propertyEntries: number
+}
+
+export const getOffBalance = (companyId: string, period?: PeriodOpts) =>
+  get<OffBalance>(`/api/books/off-balance?company_id=${companyId}${periodQuery(period)}`)
+
+export interface OffBalanceHidden {
+  asOf: string | null
+  fixedCost: number; fixedWear: number; fixedRest: number
+  fixed: { account: string; name: string | null; sub: string | null; cost: number }[]
+  lowValue: { account_kt: string; account_dt: string; amount: number; count: number }[]
+  lowValueTotal: number
+  stale: {
+    counterparty: string; count: number; amount: number
+    last: string; oldest: string
+  }[]
+  staleTotal: number
+  /** Старые счета, которых регистр не свёл с оплатой: их долг неизвестен, а не равен нулю. */
+  staleUnknown: number
+}
+
+export const getOffBalanceHidden = (companyId: string) =>
+  get<OffBalanceHidden>(`/api/books/off-balance-hidden?company_id=${companyId}`)

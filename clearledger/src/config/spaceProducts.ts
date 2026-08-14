@@ -120,7 +120,7 @@ export const SPACE_PRODUCTS: SpaceProduct[] = [
     // полосой вкладок внутри — единственное рабочее место пространства, устроенное
     // не как все (13.08.2026).
     code: 'books', route: '/books', label: 'Бухгалтерия',
-    modes: ['books_ledger', 'books_primary'], paths: [],
+    modes: ['books_ledger', 'books_primary', 'books_offbal'], paths: [],
   },
   {
     // «Реализация» — что компания продала. Разделы по ВОПРОСУ: сколько продали

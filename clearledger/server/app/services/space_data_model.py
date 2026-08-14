@@ -29,7 +29,8 @@ from app.models import (
     ContractLocation, CorporateClient, Counterparty, EzsCustomer, EzsEquipmentUnit,
     EzsReference, EzsRfidCard, EzsSite, EzsSiteCost, EzsSiteDoc, EzsSiteEquipment,
     EzsTariff, EzsSiteEvent, EzsTechConnection, ExportPacket, FuelExportDoc, FuelReceipt,
-    FuelShift, GlAccount, GlEntry, GlReference, HubexAsset, HubexTask, LocationTypeDef,
+    FuelShift, GlAccount, GlBalance, GlEntry, GlReference, GlTurnover, HubexAsset,
+    HubexTask, LocationTypeDef,
     NomenclatureItem, OnlineOrder, Period, RawBatchRecord, Region, ServiceLocation,
     SourceFile, StationContractSettlement, StationDispensePeriod, StationEnergyPeriod,
     UserCompany,
@@ -205,6 +206,22 @@ _ENTITIES: list[tuple[str, str, list[tuple]]] = [
          # Пока это текст, проводку нельзя открыть карточкой документа, а аналитику
          # (субконто) не свести — через COM она недоступна вовсе.
          GlEntry.doc_id.is_(None), "документ не найден в первичке"),
+        # Обороты с аналитикой и сальдо на дату — отдельные сущности, а не колонки
+        # проводки: гранулярность другая. Субконто в основной таблице регистра через
+        # COM недоступно, поэтому контрагент, договор и статья приезжают только сюда —
+        # и на них стоят взаиморасчёты, забалансовые остатки и всё, где нужен разрез
+        # по стороне счёта.
+        ("gl_turnovers", "Обороты с аналитикой", GlTurnover,
+         "Виртуальная таблица оборотов (.dt → коннектор)",
+         "взаиморасчёты · за балансом · разрезы учёта", "месяц + корреспонденция + субконто",
+         # Аналитика приходит ПРЕДСТАВЛЕНИЕМ: имя контрагента строкой, а не ссылкой.
+         # Свести её на лету нельзя — написание в разных документах расходится.
+         GlTurnover.dt1.isnot(None), "аналитика строкой, ссылки на справочник нет"),
+        ("gl_balances", "Остатки по счетам", GlBalance,
+         "Оборотно-сальдовая ведомость на дату", "за балансом · взаиморасчёты · запасы",
+         "дата среза + счёт + субконто",
+         and_(GlBalance.sub1.isnot(None), GlBalance.counterparty_id.is_(None)),
+         "субконто есть, контрагент не сведён"),
         ("accounting_docs", "Первичные документы", AccountingDoc,
          "Реализации, услуги и поступления из бухгалтерии", "продажи · услуги · сверка",
          "вид + номер + дата + контрагент",

@@ -26,7 +26,7 @@ import {
   REV_SALES_MENU, REV_CLIENTS_MENU, REV_ITEMS_MENU, REV_DOCS_MENU, REV_MONEY_MENU,
   REV_STOCK_MENU, REV_HELP_MENU,
   ECON_RESULT_MENU, ECON_COSTS_MENU, ECON_TAXES_MENU, ECON_HELP_MENU,
-  BOOKS_LEDGER_MENU, BOOKS_PRIMARY_MENU,
+  BOOKS_LEDGER_MENU, BOOKS_OFFBAL_MENU, BOOKS_PRIMARY_MENU,
 } from './workspaceMenus'
 import { storeMenu, STORE_HELP_MENU } from './storeCatalog'
 import { MODULE_COMPONENTS, ACCOUNTING_SECTIONS, componentSection } from './moduleComponents'
@@ -149,6 +149,7 @@ export const PRODUCT_MODULES: Record<string, ProductModuleDef[]> = {
   books: [
     ...items(BOOKS_LEDGER_MENU, 'Регистр'),
     ...items(BOOKS_PRIMARY_MENU, 'Документы'),
+    ...items(BOOKS_OFFBAL_MENU, 'За балансом'),
   ],
 }
 

@@ -176,7 +176,8 @@ function ModePanel() {
           вопросом к тем же документам бухгалтерии. */}
       {REVENUE_MODES.includes(coreMode) && <RevenuePanel />}
       {ECONOMY_MODES.includes(coreMode) && <EconomyPanel />}
-      {(coreMode === 'books_ledger' || coreMode === 'books_primary') && <BooksPanel />}
+      {(coreMode === 'books_ledger' || coreMode === 'books_primary'
+        || coreMode === 'books_offbal') && <BooksPanel />}
       {/* «Подключения»: один раздел, его пункты — во второй колонке. Пока ветки не
           было, маршрут /connect (плитка стола, лаунчер) открывал рабочую область без
           содержимого. */}
