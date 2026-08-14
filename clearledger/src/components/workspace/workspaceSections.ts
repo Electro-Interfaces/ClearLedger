@@ -10,7 +10,7 @@
  */
 
 import type { ComponentType } from 'react'
-import { BarChart3, Gauge, BookOpen, FileOutput, HardHat, Building2, Megaphone, Sparkles, GitCompare, Activity, Wallet, Boxes, Receipt, Truck, Scale, FileText, Users, Package, TrendingUp, Landmark, Cable, PackageOpen, Shield, Handshake } from 'lucide-react'
+import { BarChart3, Gauge, BookOpen, FileOutput, HardHat, Building2, Megaphone, Sparkles, GitCompare, Activity, Wallet, Boxes, Receipt, Truck, Scale, FileText, Users, Package, TrendingUp, Landmark, Cable, PackageOpen, Shield, Handshake, Banknote } from 'lucide-react'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useWorkspace, type CoreMode } from '@/contexts/WorkspaceContext'
 import { modeAllowed } from '@/config/accessModules'
@@ -35,7 +35,8 @@ import {
   REV_STOCK_MENU, REV_HELP_MENU,
   ECON_RESULT_MENU, ECON_COSTS_MENU, ECON_TAXES_MENU, ECON_HELP_MENU,
   BOOKS_LEDGER_MENU, BOOKS_OFFBAL_MENU, BOOKS_PRIMARY_MENU, CONNECT_MENU,
-  PER_PICTURE_MENU, PER_OFFICIAL_MENU, PER_RECORDS_MENU, PER_HELP_MENU,
+  PER_PICTURE_MENU, PER_OFFICIAL_MENU, PER_RECORDS_MENU, PER_CASH_MENU,
+  PER_PEOPLE_MENU, PER_HELP_MENU,
 } from '@/config/workspaceMenus'
 // CHARGE_SESSIONS_MENU здесь не используется — общий список нужен карте прав и роутеру
 // панелей; секции собираются из трёх меню разделов.
@@ -58,7 +59,8 @@ export {
   REV_STOCK_MENU, REV_HELP_MENU,
   ECON_RESULT_MENU, ECON_COSTS_MENU, ECON_TAXES_MENU, ECON_HELP_MENU,
   BOOKS_LEDGER_MENU, BOOKS_OFFBAL_MENU, BOOKS_PRIMARY_MENU,
-  PER_PICTURE_MENU, PER_OFFICIAL_MENU, PER_RECORDS_MENU, PER_HELP_MENU,
+  PER_PICTURE_MENU, PER_OFFICIAL_MENU, PER_RECORDS_MENU, PER_CASH_MENU,
+  PER_PEOPLE_MENU, PER_HELP_MENU,
 }
 
 // Меню бухгалтерского (mode=accounting) собирается из включённых компонентов модуля
@@ -236,6 +238,10 @@ export function useWorkspaceSections(): WorkspaceSection[] {
     items: isOffice ? PER_OFFICIAL_MENU : [], connected: isOffice }
   const perRecords: WorkspaceSection = { mode: 'per_records', label: 'Договорённости', icon: Handshake,
     items: isOffice ? PER_RECORDS_MENU : [], connected: isOffice }
+  const perCash: WorkspaceSection = { mode: 'per_cash', label: 'Наличные', icon: Banknote,
+    items: isOffice ? PER_CASH_MENU : [], connected: isOffice }
+  const perPeople: WorkspaceSection = { mode: 'per_people', label: 'Люди', icon: Users,
+    items: isOffice ? PER_PEOPLE_MENU : [], connected: isOffice }
   const perHelp: WorkspaceSection = { mode: 'per_help', label: 'Помощь', icon: BookOpen,
     items: isOffice ? PER_HELP_MENU : [], connected: isOffice }
   // Разделы продукта «Данные» — у ОБОИХ профилей: без них рабочее место открывается
@@ -262,7 +268,7 @@ export function useWorkspaceSections(): WorkspaceSection[] {
   const all = isOffice
     ? [revSales, revBuyers, revCatalog, revPapers, revMoney, revStock, revHelp,
        econResult, econCosts, econTaxes, econHelp, booksLedger, booksPrimary, booksOffbal,
-       perPicture, perOfficial, perRecords, perHelp, normalize,
+       perPicture, perOfficial, perRecords, perCash, perPeople, perHelp, normalize,
        connect]
     : isEnergy
     ? [sales, salesSessions, salesCommerce, corporate, marketing,

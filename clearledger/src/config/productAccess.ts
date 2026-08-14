@@ -27,7 +27,8 @@ import {
   REV_STOCK_MENU, REV_HELP_MENU,
   ECON_RESULT_MENU, ECON_COSTS_MENU, ECON_TAXES_MENU, ECON_HELP_MENU,
   BOOKS_LEDGER_MENU, BOOKS_OFFBAL_MENU, BOOKS_PRIMARY_MENU,
-  PER_PICTURE_MENU, PER_OFFICIAL_MENU, PER_RECORDS_MENU, PER_HELP_MENU,
+  PER_PICTURE_MENU, PER_OFFICIAL_MENU, PER_RECORDS_MENU, PER_CASH_MENU,
+  PER_PEOPLE_MENU, PER_HELP_MENU,
 } from './workspaceMenus'
 import { storeMenu, STORE_HELP_MENU } from './storeCatalog'
 import { MODULE_COMPONENTS, ACCOUNTING_SECTIONS, componentSection } from './moduleComponents'
@@ -156,6 +157,10 @@ export const PRODUCT_MODULES: Record<string, ProductModuleDef[]> = {
     ...items(PER_PICTURE_MENU, 'Картина'),
     ...items(PER_OFFICIAL_MENU, 'Официально'),
     ...items(PER_RECORDS_MENU, 'Договорённости'),
+    // Наличные расчёты видит не каждый, кому открыт «Периметр»: права на эти пункты
+    // выдаются отдельно, как и на любой другой экран продукта.
+    ...items(PER_CASH_MENU, 'Наличные'),
+    ...items(PER_PEOPLE_MENU, 'Люди'),
     ...items(PER_HELP_MENU, 'Помощь'),
   ],
 }

@@ -38,14 +38,24 @@ import { OffBalanceAccounts, OffBalanceHiddenScreen } from './OfficeOffBalance'
 import { ExportButton, SearchInput, Tabs, money, num } from './officeShared'
 import { ProductHelpPanel } from './ProductHelpPanel'
 import { PERIMETER_HELP_SLICES } from './helpSlices'
-import { PER_PICTURE_MENU, PER_OFFICIAL_MENU, PER_RECORDS_MENU } from '@/config/workspaceMenus'
+import {
+  PER_PICTURE_MENU, PER_OFFICIAL_MENU, PER_RECORDS_MENU, PER_CASH_MENU,
+  PER_PEOPLE_MENU,
+} from '@/config/workspaceMenus'
+import {
+  CashJournalScreen, CashLoansScreen, CashPapersScreen, CashPeopleScreen,
+} from './OfficeCash'
+import { PerimeterPeopleScreen } from './OfficePeople'
 import { useWorkspaceSections } from './workspaceSections'
 
-const PER_MENU_FOR_HELP = [...PER_PICTURE_MENU, ...PER_OFFICIAL_MENU, ...PER_RECORDS_MENU]
+const PER_MENU_FOR_HELP = [...PER_PICTURE_MENU, ...PER_OFFICIAL_MENU,
+  ...PER_RECORDS_MENU, ...PER_CASH_MENU, ...PER_PEOPLE_MENU]
 
 const modeForHelpKey = (key: string): string =>
   PER_OFFICIAL_MENU.some((m) => m.key === key) ? 'per_official'
   : PER_RECORDS_MENU.some((m) => m.key === key) ? 'per_records'
+  : PER_CASH_MENU.some((m) => m.key === key) ? 'per_cash'
+  : PER_PEOPLE_MENU.some((m) => m.key === key) ? 'per_people'
   : 'per_picture'
 
 function Td({ children, right, muted }: {
@@ -98,6 +108,11 @@ export function PerimeterPanel() {
       case 'pr_hidden':   return <OffBalanceHiddenScreen companyId={companyId} />
       case 'pr_registry': return <PerimeterRegistry companyId={companyId} />
       case 'pr_parties':  return <PerimeterParties companyId={companyId} />
+      case 'pr_cash':        return <CashJournalScreen companyId={companyId} />
+      case 'pr_cash_people': return <CashPeopleScreen companyId={companyId} />
+      case 'pr_cash_loans':  return <CashLoansScreen companyId={companyId} />
+      case 'pr_cash_papers': return <CashPapersScreen companyId={companyId} />
+      case 'pr_people':      return <PerimeterPeopleScreen companyId={companyId} />
       default:            return <PerimeterLayers companyId={companyId} />
     }
   })()

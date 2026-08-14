@@ -142,6 +142,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         except Exception as e:  # noqa: BLE001 — не валим старт из-за НСИ
             logger.warning(f"backfill region offsets пропущен: {e}")
 
+    # «Периметр»: колонки, добавленные после первого создания таблиц.
+    async with async_session_factory() as session:
+        try:
+            from app.routers.perimeter_router import ensure_perimeter_schema
+            await ensure_perimeter_schema(session)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"схема периметра не дотянута: {e}")
+
     # Каталог приложений экосистемы (ElsyPlus Core) — идемпотентный сид.
     async with async_session_factory() as session:
         try:

@@ -125,7 +125,9 @@ export const SPACE_PRODUCTS: SpaceProduct[] = [
     // договорённостями, которых в учёте нет вовсе. Разные разделы, а не один список:
     // документально подтверждённое и записанное со слов путать нельзя.
     code: 'perimeter', route: '/perimeter', label: 'Периметр',
-    modes: ['per_picture', 'per_official', 'per_records', 'per_help'], paths: [],
+    modes: ['per_picture', 'per_official', 'per_records', 'per_cash', 'per_people',
+            'per_help'],
+    paths: [],
   },
   {
     code: 'books', route: '/books', label: 'Бухгалтерия',
