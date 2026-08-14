@@ -1407,6 +1407,12 @@ class GlEntry(Base):
     company_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
     )
+    # Организация (юрлицо) внутри учёта клиента. У аутсорсера в одной базе 1С обычно
+    # несколько юрлиц одного владельца, и без этой оси их цифры складываются в одну —
+    # тихо, без ошибки на экране. Пусто означает «вся компания».
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=True
+    )
     entry_date: Mapped[date_type] = mapped_column(Date, nullable=False)
     # Год и месяц держим колонками: обороты по периодам — самый частый запрос, а
     # EXTRACT по дате индекс не берёт.
@@ -1464,6 +1470,12 @@ class GlTurnover(Base):
     company_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
     )
+    # Организация (юрлицо) внутри учёта клиента. У аутсорсера в одной базе 1С обычно
+    # несколько юрлиц одного владельца, и без этой оси их цифры складываются в одну —
+    # тихо, без ошибки на экране. Пусто означает «вся компания».
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=True
+    )
     period_year: Mapped[int] = mapped_column(Integer, nullable=False)
     period_month: Mapped[int] = mapped_column(Integer, nullable=False)
     account_dt: Mapped[str | None] = mapped_column(String(20), nullable=True)
@@ -1505,6 +1517,12 @@ class GlBalance(Base):
     )
     company_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
+    )
+    # Организация (юрлицо) внутри учёта клиента. У аутсорсера в одной базе 1С обычно
+    # несколько юрлиц одного владельца, и без этой оси их цифры складываются в одну —
+    # тихо, без ошибки на экране. Пусто означает «вся компания».
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=True
     )
     as_of: Mapped[date_type] = mapped_column(Date, nullable=False)
     account: Mapped[str] = mapped_column(String(20), nullable=False)
@@ -1548,6 +1566,12 @@ class VatEntry(Base):
     )
     company_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
+    )
+    # Организация (юрлицо) внутри учёта клиента. У аутсорсера в одной базе 1С обычно
+    # несколько юрлиц одного владельца, и без этой оси их цифры складываются в одну —
+    # тихо, без ошибки на экране. Пусто означает «вся компания».
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=True
     )
     # issued — выставленный покупателю, received — полученный от поставщика,
     # claimed — НДС, предъявленный поставщиком (движение вычета).
@@ -1599,6 +1623,12 @@ class InvoicePayment(Base):
     company_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
     )
+    # Организация (юрлицо) внутри учёта клиента. У аутсорсера в одной базе 1С обычно
+    # несколько юрлиц одного владельца, и без этой оси их цифры складываются в одну —
+    # тихо, без ошибки на экране. Пусто означает «вся компания».
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=True
+    )
     # Представление счёта на оплату и платёжного документа — как в источнике.
     invoice_title: Mapped[str] = mapped_column(String(500), nullable=False)
     payment_title: Mapped[str | None] = mapped_column(String(500), nullable=True)
@@ -1644,6 +1674,12 @@ class ExportAdjustment(Base):
     )
     company_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
+    )
+    # Организация (юрлицо) внутри учёта клиента. У аутсорсера в одной базе 1С обычно
+    # несколько юрлиц одного владельца, и без этой оси их цифры складываются в одну —
+    # тихо, без ошибки на экране. Пусто означает «вся компания».
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=True
     )
     period: Mapped[str] = mapped_column(String(7), nullable=False)      # ГГГГ-ММ
     doc_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -1794,6 +1830,12 @@ class DocRequest(Base):
     company_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
     )
+    # Организация (юрлицо) внутри учёта клиента. У аутсорсера в одной базе 1С обычно
+    # несколько юрлиц одного владельца, и без этой оси их цифры складываются в одну —
+    # тихо, без ошибки на экране. Пусто означает «вся компания».
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=True
+    )
     # Период, за который ждём документ (ГГГГ-ММ): у бухгалтера всё считается месяцем.
     period: Mapped[str] = mapped_column(String(7), nullable=False)
     # Правило, которым находка была найдена (`purchase_no_vat_invoice` и т. п.) —
@@ -1898,6 +1940,12 @@ class PayrollEntry(Base):
     )
     company_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
+    )
+    # Организация (юрлицо) внутри учёта клиента. У аутсорсера в одной базе 1С обычно
+    # несколько юрлиц одного владельца, и без этой оси их цифры складываются в одну —
+    # тихо, без ошибки на экране. Пусто означает «вся компания».
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=True
     )
     # accrual — начислено, deduction — удержано, ndfl — налог, payment — выплачено.
     kind: Mapped[str] = mapped_column(String(20), nullable=False)
@@ -2307,6 +2355,12 @@ class AccountingDoc(Base):
     )
     company_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
+    )
+    # Организация (юрлицо) внутри учёта клиента. У аутсорсера в одной базе 1С обычно
+    # несколько юрлиц одного владельца, и без этой оси их цифры складываются в одну —
+    # тихо, без ошибки на экране. Пусто означает «вся компания».
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=True
     )
     external_id: Mapped[str] = mapped_column(String(100), nullable=False)  # GUID 1С
     doc_type: Mapped[str] = mapped_column(String(50), nullable=False)
@@ -8684,3 +8738,13 @@ class AuditorRun(Base):
     duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True)
+    # ── Оценка человека: вход петли обучения ──
+    # ok — ответ верный; wrong — неверный; not_an_issue — находка не ошибка.
+    # Последнее ценнее всего: из него рождается правило исключения, и агент перестаёт
+    # повторять ложную находку. Пусто = не оценивали, и это не «плохо».
+    verdict: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)
+    # Почему. Без объяснения оценка бесполезна: «неверно» без причины нечего исправить.
+    feedback: Mapped[str | None] = mapped_column(Text, nullable=True)
+    rated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    rated_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)

@@ -9,6 +9,8 @@ from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
 
 from fastapi import Depends, FastAPI
+import uuid
+
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.auth import get_current_user
@@ -245,6 +247,30 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.middleware("http")
+async def organization_context(request, call_next):
+    """Активная организация запроса — из заголовка `X-Organization-Id`.
+
+    Организация относится к ДАННЫМ, а не к правам: компания решает, к чьему учёту
+    есть доступ, организация — на какое юрлицо этого учёта человек сейчас смотрит.
+    Заголовок, а не параметр каждой ручки: разрез нужен десяткам выборок, и
+    протаскивать его руками — однажды забыть в одной и смешать два налогоплательщика.
+
+    Пустой заголовок означает «все организации компании» — законный сводный режим.
+    """
+    from app.scope import set_request_organization
+
+    raw = request.headers.get("X-Organization-Id") or ""
+    org = None
+    if raw.strip():
+        try:
+            org = uuid.UUID(raw.strip())
+        except ValueError:
+            org = None      # мусор в заголовке — это «все», а не ошибка запроса
+    set_request_organization(org)
+    return await call_next(request)
+
 
 # Роутеры — все под /api
 API_PREFIX = "/api"

@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import assert_company_member, get_current_user
 from app.database import get_db
+from app.scope import current_organization
 from app.models import (
     AccountingDoc, Contract, Counterparty, DocRequest, ExportAdjustment, ExportRule,
     FindingDecision, GlAccount, GlBalance, GlEntry, GlReference,
@@ -30,6 +31,17 @@ from app.models import (
 )
 
 router = APIRouter(prefix="/books", tags=["Бухгалтерия пространства"])
+
+
+def _org_param() -> str | None:
+    """Активная организация запроса строкой — для bind-параметра `:org`.
+
+    None означает «все организации компании»: сводная картина по клиенту нужна не
+    реже, чем разрез по юрлицу, и это законный режим, а не отсутствие фильтра.
+    """
+    org = current_organization()
+    return str(org) if org else None
+
 
 # Счета выручки, НДС с продаж и себестоимости. Вынесены константами: у другой
 # организации пространства план счетов тот же типовой, но если разойдётся —
@@ -837,7 +849,7 @@ async def assortment(
 ) -> dict[str, Any]:
     """Ассортимент или клиентская база с помесячным рядом и (для позиций) маржой."""
     cid = await assert_company_member(company_id, current_user, db)
-    p: dict[str, Any] = {"cid": str(cid), "limit": limit}
+    p: dict[str, Any] = {"cid": str(cid), "org": _org_param(), "limit": limit}
     where_date = ""
     if date_from:
         where_date += " AND d.date >= :df"
@@ -862,7 +874,8 @@ async def assortment(
                      -- квалификатор интервала (`'1' month`), и запрос падает.
                      min(d.date) first, max(d.date) last
                 FROM accounting_docs d
-               WHERE d.company_id = :cid AND d.doc_type = 'sale'{where_date}
+               WHERE d.company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR d.organization_id IS NULL OR d.organization_id = CAST(:org AS uuid)) AND d.doc_type = 'sale'{where_date}
                GROUP BY 1, 4
             )
             SELECT max(id), max(name), sum(amount), sum(docs), min(first), max(last),
@@ -891,6 +904,7 @@ async def assortment(
           SELECT d.id doc, d.doc_type, d.date, jsonb_array_elements(d.lines) ln
             FROM accounting_docs d
            WHERE d.company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR d.organization_id IS NULL OR d.organization_id = CAST(:org AS uuid))
              AND (d.doc_type = 'purchase'
                   OR (d.doc_type = 'sale'{where_date}))
         ), x AS (
@@ -934,9 +948,10 @@ async def assortment(
     # «8 % от регистра» — катастрофу, которой нет.
     cost_sql = """
         SELECT coalesce(sum(amount), 0) FROM gl_entries
-         WHERE company_id = :cid AND account_dt = :dt AND account_kt LIKE :kt
+         WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND account_dt = :dt AND account_kt LIKE :kt
     """
-    cost_p = {"cid": str(cid), "dt": COST_DT, "kt": f"{STOCK_ACCOUNT}%"}
+    cost_p = {"cid": str(cid), "org": _org_param(), "dt": COST_DT, "kt": f"{STOCK_ACCOUNT}%"}
     if date_from:
         cost_sql += " AND entry_date >= :df"
         cost_p["df"] = _day(date_from)
@@ -1003,12 +1018,13 @@ async def revenue_check(
     документы — то, что мы показываем; разница помесячно и есть предмет разбора.
     """
     cid = await assert_company_member(company_id, current_user, db)
-    p = {"cid": str(cid), "kt": REVENUE_KT}
+    p = {"cid": str(cid), "org": _org_param(), "kt": REVENUE_KT}
 
     docs = {r[0]: (_num(r[1]), r[2]) for r in (await db.execute(text("""
         SELECT substr(date, 1, 7), sum(amount), count(*)
           FROM accounting_docs
-         WHERE company_id = :cid AND doc_type = 'sale' GROUP BY 1
+         WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND doc_type = 'sale' GROUP BY 1
     """), p)).all()}
 
     # Регистр даёт выручку С НДС только вместе с 90.03: по кредиту 90.01.1 лежит
@@ -1016,13 +1032,14 @@ async def revenue_check(
     reg = {r[0]: _num(r[1]) for r in (await db.execute(text("""
         SELECT to_char(entry_date, 'YYYY-MM'), sum(amount)
           FROM gl_entries
-         WHERE company_id = :cid AND account_kt = :kt GROUP BY 1
+         WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND account_kt = :kt GROUP BY 1
     """), p)).all()}
 
     status = {r[0]: r[1] for r in (await db.execute(text("""
         SELECT to_char(make_date(year, month, 1), 'YYYY-MM'), status
           FROM periods WHERE company_id = :cid
-    """), {"cid": str(cid)})).all()}
+    """), {"cid": str(cid), "org": _org_param()})).all()}
 
     months = []
     for m in sorted(set(docs) | set(reg)):
@@ -1097,10 +1114,11 @@ async def ar_aging(
           FROM accounting_docs d
           LEFT JOIN (SELECT invoice_doc_id, sum(amount) paid, max(paid_at) last_paid
                        FROM invoice_payments WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid))
                       GROUP BY invoice_doc_id) p ON p.invoice_doc_id = d.id
          WHERE d.company_id = :cid AND d.doc_type = 'invoice_out'
            AND d.date ~ '^\d{4}-\d{2}-\d{2}'
-    """), {"cid": str(cid)})).all()]
+    """), {"cid": str(cid), "org": _org_param()})).all()]
 
     open_rows, unknown = [], []
     for r in rows:
@@ -1147,9 +1165,11 @@ async def ar_aging(
     saldo = (await db.execute(text("""
         SELECT coalesce(sum(debit), 0), coalesce(sum(credit), 0)
           FROM gl_balances
-         WHERE company_id = :cid AND account LIKE '62%'
-           AND as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid AND source <> 'monthly')
-    """), {"cid": str(cid)})).one()
+         WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND account LIKE '62%'
+           AND as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND source <> 'monthly')
+    """), {"cid": str(cid), "org": _org_param()})).one()
 
     return {
         "buckets": buckets,
@@ -1187,7 +1207,8 @@ async def collection_curve(
         WITH inv AS (
           SELECT d.id, substr(d.date, 1, 7) AS month, d.date, d.amount
             FROM accounting_docs d
-           WHERE d.company_id = :cid AND d.doc_type = 'invoice_out'
+           WHERE d.company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR d.organization_id IS NULL OR d.organization_id = CAST(:org AS uuid)) AND d.doc_type = 'invoice_out'
              AND d.date ~ '^\d{4}-\d{2}-\d{2}'
              AND EXISTS (SELECT 1 FROM invoice_payments p WHERE p.invoice_doc_id = d.id)
         ), pay AS (
@@ -1204,7 +1225,7 @@ async def collection_curve(
                coalesce(sum(d30), 0), coalesce(sum(d60), 0),
                coalesce(sum(d90), 0), coalesce(sum(d180), 0)
           FROM pay GROUP BY month ORDER BY month
-    """), {"cid": str(cid)})).all()]
+    """), {"cid": str(cid), "org": _org_param()})).all()]
 
     months = [{
         "month": m, "billed": billed, "invoices": n,
@@ -1258,7 +1279,8 @@ async def cash_forecast(
         WITH inv AS (
           SELECT d.id, d.date, d.amount
             FROM accounting_docs d
-           WHERE d.company_id = :cid AND d.doc_type = 'invoice_out'
+           WHERE d.company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR d.organization_id IS NULL OR d.organization_id = CAST(:org AS uuid)) AND d.doc_type = 'invoice_out'
              AND d.date ~ '^\d{4}-\d{2}-\d{2}'
              AND EXISTS (SELECT 1 FROM invoice_payments p
                           WHERE p.invoice_doc_id = d.id AND p.paid_at IS NOT NULL)
@@ -1282,7 +1304,7 @@ async def cash_forecast(
               FROM invoice_payments pp
              WHERE pp.invoice_doc_id = i.id AND pp.paid_at IS NOT NULL
           ) p ON true
-    """), {"cid": str(cid)})).one()
+    """), {"cid": str(cid), "org": _org_param()})).one()
 
     billed = _num(hist[0])
     curve = {g: (_num(hist[3 + n]) / billed if billed else 0.0)
@@ -1313,11 +1335,12 @@ async def cash_forecast(
                d.amount, coalesce(p.paid, 0)
           FROM accounting_docs d
           JOIN (SELECT invoice_doc_id, sum(amount) paid FROM invoice_payments
-                 WHERE company_id = :cid GROUP BY invoice_doc_id) p
+                 WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) GROUP BY invoice_doc_id) p
             ON p.invoice_doc_id = d.id
          WHERE d.company_id = :cid AND d.doc_type = 'invoice_out'
            AND d.date ~ '^\d{4}-\d{2}-\d{2}' AND d.amount - coalesce(p.paid, 0) > 0.01
-    """), {"cid": str(cid)})).all()]
+    """), {"cid": str(cid), "org": _org_param()})).all()]
 
     WINDOWS = [(30, "30 дней"), (60, "60 дней"), (90, "90 дней"), (180, "180 дней")]
     windows = {w: 0.0 for w, _ in WINDOWS}
@@ -1350,9 +1373,10 @@ async def cash_forecast(
 
     unknown = (await db.execute(text("""
         SELECT count(*), coalesce(sum(d.amount), 0) FROM accounting_docs d
-         WHERE d.company_id = :cid AND d.doc_type = 'invoice_out'
+         WHERE d.company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR d.organization_id IS NULL OR d.organization_id = CAST(:org AS uuid)) AND d.doc_type = 'invoice_out'
            AND NOT EXISTS (SELECT 1 FROM invoice_payments p WHERE p.invoice_doc_id = d.id)
-    """), {"cid": str(cid)})).one()
+    """), {"cid": str(cid), "org": _org_param()})).one()
 
     return {
         "rows": rows,
@@ -1388,7 +1412,7 @@ async def deals(
 ) -> dict[str, Any]:
     """Реализации как сделки: сумма без НДС, себестоимость по строкам, маржа."""
     cid = await assert_company_member(company_id, current_user, db)
-    p: dict[str, Any] = {"cid": str(cid)}
+    p: dict[str, Any] = {"cid": str(cid), "org": _org_param()}
     where = ""
     if date_from:
         where += " AND d.date >= :df"
@@ -1417,7 +1441,8 @@ async def deals(
           SELECT d.id, d.number, d.date, d.counterparty_name, d.counterparty_id, d.amount,
                  jsonb_array_elements(d.lines) ln
             FROM accounting_docs d
-           WHERE d.company_id = :cid AND d.doc_type = 'sale'
+           WHERE d.company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR d.organization_id IS NULL OR d.organization_id = CAST(:org AS uuid)) AND d.doc_type = 'sale'
              AND jsonb_typeof(d.lines) = 'array'{where}
         )
         SELECT s.id, max(s.number), max(s.date), max(s.counterparty_name),
@@ -1483,10 +1508,11 @@ async def backlog(
                min(date) FILTER (WHERE doc_type = 'invoice_out'),
                max(date) FILTER (WHERE doc_type = 'invoice_out')
           FROM accounting_docs
-         WHERE company_id = :cid AND doc_type IN ('invoice_out', 'sale')
+         WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND doc_type IN ('invoice_out', 'sale')
          GROUP BY 1 HAVING count(*) FILTER (WHERE doc_type = 'invoice_out') > 0
          ORDER BY 4 DESC
-    """), {"cid": str(cid)})).all()]
+    """), {"cid": str(cid), "org": _org_param()})).all()]
 
     for r in rows:
         r["gap"] = round(r["invoiced"] - r["shipped"], 2)
@@ -1524,9 +1550,10 @@ async def concentration(
                coalesce(counterparty_id::text, counterparty_name) AS client,
                sum(amount)
           FROM accounting_docs
-         WHERE company_id = :cid AND doc_type = 'sale' AND date ~ '^\d{4}'
+         WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND doc_type = 'sale' AND date ~ '^\d{4}'
          GROUP BY 1, 2
-    """), {"cid": str(cid)})).all()]
+    """), {"cid": str(cid), "org": _org_param()})).all()]
 
     def stats(pairs: list[tuple[str, float]]) -> dict[str, Any]:
         total = sum(a for _, a in pairs)
@@ -1569,7 +1596,7 @@ async def stock(
 ) -> dict[str, Any]:
     """Остатки по номенклатуре: приход − расход, запас в днях, неликвиды."""
     cid = await assert_company_member(company_id, current_user, db)
-    p = {"cid": str(cid)}
+    p = {"cid": str(cid), "org": _org_param()}
 
     # Ключ — код И наименование: в выгрузке код переиспользован (у пилота два кода
     # несут разные товары), и по одному коду остаток складывал бы несравнимое.
@@ -1585,7 +1612,8 @@ async def stock(
         WITH l AS (
           SELECT d.doc_type, d.date, jsonb_array_elements(d.lines) ln
             FROM accounting_docs d
-           WHERE d.company_id = :cid AND d.doc_type IN ('sale', 'purchase')
+           WHERE d.company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR d.organization_id IS NULL OR d.organization_id = CAST(:org AS uuid)) AND d.doc_type IN ('sale', 'purchase')
         ), x AS (
           SELECT doc_type, date, btrim(ln->>'code') code, ln->>'name' name,
                  (ln->>'qty')::numeric qty,
@@ -1661,19 +1689,22 @@ async def stock(
     balance = (await db.execute(text("""
         WITH snap AS (
           SELECT account, debit, credit FROM gl_balances
-           WHERE company_id = :cid AND account LIKE :acc
-             AND as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid AND source <> 'monthly')
+           WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND account LIKE :acc
+             AND as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND source <> 'monthly')
         )
         SELECT coalesce(sum(debit - credit), 0) FROM snap
          WHERE CASE WHEN EXISTS (SELECT 1 FROM snap WHERE account LIKE :sub)
                     THEN account LIKE :sub ELSE true END
-    """), {"cid": str(cid), "acc": f"{STOCK_ACCOUNT}%",
+    """), {"cid": str(cid), "org": _org_param(), "acc": f"{STOCK_ACCOUNT}%",
             "sub": f"{STOCK_ACCOUNT}.%"})).scalar_one_or_none()
 
     intake = (await db.execute(text("""
         SELECT sum(amount) FROM gl_entries
-         WHERE company_id = :cid AND account_dt LIKE :acc
-    """), {"cid": str(cid), "acc": f"{STOCK_ACCOUNT}%"})).scalar_one_or_none()
+         WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND account_dt LIKE :acc
+    """), {"cid": str(cid), "org": _org_param(), "acc": f"{STOCK_ACCOUNT}%"})).scalar_one_or_none()
 
     return {
         "rows": out,
@@ -1706,7 +1737,7 @@ async def suppliers(
 ) -> dict[str, Any]:
     """Поставщики: объём закупок, зависимость и разброс цен на одну позицию."""
     cid = await assert_company_member(company_id, current_user, db)
-    p: dict[str, Any] = {"cid": str(cid)}
+    p: dict[str, Any] = {"cid": str(cid), "org": _org_param()}
     # Два условия периода: внутри CTE документов алиаса `d` ещё нет (ссылка на него
     # даёт «missing FROM entry for table d»), а в запросе спреда он есть.
     where_bare, where = "", ""
@@ -1731,7 +1762,8 @@ async def suppliers(
         WITH d AS (
           SELECT id, counterparty_id, counterparty_name, counterparty_inn, amount, date, lines
             FROM accounting_docs
-           WHERE company_id = :cid AND doc_type = 'purchase'{where_bare}
+           WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND doc_type = 'purchase'{where_bare}
         ), agg AS (
           SELECT coalesce(counterparty_name, '—') nm,
                  max(counterparty_id::text) id, max(counterparty_inn) inn,
@@ -1856,7 +1888,7 @@ async def _pnl_rows(db: AsyncSession, cid, date_from: str | None, date_to: str |
     типа date, а период приезжает строкой, и драйвер сравнивать их отказывается. В
     `accounting_docs` дата хранится строкой, поэтому там та же запись работает.
     """
-    p: dict[str, Any] = {"cid": str(cid)}
+    p: dict[str, Any] = {"cid": str(cid), "org": _org_param()}
     where = ""
     if date_from:
         where += " AND entry_date >= :df"
@@ -1914,7 +1946,8 @@ async def _pnl_rows(db: AsyncSession, cid, date_from: str | None, date_to: str |
                      f" AND NOT {_acc_any('account_dt', INDIRECT_ACCS)}"
                      f" AND NOT {_acc_any('account_dt', SELLING_ACCS)} AND NOT {sales_dt}")}
           FROM gl_entries
-         WHERE company_id = :cid{where}
+         WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)){where}
          GROUP BY 1 ORDER BY 1
     """
     return [{
@@ -1984,7 +2017,7 @@ async def pnl(
     for r in rows:
         years.setdefault(r["month"][:4], []).append(r)
 
-    p: dict[str, Any] = {"cid": str(cid)}
+    p: dict[str, Any] = {"cid": str(cid), "org": _org_param()}
     where = ""
     if date_from:
         where += " AND entry_date >= :df"
@@ -1997,7 +2030,8 @@ async def pnl(
                  WHERE {_acc('account_dt', '99')} AND {_acc('account_kt', '84')}), 0)
              - coalesce(sum(amount) FILTER (
                  WHERE {_acc('account_dt', '84')} AND {_acc('account_kt', '99')}), 0)
-          FROM gl_entries WHERE company_id = :cid{where}
+          FROM gl_entries WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)){where}
     """), p)).scalar_one()
 
     # Признак «план счетов опознан»: если оборотов по 90 нет вовсе, отчёт покажет
@@ -2005,6 +2039,7 @@ async def pnl(
     plan_ok = (await db.execute(text(f"""
         SELECT count(*) FROM gl_entries
          WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid))
            AND ({_acc('account_dt', '90')} OR {_acc('account_kt', '90')}){where}
     """), p)).scalar_one()
 
@@ -2019,7 +2054,8 @@ async def pnl(
         # управленческие расходы могли «сидеть» в себестоимости.
         "adminInCogs": totals["admin"] > 0 and (await db.execute(text(f"""
             SELECT count(*) FROM gl_entries
-             WHERE company_id = :cid AND {_acc('account_dt', '90.02')}
+             WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND {_acc('account_dt', '90.02')}
                AND {_acc_any('account_kt', INDIRECT_ACCS)}{where}
         """), p)).scalar_one() > 0,
     }
@@ -2045,7 +2081,7 @@ async def expenses(
     переносе. Списание на 90/91 тоже не в счёт — это уже признание расхода.
     """
     cid = await assert_company_member(company_id, current_user, db)
-    p: dict[str, Any] = {"cid": str(cid)}
+    p: dict[str, Any] = {"cid": str(cid), "org": _org_param()}
     where = ""
     if date_from:
         where += " AND e.entry_date >= :df"
@@ -2071,7 +2107,8 @@ async def expenses(
           FROM gl_entries e
           LEFT JOIN gl_accounts ad ON ad.company_id = e.company_id AND ad.code = e.account_dt
           LEFT JOIN gl_accounts ak ON ak.company_id = e.company_id AND ak.code = e.account_kt
-         WHERE e.company_id = :cid AND ({cost_dt} OR {direct_dt}) AND {outer_kt}{where}
+         WHERE e.company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR e.organization_id IS NULL OR e.organization_id = CAST(:org AS uuid)) AND ({cost_dt} OR {direct_dt}) AND {outer_kt}{where}
          GROUP BY e.account_dt, e.account_kt
          ORDER BY sum(e.amount) DESC
     """), p)).all()]
@@ -2081,13 +2118,14 @@ async def expenses(
     } for r in (await db.execute(text(f"""
         SELECT to_char(e.entry_date, 'YYYY-MM'), sum(e.amount)
           FROM gl_entries e
-         WHERE e.company_id = :cid AND ({cost_dt} OR {direct_dt}) AND {outer_kt}{where}
+         WHERE e.company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR e.organization_id IS NULL OR e.organization_id = CAST(:org AS uuid)) AND ({cost_dt} OR {direct_dt}) AND {outer_kt}{where}
          GROUP BY 1 ORDER BY 1
     """), p)).all()]
 
     # Статьи затрат из субконто. `dt1` у затратных счетов и есть статья, `dt2` пуст.
     # Период у оборотов — год и месяц числами, а не датой: сравниваем по паре.
-    pt: dict[str, Any] = {"cid": str(cid)}
+    pt: dict[str, Any] = {"cid": str(cid), "org": _org_param()}
     twhere = ""
     if date_from:
         twhere += " AND (t.period_year, t.period_month) >= (:fy, :fm)"
@@ -2103,6 +2141,7 @@ async def expenses(
                count(DISTINCT (t.period_year, t.period_month))
           FROM gl_turnovers t
          WHERE t.company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR t.organization_id IS NULL OR t.organization_id = CAST(:org AS uuid))
            AND {_acc_any('t.account_dt', COST_ACCS)}
            AND NOT {_acc_any('t.account_kt', COST_ACCS)}
            AND NOT {_acc('t.account_kt', '90')} AND NOT {_acc('t.account_kt', '91')}{twhere}
@@ -2148,7 +2187,7 @@ async def taxes(
     3. Возврат из бюджета (Дт 51 Кт 68) — не начисление, поэтому оборот двусторонний.
     """
     cid = await assert_company_member(company_id, current_user, db)
-    p: dict[str, Any] = {"cid": str(cid)}
+    p: dict[str, Any] = {"cid": str(cid), "org": _org_param()}
     where = ""
     if date_from:
         where += " AND e.entry_date >= :df"
@@ -2172,17 +2211,20 @@ async def taxes(
                count(*)
           FROM gl_entries e
           LEFT JOIN gl_accounts a ON a.company_id = e.company_id AND a.code = e.account_kt
-         WHERE e.company_id = :cid AND {budget_kt} AND NOT {budget_dt}{where}
+         WHERE e.company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR e.organization_id IS NULL OR e.organization_id = CAST(:org AS uuid)) AND {budget_kt} AND NOT {budget_dt}{where}
          GROUP BY e.account_kt, e.company_id ORDER BY 3 DESC
     """), p)).all()]
 
     paid = _num((await db.execute(text(f"""
         SELECT coalesce(sum(e.amount), 0) - coalesce((
                  SELECT sum(x.amount) FROM gl_entries x
-                  WHERE x.company_id = :cid AND {_acc_any('x.account_kt', BUDGET_ACCS)}
+                  WHERE x.company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR x.organization_id IS NULL OR x.organization_id = CAST(:org AS uuid)) AND {_acc_any('x.account_kt', BUDGET_ACCS)}
                     AND ({_acc('x.account_dt', '51')} OR {_acc('x.account_dt', '50')})), 0)
           FROM gl_entries e
-         WHERE e.company_id = :cid AND {budget_dt} AND {money_kt}{where}
+         WHERE e.company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR e.organization_id IS NULL OR e.organization_id = CAST(:org AS uuid)) AND {budget_dt} AND {money_kt}{where}
     """), p)).scalar_one())
 
     months = [{
@@ -2193,6 +2235,7 @@ async def taxes(
                coalesce(sum(e.amount) FILTER (WHERE {budget_dt} AND {money_kt}), 0)
           FROM gl_entries e
          WHERE e.company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR e.organization_id IS NULL OR e.organization_id = CAST(:org AS uuid))
            AND ({budget_kt} OR {budget_dt}){where}
          GROUP BY 1 ORDER BY 1
     """), p)).all()]
@@ -2284,7 +2327,7 @@ async def pnl_entries(
         conds.append("NOT " + _acc_any("e.account_kt", rule["not_kt"]))
     where = " AND ".join(conds)
 
-    p: dict[str, Any] = {"cid": str(cid), "lim": limit}
+    p: dict[str, Any] = {"cid": str(cid), "org": _org_param(), "lim": limit}
     if date_from:
         where += " AND e.entry_date >= :df"
         p["df"] = _day(date_from)
@@ -2294,7 +2337,8 @@ async def pnl_entries(
 
     total, count = (await db.execute(text(f"""
         SELECT coalesce(sum(e.amount), 0), count(*)
-          FROM gl_entries e WHERE e.company_id = :cid AND {where}
+          FROM gl_entries e WHERE e.company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR e.organization_id IS NULL OR e.organization_id = CAST(:org AS uuid)) AND {where}
     """), p)).one()
 
     rows = [{
@@ -2304,7 +2348,8 @@ async def pnl_entries(
     } for r in (await db.execute(text(f"""
         SELECT e.entry_date, e.account_dt, e.account_kt, e.amount,
                e.doc_kind, e.doc_title, e.content
-          FROM gl_entries e WHERE e.company_id = :cid AND {where}
+          FROM gl_entries e WHERE e.company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR e.organization_id IS NULL OR e.organization_id = CAST(:org AS uuid)) AND {where}
          ORDER BY e.entry_date DESC, e.id LIMIT :lim
     """), p)).all()]
 
@@ -2329,7 +2374,7 @@ async def cost_bridge(
 ) -> dict[str, Any]:
     """Сколько затрат начислено, сколько списано в результат и что осталось."""
     cid = await assert_company_member(company_id, current_user, db)
-    p: dict[str, Any] = {"cid": str(cid)}
+    p: dict[str, Any] = {"cid": str(cid), "org": _org_param()}
     where = ""
     if date_from:
         where += " AND e.entry_date >= :df"
@@ -2431,11 +2476,12 @@ async def attention(
     } for r in (await db.execute(text(r"""
         SELECT coalesce(counterparty_name, '—'), sum(amount), max(date)
           FROM accounting_docs
-         WHERE company_id = :cid AND doc_type = 'sale'
+         WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND doc_type = 'sale'
            AND date ~ '^\d{4}-\d{2}-\d{2}'
          GROUP BY 1 HAVING max(date) < to_char(now() - interval '180 days', 'YYYY-MM-DD')
          ORDER BY 2 DESC LIMIT 20
-    """), {"cid": str(cid)})).all()]
+    """), {"cid": str(cid), "org": _org_param()})).all()]
     if silent:
         add("clients_silent", "warn", "Молчащие покупатели",
             f"{len(silent)} из тех, кто покупал",
@@ -2493,6 +2539,310 @@ async def attention(
         "danger": sum(1 for s in signals if s["level"] == "danger"),
         "warn": sum(1 for s in signals if s["level"] == "warn"),
         "asOf": today.isoformat(),
+    }
+
+
+# ── За балансом ──────────────────────────────────────────────────────────────
+# Баланс отвечает на вопрос «чем компания владеет и кому должна». Часть имущества и
+# обязательств в него не попадает по правилам учёта, а работать с ними надо:
+#
+#   • чужое у нас и наше у чужих — арендованное, принятое на хранение, комиссия, монтаж;
+#   • обязательства, которых в балансе нет, — выданные и полученные обеспечения, залоги;
+#   • долг, списанный в убыток (007): из баланса убран, взыскание не прекращено, и
+#     числится он пять лет;
+#   • имущество, самортизированное до нуля или списанное в затраты, но работающее:
+#     остаточная стоимость нулевая, а станок стоит в цеху.
+#
+# Первые три — забалансовые счета плана (001–012, МЦ.*), механика штатная. Четвёртое в
+# балансе видно нулём, и находить его надо сравнением 01 с 02.
+#
+# Забалансовый учёт односторонний: приход дебетом, выбытие кредитом, корреспонденции
+# нет. Поэтому остаток здесь — разница оборотов, а не сальдо пары счетов, и «нулевая
+# сумма при ненулевом количестве» — норма: 002 и 004 ведут количественный учёт, и
+# ценность принятого на хранение товара может быть не оценена вовсе.
+
+# Группы забалансовых счетов по смыслу вопроса, а не по номеру. Служебные счета
+# налогового учёта (НЕ, УСН, ОТ, РВ, ГТД, КВ, ИНВ) в имущество не входят: это механика
+# расчёта налога, и смешивать их с арендованным складом нельзя — они дадут «остаток»,
+# которым никто не владеет.
+OFF_GROUPS: list[tuple[str, str, tuple[str, ...], str]] = [
+    ("theirs_here", "Чужое имущество у нас",
+     ("001", "002", "003", "004", "005"),
+     "арендованное, принятое на хранение и в переработку, комиссия, оборудование к монтажу"),
+    ("ours_elsewhere", "Наше имущество у других",
+     ("011", "012"),
+     "сдано в аренду и возвратная тара у покупателей: владеем, но не распоряжаемся"),
+    ("in_use", "В эксплуатации, но не в балансе",
+     ("МЦ",),
+     "спецодежда, оснастка и инвентарь: стоимость списана в затраты, вещи работают"),
+    ("obligations", "Обязательства вне баланса",
+     ("008", "009"),
+     "полученные и выданные обеспечения, залоги, поручительства"),
+    ("written_off", "Списано в убыток",
+     ("007",),
+     "долг убран из баланса, но взыскание не прекращено — числится пять лет"),
+    ("other_prop", "Прочее имущество",
+     ("006", "010"),
+     "бланки строгой отчётности и износ имущества, которое не амортизируется"),
+    ("tax_service", "Служебные счета налогового учёта",
+     ("НЕ", "УСН", "ОТ", "РВ", "ГТД", "КВ", "ИНВ"),
+     "механика расчёта налога, а не имущество: не учитываемые расходы, вычеты, ГТД"),
+]
+# Счета имущества и обязательств — всё, кроме служебных: по ним считается итог.
+OFF_PROPERTY = tuple(k for k, _l, _p, _h in OFF_GROUPS if k != "tax_service")
+
+
+# Условие «своя организация» для алиасов `e.` (проводки) и без алиаса.
+_ORG_E = ("(CAST(:org AS uuid) IS NULL OR e.organization_id IS NULL "
+          "OR e.organization_id = CAST(:org AS uuid))")
+
+
+def _off_group(code: str) -> str:
+    for key, _label, prefixes, _hint in OFF_GROUPS:
+        if any(code == pref or code.startswith(pref + ".") for pref in prefixes):
+            return key
+    return "other"
+
+
+@router.get("/off-balance")
+async def off_balance(
+    company_id: str,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Забалансовые счета: что заведено, что движется, что лежит на конец периода."""
+    cid = await assert_company_member(company_id, current_user, db)
+    p: dict[str, Any] = {"cid": str(cid), "org": _org_param()}
+    period = ""
+    if date_from:
+        p["df"] = _day(date_from)
+        period += " AND e.entry_date >= :df"
+    if date_to:
+        p["dt"] = _day(date_to)
+        period += " AND e.entry_date <= :dt"
+
+    # План счетов — источник состава. Без него пустой экран читается как «счетов нет»,
+    # хотя контур в 1С заведён всегда: не ведут учёт, а не нечем вести.
+    plan = [{
+        "code": r[0], "name": r[1], "kind": r[2], "quantitative": bool(r[3]),
+        "group": _off_group(r[0]),
+    } for r in (await db.execute(text("""
+        SELECT code, name, kind, quantitative FROM gl_accounts
+         WHERE company_id = :cid AND off_balance IS TRUE AND is_deleted IS NOT TRUE
+         ORDER BY code
+    """), {"cid": str(cid)})).all()]
+    codes = {a["code"] for a in plan}
+
+    # Обороты периода. Забалансовая проводка односторонняя, поэтому счёт ищется в обеих
+    # ногах, а сторона определяет знак движения.
+    turn: dict[str, dict[str, float]] = {}
+    for r in (await db.execute(text(f"""
+        SELECT code, side, sum(amount), count(*), min(entry_date), max(entry_date) FROM (
+          SELECT e.account_dt AS code, 'dt' AS side, e.amount, e.entry_date
+            FROM gl_entries e
+           WHERE e.company_id = :cid AND {org} AND e.account_dt IS NOT NULL{period}
+          UNION ALL
+          SELECT e.account_kt, 'kt', e.amount, e.entry_date
+            FROM gl_entries e
+           WHERE e.company_id = :cid AND {org} AND e.account_kt IS NOT NULL{period}
+        ) x GROUP BY code, side
+    """.replace("{org}", _ORG_E)), p)).all():
+        if r[0] not in codes:
+            continue
+        cur = turn.setdefault(r[0], {"debit": 0.0, "credit": 0.0, "entries": 0,
+                                     "first": None, "last": None})
+        cur["debit" if r[1] == "dt" else "credit"] = _num(r[2])
+        cur["entries"] += r[3]
+        first, last = r[4], r[5]
+        if first and (cur["first"] is None or first < cur["first"]):
+            cur["first"] = first
+        if last and (cur["last"] is None or last > cur["last"]):
+            cur["last"] = last
+
+    # Остаток берётся из снимка сальдо, а не считается по проводкам: выгрузка обычно
+    # начинается не с первого дня жизни компании, и принятое на хранение пять лет назад
+    # в наши обороты не попадёт. Снимок — на последнюю дату, не позже конца периода.
+    as_of_row = (await db.execute(text("""
+        SELECT max(as_of) FROM gl_balances
+         WHERE company_id = :cid AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND source <> 'monthly'
+    """ + (" AND as_of <= :dt" if date_to else "")),
+        {"cid": str(cid), "org": _org_param(),
+         **({"dt": _day(date_to)} if date_to else {})})).scalar()
+    rest: dict[str, dict[str, Any]] = {}
+    subs: list[dict[str, Any]] = []
+    if as_of_row:
+        for r in (await db.execute(text("""
+            SELECT account, account_name, sum(debit), sum(credit),
+                   sum(qty_debit), sum(qty_credit), count(*)
+              FROM gl_balances
+             WHERE company_id = :cid AND as_of = :ao AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid))
+             GROUP BY account, account_name
+        """), {"cid": str(cid), "ao": as_of_row, "org": _org_param()})).all():
+            if r[0] not in codes:
+                continue
+            rest[r[0]] = {
+                "amount": round(_num(r[2]) - _num(r[3]), 2),
+                "qty": round(_num(r[4]) - _num(r[5]), 3),
+            }
+        # Аналитика остатка: чьё имущество, по какому договору. Ради этого забалансовый
+        # учёт и ведут — «на 002 висит 1,2 млн» без имени поклажедателя бесполезно.
+        subs = [{
+            "account": r[0], "name": r[1], "sub1": r[2], "sub2": r[3], "sub3": r[4],
+            "amount": round(_num(r[5]) - _num(r[6]), 2),
+            "qty": round(_num(r[7] or 0) - _num(r[8] or 0), 3),
+        } for r in (await db.execute(text("""
+            SELECT account, account_name, sub1, sub2, sub3,
+                   debit, credit, qty_debit, qty_credit
+              FROM gl_balances
+             WHERE company_id = :cid AND as_of = :ao AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND sub1 IS NOT NULL
+             ORDER BY account, debit DESC
+        """), {"cid": str(cid), "ao": as_of_row,
+                 "org": _org_param()})).all() if r[0] in codes]
+
+    accounts = [{
+        **a,
+        "debit": turn.get(a["code"], {}).get("debit", 0.0),
+        "credit": turn.get(a["code"], {}).get("credit", 0.0),
+        "entries": turn.get(a["code"], {}).get("entries", 0),
+        "first": (turn.get(a["code"], {}).get("first") or None)
+                 and turn[a["code"]]["first"].isoformat(),
+        "last": (turn.get(a["code"], {}).get("last") or None)
+                and turn[a["code"]]["last"].isoformat(),
+        "rest": rest.get(a["code"], {}).get("amount", 0.0),
+        "restQty": rest.get(a["code"], {}).get("qty", 0.0),
+    } for a in plan]
+
+    groups = []
+    for key, label, _prefixes, hint in OFF_GROUPS:
+        mine = [a for a in accounts if a["group"] == key]
+        groups.append({
+            "key": key, "label": label, "hint": hint,
+            "accounts": len(mine),
+            "rest": round(sum(a["rest"] for a in mine), 2),
+            "restQty": round(sum(a["restQty"] for a in mine), 3),
+            "debit": round(sum(a["debit"] for a in mine), 2),
+            "credit": round(sum(a["credit"] for a in mine), 2),
+            "entries": sum(a["entries"] for a in mine),
+        })
+
+    prop = [a for a in accounts if a["group"] in OFF_PROPERTY]
+    return {
+        "asOf": as_of_row.isoformat() if as_of_row else None,
+        "groups": groups,
+        "accounts": [a for a in accounts if a["entries"] or a["rest"] or a["restQty"]],
+        "planCount": len(plan),
+        "subs": subs,
+        "entries": sum(a["entries"] for a in accounts),
+        "propertyRest": round(sum(a["rest"] for a in prop), 2),
+        "propertyEntries": sum(a["entries"] for a in prop),
+    }
+
+
+@router.get("/off-balance-hidden")
+async def off_balance_hidden(
+    company_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Имущество и долги, которые в учёте есть, а в балансе не видны.
+
+    Три разных случая, и путать их нельзя:
+
+    * **самортизированное до нуля** — на 01 стоит, на 02 накоплена вся сумма. Строка
+      баланса нулевая, имущество работает, и продать его можно за реальные деньги;
+    * **списанное в затраты** — малоценка и инвентарь: расход признан сразу, вещь
+      служит годами. Для этого и заведены счета МЦ, но ведут их не все;
+    * **долг с истёкшим сроком давности** — в балансе актив, взыскать нельзя.
+      Три года считаются от последней отгрузки или последнего признания долга.
+    """
+    cid = await assert_company_member(company_id, current_user, db)
+    p = {"cid": str(cid), "org": _org_param()}
+
+    # Основные средства: остаток по 01 против накопленной амортизации по 02. Снимок
+    # сальдо честнее оборотов — имущество куплено до начала выгрузки.
+    as_of = (await db.execute(text(
+        "SELECT max(as_of) FROM gl_balances WHERE company_id = :cid"
+        f" AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND source <> 'monthly'"), p)).scalar()
+    fixed: list[dict[str, Any]] = []
+    cost = wear = 0.0
+    if as_of:
+        for r in (await db.execute(text("""
+            SELECT account, account_name, sub1, sum(debit), sum(credit)
+              FROM gl_balances
+             WHERE company_id = :cid AND as_of = :ao AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid))
+               AND (account LIKE '01%' OR account LIKE '02%')
+             GROUP BY 1, 2, 3
+        """), {"cid": str(cid), "ao": as_of, "org": _org_param()})).all():
+            amount = _num(r[3]) - _num(r[4])
+            if r[0].startswith("01"):
+                cost += amount
+                fixed.append({"account": r[0], "name": r[1], "sub": r[2],
+                              "cost": round(amount, 2)})
+            else:
+                # На 02 амортизация пассивная: остаток кредитовый.
+                wear += -amount
+
+    # Малоценка, списанная в затраты: приход на 10 и списание в расходы того же счёта.
+    # Смотрим обороты, а не остаток: остатка у списанного нет по определению.
+    low_value = [{
+        "account_kt": r[0], "account_dt": r[1], "amount": _num(r[2]), "count": r[3],
+    } for r in (await db.execute(text("""
+        SELECT e.account_kt, e.account_dt, sum(e.amount), count(*)
+          FROM gl_entries e
+         WHERE e.company_id = :cid
+           AND (e.account_kt LIKE '10.09%' OR e.account_kt LIKE '10.10%'
+                OR e.account_kt LIKE '10.11%' OR e.account_kt LIKE '10.21%')
+           AND (e.account_dt LIKE '20%' OR e.account_dt LIKE '25%'
+                OR e.account_dt LIKE '26%' OR e.account_dt LIKE '44%')
+         GROUP BY 1, 2 ORDER BY 3 DESC
+    """), p)).all()]
+
+    # Долг с истёкшим сроком давности: счёт выставлен больше трёх лет назад и не
+    # закрыт. Долг считается ТОЛЬКО там, где регистр свёл счёт с оплатой (как в реестре
+    # старения): счёт без записи об оплате означает «неизвестно», а не «не платили», и
+    # именно подстановка нуля в это место когда-то дала долг в 123 млн ₽.
+    stale = [{
+        "counterparty": r[0], "count": r[1], "amount": _num(r[2]),
+        "last": r[3], "oldest": r[4],
+    } for r in (await db.execute(text(r"""
+        WITH paid AS (
+          SELECT invoice_doc_id, sum(amount) AS s FROM invoice_payments
+           WHERE company_id = :cid GROUP BY 1
+        )
+        SELECT coalesce(d.counterparty_name, '—'), count(*),
+               sum(d.amount - paid.s), max(d.date), min(d.date)
+          FROM accounting_docs d
+          JOIN paid ON paid.invoice_doc_id = d.id
+         WHERE d.company_id = :cid AND d.doc_type = 'invoice_out'
+           AND d.date ~ '^\d{4}-\d{2}-\d{2}'
+           AND d.date < to_char(now() - interval '3 years', 'YYYY-MM-DD')
+           AND d.amount - paid.s > 0.5
+         GROUP BY 1 ORDER BY 3 DESC LIMIT 50
+    """), p)).all()]
+    # Сколько старых счетов регистр с оплатой не свёл: без этой цифры пустой список
+    # читается как «просроченного долга нет», хотя на деле он просто не виден.
+    stale_unknown = (await db.execute(text(r"""
+        SELECT count(*) FROM accounting_docs d
+         WHERE d.company_id = :cid AND d.doc_type = 'invoice_out'
+           AND d.date ~ '^\d{4}-\d{2}-\d{2}'
+           AND d.date < to_char(now() - interval '3 years', 'YYYY-MM-DD')
+           AND NOT EXISTS (SELECT 1 FROM invoice_payments ip
+                            WHERE ip.invoice_doc_id = d.id)
+    """), p)).scalar() or 0
+
+    return {
+        "asOf": as_of.isoformat() if as_of else None,
+        "fixedCost": round(cost, 2),
+        "fixedWear": round(wear, 2),
+        "fixedRest": round(cost - wear, 2),
+        "fixed": sorted(fixed, key=lambda x: -x["cost"])[:50],
+        "lowValue": low_value,
+        "lowValueTotal": round(sum(r["amount"] for r in low_value), 2),
+        "stale": stale,
+        "staleTotal": round(sum(r["amount"] for r in stale), 2),
+        "staleUnknown": stale_unknown,
     }
 
 
@@ -2698,7 +3048,7 @@ async def revenue_quality(
 ) -> dict[str, Any]:
     """Проверки, от которых зависят цифры продукта: что и почему может врать."""
     cid = await assert_company_member(company_id, current_user, db)
-    p = {"cid": str(cid)}
+    p = {"cid": str(cid), "org": _org_param()}
 
     async def one(sql: str) -> int:
         return int((await db.execute(text(sql), p)).scalar_one() or 0)
@@ -2711,7 +3061,8 @@ async def revenue_quality(
             # jsonb_array_length падает, если `lines` приехал не массивом, — проверка
             # качества данных обязана переживать плохие данные, ради которых она и есть.
             "count": await one("""SELECT count(*) FROM accounting_docs
-                                   WHERE company_id = :cid AND doc_type = 'sale'
+                                   WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND doc_type = 'sale'
                                      AND coalesce(CASE WHEN jsonb_typeof(lines) = 'array'
                                                        THEN jsonb_array_length(lines) END, 0) = 0"""),
         },
@@ -2719,14 +3070,16 @@ async def revenue_quality(
             "key": "no_counterparty", "title": "Реализации без контрагента",
             "why": "документ не попадёт ни в одного покупателя, разрез по клиентам занижен",
             "count": await one("""SELECT count(*) FROM accounting_docs
-                                   WHERE company_id = :cid AND doc_type = 'sale'
+                                   WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND doc_type = 'sale'
                                      AND counterparty_id IS NULL"""),
         },
         {
             "key": "no_contract", "title": "Реализации без договора",
             "why": "не попадут в разрез по договорам; в 1С основание не заполнено",
             "count": await one("""SELECT count(*) FROM accounting_docs
-                                   WHERE company_id = :cid AND doc_type = 'sale'
+                                   WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND doc_type = 'sale'
                                      AND contract_id IS NULL"""),
         },
         {
@@ -2749,7 +3102,8 @@ async def revenue_quality(
             "key": "negative", "title": "Реализации с отрицательной суммой",
             "why": "скорее всего возврат, проведённый реализацией: выручка занижена или задвоена",
             "count": await one("""SELECT count(*) FROM accounting_docs
-                                   WHERE company_id = :cid AND doc_type = 'sale'
+                                   WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND doc_type = 'sale'
                                      AND amount < 0"""),
         },
         {
@@ -2788,7 +3142,8 @@ async def revenue_quality(
                 WITH l AS (
                   SELECT d.doc_type, jsonb_array_elements(d.lines) ln
                     FROM accounting_docs d
-                   WHERE d.company_id = :cid AND d.doc_type IN ('sale', 'purchase')
+                   WHERE d.company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR d.organization_id IS NULL OR d.organization_id = CAST(:org AS uuid)) AND d.doc_type IN ('sale', 'purchase')
                 ), x AS (
                   SELECT doc_type, btrim(ln->>'code') code FROM l
                    WHERE coalesce(btrim(ln->>'code'), '') <> ''
@@ -2803,7 +3158,8 @@ async def revenue_quality(
             "why": "либо деньги не пришли, либо оплата не сведена регистром — воронка врёт",
             "count": await one("""
                 SELECT count(*) FROM accounting_docs d
-                 WHERE d.company_id = :cid AND d.doc_type = 'invoice_out'
+                 WHERE d.company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR d.organization_id IS NULL OR d.organization_id = CAST(:org AS uuid)) AND d.doc_type = 'invoice_out'
                    AND d.date < to_char(now() - interval '1 year', 'YYYY-MM-DD')
                    AND NOT EXISTS (SELECT 1 FROM invoice_payments p
                                     WHERE p.invoice_doc_id = d.id)"""),
@@ -2811,7 +3167,8 @@ async def revenue_quality(
     ]
 
     total_sales = await one("""SELECT count(*) FROM accounting_docs
-                                WHERE company_id = :cid AND doc_type = 'sale'""")
+                                WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND doc_type = 'sale'""")
     return {
         "checks": checks,
         "salesDocs": total_sales,
@@ -2855,7 +3212,7 @@ async def payment_terms(
     наоборот. Отсюда и ограничение экрана: он видит ровно те счета, что регистр свёл.
     """
     cid = await assert_company_member(company_id, current_user, db)
-    p: dict[str, Any] = {"cid": str(cid)}
+    p: dict[str, Any] = {"cid": str(cid), "org": _org_param()}
     where = ""
     if date_from:
         where += " AND d.date >= :df"
@@ -2885,7 +3242,8 @@ async def payment_terms(
                count(*)
           FROM invoice_payments p
           JOIN accounting_docs d ON d.id = p.invoice_doc_id
-         WHERE p.company_id = :cid AND p.paid_at IS NOT NULL
+         WHERE p.company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR p.organization_id IS NULL OR p.organization_id = CAST(:org AS uuid)) AND p.paid_at IS NOT NULL
            AND coalesce(d.date, '') <> ''{where}
          GROUP BY d.id
          ORDER BY days DESC
@@ -2896,9 +3254,10 @@ async def payment_terms(
     orphans = (await db.execute(text("""
         SELECT count(*), coalesce(sum(amount), 0) FROM invoice_payments p
          WHERE p.company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR p.organization_id IS NULL OR p.organization_id = CAST(:org AS uuid))
            AND (p.invoice_doc_id IS NULL
                 OR NOT EXISTS (SELECT 1 FROM accounting_docs d WHERE d.id = p.invoice_doc_id))
-    """), {"cid": str(cid)})).one()
+    """), {"cid": str(cid), "org": _org_param()})).one()
 
     buckets = [{
         "key": key, "label": label,
@@ -2960,7 +3319,7 @@ async def cashflow(
     документа (перевод между своими счетами, эквайринг, инкассация).
     """
     cid = await assert_company_member(company_id, current_user, db)
-    p = {"cid": str(cid)}
+    p = {"cid": str(cid), "org": _org_param()}
 
     months = [{
         "month": r[0], "inflow": _num(r[1]), "outflow": _num(r[2]),
@@ -2972,7 +3331,8 @@ async def cashflow(
                count(*)    FILTER (WHERE doc_type = 'bank_in')  in_docs,
                count(*)    FILTER (WHERE doc_type = 'bank_out') out_docs
           FROM accounting_docs
-         WHERE company_id = :cid AND doc_type IN ('bank_in', 'bank_out')
+         WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND doc_type IN ('bank_in', 'bank_out')
          GROUP BY 1 ORDER BY 1
     """), p)).all()]
 
@@ -2988,7 +3348,8 @@ async def cashflow(
         SELECT coalesce(counterparty_name, '—'), max(counterparty_id::text), sum(amount),
                count(*), max(date)
           FROM accounting_docs
-         WHERE company_id = :cid AND doc_type = 'bank_in'
+         WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND doc_type = 'bank_in'
          GROUP BY 1 ORDER BY 3 DESC LIMIT 50
     """), p)).all()]
 
@@ -2998,7 +3359,8 @@ async def cashflow(
         SELECT coalesce(counterparty_name, '—'), max(counterparty_id::text), sum(amount),
                count(*), max(date)
           FROM accounting_docs
-         WHERE company_id = :cid AND doc_type = 'bank_out'
+         WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND doc_type = 'bank_out'
          GROUP BY 1 ORDER BY 3 DESC LIMIT 50
     """), p)).all()]
 
@@ -3014,11 +3376,11 @@ async def cashflow(
         "registerIn": _num((await db.execute(text(
             "SELECT coalesce(sum(amount), 0) FROM gl_entries "
             "WHERE company_id = :cid AND (account_dt = '51' OR account_dt LIKE '51.%')"),
-            {"cid": str(cid)})).scalar_one()),
+            {"cid": str(cid), "org": _org_param()})).scalar_one()),
         "registerOut": _num((await db.execute(text(
             "SELECT coalesce(sum(amount), 0) FROM gl_entries "
             "WHERE company_id = :cid AND (account_kt = '51' OR account_kt LIKE '51.%')"),
-            {"cid": str(cid)})).scalar_one()),
+            {"cid": str(cid), "org": _org_param()})).scalar_one()),
     }
 
 
@@ -3068,7 +3430,7 @@ async def cashflow_items(
 ) -> dict[str, Any]:
     """Куда и откуда двигались деньги: статьи, виды деятельности, помесячно."""
     cid = await assert_company_member(company_id, current_user, db)
-    p: dict[str, Any] = {"cid": str(cid)}
+    p: dict[str, Any] = {"cid": str(cid), "org": _org_param()}
     where = ""
     if date_from:
         where += " AND date >= :df"
@@ -3090,7 +3452,8 @@ async def cashflow_items(
                count(*) FILTER (WHERE doc_type = 'bank_out'),
                min(date), max(date)
           FROM accounting_docs
-         WHERE company_id = :cid AND doc_type IN ('bank_in', 'bank_out'){where}
+         WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND doc_type IN ('bank_in', 'bank_out'){where}
          GROUP BY 1 ORDER BY 2 + 3 DESC
     """), p)).all()]
 
@@ -3105,7 +3468,8 @@ async def cashflow_items(
                coalesce(sum(amount) FILTER (WHERE doc_type = 'bank_in'), 0),
                coalesce(sum(amount) FILTER (WHERE doc_type = 'bank_out'), 0)
           FROM accounting_docs
-         WHERE company_id = :cid AND doc_type IN ('bank_in', 'bank_out'){where}
+         WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND doc_type IN ('bank_in', 'bank_out'){where}
          GROUP BY 1 ORDER BY 1
     """), p)).all()]
 
@@ -3147,7 +3511,7 @@ async def contract_sales(
     больше половины, и прятать это нельзя.
     """
     cid = await assert_company_member(company_id, current_user, db)
-    p: dict[str, Any] = {"cid": str(cid)}
+    p: dict[str, Any] = {"cid": str(cid), "org": _org_param()}
     where = ""
     if date_from:
         where += " AND d.date >= :df"
@@ -3179,6 +3543,7 @@ async def contract_sales(
           FROM accounting_docs d
           LEFT JOIN contracts c ON c.id = d.contract_id
          WHERE d.company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR d.organization_id IS NULL OR d.organization_id = CAST(:org AS uuid))
            AND d.doc_type IN ('sale', 'invoice_out'){where}
          GROUP BY d.contract_id
          ORDER BY sum(d.amount) FILTER (WHERE d.doc_type = 'sale') DESC NULLS LAST
@@ -3239,13 +3604,14 @@ async def counterparties(
     у кого долг и аванс лежат на разных субсчетах.
     """
     cid = await assert_company_member(company_id, current_user, db)
-    params: dict[str, Any] = {"cid": str(cid), "df": date_from, "dt": date_to,
+    params: dict[str, Any] = {"cid": str(cid), "org": _org_param(), "df": date_from, "dt": date_to,
                               "q": f"%{q.lower()}%" if q else None, "lim": limit}
     rows = (await db.execute(text("""
         WITH doc AS (
           SELECT d.id, d.counterparty_id, d.doc_type, d.amount, d.date
             FROM accounting_docs d
-           WHERE d.company_id = :cid AND d.counterparty_id IS NOT NULL
+           WHERE d.company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR d.organization_id IS NULL OR d.organization_id = CAST(:org AS uuid)) AND d.counterparty_id IS NOT NULL
              AND (CAST(:df AS text) IS NULL OR d.date >= :df)
              AND (CAST(:dt AS text) IS NULL OR d.date <= :dt)
         ), agg AS (
@@ -3280,8 +3646,10 @@ async def counterparties(
                           THEN b.credit ELSE 0 END) AS loan_in,
                  sum(CASE WHEN b.account LIKE '71%' THEN b.credit - b.debit ELSE 0 END) AS accountable
             FROM gl_balances b
-           WHERE b.company_id = :cid AND b.counterparty_id IS NOT NULL
-             AND b.as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid AND source <> 'monthly')
+           WHERE b.company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR b.organization_id IS NULL OR b.organization_id = CAST(:org AS uuid)) AND b.counterparty_id IS NOT NULL
+             AND b.as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND source <> 'monthly')
            GROUP BY 1
         )
         SELECT k.id, k.name, k.inn, k.kind,
@@ -3328,7 +3696,7 @@ async def counterparty_card(
 ) -> dict[str, Any]:
     """Карточка контрагента: реквизиты, договоры, документы, долг, помесячно."""
     cid = await assert_company_member(company_id, current_user, db)
-    params = {"cid": str(cid), "kid": counterparty_id}
+    params = {"cid": str(cid), "org": _org_param(), "kid": counterparty_id}
 
     k = (await db.execute(select(Counterparty).where(
         Counterparty.company_id == cid,
@@ -3345,13 +3713,15 @@ async def counterparty_card(
                c.type, d.period_status
           FROM accounting_docs d
           LEFT JOIN contracts c ON c.id = d.contract_id
-         WHERE d.company_id = :cid AND d.counterparty_id::text = :kid
+         WHERE d.company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR d.organization_id IS NULL OR d.organization_id = CAST(:org AS uuid)) AND d.counterparty_id::text = :kid
          ORDER BY d.date DESC LIMIT 300
     """), params)).all()]
 
     by_type = {r[0]: {"docs": r[1], "amount": _num(r[2])} for r in (await db.execute(text("""
         SELECT doc_type, count(*), sum(amount) FROM accounting_docs
-         WHERE company_id = :cid AND counterparty_id::text = :kid GROUP BY 1
+         WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND counterparty_id::text = :kid GROUP BY 1
     """), params)).all()}
 
     months = [{"month": r[0], "sales": _num(r[1]), "purchases": _num(r[2]),
@@ -3361,7 +3731,8 @@ async def counterparty_card(
                sum(amount) FILTER (WHERE doc_type = 'purchase'),
                sum(amount) FILTER (WHERE doc_type IN ('bank_in', 'bank_out'))
           FROM accounting_docs
-         WHERE company_id = :cid AND counterparty_id::text = :kid
+         WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND counterparty_id::text = :kid
          GROUP BY 1 ORDER BY 1
     """), params)).all()]
 
@@ -3372,7 +3743,8 @@ async def counterparty_card(
         WITH l AS (
           SELECT d.id doc, jsonb_array_elements(d.lines) ln
             FROM accounting_docs d
-           WHERE d.company_id = :cid AND d.counterparty_id::text = :kid
+           WHERE d.company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR d.organization_id IS NULL OR d.organization_id = CAST(:org AS uuid)) AND d.counterparty_id::text = :kid
              AND d.doc_type IN ('sale', 'purchase')
         ), x AS (
           -- Разворачивать JSONB и агрегировать в одном запросе Postgres не даёт:
@@ -3409,8 +3781,10 @@ async def counterparty_card(
                sum(b.credit) FILTER (WHERE b.account LIKE '66%' OR b.account LIKE '67%'),
                sum(b.credit - b.debit) FILTER (WHERE b.account LIKE '71%')
           FROM gl_balances b
-         WHERE b.company_id = :cid AND b.counterparty_id::text = :kid
-           AND b.as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid AND source <> 'monthly')
+         WHERE b.company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR b.organization_id IS NULL OR b.organization_id = CAST(:org AS uuid)) AND b.counterparty_id::text = :kid
+           AND b.as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND source <> 'monthly')
     """), params)).one()
 
     contracts = [{"id": str(r[0]), "number": r[1], "date": r[2], "type": r[3],
@@ -3496,13 +3870,14 @@ async def reconciliation_act(
 
     sections = []
     for kind, prefix, title, doc_types in _ACT_SIDES:
-        params: dict[str, Any] = {"cid": str(cid), "name": k.name, "p": f"{prefix}%"}
+        params: dict[str, Any] = {"cid": str(cid), "org": _org_param(), "name": k.name, "p": f"{prefix}%"}
         rows = (await db.execute(text("""
             SELECT period_year, period_month,
                    coalesce(sum(amount) FILTER (WHERE account_dt LIKE :p AND dt1 = :name), 0) dt,
                    coalesce(sum(amount) FILTER (WHERE account_kt LIKE :p AND kt1 = :name), 0) kt
               FROM gl_turnovers
              WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid))
                AND ((account_dt LIKE :p AND dt1 = :name) OR (account_kt LIKE :p AND kt1 = :name))
              GROUP BY 1, 2 ORDER BY 1, 2
         """), params)).all()
@@ -3538,12 +3913,13 @@ async def reconciliation_act(
         } for r in (await db.execute(text("""
             SELECT d.id, d.date, d.doc_type, d.number, d.amount
               FROM accounting_docs d
-             WHERE d.company_id = :cid AND d.counterparty_id::text = :kid
+             WHERE d.company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR d.organization_id IS NULL OR d.organization_id = CAST(:org AS uuid)) AND d.counterparty_id::text = :kid
                AND d.doc_type = ANY(:types)
                AND (CAST(:df AS text) IS NULL OR d.date >= :df)
                AND (CAST(:dt AS text) IS NULL OR d.date <= :dt)
              ORDER BY d.date
-        """), {"cid": str(cid), "kid": counterparty_id, "types": list(doc_types),
+        """), {"cid": str(cid), "org": _org_param(), "kid": counterparty_id, "types": list(doc_types),
                "df": date_from, "dt": date_to})).all()]
 
         sections.append({
@@ -3579,7 +3955,7 @@ async def counterparty_quality(
 ) -> dict[str, Any]:
     """Болезни справочника: дубли, карточки без ИНН, несведённые документы."""
     cid = await assert_company_member(company_id, current_user, db)
-    p = {"cid": str(cid)}
+    p = {"cid": str(cid), "org": _org_param()}
 
     # Дубли по ИНН — самый жёсткий случай: это заведомо одно юрлицо, и обороты
     # разделены между карточками пополам.
@@ -3589,7 +3965,8 @@ async def counterparty_quality(
         SELECT k.inn, json_agg(json_build_object(
                  'id', k.id, 'name', k.name, 'kpp', k.kpp,
                  'docs', (SELECT count(*) FROM accounting_docs d
-                           WHERE d.company_id = :cid AND d.counterparty_id = k.id),
+                           WHERE d.company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR d.organization_id IS NULL OR d.organization_id = CAST(:org AS uuid)) AND d.counterparty_id = k.id),
                  'contracts', (SELECT count(*) FROM contracts c
                                 WHERE c.company_id = :cid AND c.counterparty_id::text = k.id::text))
                ORDER BY k.name)
@@ -3610,7 +3987,8 @@ async def counterparty_quality(
         SELECT {norm} nm, json_agg(json_build_object(
                  'id', k.id, 'name', k.name, 'inn', k.inn,
                  'docs', (SELECT count(*) FROM accounting_docs d
-                           WHERE d.company_id = :cid AND d.counterparty_id = k.id))
+                           WHERE d.company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR d.organization_id IS NULL OR d.organization_id = CAST(:org AS uuid)) AND d.counterparty_id = k.id))
                ORDER BY k.name)
           FROM counterparties k
          WHERE k.company_id = :cid
@@ -3623,9 +4001,11 @@ async def counterparty_quality(
     } for r in (await db.execute(text("""
         SELECT k.id, k.name,
                (SELECT count(*) FROM accounting_docs d
-                 WHERE d.company_id = :cid AND d.counterparty_id = k.id),
+                 WHERE d.company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR d.organization_id IS NULL OR d.organization_id = CAST(:org AS uuid)) AND d.counterparty_id = k.id),
                (SELECT coalesce(sum(d.amount), 0) FROM accounting_docs d
-                 WHERE d.company_id = :cid AND d.counterparty_id = k.id)
+                 WHERE d.company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR d.organization_id IS NULL OR d.organization_id = CAST(:org AS uuid)) AND d.counterparty_id = k.id)
           FROM counterparties k
          WHERE k.company_id = :cid AND coalesce(k.inn, '') = ''
          ORDER BY 3 DESC LIMIT 200
@@ -3641,7 +4021,8 @@ async def counterparty_quality(
           SELECT d.counterparty_name nm, d.counterparty_inn inn,
                  count(*) n, sum(d.amount) amt
             FROM accounting_docs d
-           WHERE d.company_id = :cid AND d.counterparty_id IS NULL
+           WHERE d.company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR d.organization_id IS NULL OR d.organization_id = CAST(:org AS uuid)) AND d.counterparty_id IS NULL
              AND coalesce(d.counterparty_name, '') <> ''
            GROUP BY 1, 2
         )
@@ -3665,14 +4046,16 @@ async def counterparty_quality(
         SELECT count(*) FROM counterparties k
          WHERE k.company_id = :cid
            AND NOT EXISTS (SELECT 1 FROM accounting_docs d
-                            WHERE d.company_id = :cid AND d.counterparty_id = k.id)
+                            WHERE d.company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR d.organization_id IS NULL OR d.organization_id = CAST(:org AS uuid)) AND d.counterparty_id = k.id)
            AND NOT EXISTS (SELECT 1 FROM contracts c
                             WHERE c.company_id = :cid AND c.counterparty_id::text = k.id::text)
     """), p)).scalar_one()
 
     total, linked = (await db.execute(text("""
         SELECT count(*), count(counterparty_id) FROM accounting_docs
-         WHERE company_id = :cid AND coalesce(counterparty_name, '') <> ''
+         WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND coalesce(counterparty_name, '') <> ''
     """), p)).one()
 
     return {
@@ -3704,7 +4087,7 @@ async def link_docs(
     res = await db.execute(text("""
         UPDATE accounting_docs SET counterparty_id = CAST(:kid AS uuid)
          WHERE company_id = :cid AND counterparty_id IS NULL AND counterparty_name = :name
-    """), {"cid": str(cid), "kid": counterparty_id, "name": name})
+    """), {"cid": str(cid), "org": _org_param(), "kid": counterparty_id, "name": name})
     await db.commit()
     return {"linked": res.rowcount or 0}
 
@@ -3793,7 +4176,7 @@ async def nomenclature_card(
     # Код нормализуем на входе: и строки документов, и справочник сравниваются
     # обрезанными — иначе «ТКС003498  » и «ТКС003498» это две разные позиции.
     code = code.strip()
-    params = {"cid": str(cid), "code": code}
+    params = {"cid": str(cid), "org": _org_param(), "code": code}
 
     # Код из строки документа приезжает с хвостовыми пробелами («ТКС003498  »), а в
     # справочнике лежит без них: без btrim карточка честно сообщает «кода нет в
@@ -3810,7 +4193,8 @@ async def nomenclature_card(
           SELECT d.id doc, d.doc_type, d.date, d.counterparty_id, d.counterparty_name,
                  jsonb_array_elements(d.lines) ln
             FROM accounting_docs d
-           WHERE d.company_id = :cid AND d.doc_type IN ('sale', 'purchase')
+           WHERE d.company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR d.organization_id IS NULL OR d.organization_id = CAST(:org AS uuid)) AND d.doc_type IN ('sale', 'purchase')
         ), x AS (
           SELECT doc, doc_type, date, counterparty_id, counterparty_name,
                  btrim(ln->>'code') code, ln->>'name' name, ln->>'kind' kind,
@@ -3997,7 +4381,7 @@ async def quality(
     # Проверки, которых экрану не хватало: эти дефекты ревизия нашла запросами, а
     # экран качества их не ловил — значит в следующий раз найдёт снова человек.
     async def _count(sql: str) -> int:
-        return int((await db.execute(text(sql), {"cid": str(cid)})).scalar_one() or 0)
+        return int((await db.execute(text(sql), {"cid": str(cid), "org": _org_param()})).scalar_one() or 0)
 
     dup_inn = await _count("""
         SELECT count(*) FROM (SELECT inn FROM counterparties
@@ -4017,7 +4401,8 @@ async def quality(
 
     head_vs_lines = await _count("""
         SELECT count(*) FROM accounting_docs d
-         WHERE d.company_id = :cid AND jsonb_array_length(coalesce(d.lines,'[]'::jsonb)) > 0
+         WHERE d.company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR d.organization_id IS NULL OR d.organization_id = CAST(:org AS uuid)) AND jsonb_array_length(coalesce(d.lines,'[]'::jsonb)) > 0
            AND d.doc_type NOT IN ('payroll_accrual', 'act_recon')
            AND abs(d.amount - (SELECT coalesce(sum((l->>'amount')::numeric),0)
                                  FROM jsonb_array_elements(d.lines) l)) > 0.01""")
@@ -4034,12 +4419,14 @@ async def quality(
 
     not_posted = await _count("""
         SELECT count(*) FROM accounting_docs
-         WHERE company_id = :cid AND coalesce(status_1c, '') NOT IN ('Проведён', '')""")
+         WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND coalesce(status_1c, '') NOT IN ('Проведён', '')""")
     add("not_posted", "Непроведённые документы", "info", not_posted,
         "Документ записан, но в учёт не попал: в книгу и в обороты он не входит")
 
     orphan = await _count("""
-        SELECT count(*) FROM gl_entries WHERE company_id = :cid AND doc_id IS NULL""")
+        SELECT count(*) FROM gl_entries WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND doc_id IS NULL""")
     add("entries_without_doc", "Проводки без документа",
         "ok" if not orphan else "warn", orphan,
         "Проводка есть, первички под ней нет: документ не загружен или не сведён")
@@ -4454,9 +4841,10 @@ async def settlements(
                sum(amount) FILTER (WHERE account_dt LIKE :p) AS grew,
                sum(amount) FILTER (WHERE account_kt LIKE :p) AS closed
           FROM gl_turnovers
-         WHERE company_id = :cid AND (account_dt LIKE :p OR account_kt LIKE :p)
+         WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND (account_dt LIKE :p OR account_kt LIKE :p)
          GROUP BY 1, 2 ORDER BY 1, 2
-    """), {"cid": str(cid), "p": f"{prefix}%"})).all()
+    """), {"cid": str(cid), "org": _org_param(), "p": f"{prefix}%"})).all()
 
     return {
         "asOf": as_of.isoformat(),
@@ -4626,7 +5014,7 @@ async def payroll(
     ⚠ Персональные данные: экран показывает ФИО сотрудников клиента.
     """
     cid = await assert_company_member(company_id, current_user, db)
-    p = {"cid": str(cid)}
+    p = {"cid": str(cid), "org": _org_param()}
 
     totals = (await db.execute(text("""
         SELECT
@@ -4635,14 +5023,17 @@ async def payroll(
           coalesce(sum(amount) FILTER (WHERE kind = 'contribution'), 0),
           coalesce(sum(amount) FILTER (WHERE kind = 'payment'), 0),
           count(DISTINCT employee_id)
-          FROM payroll_entries WHERE company_id = :cid"""), p)).one()
+          FROM payroll_entries WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid))"""), p)).one()
 
     # Долг перед сотрудниками — сальдо 70, а не «начислено минус выплачено»: в
     # разнице не учтён НДФЛ, который удержан, но сотруднику не причитается.
     debt = _num((await db.execute(text("""
         SELECT coalesce(sum(credit - debit), 0) FROM gl_balances
-         WHERE company_id = :cid AND account LIKE '70%'
-           AND as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid AND source <> 'monthly')"""),
+         WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND account LIKE '70%'
+           AND as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND source <> 'monthly')"""),
         p)).scalar_one())
 
     months = [{
@@ -4655,7 +5046,8 @@ async def payroll(
                coalesce(sum(amount) FILTER (WHERE kind = 'contribution'), 0),
                coalesce(sum(amount) FILTER (WHERE kind = 'payment'), 0)
           FROM payroll_entries
-         WHERE company_id = :cid AND period_month IS NOT NULL
+         WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND period_month IS NOT NULL
          GROUP BY 1 ORDER BY 1"""), p)).all()]
 
     employees = [{
@@ -4672,6 +5064,7 @@ async def payroll(
           FROM payroll_entries p
           LEFT JOIN employees e ON e.id = p.employee_id
          WHERE p.company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR p.organization_id IS NULL OR p.organization_id = CAST(:org AS uuid))
          GROUP BY 1, 2, 3, 4 ORDER BY 5 DESC"""), p)).all()]
 
     # Виды начислений и удержаний: «из чего сложилась сумма» — первый вопрос к расчёту.
@@ -4679,6 +5072,7 @@ async def payroll(
              for r in (await db.execute(text("""
         SELECT kind, coalesce(name, '—'), sum(amount), count(*)
           FROM payroll_entries WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid))
          GROUP BY 1, 2 ORDER BY 3 DESC"""), p)).all()]
 
     # Документы блока: аванс за первую половину месяца проводок не делает, и без
@@ -4691,7 +5085,8 @@ async def payroll(
         SELECT id, doc_type, number, date, amount, status_1c,
                (details->>'Расчёт') IS NOT NULL, details->>'Месяц начисления'
           FROM accounting_docs
-         WHERE company_id = :cid AND doc_type IN ('payroll_accrual', 'payroll_payment')
+         WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND doc_type IN ('payroll_accrual', 'payroll_payment')
          ORDER BY date DESC"""), p)).all()]
 
     advance = sum(d["amount"] for d in docs
@@ -4725,6 +5120,7 @@ async def payroll(
                    coalesce(sum(amount) FILTER (WHERE kind = 'contrib_tax'), 0)
               FROM payroll_entries
              WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid))
                AND kind IN ('ndfl_income','ndfl_tax','ndfl_paid','contrib_base','contrib_tax')
              GROUP BY 1 ORDER BY 1 DESC LIMIT 36"""), p)).all()],
     }
@@ -4765,7 +5161,7 @@ async def closing(
     одного: чего не хватает, по кому и на какую сумму.
     """
     cid = await assert_company_member(company_id, current_user, db)
-    p: dict[str, Any] = {"cid": str(cid), "period": period}
+    p: dict[str, Any] = {"cid": str(cid), "org": _org_param(), "period": period, "org": _org_param()}
 
     months = [{
         "month": r[0], "status": r[1], "docs": r[2], "amount": _num(r[3]),
@@ -4774,10 +5170,12 @@ async def closing(
     } for r in (await db.execute(text("""
         WITH d AS (
           SELECT substr(date, 1, 7) AS m, count(*) AS docs, sum(amount) AS amount
-            FROM accounting_docs WHERE company_id = :cid GROUP BY 1
+            FROM accounting_docs WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) GROUP BY 1
         ), e AS (
           SELECT to_char(entry_date, 'YYYY-MM') AS m, count(*) AS cnt, sum(amount) AS turnover
-            FROM gl_entries WHERE company_id = :cid GROUP BY 1
+            FROM gl_entries WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) GROUP BY 1
         )
         SELECT coalesce(d.m, e.m) AS m,
                coalesce(p.status, 'open'), coalesce(d.docs, 0), coalesce(d.amount, 0),
@@ -4809,7 +5207,8 @@ async def closing(
     await collect("purchase_no_vat_invoice", """
         SELECT d.id, d.date, d.number, d.counterparty_name, d.amount
           FROM accounting_docs d
-         WHERE d.company_id = :cid AND d.doc_type = 'purchase' """ + where_period + """
+         WHERE d.company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR d.organization_id IS NULL OR d.organization_id = CAST(:org AS uuid)) AND d.doc_type = 'purchase' """ + where_period + """
            AND coalesce(d.vat_amount, 0) > 0
            AND NOT EXISTS (
              SELECT 1 FROM accounting_docs v
@@ -4822,7 +5221,8 @@ async def closing(
     await collect("sale_no_vat_invoice", """
         SELECT d.id, d.date, d.number, d.counterparty_name, d.amount
           FROM accounting_docs d
-         WHERE d.company_id = :cid AND d.doc_type = 'sale' """ + where_period + """
+         WHERE d.company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR d.organization_id IS NULL OR d.organization_id = CAST(:org AS uuid)) AND d.doc_type = 'sale' """ + where_period + """
            AND coalesce(d.vat_amount, 0) > 0
            AND NOT EXISTS (
              SELECT 1 FROM accounting_docs v
@@ -4836,7 +5236,8 @@ async def closing(
     await collect("payment_no_document", """
         SELECT d.id, d.date, d.number, d.counterparty_name, d.amount
           FROM accounting_docs d
-         WHERE d.company_id = :cid AND d.doc_type = 'bank_out' """ + where_period + """
+         WHERE d.company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR d.organization_id IS NULL OR d.organization_id = CAST(:org AS uuid)) AND d.doc_type = 'bank_out' """ + where_period + """
            AND coalesce(d.counterparty_inn, '') <> ''
            AND NOT EXISTS (
              SELECT 1 FROM accounting_docs x
@@ -4863,7 +5264,8 @@ async def closing(
     await collect("invoice_paid_no_sale", """
         SELECT d.id, d.date, d.number, d.counterparty_name, d.amount
           FROM accounting_docs d
-         WHERE d.company_id = :cid AND d.doc_type = 'invoice_out' """ + where_period + """
+         WHERE d.company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR d.organization_id IS NULL OR d.organization_id = CAST(:org AS uuid)) AND d.doc_type = 'invoice_out' """ + where_period + """
            AND EXISTS (SELECT 1 FROM invoice_payments ip WHERE ip.invoice_doc_id = d.id)
            AND NOT EXISTS (
              SELECT 1 FROM accounting_docs s
@@ -4877,7 +5279,8 @@ async def closing(
     await collect("not_posted", """
         SELECT d.id, d.date, d.number, d.counterparty_name, d.amount
           FROM accounting_docs d
-         WHERE d.company_id = :cid AND coalesce(d.status_1c, '') NOT IN ('Проведён', '')
+         WHERE d.company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR d.organization_id IS NULL OR d.organization_id = CAST(:org AS uuid)) AND coalesce(d.status_1c, '') NOT IN ('Проведён', '')
            AND d.doc_type NOT IN ('closing_op', 'act_recon', 'manual_entry')
            AND NOT EXISTS (SELECT 1 FROM gl_entries e WHERE e.doc_id = d.id) """ + where_period + """
          ORDER BY d.date DESC""")
@@ -5042,6 +5445,7 @@ _CHECKS: list[tuple] = [
                e.account_dt || '/' || e.account_kt, coalesce(e.doc_title, ''), e.amount
           FROM gl_entries e
          WHERE e.company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR e.organization_id IS NULL OR e.organization_id = CAST(:org AS uuid))
            AND (e.account_dt LIKE '09%' OR e.account_kt LIKE '09%'
              OR e.account_dt LIKE '77%' OR e.account_kt LIKE '77%')
            AND EXISTS (SELECT 1 FROM gl_references r WHERE r.company_id = :cid
@@ -5054,6 +5458,7 @@ _CHECKS: list[tuple] = [
                e.account_dt || '/' || e.account_kt, coalesce(e.doc_title, ''), e.amount
           FROM gl_entries e
          WHERE e.company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR e.organization_id IS NULL OR e.organization_id = CAST(:org AS uuid))
            AND (e.account_dt LIKE '63%' OR e.account_kt LIKE '63%')
            AND EXISTS (SELECT 1 FROM gl_references r WHERE r.company_id = :cid
                         AND r.kind = 'accounting_policy'
@@ -5065,6 +5470,7 @@ _CHECKS: list[tuple] = [
                e.account_dt || '/' || e.account_kt, coalesce(e.doc_title, ''), e.amount
           FROM gl_entries e
          WHERE e.company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR e.organization_id IS NULL OR e.organization_id = CAST(:org AS uuid))
            AND (e.account_dt LIKE '57%' OR e.account_kt LIKE '57%')
            AND EXISTS (SELECT 1 FROM gl_references r WHERE r.company_id = :cid
                         AND r.kind = 'accounting_policy'
@@ -5076,6 +5482,7 @@ _CHECKS: list[tuple] = [
                e.account_dt || '/' || e.account_kt, coalesce(e.doc_title, ''), e.amount
           FROM gl_entries e
          WHERE e.company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR e.organization_id IS NULL OR e.organization_id = CAST(:org AS uuid))
            AND (e.account_dt LIKE '68.12%' OR e.account_kt LIKE '68.12%')
            AND EXISTS (SELECT 1 FROM gl_references r WHERE r.company_id = :cid
                         AND r.kind = 'tax_mode'
@@ -5085,7 +5492,8 @@ _CHECKS: list[tuple] = [
      "Компания платит НДС, но у части реализаций налог не выделен — вычет и книга продаж поедут", """
         SELECT d.id::text, d.date, d.number, coalesce(d.counterparty_name, ''), d.amount
           FROM accounting_docs d
-         WHERE d.company_id = :cid AND d.doc_type = 'sale'
+         WHERE d.company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR d.organization_id IS NULL OR d.organization_id = CAST(:org AS uuid)) AND d.doc_type = 'sale'
            AND coalesce(d.vat_amount, 0) = 0 AND d.amount > 0
            AND EXISTS (SELECT 1 FROM gl_references r WHERE r.company_id = :cid
                         AND r.kind = 'tax_mode' AND r.meta->>'Плательщик НДС' = 'да')
@@ -5094,13 +5502,15 @@ _CHECKS: list[tuple] = [
     ("entries_no_doc", "books", "Проводки без первичного документа",
      "Проводка есть, документа под ней нет: обосновать запись нечем", """
         SELECT id::text, entry_date::text, coalesce(doc_kind, ''), coalesce(doc_title, ''), amount
-          FROM gl_entries WHERE company_id = :cid AND doc_id IS NULL
+          FROM gl_entries WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND doc_id IS NULL
          ORDER BY entry_date DESC"""),
     ("head_vs_lines", "books", "Сумма документа не сходится со строками",
      "Итог документа расходится с его же составом: обычно НДС начислен сверху", """
         SELECT d.id::text, d.date, d.number, d.counterparty_name, d.amount
           FROM accounting_docs d
-         WHERE d.company_id = :cid AND jsonb_array_length(coalesce(d.lines,'[]'::jsonb)) > 0
+         WHERE d.company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR d.organization_id IS NULL OR d.organization_id = CAST(:org AS uuid)) AND jsonb_array_length(coalesce(d.lines,'[]'::jsonb)) > 0
            AND d.doc_type <> 'payroll_accrual'
            AND abs(d.amount - (SELECT coalesce(sum((l->>'amount')::numeric),0)
                                  FROM jsonb_array_elements(d.lines) l)) > 0.01
@@ -5109,7 +5519,8 @@ _CHECKS: list[tuple] = [
      "Нулевая сумма у первички — обычно недозаполненный документ", """
         SELECT id::text, date, number, counterparty_name, amount
           FROM accounting_docs
-         WHERE company_id = :cid AND amount = 0
+         WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND amount = 0
            AND doc_type NOT IN ('closing_op', 'manual_entry', 'act_recon', 'vat_book_in',
                                 'vat_book_out', 'tax_notice', 'payroll_accrual', 'demand_note')
          ORDER BY date DESC"""),
@@ -5117,7 +5528,8 @@ _CHECKS: list[tuple] = [
      "Контрагент не сведён со справочником: документ не попадёт в его карточку и в акт сверки", """
         SELECT id::text, date, number, coalesce(counterparty_name, ''), amount
           FROM accounting_docs
-         WHERE company_id = :cid AND counterparty_id IS NULL
+         WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND counterparty_id IS NULL
            AND coalesce(counterparty_name, '') <> ''
            -- Выплата зарплаты идёт сотруднику: контрагента у неё не бывает.
            AND NOT EXISTS (SELECT 1 FROM gl_entries e
@@ -5132,12 +5544,14 @@ _CHECKS: list[tuple] = [
                round(b.book - coalesce(a.acct, 0), 2)
           FROM (SELECT substr(doc_date, 1, 7) AS period, sum(vat) AS book
                   FROM vat_entries
-                 WHERE company_id = :cid AND kind = 'book_sale' AND doc_date IS NOT NULL
+                 WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND kind = 'book_sale' AND doc_date IS NOT NULL
                  GROUP BY 1) b
           LEFT JOIN (SELECT period_year || '-' || lpad(period_month::text, 2, '0') AS period,
                             sum(amount) AS acct
                        FROM gl_entries
-                      WHERE company_id = :cid AND account_kt LIKE '68.02%'
+                      WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND account_kt LIKE '68.02%'
                       GROUP BY 1) a ON a.period = b.period
          WHERE abs(b.book - coalesce(a.acct, 0)) > 1
          ORDER BY b.period DESC"""),
@@ -5145,7 +5559,8 @@ _CHECKS: list[tuple] = [
      "Налог в документе не равен ставке периода: либо ошибка ввода, либо смешанные ставки в одной строке", """
         SELECT id::text, date, number, coalesce(counterparty_name, ''), amount
           FROM accounting_docs
-         WHERE company_id = :cid AND doc_type IN ('sale', 'purchase')
+         WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND doc_type IN ('sale', 'purchase')
            AND coalesce(vat_amount, 0) > 0 AND amount > 0
            AND abs(vat_amount - amount * (CASE WHEN date >= '2026-01-01'
                                                THEN 22.0/122 ELSE 20.0/120 END)) > 1
@@ -5155,7 +5570,8 @@ _CHECKS: list[tuple] = [
      "Пункт 3 статьи 168 НК: пять календарных дней от отгрузки. Позже — спор о вычете у покупателя", r"""
         SELECT id::text, date, number, coalesce(counterparty_name, ''), amount
           FROM accounting_docs
-         WHERE company_id = :cid AND doc_type = 'vat_invoice_out'
+         WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND doc_type = 'vat_invoice_out'
            AND details->>'Основание' ~ '\d{2}\.\d{2}\.\d{4}'
            AND date::date - to_date(substring(details->>'Основание'
                                               from '(\d{2}\.\d{2}\.\d{4})'), 'DD.MM.YYYY') > 5
@@ -5164,24 +5580,30 @@ _CHECKS: list[tuple] = [
      "Предъявленный налог висит на 19 счёте: вычет не заявлен, деньги лежат в бюджете зря", """
         SELECT min(id::text), max(entry_date)::text, account, 'не принят к вычету', sum(amt)
           FROM (SELECT id, entry_date, account_dt AS account, amount AS amt
-                  FROM gl_entries WHERE company_id = :cid AND account_dt LIKE '19%'
+                  FROM gl_entries WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND account_dt LIKE '19%'
                  UNION ALL
                 SELECT id, entry_date, account_kt, -amount
-                  FROM gl_entries WHERE company_id = :cid AND account_kt LIKE '19%') t
+                  FROM gl_entries WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND account_kt LIKE '19%') t
          GROUP BY account HAVING sum(amt) > 0.004"""),
     ("advance_out_stuck", "vat_in", "Аванс поставщику висит без поставки",
      "Деньги ушли, товара нет: либо поставка потерялась, либо аванс пора возвращать", """
         SELECT id::text, as_of::text, account, coalesce(sub1, '') || ' · ' || coalesce(sub2, ''), debit
           FROM gl_balances
-         WHERE company_id = :cid AND account LIKE '60.02%' AND debit > 1000
-           AND as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid AND source <> 'monthly')
+         WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND account LIKE '60.02%' AND debit > 1000
+           AND as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND source <> 'monthly')
          ORDER BY debit DESC"""),
     ("advance_vat_stuck", "vat_out", "НДС с полученного аванса не зачтён",
      "76.АВ висит: отгрузки по авансу не было, налог начислен и не возвращён вычетом", """
         SELECT id::text, as_of::text, account, coalesce(sub1, ''), debit
           FROM gl_balances
-         WHERE company_id = :cid AND account LIKE '76.АВ%' AND debit > 0.004
-           AND as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid AND source <> 'monthly')
+         WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND account LIKE '76.АВ%' AND debit > 0.004
+           AND as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND source <> 'monthly')
          ORDER BY debit DESC"""),
 
     # ── Первичка: то, что находит проверяющий раньше бухгалтера ────────────────
@@ -5190,7 +5612,8 @@ _CHECKS: list[tuple] = [
         SELECT min(id::text), date, string_agg(number, ' / ' ORDER BY number),
                coalesce(counterparty_name, ''), max(amount)
           FROM accounting_docs
-         WHERE company_id = :cid AND doc_type IN ('sale', 'purchase') AND amount > 0
+         WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND doc_type IN ('sale', 'purchase') AND amount > 0
          GROUP BY date, doc_type, coalesce(counterparty_inn, ''), counterparty_name, amount
         HAVING count(*) > 1
          ORDER BY max(amount) DESC"""),
@@ -5198,7 +5621,8 @@ _CHECKS: list[tuple] = [
      "Основание сделки не указано: для расхода это первый вопрос проверяющего", """
         SELECT id::text, date, number, coalesce(counterparty_name, ''), amount
           FROM accounting_docs
-         WHERE company_id = :cid AND doc_type IN ('sale', 'purchase')
+         WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND doc_type IN ('sale', 'purchase')
            AND amount > 100000 AND contract_id IS NULL
          ORDER BY amount DESC"""),
     ("invoice_overpaid", "money", "Счёт оплачен больше, чем выставлен",
@@ -5207,6 +5631,7 @@ _CHECKS: list[tuple] = [
                sum(ip.amount) - d.amount
           FROM accounting_docs d JOIN invoice_payments ip ON ip.invoice_doc_id = d.id
          WHERE d.company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR d.organization_id IS NULL OR d.organization_id = CAST(:org AS uuid))
          GROUP BY d.id, d.date, d.number, d.counterparty_name, d.amount
         HAVING sum(ip.amount) > d.amount + 0.01
          ORDER BY sum(ip.amount) - d.amount DESC"""),
@@ -5214,7 +5639,8 @@ _CHECKS: list[tuple] = [
      "Отрицательная сумма — это исправление: смотреть, что именно правили и почему", """
         SELECT id::text, entry_date::text, account_dt || '/' || account_kt,
                coalesce(doc_title, ''), amount
-          FROM gl_entries WHERE company_id = :cid AND amount < 0
+          FROM gl_entries WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND amount < 0
          ORDER BY amount"""),
 
     ("ndfl_reg_vs_acct", "payroll", "Регистр НДФЛ расходится с 68.01",
@@ -5223,9 +5649,11 @@ _CHECKS: list[tuple] = [
                'регистр ' || round(r.reg, 2) || ' · счёт ' || round(a.acct, 2),
                round(r.reg - a.acct, 2)
           FROM (SELECT coalesce(sum(amount) FILTER (WHERE kind = 'ndfl_tax'), 0) AS reg
-                  FROM payroll_entries WHERE company_id = :cid) r,
+                  FROM payroll_entries WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid))) r,
                (SELECT coalesce(sum(amount) FILTER (WHERE account_kt LIKE '68.01%'), 0) AS acct
-                  FROM gl_entries WHERE company_id = :cid) a
+                  FROM gl_entries WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid))) a
          WHERE abs(r.reg - a.acct) > 1 AND r.reg > 0"""),
     ("contrib_reg_vs_acct", "payroll", "Регистр взносов расходится с 69",
      "РСВ собирается по регистру взносов: расхождение с оборотами счёта надо объяснить", """
@@ -5233,23 +5661,27 @@ _CHECKS: list[tuple] = [
                'регистр ' || round(r.reg, 2) || ' · счёт ' || round(a.acct, 2),
                round(r.reg - a.acct, 2)
           FROM (SELECT coalesce(sum(amount) FILTER (WHERE kind = 'contrib_tax'), 0) AS reg
-                  FROM payroll_entries WHERE company_id = :cid) r,
+                  FROM payroll_entries WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid))) r,
                (SELECT coalesce(sum(amount) FILTER (WHERE account_kt LIKE '69%'), 0) AS acct
-                  FROM gl_entries WHERE company_id = :cid) a
+                  FROM gl_entries WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid))) a
          WHERE abs(r.reg - a.acct) > 100 AND r.reg > 0"""),
 
     ("payment_no_purpose", "money", "Платежи без назначения",
      "Назначение платежа — главный реквизит банковской операции: без него платёж не опознать", """
         SELECT id::text, date, number, counterparty_name, amount
           FROM accounting_docs
-         WHERE company_id = :cid AND doc_type IN ('bank_in', 'bank_out')
+         WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND doc_type IN ('bank_in', 'bank_out')
            AND coalesce(details->>'Назначение платежа', '') = ''
          ORDER BY date DESC"""),
     ("bank_no_article", "money", "Платежи без статьи движения денежных средств",
      "Без статьи ДДС платёж не встанет ни в один отчёт о движении денег", """
         SELECT id::text, date, number, counterparty_name, amount
           FROM accounting_docs
-         WHERE company_id = :cid AND doc_type IN ('bank_in', 'bank_out')
+         WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND doc_type IN ('bank_in', 'bank_out')
            AND coalesce(details->>'Статья ДДС', '') = ''
          ORDER BY date DESC"""),
 
@@ -5257,7 +5689,8 @@ _CHECKS: list[tuple] = [
      "Покупатель не получит вычет и потребует документ; у нас — риск по книге продаж", """
         SELECT d.id::text, d.date, d.number, d.counterparty_name, d.amount
           FROM accounting_docs d
-         WHERE d.company_id = :cid AND d.doc_type = 'sale' AND coalesce(d.vat_amount,0) > 0
+         WHERE d.company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR d.organization_id IS NULL OR d.organization_id = CAST(:org AS uuid)) AND d.doc_type = 'sale' AND coalesce(d.vat_amount,0) > 0
            AND NOT EXISTS (SELECT 1 FROM accounting_docs v
                  WHERE v.company_id = d.company_id AND v.doc_type = 'vat_invoice_out'
                    AND coalesce(v.counterparty_inn,'') = coalesce(d.counterparty_inn,'')
@@ -5267,7 +5700,8 @@ _CHECKS: list[tuple] = [
      "Не видно, чем подтверждена отгрузка: счёт-фактура сам по себе не первичка", """
         SELECT id::text, date, number, counterparty_name, amount
           FROM accounting_docs
-         WHERE company_id = :cid AND doc_type = 'vat_invoice_out'
+         WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND doc_type = 'vat_invoice_out'
            AND coalesce(details->>'Основание', '') = ''
          ORDER BY date DESC"""),
 
@@ -5275,7 +5709,8 @@ _CHECKS: list[tuple] = [
      "Вычет НДС заявить нечем — налог придётся заплатить полностью", """
         SELECT d.id::text, d.date, d.number, d.counterparty_name, d.amount
           FROM accounting_docs d
-         WHERE d.company_id = :cid AND d.doc_type = 'purchase' AND coalesce(d.vat_amount,0) > 0
+         WHERE d.company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR d.organization_id IS NULL OR d.organization_id = CAST(:org AS uuid)) AND d.doc_type = 'purchase' AND coalesce(d.vat_amount,0) > 0
            AND NOT EXISTS (SELECT 1 FROM accounting_docs v
                  WHERE v.company_id = d.company_id AND v.doc_type = 'vat_invoice_in'
                    AND coalesce(v.counterparty_inn,'') = coalesce(d.counterparty_inn,'')
@@ -5285,7 +5720,8 @@ _CHECKS: list[tuple] = [
      "В книге покупок нужен номер продавца, а не наш внутренний", """
         SELECT id::text, date, number, counterparty_name, amount
           FROM accounting_docs
-         WHERE company_id = :cid AND doc_type = 'vat_invoice_in'
+         WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND doc_type = 'vat_invoice_in'
            AND coalesce(external_number, '') = ''
          ORDER BY date DESC"""),
 
@@ -5303,17 +5739,21 @@ _CHECKS: list[tuple] = [
      "Списали больше, чем приняли: либо не хватает поступления, либо ошибка в количестве", """
         SELECT id::text, as_of::text, account, coalesce(sub1, ''), credit - debit
           FROM gl_balances
-         WHERE company_id = :cid AND (account LIKE '41%' OR account LIKE '10%'
+         WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND (account LIKE '41%' OR account LIKE '10%'
                                    OR account LIKE '43%') AND credit > debit
-           AND as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid AND source <> 'monthly')"""),
+           AND as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND source <> 'monthly')"""),
     # Остаток «не в свою сторону» — классика анализа состояния учёта: минус в дебете
     # активного счёта не бывает физически, это всегда ошибка ввода или зачёта.
     ("negative_balance", "books", "Отрицательное сальдо на счёте",
      "Минусовой остаток не бывает в природе: обычно зачёт не туда или ошибка ввода", """
         SELECT id::text, as_of::text, account, coalesce(sub1, ''), least(debit, credit)
           FROM gl_balances
-         WHERE company_id = :cid AND (debit < 0 OR credit < 0)
-           AND as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid AND source <> 'monthly')
+         WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND (debit < 0 OR credit < 0)
+           AND as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND source <> 'monthly')
          ORDER BY least(debit, credit)"""),
 
     # Регламентные операции, акты сверки и ручные операции в 1С не проводятся по
@@ -5347,7 +5787,7 @@ async def checks(
 ) -> dict[str, Any]:
     """Проверки состояния учёта, сгруппированные как экспресс-проверка в 1С."""
     cid = await assert_company_member(company_id, current_user, db)
-    p = {"cid": str(cid)}
+    p = {"cid": str(cid), "org": _org_param()}
     out: list[dict[str, Any]] = []
 
     policy_meta = {r[0]: (r[1] or {}) for r in (await db.execute(text("""
@@ -5384,7 +5824,8 @@ async def checks(
             amount = _num((await db.execute(text("""
                 SELECT coalesce(sum(amount) FILTER (WHERE account_kt LIKE :acct), 0)
                      - coalesce(sum(amount) FILTER (WHERE account_dt LIKE :acct), 0)
-                  FROM gl_entries WHERE company_id = :cid"""),
+                  FROM gl_entries WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid))"""),
                 {**p, "acct": acct + "%"})).scalar_one())
             count = 1 if amount > 0.004 else 0
 
@@ -5546,8 +5987,9 @@ async def create_requests_from_gaps(
     # документом и по ней же берутся контакты для обращения.
     parties = {r[0]: r[1] for r in (await db.execute(text("""
         SELECT id::text, counterparty_id::text FROM accounting_docs
-         WHERE company_id = :cid AND id = ANY(CAST(:ids AS uuid[]))"""),
-        {"cid": str(cid), "ids": [r["id"] for r in gap["rows"]] or ["00000000-0000-0000-0000-000000000000"]}
+         WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND id = ANY(CAST(:ids AS uuid[]))"""),
+        {"cid": str(cid), "org": _org_param(), "ids": [r["id"] for r in gap["rows"]] or ["00000000-0000-0000-0000-000000000000"]}
         )).all()}
 
     created = 0
@@ -5684,13 +6126,13 @@ async def request_letter(
             SELECT address FROM counterparty_emails
              WHERE company_id = :cid AND counterparty_id = CAST(:party AS uuid)
              ORDER BY created_at LIMIT 1"""),
-            {"cid": str(cid), "party": str(r.counterparty_id)})).first()
+            {"cid": str(cid), "org": _org_param(), "party": str(r.counterparty_id)})).first()
         to = row[0] if row else ""
 
     box = (await db.execute(text("""
         SELECT id::text, address, title FROM mail_accounts
          WHERE company_id = :cid AND mode <> 'in' AND is_active
-         ORDER BY created_at LIMIT 1"""), {"cid": str(cid)})).first()
+         ORDER BY created_at LIMIT 1"""), {"cid": str(cid), "org": _org_param()})).first()
 
     doc = None
     if r.source_doc_id:
@@ -5757,7 +6199,7 @@ async def send_request_letter(
     box = (await db.execute(text("""
         SELECT id::text FROM mail_accounts
          WHERE company_id = :cid AND mode <> 'in' AND is_active
-         ORDER BY created_at LIMIT 1"""), {"cid": str(cid)})).first()
+         ORDER BY created_at LIMIT 1"""), {"cid": str(cid), "org": _org_param()})).first()
     if not box:
         raise HTTPException(status_code=400, detail="У компании нет ящика для отправки")
 
@@ -5826,14 +6268,15 @@ async def resolve_requests(
         # накладной — реестр отчитывался о документах, которых не приходило.
         found = (await db.execute(text("""
             SELECT d.id FROM accounting_docs d
-             WHERE d.company_id = :cid AND d.doc_type = ANY(:types)
+             WHERE d.company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR d.organization_id IS NULL OR d.organization_id = CAST(:org AS uuid)) AND d.doc_type = ANY(:types)
                AND substr(d.date, 1, 7) = :period
                AND (CASE WHEN :party IS NOT NULL
                          THEN d.counterparty_id = CAST(:party AS uuid)
                          ELSE lower(coalesce(d.counterparty_name, '')) = lower(:name) END)
                AND (:amount <= 0 OR abs(d.amount - :amount) <= 1.0)
              ORDER BY d.date LIMIT 1"""),
-            {"cid": str(cid), "types": list(types), "period": r.period,
+            {"cid": str(cid), "org": _org_param(), "types": list(types), "period": r.period,
              "name": r.counterparty_name,
              "party": str(r.counterparty_id) if r.counterparty_id else None,
              "amount": _num(r.amount)})).scalar_one_or_none()
@@ -5891,7 +6334,7 @@ async def tax_forecast(
 ) -> dict[str, Any]:
     """Оценка НДС и налога на прибыль по кварталам плюс сценарий сбора документов."""
     cid = await assert_company_member(company_id, current_user, db)
-    p: dict[str, Any] = {"cid": str(cid)}
+    p: dict[str, Any] = {"cid": str(cid), "org": _org_param()}
 
     # НДС считаем ПО СЧЁТУ 68.02, а не по журналу счетов-фактур. Журнал знает только
     # выставленные и полученные СФ и не видит зачёт авансов (Дт 68.02 Кт 76.АВ) и
@@ -5906,6 +6349,7 @@ async def tax_forecast(
                                      AND account_kt NOT LIKE '51%'
                                      AND account_kt NOT LIKE '68.90%')                AS deducted
           FROM gl_entries WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid))
          GROUP BY 1"""), p)).all()
 
     # Книга — рядом, справкой: по ней сверяются с контрагентом и собирают декларацию.
@@ -5915,7 +6359,8 @@ async def tax_forecast(
                CASE WHEN kind = 'book_sale' THEN 'issued' ELSE 'received' END,
                sum(vat), count(*)
           FROM vat_entries
-         WHERE company_id = :cid AND doc_date IS NOT NULL
+         WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND doc_date IS NOT NULL
            AND kind IN ('book_sale', 'book_purchase')
          GROUP BY 1, 2"""), p)).all()
 
@@ -5956,6 +6401,7 @@ async def tax_forecast(
                sum(amount) FILTER (WHERE account_kt LIKE '91.01%')                       AS other_income,
                sum(amount) FILTER (WHERE account_dt LIKE '91.02%')                       AS other_expense
           FROM gl_entries WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid))
          GROUP BY 1"""), p)).all()
 
     for q, revenue, vat_sales, cost, oth_in, oth_exp in pl_rows:
@@ -5972,7 +6418,8 @@ async def tax_forecast(
                to_char(ceil(substr(period, 6, 2)::numeric / 3), 'FM9') AS q,
                rule, sum(amount), count(*)
           FROM doc_requests
-         WHERE company_id = :cid AND status IN ('open', 'requested', 'promised')
+         WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND status IN ('open', 'requested', 'promised')
          GROUP BY 1, 2"""), p)).all()
 
     for q, rule, amount, cnt in pending:
@@ -6023,15 +6470,18 @@ async def tax_forecast(
     payroll = (await db.execute(text("""
         SELECT coalesce(sum(amount) FILTER (WHERE kind = 'ndfl'), 0),
                coalesce(sum(amount) FILTER (WHERE kind = 'contribution'), 0)
-          FROM payroll_entries WHERE company_id = :cid"""), p)).one()
+          FROM payroll_entries WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid))"""), p)).one()
 
     # Долги перед бюджетом на дату среза: что уже начислено и не уплачено.
     budget = [{"account": r[0], "name": r[1], "debt": _num(r[2])}
               for r in (await db.execute(text("""
         SELECT account, max(coalesce(account_name, '')), sum(credit - debit)
           FROM gl_balances
-         WHERE company_id = :cid AND (account LIKE '68%' OR account LIKE '69%')
-           AND as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid AND source <> 'monthly')
+         WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND (account LIKE '68%' OR account LIKE '69%')
+           AND as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND source <> 'monthly')
          GROUP BY account HAVING abs(sum(credit - debit)) > 0.004
          ORDER BY 3 DESC"""), p)).all()]
 
@@ -6098,7 +6548,7 @@ async def export_layer(
     по которым корректировки повторяются в следующих периодах.
     """
     cid = await assert_company_member(company_id, current_user, db)
-    p: dict[str, Any] = {"cid": str(cid), "period": period}
+    p: dict[str, Any] = {"cid": str(cid), "org": _org_param(), "period": period, "org": _org_param()}
 
     q = select(ExportAdjustment).where(ExportAdjustment.company_id == cid)
     if period:
@@ -6384,7 +6834,7 @@ async def tax_calendar(
 ) -> dict[str, Any]:
     """Календарь сроков, начисления на ЕНС, уведомления и сданная отчётность."""
     cid = await assert_company_member(company_id, current_user, db)
-    p: dict[str, Any] = {"cid": str(cid)}
+    p: dict[str, Any] = {"cid": str(cid), "org": _org_param()}
     today = date.today().isoformat()
 
     # Задачи бухгалтера: срок, период события, статус. Архивные не показываем —
@@ -6430,15 +6880,18 @@ async def tax_calendar(
     enp_balance = _num((await db.execute(text("""
         SELECT coalesce(sum(amount) FILTER (WHERE account_kt LIKE '68.90%'), 0)
              - coalesce(sum(amount) FILTER (WHERE account_dt LIKE '68.90%'), 0)
-          FROM gl_entries WHERE company_id = :cid"""), p)).scalar_one())
+          FROM gl_entries WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid))"""), p)).scalar_one())
 
     # Долг перед бюджетом по каждому налогу: кредит минус дебет счёта 68/69.
     debts = [{"account": r[0], "name": r[1] or r[0], "amount": _num(r[2])}
              for r in (await db.execute(text("""
         SELECT account, max(account_name), sum(credit) - sum(debit)
           FROM gl_balances
-         WHERE company_id = :cid AND (account LIKE '68%' OR account LIKE '69%')
-           AND as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid AND source <> 'monthly')
+         WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND (account LIKE '68%' OR account LIKE '69%')
+           AND as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND source <> 'monthly')
          GROUP BY account HAVING abs(sum(credit) - sum(debit)) > 0.004
          ORDER BY 3 DESC"""), p)).all()]
 
@@ -6449,7 +6902,8 @@ async def tax_calendar(
                    for r in (await db.execute(text("""
         SELECT as_of::text, sum(credit) - sum(debit)
           FROM gl_balances
-         WHERE company_id = :cid AND source = 'monthly'
+         WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND source = 'monthly'
            AND (account LIKE '68%' OR account LIKE '69%')
          GROUP BY as_of ORDER BY as_of DESC LIMIT 24"""), p)).all()]
 
@@ -6460,7 +6914,8 @@ async def tax_calendar(
     } for r in (await db.execute(text("""
         SELECT number, date, amount, details, lines
           FROM accounting_docs
-         WHERE company_id = :cid AND doc_type = 'tax_notice'
+         WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND doc_type = 'tax_notice'
          ORDER BY date DESC LIMIT 24"""), p)).all()]
 
     filed = [{"date": r[0], "title": r[1],
@@ -6497,7 +6952,7 @@ async def trends(
 ) -> dict[str, Any]:
     """Динамика по месяцам и находки, которые стоит объяснить."""
     cid = await assert_company_member(company_id, current_user, db)
-    p: dict[str, Any] = {"cid": str(cid)}
+    p: dict[str, Any] = {"cid": str(cid), "org": _org_param()}
 
     months = [{
         "month": r[0], "revenue": _num(r[1]), "cost": _num(r[2]),
@@ -6518,10 +6973,12 @@ async def trends(
                + coalesce(sum(amount) FILTER (WHERE account_dt LIKE '91.02%'), 0)
                - coalesce(sum(amount) FILTER (WHERE account_kt LIKE '91.01%'), 0)
                  AS expense
-            FROM gl_entries WHERE company_id = :cid GROUP BY 1
+            FROM gl_entries WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) GROUP BY 1
         ), d AS (
           SELECT substr(date, 1, 7) AS m, count(*) AS docs
-            FROM accounting_docs WHERE company_id = :cid GROUP BY 1
+            FROM accounting_docs WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) GROUP BY 1
         )
         SELECT e.m, coalesce(e.revenue, 0), coalesce(e.cost, 0), coalesce(e.expense, 0),
                coalesce(d.docs, 0)
@@ -6578,7 +7035,8 @@ async def trends(
               for r in (await db.execute(text("""
         SELECT amount, date, doc_type, number, coalesce(counterparty_name, '')
           FROM accounting_docs
-         WHERE company_id = :cid AND date > to_char(CURRENT_DATE, 'YYYY-MM-DD')
+         WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND date > to_char(CURRENT_DATE, 'YYYY-MM-DD')
          ORDER BY date DESC LIMIT 50"""), p)).all()]
     add("future_dated", "Документы датированы будущим",
         "Дата позже сегодняшней: обычно опечатка в дате, но в закрытом периоде это уже расхождение",
@@ -6592,7 +7050,8 @@ async def trends(
         SELECT coalesce(max(counterparty_name), ''), sum(amount),
                max(substr(date, 1, 7)), count(*)
           FROM accounting_docs
-         WHERE company_id = :cid AND doc_type = 'purchase'
+         WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND doc_type = 'purchase'
            AND coalesce(counterparty_name, '') <> ''
          GROUP BY coalesce(counterparty_id::text, lower(counterparty_name))
         HAVING count(*) <= 2 AND sum(amount) > :big
@@ -6609,7 +7068,8 @@ async def trends(
                   for r in (await db.execute(text("""
         SELECT amount, date, number, doc_type, coalesce(counterparty_name, '')
           FROM accounting_docs
-         WHERE company_id = :cid AND doc_type = 'purchase'
+         WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND doc_type = 'purchase'
            AND amount >= :notable AND amount = round(amount) AND (amount::numeric % 10000) = 0
            AND NOT EXISTS (
              SELECT 1 FROM accounting_docs x
@@ -6630,7 +7090,8 @@ async def trends(
                sum(amount) FILTER (WHERE doc_type = 'sale'),
                sum(amount) FILTER (WHERE doc_type = 'purchase')
           FROM accounting_docs
-         WHERE company_id = :cid AND coalesce(counterparty_name, '') <> ''
+         WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND coalesce(counterparty_name, '') <> ''
          GROUP BY coalesce(counterparty_id::text, lower(counterparty_name))
         HAVING sum(amount) FILTER (WHERE doc_type = 'sale') > 0
            AND sum(amount) FILTER (WHERE doc_type = 'purchase') > 0
@@ -6668,7 +7129,8 @@ async def trends(
                                               AND account_kt NOT LIKE '51%'
                                               AND account_kt NOT LIKE '68.90%'), 0)
           FROM gl_entries
-         WHERE company_id = :cid AND period_year >= :y"""),
+         WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND period_year >= :y"""),
         {**p, "y": int(year_now[:4] or 0) - 1})).one()
     if _num(vat_acc) > 0:
         share = _num(vat_ded) / _num(vat_acc) * 100
@@ -6679,7 +7141,8 @@ async def trends(
     # 2. Налоговая нагрузка: уплачено налогов к выручке без НДС.
     paid = _num((await db.execute(text("""
         SELECT coalesce(sum(amount), 0) FROM gl_entries
-         WHERE company_id = :cid AND period_year >= :y
+         WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND period_year >= :y
            AND (account_dt LIKE '68%' OR account_dt LIKE '69%')
            AND (account_kt LIKE '51%' OR account_kt LIKE '50%')"""),
         {**p, "y": int(year_now[:4] or 0) - 1})).scalar_one())
@@ -6733,7 +7196,8 @@ async def trends(
         SELECT coalesce(sum(amount) FILTER (WHERE kind = 'accrual'), 0),
                count(DISTINCT employee_id),
                count(DISTINCT period_month)
-          FROM payroll_entries WHERE company_id = :cid"""), p)).one()
+          FROM payroll_entries WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid))"""), p)).one()
     if heads and mons and _num(fot) > 0:
         avg = _num(fot) / heads / mons
         risk("Зарплата на человека в месяц", f"{avg:,.0f} ₽".replace(",", " "),

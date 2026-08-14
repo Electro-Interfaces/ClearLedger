@@ -20,7 +20,9 @@ import { getCategoriesForProfile, type Category } from '@/config/categories'
 import { useAuth } from '@/contexts/AuthContext'
 import type { CompanyRef } from '@/services/authService'
 import { resetServiceCaches, setServicesCompany } from '@/services/cacheReset'
-import { setApiCompany } from '@/services/apiClient'
+import { getApiOrganization, setApiCompany, setApiOrganization } from '@/services/apiClient'
+import * as referenceService from '@/services/referenceService'
+import { useQuery } from '@tanstack/react-query'
 import { useRegistryModules, intersectAccess } from '@/hooks/useCompanyRegistry'
 
 interface CompanyContextType {
@@ -28,6 +30,16 @@ interface CompanyContextType {
   companyId: string
   companies: Company[]
   setCompanyId: (id: string) => void
+  /**
+   * Организации (юрлица) активной компании и выбранная из них.
+   *
+   * Компания — это КЛИЕНТ (одна база 1С), организация — юрлицо внутри его учёта.
+   * У аутсорсера их обычно несколько: ООО и ИП одного владельца в одной базе, и без
+   * выбора их цифры складываются в одну. Пусто = все организации, законный сводный режим.
+   */
+  organizations: { id: string; name: string; inn?: string }[]
+  organizationId: string | null
+  setOrganizationId: (id: string | null) => void
   companyRole: 'user' | 'admin'   // роль текущего пользователя в активной компании
   isCompanyAdmin: boolean         // admin в активной компании ИЛИ суперадмин
   // Что показывать в активной компании: права RBAC ∩ состав поставки (реестр Ядра).
@@ -116,6 +128,35 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
     setCompanyIdState(id)
   }, [user, companies])
 
+  // Организации активной компании: список нужен и переключателю, и для сброса
+  // выбора при смене компании — юрлицо одного клиента не должно утечь в другого.
+  const orgsQ = useQuery({
+    queryKey: ['own-organizations', companyId],
+    queryFn: () => referenceService.getOrganizations(companyId),
+    enabled: !!companyId,
+  })
+  const organizations = useMemo(
+    () => (orgsQ.data ?? []).map((o) => ({ id: o.id, name: o.name, inn: o.inn })),
+    [orgsQ.data],
+  )
+  const [organizationId, setOrganizationIdState] = useState<string | null>(getApiOrganization())
+
+  useEffect(() => {
+    // Выбранная организация обязана принадлежать активной компании: иначе после
+    // переключения клиента экран покажет пустоту, а причина будет невидима.
+    if (organizationId && organizations.length &&
+        !organizations.some((o) => o.id === organizationId)) {
+      setApiOrganization(null)
+      setOrganizationIdState(null)
+    }
+  }, [organizations, organizationId])
+
+  const setOrganizationId = useCallback((id: string | null) => {
+    setApiOrganization(id)          // синхронно — заголовок готов до рефетчей
+    setOrganizationIdState(id)
+    qc.clear()                      // разрез данных сменился целиком
+  }, [qc])
+
   const company = companies.find((c) => c.id === companyId)
 
   const profile = useMemo<CompanyProfile | null>(
@@ -182,6 +223,9 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
         companyId: companyId || activeCompany.id,
         companies,
         setCompanyId,
+        organizations,
+        organizationId,
+        setOrganizationId,
         companyRole,
         isCompanyAdmin,
         companyModules,

@@ -7,6 +7,7 @@ import { HeaderUserMenu } from '@/components/layout/HeaderUserMenu'
 import { HeaderInteractionButtons } from '@/components/layout/HeaderInteractionButtons'
 import { APP_VERSION } from '@/config/version'
 import { ECOSYSTEM_BRAND } from '@/config/brand'
+import { OrganizationSelector } from '@/components/layout/OrganizationSelector'
 import { useCompany } from '@/contexts/CompanyContext'
 import { coreAppTitle, isCarvedProfile, productForPath, productLabel } from '@/config/spaceProducts'
 import { CompanySelector } from '@/components/company/CompanySelector'
@@ -77,6 +78,9 @@ export function Header({ onMobileMenuToggle, isMobile }: HeaderProps) {
             прямо в рабочей области. В шапке остаётся выбор компании. */}
         <div className="hidden flex-1 items-center justify-end min-w-0 gap-2 px-2 sm:flex sm:justify-center">
           <CompanySelector />
+          {/* Юрлицо внутри учёта компании. Появляется только там, где их несколько:
+              у клиента с одной организацией выбирать нечего. */}
+          <OrganizationSelector />
         </div>
 
         {/* Распорка: прижимает связь и профиль к правому краю. */}

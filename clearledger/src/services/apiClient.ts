@@ -29,6 +29,25 @@ export function setApiCompany(id: string | null): void {
   activeCompanyId = id || null
 }
 
+// Активная ОРГАНИЗАЦИЯ (юрлицо внутри учёта клиента) — уходит заголовком
+// X-Organization-Id. Компания решает, к чьему учёту есть доступ; организация — на
+// какое юрлицо этого учёта человек сейчас смотрит. Пусто = все организации: сводная
+// картина по клиенту нужна не реже, чем разрез по юрлицу.
+const ORG_KEY = 'elsy.activeOrganization'
+let activeOrganizationId: string | null = localStorage.getItem(ORG_KEY)
+
+/** Прокинуть активную организацию в HTTP-клиент (заголовок X-Organization-Id). */
+export function setApiOrganization(id: string | null): void {
+  activeOrganizationId = id || null
+  if (id) localStorage.setItem(ORG_KEY, id)
+  else localStorage.removeItem(ORG_KEY)
+}
+
+/** Активная организация, выбранная в интерфейсе. */
+export function getApiOrganization(): string | null {
+  return activeOrganizationId
+}
+
 /** Получить сохранённый токен */
 export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY)
@@ -138,6 +157,7 @@ function headers(extra?: Record<string, string>): Record<string, string> {
   const token = getToken()
   if (token) h['Authorization'] = `Bearer ${token}`
   if (activeCompanyId) h['X-Company-Id'] = activeCompanyId
+  if (activeOrganizationId) h['X-Organization-Id'] = activeOrganizationId
   return h
 }
 

@@ -35,7 +35,7 @@ from __future__ import annotations
 import uuid
 from contextvars import ContextVar
 
-from sqlalchemy import select
+from sqlalchemy import select, true as sa_true
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import ServiceLocation, User, UserCompany
@@ -165,3 +165,48 @@ def install_orm_scope() -> None:
             with_loader_criteria(ChargeSession, ChargeSession.location_id.in_(ids),
                                  include_aliases=True),
         )
+
+
+# ── Активная организация запроса ────────────────────────────────────────────
+# Компания пространства — это КЛИЕНТ (одна база 1С). Организация — ЮРЛИЦО внутри
+# его учёта, и у аутсорсера их обычно несколько: ООО и ИП одного владельца в одной
+# базе. Без выбора организации их цифры складываются в одну — тихо, без ошибки на
+# экране, и «НДС к уплате» показывает сумму двух налогоплательщиков.
+#
+# Ведётся тем же приёмом, что и скоуп объектов, и по той же причине: фильтр нужен
+# десяткам ручек, и протаскивать его параметром — однажды забыть в одной и смешать
+# юрлица. None означает «все организации компании» — это законный режим: сводная
+# картина по клиенту нужна не реже, чем разрез по юрлицу.
+
+_current_org: ContextVar[uuid.UUID | None] = ContextVar("organization", default=None)
+
+
+def set_request_organization(org_id: uuid.UUID | None) -> None:
+    """Задать активную организацию запроса."""
+    _current_org.set(org_id)
+
+
+def current_organization() -> uuid.UUID | None:
+    """Организация текущего запроса. None = все организации компании."""
+    return _current_org.get()
+
+
+def org_filter(column):
+    """Условие фильтра по активной организации для SQLAlchemy-выборки.
+
+    Возвращает `True`-условие, когда организация не выбрана: так вызов остаётся
+    одинаковым в обоих режимах и не заводит ветвлений в каждой ручке.
+    """
+    org = current_organization()
+    return column == org if org is not None else sa_true()
+
+
+def org_sql() -> str:
+    """То же для текстовых запросов: кусок WHERE и параметр `:org`.
+
+    Условие написано так, чтобы работать и с NULL в данных: строки без организации
+    (загруженные до появления оси) остаются видимыми в разрезе любого юрлица —
+    иначе экран опустеет там, где данные просто старые.
+    """
+    return ("(:org IS NULL OR organization_id IS NULL "
+            "OR organization_id = CAST(:org AS uuid))")
