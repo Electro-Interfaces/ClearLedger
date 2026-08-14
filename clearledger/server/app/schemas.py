@@ -75,6 +75,10 @@ class CompanyBrief(BaseModel):
     profile_id: str
     role: str = "user"   # роль пользователя в этой компании (user|admin); суперадмин — admin
     modules: list[str] | None = None   # RBAC: разрешённые модули; null = полный доступ
+    # Юрлицо, закреплённое за участником. Интерфейс по нему понимает, что выбор
+    # организации в шапке зафиксирован правами, и не обещает переключение, которого
+    # сервер всё равно не даст.
+    own_organization_id: str | None = None
 
 
 class MeResponse(BaseModel):
@@ -166,6 +170,8 @@ class MemberScopeUpdate(BaseModel):
     """
     company_id: str
     object_scope: list[str] | None = None
+    # Юрлицо участника: '' или null снимают ограничение (видит все).
+    own_organization_id: str | None = None
 
 
 class BusinessGrant(BaseModel):
@@ -235,6 +241,9 @@ class UserAdminResponse(BaseModel):
     role_id: str | None = None      # назначенная именованная роль доступа (company_roles)
     role_name: str | None = None    # имя назначенной роли (для UI)
     object_scope: list[str] | None = None  # скоуп данных: объекты; null = вся сеть
+    # Юрлицо клиента, которое ведёт участник; null = видит все юрлица компании.
+    own_organization_id: str | None = None
+    own_organization_name: str | None = None
     business_grants: list[BusinessGrant] = Field(default_factory=list)  # права = объединение grant
     contract_ids: list[str] | None = None  # основание допуска: договоры (справка, не права)
     department_id: str | None = None       # подразделение штатной структуры

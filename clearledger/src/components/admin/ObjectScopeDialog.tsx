@@ -20,6 +20,7 @@ import { Check, Loader2, MapPin, Search } from 'lucide-react'
 import * as userService from '@/services/userService'
 import type { AdminUser } from '@/services/userService'
 import { listSpaceObjects } from '@/services/spaceObjectsService'
+import * as referenceService from '@/services/referenceService'
 
 export function ObjectScopeDialog({ member, companyId, onSaved }: {
   member: AdminUser; companyId: string; onSaved: () => void
@@ -29,6 +30,17 @@ export function ObjectScopeDialog({ member, companyId, onSaved }: {
   const [search, setSearch] = useState('')
   const [all, setAll] = useState(!member.object_scope?.length)
   const [sel, setSel] = useState<Set<string>>(new Set(member.object_scope ?? []))
+  const [orgId, setOrgId] = useState<string>(member.own_organization_id ?? '')
+
+  // Юрлица клиента: у аутсорсера в одной базе 1С несколько организаций одного
+  // владельца, и «бухгалтер ИП» не обязан видеть обороты ООО.
+  const orgsQ = useQuery({
+    queryKey: ['own-organizations', companyId],
+    queryFn: () => referenceService.getOrganizations(companyId),
+    enabled: open,
+    staleTime: 5 * 60_000,
+  })
+  const orgs = orgsQ.data ?? []
 
   const objectsQ = useQuery({
     queryKey: ['space-objects-scope', companyId],
@@ -44,6 +56,7 @@ export function ObjectScopeDialog({ member, companyId, onSaved }: {
     if (v) {
       setAll(!member.object_scope?.length)
       setSel(new Set(member.object_scope ?? []))
+      setOrgId(member.own_organization_id ?? '')
       setSearch('')
     }
     setOpen(v)
@@ -56,9 +69,12 @@ export function ObjectScopeDialog({ member, companyId, onSaved }: {
   }, [objects, search])
 
   const save = useMutation({
-    mutationFn: () => userService.setMemberScope(member.id, companyId, all ? null : [...sel]),
+    mutationFn: () => userService.setMemberScope(
+      member.id, companyId, all ? null : [...sel], orgId || null),
     onSuccess: () => {
-      toast.success(all ? 'Доступ ко всей сети' : `Объектов в доступе: ${sel.size}`)
+      const orgName = orgs.find((o) => o.id === orgId)?.name
+      toast.success(all ? 'Доступ ко всей сети' : `Объектов в доступе: ${sel.size}`,
+        { description: orgName ? `Юрлицо: ${orgName}` : 'Юрлица: все' })
       qc.invalidateQueries({ queryKey: ['team-members', companyId] })
       onSaved(); setOpen(false)
     },
@@ -86,6 +102,24 @@ export function ObjectScopeDialog({ member, companyId, onSaved }: {
           Данные на всех экранах — сессии, оборудование, объекты — сузятся до выбранных.
           Что именно человек открывает, задаёт роль.
         </p>
+        {/* Юрлицо стоит ПЕРЕД объектами: это более крупный разрез — сначала «чей
+            учёт», потом «какие точки внутри него». */}
+        <label className="block text-sm font-medium">
+          Юрлицо клиента
+          <select value={orgId} onChange={(e) => setOrgId(e.target.value)}
+            className="mt-1 h-8 w-full rounded-md border border-border bg-background
+                       px-2 text-[13px] outline-none">
+            <option value="">Все юрлица компании</option>
+            {orgs.map((o) => (
+              <option key={o.id} value={o.id}>{o.name}{o.inn ? ` · ИНН ${o.inn}` : ''}</option>
+            ))}
+          </select>
+          <span className="mt-1 block text-[11px] font-normal text-muted-foreground">
+            Ограничение сильнее выбора в шапке: человек не увидит чужое юрлицо, даже
+            переключив его вручную.
+          </span>
+        </label>
+
         <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
           <input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} className="h-4 w-4" />
           Вся сеть организации

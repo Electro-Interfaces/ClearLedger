@@ -29,6 +29,9 @@ export interface AdminUser {
   // Скоуп данных: объекты, по которым человек видит данные; null = вся сеть компании.
   // Ортогонален правам: modules — какие экраны, object_scope — по каким объектам.
   object_scope?: string[] | null
+  /** Юрлицо клиента, которое ведёт участник; null = видит все. */
+  own_organization_id?: string | null
+  own_organization_name?: string | null
   business_grants?: BusinessGrant[]
   // Основание допуска: договоры, по которым человек здесь работает. Не права и не
   // скоуп — справка «почему он в пространстве»; у своих сотрудников обычно пусто.
@@ -136,9 +139,12 @@ export async function setMemberAccess(
 /** Скоуп данных члена: объекты, по которым он видит данные. null/пусто = вся сеть. */
 export async function setMemberScope(
   id: string, companyId: string, objectScope: string[] | null,
+  ownOrganizationId?: string | null,
 ): Promise<AdminUser> {
   return put<AdminUser>(`/api/users/${id}/scope`, {
     company_id: companyId, object_scope: objectScope,
+    // undefined — не трогать назначение; '' — снять ограничение по юрлицу.
+    ...(ownOrganizationId === undefined ? {} : { own_organization_id: ownOrganizationId ?? '' }),
   })
 }
 

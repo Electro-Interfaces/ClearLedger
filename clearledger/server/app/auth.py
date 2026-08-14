@@ -152,7 +152,7 @@ async def assert_company_member(
     десяткам ручек, и протаскивать его параметром — однажды забыть в одной и открыть
     данные. Пройти к данным компании мимо этой функции нельзя.
     """
-    from app.scope import _as_ids, set_request_scope
+    from app.scope import _as_ids, set_request_organization, set_request_scope
 
     cid = await resolve_company_id(company_ref, db)  # 400, если нет такой компании
     if user.is_superadmin:
@@ -171,6 +171,13 @@ async def assert_company_member(
         )
     # Админ компании видит всю сеть: иначе он не настроит то, чего не видит.
     set_request_scope(None if m.role == "admin" else _as_ids(m.object_scope))
+
+    # Право на юрлицо СИЛЬНЕЕ выбора в интерфейсе: если человеку назначена
+    # организация, заголовок её не переопределяет. Иначе достаточно подменить
+    # `X-Organization-Id` руками, чтобы увидеть чужое юрлицо — а разрез по юрлицу
+    # для аутсорсера это разные клиенты одного владельца.
+    if m.role != "admin" and m.own_organization_id:
+        set_request_organization(m.own_organization_id)
     return cid
 
 

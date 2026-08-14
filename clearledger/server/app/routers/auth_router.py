@@ -300,7 +300,9 @@ async def get_me(
         # фронт читает NULL как «полный доступ» — то есть назначенная роль не
         # ограничивала ничего. admin-член видит всё.
         briefs = [
-            _brief(c, uc.role, None if uc.role == "admin" else await resolve_member_modules(uc, db))
+            _brief(c, uc.role, None if uc.role == "admin" else await resolve_member_modules(uc, db),
+                   None if uc.role == "admin" or not getattr(uc, "own_organization_id", None)
+                   else str(uc.own_organization_id))
             for c, uc in rows
         ]
 
@@ -337,11 +339,12 @@ async def get_me(
     )
 
 
-def _brief(c, role: str, modules: list[str] | None = None) -> CompanyBrief:
+def _brief(c, role: str, modules: list[str] | None = None,
+           own_org: str | None = None) -> CompanyBrief:
     return CompanyBrief(
         id=str(c.id), slug=c.slug, name=c.name,
         short_name=c.short_name, color=c.color, profile_id=c.profile_id, role=role,
-        modules=modules,
+        modules=modules, own_organization_id=own_org,
     )
 
 

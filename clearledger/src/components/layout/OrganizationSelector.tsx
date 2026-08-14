@@ -15,26 +15,36 @@ import { Building2, Check, ChevronDown } from 'lucide-react'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { useAuth } from '@/contexts/AuthContext'
 import { useCompany } from '@/contexts/CompanyContext'
 import { cn } from '@/lib/utils'
 
 export function OrganizationSelector() {
-  const { organizations, organizationId, setOrganizationId } = useCompany()
+  const { organizations, organizationId, setOrganizationId, companyId } = useCompany()
+  const { user } = useAuth()
+  // Юрлицо, закреплённое правами. Сервер игнорирует заголовок у такого участника,
+  // поэтому и переключатель не должен обещать выбор, которого не будет.
+  const pinnedId = (user?.companies ?? []).find((c) => c.id === companyId)?.own_organization_id
+  const pinned = pinnedId ? organizations.find((o) => o.id === pinnedId) : undefined
   const active = organizations.find((o) => o.id === organizationId)
   // Организаций может не быть вовсе (компания без своего учёта) — тогда переключатель
   // честно говорит об этом, а не притворяется, что выбор есть.
-  const label = active ? active.name
+  const label = pinned ? pinned.name
+    : active ? active.name
     : organizations.length ? 'Все организации'
     : 'Организация не заведена'
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button className="flex h-8 max-w-[220px] items-center gap-1.5 rounded-md border
-                           border-border px-2.5 text-[13px] hover:bg-accent">
+      <DropdownMenuTrigger asChild disabled={!!pinned}>
+        <button title={pinned ? 'Юрлицо закреплено за вами правами доступа' : undefined}
+          className="flex h-8 max-w-[220px] items-center gap-1.5 rounded-md border
+                     border-border px-2.5 text-[13px] hover:bg-accent
+                     disabled:cursor-default disabled:opacity-100"
+          disabled={!!pinned}>
           <Building2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           <span className="truncate">{label}</span>
-          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          {!pinned && <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="center" className="w-64">

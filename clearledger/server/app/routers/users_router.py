@@ -20,7 +20,8 @@ from app.audit import log_audit
 from app.auth import get_current_user, hash_password, resolve_member_modules
 from app.business_access import normalize_business_grants
 from app.database import get_db
-from app.models import (ChatParticipant, ChatRoom, Contract, Counterparty, Company,
+from app.models import (
+    Organization,ChatParticipant, ChatRoom, Contract, Counterparty, Company,
                         CompanyRole, Department, EdgeAgent, ServiceLocation, User,
                         UserCompany)
 from app.services import email_service
@@ -107,6 +108,8 @@ async def _resp(
     org_id: str | None = None
     org_name: str | None = None
     object_scope: list[str] | None = None
+    own_org_id: str | None = None
+    own_org_name: str | None = None
     business_grants: list[dict] = []
     contract_ids: list[str] | None = None
     department_id: str | None = None
@@ -125,6 +128,10 @@ async def _resp(
             # Скоуп отдаём как есть: на админа он не действует, но админом человек
             # может перестать быть — заранее заданный список тогда пригодится.
             object_scope = [str(x) for x in (m.object_scope or [])] or None
+            if getattr(m, "own_organization_id", None):
+                own_org = await db.get(Organization, m.own_organization_id)
+                if own_org is not None:
+                    own_org_id, own_org_name = str(own_org.id), own_org.name
             business_grants = list(getattr(m, "business_grants", None) or [])
             # Основание допуска — справка, а не права: отдаём всем, включая админов.
             contract_ids = [str(x) for x in (getattr(m, "contract_ids", None) or [])] or None
@@ -143,6 +150,7 @@ async def _resp(
         id=str(u.id), email=u.email, name=u.name,
         role=role, position=position, modules=modules,
         role_id=role_id_str, role_name=role_name, object_scope=object_scope,
+        own_organization_id=own_org_id, own_organization_name=own_org_name,
         business_grants=business_grants,
         contract_ids=contract_ids,
         department_id=department_id, department_name=department_name,
@@ -391,9 +399,28 @@ async def set_member_scope(
             ServiceLocation.company_id == cid, ServiceLocation.id.in_(raw_ids)))).scalars().all()
         ids = [str(x) for x in own]
     m.object_scope = ids or None
+
+    # Юрлицо участника: у аутсорсера в одной базе несколько организаций одного
+    # владельца, и «бухгалтер ИП» не обязан видеть обороты ООО. Чужая организация
+    # молча игнорируется — проверяем принадлежность компании, а не доверяем запросу.
+    if payload.own_organization_id is not None:
+        raw = (payload.own_organization_id or "").strip()
+        org_uid = None
+        if raw:
+            try:
+                cand = uuid.UUID(raw)
+            except ValueError:
+                cand = None
+            if cand is not None:
+                org_uid = (await db.execute(select(Organization.id).where(
+                    Organization.company_id == cid, Organization.id == cand))).scalar_one_or_none()
+        m.own_organization_id = org_uid
+
     await log_audit(db, actor=current_user, company_id=cid, action="member.scope",
                     target=(target.email if target else user_id),
-                    details={"objects": len(ids) if ids else "вся сеть"})
+                    details={"objects": len(ids) if ids else "вся сеть",
+                             "организация": str(m.own_organization_id) if m.own_organization_id
+                             else "все юрлица"})
     await db.commit()
     return await _resp(target, db, scope_cid=cid)
 

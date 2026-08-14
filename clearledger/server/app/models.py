@@ -176,6 +176,16 @@ class UserCompany(Base):
     organization_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("counterparties.id", ondelete="SET NULL"), nullable=True
     )
+    # ЮРЛИЦО, которое участник ведёт. Не путать с `organization_id` выше: та про
+    # внешнего подрядчика и ссылается на контрагента, а это — своя организация
+    # компании (юрлицо её учёта). NULL = человек видит все юрлица клиента.
+    #
+    # Одно юрлицо, а не список: реальный случай — «бухгалтер ИП» и «бухгалтер ООО»,
+    # и набор из нескольких потребует `= ANY(...)` во всех выборках. Заведём, когда
+    # появится человек, ведущий два юрлица из трёх.
+    own_organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True
+    )
     # СКОУП ДАННЫХ: объекты пространства (`service_locations.id`), которые человек видит.
     # NULL = вся сеть компании; список = только эти объекты и всё, что к ним привязано
     # (сессии, оборудование, заявки). Права (`modules`) отвечают на вопрос «какие
@@ -8831,4 +8841,151 @@ class OffLedgerRecord(Base):
 
     __table_args__ = (
         Index("idx_off_ledger_company_status", "company_id", "status"),
+    )
+
+
+# Наличные расчёты вне учёта: четвёртая грань периметра.
+#
+# У предпринимателя часть расчётов идёт мимо кассы компании: работу частного лица
+# оплатили наличными, дали в долг знакомому, вложили свои деньги в закупку, забрали
+# выручку на личные нужды. В бухгалтерии этих движений нет, а помнить о них надо —
+# особенно кто кому сколько остался должен.
+#
+# Отдельная сущность, а не вид записи периметра: у денег своя арифметика. Договорённость
+# либо действует, либо закрыта; выданный заём гасится частями, и по каждому человеку
+# нужно сальдо, а не список фраз. Возврат привязывается к своей выдаче (`parent_id`),
+# иначе «отдал 50 из 200» превращается в две несвязанные строки.
+class OffLedgerCash(Base):
+    """Движение наличных мимо учёта: кому, сколько, за что и что осталось."""
+
+    __tablename__ = "off_ledger_cash"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=True)
+
+    # out — деньги ушли, in — пришли. Знак операции всегда явный: «минус» в сумме
+    # читается двусмысленно, когда речь и о выдаче, и о возврате.
+    direction: Mapped[str] = mapped_column(String(10), nullable=False, default="out")
+    # work — оплата работ и услуг физлицу, loan — заём, repayment — возврат займа,
+    # advance — выдача под отчёт (купить оборудование, материалы), report — отчёт по
+    # выданному (чеки, накладные), travel — компенсация проезда, bonus — премия,
+    # expense — расход на нужды компании, owner — движение с собственником,
+    # other — прочее.
+    kind: Mapped[str] = mapped_column(String(20), nullable=False, default="work")
+    # Кто вторая сторона: employee — свой сотрудник, individual — частное лицо,
+    # owner — собственник, other — прочее. Ось важна не для красоты: выдачи сотруднику
+    # бухгалтерия потом проводит документами, а расчёт с частным лицом — нет.
+    person_kind: Mapped[str] = mapped_column(String(20), nullable=False,
+                                             default="individual")
+    happened_on: Mapped[date_type] = mapped_column(Date, nullable=False, index=True)
+    amount: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False, default=0)
+
+    # С кем рассчитались. Имя строкой хранится всегда: операцию записывают на ходу, и
+    # требовать карточку значило бы не записать её вовсе. Ссылка проставляется рядом —
+    # карточка заводится сама при первом расчёте с человеком.
+    person_name: Mapped[str] = mapped_column(String(300), nullable=False)
+    person_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("off_ledger_people.id", ondelete="SET NULL"),
+        nullable=True)
+    counterparty_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("counterparties.id", ondelete="SET NULL"),
+        nullable=True)
+    # За что: «монтаж стеллажей на складе», «в долг до зарплаты».
+    purpose: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Чем подтверждено: none — ничем, receipt — расписка, contract — договор ГПХ,
+    # act — акт или наряд. Для займа расписка это единственное, чем он доказуем.
+    proof: Mapped[str] = mapped_column(String(20), nullable=False, default="none")
+    # Чьи деньги: owner — личные средства собственника, company — наличные компании.
+    # Без этой оси нельзя ответить, сколько собственник вложил своего.
+    purse: Mapped[str] = mapped_column(String(20), nullable=False, default="owner")
+
+    # Возврат ссылается на свою выдачу: остаток долга считается по цепочке, а не
+    # вычитанием всех возвратов человека из всех его займов.
+    parent_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("off_ledger_cash.id", ondelete="SET NULL"),
+        nullable=True)
+    # Связь с договорённостью периметра: заём часто сначала обещание, потом деньги.
+    record_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("off_ledger_records.id", ondelete="SET NULL"),
+        nullable=True)
+    # Срок возврата — у займов и выдач под отчёт.
+    due_on: Mapped[date_type | None] = mapped_column(Date, nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # ── Мост в бухгалтерию ──
+    # Часть этих движений учёт всё-таки принимает: выданное под отчёт закрывается
+    # авансовым отчётом, премия проводится ведомостью, компенсация проезда — приказом
+    # и чеками. Пока документы не сделаны, операция живёт только здесь, и главное для
+    # владельца — видеть, что ждёт оформления, а что уже проведено.
+    formalized: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    formalized_on: Mapped[date_type | None] = mapped_column(Date, nullable=True)
+    # Чем оформлено: «авансовый отчёт № 12 от 14.08», «ведомость за август».
+    formalized_by: Mapped[str | None] = mapped_column(String(300), nullable=True)
+
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        Index("idx_off_cash_company_date", "company_id", "happened_on"),
+        Index("idx_off_cash_person", "company_id", "person_name"),
+    )
+
+
+# Люди периметра: с кем компания имеет дело помимо штата и договоров.
+#
+# Это НЕ зарплатный контур и не справочник контрагентов. Здесь монтажник, который
+# приезжает на разовые работы; водитель, возящий товар за наличные; сотрудник, которому
+# выдают под отчёт; знакомый, взявший в долг; представитель поставщика, с которым
+# договорились устно. Часть из них есть в штате, часть — в справочнике контрагентов
+# (`counterparty_id`), часть не заведена нигде, и именно ради последних список
+# существует: через полгода «Сергей с гидравликой» не восстанавливается ничем.
+#
+# Карточка заводится САМА при первом расчёте: заставлять человека сначала завести
+# карточку, а потом записать выдачу, значит получить журнал без карточек.
+class OffLedgerPerson(Base):
+    """Человек или представитель, участвующий в расчётах и договорённостях."""
+
+    __tablename__ = "off_ledger_people"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(300), nullable=False)
+    # employee — свой сотрудник, individual — частное лицо, owner — собственник,
+    # contractor_rep — представитель контрагента, other — прочее.
+    kind: Mapped[str] = mapped_column(String(20), nullable=False, default="individual")
+    # Кем приходится делу: «монтажник», «водитель», «прораб у подрядчика».
+    role: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # Из персональных данных держим только телефон — по правилу пространства.
+    phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    # Если человек представляет компанию из справочника.
+    counterparty_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("counterparties.id", ondelete="SET NULL"),
+        nullable=True)
+    # Ссылка на учётную запись пространства — если это наш человек и он здесь работает.
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Ушедших не удаляют: за ними остаётся история расчётов. Их скрывают из подсказок.
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        Index("uq_off_person_name", "company_id", "name", unique=True),
     )
