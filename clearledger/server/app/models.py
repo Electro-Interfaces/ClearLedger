@@ -8830,6 +8830,17 @@ class OffLedgerRecord(Base):
     # Мост между третьим слоем и первым: по нему видно, что уже пора оформлять.
     account: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
+    # ── Насколько вероятно, что сработает ──
+    # У поручительства на пять миллионов с шансом три процента и у претензии на
+    # полмиллиона, которую почти наверняка удовлетворят, одна сумма означает разное.
+    # Градация взята из практики условных обязательств (IAS 37): probable — больше
+    # половины (это уже кандидат в резерв), possible — возможно, remote — маловероятно.
+    likelihood: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Вилка: минимум и максимум, если сумма не одна. `amount` остаётся ожидаемой —
+    # той, которую разумно назвать одним числом.
+    amount_min: Mapped[float | None] = mapped_column(Numeric(18, 2), nullable=True)
+    amount_max: Mapped[float | None] = mapped_column(Numeric(18, 2), nullable=True)
+
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -8924,6 +8935,15 @@ class OffLedgerCash(Base):
     commitment_period: Mapped[date_type | None] = mapped_column(Date, nullable=True)
     # Срок возврата — у займов и выдач под отчёт.
     due_on: Mapped[date_type | None] = mapped_column(Date, nullable=True)
+    # ── Исковая давность ──
+    # Три года считаются не от выдачи: срок ПРЕРЫВАЕТСЯ действием должника, из которого
+    # видно, что он долг признаёт, — частичной оплатой, подписанным актом сверки,
+    # просьбой об отсрочке (ст. 203 ГК). После перерыва срок течёт заново, и прошедшее
+    # время не засчитывается. Поэтому храним последнее такое действие, а не считаем от
+    # даты займа: иначе продукт объявит долг сгоревшим, когда он живой.
+    acknowledged_on: Mapped[date_type | None] = mapped_column(Date, nullable=True)
+    # Чем признан: оплата, акт сверки, переписка.
+    acknowledged_by: Mapped[str | None] = mapped_column(String(200), nullable=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # ── Мост в бухгалтерию ──
@@ -9148,6 +9168,15 @@ class PulseView(Base):
     note: Mapped[str] = mapped_column(Text, nullable=False, default="")
     # draft — собирается, published — видна получателям.
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft")
+    # Куда уходит обратная связь: task — задача (не потеряется), chat — сообщение
+    # в комнату (скорость), both — и то и другое, none — витрина только показывает.
+    # Своего ящика обращений витрина не заводит: ответ получателя должен попасть
+    # туда, где с ним работают.
+    feedback_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="task")
+    feedback_room_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    feedback_assignee_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
     created_by: Mapped[str | None] = mapped_column(String(200), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -9199,3 +9228,49 @@ class PulseViewGrant(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
     )
+
+
+# Настройки «Периметра» на компанию.
+#
+# Продукт закрывает разные по чувствительности вещи: арендованный склад на 001 — обычный
+# учёт, а доплата сверх ведомости — то, за что отвечают лично. Поэтому спорные
+# возможности не включены по умолчанию: компания включает их сама, видя предупреждение,
+# и решение остаётся зафиксированным — кем и когда.
+#
+# Пороговые значения тоже здесь, а не в коде: лимит наличных расчётов и срок отчёта по
+# подотчёту компания устанавливает сама (для подотчёта это прямо предписано Указанием
+# ЦБ 3210-У), и зашитая константа была бы чужим решением.
+class OffLedgerSettings(Base):
+    """Что включено в «Периметре» у этой компании."""
+
+    __tablename__ = "off_ledger_settings"
+
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        primary_key=True)
+
+    # Доплаты сверх ведомости — выплаты работникам из средств собственника помимо
+    # расчётного листка. Выключено по умолчанию: у компании, которая так не работает,
+    # этого вида в списке быть не должно.
+    allow_extra_pay: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Через сколько дней подотчётное лицо обязано отчитаться. Срок устанавливает
+    # работодатель; невозвращённое и неотчитанное налоговая признаёт доходом.
+    advance_days: Mapped[int] = mapped_column(Integer, nullable=False, default=30)
+    # Предел наличных расчётов по одному договору между организациями и ИП.
+    cash_limit: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False,
+                                              default=100000)
+    # Порог, выше которого заём между гражданами требует письменной формы.
+    loan_written_from: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False,
+                                                     default=10000)
+    # Порог, выше которого заём по умолчанию считается процентным.
+    loan_interest_from: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False,
+                                                      default=100000)
+    # Срок исковой давности в годах — общий, но у отдельных требований свой.
+    limitation_years: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
+    # Показывать в выгрузках и на экранах оговорку о статусе данных.
+    show_disclaimer: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    updated_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

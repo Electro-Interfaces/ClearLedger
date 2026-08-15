@@ -380,10 +380,12 @@ export interface PulseViewCard {
 export interface PulseViewData {
   id: string; name: string; audience: string; company: string | null
   owner: string | null; note: string; status: string; asOf: string
+  /** Можно ли писать с витрины: кнопка, которая ничего не делает, хуже её отсутствия. */
+  canWrite: boolean
   blocks: {
     key: string; title: string; hint: string | null
     metrics: { label: string; value: string; tone?: string | null }[]
-    items: { title: string; detail?: string; amount?: string }[]
+    items: { title: string; detail?: string; amount?: string; requestId?: string }[]
     note: string | null
   }[]
 }
@@ -426,3 +428,18 @@ export const setPulseViewBlocks = (
 export const setPulseViewGrants = (companyId: string, id: string, users: string[]) =>
   put<{ granted: number; skipped: number }>(
     `/api/pulse/views/${id}/grants?company_id=${companyId}`, { users })
+
+/** Обращение с витрины: уходит задачей и/или сообщением в чат — своего ящика нет. */
+export const sendPulseFeedback = (
+  companyId: string, viewId: string, v: { text: string; blockTitle?: string },
+) => post<{ sent: boolean; task: { id: string; number: number } | null
+            chat: { roomId: string } | null }>(
+  `/api/pulse/views/${viewId}/feedback?company_id=${companyId}`, v)
+
+/** Ответ по строке «Чего ждём от вас» — идёт в само требование. */
+export const replyPulseRequest = (
+  companyId: string, viewId: string,
+  v: { requestId: string; decision: 'sent' | 'will_send' | 'declined' | 'question'; note?: string },
+) => post<{ ok: boolean; status: string; answer: string
+            task: { id: string; number: number } | null }>(
+  `/api/pulse/views/${viewId}/reply?company_id=${companyId}`, v)

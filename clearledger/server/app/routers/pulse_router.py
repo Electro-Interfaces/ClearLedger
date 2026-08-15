@@ -26,10 +26,14 @@ from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import log_audit
-from app.auth import assert_company_product, get_current_user, resolve_member_modules
+from app.auth import (
+    assert_company_member, assert_company_product, get_current_user,
+    resolve_member_modules,
+)
 from app.database import get_db
 from app.models import (
-    PulseAck, PulseView, PulseViewBlock, PulseViewGrant, User, UserCompany,
+    ChatMessage, PulseAck, PulseView, PulseViewBlock, PulseViewGrant, Task, TaskEvent,
+    User, UserCompany,
 )
 # Словарь стадий — общий с «Проектами»: «Проработка» не должна стать «dd»
 # только потому, что экран другой.
@@ -2853,6 +2857,9 @@ async def pulse_view_update(
     period: str | None = None,
     owner_name: str | None = None,
     note: str | None = None,
+    feedback_mode: str | None = None,
+    feedback_room_id: str | None = None,
+    feedback_assignee_id: str | None = None,
     status_: str | None = Query(None, alias="status"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -2877,6 +2884,19 @@ async def pulse_view_update(
                          ("owner_name", owner_name), ("note", note)):
         if value is not None:
             setattr(v, field, value.strip() if isinstance(value, str) else value)
+
+    if feedback_mode is not None:
+        if feedback_mode not in ("task", "chat", "both", "none"):
+            raise HTTPException(status_code=400, detail="Неизвестный канал обращений")
+        v.feedback_mode = feedback_mode
+    for field, raw in (("feedback_room_id", feedback_room_id),
+                       ("feedback_assignee_id", feedback_assignee_id)):
+        if raw is None:
+            continue
+        try:
+            setattr(v, field, uuid.UUID(raw.strip()) if raw.strip() else None)
+        except ValueError:
+            setattr(v, field, None)
     await db.commit()
     return {"id": str(v.id), "status": v.status}
 
@@ -2988,6 +3008,10 @@ async def pulse_view_card(
         "id": str(v.id), "name": v.name, "audience": v.audience, "period": v.period,
         "owner": v.owner_name, "note": v.note, "status": v.status,
         "blocks": blocks, "people": people, "canEdit": is_admin,
+        "feedbackMode": v.feedback_mode,
+        "feedbackRoomId": str(v.feedback_room_id) if v.feedback_room_id else None,
+        "feedbackAssigneeId": (str(v.feedback_assignee_id)
+                               if v.feedback_assignee_id else None),
         # Дата, на которую верны цифры: витрина уходит наружу, и «когда-то посчитано»
         # там не ответ.
         "asOf": date.today().isoformat(),
@@ -3041,6 +3065,10 @@ async def pulse_view_data(
         "id": str(v.id), "name": v.name, "audience": v.audience,
         "owner": v.owner_name, "note": v.note, "status": v.status,
         "asOf": date.today().isoformat(),
+        # Получателю нужно знать, можно ли отсюда написать: кнопка, которая ничего
+        # не делает, хуже её отсутствия.
+        "canWrite": v.feedback_mode != "none" and not (
+            v.feedback_mode == "chat" and not v.feedback_room_id),
         "company": (await db.execute(text(
             "SELECT name FROM companies WHERE id = CAST(:cid AS uuid)"),
             {"cid": cid})).scalar_one_or_none(),
@@ -3155,9 +3183,9 @@ async def _office_block_data(db: AsyncSession, cid: str, key: str) -> dict[str, 
 
     if key == "books.requests":
         items = [{"title": r[0] or "—", "detail": f"{r[1]} · до {r[2] or 'срок не задан'}",
-                  "amount": _money(r[3])}
+                  "amount": _money(r[3]), "requestId": str(r[4])}
                  for r in (await db.execute(text("""
-            SELECT counterparty_name, doc_kind, due_date, amount
+            SELECT counterparty_name, doc_kind, due_date, amount, id
               FROM doc_requests
              WHERE company_id = CAST(:cid AS uuid)
                AND status IN ('open','requested','promised')
@@ -3254,3 +3282,163 @@ def _money(v) -> str:
         return f"{float(v or 0):,.0f} ₽".replace(",", " ")
     except (TypeError, ValueError):
         return "—"
+
+
+# ── Обратная связь с витрины: контур замыкается в то, что уже работает ──────
+# Витрина не заводит свой канал обращений. У пространства уже есть задачи (там
+# исполнитель, срок и статус), чаты (там скорость) и требования «Бухгалтерии» (там
+# конкретный документ, которого ждут). Ещё один параллельный ящик означал бы, что
+# ответ получателя лежит там, куда никто не смотрит.
+#
+# Поэтому с витрины уходит не «сообщение витрины», а:
+#   · ответ по строке требования → в само требование (статус + лента обращений);
+#   · вопрос или просьба → ЗАДАЧА (не потеряется) и, если задана комната, эхо в чат.
+
+
+@router.post("/views/{view_id}/feedback")
+async def pulse_view_feedback(
+    view_id: str,
+    payload: dict,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Обращение получателя с витрины: вопрос, просьба, замечание.
+
+    Создаёт задачу от имени получателя — даже если «Задачи» ему не открыты: он не
+    работает в трекере, он оставил обращение, и потерять его нельзя. Право
+    проверяется по назначению витрины, а не по продукту.
+    """
+    cid = str(await assert_company_member(company_id, current_user, db))
+    v = await _view_or_404(db, cid, view_id)
+
+    mine = (await db.execute(text("""
+        SELECT 1 FROM pulse_view_grants
+         WHERE view_id = CAST(:v AS uuid) AND user_id = CAST(:u AS uuid)"""),
+        {"v": str(v.id), "u": str(current_user.id)})).first() is not None
+    is_admin = current_user.is_superadmin or await _is_company_admin(db, cid, current_user)
+    if not is_admin and not (mine and v.status == "published"):
+        raise HTTPException(status_code=404, detail="Витрина не найдена")
+
+    text_ = (payload.get("text") or "").strip()
+    if not text_:
+        raise HTTPException(status_code=400, detail="Пустое обращение")
+    block = (payload.get("blockTitle") or "").strip()
+
+    made: dict[str, Any] = {"task": None, "chat": None}
+    title = f"С витрины «{v.name}»" + (f": {block}" if block else "")
+
+    if v.feedback_mode in ("task", "both"):
+        # Автор — получатель, исполнитель — тот, кого назначили на витрине. Без
+        # исполнителя задача попадёт в общий поток «Задач», а не потеряется.
+        t = Task(
+            company_id=uuid.UUID(cid), title=title[:300], description=text_,
+            priority="medium", status="open",
+            assignee_id=v.feedback_assignee_id, author_id=current_user.id)
+        db.add(t)
+        await db.flush()
+        db.add(TaskEvent(task_id=t.id, kind="created", user_id=current_user.id,
+                         note=f"обращение с витрины «{v.name}»"))
+        made["task"] = {"id": str(t.id), "number": t.number}
+
+    if v.feedback_mode in ("chat", "both") and v.feedback_room_id:
+        # Эхо в чат — это скорость: задача не пискнет, а комната пискнет сразу.
+        db.add(ChatMessage(
+            room_id=v.feedback_room_id, user_id=current_user.id, type="text",
+            content=f"{title}\n{text_}"))
+        made["chat"] = {"roomId": str(v.feedback_room_id)}
+
+    await db.commit()
+    if not made["task"] and not made["chat"]:
+        # Режим «none» или чат без комнаты: обращение некуда девать, и молчать об
+        # этом нельзя — человек будет ждать ответа, которого никто не увидит.
+        raise HTTPException(status_code=400,
+                            detail="Для этой витрины не настроен канал обращений")
+    return {"sent": True, **made}
+
+
+@router.post("/views/{view_id}/reply")
+async def pulse_view_reply(
+    view_id: str,
+    payload: dict,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Ответ получателя по строке блока «Чего ждём от вас».
+
+    Идёт в САМО требование: статус и лента обращений. Отдельная переписка о
+    документе рядом с реестром документов означала бы два места, где нужно смотреть,
+    и одно из них всегда забывают.
+
+    Ответ получателя не закрывает требование: закрывает его появление документа в
+    учёте. «Отправил» — это обещание, а не факт, и подменять им факт нельзя.
+    """
+    cid = str(await assert_company_member(company_id, current_user, db))
+    v = await _view_or_404(db, cid, view_id)
+
+    mine = (await db.execute(text("""
+        SELECT 1 FROM pulse_view_grants
+         WHERE view_id = CAST(:v AS uuid) AND user_id = CAST(:u AS uuid)"""),
+        {"v": str(v.id), "u": str(current_user.id)})).first() is not None
+    is_admin = current_user.is_superadmin or await _is_company_admin(db, cid, current_user)
+    if not is_admin and not (mine and v.status == "published"):
+        raise HTTPException(status_code=404, detail="Витрина не найдена")
+
+    decision = (payload.get("decision") or "").strip()
+    note = (payload.get("note") or "").strip()
+    if decision not in ("sent", "will_send", "declined", "question"):
+        raise HTTPException(status_code=400, detail="Неизвестный ответ")
+
+    try:
+        rid = uuid.UUID(str(payload.get("requestId") or ""))
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Требование не найдено")
+
+    row = (await db.execute(text("""
+        SELECT id::text, status, coalesce(escalations, '[]'::jsonb), counterparty_name, doc_kind
+          FROM doc_requests
+         WHERE company_id = CAST(:cid AS uuid) AND id = CAST(:id AS uuid)"""),
+        {"cid": cid, "id": str(rid)})).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Требование не найдено")
+
+    LABEL = {"sent": "документ отправлен", "will_send": "обещали прислать",
+             "declined": "документа не будет", "question": "вопрос по требованию"}
+    # «Отправил» и «пришлём» — это обещание: статус `promised`. Факт получения
+    # ставит появление документа в учёте, а не слово на витрине.
+    NEW_STATUS = {"sent": "promised", "will_send": "promised",
+                  "declined": "disputed", "question": None}
+
+    entry = {
+        "at": datetime.now(timezone.utc).isoformat(), "by": current_user.email,
+        "kind": "ответ с витрины", "decision": LABEL[decision], "note": note or None,
+        "view": v.name,
+    }
+    new_status = NEW_STATUS[decision]
+    await db.execute(text("""
+        UPDATE doc_requests
+           SET escalations = coalesce(escalations, '[]'::jsonb) || CAST(:e AS jsonb),
+               status = coalesce(:st, status),
+               updated_at = now()
+         WHERE company_id = CAST(:cid AS uuid) AND id = CAST(:id AS uuid)"""),
+        {"cid": cid, "id": str(rid), "st": new_status,
+         "e": json.dumps([entry], ensure_ascii=False)})
+
+    # Вопрос по требованию — это уже разговор, а не отметка: заводим задачу тем же
+    # путём, что и обычное обращение с витрины.
+    task = None
+    if decision == "question" and v.feedback_mode in ("task", "both"):
+        t = Task(company_id=uuid.UUID(cid),
+                 title=f"Вопрос по документу: {row[3] or ''} · {row[4] or ''}"[:300],
+                 description=note or "Вопрос с витрины", priority="medium", status="open",
+                 assignee_id=v.feedback_assignee_id, author_id=current_user.id)
+        db.add(t)
+        await db.flush()
+        db.add(TaskEvent(task_id=t.id, kind="created", user_id=current_user.id,
+                         note=f"вопрос с витрины «{v.name}» по требованию"))
+        task = {"id": str(t.id), "number": t.number}
+
+    await db.commit()
+    return {"ok": True, "status": new_status or row[1], "answer": LABEL[decision],
+            "task": task}
