@@ -48,6 +48,9 @@ const proofTone = (proof: string) =>
 
 const today = () => new Date().toISOString().slice(0, 10)
 
+/** Виды, которые смотрят чаще прочих: они и остаются табами. */
+const QUICK_KINDS_TABS = ['work', 'advance', 'loan', 'bonus']
+
 const EMPTY_CASH = (): CashIn => ({
   personName: '', amount: 0, happenedOn: today(), direction: 'out', kind: 'work',
   proof: 'none', purse: 'owner', personKind: 'individual', formalized: false,
@@ -180,10 +183,26 @@ export function CashJournalScreen({ companyId }: { companyId: string }) {
       </Card>
 
       <div className="flex flex-wrap items-center gap-2 justify-between">
-        <Tabs value={kind} onChange={setKind} items={[
-          { key: '', label: 'Все' },
-          ...(dicts.data?.kinds ?? []).map((k) => ({ key: k.key, label: k.label })),
-        ]} />
+        {/* Видов операций одиннадцать — табами они встают в две строки и шумят.
+            Часто нужны три-четыре, остальные выбираются списком. */}
+        <div className="flex items-center gap-2">
+          <Tabs value={QUICK_KINDS_TABS.includes(kind) ? kind : ''} onChange={setKind}
+            label="разрез журнала" items={[
+              { key: '', label: 'Все' },
+              ...(dicts.data?.kinds ?? [])
+                .filter((k) => QUICK_KINDS_TABS.includes(k.key))
+                .map((k) => ({ key: k.key, label: k.label })),
+            ]} />
+          <select className="rounded-md border bg-background px-2.5 py-1.5 text-sm"
+            aria-label="Другие виды операций"
+            value={QUICK_KINDS_TABS.includes(kind) ? '' : kind}
+            onChange={(e) => setKind(e.target.value)}>
+            <option value="">Другие виды…</option>
+            {(dicts.data?.kinds ?? [])
+              .filter((k) => !QUICK_KINDS_TABS.includes(k.key))
+              .map((k) => <option key={k.key} value={k.key}>{k.label}</option>)}
+          </select>
+        </div>
         <div className="flex items-center gap-2">
           <SearchInput value={search} onChange={setSearch} placeholder="Кто или за что" />
           {!!rows.length && (

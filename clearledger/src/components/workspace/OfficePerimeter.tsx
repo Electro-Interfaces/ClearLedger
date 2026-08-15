@@ -841,7 +841,12 @@ function RecordDialog({ value, isNew, dicts, saving, error, onChange, onClose, o
 
           {error && <div className="text-sm text-destructive">{error}</div>}
         </div>
-        <div className="flex justify-end gap-2 pt-2">
+        <div className="flex flex-wrap items-center justify-end gap-2 pt-2">
+          {!value.title.trim() && (
+            <span className="text-[11px] text-muted-foreground mr-auto">
+              Заполните: что записано
+            </span>
+          )}
           <Button variant="outline" size="sm" onClick={onClose}>Отмена</Button>
           <Button size="sm" disabled={!value.title.trim() || saving} onClick={onSave}>
             {saving ? 'Сохраняем…' : 'Сохранить'}
