@@ -1837,7 +1837,9 @@ function RevRecon({ companyId }: { companyId: string }) {
   if (!q.data) return <Loading />
   const d = q.data
   const months = onlyBroken ? d.months.filter((m) => Math.abs(m.diff) > 1) : d.months
-  const ok = Math.abs(d.diff) <= 1
+  // Комиссионный товар продан по нашему документу, но выручка чужая: пока он есть,
+  // равенство «документы = 90.01.1» не обязано выполняться, и красная плитка врёт.
+  const ok = Math.abs(d.diff) <= 1 || (!!d.commission && !d.broken.length)
 
   return (
     <div className="p-4 space-y-4">
@@ -1847,9 +1849,18 @@ function RevRecon({ companyId }: { companyId: string }) {
         <MetricTile label="По регистру (90.01.1)" value={money.format(d.totalRegister) + ' ₽'}
           hint="оборот по кредиту счёта выручки" />
         <MetricTile label="Расхождение" value={money.format(d.diff) + ' ₽'}
-          hint={ok ? 'сходится до рубля' : `${d.broken.length} месяцев с расхождением`}
+          hint={Math.abs(d.diff) <= 1 ? 'сходится до рубля'
+            : d.commission ? 'объяснено комиссионной торговлей'
+            : `${d.broken.length} месяцев с расхождением`}
           tone={ok ? 'success' : 'danger'} />
       </div>
+
+      {!!d.commission && (
+        <p className="text-[11px] text-muted-foreground">
+          {d.commissionNote}. Списано товара комитента: {money.format(d.commission)} ₽ —
+          на эту величину сумма документов законно больше оборота 90.01.1.
+        </p>
+      )}
 
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <Tabs value={onlyBroken ? 'broken' : 'all'} onChange={(v) => setOnlyBroken(v === 'broken')}
@@ -1860,6 +1871,7 @@ function RevRecon({ companyId }: { companyId: string }) {
           { header: 'Документов', key: 'docsCount', width: 12 },
           { header: 'По регистру', key: 'register', width: 18, money: true },
           { header: 'Расхождение', key: 'diff', width: 16, money: true },
+          ...(d.commission ? [{ header: 'Товар комитента', key: 'commission', width: 18, money: true }] : []),
           { header: 'Период', key: 'periodStatus', width: 10 },
         ], months)} />
       </div>
@@ -2911,8 +2923,12 @@ function RevDeals({ companyId, period }: { companyId: string; period: Period }) 
           hint={`${avgPct.toFixed(1)} % от суммы сделок с известной себестоимостью`} />
         <MetricTile label="Себестоимость известна" value={num.format(d.withMargin)}
           hint={`из ${num.format(d.count)} сделок`} />
-        <MetricTile label="Маржа ниже 30 %" value={num.format(d.lowMargin)}
-          hint="порог, за которым проверяют цену и объём работ"
+        {/* Порог свой у каждой компании: у оптовика нормальная маржа — проценты,
+            и абсолютные «30 %» красили бы весь список разом. */}
+        <MetricTile label={d.lowPct === null ? 'Маржа ниже обычной' : `Маржа ниже ${d.lowPct} %`}
+          value={num.format(d.lowMargin)}
+          hint={d.medianPct === null ? 'себестоимость неизвестна ни по одной сделке'
+            : `вдвое ниже медианной маржи компании (${d.medianPct} %)`}
           tone={d.lowMargin > d.withMargin / 2 ? 'danger' : undefined} />
       </div>
 

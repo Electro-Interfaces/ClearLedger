@@ -1186,16 +1186,36 @@ async def revenue_check(
             "periodStatus": status.get(m, "open"),
         })
 
+    # Комиссионный товар: продан по нашему документу, но выручка не наша. Пока он
+    # есть, равенство «документы = 90.01.1» не обязано выполняться, и экран должен
+    # называть причину, а не оставлять человека с красной строкой без объяснения.
+    comm = {r[0]: _num(r[1]) for r in (await db.execute(text(f"""
+        SELECT to_char(entry_date, 'YYYY-MM'), sum(amount)
+          FROM gl_entries
+         WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid))
+           AND account_kt LIKE '004%'{_reg_period(date_from, date_to)} GROUP BY 1
+    """), _reg_params(cid, date_from, date_to))).all()}
+    for m in months:
+        m["commission"] = comm.get(m["month"], 0.0)
+
     total_docs = sum(m["docs"] for m in months)
     total_reg = sum(m["register"] for m in months)
+    total_comm = round(sum(comm.values()), 2)
     return {
         "months": months,
         "totalDocs": round(total_docs, 2),
         "totalRegister": round(total_reg, 2),
         "diff": round(total_docs - total_reg, 2),
+        "commission": total_comm,
+        "commissionNote": ("Часть продаж — товар комитента: покупателю выставлен наш "
+                           "документ, а выручка чужая и на 90.01.1 не попадает"
+                           if total_comm else None),
         # Месяцы, где сходимость нарушена больше рубля: округление копеек не повод
-        # звать бухгалтера, расхождение в тысячу — повод.
-        "broken": [m["month"] for m in months if abs(m["diff"]) > 1],
+        # звать бухгалтера, расхождение в тысячу — повод. Месяц с комиссионным
+        # товаром сломанным не считается: там расхождение объяснено природой сделки.
+        "broken": [m["month"] for m in months
+                   if abs(m["diff"]) > 1 and not m["commission"]],
     }
 
 
@@ -1623,7 +1643,7 @@ async def deals(
           -- за «штуку». Итог: маржа −4,6 млн против +1,0 млн по отчёту о результате и
           -- 123 «низкомаржинальные» сделки из 146. Неизвестная себестоимость честнее
           -- выдуманной: строка уходит в `unknownLines`, и маржа по сделке не считается.
-          SELECT btrim(ln->>'code') code,
+          SELECT btrim(ln->>'code') code, btrim(ln->>'name') name,
                  sum((ln->>'amount')::numeric - coalesce((ln->>'vat')::numeric, 0))
                    / nullif(sum((ln->>'qty')::numeric), 0) price
             FROM accounting_docs d, jsonb_array_elements(d.lines) ln
@@ -1631,6 +1651,16 @@ async def deals(
              AND coalesce(btrim(ln->>'code'), '') <> ''
              AND coalesce(ln->>'kind', 'goods') <> 'service'
              AND coalesce((ln->>'qty')::numeric, 0) > 0
+           GROUP BY 1, 2
+        ), buy_code AS (
+          -- Тот же расчёт, но по одному коду — для позиций, где код ОДНОЗНАЧЕН.
+          -- У ПРОМИЗОЛ семь кодов носят по две разные позиции («00-00000001» — и
+          -- «Изоруф-Н», и «Аренда нежилого помещения»), и сопоставление только по коду
+          -- приписывало продаже цену чужого товара.
+          SELECT b.code, sum(b.price) / count(*) price
+            FROM buy b
+           WHERE b.code IN (SELECT code FROM nomenclature
+                             WHERE company_id = :cid GROUP BY code HAVING count(*) = 1)
            GROUP BY 1
         ), sale AS (
           SELECT d.id, d.number, d.date, d.counterparty_name, d.counterparty_id, d.amount,
@@ -1643,13 +1673,18 @@ async def deals(
         SELECT s.id, max(s.number), max(s.date), max(s.counterparty_name),
                max(s.counterparty_id::text), max(s.amount),
                sum((s.ln->>'amount')::numeric - coalesce((s.ln->>'vat')::numeric, 0)),
-               sum(buy.price * (s.ln->>'qty')::numeric),
+               sum(coalesce(buy.price, buy_code.price) * (s.ln->>'qty')::numeric),
                count(*),
-               count(*) FILTER (WHERE buy.price IS NULL)
+               count(*) FILTER (WHERE coalesce(buy.price, buy_code.price) IS NULL)
           FROM sale s
-          -- Услуга не сопоставляется с закупкой по коду — см. комментарий в `buy`.
+          -- Сначала точное совпадение «код + наименование», и только для однозначного
+          -- кода — запасной вариант по одному коду. Услуга не сопоставляется вовсе,
+          -- см. комментарий в `buy`.
           LEFT JOIN buy ON buy.code = btrim(s.ln->>'code')
+                       AND buy.name = btrim(s.ln->>'name')
                        AND coalesce(s.ln->>'kind', 'goods') <> 'service'
+          LEFT JOIN buy_code ON buy_code.code = btrim(s.ln->>'code')
+                            AND coalesce(s.ln->>'kind', 'goods') <> 'service'
          GROUP BY s.id
          ORDER BY max(s.date) DESC
     """), p)).all()]
@@ -1663,6 +1698,16 @@ async def deals(
                           if full and r["net"] else None)
 
     known = [r for r in rows if r["margin"] is not None]
+
+    # Порог тревоги — ОТНОСИТЕЛЬНЫЙ: половина медианной маржи компании. Абсолютные
+    # 30 % годятся проектным поставкам и бессмысленны в оптовой торговле: у НПК с её
+    # топливной маржой в проценты «низкомаржинальными» оказывались 331 сделка из 335,
+    # то есть сигнал не отличал ничего от ничего. Медиана берётся по своим же сделкам,
+    # порог возвращается на экран — цифру видно и можно оспорить.
+    pcts = sorted(r["marginPct"] for r in known if r["marginPct"] is not None)
+    median = (pcts[len(pcts) // 2] if len(pcts) % 2
+              else (pcts[len(pcts) // 2 - 1] + pcts[len(pcts) // 2]) / 2) if pcts else None
+    low_pct = round(median / 2, 1) if median is not None and median > 0 else None
     return {
         "rows": rows,
         "count": len(rows),
@@ -1670,9 +1715,10 @@ async def deals(
         "withMargin": len(known),
         "marginTotal": round(sum(r["margin"] for r in known), 2),
         "netWithMargin": round(sum(r["net"] for r in known), 2),
-        # Порог тревоги из практики проектных поставок: сделка ниже 30 % маржи —
-        # повод проверить цену и объём работ, а не статистическая аномалия.
-        "lowMargin": sum(1 for r in known if (r["marginPct"] or 0) < 30),
+        "medianPct": median,
+        "lowPct": low_pct,
+        "lowMargin": (sum(1 for r in known if (r["marginPct"] or 0) < low_pct)
+                      if low_pct is not None else 0),
     }
 
 
@@ -2783,9 +2829,9 @@ async def attention(
     # Сделки с низкой маржой.
     dl = await deals(company_id, date_from, date_to, db, current_user)
     if dl["lowMargin"]:
-        add("deals_low", "warn", "Сделки с маржой ниже 30 %",
+        add("deals_low", "warn", "Сделки с маржой вдвое ниже обычной",
             f"{dl['lowMargin']} из {dl['withMargin']}",
-            "порог, за которым проверяют цену и объём работ",
+            "порог — половина медианной маржи компании (%s %%)" % dl["lowPct"],
             "rev_sales", "rev_deals", dl["lowMargin"])
 
     # Концентрация за последний год.
@@ -4916,7 +4962,9 @@ async def quality(
          GROUP BY external_ref HAVING count(*) > 1) t""")
     add("dup_nomenclature_code", "Код номенклатуры уникален",
         "ok" if not dup_code else "warn", dup_code,
-        "Один код на две позиции: сопоставление строк документов промахнётся")
+        "Один код носят разные позиции. Себестоимость от этого не страдает — она "
+        "сопоставляется по коду И наименованию, — но разрезы по коду (ассортимент, "
+        "цены закупки) складывают несравнимое. Правится в справочнике 1С")
 
     head_vs_lines = await _count("""
         SELECT count(*) FROM accounting_docs d
@@ -4962,10 +5010,26 @@ async def quality(
         .where(AccountingDoc.company_id == cid,
                AccountingDoc.doc_type == "sale"))).scalar_one())
     diff = round(revenue - sales_total, 2)
-    add("revenue_match", "Выручка документов = оборот 90.01.1",
-        "ok" if abs(diff) < 0.02 else "error",
-        "%.2f ₽" % diff if diff else "сходится",
-        "Расхождение означает, что часть документов посчитана по другому правилу НДС")
+    # Комиссионная торговля ломает равенство ЗАКОННО: документ реализации выписан
+    # покупателю на всю сумму, а выручка чужого товара не наша — на 90.01.1 её нет,
+    # товар списывается с забалансового 004. У НПК до 2024 года так расходилось
+    # 8,7–12,6 млн в год, и проверка объявляла ошибкой природу учёта.
+    commission = _num((await db.execute(text("""
+        SELECT coalesce(sum(amount), 0) FROM gl_entries
+         WHERE company_id = :cid AND account_kt LIKE '004%'"""),
+        {"cid": str(cid), "org": _org_param()})).scalar_one())
+    if abs(diff) < 0.02:
+        status, hint = "ok", "Выручка документов сходится с регистром до копейки"
+    elif commission > 0:
+        status = "info"
+        hint = ("В компании есть комиссионная торговля (списано с 004: "
+                "%.2f ₽) — выручка чужого товара на 90.01.1 не попадает, "
+                "и расхождение здесь ожидаемо" % commission)
+    else:
+        status = "error"
+        hint = "Расхождение означает, что часть документов посчитана по другому правилу НДС"
+    add("revenue_match", "Выручка документов = оборот 90.01.1", status,
+        "%.2f ₽" % diff if diff else "сходится", hint)
 
     # Считаем только те виды, у которых контрагент есть по природе: у регламентной
     # операции закрытия и операции вручную его не бывает вовсе, и без этого условия
@@ -4975,12 +5039,16 @@ async def quality(
     WITH_COUNTERPARTY = ("sale", "purchase", "invoice_out", "invoice_in",
                          "vat_invoice_out", "vat_invoice_in", "act_recon",
                          "bank_in", "bank_out")
-    no_inn = (await db.execute(
-        select(func.count()).select_from(AccountingDoc)
-        .where(AccountingDoc.company_id == cid,
-               AccountingDoc.doc_type.in_(WITH_COUNTERPARTY),
-               (AccountingDoc.counterparty_inn.is_(None))
-               | (AccountingDoc.counterparty_inn == "")))).scalar_one()
+    # Операции со СВОИМИ счетами контрагента не имеют по природе: перевод между
+    # своими счетами и депозит — движение внутри компании, второй стороны у них нет.
+    # Без этого условия проверка вечно жёлтая на всех трёх компаниях сразу.
+    no_inn = int((await db.execute(text("""
+        SELECT count(*) FROM accounting_docs
+         WHERE company_id = :cid AND doc_type = ANY(:kinds)
+           AND coalesce(counterparty_inn, '') = ''
+           AND coalesce(details->>'Вид операции', '') NOT LIKE 'Перевод%'
+           AND coalesce(details->>'Вид операции', '') <> 'Депозит'"""),
+        {"cid": str(cid), "kinds": list(WITH_COUNTERPARTY)})).scalar_one() or 0)
     add("docs_without_inn", "Документы без ИНН контрагента",
         "ok" if not no_inn else "warn", no_inn,
         "Без ИНН документ нельзя связать с карточкой контрагента")
@@ -4993,8 +5061,10 @@ async def quality(
             .where(AccountingDoc.company_id == cid)
             .group_by(AccountingDoc.doc_type, AccountingDoc.number, AccountingDoc.date)
             .having(func.count() > 1).subquery()))).scalar_one()
+    # Жёлтой эта строка быть не должна: подсказка сама говорит, что так и бывает.
+    # «Требует внимания» рядом с «нормально» обесценивает остальные жёлтые строки.
     add("duplicate_numbers", "Номер+дата дважды в одном виде",
-        "ok" if not dup else "warn", dup,
+        "ok" if not dup else "info", dup,
         "Нормально для бухгалтерии: ключ документа включает ещё и контрагента")
 
     open_periods = (await db.execute(

@@ -542,6 +542,10 @@ export interface DealsData {
   marginTotal: number
   netWithMargin: number
   lowMargin: number
+  /** Медианная рентабельность сделок компании, %; null — маржи нет ни у одной. */
+  medianPct: number | null
+  /** Порог «низкой» маржи: половина медианы. */
+  lowPct: number | null
 }
 
 export const getDeals = (companyId: string, period?: PeriodOpts) =>
@@ -725,15 +729,20 @@ export interface RevenueCheck {
   months: {
     month: string; docs: number; docsCount: number; register: number
     diff: number; periodStatus: string
+    /** Списано комиссионного товара за месяц: его выручка не наша. */
+    commission: number
   }[]
   totalDocs: number
   totalRegister: number
   diff: number
+  /** Итого комиссионного товара; 0 — комиссионной торговли нет. */
+  commission: number
+  commissionNote: string | null
   broken: string[]
 }
 
-export const getRevenueCheck = (companyId: string) =>
-  get<RevenueCheck>(`/api/books/revenue-check?company_id=${companyId}`)
+export const getRevenueCheck = (companyId: string, period?: PeriodOpts) =>
+  get<RevenueCheck>(`/api/books/revenue-check?company_id=${companyId}` + periodQuery(period))
 
 export interface BalanceRow {
   code: string
