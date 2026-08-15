@@ -289,7 +289,12 @@ export async function dictate(audio: Blob): Promise<string> {
     body: form,
   })
   if (!res.ok) {
-    throw new Error((await res.json().catch(() => null))?.error || `Не распозналось (${res.status})`)
+    const said = (await res.json().catch(() => null))?.error
+    // Голый код ответа человеку ничего не говорит, а 502/503 в пространстве почти всегда
+    // означают одно: сервис перезапускается после выката. Так и пишем.
+    throw new Error(said || (res.status >= 502
+      ? 'Сервис сейчас перезапускается — повторите через минуту'
+      : `Не распозналось (${res.status})`))
   }
   return (await res.json()).text || ''
 }
