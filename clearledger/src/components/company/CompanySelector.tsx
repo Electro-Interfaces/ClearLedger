@@ -32,7 +32,15 @@ export function CompanySelector() {
       >
         <SelectValue placeholder="Организация" />
       </SelectTrigger>
+      {/* Список падает ВНИЗ, как обычная выпадашка.
+          По умолчанию Radix ведёт себя как нативный <select>: совмещает выбранный пункт
+          с триггером, из-за чего список выезжает поверх шапки и вверх, а перед этим
+          заметно считает позицию. В шапке это читается как подвисание. */}
       <SelectContent
+        position="popper"
+        side="bottom"
+        align="start"
+        sideOffset={6}
         style={{ boxShadow: 'var(--shadow-large)' }}
       >
         {companies.map((c) => (
