@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import ipaddress
+import os
 import socket
 
 from fastapi import HTTPException, status
@@ -31,11 +32,27 @@ def _is_internal_ip(ip: str) -> bool:
             or addr.is_reserved or addr.is_multicast or addr.is_unspecified)
 
 
+def _allowed_hosts() -> set[str]:
+    """Хосты, которым доверяем несмотря на внутренний адрес.
+
+    Единственный законный случай: почтовый сервер САМОЙ ПЛОЩАДКИ. Он стоит рядом,
+    в той же сети, и снаружи не виден — но это наш сервер, а не сосед по стеку,
+    которого называет пользователь. Разрешение задаётся ОКРУЖЕНИЕМ стека
+    (`MAIL_ALLOWED_HOSTS`), то есть администратором площадки, а не формой: иначе
+    любой сотрудник снял бы защиту, вписав нужное имя.
+    """
+    raw = os.environ.get("MAIL_ALLOWED_HOSTS", "")
+    return {h.strip().lower() for h in raw.split(",") if h.strip()}
+
+
 def assert_external_host(host: str | None) -> None:
     """Пустить только к внешнему хосту. Иначе — понятный отказ, а не молчание."""
     name = (host or "").strip().strip("[]")
     if not name:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Не указан адрес сервера")
+
+    if name.lower() in _allowed_hosts():
+        return
 
     if _is_internal_name(name) or _is_internal_ip(name):
         raise HTTPException(
