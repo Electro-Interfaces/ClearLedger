@@ -9274,3 +9274,39 @@ class OffLedgerSettings(Base):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+# Заказчик не заведёт пароль ради одного экрана, а показать ему картину нужно.
+# Ссылка решает это, но она же и самый опасный элемент концепции: по ней уходят
+# финансовые данные компании. Поэтому у неё есть всё, чего нет у «просто ссылки»:
+# срок жизни, отзыв, счётчик открытий и журнал последнего входа. Ссылка отдаёт
+# ТОЛЬКО опубликованную витрину и только на чтение — ни обращений, ни ответов по
+# требованиям с неё нет: писать может тот, кто вошёл под собой.
+
+
+class PulseViewLink(Base):
+    """Ссылка на витрину без учётки."""
+
+    __tablename__ = "pulse_view_links"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    view_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("pulse_views.id", ondelete="CASCADE"), nullable=False
+    )
+    token: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    label: Mapped[str] = mapped_column(String(200), nullable=False, default="")
+    # Без срока ссылка живёт вечно, а вечная ссылка на финансы — это утечка,
+    # отложенная во времени.
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    revoked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    opened_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_opened_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_by: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )

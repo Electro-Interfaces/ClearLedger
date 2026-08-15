@@ -290,6 +290,8 @@ app.include_router(station_console_router.router, prefix=API_PREFIX)
 app.include_router(tickets_router.router, prefix=API_PREFIX)
 app.include_router(tasks_router.router, prefix=API_PREFIX)  # «Задачи»: свой движок с маршрутами
 app.include_router(pulse_router.router, prefix=API_PREFIX)
+# Витрина по ссылке: без авторизации, доступ по токену самой ссылки.
+app.include_router(pulse_router.public_router, prefix=API_PREFIX)
 app.include_router(perimeter_router.router, prefix=API_PREFIX)  # «Периметр»: три слоя вне баланса
 app.include_router(departments_router.router, prefix=API_PREFIX)
 app.include_router(users_router.router, prefix=API_PREFIX)

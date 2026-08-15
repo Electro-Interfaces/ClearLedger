@@ -44,6 +44,7 @@ export function ShowcaseBody({ viewId, onBack }: { viewId: string; onBack?: () =
           <div className="text-base font-semibold">{d.name}</div>
           <div className="text-[12px] text-muted-foreground">
             {d.company}{d.audience ? ` · для: ${d.audience}` : ''}
+            {d.periodLabel ? ` · цифры ${d.periodLabel}` : ''}
           </div>
         </div>
         {onBack && (
@@ -69,6 +70,16 @@ export function ShowcaseBody({ viewId, onBack }: { viewId: string; onBack?: () =
                         m.tone === 'warning' && 'text-amber-600 dark:text-amber-500')}>
                         {m.value}
                       </div>
+                      {/* Сравнение с прошлым окном: сама по себе цифра не говорит,
+                          стало лучше или хуже, а получателю важно именно это. */}
+                      {m.delta && (
+                        <div className={cn('text-[11px]',
+                          m.delta.tone === 'good' && 'text-emerald-600 dark:text-emerald-500',
+                          m.delta.tone === 'warning' && 'text-amber-600 dark:text-amber-500',
+                          !m.delta.tone && 'text-muted-foreground')}>
+                          {m.delta.text}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>

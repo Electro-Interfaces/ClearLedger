@@ -71,6 +71,8 @@ const EcosystemHomePage = lazy(() => import('@/pages/EcosystemHomePage').then((m
 const LoginPage = lazy(() => import('@/pages/LoginPage').then((m) => ({ default: m.LoginPage })))
 const AcceptInvitePage = lazy(() => import('@/pages/AcceptInvitePage').then((m) => ({ default: m.AcceptInvitePage })))
 const ResetPasswordPage = lazy(() => import('@/pages/ResetPasswordPage').then((m) => ({ default: m.ResetPasswordPage })))
+const ShowcaseLinkPage = lazy(() => import('@/pages/ShowcaseLinkPage')
+  .then((m) => ({ default: m.ShowcaseLinkPage })))
 // ShiftReportsPage не используется как отдельная страница — просмотр через RawPanel
 
 function LazyPage({ children }: { children: React.ReactNode }) {
@@ -187,6 +189,9 @@ const router = createBrowserRouter([
       { path: '/login', element: <LazyPage><LoginPage /></LazyPage> },
       { path: '/invite/:token', element: <LazyPage><AcceptInvitePage /></LazyPage> },
       { path: '/reset-password/:token', element: <LazyPage><ResetPasswordPage /></LazyPage> },
+      // Витрина по ссылке: стоит рядом с приглашением и сбросом пароля — это
+      // третий вход без учётки, и открывать его должен кто угодно с токеном.
+      { path: '/showcase/:token', element: <LazyPage><ShowcaseLinkPage /></LazyPage> },
       {
         path: '/',
         element: <ProtectedRoute><LazyPage><EcosystemHomePage /></LazyPage></ProtectedRoute>,

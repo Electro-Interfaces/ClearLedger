@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import csv
 import io
+import secrets
 import json
 import uuid
 from datetime import date, datetime, timedelta, timezone
@@ -32,8 +33,8 @@ from app.auth import (
 )
 from app.database import get_db
 from app.models import (
-    ChatMessage, PulseAck, PulseView, PulseViewBlock, PulseViewGrant, Task, TaskEvent,
-    User, UserCompany,
+    ChatMessage, PulseAck, PulseView, PulseViewBlock, PulseViewGrant, PulseViewLink,
+    Task, TaskEvent, User, UserCompany,
 )
 # Словарь стадий — общий с «Проектами»: «Проработка» не должна стать «dd»
 # только потому, что экран другой.
@@ -3057,7 +3058,7 @@ async def pulse_view_data(
         if key == "view.feedback":
             data = await _feedback_block(db, cid, current_user)
         elif profile == "office":
-            data = await _office_block_data(db, cid, key)
+            data = await _office_block_data(db, cid, key, v.period)
         else:
             data = {"note": "Блок этого профиля пока не считается для витрины."}
         blocks.append({
@@ -3070,6 +3071,9 @@ async def pulse_view_data(
         "id": str(v.id), "name": v.name, "audience": v.audience,
         "owner": v.owner_name, "note": v.note, "status": v.status,
         "asOf": date.today().isoformat(),
+        "period": v.period,
+        "periodLabel": {"week": "за неделю", "month": "за месяц",
+                        "quarter": "за квартал"}.get(v.period, v.period),
         # Получателю нужно знать, можно ли отсюда написать: кнопка, которая ничего
         # не делает, хуже её отсутствия.
         "canWrite": v.feedback_mode != "none" and not (
@@ -3129,6 +3133,53 @@ async def assert_company_admin_product(company_id: str, user: User, db: AsyncSes
         raise HTTPException(status_code=403, detail="Витрины настраивает администратор")
     return cid
 
+# ── Период витрины и сравнение с прошлым ────────────────────────────────────
+# Витрина показывала состояние на сегодня. Но получателю — куратору, владельцу,
+# заказчику — важнее не сама цифра, а стало лучше или хуже: «НДС 158 тысяч» без
+# «в прошлом квартале было 96» не говорит ничего.
+#
+# Период задаётся у витрины (неделя, месяц, квартал) и означает окно, за которое
+# считаются оборотные блоки. Остаточные (сальдо, долг) периодом не режутся: остаток
+# на дату — это остаток на дату, и «сальдо за неделю» бессмыслица.
+
+
+def _period_bounds(period: str, today: date) -> tuple[date, date, date, date]:
+    """Границы текущего и предыдущего окна: (с, по, с_прошлого, по_прошлого)."""
+    if period == "week":
+        start = today - timedelta(days=today.weekday())
+        prev_start = start - timedelta(days=7)
+        return start, today, prev_start, start - timedelta(days=1)
+    if period == "quarter":
+        q = (today.month - 1) // 3
+        start = date(today.year, q * 3 + 1, 1)
+        prev_end = start - timedelta(days=1)
+        prev_start = date(prev_end.year, ((prev_end.month - 1) // 3) * 3 + 1, 1)
+        return start, today, prev_start, prev_end
+    start = date(today.year, today.month, 1)
+    prev_end = start - timedelta(days=1)
+    prev_start = date(prev_end.year, prev_end.month, 1)
+    return start, today, prev_start, prev_end
+
+
+def _delta(now_v: float, was_v: float, higher_is_better: bool = True) -> dict[str, Any] | None:
+    """Сравнение с прошлым окном: сколько и в какую сторону.
+
+    Без базы сравнения (в прошлом окне пусто) сравнения НЕТ — «рост на 100 %» от
+    нуля это не рост, а появление, и подавать его цифрой значит врать.
+    """
+    if not was_v:
+        return None
+    diff = now_v - was_v
+    pct = diff / abs(was_v) * 100
+    if abs(pct) < 0.5:
+        return {"text": "как в прошлом периоде", "tone": None}
+    up = diff > 0
+    good = up if higher_is_better else not up
+    return {
+        "text": ("%+.0f%% к прошлому периоду" % pct),
+        "tone": "good" if good else "warning",
+    }
+
 # ── Блоки витрины для профиля «office» ──────────────────────────────────────
 # Каталог «Пульса» собран под сети: продажи ЭЗС, заправки, объекты, эксплуатация.
 # В пространстве бухгалтерского аутсорсера этих данных нет вовсе, зато есть учёт
@@ -3155,7 +3206,8 @@ OFFICE_BLOCKS: list[tuple[str, str, str]] = [
 ]
 
 
-async def _office_block_data(db: AsyncSession, cid: str, key: str) -> dict[str, Any]:
+async def _office_block_data(db: AsyncSession, cid: str, key: str,
+                             period: str = "month") -> dict[str, Any]:
     """Данные одного блока витрины для профиля «office».
 
     Возвращает готовую к показу карточку: цифры, строка-объяснение и, если есть,
@@ -3163,6 +3215,7 @@ async def _office_block_data(db: AsyncSession, cid: str, key: str) -> dict[str, 
     отличается «Закрытие периода» от «Налогов»: разное здесь только содержание.
     """
     p = {"cid": cid, "org": None}
+    since, till, prev_since, prev_till = _period_bounds(period, date.today())
 
     if key == "books.state":
         docs, entries = (await db.execute(text("""
@@ -3215,25 +3268,55 @@ async def _office_block_data(db: AsyncSession, cid: str, key: str) -> dict[str, 
         }
 
     if key == "books.taxes":
-        vat, profit = (await db.execute(text("""
-            SELECT coalesce(sum(amount) FILTER (WHERE account_kt LIKE '68.02%'), 0)
-                 - coalesce(sum(amount) FILTER (WHERE account_dt LIKE '68.02%'
-                                                  AND account_kt NOT LIKE '51%'
-                                                  AND account_kt NOT LIKE '68.90%'), 0),
-                   coalesce(sum(amount) FILTER (WHERE account_dt LIKE '99%'
-                                                  AND account_kt LIKE '68.04%'), 0)
-              FROM gl_entries
-             WHERE company_id = CAST(:cid AS uuid) AND period_year = :y"""),
-            {**p, "y": date.today().year})).one()
+        # НДС и налог на прибыль за ОКНО витрины: «за год» на квартальной витрине
+        # отвечало не на тот вопрос, который задан.
+        async def taxes_for(a: date, b: date):
+            return (await db.execute(text("""
+                SELECT coalesce(sum(amount) FILTER (WHERE account_kt LIKE '68.02%%'), 0)
+                     - coalesce(sum(amount) FILTER (WHERE account_dt LIKE '68.02%%'
+                                                      AND account_kt NOT LIKE '51%%'
+                                                      AND account_kt NOT LIKE '68.90%%'), 0),
+                       coalesce(sum(amount) FILTER (WHERE account_dt LIKE '99%%'
+                                                      AND account_kt LIKE '68.04%%'), 0)
+                  FROM gl_entries
+                 WHERE company_id = CAST(:cid AS uuid)
+                   AND make_date(period_year, period_month, 1)
+                       BETWEEN date_trunc('month', CAST(:a AS date))::date
+                           AND CAST(:b AS date)"""),
+                {**p, "a": a, "b": b})).one()
+
+        vat, profit = await taxes_for(since, till)
+        vat_was, profit_was = await taxes_for(prev_since, prev_till)
         return {
-            "metrics": [{"label": "НДС к уплате за год", "value": _money(vat)},
-                        {"label": "Налог на прибыль", "value": _money(profit)}],
-            "note": "Оценка по данным учёта. Декларацию формирует бухгалтерия.",
+            "metrics": [
+                {"label": "НДС к уплате", "value": _money(vat),
+                 "delta": _delta(float(vat or 0), float(vat_was or 0), higher_is_better=False)},
+                {"label": "Налог на прибыль", "value": _money(profit),
+                 "delta": _delta(float(profit or 0), float(profit_was or 0),
+                                 higher_is_better=False)},
+            ],
+            "note": "Оценка по данным учёта за период витрины. Декларацию формирует бухгалтерия.",
         }
 
     if key == "books.result":
-        rows = [{"title": r[0], "detail": "выручка " + _money(r[1]),
-                 "amount": _money(r[2])}
+        async def result_for(a: date, b: date):
+            return (await db.execute(text("""
+                SELECT coalesce(sum(amount) FILTER (WHERE account_kt LIKE '90.01%%'), 0)
+                     - coalesce(sum(amount) FILTER (WHERE account_dt LIKE '90.03%%'), 0),
+                       coalesce(sum(amount) FILTER (WHERE account_dt LIKE '90.09%%'
+                                                      AND account_kt LIKE '99%%'), 0)
+                     - coalesce(sum(amount) FILTER (WHERE account_dt LIKE '99%%'
+                                                      AND account_kt LIKE '90.09%%'), 0)
+                  FROM gl_entries
+                 WHERE company_id = CAST(:cid AS uuid)
+                   AND make_date(period_year, period_month, 1)
+                       BETWEEN date_trunc('month', CAST(:a AS date))::date
+                           AND CAST(:b AS date)"""),
+                {**p, "a": a, "b": b})).one()
+
+        rev, prof = await result_for(since, till)
+        rev_was, prof_was = await result_for(prev_since, prev_till)
+        rows = [{"title": r[0], "detail": "выручка " + _money(r[1]), "amount": _money(r[2])}
                 for r in (await db.execute(text("""
             SELECT period_year || '-' || lpad(period_month::text, 2, '0'),
                    coalesce(sum(amount) FILTER (WHERE account_kt LIKE '90.01%'), 0)
@@ -3244,7 +3327,16 @@ async def _office_block_data(db: AsyncSession, cid: str, key: str) -> dict[str, 
                                                   AND account_kt LIKE '90.09%'), 0)
               FROM gl_entries WHERE company_id = CAST(:cid AS uuid)
              GROUP BY 1 ORDER BY 1 DESC LIMIT 6"""), p)).all()]
-        return {"items": rows, "note": "Выручка без НДС и финансовый результат по месяцам."}
+        return {
+            "metrics": [
+                {"label": "Выручка за период", "value": _money(rev),
+                 "delta": _delta(float(rev or 0), float(rev_was or 0))},
+                {"label": "Прибыль за период", "value": _money(prof),
+                 "delta": _delta(float(prof or 0), float(prof_was or 0))},
+            ],
+            "items": rows,
+            "note": "Выручка без НДС и финансовый результат: за период и по месяцам.",
+        }
 
     if key == "books.settlements":
         dt, kt = (await db.execute(text("""
@@ -3500,4 +3592,144 @@ async def _feedback_block(db: AsyncSession, cid: str, user: User) -> dict[str, A
         "note": ("Здесь видно, что стало с вашими вопросами. Ответ появляется, когда "
                  "его напишет ответственный."
                  if rows else "Вы пока ничего не спрашивали с этой витрины."),
+    }
+
+
+@router.get("/views/{view_id}/links")
+async def pulse_view_links(
+    view_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Ссылки на витрину: кому выдана, до какого числа, сколько раз открывали."""
+    cid = await assert_company_admin_product(company_id, current_user, db)
+    v = await _view_or_404(db, str(cid), view_id)
+    rows = (await db.execute(select(PulseViewLink).where(
+        PulseViewLink.view_id == v.id).order_by(PulseViewLink.created_at.desc()))).scalars().all()
+    now = datetime.now(timezone.utc)
+    return {"links": [{
+        "id": str(r.id), "token": r.token, "label": r.label,
+        "expiresAt": r.expires_at.isoformat() if r.expires_at else None,
+        "revoked": r.revoked,
+        "expired": bool(r.expires_at and r.expires_at < now),
+        "opened": r.opened_count,
+        "lastOpenedAt": r.last_opened_at.isoformat() if r.last_opened_at else None,
+        "url": f"/showcase/{r.token}",
+    } for r in rows]}
+
+
+@router.post("/views/{view_id}/links")
+async def pulse_view_link_create(
+    view_id: str,
+    company_id: str = Query(...),
+    label: str = "",
+    days: int = Query(30, ge=1, le=365),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Выдать ссылку. Срок обязателен: вечная ссылка на финансы — отложенная утечка."""
+    cid = await assert_company_admin_product(company_id, current_user, db)
+    v = await _view_or_404(db, str(cid), view_id)
+    if v.status != "published":
+        raise HTTPException(status_code=400,
+                            detail="Витрина не опубликована — показывать нечего")
+    row = PulseViewLink(
+        view_id=v.id, token=secrets.token_urlsafe(24), label=label.strip(),
+        expires_at=datetime.now(timezone.utc) + timedelta(days=days),
+        created_by=current_user.email)
+    db.add(row)
+    await db.commit()
+    return {"id": str(row.id), "token": row.token, "url": f"/showcase/{row.token}",
+            "expiresAt": row.expires_at.isoformat()}
+
+
+@router.delete("/views/{view_id}/links/{link_id}")
+async def pulse_view_link_revoke(
+    view_id: str,
+    link_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Отозвать ссылку. Не удаляем: след того, что она была и сколько раз открыта."""
+    cid = await assert_company_admin_product(company_id, current_user, db)
+    v = await _view_or_404(db, str(cid), view_id)
+    try:
+        uid = uuid.UUID(link_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Ссылка не найдена")
+    row = (await db.execute(select(PulseViewLink).where(
+        PulseViewLink.id == uid, PulseViewLink.view_id == v.id))).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Ссылка не найдена")
+    row.revoked = True
+    await db.commit()
+    return {"revoked": True}
+
+
+# Публичная ручка: без токена авторизации, доступ — по токену ссылки. Стоит
+# отдельно и намеренно скупа: отдаёт витрину и ничего больше, ни списка витрин, ни
+# компании, ни людей.
+public_router = APIRouter(prefix="/showcase", tags=["Витрина по ссылке"])
+
+
+@public_router.get("/{token}")
+async def showcase_by_link(token: str, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+    """Витрина по ссылке — только чтение и только опубликованная.
+
+    Обращений и ответов по требованиям отсюда нет: писать может тот, кто вошёл под
+    собой. Аноним с ссылкой смотрит, но не действует.
+    """
+    row = (await db.execute(select(PulseViewLink).where(
+        PulseViewLink.token == token))).scalar_one_or_none()
+    now = datetime.now(timezone.utc)
+    if row is None or row.revoked or (row.expires_at and row.expires_at < now):
+        # Одинаковый ответ на «нет», «отозвана» и «истекла»: подсказывать, что
+        # ссылка существовала, незачем.
+        raise HTTPException(status_code=404, detail="Ссылка недействительна")
+
+    v = (await db.execute(select(PulseView).where(
+        PulseView.id == row.view_id))).scalar_one_or_none()
+    if v is None or v.status != "published":
+        raise HTTPException(status_code=404, detail="Ссылка недействительна")
+
+    row.opened_count += 1
+    row.last_opened_at = now
+    await db.commit()
+
+    cid = str(v.company_id)
+    catalog = {k: t for k, t, _ in await _catalog(db, cid)}
+    profile = (await db.execute(text(
+        "SELECT profile_id FROM companies WHERE id = CAST(:cid AS uuid)"),
+        {"cid": cid})).scalar_one_or_none()
+
+    blocks = []
+    for r in (await db.execute(text("""
+        SELECT block_key, title, hint FROM pulse_view_blocks
+         WHERE view_id = CAST(:v AS uuid) ORDER BY sort"""), {"v": str(v.id)})).all():
+        key, title, hint = r
+        if key == "view.feedback":
+            # Личный блок: по ссылке неизвестно, кто смотрит, и показывать чужие
+            # обращения нельзя.
+            continue
+        data = (await _office_block_data(db, cid, key, v.period) if profile == "office"
+                else {"note": "Блок этого профиля пока не считается для витрины."})
+        blocks.append({
+            "key": key, "title": title or catalog.get(key, key), "hint": hint,
+            "metrics": data.get("metrics") or [], "items": data.get("items") or [],
+            "note": data.get("note"),
+        })
+
+    return {
+        "id": str(v.id), "name": v.name, "audience": v.audience,
+        "owner": v.owner_name, "note": v.note, "status": v.status,
+        "asOf": date.today().isoformat(), "period": v.period,
+        "periodLabel": {"week": "за неделю", "month": "за месяц",
+                        "quarter": "за квартал"}.get(v.period, v.period),
+        "company": (await db.execute(text(
+            "SELECT name FROM companies WHERE id = CAST(:cid AS uuid)"),
+            {"cid": cid})).scalar_one_or_none(),
+        "canWrite": False,
+        "blocks": blocks,
     }

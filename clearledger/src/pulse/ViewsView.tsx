@@ -14,7 +14,7 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Check, Eye, GripVertical, Plus, Send, X } from 'lucide-react'
+import { Check, Copy, Eye, GripVertical, Link2, Plus, Send, X } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -24,8 +24,8 @@ import { cn } from '@/lib/utils'
 import { useCompany } from '@/contexts/CompanyContext'
 import * as userService from '@/services/userService'
 import {
-  createPulseView, getPulseView, getPulseViews, setPulseViewBlocks,
-  setPulseViewGrants, updatePulseView,
+  createPulseView, createPulseViewLink, getPulseView, getPulseViewLinks, getPulseViews,
+  revokePulseViewLink, setPulseViewBlocks, setPulseViewGrants, updatePulseView,
 } from './pulseService'
 import { PulseError, PulseLoading } from './parts'
 import { ShowcaseBody } from './ShowcaseView'
@@ -297,6 +297,8 @@ function ViewEditor({ viewId, catalog, onPreview, onChanged }: {
           </div>
         </div>
 
+        <LinksBlock viewId={viewId} published={q.data.status === 'published'} />
+
         <div className="flex flex-wrap items-center gap-2 border-t pt-3">
           <Button size="sm" className="h-8" disabled={save.isPending}
             onClick={() => save.mutate()}>Сохранить</Button>
@@ -318,5 +320,104 @@ function ViewEditor({ viewId, catalog, onPreview, onChanged }: {
         </div>
       </CardContent>
     </Card>
+  )
+}
+
+/**
+ * Ссылки на витрину: показ тому, у кого нет учётки.
+ *
+ * Самый опасный элемент концепции — по ссылке уходят финансовые данные. Поэтому у
+ * неё срок, отзыв и счётчик открытий, а отозванная ссылка не удаляется: след того,
+ * что она была и сколько раз её открывали, важнее чистоты списка.
+ */
+function LinksBlock({ viewId, published }: { viewId: string; published: boolean }) {
+  const { companyId } = useCompany()
+  const qc = useQueryClient()
+  const [label, setLabel] = useState('')
+  const [days, setDays] = useState(30)
+
+  const q = useQuery({
+    queryKey: ['pulse-view-links', companyId, viewId],
+    queryFn: () => getPulseViewLinks(companyId, viewId),
+  })
+  const refresh = () => qc.invalidateQueries({ queryKey: ['pulse-view-links', companyId, viewId] })
+
+  const create = useMutation({
+    mutationFn: () => createPulseViewLink(companyId, viewId, { label: label.trim(), days }),
+    onSuccess: (r) => {
+      setLabel('')
+      refresh()
+      const url = `${window.location.origin}${r.url}`
+      navigator.clipboard?.writeText(url)
+      toast.success('Ссылка выдана и скопирована', { description: url })
+    },
+    onError: (e) => toast.error('Не вышло', { description: (e as Error).message }),
+  })
+  const revoke = useMutation({
+    mutationFn: (id: string) => revokePulseViewLink(companyId, viewId, id),
+    onSuccess: () => { toast.success('Ссылка отозвана'); refresh() },
+  })
+
+  const links = q.data?.links ?? []
+
+  return (
+    <div className="border-t pt-3">
+      <div className="mb-1.5 flex items-center gap-1.5 text-[12px] font-medium">
+        <Link2 className="h-3.5 w-3.5" /> Ссылка без учётки
+      </div>
+      {!published && (
+        <div className="mb-2 text-[11px] text-muted-foreground">
+          Ссылку можно выдать только у опубликованной витрины.
+        </div>
+      )}
+      <div className="flex flex-wrap items-center gap-2">
+        <Input value={label} onChange={(e) => setLabel(e.target.value)}
+          placeholder="Кому: «Директору ПРОМИЗОЛ»"
+          className="h-8 max-w-[240px] text-[13px]" />
+        <select value={days} onChange={(e) => setDays(Number(e.target.value))}
+          className="h-8 rounded-md border border-border bg-background px-2 text-[13px]">
+          <option value={7}>на 7 дней</option>
+          <option value={30}>на 30 дней</option>
+          <option value={90}>на 90 дней</option>
+        </select>
+        <Button size="sm" className="h-8" disabled={!published || create.isPending}
+          onClick={() => create.mutate()}>Выдать</Button>
+        <span className="text-[11px] text-muted-foreground">
+          Срок обязателен: вечная ссылка на цифры — отложенная утечка.
+        </span>
+      </div>
+
+      {links.length > 0 && (
+        <div className="mt-2 space-y-1">
+          {links.map((l) => {
+            const dead = l.revoked || l.expired
+            return (
+              <div key={l.id} className={cn('flex flex-wrap items-center gap-2 rounded-md',
+                'border border-border px-2 py-1 text-[12px]', dead && 'opacity-50')}>
+                <span className="font-medium">{l.label || 'без пометки'}</span>
+                <span className="text-muted-foreground">
+                  {l.revoked ? 'отозвана' : l.expired ? 'истекла'
+                    : `до ${(l.expiresAt ?? '').slice(0, 10)}`}
+                  {' · открывали '}{l.opened}
+                </span>
+                {!dead && (
+                  <>
+                    <button onClick={() => {
+                      navigator.clipboard?.writeText(`${window.location.origin}${l.url}`)
+                      toast.success('Ссылка скопирована')
+                    }} className="inline-flex items-center gap-1 text-muted-foreground
+                                  hover:text-foreground">
+                      <Copy className="h-3 w-3" /> скопировать
+                    </button>
+                    <button onClick={() => revoke.mutate(l.id)}
+                      className="text-muted-foreground hover:text-foreground">отозвать</button>
+                  </>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
   )
 }

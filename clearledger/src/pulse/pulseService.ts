@@ -3,7 +3,7 @@
  * Модуль намеренно обособлен: экран и клиент живут в src/pulse/, наружу —
  * только маршрут в App.tsx и код продукта в реестре.
  */
-import { get, patch, post, put } from '@/services/apiClient'
+import { del, get, patch, post, put } from '@/services/apiClient'
 
 export interface PulseKpi {
   key: string
@@ -380,11 +380,16 @@ export interface PulseViewCard {
 export interface PulseViewData {
   id: string; name: string; audience: string; company: string | null
   owner: string | null; note: string; status: string; asOf: string
+  period: string; periodLabel: string
   /** Можно ли писать с витрины: кнопка, которая ничего не делает, хуже её отсутствия. */
   canWrite: boolean
   blocks: {
     key: string; title: string; hint: string | null
-    metrics: { label: string; value: string; tone?: string | null }[]
+    metrics: {
+      label: string; value: string; tone?: string | null
+      /** Сравнение с прошлым окном; null — базы сравнения нет, и врать нечем. */
+      delta?: { text: string; tone: string | null } | null
+    }[]
     items: { title: string; detail?: string; amount?: string; requestId?: string }[]
     note: string | null
   }[]
@@ -443,3 +448,28 @@ export const replyPulseRequest = (
 ) => post<{ ok: boolean; status: string; answer: string
             task: { id: string; number: number } | null }>(
   `/api/pulse/views/${viewId}/reply?company_id=${companyId}`, v)
+
+/* ── Ссылки на витрину: показ тому, у кого нет учётки ─────────────────── */
+
+export interface PulseViewLink {
+  id: string; token: string; label: string
+  expiresAt: string | null; revoked: boolean; expired: boolean
+  opened: number; lastOpenedAt: string | null; url: string
+}
+
+export const getPulseViewLinks = (companyId: string, viewId: string) =>
+  get<{ links: PulseViewLink[] }>(`/api/pulse/views/${viewId}/links`,
+    { company_id: companyId })
+
+export const createPulseViewLink = (
+  companyId: string, viewId: string, v: { label: string; days: number },
+) => post<{ id: string; token: string; url: string; expiresAt: string }>(
+  `/api/pulse/views/${viewId}/links?company_id=${companyId}`
+  + `&label=${encodeURIComponent(v.label)}&days=${v.days}`, {})
+
+export const revokePulseViewLink = (companyId: string, viewId: string, id: string) =>
+  del<{ revoked: boolean }>(`/api/pulse/views/${viewId}/links/${id}?company_id=${companyId}`)
+
+/** Витрина по ссылке — без авторизации, только чтение. */
+export const getShowcaseByToken = (token: string) =>
+  get<PulseViewData>(`/api/showcase/${token}`)
