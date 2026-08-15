@@ -79,28 +79,55 @@ DOC_LABELS = {
     "debt_correction": "Корректировка долга",
     "goods_writeoff": "Списание товаров",
     "tax_notice": "Уведомление об исчисленных налогах",
+    # Виды, которых нет у компании на ОСНО, но есть у УСН и там, где ведут кадры.
+    "usn_notice": "Уведомление о спецрежиме налогообложения",
+    "nma_intake": "Принятие к учёту НМА",
+    "capital": "Формирование уставного капитала",
+    "payroll_base": "Регистрация облагаемой базы руководителя",
+    "vacation": "Отпуск",
+    "hire": "Приём на работу",
+    "transfer": "Кадровый перевод",
+    "sfr_stazh": "ЕФС-1: сведения о страховом стаже",
+    "sfr_td": "ЕФС-1: сведения о трудовой деятельности",
+    # Агентская схема и НДС — есть у компании-агента на ОСНО.
+    "commission_report": "Отчёт комиссионера (агента)",
+    "committent_report": "Отчёт комитенту",
+    "goods_intake": "Оприходование товаров",
+    "vat_writeoff": "Списание НДС",
+    "vat_distribution": "Распределение НДС",
+    "ens_operation": "Операция по единому налоговому счёту",
+    "services": "Оказание услуг",
+    "dismissal": "Увольнение",
+    "payroll_sheet": "Ведомость на выплату зарплаты",
+    "szv_m": "СЗВ-М: сведения о застрахованных лицах",
 }
 
 # Папки реестра — УЧАСТКИ УЧЁТА, а не виды документов: счёт, накладная и
 # счёт-фактура по одной сделке лежат в одной папке, потому что вопрос к ним общий
 # («чем закрыт этот счёт»), а не «где хранятся счета-фактуры».
 DOC_SECTIONS = [
-    ("sales", "Продажи", ["invoice_out", "sale", "vat_invoice_out"]),
+    ("sales", "Продажи", ["invoice_out", "sale", "vat_invoice_out",
+                          "commission_report", "committent_report", "services"]),
     ("purchases", "Закупки", ["purchase", "invoice_in", "vat_invoice_in",
                               "purchase_correction", "proxy"]),
     ("money", "Деньги", ["bank_in", "bank_out", "payment_order",
                          "cash_in", "cash_out", "advance_report"]),
-    ("warehouse", "Склад", ["demand_note", "goods_writeoff"]),
+    ("warehouse", "Склад", ["demand_note", "goods_writeoff", "goods_intake"]),
     ("recon", "Сверка", ["act_recon"]),
     # Зарплата — свой участок: у него другой предмет (человек, а не сделка), другие
     # счета учёта (70, 68.01, 69) и другой режим доступа — это персональные данные.
-    ("payroll", "Зарплата", ["payroll_accrual", "payroll_payment"]),
+    ("payroll", "Зарплата", ["payroll_accrual", "payroll_payment", "payroll_base",
+                             "vacation", "hire", "transfer", "sfr_stazh", "sfr_td",
+                             "dismissal", "payroll_sheet", "szv_m"]),
     # Служебные документы отдельно: пять сотен регламентных операций в общем списке
     # хоронят первичку, ради которой реестр и открывают.
     # Книги покупок и продаж и корректировки долга — тоже закрытие периода: они не
     # первичка, а способ, которым бухгалтерия сводит налог и расчёты.
     ("closing", "Закрытие периода", ["closing_op", "manual_entry", "vat_book_in",
-                                     "vat_book_out", "debt_correction", "tax_notice"]),
+                                     "vat_book_out", "debt_correction", "tax_notice",
+                                     "usn_notice", "nma_intake", "capital",
+                                     "vat_writeoff", "vat_distribution",
+                                     "ens_operation"]),
 ]
 SECTION_OF = {code: sec for sec, _, codes in DOC_SECTIONS for code in codes}
 

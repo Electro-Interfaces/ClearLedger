@@ -1,5 +1,15 @@
-# Find metadata objects by name pattern and print their tables/fields.
-param([string]$Pattern = 'Zarplat', [string]$Out = 'find.txt')
+﻿# Find metadata objects by name pattern and print their tables/fields.
+# Строка соединения — как у q1c.ps1: -Base <путь> либо -Srvr/-Ref, либо готовая -Conn.
+param(
+    [string]$Pattern = 'Zarplat',
+    [string]$Out = 'find.txt',
+    [string]$Base,
+    [string]$Srvr,
+    [string]$Ref,
+    [string]$User = '',
+    [string]$Password,
+    [string]$Conn
+)
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $OutputEncoding = [System.Text.Encoding]::UTF8
@@ -8,8 +18,20 @@ function Prop($obj, $name) {
     return [System.__ComObject].InvokeMember($name, [System.Reflection.BindingFlags]::GetProperty, $null, $obj, $null)
 }
 
+if (-not $Password) { $Password = $env:ONEC_PWD }
+if (-not $Conn) {
+    if ($Srvr -and $Ref) {
+        $Conn = 'Srvr="' + $Srvr + '";Ref="' + $Ref + '";Usr="' + $User + '";Pwd="' + $Password + '";'
+    } elseif ($Base) {
+        $Conn = 'File="' + $Base + '";Usr="' + $User + '";Pwd="' + $Password + '";'
+    } else {
+        Write-Output 'нужна база: -Base <путь> либо -Srvr <сервер> -Ref <имя базы> либо -Conn <строка>'
+        exit 1
+    }
+}
+
 $c = New-Object -ComObject 'V83.COMConnector'
-$cn = $c.Connect('File="D:\Users\magsp\1C-Bases\promizol-spb";Usr="";Pwd="";')
+$cn = $c.Connect($Conn)
 $md = Prop $cn 'Metadata'
 
 $sw = New-Object System.IO.StreamWriter($Out, $false, [System.Text.UTF8Encoding]::new($false))

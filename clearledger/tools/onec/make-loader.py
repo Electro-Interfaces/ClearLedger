@@ -11,7 +11,7 @@ with open(os.path.join(SP, 'pull.json'), 'rb') as f:
 print('в base64:', len(packed) // 1024, 'КБ')
 
 BODY = '''# -*- coding: utf-8 -*-
-"""Загрузка аналитического слоя ПРОМИЗОЛ: обороты с субконто, сальдо, НДС, оплата счетов.
+"""Загрузка аналитического слоя компании: обороты с субконто, сальдо, НДС, оплата счетов.
 
 Наборы производные: повторный заход стирает свой source и грузит заново — так
 идемпотентность не зависит от того, совпали ли ключи с прошлой выгрузкой.
@@ -19,6 +19,7 @@ BODY = '''# -*- coding: utf-8 -*-
 import base64
 import gzip
 import json
+import os
 import re
 from datetime import date
 
@@ -29,8 +30,12 @@ from app.models import (AccountingDoc, Company, Counterparty, GlBalance, GlTurno
                         InvoicePayment, VatEntry)
 
 DATA = json.loads(gzip.decompress(base64.b64decode(PACKED)).decode('utf-8'))
-SRC = '1c_dt'
-AS_OF = date(2026, 8, 13)
+# Пометка способа получения. Загрузчик стирает и перезаливает СВОЙ source, поэтому
+# менять его у уже загруженной компании нельзя: старые записи останутся рядом и
+# обороты удвоятся. `1c_dt` — заход из выгрузки, `1c_com` — из живой базы.
+SRC = os.environ.get('LAYER_SOURCE', '1c_dt')
+# Дата среза сальдо: остатки читаются на момент выгрузки, а не на дату загрузки.
+AS_OF = date.fromisoformat(os.environ['AS_OF']) if os.environ.get('AS_OF') else date.today()
 
 # «Счет покупателю ХАРД-000123 от 01.02.2024 12:00:00» → номер и дата.
 TITLE_RE = re.compile(r'^(?P<kind>.+?)\\s+(?P<number>\\S+)\\s+от\\s+(?P<date>\\d{2}\\.\\d{2}\\.\\d{4})')
@@ -46,9 +51,16 @@ def parse_title(t):
 
 from resolve_org import org_id, org_map
 
+# Какой компании грузим. Дефолта нет намеренно: забытая переменная подписала бы
+# данные одной компании другой — молча и без следа в цифрах.
+SLUG = os.environ.get('COMPANY_SLUG')
+if not SLUG:
+    raise SystemExit('COMPANY_SLUG не задан: укажи slug компании (promizol, rti, ...)')
+
+
 async def main():
     async with async_session_factory() as s:
-        cid = (await s.execute(select(Company.id).where(Company.slug == 'promizol'))).scalar_one()
+        cid = (await s.execute(select(Company.id).where(Company.slug == SLUG))).scalar_one()
 
         # Реестры для связей: счета покупателям по «номер|дата», контрагенты по ИНН и имени.
         docs = (await s.execute(select(AccountingDoc.id, AccountingDoc.number, AccountingDoc.date)

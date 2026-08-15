@@ -1,19 +1,32 @@
 # Коннектор к 1С: выгрузка среза компании в пространство
 
-Забирает данные из **файловой базы 1С** (ЭЛСИ.АЗК, Бухгалтерия 3.0) и кладёт их в
+Забирает данные из базы 1С (ЭЛСИ.АЗК, Бухгалтерия 3.0) COM-соединением и кладёт их в
 нормализованный слой пространства. Запускается **на Windows-машине, где стоит платформа
-1С**, — база файловая и локальная, из контейнера её не видно.
+1С**: файловую базу из контейнера не видно, да и COM-коннектор — компонент платформы.
 
-Первый заход по компании делают разово из `.dt`; этот набор — то, чем срез **обновляют**
-и чем он дополняется. Разовые скрипты в скретчпаде сессии не годятся: через неделю никто
-не вспомнит, каким запросом взяты обороты и почему дата уехала на день.
+Первый заход по новой компании — `first-run/` (план счетов, проводки, справочники,
+первичка). Этот набор — то, чем срез **обновляют** и чем он дополняется. Разовые скрипты
+в скретчпаде сессии не годятся: через неделю никто не вспомнит, каким запросом взяты
+обороты и почему дата уехала на день.
+
+## Компания задаётся явно
+
+В пространстве больше одной компании-клиента, поэтому каждый скрипт слоя требует
+`COMPANY_SLUG` и падает без него. Дефолта нет намеренно: забытая переменная подписала бы
+данные одной компании другой — молча и без следа в цифрах. `LAYER_SOURCE` (`1c_dt` или
+`1c_com`) помечает способ получения и у уже загруженной компании не меняется: загрузчик
+стирает и перезаливает только свой `source`, старые записи остались бы рядом.
 
 ## Порядок
 
 ```powershell
-# 1. Выгрузить (ТОЛЬКО x86 PowerShell — COM-коннектор 32-битный)
+# 1. Выгрузить (ТОЛЬКО x86 PowerShell — COM-коннектор 32-битный).
+#    Файловая база:
 C:\Windows\SysWOW64\WindowsPowerShell\v1.0\powershell.exe -ExecutionPolicy Bypass `
   -File q1c.ps1 -QueryDir queries -Base "D:\Users\magsp\1C-Bases\promizol-spb" > pull.out.txt
+#    Клиент-серверная (пароль — в $env:ONEC_PWD, не в командной строке):
+C:\Windows\SysWOW64\WindowsPowerShell\v1.0\powershell.exe -ExecutionPolicy Bypass `
+  -File q1c.ps1 -QueryDir queries -Srvr "1c-srv:1541" -Ref "buh" -User "Читатель" > pull.out.txt
 
 # 2. Разобрать в нормализованный вид (даты, суммы, виды)
 py parse.py            # → pull.json + контрольные суммы
@@ -24,8 +37,9 @@ py make-loader.py      # → load-pull.py
 # 4. Загрузить в стек и проверить
 scp -o ProxyJump=ns1-jump -i ~/.ssh/mag-miran load-pull.py root@10.10.70.53:/tmp/
 ssh -J ns1-jump -i ~/.ssh/mag-miran root@10.10.70.53 \
-  "docker cp /tmp/load-pull.py office-backend:/app/ && docker exec -w /app office-backend python load-pull.py"
-~/.claude/skills/elsy-deploy/scripts/exec-py.sh office verify.py
+  "docker cp /tmp/load-pull.py office-backend:/app/ && docker exec -w /app \
+   -e COMPANY_SLUG=promizol office-backend python load-pull.py"
+COMPANY_SLUG=promizol ~/.claude/skills/elsy-deploy/scripts/exec-py.sh office verify.py
 ```
 
 `verify.py` сверяет загруженное с уже выверенным ядром: обороты с аналитикой обязаны

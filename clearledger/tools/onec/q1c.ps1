@@ -1,7 +1,11 @@
-# Выполнить запросы 1С к файловой базе через COM и напечатать строки как JSON.
+﻿# Выполнить запросы 1С через COM и напечатать строки как JSON.
 # Usage (только x86 PowerShell!):
-#   q1c.ps1 -QueryDir <каталог с *.txt> [-Limit N]
-#   q1c.ps1 -QueryFile <один .txt> [-Limit N]
+#   q1c.ps1 -QueryDir <каталог с *.txt> -Base <путь к файловой базе> [-Limit N]
+#   q1c.ps1 -QueryDir <каталог> -Srvr <сервер[:порт]> -Ref <имя базы> -User <логин> [-Limit N]
+#   q1c.ps1 -QueryDir <каталог> -Conn 'Srvr="...";Ref="...";Usr="...";Pwd="...";'
+#
+# Пароль лучше не писать в командной строке (остаётся в истории и в логах задач) —
+# скрипт берёт его из переменной окружения ONEC_PWD, если -Password не задан.
 #
 # Текст запроса лежит в отдельном UTF-8 файле: кириллицы в самом .ps1 нет, поэтому
 # возни с BOM/ANSI не возникает. Строки печатаются МАССИВАМИ значений — имена колонок
@@ -11,7 +15,12 @@ param(
     [string]$QueryFile,
     [string]$QueryDir,
     [int]$Limit = 0,
-    [string]$Base = 'D:\Users\magsp\1C-Bases\promizol-spb'
+    [string]$Base,          # файловая база: путь к каталогу
+    [string]$Srvr,          # клиент-серверная: адрес сервера 1С, напр. 1c-dev-01:1541
+    [string]$Ref,           # клиент-серверная: имя информационной базы в кластере
+    [string]$User = '',
+    [string]$Password,
+    [string]$Conn           # готовая строка соединения — если задана, остальное игнорируется
 )
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -22,8 +31,22 @@ if ($QueryDir) { $files = Get-ChildItem -Path $QueryDir -Filter '*.txt' | Sort-O
 if ($QueryFile) { $files += $QueryFile }
 if (-not $files) { Write-Output 'no query files'; exit 1 }
 
+if (-not $Password) { $Password = $env:ONEC_PWD }
+if (-not $Conn) {
+    if ($Srvr -and $Ref) {
+        $Conn = 'Srvr="' + $Srvr + '";Ref="' + $Ref + '";Usr="' + $User + '";Pwd="' + $Password + '";'
+    } elseif ($Base) {
+        $Conn = 'File="' + $Base + '";Usr="' + $User + '";Pwd="' + $Password + '";'
+    } else {
+        Write-Output 'нужна база: -Base <путь> либо -Srvr <сервер> -Ref <имя базы> либо -Conn <строка>'
+        exit 1
+    }
+}
+# В лог печатаем строку БЕЗ пароля: файл выгрузки живёт дольше сессии.
+Write-Output ('#### connect ' + ($Conn -replace 'Pwd="[^"]*"', 'Pwd="***"'))
+
 $c = New-Object -ComObject 'V83.COMConnector'
-$cn = $c.Connect('File="' + $Base + '";Usr="";Pwd="";')
+$cn = $c.Connect($Conn)
 
 foreach ($f in $files) {
     $name = [System.IO.Path]::GetFileNameWithoutExtension($f)

@@ -8,9 +8,18 @@ from app.database import async_session_factory
 from app.models import AccountingDoc, Company, GlBalance, GlEntry, GlTurnover, InvoicePayment, VatEntry
 
 
+import os
+
+# Какой компании грузим. Дефолта нет намеренно: забытая переменная подписала бы
+# данные одной компании другой — молча и без следа в цифрах.
+SLUG = os.environ.get('COMPANY_SLUG')
+if not SLUG:
+    raise SystemExit('COMPANY_SLUG не задан: укажи slug компании (promizol, rti, ...)')
+
+
 async def main():
     async with async_session_factory() as s:
-        cid = (await s.execute(select(Company.id).where(Company.slug == 'promizol'))).scalar_one()
+        cid = (await s.execute(select(Company.id).where(Company.slug == SLUG))).scalar_one()
 
         ent = dict((y, float(a or 0)) for y, a in (await s.execute(
             select(GlEntry.period_year, func.sum(GlEntry.amount))

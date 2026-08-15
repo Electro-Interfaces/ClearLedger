@@ -44,3 +44,10 @@ Desktop.ini
 /*.png
 clearledger/*.png
 
+# Выгрузки 1С и промежуточные файлы коннектора: это данные клиентов (в зарплатных
+# наборах — ФИО, ИНН, СНИЛС и даты рождения), в репозиторий они не попадают.
+clearledger/tools/onec/dumps/
+clearledger/tools/onec/*.out.txt
+clearledger/tools/onec/*.json
+clearledger/tools/onec/load-*.py
+clearledger/tools/onec/first-run/load-pull.py

@@ -158,9 +158,18 @@ def num(v):
 
 from resolve_org import org_id, org_map
 
+import os
+
+# Какой компании грузим. Дефолта нет намеренно: забытая переменная подписала бы
+# данные одной компании другой — молча и без следа в цифрах.
+SLUG = os.environ.get('COMPANY_SLUG')
+if not SLUG:
+    raise SystemExit('COMPANY_SLUG не задан: укажи slug компании (promizol, rti, ...)')
+
+
 async def main():
     async with async_session_factory() as s:
-        cid = (await s.execute(select(Company.id).where(Company.slug == 'promizol'))).scalar_one()
+        cid = (await s.execute(select(Company.id).where(Company.slug == SLUG))).scalar_one()
         closed = {(p.year, p.month) for p in (await s.execute(
             select(Period).where(Period.company_id == cid, Period.status == 'closed'))).scalars()}
 

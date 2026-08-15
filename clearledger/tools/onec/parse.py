@@ -7,10 +7,12 @@
 import json
 import os
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 SP = os.path.dirname(os.path.abspath(__file__))  # каталог коннектора: pull.out.txt, pull.json, load-pull.py
-MSK = timezone(timedelta(hours=3))
+# Пояс с историей переходов: до 26.10.2014 Москва была на UTC+4.
+MSK = ZoneInfo('Europe/Moscow')
 
 
 def d(v):

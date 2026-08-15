@@ -1,0 +1,3 @@
+SELECT B.Code AS Код, B.Description AS Наименование,
+  B.ПолноеНаименование AS Полное, B.DeletionMark AS Удален
+FROM Catalog.ВидыВычетовНДФЛ AS B

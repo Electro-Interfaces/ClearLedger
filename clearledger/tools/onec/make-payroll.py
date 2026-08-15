@@ -97,6 +97,9 @@ for r in raw.get('accrual', []):
         'deleted': bool(r[6]) if r[6] is not None else f.get('deleted', False),
         'department': s(r[7]), 'comment': s(r[8]),
         'advance': advance.get((number or '', date or ''), False),
+        # Организация — последняя колонка любого запроса коннектора. Без неё загрузчик
+        # клал документ без юрлица, и разрез по организации терял всю зарплату.
+        'org': s(r[-1]),
     })
 
 # Ведомость: Номер, Дата, Месяц, Сумма, ДатаВыплаты, Проведен, Удален.
@@ -109,6 +112,7 @@ for r in raw.get('payment', []):
         'posted': bool(r[5]) if len(r) > 5 and r[5] is not None else True,
         'deleted': bool(r[6]) if len(r) > 6 and r[6] is not None else False,
         'department': None, 'comment': None,
+        'org': s(r[-1]),
     })
 
 # Строки расчёта. Ключ документа — вид + номер + дата, как во всём слое.
@@ -209,9 +213,18 @@ SRC = '1c_dt'
 
 from resolve_org import org_id, org_map
 
+import os
+
+# Какой компании грузим. Дефолта нет намеренно: забытая переменная подписала бы
+# данные одной компании другой — молча и без следа в цифрах.
+SLUG = os.environ.get('COMPANY_SLUG')
+if not SLUG:
+    raise SystemExit('COMPANY_SLUG не задан: укажи slug компании (promizol, rti, ...)')
+
+
 async def main():
     async with async_session_factory() as s:
-        cid = (await s.execute(select(Company.id).where(Company.slug == 'promizol'))).scalar_one()
+        cid = (await s.execute(select(Company.id).where(Company.slug == SLUG))).scalar_one()
 
         # Статус периода — как у остальной первички: закрытый месяц неизменяем.
         closed = {(p.year, p.month) for p in (await s.execute(

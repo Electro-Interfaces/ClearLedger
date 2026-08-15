@@ -1,0 +1,2 @@
+SELECT B.Description AS Наименование, B.DeletionMark AS Удален
+FROM ChartOfCharacteristicTypes.ВидыСубконтоХозрасчетные AS B

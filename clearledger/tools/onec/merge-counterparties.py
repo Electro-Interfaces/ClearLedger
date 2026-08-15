@@ -28,9 +28,18 @@ REFS = [
 ]
 
 
+import os
+
+# Какой компании грузим. Дефолта нет намеренно: забытая переменная подписала бы
+# данные одной компании другой — молча и без следа в цифрах.
+SLUG = os.environ.get('COMPANY_SLUG')
+if not SLUG:
+    raise SystemExit('COMPANY_SLUG не задан: укажи slug компании (promizol, rti, ...)')
+
+
 async def main():
     async with async_session_factory() as s:
-        cid = (await s.execute(select(Company.id).where(Company.slug == 'promizol'))).scalar_one()
+        cid = (await s.execute(select(Company.id).where(Company.slug == SLUG))).scalar_one()
 
         rows = (await s.execute(text("""
             SELECT inn, array_agg(id::text) FROM core.counterparties

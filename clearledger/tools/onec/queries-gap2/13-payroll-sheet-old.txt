@@ -1,0 +1,3 @@
+SELECT V.Number AS Номер, V.Date AS Дата, V.Posted AS Проведен,
+  V.DeletionMark AS Удален, ПРЕДСТАВЛЕНИЕ(V.Организация) AS Организация1С
+FROM Document.ВедомостьНаВыплатуЗарплаты AS V
