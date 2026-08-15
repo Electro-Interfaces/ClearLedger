@@ -31,17 +31,8 @@ import {
   markCommitment, unmarkCommitment, updateCommitment,
   type Commitment, type CommitmentIn, type CommitmentList,
 } from '@/services/perimeterService'
-import { Loading, TableCard, Th } from './OfficePanels'
+import { Loading } from './OfficePanels'
 import { ExportButton, SearchInput, Tabs, money, num } from './officeShared'
-
-function Td({ children, right, muted }: {
-  children: React.ReactNode; right?: boolean; muted?: boolean
-}) {
-  return (
-    <td className={cn('px-3 py-2 align-top', right && 'text-right tabular-nums whitespace-nowrap',
-      muted && 'text-muted-foreground')}>{children}</td>
-  )
-}
 
 const today = () => new Date().toISOString().slice(0, 10)
 

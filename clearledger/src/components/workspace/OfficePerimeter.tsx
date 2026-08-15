@@ -48,6 +48,8 @@ import {
   CashJournalScreen, CashLoansScreen, CashPapersScreen, CashPeopleScreen,
 } from './OfficeCash'
 import { PerimeterPeopleScreen } from './OfficePeople'
+import { CashAgingScreen } from './OfficeCashAging'
+import { PerimeterSettingsScreen } from './OfficePerimeterSettings'
 import { CommitmentsScreen } from './OfficeCommitments'
 import { useWorkspaceSections } from './workspaceSections'
 
@@ -116,6 +118,8 @@ export function PerimeterPanel() {
       case 'pr_cash_people': return <CashPeopleScreen companyId={companyId} />
       case 'pr_cash_loans':  return <CashLoansScreen companyId={companyId} />
       case 'pr_cash_papers': return <CashPapersScreen companyId={companyId} />
+      case 'pr_cash_aging':  return <CashAgingScreen companyId={companyId} />
+      case 'pr_settings':    return <PerimeterSettingsScreen companyId={companyId} />
       case 'pr_people':      return <PerimeterPeopleScreen companyId={companyId} />
       default:            return <PerimeterLayers companyId={companyId} />
     }
@@ -755,6 +759,35 @@ function RecordDialog({ value, isNew, dicts, saving, error, onChange, onClose, o
                 onChange={(e) => set({ evidence: e.target.value })} />
             </Field>
           </div>
+
+          {['guarantee', 'claim'].includes(value.kind) && (
+            <div className="grid gap-3 sm:grid-cols-3">
+              <Field label="Насколько вероятно"
+                hint="Поручительство с шансом три процента и почти верная претензия — разные вещи">
+                <select className={inputCls} value={value.likelihood ?? ''}
+                  onChange={(e) => set({ likelihood: e.target.value || null })}>
+                  <option value="">— не оценивали —</option>
+                  <option value="probable">Вероятно (больше половины)</option>
+                  <option value="possible">Возможно</option>
+                  <option value="remote">Маловероятно</option>
+                </select>
+              </Field>
+              <Field label="Не меньше, ₽" hint="Низ вилки, если сумма плавает">
+                <input className={inputCls} type="number" step="0.01"
+                  value={value.amountMin ?? ''}
+                  onChange={(e) => set({
+                    amountMin: e.target.value === '' ? null : Number(e.target.value),
+                  })} />
+              </Field>
+              <Field label="Не больше, ₽" hint="Верх вилки">
+                <input className={inputCls} type="number" step="0.01"
+                  value={value.amountMax ?? ''}
+                  onChange={(e) => set({
+                    amountMax: e.target.value === '' ? null : Number(e.target.value),
+                  })} />
+              </Field>
+            </div>
+          )}
 
           <Field label="Что будет, если сработает"
             hint="Словами: «вернём предоплату 300 тыс.», «встанет отгрузка на неделю»">

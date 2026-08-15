@@ -25,6 +25,13 @@ export interface PerimeterRecord {
   consequence: string | null
   /** Забалансовый счёт, на который запись встала бы при оформлении. */
   account: string | null
+  /** Насколько вероятно, что сработает: у гарантии и претензии сумма без этого немая. */
+  likelihood: string | null
+  likelihoodLabel: string | null
+  amountMin: number | null
+  amountMax: number | null
+  /** Ожидаемая величина с поправкой на вероятность. */
+  expected: number | null
   createdAt: string | null; closedAt: string | null; closedNote: string | null
 }
 
@@ -44,6 +51,9 @@ export interface PerimeterRecordIn {
   evidence?: string | null
   consequence?: string | null
   account?: string | null
+  likelihood?: string | null
+  amountMin?: number | null
+  amountMax?: number | null
   closedNote?: string | null
 }
 
@@ -140,6 +150,9 @@ export interface CashMove {
   /** Регулярное обязательство, по которому платят: период закроется отметкой сам. */
   commitmentId: string | null
   dueOn: string | null
+  /** Действие должника, признающее долг: прерывает срок исковой давности. */
+  acknowledgedOn: string | null
+  acknowledgedBy: string | null
   overdue: boolean
   note: string | null
   /** Сотрудник, частное лицо, собственник: от этого зависит, примет ли учёт. */
@@ -177,6 +190,8 @@ export interface CashIn {
   commitmentId?: string | null
   /** За какой период платим: первый день периода. Пусто — период даты операции. */
   commitmentPeriod?: string | null
+  acknowledgedOn?: string | null
+  acknowledgedBy?: string | null
   dueOn?: string | null
   note?: string | null
   counterpartyId?: string | null
@@ -411,3 +426,61 @@ export const markCommitment = (
 export const unmarkCommitment = (companyId: string, id: string, markId: string) =>
   del<{ deleted: boolean }>(
     `/api/perimeter/commitments/${id}/marks/${markId}?company_id=${companyId}`)
+
+/* ── Настройки, проверки и правовой контур ───────────────────────────────── */
+
+export interface PerimeterSettings {
+  /** Доплаты сверх ведомости: спорная возможность, выключена по умолчанию. */
+  allowExtraPay: boolean
+  advanceDays: number
+  cashLimit: number
+  loanWrittenFrom: number
+  loanInterestFrom: number
+  limitationYears: number
+  showDisclaimer: boolean
+  disclaimer: string
+  updatedAt: string | null
+}
+
+export const getPerimeterSettings = (companyId: string) =>
+  get<PerimeterSettings>(`/api/perimeter/settings?company_id=${companyId}`)
+
+export const savePerimeterSettings = (companyId: string, body: Omit<PerimeterSettings,
+  'disclaimer' | 'updatedAt'>) =>
+  put<PerimeterSettings>(`/api/perimeter/settings?company_id=${companyId}`, body)
+
+/** Предупреждения до сохранения: не запреты, а то, что стоит знать. */
+export const checkCash = (companyId: string, body: CashIn) =>
+  post<{ warnings: { key: string; text: string }[] }>(
+    `/api/perimeter/cash/check?company_id=${companyId}`, body)
+
+export interface CashAging {
+  rows: (CashMove & {
+    age: number; bucket: string; overdueReport: boolean
+    limitationFrom?: string; limitationExpiresOn?: string
+    limitationDaysLeft?: number; limitationBase?: string
+  })[]
+  buckets: { key: string; label: string; count: number; amount: number }[]
+  byPurse: { key: string; label: string; amount: number }[]
+  total: number
+  overdueReports: CashMove[]
+  advanceDays: number
+  /** Право требования, сгорающее в ближайший квартал. */
+  expiring: CashAging['rows']
+  disclaimer: string | null
+}
+
+export const getCashAging = (companyId: string) =>
+  get<CashAging>(`/api/perimeter/cash/aging?company_id=${companyId}`)
+
+export const cashOffset = (
+  companyId: string, body: { personName: string; amount: number; happenedOn: string
+    note?: string | null },
+) => post<{ offset: number; rows: number; left: number }>(
+  `/api/perimeter/cash/offset?company_id=${companyId}`, body)
+
+/** Отметить выгрузку: файл живёт дальше сам по себе, и след нужен. */
+export const logExport = (companyId: string, what: string, rows: number) =>
+  post<{ logged: boolean }>(
+    `/api/perimeter/export-log?company_id=${companyId}`
+    + `&what=${encodeURIComponent(what)}&rows=${rows}`, {})

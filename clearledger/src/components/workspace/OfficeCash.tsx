@@ -25,8 +25,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { cn } from '@/lib/utils'
 import { exportTable } from '@/services/booksExport'
 import {
-  createCash, deleteCash, getCashDicts, getCashJournal, getCashLoans, getCashPapers,
-  getCashPeople, getCommitments, getPerimeterPeople, updateCash,
+  checkCash, createCash, deleteCash, getCashDicts, getCashJournal, getCashLoans,
+  getCashPapers, getCashPeople, getCommitments, getPerimeterPeople, logExport,
+  updateCash,
   type CashDicts, type CashIn, type CashMove,
 } from '@/services/perimeterService'
 import { Loading, TableCard, Th } from './OfficePanels'
@@ -150,7 +151,8 @@ export function CashJournalScreen({ companyId }: { companyId: string }) {
         <div className="flex items-center gap-2">
           <SearchInput value={search} onChange={setSearch} placeholder="Кто или за что" />
           {!!rows.length && (
-            <ExportButton onClick={() => exportTable('Наличные расчёты', [
+            <ExportButton onClick={() => {
+              exportTable('Наличные расчёты', [
               { header: 'Дата', key: 'happenedOn', width: 13 },
               { header: 'Направление', key: 'directionLabel', width: 13 },
               { header: 'Вид', key: 'kindLabel', width: 24 },
@@ -160,7 +162,9 @@ export function CashJournalScreen({ companyId }: { companyId: string }) {
               { header: 'Чьи деньги', key: 'purseLabel', width: 18 },
               { header: 'Подтверждение', key: 'proofLabel', width: 16 },
               { header: 'Остаток по займу', key: 'rest', width: 16, money: true },
-            ], rows)} />
+            ], rows)
+              logExport(companyId, 'Наличные расчёты', rows.length)
+            }} />
           )}
           <Button size="sm" onClick={() => setEdit({ id: null, body: EMPTY_CASH() })}>
             <Plus className="w-4 h-4 mr-1" />Записать
@@ -279,6 +283,7 @@ export function CashJournalScreen({ companyId }: { companyId: string }) {
 
       {edit && dicts.data && (
         <CashDialog
+          companyId={companyId}
           value={edit.body}
           isNew={!edit.id}
           dicts={dicts.data}
@@ -302,6 +307,7 @@ const toCashForm = (r: CashMove): CashIn => ({
   direction: r.direction, kind: r.kind, purpose: r.purpose, proof: r.proof,
   purse: r.purse, parentId: r.parentId, recordId: r.recordId,
   commitmentId: r.commitmentId, dueOn: r.dueOn,
+  acknowledgedOn: r.acknowledgedOn, acknowledgedBy: r.acknowledgedBy,
   note: r.note, counterpartyId: r.counterpartyId,
   // Эти три поля терялись при правке: «кто это» сбрасывалось на частное лицо, а
   // проведённая премия возвращалась в очередь на оформление. Форма отправляет весь
@@ -325,9 +331,10 @@ function Field({ label, hint, children }: {
 const inputCls = 'w-full rounded-md border bg-background px-2.5 py-1.5 text-sm'
 
 function CashDialog({
-  value, isNew, dicts, loans, people, commitments, saving, error, onChange, onClose,
-  onSave,
+  companyId, value, isNew, dicts, loans, people, commitments, saving, error, onChange,
+  onClose, onSave,
 }: {
+  companyId: string
   value: CashIn
   isNew: boolean
   dicts: CashDicts
@@ -347,6 +354,14 @@ function CashDialog({
   onSave: () => void
 }) {
   const set = (patch: Partial<CashIn>) => onChange({ ...value, ...patch })
+  // Предупреждения считает сервер: пороги живут в настройках компании, и вторая копия
+  // правил во фронте разошлась бы с ними молча.
+  const warn = useQuery({
+    queryKey: ['perimeter', 'cash-check', companyId, value.kind, value.amount,
+               value.proof, value.dueOn, value.personKind],
+    queryFn: () => checkCash(companyId, value),
+    enabled: !!value.amount,
+  })
   const isRepayment = value.kind === 'repayment' || value.kind === 'report'
   const isLoan = value.kind === 'loan'
   // Остаток есть у займа и подотчёта: и то и другое чем-то закрывается.
@@ -450,11 +465,23 @@ function CashDialog({
           )}
 
           {isOpen && (
-            <Field label={isLoan ? 'Срок возврата' : 'Отчитаться до'}
-              hint="Пусто, если договорились без срока">
-              <input className={inputCls} type="date" value={value.dueOn ?? ''}
-                onChange={(e) => set({ dueOn: e.target.value || null })} />
-            </Field>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <Field label={isLoan ? 'Срок возврата' : 'Отчитаться до'}
+                hint="Пусто, если договорились без срока">
+                <input className={inputCls} type="date" value={value.dueOn ?? ''}
+                  onChange={(e) => set({ dueOn: e.target.value || null })} />
+              </Field>
+              <Field label="Долг признан"
+                hint="Частичная оплата, акт сверки, просьба об отсрочке — они прерывают срок давности, и он течёт заново">
+                <input className={inputCls} type="date" value={value.acknowledgedOn ?? ''}
+                  onChange={(e) => set({ acknowledgedOn: e.target.value || null })} />
+              </Field>
+              <Field label="Чем признан">
+                <input className={inputCls} value={value.acknowledgedBy ?? ''}
+                  placeholder="акт сверки" disabled={!value.acknowledgedOn}
+                  onChange={(e) => set({ acknowledgedBy: e.target.value })} />
+              </Field>
+            </div>
           )}
 
           {!!commitments.length && value.direction === 'out' && (
@@ -546,9 +573,27 @@ function CashDialog({
               onChange={(e) => set({ note: e.target.value })} />
           </Field>
 
+          {!!warn.data?.warnings.length && (
+            <div className="rounded-md border border-amber-500/50 bg-amber-500/5 p-3
+                space-y-1.5">
+              {warn.data.warnings.map((w) => (
+                <p key={w.key} className="text-[11px] text-muted-foreground">{w.text}</p>
+              ))}
+            </div>
+          )}
+
           {error && <div className="text-sm text-destructive">{error}</div>}
         </div>
-        <div className="flex justify-end gap-2 pt-2">
+        <div className="flex flex-wrap items-center justify-end gap-2 pt-2">
+          {(!value.personName.trim() || !value.amount
+            || (isRepayment && !value.parentId)) && (
+            <span className="text-[11px] text-muted-foreground mr-auto">
+              Заполните: {[!value.personName.trim() && 'с кем',
+                           !value.amount && 'сумма',
+                           isRepayment && !value.parentId && 'к какой выдаче']
+                .filter(Boolean).join(', ')}
+            </span>
+          )}
           <Button variant="outline" size="sm" onClick={onClose}>Отмена</Button>
           <Button size="sm" onClick={onSave}
             disabled={saving || !value.personName.trim() || !value.amount

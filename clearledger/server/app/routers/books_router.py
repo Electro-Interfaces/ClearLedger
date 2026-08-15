@@ -6249,6 +6249,7 @@ async def resolve_requests(
     }
 
     resolved = 0
+    closed: list = []
     for r in rows:
         types = closes.get(r.rule)
         if r.rule == "not_posted":
@@ -6285,9 +6286,55 @@ async def resolve_requests(
             r.status, r.resolved_at = "received", datetime.now(timezone.utc)
             r.resolved_doc_id = found
             resolved += 1
+            closed.append(r)
 
     await db.commit()
-    return {"checked": len(rows), "resolved": resolved}
+
+    # Кто отвечал по этим требованиям с витрины — тому и сообщаем, что документ
+    # дошёл. Иначе обратная связь односторонняя: человек отправил документ и до
+    # следующего захода на витрину не знает, приняли его или нет.
+    notified = await _notify_request_closed(db, cid, closed, current_user)
+    return {"checked": len(rows), "resolved": resolved, "notified": notified}
+
+
+async def _notify_request_closed(db: AsyncSession, cid, closed: list, actor: User) -> int:
+    """Письмо тем, кто отвечал по требованию с витрины: документ получен.
+
+    Адресат берётся из ленты обращений: там записано, кто и что ответил. Писать
+    всем подряд нельзя — уведомление о чужом документе выглядит как ошибка.
+    """
+    if not closed:
+        return 0
+    box = (await db.execute(text("""
+        SELECT id::text FROM mail_accounts
+         WHERE company_id = :cid AND mode <> 'in' AND is_active
+         ORDER BY created_at LIMIT 1"""), {"cid": str(cid)})).first()
+    if not box:
+        return 0      # ящика нет — сказать некому и нечем
+
+    from ..services.mail_send import send_message
+    sent = 0
+    for r in closed:
+        who = [e.get("by") for e in (r.escalations or [])
+               if e.get("kind") == "ответ с витрины" and e.get("by")]
+        for addr in dict.fromkeys(who):
+            body = chr(10).join([
+                'Здравствуйте!',
+                '',
+                'Документ, который мы ждали (%s за %s), поступил в учёт. Требование закрыто.',
+                '',
+                'Спасибо!',
+                '',
+                'С уважением,',
+                'бухгалтерия',
+            ]) % (r.doc_kind or 'документ', r.period)
+            res = await send_message(
+                db, cid, account_id=uuid.UUID(box[0]), to=[addr],
+                subject=f"Документ получен: {r.doc_kind or 'документ'} за {r.period}",
+                body=body, author=actor.email)
+            if not res.get("error"):
+                sent += 1
+    return sent
 
 
 # ── Налоги заранее: сколько заплатим, если закрыть период как есть ───────────

@@ -41,7 +41,7 @@ from app.services.perimeter_periods import (
 )
 from app.models import (
     Counterparty, OffLedgerCash, OffLedgerCommitment, OffLedgerCommitmentMark,
-    OffLedgerPerson, OffLedgerRecord, User,
+    OffLedgerPerson, OffLedgerRecord, OffLedgerSettings, User,
 )
 
 router = APIRouter(prefix="/perimeter", tags=["Периметр"])
@@ -72,6 +72,14 @@ async def ensure_perimeter_schema(db: AsyncSession) -> None:
         "ON off_ledger_commitment_marks (commitment_id, period_start)",
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_off_person_name "
         "ON off_ledger_people (company_id, name)",
+        "ALTER TABLE off_ledger_cash ADD COLUMN IF NOT EXISTS acknowledged_on DATE",
+        "ALTER TABLE off_ledger_cash ADD COLUMN IF NOT EXISTS acknowledged_by "
+        "VARCHAR(200)",
+        "ALTER TABLE off_ledger_records ADD COLUMN IF NOT EXISTS likelihood VARCHAR(20)",
+        "ALTER TABLE off_ledger_records ADD COLUMN IF NOT EXISTS "
+        "amount_min NUMERIC(18,2)",
+        "ALTER TABLE off_ledger_records ADD COLUMN IF NOT EXISTS "
+        "amount_max NUMERIC(18,2)",
     ]
     for sql in stmts:
         try:
@@ -111,6 +119,17 @@ CONFIDENCE: dict[str, str] = {
     "correspondence": "Переписка",
     "signed": "Есть подпись",
 }
+# Насколько вероятно, что обязательство сработает. Градация из практики условных
+# обязательств: «вероятно» — кандидат в резерв бухгалтерии, «возможно» — раскрытие,
+# «маловероятно» — держим в виду. Без этой оси гарантия с шансом три процента
+# складывается с почти верной претензией.
+LIKELIHOOD: dict[str, str] = {
+    "probable": "Вероятно",
+    "possible": "Возможно",
+    "remote": "Маловероятно",
+}
+# Виды, у которых вероятность осмысленна: у обещания или решения её не спрашивают.
+LIKELIHOOD_KINDS = ("guarantee", "claim")
 
 
 class RecordIn(BaseModel):
@@ -135,6 +154,9 @@ class RecordIn(BaseModel):
     evidence: str | None = Field(default=None, max_length=500)
     consequence: str | None = Field(default=None, max_length=4000)
     account: str | None = Field(default=None, max_length=20)
+    likelihood: str | None = None
+    amountMin: float | None = Field(default=None, ge=0)
+    amountMax: float | None = Field(default=None, ge=0)
     closedNote: str | None = None
 
 
@@ -181,6 +203,16 @@ def _row(r: OffLedgerRecord, cp_name: str | None = None) -> dict[str, Any]:
         "confidenceLabel": CONFIDENCE.get(r.confidence, r.confidence),
         "source": r.source, "evidence": r.evidence,
         "consequence": r.consequence, "account": r.account,
+        "likelihood": r.likelihood,
+        "likelihoodLabel": LIKELIHOOD.get(r.likelihood or "", None),
+        "amountMin": float(r.amount_min) if r.amount_min is not None else None,
+        "amountMax": float(r.amount_max) if r.amount_max is not None else None,
+        # Ожидаемая величина: у «вероятно» это сумма целиком, у «возможно» — половина,
+        # у «маловероятного» — ноль. Грубая шкала намеренно: точность здесь мнимая, а
+        # порядок величины рабочий, и он не даёт сложить несравнимое.
+        "expected": (round(float(r.amount) * {"probable": 1.0, "possible": 0.5,
+                                              "remote": 0.0}[r.likelihood], 2)
+                     if r.amount is not None and r.likelihood in LIKELIHOOD else None),
         "createdAt": r.created_at.isoformat() if r.created_at else None,
         "closedAt": r.closed_at.isoformat() if r.closed_at else None,
         "closedNote": r.closed_note,
@@ -277,7 +309,8 @@ async def create_record(
         status=body.status, confidence=body.confidence,
         source=body.source, evidence=body.evidence,
         consequence=body.consequence, account=body.account,
-        created_by=current_user.id,
+        likelihood=body.likelihood, amount_min=body.amountMin,
+        amount_max=body.amountMax, created_by=current_user.id,
     )
     db.add(rec)
     await db.flush()
@@ -312,6 +345,8 @@ async def update_record(
     rec.status, rec.confidence = body.status, body.confidence
     rec.source, rec.evidence = body.source, body.evidence
     rec.consequence, rec.account = body.consequence, body.account
+    rec.likelihood = body.likelihood
+    rec.amount_min, rec.amount_max = body.amountMin, body.amountMax
     rec.closed_note = body.closedNote
     # Отметка о закрытии ставится один раз — при уходе из «действует»; возврат в
     # работу её снимает, иначе в реестре останется дата закрытия у живой записи.
@@ -359,6 +394,11 @@ def _validate(body: RecordIn) -> None:
         raise HTTPException(422, f"Неизвестное подтверждение: {body.confidence}")
     if body.startedOn and body.dueOn and body.dueOn < body.startedOn:
         raise HTTPException(422, "Срок раньше даты возникновения")
+    if body.likelihood and body.likelihood not in LIKELIHOOD:
+        raise HTTPException(422, f"Неизвестная вероятность: {body.likelihood}")
+    if (body.amountMin is not None and body.amountMax is not None
+            and body.amountMax < body.amountMin):
+        raise HTTPException(422, "Верх вилки ниже низа")
 
 
 @router.get("/overview")
@@ -547,8 +587,19 @@ CASH_KINDS: dict[str, str] = {
     "repayment": "Возврат займа",
     "expense": "Расход на нужды компании",
     "owner": "Расчёт с собственником",
+    # Выплата работнику помимо расчётного листка, из средств собственника. Вид скрыт,
+    # пока компания не включит его в настройках: у того, кто так не работает, его в
+    # списке быть не должно. Название нейтральное намеренно — ярлык, поставленный
+    # системой, потом читается как признание, а решать это не программе.
+    "extra_pay": "Доплата сверх ведомости",
+    # Взаимозачёт: у человека и выданный ему заём, и наш долг перед ним. Деньги при
+    # этом не движутся, поэтому в приход-расход операция не попадает — она закрывает
+    # обе стороны разом.
+    "offset": "Взаимозачёт",
     "other": "Прочее",
 }
+# Виды, доступные только при включённой настройке.
+GATED_KINDS = {"extra_pay": "allow_extra_pay"}
 PERSON_KINDS: dict[str, str] = {
     "employee": "Сотрудник",
     "individual": "Частное лицо",
@@ -558,8 +609,9 @@ PERSON_KINDS: dict[str, str] = {
 # Виды, у которых есть остаток: деньги выданы и должны чем-то закрыться. Заём —
 # деньгами, подотчёт — деньгами ИЛИ документами о покупке.
 OPEN_KINDS = ("loan", "advance")
-# Чем закрывается выданное: возврат наличными и отчёт документами.
-CLOSING_KINDS = ("repayment", "report")
+# Чем закрывается выданное: возврат наличными, отчёт документами и взаимозачёт
+# встречного долга. Последний денег не двигает, но выдачу гасит так же.
+CLOSING_KINDS = ("repayment", "report", "offset")
 # Что бухгалтерия обычно проводит документами. Оплата частнику наличными и заём
 # знакомому в учёт не попадут; выдача сотруднику, премия и проезд — попадут, и до
 # этого момента операция живёт только здесь.
@@ -601,6 +653,10 @@ class CashIn(BaseModel):
     # За какой период платим. Пусто — период даты операции, но чаще платят за
     # прошедший: доплату за август выдают в сентябре, и отметка должна лечь на август.
     commitmentPeriod: str | None = None
+    # Действие должника, из которого видно, что он признаёт долг: оно ПРЕРЫВАЕТ срок
+    # исковой давности, и тот начинает течь заново.
+    acknowledgedOn: str | None = None
+    acknowledgedBy: str | None = Field(default=None, max_length=200)
     dueOn: str | None = None
     note: str | None = None
     counterpartyId: str | None = None
@@ -719,14 +775,21 @@ async def cash_dictionaries(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
-    await assert_company_product(company_id, current_user, db, PRODUCT)
-    return {
-        "kinds": [{"key": k, "label": v} for k, v in CASH_KINDS.items()],
+    cid = await assert_company_product(company_id, current_user, db, PRODUCT)
+    st = await _settings(cid, db)
+    out = {
+        # Виды под настройкой в список не попадают: у компании, которая так не
+        # работает, их быть не должно.
+        "kinds": [{"key": k, "label": v} for k, v in CASH_KINDS.items()
+                  if k not in GATED_KINDS or getattr(st, GATED_KINDS[k])],
+        "settings": _settings_row(st),
         "personKinds": [{"key": k, "label": v} for k, v in PERSON_KINDS.items()],
         "proof": [{"key": k, "label": v} for k, v in CASH_PROOF.items()],
         "purse": [{"key": k, "label": v} for k, v in CASH_PURSE.items()],
         "directions": [{"key": k, "label": v} for k, v in CASH_DIRECTIONS.items()],
     }
+    await db.commit()
+    return out
 
 
 @router.get("/cash")
@@ -762,7 +825,7 @@ async def list_cash(
 
     # Отчёт документами деньгами не движется: сотрудник принёс чеки, наличные ушли
     # раньше — выдачей. Складывать их с выдачей значит показать двойной расход.
-    cashflow = [i for i in items if i["kind"] != "report"]
+    cashflow = [i for i in items if i["kind"] not in ("report", "offset")]
     out = round(sum(i["amount"] for i in cashflow if i["direction"] == "out"), 2)
     inn = round(sum(i["amount"] for i in cashflow if i["direction"] == "in"), 2)
     return {
@@ -807,6 +870,7 @@ async def create_cash(
 ) -> dict[str, Any]:
     cid = await assert_company_product(company_id, current_user, db, PRODUCT)
     _validate_cash(body)
+    await _check_gated(cid, body.kind, db)
     await _check_parent(cid, body, db)
     person = await _ensure_person(cid, body.personName, body.personKind,
                                   current_user, db)
@@ -824,6 +888,8 @@ async def create_cash(
         record_id=_uuid(body.recordId, "договорённость"),
         commitment_id=_uuid(body.commitmentId, "обязательство"),
         commitment_period=_day(body.commitmentPeriod),
+        acknowledged_on=_day(body.acknowledgedOn),
+        acknowledged_by=body.acknowledgedBy,
         due_on=_day(body.dueOn), note=body.note, created_by=current_user.id,
     )
     db.add(c)
@@ -852,6 +918,7 @@ async def update_cash(
 ) -> dict[str, Any]:
     cid = await assert_company_product(company_id, current_user, db, PRODUCT)
     _validate_cash(body)
+    await _check_gated(cid, body.kind, db)
     c = await db.get(OffLedgerCash, _uuid(cash_id, "идентификатор операции"))
     if c is None or c.company_id != cid:
         raise HTTPException(404, "Движение не найдено")
@@ -890,6 +957,8 @@ async def update_cash(
     c.record_id = _uuid(body.recordId, "договорённость")
     c.commitment_id = _uuid(body.commitmentId, "обязательство")
     c.commitment_period = _day(body.commitmentPeriod)
+    c.acknowledged_on = _day(body.acknowledgedOn)
+    c.acknowledged_by = body.acknowledgedBy
     c.due_on, c.note = _day(body.dueOn), body.note
     if c.commitment_id:
         await _touch_commitment_mark(cid, c, current_user, db)
@@ -958,6 +1027,8 @@ async def cash_people(
             "out": 0.0, "in": 0.0, "work": 0.0,
             "loanRest": 0.0, "operations": 0, "last": None, "overdue": 0,
             "noProof": 0, "awaits": 0, "awaitsAmount": 0.0,
+            # Встречные стороны: сколько должен нам он и сколько должны мы ему.
+            "owed": 0.0, "owes": 0.0,
         })
         amount = float(c.amount)
         p["operations"] += 1
@@ -971,6 +1042,11 @@ async def cash_people(
             rest = amount - repaid.get(c.id, 0.0)
             # Знак сохраняем: выданное это долг перед нами, полученный заём — наш.
             p["loanRest"] += rest if c.direction == "out" else -rest
+            if rest > 0.01:
+                if c.direction == "out":
+                    p["owed"] += rest
+                else:
+                    p["owes"] += rest
             if c.due_on and c.due_on < today and rest > 0.01:
                 p["overdue"] += 1
         if c.kind in FORMALIZABLE and not c.formalized:
@@ -986,6 +1062,13 @@ async def cash_people(
         "out": round(p["out"], 2), "in": round(p["in"], 2),
         "work": round(p["work"], 2), "loanRest": round(p["loanRest"], 2),
         "awaitsAmount": round(p["awaitsAmount"], 2),
+        # Нетто по паре: сворачиваем только внутри одного человека и только незакрытое.
+        # Переносить долг на третье лицо продукт не станет — перевод долга требует
+        # согласия кредитора, и запись «Иванов должен Петрову», которой не было, не
+        # имеет ни силы, ни смысла.
+        "net": round(p["loanRest"], 2),
+        "canOffset": bool(p["owed"] > 0.01 and p["owes"] > 0.01),
+        "owed": round(p["owed"], 2), "owes": round(p["owes"], 2),
         "last": p["last"].isoformat() if p["last"] else None,
     } for p in people.values()]
     out.sort(key=lambda p: (-abs(p["loanRest"]), -p["out"]))
@@ -1863,3 +1946,358 @@ async def _paid_by_period(cid, com: OffLedgerCommitment,
         start = _period_start(r.commitment_period or r.happened_on, com.periodicity)
         out[start] = round(out.get(start, 0.0) + float(r.amount), 2)
     return out
+
+
+# ── Настройки продукта ───────────────────────────────────────────────────────
+
+class SettingsIn(BaseModel):
+    allowExtraPay: bool = False
+    advanceDays: int = Field(default=30, ge=1, le=365)
+    cashLimit: float = Field(default=100000, ge=0)
+    loanWrittenFrom: float = Field(default=10000, ge=0)
+    loanInterestFrom: float = Field(default=100000, ge=0)
+    limitationYears: int = Field(default=3, ge=1, le=10)
+    showDisclaimer: bool = True
+
+
+# Оговорка о статусе данных. Две работы сразу: не даёт принять цифры Периметра за
+# учётные и снижает доказательную самостоятельность записи — это заметка руководителя,
+# а не признание компании.
+DISCLAIMER = ("Оперативная запись руководителя. Не является документом бухгалтерского "
+              "учёта и не порождает обязательств.")
+
+
+async def _settings(cid, db: AsyncSession) -> OffLedgerSettings:
+    """Настройки компании; при первом обращении заводятся со значениями по умолчанию."""
+    st = await db.get(OffLedgerSettings, cid)
+    if st is None:
+        st = OffLedgerSettings(company_id=cid)
+        db.add(st)
+        await db.flush()
+    return st
+
+
+def _settings_row(st: OffLedgerSettings) -> dict[str, Any]:
+    return {
+        "allowExtraPay": bool(st.allow_extra_pay),
+        "advanceDays": st.advance_days,
+        "cashLimit": float(st.cash_limit),
+        "loanWrittenFrom": float(st.loan_written_from),
+        "loanInterestFrom": float(st.loan_interest_from),
+        "limitationYears": st.limitation_years,
+        "showDisclaimer": bool(st.show_disclaimer),
+        "disclaimer": DISCLAIMER,
+        "updatedAt": st.updated_at.isoformat() if st.updated_at else None,
+    }
+
+
+@router.get("/settings")
+async def get_settings(
+    company_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    cid = await assert_company_product(company_id, current_user, db, PRODUCT)
+    st = await _settings(cid, db)
+    row = _settings_row(st)
+    await db.commit()
+    return row
+
+
+@router.put("/settings")
+async def put_settings(
+    company_id: str,
+    body: SettingsIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Изменить настройки. Включение спорной возможности остаётся в журнале действий."""
+    cid = await assert_company_product(company_id, current_user, db, PRODUCT)
+    st = await _settings(cid, db)
+    was_extra = bool(st.allow_extra_pay)
+    st.allow_extra_pay = body.allowExtraPay
+    st.advance_days = body.advanceDays
+    st.cash_limit = body.cashLimit
+    st.loan_written_from = body.loanWrittenFrom
+    st.loan_interest_from = body.loanInterestFrom
+    st.limitation_years = body.limitationYears
+    st.show_disclaimer = body.showDisclaimer
+    st.updated_by = current_user.id
+    if was_extra != body.allowExtraPay:
+        # Включение и выключение этой возможности фиксируется отдельным событием: это
+        # решение компании, и через год должно быть видно, кто его принял.
+        await log_audit(db, actor=current_user, company_id=cid,
+                        action="perimeter.settings.extra_pay",
+                        target=str(cid), details={"enabled": body.allowExtraPay})
+    await log_audit(db, actor=current_user, company_id=cid,
+                    action="perimeter.settings.update", target=str(cid),
+                    details={"advanceDays": body.advanceDays})
+    row = _settings_row(st)
+    await db.commit()
+    return row
+
+
+async def _check_gated(cid, kind: str, db: AsyncSession) -> None:
+    """Вид, закрытый настройкой, нельзя записать в обход интерфейса."""
+    flag = GATED_KINDS.get(kind)
+    if flag and not getattr(await _settings(cid, db), flag):
+        raise HTTPException(
+            422, f"Вид «{CASH_KINDS[kind]}» выключен в настройках «Периметра»")
+
+
+def _limitation(c: OffLedgerCash, years: int) -> dict[str, Any]:
+    """Когда сгорает право требования по выданному.
+
+    Отсчёт идёт от последнего действия должника, из которого видно, что он долг
+    признаёт: частичной оплаты, подписанного акта сверки, просьбы об отсрочке. Такое
+    действие прерывает срок, и он течёт заново — считать от даты выдачи значило бы
+    объявлять сгоревшим живой долг.
+    """
+    if c.kind not in OPEN_KINDS or c.direction != "out":
+        return {}
+    base = c.acknowledged_on or c.due_on or c.happened_on
+    expires = date(base.year + years, base.month, base.day) \
+        if not (base.month == 2 and base.day == 29) else date(base.year + years, 3, 1)
+    left = (expires - date.today()).days
+    return {
+        "limitationFrom": base.isoformat(),
+        "limitationExpiresOn": expires.isoformat(),
+        "limitationDaysLeft": left,
+        "limitationBase": ("признание долга" if c.acknowledged_on
+                           else "срок возврата" if c.due_on else "дата выдачи"),
+    }
+
+
+# Возрастные корзины открытых сумм: чем дольше висит невозвращённое, тем выше риск,
+# что налоговая признает его доходом человека со всеми последствиями.
+AGE_BUCKETS = (("d30", "до 30 дней", 0, 30), ("d60", "31–60 дней", 31, 60),
+               ("d90", "61–90 дней", 61, 90), ("older", "больше 90 дней", 91, 10 ** 6))
+
+
+@router.get("/cash/aging")
+async def cash_aging(
+    company_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Возраст незакрытых выдач: займы и подотчёт по корзинам и по людям."""
+    cid = await assert_company_product(company_id, current_user, db, PRODUCT)
+    st = await _settings(cid, db)
+    rows = list((await db.execute(
+        select(OffLedgerCash).where(OffLedgerCash.company_id == cid,
+                                    OffLedgerCash.kind.in_(OPEN_KINDS))
+    )).scalars().all())
+    repaid = await _repaid_map(cid, db)
+    today = date.today()
+
+    open_rows = []
+    for c in rows:
+        rest = round(float(c.amount) - repaid.get(c.id, 0.0), 2)
+        if rest <= 0.01:
+            continue
+        age = (today - c.happened_on).days
+        bucket = next(k for k, _l, lo, hi in AGE_BUCKETS if lo <= age <= hi)
+        row = _cash_row(c, repaid.get(c.id, 0.0))
+        row.update(age=age, bucket=bucket, **_limitation(c, st.limitation_years))
+        # Подотчёт, не закрытый в установленный компанией срок: именно его налоговая
+        # переквалифицирует в доход человека.
+        row["overdueReport"] = bool(c.kind == "advance" and age > st.advance_days)
+        open_rows.append(row)
+
+    buckets = [{
+        "key": k, "label": label,
+        "count": sum(1 for r in open_rows if r["bucket"] == k),
+        "amount": round(sum(r["rest"] for r in open_rows if r["bucket"] == k), 2),
+    } for k, label, _lo, _hi in AGE_BUCKETS]
+
+    by_purse = [{
+        "key": k, "label": v,
+        "amount": round(sum(r["rest"] for r in open_rows if r["purse"] == k), 2),
+    } for k, v in CASH_PURSE.items()]
+
+    return {
+        "rows": sorted(open_rows, key=lambda r: -r["age"]),
+        "buckets": buckets,
+        "byPurse": by_purse,
+        "total": round(sum(r["rest"] for r in open_rows), 2),
+        "overdueReports": [r for r in open_rows if r["overdueReport"]],
+        "advanceDays": st.advance_days,
+        # Право требования, которое сгорит в ближайший квартал: сгоревшее взыскать
+        # нельзя, а прервать срок можно актом сверки — пока он не сгорел.
+        "expiring": sorted(
+            [r for r in open_rows
+             if r.get("limitationDaysLeft") is not None
+             and r["limitationDaysLeft"] <= 90],
+            key=lambda r: r["limitationDaysLeft"]),
+        "disclaimer": DISCLAIMER if st.show_disclaimer else None,
+    }
+
+
+@router.post("/cash/check")
+async def cash_check(
+    company_id: str,
+    body: CashIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Что стоит знать до сохранения операции.
+
+    Не запреты, а предупреждения: продукт не решает за компанию, но и не молчит о том,
+    что превышен порог, после которого закон требует бумагу.
+    """
+    cid = await assert_company_product(company_id, current_user, db, PRODUCT)
+    st = await _settings(cid, db)
+    limits = (float(st.loan_written_from), float(st.loan_interest_from),
+              float(st.cash_limit), st.advance_days)
+    await db.commit()
+    written_from, interest_from, cash_limit, advance_days = limits
+    warn: list[dict[str, str]] = []
+    amount = body.amount or 0
+
+    if body.kind == "loan" and amount > written_from:
+        warn.append({
+            "key": "loan_written",
+            "text": f"Заём свыше {int(written_from):,} руб. между гражданами "
+                    "требует письменной формы. Без расписки взыскание опирается только "
+                    "на письменные доказательства: свидетели в таком споре не "
+                    "принимаются.".replace(",", " "),
+        })
+    if body.kind == "loan" and amount > interest_from:
+        warn.append({
+            "key": "loan_interest",
+            "text": f"Заём свыше {int(interest_from):,} руб. по умолчанию "
+                    "считается ПРОЦЕНТНЫМ по ключевой ставке. Если договорились без "
+                    "процентов, это нужно прямо написать в расписке."
+                    .replace(",", " "),
+        })
+    if body.personKind in ("other",) and amount > cash_limit:
+        warn.append({
+            "key": "cash_limit",
+            "text": f"Предел наличных расчётов между организациями и ИП по одному "
+                    f"договору — {int(cash_limit):,} руб.".replace(",", " "),
+        })
+    if body.kind == "advance" and not body.dueOn:
+        warn.append({
+            "key": "advance_due",
+            "text": f"Срок отчёта не указан. По умолчанию в настройках — "
+                    f"{advance_days} дн.; невозвращённое и неотчитанное налоговая "
+                    "признаёт доходом человека с НДФЛ и взносами.",
+        })
+    if body.kind == "extra_pay":
+        warn.append({
+            "key": "extra_pay",
+            "text": "Выплата помимо расчётного листка не уменьшает обязательств "
+                    "компании перед работником и бюджетом. Запись нужна, чтобы знать "
+                    "реальные расчёты, — она не заменяет оформление и не защищает от "
+                    "последствий.",
+        })
+    if body.proof == "none" and amount >= 50000:
+        warn.append({
+            "key": "no_proof",
+            "text": "Крупный расчёт без единой бумаги: доказательства не будет ни у "
+                    "одной стороны.",
+        })
+    return {"warnings": warn}
+
+
+class OffsetIn(BaseModel):
+    """Взаимозачёт встречных долгов одного человека."""
+
+    personName: str = Field(min_length=1, max_length=300)
+    amount: float = Field(gt=0)
+    happenedOn: str
+    note: str | None = Field(default=None, max_length=2000)
+
+
+@router.post("/cash/offset")
+async def cash_offset(
+    company_id: str,
+    body: OffsetIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Зачесть встречные долги: он должен нам и мы должны ему.
+
+    Гасятся обе стороны разом, деньги при этом не движутся. Правило заимствовано из
+    практики раздела расходов между людьми и намеренно сужено: сворачиваем ТОЛЬКО
+    внутри одной пары. Транзитивное упрощение («Иванов теперь должен Петрову») создало
+    бы обязательство, которого не было, — перевод долга требует согласия кредитора.
+
+    Ограничение на сумму: зачесть можно не больше меньшей из встречных сторон, иначе
+    у одного из долгов остаток уйдёт в минус.
+    """
+    cid = await assert_company_product(company_id, current_user, db, PRODUCT)
+    people = await cash_people(company_id, db, current_user)
+    key = body.personName.strip().lower()
+    row = next((r for r in people["rows"] if r["person"].strip().lower() == key), None)
+    if row is None:
+        raise HTTPException(404, "С этим человеком расчётов нет")
+    limit = min(row["owed"], row["owes"])
+    if limit <= 0.01:
+        raise HTTPException(422, "Встречных долгов нет: зачитывать нечего")
+    if body.amount > limit + 0.01:
+        raise HTTPException(422, f"Зачесть можно не больше {round(limit, 2)} руб. — "
+                                 "это меньшая из встречных сторон")
+
+    # Зачёт закрывает выдачи по очереди, начиная со старых: так же, как это делает
+    # любой разумный человек, — сперва то, что висит дольше.
+    repaid = await _repaid_map(cid, db)
+    opened = sorted(
+        [c for c in (await db.execute(
+            select(OffLedgerCash).where(
+                OffLedgerCash.company_id == cid,
+                OffLedgerCash.kind.in_(OPEN_KINDS),
+                func.lower(OffLedgerCash.person_name) == key))).scalars().all()
+         if float(c.amount) - repaid.get(c.id, 0.0) > 0.01],
+        key=lambda c: c.happened_on)
+
+    left = body.amount
+    made = []
+    for side in ("out", "in"):
+        rest_side = body.amount
+        for c in [x for x in opened if x.direction == side]:
+            if rest_side <= 0.01:
+                break
+            free = round(float(c.amount) - repaid.get(c.id, 0.0), 2)
+            take = min(free, rest_side)
+            row_ = OffLedgerCash(
+                company_id=cid, direction="in" if side == "out" else "out",
+                kind="offset", happened_on=_day(body.happenedOn) or date.today(),
+                amount=take, person_name=body.personName.strip(),
+                person_id=(await _ensure_person(cid, body.personName, "individual",
+                                                current_user, db)).id,
+                purpose="взаимозачёт встречных долгов", proof="none", purse="owner",
+                parent_id=c.id, note=body.note, created_by=current_user.id,
+            )
+            db.add(row_)
+            made.append(row_)
+            rest_side = round(rest_side - take, 2)
+        left = rest_side
+    await db.flush()
+    await log_audit(db, actor=current_user, company_id=cid,
+                    action="perimeter.cash.offset", target=str(cid),
+                    details={"person": body.personName, "amount": body.amount})
+    await db.commit()
+    return {"offset": body.amount, "rows": len(made), "left": left}
+
+
+@router.post("/export-log")
+async def export_log(
+    company_id: str,
+    what: str,
+    rows: int = 0,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, bool]:
+    """Отметить, что данные периметра выгружены.
+
+    Выгрузка — самая чувствительная операция продукта: файл живёт дальше сам по себе.
+    Экспорт без следа делает бессмысленным весь остальной контроль доступа, поэтому
+    фронт сообщает о каждой выгрузке, а журнал действий хранит, кто и что забрал.
+    """
+    cid = await assert_company_product(company_id, current_user, db, PRODUCT)
+    await log_audit(db, actor=current_user, company_id=cid,
+                    action="perimeter.export", target=what,
+                    details={"rows": rows})
+    await db.commit()
+    return {"logged": True}

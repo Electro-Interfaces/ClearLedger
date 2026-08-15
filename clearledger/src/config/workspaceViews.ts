@@ -84,6 +84,13 @@ export const MODE_LABELS: Record<CoreMode, string> = {
   econ_help: 'Экономика · Помощь',
   books_ledger: 'Бухгалтерия · Регистр',
   books_primary: 'Бухгалтерия · Документы',
+  books_offbal: 'Бухгалтерия · За балансом',
+  per_picture: 'Периметр · Картина',
+  per_official: 'Периметр · Официально',
+  per_records: 'Периметр · Договорённости',
+  per_cash: 'Периметр · Наличные',
+  per_people: 'Периметр · Люди',
+  per_help: 'Периметр · Помощь',
 }
 
 // Подписи под-разделов по режимам (ключ = ключ под-вида в панели).

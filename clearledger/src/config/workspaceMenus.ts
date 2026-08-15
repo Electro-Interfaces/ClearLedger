@@ -530,6 +530,8 @@ export const PER_PICTURE_MENU: CentralMenuItem[] = [
   { key: 'pr_layers', label: 'Три слоя' },
   // Ближайшее и просроченное: у договорённости срок есть чаще, чем сумма.
   { key: 'pr_due', label: 'Сроки' },
+  // Настройки продукта: спорные возможности включает компания, а не программа.
+  { key: 'pr_settings', label: 'Настройки' },
 ]
 export const PER_OFFICIAL_MENU: CentralMenuItem[] = [
   { key: 'pr_accounts', label: 'Забалансовые счета' },
@@ -555,6 +557,8 @@ export const PER_CASH_MENU: CentralMenuItem[] = [
   { key: 'pr_cash_people', label: 'Расчёты с людьми' },
   { key: 'pr_cash_loans', label: 'Займы и подотчёт' },
   { key: 'pr_cash_papers', label: 'К оформлению' },
+  // Возраст незакрытого и сроки давности: два разных срока, оба денежные.
+  { key: 'pr_cash_aging', label: 'Возраст и сроки' },
 ]
 
 /**

@@ -2789,7 +2789,8 @@ async def _catalog(db: AsyncSession, cid: str) -> list[tuple[str, str, str]]:
     profile = (await db.execute(text(
         "SELECT profile_id FROM companies WHERE id = CAST(:cid AS uuid)"),
         {"cid": str(cid)})).scalar_one_or_none()
-    return OFFICE_BLOCKS if profile == "office" else PULSE_ITEMS
+    base = OFFICE_BLOCKS if profile == "office" else PULSE_ITEMS
+    return [*base, *COMMON_BLOCKS]
 
 
 @router.get("/views")
@@ -3053,8 +3054,12 @@ async def pulse_view_data(
         SELECT block_key, title, hint FROM pulse_view_blocks
          WHERE view_id = CAST(:v AS uuid) ORDER BY sort"""), {"v": str(v.id)})).all():
         key, title, hint = r
-        data = (await _office_block_data(db, cid, key) if profile == "office"
-                else {"note": "Блок этого профиля пока не считается для витрины."})
+        if key == "view.feedback":
+            data = await _feedback_block(db, cid, current_user)
+        elif profile == "office":
+            data = await _office_block_data(db, cid, key)
+        else:
+            data = {"note": "Блок этого профиля пока не считается для витрины."}
         blocks.append({
             "key": key, "title": title or catalog.get(key, key), "hint": hint,
             "metrics": data.get("metrics") or [], "items": data.get("items") or [],
@@ -3132,6 +3137,11 @@ async def assert_company_admin_product(company_id: str, user: User, db: AsyncSes
 #
 # Блоки считают ПО ТЕМ ЖЕ ручкам «Бухгалтерии», а не по своим запросам: разошедшаяся
 # цифра наружу — худшее, что может сделать витрина.
+
+# Обратный ход витрины — общий блок для всех профилей.
+COMMON_BLOCKS: list[tuple[str, str, str]] = [
+    ("view.feedback", "Мои обращения", "Связь"),
+]
 
 OFFICE_BLOCKS: list[tuple[str, str, str]] = [
     ("books.state", "Состояние учёта", "Учёт"),
@@ -3442,3 +3452,52 @@ async def pulse_view_reply(
     await db.commit()
     return {"ok": True, "status": new_status or row[1], "answer": LABEL[decision],
             "task": task}
+
+
+# ── «Мои обращения»: обратный ход витрины ───────────────────────────────────
+# Получатель написал — и до сих пор узнавал о судьбе обращения только устно. Блок
+# показывает ему его же обращения: что он спросил, в какой стадии это сейчас и что
+# ответили. Без него витрина односторонняя: мы просим документы, он пишет вопросы,
+# и оба ждут ответа в тишине.
+#
+# Блок общий для любого профиля: обращения приходят с любой витрины.
+
+
+async def _feedback_block(db: AsyncSession, cid: str, user: User) -> dict[str, Any]:
+    """Обращения этого получателя и что с ними стало."""
+    rows = (await db.execute(text("""
+        SELECT t.number, t.title, t.status, t.created_at,
+               (SELECT e.note FROM task_events e
+                 WHERE e.task_id = t.id AND e.kind = 'comment' AND e.note IS NOT NULL
+                 ORDER BY e.created_at DESC LIMIT 1) AS answer,
+               (SELECT max(e.created_at) FROM task_events e
+                 WHERE e.task_id = t.id AND e.kind = 'comment') AS answered_at
+          FROM tasks t
+         WHERE t.company_id = CAST(:cid AS uuid) AND t.author_id = CAST(:u AS uuid)
+           -- Скобки обязательны: без них AND связывает сильнее OR, и в ленту
+           -- попали бы чужие задачи компании.
+           AND (t.title LIKE 'С витрины%' OR t.title LIKE 'Вопрос по документу%')
+         ORDER BY t.created_at DESC LIMIT 10"""),
+        {"cid": cid, "u": str(user.id)})).all()
+
+    STATUS = {"open": "в работе", "in_progress": "в работе",
+              "done": "решено", "closed": "закрыто", "cancelled": "снято"}
+    items = [{
+        "title": r[1],
+        "detail": ("№%s · %s" % (r[0], STATUS.get(r[2], r[2]))
+                   + (" · ответ: " + (r[4] or "")[:90] if r[4] else "")),
+        "amount": "",
+    } for r in rows]
+
+    waiting = sum(1 for r in rows if r[2] in ("open", "in_progress"))
+    answered = sum(1 for r in rows if r[4])
+    return {
+        "metrics": [{"label": "Обращений", "value": str(len(rows))},
+                    {"label": "В работе", "value": str(waiting),
+                     "tone": "warning" if waiting else None},
+                    {"label": "С ответом", "value": str(answered)}],
+        "items": items,
+        "note": ("Здесь видно, что стало с вашими вопросами. Ответ появляется, когда "
+                 "его напишет ответственный."
+                 if rows else "Вы пока ничего не спрашивали с этой витрины."),
+    }
