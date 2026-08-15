@@ -92,9 +92,10 @@ export function AuditorTerminal() {
     // Терминал грузится лениво: xterm и его стили нужны только тут, а тянуть их в общий
     // чанк ради раздела, куда заходит один админ, — лишние килобайты всем остальным.
     void (async () => {
-      const [{ Terminal }, { FitAddon }] = await Promise.all([
+      const [{ Terminal }, { FitAddon }, { WebglAddon }] = await Promise.all([
         import('@xterm/xterm'),
         import('@xterm/addon-fit'),
+        import('@xterm/addon-webgl'),
       ])
       if (disposed || !hostRef.current) return
 
@@ -109,6 +110,20 @@ export function AuditorTerminal() {
       const fit = new FitAddon()
       term.loadAddon(fit)
       term.open(hostRef.current)
+
+      // 🔴 Рендерер по умолчанию (DOM) оставлял мусор в ячейках, ставших пустыми: после
+      // прокрутки между маркером списка и текстом торчала буква прошлого кадра — «●тПроверю»
+      // вместо «● Проверю», а слева выстраивался столбик обрывков «го», «Об», «На».
+      // WebGL перерисовывает кадр целиком и этой болезни не имеет.
+      //
+      // Контекста может не быть (старый драйвер, отключённое ускорение) — тогда молча
+      // остаёмся на DOM: терминал с артефактами лучше, чем терминал, который не открылся.
+      try {
+        const webgl = new WebglAddon()
+        webgl.onContextLoss(() => webgl.dispose())
+        term.loadAddon(webgl)
+      } catch { /* нет WebGL — работаем на DOM-рендерере */ }
+
       fit.fit()
       termRef.current = term
       term.focus()   // открыли раздел — можно печатать сразу, без клика в поле
