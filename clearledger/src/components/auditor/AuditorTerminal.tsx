@@ -22,7 +22,13 @@ import { useCompany } from '@/contexts/CompanyContext'
 import { cn } from '@/lib/utils'
 
 export function AuditorTerminal() {
+  // Компания нужна ТОЛЬКО чтобы сервис проверил право администратора. Сама мастерская
+  // работает с рабочей папкой агента, а она одна на пространство — поэтому смена
+  // организации в шапке не должна рвать терминал и уносить открытый сеанс. Берём через
+  // ref, а не зависимостью эффекта.
   const { companyId } = useCompany()
+  const companyRef = useRef(companyId)
+  companyRef.current = companyId
   const hostRef = useRef<HTMLDivElement>(null)
   const [state, setState] = useState<'connecting' | 'open' | 'closed' | 'detached'>('connecting')
   const [error, setError] = useState('')
@@ -65,8 +71,12 @@ export function AuditorTerminal() {
     queryKey: ['auditor-health'], queryFn: auditor.getHealth, staleTime: 60_000, retry: false,
   })
 
+  // Зависим от того, ЕСТЬ ли компания, а не от того, какая именно: терминал должен
+  // подняться, когда она загрузилась, и пережить переключение организации в шапке.
+  const hasCompany = !!companyId
+
   useEffect(() => {
-    if (!hostRef.current || !companyId) return
+    if (!hostRef.current || !hasCompany) return
     let disposed = false
     let cleanup = () => {}
 
@@ -102,7 +112,7 @@ export function AuditorTerminal() {
         tries.current = 0
         // Токен уходит ПЕРВЫМ СООБЩЕНИЕМ, а не в адресе: адрес попадает в логи кромки.
         ws.send(JSON.stringify({
-          type: 'start', token: getToken() ?? '', companyId,
+          type: 'start', token: getToken() ?? '', companyId: companyRef.current,
           cols: term.cols, rows: term.rows, fresh: freshRef.current, tab,
         }))
         freshRef.current = false
@@ -186,7 +196,7 @@ export function AuditorTerminal() {
     })()
 
     return () => { disposed = true; clearTimeout(retryRef.current); cleanup() }
-  }, [companyId, attempt, tab])
+  }, [attempt, tab, hasCompany])
 
   return (
     <div className="flex h-full min-h-0 flex-col">
