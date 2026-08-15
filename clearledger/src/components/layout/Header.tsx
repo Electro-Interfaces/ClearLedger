@@ -8,9 +8,9 @@ import { HeaderInteractionButtons } from '@/components/layout/HeaderInteractionB
 import { APP_VERSION } from '@/config/version'
 import { ECOSYSTEM_BRAND } from '@/config/brand'
 import { OrganizationSelector } from '@/components/layout/OrganizationSelector'
+import { CompanySelector } from '@/components/company/CompanySelector'
 import { useCompany } from '@/contexts/CompanyContext'
 import { coreAppTitle, isCarvedProfile, productForPath, productLabel } from '@/config/spaceProducts'
-import { CompanySelector } from '@/components/company/CompanySelector'
 
 interface HeaderProps {
   onMobileMenuToggle?: () => void
@@ -29,12 +29,16 @@ export function Header({ onMobileMenuToggle, isMobile }: HeaderProps) {
   const BrandIcon = BookText
 
   return (
-    <header className="h-[var(--header-height)] shrink-0 border-b border-border/50 bg-card/95 backdrop-blur-xl">
+    <header className="mobile-safe-top box-content h-[var(--header-height)] shrink-0
+                       border-b border-border/50 bg-card/95 backdrop-blur-xl">
       <div className="flex h-full items-center justify-between gap-3 px-4 md:px-6">
         {/* Левый блок: бургер (моб.) + лого + бренд + свёртка сайдбара */}
-        <div className="flex items-center gap-3 md:gap-4 shrink-0">
+        <div className="flex min-w-0 items-center gap-3 md:gap-4">
           {isMobile && (
-            <Button variant="ghost" size="icon" className="shrink-0" onClick={onMobileMenuToggle}>
+            <Button variant="ghost" size="icon"
+              className="h-10 w-10 shrink-0 rounded-xl"
+              aria-label="Меню разделов"
+              onClick={onMobileMenuToggle}>
               <Menu className="h-5 w-5" />
             </Button>
           )}
@@ -43,7 +47,7 @@ export function Header({ onMobileMenuToggle, isMobile }: HeaderProps) {
               приложений. Рабочий стол самого Ledger — `/workspace`.
               На телефоне логотипа нет: он был третьим путём на стол (рядом стояли
               кнопка «Стол» и нижняя навигация), а место занимал в первом ряду. */}
-          <Link to="/" title="К рабочему столу экосистемы" className="hidden items-center gap-3 shrink-0 sm:flex">
+          <Link to="/" title="К рабочему столу экосистемы" className="hidden items-center gap-3 shrink-0 lg:flex">
             <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-blue-600 to-blue-700 shadow-lg">
               <BrandIcon className="h-5 w-5 text-white" />
             </div>
@@ -64,7 +68,7 @@ export function Header({ onMobileMenuToggle, isMobile }: HeaderProps) {
               семь безымянных иконок, две из них — одинаковые сетки («Стол» и
               «Приложения»), а название текущего продукта пряталось на sm:. Человек
               не видел главного — где он находится. */}
-          <span className="min-w-0 truncate text-base font-semibold tracking-tight text-foreground sm:hidden">
+          <span className="min-w-0 truncate text-base font-semibold tracking-tight text-foreground lg:hidden">
             {product ? productLabel(product, company.profileId)
               : coreTitle ?? `${ECOSYSTEM_BRAND} Учёт`}
           </span>
@@ -78,19 +82,21 @@ export function Header({ onMobileMenuToggle, isMobile }: HeaderProps) {
             прямо в рабочей области. В шапке остаётся выбор организации.
             В пространстве работают ОРГАНИЗАЦИИ (терминология МАГа 15.08.2026) — их и
             выбирают здесь. Оба переключателя скрываются, когда выбирать не из чего. */}
-        <div className="hidden flex-1 items-center justify-end min-w-0 gap-2 px-2 sm:flex sm:justify-center">
-          <CompanySelector />
-          {/* Юрлицо ВНУТРИ организации (ООО и ИП одного владельца в одной базе 1С).
-              Появляется, только когда их несколько: иначе в шапке стояли два похожих
-              переключателя с почти одинаковыми названиями, и это читалось как ошибка. */}
-          <OrganizationSelector />
-        </div>
+        {/* Распорка: прижимает переключатель, связь и профиль к правому краю. */}
+        <div className="flex-1" />
 
-        {/* Распорка: прижимает связь и профиль к правому краю. */}
-        <div className="flex-1 sm:hidden" />
-
-        {/* Правый блок: связь с пространством + режим + профиль */}
+        {/* Правый блок: организация + связь с пространством + режим + профиль */}
         <div className="flex items-center gap-1.5 md:gap-2 shrink-0">
+          {/* 🔴 Переключатель организации — В ШАПКЕ, слева от «Конференции».
+              Он уезжал отсюда дважды: сначала скрывался при единственной организации,
+              потом переехал в полосу под шапкой. Оба раза человек искал его глазами на
+              привычном месте и не находил. Место фиксировано (решение МАГа 15.08.2026):
+              шапка, перед кнопками связи, во всех приложениях одинаково. */}
+          <span className="hidden sm:inline-flex"><CompanySelector /></span>
+          {/* Юрлицо ВНУТРИ организации (ООО и ИП одного владельца в одной базе 1С).
+              Появляется, только когда их несколько: иначе рядом стояли два похожих
+              переключателя с почти одинаковыми названиями. */}
+          <span className="hidden sm:inline-flex"><OrganizationSelector /></span>
           {/* Чат · Задачи · Конференция (+ Инфо и поддержка на десктопе) — общий блок продуктов
               контейнера. Стоит справа и на телефоне: это то, ради чего берут трубку. */}
           <HeaderInteractionButtons conference />

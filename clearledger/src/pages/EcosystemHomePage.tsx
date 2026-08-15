@@ -15,7 +15,7 @@ import { useEffect, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
-  Menu, LayoutGrid, ExternalLink, Loader2, LogOut,
+  Menu, LayoutGrid, ExternalLink, Loader2,
   LifeBuoy, ClipboardList, ListChecks, Video, FileText, MessagesSquare,
   ShieldCheck, BookOpen, HardHat, Gauge, BarChart3, Wallet, Database, MessageCircle,
   Building2, ShoppingCart, Megaphone, Network, Calculator, Stethoscope, Activity,
@@ -212,8 +212,8 @@ export function EcosystemHomePage({ embedded, onNavigate }: {
   // Тот же порог, что у раскладок: ниже него интерфейс живёт в руке, а не под курсором.
   const narrow = useMaxWidth(1024)
   const [menuOpen, setMenuOpen] = useState(false)
-  const { user, logout } = useAuth()
-  const { company, companyId, companies } = useCompany()
+  const { user } = useAuth()
+  const { company, companyId } = useCompany()
   // Открытие продуктов — общей логикой с лаунчером: там же живёт особый случай
   // «Конференций», где вместо перехода на чужую главную создаётся комната.
   const { open: openViaHook, busy } = useOpenApp()
@@ -404,14 +404,10 @@ export function EcosystemHomePage({ embedded, onNavigate }: {
           </div>
         </div>
 
-        {/* Переключатель организации — на том же месте, что в приложениях: центр шапки.
-            Стола он раньше не касался вовсе, и человек, привыкший искать его глазами в
-            середине, не находил нигде. */}
-        <div className="hidden min-w-0 flex-1 justify-center sm:flex">
-          <CompanySelector />
-        </div>
-
         <div className="flex items-center gap-1.5 sm:gap-3">
+          {/* Переключатель организации — там же, где в приложениях: в шапке, слева от
+              «Конференции». Место одно на всё пространство, куда бы человек ни зашёл. */}
+          <span className="hidden sm:inline-flex"><CompanySelector /></span>
           {/* Чат · Заявки · Конференция — тот же блок, что в шапке приложений:
               связь с пространством лежит на одном месте, куда бы человек ни зашёл. */}
           <HeaderInteractionButtons conference />
