@@ -22,8 +22,11 @@ import {
   Briefcase, Bot,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { CompanySelector } from '@/components/company/CompanySelector'
+import { HeaderUserMenu } from '@/components/layout/HeaderUserMenu'
+import { MobileContextBar } from '@/components/layout/MobileContextBar'
 import { HeaderInteractionButtons } from '@/components/layout/HeaderInteractionButtons'
+import { CompanySelector } from '@/components/company/CompanySelector'
+import { ECOSYSTEM_BRAND } from '@/config/brand'
 import { InteractionModal } from '@/components/support/InteractionModal'
 import { SidebarNavContent } from '@/components/layout/AppSidebar'
 import { SidebarProvider } from '@/components/ui/sidebar'
@@ -38,7 +41,7 @@ import {
   READINESS_LABEL, SPACE_PRODUCTS, productReadiness, type Readiness,
 } from '@/config/spaceProducts'
 
-/** База сборки SPA (`/ClearLedger/`) — новая вкладка открывается по полному адресу. */
+/** База сборки SPA (корень домена) — новая вкладка открывается по полному адресу. */
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, '')
 
 /** Иконка по имени из реестра Ядра (`eco_apps.icon`, манифест `apps/<code>.yml`).
@@ -391,26 +394,36 @@ export function EcosystemHomePage({ embedded, onNavigate }: {
           <span className="hidden rounded-xl bg-primary/10 p-2 text-primary sm:inline-flex">
             <LayoutGrid className="size-5" />
           </span>
-          {/* После входа человек внутри своего пространства: в шапке только имя
-              компании, без имени платформы и слова «экосистема». На телефоне имя
-              скрыто — оно ничего не сообщает тому, кто и так внутри, а строка
-              нужнее под связь с пространством (решение МАГа 01.08.2026). */}
+          {/* Слева — имя ПРОСТРАНСТВА, а не организации. Здесь стояло имя организации,
+              и стол называл себя «ПРОМИЗОЛ СПБ», хотя это пространство «Аудит», внутри
+              которого организаций может быть много. Организацию называет переключатель;
+              путать эти два уровня нельзя (замечание МАГа 15.08.2026). */}
           <div className="hidden min-w-0 sm:block">
-            <div className="truncate font-semibold leading-tight">{company.name}</div>
+            <div className="truncate font-semibold leading-tight">{ECOSYSTEM_BRAND}</div>
             <div className="truncate text-xs text-muted-foreground">Рабочее пространство</div>
           </div>
         </div>
+
+        {/* Переключатель организации — на том же месте, что в приложениях: центр шапки.
+            Стола он раньше не касался вовсе, и человек, привыкший искать его глазами в
+            середине, не находил нигде. */}
+        <div className="hidden min-w-0 flex-1 justify-center sm:flex">
+          <CompanySelector />
+        </div>
+
         <div className="flex items-center gap-1.5 sm:gap-3">
           {/* Чат · Заявки · Конференция — тот же блок, что в шапке приложений:
               связь с пространством лежит на одном месте, куда бы человек ни зашёл. */}
           <HeaderInteractionButtons conference />
-          {companies.length > 1 && <CompanySelector />}
-          <Button variant="ghost" size="sm" onClick={logout} title="Выйти">
-            <LogOut className="size-4" />
-            <span className="ml-2 hidden sm:inline">Выйти</span>
-          </Button>
+          {/* Профиль иконкой — как в приложениях пространства: выход, тема,
+              уведомления и версия лежат внутри, а не отдельными кнопками. */}
+          <HeaderUserMenu settingsPath="/settings" />
         </div>
       </header>
+
+      {/* Организация и юрлицо — строкой ниже и слева: в шапке они конкурировали
+          за место с кнопками связи и профилем. Полоса одна на всё пространство. */}
+      <MobileContextBar />
 
       {/* Ширину не режем до 1024: на широком экране это выталкивало продукты вниз
           при пустых полях по бокам. Предел нужен лишь чтобы строка плиток не
