@@ -195,7 +195,7 @@ export async function exportWork() {
  * Занятость вкладок мастерской. Сеанс живёт без соединения, поэтому по открытому
  * терминалу не видно, работает ли агент в соседней вкладке.
  */
-export async function getSessions(): Promise<{ tab: number; live: boolean }[]> {
+export async function getSessions(): Promise<{ tab: number; live: boolean; shared?: boolean }[]> {
   const res = await fetch(`${BASE}/sessions`)
   if (!res.ok || !res.headers.get('content-type')?.includes('application/json')) return []
   return res.json()

@@ -246,6 +246,13 @@ export function AuditorTerminal() {
           ))}
         </span>
         {state === 'connecting' && <Loader2 className="size-3.5 animate-spin" />}
+        {/* Сеанс смотрят из нескольких окон — тогда tmux ведёт его по самому узкому, и
+            справа остаётся пустое поле. Без объяснения это выглядит поломкой. */}
+        {sessions?.find((s) => s.tab === tab)?.shared && (
+          <span className="max-xl:hidden text-amber-600 dark:text-amber-400">
+            открыт ещё в одном окне — ширина по меньшему
+          </span>
+        )}
         {health?.dictation && state === 'open' && (
           <>
             <span className="ml-2">
