@@ -50,6 +50,7 @@ import {
 import { PerimeterPeopleScreen } from './OfficePeople'
 import { CashAgingScreen } from './OfficeCashAging'
 import { PerimeterSettingsScreen } from './OfficePerimeterSettings'
+import { WeekReviewScreen } from './OfficeWeekReview'
 import { CommitmentsScreen } from './OfficeCommitments'
 import { useWorkspaceSections } from './workspaceSections'
 
@@ -119,6 +120,7 @@ export function PerimeterPanel() {
       case 'pr_cash_loans':  return <CashLoansScreen companyId={companyId} />
       case 'pr_cash_papers': return <CashPapersScreen companyId={companyId} />
       case 'pr_cash_aging':  return <CashAgingScreen companyId={companyId} />
+      case 'pr_review':      return <WeekReviewScreen companyId={companyId} />
       case 'pr_settings':    return <PerimeterSettingsScreen companyId={companyId} />
       case 'pr_people':      return <PerimeterPeopleScreen companyId={companyId} />
       default:            return <PerimeterLayers companyId={companyId} />

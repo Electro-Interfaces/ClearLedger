@@ -484,3 +484,51 @@ export const logExport = (companyId: string, what: string, rows: number) =>
   post<{ logged: boolean }>(
     `/api/perimeter/export-log?company_id=${companyId}`
     + `&what=${encodeURIComponent(what)}&rows=${rows}`, {})
+
+/* ── Разбор недели ───────────────────────────────────────────────────────── */
+
+export interface WeekReview {
+  weekStart: string
+  weekEnd: string
+  isCurrent: boolean
+  added: {
+    cash: number; cashOut: number; records: number
+    rows: {
+      id: string; date: string; person: string; kind: string
+      amount: number; direction: string; proof: string
+    }[]
+    recordRows: {
+      id: string; title: string; counterparty: string | null; confidence: string
+    }[]
+  }
+  /** Что требует решения: список намеренно короткий — длинный не разбирают. */
+  todo: {
+    key: string; title: string; count: number; hint: string
+    mode: string; sub: string
+    items: { id: string; text: string; note: string }[]
+  }[]
+  todoTotal: number
+  reviewed: boolean
+  reviewedAt: string | null
+  reviewNote: string | null
+  snapshot: unknown
+}
+
+export const getWeekReview = (companyId: string, week?: string) =>
+  get<WeekReview>(`/api/perimeter/review?company_id=${companyId}`
+    + (week ? `&week=${week}` : ''))
+
+export const markWeekReview = (
+  companyId: string, body: { weekStart: string; note: string | null },
+) => post<{ weekStart: string; reviewed: boolean }>(
+  `/api/perimeter/review?company_id=${companyId}`, body)
+
+export const getReviewHistory = (companyId: string) =>
+  get<{
+    rows: {
+      weekStart: string; reviewedAt: string | null; by: string | null
+      note: string | null; todoTotal: number | null
+      added: { cash: number; cashOut: number; records: number } | null
+    }[]
+    weeksInRow: number
+  }>(`/api/perimeter/reviews?company_id=${companyId}`)

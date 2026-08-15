@@ -9310,3 +9310,43 @@ class PulseViewLink(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+
+# Разбор недели: отметка о том, что периметр просмотрели.
+#
+# Реестры такого рода умирают не от нехватки возможностей, а от нерегулярности: записи
+# заводят неделю, потом бросают, и через полгода им не верят. Ежедневная дисциплина
+# здесь не работает — событий мало; ежемесячная приходит поздно. Рабочий ритм —
+# короткий еженедельный просмотр: что записано, что просрочено, что до сих пор держится
+# на словах.
+#
+# Отметка о разборе нужна не для отчётности перед кем-то, а как след регулярности: у
+# компании есть доказательство, что контроль вёлся, а не «кто-то что-то писал». Поэтому
+# в ней сохраняется снимок счётчиков на момент разбора — иначе через год не отличить
+# «разобрали пустую неделю» от «разобрали неделю с семью просрочками».
+class OffLedgerReview(Base):
+    """Отметка о разборе периметра за неделю."""
+
+    __tablename__ = "off_ledger_reviews"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    # Понедельник разбираемой недели: по нему неделя и опознаётся.
+    week_start: Mapped[date_type] = mapped_column(Date, nullable=False)
+    reviewed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+    reviewed_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    # Что было на момент разбора: сколько записано, сколько просрочено, сколько ждёт
+    # оформления. Снимок, а не пересчёт задним числом.
+    snapshot: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb"))
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (
+        # Неделя разбирается один раз: повторная отметка исправляет прежнюю.
+        Index("uq_off_review_week", "company_id", "week_start", unique=True),
+    )

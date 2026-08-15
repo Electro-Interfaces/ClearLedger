@@ -41,7 +41,7 @@ from app.services.perimeter_periods import (
 )
 from app.models import (
     Counterparty, OffLedgerCash, OffLedgerCommitment, OffLedgerCommitmentMark,
-    OffLedgerPerson, OffLedgerRecord, OffLedgerSettings, User,
+    OffLedgerPerson, OffLedgerRecord, OffLedgerReview, OffLedgerSettings, User,
 )
 
 router = APIRouter(prefix="/perimeter", tags=["Периметр"])
@@ -2301,3 +2301,271 @@ async def export_log(
                     details={"rows": rows})
     await db.commit()
     return {"logged": True}
+
+
+# ── Разбор недели ────────────────────────────────────────────────────────────
+# Продукт держится не на возможностях, а на регулярности: записи заводят неделю, потом
+# бросают, и реестру перестают верить. Ежедневная дисциплина здесь не нужна — событий
+# мало; ежемесячная приходит поздно. Рабочий ритм — короткий еженедельный просмотр.
+#
+# Экран отвечает на три вопроса и ни на один сверх: что появилось за неделю, что требует
+# решения сейчас, и всё ли просмотрено. Никаких стриков и баллов: соревнование за объём
+# записей о неоформленных выплатах — плохая мысль и как стимул, и как факт.
+
+class ReviewIn(BaseModel):
+    weekStart: str
+    note: str | None = Field(default=None, max_length=4000)
+
+
+def _week_start(day: date) -> date:
+    return day - timedelta(days=day.weekday())
+
+
+@router.get("/review")
+async def week_review(
+    company_id: str,
+    week: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Что разбирать за неделю."""
+    cid = await assert_company_product(company_id, current_user, db, PRODUCT)
+    st = await _settings(cid, db)
+    limitation_years, advance_days = st.limitation_years, st.advance_days
+    await db.commit()
+
+    start = _week_start(_day(week) or date.today())
+    end = start + timedelta(days=6)
+    today = date.today()
+
+    # ── Что появилось за неделю
+    new_cash = list((await db.execute(
+        select(OffLedgerCash).where(
+            OffLedgerCash.company_id == cid,
+            OffLedgerCash.happened_on >= start,
+            OffLedgerCash.happened_on <= end).order_by(OffLedgerCash.happened_on)
+    )).scalars().all())
+    repaid = await _repaid_map(cid, db)
+    new_records = list((await db.execute(
+        select(OffLedgerRecord).where(
+            OffLedgerRecord.company_id == cid,
+            OffLedgerRecord.created_at >= datetime.combine(
+                start, datetime.min.time(), tzinfo=timezone.utc),
+            OffLedgerRecord.created_at < datetime.combine(
+                end + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc))
+    )).scalars().all())
+
+    # ── Что требует решения. Список намеренно короткий: длинный не разбирают.
+    todo: list[dict[str, Any]] = []
+
+    records = list((await db.execute(
+        select(OffLedgerRecord).where(OffLedgerRecord.company_id == cid,
+                                      OffLedgerRecord.status == "active")
+    )).scalars().all())
+    overdue_records = [r for r in records if r.due_on and r.due_on < today]
+    if overdue_records:
+        todo.append({
+            "key": "records_overdue", "title": "Договорённости с прошедшим сроком",
+            "count": len(overdue_records),
+            "hint": "Либо выполнено и надо закрыть запись, либо разговор откладывать нельзя",
+            "mode": "per_records", "sub": "pr_registry",
+            "items": [{"id": str(r.id), "text": f"{r.counterparty_name or '—'}: {r.title}",
+                       "note": r.due_on.isoformat()} for r in overdue_records[:8]],
+        })
+
+    # Записанное со слов и живущее дольше квартала: либо подтвердить перепиской, либо
+    # оформить. Со временем такая запись стоит ровно столько, сколько чужая память.
+    old_spoken = [r for r in records
+                  if r.confidence == "spoken" and r.created_at
+                  and (today - r.created_at.date()).days > 90]
+    if old_spoken:
+        todo.append({
+            "key": "still_spoken", "title": "Держится только на словах больше трёх месяцев",
+            "count": len(old_spoken),
+            "hint": "Подтвердить перепиской или оформить: память сторон расходится быстрее, чем кажется",
+            "mode": "per_records", "sub": "pr_registry",
+            "items": [{"id": str(r.id), "text": f"{r.counterparty_name or '—'}: {r.title}",
+                       "note": r.created_at.date().isoformat()} for r in old_spoken[:8]],
+        })
+
+    coms = await _commitments(cid, db, only_active=True)
+    missed = [c for c in coms if c["missedCount"]]
+    if missed:
+        todo.append({
+            "key": "commitments_missed", "title": "Регулярные обязательства с пропусками",
+            "count": sum(c["missedCount"] for c in missed),
+            "hint": "Выполнить или отметить пропуск: неотмеченный период неотличим от забытого",
+            "mode": "per_records", "sub": "pr_regular",
+            "items": [{"id": c["id"], "text": f'{c["person"]}: {c["title"]}',
+                       "note": ", ".join(c["missedPeriods"][-3:])} for c in missed[:8]],
+        })
+
+    opened = [c for c in (await db.execute(
+        select(OffLedgerCash).where(OffLedgerCash.company_id == cid,
+                                    OffLedgerCash.kind.in_(OPEN_KINDS))
+    )).scalars().all() if float(c.amount) - repaid.get(c.id, 0.0) > 0.01]
+
+    late_advances = [c for c in opened
+                     if c.kind == "advance" and (today - c.happened_on).days > advance_days]
+    if late_advances:
+        todo.append({
+            "key": "advances_late", "title": "Подотчёт не закрыт в срок",
+            "count": len(late_advances),
+            "hint": f"Срок отчёта — {advance_days} дн. Невозвращённое и неотчитанное "
+                    "налоговая признаёт доходом человека",
+            "mode": "per_cash", "sub": "pr_cash_aging",
+            "items": [{"id": str(c.id),
+                       "text": f"{c.person_name}: {round(float(c.amount) - repaid.get(c.id, 0.0), 2)} руб.",
+                       "note": f"{(today - c.happened_on).days} дн."}
+                      for c in late_advances[:8]],
+        })
+
+    expiring = []
+    for c in opened:
+        lim = _limitation(c, limitation_years)
+        if lim and 0 <= lim["limitationDaysLeft"] <= 90:
+            expiring.append((c, lim))
+    if expiring:
+        todo.append({
+            "key": "limitation", "title": "Право требования скоро сгорит",
+            "count": len(expiring),
+            "hint": "Прервать срок можно актом сверки или частичной оплатой — пока он не истёк",
+            "mode": "per_cash", "sub": "pr_cash_aging",
+            "items": [{"id": str(c.id), "text": f"{c.person_name}: {float(c.amount)} руб.",
+                       "note": lim["limitationExpiresOn"]} for c, lim in expiring[:8]],
+        })
+
+    papers = await cash_papers(company_id, db, current_user)
+    if papers["waiting"]:
+        todo.append({
+            "key": "papers", "title": "Ждёт оформления в бухгалтерии",
+            "count": len(papers["waiting"]),
+            "hint": "Подотчёт, премии и компенсации учёт принимает документами",
+            "mode": "per_cash", "sub": "pr_cash_papers",
+            "items": [{"id": r["id"], "text": f'{r["person"]}: {r["amount"]} руб.',
+                       "note": r["kindLabel"]} for r in papers["waiting"][:8]],
+        })
+
+    no_proof = [c for c in new_cash if c.proof == "none" and float(c.amount) >= 50000]
+    if no_proof:
+        todo.append({
+            "key": "no_proof", "title": "Крупные расчёты недели без подтверждения",
+            "count": len(no_proof),
+            "hint": "Пока свежо — взять расписку или сохранить переписку",
+            "mode": "per_cash", "sub": "pr_cash",
+            "items": [{"id": str(c.id), "text": f"{c.person_name}: {float(c.amount)} руб.",
+                       "note": c.happened_on.isoformat()} for c in no_proof[:8]],
+        })
+
+    review = (await db.execute(
+        select(OffLedgerReview).where(OffLedgerReview.company_id == cid,
+                                      OffLedgerReview.week_start == start)
+    )).scalar_one_or_none()
+
+    money_out = round(sum(float(c.amount) for c in new_cash
+                          if c.direction == "out" and c.kind not in ("report", "offset")), 2)
+    return {
+        "weekStart": start.isoformat(),
+        "weekEnd": end.isoformat(),
+        "isCurrent": start == _week_start(today),
+        "added": {
+            "cash": len(new_cash),
+            "cashOut": money_out,
+            "records": len(new_records),
+            "rows": [{
+                "id": str(c.id), "date": c.happened_on.isoformat(),
+                "person": c.person_name, "kind": CASH_KINDS.get(c.kind, c.kind),
+                "amount": float(c.amount), "direction": c.direction,
+                "proof": CASH_PROOF.get(c.proof, c.proof),
+            } for c in new_cash],
+            "recordRows": [{
+                "id": str(r.id), "title": r.title,
+                "counterparty": r.counterparty_name,
+                "confidence": CONFIDENCE.get(r.confidence, r.confidence),
+            } for r in new_records],
+        },
+        "todo": todo,
+        "todoTotal": sum(t["count"] for t in todo),
+        "reviewed": review is not None,
+        "reviewedAt": review.reviewed_at.isoformat() if review else None,
+        "reviewNote": review.note if review else None,
+        "snapshot": review.snapshot if review else None,
+    }
+
+
+@router.post("/review")
+async def mark_review(
+    company_id: str,
+    body: ReviewIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Отметить неделю разобранной.
+
+    В отметке сохраняется снимок счётчиков: через год «разобрали пустую неделю» и
+    «разобрали неделю с семью просрочками» иначе не различить.
+    """
+    cid = await assert_company_product(company_id, current_user, db, PRODUCT)
+    start = _week_start(_day(body.weekStart) or date.today())
+    data = await week_review(company_id, body.weekStart, db, current_user)
+    snapshot = {
+        "added": {k: v for k, v in data["added"].items() if not isinstance(v, list)},
+        "todo": [{"key": t["key"], "title": t["title"], "count": t["count"]}
+                 for t in data["todo"]],
+        "todoTotal": data["todoTotal"],
+    }
+    review = (await db.execute(
+        select(OffLedgerReview).where(OffLedgerReview.company_id == cid,
+                                      OffLedgerReview.week_start == start)
+    )).scalar_one_or_none()
+    if review is None:
+        review = OffLedgerReview(company_id=cid, week_start=start)
+        db.add(review)
+    review.reviewed_by = current_user.id
+    review.reviewed_at = datetime.now(timezone.utc)
+    review.snapshot = snapshot
+    review.note = body.note
+    await db.flush()
+    await log_audit(db, actor=current_user, company_id=cid,
+                    action="perimeter.review", target=start.isoformat(),
+                    details={"todo": snapshot["todoTotal"]})
+    await db.commit()
+    return {"weekStart": start.isoformat(), "reviewed": True}
+
+
+@router.get("/reviews")
+async def review_history(
+    company_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """История разборов: чем и подтверждается регулярность контроля."""
+    cid = await assert_company_product(company_id, current_user, db, PRODUCT)
+    rows = list((await db.execute(
+        select(OffLedgerReview).where(OffLedgerReview.company_id == cid)
+        .order_by(OffLedgerReview.week_start.desc()).limit(52)
+    )).scalars().all())
+    names = {}
+    ids = {r.reviewed_by for r in rows if r.reviewed_by}
+    if ids:
+        names = {u[0]: u[1] for u in (await db.execute(
+            select(User.id, User.name).where(User.id.in_(ids)))).all()}
+    today_week = _week_start(date.today())
+    # Сколько недель подряд разбор не пропускали — но без счётчиков достижений на
+    # экране: это справка о регулярности, а не соревнование.
+    weeks = {r.week_start for r in rows}
+    streak, cur = 0, today_week - timedelta(days=7)
+    while cur in weeks:
+        streak += 1
+        cur -= timedelta(days=7)
+    return {
+        "rows": [{
+            "weekStart": r.week_start.isoformat(),
+            "reviewedAt": r.reviewed_at.isoformat() if r.reviewed_at else None,
+            "by": names.get(r.reviewed_by),
+            "note": r.note,
+            "todoTotal": (r.snapshot or {}).get("todoTotal"),
+            "added": (r.snapshot or {}).get("added"),
+        } for r in rows],
+        "weeksInRow": streak,
+    }
