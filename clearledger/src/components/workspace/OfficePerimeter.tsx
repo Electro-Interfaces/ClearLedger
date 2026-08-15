@@ -188,6 +188,22 @@ function PerimeterLayers({ companyId }: { companyId: string }) {
               </div>
               <div className="text-xl tabular-nums">{money.format(l.amount)} ₽</div>
               <div className="text-[11px] text-muted-foreground">{l.hint}</div>
+              {!!l.parts?.length && (
+                <ul className="text-[11px] text-muted-foreground space-y-0.5">
+                  {l.parts.map((p) => (
+                    <li key={p.label} className="flex justify-between gap-2">
+                      <span>{p.label}</span>
+                      <span className="tabular-nums">{money.format(p.amount)} ₽</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {!!l.unknown && (
+                <div className="text-[11px] text-amber-600">
+                  ещё по {num.format(l.unknown)} счетам оплата не сведена — их долг
+                  неизвестен, а не равен нулю
+                </div>
+              )}
               <div className="text-[11px] text-muted-foreground tabular-nums">
                 {l.empty ? 'записей нет' : `${num.format(l.count)} · ${l.note}`}
               </div>

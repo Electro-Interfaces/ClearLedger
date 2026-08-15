@@ -28,7 +28,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select, text, update
+from sqlalchemy import func, or_, select, text, true, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import log_audit
@@ -36,6 +36,7 @@ from app.auth import assert_company_product, get_current_user
 from app.database import get_db
 # Календарная арифметика периодов живёт отдельным модулем: её гоняет
 # проверка `scripts/perimeter-periods-check.py` без базы и FastAPI.
+from app.scope import current_organization
 from app.services.perimeter_periods import (
     PERIODICITY, _next_period, _period_label, _period_start, _periods,
 )
@@ -98,6 +99,24 @@ async def ensure_perimeter_schema(db: AsyncSession) -> None:
             await db.rollback()
 
 PRODUCT = "perimeter"
+
+
+def _org_of(model) -> Any:
+    """Условие «запись принадлежит активной организации».
+
+    Записи БЕЗ организации видны всем — так же, как в «Бухгалтерии»: у компании с одним
+    юрлицом ось не заполняется вовсе, и жёсткое равенство спрятало бы от неё все данные.
+    Пока организация не выбрана, условие истинно.
+    """
+    org = current_organization()
+    if org is None:
+        return true()
+    return or_(model.organization_id.is_(None), model.organization_id == org)
+
+
+def _org_now():
+    """Организация, которой принадлежит новая запись."""
+    return current_organization()
 
 # Словари продукта. Держатся здесь, а не на фронте: их же читают выгрузка в Excel и
 # сводка, и разъехавшийся перевод «guarantee» дал бы два разных названия одному виду.
@@ -275,7 +294,8 @@ async def list_records(
 ) -> dict[str, Any]:
     """Реестр третьего слоя."""
     cid = await assert_company_product(company_id, current_user, db, PRODUCT)
-    sel = select(OffLedgerRecord).where(OffLedgerRecord.company_id == cid)
+    sel = select(OffLedgerRecord).where(OffLedgerRecord.company_id == cid,
+                                    _org_of(OffLedgerRecord))
     if status_:
         sel = sel.where(OffLedgerRecord.status == status_)
     if kind:
@@ -308,7 +328,7 @@ async def create_record(
     cid = await assert_company_product(company_id, current_user, db, PRODUCT)
     _validate(body)
     rec = OffLedgerRecord(
-        company_id=cid,
+        company_id=cid, organization_id=_org_now(),
         kind=body.kind, direction=body.direction,
         title=body.title.strip(), details=body.details,
         counterparty_id=_uuid(body.counterpartyId, "контрагент"),
@@ -431,9 +451,13 @@ async def overview(
 
     off = await books.off_balance(str(cid), None, None, db, current_user)
     hidden = await books.off_balance_hidden(str(cid), db, current_user)
+    # Имущество самортизировано полностью: стоимость ненулевая, остаток нулевой.
+    # Порог в рубль, а не ноль: копеечный остаток бывает от округления амортизации.
+    worn_out = hidden["fixedCost"] > 0 and hidden["fixedRest"] < 1
 
     rows = list((await db.execute(
-        select(OffLedgerRecord).where(OffLedgerRecord.company_id == cid)
+        select(OffLedgerRecord).where(OffLedgerRecord.company_id == cid,
+                                    _org_of(OffLedgerRecord))
     )).scalars().all())
     today = date.today()
     active = [r for r in rows if r.status == "active"]
@@ -483,12 +507,27 @@ async def overview(
                 "key": "hidden", "no": 2, "title": "Не видно в балансе",
                 "hint": "самортизированное, списанное в затраты, просроченный долг",
                 "official": True,
-                "count": len(hidden["stale"]) + len(hidden["lowValue"]),
+                "count": len(hidden["stale"]) + len(hidden["lowValue"])
+                + (1 if worn_out else 0),
+                # Складываем ровно то, чего в балансе НЕ видно: малоценку, списанную в
+                # затраты, просроченный долг и первоначальную стоимость имущества,
+                # самортизированного до нуля. Остаточная стоимость сюда не идёт — она
+                # как раз в балансе видна, и её сложение с оборотами списания давало
+                # цифру, не означающую ничего.
                 "amount": round(hidden["lowValueTotal"] + hidden["staleTotal"]
-                                + hidden["fixedRest"], 2),
+                                + (hidden["fixedCost"] if worn_out else 0), 2),
                 "empty": not (hidden["lowValueTotal"] or hidden["staleTotal"]
-                              or hidden["fixedCost"]),
-                "note": "малоценка, долг старше трёх лет, остаточная стоимость",
+                              or worn_out),
+                "parts": [p for p in (
+                    {"label": "Малоценка в затратах", "amount": hidden["lowValueTotal"]},
+                    {"label": "Долг старше трёх лет", "amount": hidden["staleTotal"]},
+                    {"label": "Самортизировано до нуля",
+                     "amount": hidden["fixedCost"] if worn_out else 0},
+                ) if p["amount"]],
+                # Счета, по которым регистр не свёл оплату: их долг НЕИЗВЕСТЕН, а не
+                # равен нулю. Подстановка нуля в это место однажды дала долг в 123 млн.
+                "unknown": hidden.get("staleUnknown") or 0,
+                "note": "малоценка, долг старше трёх лет, самортизированное имущество",
             },
             {
                 "key": "records", "no": 3, "title": "Договорённости",
@@ -549,7 +588,8 @@ async def by_counterparty(
     """Третий слой в разрезе второй стороны: с кем и о чём договорились."""
     cid = await assert_company_product(company_id, current_user, db, PRODUCT)
     rows = list((await db.execute(
-        select(OffLedgerRecord).where(OffLedgerRecord.company_id == cid)
+        select(OffLedgerRecord).where(OffLedgerRecord.company_id == cid,
+                                    _org_of(OffLedgerRecord))
     )).scalars().all())
     items = await _with_names(rows, db, cid)
     by: dict[str, dict[str, Any]] = {}
@@ -748,6 +788,7 @@ async def _repaid_map(cid: uuid.UUID, db: AsyncSession,
     """
     sel = (select(OffLedgerCash.parent_id, func.sum(OffLedgerCash.amount))
            .where(OffLedgerCash.company_id == cid,
+                                    _org_of(OffLedgerCash),
                   OffLedgerCash.kind.in_(CLOSING_KINDS),
                   OffLedgerCash.parent_id.isnot(None)))
     if exclude_id is not None:
@@ -846,7 +887,8 @@ async def list_cash(
 ) -> dict[str, Any]:
     """Журнал движений с итогами периода."""
     cid = await assert_company_product(company_id, current_user, db, PRODUCT)
-    sel = select(OffLedgerCash).where(OffLedgerCash.company_id == cid)
+    sel = select(OffLedgerCash).where(OffLedgerCash.company_id == cid,
+                                    _org_of(OffLedgerCash))
     if date_from:
         sel = sel.where(OffLedgerCash.happened_on >= _day(date_from))
     if date_to:
@@ -918,7 +960,8 @@ async def create_cash(
     person = await _ensure_person(cid, body.personName, body.personKind,
                                   current_user, db)
     c = OffLedgerCash(
-        company_id=cid, direction=body.direction, kind=body.kind,
+        company_id=cid, organization_id=_org_now(),
+        direction=body.direction, kind=body.kind,
         person_id=person.id,
         happened_on=_day(body.happenedOn) or date.today(), amount=body.amount,
         person_name=body.personName.strip(),
@@ -1057,7 +1100,8 @@ async def cash_people(
     """
     cid = await assert_company_product(company_id, current_user, db, PRODUCT)
     rows = list((await db.execute(
-        select(OffLedgerCash).where(OffLedgerCash.company_id == cid)
+        select(OffLedgerCash).where(OffLedgerCash.company_id == cid,
+                                    _org_of(OffLedgerCash))
     )).scalars().all())
     repaid = await _repaid_map(cid, db)
     today = date.today()
@@ -1134,12 +1178,14 @@ async def cash_loans(
     cid = await assert_company_product(company_id, current_user, db, PRODUCT)
     loans = list((await db.execute(
         select(OffLedgerCash)
-        .where(OffLedgerCash.company_id == cid, OffLedgerCash.kind.in_(OPEN_KINDS))
+        .where(OffLedgerCash.company_id == cid,
+                                    _org_of(OffLedgerCash), OffLedgerCash.kind.in_(OPEN_KINDS))
         .order_by(OffLedgerCash.happened_on.desc())
     )).scalars().all())
     pays = list((await db.execute(
         select(OffLedgerCash)
-        .where(OffLedgerCash.company_id == cid, OffLedgerCash.kind.in_(CLOSING_KINDS))
+        .where(OffLedgerCash.company_id == cid,
+                                    _org_of(OffLedgerCash), OffLedgerCash.kind.in_(CLOSING_KINDS))
         .order_by(OffLedgerCash.happened_on)
     )).scalars().all())
     by_parent: dict[uuid.UUID, list[OffLedgerCash]] = {}
@@ -1191,6 +1237,7 @@ async def cash_papers(
     rows = list((await db.execute(
         select(OffLedgerCash)
         .where(OffLedgerCash.company_id == cid,
+                                    _org_of(OffLedgerCash),
                OffLedgerCash.kind.in_(FORMALIZABLE))
         .order_by(OffLedgerCash.happened_on.desc())
     )).scalars().all())
@@ -1293,13 +1340,15 @@ async def list_people(
 
     # Что за человеком числится: операции наличных и незакрытые выдачи.
     moves = list((await db.execute(
-        select(OffLedgerCash).where(OffLedgerCash.company_id == cid)
+        select(OffLedgerCash).where(OffLedgerCash.company_id == cid,
+                                    _org_of(OffLedgerCash))
     )).scalars().all())
     repaid = await _repaid_map(cid, db)
     # Договорённости связаны с человеком именем второй стороны: у записи третьего слоя
     # ссылки на карточку нет — она про отношения, а не про расчёты.
     records = list((await db.execute(
         select(OffLedgerRecord).where(OffLedgerRecord.company_id == cid,
+                                    _org_of(OffLedgerRecord),
                                       OffLedgerRecord.status == "active")
     )).scalars().all())
 
@@ -1432,6 +1481,7 @@ async def update_person(
         await db.execute(
             update(OffLedgerCash)
             .where(OffLedgerCash.company_id == cid,
+                                    _org_of(OffLedgerCash),
                    OffLedgerCash.person_name == old_name)
             .values(person_name=p.name, person_id=p.id)
         )
@@ -1440,6 +1490,7 @@ async def update_person(
         await db.execute(
             update(OffLedgerCommitment)
             .where(OffLedgerCommitment.company_id == cid,
+                                    _org_of(OffLedgerCommitment),
                    OffLedgerCommitment.person_name == old_name)
             .values(person_name=p.name, person_id=p.id)
         )
@@ -1468,11 +1519,13 @@ async def delete_person(
     used = (await db.execute(
         select(func.count()).select_from(OffLedgerCash)
         .where(OffLedgerCash.company_id == cid,
+                                    _org_of(OffLedgerCash),
                func.lower(OffLedgerCash.person_name) == p.name.lower())
     )).scalar() or 0
     used += (await db.execute(
         select(func.count()).select_from(OffLedgerCommitment)
         .where(OffLedgerCommitment.company_id == cid,
+                                    _org_of(OffLedgerCommitment),
                func.lower(OffLedgerCommitment.person_name) == p.name.lower())
     )).scalar() or 0
     if used:
@@ -1668,7 +1721,8 @@ def _commitment_row(c: OffLedgerCommitment, marks: list[OffLedgerCommitmentMark]
 
 async def _commitments(cid, db: AsyncSession, only_active: bool = False
                        ) -> list[dict[str, Any]]:
-    sel = select(OffLedgerCommitment).where(OffLedgerCommitment.company_id == cid)
+    sel = select(OffLedgerCommitment).where(OffLedgerCommitment.company_id == cid,
+                                    _org_of(OffLedgerCommitment))
     if only_active:
         sel = sel.where(OffLedgerCommitment.status == "active")
     rows = list((await db.execute(sel.order_by(OffLedgerCommitment.person_name)))
@@ -1684,6 +1738,7 @@ async def _commitments(cid, db: AsyncSession, only_active: bool = False
     # уходил бы свой поход в базу.
     cash = list((await db.execute(
         select(OffLedgerCash).where(OffLedgerCash.company_id == cid,
+                                    _org_of(OffLedgerCash),
                                     OffLedgerCash.commitment_id.isnot(None),
                                     OffLedgerCash.direction == "out")
     )).scalars().all())
@@ -1749,7 +1804,8 @@ async def create_commitment(
     person = await _ensure_person(cid, body.personName, body.personKind,
                                   current_user, db)
     c = OffLedgerCommitment(
-        company_id=cid, person_name=body.personName.strip(), person_id=person.id,
+        company_id=cid, organization_id=_org_now(),
+        person_name=body.personName.strip(), person_id=person.id,
         title=body.title.strip(), details=body.details, form=body.form,
         amount=body.amount, periodicity=body.periodicity, due_day=body.dueDay,
         started_on=_day(body.startedOn) or date.today(), ends_on=_day(body.endsOn),
@@ -1992,6 +2048,7 @@ async def _paid_by_period(cid, com: OffLedgerCommitment,
     rows = list((await db.execute(
         select(OffLedgerCash).where(
             OffLedgerCash.company_id == cid,
+                                    _org_of(OffLedgerCash),
             OffLedgerCash.commitment_id == com.id,
             # Обязательство исполняет РАСХОД. Приход по нему (вернули излишне
             # выданное) период не закрывает и в потраченное не идёт.
@@ -2140,6 +2197,7 @@ async def cash_aging(
     st = await _settings(cid, db)
     rows = list((await db.execute(
         select(OffLedgerCash).where(OffLedgerCash.company_id == cid,
+                                    _org_of(OffLedgerCash),
                                     OffLedgerCash.kind.in_(OPEN_KINDS))
     )).scalars().all())
     repaid = await _repaid_map(cid, db)
@@ -2301,6 +2359,7 @@ async def cash_offset(
         [c for c in (await db.execute(
             select(OffLedgerCash).where(
                 OffLedgerCash.company_id == cid,
+                                    _org_of(OffLedgerCash),
                 OffLedgerCash.kind.in_(OPEN_KINDS),
                 func.lower(OffLedgerCash.person_name) == key))).scalars().all()
          if float(c.amount) - repaid.get(c.id, 0.0) > 0.01],
@@ -2316,7 +2375,8 @@ async def cash_offset(
             free = round(float(c.amount) - repaid.get(c.id, 0.0), 2)
             take = min(free, rest_side)
             row_ = OffLedgerCash(
-                company_id=cid, direction="in" if side == "out" else "out",
+                company_id=cid, organization_id=_org_now(),
+                direction="in" if side == "out" else "out",
                 kind="offset", happened_on=_day(body.happenedOn) or date.today(),
                 amount=take, person_name=body.personName.strip(),
                 person_id=(await _ensure_person(cid, body.personName, "individual",
@@ -2397,6 +2457,7 @@ async def week_review(
     new_cash = list((await db.execute(
         select(OffLedgerCash).where(
             OffLedgerCash.company_id == cid,
+                                    _org_of(OffLedgerCash),
             OffLedgerCash.happened_on >= start,
             OffLedgerCash.happened_on <= end).order_by(OffLedgerCash.happened_on)
     )).scalars().all())
@@ -2404,6 +2465,7 @@ async def week_review(
     new_records = list((await db.execute(
         select(OffLedgerRecord).where(
             OffLedgerRecord.company_id == cid,
+                                    _org_of(OffLedgerRecord),
             OffLedgerRecord.created_at >= datetime.combine(
                 start, datetime.min.time(), tzinfo=timezone.utc),
             OffLedgerRecord.created_at < datetime.combine(
@@ -2415,6 +2477,7 @@ async def week_review(
 
     records = list((await db.execute(
         select(OffLedgerRecord).where(OffLedgerRecord.company_id == cid,
+                                    _org_of(OffLedgerRecord),
                                       OffLedgerRecord.status == "active")
     )).scalars().all())
     overdue_records = [r for r in records if r.due_on and r.due_on < today]
@@ -2457,6 +2520,7 @@ async def week_review(
 
     opened = [c for c in (await db.execute(
         select(OffLedgerCash).where(OffLedgerCash.company_id == cid,
+                                    _org_of(OffLedgerCash),
                                     OffLedgerCash.kind.in_(OPEN_KINDS))
     )).scalars().all() if float(c.amount) - repaid.get(c.id, 0.0) > 0.01]
 
@@ -2767,6 +2831,7 @@ async def person_statement(
     cash = list((await db.execute(
         select(OffLedgerCash).where(
             OffLedgerCash.company_id == cid,
+                                    _org_of(OffLedgerCash),
             func.lower(OffLedgerCash.person_name) == key)
         .order_by(OffLedgerCash.happened_on))).scalars().all())
     repaid = await _repaid_map(cid, db)
@@ -2779,7 +2844,8 @@ async def person_statement(
     coms = [c for c in await _commitments(cid, db)
             if c["person"].strip().lower() == key]
     records = [r for r in (await db.execute(
-        select(OffLedgerRecord).where(OffLedgerRecord.company_id == cid))).scalars().all()
+        select(OffLedgerRecord).where(OffLedgerRecord.company_id == cid,
+                                    _org_of(OffLedgerRecord)))).scalars().all()
         if (r.counterparty_name or "").strip().lower() == key]
     reminders = list((await db.execute(
         select(OffLedgerReminder).where(
@@ -2999,6 +3065,7 @@ async def cash_reconcile_state(
     cid = await assert_company_product(company_id, current_user, db, PRODUCT)
     rows = list((await db.execute(
         select(OffLedgerCash).where(OffLedgerCash.company_id == cid,
+                                    _org_of(OffLedgerCash),
                                     OffLedgerCash.purse == purse)
     )).scalars().all())
     flow = [c for c in rows if c.kind not in ("report", "offset", "writeoff")]
@@ -3006,6 +3073,7 @@ async def cash_reconcile_state(
     inn = round(sum(float(c.amount) for c in flow if c.direction == "in"), 2)
     last = (await db.execute(
         select(OffLedgerCash).where(OffLedgerCash.company_id == cid,
+                                    _org_of(OffLedgerCash),
                                     OffLedgerCash.purse == purse,
                                     OffLedgerCash.kind == "adjust")
         .order_by(OffLedgerCash.happened_on.desc()).limit(1))).scalar_one_or_none()
@@ -3038,7 +3106,7 @@ async def cash_reconcile(
         return {"diff": 0.0, "created": False,
                 "message": "Пересчёт сошёлся с журналом"}
     c = OffLedgerCash(
-        company_id=cid,
+        company_id=cid, organization_id=_org_now(),
         # Меньше, чем по журналу, — значит часть денег ушла мимо записи (расход);
         # больше — значит мимо записи пришли.
         direction="out" if diff < 0 else "in",
@@ -3103,6 +3171,7 @@ async def cash_forecast(
     repaid = await _repaid_map(cid, db)
     for c in (await db.execute(
         select(OffLedgerCash).where(OffLedgerCash.company_id == cid,
+                                    _org_of(OffLedgerCash),
                                     OffLedgerCash.kind.in_(OPEN_KINDS),
                                     OffLedgerCash.direction == "in")
     )).scalars().all():
@@ -3148,7 +3217,8 @@ async def debt_bridge(
     cid = await assert_company_product(company_id, current_user, db, PRODUCT)
     df, dt = _day(date_from), _day(date_to)
     rows = list((await db.execute(
-        select(OffLedgerCash).where(OffLedgerCash.company_id == cid)
+        select(OffLedgerCash).where(OffLedgerCash.company_id == cid,
+                                    _org_of(OffLedgerCash))
     )).scalars().all())
 
     def rest_at(moment: date) -> float:

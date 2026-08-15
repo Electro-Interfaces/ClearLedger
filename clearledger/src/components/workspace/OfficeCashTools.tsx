@@ -99,9 +99,9 @@ export function CashToolsScreen({ companyId }: { companyId: string }) {
           hint="по известным обязательствам и срокам" />
         <MetricTile label="Всего до конца горизонта" value={`${money.format(f.total)} ₽`}
           hint={`по ${f.horizon}`} />
-        <MetricTile label="Не закрыто на конец периода"
+        <MetricTile label="Не закрыто за людьми"
           value={`${money.format(b.steps.at(-1)?.amount ?? 0)} ₽`}
-          hint="займы и подотчёт за людьми" />
+          hint="на конец периода: займы и подотчёт" />
       </div>
 
       <TableCard note={`Как изменился долг за ${b.from} — ${b.to}. Каждая ступень — сумма операций своего вида, а не разность`}

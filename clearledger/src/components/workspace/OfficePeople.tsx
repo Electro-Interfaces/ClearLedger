@@ -91,10 +91,10 @@ export function PerimeterPeopleScreen({ companyId }: { companyId: string }) {
         <MetricTile label="Сотрудников"
           value={num.format(d.byKind.find((k) => k.key === 'employee')?.count ?? 0)}
           hint="свои, с подотчётом и премиями" />
-        <MetricTile label="За кем числится" value={num.format(withDebt.length)}
-          hint="незакрытые займы и подотчёт"
+        <MetricTile label="Людей с незакрытым" value={num.format(withDebt.length)}
+          hint="за ними займы или подотчёт"
           tone={withDebt.length ? 'warning' : undefined} />
-        <MetricTile label="Ждут документов"
+        <MetricTile label="Ждёт документов"
           value={num.format(d.rows.reduce((s, p) => s + p.awaits, 0))}
           hint="операций без оформления"
           tone={d.rows.some((p) => p.awaits) ? 'warning' : undefined} />

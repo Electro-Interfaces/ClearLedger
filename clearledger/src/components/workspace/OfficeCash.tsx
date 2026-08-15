@@ -147,7 +147,7 @@ export function CashJournalScreen({ companyId }: { companyId: string }) {
             hint={d.ownerIn ? `вернулось ${money.format(d.ownerIn)} ₽` : 'вложено собственником'} />
           <MetricTile label="Выдано сотрудникам" value={`${money.format(d.employeeOut)} ₽`}
             hint="подотчёт, проезд, премии" />
-          <MetricTile label="Ждёт оформления" value={`${money.format(d.awaitsPapers)} ₽`}
+          <MetricTile label="Ждёт документов" value={`${money.format(d.awaitsPapers)} ₽`}
             hint={`${num.format(d.awaitsPapersCount)} операций без документов`}
             tone={d.awaitsPapersCount ? 'warning' : undefined} />
           <MetricTile label="Без подтверждения" value={`${money.format(d.noProof)} ₽`}
@@ -197,7 +197,7 @@ export function CashJournalScreen({ companyId }: { companyId: string }) {
               { header: 'Сумма', key: 'amount', width: 16, money: true },
               { header: 'Чьи деньги', key: 'purseLabel', width: 18 },
               { header: 'Подтверждение', key: 'proofLabel', width: 16 },
-              { header: 'Остаток по займу', key: 'rest', width: 16, money: true },
+              { header: 'Не закрыто', key: 'rest', width: 16, money: true },
             ], rows)
               logExport(companyId, 'Наличные расчёты', rows.length)
             }} />
@@ -235,9 +235,10 @@ export function CashJournalScreen({ companyId }: { companyId: string }) {
           </CardContent>
         </Card>
       ) : (
-        <TableCard note="Период берётся из фильтра рабочей области. Остаток показан только у займов"
+        <TableCard note="Период берётся из фильтра рабочей области. «Не закрыто» показано у займов и подотчёта"
           head={<><Th>Дата</Th><Th>С кем и за что</Th><Th>Вид</Th>
-            <Th>Чем подтверждено</Th><Th right>Сумма</Th><Th right>Остаток</Th><Th right> </Th></>}>
+            <Th>Чем подтверждено</Th><Th right>Сумма</Th><Th right>Не закрыто</Th>
+            <Th right> </Th></>}>
           {rows.map((r) => (
             <tr key={r.id} className={cn('border-b last:border-0 hover:bg-muted/40',
               r.overdue && 'bg-destructive/5')}>
@@ -777,10 +778,10 @@ export function CashLoansScreen({ companyId }: { companyId: string }) {
   return (
     <div className="p-4 space-y-4">
       <div className="grid gap-3 sm:grid-cols-3">
-        <MetricTile label="За людьми" value={`${money.format(d.givenRest)} ₽`}
-          hint="остаток по выданным займам и подотчёту" />
-        <MetricTile label="Должны мы" value={`${money.format(d.takenRest)} ₽`}
-          hint="остаток по полученным займам" />
+        <MetricTile label="Не закрыто за людьми" value={`${money.format(d.givenRest)} ₽`}
+          hint="выданные займы и подотчёт" />
+        <MetricTile label="Не закрыто за нами" value={`${money.format(d.takenRest)} ₽`}
+          hint="полученные займы" />
         <MetricTile label="Просрочено" value={num.format(d.overdue)}
           hint="срок прошёл, остаток не погашен"
           tone={d.overdue ? 'danger' : undefined} />
@@ -788,7 +789,7 @@ export function CashLoansScreen({ companyId }: { companyId: string }) {
 
       <TableCard note="Выданные и полученные не сворачиваются в одну цифру: долг знакомого не гасит наш долг перед другим"
         head={<><Th>Дата</Th><Th>С кем и за что</Th><Th right>Сумма</Th>
-          <Th right>Возвращено</Th><Th right>Остаток</Th><Th>Срок</Th></>}>
+          <Th right>Возвращено</Th><Th right>Не закрыто</Th><Th>Срок</Th></>}>
         {d.rows.map((l) => (
           <Fragment key={l.id}>
             <tr className={cn('border-b last:border-0',

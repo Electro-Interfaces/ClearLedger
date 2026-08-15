@@ -70,6 +70,10 @@ export interface PerimeterOverview {
     /** Официальный слой приезжает из учёта, неофициальный записан человеком. */
     official: boolean
     count: number; amount: number; empty: boolean; note: string
+    /** Из чего сложилась сумма слоя: разнородное показываем составом, а не итогом. */
+    parts?: { label: string; amount: number }[]
+    /** Записи, по которым величина НЕИЗВЕСТНА, а не равна нулю. */
+    unknown?: number
   }[]
   byKind: { key: string; label: string; count: number; amount: number }[]
   byConfidence: { key: string; label: string; count: number; amount: number }[]
