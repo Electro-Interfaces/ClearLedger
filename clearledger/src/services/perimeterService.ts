@@ -157,6 +157,8 @@ export interface CashMove {
   note: string | null
   /** Сотрудник, частное лицо, собственник: от этого зависит, примет ли учёт. */
   personKind: string; personKindLabel: string
+  writeoffReason: string | null
+  writeoffReasonLabel: string | null
   formalized: boolean
   formalizedOn: string | null
   formalizedBy: string | null
@@ -192,6 +194,8 @@ export interface CashIn {
   commitmentPeriod?: string | null
   acknowledgedOn?: string | null
   acknowledgedBy?: string | null
+  /** Почему списали долг: простили, взыскать не с кого, истёк срок. */
+  writeoffReason?: string | null
   dueOn?: string | null
   note?: string | null
   counterpartyId?: string | null
@@ -286,6 +290,9 @@ export interface PerimeterPerson {
   kind: string; kindLabel: string
   role: string | null
   phone: string | null
+  payoutPhone: string | null
+  payoutBank: string | null
+  payoutNote: string | null
   counterpartyId: string | null
   note: string | null
   isActive: boolean
@@ -304,6 +311,10 @@ export interface PersonIn {
   kind: string
   role?: string | null
   phone?: string | null
+  /** Как вернуть деньги: телефон перевода, банк, способ словами. */
+  payoutPhone?: string | null
+  payoutBank?: string | null
+  payoutNote?: string | null
   counterpartyId?: string | null
   note?: string | null
   isActive: boolean
@@ -532,3 +543,108 @@ export const getReviewHistory = (companyId: string) =>
     }[]
     weeksInRow: number
   }>(`/api/perimeter/reviews?company_id=${companyId}`)
+
+/* ── Быстрый ввод, сверка, прогноз, мост ─────────────────────────────────── */
+
+/** Разобранная строка быстрого ввода: то, в чём система уверена. */
+export interface QuickDraft extends CashIn {
+  kindLabel: string
+  /** Что удалось понять — показывается человеку до сохранения. */
+  understood: string[]
+  /** Чего не хватает для сохранения. */
+  missing: string[]
+}
+
+export const parseQuick = (companyId: string, line: string) =>
+  post<QuickDraft>(`/api/perimeter/cash/parse?company_id=${companyId}`
+    + `&text_line=${encodeURIComponent(line)}`, {})
+
+export interface ReconcileState {
+  purse: string; purseLabel: string
+  out: number; in: number
+  /** Сколько должно быть в кошельке по журналу. */
+  byJournal: number
+  lastCheckedOn: string | null
+  lastDiff: number | null
+}
+
+export const getReconcileState = (companyId: string, purse = 'owner') =>
+  get<ReconcileState>(`/api/perimeter/cash/reconcile?company_id=${companyId}&purse=${purse}`)
+
+export const doReconcile = (
+  companyId: string,
+  body: { countedOn: string; counted: number; purse: string; note?: string | null },
+) => post<{ diff: number; created: boolean; message?: string }>(
+  `/api/perimeter/cash/reconcile?company_id=${companyId}`, body)
+
+export interface CashForecast {
+  points: { date: string; amount: number; what: string; kind: string; id: string }[]
+  total: number
+  weeks: { weekStart: string; amount: number }[]
+  horizon: string
+  next30: number
+}
+
+export const getCashForecast = (companyId: string, days = 90) =>
+  get<CashForecast>(`/api/perimeter/cash/forecast?company_id=${companyId}&days=${days}`)
+
+export interface DebtBridge {
+  steps: { key: string; label: string; amount: number; kind: string }[]
+  from: string; to: string
+  checks: { calculated: number; actual: number; diff: number }
+}
+
+export const getDebtBridge = (companyId: string, from: string, to: string) =>
+  get<DebtBridge>(`/api/perimeter/cash/debt-bridge?company_id=${companyId}`
+    + `&date_from=${from}&date_to=${to}`)
+
+/* ── Напоминания и акт сверки ────────────────────────────────────────────── */
+
+export interface Reminder {
+  id: string; person: string; happenedOn: string
+  channel: string; channelLabel: string
+  outcome: string; outcomeLabel: string
+  promisedOn: string | null
+  /** Обещал и срок прошёл: второе обещание стоит дешевле первого. */
+  promiseBroken: boolean
+  note: string | null
+  cashId: string | null; recordId: string | null; commitmentId: string | null
+  createdAt: string | null
+}
+
+export const getReminders = (companyId: string, person?: string) =>
+  get<{
+    rows: Reminder[]; count: number
+    channels: { key: string; label: string }[]
+    outcomes: { key: string; label: string }[]
+    broken: Reminder[]
+  }>(`/api/perimeter/reminders?company_id=${companyId}`
+     + (person ? `&person=${encodeURIComponent(person)}` : ''))
+
+export const createReminder = (companyId: string, body: {
+  personName: string; happenedOn: string; channel: string; outcome: string
+  promisedOn?: string | null; note?: string | null
+  cashId?: string | null; recordId?: string | null; commitmentId?: string | null
+}) => post<Reminder>(`/api/perimeter/reminders?company_id=${companyId}`, body)
+
+export interface PersonStatement {
+  person: string
+  card: {
+    kind: string | null; role: string | null; phone: string | null
+    payoutPhone: string | null; payoutBank: string | null; payoutNote: string | null
+  } | null
+  cash: (CashMove & { limitationExpiresOn?: string; limitationDaysLeft?: number })[]
+  commitments: Commitment[]
+  records: PerimeterRecord[]
+  reminders: Reminder[]
+  totals: {
+    out: number; in: number
+    /** Не закрыто: плюс за человеком, минус за нами. */
+    open: number; openCount: number; writtenOff: number
+  }
+  disclaimer: string | null
+}
+
+export const getPersonStatement = (companyId: string, person: string) =>
+  get<PersonStatement>(`/api/perimeter/people/statement?company_id=${companyId}`
+    + `&person=${encodeURIComponent(person)}`)

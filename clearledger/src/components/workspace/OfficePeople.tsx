@@ -250,6 +250,7 @@ export function PerimeterPeopleScreen({ companyId }: { companyId: string }) {
 
 const toForm = (p: PerimeterPerson): PersonIn => ({
   name: p.name, kind: p.kind, role: p.role, phone: p.phone,
+  payoutPhone: p.payoutPhone, payoutBank: p.payoutBank, payoutNote: p.payoutNote,
   counterpartyId: p.counterpartyId, note: p.note, isActive: p.isActive,
 })
 
@@ -305,6 +306,30 @@ function PersonDialog({ value, isNew, kinds, saving, error, onChange, onClose, o
             <input className={inputCls} value={value.phone ?? ''}
               onChange={(e) => set({ phone: e.target.value })} />
           </Field>
+          <div className="rounded-md border p-3 space-y-3">
+            <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
+              Как вернуть деньги
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              Долг зафиксирован, а действие «верни» упирается в поиск реквизитов по
+              переписке — пусть лежат там же, где сальдо.
+            </p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Телефон для перевода">
+                <input className={inputCls} value={value.payoutPhone ?? ''}
+                  onChange={(e) => set({ payoutPhone: e.target.value })} />
+              </Field>
+              <Field label="Банк">
+                <input className={inputCls} value={value.payoutBank ?? ''}
+                  onChange={(e) => set({ payoutBank: e.target.value })} />
+              </Field>
+            </div>
+            <Field label="Иначе" hint="«наличными в офисе», «переводом от жены»">
+              <input className={inputCls} value={value.payoutNote ?? ''}
+                onChange={(e) => set({ payoutNote: e.target.value })} />
+            </Field>
+          </div>
+
           <Field label="Заметка">
             <textarea className={inputCls} rows={3} value={value.note ?? ''}
               onChange={(e) => set({ note: e.target.value })} />

@@ -27,7 +27,7 @@ import { exportTable } from '@/services/booksExport'
 import {
   checkCash, createCash, deleteCash, getCashDicts, getCashJournal, getCashLoans,
   getCashPapers, getCashPeople, getCommitments, getPerimeterPeople, logExport,
-  updateCash,
+  parseQuick, updateCash,
   type CashDicts, type CashIn, type CashMove,
 } from '@/services/perimeterService'
 import { Loading, TableCard, Th } from './OfficePanels'
@@ -63,6 +63,19 @@ export function CashJournalScreen({ companyId }: { companyId: string }) {
   const [kind, setKind] = useState('')
   const [search, setSearch] = useState('')
   const [edit, setEdit] = useState<{ id: string | null; body: CashIn } | null>(null)
+  // Быстрый ввод: строка вместо формы. Трение записи — главная причина, по которой
+  // такие реестры бросают, поэтому обычный путь начинается здесь.
+  const [quick, setQuick] = useState('')
+  const parse = useMutation({
+    mutationFn: (line: string) => parseQuick(companyId, line),
+    onSuccess: (draft) => {
+      const { understood: _u, missing: _m, kindLabel: _k, ...body } = draft
+      setEdit({ id: null, body: body as CashIn })
+      setQuick('')
+      if (draft.understood.length) toast.info(`Понял: ${draft.understood.join(', ')}`)
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
 
   const dicts = useQuery({
     queryKey: ['perimeter', 'cash-dicts', companyId],
@@ -142,6 +155,29 @@ export function CashJournalScreen({ companyId }: { companyId: string }) {
             tone={d.noProofCount ? 'warning' : undefined} />
         </div>
       )}
+
+      <Card>
+        <CardContent className="p-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              className="flex-1 min-w-64 rounded-md border bg-background px-3 py-2 text-sm"
+              value={quick} placeholder="5000 Иванову за монтаж наличными"
+              onChange={(e) => setQuick(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && quick.trim()) parse.mutate(quick)
+              }} />
+            <Button size="sm" variant="outline" disabled={!quick.trim() || parse.isPending}
+              onClick={() => parse.mutate(quick)}>
+              {parse.isPending ? 'Разбираем…' : 'Разобрать'}
+            </Button>
+          </div>
+          <p className="text-[11px] text-muted-foreground mt-1.5">
+            Одной строкой: сумма, кому, за что. Понимает «вчера», «в долг», «под отчёт»,
+            «из кассы», дату вида 12.08. Разобранное открывается формой — вы проверяете и
+            сохраняете.
+          </p>
+        </CardContent>
+      </Card>
 
       <div className="flex flex-wrap items-center gap-2 justify-between">
         <Tabs value={kind} onChange={setKind} items={[
@@ -460,6 +496,19 @@ function CashDialog({
                     {money.format(l.rest ?? 0)} ₽
                   </option>
                 ))}
+              </select>
+            </Field>
+          )}
+
+          {value.kind === 'writeoff' && (
+            <Field label="Почему списываем"
+              hint="Долг не исчезает: по правилам учёта он уходит на забалансовый счёт 007 и числится там ещё пять лет">
+              <select className={inputCls} value={value.writeoffReason ?? ''}
+                onChange={(e) => set({ writeoffReason: e.target.value || null })}>
+                <option value="">— выберите причину —</option>
+                <option value="forgiven">Простили</option>
+                <option value="hopeless">Взыскать не с кого</option>
+                <option value="expired">Истёк срок давности</option>
               </select>
             </Field>
           )}

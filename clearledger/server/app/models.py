@@ -8944,6 +8944,10 @@ class OffLedgerCash(Base):
     acknowledged_on: Mapped[date_type | None] = mapped_column(Date, nullable=True)
     # Чем признан: оплата, акт сверки, переписка.
     acknowledged_by: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # Почему списали долг: forgiven — простили, hopeless — взыскать не с кого,
+    # expired — истёк срок давности. Долг не исчезает бесследно: он меняет природу и
+    # по правилам учёта уходит на забалансовый счёт 007 ещё на пять лет.
+    writeoff_reason: Mapped[str | None] = mapped_column(String(20), nullable=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # ── Мост в бухгалтерию ──
@@ -8998,6 +9002,12 @@ class OffLedgerPerson(Base):
     role: Mapped[str | None] = mapped_column(String(200), nullable=True)
     # Из персональных данных держим только телефон — по правилу пространства.
     phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    # Как вернуть деньги этому человеку: телефон для перевода, банк, любой другой
+    # способ словами. Долг зафиксирован, а действие «верни» упирается в поиск
+    # реквизитов по переписке — поэтому они лежат там же, где сальдо.
+    payout_phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    payout_bank: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    payout_note: Mapped[str | None] = mapped_column(String(300), nullable=True)
     # Если человек представляет компанию из справочника.
     counterparty_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("counterparties.id", ondelete="SET NULL"),
@@ -9161,6 +9171,12 @@ class PulseView(Base):
     # Категорий получателей больше, чем ролей, и заводить роль под каждую значило бы
     # плодить права, которые никому не дают доступа к работе.
     audience: Mapped[str] = mapped_column(String(300), nullable=False, default="")
+    # Юрлицо, о котором витрина. Пусто — вся компания; заданное — только его
+    # данные. В пространстве аутсорсера без этого заказчику показывались бы
+    # сводные цифры всех клиентов, и то же уходило бы по публичной ссылке.
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=True
+    )
     period: Mapped[str] = mapped_column(String(20), nullable=False, default="month")
     # Кто отвечает за цифры. Витрина уходит наружу, и «данные из системы» там не ответ:
     # у показанного числа должен быть человек.
@@ -9349,4 +9365,51 @@ class OffLedgerReview(Base):
     __table_args__ = (
         # Неделя разбирается один раз: повторная отметка исправляет прежнюю.
         Index("uq_off_review_week", "company_id", "week_start", unique=True),
+    )
+
+
+# Напоминание — запись, а не рассылка.
+#
+# Для просроченной устной договорённости важнее не сумма, а то, сколько раз о ней
+# напоминали и что отвечали. Фоновая рассылка этого не даёт: она не знает, дошло ли и
+# что сказали в ответ. Поэтому напоминание фиксируется человеком как факт разговора —
+# с каналом, текстом и результатом.
+class OffLedgerReminder(Base):
+    """Напоминание о долге или договорённости: когда, как и с каким результатом."""
+
+    __tablename__ = "off_ledger_reminders"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    # О чём напоминали: операция журнала, договорённость или обязательство. Ровно одна
+    # из ссылок заполнена — напоминание всегда о чём-то конкретном.
+    cash_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("off_ledger_cash.id", ondelete="CASCADE"),
+        nullable=True)
+    record_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("off_ledger_records.id", ondelete="CASCADE"),
+        nullable=True)
+    commitment_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("off_ledger_commitments.id", ondelete="CASCADE"),
+        nullable=True)
+    person_name: Mapped[str] = mapped_column(String(300), nullable=False)
+    happened_on: Mapped[date_type] = mapped_column(Date, nullable=False)
+    # Как напомнили: разговор, звонок, письмо, чат, сообщение.
+    channel: Mapped[str] = mapped_column(String(20), nullable=False, default="talk")
+    # Чем закончилось: promised — обещал, refused — отказал, silent — молчит,
+    # paid — сразу рассчитался.
+    outcome: Mapped[str] = mapped_column(String(20), nullable=False, default="promised")
+    # Что обещал: дата, к которой вернёт. Отсюда растёт следующее напоминание.
+    promised_on: Mapped[date_type | None] = mapped_column(Date, nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("idx_off_reminder_company", "company_id", "happened_on"),
     )
