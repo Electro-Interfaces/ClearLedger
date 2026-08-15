@@ -26,11 +26,10 @@ import { ConfirmActionDialog } from '@/components/common/ConfirmActionDialog'
 import { cn } from '@/lib/utils'
 import {
   checkCash, createCash, deleteCash, getCashDicts, getCashJournal, getCashLoans,
-  getCashPapers, getCashPeople, getCommitments, getPerimeterPeople,
+  getCashPapers, getCommitments, getPerimeterPeople,
   parseQuick, updateCash,
   type CashDicts, type CashIn, type CashMove,
 } from '@/services/perimeterService'
-import { PersonCardDialog } from './OfficePersonCard'
 import { PerimeterExport } from './perimeterShared'
 import { Loading, TableCard, Th } from './OfficePanels'
 import { SearchInput, Tabs, money, num , Td } from './officeShared'
@@ -701,96 +700,6 @@ function CashDialog({
 /* ────────────────────────────────────────────────────────────── */
 /*                      Расчёты по людям                          */
 /* ────────────────────────────────────────────────────────────── */
-
-export function CashPeopleScreen({ companyId }: { companyId: string }) {
-  const [card, setCard] = useState<string | null>(null)
-  const q = useQuery({
-    queryKey: ['perimeter', 'cash-people', companyId],
-    queryFn: () => getCashPeople(companyId),
-    enabled: !!companyId,
-  })
-  if (q.isError) {
-    return <div className="p-4">
-      <QueryError message="Не удалось собрать расчёты по людям"
-        onRetry={() => q.refetch()} />
-    </div>
-  }
-  if (!q.data) return <Loading />
-  if (!q.data.rows.length) {
-    return (
-      <div className="p-4">
-        <Card>
-          <CardContent className="p-4 text-sm text-muted-foreground">
-            Расчётов пока нет. Записи появляются здесь сами, как только в журнале
-            наличных заведена первая операция.
-          </CardContent>
-        </Card>
-      </div>
-    )
-  }
-  const d = q.data
-  return (
-    <div className="p-4 space-y-4">
-      <div className="grid gap-3 sm:grid-cols-3">
-        <MetricTile label="Людей в расчётах" value={num.format(d.peopleCount)}
-          hint="с кем были наличные операции" />
-        <MetricTile label="Осталось"
-          value={`${money.format(Math.abs(d.loanRestTotal))} ₽`}
-          hint={d.loanRestTotal >= 0 ? 'займы и подотчёт за людьми' : 'должны мы'}
-          tone={d.loanRestTotal ? 'warning' : undefined} />
-        <MetricTile label="Просрочено"
-          value={num.format(d.rows.reduce((s, p) => s + p.overdue, 0))}
-          hint="выдач с прошедшим сроком"
-          tone={d.rows.some((p) => p.overdue) ? 'danger' : undefined} />
-      </div>
-
-      <TableCard note="Долг человека — это непогашенные займы и невозвращённый подотчёт. Оплата выполненной работы и премия долгом не становятся, сколько их ни выдай"
-        head={<><Th>С кем</Th><Th right>Операций</Th><Th right>Выдано</Th>
-          <Th right>Получено</Th><Th right>Осталось</Th><Th right>Последняя</Th></>}>
-        {d.rows.map((p) => (
-          <tr key={p.person} className="border-b last:border-0">
-            <Td>
-              {/* Имя открывает сверку: акт по человеку, разговоры о долге и зачёт
-                  встречных требований — то, ради чего в такой список и заходят. */}
-              <button className="text-left hover:underline"
-                onClick={() => setCard(p.person)}>{p.person}</button>
-              <div className="text-[11px] text-muted-foreground">{p.personKindLabel}</div>
-              {!!p.noProof && (
-                <div className="text-[11px] text-amber-700 dark:text-amber-400">
-                  {num.format(p.noProof)} операций без подтверждения
-                </div>
-              )}
-              {!!p.awaits && (
-                <div className="text-[11px] text-amber-700 dark:text-amber-400">
-                  ждёт документов: {money.format(p.awaitsAmount)} ₽
-                </div>
-              )}
-            </Td>
-            <Td right muted>{num.format(p.operations)}</Td>
-            <Td right>{p.out ? `${money.format(p.out)} ₽` : '—'}</Td>
-            <Td right>{p.in ? `${money.format(p.in)} ₽` : '—'}</Td>
-            <Td right>
-              {Math.abs(p.loanRest) < 0.01 ? '—' : (
-                <>
-                  <div>{money.format(Math.abs(p.loanRest))} ₽</div>
-                  <div className="text-[11px] text-muted-foreground">
-                    {p.loanRest > 0 ? 'должен нам' : 'должны мы'}
-                  </div>
-                </>
-              )}
-            </Td>
-            <Td right muted><span className="tabular-nums">{p.last ?? '—'}</span></Td>
-          </tr>
-        ))}
-      </TableCard>
-
-      {card && (
-        <PersonCardDialog companyId={companyId} person={card}
-          onClose={() => setCard(null)} />
-      )}
-    </div>
-  )
-}
 
 /* ────────────────────────────────────────────────────────────── */
 /*                            Займы                               */

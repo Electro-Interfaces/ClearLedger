@@ -85,13 +85,19 @@ export function PerimeterPeopleScreen({ companyId }: { companyId: string }) {
         <MetricTile label="Сотрудников"
           value={num.format(d.byKind.find((k) => k.key === 'employee')?.count ?? 0)}
           hint="свои, с подотчётом и премиями" />
-        <MetricTile label="Людей с незакрытым" value={num.format(withDebt.length)}
-          hint="за ними займы или подотчёт"
-          tone={withDebt.length ? 'warning' : undefined} />
+        <MetricTile label="Осталось"
+          value={`${money.format(Math.abs(d.restTotal))} ₽`}
+          hint={d.restTotal >= 0
+            ? `за ${num.format(withDebt.length)} людьми — займы и подотчёт`
+            : 'должны мы'}
+          tone={d.restTotal ? 'warning' : undefined} />
+        <MetricTile label="Просрочено" value={num.format(d.overdueTotal)}
+          hint="выдач с прошедшим сроком"
+          tone={d.overdueTotal ? 'danger' : undefined} />
         <MetricTile label="Ждёт документов"
-          value={num.format(d.rows.reduce((s, p) => s + p.awaits, 0))}
-          hint="операций без оформления"
-          tone={d.rows.some((p) => p.awaits) ? 'warning' : undefined} />
+          value={`${money.format(d.awaitsTotal)} ₽`}
+          hint={`${num.format(d.rows.reduce((s, p) => s + p.awaits, 0))} операций без оформления`}
+          tone={d.awaitsTotal ? 'warning' : undefined} />
       </div>
 
       <div className="flex flex-wrap items-center gap-2 justify-between">
@@ -111,7 +117,9 @@ export function PerimeterPeopleScreen({ companyId }: { companyId: string }) {
               { header: 'Телефон', key: 'phone', width: 18 },
               { header: 'Операций', key: 'operations', width: 12 },
               { header: 'Выдано', key: 'out', width: 16, money: true },
+              { header: 'Получено', key: 'in', width: 16, money: true },
               { header: 'Осталось', key: 'rest', width: 16, money: true },
+              { header: 'Просрочено', key: 'overdue', width: 12 },
               { header: 'Договорённостей', key: 'records', width: 16 },
               { header: 'Заметка', key: 'note', width: 40 },
             ]}
@@ -147,10 +155,10 @@ export function PerimeterPeopleScreen({ companyId }: { companyId: string }) {
           </CardContent>
         </Card>
       ) : (
-        <TableCard note="«Осталось» — займы и подотчёт: плюс за человеком, минус за нами. Оплата работы и премия долгом не становятся"
+        <TableCard note="Долг человека — это непогашенные займы и невозвращённый подотчёт: оплата выполненной работы и премия долгом не становятся, сколько их ни выдай. Имя открывает сверку по человеку"
           head={<><Th>Имя</Th><Th>Кто это</Th><Th>Телефон</Th>
-            <Th right>Операций</Th><Th right>Выдано</Th><Th right>Осталось</Th>
-            <Th right> </Th></>}>
+            <Th right>Операций</Th><Th right>Выдано</Th><Th right>Получено</Th>
+            <Th right>Осталось</Th><Th right>Последняя</Th><Th right /></>}>
           {rows.map((p) => (
             <tr key={p.id} className={cn('border-b last:border-0 hover:bg-muted/40',
               !p.isActive && 'opacity-60')}>
@@ -185,11 +193,22 @@ export function PerimeterPeopleScreen({ companyId }: { companyId: string }) {
                 {p.operations ? num.format(p.operations) : '—'}
                 {!!p.awaits && (
                   <div className="text-[11px] text-amber-700 dark:text-amber-400">
-                    {num.format(p.awaits)} без документов
+                    {num.format(p.awaits)} ждёт документов
+                  </div>
+                )}
+                {!!p.noProof && (
+                  <div className="text-[11px] text-amber-700 dark:text-amber-400">
+                    {num.format(p.noProof)} без подтверждения
+                  </div>
+                )}
+                {!!p.overdue && (
+                  <div className="text-[11px] text-destructive">
+                    {num.format(p.overdue)} просрочено
                   </div>
                 )}
               </Td>
               <Td right>{p.out ? `${money.format(p.out)} ₽` : '—'}</Td>
+              <Td right>{p.in ? `${money.format(p.in)} ₽` : '—'}</Td>
               <Td right>
                 {Math.abs(p.rest) < 0.01 ? '—' : (
                   <>
@@ -200,6 +219,7 @@ export function PerimeterPeopleScreen({ companyId }: { companyId: string }) {
                   </>
                 )}
               </Td>
+              <Td right muted><span className="tabular-nums">{p.last ?? '—'}</span></Td>
               <Td right>
                 {p.operations ? (
                   <Button variant="ghost" size="icon-sm" disabled

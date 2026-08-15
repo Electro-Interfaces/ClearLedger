@@ -1161,96 +1161,6 @@ async def delete_cash(
     return {"deleted": True}
 
 
-@router.get("/cash/people")
-async def cash_people(
-    company_id: str,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-) -> dict[str, Any]:
-    """Расчёты по людям: сколько выдано, сколько вернулось, что осталось.
-
-    Долг человека — это НЕ «выдано минус получено»: оплата выполненной работы долгом
-    не становится, сколько её ни выдай. Должен человек ровно на непогашенные займы.
-    """
-    cid = await _scope(company_id, current_user, db, "pr_cash_people")
-    rows = list((await db.execute(
-        select(OffLedgerCash).where(OffLedgerCash.company_id == cid,
-                                    _org_of(OffLedgerCash))
-    )).scalars().all())
-    repaid = await _repaid_map(cid, db)
-    today = date.today()
-
-    people: dict[str, dict[str, Any]] = {}
-    for c in rows:
-        # У пересчёта кошелька второй стороны нет: система пишет его сама с именем
-        # «Пересчёт наличных». В расчётах с людьми он выглядел человеком, которому
-        # что-то выдали, и просился завести карточку.
-        if c.kind in TECHNICAL_KINDS:
-            continue
-        # Ключ — нормализованное имя, как в списке людей: иначе «Иван» и «иван» дают
-        # две строки с разрезанным пополам сальдо на одном экране и одну на другом.
-        p = people.setdefault(c.person_name.strip().lower(), {
-            "person": c.person_name, "personKind": c.person_kind,
-            "personKindLabel": PERSON_KINDS.get(c.person_kind, c.person_kind),
-            "out": 0.0, "in": 0.0, "work": 0.0,
-            "loanRest": 0.0, "operations": 0, "last": None, "overdue": 0,
-            "noProof": 0, "awaits": 0, "awaitsAmount": 0.0,
-            # Встречные стороны: сколько должен нам он и сколько должны мы ему.
-            "owed": 0.0, "owes": 0.0,
-        })
-        amount = float(c.amount)
-        p["operations"] += 1
-        # «Выдали» и «получили» — про наличные. Отчёт документами, зачёт и списание
-        # гасят выданное, но денег не приносят: сложенные сюда, они превращали
-        # авансовый отчёт в «получили от Титовой 35 000 ₽».
-        if c.kind not in NON_CASH:
-            if c.direction == "out":
-                p["out"] += amount
-            else:
-                p["in"] += amount
-        if c.kind == "work":
-            p["work"] += amount
-        if c.kind in OPEN_KINDS:
-            rest = amount - repaid.get(c.id, 0.0)
-            # Знак сохраняем: выданное это долг перед нами, полученный заём — наш.
-            p["loanRest"] += rest if c.direction == "out" else -rest
-            if rest > 0.01:
-                if c.direction == "out":
-                    p["owed"] += rest
-                else:
-                    p["owes"] += rest
-            if c.due_on and c.due_on < today and rest > 0.01:
-                p["overdue"] += 1
-        if c.kind in FORMALIZABLE and not c.formalized:
-            p["awaits"] += 1
-            p["awaitsAmount"] += amount
-        if c.proof == "none":
-            p["noProof"] += 1
-        if p["last"] is None or c.happened_on > p["last"]:
-            p["last"] = c.happened_on
-
-    out = [{
-        **p,
-        "out": round(p["out"], 2), "in": round(p["in"], 2),
-        "work": round(p["work"], 2), "loanRest": round(p["loanRest"], 2),
-        "awaitsAmount": round(p["awaitsAmount"], 2),
-        # Нетто по паре: сворачиваем только внутри одного человека и только незакрытое.
-        # Переносить долг на третье лицо продукт не станет — перевод долга требует
-        # согласия кредитора, и запись «Иванов должен Петрову», которой не было, не
-        # имеет ни силы, ни смысла.
-        "net": round(p["loanRest"], 2),
-        "canOffset": bool(p["owed"] > 0.01 and p["owes"] > 0.01),
-        "owed": round(p["owed"], 2), "owes": round(p["owes"], 2),
-        "last": p["last"].isoformat() if p["last"] else None,
-    } for p in people.values()]
-    out.sort(key=lambda p: (-abs(p["loanRest"]), -p["out"]))
-    return {
-        "rows": out,
-        "peopleCount": len(out),
-        "loanRestTotal": round(sum(p["loanRest"] for p in out), 2),
-    }
-
-
 @router.get("/cash/loans")
 async def cash_loans(
     company_id: str,
@@ -1427,6 +1337,7 @@ async def list_people(
                                     _org_of(OffLedgerCash))
     )).scalars().all())
     repaid = await _repaid_map(cid, db)
+    today = date.today()
     # Договорённости связаны с человеком именем второй стороны: у записи третьего слоя
     # ссылки на карточку нет — она про отношения, а не про расчёты.
     records = list((await db.execute(
@@ -1441,7 +1352,10 @@ async def list_people(
             continue
         key = (c.person_name or "").strip().lower()
         agg = names.setdefault(key, {"ops": 0, "out": 0.0, "in": 0.0, "rest": 0.0,
-                                     "last": None, "awaits": 0})
+                                     "last": None, "awaits": 0, "awaitsAmount": 0.0,
+                                     "overdue": 0, "noProof": 0,
+                                     # Встречные стороны: сколько должен он и сколько мы.
+                                     "owed": 0.0, "owes": 0.0, "work": 0.0})
         agg["ops"] += 1
         amount = float(c.amount)
         if c.kind not in NON_CASH:  # см. NON_CASH: закрытие документами не деньги
@@ -1449,11 +1363,24 @@ async def list_people(
                 agg["out"] += amount
             else:
                 agg["in"] += amount
+        if c.kind == "work":
+            agg["work"] += amount
         if c.kind in OPEN_KINDS:
             rest = amount - repaid.get(c.id, 0.0)
+            # Знак сохраняем: выданное — долг перед нами, полученный заём — наш.
             agg["rest"] += rest if c.direction == "out" else -rest
+            if rest > 0.01:
+                if c.direction == "out":
+                    agg["owed"] += rest
+                else:
+                    agg["owes"] += rest
+                if c.due_on and c.due_on < today:
+                    agg["overdue"] += 1
         if c.kind in FORMALIZABLE and not c.formalized:
             agg["awaits"] += 1
+            agg["awaitsAmount"] += amount
+        if c.proof == "none" and c.kind not in NON_CASH:
+            agg["noProof"] += 1
         if agg["last"] is None or c.happened_on > agg["last"]:
             agg["last"] = c.happened_on
 
@@ -1478,8 +1405,16 @@ async def list_people(
             "operations": agg.get("ops", 0),
             "out": round(agg.get("out", 0.0), 2),
             "in": round(agg.get("in", 0.0), 2),
+            "work": round(agg.get("work", 0.0), 2),
             "rest": round(agg.get("rest", 0.0), 2),
             "awaits": agg.get("awaits", 0),
+            "awaitsAmount": round(agg.get("awaitsAmount", 0.0), 2),
+            "overdue": agg.get("overdue", 0),
+            "noProof": agg.get("noProof", 0),
+            "owed": round(agg.get("owed", 0.0), 2),
+            "owes": round(agg.get("owes", 0.0), 2),
+            # Зачесть можно только там, где долги встречные и оба живые.
+            "canOffset": bool(agg.get("owed", 0.0) > 0.01 and agg.get("owes", 0.0) > 0.01),
             "records": rec_by_name.get(key, 0),
             "last": agg["last"].isoformat() if agg.get("last") else None,
         })
@@ -1487,6 +1422,11 @@ async def list_people(
     known = {p.name.strip().lower() for p in people}
     return {
         "rows": rows,
+        # Итоги по списку: раньше их считал отдельный экран «Расчёты с людьми».
+        "peopleInSettlements": sum(1 for r in rows if r["operations"]),
+        "restTotal": round(sum(r["rest"] for r in rows), 2),
+        "overdueTotal": sum(r["overdue"] for r in rows),
+        "awaitsTotal": round(sum(r["awaitsAmount"] for r in rows), 2),
         "kinds": [{"key": k, "label": v} for k, v in PEOPLE_KINDS.items()],
         "count": len(rows),
         "byKind": [{
@@ -1494,9 +1434,11 @@ async def list_people(
             "count": sum(1 for r in rows if r["kind"] == k),
         } for k, v in PEOPLE_KINDS.items() if any(r["kind"] == k for r in rows)],
         # Имена из расчётов, которым карточка так и не завелась: бывает у записей,
-        # приехавших до появления справочника.
+        # приехавших до появления справочника. Технические записи сюда не попадают:
+        # «Пересчёт наличных» — не человек, и заводить ему карточку не нужно.
         "orphans": sorted({c.person_name for c in moves
-                           if (c.person_name or "").strip().lower() not in known}),
+                           if c.kind not in TECHNICAL_KINDS
+                           and (c.person_name or "").strip().lower() not in known}),
     }
 
 
@@ -2487,10 +2429,10 @@ async def cash_offset(
     Ограничение на сумму: зачесть можно не больше меньшей из встречных сторон, иначе
     у одного из долгов остаток уйдёт в минус.
     """
-    cid = await _scope(company_id, current_user, db, "pr_cash_people")
-    people = await cash_people(company_id, db, current_user)
+    cid = await _scope(company_id, current_user, db, "pr_people")
+    people = await list_people(company_id, None, db, current_user)
     key = body.personName.strip().lower()
-    row = next((r for r in people["rows"] if r["person"].strip().lower() == key), None)
+    row = next((r for r in people["rows"] if r["name"].strip().lower() == key), None)
     if row is None:
         raise HTTPException(404, "С этим человеком расчётов нет")
     limit = min(row["owed"], row["owes"])
@@ -2636,7 +2578,24 @@ async def week_review(
             "hint": "Либо выполнено и надо закрыть запись, либо разговор откладывать нельзя",
             "mode": "per_records", "sub": "pr_registry",
             "items": [{"id": str(r.id), "text": f"{r.counterparty_name or '—'}: {r.title}",
-                       "note": r.due_on.isoformat()} for r in overdue_records[:8]],
+                       "note": r.due_on.isoformat()} for r in overdue_records[:12]],
+        })
+
+    # Срок ещё не прошёл, но подходит: договорённость на то и записывают, чтобы
+    # вспомнить о ней ЗАРАНЕЕ. Просроченное показано выше отдельной группой — там уже
+    # не напоминание, а разбор последствий.
+    soon_records = [r for r in records
+                    if r.due_on and today <= r.due_on <= today + timedelta(days=30)]
+    if soon_records:
+        todo.append({
+            "key": "records_soon", "title": "Срок подходит в ближайший месяц",
+            "count": len(soon_records),
+            "hint": "Напомнить второй стороне или подготовиться самим — пока время есть",
+            "mode": "per_records", "sub": "pr_registry",
+            "items": [{"id": str(r.id), "text": f"{r.counterparty_name or '—'}: {r.title}",
+                       "note": f"{r.due_on.isoformat()} · через "
+                               f"{(r.due_on - today).days} дн."}
+                      for r in sorted(soon_records, key=lambda x: x.due_on)[:12]],
         })
 
     # Записанное со слов и живущее дольше квартала: либо подтвердить перепиской, либо
@@ -2651,7 +2610,7 @@ async def week_review(
             "hint": "Подтвердить перепиской или оформить: память сторон расходится быстрее, чем кажется",
             "mode": "per_records", "sub": "pr_registry",
             "items": [{"id": str(r.id), "text": f"{r.counterparty_name or '—'}: {r.title}",
-                       "note": r.created_at.date().isoformat()} for r in old_spoken[:8]],
+                       "note": r.created_at.date().isoformat()} for r in old_spoken[:12]],
         })
 
     coms = await _commitments(cid, db, only_active=True)
@@ -2659,11 +2618,14 @@ async def week_review(
     if missed:
         todo.append({
             "key": "commitments_missed", "title": "Регулярные обязательства с пропусками",
-            "count": sum(c["missedCount"] for c in missed),
+            # Считаем обязательства, а не периоды: строки списка — обязательства, и
+            # «…и ещё 9» при трёх строках означало другую единицу измерения.
+            "count": len(missed),
+            "periodsMissed": sum(c["missedCount"] for c in missed),
             "hint": "Выполнить или отметить пропуск: неотмеченный период неотличим от забытого",
             "mode": "per_records", "sub": "pr_regular",
             "items": [{"id": c["id"], "text": f'{c["person"]}: {c["title"]}',
-                       "note": ", ".join(c["missedPeriods"][-3:])} for c in missed[:8]],
+                       "note": ", ".join(c["missedPeriods"][-3:])} for c in missed[:12]],
         })
 
     opened = [c for c in (await db.execute(
@@ -2684,7 +2646,22 @@ async def week_review(
             "items": [{"id": str(c.id),
                        "text": f"{c.person_name}: {round(float(c.amount) - repaid.get(c.id, 0.0), 2)} руб.",
                        "note": f"{(today - c.happened_on).days} дн."}
-                      for c in late_advances[:8]],
+                      for c in late_advances[:12]],
+        })
+
+    overdue_loans = [c for c in opened if c.due_on and c.due_on < today]
+    if overdue_loans:
+        todo.append({
+            "key": "loans_overdue", "title": "Займы и подотчёт с прошедшим сроком",
+            "count": len(overdue_loans),
+            "hint": "Разговор о возврате: чем дольше висит, тем труднее его начинать",
+            "mode": "per_cash", "sub": "pr_cash_loans",
+            "items": [{"id": str(c.id),
+                       "text": f"{c.person_name}: "
+                               f"{round(float(c.amount) - repaid.get(c.id, 0.0), 2)} руб.",
+                       "note": f"{c.due_on.isoformat()} · просрочено "
+                               f"{(today - c.due_on).days} дн."}
+                      for c in sorted(overdue_loans, key=lambda x: x.due_on)[:12]],
         })
 
     expiring = []
@@ -2699,7 +2676,7 @@ async def week_review(
             "hint": "Прервать срок можно актом сверки или частичной оплатой — пока он не истёк",
             "mode": "per_cash", "sub": "pr_cash_aging",
             "items": [{"id": str(c.id), "text": f"{c.person_name}: {float(c.amount)} руб.",
-                       "note": lim["limitationExpiresOn"]} for c, lim in expiring[:8]],
+                       "note": lim["limitationExpiresOn"]} for c, lim in expiring[:12]],
         })
 
     papers = await cash_papers(company_id, db, None)
@@ -2710,7 +2687,7 @@ async def week_review(
             "hint": "Подотчёт, премии и компенсации учёт принимает документами",
             "mode": "per_cash", "sub": "pr_cash_papers",
             "items": [{"id": r["id"], "text": f'{r["person"]}: {r["amount"]} руб.',
-                       "note": r["kindLabel"]} for r in papers["waiting"][:8]],
+                       "note": r["kindLabel"]} for r in papers["waiting"][:12]],
         })
 
     no_proof = [c for c in new_cash if c.proof == "none" and float(c.amount) >= 50000]
@@ -2721,7 +2698,7 @@ async def week_review(
             "hint": "Пока свежо — взять расписку или сохранить переписку",
             "mode": "per_cash", "sub": "pr_cash",
             "items": [{"id": str(c.id), "text": f"{c.person_name}: {float(c.amount)} руб.",
-                       "note": c.happened_on.isoformat()} for c in no_proof[:8]],
+                       "note": c.happened_on.isoformat()} for c in no_proof[:12]],
         })
 
     review = (await db.execute(
@@ -2886,7 +2863,7 @@ async def list_reminders(
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """История напоминаний: кому, как и с каким результатом."""
-    cid = await _scope(company_id, current_user, db, "pr_cash_people")
+    cid = await _scope(company_id, current_user, db, "pr_people")
     sel = select(OffLedgerReminder).where(OffLedgerReminder.company_id == cid)
     if person:
         sel = sel.where(func.lower(OffLedgerReminder.person_name) == person.strip().lower())
@@ -2910,7 +2887,7 @@ async def create_reminder(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
-    cid = await _scope(company_id, current_user, db, "pr_cash_people")
+    cid = await _scope(company_id, current_user, db, "pr_people")
     if body.channel not in REMINDER_CHANNELS:
         raise HTTPException(422, f"Неизвестный канал: {body.channel}")
     if body.outcome not in REMINDER_OUTCOMES:
@@ -2950,7 +2927,7 @@ async def delete_reminder(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, bool]:
-    cid = await _scope(company_id, current_user, db, "pr_cash_people")
+    cid = await _scope(company_id, current_user, db, "pr_people")
     r = await db.get(OffLedgerReminder, _uuid(reminder_id, "идентификатор напоминания"))
     if r is None or r.company_id != cid:
         raise HTTPException(404, "Напоминание не найдено")
@@ -2995,7 +2972,7 @@ async def person_statement(
     имени, а не по ссылке на карточку, — записи третьего слоя держат вторую сторону
     строкой, и требовать заведённой карточки значило бы потерять часть истории.
     """
-    cid = await _scope(company_id, current_user, db, "pr_cash_people")
+    cid = await _scope(company_id, current_user, db, "pr_people")
     st = await _settings(cid, db)
     years, show_disclaimer = st.limitation_years, st.show_disclaimer
     await db.commit()

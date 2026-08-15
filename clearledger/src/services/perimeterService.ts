@@ -222,19 +222,6 @@ export interface CashJournal {
   awaitsPapersCount: number
 }
 
-export interface CashPerson {
-  person: string
-  personKind: string; personKindLabel: string
-  awaits: number; awaitsAmount: number
-  out: number; in: number; work: number
-  /** Непогашенные займы: плюс — должны нам, минус — должны мы. */
-  loanRest: number
-  operations: number
-  last: string | null
-  overdue: number
-  noProof: number
-}
-
 export interface CashDicts {
   kinds: { key: string; label: string }[]
   personKinds: { key: string; label: string }[]
@@ -263,10 +250,6 @@ export const updateCash = (companyId: string, id: string, body: CashIn) =>
 
 export const deleteCash = (companyId: string, id: string) =>
   del<{ deleted: boolean }>(`/api/perimeter/cash/${id}?company_id=${companyId}`)
-
-export const getCashPeople = (companyId: string) =>
-  get<{ rows: CashPerson[]; peopleCount: number; loanRestTotal: number }>(
-    `/api/perimeter/cash/people?company_id=${companyId}`)
 
 export const getCashLoans = (companyId: string) =>
   get<{ rows: CashMove[]; givenRest: number; takenRest: number; overdue: number }>(
@@ -303,9 +286,17 @@ export interface PerimeterPerson {
   /** Что за человеком числится: считается по расчётам и договорённостям. */
   operations: number
   out: number; in: number
+  /** Оплата выполненной работы: долгом не становится, сколько её ни выдай. */
+  work: number
   /** Незакрытые займы и подотчёт: плюс — за человеком, минус — за нами. */
   rest: number
+  /** Встречные стороны по отдельности: свернуть их в одну цифру нельзя. */
+  owed: number; owes: number
+  canOffset: boolean
+  overdue: number
+  noProof: number
   awaits: number
+  awaitsAmount: number
   records: number
   last: string | null
 }
@@ -330,6 +321,11 @@ export const getPerimeterPeople = (companyId: string, q?: string) =>
     kinds: { key: string; label: string }[]
     count: number
     byKind: { key: string; label: string; count: number }[]
+    /** Итоги по расчётам: раньше их считал отдельный экран. */
+    peopleInSettlements: number
+    restTotal: number
+    overdueTotal: number
+    awaitsTotal: number
     orphans: string[]
   }>(`/api/perimeter/people?company_id=${companyId}`
      + (q ? `&q=${encodeURIComponent(q)}` : ''))

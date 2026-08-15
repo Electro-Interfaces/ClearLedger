@@ -31,7 +31,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { ConfirmActionDialog } from '@/components/common/ConfirmActionDialog'
 import { cn } from '@/lib/utils'
 import {
-  createPerimeterRecord, deletePerimeterRecord, getCashLoans, getPerimeterDicts,
+  createPerimeterRecord, deletePerimeterRecord, getPerimeterDicts,
   getPerimeterOverview, getPerimeterParties, getPerimeterRecords, updatePerimeterRecord,
   type PerimeterRecord, type PerimeterRecordIn,
 } from '@/services/perimeterService'
@@ -43,10 +43,10 @@ import { ProductHelpPanel } from './ProductHelpPanel'
 import { PERIMETER_HELP_SLICES } from './helpSlices'
 import {
   PER_PICTURE_MENU, PER_OFFICIAL_MENU, PER_RECORDS_MENU, PER_CASH_MENU,
-  PER_PEOPLE_MENU,
+  PER_PEOPLE_MENU, PER_SETUP_MENU,
 } from '@/config/workspaceMenus'
 import {
-  CashJournalScreen, CashLoansScreen, CashPapersScreen, CashPeopleScreen,
+  CashJournalScreen, CashLoansScreen, CashPapersScreen,
 } from './OfficeCash'
 import { PerimeterPeopleScreen } from './OfficePeople'
 import { CashAgingScreen } from './OfficeCashAging'
@@ -58,13 +58,14 @@ import { CommitmentsScreen } from './OfficeCommitments'
 import { useWorkspaceSections } from './workspaceSections'
 
 const PER_MENU_FOR_HELP = [...PER_PICTURE_MENU, ...PER_OFFICIAL_MENU,
-  ...PER_RECORDS_MENU, ...PER_CASH_MENU, ...PER_PEOPLE_MENU]
+  ...PER_RECORDS_MENU, ...PER_CASH_MENU, ...PER_PEOPLE_MENU, ...PER_SETUP_MENU]
 
 const modeForHelpKey = (key: string): string =>
   PER_OFFICIAL_MENU.some((m) => m.key === key) ? 'per_official'
   : PER_RECORDS_MENU.some((m) => m.key === key) ? 'per_records'
   : PER_CASH_MENU.some((m) => m.key === key) ? 'per_cash'
   : PER_PEOPLE_MENU.some((m) => m.key === key) ? 'per_people'
+  : PER_SETUP_MENU.some((m) => m.key === key) ? 'per_setup'
   : 'per_picture'
 
 /** Сумма записи: её может не быть, и это законно, а не ноль. */
@@ -113,14 +114,12 @@ export function PerimeterPanel() {
   const view = (() => {
     switch (sub) {
       case 'pr_layers':   return <PerimeterLayers companyId={companyId} />
-      case 'pr_due':      return <PerimeterDue companyId={companyId} />
       case 'pr_accounts': return <OffBalanceAccounts companyId={companyId} />
       case 'pr_hidden':   return <OffBalanceHiddenScreen companyId={companyId} />
       case 'pr_registry': return <PerimeterRegistry companyId={companyId} />
       case 'pr_regular':  return <CommitmentsScreen companyId={companyId} />
       case 'pr_parties':  return <PerimeterParties companyId={companyId} />
       case 'pr_cash':        return <CashJournalScreen companyId={companyId} />
-      case 'pr_cash_people': return <CashPeopleScreen companyId={companyId} />
       case 'pr_cash_loans':  return <CashLoansScreen companyId={companyId} />
       case 'pr_cash_papers': return <CashPapersScreen companyId={companyId} />
       case 'pr_cash_aging':  return <CashAgingScreen companyId={companyId} />
@@ -389,136 +388,6 @@ function PerimeterLayers({ companyId }: { companyId: string }) {
 /* ────────────────────────────────────────────────────────────── */
 /*                            Сроки                               */
 /* ────────────────────────────────────────────────────────────── */
-
-function PerimeterDue({ companyId }: { companyId: string }) {
-  const q = useQuery({
-    queryKey: ['perimeter', 'overview', companyId],
-    queryFn: () => getPerimeterOverview(companyId),
-    enabled: !!companyId,
-  })
-  const loans = useQuery({
-    queryKey: ['perimeter', 'cash-loans', companyId],
-    queryFn: () => getCashLoans(companyId),
-    enabled: !!companyId,
-  })
-  if (q.isError || loans.isError) {
-    return <div className="p-4">
-      <QueryError message="Не удалось собрать сроки" onRetry={() => {
-        q.refetch(); loans.refetch()
-      }} />
-    </div>
-  }
-  // Пока вторая очередь не пришла, «сроков нет» показывать нельзя: сбой загрузки
-  // выглядел бы как порядок в делах.
-  if (!q.data || loans.isPending) return <Loading />
-  const d = q.data
-  const rows = [...d.overdue, ...d.soon]
-  // Просроченные выдачи и пропущенные периоды — такие же сроки, как у договорённостей.
-  // Держать их на отдельных экранах значит требовать обхода четырёх мест вместо одного.
-  const overdueLoans = (loans.data?.rows ?? []).filter((l) => l.overdue)
-  const missed = d.commitments.missed
-
-  if (!rows.length && !overdueLoans.length && !missed.length) {
-    return (
-      <div className="p-4">
-        <Card>
-          <CardContent className="p-4 text-sm text-muted-foreground">
-            Ближайших сроков нет: ни одна запись не просрочена, выдачи закрыты,
-            периоды регулярных обязательств отмечены. Срок ставится не у всех записей —
-            «пока работаем, скидка сохраняется» бессрочно по своей природе.
-          </CardContent>
-        </Card>
-      </div>
-    )
-  }
-
-  return (
-    <div className="p-4 space-y-4">
-      {!!missed.length && (
-        <TableCard note="Регулярные обязательства с непроставленными отметками: либо выполнить, либо отметить пропуск"
-          head={<><Th>Перед кем</Th><Th>Что</Th><Th>Какие периоды</Th>
-            <Th right>Пропущено</Th><Th right>Ожидалось</Th></>}>
-          {missed.map((m) => (
-            <tr key={m.id} className="border-b last:border-0 bg-destructive/5">
-              <Td>{m.person}</Td>
-              <Td>{m.title}</Td>
-              <Td muted>{m.missedPeriods.join(', ')}</Td>
-              <Td right>{num.format(m.missedCount)}</Td>
-              <Td right>{m.missedAmount ? `${money.format(m.missedAmount)} ₽` : '—'}</Td>
-            </tr>
-          ))}
-        </TableCard>
-      )}
-
-      {!!overdueLoans.length && (
-        <TableCard note="Займы и выдачи под отчёт с прошедшим сроком"
-          head={<><Th>Срок</Th><Th>С кем и за что</Th><Th>Вид</Th>
-            <Th right>Выдано</Th><Th right>Осталось</Th></>}>
-          {overdueLoans.map((l) => (
-            <tr key={l.id} className="border-b last:border-0 bg-destructive/5">
-              <Td><span className="tabular-nums text-destructive">{l.dueOn}</span></Td>
-              <Td>
-                <div>{l.person}</div>
-                <div className="text-[11px] text-muted-foreground">{l.purpose ?? '—'}</div>
-              </Td>
-              <Td muted>{l.kindLabel}</Td>
-              <Td right muted>{money.format(l.amount)} ₽</Td>
-              <Td right>{money.format(l.rest ?? 0)} ₽</Td>
-            </tr>
-          ))}
-        </TableCard>
-      )}
-
-      {!!rows.length && (
-      <div className="flex items-center justify-between">
-        <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
-          Договорённости: просроченное и ближайшее
-        </div>
-        <PerimeterExport companyId={companyId} title="Сроки периметра"
-            columns={[
-          { header: 'Срок', key: 'dueOn', width: 14 },
-          { header: 'Дней', key: 'daysLeft', width: 8 },
-          { header: 'Что записано', key: 'title', width: 46 },
-          { header: 'Вторая сторона', key: 'counterparty', width: 30 },
-          { header: 'Вид', key: 'kindLabel', width: 24 },
-          { header: 'Сумма', key: 'amount', width: 16, money: true },
-        ]}
-            rows={rows} />
-      </div>
-      )}
-      {!!rows.length && (
-      <TableCard note="Отрицательные дни — просрочка. Запись не исчезает по сроку: её закрывают руками, отметив, чем закончилось"
-        head={<><Th>Срок</Th><Th>Что записано</Th><Th>Вторая сторона</Th>
-          <Th>Подтверждение</Th><Th right>Сумма</Th></>}>
-        {rows.map((r) => (
-          <tr key={r.id} className={cn('border-b last:border-0', r.overdue && 'bg-destructive/5')}>
-            <Td>
-              <div className="tabular-nums">{r.dueOn}</div>
-              <div className={cn('text-[11px] tabular-nums',
-                r.overdue ? 'text-destructive' : 'text-muted-foreground')}>
-                {r.daysLeft === null ? '' : r.daysLeft < 0
-                  ? `просрочено на ${Math.abs(r.daysLeft)} дн.`
-                  : `через ${r.daysLeft} дн.`}
-              </div>
-            </Td>
-            <Td>
-              <div>{r.title}</div>
-              <div className="text-[11px] text-muted-foreground">{r.kindLabel} · {r.directionLabel}</div>
-            </Td>
-            <Td muted>{r.counterparty ?? '—'}</Td>
-            <Td muted>
-              <span className={cn('inline-block w-1.5 h-1.5 rounded-full mr-1.5',
-                CONF_TONE[r.confidence] ?? 'bg-muted-foreground')} />
-              {r.confidenceLabel}
-            </Td>
-            <Td right>{amountText(r.amount)}</Td>
-          </tr>
-        ))}
-      </TableCard>
-      )}
-    </div>
-  )
-}
 
 /* ────────────────────────────────────────────────────────────── */
 /*                            Реестр                              */

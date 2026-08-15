@@ -712,7 +712,7 @@ ABC делит покупателей и позиции по вкладу в о�
         "title": "Наличные расчёты и люди периметра",
         "kind": "guide", "category": "Периметр компании", "sort": 30,
         "summary": "Расчёты мимо кассы: подотчёт, премии, займы и кто кому остался должен.",
-        "bindings": [("perimeter", "pr_cash", 95), ("perimeter", "pr_cash_people", 90),
+        "bindings": [("perimeter", "pr_cash", 95),
                      ("perimeter", "pr_cash_loans", 90),
                      ("perimeter", "pr_cash_papers", 90),
                      ("perimeter", "pr_people", 85)],
