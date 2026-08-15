@@ -40,11 +40,17 @@ async def main():
         # ── 1. связь проводки с документом ──
         docs = (await s.execute(
             select(AccountingDoc.id, AccountingDoc.number, AccountingDoc.date,
-                   AccountingDoc.doc_type)
+                   AccountingDoc.doc_type, AccountingDoc.details, AccountingDoc.doc_meta)
             .where(AccountingDoc.company_id == cid))).all()
         by_key: dict[tuple, list] = {}
-        for did, num, date, dtype in docs:
-            by_key.setdefault(((num or '').strip(), (date or '')[:10]), []).append((did, dtype))
+        for did, num, date, dtype, details, meta in docs:
+            # Время документа: им разводятся настоящие двойники — два разных документа
+            # с одним номером и датой (№1-2212 от 22.12.2023).
+            tm = ((details or {}).get('Время документа')
+                  or (meta or {}).get('Время документа')
+                  or (meta or {}).get('time'))
+            by_key.setdefault(((num or '').strip(), (date or '')[:10]), []).append(
+                (did, dtype, tm))
 
         # Вид регистратора 1С → вид документа у нас. Нужен, когда номер+дата ведут к
         # нескольким записям: один документ 1С с товарами и услугами лежит у нас двумя
@@ -71,7 +77,11 @@ async def main():
             'Выдача наличных': 'cash_out',
             'Корректировка долга': 'debt_correction',
             'Корректировка поступления': 'purchase_correction',
-            'Расход материалов': 'goods_writeoff',
+            # «Расход материалов» — как в этой конфигурации зовётся требование-накладная.
+            # Карта ОБЯЗАНА совпадать с `books_links._KIND_TO_TYPE`: там был
+            # `demand_note`, здесь `goods_writeoff` — связь ставилась и тут же
+            # снималась сведением, 74 проводки оставались без документа.
+            'Расход материалов': 'demand_note',
             'Требование-накладная': 'demand_note',
             'Платежное поручение': 'payment_order',
             'Формирование записей книги покупок': 'vat_book_in',
@@ -131,15 +141,18 @@ async def main():
             if want is None:
                 missed += 1
                 continue
-            found = [(d, t) for d, t in found if t == want]
+            found = [(d, t, tm) for d, t, tm in found if t == want]
             if not found:
                 missed += 1
                 continue
             if len(found) > 1:
-                same = [d for d, t in found]
+                # Двойников разводим ВРЕМЕНЕМ: оно есть и в представлении проводки
+                # («…от 22.12.2023 12:00:01»), и в реквизитах документа. Без этого
+                # семь проводок реализации оставались без первички.
+                mt = re.search(r'(\d{2}:\d{2}:\d{2})', e.doc_title or '')
+                same = [d for d, _, tm in found if mt and tm and tm == mt.group(1)]
                 if len(same) != 1:
-                    # Остаются настоящие двойники: два разных документа с одним
-                    # номером и датой (№1-2212 от 22.12.2023). Наугад не связываем.
+                    # Наугад не связываем: карточка документа показала бы чужие деньги.
                     ambiguous += 1
                     continue
                 e.doc_id = same[0]

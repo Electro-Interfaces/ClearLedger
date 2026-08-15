@@ -11,9 +11,12 @@ import json
 import os
 import re
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 SP = os.path.dirname(os.path.abspath(__file__))
-MSK = timezone(timedelta(hours=3))
+# Пояс с ИСТОРИЕЙ переходов: до 26.10.2014 Москва жила на UTC+4, и фиксированные
+# +3 уводили документы тех лет на день назад — проводка не находила своего документа.
+MSK = ZoneInfo('Europe/Moscow')
 
 
 def d(v):
@@ -83,6 +86,9 @@ for r in raw.get('debt_correction', []):
         'amount': num(r[6]) or num(r[7]),
         'details': {k: v for k, v in (('Дебитор', s(r[4])), ('Кредитор', s(r[5])),
                                       ('Вид операции', s(r[8]))) if v},
+        # Этот вид собирается мимо `head()`, поэтому организацию надо взять здесь же —
+        # иначе 14 документов ложатся без юрлица при заполненном источнике.
+        'org': s(r[-1]),
     })
 
 # Строки складских документов.

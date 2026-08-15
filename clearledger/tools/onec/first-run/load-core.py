@@ -17,8 +17,11 @@ import json
 import os
 import uuid
 from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
-MSK = timezone(timedelta(hours=3))
+# Пояс с ИСТОРИЕЙ переходов: до 26.10.2014 Москва жила на UTC+4, и фиксированные
+# +3 уводили документы тех лет на день назад — проводка не находила своего документа.
+MSK = ZoneInfo('Europe/Moscow')
 
 from sqlalchemy import delete, select, text
 

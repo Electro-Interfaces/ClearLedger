@@ -12,12 +12,13 @@ import asyncio
 import json
 import os
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 
 from app.database import async_session_factory
 from app.models import (
     AccountingDoc, Company, Counterparty, GlAccount, GlEntry, NomenclatureItem, Period,
 )
+from resolve_org import org_id, org_map
 
 SRC = '/tmp/onec-core.json'
 
@@ -57,6 +58,20 @@ async def main():
     async with async_session_factory() as s:
         cid = (await s.execute(select(Company.id).where(Company.slug == SLUG))).scalar_one()
         fails = []
+
+        # Файл источника в контейнере ОДИН на все компании: он перезаписывается каждой
+        # доставкой. Сверять слой с чужой выгрузкой хуже, чем не сверять вовсе —
+        # «расхождение» тогда означает лишь то, что рядом грузили соседа.
+        org_in_file = next((e.get('Организация1С') for e in entries if e.get('Организация1С')), None)
+        if org_in_file:
+            known = org_map((await s.execute(text(
+                "SELECT id::text, name, inn FROM organizations WHERE company_id = :c"),
+                {"c": str(cid)})).all())
+            if not org_id(known, org_in_file):
+                raise SystemExit(
+                    'источник %s принадлежит другой компании (%s) — перевезите выгрузку %s'
+                    % (SRC, org_in_file, SLUG))
+
 
         print('=== состав (слой против выгрузки) ===')
         for name, model, want in (('счетов', GlAccount, len(accounts)),
