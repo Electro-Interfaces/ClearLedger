@@ -13,10 +13,10 @@
  * Не путать с `pages/partner/AuditorPage.tsx`: тот из партнёрского контура и
  * обслуживает внешние инстансы ClearLedger.
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { BookOpen, Bot, CheckCircle2, ClipboardList, FlaskConical, GitCommitHorizontal, ListChecks, MessageSquare, Save, SlidersHorizontal, TerminalSquare, Wrench } from 'lucide-react'
+import { BookOpen, Bot, CheckCircle2, ClipboardList, FlaskConical, Download, GitCommitHorizontal, ListChecks, Loader2, MessageSquare, Plus, Save, SlidersHorizontal, TerminalSquare, Upload, Wrench } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
@@ -288,13 +288,30 @@ function MethodsView() {
 
   return (
     <div className="h-full overflow-y-auto p-4">
-      <h1 className="text-lg font-semibold">Методы</h1>
-      <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-        Чему агента научили: как отвечать на класс вопросов — что смотреть, в каком порядке,
-        что считать находкой. В отличие от навыков, методы не приходят с обновлением —
-        они наживаются здесь, в работе, и лежат файлами в рабочей папке под версиями.
-        {methods.length > 0 && <> Всего {methods.length}, проверено {verified}.</>}
-      </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-lg font-semibold">Методы</h1>
+          <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
+            Чему агента научили: как отвечать на класс вопросов — что смотреть, в каком порядке,
+            что считать находкой. В отличие от навыков, методы не приходят с обновлением —
+            они наживаются здесь, в работе, и лежат файлами в рабочей папке под версиями.
+            {methods.length > 0 && <> Всего {methods.length}, проверено {verified}.</>}
+          </p>
+        </div>
+        {/* Наработка живёт в томе ОДНОГО стека: без выгрузки метод, проверенный здесь, не
+            попадёт ни на соседнее пространство, ни в следующее развёрнутое. */}
+        {settings?.can_manage && (
+          <div className="shrink-0 text-right">
+            <Button variant="outline" size="sm"
+              onClick={() => auditor.exportWork().catch((e: Error) => toast.error(e.message))}>
+              <Download className="mr-1 size-3.5" />Выгрузить для поставки
+            </Button>
+            <p className="mt-1 max-w-56 text-[11px] text-muted-foreground">
+              методы, скрипты и общее знание — без данных организаций
+            </p>
+          </div>
+        )}
+      </div>
 
       {isLoading && <div className="mt-4 text-sm text-muted-foreground">Загружаю…</div>}
       {!isLoading && !methods.length && (
@@ -324,6 +341,12 @@ function MethodsView() {
             </button>
             {open === m.id && (
               <>
+                {/* Техническое имя нужно, только когда метод открыли: по нему ищут файл в
+                    рабочей папке. В списке оно занимало место названия и ничего не значило
+                    для человека — CLI требует латиницу, но это его дело, а не читателя. */}
+                <div className="mt-1 font-mono text-[11px] text-muted-foreground">
+                  .claude/skills/{m.id}/SKILL.md
+                </div>
                 {m.proof && (
                   <div className="mt-2 rounded-lg border border-emerald-500/40 bg-emerald-500/5 px-2.5 py-1.5">
                     <div className="text-[11px] font-medium uppercase tracking-wide text-emerald-600 dark:text-emerald-400">
@@ -353,44 +376,113 @@ function KnowledgeView() {
     queryFn: () => auditor.getSettings(companyId), enabled: !!companyId, retry: false,
   })
   const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ['auditor-knowledge'], queryFn: auditor.getKnowledge, retry: false,
+    queryKey: ['auditor-knowledge', companyId],
+    queryFn: () => auditor.getKnowledge(companyId), enabled: !!companyId, retry: false,
   })
   const { data: growth } = useQuery({
     queryKey: ['auditor-growth'], queryFn: auditor.getGrowth, retry: false,
   })
   const [open, setOpen] = useState<string | null>(null)
+  const reload = () => qc.invalidateQueries({ queryKey: ['auditor-knowledge', companyId] })
+  const canEdit = !!settings?.can_manage
 
   if (error) return <div className="p-4"><QueryError message={(error as Error).message} onRetry={() => refetch()} /></div>
+
+  const all = data ?? []
+  // Два слоя не смешиваем в один список: правило «у этого клиента УСН» и общая методика
+  // живут по-разному, и человек должен видеть, что именно он правит — знание про одну
+  // организацию или знание, которое поедет ко всем клиентам фирмы.
+  const LAYERS = [
+    {
+      scope: 'company' as const,
+      title: 'Знание об этой организации',
+      hint: 'Едет в ответы только про неё: особенности учёта, исключения, загруженные документы, '
+        + 'уточнения к общим методам под её специфику.',
+    },
+    {
+      scope: 'space' as const,
+      title: 'Знание пространства',
+      hint: 'Общее для всех клиентов: методика, нормативы, словарь. Правка здесь меняет ответы '
+        + 'по каждой организации сразу.',
+    },
+  ]
 
   return (
     <div className="h-full overflow-y-auto p-4">
       <h1 className="text-lg font-semibold">Знание</h1>
       <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-        Что агент знает об этой компании: особенности учёта, которые не выводятся из данных,
-        и правила «это не ошибка, потому что…». Читается перед каждым ответом и стоит выше
-        общих правил — поэтому правка здесь меняет ответы сразу.
+        То, что агент читает перед каждым ответом. Стоит выше общих правил — поэтому правка
+        здесь меняет ответы сразу, без перезапуска.
       </p>
 
       {isLoading && <div className="mt-4 text-sm text-muted-foreground">Загружаю…</div>}
-      <div className="mt-4 space-y-2">
-        {(data ?? []).map((k) => (
-          <div key={k.file} className="rounded-lg border border-border/60 bg-card px-3 py-2">
-            <button type="button" onClick={() => setOpen(open === k.file ? null : k.file)}
-              className="flex w-full items-center gap-2 text-left">
-              <BookOpen className="size-4 shrink-0 text-muted-foreground" />
-              <span className="font-medium">{k.title}</span>
-              <span className="ml-auto text-xs text-muted-foreground">
-                {new Date(k.updated).toLocaleDateString('ru-RU')}
-              </span>
-            </button>
-            {open === k.file && (
-              <FileEditor path={`knowledge/${k.file}`} body={k.body}
-                canEdit={!!settings?.can_manage}
-                onSaved={() => qc.invalidateQueries({ queryKey: ['auditor-knowledge'] })} />
+
+      {LAYERS.map((layer) => {
+        const items = all.filter((k) => k.scope === layer.scope)
+        return (
+          <section key={layer.scope} className="mt-6 max-w-3xl">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-semibold">{layer.title}</h2>
+                <p className="mt-0.5 text-xs text-muted-foreground">{layer.hint}</p>
+              </div>
+              {layer.scope === 'company' && canEdit && <KnowledgeAdd companyId={companyId} onDone={reload} />}
+            </div>
+
+            {!isLoading && !items.length && (
+              <p className="mt-2 rounded-lg border border-dashed border-border/60 px-3 py-4 text-sm text-muted-foreground">
+                {layer.scope === 'company'
+                  ? 'Пока пусто. Загрузите учётную политику, приказ или регламент — или напишите текстом, '
+                    + 'что агенту нужно знать именно про эту организацию.'
+                  : 'Пусто.'}
+              </p>
             )}
-          </div>
-        ))}
-      </div>
+
+            <div className="mt-2 space-y-2">
+              {items.map((k) => (
+                <div key={k.file} className="rounded-lg border border-border/60 bg-card px-3 py-2">
+                  <button type="button" onClick={() => setOpen(open === k.file ? null : k.file)}
+                    className="flex w-full items-center gap-2 text-left">
+                    <BookOpen className="size-4 shrink-0 text-muted-foreground" />
+                    <span className="font-medium">{k.title}</span>
+                    {k.generated && (
+                      <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
+                        пересчитывается
+                      </span>
+                    )}
+                    <span className="ml-auto text-xs text-muted-foreground">
+                      {new Date(k.updated).toLocaleDateString('ru-RU')}
+                    </span>
+                  </button>
+                  {open === k.file && (
+                    <>
+                      {k.generated && (
+                        <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
+                          Файл пересчитывается скриптом — правка руками затрётся при следующем пересчёте.
+                        </p>
+                      )}
+                      <FileEditor path={`knowledge/${k.file}`} body={k.body}
+                        canEdit={canEdit} onSaved={reload} />
+                      {k.scope === 'company' && canEdit && (
+                        <button type="button"
+                          onClick={() => {
+                            if (!confirm(`Убрать «${k.title}» из знания организации?`)) return
+                            auditor.deleteAgentFile(companyId, `knowledge/${k.file}`)
+                              .then(() => { setOpen(null); reload(); toast.success('Убрано из знания') })
+                              .catch((e: Error) => toast.error(e.message))
+                          }}
+                          className="mt-2 text-xs text-red-600 hover:underline dark:text-red-400">
+                          Убрать из знания
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+          </section>
+        )
+      })}
 
       {!!growth?.length && (
         <section className="mt-6 max-w-3xl">
@@ -413,6 +505,66 @@ function KnowledgeView() {
           </ul>
         </section>
       )}
+    </div>
+  )
+}
+
+/**
+ * Пополнить знание организации: загрузить документ или написать своё.
+ *
+ * Имя файла на диске не спрашиваем — оно техническое и человеку неинтересно. Человек
+ * даёт заголовок, он же становится первой строкой файла и именем в списке.
+ */
+function KnowledgeAdd({ companyId, onDone }: { companyId: string; onDone: () => void }) {
+  const fileRef = useRef<HTMLInputElement>(null)
+  const [busy, setBusy] = useState(false)
+  const [title, setTitle] = useState<string | null>(null)
+
+  const upload = (f?: File | null) => {
+    if (!f) return
+    setBusy(true)
+    auditor.uploadKnowledge(companyId, f)
+      .then((r) => { toast.success(`«${r.title}» в знании: ${r.chars.toLocaleString('ru-RU')} знаков`); onDone() })
+      .catch((e: Error) => toast.error(e.message))
+      .finally(() => { setBusy(false); if (fileRef.current) fileRef.current.value = '' })
+  }
+
+  const create = () => {
+    const t = (title ?? '').trim()
+    if (!t) return
+    // Имя файла — техническое и латиницей: по нему ходит белый список правки на сервисе.
+    // Заголовок кириллицей живёт внутри файла, и в списке видно именно его.
+    auditor.saveAgentFile(companyId, `knowledge/${companyId}/zapis-${Date.now()}.md`, `# ${t}\n\n`)
+      .then(() => { setTitle(null); onDone(); toast.success('Создано — откройте и напишите текст') })
+      .catch((e: Error) => toast.error(e.message))
+  }
+
+  return (
+    <div className="shrink-0 text-right">
+      <div className="flex items-center gap-2">
+        <input ref={fileRef} type="file" className="hidden"
+          accept=".md,.txt,.pdf,.docx,.doc,.xlsx,.xls,.csv,.json,.xml"
+          onChange={(e) => upload(e.target.files?.[0])} />
+        <Button variant="outline" size="sm" disabled={busy} onClick={() => fileRef.current?.click()}>
+          {busy ? <Loader2 className="mr-1 size-3.5 animate-spin" /> : <Upload className="mr-1 size-3.5" />}
+          Загрузить документ
+        </Button>
+        <Button variant="outline" size="sm" onClick={() => setTitle(title === null ? '' : null)}>
+          <Plus className="mr-1 size-3.5" />Написать
+        </Button>
+      </div>
+      {title !== null && (
+        <div className="mt-2 flex items-center gap-2">
+          <input autoFocus value={title} onChange={(e) => setTitle(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') create(); if (e.key === 'Escape') setTitle(null) }}
+            placeholder="О чём это знание — например «Учётная политика 2026»"
+            className="w-72 rounded-md border border-border/60 bg-background px-2 py-1 text-sm" />
+          <Button size="sm" onClick={create} disabled={!title.trim()}>Создать</Button>
+        </div>
+      )}
+      <p className="mt-1 text-[11px] text-muted-foreground">
+        Word, PDF и таблицы переводятся в текст при загрузке
+      </p>
     </div>
   )
 }

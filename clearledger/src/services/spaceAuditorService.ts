@@ -125,9 +125,16 @@ export interface AuditorMethod {
   updated: string
 }
 
-/** Файл знания о компании — то же, что едет в промпт каждого ответа. */
+/**
+ * Файл знания — то же, что едет в промпт каждого ответа, и ровно в двух слоях:
+ * общий для пространства (методика, нормативы) и свой у каждой организации.
+ */
 export interface AuditorKnowledge {
   file: string
+  /** `space` — общее всем клиентам фирмы, `company` — только этой организации. */
+  scope: 'space' | 'company'
+  /** Пересчитывается скриптом: правка руками затрётся при следующем пересчёте. */
+  generated?: boolean
   title: string
   body: string
   updated: string
@@ -150,8 +157,95 @@ const readJson = async <T>(path: string, what: string): Promise<T> => {
 }
 
 export const getMethods = () => readJson<AuditorMethod[]>('/methods', 'Методы')
-export const getKnowledge = () => readJson<AuditorKnowledge[]>('/knowledge', 'Знание')
 export const getGrowth = () => readJson<AuditorGrowth[]>('/growth', 'История')
+
+/**
+ * Знание обоих слоёв. Компанию обязательно передаём: без неё вернётся только общий
+ * слой пространства, и знание про эту организацию будет выглядеть отсутствующим.
+ */
+export async function getKnowledge(companyId: string): Promise<AuditorKnowledge[]> {
+  const res = await fetch(`${BASE}/knowledge`, { headers: { 'X-Company-Id': companyId } })
+  if (!res.ok || !res.headers.get('content-type')?.includes('application/json')) {
+    throw new Error('Знание недоступно: аудитор не подключён')
+  }
+  return res.json()
+}
+
+/**
+ * Забрать наработанное агентом для возврата в поставку: методы, скрипты, общее знание.
+ *
+ * Знание об организациях в архив не идёт — это данные клиента, а не поставка. Прямого
+ * доступа к общему репозиторию у агента нет намеренно: решение о том, что войдёт в
+ * поставку, принимает человек, посмотрев дифф.
+ */
+export async function exportWork() {
+  const res = await fetch(`${BASE}/export-work`, {
+    headers: { Authorization: `Bearer ${getToken() ?? ''}` },
+  })
+  if (!res.ok) throw new Error((await res.json().catch(() => null))?.error || `Не выгрузилось (${res.status})`)
+  const url = URL.createObjectURL(await res.blob())
+  const a = document.createElement('a')
+  a.href = url
+  a.download = 'auditor-work.tar.gz'
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+/**
+ * Занятость вкладок мастерской. Сеанс живёт без соединения, поэтому по открытому
+ * терминалу не видно, работает ли агент в соседней вкладке.
+ */
+export async function getSessions(): Promise<{ tab: number; live: boolean }[]> {
+  const res = await fetch(`${BASE}/sessions`)
+  if (!res.ok || !res.headers.get('content-type')?.includes('application/json')) return []
+  return res.json()
+}
+
+/** Готовый запуск: формулировка, с которой начинают работу. */
+export interface AuditorPrompt {
+  text: string
+  /** `company` — свой запуск этой организации, показывается первым. */
+  scope: 'space' | 'company'
+}
+
+/**
+ * Готовые запуски вместо пустого поля. Правятся как обычный файл знания
+ * (`prompts.md` в своём слое), поэтому у каждой организации могут быть свои.
+ */
+export async function getPrompts(companyId: string): Promise<AuditorPrompt[]> {
+  const res = await fetch(`${BASE}/prompts`, { headers: { 'X-Company-Id': companyId } })
+  if (!res.ok || !res.headers.get('content-type')?.includes('application/json')) return []
+  return res.json()
+}
+
+/** Убрать файл из знания организации. Общий слой пространства так не трогается. */
+export async function deleteAgentFile(companyId: string, path: string) {
+  const res = await fetch(`${BASE}/agent-file?path=${encodeURIComponent(path)}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${getToken() ?? ''}`, 'X-Company-Id': companyId },
+  })
+  if (!res.ok) throw new Error((await res.json().catch(() => null))?.error || `Не убралось (${res.status})`)
+  return res.json() as Promise<{ status: string }>
+}
+
+/**
+ * Пополнить знание организации готовым документом: учётной политикой, приказом,
+ * регламентом. Word, PDF и таблицы переводятся в текст на стороне сервиса.
+ *
+ * Это не то же, что файл, приложенный к разговору: приложенный виден одному ответу,
+ * загруженный сюда едет в промпт каждого ответа про эту организацию.
+ */
+export async function uploadKnowledge(companyId: string, file: File) {
+  const form = new FormData()
+  form.append('file', file, file.name)
+  const res = await fetch(`${BASE}/knowledge/upload`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${getToken() ?? ''}`, 'X-Company-Id': companyId },
+    body: form,
+  })
+  if (!res.ok) throw new Error((await res.json().catch(() => null))?.error || `Не загрузилось (${res.status})`)
+  return res.json() as Promise<{ file: string; title: string; chars: number }>
+}
 
 /**
  * Править знание или метод прямо из интерфейса. Только админ пространства; правка

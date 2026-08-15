@@ -15,11 +15,13 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { dictate } from '@/services/spaceAuditorService'
 
-export function DictateButton({ onText, disabled, title = 'Продиктовать' }: {
-  onText: (text: string) => void
-  disabled?: boolean
-  title?: string
-}) {
+/**
+ * Запись и распознавание — отдельно от кнопки.
+ *
+ * Тем же занимается удержание клавиши в мастерской: терминал не текстовое поле, кнопку
+ * там жать неудобно, а руки уже на клавиатуре. Логика одна, входов два.
+ */
+export function useDictation(onText: (text: string) => void) {
   const [state, setState] = useState<'idle' | 'rec' | 'busy'>('idle')
   const recRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
@@ -60,6 +62,16 @@ export function DictateButton({ onText, disabled, title = 'Продиктова�
   }
 
   const stop = () => recRef.current?.stop()
+
+  return { state, start, stop }
+}
+
+export function DictateButton({ onText, disabled, title = 'Продиктовать' }: {
+  onText: (text: string) => void
+  disabled?: boolean
+  title?: string
+}) {
+  const { state, start, stop } = useDictation(onText)
 
   return (
     <Button

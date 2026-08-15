@@ -111,6 +111,13 @@ const SEVERITY = {
   low: { label: 'к сведению', cls: 'border-border bg-muted/40 text-muted-foreground' },
 } as const
 
+// Если файл запусков ещё не завели — панель не должна встречать человека пустотой.
+const FALLBACK_PROMPTS: auditor.AuditorPrompt[] = [
+  { text: 'Что здесь не так?', scope: 'space' },
+  { text: 'Можно закрывать месяц?', scope: 'space' },
+  { text: 'Кто должен и сколько?', scope: 'space' },
+]
+
 export function AuditorPanel() {
   const { pathname } = useLocation()
   const { companyId } = useCompany()
@@ -132,6 +139,11 @@ export function AuditorPanel() {
   // Микрофон показываем, только если распознаватель в стеке поднят.
   const { data: health } = useQuery({
     queryKey: ['auditor-health'], queryFn: auditor.getHealth, staleTime: 60_000, retry: false,
+  })
+  // Готовые запуски правятся в «Знании» — и у пространства, и у каждой организации свои.
+  const { data: prompts } = useQuery({
+    queryKey: ['auditor-prompts', companyId],
+    queryFn: () => auditor.getPrompts(companyId), enabled: !!companyId, staleTime: 60_000, retry: false,
   })
 
   const product = productForPath(pathname)
@@ -231,10 +243,13 @@ export function AuditorPanel() {
           <div className="space-y-3 pt-4 text-sm text-muted-foreground">
             <p>Спросите про то, что видите на экране. Я смотрю данные пространства и отвечаю цифрами.</p>
             <div className="flex flex-col gap-1.5">
-              {['Что здесь не так?', 'Можно закрывать месяц?', 'Кто должен и сколько?'].map((q) => (
-                <button key={q} type="button" onClick={() => send(q)}
+              {(prompts?.length ? prompts : FALLBACK_PROMPTS).map((q) => (
+                <button key={q.text} type="button" onClick={() => send(q.text)}
                   className="rounded-lg border border-border/60 px-3 py-2 text-left text-foreground transition-colors hover:bg-accent">
-                  {q}
+                  {q.text}
+                  {q.scope === 'company' && (
+                    <span className="ml-2 text-[11px] text-muted-foreground">только у этой организации</span>
+                  )}
                 </button>
               ))}
             </div>
