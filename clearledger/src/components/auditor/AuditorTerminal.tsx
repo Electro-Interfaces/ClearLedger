@@ -24,8 +24,11 @@ import { cn } from '@/lib/utils'
 export function AuditorTerminal() {
   const { companyId } = useCompany()
   const hostRef = useRef<HTMLDivElement>(null)
-  const [state, setState] = useState<'connecting' | 'open' | 'closed'>('connecting')
+  const [state, setState] = useState<'connecting' | 'open' | 'closed' | 'detached'>('connecting')
   const [error, setError] = useState('')
+  // Счётчик подряд идущих неудач. Сбрасывается, как только связь встала: обрыв через час
+  // работы — это первая попытка, а не четвёртая.
+  const tries = useRef(0)
   // Диктовка в терминал: текст ПЕЧАТАЕТСЯ в PTY, а не отправляется — человек видит его
   // в приглашении и жмёт Enter сам. Отправлять за него нельзя: распознавание ошибается,
   // а команда в мастерской может быть недешёвой.
@@ -96,6 +99,7 @@ export function AuditorTerminal() {
       ws.onopen = () => {
         setState('open')
         setError('')   // связь вернулась — старое сообщение об ошибке иначе висит навсегда
+        tries.current = 0
         // Токен уходит ПЕРВЫМ СООБЩЕНИЕМ, а не в адресе: адрес попадает в логи кромки.
         ws.send(JSON.stringify({
           type: 'start', token: getToken() ?? '', companyId,
@@ -105,15 +109,29 @@ export function AuditorTerminal() {
       }
       ws.onmessage = (e) => term.write(typeof e.data === 'string' ? e.data : '')
       ws.onerror = () => setError('Терминал недоступен: сервис аудитора не отвечает')
-      ws.onclose = () => {
+      ws.onclose = (e) => {
         if (disposed) return
-        // Возвращаемся САМИ. Сеанс на той стороне живёт в tmux и продолжает работать без
-        // нас, поэтому обрыв — это не конец работы, а несколько секунд без картинки.
-        // Просить человека нажать кнопку здесь незачем: он в это время смотрит на экран
-        // и ждёт ответа агента, а не разбирается со связью.
-        term.write('\r\n\x1b[33m— связь оборвалась, возвращаюсь в сеанс…\x1b[0m\r\n')
+        // 4001 — сеанс закрыт или отдан другому окну. Возвращаться нельзя: две вкладки
+        // начнут выкидывать друг друга по кругу. Ждём решения человека.
+        if (e.code === 4001) {
+          setState('detached')
+          return
+        }
+        // Обрыв связи — другое дело. Сеанс на той стороне живёт в tmux и продолжает
+        // работать без нас, поэтому это не конец работы, а несколько секунд без картинки:
+        // возвращаемся сами, человек в это время ждёт ответа агента, а не чинит связь.
+        //
+        // Попыток три, с растущей паузой: если не вышло и за это время — дело не в связи,
+        // и молотить дальше значит грузить сервис впустую.
+        tries.current += 1
+        if (tries.current > 3) {
+          term.write('\r\n\x1b[31m— связь не восстанавливается, откройте мастерскую заново\x1b[0m\r\n')
+          setState('closed')
+          return
+        }
+        term.write(`\r\n\x1b[33m— связь оборвалась, возвращаюсь в сеанс (попытка ${tries.current})…\x1b[0m\r\n`)
         setState('connecting')
-        retryRef.current = window.setTimeout(() => setAttempt((n) => n + 1), 2000)
+        retryRef.current = window.setTimeout(() => setAttempt((n) => n + 1), 2000 * tries.current)
       }
 
       // Встречный такт. Серверные ping-кадры браузеру не видны, поэтому о своей жизни
@@ -203,12 +221,31 @@ export function AuditorTerminal() {
             </span>
           </>
         )}
-        {/* Сеанс живёт на той стороне и переживает обрыв, поэтому «начать заново» — это
-            осознанное действие (закрыть работу агента), а не способ починить связь. */}
-        <button type="button" onClick={() => reconnect(true)}
-          className="ml-auto rounded-md border border-border/60 px-2 py-0.5 hover:bg-accent hover:text-foreground">
-          Начать заново
-        </button>
+        <span className="ml-auto flex shrink-0 items-center gap-2">
+          {/* Отсоединение — не ошибка, а развилка: вернуть работу сюда или оставить там,
+              где её открыли. Молча возвращаться нельзя, иначе вкладки зациклятся. */}
+          {state === 'detached' && (
+            <>
+              <span className="text-amber-600 dark:text-amber-400">открыто в другом окне</span>
+              <button type="button" onClick={() => reconnect(false)}
+                className="rounded-md border border-border/60 px-2 py-0.5 hover:bg-accent hover:text-foreground">
+                Вернуть сюда
+              </button>
+            </>
+          )}
+          {state === 'closed' && (
+            <button type="button" onClick={() => reconnect(false)}
+              className="rounded-md border border-border/60 px-2 py-0.5 hover:bg-accent hover:text-foreground">
+              Подключиться
+            </button>
+          )}
+          {/* Сеанс живёт на той стороне и переживает обрыв, поэтому «начать заново» — это
+              осознанное действие (закрыть работу агента), а не способ починить связь. */}
+          <button type="button" onClick={() => reconnect(true)}
+            className="rounded-md border border-border/60 px-2 py-0.5 hover:bg-accent hover:text-foreground">
+            Начать заново
+          </button>
+        </span>
       </div>
       {error && <div className="border-b border-red-500/40 bg-red-500/5 px-4 py-2 text-sm text-red-600 dark:text-red-400">{error}</div>}
       {/* 🔴 Никаких отступов на контейнере терминала.
