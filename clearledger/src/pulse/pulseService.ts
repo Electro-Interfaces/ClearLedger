@@ -374,6 +374,8 @@ export interface PulseViewCard {
   owner: string | null; note: string; status: string
   blocks: { key: string; title: string; originalTitle: string; hint: string | null }[]
   people: { id: string; name: string; email: string }[]
+  /** Роли, которым показана витрина. */
+  roles: { id: string; name: string }[]
   canEdit: boolean; asOf: string
 }
 
@@ -392,6 +394,8 @@ export interface PulseViewData {
     }[]
     items: { title: string; detail?: string; amount?: string; requestId?: string }[]
     note: string | null
+    /** Куда идти, если нужно разобраться глубже: витрина не заменяет приложение. */
+    link?: { title: string; href: string } | null
   }[]
 }
 
@@ -473,3 +477,8 @@ export const revokePulseViewLink = (companyId: string, viewId: string, id: strin
 /** Витрина по ссылке — без авторизации, только чтение. */
 export const getShowcaseByToken = (token: string) =>
   get<PulseViewData>(`/api/showcase/${token}`)
+
+/** Роли, которым показана витрина: «настроили для роли» вместо поимённой выдачи. */
+export const setPulseViewRoles = (companyId: string, viewId: string, roles: string[]) =>
+  put<{ roles: number; skipped: number }>(
+    `/api/pulse/views/${viewId}/roles?company_id=${companyId}`, { roles })

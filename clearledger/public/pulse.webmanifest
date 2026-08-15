@@ -1,0 +1,16 @@
+{
+  "name": "Пульс — пространство ElsyPlus",
+  "short_name": "Пульс",
+  "description": "Личная витрина пространства: что происходит, что от вас нужно и где ответить",
+  "start_url": "/pulse",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0b0f19",
+  "theme_color": "#1d4ed8",
+  "lang": "ru",
+  "icons": [
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}

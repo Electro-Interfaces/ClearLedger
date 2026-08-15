@@ -13,6 +13,13 @@
     <!-- Стартовый заголовок; дальше его ведёт приложение (DocumentTitle) — иначе все
          вкладки продуктов назывались бы одинаково. -->
     <title>Рабочее пространство</title>
+    <!-- PWA: «Пульс» ставится на телефон отдельным приложением. Манифест
+         указывает start_url на /pulse — человек открывает свою витрину, а не
+         общий рабочий стол, ради которого он приложение не ставил. -->
+    <link rel="manifest" href="/pulse.webmanifest" />
+    <meta name="theme-color" content="#1d4ed8" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Пульс" />
   </head>
   <body>
     <div id="root"></div>

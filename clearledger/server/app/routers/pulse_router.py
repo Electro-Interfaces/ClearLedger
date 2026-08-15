@@ -23,7 +23,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel
 from sqlalchemy import select, text
-from sqlalchemy.exc import ProgrammingError
+from sqlalchemy.exc import DBAPIError, ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import log_audit
@@ -2986,7 +2986,11 @@ async def pulse_view_card(
 
     mine = (await db.execute(text("""
         SELECT 1 FROM pulse_view_grants
-         WHERE view_id = CAST(:v AS uuid) AND user_id = CAST(:u AS uuid)"""),
+         WHERE view_id = CAST(:v AS uuid) AND user_id = CAST(:u AS uuid)
+        UNION ALL
+        SELECT 1 FROM pulse_view_role_grants rg
+          JOIN user_companies uc ON uc.role_id = rg.role_id
+         WHERE rg.view_id = CAST(:v AS uuid) AND uc.user_id = CAST(:u AS uuid)"""),
         {"v": str(v.id), "u": str(current_user.id)})).first() is not None
     is_admin = current_user.is_superadmin or await _is_company_admin(db, cid, current_user)
     if not is_admin and not (mine and v.status == "published"):
@@ -3010,6 +3014,11 @@ async def pulse_view_card(
         "id": str(v.id), "name": v.name, "audience": v.audience, "period": v.period,
         "owner": v.owner_name, "note": v.note, "status": v.status,
         "blocks": blocks, "people": people, "canEdit": is_admin,
+        "roles": [{"id": str(r[0]), "name": r[1]} for r in (await db.execute(text("""
+            SELECT cr.id, cr.name FROM pulse_view_role_grants rg
+              JOIN company_roles cr ON cr.id = rg.role_id
+             WHERE rg.view_id = CAST(:v AS uuid) ORDER BY cr.name"""),
+            {"v": str(v.id)})).all()],
         "feedbackMode": v.feedback_mode,
         "feedbackRoomId": str(v.feedback_room_id) if v.feedback_room_id else None,
         "feedbackAssigneeId": (str(v.feedback_assignee_id)
@@ -3018,6 +3027,45 @@ async def pulse_view_card(
         # там не ответ.
         "asOf": date.today().isoformat(),
     }
+
+
+@router.put("/views/{view_id}/roles")
+async def pulse_view_roles(
+    view_id: str,
+    payload: dict,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Каким ролям показываем витрину.
+
+    Роль, а не только поимённый список: «настраиваем для каждой роли» означает, что
+    новый сотрудник с этой ролью получает свою картину сам, без ручной выдачи.
+    Поимённое назначение остаётся для исключений.
+    """
+    cid = await assert_company_admin_product(company_id, current_user, db)
+    v = await _view_or_404(db, str(cid), view_id)
+
+    raw = payload.get("roles") or []
+    ids = []
+    for x in raw:
+        try:
+            ids.append(str(uuid.UUID(str(x))))
+        except ValueError:
+            continue
+    ours = [str(r[0]) for r in (await db.execute(text("""
+        SELECT id FROM company_roles
+         WHERE company_id = CAST(:cid AS uuid) AND id = ANY(CAST(:ids AS uuid[]))"""),
+        {"cid": str(cid), "ids": ids or ["00000000-0000-0000-0000-000000000000"]})).all()]
+
+    await db.execute(text("DELETE FROM pulse_view_role_grants WHERE view_id = CAST(:v AS uuid)"),
+                     {"v": str(v.id)})
+    for rid in ours:
+        await db.execute(text("""
+            INSERT INTO pulse_view_role_grants (view_id, role_id)
+            VALUES (CAST(:v AS uuid), CAST(:r AS uuid))"""), {"v": str(v.id), "r": rid})
+    await db.commit()
+    return {"roles": len(ours), "skipped": len(raw) - len(ours)}
 
 
 @router.get("/views/{view_id}/data")
@@ -3039,7 +3087,11 @@ async def pulse_view_data(
 
     mine = (await db.execute(text("""
         SELECT 1 FROM pulse_view_grants
-         WHERE view_id = CAST(:v AS uuid) AND user_id = CAST(:u AS uuid)"""),
+         WHERE view_id = CAST(:v AS uuid) AND user_id = CAST(:u AS uuid)
+        UNION ALL
+        SELECT 1 FROM pulse_view_role_grants rg
+          JOIN user_companies uc ON uc.role_id = rg.role_id
+         WHERE rg.view_id = CAST(:v AS uuid) AND uc.user_id = CAST(:u AS uuid)"""),
         {"v": str(v.id), "u": str(current_user.id)})).first() is not None
     is_admin = current_user.is_superadmin or await _is_company_admin(db, cid, current_user)
     if not is_admin and not (mine and v.status == "published"):
@@ -3057,6 +3109,8 @@ async def pulse_view_data(
         key, title, hint = r
         if key == "view.feedback":
             data = await _feedback_block(db, cid, current_user)
+        elif key.startswith("my."):
+            data = await _my_block(db, cid, current_user, key)
         elif profile == "office":
             data = await _office_block_data(db, cid, key, v.period)
         else:
@@ -3065,6 +3119,9 @@ async def pulse_view_data(
             "key": key, "title": title or catalog.get(key, key), "hint": hint,
             "metrics": data.get("metrics") or [], "items": data.get("items") or [],
             "note": data.get("note"),
+            # Витрина не заменяет приложение: где нужно разбираться глубже, она
+            # честно уводит туда, а не отращивает вторую копию чата или трекера.
+            "link": data.get("link"),
         })
 
     return {
@@ -3093,11 +3150,17 @@ async def pulse_my_views(
 ) -> dict[str, Any]:
     """Витрины, назначенные мне. Для получателя это весь его «Пульс»."""
     cid = str(await assert_company_product(company_id, current_user, db, "pulse"))
+    # Витрина достаётся человеку поимённо ИЛИ по его роли в компании: второй путь
+    # и есть «настроили для роли» — новый сотрудник получает картину сам.
     rows = (await db.execute(text("""
-        SELECT v.id::text, v.name, v.audience, v.owner_name, v.updated_at
-          FROM pulse_views v JOIN pulse_view_grants g ON g.view_id = v.id
+        SELECT DISTINCT v.id::text, v.name, v.audience, v.owner_name, v.updated_at
+          FROM pulse_views v
+          LEFT JOIN pulse_view_grants g ON g.view_id = v.id AND g.user_id = CAST(:u AS uuid)
+          LEFT JOIN pulse_view_role_grants rg ON rg.view_id = v.id
+          LEFT JOIN user_companies uc ON uc.company_id = v.company_id
+               AND uc.user_id = CAST(:u AS uuid) AND uc.role_id = rg.role_id
          WHERE v.company_id = CAST(:cid AS uuid) AND v.status = 'published'
-           AND g.user_id = CAST(:u AS uuid)
+           AND (g.user_id IS NOT NULL OR uc.user_id IS NOT NULL)
          ORDER BY v.name"""), {"cid": cid, "u": str(current_user.id)})).all()
     return {"views": [{"id": r[0], "name": r[1], "audience": r[2], "owner": r[3],
                        "updatedAt": r[4].isoformat() if r[4] else None} for r in rows]}
@@ -3192,6 +3255,13 @@ def _delta(now_v: float, was_v: float, higher_is_better: bool = True) -> dict[st
 # Обратный ход витрины — общий блок для всех профилей.
 COMMON_BLOCKS: list[tuple[str, str, str]] = [
     ("view.feedback", "Мои обращения", "Связь"),
+    # «Пульс» — место работы, а не только просмотра: у человека тут его разговоры,
+    # его заявки и его задачи. Но это ВИТРИНА, а не второй чат и не второй трекер:
+    # блок показывает, что требует внимания, и уводит в специализированное
+    # приложение, где с этим работают по-настоящему.
+    ("my.chats", "Мои разговоры", "Связь"),
+    ("my.tickets", "Мои заявки", "Связь"),
+    ("my.tasks", "Мои задачи", "Связь"),
 ]
 
 OFFICE_BLOCKS: list[tuple[str, str, str]] = [
@@ -3416,7 +3486,11 @@ async def pulse_view_feedback(
 
     mine = (await db.execute(text("""
         SELECT 1 FROM pulse_view_grants
-         WHERE view_id = CAST(:v AS uuid) AND user_id = CAST(:u AS uuid)"""),
+         WHERE view_id = CAST(:v AS uuid) AND user_id = CAST(:u AS uuid)
+        UNION ALL
+        SELECT 1 FROM pulse_view_role_grants rg
+          JOIN user_companies uc ON uc.role_id = rg.role_id
+         WHERE rg.view_id = CAST(:v AS uuid) AND uc.user_id = CAST(:u AS uuid)"""),
         {"v": str(v.id), "u": str(current_user.id)})).first() is not None
     is_admin = current_user.is_superadmin or await _is_company_admin(db, cid, current_user)
     if not is_admin and not (mine and v.status == "published"):
@@ -3481,7 +3555,11 @@ async def pulse_view_reply(
 
     mine = (await db.execute(text("""
         SELECT 1 FROM pulse_view_grants
-         WHERE view_id = CAST(:v AS uuid) AND user_id = CAST(:u AS uuid)"""),
+         WHERE view_id = CAST(:v AS uuid) AND user_id = CAST(:u AS uuid)
+        UNION ALL
+        SELECT 1 FROM pulse_view_role_grants rg
+          JOIN user_companies uc ON uc.role_id = rg.role_id
+         WHERE rg.view_id = CAST(:v AS uuid) AND uc.user_id = CAST(:u AS uuid)"""),
         {"v": str(v.id), "u": str(current_user.id)})).first() is not None
     is_admin = current_user.is_superadmin or await _is_company_admin(db, cid, current_user)
     if not is_admin and not (mine and v.status == "published"):
@@ -3553,6 +3631,94 @@ async def pulse_view_reply(
 # и оба ждут ответа в тишине.
 #
 # Блок общий для любого профиля: обращения приходят с любой витрины.
+
+
+
+async def _my_block(db: AsyncSession, cid: str, user: User, key: str) -> dict[str, Any]:
+    """Личные блоки: разговоры, заявки, задачи.
+
+    Каждый отвечает на один вопрос — «есть ли что-то, требующее меня», — и ведёт в
+    своё приложение. Дублировать чат и трекер внутри витрины бессмысленно: там
+    вложения, поиск, история и права, и второй такой же экран будет хуже первого.
+    """
+    if key == "my.chats":
+        rows = (await db.execute(text("""
+            SELECT r.name,
+                   count(*) FILTER (WHERE m.created_at > coalesce(p.last_read_at,
+                                                                  to_timestamp(0))) AS unread,
+                   max(m.created_at) AS last_at
+              FROM chat_participants p
+              JOIN chat_rooms r ON r.id = p.room_id
+              LEFT JOIN chat_messages m ON m.room_id = r.id
+             WHERE p.user_id = CAST(:u AS uuid) AND r.company_id = CAST(:cid AS uuid)
+             GROUP BY r.id, r.name
+            HAVING count(*) FILTER (WHERE m.created_at > coalesce(p.last_read_at,
+                                                                  to_timestamp(0))) > 0
+             ORDER BY 3 DESC NULLS LAST LIMIT 8"""),
+            {"cid": cid, "u": str(user.id)})).all()
+        total = sum(int(r[1] or 0) for r in rows)
+        return {
+            "metrics": [{"label": "Непрочитанных", "value": str(total),
+                         "tone": "warning" if total else None},
+                        {"label": "Разговоров ждут", "value": str(len(rows))}],
+            "items": [{"title": r[0] or "Разговор", "detail": "%d новых" % (r[1] or 0),
+                       "amount": ""} for r in rows],
+            "link": {"title": "Открыть чаты", "href": "/chat"},
+            "note": "Ответить и посмотреть историю — в «Чатах».",
+        }
+
+    if key == "my.tickets":
+        # Заявки живут в контуре Поддержки, и прав на его таблицы у нас может не
+        # быть. Спрашиваем ПРАВО заранее, а не ловим падение: после ошибки внутри
+        # транзакции сессия уже сломана, и откат в том же месте даёт MissingGreenlet.
+        allowed = (await db.execute(text(
+            "SELECT has_table_privilege(current_user, 'tickets', 'SELECT')"))).scalar()
+        if not allowed:
+            return {
+                "link": {"title": "Открыть Поддержку", "href": "/tickets"},
+                "note": "Заявки показывает «Поддержка» — откройте её, чтобы увидеть свои.",
+            }
+        rows = (await db.execute(text("""
+            SELECT t.number, t.title, t.status, t.updated_at
+              FROM tickets t
+             WHERE t.company_id = CAST(:cid AS uuid)
+               AND (t.customer_user_id = CAST(:u AS uuid)
+                 OR t.current_assignee_id = CAST(:u AS uuid))
+               AND coalesce(t.status, '') NOT IN ('closed', 'resolved', 'cancelled')
+               AND NOT coalesce(t.is_deleted, false)
+             ORDER BY t.updated_at DESC NULLS LAST LIMIT 8"""),
+            {"cid": cid, "u": str(user.id)})).all()
+        return {
+            "metrics": [{"label": "Открытых заявок", "value": str(len(rows)),
+                         "tone": "warning" if rows else None}],
+            "items": [{"title": r[1] or "Заявка", "detail": "№%s · %s" % (r[0], r[2] or ""),
+                       "amount": ""} for r in rows],
+            "link": {"title": "Открыть Поддержку", "href": "/tickets"},
+            "note": "Переписка по заявке и вложения — в «Поддержке».",
+        }
+
+    if key == "my.tasks":
+        rows = (await db.execute(text("""
+            SELECT t.number, t.title, t.status, t.due_at
+              FROM tasks t
+             WHERE t.company_id = CAST(:cid AS uuid)
+               AND t.assignee_id = CAST(:u AS uuid)
+               AND t.status NOT IN ('done', 'closed', 'cancelled')
+             ORDER BY t.due_at NULLS LAST LIMIT 8"""),
+            {"cid": cid, "u": str(user.id)})).all()
+        overdue = sum(1 for r in rows if r[3] and r[3].date() < date.today())
+        return {
+            "metrics": [{"label": "Задач на мне", "value": str(len(rows))},
+                        {"label": "Срок прошёл", "value": str(overdue),
+                         "tone": "warning" if overdue else None}],
+            "items": [{"title": r[1], "amount": "",
+                       "detail": "№%s%s" % (r[0], " · до " + r[3].date().isoformat()
+                                            if r[3] else "")} for r in rows],
+            "link": {"title": "Открыть задачи", "href": "/tasks"},
+            "note": "Работать с задачей — в «Задачах».",
+        }
+
+    return {"note": "Блок не рассчитывается."}
 
 
 async def _feedback_block(db: AsyncSession, cid: str, user: User) -> dict[str, Any]:

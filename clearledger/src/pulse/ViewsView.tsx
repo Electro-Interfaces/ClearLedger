@@ -23,9 +23,11 @@ import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import { useCompany } from '@/contexts/CompanyContext'
 import * as userService from '@/services/userService'
+import * as roleService from '@/services/roleService'
 import {
   createPulseView, createPulseViewLink, getPulseView, getPulseViewLinks, getPulseViews,
-  revokePulseViewLink, setPulseViewBlocks, setPulseViewGrants, updatePulseView,
+  revokePulseViewLink, setPulseViewBlocks, setPulseViewGrants, setPulseViewRoles,
+  updatePulseView,
 } from './pulseService'
 import { PulseError, PulseLoading } from './parts'
 import { ShowcaseBody } from './ShowcaseView'
@@ -132,6 +134,7 @@ function ViewEditor({ viewId, catalog, onPreview, onChanged }: {
   const [owner, setOwner] = useState('')
   const [note, setNote] = useState('')
   const [people, setPeople] = useState<Set<string>>(new Set())
+  const [roles, setRoles] = useState<Set<string>>(new Set())
 
   const q = useQuery({
     queryKey: ['pulse-view', companyId, viewId],
@@ -140,6 +143,11 @@ function ViewEditor({ viewId, catalog, onPreview, onChanged }: {
   const teamQ = useQuery({
     queryKey: ['team-members', companyId],
     queryFn: () => userService.listUsers(companyId),
+    staleTime: 5 * 60_000,
+  })
+  const rolesQ = useQuery({
+    queryKey: ['company-roles', companyId],
+    queryFn: () => roleService.listRoles(companyId),
     staleTime: 5 * 60_000,
   })
 
@@ -151,6 +159,7 @@ function ViewEditor({ viewId, catalog, onPreview, onChanged }: {
     setOwner(q.data.owner ?? '')
     setNote(q.data.note ?? '')
     setPeople(new Set(q.data.people.map((p) => p.id)))
+    setRoles(new Set((q.data.roles ?? []).map((r) => r.id)))
   }, [q.data])
 
   const save = useMutation({
@@ -158,6 +167,7 @@ function ViewEditor({ viewId, catalog, onPreview, onChanged }: {
       await updatePulseView(companyId, viewId, { name, audience, owner_name: owner, note })
       await setPulseViewBlocks(companyId, viewId, blocks)
       await setPulseViewGrants(companyId, viewId, [...people])
+      await setPulseViewRoles(companyId, viewId, [...roles])
     },
     onSuccess: () => {
       toast.success('Витрина сохранена')
@@ -278,7 +288,32 @@ function ViewEditor({ viewId, catalog, onPreview, onChanged }: {
         </div>
 
         <div>
-          <div className="mb-1.5 text-[12px] font-medium">Кому показываем</div>
+          {/* Роль — главный способ раздачи: новый сотрудник с этой ролью получает
+              картину сам. Поимённо — для исключений. */}
+          <div className="mb-1.5 text-[12px] font-medium">Каким ролям</div>
+          <div className="mb-3 flex flex-wrap gap-1.5">
+            {(rolesQ.data ?? []).map((r) => {
+              const on = roles.has(r.id)
+              return (
+                <button key={r.id} onClick={() => setRoles((s) => {
+                  const n = new Set(s)
+                  if (n.has(r.id)) n.delete(r.id); else n.add(r.id)
+                  return n
+                })}
+                  className={cn('rounded-md border px-2 py-1 text-[12px]',
+                    on ? 'border-primary/50 bg-primary/10' : 'border-border hover:bg-accent')}>
+                  {r.name}
+                </button>
+              )
+            })}
+            {(rolesQ.data ?? []).length === 0 && (
+              <span className="text-[11px] text-muted-foreground">
+                Ролей в компании нет — назначьте людей поимённо ниже.
+              </span>
+            )}
+          </div>
+
+          <div className="mb-1.5 text-[12px] font-medium">Кому персонально</div>
           <div className="flex flex-wrap gap-1.5">
             {(teamQ.data ?? []).map((u) => {
               const on = people.has(u.id)

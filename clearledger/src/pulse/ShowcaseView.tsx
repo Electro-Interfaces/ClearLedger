@@ -109,6 +109,13 @@ export function ShowcaseBody({ viewId, onBack }: { viewId: string; onBack?: () =
               )}
 
               {b.note && <div className="text-[11px] text-muted-foreground">{b.note}</div>}
+              {b.link && (
+                <a href={b.link.href}
+                  className="inline-flex items-center gap-1 text-[12px] text-primary
+                             hover:underline">
+                  {b.link.title} →
+                </a>
+              )}
             </CardContent>
           </Card>
         ))}
