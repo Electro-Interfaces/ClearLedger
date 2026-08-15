@@ -2795,7 +2795,10 @@ async def _catalog(db: AsyncSession, cid: str) -> list[tuple[str, str, str]]:
     profile = (await db.execute(text(
         "SELECT profile_id FROM companies WHERE id = CAST(:cid AS uuid)"),
         {"cid": str(cid)})).scalar_one_or_none()
-    base = OFFICE_BLOCKS if profile == "office" else PULSE_ITEMS
+    # Каталог показывает ТОЛЬКО то, что в этом пространстве считается. Предлагать
+    # блок, который вернёт «не считается», значит обманывать того, кто собирает
+    # витрину: он узнает об этом от получателя.
+    base = OFFICE_BLOCKS if profile == "office" else NET_BLOCKS
     return [*base, *COMMON_BLOCKS]
 
 
@@ -2814,7 +2817,8 @@ async def pulse_views(
         SELECT v.id::text, v.name, v.audience, v.period, v.owner_name, v.note, v.status,
                v.updated_at,
                (SELECT count(*) FROM pulse_view_blocks b WHERE b.view_id = v.id) AS blocks,
-               (SELECT count(*) FROM pulse_view_grants g WHERE g.view_id = v.id) AS people
+               (SELECT count(*) FROM pulse_view_grants g WHERE g.view_id = v.id) AS people,
+               (SELECT count(*) FROM pulse_view_role_grants rg WHERE rg.view_id = v.id) AS roles
           FROM pulse_views v
          WHERE v.company_id = CAST(:cid AS uuid)
          ORDER BY v.status, v.name"""), {"cid": cid})).all()
@@ -2824,7 +2828,7 @@ async def pulse_views(
             "id": r[0], "name": r[1], "audience": r[2], "period": r[3],
             "owner": r[4], "note": r[5], "status": r[6],
             "updatedAt": r[7].isoformat() if r[7] else None,
-            "blocks": r[8], "people": r[9],
+            "blocks": r[8], "people": r[9], "roles": r[10],
         } for r in rows],
         # Каталог — тот же список пунктов «Пульса»: витрина показывает готовые разрезы,
         # а не свои. Группа нужна конструктору, чтобы блоки не шли одной кучей.
@@ -2902,6 +2906,15 @@ async def pulse_view_update(
                 # Пустая витрина у получателя выглядит как поломка, а не как «ещё не
                 # собрали»: публиковать нечего.
                 raise HTTPException(status_code=400, detail="В витрине нет ни одного блока")
+            # Обращение без адресата ложится задачей в общий поток и никому не
+            # «горит» — на пилоте так потерялись два вопроса клиента.
+            if v.feedback_mode in ("task", "both") and not v.feedback_assignee_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Укажите, кому уходят обращения, — иначе они лягут без адресата")
+            if v.feedback_mode in ("chat", "both") and not v.feedback_room_id:
+                raise HTTPException(status_code=400,
+                                    detail="Для канала «чат» нужна комната")
         v.status = status_
     for field, value in (("name", name), ("audience", audience), ("period", period),
                          ("owner_name", owner_name), ("note", note)):
@@ -2934,6 +2947,29 @@ async def pulse_view_update(
             setattr(v, field, None)
     await db.commit()
     return {"id": str(v.id), "status": v.status}
+
+
+@router.delete("/views/{view_id}")
+async def pulse_view_delete(
+    view_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Удалить витрину вместе с составом, назначениями и ссылками.
+
+    Опубликованную удалять нельзя: у кого-то она сейчас открыта, и исчезновение
+    без предупреждения читается как поломка. Сначала снять с показа — это отдельное
+    решение, которое видно в журнале.
+    """
+    cid = await assert_company_admin_product(company_id, current_user, db)
+    v = await _view_or_404(db, str(cid), view_id)
+    if v.status == "published":
+        raise HTTPException(status_code=400,
+                            detail="Сначала снимите витрину с показа")
+    await db.delete(v)      # состав, гранты и ссылки уходят каскадом
+    await db.commit()
+    return {"deleted": True}
 
 
 @router.put("/views/{view_id}/blocks")
@@ -3158,7 +3194,7 @@ async def pulse_view_data(
                                             str(v.organization_id)
                                             if v.organization_id else None)
         else:
-            data = {"note": "Блок этого профиля пока не считается для витрины."}
+            data = await _net_block_data(db, cid, key, _profile_of_row(profile))
         blocks.append({
             "key": key, "title": title or catalog.get(key, key), "hint": hint,
             "metrics": data.get("metrics") or [], "items": data.get("items") or [],
@@ -3307,6 +3343,14 @@ COMMON_BLOCKS: list[tuple[str, str, str]] = [
     ("my.chats", "Мои разговоры", "Связь"),
     ("my.tickets", "Мои заявки", "Связь"),
     ("my.tasks", "Мои задачи", "Связь"),
+]
+
+# Блоки витрины для сетей. Имена — словами получателя: владельцу сети «Продажи»
+# понятнее как «Отпуск и выручка», а «Где болит» — как «Проблемные точки».
+NET_BLOCKS: list[tuple[str, str, str]] = [
+    ("net.sales", "Отпуск и выручка", "Сеть"),
+    ("net.objects", "Проблемные точки", "Сеть"),
+    ("net.ops", "Эксплуатация", "Сеть"),
 ]
 
 OFFICE_BLOCKS: list[tuple[str, str, str]] = [
@@ -3781,6 +3825,74 @@ async def pulse_view_reply(
 
 
 
+
+
+def _profile_of_row(profile: str | None) -> str:
+    """Профиль пространства → профиль расчёта продаж (fuel/energy)."""
+    return profile if profile in PROFILE_SALES else DEFAULT_PROFILE
+
+
+async def _net_block_data(db: AsyncSession, cid: str, key: str,
+                          profile: str) -> dict[str, Any]:
+    """Блоки витрины для сети: те же снимки, что у рабочих экранов «Пульса»."""
+    if key == "net.sales":
+        snap = await _sales_snapshot(db, cid, None, profile)
+        if not snap:
+            return {"note": "Данных о продажах за период нет."}
+        unit = PROFILE_SALES.get(profile, PROFILE_SALES[DEFAULT_PROFILE])
+        return {
+            "metrics": [
+                {"label": "Выручка", "value": _money(snap.get("revenue")),
+                 "delta": _delta(float(snap.get("revenue") or 0),
+                                 float(snap.get("revenue_prev") or 0))},
+                {"label": unit[4], "value": f"{float(snap.get('kwh') or 0):,.0f}".replace(",", " "),
+                 "delta": _delta(float(snap.get("kwh") or 0),
+                                 float(snap.get("kwh_prev") or 0))},
+                {"label": unit[6], "value": str(snap.get("sessions") or 0),
+                 "delta": _delta(float(snap.get("sessions") or 0),
+                                 float(snap.get("sessions_prev") or 0))},
+                {"label": "Точки в работе", "value": str(snap.get("live") or 0),
+                 "delta": _delta(float(snap.get("live") or 0),
+                                 float(snap.get("live_prev") or 0))},
+            ],
+            "note": "Отпуск и выручка сети за период — те же цифры, что на экране дня.",
+        }
+
+    if key == "net.objects":
+        snap = await _objects_snapshot(db, cid)
+        pain = snap.get("pain") or []
+        return {
+            "metrics": [
+                {"label": "Точек в сети", "value": str(snap.get("total") or 0)},
+                {"label": "Требуют внимания", "value": str(snap.get("pain_count") or 0),
+                 "tone": "warning" if snap.get("pain_count") else None},
+                {"label": "Платим, но не продают", "value": str(snap.get("idle_cost_count") or 0),
+                 "tone": "warning" if snap.get("idle_cost_count") else None},
+                {"label": "На сумму", "value": _money(snap.get("idle_cost_amount"))},
+            ],
+            "items": [{"title": p.get("name") or p.get("code") or "Точка",
+                       "detail": p.get("why") or "", "amount": ""} for p in pain[:8]],
+            "note": "Точки, где сошлось несколько проблем сразу.",
+            "link": {"title": "Открыть «Пульс»", "href": "/pulse/business?view=objects"},
+        }
+
+    if key == "net.ops":
+        snap = await _ops_snapshot(db, cid)
+        return {
+            "metrics": [
+                {"label": "Период", "value": str(snap.get("period") or "—")},
+                {"label": "Договоров", "value": str(snap.get("contracts_total") or 0)},
+                {"label": "Со сроком", "value": str(snap.get("contracts_with_term") or 0)},
+                {"label": "Срок истёк", "value": str(snap.get("contracts_expired") or 0),
+                 "tone": "warning" if snap.get("contracts_expired") else None},
+            ],
+            "note": "Состояние эксплуатации и договоров сети.",
+            "link": {"title": "Открыть «Пульс»", "href": "/pulse/business?view=ops"},
+        }
+
+    return {"note": "Блок не рассчитывается."}
+
+
 async def _my_block(db: AsyncSession, cid: str, user: User, key: str) -> dict[str, Any]:
     """Личные блоки: разговоры, заявки, задачи.
 
@@ -3854,8 +3966,13 @@ async def _my_block(db: AsyncSession, cid: str, user: User, key: str) -> dict[st
              ORDER BY t.due_at NULLS LAST LIMIT 8"""),
             {"cid": cid, "u": str(user.id)})).all()
         overdue = sum(1 for r in rows if r[3] and r[3].date() < date.today())
+        total_tasks = (await db.execute(text("""
+            SELECT count(*) FROM tasks
+             WHERE company_id = CAST(:cid AS uuid) AND assignee_id = CAST(:u AS uuid)
+               AND status NOT IN ('done', 'closed', 'cancelled')"""),
+            {"cid": cid, "u": str(user.id)})).scalar_one()
         return {
-            "metrics": [{"label": "Задач на мне", "value": str(len(rows))},
+            "metrics": [{"label": "Задач на мне", "value": str(total_tasks)},
                         {"label": "Срок прошёл", "value": str(overdue),
                          "tone": "warning" if overdue else None}],
             "items": [{"title": r[1], "amount": "",
@@ -3872,8 +3989,11 @@ async def _feedback_block(db: AsyncSession, cid: str, user: User) -> dict[str, A
     """Обращения этого получателя и что с ними стало."""
     rows = (await db.execute(text("""
         SELECT t.number, t.title, t.status, t.created_at,
+               -- Ответом считается комментарий НЕ автора: иначе человек видит
+               -- собственный текст как ответ на свой же вопрос.
                (SELECT e.note FROM task_events e
                  WHERE e.task_id = t.id AND e.kind = 'comment' AND e.note IS NOT NULL
+                   AND e.user_id IS DISTINCT FROM t.author_id
                  ORDER BY e.created_at DESC LIMIT 1) AS answer,
                (SELECT max(e.created_at) FROM task_events e
                  WHERE e.task_id = t.id AND e.kind = 'comment') AS answered_at
@@ -4029,7 +4149,7 @@ async def showcase_by_link(token: str, db: AsyncSession = Depends(get_db)) -> di
         data = (await _office_block_data(db, cid, key, v.period,
                                          str(v.organization_id) if v.organization_id else None)
                 if profile == "office"
-                else {"note": "Блок этого профиля пока не считается для витрины."})
+                else await _net_block_data(db, cid, key, _profile_of_row(profile)))
         blocks.append({
             "key": key, "title": title or catalog.get(key, key), "hint": hint,
             "metrics": data.get("metrics") or [], "items": data.get("items") or [],

@@ -15,43 +15,43 @@ import { toast } from 'sonner'
 import { ArrowLeft, MessageSquare, ShieldCheck } from 'lucide-react'
 
 import { Card, CardContent } from '@/components/ui/card'
+import { MetricTile } from '@/components/ui/metric-tile'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import { useCompany } from '@/contexts/CompanyContext'
 import {
   getPulseMyViews, getPulseViewData, replyPulseRequest, sendPulseFeedback,
+  type PulseViewData,
 } from './pulseService'
 import { PulseError, PulseLoading } from './parts'
 
 /** Витрина по id: тело без выбора — используется и в предпросмотре конструктора. */
-export function ShowcaseBody({ viewId, onBack }: { viewId: string; onBack?: () => void }) {
-  const { companyId } = useCompany()
-  const qc = useQueryClient()
-  const q = useQuery({
-    queryKey: ['pulse-view-data', companyId, viewId],
-    queryFn: () => getPulseViewData(companyId, viewId),
-  })
-
-  if (q.isError) return <PulseError what="витрину" onRetry={() => q.refetch()} />
-  if (!q.data) return <PulseLoading what="витрины" />
-  const d = q.data
-
+/**
+ * Полотно витрины: то, что видит получатель.
+ *
+ * Отделено от загрузки намеренно — этим же компонентом рисуется публичная страница
+ * по ссылке. Пока копий было две, они разошлись: на публичной потерялся тон
+ * предупреждения, и одна и та же витрина выглядела спокойнее, чем на самом деле.
+ *
+ * Действия (ответ по строке, обращение) приходят снаружи: по ссылке их нет —
+ * аноним смотрит, но не действует.
+ */
+export function ShowcaseCanvas({ data, onReply, onRefresh }: {
+  data: PulseViewData
+  onReply?: (requestId: string) => React.ReactNode
+  onRefresh?: () => void
+}) {
+  const d = data
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div>
-          <div className="text-base font-semibold">{d.name}</div>
-          <div className="text-[12px] text-muted-foreground">
-            {d.company}{d.audience ? ` · для: ${d.audience}` : ''}
-            {d.periodLabel ? ` · цифры ${d.periodLabel}` : ''}
-          </div>
+      <div>
+        <div className="text-base font-semibold">{d.name}</div>
+        <div className="text-[12px] text-muted-foreground">
+          {d.company}{d.audience ? ` · для: ${d.audience}` : ''}
+          {d.periodLabel ? ` · цифры ${d.periodLabel}` : ''}
+          {d.owner ? ` · отвечает: ${d.owner}` : ''}
         </div>
-        {onBack && (
-          <Button size="sm" variant="ghost" className="h-7 gap-1" onClick={onBack}>
-            <ArrowLeft className="h-3.5 w-3.5" /> К настройке
-          </Button>
-        )}
       </div>
 
       <div className="grid gap-3 md:grid-cols-2">
@@ -64,23 +64,8 @@ export function ShowcaseBody({ viewId, onBack }: { viewId: string; onBack?: () =
               {b.metrics.length > 0 && (
                 <div className="grid gap-2 sm:grid-cols-2">
                   {b.metrics.map((m) => (
-                    <div key={m.label} className="rounded-md border border-border px-2.5 py-1.5">
-                      <div className="text-[11px] text-muted-foreground">{m.label}</div>
-                      <div className={cn('text-[15px] font-semibold tabular-nums',
-                        m.tone === 'warning' && 'text-amber-600 dark:text-amber-500')}>
-                        {m.value}
-                      </div>
-                      {/* Сравнение с прошлым окном: сама по себе цифра не говорит,
-                          стало лучше или хуже, а получателю важно именно это. */}
-                      {m.delta && (
-                        <div className={cn('text-[11px]',
-                          m.delta.tone === 'good' && 'text-emerald-600 dark:text-emerald-500',
-                          m.delta.tone === 'warning' && 'text-amber-600 dark:text-amber-500',
-                          !m.delta.tone && 'text-muted-foreground')}>
-                          {m.delta.text}
-                        </div>
-                      )}
-                    </div>
+                    <MetricTile key={m.label} label={m.label} value={m.value}
+                      tone={m.tone ?? undefined} hint={m.delta?.text} />
                   ))}
                 </div>
               )}
@@ -88,11 +73,9 @@ export function ShowcaseBody({ viewId, onBack }: { viewId: string; onBack?: () =
               {b.items.length > 0 && (
                 <div className="divide-y divide-border/60">
                   {b.items.map((it, i) => (
-                    // Строка переносится: на телефоне три кнопки ответа и сумма
-                    // выдавливали название требования до «Акт вы…».
-                    <div key={i} className="flex flex-wrap items-start justify-between gap-3 py-1.5">
+                    <div key={i} className="flex flex-wrap items-start justify-between gap-2 py-1.5">
                       <div className="min-w-0 flex-1">
-                        <div className="truncate text-[13px]">{it.title}</div>
+                        <div className="text-[13px]">{it.title}</div>
                         {it.detail && (
                           <div className="text-[11px] text-muted-foreground">{it.detail}</div>
                         )}
@@ -100,11 +83,7 @@ export function ShowcaseBody({ viewId, onBack }: { viewId: string; onBack?: () =
                       {it.amount && (
                         <div className="shrink-0 text-[13px] tabular-nums">{it.amount}</div>
                       )}
-                      {it.requestId && (
-                        <RequestReply viewId={d.id} requestId={it.requestId}
-                          onDone={() => qc.invalidateQueries({
-                            queryKey: ['pulse-view-data', companyId, viewId] })} />
-                      )}
+                      {it.requestId && onReply ? onReply(it.requestId) : null}
                     </div>
                   ))}
                 </div>
@@ -123,17 +102,52 @@ export function ShowcaseBody({ viewId, onBack }: { viewId: string; onBack?: () =
         ))}
       </div>
 
-      {d.canWrite && <FeedbackBox viewId={d.id} />}
+      {d.canWrite && onRefresh !== undefined && <FeedbackBox viewId={d.id} />}
 
-      {/* Подпись витрины. Стоит внизу и всегда: цифра без ответственного и без даты
-          наружу не показывается. */}
+      {/* Подпись витрины: дата и ответственный. Цифра без них наружу не идёт. */}
       <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border
                       px-3 py-2 text-[11px] text-muted-foreground">
         <ShieldCheck className="h-3.5 w-3.5" />
-        <span>Данные на {d.asOf}</span>
+        <span>Данные на {ruDate(d.asOf)}</span>
         {d.owner && <span>· за цифры отвечает: {d.owner}</span>}
         {d.note && <span>· {d.note}</span>}
       </div>
+    </div>
+  )
+}
+
+/** ISO-дата в привычный вид: наружу «15.08.2026», а не «2026-08-15». */
+function ruDate(v: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v ?? '')
+  return m ? `${m[3]}.${m[2]}.${m[1]}` : (v ?? '')
+}
+
+/** Витрина по id: загрузка + действия. Используется и в предпросмотре. */
+export function ShowcaseBody({ viewId, onBack }: { viewId: string; onBack?: () => void }) {
+  const { companyId } = useCompany()
+  const qc = useQueryClient()
+  const q = useQuery({
+    queryKey: ['pulse-view-data', companyId, viewId],
+    queryFn: () => getPulseViewData(companyId, viewId),
+  })
+
+  if (q.isError) return <PulseError what="витрину" onRetry={() => q.refetch()} />
+  if (!q.data) return <PulseLoading what="витрину" />
+  const refresh = () => qc.invalidateQueries({ queryKey: ['pulse-view-data', companyId, viewId] })
+
+  return (
+    <div className="space-y-2">
+      {onBack && (
+        <div className="flex justify-end">
+          <Button size="sm" variant="ghost" className="h-7 gap-1" onClick={onBack}>
+            <ArrowLeft className="h-3.5 w-3.5" /> К настройке
+          </Button>
+        </div>
+      )}
+      <ShowcaseCanvas data={q.data} onRefresh={refresh}
+        onReply={(requestId) => (
+          <RequestReply viewId={q.data.id} requestId={requestId} onDone={refresh} />
+        )} />
     </div>
   )
 }
