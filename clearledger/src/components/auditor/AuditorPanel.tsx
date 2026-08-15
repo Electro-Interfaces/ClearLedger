@@ -140,6 +140,7 @@ export function AuditorPanel() {
   const { data: health } = useQuery({
     queryKey: ['auditor-health'], queryFn: auditor.getHealth, staleTime: 60_000, retry: false,
   })
+  const askRef = useRef<HTMLTextAreaElement>(null)
   // Готовые запуски правятся в «Знании» — и у пространства, и у каждой организации свои.
   const { data: prompts } = useQuery({
     queryKey: ['auditor-prompts', companyId],
@@ -323,7 +324,9 @@ export function AuditorPanel() {
             onChange={(e) => attach(e.target.files?.[0])} />
           {health?.dictation && (
             <DictateButton disabled={busy}
-              onText={(t) => setInput((v) => (v ? `${v} ${t}` : t))}
+              // Фокус возвращаем в поле: иначе текст появился, а Enter уходит в кнопку
+              // микрофона, и приходится тыкать мышью в строку, чтобы отправить.
+              onText={(t) => { setInput((v) => (v ? `${v} ${t}` : t)); askRef.current?.focus() }}
               title="Продиктовать вопрос" />
           )}
           <Button size="icon" variant="outline" disabled={uploading || busy}
@@ -332,6 +335,7 @@ export function AuditorPanel() {
             {uploading ? <Loader2 className="size-4 animate-spin" /> : <Paperclip className="size-4" />}
           </Button>
           <textarea
+            ref={askRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {

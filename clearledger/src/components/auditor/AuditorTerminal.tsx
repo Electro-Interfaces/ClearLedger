@@ -10,6 +10,7 @@
  * рабочий каталог `/work`. Доступ — админ пространства и включённый `AUDITOR_WORKSHOP`.
  */
 import { useEffect, useRef, useState } from 'react'
+import type { Terminal } from '@xterm/xterm'
 import { Loader2, TerminalSquare } from 'lucide-react'
 import { DictateButton, useDictation } from './DictateButton'
 import { useQuery } from '@tanstack/react-query'
@@ -39,15 +40,23 @@ export function AuditorTerminal() {
   // в приглашении и жмёт Enter сам. Отправлять за него нельзя: распознавание ошибается,
   // а команда в мастерской может быть недешёвой.
   const wsRef = useRef<WebSocket | null>(null)
+  const termRef = useRef<Terminal | null>(null)
   const retryRef = useRef<number | undefined>(undefined)
-  // Диктовка удержанием клавиши: в терминале руки на клавиатуре, и тянуться мышью к
-  // кнопке микрофона неудобно. Текст ПЕЧАТАЕТСЯ в приглашение, а не отправляется:
-  // распознавание ошибается, а команда в мастерской может быть недешёвой.
-  const dictation = useDictation((text) => {
+
+  /**
+   * Продиктованный текст печатается в приглашение — и фокус возвращается в терминал.
+   *
+   * Без возврата фокуса текст появлялся, но клавиатура оставалась у кнопки микрофона
+   * (или у промиса записи), и Enter уходил в никуда: приходилось тыкать мышью в строку.
+   * Отправляем не за человека: распознавание ошибается, а команда бывает недешёвой.
+   */
+  const typeIntoTerminal = (text: string) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: 'data', data: text }))
     }
-  })
+    termRef.current?.focus()
+  }
+  const dictation = useDictation(typeIntoTerminal)
   const dictRef = useRef(dictation)
   dictRef.current = dictation
   // Пересоединение без перезагрузки страницы: счётчик перезапускает эффект целиком, и
@@ -101,6 +110,8 @@ export function AuditorTerminal() {
       term.loadAddon(fit)
       term.open(hostRef.current)
       fit.fit()
+      termRef.current = term
+      term.focus()   // открыли раздел — можно печатать сразу, без клика в поле
 
       const proto = location.protocol === 'https:' ? 'wss' : 'ws'
       const ws = new WebSocket(`${proto}://${location.host}/auditor/ws/terminal`)
@@ -192,7 +203,10 @@ export function AuditorTerminal() {
       })
       ro.observe(hostRef.current)
 
-      cleanup = () => { clearInterval(tick); ro.disconnect(); ws.close(); term.dispose() }
+      cleanup = () => {
+        clearInterval(tick); ro.disconnect(); ws.close(); term.dispose()
+        termRef.current = null   // иначе диктовка после ухода целится в уничтоженный терминал
+      }
     })()
 
     return () => { disposed = true; clearTimeout(retryRef.current); cleanup() }
@@ -220,9 +234,7 @@ export function AuditorTerminal() {
         {health?.dictation && state === 'open' && (
           <>
             <span className="ml-2">
-              <DictateButton title="Продиктовать команду"
-                onText={(t) => wsRef.current?.readyState === WebSocket.OPEN
-                  && wsRef.current.send(JSON.stringify({ type: 'data', data: t }))} />
+              <DictateButton title="Продиктовать команду" onText={typeIntoTerminal} />
             </span>
             <span className="max-xl:hidden">
               {dictation.state === 'rec' ? (
