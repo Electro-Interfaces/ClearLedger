@@ -193,6 +193,11 @@ PULSE_ITEMS: list[tuple[str, str, str]] = [
     ("team.comms", "Переписка", "Команда"),
     ("week.totals", "Итоги недели", "Неделя"),
     ("week.moves", "Движения", "Неделя"),
+    # Витрина — отдельный пункт прав: внешнему получателю нужна ТОЛЬКО она, а
+    # без своего ключа роль открывала либо весь «Пульс» (включая «Команду» и
+    # журнал доступа), либо ничего.
+    ("showcase", "Моя витрина", "Витрины"),
+    ("views", "Настройка витрин", "Витрины"),
 ]
 PULSE_ITEM_KEYS = {k for k, _, _ in PULSE_ITEMS}
 
@@ -2801,7 +2806,9 @@ async def pulse_views(
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Витрины компании и каталог блоков, из которых их собирают."""
-    cid = str(await assert_company_product(company_id, current_user, db, "pulse"))
+    # Список витрин — только администратору: в нём видно, кому и что мы
+    # показываем, включая черновики. Своему получателю нужен `/my-views`.
+    cid = str(await assert_company_admin_product(company_id, current_user, db))
 
     rows = (await db.execute(text("""
         SELECT v.id::text, v.name, v.audience, v.period, v.owner_name, v.note, v.status,
@@ -2825,8 +2832,11 @@ async def pulse_views(
         # пространстве бухгалтерского аутсорсера пусты, и предлагать их — обманывать
         # того, кто собирает витрину.
         "catalog": [{"key": k, "title": t, "group": g} for k, t, g in await _catalog(db, cid)],
-        "periods": [{"key": "week", "title": "Неделя"}, {"key": "month", "title": "Месяц"},
-                    {"key": "quarter", "title": "Квартал"}],
+        # Недели в списке нет намеренно: регистр бухгалтерии помесячный, и «неделя»
+        # молча превращалась в тот же месяц — ярлык обещал одно, цифра давала другое.
+        "periods": [{"key": "month", "title": "Месяц"},
+                    {"key": "quarter", "title": "Квартал"},
+                    {"key": "year", "title": "Год"}],
     }
 
 
@@ -2837,14 +2847,24 @@ async def pulse_view_create(
     audience: str = "",
     period: str = "month",
     owner_name: str | None = None,
+    organization_id: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Завести витрину. Создаётся черновиком: показывать недособранное нельзя."""
     cid = await assert_company_admin_product(company_id, current_user, db)
+    org = None
+    if organization_id:
+        try:
+            org = (await db.execute(text(
+                "SELECT id FROM organizations WHERE company_id = CAST(:c AS uuid)"
+                "   AND id = CAST(:o AS uuid)"),
+                {"c": str(cid), "o": organization_id})).scalar_one_or_none()
+        except Exception:
+            org = None
     row = PulseView(company_id=cid, name=name.strip(), audience=audience.strip(),
                     period=period, owner_name=(owner_name or "").strip() or None,
-                    created_by=current_user.email)
+                    organization_id=org, created_by=current_user.email)
     db.add(row)
     await db.commit()
     return {"id": str(row.id), "name": row.name, "status": row.status}
@@ -2859,6 +2879,7 @@ async def pulse_view_update(
     period: str | None = None,
     owner_name: str | None = None,
     note: str | None = None,
+    organization_id: str | None = None,
     feedback_mode: str | None = None,
     feedback_room_id: str | None = None,
     feedback_assignee_id: str | None = None,
@@ -2886,6 +2907,18 @@ async def pulse_view_update(
                          ("owner_name", owner_name), ("note", note)):
         if value is not None:
             setattr(v, field, value.strip() if isinstance(value, str) else value)
+
+    if organization_id is not None:
+        raw = organization_id.strip()
+        v.organization_id = None
+        if raw:
+            try:
+                v.organization_id = (await db.execute(text(
+                    "SELECT id FROM organizations WHERE company_id = CAST(:c AS uuid)"
+                    "   AND id = CAST(:o AS uuid)"),
+                    {"c": str(cid), "o": raw})).scalar_one_or_none()
+            except Exception:
+                v.organization_id = None
 
     if feedback_mode is not None:
         if feedback_mode not in ("task", "chat", "both", "none"):
@@ -2989,7 +3022,9 @@ async def pulse_view_card(
          WHERE view_id = CAST(:v AS uuid) AND user_id = CAST(:u AS uuid)
         UNION ALL
         SELECT 1 FROM pulse_view_role_grants rg
+          JOIN pulse_views pv ON pv.id = rg.view_id
           JOIN user_companies uc ON uc.role_id = rg.role_id
+               AND uc.company_id = pv.company_id
          WHERE rg.view_id = CAST(:v AS uuid) AND uc.user_id = CAST(:u AS uuid)"""),
         {"v": str(v.id), "u": str(current_user.id)})).first() is not None
     is_admin = current_user.is_superadmin or await _is_company_admin(db, cid, current_user)
@@ -3013,12 +3048,17 @@ async def pulse_view_card(
     return {
         "id": str(v.id), "name": v.name, "audience": v.audience, "period": v.period,
         "owner": v.owner_name, "note": v.note, "status": v.status,
-        "blocks": blocks, "people": people, "canEdit": is_admin,
+        "blocks": blocks,
+        # Состав получателей — дело администратора: получателю ни к чему имена и
+        # почты тех, кому показывают ту же картину.
+        "people": people if is_admin else [],
+        "canEdit": is_admin,
         "roles": [{"id": str(r[0]), "name": r[1]} for r in (await db.execute(text("""
             SELECT cr.id, cr.name FROM pulse_view_role_grants rg
               JOIN company_roles cr ON cr.id = rg.role_id
              WHERE rg.view_id = CAST(:v AS uuid) ORDER BY cr.name"""),
             {"v": str(v.id)})).all()],
+        "organizationId": str(v.organization_id) if v.organization_id else None,
         "feedbackMode": v.feedback_mode,
         "feedbackRoomId": str(v.feedback_room_id) if v.feedback_room_id else None,
         "feedbackAssigneeId": (str(v.feedback_assignee_id)
@@ -3090,7 +3130,9 @@ async def pulse_view_data(
          WHERE view_id = CAST(:v AS uuid) AND user_id = CAST(:u AS uuid)
         UNION ALL
         SELECT 1 FROM pulse_view_role_grants rg
+          JOIN pulse_views pv ON pv.id = rg.view_id
           JOIN user_companies uc ON uc.role_id = rg.role_id
+               AND uc.company_id = pv.company_id
          WHERE rg.view_id = CAST(:v AS uuid) AND uc.user_id = CAST(:u AS uuid)"""),
         {"v": str(v.id), "u": str(current_user.id)})).first() is not None
     is_admin = current_user.is_superadmin or await _is_company_admin(db, cid, current_user)
@@ -3112,7 +3154,9 @@ async def pulse_view_data(
         elif key.startswith("my."):
             data = await _my_block(db, cid, current_user, key)
         elif profile == "office":
-            data = await _office_block_data(db, cid, key, v.period)
+            data = await _office_block_data(db, cid, key, v.period,
+                                            str(v.organization_id)
+                                            if v.organization_id else None)
         else:
             data = {"note": "Блок этого профиля пока не считается для витрины."}
         blocks.append({
@@ -3129,8 +3173,8 @@ async def pulse_view_data(
         "owner": v.owner_name, "note": v.note, "status": v.status,
         "asOf": date.today().isoformat(),
         "period": v.period,
-        "periodLabel": {"week": "за неделю", "month": "за месяц",
-                        "quarter": "за квартал"}.get(v.period, v.period),
+        "periodLabel": {"month": "за месяц", "quarter": "за квартал",
+                        "year": "за год"}.get(v.period, v.period),
         # Получателю нужно знать, можно ли отсюда написать: кнопка, которая ничего
         # не делает, хуже её отсутствия.
         "canWrite": v.feedback_mode != "none" and not (
@@ -3208,10 +3252,9 @@ async def assert_company_admin_product(company_id: str, user: User, db: AsyncSes
 
 def _period_bounds(period: str, today: date) -> tuple[date, date, date, date]:
     """Границы текущего и предыдущего окна: (с, по, с_прошлого, по_прошлого)."""
-    if period == "week":
-        start = today - timedelta(days=today.weekday())
-        prev_start = start - timedelta(days=7)
-        return start, today, prev_start, start - timedelta(days=1)
+    if period == "year":
+        start = date(today.year, 1, 1)
+        return start, today, date(today.year - 1, 1, 1), date(today.year - 1, 12, 31)
     if period == "quarter":
         q = (today.month - 1) // 3
         start = date(today.year, q * 3 + 1, 1)
@@ -3227,10 +3270,12 @@ def _period_bounds(period: str, today: date) -> tuple[date, date, date, date]:
 def _delta(now_v: float, was_v: float, higher_is_better: bool = True) -> dict[str, Any] | None:
     """Сравнение с прошлым окном: сколько и в какую сторону.
 
-    Без базы сравнения (в прошлом окне пусто) сравнения НЕТ — «рост на 100 %» от
-    нуля это не рост, а появление, и подавать его цифрой значит врать.
+    Сравнения НЕТ в двух случаях, и оба — про честность:
+    · в прошлом окне пусто — «рост на 100 %» от нуля это не рост, а появление;
+    · в ТЕКУЩЕМ окне пусто — месяц просто ещё не закрыт, а «−100 %» зелёным
+      читается как «налог упал до нуля». Это самая опасная ложь витрины.
     """
-    if not was_v:
+    if not was_v or not now_v:
         return None
     diff = now_v - was_v
     pct = diff / abs(was_v) * 100
@@ -3276,21 +3321,56 @@ OFFICE_BLOCKS: list[tuple[str, str, str]] = [
 ]
 
 
+
+async def _result_window(db: AsyncSession, p: dict, a, b) -> tuple[float, float]:
+    """Выручка без НДС и прибыль ДО налога за окно — как считает «Бухгалтерия».
+
+    Расход берётся тем, что списано на финрезультат (90.02, 90.07, 90.08 и 91.02
+    минус 91.01): складывать обороты затратных счетов с себестоимостью значит
+    считать одни деньги дважды — 26-й закрывается на 90.02, 44-й на 90.07.
+    """
+    row = (await db.execute(text("""
+        SELECT coalesce(sum(amount) FILTER (WHERE account_kt LIKE '90.01%'), 0)
+             - coalesce(sum(amount) FILTER (WHERE account_dt LIKE '90.03%'), 0) AS revenue,
+               coalesce(sum(amount) FILTER (WHERE account_dt LIKE '90.02%'
+                                              OR account_dt LIKE '90.07%'
+                                              OR account_dt LIKE '90.08%'), 0)
+             + coalesce(sum(amount) FILTER (WHERE account_dt LIKE '91.02%'), 0)
+             - coalesce(sum(amount) FILTER (WHERE account_kt LIKE '91.01%'), 0) AS expense
+          FROM gl_entries
+         WHERE company_id = CAST(:cid AS uuid)
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL
+                OR organization_id = CAST(:org AS uuid))
+           AND make_date(period_year, period_month, 1)
+               BETWEEN date_trunc('month', CAST(:a AS date))::date AND CAST(:b AS date)"""),
+        {**p, "a": a, "b": b})).one()
+    revenue = float(row[0] or 0)
+    return revenue, revenue - float(row[1] or 0)
+
+
 async def _office_block_data(db: AsyncSession, cid: str, key: str,
-                             period: str = "month") -> dict[str, Any]:
+                             period: str = "month",
+                             org: str | None = None) -> dict[str, Any]:
     """Данные одного блока витрины для профиля «office».
 
     Возвращает готовую к показу карточку: цифры, строка-объяснение и, если есть,
     короткий список. Формат один на все блоки — витрина не должна знать, чем
     отличается «Закрытие периода» от «Налогов»: разное здесь только содержание.
     """
-    p = {"cid": cid, "org": None}
+    # Юрлицо витрины. Пусто — вся компания; заданное — только его данные, тем же
+    # условием, что и в «Бухгалтерии»: строки без организации видны в любом разрезе
+    # (они старше появления оси), чужие — нет.
+    p = {"cid": cid, "org": org}
     since, till, prev_since, prev_till = _period_bounds(period, date.today())
 
     if key == "books.state":
         docs, entries = (await db.execute(text("""
-            SELECT (SELECT count(*) FROM accounting_docs WHERE company_id = CAST(:cid AS uuid)),
-                   (SELECT count(*) FROM gl_entries WHERE company_id = CAST(:cid AS uuid))"""),
+            SELECT (SELECT count(*) FROM accounting_docs WHERE company_id = CAST(:cid AS uuid)
+               AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL
+                    OR organization_id = CAST(:org AS uuid))),
+                   (SELECT count(*) FROM gl_entries WHERE company_id = CAST(:cid AS uuid)
+               AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL
+                    OR organization_id = CAST(:org AS uuid)))"""),
             p)).one()
         return {
             "metrics": [{"label": "Документов в учёте", "value": f"{docs:,}".replace(",", " ")},
@@ -3302,11 +3382,15 @@ async def _office_block_data(db: AsyncSession, cid: str, key: str,
         rows = (await db.execute(text("""
             SELECT count(*), coalesce(sum(amount), 0)
               FROM doc_requests
-             WHERE company_id = CAST(:cid AS uuid) AND status IN ('open','requested','promised')"""),
+             WHERE company_id = CAST(:cid AS uuid)
+               AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL
+                    OR organization_id = CAST(:org AS uuid)) AND status IN ('open','requested','promised')"""),
             p)).one()
         closed, total = (await db.execute(text("""
             SELECT count(*) FILTER (WHERE status = 'closed'), count(*)
-              FROM periods WHERE company_id = CAST(:cid AS uuid)"""), p)).one()
+              FROM periods WHERE company_id = CAST(:cid AS uuid)
+               AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL
+                    OR organization_id = CAST(:org AS uuid))"""), p)).one()
         return {
             "metrics": [{"label": "Периодов закрыто", "value": f"{closed} из {total}"},
                         {"label": "Ждём документов", "value": f"{rows[0]}"},
@@ -3321,131 +3405,189 @@ async def _office_block_data(db: AsyncSession, cid: str, key: str,
             SELECT counterparty_name, doc_kind, due_date, amount, id
               FROM doc_requests
              WHERE company_id = CAST(:cid AS uuid)
+               AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL
+                    OR organization_id = CAST(:org AS uuid))
                AND status IN ('open','requested','promised')
              ORDER BY due_date NULLS LAST LIMIT 12"""), p)).all()]
         overdue = (await db.execute(text("""
             SELECT count(*) FROM doc_requests
              WHERE company_id = CAST(:cid AS uuid)
+               AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL
+                    OR organization_id = CAST(:org AS uuid))
                AND status IN ('open','requested','promised')
                AND due_date IS NOT NULL AND due_date < to_char(CURRENT_DATE, 'YYYY-MM-DD')"""),
             p)).scalar_one()
+        # Счётчик — по всем требованиям, а не по показанным: список ограничен
+        # дюжиной строк, и «12» рядом с «15» в соседнем блоке той же витрины
+        # выглядит как ошибка в цифрах, а не как лимит показа.
+        total = (await db.execute(text("""
+            SELECT count(*) FROM doc_requests
+             WHERE company_id = CAST(:cid AS uuid)
+               AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL
+                    OR organization_id = CAST(:org AS uuid))
+               AND status IN ('open','requested','promised')"""), p)).scalar_one()
+        note = "Это то, что нужно от вас, чтобы закрыть период и заявить вычет."
+        if total > len(items):
+            note += " Показаны первые %d из %d." % (len(items), total)
         return {
-            "metrics": [{"label": "Ждём документов", "value": str(len(items))},
+            "metrics": [{"label": "Ждём документов", "value": str(total)},
                         {"label": "Срок прошёл", "value": str(overdue),
                          "tone": "warning" if overdue else None}],
             "items": items,
-            "note": "Это то, что нужно от вас, чтобы закрыть период и заявить вычет.",
+            "note": note,
         }
 
     if key == "books.taxes":
-        # НДС и налог на прибыль за ОКНО витрины: «за год» на квартальной витрине
-        # отвечало не на тот вопрос, который задан.
-        async def taxes_for(a: date, b: date):
+        # НДС берём по счёту 68.02 — это факт начисления и вычета. А налог на
+        # прибыль СЧИТАЕМ, а не ждём проводки закрытия: в незакрытом месяце её нет,
+        # и блок «Налоги заранее» показывал ноль вместо реальной оценки.
+        async def vat_for(a, b):
             return (await db.execute(text("""
-                SELECT coalesce(sum(amount) FILTER (WHERE account_kt LIKE '68.02%%'), 0)
-                     - coalesce(sum(amount) FILTER (WHERE account_dt LIKE '68.02%%'
-                                                      AND account_kt NOT LIKE '51%%'
-                                                      AND account_kt NOT LIKE '68.90%%'), 0),
-                       coalesce(sum(amount) FILTER (WHERE account_dt LIKE '99%%'
-                                                      AND account_kt LIKE '68.04%%'), 0)
+                SELECT coalesce(sum(amount) FILTER (WHERE account_kt LIKE '68.02%'), 0)
+                     - coalesce(sum(amount) FILTER (WHERE account_dt LIKE '68.02%'
+                                                      AND account_kt NOT LIKE '51%'
+                                                      AND account_kt NOT LIKE '68.90%'), 0)
                   FROM gl_entries
                  WHERE company_id = CAST(:cid AS uuid)
+                   AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL
+                        OR organization_id = CAST(:org AS uuid))
                    AND make_date(period_year, period_month, 1)
                        BETWEEN date_trunc('month', CAST(:a AS date))::date
                            AND CAST(:b AS date)"""),
-                {**p, "a": a, "b": b})).one()
+                {**p, "a": a, "b": b})).scalar_one()
 
-        vat, profit = await taxes_for(since, till)
-        vat_was, profit_was = await taxes_for(prev_since, prev_till)
+        vat = float(await vat_for(since, till) or 0)
+        vat_was = float(await vat_for(prev_since, prev_till) or 0)
+        _, profit = await _result_window(db, p, since, till)
+        _, profit_was = await _result_window(db, p, prev_since, prev_till)
+        rate = 0.25 if till.year >= 2025 else 0.20
+        tax = max(profit, 0) * rate
+        tax_was = max(profit_was, 0) * rate
         return {
             "metrics": [
                 {"label": "НДС к уплате", "value": _money(vat),
-                 "delta": _delta(float(vat or 0), float(vat_was or 0), higher_is_better=False)},
-                {"label": "Налог на прибыль", "value": _money(profit),
-                 "delta": _delta(float(profit or 0), float(profit_was or 0),
-                                 higher_is_better=False)},
+                 "delta": _delta(vat, vat_was, higher_is_better=False)},
+                {"label": "Налог на прибыль", "value": _money(tax),
+                 "delta": _delta(tax, tax_was, higher_is_better=False)},
             ],
-            "note": "Оценка по данным учёта за период витрины. Декларацию формирует бухгалтерия.",
+            "note": ("Оценка по данным учёта за период, до закрытия месяца. "
+                     "Декларацию формирует бухгалтерия."),
         }
 
     if key == "books.result":
-        async def result_for(a: date, b: date):
-            return (await db.execute(text("""
-                SELECT coalesce(sum(amount) FILTER (WHERE account_kt LIKE '90.01%%'), 0)
-                     - coalesce(sum(amount) FILTER (WHERE account_dt LIKE '90.03%%'), 0),
-                       coalesce(sum(amount) FILTER (WHERE account_dt LIKE '90.09%%'
-                                                      AND account_kt LIKE '99%%'), 0)
-                     - coalesce(sum(amount) FILTER (WHERE account_dt LIKE '99%%'
-                                                      AND account_kt LIKE '90.09%%'), 0)
-                  FROM gl_entries
-                 WHERE company_id = CAST(:cid AS uuid)
-                   AND make_date(period_year, period_month, 1)
-                       BETWEEN date_trunc('month', CAST(:a AS date))::date
-                           AND CAST(:b AS date)"""),
-                {**p, "a": a, "b": b})).one()
-
-        rev, prof = await result_for(since, till)
-        rev_was, prof_was = await result_for(prev_since, prev_till)
+        rev, prof = await _result_window(db, p, since, till)
+        rev_was, prof_was = await _result_window(db, p, prev_since, prev_till)
         rows = [{"title": r[0], "detail": "выручка " + _money(r[1]), "amount": _money(r[2])}
                 for r in (await db.execute(text("""
             SELECT period_year || '-' || lpad(period_month::text, 2, '0'),
                    coalesce(sum(amount) FILTER (WHERE account_kt LIKE '90.01%'), 0)
                  - coalesce(sum(amount) FILTER (WHERE account_dt LIKE '90.03%'), 0),
-                   coalesce(sum(amount) FILTER (WHERE account_dt LIKE '90.09%'
-                                                  AND account_kt LIKE '99%'), 0)
-                 - coalesce(sum(amount) FILTER (WHERE account_dt LIKE '99%'
-                                                  AND account_kt LIKE '90.09%'), 0)
-              FROM gl_entries WHERE company_id = CAST(:cid AS uuid)
+                   coalesce(sum(amount) FILTER (WHERE account_kt LIKE '90.01%'), 0)
+                 - coalesce(sum(amount) FILTER (WHERE account_dt LIKE '90.03%'), 0)
+                 - coalesce(sum(amount) FILTER (WHERE account_dt LIKE '90.02%'
+                                                  OR account_dt LIKE '90.07%'
+                                                  OR account_dt LIKE '90.08%'), 0)
+              FROM gl_entries
+             WHERE company_id = CAST(:cid AS uuid)
+               AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL
+                    OR organization_id = CAST(:org AS uuid))
              GROUP BY 1 ORDER BY 1 DESC LIMIT 6"""), p)).all()]
         return {
             "metrics": [
                 {"label": "Выручка за период", "value": _money(rev),
-                 "delta": _delta(float(rev or 0), float(rev_was or 0))},
+                 "delta": _delta(rev, rev_was)},
                 {"label": "Прибыль за период", "value": _money(prof),
-                 "delta": _delta(float(prof or 0), float(prof_was or 0))},
+                 "delta": _delta(prof, prof_was)},
             ],
             "items": rows,
-            "note": "Выручка без НДС и финансовый результат: за период и по месяцам.",
+            "note": "Выручка без НДС и прибыль до налога: за период и по месяцам.",
         }
 
     if key == "books.settlements":
-        dt, kt = (await db.execute(text("""
-            SELECT coalesce(sum(debit), 0), coalesce(sum(credit), 0)
+        # «Должны вам» — дебет 62 (долг покупателей), «Должны вы» — кредит 60 (долг
+        # поставщикам). Складывать дебет обоих счетов нельзя: в дебет 60 попадают
+        # АВАНСЫ, выданные поставщикам, а это не то, что вам должны. На пилоте так
+        # набегало +150 550 ₽ дебиторки и +432 319 ₽ кредиторки против рабочего
+        # экрана. Срез — последний: без max(as_of) вторая выгрузка удвоит суммы.
+        dt, kt, adv_out, adv_in = (await db.execute(text("""
+            SELECT coalesce(sum(debit) FILTER (WHERE account LIKE '62%'), 0),
+                   coalesce(sum(credit) FILTER (WHERE account LIKE '60%'), 0),
+                   coalesce(sum(debit) FILTER (WHERE account LIKE '60%'), 0),
+                   coalesce(sum(credit) FILTER (WHERE account LIKE '62%'), 0)
               FROM gl_balances
-             WHERE company_id = CAST(:cid AS uuid) AND source <> 'monthly'
+             WHERE company_id = CAST(:cid AS uuid)
+               AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL
+                    OR organization_id = CAST(:org AS uuid))
+               AND source <> 'monthly'
+               AND as_of = (SELECT max(as_of) FROM gl_balances
+                             WHERE company_id = CAST(:cid AS uuid) AND source <> 'monthly')
                AND (account LIKE '62%' OR account LIKE '60%')"""), p)).one()
+        as_of = (await db.execute(text("""
+            SELECT max(as_of)::text FROM gl_balances
+             WHERE company_id = CAST(:cid AS uuid) AND source <> 'monthly'"""), p)).scalar()
         return {
             "metrics": [{"label": "Должны вам", "value": _money(dt)},
-                        {"label": "Должны вы", "value": _money(kt)}],
-            "note": "Сальдо расчётов с покупателями и поставщиками на последнюю дату.",
+                        {"label": "Должны вы", "value": _money(kt)},
+                        {"label": "Авансы выданы", "value": _money(adv_out)},
+                        {"label": "Авансы получены", "value": _money(adv_in)}],
+            "note": ("Долг покупателей и наш долг поставщикам на %s. Авансы показаны "
+                     "отдельно: это не долг, а деньги вперёд." % _ru_date(as_of)),
         }
 
     if key == "books.calendar":
-        soon = [{"title": r[1], "detail": r[0] or "срок не задан", "amount": ""}
+        # Раньше окно начиналось за 30 дней и обрезалось лимитом — в список
+        # попадала только просрочка, и блок «Сроки» физически не мог показать
+        # ближайший срок. Теперь: счётчик просроченного отдельно, список — впереди.
+        soon = [{"title": r[1], "detail": _ru_date(r[0]) or "срок не задан", "amount": ""}
                 for r in (await db.execute(text("""
             SELECT code, name FROM gl_references
              WHERE company_id = CAST(:cid AS uuid) AND kind = 'tax_calendar'
-               AND code >= to_char(CURRENT_DATE - 30, 'YYYY-MM-DD')
-             ORDER BY code LIMIT 10"""), p)).all()]
+               AND coalesce(meta->>'В архиве', 'false') <> 'true'
+               AND code >= to_char(CURRENT_DATE, 'YYYY-MM-DD')
+             ORDER BY code LIMIT 8"""), p)).all()]
+        overdue = (await db.execute(text("""
+            SELECT count(*) FROM gl_references
+             WHERE company_id = CAST(:cid AS uuid) AND kind = 'tax_calendar'
+               AND coalesce(meta->>'В архиве', 'false') <> 'true'
+               AND coalesce(meta->>'Статус', '') <> 'Сдано'
+               AND code < to_char(CURRENT_DATE, 'YYYY-MM-DD')
+               AND code >= to_char(CURRENT_DATE - 60, 'YYYY-MM-DD')"""), p)).scalar_one()
         debt = (await db.execute(text("""
             SELECT coalesce(sum(credit) - sum(debit), 0) FROM gl_balances
-             WHERE company_id = CAST(:cid AS uuid) AND source <> 'monthly'
+             WHERE company_id = CAST(:cid AS uuid)
+               AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL
+                    OR organization_id = CAST(:org AS uuid))
+               AND source <> 'monthly'
+               AND as_of = (SELECT max(as_of) FROM gl_balances
+                             WHERE company_id = CAST(:cid AS uuid) AND source <> 'monthly')
                AND (account LIKE '68%' OR account LIKE '69%')"""), p)).scalar_one()
         return {
-            "metrics": [{"label": "Долг перед бюджетом", "value": _money(debt)}],
+            "metrics": [{"label": "Долг перед бюджетом", "value": _money(debt)},
+                        {"label": "Срок прошёл", "value": str(overdue),
+                         "tone": "warning" if overdue else None}],
             "items": soon,
-            "note": "Сроки берутся из вашей 1С — календарь бухгалтера.",
+            "note": "Ближайшие сроки из вашей 1С — календарь бухгалтера.",
         }
 
     if key == "books.trends":
         items = [{"title": r[0], "detail": r[1] or "", "amount": ""}
                  for r in (await db.execute(text("""
             SELECT name, meta->>'Период' FROM gl_references
-             WHERE company_id = CAST(:cid AS uuid) AND kind = 'reports_filed'
+             WHERE company_id = CAST(:cid AS uuid)
+               AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL
+                    OR organization_id = CAST(:org AS uuid)) AND kind = 'reports_filed'
              ORDER BY code DESC LIMIT 8"""), p)).all()]
         return {"items": items, "note": "Последняя сданная отчётность по данным 1С."}
 
     return {"note": "Блок не рассчитывается в этом пространстве."}
+
+
+def _ru_date(v) -> str:
+    """ISO-дата в привычный вид: наружу «15.08.2026», а не «2026-08-15»."""
+    t = str(v or "")
+    if len(t) >= 10 and t[4] == "-" and t[7] == "-":
+        return "%s.%s.%s" % (t[8:10], t[5:7], t[:4])
+    return t
 
 
 def _money(v) -> str:
@@ -3489,7 +3631,9 @@ async def pulse_view_feedback(
          WHERE view_id = CAST(:v AS uuid) AND user_id = CAST(:u AS uuid)
         UNION ALL
         SELECT 1 FROM pulse_view_role_grants rg
+          JOIN pulse_views pv ON pv.id = rg.view_id
           JOIN user_companies uc ON uc.role_id = rg.role_id
+               AND uc.company_id = pv.company_id
          WHERE rg.view_id = CAST(:v AS uuid) AND uc.user_id = CAST(:u AS uuid)"""),
         {"v": str(v.id), "u": str(current_user.id)})).first() is not None
     is_admin = current_user.is_superadmin or await _is_company_admin(db, cid, current_user)
@@ -3558,7 +3702,9 @@ async def pulse_view_reply(
          WHERE view_id = CAST(:v AS uuid) AND user_id = CAST(:u AS uuid)
         UNION ALL
         SELECT 1 FROM pulse_view_role_grants rg
+          JOIN pulse_views pv ON pv.id = rg.view_id
           JOIN user_companies uc ON uc.role_id = rg.role_id
+               AND uc.company_id = pv.company_id
          WHERE rg.view_id = CAST(:v AS uuid) AND uc.user_id = CAST(:u AS uuid)"""),
         {"v": str(v.id), "u": str(current_user.id)})).first() is not None
     is_admin = current_user.is_superadmin or await _is_company_admin(db, cid, current_user)
@@ -3601,7 +3747,8 @@ async def pulse_view_reply(
            SET escalations = coalesce(escalations, '[]'::jsonb) || CAST(:e AS jsonb),
                status = coalesce(:st, status),
                updated_at = now()
-         WHERE company_id = CAST(:cid AS uuid) AND id = CAST(:id AS uuid)"""),
+         WHERE company_id = CAST(:cid AS uuid)
+           AND id = CAST(:id AS uuid)"""),
         {"cid": cid, "id": str(rid), "st": new_status,
          "e": json.dumps([entry], ensure_ascii=False)})
 
@@ -3879,7 +4026,9 @@ async def showcase_by_link(token: str, db: AsyncSession = Depends(get_db)) -> di
             # Личный блок: по ссылке неизвестно, кто смотрит, и показывать чужие
             # обращения нельзя.
             continue
-        data = (await _office_block_data(db, cid, key, v.period) if profile == "office"
+        data = (await _office_block_data(db, cid, key, v.period,
+                                         str(v.organization_id) if v.organization_id else None)
+                if profile == "office"
                 else {"note": "Блок этого профиля пока не считается для витрины."})
         blocks.append({
             "key": key, "title": title or catalog.get(key, key), "hint": hint,
@@ -3891,8 +4040,8 @@ async def showcase_by_link(token: str, db: AsyncSession = Depends(get_db)) -> di
         "id": str(v.id), "name": v.name, "audience": v.audience,
         "owner": v.owner_name, "note": v.note, "status": v.status,
         "asOf": date.today().isoformat(), "period": v.period,
-        "periodLabel": {"week": "за неделю", "month": "за месяц",
-                        "quarter": "за квартал"}.get(v.period, v.period),
+        "periodLabel": {"month": "за месяц", "quarter": "за квартал",
+                        "year": "за год"}.get(v.period, v.period),
         "company": (await db.execute(text(
             "SELECT name FROM companies WHERE id = CAST(:cid AS uuid)"),
             {"cid": cid})).scalar_one_or_none(),

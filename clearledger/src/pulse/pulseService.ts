@@ -422,7 +422,8 @@ export const createPulseView = (companyId: string, name: string) =>
 
 export const updatePulseView = (
   companyId: string, id: string,
-  v: { name?: string; audience?: string; owner_name?: string; note?: string; status?: string },
+  v: { name?: string; audience?: string; owner_name?: string; note?: string
+       status?: string; period?: string; organization_id?: string },
 ) => patch<{ id: string; status: string }>(
   `/api/pulse/views/${id}?company_id=${companyId}`
   + Object.entries(v).filter(([, x]) => x !== undefined && x !== null)

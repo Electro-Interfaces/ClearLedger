@@ -55,12 +55,14 @@ export function ViewsView() {
     onError: (e) => toast.error('Не создано', { description: (e as Error).message }),
   })
 
-  if (listQ.isError) return <PulseError onRetry={() => listQ.refetch()} />
-  if (!listQ.data) return <PulseLoading />
+  if (listQ.isError) return <PulseError what="витрины" onRetry={() => listQ.refetch()} />
+  if (!listQ.data) return <PulseLoading what="витрин" />
   const { views, catalog } = listQ.data
 
   return (
-    <div className="p-4 space-y-4">
+    // Внешний отступ даёт оболочка «Пульса» (`PulseLayout`), как у соседних
+    // разделов: свой `p-4` сдвигал конструктор относительно заголовка экрана.
+    <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
         <Input value={newName} onChange={(e) => setNewName(e.target.value)}
           placeholder="Название витрины: «Кабинет клиента»"
@@ -110,7 +112,7 @@ export function ViewsView() {
           {openId && (
             preview
               ? <ShowcaseBody viewId={openId} onBack={() => setPreview(false)} />
-              : <ViewEditor viewId={openId} catalog={catalog}
+              : <ViewEditor viewId={openId} catalog={catalog} periods={listQ.data.periods}
                   onPreview={() => setPreview(true)}
                   onChanged={() => qc.invalidateQueries({ queryKey: ['pulse-views', companyId] })} />
           )}
@@ -123,8 +125,10 @@ export function ViewsView() {
 type CatalogItem = { key: string; title: string; group: string }
 type Draft = { key: string; title: string }
 
-function ViewEditor({ viewId, catalog, onPreview, onChanged }: {
-  viewId: string; catalog: CatalogItem[]; onPreview: () => void; onChanged: () => void
+function ViewEditor({ viewId, catalog, periods, onPreview, onChanged }: {
+  viewId: string; catalog: CatalogItem[]
+  periods: { key: string; title: string }[]
+  onPreview: () => void; onChanged: () => void
 }) {
   const { companyId } = useCompany()
   const qc = useQueryClient()
@@ -133,6 +137,7 @@ function ViewEditor({ viewId, catalog, onPreview, onChanged }: {
   const [audience, setAudience] = useState('')
   const [owner, setOwner] = useState('')
   const [note, setNote] = useState('')
+  const [period, setPeriod] = useState('month')
   const [people, setPeople] = useState<Set<string>>(new Set())
   const [roles, setRoles] = useState<Set<string>>(new Set())
 
@@ -158,13 +163,15 @@ function ViewEditor({ viewId, catalog, onPreview, onChanged }: {
     setAudience(q.data.audience ?? '')
     setOwner(q.data.owner ?? '')
     setNote(q.data.note ?? '')
+    setPeriod(q.data.period ?? 'month')
     setPeople(new Set(q.data.people.map((p) => p.id)))
     setRoles(new Set((q.data.roles ?? []).map((r) => r.id)))
   }, [q.data])
 
   const save = useMutation({
     mutationFn: async () => {
-      await updatePulseView(companyId, viewId, { name, audience, owner_name: owner, note })
+      await updatePulseView(companyId, viewId,
+        { name, audience, owner_name: owner, note, period })
       await setPulseViewBlocks(companyId, viewId, blocks)
       await setPulseViewGrants(companyId, viewId, [...people])
       await setPulseViewRoles(companyId, viewId, [...roles])
@@ -188,8 +195,8 @@ function ViewEditor({ viewId, catalog, onPreview, onChanged }: {
     onError: (e) => toast.error('Не вышло', { description: (e as Error).message }),
   })
 
-  if (q.isError) return <PulseError onRetry={() => q.refetch()} />
-  if (!q.data) return <PulseLoading />
+  if (q.isError) return <PulseError what="витрину" onRetry={() => q.refetch()} />
+  if (!q.data) return <PulseLoading what="витрины" />
 
   const used = new Set(blocks.map((b) => b.key))
   const groups = [...new Set(catalog.map((c) => c.group))]
@@ -217,9 +224,19 @@ function ViewEditor({ viewId, catalog, onPreview, onChanged }: {
               className="mt-1 h-8 text-[13px]" />
           </label>
           <label className="text-[12px] text-muted-foreground">
+            Период цифр
+            <select value={period} onChange={(e) => setPeriod(e.target.value)}
+              className="mt-1 h-8 w-full rounded-md border border-border bg-background
+                         px-2 text-[13px]">
+              {(periods ?? []).map((x) => (
+                <option key={x.key} value={x.key}>{x.title}</option>
+              ))}
+            </select>
+          </label>
+          <label className="text-[12px] text-muted-foreground">
             За цифры отвечает
             <Input value={owner} onChange={(e) => setOwner(e.target.value)}
-              placeholder="Бухгалтерия «Аудит»" className="mt-1 h-8 text-[13px]" />
+              placeholder="Кто отвечает за цифры" className="mt-1 h-8 text-[13px]" />
           </label>
           <label className="text-[12px] text-muted-foreground">
             Оговорка под витриной
@@ -255,7 +272,12 @@ function ViewEditor({ viewId, catalog, onPreview, onChanged }: {
                     onChange={(e) => setBlocks((bs) => bs.map((x, j) =>
                       j === i ? { ...x, title: e.target.value } : x))}
                     className="h-7 text-[13px]" />
-                  <span className="shrink-0 text-[11px] text-muted-foreground">{orig}</span>
+                  {/* На телефоне исходное имя блока прячем: оно уже стоит
+                      подсказкой в поле, а второй копией отнимало у поля
+                      переименования половину и без того узкой строки. */}
+                  <span className="hidden shrink-0 text-[11px] text-muted-foreground sm:inline">
+                    {orig}
+                  </span>
                   <button onClick={() => setBlocks((bs) => bs.filter((_, j) => j !== i))}
                     className="shrink-0 text-muted-foreground hover:text-foreground">
                     <X className="h-3.5 w-3.5" />
@@ -407,7 +429,7 @@ function LinksBlock({ viewId, published }: { viewId: string; published: boolean 
       )}
       <div className="flex flex-wrap items-center gap-2">
         <Input value={label} onChange={(e) => setLabel(e.target.value)}
-          placeholder="Кому: «Директору ПРОМИЗОЛ»"
+          placeholder="Кому: «Директору компании-клиента»"
           className="h-8 max-w-[240px] text-[13px]" />
         <select value={days} onChange={(e) => setDays(Number(e.target.value))}
           className="h-8 rounded-md border border-border bg-background px-2 text-[13px]">
@@ -416,7 +438,15 @@ function LinksBlock({ viewId, published }: { viewId: string; published: boolean 
           <option value={90}>на 90 дней</option>
         </select>
         <Button size="sm" className="h-8" disabled={!published || create.isPending}
-          onClick={() => create.mutate()}>Выдать</Button>
+          onClick={() => {
+            // Ссылка открывается без пароля у любого, кто её получит. Один клик на
+            // такое действие — слишком дёшево для цифр, которые уходят наружу.
+            const until = new Date(Date.now() + days * 864e5).toLocaleDateString('ru-RU')
+            if (window.confirm(
+              `Ссылку сможет открыть любой, у кого она окажется, без пароля.
+`
+              + `Она будет действовать до ${until}. Выдать?`)) create.mutate()
+          }}>Выдать</Button>
         <span className="text-[11px] text-muted-foreground">
           Срок обязателен: вечная ссылка на цифры — отложенная утечка.
         </span>
@@ -444,8 +474,10 @@ function LinksBlock({ viewId, published }: { viewId: string; published: boolean 
                                   hover:text-foreground">
                       <Copy className="h-3 w-3" /> скопировать
                     </button>
-                    <button onClick={() => revoke.mutate(l.id)}
-                      className="text-muted-foreground hover:text-foreground">отозвать</button>
+                    <button onClick={() => {
+                      if (window.confirm('Отозвать ссылку? У получателя витрина'
+                        + ' перестанет открываться сразу.')) revoke.mutate(l.id)
+                    }} className="text-muted-foreground hover:text-foreground">отозвать</button>
                   </>
                 )}
               </div>

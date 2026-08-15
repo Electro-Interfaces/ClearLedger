@@ -33,8 +33,8 @@ export function ShowcaseBody({ viewId, onBack }: { viewId: string; onBack?: () =
     queryFn: () => getPulseViewData(companyId, viewId),
   })
 
-  if (q.isError) return <PulseError onRetry={() => q.refetch()} />
-  if (!q.data) return <PulseLoading />
+  if (q.isError) return <PulseError what="витрину" onRetry={() => q.refetch()} />
+  if (!q.data) return <PulseLoading what="витрины" />
   const d = q.data
 
   return (
@@ -88,8 +88,10 @@ export function ShowcaseBody({ viewId, onBack }: { viewId: string; onBack?: () =
               {b.items.length > 0 && (
                 <div className="divide-y divide-border/60">
                   {b.items.map((it, i) => (
-                    <div key={i} className="flex items-start justify-between gap-3 py-1.5">
-                      <div className="min-w-0">
+                    // Строка переносится: на телефоне три кнопки ответа и сумма
+                    // выдавливали название требования до «Акт вы…».
+                    <div key={i} className="flex flex-wrap items-start justify-between gap-3 py-1.5">
+                      <div className="min-w-0 flex-1">
                         <div className="truncate text-[13px]">{it.title}</div>
                         {it.detail && (
                           <div className="text-[11px] text-muted-foreground">{it.detail}</div>
@@ -145,17 +147,15 @@ export function ShowcaseView() {
     queryFn: () => getPulseMyViews(companyId),
   })
 
-  if (q.isError) return <PulseError onRetry={() => q.refetch()} />
-  if (!q.data) return <PulseLoading />
+  if (q.isError) return <PulseError what="ваши витрины" onRetry={() => q.refetch()} />
+  if (!q.data) return <PulseLoading what="витрин" />
   const views = q.data.views
 
   if (views.length === 0) {
     return (
-      <div className="p-4">
-        <Card><CardContent className="py-10 text-center text-sm text-muted-foreground">
-          Вам пока не назначено ни одной витрины.
-        </CardContent></Card>
-      </div>
+      <Card><CardContent className="py-10 text-center text-sm text-muted-foreground">
+        Вам пока не назначено ни одной витрины.
+      </CardContent></Card>
     )
   }
 
@@ -163,7 +163,8 @@ export function ShowcaseView() {
   const active = openId ?? (views.length === 1 ? views[0].id : null)
 
   return (
-    <div className="p-4 space-y-3">
+    // Внешний отступ — на оболочке «Пульса», как у соседних разделов.
+    <div className="space-y-3">
       {views.length > 1 && (
         <div className="flex flex-wrap gap-1.5">
           {views.map((v) => (
@@ -244,7 +245,8 @@ function RequestReply({ viewId, requestId, onDone }: {
     )
   }
   return (
-    <div className="flex shrink-0 gap-1">
+    // На узкой строке ответы уходят на свою строку (`w-full`), а не режут название.
+    <div className="flex w-full shrink-0 justify-end gap-1 sm:w-auto">
       {([['sent', 'отправил'], ['will_send', 'пришлю'], ['declined', 'не будет']] as const)
         .map(([k, label]) => (
           <button key={k} disabled={m.isPending} onClick={() => m.mutate(k)}
