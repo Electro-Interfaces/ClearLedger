@@ -271,6 +271,12 @@ _GAPS_OFF_BY_PROFILE: dict[str, set[str]] = {
     "office": {"contracts"},
 }
 
+# Отметка есть, а связь ни при чём: открытый период — состояние учёта, а не запись,
+# оставшаяся строкой вместо ссылки. В строке сущности она нужна («цифры ещё поедут»),
+# в плитке «Разрывов связей» — врёт: у РТИ два открытых месяца читались как два
+# незакрытых отношения между таблицами.
+_GAP_NOT_A_LINK = {"periods"}
+
 
 async def data_model(db: AsyncSession, company_id: uuid.UUID) -> dict[str, Any]:
     """Состав нормализованной базы компании: сущности, объёмы и незакрытые связи."""
@@ -305,7 +311,8 @@ async def data_model(db: AsyncSession, company_id: uuid.UUID) -> dict[str, Any]:
                 "gap": gap or None, "gapLabel": gap_label if gap else None,
             })
             total_records += records
-            total_gaps += gap or 0
+            if key not in _GAP_NOT_A_LINK:
+                total_gaps += gap or 0
             total_entities += 1
         domains.append({"key": dkey, "label": dlabel, "entities": entities})
 

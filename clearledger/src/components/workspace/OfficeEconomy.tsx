@@ -600,11 +600,18 @@ function foldMonths(months: PnlData['months'], grain: Grain): FoldedRow[] {
 
   if (grain === 'roll12') {
     // Скользящие 12 месяцев: сезонность снимается полностью, тренд виден без
-    // календарных скачков. Первые одиннадцать точек неполные — их не показываем.
-    return months.map((_, i) => (i < 11 ? null : {
-      label: monthLabel(months[i].month),
-      ...sum(months.slice(i - 11, i + 1)),
-    })).filter(Boolean) as FoldedRow[]
+    // календарных скачков. Окно берётся ПО КАЛЕНДАРЮ, а не по двенадцати строкам
+    // ряда: месяц без единой проводки строки не даёт, и счёт строк растягивал окно
+    // на полтора года — «скользящий год» складывал больше года.
+    const idx = (m: string) => Number(m.slice(0, 4)) * 12 + Number(m.slice(5, 7))
+    const first = months.length ? idx(months[0].month) : 0
+    return months.map((cur) => {
+      const to = idx(cur.month)
+      // Первые одиннадцать календарных месяцев истории окна не набирают.
+      if (to - first < 11) return null
+      const win = months.filter((r) => idx(r.month) > to - 12 && idx(r.month) <= to)
+      return { label: monthLabel(cur.month), ...sum(win) }
+    }).filter(Boolean) as FoldedRow[]
   }
 
   const key = (m: string) =>
@@ -1269,10 +1276,19 @@ function EconTaxes({ companyId, period, view }: {
   return (
     <div className="p-4 space-y-4">
       <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
-        <MetricTile label="Налог на прибыль" value={money.format(g.profitTax) + ' ₽'}
-          hint="строка отчёта о результате" />
-        <MetricTile label="НДС" value={money.format(g.vat) + ' ₽'}
-          hint="транзитный: собирается с покупателя, расходом не является" />
+        {/* Имя налога — по режиму компании: на УСН «налога на прибыль» не бывает,
+            а плитка НДС у неуплачивающего его показывает вечный ноль. */}
+        <MetricTile
+          label={d.taxMode && d.taxMode !== 'ОСНО'
+            ? `Налог с дохода (${d.taxMode})` : 'Налог на прибыль'}
+          value={money.format(g.profitTax) + ' ₽'}
+          hint={d.taxMode && d.taxMode !== 'ОСНО'
+            ? 'спецрежим: считается от дохода, а не от прибыли'
+            : 'строка отчёта о результате'} />
+        {(g.vat > 0 || !d.taxMode || d.taxMode === 'ОСНО') && (
+          <MetricTile label="НДС" value={money.format(g.vat) + ' ₽'}
+            hint="транзитный: собирается с покупателя, расходом не является" />
+        )}
         <MetricTile label="Страховые взносы" value={money.format(g.contributions) + ' ₽'}
           hint="часть затрат на персонал, уже внутри расходов" />
         <MetricTile label="НДФЛ" value={money.format(g.ndfl) + ' ₽'}
@@ -1431,10 +1447,13 @@ function EconCostBridge({ companyId, period }: { companyId: string; period: Peri
           hint="ушло на счета 90 и 91 — это и есть расходы отчёта" />
         <MetricTile label="Осталось на счетах" value={money.format(d.rest) + ' ₽'}
           hint="незавершёнка и расходы, распределяемые на будущие периоды" />
+        {/* Ноль против ноля — не сходимость: зелёная плитка на пустом периоде
+            читается как «проверено и верно», хотя проверять было нечего. */}
         <MetricTile label="В отчёте о результате" value={money.format(d.inPnl) + ' ₽'}
-          hint={Math.abs(gap) < 1 ? 'сходится со списанным'
+          hint={!d.written && !d.inPnl ? 'сравнивать нечего: за период ничего не списано'
+            : Math.abs(gap) < 1 ? 'сходится со списанным'
             : `расхождение со списанным ${money.format(gap)} ₽`}
-          tone={Math.abs(gap) < 1 ? 'success' : undefined} />
+          tone={(d.written || d.inPnl) && Math.abs(gap) < 1 ? 'success' : undefined} />
       </div>
 
       <p className="text-[11px] text-muted-foreground">

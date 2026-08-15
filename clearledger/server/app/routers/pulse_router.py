@@ -103,6 +103,35 @@ ACCESS_ACTIONS = ("user.create", "user.remove", "member.access", "member.scope",
                   "member.party", "role.create", "role.update", "invite.create")
 
 
+
+
+class _TicketsZero:
+    """Пустой ответ по заявкам: контур Поддержки недоступен этому пространству.
+
+    Нули, а не отсутствие ключей: экраны читают поля напрямую, и «нет данных»
+    здесь означает «заявок не видно», а не «ошибка».
+    """
+
+    created = closed = created_prev = closed_prev = 0
+    own_open = own_sla = own_sla_stale = own_reopen = ext_open = ext_old = 0
+    n = 0
+    at = None
+
+
+async def _tickets_available(db: AsyncSession) -> bool:
+    """Есть ли у пространства доступ к таблице заявок Поддержки.
+
+    У части пространств Поддержка стоит отдельным контуром, и прав на её таблицы
+    у Ядра нет. Это НЕ ошибка: заявок просто не видно, и экран должен показать
+    остальное, а не упасть целиком.
+    """
+    try:
+        return bool((await db.execute(text(
+            "SELECT has_table_privilege(current_user, 'tickets', 'SELECT')"))).scalar())
+    except Exception:
+        return False
+
+
 async def _access_snapshot(db: AsyncSession, cid: str) -> dict[str, Any]:
     """Люди и доступ: то, что касается руководителя лично.
 
@@ -187,6 +216,13 @@ PULSE_ITEMS: list[tuple[str, str, str]] = [
     ("business.objects", "Где болит", "Бизнес"),
     ("business.support", "Поддержка", "Бизнес"),
     ("business.summary", "Коротко", "Бизнес"),
+    # Пункты «Бизнеса» бухгалтерского пространства: предмет другой, права такие же.
+    ("business.money", "Деньги", "Бизнес"),
+    ("business.accounting", "Учёт", "Бизнес"),
+    ("business.taxes", "Налоги", "Бизнес"),
+    ("business.requests", "Чего ждём", "Бизнес"),
+    ("business.deadlines", "Сроки", "Бизнес"),
+    ("business.tasks", "Задачи", "Бизнес"),
     ("team.people", "Люди", "Команда"),
     ("team.departments", "Подразделения", "Команда"),
     ("team.access", "Доступ", "Команда"),
@@ -221,12 +257,22 @@ CARD_SCOPE = {
     "ops_jump": "business.ops", "ops_contracts": "business.ops",
     "obj_idle_cost": "business.objects",
     "access_admins": "team.access", "access_invites": "team.access",
+    # Офисное пространство: карточки о деньгах учёта, документах и сроках.
+    "doc_overdue": "business.requests", "intake_waiting": "business.requests",
+    "tax_overdue": "business.deadlines", "tax_next": "business.deadlines",
+    "periods_open": "business.accounting",
 }
 KPI_SCOPE = {
     "revenue": "business.sales", "sessions": "business.sales",
     "silent": "business.sales", "cc_missed": "business.contacts",
     "own_open": "business.support", "ext_open": "business.support",
     "funnel": "business.projects", "people": "team.people",
+    # Офисные плитки: у выручки свой ключ (`money_revenue`), потому что «revenue»
+    # уже занят продажами сети, и общая область прав скрывала бы её не по делу.
+    "money_revenue": "business.money", "profit": "business.money",
+    "vat": "business.taxes",
+    "receivable": "business.money", "doc_requests": "business.requests",
+    "periods": "business.accounting",
 }
 
 
@@ -322,6 +368,36 @@ async def _profile(db: AsyncSession, cid: str) -> str:
 # начислений — месяц: они и приходят раз в месяц.
 def _data_sources(profile: str) -> list[dict[str, Any]]:
     """Приёмники этого профиля: у топлива продажи едут заправками, у ЭЗС — сессиями."""
+    # Бухгалтерское пространство кормится другим: выгрузкой из 1С, почтой и
+    # первичкой. Сетевой список там показывал пять молчащих контуров, которых в
+    # компании нет вовсе, — и экран «чему верить» сам переставал вызывать доверие.
+    if profile == "office":
+        return [
+            {"key": "gl", "label": "Проводки из 1С", "feeds": "«Деньги», «Налоги»",
+             "window": 14,
+             "sql": "select max(created_at) as at, count(*) as n from gl_entries"
+                    " where company_id = :cid"},
+            {"key": "docs", "label": "Документы из 1С", "feeds": "«Учёт», «Контрагенты»",
+             "window": 14,
+             "sql": "select max(created_at) as at, count(*) as n from accounting_docs"
+                    " where company_id = :cid"},
+            {"key": "balances", "label": "Остатки по счетам", "feeds": "«Деньги», «Сроки»",
+             "window": 35,
+             "sql": "select max(created_at) as at, count(*) as n from gl_balances"
+                    " where company_id = :cid"},
+            {"key": "intake", "label": "Первичка на приёмке", "feeds": "«Загрузка»",
+             "window": 30,
+             "sql": "select max(created_at) as at, count(*) as n from intake_batches"
+                    " where company_id = :cid"},
+            {"key": "mail", "label": "Почта компании", "feeds": "«Чего ждём», «Контрагенты»",
+             "window": 14,
+             "sql": "select max(created_at) as at, count(*) as n from mail_messages"
+                    " where company_id = :cid"},
+            {"key": "tasks", "label": "Задачи", "feeds": "«Задачи»",
+             "window": 14,
+             "sql": "select max(created_at) as at, count(*) as n from tasks"
+                    " where company_id = :cid"},
+        ]
     table, ts, _amt, _vol, _lbl, _loc, _word = PROFILE_SALES[profile]
     sales_label = "Операции АЗС" if profile == "fuel" else "Сессии сети"
     return [
@@ -352,7 +428,11 @@ async def _sources_snapshot(db: AsyncSession, cid: str) -> list[dict[str, Any]]:
     проектов ЭЗС, и тревога по ним сообщала бы о поломке там, где просто другой
     набор продуктов.
     """
-    profile = await _profile(db, cid)
+    profile = (await db.execute(text(
+        "select profile_id from companies where id = :cid"),
+        {"cid": cid})).scalar_one_or_none() or ""
+    if profile != "office":
+        profile = await _profile(db, cid)
     out: list[dict[str, Any]] = []
     for src in _data_sources(profile):
         try:
@@ -804,7 +884,13 @@ def _kpi(key: str, title: str, value: float | int | None, *, unit: str | None = 
 
 
 def _dpct(cur: float, prev: float) -> float | None:
-    if not prev:
+    """Динамика в процентах. Молчит, когда любое из окон пусто.
+
+    Ноль в ТЕКУЩЕМ окне почти всегда означает «данные ещё не доехали», а не падение
+    до нуля, — и «−100 %» на плитке читается как катастрофа. Та же защита стоит в
+    `_delta` с тем же обоснованием: это самая опасная ложь витрины.
+    """
+    if not prev or not cur:
         return None
     return round((cur - prev) / prev * 100, 1)
 
@@ -1267,9 +1353,12 @@ async def pulse_day(
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Экран дня: строка KPI по направлениям + карточки-эскалации (сводки)."""
-    await assert_company_product(company_id, current_user, db, "pulse")
-    visible = await _visible_items(db, str(company_id), current_user, as_role)
-    return await pulse_day_data(db, str(company_id), visible)
+    # Проверка доступа возвращает UUID компании — им и работаем: внутренние запросы
+    # кастуют `:cid` в uuid, и переданный slug («rti») ронял весь экран пятисоткой
+    # «invalid UUID». Остальные продукты пространства slug принимают, этот — нет.
+    cid = await assert_company_product(company_id, current_user, db, "pulse")
+    visible = await _visible_items(db, str(cid), current_user, as_role)
+    return await pulse_day_data(db, str(cid), visible)
 
 
 async def pulse_day_data(db: AsyncSession, company_id: str,
@@ -1284,6 +1373,15 @@ async def pulse_day_data(db: AsyncSession, company_id: str,
     # Чем мерить продажи, решает профиль: у топливного пространства это заправки,
     # у ЭЗС — зарядные сессии. Раньше таблица была зашита, и на профиле fuel экран
     # дня тревожно писал «Данных о сессиях нет» при 376 744 живых заправках.
+    # У бухгалтерского пространства сети нет вовсе, и весь сетевой набор — сессии,
+    # молчащие станции, воронка проектов — давал пустой экран с тревожной карточкой
+    # «Данных о сессиях нет». Там мерят другим: деньгами учёта, документами и сроками.
+    # Профиль спрашиваем НАПРЯМУЮ: `_profile` знает только отраслевые профили
+    # продаж и всё остальное сводит к `energy` — «office» до проверки не доживал.
+    if (await db.execute(text(
+            "select profile_id from companies where id = :cid"),
+            {"cid": cid})).scalar_one_or_none() == "office":
+        return await _office_day_data(db, cid, visible)
     profile = await _profile(db, cid)
     TBL, TS, AMT, VOL, VOL_LABEL, LOC, SESS_WORD = PROFILE_SALES[profile]
 
@@ -1326,7 +1424,8 @@ async def pulse_day_data(db: AsyncSession, company_id: str,
     # (не closed/cancelled), иначе «Пульс» и «Заявки» разойдутся в цифре.
     # company_id тут не фильтруется сознательно — как во всей витрине заявок
     # (предусловие мультикомпанийности, PULSE.md §7): чинить в одном месте.
-    t = (await db.execute(text(f"""
+    # Заявки — чужой контур: без прав на него экран показывает остальное.
+    t = _TicketsZero() if not await _tickets_available(db) else (await db.execute(text(f"""
         select count(*) filter (where external_system is null) as own_open,
                count(*) filter (where external_system is null
                                 and coalesce(sla_breached, false)) as own_sla,
@@ -1456,6 +1555,286 @@ async def pulse_day_data(db: AsyncSession, company_id: str,
     }
 
 
+_MONTHS_RU = ("январь", "февраль", "март", "апрель", "май", "июнь", "июль",
+              "август", "сентябрь", "октябрь", "ноябрь", "декабрь")
+
+
+async def _books_anchor(db: AsyncSession, cid: str) -> date:
+    """Последний месяц, за который в учёте есть проводки.
+
+    Выгрузка из 1С приезжает с задержкой: у аутсорсера август идёт, а закрытые
+    цифры кончаются июлем. Считать «за текущий месяц» по календарю значит
+    показать руководителю и заказчику ноль — тогда как деньги за период есть.
+    Опора — последний месяц с данными, и он же называется в подписи.
+    """
+    # Месяц опознаётся по ХОЗЯЙСТВЕННОЙ деятельности — оборотам счетов результата
+    # (90/91), а не по числу проводок. В идущем месяце уже есть зарплата, отпуска и
+    # платежи по ЕНС: два десятка проводок без единой продажи. По ним якорь уезжал на
+    # такой месяц, и витрина показывала «Выручка за месяц 0 ₽, −100 %» — ровно тот ноль,
+    # ради избежания которого якорь и написан.
+    row = (await db.execute(text("""
+        SELECT period_year, period_month FROM gl_entries
+         WHERE company_id = CAST(:cid AS uuid)
+           AND (account_dt LIKE '90%' OR account_kt LIKE '90%'
+                OR account_dt LIKE '91%' OR account_kt LIKE '91%')
+         GROUP BY 1, 2 HAVING count(*) > 2
+         ORDER BY 1 DESC, 2 DESC LIMIT 1"""), {"cid": cid})).first()
+    if not row:
+        return date.today()
+    y, m = int(row[0]), int(row[1])
+    last = date(y + (m // 12), (m % 12) + 1, 1) - timedelta(days=1)
+    return min(last, date.today())
+
+
+
+async def _office_week_data(db: AsyncSession, cid: str) -> dict[str, Any]:
+    """«Неделя» бухгалтерского пространства: что доехало, что разобрали, чего ждём.
+
+    Тот же жанр, что у сети: семь дней против предыдущих семи. Предмет другой —
+    документы из 1С, пакеты первички, требования к клиенту, задачи и письма.
+    """
+    def pair(table: str, ts: str = "created_at", extra: str = "") -> str:
+        return f"""
+            select count(*) filter (where {ts} >= now() - interval '7 days') as n,
+                   count(*) filter (where {ts} >= now() - interval '14 days'
+                                      and {ts} < now() - interval '7 days') as p
+              from {table} where company_id = CAST(:cid AS uuid) {extra}"""
+
+    rows: list[dict[str, Any]] = []
+    for label, sql, better in (
+        ("Документов доехало", pair("accounting_docs"), True),
+        ("Проводок доехало", pair("gl_entries"), True),
+        ("Пакетов первички", pair("intake_batches"), True),
+        ("Требований выставлено", pair("doc_requests"), True),
+        ("Требований закрыто", pair("doc_requests", "updated_at",
+                                    "and status = 'closed'"), True),
+        ("Периодов закрыто", pair("periods", "closed_at", "and status = 'closed'"), True),
+        ("Задач поставлено", pair("tasks"), True),
+        ("Задач закрыто", pair("tasks", "closed_at", "and closed_at is not null"), True),
+        ("Писем получено", pair("mail_messages", "created_at", "and direction = 'in'"), True),
+    ):
+        try:
+            r = (await db.execute(text(sql), {"cid": cid})).one()
+        except Exception:  # noqa: BLE001 — таблицы может не быть в этом пространстве
+            continue
+        # Строку показываем и с нулём: исчезнувшая метрика читается как поломка,
+        # а «0 против 0» — как честное «на этой неделе тихо».
+        rows.append({"label": label, "value": r.n, "prev": r.p,
+                     "unit": None, "higher_is_better": better})
+
+    # Что именно сдвинулось: закрытые периоды и требования — с именами, а не числом.
+    highlights = [{"at": r.at.isoformat() if r.at else None, "text": r.txt}
+                  for r in (await db.execute(text("""
+        select closed_at as at,
+               'закрыт период ' || year || '-' || lpad(month::text, 2, '0') as txt
+          from periods
+         where company_id = CAST(:cid AS uuid) AND status = 'closed'
+           and closed_at >= now() - interval '7 days'
+        union all
+        select updated_at,
+               'документ получен: ' || coalesce(counterparty_name, '—')
+               || ' · ' || coalesce(doc_kind, 'документ')
+          from doc_requests
+         where company_id = CAST(:cid AS uuid) AND status = 'closed'
+           and updated_at >= now() - interval '7 days'
+        order by 1 desc limit 10"""), {"cid": cid})).all()]
+
+    as_of = (await db.execute(text("""
+        SELECT max(as_of)::text FROM gl_balances
+         WHERE company_id = CAST(:cid AS uuid) AND source <> 'monthly'"""),
+        {"cid": cid})).scalar()
+    return {"rows": rows, "highlights": highlights, "as_of": as_of}
+
+
+async def _office_day_data(db: AsyncSession, cid: str,
+                           visible: set[str] | None = None) -> dict[str, Any]:
+    """Экран дня бухгалтерского пространства: деньги учёта, документы, сроки.
+
+    Тот же жанр, что и сетевой: строка плиток и карточки-эскалации. Меняется
+    только предмет — вместо «молчащих станций» здесь «требования просрочены»,
+    вместо выручки сети выручка по данным учёта клиента.
+
+    Цифры считаются ТЕМИ ЖЕ формулами, что «Бухгалтерия» и витрина (`_result_window`,
+    68.02 по счёту, дебиторка дебетом 62): второй набор определений в одном
+    пространстве расходится с первым на первой же правке.
+    """
+    p = {"cid": cid, "org": None}
+    anchor = await _books_anchor(db, cid)
+    since, till, prev_since, prev_till = _period_bounds("month", anchor)
+
+    # Свежесть: чем свежее срез остатков, тем к какой дате относятся деньги.
+    as_of_raw = (await db.execute(text("""
+        SELECT max(as_of)::text FROM gl_balances
+         WHERE company_id = CAST(:cid AS uuid) AND source <> 'monthly'"""),
+        {"cid": cid})).scalar()
+    as_of = datetime.fromisoformat(as_of_raw) if as_of_raw else None
+    stale_days = (date.today() - as_of.date()).days if as_of else None
+
+    rev, prof = await _result_window(db, p, since, till)
+    rev_was, prof_was = await _result_window(db, p, prev_since, prev_till)
+
+    vat = float((await db.execute(text("""
+        SELECT coalesce(sum(amount) FILTER (WHERE account_kt LIKE '68.02%'), 0)
+             - coalesce(sum(amount) FILTER (WHERE account_dt LIKE '68.02%'
+                                              AND account_kt NOT LIKE '51%'
+                                              AND account_kt NOT LIKE '68.90%'), 0)
+          FROM gl_entries
+         WHERE company_id = CAST(:cid AS uuid)
+           AND make_date(period_year, period_month, 1)
+               BETWEEN date_trunc('month', CAST(:a AS date))::date AND CAST(:b AS date)"""),
+        {"cid": cid, "a": since, "b": till})).scalar_one() or 0)
+    tax_mode = await _tax_mode(db, p)
+
+    # Долг покупателей — дебет 62 по последнему срезу (дебет 60 это авансы, не долг).
+    debt = float((await db.execute(text("""
+        SELECT coalesce(sum(debit), 0) FROM gl_balances
+         WHERE company_id = CAST(:cid AS uuid) AND source <> 'monthly'
+           AND account LIKE '62%'
+           AND as_of = (SELECT max(as_of) FROM gl_balances
+                         WHERE company_id = CAST(:cid AS uuid) AND source <> 'monthly')"""),
+        {"cid": cid})).scalar_one() or 0)
+
+    req = (await db.execute(text("""
+        SELECT count(*) AS open,
+               count(*) FILTER (WHERE due_date IS NOT NULL
+                                  AND due_date < to_char(CURRENT_DATE, 'YYYY-MM-DD')) AS overdue
+          FROM doc_requests
+         WHERE company_id = CAST(:cid AS uuid)
+           AND status IN ('open','requested','promised')"""), {"cid": cid})).one()
+
+    per = (await db.execute(text("""
+        SELECT count(*) FILTER (WHERE status = 'closed') AS closed, count(*) AS total
+          FROM periods WHERE company_id = CAST(:cid AS uuid)"""), {"cid": cid})).one()
+
+    tax_overdue = (await db.execute(text("""
+        SELECT count(*) FROM gl_references
+         WHERE company_id = CAST(:cid AS uuid) AND kind = 'tax_calendar'
+           AND coalesce(meta->>'В архиве', 'false') <> 'true'
+           AND coalesce(meta->>'Статус', '') <> 'Сдано'
+           AND code < to_char(CURRENT_DATE, 'YYYY-MM-DD')
+           AND code >= to_char(CURRENT_DATE - 60, 'YYYY-MM-DD')"""),
+        {"cid": cid})).scalar_one()
+    tax_next = (await db.execute(text("""
+        SELECT code, name FROM gl_references
+         WHERE company_id = CAST(:cid AS uuid) AND kind = 'tax_calendar'
+           AND coalesce(meta->>'В архиве', 'false') <> 'true'
+           AND code >= to_char(CURRENT_DATE, 'YYYY-MM-DD')
+         ORDER BY code LIMIT 1"""), {"cid": cid})).first()
+
+    # Первичка, доехавшая, но не разобранная до конца: работа, которая стоит.
+    intake = (await db.execute(text("""
+        SELECT count(*) FROM intake_batches
+         WHERE company_id = CAST(:cid AS uuid) AND status = 'parsed'"""),
+        {"cid": cid})).scalar_one()
+
+    people = (await db.execute(text("""
+        select count(*) filter (where u.last_seen_at > now() - interval '6 minutes') as online,
+               count(*) filter (where u.last_seen_at >= current_date) as today,
+               count(*) as total
+        from users u join user_companies uc on uc.user_id = u.id
+        where uc.company_id = :cid"""), {"cid": cid})).one()
+
+    m_label = "%s %d" % (_MONTHS_RU[till.month - 1], till.year)
+    kpi: list[dict[str, Any]] = [
+        _kpi("money_revenue", "Выручка за месяц, ₽", round(rev),
+             delta_pct=_dpct(rev, rev_was), note=m_label, link="/books?tab=trends"),
+        _kpi("profit", "Прибыль за месяц, ₽", round(prof),
+             delta_pct=_dpct(prof, prof_was), note=m_label, link="/books?tab=trends"),
+        # Плитка остаётся на любом режиме: пропавшая плитка читается как поломка, а
+        # ноль без объяснения — как потерянные данные. На УСН подпись говорит, почему.
+        _kpi("vat", "НДС к уплате, ₽", round(vat),
+             note=("%s · оценка до закрытия" % m_label if tax_mode["vat"]
+                   else "%s · на %s НДС не начисляется"
+                        % (m_label, tax_mode["label"] or "этом режиме")),
+             link="/books?tab=taxes", higher_is_better=False),
+        _kpi("receivable", "Должны вам, ₽", round(debt),
+             note=f"на {_ru_date(as_of_raw)}" if as_of_raw else None,
+             link="/counterparties", higher_is_better=False),
+    ]
+    if req.open:
+        kpi.append(_kpi("doc_requests", "Ждём документов", req.open,
+                        note=f"срок прошёл: {req.overdue}",
+                        state="warn" if req.overdue else None,
+                        link="/books?tab=requests", higher_is_better=False))
+    if per.total:
+        kpi.append(_kpi("periods", "Периодов закрыто", per.closed,
+                        note=f"из {per.total}", link="/books?tab=closing"))
+    kpi.append(_kpi("people", "Сейчас в системе", people.online,
+                    note=f"за сегодня: {people.today} из {people.total}",
+                    link="/pulse/team"))
+
+    acked = {r.card_key for r in (await db.execute(text("""
+        select card_key from pulse_acks
+        where company_id = :cid
+          and (acked_on = current_date
+               or (snooze_until is not null and snooze_until >= current_date))"""),
+        {"cid": cid})).all()}
+
+    cards: list[dict[str, Any]] = []
+
+    def card(key: str, title: str, insight: str, *, count: int | None = None,
+             level: str = "warn", link: str | None = None) -> None:
+        if key in acked:
+            return
+        cards.append({"key": key, "title": title, "insight": insight,
+                      "count": count, "level": level, "link": link})
+
+    # №0 — свежесть: без неё остальные цифры обсуждать нельзя (правило то же,
+    # что и у сети, предмет другой — выгрузка из 1С, а не сессии).
+    if stale_days is None:
+        card("books_stale", "Данных учёта нет",
+             "Из 1С ещё ничего не доехало: считать по чему.",
+             level="alert", link="/connect")
+    elif stale_days > 30:
+        card("books_stale", "Учёт не обновлялся",
+             f"Последняя выгрузка из 1С на {_ru_date(as_of_raw)}: прошло "
+             f"{stale_days} дн. Цифры верны только по эту дату.",
+             count=stale_days, level="alert", link="/connect")
+
+    if req.overdue:
+        card("doc_overdue", "Документы не приходят в срок",
+             f"{req.overdue} {plural(req.overdue, 'требование', 'требования', 'требований')} "
+             f"с прошедшим сроком: без них период не закрыть и вычет не заявить.",
+             count=req.overdue, link="/books?tab=requests")
+
+    if tax_overdue:
+        card("tax_overdue", "Сроки отчётности прошли",
+             f"{tax_overdue} {plural(tax_overdue, 'срок', 'срока', 'сроков')} в календаре "
+             f"не отмечены сданными — проверьте, что отчёт ушёл.",
+             count=tax_overdue, level="alert", link="/books?tab=calendar")
+    elif tax_next:
+        card("tax_next", "Ближайший срок отчётности",
+             f"{tax_next[1]} — до {_ru_date(tax_next[0])}.",
+             level="info", link="/books?tab=calendar")
+
+    if intake:
+        card("intake_waiting", "Первичка ждёт разбора",
+             f"{intake} {plural(intake, 'пакет', 'пакета', 'пакетов')} загружено, но не "
+             f"принято в учёт: пока не примете, документы не станут проводками.",
+             count=intake, link="/intake")
+
+    if per.total and per.closed < per.total:
+        open_p = per.total - per.closed
+        card("periods_open", "Периоды не закрыты",
+             f"{open_p} {plural(open_p, 'период', 'периода', 'периодов')} открыто: "
+             f"цифры в них ещё могут измениться.",
+             count=open_p, level="info", link="/books?tab=closing")
+
+    if visible is not None:
+        cards = [c for c in cards
+                 if CARD_SCOPE.get(c["key"]) is None or CARD_SCOPE[c["key"]] in visible]
+        kpi = [k for k in kpi if KPI_SCOPE.get(k["key"]) is None
+               or KPI_SCOPE[k["key"]] in visible]
+
+    return {
+        "as_of": as_of.isoformat() if as_of else None,
+        "stale_days": stale_days,
+        "kpi": kpi,
+        "cards": cards,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 @router.get("/business")
 async def pulse_business(
     company_id: str = Query(...),
@@ -1467,8 +1846,8 @@ async def pulse_business(
     Ни фамилий, ни заявок (PULSE.md §3): куратора интересует, в каком состоянии
     дело и как оно движется, а операциями занят директор.
     """
-    await assert_company_product(company_id, current_user, db, "pulse")
-    cid = str(company_id)
+    cid = await assert_company_product(company_id, current_user, db, "pulse")
+    cid = str(cid)
 
     profile = await _profile(db, cid)
     TBL, TS, AMT, VOL, VOL_LABEL, LOC, SESS_WORD = PROFILE_SALES[profile]
@@ -1625,8 +2004,8 @@ async def pulse_access(
     Не слежка за присутствием (PULSE.md §3), а риск: доступ переживает людей, и
     единственный, кому это видно целиком, — руководитель пространства.
     """
-    await assert_company_product(company_id, current_user, db, "pulse")
-    a = await _access_snapshot(db, str(company_id))
+    cid = await assert_company_product(company_id, current_user, db, "pulse")
+    a = await _access_snapshot(db, str(cid))
     kpi = [
         _kpi("members", "Людей в пространстве", a["members"]),
         _kpi("admins", "С полным доступом", a["admins"],
@@ -1658,15 +2037,15 @@ async def pulse_sources(
     цифрам сегодня можно верить. Реестр коннекторов для этого не годится —
     коннектор бывает «активным» при том, что данные не приезжали неделю.
     """
-    await assert_company_product(company_id, current_user, db, "pulse")
-    items = await _sources_snapshot(db, str(company_id))
+    cid = await assert_company_product(company_id, current_user, db, "pulse")
+    items = await _sources_snapshot(db, str(cid))
     # Каналы обмена — как их видит Учёт: имя, расписание, последний обмен.
     channels = [{"name": r.name, "status": r.status, "docs": r.docs_loaded or 0,
                  "last_sync": r.last_sync_at.isoformat() if r.last_sync_at else None}
                 for r in (await db.execute(text("""
         select name, status, docs_loaded, last_sync_at from channels
         where company_id = :cid order by last_sync_at desc nulls last limit 12
-    """), {"cid": str(company_id)})).all()]
+    """), {"cid": str(cid)})).all()]
     return {"items": items, "channels": channels,
             "stale": sum(1 for i in items if i["stale"])}
 
@@ -1872,8 +2251,8 @@ async def pulse_targets(
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Пороги эскалаций: что настроено и что предлагается по умолчанию."""
-    await assert_company_product(company_id, current_user, db, "pulse")
-    th = await _thresholds(db, str(company_id))
+    cid = await assert_company_product(company_id, current_user, db, "pulse")
+    th = await _thresholds(db, str(cid))
     return {"items": [{
         "key": k, "value": th[k], "default": float(v["default"]),
         "is_custom": abs(th[k] - float(v["default"])) > 1e-9,
@@ -1927,8 +2306,8 @@ async def pulse_objects(
     порядке. Здесь они сведены по одному ключу, и в список попадает точка, у
     которой сошлось несколько независимых признаков сразу.
     """
-    await assert_company_product(company_id, current_user, db, "pulse")
-    s = await _objects_snapshot(db, str(company_id))
+    cid = await assert_company_product(company_id, current_user, db, "pulse")
+    s = await _objects_snapshot(db, str(cid))
     if not s:
         return {"available": False, "kpi": [], "pain": []}
 
@@ -1964,8 +2343,8 @@ async def pulse_operations(
     договору) и ФАКТ (документ от контрагента) — разные вещи. Пока акта нет, это
     не расход, а обещание, и закрывать месяц по ожиданиям нельзя.
     """
-    await assert_company_product(company_id, current_user, db, "pulse")
-    cid = str(company_id)
+    cid = await assert_company_product(company_id, current_user, db, "pulse")
+    cid = str(cid)
     s = await _ops_snapshot(db, cid)
     if not s.get("charges") and not s.get("docs_overdue"):
         return {"available": False, "kpi": [], "items": [], "counterparties": [],
@@ -2072,8 +2451,8 @@ async def pulse_projects(
     потому что «46 застряло» задачей не становится, а «Магадан, Пролетарская 66,
     175 дней в проработке, ведущего нет» — становится.
     """
-    await assert_company_product(company_id, current_user, db, "pulse")
-    cid = str(company_id)
+    cid = await assert_company_product(company_id, current_user, db, "pulse")
+    cid = str(cid)
     s = await _projects_snapshot(db, cid)
     if not s.get("active"):
         return {"available": False, "kpi": [], "stages": [], "longest": [],
@@ -2168,8 +2547,8 @@ async def pulse_sales(
     которого нет больше нигде: ЧТО именно двигает недельную цифру — конкретные
     станции и регионы, а не «выручка упала на 10%».
     """
-    await assert_company_product(company_id, current_user, db, "pulse")
-    cid = str(company_id)
+    cid = await assert_company_product(company_id, current_user, db, "pulse")
+    cid = str(cid)
 
     profile = await _profile(db, cid)
     TBL, TS, AMT, VOL, VOL_LABEL, LOC, SESS_WORD = PROFILE_SALES[profile]
@@ -2426,41 +2805,12 @@ async def pulse_team(
     помочь и у кого работа стоит. Заявки Поддержки соединяются с людьми Ядра по
     email — той же связкой, что и разрез по подразделениям в «Заявках».
     """
-    await assert_company_product(company_id, current_user, db, "pulse")
-    cid = str(company_id)
-
-    # Человек виден СРАЗУ во всех приложениях пространства (постановка МАГа
-    # 31.07.2026): штатное место, заявки, проекты, чаты, журнал. Иначе руководитель
-    # смотрит пять экранов, чтобы понять, чем занят один сотрудник.
-    people = [{
-        "id": str(r.id),
-        "name": r.name, "email": r.email, "department": r.dept,
-        "is_head": r.is_head, "party": r.party_type, "position": r.position,
-        "last_seen": r.last_seen_at.isoformat() if r.last_seen_at else None,
-        # Заявки: связь Ядра и Поддержки по email — та же, что в разрезе «Заявок».
-        "open": r.open_tickets, "breached": r.breached,
-        "authored": r.authored_tickets, "closed_30d": r.closed_30d,
-        # Проекты: ведёт (ответственный) и сколько правок внёс за 30 дней.
-        "projects_owned": r.projects_owned, "project_edits_30d": r.project_edits,
-        # Чаты и общая активность в пространстве.
-        "chat_rooms": r.chat_rooms, "actions_30d": r.actions_30d,
-    } for r in (await db.execute(text("""
-        select u.id, u.name, u.email, u.last_seen_at, uc.party_type, uc.position,
-               od.name as dept,
-               (od.head_user_id = u.id) as is_head,
-               coalesce(t.open, 0) as open_tickets,
-               coalesce(t.breached, 0) as breached,
-               coalesce(t.authored, 0) as authored_tickets,
-               coalesce(t.closed_30d, 0) as closed_30d,
-               coalesce(p.owned, 0) as projects_owned,
-               coalesce(p.edits, 0) as project_edits,
-               coalesce(c.rooms, 0) as chat_rooms,
-               coalesce(a.n, 0) as actions_30d
-        from users u
-        join user_companies uc on uc.user_id = u.id and uc.company_id = :cid
-        left join org_departments od on od.id = uc.department_id
-        left join lateral (
-            select count(*) filter (where tk.status not in ('closed','cancelled')
+    cid = await assert_company_product(company_id, current_user, db, "pulse")
+    cid = str(cid)
+    tickets_ok = await _tickets_available(db)
+    # Без прав на заявки колонка считается нулями: остальная картина по
+    # человеку (проекты, чаты, действия) от этого не страдает.
+    tickets_block = """select count(*) filter (where tk.status not in ('closed','cancelled')
                                     and (au.id is not null)) as open,
                    count(*) filter (where tk.status not in ('closed','cancelled')
                                     and au.id is not null
@@ -2479,7 +2829,41 @@ async def pulse_team(
                  and lower(cu.email) = lower(u.email)
             where coalesce(tk.is_deleted,false) = false
               and coalesce(tk.is_archived,false) = false
-              and (au.id is not null or cu.id is not null)
+              and (au.id is not null or cu.id is not null)""" if tickets_ok else (
+        "select 0 as open, 0 as breached, 0 as authored, 0 as closed_30d")
+
+    # Человек виден СРАЗУ во всех приложениях пространства (постановка МАГа
+    # 31.07.2026): штатное место, заявки, проекты, чаты, журнал. Иначе руководитель
+    # смотрит пять экранов, чтобы понять, чем занят один сотрудник.
+    people = [{
+        "id": str(r.id),
+        "name": r.name, "email": r.email, "department": r.dept,
+        "is_head": r.is_head, "party": r.party_type, "position": r.position,
+        "last_seen": r.last_seen_at.isoformat() if r.last_seen_at else None,
+        # Заявки: связь Ядра и Поддержки по email — та же, что в разрезе «Заявок».
+        "open": r.open_tickets, "breached": r.breached,
+        "authored": r.authored_tickets, "closed_30d": r.closed_30d,
+        # Проекты: ведёт (ответственный) и сколько правок внёс за 30 дней.
+        "projects_owned": r.projects_owned, "project_edits_30d": r.project_edits,
+        # Чаты и общая активность в пространстве.
+        "chat_rooms": r.chat_rooms, "actions_30d": r.actions_30d,
+    } for r in (await db.execute(text(f"""
+        select u.id, u.name, u.email, u.last_seen_at, uc.party_type, uc.position,
+               od.name as dept,
+               (od.head_user_id = u.id) as is_head,
+               coalesce(t.open, 0) as open_tickets,
+               coalesce(t.breached, 0) as breached,
+               coalesce(t.authored, 0) as authored_tickets,
+               coalesce(t.closed_30d, 0) as closed_30d,
+               coalesce(p.owned, 0) as projects_owned,
+               coalesce(p.edits, 0) as project_edits,
+               coalesce(c.rooms, 0) as chat_rooms,
+               coalesce(a.n, 0) as actions_30d
+        from users u
+        join user_companies uc on uc.user_id = u.id and uc.company_id = :cid
+        left join org_departments od on od.id = uc.department_id
+        left join lateral (
+            {tickets_block}
         ) t on true
         left join lateral (
             select (select count(*) from ezs_projects pr
@@ -2529,8 +2913,8 @@ async def pulse_person(
     Открывается из «Команды» разворотом строки — руководителю нужен не только
     счётчик, но и ответ «что именно у него в работе и куда он ходит».
     """
-    await assert_company_product(company_id, current_user, db, "pulse")
-    cid, uid = str(company_id), str(user_id)
+    cid = await assert_company_product(company_id, current_user, db, "pulse")
+    cid, uid = str(cid), str(user_id)
 
     who = (await db.execute(text("""
         select u.name, u.email, u.last_seen_at, uc.position, uc.party_type,
@@ -2544,7 +2928,7 @@ async def pulse_person(
     if who is None:
         return {"found": False}
 
-    tickets = [{
+    tickets = [] if not await _tickets_available(db) else [{
         "number": r.display_number or r.number, "title": r.title, "status": r.status,
         "breached": bool(r.sla_breached), "object": r.obj,
         "created": r.created_at.isoformat() if r.created_at else None,
@@ -2617,13 +3001,20 @@ async def pulse_week(
     Доставка утренним письмом живёт отдельно (`services/pulse_digest.py`) и
     считает тот же экран дня, поэтому здесь только запрос-ответ.
     """
-    await assert_company_product(company_id, current_user, db, "pulse")
-    return await pulse_week_data(db, str(company_id))
+    cid = await assert_company_product(company_id, current_user, db, "pulse")
+    return await pulse_week_data(db, str(cid))
 
 
 async def pulse_week_data(db: AsyncSession, company_id: str) -> dict[str, Any]:
     """Данные «Недели» без проверки доступа — её делает вызывающий (и выгрузка)."""
     cid = str(company_id)
+
+    # Бухгалтерское пространство меряет неделю не сессиями и стадиями проектов, а
+    # тем, что доехало из 1С, что разобрали и чего дождались от клиента.
+    if (await db.execute(text(
+            "select profile_id from companies where id = :cid"),
+            {"cid": cid})).scalar_one_or_none() == "office":
+        return await _office_week_data(db, cid)
 
     profile = await _profile(db, cid)
     TBL, TS, AMT, VOL, VOL_LABEL, LOC, SESS_WORD = PROFILE_SALES[profile]
@@ -2647,7 +3038,9 @@ async def pulse_week_data(db: AsyncSession, company_id: str) -> dict[str, Any]:
         rows.append({"label": SESS_WORD, "value": w.s, "prev": w.sp,
                      "unit": None, "higher_is_better": True})
 
-    t = (await db.execute(text("""
+    # Заявки живут в контуре Поддержки: без прав на него экран показывает
+    # остальное, а не падает целиком.
+    t = _TicketsZero() if not await _tickets_available(db) else (await db.execute(text("""
         select count(*) filter (where created_at >= now() - interval '7 days') as created,
                count(*) filter (where closed_at >= now() - interval '7 days') as closed,
                count(*) filter (where created_at >= now() - interval '14 days'
@@ -3222,6 +3615,47 @@ async def pulse_view_data(
     }
 
 
+@router.get("/blocks")
+async def pulse_blocks(
+    company_id: str = Query(...),
+    keys: str = Query(..., description="ключи блоков через запятую"),
+    period: str = Query("month"),
+    organization_id: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Готовые блоки — те же, что уходят в витрину, но для экранов «Пульса».
+
+    Каталог «Бизнеса» собран под сети (продажи ЭЗС, эксплуатация, объекты), и в
+    бухгалтерском пространстве все его пункты пусты: данных такого рода там нет
+    вовсе. Считать для офиса ВТОРОЙ набор метрик нельзя — разошедшиеся цифры
+    внутри одного пространства хуже отсутствующих, поэтому экраны берут ровно то,
+    что уже посчитано для витрины по ручкам «Бухгалтерии».
+    """
+    cid = str(await assert_company_product(company_id, current_user, db, "pulse"))
+    profile = (await db.execute(text(
+        "SELECT profile_id FROM companies WHERE id = CAST(:cid AS uuid)"),
+        {"cid": cid})).scalar_one_or_none()
+    catalog = {k: t for k, t, _ in await _catalog(db, cid)}
+
+    blocks = []
+    for key in [k.strip() for k in keys.split(",") if k.strip()][:12]:
+        if key == "view.feedback":
+            data = await _feedback_block(db, cid, current_user)
+        elif key.startswith("my."):
+            data = await _my_block(db, cid, current_user, key)
+        elif profile == "office":
+            data = await _office_block_data(db, cid, key, period, organization_id)
+        else:
+            data = await _net_block_data(db, cid, key, _profile_of_row(profile))
+        blocks.append({
+            "key": key, "title": catalog.get(key, key), "hint": None,
+            "metrics": data.get("metrics") or [], "items": data.get("items") or [],
+            "note": data.get("note"), "link": data.get("link"),
+        })
+    return {"blocks": blocks, "asOf": date.today().isoformat()}
+
+
 @router.get("/my-views")
 async def pulse_my_views(
     company_id: str = Query(...),
@@ -3392,6 +3826,29 @@ async def _result_window(db: AsyncSession, p: dict, a, b) -> tuple[float, float]
     return revenue, revenue - float(row[1] or 0)
 
 
+async def _tax_mode(db: AsyncSession, p: dict) -> dict[str, Any]:
+    """Режим налогообложения — по тому, какой налог с дохода компания НАЧИСЛЯЕТ.
+
+    Ставку ОСНО применять ко всем подряд нельзя: у компании на УСН налог считается от
+    дохода, а не от прибыли, и «налог на прибыль 25 %» на её экране — не оценка, а
+    выдуманная цифра. Режимы совмещаются: на УСН докупают патенты под отдельные виды
+    деятельности, и тогда счета 68.12 и 68.45 работают вместе.
+    """
+    row = (await db.execute(text("""
+        SELECT count(*) FILTER (WHERE account_dt LIKE '68.04%' OR account_kt LIKE '68.04%'),
+               count(*) FILTER (WHERE account_dt LIKE '68.12%' OR account_kt LIKE '68.12%'),
+               count(*) FILTER (WHERE account_dt LIKE '68.45%' OR account_kt LIKE '68.45%'),
+               count(*) FILTER (WHERE account_dt LIKE '68.02%' OR account_kt LIKE '68.02%')
+          FROM gl_entries
+         WHERE company_id = CAST(:cid AS uuid)
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL
+                OR organization_id = CAST(:org AS uuid))"""), p)).one()
+    osno, usn, patent, vat = (bool(x) for x in row)
+    names = [n for n, on in (("ОСНО", osno), ("УСН", usn), ("патент", patent)) if on]
+    return {"osno": osno, "usn": usn, "patent": patent, "vat": vat,
+            "label": " + ".join(names) if names else None}
+
+
 async def _office_block_data(db: AsyncSession, cid: str, key: str,
                              period: str = "month",
                              org: str | None = None) -> dict[str, Any]:
@@ -3405,7 +3862,8 @@ async def _office_block_data(db: AsyncSession, cid: str, key: str,
     # условием, что и в «Бухгалтерии»: строки без организации видны в любом разрезе
     # (они старше появления оси), чужие — нет.
     p = {"cid": cid, "org": org}
-    since, till, prev_since, prev_till = _period_bounds(period, date.today())
+    # Окно — от последнего месяца с данными, а не от календарного: см. `_books_anchor`.
+    since, till, prev_since, prev_till = _period_bounds(period, await _books_anchor(db, cid))
 
     if key == "books.state":
         docs, entries = (await db.execute(text("""
@@ -3502,20 +3960,59 @@ async def _office_block_data(db: AsyncSession, cid: str, key: str,
 
         vat = float(await vat_for(since, till) or 0)
         vat_was = float(await vat_for(prev_since, prev_till) or 0)
-        _, profit = await _result_window(db, p, since, till)
-        _, profit_was = await _result_window(db, p, prev_since, prev_till)
-        rate = 0.25 if till.year >= 2025 else 0.20
-        tax = max(profit, 0) * rate
-        tax_was = max(profit_was, 0) * rate
+        mode = await _tax_mode(db, p)
+
+        if mode["osno"] or not (mode["usn"] or mode["patent"]):
+            # ОСНО: налог СЧИТАЕМ, а не ждём проводки закрытия — в незакрытом месяце
+            # её нет, и блок показывал бы ноль вместо реальной оценки.
+            _, profit = await _result_window(db, p, since, till)
+            _, profit_was = await _result_window(db, p, prev_since, prev_till)
+            rate = 0.25 if till.year >= 2025 else 0.20
+            tax, tax_was = max(profit, 0) * rate, max(profit_was, 0) * rate
+            tax_label = "Налог на прибыль"
+            note = ("Оценка по данным учёта за период, до закрытия месяца. "
+                    "Декларацию формирует бухгалтерия.")
+        else:
+            # УСН и патент: считать 25 % от прибыли здесь нельзя — база другая (доход
+            # либо доход минус расходы, у патента вменённая). Берём НАЧИСЛЕННОЕ по
+            # 68.12 и 68.45: это факт учёта, а не наша модель чужого режима.
+            async def income_tax_for(a, b):
+                return (await db.execute(text("""
+                    SELECT coalesce(sum(amount) FILTER (
+                             WHERE account_kt LIKE '68.12%' OR account_kt LIKE '68.45%'), 0)
+                         - coalesce(sum(amount) FILTER (
+                             WHERE (account_dt LIKE '68.12%' OR account_dt LIKE '68.45%')
+                               AND account_kt NOT LIKE '51%'
+                               AND account_kt NOT LIKE '68.90%'), 0)
+                      FROM gl_entries
+                     WHERE company_id = CAST(:cid AS uuid)
+                       AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL
+                            OR organization_id = CAST(:org AS uuid))
+                       AND make_date(period_year, period_month, 1)
+                           BETWEEN date_trunc('month', CAST(:a AS date))::date
+                               AND CAST(:b AS date)"""),
+                    {**p, "a": a, "b": b})).scalar_one()
+
+            tax = float(await income_tax_for(since, till) or 0)
+            tax_was = float(await income_tax_for(prev_since, prev_till) or 0)
+            tax_label = "Налог по патенту" if mode["patent"] and not mode["usn"] else "Налог по УСН"
+            note = ("Режим: %s. Начислено по учёту за период — авансовый платёж "
+                    "приходится не на каждый месяц. Декларацию формирует бухгалтерия."
+                    % mode["label"])
+
+        # Плитку НДС не убираем: исчезнувшая строка читается как поломка экрана.
+        # Вместо этого прямо сказано, почему на этом режиме там ноль.
+        vat_metric = {"label": "НДС к уплате", "value": _money(vat),
+                      "delta": _delta(vat, vat_was, higher_is_better=False)}
+        if not mode["vat"]:
+            vat_metric["hint"] = "на этом режиме НДС не начисляется"
         return {
             "metrics": [
-                {"label": "НДС к уплате", "value": _money(vat),
-                 "delta": _delta(vat, vat_was, higher_is_better=False)},
-                {"label": "Налог на прибыль", "value": _money(tax),
+                vat_metric,
+                {"label": tax_label, "value": _money(tax),
                  "delta": _delta(tax, tax_was, higher_is_better=False)},
             ],
-            "note": ("Оценка по данным учёта за период, до закрытия месяца. "
-                     "Декларацию формирует бухгалтерия."),
+            "note": note,
         }
 
     if key == "books.result":
@@ -3544,7 +4041,9 @@ async def _office_block_data(db: AsyncSession, cid: str, key: str,
                  "delta": _delta(prof, prof_was)},
             ],
             "items": rows,
-            "note": "Выручка без НДС и прибыль до налога: за период и по месяцам.",
+            "note": ("Выручка без НДС и прибыль до налога за %s (последний период с "
+                     "данными учёта) и по месяцам." % (
+                         _MONTHS_RU[till.month - 1] + " " + str(till.year))),
         }
 
     if key == "books.settlements":
@@ -3616,11 +4115,12 @@ async def _office_block_data(db: AsyncSession, cid: str, key: str,
     if key == "books.trends":
         items = [{"title": r[0], "detail": r[1] or "", "amount": ""}
                  for r in (await db.execute(text("""
+            -- Справочники 1С (`gl_references`) оси юрлица не имеют: они общие для
+            -- компании. Фильтр по организации здесь ронял блок целиком — «column
+            -- organization_id does not exist», и в витрине заказчика тоже.
             SELECT name, meta->>'Период' FROM gl_references
-             WHERE company_id = CAST(:cid AS uuid)
-               AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL
-                    OR organization_id = CAST(:org AS uuid)) AND kind = 'reports_filed'
-             ORDER BY code DESC LIMIT 8"""), p)).all()]
+             WHERE company_id = CAST(:cid AS uuid) AND kind = 'reports_filed'
+             ORDER BY code DESC LIMIT 8"""), {"cid": p["cid"]})).all()]
         return {"items": items, "note": "Последняя сданная отчётность по данным 1С."}
 
     return {"note": "Блок не рассчитывается в этом пространстве."}
@@ -3695,9 +4195,16 @@ async def pulse_view_feedback(
     if v.feedback_mode in ("task", "both"):
         # Автор — получатель, исполнитель — тот, кого назначили на витрине. Без
         # исполнителя задача попадёт в общий поток «Задач», а не потеряется.
+        # Тип обязателен по делу, а не по схеме: доска «Задач» строится ПО ТИПУ, и
+        # задача без него не попадает ни в одну колонку — в сводке она числится
+        # «без типа» и выпадает из работы. Берём «Поручение», если оно заведено:
+        # обращение с витрины — именно разовая работа с исполнителем и сроком.
+        type_id = (await db.execute(text(
+            "SELECT id FROM task_types WHERE company_id = CAST(:cid AS uuid)"
+            " AND code = 'errand' LIMIT 1"), {"cid": cid})).scalar_one_or_none()
         t = Task(
             company_id=uuid.UUID(cid), title=title[:300], description=text_,
-            priority="medium", status="open",
+            priority="medium", status="open", type_id=type_id,
             assignee_id=v.feedback_assignee_id, author_id=current_user.id)
         db.add(t)
         await db.flush()

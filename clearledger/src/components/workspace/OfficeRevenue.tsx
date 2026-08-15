@@ -30,6 +30,7 @@ import { MetricTile } from '@/components/ui/metric-tile'
 import { cn } from '@/lib/utils'
 import {
   getArAging, getAssortment, getAttention, getBacklog, getCashflow, getCashflowItems,
+  getBankAccounts, getBankStatement,
   getCashForecast, getCollectionCurve,
   getConcentration, getContractSales, getDeals, getDocsAll, getPaymentTerms,
   getRevenue, getRevenueCheck, getRevenueQuality, getStock, getSuppliers,
@@ -267,6 +268,7 @@ const FIXED_KIND: Record<string, RevKind> = {
 /** Экраны, у которых своя ручка и разрез над ними не имеет смысла. */
 const NO_KIND = ['rev_invoices', 'rev_funnel', 'rev_recon', 'rev_abc', 'rev_abc_items',
   'rev_margin', 'rev_terms', 'rev_cashflow', 'rev_contracts', 'rev_stock', 'rev_suppliers',
+  'rev_bank', 'rev_statement',
   'rev_prices', 'rev_quality', 'rev_deals', 'rev_conc', 'rev_aging', 'rev_collect',
   'rev_backlog', 'rev_forecast', 'rev_cfitems', 'rev_attention']
 
@@ -328,6 +330,8 @@ export function RevenuePanel() {
       case 'rev_recon':      return <RevRecon companyId={companyId} />
       case 'rev_margin':     return <RevMargin companyId={companyId} period={period} />
       case 'rev_terms':      return <RevTerms companyId={companyId} period={period} />
+      case 'rev_bank':       return <RevBank companyId={companyId} period={period} />
+      case 'rev_statement':  return <RevStatement companyId={companyId} period={period} />
       case 'rev_cashflow':   return <RevCashflow companyId={companyId} />
       case 'rev_contracts':  return <RevContracts companyId={companyId} period={period} />
       case 'rev_stock':      return <RevStock companyId={companyId} />
@@ -3412,6 +3416,216 @@ function RevCashflowItems({ companyId, period }: { companyId: string; period: Pe
             </td>
             <td className="px-3 py-1.5 text-[11px] text-muted-foreground tabular-nums whitespace-nowrap">
               {r.first} — {r.last}
+            </td>
+          </tr>
+        ))}
+      </TableCard>
+    </div>
+  )
+}
+
+/**
+ * Счета и касса компании: где лежат деньги и сколько прошло за период.
+ *
+ * Остаток — из САЛЬДО регистра, обороты — по документам банка. Две разные природы
+ * цифр рядом намеренно: остаток накоплен всей историей счёта, оборот — только тем,
+ * что попало в выгрузку, и их расхождение и есть предмет разговора с бухгалтерией.
+ */
+function RevBank({ companyId, period }: { companyId: string; period: Period }) {
+  const q = useQuery({
+    queryKey: ['books', 'bank-accounts', companyId, period.from, period.to],
+    queryFn: () => getBankAccounts(companyId, period),
+    enabled: !!companyId,
+  })
+  if (q.isError) return <div className="p-4"><QueryError onRetry={() => q.refetch()} /></div>
+  if (!q.data) return <Loading />
+  const d = q.data
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
+        <MetricTile label="Денег на счетах" value={money.format(d.rest) + ' ₽'}
+          hint={d.asOf ? `сальдо на ${d.asOf.slice(0, 10)}` : 'сальдо не загружено'} />
+        <MetricTile label="Поступило за период" value={money.format(d.inflow) + ' ₽'} />
+        <MetricTile label="Ушло за период" value={money.format(d.outflow) + ' ₽'} />
+        <MetricTile label="Счетов" value={num.format(d.rows.length)}
+          hint={`в справочнике 1С: ${num.format(d.refAccounts)}`} />
+      </div>
+
+      {!d.rows.length && (
+        <p className="text-sm text-muted-foreground">
+          Ни денежных остатков, ни операций банка за период не загружено.
+        </p>
+      )}
+
+      <TableCard note="Остаток — из сальдо счетов 50/51/52, обороты — из документов банка за период"
+        head={<><Th>Счёт</Th><Th>Банк</Th><Th right>Остаток</Th><Th right>Поступило</Th>
+          <Th right>Ушло</Th><Th right>Итог</Th></>}>
+        {d.rows.map((r) => (
+          <tr key={r.sub || r.number} className="border-b last:border-0 hover:bg-muted/40">
+            <td className="px-3 py-1.5">
+              <span className="tabular-nums">{r.number || '—'}</span>
+              <div className="text-[11px] text-muted-foreground">
+                {r.kind}{r.account ? ` · счёт ${r.account}` : ''}
+              </div>
+            </td>
+            <td className="px-3 py-1.5 max-w-[280px] truncate" title={r.bankFull ?? ''}>
+              {r.bankFull || '—'}
+              {r.bik && <div className="text-[11px] text-muted-foreground">БИК {r.bik}</div>}
+            </td>
+            <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">
+              {r.rest === null
+                ? <span className="text-[11px] text-muted-foreground">нет в сальдо</span>
+                : `${money.format(r.rest)} ₽`}
+            </td>
+            <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">
+              {r.inflow ? `${money.format(r.inflow)} ₽` : '—'}
+              {r.inDocs > 0 && (
+                <span className="ml-1 text-[11px] text-muted-foreground">{r.inDocs}</span>
+              )}
+            </td>
+            <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">
+              {r.outflow ? `${money.format(r.outflow)} ₽` : '—'}
+              {r.outDocs > 0 && (
+                <span className="ml-1 text-[11px] text-muted-foreground">{r.outDocs}</span>
+              )}
+            </td>
+            <td className={cn('px-3 py-1.5 text-right tabular-nums whitespace-nowrap',
+              r.net >= 0 ? 'text-emerald-600 dark:text-emerald-400'
+                : 'text-rose-600 dark:text-rose-400')}>
+              {money.format(r.net)} ₽
+            </td>
+          </tr>
+        ))}
+      </TableCard>
+
+      <div className="flex justify-end">
+        <ExportButton onClick={() => exportTable('Счета компании', [
+          { header: 'Счёт', key: 'number', width: 26 },
+          { header: 'Банк', key: 'bankFull', width: 42 },
+          { header: 'Вид', key: 'kind', width: 18 },
+          { header: 'БИК', key: 'bik', width: 14 },
+          { header: 'Остаток', key: 'rest', width: 18, money: true },
+          { header: 'Поступило', key: 'inflow', width: 18, money: true },
+          { header: 'Ушло', key: 'outflow', width: 18, money: true },
+        ], d.rows)} />
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Выписка: сами операции банка за период.
+ *
+ * Итоги приходят с сервера по ВСЕЙ выборке, а не считаются по показанным строкам:
+ * сумма под таблицей, не сходящаяся с банком из-за лимита, хуже отсутствующей. Рядом
+ * с ней обороты денежных счетов регистра — расхождение видно сразу, а не у заказчика.
+ */
+function RevStatement({ companyId, period }: { companyId: string; period: Period }) {
+  const [side, setSide] = useState<'all' | 'in' | 'out'>('all')
+  const [query, setQuery] = useState('')
+  const q = useQuery({
+    queryKey: ['books', 'bank-statement', companyId, period.from, period.to, side, query],
+    queryFn: () => getBankStatement(companyId, period, {
+      side: side === 'all' ? undefined : side,
+      q: query.trim() || undefined,
+      limit: FULL,
+    }),
+    enabled: !!companyId,
+  })
+  if (q.isError) return <div className="p-4"><QueryError onRetry={() => q.refetch()} /></div>
+  if (!q.data) return <Loading />
+  const d = q.data
+  const gapIn = Math.round((d.inflow - d.registerIn) * 100) / 100
+  const gapOut = Math.round((d.outflow - d.registerOut) * 100) / 100
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
+        <MetricTile label="Поступило" value={money.format(d.inflow) + ' ₽'}
+          hint={`по регистру ${money.format(d.registerIn)} ₽`}
+          tone={Math.abs(gapIn) < 1 ? undefined : 'warning'} />
+        <MetricTile label="Ушло" value={money.format(d.outflow) + ' ₽'}
+          hint={`по регистру ${money.format(d.registerOut)} ₽`}
+          tone={Math.abs(gapOut) < 1 ? undefined : 'warning'} />
+        <MetricTile label="Итог движения" value={money.format(d.net) + ' ₽'} />
+        <MetricTile label="Операций" value={num.format(d.count)}
+          hint={d.shown < d.count ? `показано ${num.format(d.shown)}` : 'показаны все'} />
+      </div>
+
+      {(Math.abs(gapIn) >= 1 || Math.abs(gapOut) >= 1) && (
+        <p className="text-[11px] text-amber-600 dark:text-amber-400">
+          Выписка расходится с проводками тех же документов: приход
+          на {money.format(gapIn)} ₽, расход на {money.format(gapOut)} ₽. Причина всегда в
+          самих данных: документ есть, а проводок он не дал (не проведён), либо проводки
+          разнесены другим документом. Разбирается в бухгалтерии компании — у РТИ так
+          нашлись два поступления марта 2026 на 3 200 ₽.
+        </p>
+      )}
+
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <Tabs value={side} onChange={setSide} label="Направление" items={[
+          { key: 'all' as const, label: 'Все операции' },
+          { key: 'in' as const, label: 'Поступления' },
+          { key: 'out' as const, label: 'Платежи' },
+        ]} />
+        <div className="flex items-center gap-2">
+          <SearchInput value={query} onChange={setQuery} width="w-64"
+            label="Поиск по выписке" placeholder="контрагент, назначение, номер" />
+          <ExportButton onClick={() => exportTable('Выписка банка', [
+            { header: 'Дата', key: 'date', width: 12 },
+            { header: 'Номер', key: 'number', width: 16 },
+            { header: 'Направление', key: 'sideLabel', width: 14 },
+            { header: 'Контрагент', key: 'counterparty', width: 40 },
+            { header: 'Статья', key: 'item', width: 32 },
+            { header: 'Назначение', key: 'purpose', width: 60 },
+            { header: 'Счёт', key: 'accountNumber', width: 24 },
+            { header: 'Сумма', key: 'amount', width: 18, money: true },
+            { header: 'НДС', key: 'vat', width: 14, money: true },
+          ], d.rows.map((r) => ({
+            ...r, sideLabel: r.side === 'in' ? 'приход' : 'расход',
+          })))} />
+        </div>
+      </div>
+
+      <TableCard note="Операция как она пришла из учёта: статья, вид операции и назначение платежа — реквизиты самого документа"
+        head={<><Th>Дата</Th><Th>Номер</Th><Th>Контрагент</Th><Th>Назначение</Th>
+          <Th>Статья</Th><Th right>Приход</Th><Th right>Расход</Th></>}>
+        {d.rows.map((r) => (
+          <tr key={r.id} className="border-b last:border-0 hover:bg-muted/40 align-top">
+            <td className="px-3 py-1.5 tabular-nums whitespace-nowrap">{r.date}</td>
+            <td className="px-3 py-1.5 whitespace-nowrap">
+              {r.number}
+              {r.payNumber && (
+                <div className="text-[11px] text-muted-foreground">
+                  п/п {r.payNumber}{r.payDate ? ` от ${r.payDate}` : ''}
+                </div>
+              )}
+            </td>
+            <td className="px-3 py-1.5 max-w-[240px]">
+              <div className="truncate" title={r.counterparty ?? ''}>{r.counterparty || '—'}</div>
+              {r.contract && (
+                <div className="truncate text-[11px] text-muted-foreground" title={r.contract}>
+                  {r.contract}
+                </div>
+              )}
+            </td>
+            <td className="px-3 py-1.5 max-w-[360px]">
+              <div className="line-clamp-2 text-[12px]" title={r.purpose ?? ''}>
+                {r.purpose || '—'}
+              </div>
+            </td>
+            <td className="px-3 py-1.5 max-w-[200px]">
+              <div className="truncate text-[12px]" title={r.item}>{r.item}</div>
+              {r.operation && (
+                <div className="truncate text-[11px] text-muted-foreground">{r.operation}</div>
+              )}
+            </td>
+            <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap text-emerald-600 dark:text-emerald-400">
+              {r.side === 'in' ? `${money.format(r.amount)} ₽` : '—'}
+            </td>
+            <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap text-rose-600 dark:text-rose-400">
+              {r.side === 'out' ? `${money.format(r.amount)} ₽` : '—'}
             </td>
           </tr>
         ))}

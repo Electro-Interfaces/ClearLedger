@@ -45,6 +45,14 @@ const DATASETS: { key: string; label: string }[] = [
   { key: 'refs', label: 'Справочники учёта' },
 ]
 
+// Источник перечисляет наборы ИМЕНАМИ ТАБЛИЦ (`gl_entries`), витрины живут под
+// своими ключами (`entries`). Пересечения не было вовсе: карточка источника
+// показывала одни названия, а список ссылок под ней — другие пять, и читалось это
+// как два разных состава данных. Карта сводит их обратно в один.
+const DATASET_BY_TABLE: Record<string, string> = {
+  gl_entries: 'entries',
+}
+
 const MENU: CentralMenuItem[] = [
   { key: 'base', label: 'База пространства' },
   { key: 'quality', label: 'Качество данных' },
@@ -172,9 +180,15 @@ function SourcesTab({ onOpen }: { onOpen?: (key: string) => void }) {
               </div>
             </div>
             <div className="grid gap-3 grid-cols-2 lg:grid-cols-3">
-              {s.datasets.map((d) => (
-                <MetricTile key={d.key} label={d.label} value={num.format(d.records)} />
-              ))}
+              {s.datasets.map((d) => {
+                const ds = DATASET_BY_TABLE[d.key]
+                const tile = <MetricTile label={d.label} value={num.format(d.records)}
+                  hint={ds && onOpen ? 'открыть витрину' : undefined} />
+                return ds && onOpen
+                  ? <button key={d.key} type="button" className="text-left"
+                      onClick={() => onOpen(ds)}>{tile}</button>
+                  : <div key={d.key}>{tile}</div>
+              })}
             </div>
 
             {/* Документы и справочники — списком по видам, а не одним числом:
@@ -252,7 +266,7 @@ function ModelTab() {
         <MetricTile label="Сущностей" value={num.format(t.entities)} />
         <MetricTile label="Записей" value={num.format(t.records)} />
         <MetricTile label="Заполнено" value={`${t.filled} из ${t.entities}`}
-          tone={t.filled === t.entities ? 'success' : 'warning'} />
+          tone={!t.entities ? undefined : t.filled === t.entities ? 'success' : 'warning'} />
         <MetricTile label="Разрывов связей" value={num.format(t.gaps)}
           hint="связь записана строкой, а не ссылкой" />
       </div>

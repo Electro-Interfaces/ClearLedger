@@ -131,6 +131,19 @@ DOC_SECTIONS = [
 ]
 SECTION_OF = {code: sec for sec, _, codes in DOC_SECTIONS for code in codes}
 
+# Опорные виды участка — те, по которым считается его сумма. Остальные виды в папке
+# сопровождают ту же сделку и повторяют те же деньги: счёт выставляется под реализацию,
+# счёт-фактура выписывается к поступлению, акт сверки суммы не несёт вовсе. Без этого
+# «Продажи» складывали реализации со счетами, и 1 816 166,77 ₽ стояли в участке дважды.
+SECTION_PRIMARY: dict[str, tuple[str, ...]] = {
+    "sales": ("sale", "commission_report", "committent_report", "services"),
+    "purchases": ("purchase",),
+    "warehouse": ("goods_writeoff", "demand_note", "goods_intake"),
+    "recon": (),
+    "payroll": ("payroll_accrual",),
+    "closing": ("manual_entry", "debt_correction"),
+}
+
 REF_LABELS = {
     "warehouses": "Склады",
     "subdivisions": "Подразделения",
@@ -155,6 +168,32 @@ REF_LABELS = {
     "balances": "Остатки по счетам",
     "contact_persons": "Контактные лица контрагентов",
     "nom_accounts": "Счета учёта номенклатуры",
+    # Наборы компании на спецрежиме и налогового контура: без имён 62 % справочных
+    # записей уезжали на экран техническими ключами.
+    "kudir": "Книга учёта доходов и расходов (УСН)",
+    "usn_expenses": "Расходы при УСН",
+    "tax_calendar": "Календарь бухгалтера",
+    "reports_filed": "Сданная отчётность",
+    "enp_accrual": "Начисления на единый налоговый счёт",
+    "enp_notice": "Уведомления об исчисленных суммах",
+    "tax_types": "Виды налогов и платежей",
+    "ndfl_income": "Виды доходов НДФЛ",
+    "ndfl_deduction": "Виды вычетов НДФЛ",
+    "subconto": "Виды субконто",
+    "primary_docs": "Реквизиты первичных документов",
+    "committent_goods": "Реализованные товары комитентов",
+    "vat_incoming": "НДС по приобретённым ценностям",
+    "vat_charged": "НДС начисленный",
+    "signers": "Подписанты",
+    "users": "Пользователи базы",
+    "doc_status": "Статусы документов",
+    "pay_terms": "Сроки оплаты документов",
+    "payment_split": "Расшифровки платежей",
+    "period_locks": "Даты запрета изменения",
+    "accounting_policy": "Учётная политика",
+    "org_contacts": "Контакты организации",
+    "organizations": "Организации",
+    "units": "Единицы измерения",
 }
 
 
@@ -304,6 +343,31 @@ def _day(iso: str | None) -> date | None:
     вовсе: «operator does not exist: date < character varying».
     """
     return date.fromisoformat(iso) if iso else None
+
+
+def _doc_period(date_from: str | None, date_to: str | None, alias: str = "") -> str:
+    """Кусок WHERE по дате ДОКУМЕНТА (`accounting_docs.date` — строка ISO).
+
+    Соседние пункты меню обязаны считать за одно окно: ручка, молча игнорирующая
+    период, даёт другую цифру рядом с той же цифрой, и разбор упирается в вопрос,
+    какая из них правда.
+    """
+    a = (alias + '.') if alias else ''
+    s = ''
+    if date_from:
+        s += f" AND {a}date >= :df"
+    if date_to:
+        s += f" AND {a}date <= :dt"
+    return s
+
+
+def _doc_params(cid, date_from: str | None, date_to: str | None) -> dict[str, Any]:
+    p: dict[str, Any] = {"cid": str(cid), "org": _org_param()}
+    if date_from:
+        p["df"] = date_from[:10]
+    if date_to:
+        p["dt"] = date_to[:10]
+    return p
 
 
 @router.get("/balance")
@@ -471,9 +535,16 @@ async def account_card(
     running = opening
     rows = []
     for e in entries:
-        dt_own = e.account_dt == code or (e.account_dt or "").startswith(f"{code}.")
+        own = lambda f: f == code or (f or "").startswith(f"{code}.")  # noqa: E731
+        dt_own, kt_own = own(e.account_dt), own(e.account_kt)
         amount = _num(e.amount)
-        running += amount if dt_own else -amount
+        # Проводка, у которой ОБЕ ноги на этом счёте (зачёт аванса 62.01↔62.02, перевод
+        # между своими расчётными счетами), сальдо синтетического счёта не меняет. Раньше
+        # она считалась одним дебетом, и колонка «сальдо» расходилась с шапкой: по 62
+        # строки показывали 3 165 968,37 при остатке 281 851,77.
+        internal = dt_own and kt_own
+        if not internal:
+            running += amount if dt_own else -amount
         rows.append({
             "date": e.entry_date.isoformat(),
             "docKind": e.doc_kind, "docTitle": e.doc_title,
@@ -481,21 +552,28 @@ async def account_card(
             "corr": e.account_kt if dt_own else e.account_dt,
             "debit": amount if dt_own else 0.0,
             "credit": 0.0 if dt_own else amount,
+            "internal": internal,
             "saldo": round(running, 2),
             "content": e.content,
         })
 
-    # Корреспонденция: с кем счёт работает и на сколько. Это ответ на вопрос
-    # «откуда на счёте деньги» без чтения всех проводок подряд.
+    # Корреспонденция: с кем счёт работает и на сколько. Считается по ВСЕМ проводкам
+    # периода, а не по показанной странице: раньше блок строился из обрезанного
+    # `limit`-списка, а обороты в шапке — по всему счёту, и корреспонденция теряла
+    # почти миллион рублей при обычном размере страницы.
     corr: dict[str, dict[str, float]] = {}
-    for e in entries:
-        dt_own = e.account_dt == code or (e.account_dt or "").startswith(f"{code}.")
-        other = e.account_kt if dt_own else e.account_dt
-        if not other:
-            continue
-        c = corr.setdefault(other, {"debit": 0.0, "credit": 0.0, "entries": 0})
-        c["debit" if dt_own else "credit"] += _num(e.amount)
-        c["entries"] += 1
+    for side, own_field, other_field in (("debit", GlEntry.account_dt, GlEntry.account_kt),
+                                         ("credit", GlEntry.account_kt, GlEntry.account_dt)):
+        cq = (select(other_field, func.sum(GlEntry.amount), func.count())
+              .where(GlEntry.company_id == cid, is_own(own_field),
+                     ~is_own(other_field), *period)
+              .group_by(other_field))
+        for other, amount, n in (await db.execute(cq)).all():
+            if not other:
+                continue
+            c = corr.setdefault(other, {"debit": 0.0, "credit": 0.0, "entries": 0})
+            c[side] += _num(amount)
+            c["entries"] += n
 
     months: dict[str, dict[str, float]] = {}
     mq = (select(GlEntry.period_year, GlEntry.period_month,
@@ -597,7 +675,22 @@ async def periods(
         cell = by_month.get((p.year, p.month), {"entries": 0, "revenue": 0.0})
         rows.append({"year": p.year, "month": p.month, "status": p.status,
                      "source": p.closure_source, **cell})
-    return {"rows": rows}
+
+    # Дыра — это месяц, которого в учёте НЕТ вовсе: ни строки периода, ни проводки.
+    # Такой месяц не виден ни в одной строке списка (списка нечего показать), и
+    # именно поэтому пропуск выгрузки замечают позже всего.
+    known = {(r["year"], r["month"]) for r in rows} | set(by_month)
+    gaps = []
+    if known:
+        (y0, m0), (y1, m1) = min(known), max(known)
+        y, m = y0, m0
+        while (y, m) < (y1, m1):
+            m += 1
+            if m > 12:
+                y, m = y + 1, 1
+            if (y, m) not in known and (y, m) != (y1, m1):
+                gaps.append({"year": y, "month": m})
+    return {"rows": rows, "gaps": gaps}
 
 
 def _doc_amounts(doc, line_kind: str | None) -> dict[str, float]:
@@ -677,10 +770,18 @@ async def docs(
 
     # Папки реестра. Отдаём ВСЕ участки, включая пустые: пустая «Касса» — это ответ
     # («наличных операций нет»), а исчезнувшая папка читается как потерянные данные.
+    # Сумма участка считается по ОПОРНЫМ видам, а не по всем сразу: счёт покупателю и
+    # реализация по одной сделке — это одни и те же деньги (на пилоте 1 816 166,77 ₽
+    # стояли в «Продажах» дважды), счёт-фактура дублирует поступление, а приход и расход
+    # денег складывать нельзя вовсе. Для «Денег» суммы участка нет — есть две стороны.
     sections = [{
         "code": code, "title": title,
         "count": sum(n for t, n, _ in counts if t in codes),
-        "amount": sum(a for t, _, a in counts if t in codes),
+        "amount": (None if code == "money" else
+                   sum(a for t, _, a in counts if t in SECTION_PRIMARY.get(code, codes))),
+        "amountBasis": SECTION_PRIMARY.get(code, codes) if code != "money" else None,
+        "inflow": (sum(a for t, _, a in counts if t == "bank_in") if code == "money" else None),
+        "outflow": (sum(a for t, _, a in counts if t == "bank_out") if code == "money" else None),
         "kinds": [k for k in kinds if k["type"] in codes],
     } for code, title, codes in DOC_SECTIONS]
 
@@ -1034,6 +1135,8 @@ def _with_stability(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 @router.get("/revenue-check")
 async def revenue_check(
     company_id: str,
+    date_from: str | None = None,
+    date_to: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
@@ -1045,23 +1148,28 @@ async def revenue_check(
     документы — то, что мы показываем; разница помесячно и есть предмет разбора.
     """
     cid = await assert_company_member(company_id, current_user, db)
-    p = {"cid": str(cid), "org": _org_param(), "kt": REVENUE_KT}
+    # Даты приезжают в обе стороны разными типами: документ хранит дату строкой,
+    # проводка — колонкой `date`. Поэтому два набора параметров, а не один.
+    p = {**_doc_params(cid, date_from, date_to), "kt": REVENUE_KT}
+    pr = {**_reg_params(cid, date_from, date_to), "kt": REVENUE_KT}
 
-    docs = {r[0]: (_num(r[1]), r[2]) for r in (await db.execute(text("""
+    docs = {r[0]: (_num(r[1]), r[2]) for r in (await db.execute(text(f"""
         SELECT substr(date, 1, 7), sum(amount), count(*)
           FROM accounting_docs
          WHERE company_id = :cid
-           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND doc_type = 'sale' GROUP BY 1
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid))
+           AND doc_type = 'sale'{_doc_period(date_from, date_to)} GROUP BY 1
     """), p)).all()}
 
     # Регистр даёт выручку С НДС только вместе с 90.03: по кредиту 90.01.1 лежит
     # сумма с налогом, поэтому сравнение идёт с суммой документа как есть.
-    reg = {r[0]: _num(r[1]) for r in (await db.execute(text("""
+    reg = {r[0]: _num(r[1]) for r in (await db.execute(text(f"""
         SELECT to_char(entry_date, 'YYYY-MM'), sum(amount)
           FROM gl_entries
          WHERE company_id = :cid
-           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND account_kt = :kt GROUP BY 1
-    """), p)).all()}
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid))
+           AND account_kt = :kt{_reg_period(date_from, date_to)} GROUP BY 1
+    """), pr)).all()}
 
     status = {r[0]: r[1] for r in (await db.execute(text("""
         SELECT to_char(make_date(year, month, 1), 'YYYY-MM'), status
@@ -1114,21 +1222,13 @@ AGING_BUCKETS: list[tuple[str, str, int, int]] = [
 ]
 
 
-@router.get("/ar-aging")
-async def ar_aging(
-    company_id: str,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-) -> dict[str, Any]:
-    """Реестр старения долга по счетам покупателям: сколько, чьё и сколько дней.
+async def _open_ar(db: AsyncSession, cid, today: date) -> tuple[list[dict], list[dict]]:
+    """Непогашенный долг покупателей, разложенный по счетам: одна формула на все экраны.
 
-    Считается по счетам с ИЗВЕСТНОЙ оплатой (регистр «Оплата счетов»). Счета, которых
-    регистр не свёл, идут отдельной строкой «оплата неизвестна» и в долг не
-    записываются: ноль вместо отсутствующих данных — та ошибка, из-за которой витрина
-    показывала долг в 123 млн ₽.
+    «Старение» и «Прогноз поступлений» обязаны считать долг ОДИНАКОВО. Пока прогноз
+    жил на своём отборе (счета, у которых регистр оплат нашёл платёж), он показывал
+    ноль ожидаемых поступлений при 406 511,77 ₽ долга на соседнем экране.
     """
-    cid = await assert_company_member(company_id, current_user, db)
-    today = date.today()
 
     rows = [{
         "id": str(r[0]), "number": r[1], "date": r[2],
@@ -1147,18 +1247,72 @@ async def ar_aging(
            AND d.date ~ '^\d{4}-\d{2}-\d{2}'
     """), {"cid": str(cid), "org": _org_param()})).all()]
 
-    open_rows, unknown = [], []
-    for r in rows:
-        if r["paid"] is None:
-            unknown.append(r)
-            continue
-        rest = round(r["amount"] - r["paid"], 2)
-        if rest <= 0.01:
-            continue
-        age = (today - date.fromisoformat(r["date"])).days
-        bucket = next(k for k, _, lo, hi in AGING_BUCKETS if lo <= age <= hi)
-        open_rows.append({**r, "rest": rest, "age": age, "bucket": bucket})
+    # Долг покупателя — это САЛЬДО 62.01, а не «счета, по которым не нашлось платежа».
+    # Регистр «Оплата счетов» покрывает не все счета (на пилоте 47 из 92), и экран
+    # показывал долг 0 ₽ зелёной плиткой при 406 511,77 ₽ по регистру, отправив
+    # 45 счетов на 1 044 511,77 ₽ в «оплата неизвестна».
+    #
+    # Раскладываем сальдо каждого покупателя по его счетам от НОВЫХ к старым: сначала
+    # гасится старый долг, значит непогашенным остаётся самый свежий. Так возраст долга
+    # считается честно, а итог сходится с регистром.
+    debt_by_client = {
+        (r[0] or '').strip(): _num(r[1]) for r in (await db.execute(text("""
+            SELECT sub1, sum(debit) - sum(credit)
+              FROM gl_balances
+             WHERE company_id = :cid AND account LIKE '62.01%' AND source <> 'monthly'
+               AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL
+                    OR organization_id = CAST(:org AS uuid))
+               AND as_of = (SELECT max(as_of) FROM gl_balances WHERE company_id = :cid
+                             AND source <> 'monthly')
+             GROUP BY 1 HAVING sum(debit) - sum(credit) > 0.01
+        """), {"cid": str(cid), "org": _org_param()})).all()
+    }
 
+    open_rows, unknown = [], []
+    by_name: dict[str, list] = {}
+    for r in rows:
+        by_name.setdefault((r["counterparty"] or '').strip(), []).append(r)
+    for name, left in debt_by_client.items():
+        docs = sorted(by_name.get(name, []), key=lambda x: x["date"], reverse=True)
+        if not docs:
+            # Долг есть, а счёта под него нет: реализация без счёта. Возраст неизвестен,
+            # но прятать такой долг нельзя — он попадает в «нераспределённый».
+            unknown.append({"counterparty": name, "amount": round(left, 2),
+                            "number": None, "date": None, "id": None,
+                            "counterpartyId": None, "paid": None, "lastPaidAt": None})
+            continue
+        for r in docs:
+            if left <= 0.01:
+                break
+            rest = round(min(left, r["amount"]), 2)
+            left -= rest
+            age = (today - date.fromisoformat(r["date"])).days
+            bucket = next(k for k, _, lo, hi in AGING_BUCKETS if lo <= age <= hi)
+            open_rows.append({**r, "rest": rest, "age": age, "bucket": bucket})
+        if left > 0.01:
+            unknown.append({"counterparty": name, "amount": round(left, 2),
+                            "number": None, "date": None, "id": None,
+                            "counterpartyId": None, "paid": None, "lastPaidAt": None})
+
+    return open_rows, unknown
+
+
+@router.get("/ar-aging")
+async def ar_aging(
+    company_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Реестр старения долга по счетам покупателям: сколько, чьё и сколько дней.
+
+    Долг берётся из САЛЬДО 62.01 и раскладывается по счетам покупателя от новых к
+    старым (`_open_ar`) — той же формулой, что и «Прогноз поступлений». Долг, под
+    который счёта нет, идёт строкой «оплата неизвестна»: ноль вместо отсутствующих
+    данных — та ошибка, из-за которой витрина показывала долг в 123 млн ₽.
+    """
+    cid = await assert_company_member(company_id, current_user, db)
+    today = date.today()
+    open_rows, unknown = await _open_ar(db, cid, today)
     buckets = [{
         "key": key, "label": label,
         "count": sum(1 for r in open_rows if r["bucket"] == key),
@@ -1205,13 +1359,16 @@ async def ar_aging(
         "openAmount": round(sum(r["rest"] for r in open_rows), 2),
         "openCount": len(open_rows),
         "risk": round(sum(b["risk"] for b in buckets), 2),
+        # «Нераспределённое» — долг, под который не нашлось счёта нужной суммы
+        # (реализация без счёта). Он входит в общий долг, но возраста у него нет.
         "unknownCount": len(unknown),
         "unknownAmount": round(sum(r["amount"] for r in unknown), 2),
         "registerDebit": _num(saldo[0]),
         "registerCredit": _num(saldo[1]),
         "asOf": today.isoformat(),
-        # Срока по договору в данных нет — возраст считается от даты счёта.
-        "ageBasis": "invoice_date",
+        # Долг берётся из сальдо 62.01 и раскладывается по счетам от новых к старым;
+        # возраст считается от даты счёта, срока по договору в данных нет.
+        "ageBasis": "invoice_date_fifo",
     }
 
 
@@ -1239,11 +1396,15 @@ async def collection_curve(
              AND d.date ~ '^\d{4}-\d{2}-\d{2}'
              AND EXISTS (SELECT 1 FROM invoice_payments p WHERE p.invoice_doc_id = d.id)
         ), pay AS (
+          -- `least(..., i.amount)`: собрано не бывает больше выставленного. Платёж,
+          -- закрывающий несколько счетов, лежит в регистре полной суммой на каждом,
+          -- и без ограничения доля сбора доходила до 203 % — цифра, которая читается
+          -- как ошибка данных, хотя ошибка была в формуле.
           SELECT i.id, i.month, i.amount,
-                 sum(p.amount) FILTER (WHERE p.paid_at::date - i.date::date <= 30)  d30,
-                 sum(p.amount) FILTER (WHERE p.paid_at::date - i.date::date <= 60)  d60,
-                 sum(p.amount) FILTER (WHERE p.paid_at::date - i.date::date <= 90)  d90,
-                 sum(p.amount) FILTER (WHERE p.paid_at::date - i.date::date <= 180) d180
+                 least(sum(p.amount) FILTER (WHERE p.paid_at::date - i.date::date <= 30),  i.amount) d30,
+                 least(sum(p.amount) FILTER (WHERE p.paid_at::date - i.date::date <= 60),  i.amount) d60,
+                 least(sum(p.amount) FILTER (WHERE p.paid_at::date - i.date::date <= 90),  i.amount) d90,
+                 least(sum(p.amount) FILTER (WHERE p.paid_at::date - i.date::date <= 180), i.amount) d180
             FROM inv i JOIN invoice_payments p ON p.invoice_doc_id = i.id
            WHERE p.paid_at IS NOT NULL
            GROUP BY i.id, i.month, i.amount
@@ -1311,26 +1472,41 @@ async def cash_forecast(
              AND d.date ~ '^\d{4}-\d{2}-\d{2}'
              AND EXISTS (SELECT 1 FROM invoice_payments p
                           WHERE p.invoice_doc_id = d.id AND p.paid_at IS NOT NULL)
+        ), tot AS (
+          SELECT i.id, i.amount, sum(p.amount) AS paid
+            FROM inv i JOIN invoice_payments p ON p.invoice_doc_id = i.id
+           WHERE p.paid_at IS NOT NULL GROUP BY i.id, i.amount
+        ), pay AS (
+          -- Платежи ОТДЕЛЬНОЙ выборкой, а не джойном к счетам: у счёта с двумя
+          -- платежами джойн размножал строку счёта, и его сумма входила в `billed`
+          -- дважды (49 счетов на 1 139 166,20 вместо 47 на 1 103 826,20) — база
+          -- кривой завышалась, а с ней занижалась вся доля сбора.
+          --
+          -- Платёж, закрывающий несколько счетов, лежит в регистре полной суммой на
+          -- каждом из них, и «собрано» выходило больше выставленного (107,6 %).
+          -- Масштабируем платежи счёта до его суммы: распределение по дням остаётся,
+          -- кривая перестаёт превышать сто процентов.
+          SELECT p.amount * least(1, t.amount / nullif(t.paid, 0)) AS amount,
+                 (p.paid_at::date - i.date::date) AS days
+            FROM inv i
+            JOIN tot t ON t.id = i.id
+            JOIN invoice_payments p ON p.invoice_doc_id = i.id
+           WHERE p.paid_at IS NOT NULL
         )
-        SELECT coalesce(sum(i.amount), 0) AS billed,
-               count(*) AS invoices,
-               coalesce(sum(p.amount), 0) AS paid,
-               coalesce(sum(p.amount) FILTER (WHERE p.days <= 0), 0),
-               coalesce(sum(p.amount) FILTER (WHERE p.days <= 30), 0),
-               coalesce(sum(p.amount) FILTER (WHERE p.days <= 60), 0),
-               coalesce(sum(p.amount) FILTER (WHERE p.days <= 90), 0),
-               coalesce(sum(p.amount) FILTER (WHERE p.days <= 120), 0),
-               coalesce(sum(p.amount) FILTER (WHERE p.days <= 180), 0),
-               coalesce(sum(p.amount) FILTER (WHERE p.days <= 270), 0),
-               coalesce(sum(p.amount) FILTER (WHERE p.days <= 360), 0),
-               coalesce(sum(p.amount) FILTER (WHERE p.days <= 540), 0),
-               coalesce(sum(p.amount) FILTER (WHERE p.days <= 720), 0)
-          FROM inv i
-          LEFT JOIN LATERAL (
-            SELECT pp.amount, (pp.paid_at::date - i.date::date) AS days
-              FROM invoice_payments pp
-             WHERE pp.invoice_doc_id = i.id AND pp.paid_at IS NOT NULL
-          ) p ON true
+        SELECT (SELECT coalesce(sum(amount), 0) FROM inv) AS billed,
+               (SELECT count(*) FROM inv) AS invoices,
+               coalesce(sum(amount), 0) AS paid,
+               coalesce(sum(amount) FILTER (WHERE days <= 0), 0),
+               coalesce(sum(amount) FILTER (WHERE days <= 30), 0),
+               coalesce(sum(amount) FILTER (WHERE days <= 60), 0),
+               coalesce(sum(amount) FILTER (WHERE days <= 90), 0),
+               coalesce(sum(amount) FILTER (WHERE days <= 120), 0),
+               coalesce(sum(amount) FILTER (WHERE days <= 180), 0),
+               coalesce(sum(amount) FILTER (WHERE days <= 270), 0),
+               coalesce(sum(amount) FILTER (WHERE days <= 360), 0),
+               coalesce(sum(amount) FILTER (WHERE days <= 540), 0),
+               coalesce(sum(amount) FILTER (WHERE days <= 720), 0)
+          FROM pay
     """), {"cid": str(cid), "org": _org_param()})).one()
 
     billed = _num(hist[0])
@@ -1352,30 +1528,17 @@ async def cash_forecast(
                 return curve[a] + (curve[b] - curve[a]) * k
         return total_share
 
-    # Открытые счета с известной оплатой — то же множество, что в реестре старения.
-    open_rows = [{
-        "id": str(r[0]), "number": r[1], "date": r[2], "counterparty": r[3],
-        "counterpartyId": str(r[4]) if r[4] else None,
-        "amount": _num(r[5]), "paid": _num(r[6]),
-    } for r in (await db.execute(text(r"""
-        SELECT d.id, d.number, d.date, d.counterparty_name, d.counterparty_id,
-               d.amount, coalesce(p.paid, 0)
-          FROM accounting_docs d
-          JOIN (SELECT invoice_doc_id, sum(amount) paid FROM invoice_payments
-                 WHERE company_id = :cid
-           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) GROUP BY invoice_doc_id) p
-            ON p.invoice_doc_id = d.id
-         WHERE d.company_id = :cid AND d.doc_type = 'invoice_out'
-           AND d.date ~ '^\d{4}-\d{2}-\d{2}' AND d.amount - coalesce(p.paid, 0) > 0.01
-    """), {"cid": str(cid), "org": _org_param()})).all()]
+    # Долг — ТОТ ЖЕ, что в реестре старения: сальдо 62.01, разложенное по счетам.
+    # Прежний отбор («счета, которым регистр оплат нашёл платёж») давал ноль
+    # ожидаемых поступлений при 406 511,77 ₽ долга на соседнем экране.
+    open_rows, unknown_rows = await _open_ar(db, cid, today)
 
     WINDOWS = [(30, "30 дней"), (60, "60 дней"), (90, "90 дней"), (180, "180 дней")]
     windows = {w: 0.0 for w, _ in WINDOWS}
     expected_total = 0.0
     rows = []
     for r in open_rows:
-        rest = round(r["amount"] - r["paid"], 2)
-        age = (today - date.fromisoformat(r["date"])).days
+        rest, age = r["rest"], r["age"]
         f_now = f_at(age)
         # Ниже единицы по построению: F не превышает total_share.
         left = 1.0 - f_now
@@ -1390,7 +1553,7 @@ async def cash_forecast(
         for w, _ in WINDOWS:
             windows[w] += rest * per_window[w]
         rows.append({
-            **r, "rest": rest, "age": age,
+            **r,
             "expected": exp,
             "expectedPct": round(share_total * 100, 1),
             "in30": round(rest * per_window[30], 2),
@@ -1398,12 +1561,8 @@ async def cash_forecast(
         })
     rows.sort(key=lambda r: -r["rest"])
 
-    unknown = (await db.execute(text("""
-        SELECT count(*), coalesce(sum(d.amount), 0) FROM accounting_docs d
-         WHERE d.company_id = :cid
-           AND (CAST(:org AS uuid) IS NULL OR d.organization_id IS NULL OR d.organization_id = CAST(:org AS uuid)) AND d.doc_type = 'invoice_out'
-           AND NOT EXISTS (SELECT 1 FROM invoice_payments p WHERE p.invoice_doc_id = d.id)
-    """), {"cid": str(cid), "org": _org_param()})).one()
+    # Долг без счёта под ним: возраст неизвестен, значит и кривая к нему неприменима.
+    # В прогноз он не входит, но и молчать о нём нельзя — это те же деньги.
 
     return {
         "rows": rows,
@@ -1418,8 +1577,8 @@ async def cash_forecast(
         "historyInvoices": hist[1],
         "historyBilled": round(billed, 2),
         # Счета вне прогноза: у них нет записи в регистре оплат вовсе.
-        "unknownCount": unknown[0],
-        "unknownAmount": _num(unknown[1]),
+        "unknownCount": len(unknown_rows),
+        "unknownAmount": round(sum(r["amount"] for r in unknown_rows), 2),
         "asOf": today.isoformat(),
     }
 
@@ -1457,12 +1616,21 @@ async def deals(
         WITH buy AS (
           -- Средняя цена закупки по коду за всю историю: себестоимость сделки не
           -- зависит от того, каким окном человек смотрит на продажи.
+          --
+          -- ТОЛЬКО ТОВАРНЫЕ строки. У услуг «количество» несопоставимо: у компании,
+          -- которая продаёт услуги одним кодом «Услуга», средняя цена закупки по этому
+          -- же коду (аренда, подряд, связь) приписывалась каждой продаже — 12 780,97 ₽
+          -- за «штуку». Итог: маржа −4,6 млн против +1,0 млн по отчёту о результате и
+          -- 123 «низкомаржинальные» сделки из 146. Неизвестная себестоимость честнее
+          -- выдуманной: строка уходит в `unknownLines`, и маржа по сделке не считается.
           SELECT btrim(ln->>'code') code,
                  sum((ln->>'amount')::numeric - coalesce((ln->>'vat')::numeric, 0))
                    / nullif(sum((ln->>'qty')::numeric), 0) price
             FROM accounting_docs d, jsonb_array_elements(d.lines) ln
            WHERE d.company_id = :cid AND d.doc_type = 'purchase'
              AND coalesce(btrim(ln->>'code'), '') <> ''
+             AND coalesce(ln->>'kind', 'goods') <> 'service'
+             AND coalesce((ln->>'qty')::numeric, 0) > 0
            GROUP BY 1
         ), sale AS (
           SELECT d.id, d.number, d.date, d.counterparty_name, d.counterparty_id, d.amount,
@@ -1479,7 +1647,9 @@ async def deals(
                count(*),
                count(*) FILTER (WHERE buy.price IS NULL)
           FROM sale s
+          -- Услуга не сопоставляется с закупкой по коду — см. комментарий в `buy`.
           LEFT JOIN buy ON buy.code = btrim(s.ln->>'code')
+                       AND coalesce(s.ln->>'kind', 'goods') <> 'service'
          GROUP BY s.id
          ORDER BY max(s.date) DESC
     """), p)).all()]
@@ -1509,6 +1679,8 @@ async def deals(
 @router.get("/backlog")
 async def backlog(
     company_id: str,
+    date_from: str | None = None,
+    date_to: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
@@ -1526,7 +1698,7 @@ async def backlog(
         "invoices": r[2], "invoiced": _num(r[3]),
         "sales": r[4], "shipped": _num(r[5]),
         "firstInvoice": r[6], "lastInvoice": r[7],
-    } for r in (await db.execute(text("""
+    } for r in (await db.execute(text(f"""
         SELECT coalesce(counterparty_name, '—'), max(counterparty_id::text),
                count(*) FILTER (WHERE doc_type = 'invoice_out'),
                coalesce(sum(amount) FILTER (WHERE doc_type = 'invoice_out'), 0),
@@ -1536,10 +1708,11 @@ async def backlog(
                max(date) FILTER (WHERE doc_type = 'invoice_out')
           FROM accounting_docs
          WHERE company_id = :cid
-           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND doc_type IN ('invoice_out', 'sale')
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid))
+           AND doc_type IN ('invoice_out', 'sale'){_doc_period(date_from, date_to)}
          GROUP BY 1 HAVING count(*) FILTER (WHERE doc_type = 'invoice_out') > 0
          ORDER BY 4 DESC
-    """), {"cid": str(cid), "org": _org_param()})).all()]
+    """), _doc_params(cid, date_from, date_to))).all()]
 
     for r in rows:
         r["gap"] = round(r["invoiced"] - r["shipped"], 2)
@@ -1560,6 +1733,8 @@ async def backlog(
 @router.get("/concentration")
 async def concentration(
     company_id: str,
+    date_from: str | None = None,
+    date_to: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
@@ -1572,15 +1747,16 @@ async def concentration(
     """
     cid = await assert_company_member(company_id, current_user, db)
 
-    raw = [(r[0], r[1], _num(r[2])) for r in (await db.execute(text(r"""
+    raw = [(r[0], r[1], _num(r[2])) for r in (await db.execute(text(rf"""
         SELECT substr(date, 1, 4) AS year,
                coalesce(counterparty_id::text, counterparty_name) AS client,
                sum(amount)
           FROM accounting_docs
          WHERE company_id = :cid
-           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND doc_type = 'sale' AND date ~ '^\d{4}'
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid))
+           AND doc_type = 'sale' AND date ~ '^\d{{4}}'{_doc_period(date_from, date_to)}
          GROUP BY 1, 2
-    """), {"cid": str(cid), "org": _org_param()})).all()]
+    """), _doc_params(cid, date_from, date_to))).all()]
 
     def stats(pairs: list[tuple[str, float]]) -> dict[str, Any]:
         total = sum(a for _, a in pairs)
@@ -1598,8 +1774,15 @@ async def concentration(
 
     years = sorted({y for y, _, _ in raw})
     by_year = [{"year": y, **stats([(c, a) for yy, c, a in raw if yy == y])} for y in years]
+    # Итог за всю историю пересобирается ПО КЛИЕНТУ: `raw` сгруппирован парой «год +
+    # клиент», и покупатель, торговавший три года, входил тремя долями — 23 «клиента»
+    # вместо 19, HHI 1609 вместо 1814, CR3 51,8 % вместо 63,9 %. Концентрация выглядела
+    # ниже, чем она есть, то есть риск занижался.
+    per_client: dict[str, float] = {}
+    for _, client, amount in raw:
+        per_client[client] = per_client.get(client, 0.0) + amount
     return {
-        "total": stats([(c, a) for _, c, a in raw]),
+        "total": stats(list(per_client.items())),
         "years": by_year,
         # Границы, по которым читается число: без них HHI это просто «2731».
         "levels": {"low": 1000, "high": 2000},
@@ -1627,8 +1810,15 @@ async def stock(
 
     # Ключ — код И наименование: в выгрузке код переиспользован (у пилота два кода
     # несут разные товары), и по одному коду остаток складывал бы несравнимое.
-    # Оценка идёт по суммам БЕЗ НДС (`amount_raw`): на счёте 41 товар лежит без
-    # налога, и с оценкой по суммам с НДС сверка расходилась на ставку.
+    #
+    # Вычитать НДС из оценки можно ТОЛЬКО там, где он выделяется на 19 счёт. На УСН
+    # налог поставщика входит в стоимость товара, и вычитание занижало остаток ровно
+    # на ставку: терминал лежал на 41 счёте за 75 000, а витрина показывала 61 475,41.
+    # Признак берём по факту — есть ли у компании проводки по 19 счёту.
+    p["sepvat"] = bool((await db.execute(text(f"""
+        SELECT 1 FROM gl_entries
+         WHERE company_id = :cid AND {_acc('account_dt', '19')} LIMIT 1
+    """), {"cid": str(cid)})).first())
     rows = [{
         "code": r[0], "name": r[1],
         "boughtQty": _num(r[2]), "boughtAmount": _num(r[3]),
@@ -1644,9 +1834,11 @@ async def stock(
         ), x AS (
           SELECT doc_type, date, btrim(ln->>'code') code, ln->>'name' name,
                  (ln->>'qty')::numeric qty,
-                 -- Оценка остатка — по суммам БЕЗ НДС (сумма минус налог строки):
-                 -- на счёте 41 товар лежит без налога.
-                 ((ln->>'amount')::numeric - coalesce((ln->>'vat')::numeric, 0)) amount
+                 -- НДС вычитается, только если он выделяется на 19 счёт (см. `sepvat`
+                 -- выше): на УСН налог сидит в стоимости товара.
+                 (CASE WHEN CAST(:sepvat AS boolean)
+                       THEN (ln->>'amount')::numeric - coalesce((ln->>'vat')::numeric, 0)
+                       ELSE (ln->>'amount')::numeric END) amount
             FROM l
            WHERE coalesce(btrim(ln->>'code'), '') <> ''
              -- Только товарные строки: у услуги остатка не бывает по природе.
@@ -1907,6 +2099,26 @@ def _acc_any(col: str, prefixes: tuple[str, ...]) -> str:
     return "(" + " OR ".join(_acc(col, p) for p in prefixes) + ")"
 
 
+def _reg_period(date_from: str | None, date_to: str | None) -> str:
+    """Кусок WHERE по дате проводки: контрольная цифра обязана считаться за тот же
+    период, что и витрина рядом с ней, иначе «расхождение» показывает разницу окон."""
+    s = ""
+    if date_from:
+        s += " AND entry_date >= CAST(:df AS date)"
+    if date_to:
+        s += " AND entry_date <= CAST(:dt AS date)"
+    return s
+
+
+def _reg_params(cid, date_from: str | None, date_to: str | None) -> dict[str, Any]:
+    p: dict[str, Any] = {"cid": str(cid), "org": _org_param()}
+    if date_from:
+        p["df"] = _day(date_from)
+    if date_to:
+        p["dt"] = _day(date_to)
+    return p
+
+
 async def _pnl_rows(db: AsyncSession, cid, date_from: str | None, date_to: str | None
                     ) -> list[dict[str, Any]]:
     """Помесячные обороты счетов результата — основа отчёта.
@@ -2150,7 +2362,10 @@ async def expenses(
          GROUP BY 1 ORDER BY 1
     """), p)).all()]
 
-    # Статьи затрат из субконто. `dt1` у затратных счетов и есть статья, `dt2` пуст.
+    # Статьи затрат из субконто. У 25/26/44 статья лежит первым субконто (`dt1`), а у
+    # счёта 20 первое — НОМЕНКЛАТУРНАЯ ГРУППА, статья вторым (`dt2`): без этого 64 %
+    # расходов сваливались в одну строку «Основная номенклатурная группа», а зарплата,
+    # амортизация и взносы внутри неё не различались.
     # Период у оборотов — год и месяц числами, а не датой: сравниваем по паре.
     pt: dict[str, Any] = {"cid": str(cid), "org": _org_param()}
     twhere = ""
@@ -2164,7 +2379,10 @@ async def expenses(
         "item": r[0] or "Без статьи", "account": r[1],
         "amount": _num(r[2]), "months": r[3],
     } for r in (await db.execute(text(f"""
-        SELECT t.dt1, t.account_dt, sum(t.amount),
+        SELECT CASE WHEN (t.account_dt = '20' OR t.account_dt LIKE '20.%')
+                    THEN coalesce(nullif(btrim(t.dt2), ''), t.dt1)
+                    ELSE t.dt1 END AS item,
+               t.account_dt, sum(t.amount),
                count(DISTINCT (t.period_year, t.period_month))
           FROM gl_turnovers t
          WHERE t.company_id = :cid
@@ -2227,15 +2445,16 @@ async def taxes(
     budget_dt = _acc_any("e.account_dt", BUDGET_ACCS)
     money_kt = "(" + " OR ".join(_acc("e.account_kt", a) for a in ("50", "51", "52", "55")) + ")"
 
+    # Начисление — оборот «Кт бюджетного счёта против НЕбюджетного дебета»; условие
+    # `NOT {budget_dt}` ниже уже отсекает переносы между бюджетными счетами (68.12 → 68.90
+    # на ЕНС). Раньше тот же перенос вычитался ВТОРОЙ раз подзапросом, притом за всю
+    # историю, без фильтра периода и организации: 450 540,78 превращались в 5 377,50, а с
+    # выбранным периодом уходили в минус (−71 908,80). Помесячный график ниже считает без
+    # вычитания — и расходился с собственным KPI этого же экрана в 84 раза.
     rows = [{
         "account": r[0], "name": r[1] or r[0], "accrued": _num(r[2]), "entries": r[3],
     } for r in (await db.execute(text(f"""
-        SELECT e.account_kt, max(a.name),
-               sum(e.amount) - coalesce((
-                 SELECT sum(x.amount) FROM gl_entries x
-                  WHERE x.company_id = e.company_id AND x.account_dt = e.account_kt
-                    AND {_acc_any('x.account_kt', BUDGET_ACCS)}), 0),
-               count(*)
+        SELECT e.account_kt, max(a.name), sum(e.amount), count(*)
           FROM gl_entries e
           LEFT JOIN gl_accounts a ON a.company_id = e.company_id AND a.code = e.account_kt
          WHERE e.company_id = :cid
@@ -2243,12 +2462,16 @@ async def taxes(
          GROUP BY e.account_kt, e.company_id ORDER BY 3 DESC
     """), p)).all()]
 
+    # Уплачено = списано с денег в бюджет минус возвраты из бюджета. Возвраты обязаны
+    # браться ЗА ТОТ ЖЕ ПЕРИОД: без `{where}` в подзапросе возврат прошлого года уменьшал
+    # уплату выбранного месяца.
     paid = _num((await db.execute(text(f"""
         SELECT coalesce(sum(e.amount), 0) - coalesce((
                  SELECT sum(x.amount) FROM gl_entries x
                   WHERE x.company_id = :cid
            AND (CAST(:org AS uuid) IS NULL OR x.organization_id IS NULL OR x.organization_id = CAST(:org AS uuid)) AND {_acc_any('x.account_kt', BUDGET_ACCS)}
-                    AND ({_acc('x.account_dt', '51')} OR {_acc('x.account_dt', '50')})), 0)
+                    AND ({_acc('x.account_dt', '51')} OR {_acc('x.account_dt', '50')})
+                    {where.replace('e.entry_date', 'x.entry_date')}), 0)
           FROM gl_entries e
          WHERE e.company_id = :cid
            AND (CAST(:org AS uuid) IS NULL OR e.organization_id IS NULL OR e.organization_id = CAST(:org AS uuid)) AND {budget_dt} AND {money_kt}{where}
@@ -2282,25 +2505,41 @@ async def taxes(
     vat = match(("68.02",))
     ndfl = match(("68.01",))
     contributions = match(("69",))
-    profit_tax = totals["tax"]
+    # Налог с дохода берём из ТЕХ ЖЕ начислений, что и остальные группы, а не из отчёта:
+    # иначе сумма групп не сходится с собственным итогом экрана. 68.04 — налог на прибыль
+    # (ОСНО), 68.12 — налог при УСН, 68.45 — патент. Режимы совмещаются: компания на УСН
+    # может докупать патенты под отдельные виды деятельности.
+    profit_tax = match(("68.04", "68.12", "68.45"))
+    modes = [name for name, accs in (("ОСНО", ("68.04",)), ("УСН", ("68.12",)),
+                                     ("патент", ("68.45",))) if match(accs) > 0]
+    osno = "ОСНО" in modes
+    other_taxes = round(accrued - vat - ndfl - contributions - profit_tax, 2)
     return {
         "rows": rows,
         "months": months,
         "accrued": accrued,
         "paid": paid,
         "revenueNet": totals["net"],
-        # Нагрузка по методике ФНС: уплаченные налоги (с НДФЛ агента, без страховых
-        # взносов) к выручке без НДС.
+        # Нагрузка: уплаченные налоги к выручке без НДС. Взносы отделить от прочих
+        # платежей нельзя — всё уходит одним платежом на ЕНС, поэтому показатель
+        # подписан как «с взносами», а не обещает методику ФНС, которой не соответствует.
         "loadPct": round(paid / totals["net"] * 100, 1) if totals["net"] else None,
+        "loadNote": "все уплаченные налоги и взносы (ЕНС не разделяется по видам)",
+        # Режим налогообложения — по тому, какой налог с дохода начислен. Их может быть
+        # несколько сразу: «УСН + патент».
+        "taxMode": " + ".join(modes) if modes else None,
         "groups": {
-            "profitTax": profit_tax,     # строка отчёта о результате
+            "profitTax": profit_tax,     # налог с дохода: 68.04 (ОСНО) либо 68.12 (УСН)
             "vat": vat,                  # транзитный: не расход компании
             "ndfl": ndfl,                # удержание у работника
             "contributions": contributions,  # часть затрат на персонал
+            "other": other_taxes,        # остаток, чтобы сумма групп сходилась с итогом
         },
-        # Эффективная ставка имеет смысл только на ОСНО и при положительной прибыли.
+        # Эффективная ставка осмысленна только на ОСНО: на УСН налог считается от дохода
+        # (или дохода за вычетом расходов), а на патенте — от вменённого дохода, и к
+        # прибыли до налогообложения ни тот, ни другой отношения не имеет.
         "etrPct": (round(profit_tax / totals["beforeTax"] * 100, 1)
-                   if totals["beforeTax"] > 0 else None),
+                   if totals["beforeTax"] > 0 and osno else None),
     }
 
 
@@ -2427,9 +2666,13 @@ async def cost_bridge(
                -- списано в результат: ушло на 90 или 91
                coalesce(sum(e.amount) FILTER (
                  WHERE e.account_kt = acc.code AND {result_dt}), 0),
-               -- перенесено внутри контура затрат (26 → 44 и подобное)
+               -- перенесено внутри контура затрат (26 → 44 и подобное). Проводка
+               -- «сам себе» (Дт 20.01 Кт 20.01 — корректировка стоимости списания)
+               -- переносом НЕ является: она ничего не уносит со счёта, а раньше
+               -- вычиталась из остатка и уводила его в минус на 1,08 млн.
                coalesce(sum(e.amount) FILTER (
-                 WHERE e.account_kt = acc.code AND {cost_dt}), 0)
+                 WHERE e.account_kt = acc.code AND {cost_dt}
+                   AND e.account_dt <> acc.code), 0)
           FROM gl_accounts acc
           LEFT JOIN gl_entries e ON e.company_id = acc.company_id
                AND (e.account_dt = acc.code OR e.account_kt = acc.code){where}
@@ -2439,10 +2682,22 @@ async def cost_bridge(
          ORDER BY 3 DESC
     """), p)).all()]
 
+    # Входящее сальдо затратных счетов: без него «остаток» считается так, будто счёт
+    # открылся с нуля в начале выбранного окна. У счёта 20 это незавершёнка, которая
+    # пришла из прошлого периода.
+    opening = {r[0]: _num(r[1]) for r in (await db.execute(text(f"""
+        SELECT e.account_dt, sum(e.amount) FROM gl_entries e
+         WHERE e.company_id = :cid AND {_acc_any('e.account_dt', COST_ACCS)}
+           {('AND e.entry_date < :df' if date_from else '')}
+         GROUP BY 1
+    """), {k: v for k, v in p.items() if k in ('cid', 'df')})).all()} if date_from else {}
+
     for r in rows:
-        # Остаток на счёте: начислено минус списанное и перенесённое. У 44 и 26 он
-        # обычно нулевой (закрываются каждый месяц), у 20 — это незавершёнка.
-        r["rest"] = round(r["accrued"] - r["written"] - r["moved"], 2)
+        # Остаток на счёте: входящее сальдо плюс начисленное минус списанное и
+        # перенесённое. У 44 и 26 он обычно нулевой (закрываются каждый месяц),
+        # у 20 — это незавершённое производство.
+        r["opening"] = round(opening.get(r["account"], 0.0), 2)
+        r["rest"] = round(r["opening"] + r["accrued"] - r["written"] - r["moved"], 2)
 
     pnl_rows = await _pnl_rows(db, cid, date_from, date_to)
     t = _pnl_totals(pnl_rows)
@@ -2517,7 +2772,7 @@ async def attention(
             "rev_buyers", "rev_clients", len(silent))
 
     # Клиенты со счетами и без единой отгрузки.
-    bl = await backlog(company_id, db, current_user)
+    bl = await backlog(company_id, date_from, date_to, db, current_user)
     if bl["silentCount"]:
         add("backlog", "warn", "Счета без отгрузки",
             f"{bl['silentAmount']:,.2f} ₽".replace(",", " "),
@@ -2534,7 +2789,7 @@ async def attention(
             "rev_sales", "rev_deals", dl["lowMargin"])
 
     # Концентрация за последний год.
-    conc = await concentration(company_id, db, current_user)
+    conc = await concentration(company_id, date_from, date_to, db, current_user)
     last = conc["years"][-1] if conc["years"] else None
     if last and last.get("hhi") and last["hhi"] > conc["levels"]["high"]:
         add("concentration", "danger", "Высокая концентрация выручки",
@@ -2552,7 +2807,7 @@ async def attention(
             "rev_sales", "rev_quality", qa["problems"])
 
     # Сходимость с бухгалтерией: если разошлась, остальное можно не смотреть.
-    chk = await revenue_check(company_id, db, current_user)
+    chk = await revenue_check(company_id, date_from, date_to, db, current_user)
     if chk["broken"]:
         add("recon", "danger", "Витрина разошлась с регистром",
             f"{len(chk['broken'])} месяцев",
@@ -2787,8 +3042,11 @@ async def off_balance_hidden(
     cid = await assert_company_member(company_id, current_user, db)
     p = {"cid": str(cid), "org": _org_param()}
 
-    # Основные средства: остаток по 01 против накопленной амортизации по 02. Снимок
-    # сальдо честнее оборотов — имущество куплено до начала выгрузки.
+    # Внеоборотные активы: остаток по 01/04 против накопленной амортизации по 02/05.
+    # НМА (04/05) обязательны наравне с основными средствами: у компании, которая
+    # разрабатывает ПО, основных средств может не быть вовсе, и экран показывал нули
+    # при нематериальных активах на 1,35 млн с износом 592 708,33. Снимок сальдо
+    # честнее оборотов — имущество куплено до начала выгрузки.
     as_of = (await db.execute(text(
         "SELECT max(as_of) FROM gl_balances WHERE company_id = :cid"
         " AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL"
@@ -2800,14 +3058,16 @@ async def off_balance_hidden(
             SELECT account, account_name, sub1, sum(debit), sum(credit)
               FROM gl_balances
              WHERE company_id = :cid AND as_of = :ao AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid))
-               AND (account LIKE '01%' OR account LIKE '02%')
+               AND (account LIKE '01%' OR account LIKE '02%'
+                    OR account LIKE '04%' OR account LIKE '05%')
              GROUP BY 1, 2, 3
         """), {"cid": str(cid), "ao": as_of, "org": _org_param()})).all():
             amount = _num(r[3]) - _num(r[4])
-            if r[0].startswith("01"):
+            if r[0].startswith("01") or r[0].startswith("04"):
                 cost += amount
                 fixed.append({"account": r[0], "name": r[1], "sub": r[2],
-                              "cost": round(amount, 2)})
+                              "cost": round(amount, 2),
+                              "kind": "НМА" if r[0].startswith("04") else "ОС"})
             else:
                 # На 02 амортизация пассивная: остаток кредитовый.
                 wear += -amount
@@ -2916,7 +3176,7 @@ async def insights(
 
     p = await pnl(company_id, None, None, db, current_user)
     years = [y for y in p["years"] if y["net"]]
-    conc = await concentration(company_id, db, current_user)
+    conc = await concentration(company_id, None, None, db, current_user)
     cf = await cashflow_items(company_id, None, None, db, current_user)
     terms = await payment_terms(company_id, None, None, db, current_user)
     items = await assortment(company_id, "item", None, None, 500, db, current_user)
@@ -3336,6 +3596,8 @@ async def payment_terms(
 @router.get("/cashflow")
 async def cashflow(
     company_id: str,
+    date_from: str | None = None,
+    date_to: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
@@ -3345,14 +3607,25 @@ async def cashflow(
     счёта: у документа есть контрагент, и рядом с суммой сразу видно, кто заплатил и
     кому ушло. Оборот по 51 идёт контролем — расхождение означает движение без
     документа (перевод между своими счетами, эквайринг, инкассация).
+
+    Период обязателен к соблюдению: раньше ручка его не принимала вовсе, и соседние
+    пункты одного меню показывали за 2026 год 2 748 372 ₽ и 2 480 044,30 ₽ — первый
+    молча считал всю историю.
     """
     cid = await assert_company_member(company_id, current_user, db)
     p = {"cid": str(cid), "org": _org_param()}
+    where = ""
+    if date_from:
+        where += " AND date >= :df"
+        p["df"] = date_from
+    if date_to:
+        where += " AND date <= :dt"
+        p["dt"] = date_to
 
     months = [{
         "month": r[0], "inflow": _num(r[1]), "outflow": _num(r[2]),
         "inDocs": r[3], "outDocs": r[4],
-    } for r in (await db.execute(text("""
+    } for r in (await db.execute(text(f"""
         SELECT substr(date, 1, 7) AS month,
                sum(amount) FILTER (WHERE doc_type = 'bank_in')  inflow,
                sum(amount) FILTER (WHERE doc_type = 'bank_out') outflow,
@@ -3360,7 +3633,7 @@ async def cashflow(
                count(*)    FILTER (WHERE doc_type = 'bank_out') out_docs
           FROM accounting_docs
          WHERE company_id = :cid
-           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND doc_type IN ('bank_in', 'bank_out')
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND doc_type IN ('bank_in', 'bank_out'){where}
          GROUP BY 1 ORDER BY 1
     """), p)).all()]
 
@@ -3372,23 +3645,23 @@ async def cashflow(
 
     payers = [{
         "name": r[0], "id": r[1], "inflow": _num(r[2]), "docs": r[3], "last": r[4],
-    } for r in (await db.execute(text("""
+    } for r in (await db.execute(text(f"""
         SELECT coalesce(counterparty_name, '—'), max(counterparty_id::text), sum(amount),
                count(*), max(date)
           FROM accounting_docs
          WHERE company_id = :cid
-           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND doc_type = 'bank_in'
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND doc_type = 'bank_in'{where}
          GROUP BY 1 ORDER BY 3 DESC LIMIT 50
     """), p)).all()]
 
     payees = [{
         "name": r[0], "id": r[1], "outflow": _num(r[2]), "docs": r[3], "last": r[4],
-    } for r in (await db.execute(text("""
+    } for r in (await db.execute(text(f"""
         SELECT coalesce(counterparty_name, '—'), max(counterparty_id::text), sum(amount),
                count(*), max(date)
           FROM accounting_docs
          WHERE company_id = :cid
-           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND doc_type = 'bank_out'
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid)) AND doc_type = 'bank_out'{where}
          GROUP BY 1 ORDER BY 3 DESC LIMIT 50
     """), p)).all()]
 
@@ -3403,12 +3676,12 @@ async def cashflow(
         # молча покажет ноль и «расхождение на весь оборот».
         "registerIn": _num((await db.execute(text(
             "SELECT coalesce(sum(amount), 0) FROM gl_entries "
-            "WHERE company_id = :cid AND (account_dt = '51' OR account_dt LIKE '51.%')"),
-            {"cid": str(cid), "org": _org_param()})).scalar_one()),
+            "WHERE company_id = :cid AND (account_dt = '51' OR account_dt LIKE '51.%')"
+            + _reg_period(date_from, date_to)), _reg_params(cid, date_from, date_to))).scalar_one()),
         "registerOut": _num((await db.execute(text(
             "SELECT coalesce(sum(amount), 0) FROM gl_entries "
-            "WHERE company_id = :cid AND (account_kt = '51' OR account_kt LIKE '51.%')"),
-            {"cid": str(cid), "org": _org_param()})).scalar_one()),
+            "WHERE company_id = :cid AND (account_kt = '51' OR account_kt LIKE '51.%')"
+            + _reg_period(date_from, date_to)), _reg_params(cid, date_from, date_to))).scalar_one()),
     }
 
 
@@ -3446,6 +3719,213 @@ CF_KIND_LABEL = {
     "investing": "Инвестиционная",
     "financing": "Финансовая",
 }
+
+
+# — Банк: счета компании и выписка —————————————————————————————
+# Движение денег продукт показывал только СВЁРНУТЫМ: потоком по месяцам и статьями
+# ДДС. Самих операций и расчётных счетов не было нигде, хотя в выгрузке они есть
+# полностью — у документа проставлены счёт организации, статья, вид операции, договор
+# и назначение платежа, а остаток по каждому счёту лежит в сальдо 51 с субконто.
+# Бухгалтер работает именно этим разрезом («что прошло по банку»), и без него
+# сходимость с банком проверить нечем.
+
+
+def _bank_account_label(raw):
+    """Строка субконто «НОМЕР, Банк» → пара (номер, банк)."""
+    s = (raw or "").strip()
+    if not s:
+        return "", ""
+    num, _, bank = s.partition(",")
+    return num.strip(), bank.strip()
+
+
+@router.get("/bank-accounts")
+async def bank_accounts(
+    company_id: str,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Счета и касса компании: остаток на последний срез и обороты за период.
+
+    Остаток берётся из САЛЬДО (счета 50/51/52/55/57 с субконто «банковский счёт»), а не
+    накапливается по документам: выгрузка документов начинается позже, чем открыт счёт,
+    и накопленный остаток был бы меньше настоящего на всю предысторию.
+    """
+    cid = await assert_company_member(company_id, current_user, db)
+    p = _doc_params(cid, date_from, date_to)
+
+    rest = [{
+        "account": r[0], "sub": r[1] or "",
+        "number": _bank_account_label(r[1])[0], "bank": _bank_account_label(r[1])[1],
+        "rest": _num(r[2]),
+    } for r in (await db.execute(text("""
+        SELECT account, sub1, sum(debit) - sum(credit)
+          FROM gl_balances
+         WHERE company_id = :cid AND source <> 'monthly'
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL
+                OR organization_id = CAST(:org AS uuid))
+           AND (account LIKE '50%' OR account LIKE '51%' OR account LIKE '52%'
+                OR account LIKE '55%' OR account LIKE '57%')
+           AND as_of = (SELECT max(as_of) FROM gl_balances
+                         WHERE company_id = :cid AND source <> 'monthly')
+         GROUP BY 1, 2 ORDER BY 1, 2
+    """), {"cid": str(cid), "org": _org_param()})).all()]
+
+    # Обороты за период — по документам банка, разрез тот же: счёт организации.
+    turn = {r[0]: (_num(r[1]), _num(r[2]), r[3], r[4]) for r in (await db.execute(text(f"""
+        SELECT coalesce(details->>'Счёт организации', '') AS acc,
+               coalesce(sum(amount) FILTER (WHERE doc_type = 'bank_in'), 0),
+               coalesce(sum(amount) FILTER (WHERE doc_type = 'bank_out'), 0),
+               count(*) FILTER (WHERE doc_type = 'bank_in'),
+               count(*) FILTER (WHERE doc_type = 'bank_out')
+          FROM accounting_docs
+         WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid))
+           AND doc_type IN ('bank_in', 'bank_out'){_doc_period(date_from, date_to)}
+         GROUP BY 1
+    """), p)).all()}
+
+    # Справочник счетов из выгрузки: БИК и полное имя банка — реквизиты, которых в
+    # сальдо нет. Сводим по номеру счёта.
+    ref = {r[0]: (r[1], r[2] or {}) for r in (await db.execute(text("""
+        SELECT code, name, meta FROM gl_references
+         WHERE company_id = :cid AND kind = 'bank_accounts'"""),
+        {"cid": str(cid)})).all()}
+
+    rows = []
+    for r in rest:
+        inflow, outflow, in_n, out_n = turn.get(r["sub"], (0.0, 0.0, 0, 0))
+        _, meta = ref.get(r["number"], (None, {}))
+        rows.append({
+            **r,
+            "kind": "касса" if str(r["account"]).startswith("50") else "расчётный счёт",
+            "bik": meta.get("bik"),
+            "bankFull": meta.get("bank") or r["bank"],
+            "inflow": inflow, "outflow": outflow,
+            "inDocs": in_n, "outDocs": out_n,
+            "net": round(inflow - outflow, 2),
+        })
+
+    # Операции по счёту, которого нет в сальдо (закрытый счёт, другая организация):
+    # молчать о них нельзя — это те же деньги компании.
+    known = {r["sub"] for r in rest}
+    for acc, (inflow, outflow, in_n, out_n) in turn.items():
+        if acc in known:
+            continue
+        number, bank = _bank_account_label(acc)
+        rows.append({
+            "account": None, "sub": acc, "number": number, "bank": bank,
+            "kind": "нет в сальдо", "rest": None, "bik": None, "bankFull": bank,
+            "inflow": inflow, "outflow": outflow, "inDocs": in_n, "outDocs": out_n,
+            "net": round(inflow - outflow, 2),
+        })
+
+    as_of = (await db.execute(text("""
+        SELECT max(as_of)::text FROM gl_balances
+         WHERE company_id = :cid AND source <> 'monthly'"""), {"cid": str(cid)})).scalar()
+    return {
+        "rows": sorted(rows, key=lambda r: -(r["rest"] or 0)),
+        "rest": round(sum(r["rest"] or 0 for r in rows), 2),
+        "inflow": round(sum(r["inflow"] for r in rows), 2),
+        "outflow": round(sum(r["outflow"] for r in rows), 2),
+        "asOf": as_of,
+        "refAccounts": len(ref),
+    }
+
+
+@router.get("/bank-statement")
+async def bank_statement(
+    company_id: str,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    side: str | None = Query(None, description="in | out; пусто — обе стороны"),
+    account: str | None = None,
+    q: str | None = None,
+    limit: int = Query(500, ge=1, le=2000),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Выписка: сами операции банка — дата, контрагент, назначение, статья, сумма.
+
+    Итоги считаются по ВСЕЙ выборке, а не по показанной странице: сумма под таблицей,
+    не сходящаяся с банком из-за лимита строк, хуже отсутствующей.
+    """
+    cid = await assert_company_member(company_id, current_user, db)
+    p = _doc_params(cid, date_from, date_to)
+    where = _doc_period(date_from, date_to, "d")
+    if side in ("in", "out"):
+        where += " AND d.doc_type = :dtype"
+        p["dtype"] = "bank_in" if side == "in" else "bank_out"
+    if account:
+        where += " AND d.details->>'Счёт организации' = :acc"
+        p["acc"] = account
+    if q:
+        where += (" AND (lower(d.counterparty_name) LIKE :q"
+                  " OR lower(coalesce(d.doc_meta->>'purpose', '')) LIKE :q"
+                  " OR lower(coalesce(d.details->>'Статья ДДС', '')) LIKE :q"
+                  " OR d.number LIKE :q)")
+        p["q"] = "%" + q.lower() + "%"
+
+    total = (await db.execute(text(f"""
+        SELECT count(*),
+               coalesce(sum(d.amount) FILTER (WHERE d.doc_type = 'bank_in'), 0),
+               coalesce(sum(d.amount) FILTER (WHERE d.doc_type = 'bank_out'), 0)
+          FROM accounting_docs d
+         WHERE d.company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR d.organization_id IS NULL OR d.organization_id = CAST(:org AS uuid))
+           AND d.doc_type IN ('bank_in', 'bank_out'){where}
+    """), p)).one()
+
+    rows = [{
+        "id": str(r[0]), "date": r[1], "number": r[2],
+        "side": "in" if r[3] == "bank_in" else "out",
+        "counterparty": r[4], "counterpartyId": str(r[5]) if r[5] else None,
+        "amount": _num(r[6]), "vat": _num(r[7]),
+        "item": r[8] or "Без статьи", "operation": r[9], "contract": r[10],
+        "account": r[11], "accountNumber": _bank_account_label(r[11])[0],
+        "purpose": r[12], "payNumber": r[13], "payDate": r[14],
+    } for r in (await db.execute(text(f"""
+        SELECT d.id, d.date, d.number, d.doc_type, d.counterparty_name, d.counterparty_id,
+               d.amount, coalesce(d.vat_amount, 0),
+               d.details->>'Статья ДДС', d.details->>'Вид операции', d.details->>'Договор',
+               d.details->>'Счёт организации', d.doc_meta->>'purpose',
+               d.doc_meta->>'Номер первичного', d.doc_meta->>'Дата первичного'
+          FROM accounting_docs d
+         WHERE d.company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR d.organization_id IS NULL OR d.organization_id = CAST(:org AS uuid))
+           AND d.doc_type IN ('bank_in', 'bank_out'){where}
+         ORDER BY d.date DESC, d.number DESC
+         LIMIT :lim
+    """), dict(p, lim=limit))).all()]
+
+    # Контрольная цифра: проводки денежных счетов ЗА ТОТ ЖЕ ВИД ДОКУМЕНТА, что и
+    # строки выписки. Сравнивать с полным оборотом 51 нельзя ни так, ни эдак: перевод
+    # между своими счетами отражён ОДНИМ документом списания, и его приход попадает в
+    # оборот, но не в выписку; депозит (51 → 55), наоборот, документ имеет, и
+    # исключение «обе стороны денежные» уносило у НПК 22,5 млн из контроля.
+    reg = (await db.execute(text(f"""
+        SELECT coalesce(sum(amount) FILTER (WHERE doc_kind = 'Поступление на расчетный счет'
+                                              AND account_dt SIMILAR TO '(50|51|52|55)%'), 0),
+               coalesce(sum(amount) FILTER (WHERE doc_kind = 'Списание с расчетного счета'
+                                              AND account_kt SIMILAR TO '(50|51|52|55)%'), 0)
+          FROM gl_entries
+         WHERE company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid))
+           {_reg_period(date_from, date_to)}
+    """), _reg_params(cid, date_from, date_to))).one()
+
+    return {
+        "rows": rows,
+        "count": total[0],
+        "inflow": _num(total[1]),
+        "outflow": _num(total[2]),
+        "net": round(_num(total[1]) - _num(total[2]), 2),
+        "shown": len(rows),
+        "registerIn": _num(reg[0]),
+        "registerOut": _num(reg[1]),
+    }
 
 
 @router.get("/cashflow-items")
@@ -3695,7 +4175,10 @@ async def counterparties(
           LEFT JOIN debt b ON b.counterparty_id = k.id
          WHERE k.company_id = :cid
            AND (CAST(:q AS text) IS NULL OR lower(k.name) LIKE :q OR coalesce(k.inn,'') LIKE :q)
-           AND (a.docs IS NOT NULL OR b.ar IS NOT NULL)
+           -- В списке тот, у кого есть документы ЛИБО любое сальдо расчётов. Раньше
+           -- условие смотрело на `b.ar` — конкретную колонку долга, и контрагент,
+           -- у которого только аванс (62.02) и ни одного документа, из списка выпадал.
+           AND (a.counterparty_id IS NOT NULL OR b.counterparty_id IS NOT NULL)
          ORDER BY coalesce(a.sales, 0) + coalesce(a.purchases, 0) DESC
          LIMIT :lim
     """), params)).all()
@@ -4411,9 +4894,17 @@ async def quality(
     async def _count(sql: str) -> int:
         return int((await db.execute(text(sql), {"cid": str(cid), "org": _org_param()})).scalar_one() or 0)
 
+    # Папки справочника (`inn = '0'`) дублями не считаются — их в 1С несколько по
+    # природе. А вот флаг `is_group` исключать нельзя: слияние карточек проставляет
+    # его донору, и проверка рапортовала «сходится», пока документы юрлица оставались
+    # на слитой карточке. Соседний экран «Контрагенты» те же дубли показывал.
     dup_inn = await _count("""
         SELECT count(*) FROM (SELECT inn FROM counterparties
-         WHERE company_id = :cid AND coalesce(inn,'') <> '' AND NOT is_group
+         WHERE company_id = :cid AND coalesce(inn,'') NOT IN ('', '0')
+           -- Карточка, СЛИТАЯ с основной, дублем не считается: слияние её и завело,
+           -- связей на ней нет, а без этого условия проверка вечно красная ровно
+           -- потому, что дубли уже разобраны.
+           AND name NOT LIKE '%[слит%'
          GROUP BY inn HAVING count(*) > 1) t""")
     add("dup_counterparty_inn", "Один ИНН — одна карточка",
         "ok" if not dup_inn else "error", dup_inn,
@@ -4432,15 +4923,21 @@ async def quality(
          WHERE d.company_id = :cid
            AND (CAST(:org AS uuid) IS NULL OR d.organization_id IS NULL OR d.organization_id = CAST(:org AS uuid)) AND jsonb_array_length(coalesce(d.lines,'[]'::jsonb)) > 0
            AND d.doc_type NOT IN ('payroll_accrual', 'act_recon')
+           AND abs(d.amount - (SELECT coalesce(sum((l->>'amount')::numeric)
+                                        + sum(coalesce((l->>'vat')::numeric, 0)), 0)
+                                 FROM jsonb_array_elements(d.lines) l)) > 0.01
            AND abs(d.amount - (SELECT coalesce(sum((l->>'amount')::numeric),0)
                                  FROM jsonb_array_elements(d.lines) l)) > 0.01""")
     add("head_vs_lines", "Шапка документа = сумма строк",
         "ok" if not head_vs_lines else "warn", head_vs_lines,
         "Расхождение бывает дефектом источника: НДС начислен сверху, а шапка без налога")
 
+    # `inn = '0'` — папка справочника 1С («Банки», «Госорганы»), а не карточка с
+    # неправильным ИНН: четыре постоянных предупреждения были шумом.
     bad_inn = await _count("""
         SELECT count(*) FROM counterparties
-         WHERE company_id = :cid AND coalesce(inn,'') <> ''
+         WHERE company_id = :cid AND coalesce(inn,'') NOT IN ('', '0')
+           AND NOT is_group
            AND inn !~ '^[0-9]{10}$' AND inn !~ '^[0-9]{12}$'""")
     add("inn_format", "ИНН правильной длины", "ok" if not bad_inn else "warn", bad_inn,
         "10 цифр у юрлица, 12 у предпринимателя — иначе карточка не сверится с реестром")
@@ -4582,6 +5079,13 @@ async def model(
     intakes = (await db.execute(select(func.count()).select_from(SourceFile)
                                 .where(SourceFile.company_id == cid,
                                        SourceFile.purpose == "data"))).scalar_one()
+    # Сам приём: имя файла, размер и отпечаток. Ради них слой и заведён — без них на
+    # экране стояло «1 приёмов», то есть счётчик вместо ответа «откуда эта цифра».
+    last_intake = (await db.execute(
+        select(SourceFile.file_name, SourceFile.size, SourceFile.fingerprint,
+               SourceFile.created_at, SourceFile.storage_path)
+        .where(SourceFile.company_id == cid, SourceFile.purpose == "data")
+        .order_by(SourceFile.created_at.desc()).limit(1))).first()
     snapshots = (await db.execute(select(func.count()).select_from(ReferenceSnapshot)
                                   .where(ReferenceSnapshot.company_id == cid))).scalar_one()
     analytics = 0
@@ -4597,7 +5101,14 @@ async def model(
         {"key": "l1", "code": "L1 · RAW", "title": "Приём выгрузки",
          "desc": "файл бухгалтерии с отпечатком: что и когда приняли",
          "records": intakes, "unit": "приёмов", "tone": "raw",
-         **({"status": "direct"} if not intakes else {})},
+         **({"status": "direct"} if not intakes else {
+             "source": {
+                 "file": last_intake[0],
+                 "size": last_intake[1],
+                 "fingerprint": last_intake[2],
+                 "acceptedAt": last_intake[3].isoformat() if last_intake[3] else None,
+                 "path": last_intake[4],
+             }} if last_intake else {})},
         {"key": "l2", "code": "L2 · CLEAN", "title": "Нормализованный слой",
          "desc": "проводки, документы, справочники",
          "records": entries + docs + accounts + refs, "unit": "записей", "tone": "clean"},
@@ -5539,7 +6050,10 @@ _CHECKS: list[tuple] = [
           FROM accounting_docs d
          WHERE d.company_id = :cid
            AND (CAST(:org AS uuid) IS NULL OR d.organization_id IS NULL OR d.organization_id = CAST(:org AS uuid)) AND jsonb_array_length(coalesce(d.lines,'[]'::jsonb)) > 0
-           AND d.doc_type <> 'payroll_accrual'
+           AND d.doc_type NOT IN ('payroll_accrual', 'act_recon')
+           AND abs(d.amount - (SELECT coalesce(sum((l->>'amount')::numeric)
+                                        + sum(coalesce((l->>'vat')::numeric, 0)), 0)
+                                 FROM jsonb_array_elements(d.lines) l)) > 0.01
            AND abs(d.amount - (SELECT coalesce(sum((l->>'amount')::numeric),0)
                                  FROM jsonb_array_elements(d.lines) l)) > 0.01
          ORDER BY d.date DESC"""),

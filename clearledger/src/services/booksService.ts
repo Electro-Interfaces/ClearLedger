@@ -427,7 +427,12 @@ export interface TaxesData {
   /** Нагрузка от УПЛАЧЕННОГО — так её считает и налоговая служба. */
   loadPct: number | null
   /** Раскладка по смыслу: что строка отчёта, что транзит, что удержание. */
-  groups: { profitTax: number; vat: number; ndfl: number; contributions: number }
+  groups: { profitTax: number; vat: number; ndfl: number; contributions: number;
+            other?: number }
+  // Режим налогообложения по начисленному налогу с дохода: «УСН», «ОСНО»,
+  // «УСН + патент». Нужен, чтобы не подписывать спецрежим налогом на прибыль.
+  taxMode?: string | null
+  loadNote?: string
   /** Эффективная ставка — только при положительной прибыли до налога. */
   etrPct: number | null
 }
@@ -647,6 +652,51 @@ export interface CashflowItems {
 
 export const getCashflowItems = (companyId: string, period?: PeriodOpts) =>
   get<CashflowItems>(`/api/books/cashflow-items?company_id=${companyId}` + periodQuery(period))
+
+/** Счета и касса компании: остаток из сальдо, обороты за период — по документам. */
+export interface BankAccounts {
+  rows: {
+    account: string | null; sub: string; number: string; bank: string
+    kind: string; bik: string | null; bankFull: string | null
+    /** null у счёта, по которому есть операции, но нет строки в сальдо. */
+    rest: number | null
+    inflow: number; outflow: number; net: number
+    inDocs: number; outDocs: number
+  }[]
+  rest: number; inflow: number; outflow: number
+  asOf: string | null
+  refAccounts: number
+}
+
+export const getBankAccounts = (companyId: string, period?: PeriodOpts) =>
+  get<BankAccounts>(`/api/books/bank-accounts?company_id=${companyId}` + periodQuery(period))
+
+/** Выписка: сами операции банка за период. */
+export interface BankStatement {
+  rows: {
+    id: string; date: string; number: string; side: 'in' | 'out'
+    counterparty: string | null; counterpartyId: string | null
+    amount: number; vat: number
+    item: string; operation: string | null; contract: string | null
+    account: string | null; accountNumber: string
+    purpose: string | null; payNumber: string | null; payDate: string | null
+  }[]
+  count: number; shown: number
+  inflow: number; outflow: number; net: number
+  /** Обороты денежных счетов регистра за то же окно — контрольная цифра. */
+  registerIn: number; registerOut: number
+}
+
+export const getBankStatement = (
+  companyId: string,
+  period?: PeriodOpts,
+  opts?: { side?: 'in' | 'out'; account?: string; q?: string; limit?: number },
+) =>
+  get<BankStatement>(`/api/books/bank-statement?company_id=${companyId}` + periodQuery(period)
+    + (opts?.side ? `&side=${opts.side}` : '')
+    + (opts?.account ? `&account=${encodeURIComponent(opts.account)}` : '')
+    + (opts?.q ? `&q=${encodeURIComponent(opts.q)}` : '')
+    + (opts?.limit ? `&limit=${opts.limit}` : ''))
 
 /** Продажи в разрезе договоров; строка с id === null — документы без договора. */
 export interface ContractSales {

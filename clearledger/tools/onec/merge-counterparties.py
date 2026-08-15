@@ -1,6 +1,12 @@
 # -*- coding: utf-8 -*-
 """Слияние карточек одного юрлица по ИНН.
 
+Дубли ищутся среди ВСЕХ карточек, включая помеченные архивом прошлым прогоном: пока
+условие было `NOT is_group`, повторная загрузка заводила карточку с тем же ИНН заново,
+архивная (а на ней все документы) из поиска выпадала, и у ВТБ 71 документ остался на
+«[слит с основной карточкой]», тогда как «основной» числилась пустая новая. Папки
+справочника (`inn = '0'`) дублями не считаются: их в 1С много по природе.
+
 Ревизия показала закономерность: у всех семи пар документы лежат на одной карточке,
 а договоры, счета-фактуры и сальдо — на другой. Открыв «Мейсак Павел Юрьевич», человек
 видит долг 524 079 ₽ и ноль документов; открыв «ИП Мейсак» — 61 документ и −5 050 ₽.
@@ -43,7 +49,7 @@ async def main():
 
         rows = (await s.execute(text("""
             SELECT inn, array_agg(id::text) FROM core.counterparties
-             WHERE company_id = :cid AND coalesce(inn,'') <> '' AND NOT is_group
+             WHERE company_id = :cid AND coalesce(inn,'') NOT IN ('', '0')
              GROUP BY inn HAVING count(*) > 1"""), {'cid': str(cid)})).all()
         print('групп дублей по ИНН:', len(rows))
 
@@ -68,6 +74,14 @@ async def main():
                 {'ids': ids})).all()}
             print('\nИНН %s → главная «%s» (док %d, дог %d, НДС %d)'
                   % (inn, names[main_id], weight[main_id][1], weight[main_id][2], weight[main_id][3]))
+
+            # Главной могла оказаться карточка, помеченная архивом прошлым прогоном:
+            # связи-то на ней. Возвращаем её в работу и снимаем пометку.
+            await s.execute(text("""
+                UPDATE core.counterparties
+                   SET is_group = false,
+                       name = replace(name, ' [слит с основной карточкой]', '')
+                 WHERE id = :main"""), {'main': main_id})
 
             for cp_id in ids:
                 if cp_id == main_id:
@@ -112,7 +126,7 @@ async def main():
 
         left = (await s.execute(text("""
             SELECT count(*) FROM (SELECT inn FROM core.counterparties
-             WHERE company_id = :cid AND coalesce(inn,'') <> '' AND NOT is_group
+             WHERE company_id = :cid AND coalesce(inn,'') NOT IN ('', '0') AND NOT is_group
              GROUP BY inn HAVING count(*) > 1) t"""), {'cid': str(cid)})).scalar_one()
         print('дублей по ИНН осталось:', left)
 

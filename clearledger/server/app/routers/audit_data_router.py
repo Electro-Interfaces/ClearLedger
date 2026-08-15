@@ -185,18 +185,14 @@ async def get_reference_integrity(
                 "inn": cp.inn,
             })
 
-    # «Просроченные» договоры — дата > 1 года назад (эвристика)
-    one_year_ago = (datetime.now(timezone.utc) - timedelta(days=365)).strftime("%Y-%m-%d")
-    expired = []
-    for c in contracts:
-        if c.date and c.date < one_year_ago:
-            expired.append({
-                "id": str(c.id),
-                "number": c.number,
-                "date": c.date,
-                "counterparty_id": c.counterparty_id,
-                "type": c.type,
-            })
+    # Срока действия договора в выгрузке 1С НЕТ — ни поля, ни реквизита в `raw`.
+    # Прежняя эвристика «заключён больше года назад = просрочен» объявляла таковыми
+    # 22 договора из 55, включая действующие бессрочные: это не находка, а шум.
+    # Отдаём то, что действительно проверяемо: договоры без даты заключения.
+    undated = [{
+        "id": str(c.id), "number": c.number, "date": c.date,
+        "counterparty_id": c.counterparty_id, "type": c.type,
+    } for c in contracts if not (c.date or "").strip()]
 
     # ИНН без КПП (для ЮЛ)
     invalid_inn = []
@@ -212,11 +208,13 @@ async def get_reference_integrity(
         "counterparties_total": len(counterparties),
         "contracts_total": len(contracts),
         "counterparties_without_contracts": len(no_contract),
-        "expired_contracts": len(expired),
+        "undated_contracts": len(undated),
+        "expiry_known": False,
+        "expiry_note": "срок действия договора в выгрузке 1С отсутствует — просрочку не проверяем",
         "invalid_inn_count": len(invalid_inn),
         "items": {
             "no_contract": no_contract[:50],
-            "expired": expired[:50],
+            "undated": undated[:50],
             "invalid_inn": invalid_inn[:50],
         },
     }
@@ -384,22 +382,25 @@ async def get_period_gaps(
     result = await db.execute(q)
     docs = result.scalars().all()
 
-    # Группируем по типу документа, ищем пробелы в числовой нумерации
+    # Группируем по типу документа И ГОДУ: нумерация в 1С начинается заново каждый
+    # год, и без года переход с №312 (декабрь) на №1 (январь) читался как пробел в
+    # 311 документов — а следующий шаг вверх давал ещё один ложный разрыв.
     gaps = []
-    by_type: dict[str, list[int]] = {}
+    by_type: dict[tuple[str, str], list[int]] = {}
     for d in docs:
         nums = re.findall(r"\d+", d.number)
         if nums:
-            num = int(nums[-1])
-            by_type.setdefault(d.doc_type, []).append(num)
+            year = (d.date or "")[:4]
+            by_type.setdefault((d.doc_type, year), []).append(int(nums[-1]))
 
-    for doc_type, numbers in by_type.items():
+    for (doc_type, year), numbers in by_type.items():
         numbers.sort()
         for i in range(1, len(numbers)):
             diff = numbers[i] - numbers[i - 1]
             if diff > 1:
                 gaps.append({
                     "doc_type": doc_type,
+                    "year": year,
                     "gap_from": numbers[i - 1],
                     "gap_to": numbers[i],
                     "missing_count": diff - 1,
