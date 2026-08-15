@@ -652,3 +652,41 @@ export interface PersonStatement {
 export const getPersonStatement = (companyId: string, person: string) =>
   get<PersonStatement>(`/api/perimeter/people/statement?company_id=${companyId}`
     + `&person=${encodeURIComponent(person)}`)
+
+/* ── Сводка в чат и календарь выдач ──────────────────────────────────────── */
+
+export interface Digest {
+  text: string
+  weekStart: string
+  todoTotal: number
+  rooms: { id: string; title: string; kind: string }[]
+  /** Готовые тексты персональных напоминаний — рассылать их продукт не станет. */
+  personal: { person: string; text: string }[]
+}
+
+export const getDigest = (companyId: string, week?: string) =>
+  get<Digest>(`/api/perimeter/digest?company_id=${companyId}`
+    + (week ? `&week=${week}` : ''))
+
+export const sendDigest = (companyId: string, body: { roomId: string; text: string }) =>
+  post<{ sent: boolean; roomId: string }>(
+    `/api/perimeter/digest/send?company_id=${companyId}`, body)
+
+export interface CashCalendar {
+  from: string; to: string
+  weeks: {
+    weekStart: string
+    days: { date: string; amount: number; count: number; inRange: boolean }[]
+  }[]
+  days: { date: string; amount: number; count: number; people: string[]; weekday: number }[]
+  byWeekday: { weekday: number; label: string; amount: number; count: number }[]
+  total: number
+  maxDay: number
+  activeDays: number
+  /** Среднее по дням С ВЫДАЧАМИ: делить на календарные — врать. */
+  avgActiveDay: number
+}
+
+export const getCashCalendar = (companyId: string, from?: string, to?: string) =>
+  get<CashCalendar>(`/api/perimeter/cash/calendar?company_id=${companyId}`
+    + (from ? `&date_from=${from}` : '') + (to ? `&date_to=${to}` : ''))

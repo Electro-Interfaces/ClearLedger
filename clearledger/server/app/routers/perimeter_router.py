@@ -41,6 +41,7 @@ from app.services.perimeter_periods import (
     PERIODICITY, _next_period, _period_label, _period_start, _periods,
 )
 from app.models import (
+    ChatMessage, ChatParticipant, ChatRoom, Company,
     Counterparty, OffLedgerCash, OffLedgerCommitment, OffLedgerCommitmentMark,
     OffLedgerPerson, OffLedgerRecord, OffLedgerReminder, OffLedgerReview,
     OffLedgerSettings, User,
@@ -3280,4 +3281,206 @@ async def debt_bridge(
         "from": df.isoformat(), "to": dt.isoformat(),
         "checks": {"calculated": calc, "actual": ended,
                    "diff": round(ended - calc, 2)},
+    }
+
+
+# ── Сводка в чат ─────────────────────────────────────────────────────────────
+# Реестр живёт, пока о нём вспоминают. Экран «Разбор недели» ждёт, что человек сам
+# зайдёт; сводка в чат приходит туда, где он и так каждый день.
+#
+# Рассылки по расписанию здесь нет намеренно. Во-первых, сообщение уходит от имени
+# человека, и решение отправить — его. Во-вторых, текст содержит имена и суммы
+# неоформленных расчётов: такое не должно улетать само по таймеру в комнату, состав
+# которой мог измениться.
+
+def _digest_text(review: dict[str, Any], aging: dict[str, Any],
+                 company: str | None = None) -> str:
+    """Собрать текст сводки: коротко и с числами, без служебных слов."""
+    lines: list[str] = [f"Периметр{f' · {company}' if company else ''}: "
+                        f"неделя {review['weekStart']} — {review['weekEnd']}"]
+    if not review["todo"]:
+        lines.append("Ничего не требует решения: сроки не прошли, периоды отмечены, "
+                     "подотчёт закрыт.")
+    for t in review["todo"]:
+        head = f"• {t['title']}: {t['count']}"
+        lines.append(head)
+        for i in t["items"][:3]:
+            lines.append(f"    — {i['text']} ({i['note']})")
+        if t["count"] > 3:
+            lines.append(f"    …и ещё {t['count'] - 3}")
+    if aging["expiring"]:
+        lines.append(f"• Право требования сгорает у {len(aging['expiring'])} выдач "
+                     "в ближайшие 90 дней")
+    added = review["added"]
+    if added["cash"] or added["records"]:
+        lines.append(f"За неделю записано: операций {added['cash']} "
+                     f"на {added['cashOut']:.0f} руб., договорённостей {added['records']}")
+    return "\n".join(lines)
+
+
+@router.get("/digest")
+async def digest(
+    company_id: str,
+    week: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Текст сводки и список комнат, куда её можно отправить."""
+    cid = await assert_company_product(company_id, current_user, db, PRODUCT)
+    review = await week_review(company_id, week, db, current_user)
+    aging = await cash_aging(company_id, db, current_user)
+    company = (await db.execute(
+        select(Company.name).where(Company.id == cid))).scalar_one_or_none()
+
+    # Комнаты, где человек состоит: сводку отправляют туда, где её прочитают, а не
+    # в первый попавшийся канал.
+    rooms = [{
+        "id": str(r[0]), "title": r[1] or "Без имени", "kind": r[2] or r[3],
+    } for r in (await db.execute(
+        select(ChatRoom.id, ChatRoom.name, ChatRoom.kind, ChatRoom.type)
+        .join(ChatParticipant, ChatParticipant.room_id == ChatRoom.id)
+        .where(ChatRoom.company_id == cid,
+               ChatRoom.is_active.is_(True),
+               ChatRoom.is_archived.is_(False),
+               ChatParticipant.user_id == current_user.id)
+        .order_by(ChatRoom.updated_at.desc()).limit(30))).all()]
+
+    return {
+        "text": _digest_text(review, aging, company),
+        "weekStart": review["weekStart"],
+        "todoTotal": review["todoTotal"],
+        "rooms": rooms,
+        # Персональные напоминания готовим текстом, но не рассылаем: у долга есть имя
+        # и сумма, и решение, кому это показать, остаётся за человеком.
+        "personal": [{
+            "person": r["person"],
+            "text": f"{r['person']}, напоминаю про расчёт: "
+                    f"{r['kindLabel'].lower()} от {r['happenedOn']} "
+                    f"на {r['amount']:.0f} руб., не закрыто {r['rest']:.0f} руб."
+                    + (f", срок был {r['dueOn']}" if r["dueOn"] else ""),
+        } for r in aging["rows"] if (r["rest"] or 0) > 0.01][:20],
+    }
+
+
+class DigestSendIn(BaseModel):
+    roomId: str
+    text: str = Field(min_length=1, max_length=8000)
+
+
+@router.post("/digest/send")
+async def send_digest(
+    company_id: str,
+    body: DigestSendIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Отправить сводку в комнату от имени человека.
+
+    Проверяем участие: сводка содержит имена и суммы, и отправить её в комнату, где
+    тебя нет, продукт не даст.
+    """
+    cid = await assert_company_product(company_id, current_user, db, PRODUCT)
+    rid = _uuid(body.roomId, "идентификатор комнаты")
+    room = await db.get(ChatRoom, rid)
+    if room is None or room.company_id != cid:
+        raise HTTPException(404, "Комната не найдена")
+    member = (await db.execute(select(ChatParticipant.user_id).where(
+        ChatParticipant.room_id == rid,
+        ChatParticipant.user_id == current_user.id))).scalar_one_or_none()
+    if member is None:
+        raise HTTPException(403, "Вы не участник этой комнаты")
+
+    msg = ChatMessage(room_id=rid, user_id=current_user.id,
+                      user_name=current_user.name, type="text", content=body.text)
+    db.add(msg)
+    room.updated_at = datetime.now(timezone.utc)
+    await db.flush()
+    await log_audit(db, actor=current_user, company_id=cid,
+                    action="perimeter.digest.send", target=str(rid),
+                    details={"chars": len(body.text)})
+    await db.commit()
+    return {"sent": True, "roomId": str(rid)}
+
+
+# ── Календарная карта выдач ──────────────────────────────────────────────────
+
+@router.get("/cash/calendar")
+async def cash_calendar(
+    company_id: str,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Выдачи по дням: видно режим, а не только итог.
+
+    Таблица отвечает «сколько», календарь — «когда»: пятничные выдачи, конец месяца,
+    всплески перед закрытием. Один и тот же итог за месяц выглядит по-разному, если
+    он собран из тридцати мелких выдач или из двух крупных.
+    """
+    cid = await assert_company_product(company_id, current_user, db, PRODUCT)
+    today = date.today()
+    df = _day(date_from) or (today - timedelta(days=83))
+    dt = _day(date_to) or today
+    rows = list((await db.execute(
+        select(OffLedgerCash).where(
+            OffLedgerCash.company_id == cid, _org_of(OffLedgerCash),
+            OffLedgerCash.happened_on >= df, OffLedgerCash.happened_on <= dt,
+            OffLedgerCash.direction == "out",
+            # Отчёт документами, зачёт и списание денег не двигают: в карте «когда
+            # выдавали» им места нет.
+            OffLedgerCash.kind.notin_(("report", "offset", "writeoff", "adjust")))
+    )).scalars().all())
+
+    by_day: dict[date, dict[str, Any]] = {}
+    for c in rows:
+        d = by_day.setdefault(c.happened_on, {"amount": 0.0, "count": 0, "people": set()})
+        d["amount"] = round(d["amount"] + float(c.amount), 2)
+        d["count"] += 1
+        d["people"].add(c.person_name)
+
+    days = [{
+        "date": d.isoformat(), "amount": v["amount"], "count": v["count"],
+        "people": sorted(v["people"])[:5],
+        "weekday": d.weekday(),
+    } for d, v in sorted(by_day.items())]
+
+    # Недельные ряды: карта рисуется сеткой «неделя × день», и пустые дни в ней
+    # обязаны присутствовать — иначе пропуск читается как отсутствие данных.
+    weeks: list[dict[str, Any]] = []
+    cur = df - timedelta(days=df.weekday())
+    while cur <= dt:
+        row = {"weekStart": cur.isoformat(), "days": []}
+        for i in range(7):
+            d = cur + timedelta(days=i)
+            v = by_day.get(d)
+            row["days"].append({
+                "date": d.isoformat(),
+                "amount": v["amount"] if v else 0.0,
+                "count": v["count"] if v else 0,
+                "inRange": df <= d <= dt,
+            })
+        weeks.append(row)
+        cur += timedelta(days=7)
+
+    # По дням недели: пятничные выдачи — самый частый режим наличных расчётов.
+    by_weekday = [{
+        "weekday": i,
+        "label": ("пн", "вт", "ср", "чт", "пт", "сб", "вс")[i],
+        "amount": round(sum(d["amount"] for d in days if d["weekday"] == i), 2),
+        "count": sum(d["count"] for d in days if d["weekday"] == i),
+    } for i in range(7)]
+
+    total = round(sum(d["amount"] for d in days), 2)
+    return {
+        "from": df.isoformat(), "to": dt.isoformat(),
+        "weeks": weeks,
+        "days": days,
+        "byWeekday": by_weekday,
+        "total": total,
+        "maxDay": max((d["amount"] for d in days), default=0.0),
+        "activeDays": len(days),
+        # Средняя по дням С ВЫДАЧАМИ, а не по всем: делить на календарные дни значит
+        # утверждать, что деньги выдают каждый день.
+        "avgActiveDay": round(total / len(days), 2) if days else 0.0,
     }

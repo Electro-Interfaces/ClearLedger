@@ -23,7 +23,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import {
-  getReviewHistory, getWeekReview, markWeekReview,
+  getDigest, getReviewHistory, getWeekReview, markWeekReview, sendDigest,
 } from '@/services/perimeterService'
 import { Loading } from './OfficePanels'
 import { money, num } from './officeShared'
@@ -42,6 +42,12 @@ export function WeekReviewScreen({ companyId }: { companyId: string }) {
   const { setCoreMode } = useWorkspace()
   const [week, setWeek] = useState<string | null>(null)
   const [note, setNote] = useState('')
+  // Сводка в чат: текст готовит сервер, отправляет — человек. Рассылки по таймеру
+  // здесь нет намеренно: в тексте имена и суммы неоформленных расчётов, и решение,
+  // кому это показать, за человеком, а не за расписанием.
+  const [digestOpen, setDigestOpen] = useState(false)
+  const [room, setRoom] = useState('')
+  const [digestText, setDigestText] = useState('')
 
   const q = useQuery({
     queryKey: ['perimeter', 'review', companyId, week],
@@ -53,6 +59,20 @@ export function WeekReviewScreen({ companyId }: { companyId: string }) {
     queryFn: () => getReviewHistory(companyId),
     enabled: !!companyId,
   })
+  const digest = useQuery({
+    queryKey: ['perimeter', 'digest', companyId, week],
+    queryFn: () => getDigest(companyId, week ?? undefined),
+    enabled: !!companyId && digestOpen,
+  })
+  const send = useMutation({
+    mutationFn: () => sendDigest(companyId, { roomId: room, text: digestText }),
+    onSuccess: () => {
+      toast.success('Сводка отправлена в чат')
+      setDigestOpen(false)
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+
   const done = useMutation({
     mutationFn: (v: { weekStart: string; note: string | null }) =>
       markWeekReview(companyId, v),
@@ -179,6 +199,79 @@ export function WeekReviewScreen({ companyId }: { companyId: string }) {
                 </li>
               ))}
             </ul>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent className="p-4 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="text-sm font-medium">Сводка в чат</div>
+            <Button variant="outline" size="sm"
+              onClick={() => setDigestOpen((v) => !v)}>
+              {digestOpen ? 'Свернуть' : 'Подготовить сводку'}
+            </Button>
+          </div>
+          {digestOpen && (
+            digest.isPending ? <div className="text-sm text-muted-foreground">Собираем…</div>
+            : digest.isError ? (
+              <p className="text-sm text-destructive">
+                {String((digest.error as Error).message)}
+              </p>
+            ) : digest.data ? (
+              <div className="space-y-2">
+                <textarea
+                  className="w-full rounded-md border bg-background px-2.5 py-2 text-sm
+                    font-mono"
+                  rows={Math.min(14, digest.data.text.split('\n').length + 1)}
+                  value={digestText || digest.data.text}
+                  onChange={(e) => setDigestText(e.target.value)} />
+                <p className="text-[11px] text-muted-foreground">
+                  Текст можно поправить перед отправкой. В нём имена и суммы
+                  неоформленных расчётов — выбирайте комнату осознанно.
+                </p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <select className="rounded-md border bg-background px-2.5 py-1.5 text-sm"
+                    aria-label="Куда отправить сводку"
+                    value={room} onChange={(e) => setRoom(e.target.value)}>
+                    <option value="">— выберите чат —</option>
+                    {digest.data.rooms.map((r) => (
+                      <option key={r.id} value={r.id}>{r.title}</option>
+                    ))}
+                  </select>
+                  <Button size="sm" disabled={!room || send.isPending}
+                    onClick={() => {
+                      if (!digestText) setDigestText(digest.data!.text)
+                      send.mutate()
+                    }}>
+                    {send.isPending ? 'Отправляем…' : 'Отправить'}
+                  </Button>
+                  {!digest.data.rooms.length && (
+                    <span className="text-[11px] text-muted-foreground">
+                      Вы не состоите ни в одном чате пространства
+                    </span>
+                  )}
+                </div>
+
+                {!!digest.data.personal.length && (
+                  <div className="pt-2 space-y-1">
+                    <div className="text-[11px] uppercase tracking-wider
+                        text-muted-foreground">
+                      Напоминания людям — текстом, без рассылки
+                    </div>
+                    <ul className="text-[11px] text-muted-foreground space-y-1">
+                      {digest.data.personal.slice(0, 6).map((p) => (
+                        <li key={p.person}>{p.text}</li>
+                      ))}
+                    </ul>
+                    <p className="text-[11px] text-muted-foreground">
+                      Продукт их не отправляет: долг с именем и суммой уходит человеку
+                      только по вашему решению и вашими словами.
+                    </p>
+                  </div>
+                )}
+              </div>
+            ) : null
           )}
         </CardContent>
       </Card>
