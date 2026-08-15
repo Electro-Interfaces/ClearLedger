@@ -12,6 +12,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Terminal } from '@xterm/xterm'
 import { Loader2, TerminalSquare } from 'lucide-react'
+import { toast } from 'sonner'
 import { DictateButton, useDictation } from './DictateButton'
 import { useQuery } from '@tanstack/react-query'
 import * as auditor from '@/services/spaceAuditorService'
@@ -41,6 +42,7 @@ export function AuditorTerminal() {
   // а команда в мастерской может быть недешёвой.
   const wsRef = useRef<WebSocket | null>(null)
   const termRef = useRef<Terminal | null>(null)
+  const copyScreenRef = useRef<(() => void) | null>(null)
   const retryRef = useRef<number | undefined>(undefined)
 
   /**
@@ -113,16 +115,13 @@ export function AuditorTerminal() {
         // command», «Чт» от «Что сделано». Симптом был только при движении ВВЕРХ, потому
         // что вниз приложение дорисовывает снизу, не трогая уже нарисованное.
         convertEol: false,
-        // 🔴 Своей истории у терминала НЕТ.
+        // История нужна: ею и листают экран.
         //
-        // Прокруткой здесь управляет сам Claude Code: он полноэкранный и перерисовывает
-        // картинку целиком. Каждая перерисовка оседала в буфере браузера обрывками, и при
-        // движении вверх человек видел не прошлый экран, а слои кусков — столбик «Пу»,
-        // «Чт», «2.» слева и обрывки строк между ними. Снято прямым сравнением: в самом
-        // tmux (`capture-pane`) текст в этот момент чистый, мусор рождался только здесь.
-        //
-        // С нулевой историей колесо уходит приложению, и листает оно, а не браузер.
-        scrollback: 0,
+        // Ставили ноль, подозревая, что мусор при прокрутке идёт из буфера. Оказалось
+        // иначе — виноваты были два клиента tmux разного размера, и лечится это на
+        // сервере (`-D`). А без буфера колесо уходило приложению, и вместо экрана
+        // двигался курсор в строке ввода: прокрутки не стало вовсе.
+        scrollback: 5000,
         // Цвета берём у страницы, а не жёстко: панель живёт и в тёмной, и в светлой теме.
         theme: pageTheme(),
       })
@@ -205,6 +204,21 @@ export function AuditorTerminal() {
       // работы агента. Различаем по наличию выделения, как делают все терминалы.
       // Ctrl+Shift+C / Ctrl+Shift+V — привычная пара, работает всегда.
       const copy = () => { void navigator.clipboard.writeText(term.getSelection()) }
+      // Копирование всего экрана — обход того, что мышь занята приложением.
+      //
+      // Claude Code включает режим мыши (`mouse_any_flag=1`), чтобы ловить клики по своим
+      // элементам. В этом режиме терминал отдаёт клики ЕМУ, и выделение мышью не
+      // работает — ни у нас, ни в любом другом терминале. Обходов два: выделять с
+      // зажатым Shift (терминалы так и договорились) либо забрать экран целиком.
+      copyScreenRef.current = () => {
+        const b = term.buffer.active
+        const rows: string[] = []
+        for (let i = 0; i < b.length; i++) rows.push(b.getLine(i)?.translateToString(true) ?? '')
+        const text = rows.join('\n').replace(/\n{3,}/g, '\n\n').trim()
+        void navigator.clipboard.writeText(text)
+          .then(() => toast.success(`Экран скопирован — ${text.length.toLocaleString('ru-RU')} знаков`))
+          .catch(() => toast.error('Буфер обмена недоступен'))
+      }
       const paste = () => {
         void navigator.clipboard.readText().then((t) => {
           if (t && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'data', data: t }))
@@ -220,8 +234,15 @@ export function AuditorTerminal() {
           return false
         }
         if (e.type !== 'keydown' || !(e.ctrlKey || e.metaKey)) return true
+
+        // Ctrl+C и Ctrl+V — как везде.
+        //
+        // Ctrl+C в терминале исторически прерывает работу, поэтому его отдают копированию
+        // с оговоркой: копирует, когда есть что копировать, и прерывает, когда выделения
+        // нет. Работу агента это не лишает прерывания — у Claude Code для этого Esc, а
+        // Ctrl+C без выделения по-прежнему доходит до него.
         if (e.code === 'KeyC' && (e.shiftKey || term.hasSelection())) { copy(); return false }
-        if (e.code === 'KeyV' && e.shiftKey) { paste(); return false }
+        if (e.code === 'KeyV') { paste(); return false }
         // Insert-пара: Ctrl+Insert копирует, Shift+Insert вставляет — так привыкли в Windows.
         if (e.code === 'Insert' && term.hasSelection()) { copy(); return false }
         return true
@@ -280,11 +301,20 @@ export function AuditorTerminal() {
             <span className="max-xl:hidden">
               {dictation.state === 'rec' ? (
                 <span className="text-foreground">говорите — отпустите Ctrl+Пробел, чтобы распознать</span>
-              ) : dictation.state === 'busy' ? 'распознаю…' : 'диктовка — Ctrl+Пробел, копирование — Ctrl+C'}
+              ) : dictation.state === 'busy' ? 'распознаю…'
+                : 'диктовка — Ctrl+Пробел · выделять с Shift · Ctrl+C / Ctrl+V'}
             </span>
           </>
         )}
         <span className="ml-auto flex shrink-0 items-center gap-2">
+          {/* Мышь занята приложением, поэтому даём прямой путь: весь экран в буфер. */}
+          {state === 'open' && (
+            <button type="button" onClick={() => copyScreenRef.current?.()}
+              title="Скопировать весь видимый текст"
+              className="rounded-md border border-border/60 px-2 py-0.5 hover:bg-accent hover:text-foreground">
+              Копировать экран
+            </button>
+          )}
           {/* Отсоединение — не ошибка, а развилка: вернуть работу сюда или оставить там,
               где её открыли. Молча возвращаться нельзя, иначе вкладки зациклятся. */}
           {state === 'detached' && (
