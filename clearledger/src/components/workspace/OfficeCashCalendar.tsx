@@ -19,7 +19,7 @@ import { MetricTile } from '@/components/ui/metric-tile'
 import { cn } from '@/lib/utils'
 import { getCashCalendar } from '@/services/perimeterService'
 import { Loading } from './OfficePanels'
-import { money, num } from './officeShared'
+import { dayLabel, money, num } from './officeShared'
 
 /** Насыщенность клетки: пять ступеней — больше глаз всё равно не различает. */
 const level = (amount: number, max: number) => {
@@ -39,7 +39,6 @@ const TONE = [
   'bg-primary/70',
 ]
 
-const human = (iso: string) => `${iso.slice(8)}.${iso.slice(5, 7)}`
 
 export function CashCalendarScreen({ companyId }: { companyId: string }) {
   const { period } = useFilters()
@@ -105,10 +104,10 @@ export function CashCalendarScreen({ companyId }: { companyId: string }) {
                     {w.days.map((day) => (
                       <div key={day.date}
                         title={day.inRange
-                          ? `${human(day.date)}: ${day.count
+                          ? `${dayLabel(day.date)}: ${day.count
                             ? `${money.format(day.amount)} ₽, ${num.format(day.count)} шт.`
                             : 'выдач не было'}`
-                          : `${human(day.date)}: вне периода`}
+                          : `${dayLabel(day.date)}: вне периода`}
                         className={cn('h-5 w-5 rounded-sm',
                           day.inRange ? TONE[level(day.amount, d.maxDay)] : 'bg-transparent',
                           day.inRange && !day.amount && 'ring-1 ring-inset ring-border')} />
@@ -169,7 +168,7 @@ export function CashCalendarScreen({ companyId }: { companyId: string }) {
               {[...d.days].sort((a, b) => b.amount - a.amount).slice(0, 8).map((day) => (
                 <li key={day.date} className="flex justify-between gap-3">
                   <span className="truncate">
-                    <span className="tabular-nums">{human(day.date)}</span>
+                    <span className="tabular-nums">{dayLabel(day.date)}</span>
                     {day.people.length ? ` · ${day.people.join(', ')}` : ''}
                   </span>
                   <span className="tabular-nums shrink-0">

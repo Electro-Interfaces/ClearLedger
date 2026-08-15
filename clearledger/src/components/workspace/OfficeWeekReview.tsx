@@ -26,7 +26,7 @@ import {
   getDigest, getReviewHistory, getWeekReview, markWeekReview, sendDigest,
 } from '@/services/perimeterService'
 import { Loading } from './OfficePanels'
-import { money, num } from './officeShared'
+import { dayLabel, money, num } from './officeShared'
 
 /** Сдвиг недели без часовых поясов: всё в UTC, иначе граница уезжает на день. */
 const shiftWeek = (iso: string, weeks: number) => {
@@ -35,7 +35,6 @@ const shiftWeek = (iso: string, weeks: number) => {
   return d.toISOString().slice(0, 10)
 }
 
-const human = (iso: string) => iso.split('-').reverse().slice(0, 2).join('.')
 
 export function WeekReviewScreen({ companyId }: { companyId: string }) {
   const qc = useQueryClient()
@@ -96,23 +95,24 @@ export function WeekReviewScreen({ companyId }: { companyId: string }) {
     <div className="p-4 space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm"
+          <Button variant="outline" size="sm" aria-label="Предыдущая неделя"
             onClick={() => setWeek(shiftWeek(d.weekStart, -1))}>
             <ChevronLeft className="w-4 h-4" />
           </Button>
           <div className="text-base font-medium tabular-nums">
-            {human(d.weekStart)} — {human(d.weekEnd)}
+            {dayLabel(d.weekStart)} — {dayLabel(d.weekEnd)}
             {d.isCurrent && (
               <span className="ml-2 text-[11px] text-muted-foreground">текущая</span>
             )}
           </div>
           <Button variant="outline" size="sm" disabled={d.isCurrent}
+            aria-label="Следующая неделя"
             onClick={() => setWeek(shiftWeek(d.weekStart, 1))}>
             <ChevronRight className="w-4 h-4" />
           </Button>
         </div>
         {d.reviewed && (
-          <span className="inline-flex items-center gap-1.5 text-sm text-emerald-600">
+          <span className="inline-flex items-center gap-1.5 text-sm text-emerald-700 dark:text-emerald-400">
             <CheckCircle2 className="w-4 h-4" />
             разобрана {d.reviewedAt?.slice(0, 10)}
           </span>
@@ -180,7 +180,7 @@ export function WeekReviewScreen({ companyId }: { companyId: string }) {
               {d.added.rows.map((r) => (
                 <li key={r.id} className="flex justify-between gap-3">
                   <span className="truncate">
-                    <span className="tabular-nums">{human(r.date)}</span> · {r.person} · {r.kind}
+                    <span className="tabular-nums">{dayLabel(r.date)}</span> · {r.person} · {r.kind}
                   </span>
                   <span className="tabular-nums shrink-0">
                     {r.direction === 'in' ? '+' : '−'}{money.format(r.amount)} ₽ · {r.proof.toLowerCase()}
@@ -223,6 +223,7 @@ export function WeekReviewScreen({ companyId }: { companyId: string }) {
                 <textarea
                   className="w-full rounded-md border bg-background px-2.5 py-2 text-sm
                     font-mono"
+                  aria-label="Текст сводки"
                   rows={Math.min(14, digest.data.text.split('\n').length + 1)}
                   value={digestText || digest.data.text}
                   onChange={(e) => setDigestText(e.target.value)} />
@@ -295,6 +296,7 @@ export function WeekReviewScreen({ companyId }: { companyId: string }) {
           )}
           <textarea className="w-full rounded-md border bg-background px-2.5 py-2 text-sm"
             rows={2} value={note} onChange={(e) => setNote(e.target.value)}
+            aria-label="Что решили по итогам недели"
             placeholder="Что решили по итогам недели (не обязательно)" />
           <div className="flex justify-end">
             <Button size="sm" disabled={done.isPending}
@@ -322,10 +324,10 @@ export function WeekReviewScreen({ companyId }: { companyId: string }) {
                 <li key={r.weekStart} className="flex justify-between gap-3">
                   <button className="hover:underline tabular-nums"
                     onClick={() => setWeek(r.weekStart)}>
-                    неделя с {human(r.weekStart)}
+                    неделя с {dayLabel(r.weekStart)}
                   </button>
                   <span className={cn('shrink-0 tabular-nums',
-                    r.todoTotal ? '' : 'text-emerald-600')}>
+                    r.todoTotal ? '' : 'text-emerald-700 dark:text-emerald-400')}>
                     {r.todoTotal ? `${num.format(r.todoTotal)} к решению` : 'чисто'}
                     {r.by ? ` · ${r.by}` : ''}
                   </span>

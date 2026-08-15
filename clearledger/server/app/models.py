@@ -9127,6 +9127,12 @@ class OffLedgerCommitmentMark(Base):
     cash_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("off_ledger_cash.id", ondelete="SET NULL"),
         nullable=True)
+    # Кто поставил отметку: cash — журнал наличных, manual — человек руками.
+    # Отдельным полем, а не по наличию `cash_id`: у ссылки ON DELETE SET NULL, и при
+    # удалении ошибочной выплаты признак исчезал вместе с ней — период оставался
+    # зелёным без единой копейки за ним. По тексту заметки его тоже не опознать:
+    # заметку правят.
+    source: Mapped[str] = mapped_column(String(10), nullable=False, default="manual")
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)

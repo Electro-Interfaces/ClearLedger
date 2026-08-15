@@ -533,8 +533,16 @@ export const PER_PICTURE_MENU: CentralMenuItem[] = [
   // Десять минут раз в неделю: реестр умирает от нерегулярности, а не от нехватки
   // возможностей.
   { key: 'pr_review', label: 'Разбор недели' },
-  // Настройки продукта: спорные возможности включает компания, а не программа.
-  { key: 'pr_settings', label: 'Настройки' },
+]
+
+/**
+ * Настройка продукта: спорные возможности включает компания, а не программа.
+ *
+ * Отдельным разделом, а не пунктом «Картины»: раздел отвечает на вопрос, а пороги и
+ * включение видов на вопрос «что у нас есть вне баланса» не отвечают.
+ */
+export const PER_SETUP_MENU: CentralMenuItem[] = [
+  { key: 'pr_settings', label: 'Возможности и пороги' },
 ]
 export const PER_OFFICIAL_MENU: CentralMenuItem[] = [
   { key: 'pr_accounts', label: 'Забалансовые счета' },
@@ -566,7 +574,7 @@ export const PER_CASH_MENU: CentralMenuItem[] = [
   // таблица операций не отвечает.
   { key: 'pr_cash_tools', label: 'Движение и прогноз' },
   // Карта дней: таблица отвечает «сколько», карта — «когда».
-  { key: 'pr_cash_calendar', label: 'Когда выдавали' },
+  { key: 'pr_cash_calendar', label: 'Календарь выдач' },
 ]
 
 /**
@@ -577,7 +585,7 @@ export const PER_CASH_MENU: CentralMenuItem[] = [
  * устной договорённости. Карточка заводится сама при первом расчёте.
  */
 export const PER_PEOPLE_MENU: CentralMenuItem[] = [
-  { key: 'pr_people', label: 'Список' },
+  { key: 'pr_people', label: 'Кто у нас есть' },
 ]
 
 export const PER_HELP_MENU: CentralMenuItem[] = [

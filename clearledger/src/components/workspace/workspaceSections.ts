@@ -10,7 +10,7 @@
  */
 
 import type { ComponentType } from 'react'
-import { BarChart3, Gauge, BookOpen, FileOutput, HardHat, Building2, Megaphone, Sparkles, GitCompare, Activity, Wallet, Boxes, Receipt, Truck, Scale, FileText, Users, Package, TrendingUp, Landmark, Cable, PackageOpen, Shield, Handshake, Banknote } from 'lucide-react'
+import { BarChart3, Gauge, BookOpen, FileOutput, HardHat, Building2, Megaphone, Sparkles, GitCompare, Activity, Wallet, Boxes, Receipt, Truck, Scale, FileText, Users, Package, TrendingUp, Landmark, Cable, PackageOpen, Shield, Handshake, Banknote, Settings } from 'lucide-react'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useWorkspace, type CoreMode } from '@/contexts/WorkspaceContext'
 import { modeAllowed } from '@/config/accessModules'
@@ -35,7 +35,7 @@ import {
   REV_STOCK_MENU, REV_HELP_MENU,
   ECON_RESULT_MENU, ECON_COSTS_MENU, ECON_TAXES_MENU, ECON_HELP_MENU,
   BOOKS_LEDGER_MENU, BOOKS_OFFBAL_MENU, BOOKS_PRIMARY_MENU, CONNECT_MENU,
-  PER_PICTURE_MENU, PER_OFFICIAL_MENU, PER_RECORDS_MENU, PER_CASH_MENU,
+  PER_PICTURE_MENU, PER_OFFICIAL_MENU, PER_RECORDS_MENU, PER_CASH_MENU, PER_SETUP_MENU,
   PER_PEOPLE_MENU, PER_HELP_MENU,
 } from '@/config/workspaceMenus'
 // CHARGE_SESSIONS_MENU здесь не используется — общий список нужен карте прав и роутеру
@@ -242,6 +242,8 @@ export function useWorkspaceSections(): WorkspaceSection[] {
     items: isOffice ? PER_CASH_MENU : [], connected: isOffice }
   const perPeople: WorkspaceSection = { mode: 'per_people', label: 'Люди', icon: Users,
     items: isOffice ? PER_PEOPLE_MENU : [], connected: isOffice }
+  const perSetup: WorkspaceSection = { mode: 'per_setup', label: 'Настройка', icon: Settings,
+    items: isOffice ? PER_SETUP_MENU : [], connected: isOffice }
   const perHelp: WorkspaceSection = { mode: 'per_help', label: 'Помощь', icon: BookOpen,
     items: isOffice ? PER_HELP_MENU : [], connected: isOffice }
   // Разделы продукта «Данные» — у ОБОИХ профилей: без них рабочее место открывается
@@ -268,7 +270,7 @@ export function useWorkspaceSections(): WorkspaceSection[] {
   const all = isOffice
     ? [revSales, revBuyers, revCatalog, revPapers, revMoney, revStock, revHelp,
        econResult, econCosts, econTaxes, econHelp, booksLedger, booksPrimary, booksOffbal,
-       perPicture, perOfficial, perRecords, perCash, perPeople, perHelp, normalize,
+       perPicture, perOfficial, perRecords, perCash, perPeople, perSetup, perHelp, normalize,
        connect]
     : isEnergy
     ? [sales, salesSessions, salesCommerce, corporate, marketing,

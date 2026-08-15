@@ -126,7 +126,7 @@ export const SPACE_PRODUCTS: SpaceProduct[] = [
     // документально подтверждённое и записанное со слов путать нельзя.
     code: 'perimeter', route: '/perimeter', label: 'Периметр',
     modes: ['per_picture', 'per_official', 'per_records', 'per_cash', 'per_people',
-            'per_help'],
+            'per_setup', 'per_help'],
     paths: [],
   },
   {

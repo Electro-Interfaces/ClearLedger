@@ -31,7 +31,7 @@ import { useSearchParams } from 'react-router-dom'
 // разрез внутри экрана: раньше это были два раздела с одинаковыми пунктами, и общей
 // выручки компании не показывал ни один (13.08.2026).
 // `books_*` — разделы «Бухгалтерии» того же профиля: эталон учёта от сводки к первичке.
-export type CoreMode = 'normalize' | 'reconcile' | 'management' | 'sales_sessions' | 'sales_commerce' | 'sales_goods' | 'sales_help' | 'operations' | 'ops_equipment' | 'ops_economy' | 'projects' | 'projects_analytics' | 'store' | 'store_documents' | 'store_catering' | 'store_stock' | 'store_cash' | 'store_catalog' | 'store_marking' | 'store_network' | 'store_1c' | 'store_reports' | 'store_help' | 'corporate' | 'marketing' | 'financial' | 'accounting' | 'acc_period' | 'acc_store' | 'acc_food' | 'acc_recon' | 'acc_docs' | 'acc_results' | 'tax' | 'export' | 'rev_sales' | 'rev_buyers' | 'rev_catalog' | 'rev_papers' | 'rev_money' | 'rev_stock' | 'rev_help' | 'econ_result' | 'econ_costs' | 'econ_taxes' | 'econ_help' | 'books_ledger' | 'books_primary' | 'books_offbal' | 'per_picture' | 'per_official' | 'per_records' | 'per_cash' | 'per_people' | 'per_help'
+export type CoreMode = 'normalize' | 'reconcile' | 'management' | 'sales_sessions' | 'sales_commerce' | 'sales_goods' | 'sales_help' | 'operations' | 'ops_equipment' | 'ops_economy' | 'projects' | 'projects_analytics' | 'store' | 'store_documents' | 'store_catering' | 'store_stock' | 'store_cash' | 'store_catalog' | 'store_marking' | 'store_network' | 'store_1c' | 'store_reports' | 'store_help' | 'corporate' | 'marketing' | 'financial' | 'accounting' | 'acc_period' | 'acc_store' | 'acc_food' | 'acc_recon' | 'acc_docs' | 'acc_results' | 'tax' | 'export' | 'rev_sales' | 'rev_buyers' | 'rev_catalog' | 'rev_papers' | 'rev_money' | 'rev_stock' | 'rev_help' | 'econ_result' | 'econ_costs' | 'econ_taxes' | 'econ_help' | 'books_ledger' | 'books_primary' | 'books_offbal' | 'per_picture' | 'per_official' | 'per_records' | 'per_cash' | 'per_people' | 'per_setup' | 'per_help'
   // «Данные» компании без объектов: источник один — бухгалтерия клиента, и разделы
   // идут от неё, а не от каналов приёма файлов.
   | 'data_sources' | 'data_model' | 'data_quality'
@@ -43,7 +43,7 @@ const VALID_MODES: CoreMode[] = ['normalize', 'reconcile', 'management', 'sales_
   'rev_help', 'econ_result', 'econ_costs', 'econ_taxes', 'econ_help',
   'books_ledger', 'books_primary', 'books_offbal',
   'per_picture', 'per_official', 'per_records', 'per_cash', 'per_people',
-  'per_help']
+  'per_setup', 'per_help']
 function readMode(sp: URLSearchParams): CoreMode {
   const m = sp.get('mode')
   return m && (VALID_MODES as string[]).includes(m) ? (m as CoreMode) : 'management'

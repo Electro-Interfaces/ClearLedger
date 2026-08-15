@@ -306,6 +306,34 @@ async def assert_company_product(
     )
 
 
+async def assert_company_item(
+    company_ref: str, user: User, db: AsyncSession, product_code: str, item: str
+) -> uuid.UUID:
+    """То же, но с правом на КОНКРЕТНЫЙ пункт продукта (`perimeter:pr_cash`).
+
+    `assert_company_product` пропускает по любому пункту продукта: право на один экран
+    открывает все ручки рабочего места. Для большинства продуктов это и задумано —
+    разрезы одного и того же. Но там, где пункты выдаются раздельно по существу
+    («Наличные» и «Люди» в «Периметре»: имена, телефоны и суммы наличных расчётов
+    видит не каждый, кому открыт продукт), прятать данные одним лишь меню нельзя.
+    """
+    cid = await assert_company_member(company_ref, user, db)
+    if user.is_superadmin:
+        return cid
+    m = await db.get(UserCompany, (user.id, cid))
+    if m is None or m.role == "admin":
+        return cid
+    mods = await resolve_member_modules(m, db)
+    if mods is None:  # роль «Полный доступ»
+        return cid
+    if product_code in mods or f"{product_code}:{item}" in mods:
+        return cid
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Нет доступа к этому разделу продукта",
+    )
+
+
 def CompanyModuleScope(module_key: str, query_param: str = "company_id"):
     """Как CompanyScope, но дополнительно требует доступ к модулю module_key (RBAC)."""
 

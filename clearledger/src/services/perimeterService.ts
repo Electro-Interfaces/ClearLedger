@@ -352,7 +352,11 @@ export interface CommitmentPeriod {
   label: string
   outcome: string
   doneOn: string | null
+  /** Всего за период: выплаты журнала плюс отмеченное руками. Только для показа. */
   amount: number | null
+  /** Отмеченное руками — то, что прошло мимо журнала. Форма правит именно его. */
+  manualAmount: number | null
+  paid: number | null
   note: string | null
   markId: string | null
   isCurrent: boolean
@@ -475,6 +479,10 @@ export interface CashAging {
     limitationFrom?: string; limitationExpiresOn?: string
     limitationDaysLeft?: number; limitationBase?: string
   })[]
+  /** Полученные займы: наш долг. Отдельно от выданного — свернуть их в один итог
+   *  значило бы сказать, что долг знакомого гасит наш. */
+  takenRows: CashAging['rows']
+  takenRest: number
   buckets: { key: string; label: string; count: number; amount: number }[]
   byPurse: { key: string; label: string; amount: number }[]
   total: number
@@ -482,6 +490,8 @@ export interface CashAging {
   advanceDays: number
   /** Право требования, сгорающее в ближайший квартал. */
   expiring: CashAging['rows']
+  /** Уже сгоревшее: взыскать через суд нельзя, разговор другой. */
+  expired: CashAging['rows']
   disclaimer: string | null
 }
 
@@ -630,6 +640,14 @@ export const createReminder = (companyId: string, body: {
   promisedOn?: string | null; note?: string | null
   cashId?: string | null; recordId?: string | null; commitmentId?: string | null
 }) => post<Reminder>(`/api/perimeter/reminders?company_id=${companyId}`, body)
+
+/**
+ * Удалить запись разговора. Признание долга держалось на нём: сервер вернёт срок
+ * исковой давности к прежнему основанию или к более раннему разговору.
+ */
+export const deleteReminder = (companyId: string, id: string) =>
+  del<{ deleted: boolean }>(
+    `/api/perimeter/reminders/${id}?company_id=${companyId}`)
 
 export interface PersonStatement {
   person: string

@@ -24,15 +24,16 @@ import { Card, CardContent } from '@/components/ui/card'
 import { MetricTile } from '@/components/ui/metric-tile'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { ConfirmActionDialog } from '@/components/common/ConfirmActionDialog'
 import { cn } from '@/lib/utils'
-import { exportTable } from '@/services/booksExport'
 import {
   createCommitment, deleteCommitment, getCommitments, getPerimeterPeople,
   markCommitment, unmarkCommitment, updateCommitment,
   type Commitment, type CommitmentIn, type CommitmentList,
 } from '@/services/perimeterService'
+import { PerimeterExport } from './perimeterShared'
 import { Loading } from './OfficePanels'
-import { ExportButton, SearchInput, Tabs, money, num } from './officeShared'
+import { SearchInput, Tabs, money, num } from './officeShared'
 
 const today = () => new Date().toISOString().slice(0, 10)
 
@@ -50,7 +51,9 @@ const PERIOD_TONE: Record<string, string> = {
   // Красное — только настоящий пропуск. Идущий период ждёт, а не провален.
   missed: 'bg-destructive/15 text-destructive',
   open: 'bg-muted/50 text-muted-foreground',
-  partial: 'bg-muted/50 text-muted-foreground',
+  // Неполный первый период: обязательство завели в середине месяца. Своя подача,
+  // иначе он выглядит как «период ещё идёт», а это разные вещи.
+  partial: 'bg-muted/30 text-muted-foreground border border-dashed',
 }
 
 /** Короткая подпись клетки: «авг», «Q3», «26» — по шагу, а не первым словом подряд. */
@@ -157,9 +160,11 @@ export function CommitmentsScreen({ companyId }: { companyId: string }) {
           { key: 'ended', label: 'Прекращённые' },
         ]} />
         <div className="flex items-center gap-2">
-          <SearchInput value={search} onChange={setSearch} placeholder="Кто или что" />
+          <SearchInput value={search} onChange={setSearch} label="Поиск по обязательствам"
+            placeholder="Кто или что" />
           {!!rows.length && (
-            <ExportButton onClick={() => exportTable('Регулярные обязательства', [
+            <PerimeterExport companyId={companyId} title="Регулярные обязательства"
+            columns={[
               { header: 'Перед кем', key: 'person', width: 30 },
               { header: 'Что', key: 'title', width: 44 },
               { header: 'Форма', key: 'formLabel', width: 22 },
@@ -169,7 +174,8 @@ export function CommitmentsScreen({ companyId }: { companyId: string }) {
               { header: 'Выполнено', key: 'doneCount', width: 12 },
               { header: 'Пропущено', key: 'missedCount', width: 12 },
               { header: 'Статус', key: 'statusLabel', width: 18 },
-            ], rows)} />
+            ]}
+            rows={rows} />
           )}
           <Button size="sm" onClick={() => setEdit({ id: null, body: { ...EMPTY } })}>
             <Plus className="w-4 h-4 mr-1" />Записать
@@ -226,10 +232,23 @@ export function CommitmentsScreen({ companyId }: { companyId: string }) {
                     <span className="text-[11px] text-muted-foreground">
                       {c.statusLabel} · {c.confidenceLabel.toLowerCase()}
                     </span>
-                    <button className="text-muted-foreground hover:text-destructive"
-                      title="Удалить обязательство" onClick={() => remove.mutate(c.id)}>
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                    <ConfirmActionDialog
+                      destructive
+                      title="Удалить обязательство?"
+                      description={<>«{c.title}» перед {c.person} исчезнет вместе со
+                        всей историей отметок ({c.doneCount} выполнено,{' '}
+                        {c.skippedCount} пропущено сознательно). Отработавшее
+                        обязательство правильнее прекратить статусом — история тогда
+                        останется.</>}
+                      confirmLabel="Удалить"
+                      onConfirm={() => remove.mutate(c.id)}
+                      trigger={
+                        <Button variant="ghost" size="icon-sm"
+                          aria-label={`Удалить обязательство «${c.title}»`}
+                          className="text-muted-foreground hover:text-destructive">
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      } />
                   </div>
                 </div>
 
@@ -450,7 +469,13 @@ function CommitmentDialog({
 
           {error && <div className="text-sm text-destructive">{error}</div>}
         </div>
-        <div className="flex justify-end gap-2 pt-2">
+        <div className="flex items-center justify-end gap-2 pt-2">
+          {(!value.title.trim() || !value.personName.trim()) && (
+            <span className="mr-auto text-[11px] text-muted-foreground">
+              Заполните: {[!value.personName.trim() && 'перед кем',
+                !value.title.trim() && 'что обещано'].filter(Boolean).join(', ')}
+            </span>
+          )}
           <Button variant="outline" size="sm" onClick={onClose}>Отмена</Button>
           <Button size="sm" onClick={onSave}
             disabled={saving || !value.title.trim() || !value.personName.trim()}>
@@ -473,8 +498,12 @@ function MarkDialog({ commitment, periodStart, label, saving, onClose, onSave, o
   onUndo: (markId: string) => void
 }) {
   const period = commitment.periods.find((p) => p.periodStart === periodStart)
+  // Правится только сумма, прошедшая мимо журнала. Пока сюда подставлялся итог
+  // периода, каждое повторное «Выполнено» складывало журнальные выплаты ещё раз, и
+  // «выплачено всего» росло само по себе: 5 000 → 10 000 → 15 000.
   const [amount, setAmount] = useState<number | null>(
-    period?.amount ?? (commitment.form === 'money' ? commitment.amount : null))
+    period?.manualAmount
+    ?? (period?.paid ? null : commitment.form === 'money' ? commitment.amount : null))
   const [note, setNote] = useState(period?.note ?? '')
 
   return (
@@ -488,8 +517,10 @@ function MarkDialog({ commitment, periodStart, label, saving, onClose, onSave, o
             {commitment.title} · {commitment.person}
           </p>
           {commitment.form === 'money' && (
-            <Field label="Сколько выплачено, ₽"
-              hint="Подставлена сумма за период — исправьте, если платили другую">
+            <Field label="Выплачено мимо журнала, ₽"
+              hint={period?.paid
+                ? `Через журнал за этот период уже прошло ${period.paid.toLocaleString('ru-RU')} ₽ — здесь только то, что отдали помимо`
+                : 'Если выплата записана в журнале наличных, оставьте пусто'}>
               <input className={inputCls} type="number" step="0.01" value={amount ?? ''}
                 onChange={(e) => setAmount(e.target.value === '' ? null
                   : Number(e.target.value))} />

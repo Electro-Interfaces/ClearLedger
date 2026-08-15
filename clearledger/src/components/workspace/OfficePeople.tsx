@@ -20,23 +20,16 @@ import { Card, CardContent } from '@/components/ui/card'
 import { MetricTile } from '@/components/ui/metric-tile'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { ConfirmActionDialog } from '@/components/common/ConfirmActionDialog'
 import { cn } from '@/lib/utils'
-import { exportTable } from '@/services/booksExport'
 import {
   createPerson, deletePerson, getPerimeterPeople, updatePerson,
   type PerimeterPerson, type PersonIn,
 } from '@/services/perimeterService'
+import { PersonCardDialog } from './OfficePersonCard'
+import { PerimeterExport } from './perimeterShared'
 import { Loading, TableCard, Th } from './OfficePanels'
-import { ExportButton, SearchInput, Tabs, money, num } from './officeShared'
-
-function Td({ children, right, muted }: {
-  children: React.ReactNode; right?: boolean; muted?: boolean
-}) {
-  return (
-    <td className={cn('px-3 py-2 align-top', right && 'text-right tabular-nums whitespace-nowrap',
-      muted && 'text-muted-foreground')}>{children}</td>
-  )
-}
+import { SearchInput, Tabs, money, num , Td } from './officeShared'
 
 const EMPTY_PERSON: PersonIn = { name: '', kind: 'individual', isActive: true }
 const inputCls = 'w-full rounded-md border bg-background px-2.5 py-1.5 text-sm'
@@ -46,6 +39,7 @@ export function PerimeterPeopleScreen({ companyId }: { companyId: string }) {
   const [kind, setKind] = useState('')
   const [search, setSearch] = useState('')
   const [edit, setEdit] = useState<{ id: string | null; body: PersonIn } | null>(null)
+  const [card, setCard] = useState<string | null>(null)
 
   const q = useQuery({
     queryKey: ['perimeter', 'people', companyId],
@@ -106,19 +100,22 @@ export function PerimeterPeopleScreen({ companyId }: { companyId: string }) {
           ...d.kinds.map((k) => ({ key: k.key, label: k.label })),
         ]} />
         <div className="flex items-center gap-2">
-          <SearchInput value={search} onChange={setSearch} placeholder="Имя, роль, телефон" />
+          <SearchInput value={search} onChange={setSearch} label="Поиск по людям"
+            placeholder="Имя, роль, телефон" />
           {!!rows.length && (
-            <ExportButton onClick={() => exportTable('Люди периметра', [
+            <PerimeterExport companyId={companyId} title="Люди периметра"
+            columns={[
               { header: 'Имя', key: 'name', width: 34 },
               { header: 'Кто это', key: 'kindLabel', width: 24 },
               { header: 'Роль', key: 'role', width: 26 },
               { header: 'Телефон', key: 'phone', width: 18 },
               { header: 'Операций', key: 'operations', width: 12 },
               { header: 'Выдано', key: 'out', width: 16, money: true },
-              { header: 'Не закрыто', key: 'rest', width: 16, money: true },
+              { header: 'Осталось', key: 'rest', width: 16, money: true },
               { header: 'Договорённостей', key: 'records', width: 16 },
               { header: 'Заметка', key: 'note', width: 40 },
-            ], rows)} />
+            ]}
+            rows={rows} />
           )}
           <Button size="sm" onClick={() => setEdit({ id: null, body: { ...EMPTY_PERSON } })}>
             <Plus className="w-4 h-4 mr-1" />Добавить
@@ -150,17 +147,23 @@ export function PerimeterPeopleScreen({ companyId }: { companyId: string }) {
           </CardContent>
         </Card>
       ) : (
-        <TableCard note="«Не закрыто» — займы и подотчёт: плюс за человеком, минус за нами. Оплата работы и премия долгом не становятся"
+        <TableCard note="«Осталось» — займы и подотчёт: плюс за человеком, минус за нами. Оплата работы и премия долгом не становятся"
           head={<><Th>Имя</Th><Th>Кто это</Th><Th>Телефон</Th>
-            <Th right>Операций</Th><Th right>Выдано</Th><Th right>Не закрыто</Th>
+            <Th right>Операций</Th><Th right>Выдано</Th><Th right>Осталось</Th>
             <Th right> </Th></>}>
           {rows.map((p) => (
             <tr key={p.id} className={cn('border-b last:border-0 hover:bg-muted/40',
               !p.isActive && 'opacity-60')}>
               <Td>
+                {/* Имя ведёт к сверке, карандаш — к правке карточки: чаще нужно
+                    первое, а карточка человека правится редко. */}
                 <button className="text-left hover:underline"
-                  onClick={() => setEdit({ id: p.id, body: toForm(p) })}>
+                  onClick={() => setCard(p.name)}>
                   {p.name}
+                </button>
+                <button className="ml-2 text-[11px] text-muted-foreground hover:underline"
+                  onClick={() => setEdit({ id: p.id, body: toForm(p) })}>
+                  править
                 </button>
                 {p.role && (
                   <div className="text-[11px] text-muted-foreground">{p.role}</div>
@@ -181,7 +184,7 @@ export function PerimeterPeopleScreen({ companyId }: { companyId: string }) {
               <Td right muted>
                 {p.operations ? num.format(p.operations) : '—'}
                 {!!p.awaits && (
-                  <div className="text-[11px] text-amber-600">
+                  <div className="text-[11px] text-amber-700 dark:text-amber-400">
                     {num.format(p.awaits)} без документов
                   </div>
                 )}
@@ -198,15 +201,29 @@ export function PerimeterPeopleScreen({ companyId }: { companyId: string }) {
                 )}
               </Td>
               <Td right>
-                <button className="text-muted-foreground hover:text-destructive
-                    disabled:opacity-40 disabled:hover:text-muted-foreground"
-                  disabled={!!p.operations}
-                  title={p.operations
-                    ? 'За человеком есть расчёты: снимите отметку «в работе»'
-                    : 'Удалить из списка'}
-                  onClick={() => remove.mutate(p.id)}>
-                  <Trash2 className="w-4 h-4" />
-                </button>
+                {p.operations ? (
+                  <Button variant="ghost" size="icon-sm" disabled
+                    aria-label={`Удалить ${p.name} нельзя: есть расчёты`}
+                    title="За человеком есть расчёты: снимите отметку «в работе»"
+                    className="text-muted-foreground">
+                    <Trash2 className="w-4 h-4" />
+                  </Button>
+                ) : (
+                  <ConfirmActionDialog
+                    destructive
+                    title="Удалить из списка?"
+                    description={<>Карточка «{p.name}» исчезнет из списка людей.
+                      Расчётов за человеком нет, поэтому история не пострадает.</>}
+                    confirmLabel="Удалить"
+                    onConfirm={() => remove.mutate(p.id)}
+                    trigger={
+                      <Button variant="ghost" size="icon-sm"
+                        aria-label={`Удалить ${p.name} из списка`}
+                        className="text-muted-foreground hover:text-destructive">
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    } />
+                )}
               </Td>
             </tr>
           ))}
@@ -243,6 +260,11 @@ export function PerimeterPeopleScreen({ companyId }: { companyId: string }) {
           onClose={() => setEdit(null)}
           onSave={() => save.mutate(edit)}
         />
+      )}
+
+      {card && (
+        <PersonCardDialog companyId={companyId} person={card}
+          onClose={() => setCard(null)} />
       )}
     </div>
   )
@@ -345,7 +367,12 @@ function PersonDialog({ value, isNew, kinds, saving, error, onChange, onClose, o
           </p>
           {error && <div className="text-sm text-destructive">{error}</div>}
         </div>
-        <div className="flex justify-end gap-2 pt-2">
+        <div className="flex items-center justify-end gap-2 pt-2">
+          {!value.name.trim() && (
+            <span className="mr-auto text-[11px] text-muted-foreground">
+              Заполните: имя
+            </span>
+          )}
           <Button variant="outline" size="sm" onClick={onClose}>Отмена</Button>
           <Button size="sm" disabled={!value.name.trim() || saving} onClick={onSave}>
             {saving ? 'Сохраняем…' : 'Сохранить'}

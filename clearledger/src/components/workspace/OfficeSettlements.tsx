@@ -40,7 +40,7 @@ function monthLabel(m: string) {
   return `${MONTHS[Number(mm)] ?? mm} ${y}`
 }
 
-function Th({ children, right }: { children: React.ReactNode; right?: boolean }) {
+function Th({ children, right }: { children?: React.ReactNode; right?: boolean }) {
   return <th className={cn('font-normal px-3 py-2', right ? 'text-right' : 'text-left')}>{children}</th>
 }
 

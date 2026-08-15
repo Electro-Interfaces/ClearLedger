@@ -22,34 +22,30 @@ import { Card, CardContent } from '@/components/ui/card'
 import { MetricTile } from '@/components/ui/metric-tile'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { ConfirmActionDialog } from '@/components/common/ConfirmActionDialog'
 import { cn } from '@/lib/utils'
-import { exportTable } from '@/services/booksExport'
 import {
   checkCash, createCash, deleteCash, getCashDicts, getCashJournal, getCashLoans,
-  getCashPapers, getCashPeople, getCommitments, getPerimeterPeople, logExport,
+  getCashPapers, getCashPeople, getCommitments, getPerimeterPeople,
   parseQuick, updateCash,
   type CashDicts, type CashIn, type CashMove,
 } from '@/services/perimeterService'
+import { PersonCardDialog } from './OfficePersonCard'
+import { PerimeterExport } from './perimeterShared'
 import { Loading, TableCard, Th } from './OfficePanels'
-import { ExportButton, SearchInput, Tabs, money, num } from './officeShared'
-
-function Td({ children, right, muted }: {
-  children: React.ReactNode; right?: boolean; muted?: boolean
-}) {
-  return (
-    <td className={cn('px-3 py-2 align-top', right && 'text-right tabular-nums whitespace-nowrap',
-      muted && 'text-muted-foreground')}>{children}</td>
-  )
-}
+import { SearchInput, Tabs, money, num , Td } from './officeShared'
 
 /** Пустое подтверждение — не придирка: у такого расчёта нет ни доказательства, ни защиты. */
 const proofTone = (proof: string) =>
-  proof === 'none' ? 'text-amber-600' : 'text-muted-foreground'
+  proof === 'none' ? 'text-amber-700 dark:text-amber-400' : 'text-muted-foreground'
 
 const today = () => new Date().toISOString().slice(0, 10)
 
 /** Виды, которые смотрят чаще прочих: они и остаются табами. */
 const QUICK_KINDS_TABS = ['work', 'advance', 'loan', 'bonus']
+
+/** Виды, закрывающие ранее выданное: каждый обязан назвать, что именно закрывает. */
+const CLOSING = ['repayment', 'report', 'offset', 'writeoff']
 
 const EMPTY_CASH = (): CashIn => ({
   personName: '', amount: 0, happenedOn: today(), direction: 'out', kind: 'work',
@@ -164,7 +160,8 @@ export function CashJournalScreen({ companyId }: { companyId: string }) {
           <div className="flex flex-wrap items-center gap-2">
             <input
               className="flex-1 min-w-64 rounded-md border bg-background px-3 py-2 text-sm"
-              value={quick} placeholder="5000 Иванову за монтаж наличными"
+              value={quick} aria-label="Быстрый ввод операции одной строкой"
+              placeholder="5000 Иванову за монтаж наличными"
               onChange={(e) => setQuick(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && quick.trim()) parse.mutate(quick)
@@ -204,10 +201,10 @@ export function CashJournalScreen({ companyId }: { companyId: string }) {
           </select>
         </div>
         <div className="flex items-center gap-2">
-          <SearchInput value={search} onChange={setSearch} placeholder="Кто или за что" />
-          {!!rows.length && (
-            <ExportButton onClick={() => {
-              exportTable('Наличные расчёты', [
+          <SearchInput value={search} onChange={setSearch} label="Поиск по операциям"
+            placeholder="Кто или за что" />
+          <PerimeterExport companyId={companyId} title="Наличные расчёты"
+            columns={[
               { header: 'Дата', key: 'happenedOn', width: 13 },
               { header: 'Направление', key: 'directionLabel', width: 13 },
               { header: 'Вид', key: 'kindLabel', width: 24 },
@@ -216,11 +213,9 @@ export function CashJournalScreen({ companyId }: { companyId: string }) {
               { header: 'Сумма', key: 'amount', width: 16, money: true },
               { header: 'Чьи деньги', key: 'purseLabel', width: 18 },
               { header: 'Подтверждение', key: 'proofLabel', width: 16 },
-              { header: 'Не закрыто', key: 'rest', width: 16, money: true },
-            ], rows)
-              logExport(companyId, 'Наличные расчёты', rows.length)
-            }} />
-          )}
+              { header: 'Осталось', key: 'rest', width: 16, money: true },
+            ]}
+            rows={rows} />
           <Button size="sm" onClick={() => setEdit({ id: null, body: EMPTY_CASH() })}>
             <Plus className="w-4 h-4 mr-1" />Записать
           </Button>
@@ -254,9 +249,9 @@ export function CashJournalScreen({ companyId }: { companyId: string }) {
           </CardContent>
         </Card>
       ) : (
-        <TableCard note="Период берётся из фильтра рабочей области. «Не закрыто» показано у займов и подотчёта"
+        <TableCard note="Период берётся из фильтра рабочей области. «Осталось» показано у займов и подотчёта"
           head={<><Th>Дата</Th><Th>С кем и за что</Th><Th>Вид</Th>
-            <Th>Чем подтверждено</Th><Th right>Сумма</Th><Th right>Не закрыто</Th>
+            <Th>Чем подтверждено</Th><Th right>Сумма</Th><Th right>Осталось</Th>
             <Th right> </Th></>}>
           {rows.map((r) => (
             <tr key={r.id} className={cn('border-b last:border-0 hover:bg-muted/40',
@@ -281,15 +276,15 @@ export function CashJournalScreen({ companyId }: { companyId: string }) {
               <Td>
                 <span className={cn('text-sm', proofTone(r.proof))}>{r.proofLabel}</span>
                 {r.formalized ? (
-                  <div className="text-[11px] text-emerald-600">
+                  <div className="text-[11px] text-emerald-700 dark:text-emerald-400">
                     проведено{r.formalizedOn ? ` ${r.formalizedOn}` : ''}
                   </div>
                 ) : r.awaitsPapers ? (
-                  <div className="text-[11px] text-amber-600">ждёт документов</div>
+                  <div className="text-[11px] text-amber-700 dark:text-amber-400">ждёт документов</div>
                 ) : null}
               </Td>
               <Td right>
-                <span className={r.direction === 'in' ? 'text-emerald-600' : undefined}>
+                <span className={r.direction === 'in' ? 'text-emerald-700 dark:text-emerald-400' : undefined}>
                   {r.direction === 'in' ? '+' : '−'}{money.format(r.amount)} ₽
                 </span>
               </Td>
@@ -307,10 +302,21 @@ export function CashJournalScreen({ companyId }: { companyId: string }) {
                 )}
               </Td>
               <Td right>
-                <button className="text-muted-foreground hover:text-destructive"
-                  title="Удалить операцию" onClick={() => remove.mutate(r.id)}>
-                  <Trash2 className="w-4 h-4" />
-                </button>
+                <ConfirmActionDialog
+                  destructive
+                  title="Удалить операцию?"
+                  description={<>{r.kindLabel} от {r.happenedOn} — {r.person},{' '}
+                    {money.format(r.amount)} ₽. Операция исчезнет насовсем; если по ней
+                    есть возвраты или отчёты, сначала удалите их.</>}
+                  confirmLabel="Удалить"
+                  onConfirm={() => remove.mutate(r.id)}
+                  trigger={
+                    <Button variant="ghost" size="icon-sm"
+                      aria-label={`Удалить операцию: ${r.person}, ${r.amount} ₽`}
+                      className="text-muted-foreground hover:text-destructive">
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  } />
               </Td>
             </tr>
           ))}
@@ -410,6 +416,7 @@ function CashDialog({
   onSave: () => void
 }) {
   const set = (patch: Partial<CashIn>) => onChange({ ...value, ...patch })
+  const parentDirection = loans.find((l) => l.id === value.parentId)?.direction ?? 'out'
   // Предупреждения считает сервер: пороги живут в настройках компании, и вторая копия
   // правил во фронте разошлась бы с ними молча.
   const warn = useQuery({
@@ -418,7 +425,11 @@ function CashDialog({
     queryFn: () => checkCash(companyId, value),
     enabled: !!value.amount,
   })
-  const isRepayment = value.kind === 'repayment' || value.kind === 'report'
+  // Закрывающие виды: каждый из них гасит конкретную выдачу и обязан её назвать.
+  // «Списание» и «Взаимозачёт» стояли в списке видов, но выбор выдачи для них не
+  // показывался, а привязка обнулялась при переключении — сохранить их было нельзя.
+  const isClosing = CLOSING.includes(value.kind)
+  const isRepayment = isClosing
   const isLoan = value.kind === 'loan'
   // Остаток есть у займа и подотчёта: и то и другое чем-то закрывается.
   const isOpen = isLoan || value.kind === 'advance'
@@ -433,11 +444,23 @@ function CashDialog({
         </DialogHeader>
         <div className="space-y-3 max-h-[70vh] overflow-y-auto pr-1">
           <div className="grid gap-3 sm:grid-cols-3">
-            <Field label="Направление">
-              <select className={inputCls} value={value.direction}
-                onChange={(e) => set({ direction: e.target.value })}>
-                {dicts.directions.map((k) => <option key={k.key} value={k.key}>{k.label}</option>)}
-              </select>
+            {/* У отчёта, зачёта и списания направление не выбирают: денег не
+                движется, а сторону задаёт сама выдача. Пока переключатель стоял здесь,
+                форма открывалась на «Выдали», никто его не трогал — и мост изменения
+                долга показывал расхождение на ровном месте. */}
+            <Field label="Направление"
+              hint={isClosing && value.kind !== 'repayment'
+                ? 'Задаётся выдачей: закрытие всегда идёт ей навстречу' : undefined}>
+              {isClosing && value.kind !== 'repayment' ? (
+                <div className={`${inputCls} text-muted-foreground`}>
+                  {parentDirection === 'out' ? 'Закрывает выданное' : 'Закрывает полученное'}
+                </div>
+              ) : (
+                <select className={inputCls} value={value.direction}
+                  onChange={(e) => set({ direction: e.target.value })}>
+                  {dicts.directions.map((k) => <option key={k.key} value={k.key}>{k.label}</option>)}
+                </select>
+              )}
             </Field>
             <Field label="Сумма, ₽">
               <input className={inputCls} type="number" step="0.01" min="0"
@@ -484,7 +507,7 @@ function CashDialog({
                   set({
                     kind: k,
                     dueOn: ['loan', 'advance'].includes(k) ? value.dueOn : null,
-                    parentId: ['repayment', 'report'].includes(k) ? value.parentId : null,
+                    parentId: CLOSING.includes(k) ? value.parentId : null,
                     formalized: ['advance', 'travel', 'bonus'].includes(k)
                       ? value.formalized : false,
                     formalizedOn: ['advance', 'travel', 'bonus'].includes(k)
@@ -504,8 +527,8 @@ function CashDialog({
             </Field>
           </div>
 
-          {isRepayment && (
-            <Field label="К какой выдаче"
+          {isClosing && (
+            <Field label="Что закрываем"
               hint="Без привязки выданное осталось бы незакрытым: остаток считается по цепочке">
               <select className={inputCls} value={value.parentId ?? ''}
                 onChange={(e) => set({ parentId: e.target.value || null })}>
@@ -680,13 +703,17 @@ function CashDialog({
 /* ────────────────────────────────────────────────────────────── */
 
 export function CashPeopleScreen({ companyId }: { companyId: string }) {
+  const [card, setCard] = useState<string | null>(null)
   const q = useQuery({
     queryKey: ['perimeter', 'cash-people', companyId],
     queryFn: () => getCashPeople(companyId),
     enabled: !!companyId,
   })
   if (q.isError) {
-    return <div className="p-4"><QueryError onRetry={() => q.refetch()} /></div>
+    return <div className="p-4">
+      <QueryError message="Не удалось собрать расчёты по людям"
+        onRetry={() => q.refetch()} />
+    </div>
   }
   if (!q.data) return <Loading />
   if (!q.data.rows.length) {
@@ -707,7 +734,7 @@ export function CashPeopleScreen({ companyId }: { companyId: string }) {
       <div className="grid gap-3 sm:grid-cols-3">
         <MetricTile label="Людей в расчётах" value={num.format(d.peopleCount)}
           hint="с кем были наличные операции" />
-        <MetricTile label="Не закрыто"
+        <MetricTile label="Осталось"
           value={`${money.format(Math.abs(d.loanRestTotal))} ₽`}
           hint={d.loanRestTotal >= 0 ? 'займы и подотчёт за людьми' : 'должны мы'}
           tone={d.loanRestTotal ? 'warning' : undefined} />
@@ -719,19 +746,22 @@ export function CashPeopleScreen({ companyId }: { companyId: string }) {
 
       <TableCard note="Долг человека — это непогашенные займы и невозвращённый подотчёт. Оплата выполненной работы и премия долгом не становятся, сколько их ни выдай"
         head={<><Th>С кем</Th><Th right>Операций</Th><Th right>Выдано</Th>
-          <Th right>Получено</Th><Th right>Не закрыто</Th><Th right>Последняя</Th></>}>
+          <Th right>Получено</Th><Th right>Осталось</Th><Th right>Последняя</Th></>}>
         {d.rows.map((p) => (
           <tr key={p.person} className="border-b last:border-0">
             <Td>
-              <div>{p.person}</div>
+              {/* Имя открывает сверку: акт по человеку, разговоры о долге и зачёт
+                  встречных требований — то, ради чего в такой список и заходят. */}
+              <button className="text-left hover:underline"
+                onClick={() => setCard(p.person)}>{p.person}</button>
               <div className="text-[11px] text-muted-foreground">{p.personKindLabel}</div>
               {!!p.noProof && (
-                <div className="text-[11px] text-amber-600">
+                <div className="text-[11px] text-amber-700 dark:text-amber-400">
                   {num.format(p.noProof)} операций без подтверждения
                 </div>
               )}
               {!!p.awaits && (
-                <div className="text-[11px] text-amber-600">
+                <div className="text-[11px] text-amber-700 dark:text-amber-400">
                   ждёт документов: {money.format(p.awaitsAmount)} ₽
                 </div>
               )}
@@ -753,6 +783,11 @@ export function CashPeopleScreen({ companyId }: { companyId: string }) {
           </tr>
         ))}
       </TableCard>
+
+      {card && (
+        <PersonCardDialog companyId={companyId} person={card}
+          onClose={() => setCard(null)} />
+      )}
     </div>
   )
 }
@@ -769,7 +804,10 @@ export function CashLoansScreen({ companyId }: { companyId: string }) {
     enabled: !!companyId,
   })
   if (q.isError) {
-    return <div className="p-4"><QueryError onRetry={() => q.refetch()} /></div>
+    return <div className="p-4">
+      <QueryError message="Не удалось загрузить займы и подотчёт"
+        onRetry={() => q.refetch()} />
+    </div>
   }
   if (!q.data) return <Loading />
   const d = q.data
@@ -797,9 +835,9 @@ export function CashLoansScreen({ companyId }: { companyId: string }) {
   return (
     <div className="p-4 space-y-4">
       <div className="grid gap-3 sm:grid-cols-3">
-        <MetricTile label="Не закрыто за людьми" value={`${money.format(d.givenRest)} ₽`}
+        <MetricTile label="Осталось за людьми" value={`${money.format(d.givenRest)} ₽`}
           hint="выданные займы и подотчёт" />
-        <MetricTile label="Не закрыто за нами" value={`${money.format(d.takenRest)} ₽`}
+        <MetricTile label="Осталось за нами" value={`${money.format(d.takenRest)} ₽`}
           hint="полученные займы" />
         <MetricTile label="Просрочено" value={num.format(d.overdue)}
           hint="срок прошёл, остаток не погашен"
@@ -808,7 +846,7 @@ export function CashLoansScreen({ companyId }: { companyId: string }) {
 
       <TableCard note="Выданные и полученные не сворачиваются в одну цифру: долг знакомого не гасит наш долг перед другим"
         head={<><Th>Дата</Th><Th>С кем и за что</Th><Th right>Сумма</Th>
-          <Th right>Возвращено</Th><Th right>Не закрыто</Th><Th>Срок</Th></>}>
+          <Th right>Возвращено</Th><Th right>Осталось</Th><Th>Срок</Th></>}>
         {d.rows.map((l) => (
           <Fragment key={l.id}>
             <tr className={cn('border-b last:border-0',
@@ -887,7 +925,10 @@ export function CashPapersScreen({ companyId }: { companyId: string }) {
     enabled: !!companyId,
   })
   if (q.isError) {
-    return <div className="p-4"><QueryError onRetry={() => q.refetch()} /></div>
+    return <div className="p-4">
+      <QueryError message="Не удалось собрать очередь на оформление"
+        onRetry={() => q.refetch()} />
+    </div>
   }
   if (!q.data) return <Loading />
   const d = q.data
@@ -941,7 +982,8 @@ export function CashPapersScreen({ companyId }: { companyId: string }) {
             <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
               Ждут оформления
             </div>
-            <ExportButton onClick={() => exportTable('К оформлению', [
+            <PerimeterExport companyId={companyId} title="К оформлению"
+            columns={[
               { header: 'Дата', key: 'happenedOn', width: 13 },
               { header: 'Кому', key: 'person', width: 30 },
               { header: 'Кто это', key: 'personKindLabel', width: 16 },
@@ -949,7 +991,8 @@ export function CashPapersScreen({ companyId }: { companyId: string }) {
               { header: 'За что', key: 'purpose', width: 44 },
               { header: 'Сумма', key: 'amount', width: 16, money: true },
               { header: 'Чем подтверждено', key: 'proofLabel', width: 18 },
-            ], d.waiting)} />
+            ]}
+            rows={d.waiting} />
           </div>
           <TableCard note="Отметка о проведении ставится в карточке операции на экране «Журнал»"
             head={<><Th>Дата</Th><Th>Кому и за что</Th><Th>Вид</Th>

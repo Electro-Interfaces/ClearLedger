@@ -14,7 +14,7 @@ import {
   REV_STOCK_MENU, REV_HELP_MENU,
   ECON_RESULT_MENU, ECON_COSTS_MENU, ECON_TAXES_MENU, ECON_HELP_MENU,
   BOOKS_LEDGER_MENU, BOOKS_OFFBAL_MENU, BOOKS_PRIMARY_MENU,
-  PER_PICTURE_MENU, PER_OFFICIAL_MENU, PER_RECORDS_MENU, PER_CASH_MENU,
+  PER_PICTURE_MENU, PER_OFFICIAL_MENU, PER_RECORDS_MENU, PER_CASH_MENU, PER_SETUP_MENU,
   PER_PEOPLE_MENU, PER_HELP_MENU,
 } from './workspaceMenus'
 
@@ -90,6 +90,7 @@ export const MODE_LABELS: Record<CoreMode, string> = {
   per_records: 'Периметр · Договорённости',
   per_cash: 'Периметр · Наличные',
   per_people: 'Периметр · Люди',
+  per_setup: 'Периметр · Настройка',
   per_help: 'Периметр · Помощь',
 }
 
@@ -213,6 +214,7 @@ const SUB_LABELS: Partial<Record<CoreMode, Record<string, string>>> = {
   per_records: Object.fromEntries(PER_RECORDS_MENU.map((m) => [m.key, m.label])),
   per_cash: Object.fromEntries(PER_CASH_MENU.map((m) => [m.key, m.label])),
   per_people: Object.fromEntries(PER_PEOPLE_MENU.map((m) => [m.key, m.label])),
+  per_setup: Object.fromEntries(PER_SETUP_MENU.map((m) => [m.key, m.label])),
   per_help: Object.fromEntries(PER_HELP_MENU.map((m) => [m.key, m.label])),
 }
 

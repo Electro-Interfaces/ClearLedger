@@ -28,16 +28,17 @@ import { Card, CardContent } from '@/components/ui/card'
 import { MetricTile } from '@/components/ui/metric-tile'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { ConfirmActionDialog } from '@/components/common/ConfirmActionDialog'
 import { cn } from '@/lib/utils'
-import { exportTable } from '@/services/booksExport'
 import {
   createPerimeterRecord, deletePerimeterRecord, getCashLoans, getPerimeterDicts,
   getPerimeterOverview, getPerimeterParties, getPerimeterRecords, updatePerimeterRecord,
   type PerimeterRecord, type PerimeterRecordIn,
 } from '@/services/perimeterService'
+import { PerimeterExport } from './perimeterShared'
 import { Loading, NoCompany, TableCard, Th } from './OfficePanels'
 import { OffBalanceAccounts, OffBalanceHiddenScreen } from './OfficeOffBalance'
-import { ExportButton, SearchInput, Tabs, money, num } from './officeShared'
+import { SearchInput, Tabs, money, num , Td } from './officeShared'
 import { ProductHelpPanel } from './ProductHelpPanel'
 import { PERIMETER_HELP_SLICES } from './helpSlices'
 import {
@@ -65,15 +66,6 @@ const modeForHelpKey = (key: string): string =>
   : PER_CASH_MENU.some((m) => m.key === key) ? 'per_cash'
   : PER_PEOPLE_MENU.some((m) => m.key === key) ? 'per_people'
   : 'per_picture'
-
-function Td({ children, right, muted }: {
-  children: React.ReactNode; right?: boolean; muted?: boolean
-}) {
-  return (
-    <td className={cn('px-3 py-2 align-top', right && 'text-right tabular-nums whitespace-nowrap',
-      muted && 'text-muted-foreground')}>{children}</td>
-  )
-}
 
 /** Сумма записи: её может не быть, и это законно, а не ноль. */
 const amountText = (v: number | null) => (v === null ? '—' : `${money.format(v)} ₽`)
@@ -143,10 +135,27 @@ export function PerimeterPanel() {
 
   return (
     <div className="h-full flex flex-col">
-      <ScrollArea className="flex-1 min-h-0">{view}</ScrollArea>
+      <ScrollArea className="flex-1 min-h-0">
+        {/* Чип периода стоит в шапке рабочей области у всех продуктов офиса, но
+            «Периметр» отвечает на вопросы двух родов. «Сколько выдали» — вопрос про
+            отрезок времени, «кому мы должны» — нет: долг не перестаёт существовать
+            оттого, что выдали его в прошлом квартале. Молчать об этом нельзя: человек
+            крутил период и не понимал, почему половина экранов не двигается. */}
+        {!PERIOD_AWARE.has(sub) && (
+          <p className="px-4 pt-3 -mb-1 text-[11px] text-muted-foreground">
+            Показано всё накопленное: период рабочей области на этом экране не
+            применяется — незакрытое остаётся незакрытым в любом периоде.
+          </p>
+        )}
+        {view}
+      </ScrollArea>
     </div>
   )
 }
+
+/** Экраны, которые действительно считают по периоду рабочей области. */
+const PERIOD_AWARE = new Set(['pr_cash', 'pr_cash_calendar', 'pr_cash_tools',
+  'pr_accounts', 'pr_hidden'])
 
 /* ────────────────────────────────────────────────────────────── */
 /*                          Три слоя                              */
@@ -168,20 +177,6 @@ function PerimeterLayers({ companyId }: { companyId: string }) {
 
   return (
     <div className="p-4 space-y-4">
-      <Card>
-        <CardContent className="p-4 space-y-2 text-sm">
-          <div className="font-medium">Что показывает этот экран</div>
-          <p className="text-muted-foreground">
-            Баланс отвечает, чем компания владеет и кому должна по документам. Рядом с ним
-            всегда есть три слоя, которых в нём нет: имущество и обязательства на
-            забалансовых счетах, невидимое в балансе из-за амортизации и списаний, и то,
-            о чём договорились словами. Первые два приходят из бухгалтерии, третий
-            записывают люди. Суммы по слоям намеренно не складываются в одну: доверие к
-            ним разное.
-          </p>
-        </CardContent>
-      </Card>
-
       <div className="grid gap-3 lg:grid-cols-3">
         {d.layers.map((l) => (
           <Card key={l.key}>
@@ -194,7 +189,7 @@ function PerimeterLayers({ companyId }: { companyId: string }) {
                   <div className="text-base font-medium">{l.title}</div>
                 </div>
                 <span className={cn('text-[11px] px-1.5 py-0.5 rounded border whitespace-nowrap',
-                  l.official ? 'text-muted-foreground' : 'border-amber-500/50 text-amber-600')}>
+                  l.official ? 'text-muted-foreground' : 'border-amber-500/50 text-amber-700 dark:text-amber-400')}>
                   {l.official ? 'из учёта' : 'со слов'}
                 </span>
               </div>
@@ -211,7 +206,7 @@ function PerimeterLayers({ companyId }: { companyId: string }) {
                 </ul>
               )}
               {!!l.unknown && (
-                <div className="text-[11px] text-amber-600">
+                <div className="text-[11px] text-amber-700 dark:text-amber-400">
                   ещё по {num.format(l.unknown)} счетам оплата не сведена — их долг
                   неизвестен, а не равен нулю
                 </div>
@@ -234,10 +229,24 @@ function PerimeterLayers({ companyId }: { companyId: string }) {
         <MetricTile label="Срок в ближайший месяц" value={num.format(d.soon.length)}
           hint="о чём напомнить заранее"
           tone={d.soon.length ? 'warning' : undefined} />
-        <MetricTile label="Пора оформлять" value={num.format(d.toFormalize.length)}
-          hint="счёт указан, движения по нему нет"
+        <MetricTile label="Довести до учёта" value={num.format(d.toFormalize.length)}
+          hint="назван забалансовый счёт, запись пока только здесь"
           tone={d.toFormalize.length ? 'warning' : undefined} />
       </div>
+
+      <Card>
+        <CardContent className="p-4 space-y-2 text-sm">
+          <div className="font-medium">Что показывает этот экран</div>
+          <p className="text-muted-foreground">
+            Баланс отвечает, чем компания владеет и кому должна по документам. Рядом с ним
+            всегда есть три слоя, которых в нём нет: имущество и обязательства на
+            забалансовых счетах, невидимое в балансе из-за амортизации и списаний, и то,
+            о чём договорились словами. Первые два приходят из бухгалтерии, третий
+            записывают люди. Суммы по слоям намеренно не складываются в одну: доверие к
+            ним разное.
+          </p>
+        </CardContent>
+      </Card>
 
       {/* Деньги и регулярные обязательства: не слои, а другой срез того же
           периметра — «что происходит и что надо сделать». */}
@@ -266,7 +275,7 @@ function PerimeterLayers({ companyId }: { companyId: string }) {
               )}
               <span className="text-muted-foreground">Ждёт документов</span>
               <span className={cn('text-right tabular-nums',
-                d.cash.awaitsPapersCount && 'text-amber-600')}>
+                d.cash.awaitsPapersCount && 'text-amber-700 dark:text-amber-400')}>
                 {money.format(d.cash.awaitsPapers)} ₽
               </span>
             </div>
@@ -465,14 +474,16 @@ function PerimeterDue({ companyId }: { companyId: string }) {
         <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
           Договорённости: просроченное и ближайшее
         </div>
-        <ExportButton onClick={() => exportTable('Сроки периметра', [
+        <PerimeterExport companyId={companyId} title="Сроки периметра"
+            columns={[
           { header: 'Срок', key: 'dueOn', width: 14 },
           { header: 'Дней', key: 'daysLeft', width: 8 },
           { header: 'Что записано', key: 'title', width: 46 },
           { header: 'Вторая сторона', key: 'counterparty', width: 30 },
           { header: 'Вид', key: 'kindLabel', width: 24 },
           { header: 'Сумма', key: 'amount', width: 16, money: true },
-        ], rows)} />
+        ]}
+            rows={rows} />
       </div>
       )}
       {!!rows.length && (
@@ -574,8 +585,10 @@ function PerimeterRegistry({ companyId }: { companyId: string }) {
           { key: 'cancelled', label: 'Снятые' },
         ]} />
         <div className="flex items-center gap-2">
-          <SearchInput value={search} onChange={setSearch} placeholder="Поиск по записям" />
-          <ExportButton onClick={() => exportTable('Договорённости', [
+          <SearchInput value={search} onChange={setSearch} label="Поиск по договорённостям"
+            placeholder="Поиск по записям" />
+          <PerimeterExport companyId={companyId} title="Договорённости"
+            columns={[
             { header: 'Что записано', key: 'title', width: 46 },
             { header: 'Вид', key: 'kindLabel', width: 24 },
             { header: 'Сторона', key: 'directionLabel', width: 16 },
@@ -586,7 +599,8 @@ function PerimeterRegistry({ companyId }: { companyId: string }) {
             { header: 'Подтверждение', key: 'confidenceLabel', width: 18 },
             { header: 'Статус', key: 'statusLabel', width: 20 },
             { header: 'Счёт', key: 'account', width: 10 },
-          ], rows)} />
+          ]}
+            rows={rows} />
           <Button size="sm" onClick={() => setEdit({ id: null, body: { ...EMPTY } })}>
             <Plus className="w-4 h-4 mr-1" />Записать
           </Button>
@@ -649,11 +663,25 @@ function PerimeterRegistry({ companyId }: { companyId: string }) {
               <Td right>{amountText(r.amount)}</Td>
               <Td muted>{r.statusLabel}</Td>
               <Td right>
-                <button className="text-muted-foreground hover:text-destructive"
-                  title="Удалить запись"
-                  onClick={() => remove.mutate(r.id)}>
-                  <Trash2 className="w-4 h-4" />
-                </button>
+                {/* Запись удаляется безвозвратно, а весь смысл продукта — вспомнить
+                    через полгода, о чём договорились. Поэтому общий жест подтверждения
+                    пространства, а не молчаливый onClick, и цель нажатия по размеру
+                    кнопки, а не по размеру иконки. */}
+                <ConfirmActionDialog
+                  destructive
+                  title="Удалить запись?"
+                  description={<>Договорённость «{r.title}»
+                    {r.counterparty ? ` (${r.counterparty})` : ''} исчезнет насовсем —
+                    восстановить её будет нечем. Отработавшую запись правильнее закрыть
+                    статусом: исполнено, снято или оформлено документом.</>}
+                  confirmLabel="Удалить"
+                  onConfirm={() => remove.mutate(r.id)}
+                  trigger={
+                    <Button variant="ghost" size="icon-sm" aria-label={`Удалить запись «${r.title}»`}
+                      className="text-muted-foreground hover:text-destructive">
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  } />
               </Td>
             </tr>
           ))}
@@ -682,6 +710,9 @@ const toForm = (r: PerimeterRecord): PerimeterRecordIn => ({
   amount: r.amount, startedOn: r.startedOn, dueOn: r.dueOn,
   status: r.status, confidence: r.confidence, source: r.source, evidence: r.evidence,
   consequence: r.consequence, account: r.account, closedNote: r.closedNote,
+  // Оценка вероятности и вилка суммы переносятся вместе с остальным: без них правка
+  // срока молча обнуляла «вероятно» и диапазон 300–800 тыс. у той же претензии.
+  likelihood: r.likelihood, amountMin: r.amountMin, amountMax: r.amountMax,
 })
 
 function Field({ label, hint, children }: {
@@ -870,7 +901,10 @@ function PerimeterParties({ companyId }: { companyId: string }) {
     enabled: !!companyId,
   })
   if (q.isError) {
-    return <div className="p-4"><QueryError onRetry={() => q.refetch()} /></div>
+    return <div className="p-4">
+      <QueryError message="Не удалось собрать разрез по второй стороне"
+        onRetry={() => q.refetch()} />
+    </div>
   }
   if (!q.data) return <Loading />
   if (!q.data.rows.length) {

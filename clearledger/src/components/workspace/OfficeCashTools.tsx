@@ -30,16 +30,7 @@ import {
   doReconcile, getCashForecast, getDebtBridge, getReconcileState,
 } from '@/services/perimeterService'
 import { Loading, TableCard, Th } from './OfficePanels'
-import { money, num } from './officeShared'
-
-function Td({ children, right, muted }: {
-  children: React.ReactNode; right?: boolean; muted?: boolean
-}) {
-  return (
-    <td className={cn('px-3 py-2 align-top', right && 'text-right tabular-nums whitespace-nowrap',
-      muted && 'text-muted-foreground')}>{children}</td>
-  )
-}
+import { money, num , Td } from './officeShared'
 
 const inputCls = 'w-full rounded-md border bg-background px-2.5 py-1.5 text-sm'
 const today = () => new Date().toISOString().slice(0, 10)
@@ -99,7 +90,7 @@ export function CashToolsScreen({ companyId }: { companyId: string }) {
           hint="по известным обязательствам и срокам" />
         <MetricTile label="Всего до конца горизонта" value={`${money.format(f.total)} ₽`}
           hint={`по ${f.horizon}`} />
-        <MetricTile label="Не закрыто за людьми"
+        <MetricTile label="Осталось за людьми"
           value={`${money.format(b.steps.at(-1)?.amount ?? 0)} ₽`}
           hint="на конец периода: займы и подотчёт" />
       </div>
@@ -112,7 +103,7 @@ export function CashToolsScreen({ companyId }: { companyId: string }) {
             <Td>{s.label}</Td>
             <Td right>
               <span className={cn(!!s.amount && s.kind === 'plus' && 'text-destructive',
-                !!s.amount && s.kind === 'minus' && 'text-emerald-600')}>
+                !!s.amount && s.kind === 'minus' && 'text-emerald-700 dark:text-emerald-400')}>
                 {s.kind === 'total' ? '' : s.amount > 0 ? '+' : ''}
                 {money.format(s.amount)} ₽
               </span>
@@ -217,7 +208,8 @@ export function CashToolsScreen({ companyId }: { companyId: string }) {
             </Button>
           </div>
 
-          <input className={inputCls} value={note} placeholder="Причина расхождения, если знаете"
+          <input className={inputCls} value={note} aria-label="Причина расхождения"
+            placeholder="Причина расхождения, если знаете"
             onChange={(e) => setNote(e.target.value)} />
 
           {state.data?.lastCheckedOn && (

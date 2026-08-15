@@ -24,19 +24,9 @@ import {
   getOffBalance, getOffBalanceHidden,
   type OffBalance, type OffBalanceHidden,
 } from '@/services/booksService'
+import { PerimeterExport } from './perimeterShared'
 import { Loading, TableCard, Th } from './OfficePanels'
-import { ExportButton, money, num, qty } from './officeShared'
-import { exportTable } from '@/services/booksExport'
-import { cn } from '@/lib/utils'
-
-function Td({ children, right, muted }: {
-  children: React.ReactNode; right?: boolean; muted?: boolean
-}) {
-  return (
-    <td className={cn('px-3 py-2 align-top', right && 'text-right tabular-nums whitespace-nowrap',
-      muted && 'text-muted-foreground')}>{children}</td>
-  )
-}
+import { money, num, qty , Td } from './officeShared'
 
 /** Дата снимка сальдо человеческим видом: остаток всегда «на дату», а не «сейчас». */
 const asOfNote = (asOf: string | null) =>
@@ -176,14 +166,16 @@ export function OffBalanceAccounts({ companyId }: { companyId: string }) {
             <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
               Чьё и по какому основанию
             </div>
-            <ExportButton onClick={() => exportTable('За балансом — аналитика', [
+            <PerimeterExport companyId={companyId} title="За балансом — аналитика"
+            columns={[
               { header: 'Счёт', key: 'account', width: 10 },
               { header: 'Наименование счёта', key: 'name', width: 40 },
               { header: 'Аналитика', key: 'sub1', width: 34 },
               { header: 'Уточнение', key: 'sub2', width: 26 },
               { header: 'Сумма', key: 'amount', width: 16, money: true },
               { header: 'Количество', key: 'qty', width: 12 },
-            ], d.subs)} />
+            ]}
+            rows={d.subs} />
           </div>
           <TableCard note="Аналитика остатка: без неё «на 002 висит миллион» ничего не значит"
             head={<><Th>Счёт</Th><Th>Аналитика</Th><Th>Уточнение</Th>
@@ -314,13 +306,15 @@ export function OffBalanceHiddenScreen({ companyId }: { companyId: string }) {
           Долг со сроком давности больше трёх лет
         </div>
         {!!d.stale.length && (
-          <ExportButton onClick={() => exportTable('Просроченный долг', [
+          <PerimeterExport companyId={companyId} title="Просроченный долг"
+            columns={[
             { header: 'Покупатель', key: 'counterparty', width: 40 },
             { header: 'Счетов', key: 'count', width: 10 },
             { header: 'Не закрыто', key: 'amount', width: 16, money: true },
             { header: 'Самый старый', key: 'oldest', width: 14 },
             { header: 'Последний', key: 'last', width: 14 },
-          ], d.stale)} />
+          ]}
+            rows={d.stale} />
         )}
       </div>
       {d.stale.length ? (

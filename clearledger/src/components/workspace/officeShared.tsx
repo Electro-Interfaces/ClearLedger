@@ -87,6 +87,51 @@ export function ExportButton({ onClick, label = 'Excel' }: {
   )
 }
 
+/** Сегодня в том же виде, в каком даты ходят по API. */
+export const today = () => new Date().toISOString().slice(0, 10)
+
+/** «2026-08-15» → «15.08». ISO-даты в интерфейсе не показываем. */
+export const dayLabel = (iso: string) => iso.slice(8, 10) + '.' + iso.slice(5, 7)
+
+/**
+ * Ячейка таблицы офисных экранов. Была скопирована в шести файлах «Периметра» —
+ * одинаковая до символа, но на 4 px выше, чем строки остальных офисных таблиц.
+ */
+export function Td({ children, right, muted, className }: {
+  children: React.ReactNode
+  right?: boolean
+  muted?: boolean
+  className?: string
+}) {
+  return (
+    <td className={cn('px-3 py-1.5 align-top',
+      right && 'text-right tabular-nums whitespace-nowrap',
+      muted && 'text-muted-foreground', className)}>{children}</td>
+  )
+}
+
+/** Поле ввода в диалогах: один класс на все офисные формы. */
+export const inputCls
+  = 'w-full rounded-md border bg-background px-2.5 py-1.5 text-sm'
+
+/**
+ * Поле формы с подписью и пояснением. Подпись — настоящая метка (`<label>`), иначе
+ * диктор читает «поле ввода, 30» без указания, что именно вводят.
+ */
+export function FormField({ label, hint, children }: {
+  label: string; hint?: string; children: React.ReactNode
+}) {
+  return (
+    <label className="block space-y-1">
+      <span className="block text-[11px] uppercase tracking-wider text-muted-foreground">
+        {label}
+      </span>
+      {children}
+      {hint && <span className="block text-[11px] text-muted-foreground">{hint}</span>}
+    </label>
+  )
+}
+
 /** Поле поиска над таблицей: без метки скринридер читает только placeholder. */
 export function SearchInput({ value, onChange, placeholder, label, width = 'w-56' }: {
   value: string

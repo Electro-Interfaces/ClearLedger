@@ -16,19 +16,10 @@ import { QueryError } from '@/components/common/QueryError'
 import { Card, CardContent } from '@/components/ui/card'
 import { MetricTile } from '@/components/ui/metric-tile'
 import { cn } from '@/lib/utils'
-import { exportTable } from '@/services/booksExport'
-import { getCashAging, logExport } from '@/services/perimeterService'
+import { getCashAging } from '@/services/perimeterService'
+import { PerimeterExport } from './perimeterShared'
 import { Loading, TableCard, Th } from './OfficePanels'
-import { ExportButton, money, num } from './officeShared'
-
-function Td({ children, right, muted }: {
-  children: React.ReactNode; right?: boolean; muted?: boolean
-}) {
-  return (
-    <td className={cn('px-3 py-2 align-top', right && 'text-right tabular-nums whitespace-nowrap',
-      muted && 'text-muted-foreground')}>{children}</td>
-  )
-}
+import { money, num , Td } from './officeShared'
 
 export function CashAgingScreen({ companyId }: { companyId: string }) {
   const q = useQuery({
@@ -48,7 +39,7 @@ export function CashAgingScreen({ companyId }: { companyId: string }) {
   return (
     <div className="p-4 space-y-4">
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <MetricTile label="Не закрыто" value={`${money.format(d.total)} ₽`}
+        <MetricTile label="Осталось за людьми" value={`${money.format(d.total)} ₽`}
           hint={`${num.format(d.rows.length)} выдач`} />
         <MetricTile label="Из личных средств" value={`${money.format(owner)} ₽`}
           hint="деньги собственника у людей" />
@@ -56,8 +47,10 @@ export function CashAgingScreen({ companyId }: { companyId: string }) {
           hint={`срок отчёта — ${d.advanceDays} дн.`}
           tone={d.overdueReports.length ? 'danger' : undefined} />
         <MetricTile label="Право сгорает" value={num.format(d.expiring.length)}
-          hint="в ближайшие 90 дней"
-          tone={d.expiring.length ? 'warning' : undefined} />
+          hint={d.expired.length
+            ? `в ближайшие 90 дней; ${num.format(d.expired.length)} уже сгорело`
+            : 'в ближайшие 90 дней'}
+          tone={d.expiring.length || d.expired.length ? 'warning' : undefined} />
       </div>
 
       {!d.rows.length ? (
@@ -83,20 +76,19 @@ export function CashAgingScreen({ companyId }: { companyId: string }) {
             <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
               Незакрытые выдачи
             </div>
-            <ExportButton onClick={() => {
-              exportTable('Возраст выдач', [
+            {/* Выгрузка живёт дальше сама по себе — её след остаётся в журнале. */}
+            <PerimeterExport companyId={companyId} title="Возраст выдач"
+              columns={[
                 { header: 'Дата', key: 'happenedOn', width: 13 },
                 { header: 'Кому', key: 'person', width: 30 },
                 { header: 'Вид', key: 'kindLabel', width: 22 },
                 { header: 'За что', key: 'purpose', width: 40 },
                 { header: 'Выдано', key: 'amount', width: 16, money: true },
                 { header: 'Осталось', key: 'rest', width: 16, money: true },
-                { header: 'Дней', key: 'age', width: 10 },
+                { header: 'Возраст, дней', key: 'age', width: 14 },
                 { header: 'Право сгорает', key: 'limitationExpiresOn', width: 16 },
-              ], d.rows)
-              // Выгрузка живёт дальше сама по себе — её след остаётся в журнале.
-              logExport(companyId, 'Возраст выдач', d.rows.length)
-            }} />
+              ]}
+              rows={d.rows} />
           </div>
           <TableCard note="«Право сгорает» считается от последнего признания долга: частичная оплата или подписанный акт сверки продлевают срок на три года"
             head={<><Th>Кому и за что</Th><Th right>Осталось</Th><Th right>Дней у человека</Th>
@@ -123,7 +115,7 @@ export function CashAgingScreen({ companyId }: { companyId: string }) {
                       <span className={cn('tabular-nums',
                         (r.limitationDaysLeft ?? 0) < 0 && 'text-destructive',
                         (r.limitationDaysLeft ?? 0) >= 0
-                        && (r.limitationDaysLeft ?? 0) <= 90 && 'text-amber-600')}>
+                        && (r.limitationDaysLeft ?? 0) <= 90 && 'text-amber-700 dark:text-amber-400')}>
                         {r.limitationExpiresOn}
                       </span>
                       <div className="text-[11px] text-muted-foreground">
@@ -158,6 +150,27 @@ export function CashAgingScreen({ companyId }: { companyId: string }) {
               {d.expiring.slice(0, 8).map((r) => (
                 <li key={r.id} className="tabular-nums">
                   {r.limitationExpiresOn} · {r.person} · {money.format(r.rest ?? 0)} ₽
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
+      )}
+
+      {!!d.takenRest && (
+        <Card>
+          <CardContent className="p-4 text-sm space-y-1">
+            <div className="font-medium">Что должны мы</div>
+            <p className="text-muted-foreground">
+              Полученные займы на {money.format(d.takenRest)} ₽ в счёт выше не входят:
+              возраст и сроки давности считаются по тому, что должны нам. Наш долг —
+              другой разговор и другой срок, и складывать их в одну цифру значило бы
+              сказать, что долг знакомого гасит наш.
+            </p>
+            <ul className="text-[11px] text-muted-foreground space-y-0.5 pt-1">
+              {d.takenRows.slice(0, 6).map((r) => (
+                <li key={r.id} className="tabular-nums">
+                  {r.happenedOn} · {r.person} · {money.format(r.rest ?? 0)} ₽
                 </li>
               ))}
             </ul>

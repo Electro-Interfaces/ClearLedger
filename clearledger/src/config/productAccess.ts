@@ -27,7 +27,7 @@ import {
   REV_STOCK_MENU, REV_HELP_MENU,
   ECON_RESULT_MENU, ECON_COSTS_MENU, ECON_TAXES_MENU, ECON_HELP_MENU,
   BOOKS_LEDGER_MENU, BOOKS_OFFBAL_MENU, BOOKS_PRIMARY_MENU,
-  PER_PICTURE_MENU, PER_OFFICIAL_MENU, PER_RECORDS_MENU, PER_CASH_MENU,
+  PER_PICTURE_MENU, PER_OFFICIAL_MENU, PER_RECORDS_MENU, PER_CASH_MENU, PER_SETUP_MENU,
   PER_PEOPLE_MENU, PER_HELP_MENU,
 } from './workspaceMenus'
 import { storeMenu, STORE_HELP_MENU } from './storeCatalog'
@@ -161,6 +161,7 @@ export const PRODUCT_MODULES: Record<string, ProductModuleDef[]> = {
     // выдаются отдельно, как и на любой другой экран продукта.
     ...items(PER_CASH_MENU, 'Наличные'),
     ...items(PER_PEOPLE_MENU, 'Люди'),
+    ...items(PER_SETUP_MENU, 'Настройка'),
     ...items(PER_HELP_MENU, 'Помощь'),
   ],
 }

@@ -57,8 +57,11 @@ export function NoCompany() {
   return <div className="p-6 text-sm text-muted-foreground">Не выбрана организация.</div>
 }
 
-/** Шапка таблицы — одинаковая во всех разрезах пространства. */
-export function Th({ children, right }: { children: React.ReactNode; right?: boolean }) {
+/**
+ * Шапка таблицы — одинаковая во всех разрезах пространства. Заголовок бывает пустым:
+ * над колонкой с кнопками подписывать нечего.
+ */
+export function Th({ children, right }: { children?: React.ReactNode; right?: boolean }) {
   return (
     <th className={cn('font-normal px-3 py-2', right ? 'text-right' : 'text-left')}>{children}</th>
   )

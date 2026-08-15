@@ -24,17 +24,25 @@ import { Loading } from './OfficePanels'
 
 const inputCls = 'w-full rounded-md border bg-background px-2.5 py-1.5 text-sm'
 
+/**
+ * Строка настройки: подпись СВЯЗАНА с полем, а не лежит рядом текстом.
+ *
+ * Раньше это были два соседних блока, и экранный диктор читал «поле ввода числа, 30»
+ * без указания, что это срок отчёта по подотчёту. На экране, где задаются сроки
+ * давности и лимиты наличного расчёта, цену такой ошибки назначает закон.
+ */
 function Row({ label, hint, children }: {
   label: string; hint?: string; children: React.ReactNode
 }) {
   return (
-    <div className="grid gap-2 sm:grid-cols-[1fr_10rem] sm:items-start py-3 border-b last:border-0">
-      <div>
-        <div className="text-sm">{label}</div>
-        {hint && <div className="text-[11px] text-muted-foreground mt-0.5">{hint}</div>}
-      </div>
-      <div>{children}</div>
-    </div>
+    <label className="grid gap-2 sm:grid-cols-[1fr_10rem] sm:items-start py-3
+        border-b last:border-0">
+      <span>
+        <span className="block text-sm">{label}</span>
+        {hint && <span className="block text-[11px] text-muted-foreground mt-0.5">{hint}</span>}
+      </span>
+      <span>{children}</span>
+    </label>
   )
 }
 
@@ -79,11 +87,12 @@ export function PerimeterSettingsScreen({ companyId }: { companyId: string }) {
 
           <Row label="Доплаты сверх ведомости"
             hint="Выплаты работникам помимо расчётного листка, из средств собственника. Пока выключено, такого вида в журнале нет вовсе.">
-            <label className="inline-flex items-center gap-2 text-sm">
+            <span className="inline-flex items-center gap-2 text-sm">
               <input type="checkbox" checked={form.allowExtraPay}
+                aria-label="Доплаты сверх ведомости"
                 onChange={(e) => set({ allowExtraPay: e.target.checked })} />
               {form.allowExtraPay ? 'включено' : 'выключено'}
-            </label>
+            </span>
           </Row>
 
           {form.allowExtraPay && (
@@ -114,11 +123,12 @@ export function PerimeterSettingsScreen({ companyId }: { companyId: string }) {
 
           <Row label="Оговорка о статусе данных"
             hint="Показывать на экранах и в выгрузках: «оперативная запись руководителя, не документ бухгалтерского учёта». Снимает риск, что цифры примут за учётные.">
-            <label className="inline-flex items-center gap-2 text-sm">
+            <span className="inline-flex items-center gap-2 text-sm">
               <input type="checkbox" checked={form.showDisclaimer}
+                aria-label="Оговорка о статусе данных"
                 onChange={(e) => set({ showDisclaimer: e.target.checked })} />
               {form.showDisclaimer ? 'показывать' : 'скрыть'}
-            </label>
+            </span>
           </Row>
         </CardContent>
       </Card>
