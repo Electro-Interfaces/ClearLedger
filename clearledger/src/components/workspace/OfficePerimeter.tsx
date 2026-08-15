@@ -77,6 +77,16 @@ function Td({ children, right, muted }: {
 /** Сумма записи: её может не быть, и это законно, а не ноль. */
 const amountText = (v: number | null) => (v === null ? '—' : `${money.format(v)} ₽`)
 
+/** «1 запись», «4 записи», «11 записей» — иначе счётчик читается как обрывок. */
+const plural = (n: number, one: string, few: string, many: string) => {
+  const mod100 = Math.abs(n) % 100
+  const mod10 = mod100 % 10
+  if (mod100 >= 11 && mod100 <= 14) return many
+  if (mod10 === 1) return one
+  if (mod10 >= 2 && mod10 <= 4) return few
+  return many
+}
+
 /** Насколько твёрдо: цвет полосы подсказывает, чему можно верить без проверки. */
 const CONF_TONE: Record<string, string> = {
   spoken: 'bg-amber-500/70',
@@ -204,8 +214,9 @@ function PerimeterLayers({ companyId }: { companyId: string }) {
                   неизвестен, а не равен нулю
                 </div>
               )}
-              <div className="text-[11px] text-muted-foreground tabular-nums">
-                {l.empty ? 'записей нет' : `${num.format(l.count)} · ${l.note}`}
+              <div className="text-[11px] text-muted-foreground">
+                {l.empty ? 'записей нет'
+                  : `${num.format(l.count)} ${plural(l.count, 'запись', 'записи', 'записей')}: ${l.note}`}
               </div>
             </CardContent>
           </Card>
@@ -584,7 +595,7 @@ function PerimeterRegistry({ companyId }: { companyId: string }) {
         <Card>
           <CardContent className="p-4 text-sm space-y-2">
             <div className="font-medium">
-              {status ? 'Под отбор ничего не подходит' : 'Записей пока нет'}
+              {q.data?.count ? 'Под отбор ничего не подходит' : 'Записей пока нет'}
             </div>
             <p className="text-muted-foreground">
               Сюда заносят то, чего нет в документах: устные договорённости с клиентами и

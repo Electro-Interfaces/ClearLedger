@@ -111,8 +111,8 @@ export function CashToolsScreen({ companyId }: { companyId: string }) {
             s.kind === 'total' && 'font-medium')}>
             <Td>{s.label}</Td>
             <Td right>
-              <span className={cn(s.kind === 'plus' && 'text-destructive',
-                s.kind === 'minus' && 'text-emerald-600')}>
+              <span className={cn(!!s.amount && s.kind === 'plus' && 'text-destructive',
+                !!s.amount && s.kind === 'minus' && 'text-emerald-600')}>
                 {s.kind === 'total' ? '' : s.amount > 0 ? '+' : ''}
                 {money.format(s.amount)} ₽
               </span>

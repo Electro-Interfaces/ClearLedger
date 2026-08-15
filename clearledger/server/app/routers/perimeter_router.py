@@ -2951,10 +2951,12 @@ def _parse_quick(text_: str, people: list[str]) -> dict[str, Any]:
             got.append(f"человек «{name}» из списка")
             break
     if person is None:
-        # «Иванову», «Петровой» — берём слово с большой буквы и отбрасываем окончание
-        # дательного падежа: справочник всё равно сведёт по совпадению.
+        # «Иванову» → «Иванов», «Петровой» → «Петров»: снимаем ПАДЕЖНОЕ окончание, а
+        # не весь суффикс фамилии. Прежнее правило резало «Петрову» до «Петр» и заводило
+        # карточку не на того человека.
         for w in re.findall(r"\b([А-ЯЁ][а-яё]{2,})\b", raw):
-            person = re.sub(r"(ову|еву|ину|ому|ой|у|е)$", "", w)
+            person = re.sub(r"(?<=ов)(у|ой)$|(?<=ев)(у|ой)$|(?<=ин)(у|ой)$"
+                            r"|(?<=[а-яё]{4})ому$", "", w)
             got.append(f"человек «{person}» из текста")
             break
 
@@ -2974,6 +2976,7 @@ def _parse_quick(text_: str, people: list[str]) -> dict[str, Any]:
 
     # Дата: «вчера», «позавчера», «12.08» или сегодня.
     happened = date.today()
+    md = None
     if "позавчера" in low:
         happened = date.today() - timedelta(days=2)
         got.append("позавчера")
@@ -2991,12 +2994,26 @@ def _parse_quick(text_: str, people: list[str]) -> dict[str, Any]:
             except ValueError:
                 pass
 
-    # Назначение: то, что осталось после числа и имени — обычно и есть «за что».
+    # Назначение: то, что осталось после числа, имени и служебных слов. Оставлять в нём
+    # «вчера» и «из кассы» нельзя — они уже разобраны в отдельные поля и в тексте
+    # выглядят мусором.
     purpose = raw
     if m:
         purpose = purpose.replace(m.group(1), " ", 1)
     if person:
         purpose = re.sub(person + r"[а-яё]*", " ", purpose, flags=re.IGNORECASE)
+    service = ["вчера", "позавчера", "сегодня"]
+    service += [w for w, _k in QUICK_KINDS if w in low]
+    service += [w for w, _p in QUICK_PURSE if w in low]
+    service += [w for w in QUICK_IN if w in low]
+    for w in sorted(service, key=len, reverse=True):
+        purpose = re.sub(re.escape(w) + r"[а-яё]*", " ", purpose, flags=re.IGNORECASE)
+    if md is not None:
+        purpose = purpose.replace(md.group(0), " ", 1)
+    # Предлоги и огрызки, оставшиеся без своего слова, — тоже мусор. Чистим по всей
+    # строке: «получил 3000 от Кузнецова вернул долг» иначе оставляет «от долг».
+    stop = {"из", "за", "на", "в", "по", "от", "до", "и", "к", "с", "у"}
+    purpose = " ".join(w for w in purpose.split() if w.lower() not in stop)
     purpose = " ".join(purpose.split()).strip(" ,.-—")
 
     return {
