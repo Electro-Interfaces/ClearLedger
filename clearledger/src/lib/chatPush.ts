@@ -16,7 +16,10 @@ export const pushSupported = (): boolean =>
 /** Тихо восстановить подписку (permission уже granted). Возвращает успех. */
 export async function ensurePushSubscription(): Promise<boolean> {
   if (!pushSupported() || Notification.permission !== 'granted') return false
-  const reg = await navigator.serviceWorker.register('/sw.js')
+  const reg = await navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`, {
+    scope: import.meta.env.BASE_URL,
+    updateViaCache: 'none',
+  })
   let sub = await reg.pushManager.getSubscription()
   if (!sub) {
     const { key } = await chat.getVapidKey()

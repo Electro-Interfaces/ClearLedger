@@ -19,6 +19,8 @@ RUN npm ci
 # вместо API, без единого предупреждения пользователю.
 ARG VITE_API_URL=/api
 ENV VITE_API_URL=${VITE_API_URL}
+ARG VITE_ECOSYSTEM_BRAND=ElsyPlus
+ENV VITE_ECOSYSTEM_BRAND=${VITE_ECOSYSTEM_BRAND}
 COPY . .
 ENV VITE_BASE_PATH=/
 RUN npm run build

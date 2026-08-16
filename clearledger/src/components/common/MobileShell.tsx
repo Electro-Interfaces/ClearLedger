@@ -7,9 +7,11 @@
  */
 import { useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
+import { useLocation } from 'react-router-dom'
 import { Loader2, ArrowDown, RefreshCw, Smartphone } from 'lucide-react'
 import { usePullToRefresh } from '@/hooks/usePullToRefresh'
 import { APP_BUILD, APP_VERSION, applyUpdate, watchForUpdate } from '@/lib/appUpdate'
+import { ECOSYSTEM_BRAND } from '@/config/brand'
 import { cn } from '@/lib/utils'
 
 /** Индикатор жеста: тянется вместе с экраном, а не появляется скачком. */
@@ -125,6 +127,7 @@ const isIos = () =>
 const SKIP_KEY = 'cl-install-skipped'
 
 export function InstallApp() {
+  const { pathname } = useLocation()
   const [prompt, setPrompt] = useState<InstallPrompt | null>(null)
   const [hidden, setHidden] = useState(() => localStorage.getItem(SKIP_KEY) === '1')
   const [installed, setInstalled] = useState(isStandalone)
@@ -147,7 +150,10 @@ export function InstallApp() {
   // Уже открыто приложением — предлагать нечего: это не спрятанный по условию
   // элемент, а завершённое действие. «Позже» тоже уважаем: предложение, которое
   // возвращается на каждом экране, превращается в помеху.
-  if (installed || hidden) return null
+  // Предложение относится ко всему пространству и не должно закрывать рабочие
+  // формы. Показываем его на входных экранах, а внутри продуктов оставляем место данным.
+  const isEntrySurface = pathname === '/' || pathname === '/pulse'
+  if (installed || hidden || !isEntrySurface) return null
 
   return (
     <div className="fixed inset-x-2 bottom-[calc(env(safe-area-inset-bottom)+4.5rem)] z-30
@@ -157,7 +163,7 @@ export function InstallApp() {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="flex items-center gap-1.5 text-muted-foreground">
           <Smartphone className="h-4 w-4 shrink-0" />
-          Держать пространство под рукой — поставьте приложением
+          Держать {ECOSYSTEM_BRAND} под рукой — поставьте приложением
         </span>
         {prompt ? (
           <button

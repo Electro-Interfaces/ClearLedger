@@ -23,12 +23,12 @@ function Page({ icon: Icon, title, hint, children }: {
   title: string; hint: string; children: ReactNode
 }) {
   return (
-    <div className="w-full space-y-4">
+    <div className="w-full min-w-0 space-y-4">
       <div className="flex items-center gap-2.5">
         <Icon className="h-6 w-6 text-primary" />
         <div className="min-w-0">
           <h2 className="text-xl font-bold leading-tight">{title}</h2>
-          <p className="truncate text-sm text-muted-foreground">{hint}</p>
+          <p className="text-sm text-muted-foreground sm:truncate">{hint}</p>
         </div>
       </div>
       {children}

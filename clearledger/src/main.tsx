@@ -54,7 +54,10 @@ if (!isApiEnabled()) {
 // (`lib/chatPush`) переиспользует эту же регистрацию.
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch((err) => {
+    navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`, {
+      scope: import.meta.env.BASE_URL,
+      updateViaCache: 'none',
+    }).catch((err) => {
       // Не повод ронять приложение: без SW работает всё, кроме установки и пушей.
       console.warn('[Пространство] service worker не зарегистрирован:', err)
     })

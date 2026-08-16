@@ -3,7 +3,7 @@
  * вертикальное текстовое меню слева + рабочая область справа.
  */
 
-import { type ReactNode } from 'react'
+import { useEffect, useRef, type ReactNode } from 'react'
 
 export interface CentralMenuItem {
   key: string
@@ -22,22 +22,30 @@ interface CentralPanelLayoutProps {
 }
 
 export function CentralPanelLayout({ items, activeKey, onSelect, children }: CentralPanelLayoutProps) {
+  const activeItem = useRef<HTMLButtonElement>(null)
+  useEffect(() => {
+    if (window.matchMedia('(max-width: 1023px)').matches) {
+      activeItem.current?.scrollIntoView({ block: 'nearest', inline: 'center' })
+    }
+  }, [activeKey])
+
   return (
-    <div className="flex h-full">
+    <div className="flex h-full min-w-0 flex-col lg:flex-row">
       {/* Вертикальное меню */}
-      <div className="flex flex-col gap-0.5 py-2 px-1.5 border-r border-border/30 bg-muted/20 shrink-0 min-w-0 overflow-y-auto">
+      <div className="scrollbar-hide flex min-w-0 shrink-0 gap-0.5 overflow-x-auto border-b border-border/30 bg-muted/20 px-1.5 py-1.5 lg:flex-col lg:overflow-x-hidden lg:overflow-y-auto lg:border-b-0 lg:border-r lg:py-2">
         {items.map((item, i) => {
           const showHeader = !!item.group && item.group !== items[i - 1]?.group
           return (
             <div key={item.key}>
               {showHeader && (
-                <div className="px-3 pt-3 pb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/60 whitespace-nowrap">
+                <div className="hidden whitespace-nowrap px-3 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/60 lg:block">
                   {item.group}
                 </div>
               )}
               <button
+                ref={activeKey === item.key ? activeItem : undefined}
                 onClick={() => onSelect(item.key)}
-                className={`w-full px-3 py-2 rounded-md text-sm font-medium text-left whitespace-nowrap transition-colors ${item.group ? 'pl-5' : ''} ${
+                className={`w-auto shrink-0 whitespace-nowrap rounded-md px-3 py-2 text-left text-sm font-medium transition-colors lg:w-full ${item.group ? 'lg:pl-5' : ''} ${
                   activeKey === item.key
                     ? 'bg-primary/15 text-primary'
                     : item.disabled
@@ -56,7 +64,7 @@ export function CentralPanelLayout({ items, activeKey, onSelect, children }: Cen
       </div>
 
       {/* Рабочая область */}
-      <div className="flex-1 overflow-hidden">
+      <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
         {children}
       </div>
     </div>

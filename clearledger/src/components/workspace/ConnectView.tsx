@@ -35,8 +35,9 @@ export function ConnectView() {
   return (
     // Рабочая область — flex-1 overflow-hidden: без своей прокрутки длинные экраны
     // («Каталог типов», «Приложения и модули») обрезаются по низу окна.
-    <ScrollArea className="h-full">
-      <div className="p-4">
+    <ScrollArea className="h-full min-w-0"
+      viewportClassName="[&>div]:!block [&>div]:!w-full [&>div]:!min-w-0">
+      <div className="w-full min-w-0 max-w-full overflow-x-hidden p-3 sm:p-4">
         {sub === 'connections' && <ConnectionsPage />}
         {sub === 'connectors' && <ChannelsPage />}
         {sub === 'sources' && <SourcesPage />}

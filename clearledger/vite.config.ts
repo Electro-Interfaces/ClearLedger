@@ -7,6 +7,13 @@ import path from 'path'
 // Метка сборки: по ней приложение понимает, что на сервере лежит уже другая версия.
 // Дата, а не номер тега: тег знает только выкатывающий скрипт, а метка нужна коду.
 const BUILD = new Date().toISOString().slice(0, 16).replace('T', ' ')
+const BASE_PATH = process.env.VITE_BASE_PATH || '/'
+const PWA_BRAND = process.env.VITE_ECOSYSTEM_BRAND?.trim() || 'Рабочее пространство'
+
+function baseUrl(pathname = '') {
+  const base = `/${BASE_PATH.replace(/^\/+|\/+$/g, '')}`.replace('//', '/')
+  return `${base === '/' ? '/' : `${base}/`}${pathname.replace(/^\//, '')}`
+}
 
 /**
  * `version.json` рядом со сборкой — единственный способ для открытой вкладки узнать
@@ -26,6 +33,52 @@ function versionFile() {
   }
 }
 
+function pwaFiles() {
+  const manifest = {
+    name: `${PWA_BRAND} — рабочее пространство`,
+    short_name: PWA_BRAND,
+    description: 'Рабочее пространство компании: приложения, данные, задачи и коммуникации',
+    id: baseUrl(),
+    start_url: baseUrl(),
+    scope: baseUrl(),
+    display: 'standalone',
+    display_override: ['standalone'],
+    background_color: '#f4f6fb',
+    theme_color: '#1d4ed8',
+    lang: 'ru',
+    categories: ['business', 'productivity'],
+    prefer_related_applications: false,
+    icons: [
+      { src: baseUrl('icon-192.png'), sizes: '192x192', type: 'image/png', purpose: 'any' },
+      { src: baseUrl('icon-512.png'), sizes: '512x512', type: 'image/png', purpose: 'any' },
+      { src: baseUrl('icon-maskable-512.png'), sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+    ],
+    shortcuts: [
+      { name: 'Рабочий стол', url: baseUrl() },
+      { name: 'Пульс', url: baseUrl('pulse') },
+      { name: 'Чаты', url: baseUrl('messages') },
+    ],
+  }
+
+  return {
+    name: 'space-pwa-files',
+    transformIndexHtml(html: string) {
+      const shortName = PWA_BRAND
+        .replaceAll('&', '&amp;')
+        .replaceAll('"', '&quot;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+      return html.replaceAll('__PWA_SHORT_NAME__', shortName)
+    },
+    writeBundle() {
+      const contents = `${JSON.stringify(manifest, null, 2)}\n`
+      fs.writeFileSync(path.resolve(__dirname, 'dist/manifest.webmanifest'), contents)
+      // Старый адрес оставляем совместимым для уже установленных первых PWA.
+      fs.writeFileSync(path.resolve(__dirname, 'dist/pulse.webmanifest'), contents)
+    },
+  }
+}
+
 export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify(
@@ -36,11 +89,12 @@ export default defineConfig({
   // `.../ClearLedger/pulse`. «ClearLedger» — внутреннее имя репозитория; наружу
   // оно не выходит (white-label), а в адресной строке заказчика читалось как
   // чужой продукт. Переопределяется сборкой, если стек ставит SPA под путь.
-  base: process.env.VITE_BASE_PATH || '/',
+  base: BASE_PATH,
   plugins: [
     react(),
     tailwindcss(),
     versionFile(),
+    pwaFiles(),
   ],
   resolve: {
     alias: {

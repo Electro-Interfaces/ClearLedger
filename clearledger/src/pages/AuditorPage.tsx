@@ -66,6 +66,10 @@ export function AuditorPage() {
   })
   const views = VIEWS.filter((v) => !('admin' in v && v.admin) || (health?.workshop && settings?.can_manage))
   const view = views.some((v) => v.key === params.get('view')) ? params.get('view')! : 'chat'
+  const activeMobileTab = useRef<HTMLButtonElement>(null)
+  useEffect(() => {
+    activeMobileTab.current?.scrollIntoView({ block: 'nearest', inline: 'center' })
+  }, [view])
   const open = (key: string) => setParams((p) => {
     const n = new URLSearchParams(p)
     n.set('view', key)
@@ -91,9 +95,10 @@ export function AuditorPage() {
 
       {/* На узком экране пункты идут строкой сверху: колонка съела бы половину ширины. */}
       <div className="flex min-w-0 flex-1 flex-col">
-        <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-border bg-card px-2 py-1.5 lg:hidden">
+        <div className="scrollbar-hide flex shrink-0 gap-1 overflow-x-auto border-b border-border bg-card px-2 py-1.5 lg:hidden">
           {views.map((v) => (
-            <button key={v.key} type="button" onClick={() => open(v.key)}
+            <button key={v.key} ref={v.key === view ? activeMobileTab : undefined}
+              type="button" onClick={() => open(v.key)}
               className={cn('min-h-10 shrink-0 whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs',
                 v.key === view ? 'bg-primary/10 font-medium text-primary' : 'text-muted-foreground')}>
               {v.label}
@@ -122,8 +127,8 @@ function ChatView() {
   const groups = groupSkills(skills)
 
   return (
-    <div className="flex h-full min-h-0 gap-4 p-4">
-      <div className="flex min-h-0 flex-1 flex-col rounded-xl border border-border/60 bg-card">
+    <div className="flex h-full min-h-0 min-w-0 gap-4 p-3 sm:p-4">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col rounded-xl border border-border/60 bg-card">
         <AuditorPanel />
       </div>
       <aside className="hidden w-80 shrink-0 flex-col overflow-y-auto rounded-xl border border-border/60 bg-card/50 p-4 xl:flex">

@@ -203,14 +203,18 @@ function ProfileCard() {
         <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
           <MetricTile label="Данные за период"
             value={`${ru(d.data.from)} — ${ru(d.data.to)}`}
+            valueClass="whitespace-normal text-lg sm:text-2xl"
             hint={`${num.format(d.data.entries)} проводок`} />
           <MetricTile label="Периодов закрыто"
             value={`${d.data.periodsClosed} из ${d.data.periodsTotal}`}
+            valueClass="text-lg sm:text-2xl"
             hint={d.data.lastClosed ? `последний — ${ru(d.data.lastClosed)}` : 'закрытых нет'} />
           <MetricTile label="Остатки на дату" value={ru(d.data.balanceAsOf)}
+            valueClass="text-lg sm:text-2xl"
             hint="срез сальдо из источника" />
           <MetricTile label="Замечаний к данным"
             value={`${d.quality.problems} из ${d.quality.checks}`}
+            valueClass="text-lg sm:text-2xl"
             tone={d.quality.problems ? 'warning' : 'success'}
             hint={d.quality.worst.map((w) => w.label).slice(0, 2).join(' · ') || 'проверки сходятся'} />
         </div>

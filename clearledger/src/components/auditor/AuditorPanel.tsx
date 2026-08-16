@@ -228,7 +228,7 @@ export function AuditorPanel() {
   }
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-w-0 flex-col">
       {/* Где стоит человек — видно ему самому: иначе непонятно, почему аудитор
           отвечает про этот раздел, а не про пространство целиком. */}
       <div className="flex items-center gap-2 border-b border-border/60 px-4 py-2 text-xs text-muted-foreground">
@@ -238,7 +238,7 @@ export function AuditorPanel() {
         </span>
       </div>
 
-      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-3">
+      <div className="min-h-0 min-w-0 flex-1 space-y-3 overflow-y-auto px-4 py-3">
         {!messages.length && (
           <div className="space-y-3 pt-4 text-sm text-muted-foreground">
             <p>Спросите про то, что видите на экране. Я смотрю данные пространства и отвечаю цифрами.</p>
@@ -317,7 +317,7 @@ export function AuditorPanel() {
             ))}
           </div>
         )}
-        <div className="flex items-end gap-2">
+        <div className="flex min-w-0 items-end gap-2">
           <input ref={fileRef} type="file" className="hidden"
             accept=".xlsx,.xlsm,.xls,.csv,.tsv,.pdf,.docx,.doc,.txt,.md,.json,.xml"
             onChange={(e) => attach(e.target.files?.[0])} />
@@ -342,7 +342,7 @@ export function AuditorPanel() {
             }}
             rows={2}
             placeholder="Спросите про этот экран…"
-            className="min-h-[44px] flex-1 resize-none rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+            className="min-h-[44px] min-w-0 flex-1 resize-none rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary"
           />
           {busy ? (
             <Button size="icon" variant="outline" onClick={stop} title="Остановить"><Square className="size-4" /></Button>

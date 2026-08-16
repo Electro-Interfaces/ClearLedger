@@ -13,6 +13,8 @@
 self.addEventListener('install', () => self.skipWaiting())
 self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()))
 
+const scopeUrl = (path) => new URL(path.replace(/^\//, ''), self.registration.scope).href
+
 self.addEventListener('fetch', (event) => {
   const req = event.request
   // Вмешиваемся только в переходы по страницам: API, ассеты и ws идут напрямую.
@@ -41,7 +43,7 @@ self.addEventListener('push', (event) => {
   if (!data.title && !data.body) return
   event.waitUntil(self.registration.showNotification(data.title || 'Сообщение', {
     body: data.body || '',
-    icon: '/favicon.svg',
+    icon: scopeUrl('icon-192.png'),
     // tag схлопывает очередь уведомлений одной комнаты в одно.
     tag: data.roomId || 'chat',
     data: { roomId: data.roomId || null },
@@ -58,7 +60,7 @@ self.addEventListener('notificationclick', (event) => {
       existing.focus()
       existing.postMessage({ type: 'open-chat', roomId: event.notification.data?.roomId })
     } else {
-      await self.clients.openWindow('/messages')
+      await self.clients.openWindow(scopeUrl('messages'))
     }
   })())
 })

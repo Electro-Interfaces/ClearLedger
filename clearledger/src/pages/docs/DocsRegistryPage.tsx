@@ -99,12 +99,12 @@ export function DocsRegistryPage() {
             {listQ.isLoading ? 'Загрузка…' : `Документов: ${docs.length}`}
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="relative">
+        <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto">
+          <div className="relative min-w-0 flex-1 sm:flex-none">
             <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input value={q} onChange={(e) => setQ(e.target.value)}
               placeholder="Номер, заголовок или текст файла"
-              className="h-9 w-64 pl-7 text-sm" />
+              className="h-9 w-full pl-7 text-sm sm:w-64" />
           </div>
           <Button size="sm" onClick={() => setCreating(true)} disabled={kinds.length === 0}>
             <FilePlus2 className="mr-1.5 h-4 w-4" />Завести
@@ -128,7 +128,36 @@ export function DocsRegistryPage() {
         </Card>
       )}
 
-      <Card className="min-h-0 flex-1 overflow-auto">
+      <Card className="min-h-0 flex-1 overflow-y-auto md:hidden">
+        <div className="divide-y divide-border/60">
+          {docs.map((d) => (
+            <button key={d.id} type="button" onClick={() => open(d.id)}
+              className="flex w-full flex-col gap-1 px-3 py-3 text-left hover:bg-accent/40">
+              <div className="flex w-full items-start justify-between gap-3">
+                <span className="min-w-0 truncate text-sm font-medium">{d.title}</span>
+                <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-xs">
+                  {DOC_STATUS[d.status]?.label ?? d.status}
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
+                <span>{d.reg_number ?? 'без номера'}</span>
+                <span>{d.reg_date ?? (d.created_at ?? '').slice(0, 10)}</span>
+                <span>{d.kind_name}</span>
+              </div>
+              {d.counterparty_name && (
+                <span className="truncate text-xs text-muted-foreground">{d.counterparty_name}</span>
+              )}
+            </button>
+          ))}
+          {!listQ.isLoading && docs.length === 0 && (
+            <div className="px-3 py-8 text-center text-sm text-muted-foreground">
+              {deferredQ ? 'По этому запросу ничего нет' : 'Документов пока нет'}
+            </div>
+          )}
+        </div>
+      </Card>
+
+      <Card className="hidden min-h-0 flex-1 overflow-auto md:block">
         <table className="w-full text-sm">
           <thead className="sticky top-0 bg-muted/40 text-xs text-muted-foreground">
             <tr>
