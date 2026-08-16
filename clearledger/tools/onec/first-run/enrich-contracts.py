@@ -62,11 +62,12 @@ async def main():
             # всем «б/н» разом — одному достаётся чужое представление, остальным ничего.
             res = await s.execute(text("""
                 UPDATE contracts SET title = :title, valid_until = :term
-                 WHERE company_id = :c AND counterparty_id = :cp AND type = :name"""), p)
+                 WHERE company_id = :c AND counterparty_id = CAST(:cp AS uuid)
+                   AND type = :name"""), p)
             if not res.rowcount:
                 res = await s.execute(text("""
                     UPDATE contracts SET title = :title, valid_until = :term
-                     WHERE company_id = :c AND counterparty_id = :cp
+                     WHERE company_id = :c AND counterparty_id = CAST(:cp AS uuid)
                        AND number = :num AND date = :dt"""), p)
             if res.rowcount:
                 updated += res.rowcount

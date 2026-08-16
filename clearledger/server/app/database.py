@@ -2652,6 +2652,28 @@ async def create_all() -> None:
             # тысячами (у НПК 17 398 из 18 045), а взаиморасчёты по оборотам нельзя
             # было открыть карточкой контрагента.
             "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS title VARCHAR(300)",
+            # Договор был единственным местом ядра, где контрагент и юрлицо хранились
+            # СТРОКОЙ без внешнего ключа: целостность не проверялась, а каждый запрос
+            # писал `::text`. Значения — валидные UUID (проверено на трёх компаниях),
+            # поэтому перевод безопасен; ошибку приведения глотаем, чтобы старт не
+            # падал на базе, где кто-то успел записать не-UUID.
+            "DO $$ BEGIN"
+            " ALTER TABLE contracts ALTER COLUMN counterparty_id TYPE uuid"
+            "   USING counterparty_id::uuid;"
+            " EXCEPTION WHEN others THEN NULL; END $$",
+            "DO $$ BEGIN"
+            " ALTER TABLE contracts ALTER COLUMN organization_id TYPE uuid"
+            "   USING organization_id::uuid;"
+            " EXCEPTION WHEN others THEN NULL; END $$",
+            "CREATE INDEX IF NOT EXISTS idx_contracts_company_cp"
+            " ON contracts (company_id, counterparty_id)",
+            # Отбор по компании — первый в КАЖДОМ запросе слоя. Без индекса это
+            # полный скан: у номенклатуры пять тысяч строк на три компании.
+            "CREATE INDEX IF NOT EXISTS idx_counterparties_company ON counterparties (company_id)",
+            "CREATE INDEX IF NOT EXISTS idx_nomenclature_company ON nomenclature (company_id)",
+            "CREATE INDEX IF NOT EXISTS idx_periods_company ON periods (company_id)",
+            "CREATE INDEX IF NOT EXISTS idx_organizations_company ON organizations (company_id)",
+            "CREATE INDEX IF NOT EXISTS idx_refsnap_company ON reference_snapshots (company_id)",
             "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS valid_until VARCHAR(20)",
             "ALTER TABLE gl_accounts ADD COLUMN IF NOT EXISTS subconto JSONB",
             "ALTER TABLE gl_turnovers ADD COLUMN IF NOT EXISTS dt_counterparty_id UUID",

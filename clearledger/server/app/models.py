@@ -1042,8 +1042,15 @@ class Contract(Base):
     # Срок действия из карточки 1С. Пока его не грузили, «просроченные договоры»
     # считались эвристикой «заключён больше года назад» — 22 из 55 ложных.
     valid_until: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    counterparty_id: Mapped[str] = mapped_column(String(100), nullable=False)
-    organization_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    # UUID со ссылкой, как во всём остальном слое. Раньше здесь стояла строка без
+    # внешнего ключа — единственное место ядра, где ось «контрагент» была не ссылкой:
+    # целостность никто не проверял, и каждый запрос писал `c.counterparty_id::text`.
+    counterparty_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("counterparties.id"), nullable=False
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False
+    )
     type: Mapped[str] = mapped_column(String(100), nullable=False)
     amount_limit: Mapped[float | None] = mapped_column(Float, nullable=True)
     external_ref: Mapped[str | None] = mapped_column(String(36), nullable=True)

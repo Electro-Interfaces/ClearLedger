@@ -17,11 +17,13 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import assert_company_member, get_current_user
 from app.database import get_db
+from app.services.tax_mode import tax_mode as space_tax_mode
 from app.scope import current_organization
 from app.models import (
     AccountingDoc, Contract, Counterparty, DocRequest, ExportAdjustment, ExportRule,
@@ -29,6 +31,8 @@ from app.models import (
     GlTurnover, InvoicePayment, NomenclatureItem, Period, User, ReferenceSnapshot,
     SourceFile, VatEntry,
 )
+
+from app.services import tax_regime
 
 router = APIRouter(prefix="/books", tags=["Бухгалтерия пространства"])
 
@@ -233,6 +237,90 @@ def _period_status(date: str | None, closed: set[tuple[int, int]]) -> str:
         return "closed" if (int(date[:4]), int(date[5:7])) in closed else "open"
     except ValueError:
         return "open"
+
+
+@router.get("/profile")
+async def profile(
+    company_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Паспорт компании: что за компания, что загружено, чему верить.
+
+    Собирает в ОДИН ответ то, что иначе стоит шести вызовов: юрлица, режим
+    налогообложения, границы и полноту данных, свежесть среза, объёмы по сущностям,
+    состояние периодов и сводку качества. Экрану это даёт заставку раздела, агенту —
+    возможность ответить на «что у нас за компания» без перебора ручек: у него лимит
+    в шесть навыков на вопрос, и половина уходила на разведку.
+
+    Ответ намеренно КОМПАКТНЫЙ — числа и метки, без строк документов: он попадает
+    в промпт целиком, а не усечённым.
+    """
+    cid = await assert_company_member(company_id, current_user, db)
+    p = {"cid": str(cid), "org": _org_param()}
+
+    company = (await db.execute(text(
+        "SELECT name, slug, inn FROM companies WHERE id = :cid"), p)).one()
+    orgs = [{"name": r[0], "inn": r[1], "docs": r[2]} for r in (await db.execute(text("""
+        SELECT o.name, o.inn,
+               (SELECT count(*) FROM accounting_docs d WHERE d.organization_id = o.id)
+          FROM organizations o WHERE o.company_id = :cid ORDER BY 3 DESC"""), p)).all()]
+
+    # Режим — общим определением пространства, тем же, что у «Налогов» и «Пульса».
+    mode = await space_tax_mode(db, cid, _org_param())
+
+    period = (await db.execute(text("""
+        SELECT min(entry_date)::text, max(entry_date)::text, count(*)
+          FROM gl_entries WHERE company_id = :cid"""), p)).one()
+    per = (await db.execute(text("""
+        SELECT count(*) FILTER (WHERE status = 'closed'), count(*),
+               max(CASE WHEN status = 'closed' THEN make_date(year, month, 1) END)::text
+          FROM periods WHERE company_id = :cid"""), p)).one()
+    as_of = (await db.execute(text("""
+        SELECT max(as_of)::text FROM gl_balances
+         WHERE company_id = :cid AND source <> 'monthly'"""), p)).scalar()
+
+    volumes = {}
+    for key, table in (("проводки", "gl_entries"), ("документы", "accounting_docs"),
+                       ("обороты с аналитикой", "gl_turnovers"), ("сальдо", "gl_balances"),
+                       ("контрагенты", "counterparties"), ("договоры", "contracts"),
+                       ("номенклатура", "nomenclature"), ("справочники", "gl_references")):
+        volumes[key] = int((await db.execute(text(
+            "SELECT count(*) FROM %s WHERE company_id = :cid" % table), p)).scalar_one() or 0)
+
+    money = (await db.execute(text("""
+        SELECT coalesce(sum(amount) FILTER (WHERE account_kt = :kt), 0),
+               coalesce(sum(amount) FILTER (WHERE account_dt LIKE '90.02%'
+                                              OR account_dt LIKE '90.07%'
+                                              OR account_dt LIKE '90.08%'), 0)
+          FROM gl_entries WHERE company_id = :cid"""), {**p, "kt": REVENUE_KT})).one()
+
+    # Качество берём у ЭКРАНА качества, а не считаем заново: две реализации одной
+    # проверки разойдутся на первой же правке, и паспорт начнёт спорить с экраном.
+    checks = (await quality(company_id, db, current_user))["checks"]
+    bad = [c for c in checks if c["status"] in ("warn", "error")]
+
+    return {
+        "company": {"name": company[0], "slug": company[1], "inn": company[2]},
+        "organizations": orgs,
+        "taxMode": mode["label"],
+        "vat": mode["vat"],
+        # Комиссионная торговля меняет чтение почти всех витрин выручки, поэтому
+        # стоит в паспорте, а не прячется в одной проверке.
+        "commission": mode["commission"],
+        "data": {
+            "from": period[0], "to": period[1], "entries": period[2],
+            "balanceAsOf": as_of,
+            "periodsClosed": per[0], "periodsTotal": per[1], "lastClosed": per[2],
+        },
+        "volumes": volumes,
+        "totals": {"revenue": _num(money[0]), "cost": _num(money[1])},
+        "quality": {
+            "checks": len(checks), "problems": len(bad),
+            "worst": [{"key": c["key"], "label": c["label"], "value": c["value"]}
+                      for c in sorted(bad, key=lambda c: 0 if c["status"] == "error" else 1)[:5]],
+        },
+    }
 
 
 @router.get("/overview")
@@ -6082,6 +6170,53 @@ def _policy_has(meta: dict[str, dict], kind: str, key: str) -> bool:
 
 
 _CHECKS: list[tuple] = [
+    # ── Режим налогообложения против документов ─────────────────────────────
+    # Условие сверяется с ЗАЯВЛЕННЫМ режимом организации: у клиента на ОСНО эти
+    # проверки просто не срабатывают, а не выдают ложную тревогу.
+    ("tax_regime_vat", "policy", "НДС у организации на спецрежиме",
+     "Режим не предполагает НДС, а по счёту 68.02 есть начисления: либо утрачено "
+     "право на спецрежим, либо ошибка в документах", """
+        SELECT e.id::text, e.entry_date::text,
+               e.account_dt || '/' || e.account_kt, coalesce(e.doc_title, ''), e.amount
+          FROM gl_entries e
+          JOIN organization_tax_regimes t ON t.organization_id = e.organization_id
+           AND t.valid_from <= e.entry_date::date
+           AND (t.valid_to IS NULL OR t.valid_to >= e.entry_date::date)
+          JOIN tax_regimes r ON r.code = t.regime_code
+         WHERE e.company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR e.organization_id IS NULL
+                OR e.organization_id = CAST(:org AS uuid))
+           AND NOT r.pays_vat AND coalesce(t.vat_payer, false) = false
+           AND (e.account_kt LIKE '68.02%' OR e.account_dt LIKE '68.02%')
+         ORDER BY e.entry_date DESC LIMIT 200"""),
+
+    ("tax_regime_profit", "policy", "Налог на прибыль у организации на спецрежиме",
+     "На УСН, патенте и НПД налога на прибыль нет — проводки по 68.04 означают "
+     "либо смену режима, о которой система не знает, либо ошибку", """
+        SELECT e.id::text, e.entry_date::text,
+               e.account_dt || '/' || e.account_kt, coalesce(e.doc_title, ''), e.amount
+          FROM gl_entries e
+          JOIN organization_tax_regimes t ON t.organization_id = e.organization_id
+           AND t.valid_from <= e.entry_date::date
+           AND (t.valid_to IS NULL OR t.valid_to >= e.entry_date::date)
+          JOIN tax_regimes r ON r.code = t.regime_code
+         WHERE e.company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR e.organization_id IS NULL
+                OR e.organization_id = CAST(:org AS uuid))
+           AND NOT r.pays_profit_tax
+           AND (e.account_kt LIKE '68.04%' OR e.account_dt LIKE '68.04%')
+         ORDER BY e.entry_date DESC LIMIT 200"""),
+
+    ("tax_regime_missing", "policy", "Организация без системы налогообложения",
+     "Пока режим не указан, налоги по организации не считаются вовсе — "
+     "ни в «Налогах заранее», ни в витрине заказчика", """
+        SELECT o.id::text, '', coalesce(o.inn, ''), o.name, 0
+          FROM organizations o
+         WHERE o.company_id = :cid
+           AND (CAST(:org AS uuid) IS NULL OR o.id = CAST(:org AS uuid))
+           AND NOT EXISTS (SELECT 1 FROM organization_tax_regimes t
+                            WHERE t.organization_id = o.id AND t.valid_to IS NULL)"""),
+
     ("policy_lock", "policy", "Дата запрета изменения данных установлена",
      "Без запрета закрытый период может быть переписан задним числом, и отчётность разъедется", """
         SELECT id::text, '', code, name, 0 FROM gl_references
@@ -7924,3 +8059,222 @@ async def trends(
             "thresholds": {"big": big, "notable": notable},
         },
     }
+
+
+# ── Системы налогообложения ──────────────────────────────────────────────────
+#
+# Режим организации — не настройка интерфейса, а основание расчёта: от него
+# зависит, какой налог считать и с какой базы (docs/TAXES.md). Поэтому ручки
+# живут здесь, рядом с налогами, а не в администрировании.
+
+
+@router.get("/tax-regimes")
+async def tax_regimes_catalog(
+    company_id: str,
+    legal_form: str | None = Query(None, description="legal · ip · person"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Справочник режимов РФ со ставками, действующими сегодня.
+
+    Фильтр по форме организации не косметика: патент юрлицу недоступен вовсе, и
+    показывать его в списке значит предлагать выбрать невозможное.
+    """
+    await assert_company_member(company_id, current_user, db)
+    today = date.today()
+
+    rows = (await db.execute(text("""
+        SELECT r.code, r.name, r.short_name, r.object, r.pays_vat, r.pays_profit_tax,
+               r.tax_account, r.combinable, r.note, r.for_legal, r.for_ip, r.for_person,
+               (SELECT value FROM tax_regime_rates x
+                 WHERE x.regime_code = r.code AND x.kind = 'rate'
+                   AND x.valid_from <= CAST(:on AS date)
+                   AND (x.valid_to IS NULL OR x.valid_to >= CAST(:on AS date))
+                 ORDER BY x.valid_from DESC LIMIT 1) AS rate,
+               (SELECT value FROM tax_regime_rates x
+                 WHERE x.regime_code = r.code AND x.kind = 'limit_income'
+                   AND x.valid_from <= CAST(:on AS date)
+                   AND (x.valid_to IS NULL OR x.valid_to >= CAST(:on AS date))
+                 ORDER BY x.valid_from DESC LIMIT 1) AS limit_income
+          FROM tax_regimes r ORDER BY r.sort"""), {"on": today})).all()
+
+    def fits(r) -> bool:
+        if not legal_form:
+            return True
+        return {"legal": r.for_legal, "ip": r.for_ip,
+                "person": r.for_person}.get(legal_form, True)
+
+    return {"regimes": [{
+        "code": r.code, "name": r.name, "short": r.short_name, "object": r.object,
+        "paysVat": r.pays_vat, "paysProfitTax": r.pays_profit_tax,
+        "taxAccount": r.tax_account, "combinable": r.combinable, "note": r.note,
+        "rate": float(r.rate) if r.rate is not None else None,
+        "limitIncome": float(r.limit_income) if r.limit_income is not None else None,
+    } for r in rows if fits(r)]}
+
+
+@router.get("/organizations/{organization_id}/tax")
+async def organization_tax(
+    organization_id: str,
+    company_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Режим организации: действующий, история и патенты."""
+    cid = await assert_company_member(company_id, current_user, db)
+
+    org = (await db.execute(text("""
+        SELECT id, name, legal_form FROM organizations
+         WHERE id = CAST(:oid AS uuid) AND company_id = CAST(:cid AS uuid)"""),
+        {"oid": organization_id, "cid": str(cid)})).first()
+    if org is None:
+        raise HTTPException(status_code=404, detail="Организация не найдена")
+
+    history = [{
+        "id": str(r.id), "code": r.regime_code, "name": r.name, "short": r.short_name,
+        "from": r.valid_from.isoformat(),
+        "to": r.valid_to.isoformat() if r.valid_to else None,
+        "rate": float(r.rate) if r.rate is not None else None,
+        "isPrimary": r.is_primary, "vatPayer": r.vat_payer,
+        "source": r.source, "note": r.note,
+    } for r in (await db.execute(text("""
+        SELECT t.id, t.regime_code, t.valid_from, t.valid_to, t.rate, t.is_primary,
+               t.vat_payer, t.source, t.note, r.name, r.short_name
+          FROM organization_tax_regimes t
+          JOIN tax_regimes r ON r.code = t.regime_code
+         WHERE t.organization_id = CAST(:oid AS uuid)
+         ORDER BY t.valid_from DESC"""), {"oid": organization_id})).all()]
+
+    patents = [{
+        "id": str(r.id), "number": r.number, "activity": r.activity,
+        "from": r.valid_from.isoformat(), "to": r.valid_to.isoformat(),
+        "cost": float(r.cost or 0), "paid": float(r.paid or 0),
+        "potentialIncome": float(r.potential_income or 0),
+    } for r in (await db.execute(text("""
+        SELECT id, number, activity, valid_from, valid_to, cost, paid, potential_income
+          FROM tax_patents WHERE organization_id = CAST(:oid AS uuid)
+         ORDER BY valid_from DESC"""), {"oid": organization_id})).all()]
+
+    current = await tax_regime.regime_of(db, str(cid), organization_id)
+    return {
+        "organization": {"id": str(org.id), "name": org.name,
+                         "legalForm": org.legal_form},
+        "current": None if current is None else {
+            "code": current.code, "name": current.name, "short": current.short_name,
+            "rate": current.rate, "paysVat": current.pays_vat,
+            "source": current.source, "combined": current.combined,
+        },
+        "history": history,
+        "patents": patents,
+    }
+
+
+class OrgTaxIn(BaseModel):
+    regime_code: str
+    valid_from: str
+    rate: float | None = None
+    is_primary: bool = True
+    vat_payer: bool | None = None
+    note: str | None = None
+
+
+@router.put("/organizations/{organization_id}/tax")
+async def set_organization_tax(
+    organization_id: str,
+    company_id: str,
+    body: OrgTaxIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Задать режим организации.
+
+    Прошлый основной режим не удаляется, а ЗАКРЫВАЕТСЯ днём раньше нового: налог
+    прошлых периодов должен считаться по правилам, которые тогда действовали.
+    Переписать историю значит задним числом изменить уже сданную отчётность.
+    """
+    cid = await assert_company_member(company_id, current_user, db)
+    new_from = date.fromisoformat(body.valid_from)
+
+    if body.is_primary:
+        # Запись, начинавшуюся В ТОТ ЖЕ день, удаляем: она не действовала ни дня и
+        # закрыть её «днём раньше» нельзя — получилась бы строка с концом раньше
+        # начала. Без этого две записи оставались действующими одновременно, и
+        # какая из них решает налог, зависело от порядка выборки.
+        await db.execute(text("""
+            DELETE FROM organization_tax_regimes
+             WHERE organization_id = CAST(:oid AS uuid) AND is_primary
+               AND valid_to IS NULL AND valid_from = CAST(:from AS date)"""),
+            {"oid": organization_id, "from": new_from})
+        await db.execute(text("""
+            UPDATE organization_tax_regimes
+               SET valid_to = CAST(:from AS date) - 1, updated_at = now()
+             WHERE organization_id = CAST(:oid AS uuid) AND is_primary
+               AND valid_to IS NULL AND valid_from < CAST(:from AS date)"""),
+            {"oid": organization_id, "from": new_from})
+
+    await db.execute(text("""
+        INSERT INTO organization_tax_regimes
+            (company_id, organization_id, regime_code, valid_from, rate,
+             is_primary, vat_payer, source, note)
+        VALUES (CAST(:cid AS uuid), CAST(:oid AS uuid), :code, CAST(:from AS date),
+                :rate, :primary, :vat, 'manual', :note)"""),
+        {"cid": str(cid), "oid": organization_id, "code": body.regime_code,
+         "from": new_from, "rate": body.rate, "primary": body.is_primary,
+         "vat": body.vat_payer, "note": body.note})
+    await db.commit()
+    return {"ok": True}
+
+
+class PatentIn(BaseModel):
+    activity: str
+    valid_from: str
+    valid_to: str
+    number: str | None = None
+    region_code: str | None = None
+    potential_income: float | None = None
+    cost: float | None = None
+    paid: float = 0
+    note: str | None = None
+
+
+@router.post("/organizations/{organization_id}/patents")
+async def add_patent(
+    organization_id: str,
+    company_id: str,
+    body: PatentIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Завести патент. Его стоимость — расход периода, известный заранее."""
+    cid = await assert_company_member(company_id, current_user, db)
+    await db.execute(text("""
+        INSERT INTO tax_patents (company_id, organization_id, number, activity,
+                                 region_code, valid_from, valid_to,
+                                 potential_income, cost, paid, note)
+        VALUES (CAST(:cid AS uuid), CAST(:oid AS uuid), :num, :act, :region,
+                CAST(:a AS date), CAST(:b AS date), :pot, :cost, :paid, :note)"""),
+        {"cid": str(cid), "oid": organization_id, "num": body.number,
+         "act": body.activity, "region": body.region_code,
+         "a": date.fromisoformat(body.valid_from),
+         "b": date.fromisoformat(body.valid_to),
+         "pot": body.potential_income, "cost": body.cost, "paid": body.paid,
+         "note": body.note})
+    await db.commit()
+    return {"ok": True}
+
+
+@router.delete("/patents/{patent_id}")
+async def delete_patent(
+    patent_id: str,
+    company_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Удалить патент, заведённый по ошибке: истории в нём нет."""
+    cid = await assert_company_member(company_id, current_user, db)
+    await db.execute(text("""
+        DELETE FROM tax_patents WHERE id = CAST(:id AS uuid)
+           AND company_id = CAST(:cid AS uuid)"""),
+        {"id": patent_id, "cid": str(cid)})
+    await db.commit()
+    return {"ok": True}

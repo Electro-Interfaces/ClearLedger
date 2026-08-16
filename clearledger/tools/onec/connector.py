@@ -117,7 +117,7 @@ GENERATED_ORDER = ['load-pull.py', 'load-enrich.py', 'load-wave2.py',
 # `link-subconto` идёт ПОСЛЕ слияния дублей контрагентов: слияние переносит
 # документы на главную карточку, и ссылки аналитики должны встать уже на неё.
 FINISH_ORDER = ['relink.py', 'link-and-snapshot.py', 'merge-counterparties.py',
-                'link-subconto.py', 'verify-first.py']
+                'link-subconto.py', 'link-doc-contracts.py', 'verify-first.py']
 
 
 def posix(p) -> str:

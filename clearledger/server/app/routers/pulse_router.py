@@ -32,12 +32,14 @@ from app.auth import (
     resolve_member_modules,
 )
 from app.database import get_db
+from app.services.tax_mode import tax_mode as space_tax_mode
 from app.models import (
     ChatMessage, PulseAck, PulseView, PulseViewBlock, PulseViewGrant, PulseViewLink,
     Task, TaskEvent, User, UserCompany,
 )
 # Словарь стадий — общий с «Проектами»: «Проработка» не должна стать «dd»
 # только потому, что экран другой.
+from app.services import tax_regime
 from app.services.ezs_changes import STAGE_LABELS
 
 router = APIRouter(prefix="/pulse", tags=["Пульс"])
@@ -3827,26 +3829,12 @@ async def _result_window(db: AsyncSession, p: dict, a, b) -> tuple[float, float]
 
 
 async def _tax_mode(db: AsyncSession, p: dict) -> dict[str, Any]:
-    """Режим налогообложения — по тому, какой налог с дохода компания НАЧИСЛЯЕТ.
+    """Режим компании — общим определением пространства (`services/tax_mode.py`).
 
-    Ставку ОСНО применять ко всем подряд нельзя: у компании на УСН налог считается от
-    дохода, а не от прибыли, и «налог на прибыль 25 %» на её экране — не оценка, а
-    выдуманная цифра. Режимы совмещаются: на УСН докупают патенты под отдельные виды
-    деятельности, и тогда счета 68.12 и 68.45 работают вместе.
+    Своей копии здесь нет намеренно: «Налоги», «Пульс» и паспорт обязаны отвечать
+    про режим одинаково, а скопированное определение расходится на первой правке.
     """
-    row = (await db.execute(text("""
-        SELECT count(*) FILTER (WHERE account_dt LIKE '68.04%' OR account_kt LIKE '68.04%'),
-               count(*) FILTER (WHERE account_dt LIKE '68.12%' OR account_kt LIKE '68.12%'),
-               count(*) FILTER (WHERE account_dt LIKE '68.45%' OR account_kt LIKE '68.45%'),
-               count(*) FILTER (WHERE account_dt LIKE '68.02%' OR account_kt LIKE '68.02%')
-          FROM gl_entries
-         WHERE company_id = CAST(:cid AS uuid)
-           AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL
-                OR organization_id = CAST(:org AS uuid))"""), p)).one()
-    osno, usn, patent, vat = (bool(x) for x in row)
-    names = [n for n, on in (("ОСНО", osno), ("УСН", usn), ("патент", patent)) if on]
-    return {"osno": osno, "usn": usn, "patent": patent, "vat": vat,
-            "label": " + ".join(names) if names else None}
+    return await space_tax_mode(db, p.get("cid"), p.get("org"))
 
 
 async def _office_block_data(db: AsyncSession, cid: str, key: str,
@@ -3967,7 +3955,15 @@ async def _office_block_data(db: AsyncSession, cid: str, key: str,
             # её нет, и блок показывал бы ноль вместо реальной оценки.
             _, profit = await _result_window(db, p, since, till)
             _, profit_was = await _result_window(db, p, prev_since, prev_till)
-            rate = 0.25 if till.year >= 2025 else 0.20
+            # Ставка из справочника на дату периода: в 2025-м она выросла с 20 до
+            # 25 %, и зашитый процент пересчитал бы задним числом прошлые годы.
+            rate = float((await db.execute(text("""
+                SELECT value FROM tax_regime_rates
+                 WHERE regime_code = 'osno' AND kind = 'rate'
+                   AND valid_from <= CAST(:on AS date)
+                   AND (valid_to IS NULL OR valid_to >= CAST(:on AS date))
+                 ORDER BY valid_from DESC LIMIT 1"""),
+                {"on": till})).scalar() or 25) / 100
             tax, tax_was = max(profit, 0) * rate, max(profit_was, 0) * rate
             tax_label = "Налог на прибыль"
             note = ("Оценка по данным учёта за период, до закрытия месяца. "

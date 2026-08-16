@@ -119,7 +119,7 @@ async def main():
         for r in (await s.execute(text(
             "SELECT id::text, number, date, title, counterparty_id FROM contracts"
             " WHERE company_id = :c"), {"c": cid})).all():
-            cid_cp = (r[4] or '').strip()
+            cid_cp = str(r[4] or '').strip()
             num, dt, title = (r[1] or '').strip(), (r[2] or '')[:10], (r[3] or '').strip()
             if title:
                 cons.setdefault(norm(title), r[0])
