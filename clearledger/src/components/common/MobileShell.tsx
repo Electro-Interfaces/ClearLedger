@@ -7,12 +7,15 @@
  */
 import { useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { useLocation } from 'react-router-dom'
 import { Loader2, ArrowDown, RefreshCw, Smartphone } from 'lucide-react'
 import { usePullToRefresh } from '@/hooks/usePullToRefresh'
 import { APP_BUILD, APP_VERSION, applyUpdate, watchForUpdate } from '@/lib/appUpdate'
+import {
+  hasPwaInstallPrompt, isPwaInstalled, requestPwaInstall, subscribePwaInstall,
+} from '@/lib/pwaInstall'
 import { ECOSYSTEM_BRAND } from '@/config/brand'
 import { cn } from '@/lib/utils'
+import { useAuth } from '@/contexts/AuthContext'
 
 /** Индикатор жеста: тянется вместе с экраном, а не появляется скачком. */
 function PullHint({ state, distance }: { state: string; distance: number }) {
@@ -113,50 +116,52 @@ export function BuildStamp() {
  * Поэтому здесь два пути и ни одного молчаливого: где можно — кнопка, где нельзя —
  * шаги для этой платформы. Человек, которому «ничего не предложили», видит, что делать.
  */
-type InstallPrompt = Event & { prompt: () => Promise<void> }
-
-const isStandalone = () =>
-  window.matchMedia('(display-mode: standalone)').matches
-  || (navigator as Navigator & { standalone?: boolean }).standalone === true
-
 const isIos = () =>
   /iphone|ipad|ipod/i.test(navigator.userAgent)
   // iPadOS 13+ представляется Mac: отличаем по наличию тач-ввода.
   || (/mac/i.test(navigator.userAgent) && navigator.maxTouchPoints > 1)
 
-const SKIP_KEY = 'cl-install-skipped'
+const DISMISS_KEY = 'cl-install-dismissed-at:v2'
+const DISMISS_FOR_MS = 24 * 60 * 60 * 1000
+
+function wasRecentlyDismissed(): boolean {
+  try {
+    const dismissedAt = Number(localStorage.getItem(DISMISS_KEY))
+    return Number.isFinite(dismissedAt) && dismissedAt > 0
+      && Date.now() - dismissedAt < DISMISS_FOR_MS
+  } catch {
+    return false
+  }
+}
 
 export function InstallApp() {
-  const { pathname } = useLocation()
-  const [prompt, setPrompt] = useState<InstallPrompt | null>(null)
-  const [hidden, setHidden] = useState(() => localStorage.getItem(SKIP_KEY) === '1')
-  const [installed, setInstalled] = useState(isStandalone)
+  const { isAuthenticated } = useAuth()
+  const [promptAvailable, setPromptAvailable] = useState(hasPwaInstallPrompt)
+  const [hidden, setHidden] = useState(wasRecentlyDismissed)
+  const [installed, setInstalled] = useState(isPwaInstalled)
   const [howto, setHowto] = useState(false)
 
   useEffect(() => {
-    const onPrompt = (e: Event) => {
-      e.preventDefault()      // иначе Chrome покажет свою подсказку когда сочтёт нужным
-      setPrompt(e as InstallPrompt)
-    }
-    const onInstalled = () => { setInstalled(true); setPrompt(null) }
-    window.addEventListener('beforeinstallprompt', onPrompt)
-    window.addEventListener('appinstalled', onInstalled)
-    return () => {
-      window.removeEventListener('beforeinstallprompt', onPrompt)
-      window.removeEventListener('appinstalled', onInstalled)
-    }
+    try { localStorage.removeItem('cl-install-skipped') } catch { /* storage недоступен */ }
+    return subscribePwaInstall((next) => {
+      setInstalled(next.installed)
+      setPromptAvailable(next.promptAvailable)
+    })
   }, [])
 
   // Уже открыто приложением — предлагать нечего: это не спрятанный по условию
-  // элемент, а завершённое действие. «Позже» тоже уважаем: предложение, которое
-  // возвращается на каждом экране, превращается в помеху.
-  // Предложение относится ко всему пространству и не должно закрывать рабочие
-  // формы. Показываем его на входных экранах, а внутри продуктов оставляем место данным.
-  const isEntrySurface = pathname === '/' || pathname === '/pulse'
-  if (installed || hidden || !isEntrySurface) return null
+  // элемент, а завершённое действие. «Позже» скрывает плашку на сутки, но не навсегда.
+  // Показываем после входа на любом экране: человек может открыть прямую ссылку на
+  // «Аудит» или другой продукт и вообще не попадать на рабочий стол.
+  if (!isAuthenticated || installed || hidden) return null
+
+  const dismiss = () => {
+    try { localStorage.setItem(DISMISS_KEY, String(Date.now())) } catch { /* storage недоступен */ }
+    setHidden(true)
+  }
 
   return (
-    <div className="fixed inset-x-2 bottom-[calc(env(safe-area-inset-bottom)+4.5rem)] z-30
+    <div data-pwa-install className="fixed inset-x-2 bottom-[calc(env(safe-area-inset-bottom)+4.5rem)] z-[60]
                     rounded-lg border border-border bg-card/95 px-3 py-2 text-[13px]
                     shadow-lg backdrop-blur
                     md:inset-x-auto md:right-4 md:bottom-4 md:max-w-md">
@@ -165,11 +170,11 @@ export function InstallApp() {
           <Smartphone className="h-4 w-4 shrink-0" />
           Держать {ECOSYSTEM_BRAND} под рукой — поставьте приложением
         </span>
-        {prompt ? (
+        {promptAvailable ? (
           <button
             className="min-h-9 rounded-md bg-primary px-3 text-[13px] font-medium
                        text-primary-foreground"
-            onClick={() => { void prompt.prompt(); setPrompt(null) }}>
+            onClick={() => { void requestPwaInstall() }}>
             Установить
           </button>
         ) : (
@@ -179,12 +184,12 @@ export function InstallApp() {
           </button>
         )}
         <button className="min-h-9 px-1 text-[13px] text-muted-foreground hover:underline"
-          onClick={() => { localStorage.setItem(SKIP_KEY, '1'); setHidden(true) }}>
+          onClick={dismiss}>
           Позже
         </button>
       </div>
 
-      {howto && !prompt && (
+      {howto && !promptAvailable && (
         <div className="mt-2 border-t border-border/60 pt-2 text-[12px] leading-relaxed
                         text-muted-foreground">
           {isIos() ? (

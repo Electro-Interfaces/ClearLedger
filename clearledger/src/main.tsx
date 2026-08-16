@@ -9,6 +9,11 @@ import { startScheduler } from './services/channelScheduler'
 import { isApiEnabled } from './services/apiClient'
 import { setServicesCompany } from './services/cacheReset'
 import { defaultCompanyId } from './config/companies'
+import { initPwaInstall } from './lib/pwaInstall'
+
+// Chrome может выдать событие установки до того, как авторизация и React-обвязка
+// закончат загрузку. Сохраняем его сразу: событие одноразовое и повторно не приходит.
+initPwaInstall()
 
 // После деплоя закэшированный index.html тянет чанки со старыми хэшами → Vite
 // кидает vite:preloadError («Failed to fetch dynamically imported module»).
