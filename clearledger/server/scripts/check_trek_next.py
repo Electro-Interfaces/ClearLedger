@@ -175,7 +175,7 @@ async def main() -> None:
             mine = await docs_router.list_docs(
                 company_id=str(cid), family=None, direction=None, status_=None,
                 kind_id=None, counterparty_id=None, responsible_id=None,
-                date_from=None, date_to=None, q=None, mine=True, limit=200,
+                date_from=None, date_to=None, q=None, mine=True, limit=200, offset=0,
                 db=db, current_user=owner,
             )
             mine_ids = {row["id"] for row in mine["docs"]}
@@ -184,7 +184,7 @@ async def main() -> None:
             search = await docs_router.list_docs(
                 company_id=str(cid), family=None, direction=None, status_=None,
                 kind_id=None, counterparty_id=None, responsible_id=None,
-                date_from=None, date_to=None, q=marker, mine=False, limit=200,
+                date_from=None, date_to=None, q=marker, mine=False, limit=200, offset=0,
                 db=db, current_user=owner,
             )
             assert str(private_doc.id) in {row["id"] for row in search["docs"]}
