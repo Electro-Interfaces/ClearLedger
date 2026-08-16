@@ -2647,6 +2647,22 @@ async def create_all() -> None:
             # Проекты ЭЗС: серийный номер станции вносит ОКС по ходу СМР — раньше
             # постановки на учёт, когда единицы склада ещё нет.
             "ALTER TABLE ezs_site_equipment ADD COLUMN IF NOT EXISTS serial_number VARCHAR(120)",
+            # Сведение аналитики оборотов: виды субконто счёта и ссылки на карточки.
+            # Пока субконто было строкой, «Разрывов связей» в модели данных считались
+            # тысячами (у НПК 17 398 из 18 045), а взаиморасчёты по оборотам нельзя
+            # было открыть карточкой контрагента.
+            "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS title VARCHAR(300)",
+            "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS valid_until VARCHAR(20)",
+            "ALTER TABLE gl_accounts ADD COLUMN IF NOT EXISTS subconto JSONB",
+            "ALTER TABLE gl_turnovers ADD COLUMN IF NOT EXISTS dt_counterparty_id UUID",
+            "ALTER TABLE gl_turnovers ADD COLUMN IF NOT EXISTS kt_counterparty_id UUID",
+            "ALTER TABLE gl_turnovers ADD COLUMN IF NOT EXISTS dt_contract_id UUID",
+            "ALTER TABLE gl_turnovers ADD COLUMN IF NOT EXISTS kt_contract_id UUID",
+            "ALTER TABLE gl_turnovers ADD COLUMN IF NOT EXISTS sub_links JSONB",
+            "CREATE INDEX IF NOT EXISTS idx_gl_turnovers_dt_cp "
+            "ON gl_turnovers (company_id, dt_counterparty_id)",
+            "CREATE INDEX IF NOT EXISTS idx_gl_turnovers_kt_cp "
+            "ON gl_turnovers (company_id, kt_counterparty_id)",
         ):
             await conn.execute(_sa.text(stmt))
 

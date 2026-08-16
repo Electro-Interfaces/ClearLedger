@@ -58,7 +58,7 @@ SETS = [
     'queries-first/09-fin', 'queries-first/10-policy', 'queries-first/11-bank',
     'queries', 'queries-docs', 'queries-contracts', 'queries-payroll', 'queries-payroll2',
     'queries-tax', 'queries-balances', 'queries-books', 'queries-wave3', 'queries-gap',
-    'queries-gap2',
+    'queries-gap2', 'queries-subconto',
 ]
 
 # ── Разбор: JSON собирается из одного или нескольких наборов. ──────────────────
@@ -73,6 +73,7 @@ JSONS = {
     'onec-tax': ['queries-tax', 'queries-balances'],
     'onec-gap': ['queries-gap'],
     'onec-gap2': ['queries-gap2'],
+    'onec-subconto': ['queries-subconto'],
 }
 
 # ── Генераторы: сначала кладём дампы под именами, которые они ждут. ────────────
@@ -104,6 +105,7 @@ LOAD_ORDER = [
     'load-tax.py',        # календарь, отчётность, ЕНС, помесячные сальдо
     'load-gap.py',        # УСН, кадры, НМА, уставный капитал, реквизиты первички
     'load-gap2.py',       # агентская схема, НДС, кадры компании-агента
+    'load-subconto.py',   # виды субконто по счетам — карта для сведения аналитики
 ]
 # Сгенерированные загрузчики едут отдельно: они везут данные внутри себя.
 GENERATED_ORDER = ['load-pull.py', 'load-enrich.py', 'load-wave2.py',
@@ -112,7 +114,10 @@ GENERATED_ORDER = ['load-pull.py', 'load-enrich.py', 'load-wave2.py',
 # в ней нет, он снимает как ложную связь — то есть откатывает работу предыдущего шага.
 # Карта в приложении дополнена, но на выкатанном образе живёт прежняя, и порядок
 # «сначала сведение, потом связи» верен при обеих.
-FINISH_ORDER = ['relink.py', 'link-and-snapshot.py', 'merge-counterparties.py', 'verify-first.py']
+# `link-subconto` идёт ПОСЛЕ слияния дублей контрагентов: слияние переносит
+# документы на главную карточку, и ссылки аналитики должны встать уже на неё.
+FINISH_ORDER = ['relink.py', 'link-and-snapshot.py', 'merge-counterparties.py',
+                'link-subconto.py', 'verify-first.py']
 
 
 def posix(p) -> str:

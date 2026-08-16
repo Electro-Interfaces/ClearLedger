@@ -21,7 +21,7 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
@@ -214,13 +214,29 @@ _ENTITIES: list[tuple[str, str, list[tuple]]] = [
         ("gl_turnovers", "Обороты с аналитикой", GlTurnover,
          "Виртуальная таблица оборотов (.dt → коннектор)",
          "взаиморасчёты · за балансом · разрезы учёта", "месяц + корреспонденция + субконто",
-         # Аналитика приходит ПРЕДСТАВЛЕНИЕМ: имя контрагента строкой, а не ссылкой.
-         # Свести её на лету нельзя — написание в разных документах расходится.
-         GlTurnover.dt1.isnot(None), "аналитика строкой, ссылки на справочник нет"),
+         # Аналитика приходит ПРЕДСТАВЛЕНИЕМ («АЗИМУТ ООО», «№ 06/21 от 22.06.2021»),
+         # и раньше разрывом считалась КАЖДАЯ такая строка — 17 398 из 18 045 у НПК.
+         # Теперь субконто разбирается по видам из плана счетов (`link-subconto.py`),
+         # и разрыв — только там, где связать было чем, а значения в справочнике нет:
+         # у контрагентов сведено 100 %, у договоров 98–100 %.
+         or_(and_(GlTurnover.dt1.isnot(None), GlTurnover.sub_links.is_(None)),
+             # Разобрано, но значение не нашлось: договор помечен на удаление,
+             # контрагент переименован. Это и есть НАСТОЯЩИЙ разрыв — в отличие от
+             # «вид субконто без своего справочника», где связывать нечем.
+             text("EXISTS (SELECT 1 FROM jsonb_each(gl_turnovers.sub_links) e"
+                  " WHERE e.value->>'table' IS NOT NULL AND e.value->>'id' IS NULL)")),
+         "значение аналитики не нашлось в справочнике"),
         ("gl_balances", "Остатки по счетам", GlBalance,
          "Оборотно-сальдовая ведомость на дату", "за балансом · взаиморасчёты · запасы",
          "дата среза + счёт + субконто",
-         and_(GlBalance.sub1.isnot(None), GlBalance.counterparty_id.is_(None)),
+         # Разрыв — только там, где первое субконто счёта ДОЛЖНО быть контрагентом.
+         # Иначе в «несведённые» попадали НМА на 04.01, банковский счёт на 51 и вид
+         # платежа на 69.11: у них контрагента нет по природе счёта.
+         and_(GlBalance.sub1.isnot(None), GlBalance.counterparty_id.is_(None),
+              text("EXISTS (SELECT 1 FROM gl_accounts a"
+                   " WHERE a.company_id = gl_balances.company_id"
+                   "   AND a.code = gl_balances.account"
+                   "   AND a.subconto->>0 = 'Контрагенты')")),
          "субконто есть, контрагент не сведён"),
         ("accounting_docs", "Первичные документы", AccountingDoc,
          "Реализации, услуги и поступления из бухгалтерии", "продажи · услуги · сверка",
@@ -232,7 +248,13 @@ _ENTITIES: list[tuple[str, str, list[tuple]]] = [
              ("sale", "purchase", "invoice_out", "invoice_in",
               "vat_invoice_out", "vat_invoice_in", "act_recon", "bank_in", "bank_out")),
              or_(AccountingDoc.counterparty_inn.is_(None),
-                 AccountingDoc.counterparty_inn == "")),
+                 AccountingDoc.counterparty_inn == ""),
+             # Перевод между своими счетами и депозит второй стороны не имеют:
+             # у РТИ так набиралось 11 «разрывов» из 11. Тот же отбор, что на экране
+             # качества данных, — один показатель обязан считаться одним правилом.
+             text("coalesce(accounting_docs.details->>'Вид операции', '')"
+                  " NOT LIKE 'Перевод%'"),
+             text("coalesce(accounting_docs.details->>'Вид операции', '') <> 'Депозит'")),
          "контрагент без ИНН — не свести"),
         ("periods", "Периоды", Period,
          "Регламентные операции закрытия месяца", "бухгалтерия · сверка первички",

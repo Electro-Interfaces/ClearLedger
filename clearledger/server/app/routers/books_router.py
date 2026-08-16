@@ -4345,9 +4345,15 @@ async def counterparty_card(
     """), params)).one()
 
     contracts = [{"id": str(r[0]), "number": r[1], "date": r[2], "type": r[3],
-                  "kind": r[4], "closed": r[5], "docs": r[6]} for r in (await db.execute(text("""
+                  "kind": r[4], "closed": r[5], "docs": r[6],
+                  # Срок действия — реквизит карточки 1С, а не догадка по дате
+                  # заключения. Заполнен он далеко не всегда, и пусто здесь значит
+                  # «в базе не указан», а не «бессрочный».
+                  "validUntil": r[7], "title": r[8]}
+                 for r in (await db.execute(text("""
         SELECT c.id, c.number, c.date, c.type, c.kind, c.is_closed,
-               (SELECT count(*) FROM accounting_docs d WHERE d.contract_id = c.id)
+               (SELECT count(*) FROM accounting_docs d WHERE d.contract_id = c.id),
+               c.valid_until, c.title
           FROM contracts c
          WHERE c.company_id = :cid AND c.counterparty_id::text = :kid
          ORDER BY c.date DESC NULLS LAST
@@ -4427,15 +4433,31 @@ async def reconciliation_act(
 
     sections = []
     for kind, prefix, title, doc_types in _ACT_SIDES:
-        params: dict[str, Any] = {"cid": str(cid), "org": _org_param(), "name": k.name, "p": f"{prefix}%"}
+        params: dict[str, Any] = {"cid": str(cid), "org": _org_param(), "name": k.name,
+                                  "kid": str(k.id), "p": f"{prefix}%"}
+        # Контрагент берётся по ССЫЛКЕ, а имя остаётся запасным вариантом. Сравнение
+        # строк ломалось на переименовании карточки и на слиянии дублей: документы
+        # переезжали на главную карточку, а обороты оставались с именем донора, и акт
+        # молча показывал пустую сверку при живом долге.
         rows = (await db.execute(text("""
             SELECT period_year, period_month,
-                   coalesce(sum(amount) FILTER (WHERE account_dt LIKE :p AND dt1 = :name), 0) dt,
-                   coalesce(sum(amount) FILTER (WHERE account_kt LIKE :p AND kt1 = :name), 0) kt
+                   coalesce(sum(amount) FILTER (
+                     WHERE account_dt LIKE :p
+                       AND (dt_counterparty_id = CAST(:kid AS uuid)
+                            OR (dt_counterparty_id IS NULL AND dt1 = :name))), 0) dt,
+                   coalesce(sum(amount) FILTER (
+                     WHERE account_kt LIKE :p
+                       AND (kt_counterparty_id = CAST(:kid AS uuid)
+                            OR (kt_counterparty_id IS NULL AND kt1 = :name))), 0) kt
               FROM gl_turnovers
              WHERE company_id = :cid
            AND (CAST(:org AS uuid) IS NULL OR organization_id IS NULL OR organization_id = CAST(:org AS uuid))
-               AND ((account_dt LIKE :p AND dt1 = :name) OR (account_kt LIKE :p AND kt1 = :name))
+               AND ((account_dt LIKE :p
+                     AND (dt_counterparty_id = CAST(:kid AS uuid)
+                          OR (dt_counterparty_id IS NULL AND dt1 = :name)))
+                 OR (account_kt LIKE :p
+                     AND (kt_counterparty_id = CAST(:kid AS uuid)
+                          OR (kt_counterparty_id IS NULL AND kt1 = :name))))
              GROUP BY 1, 2 ORDER BY 1, 2
         """), params)).all()
         if not rows:
@@ -4956,6 +4978,28 @@ async def quality(
         "ok" if not dup_inn else "error", dup_inn,
         "Дубль режет историю юрлица: документы на одной карточке, договоры на другой")
 
+    # Срок действия договора — реквизит карточки 1С. Заполняют его редко (у ПРОМИЗОЛ
+    # 33 договора из 253, у РТИ и НПК ни одного), поэтому проверка сначала говорит,
+    # есть ли что проверять: «истёкших нет» при незаполненном сроке — ложное
+    # спокойствие, ровно как прежняя эвристика «старше года» была ложной тревогой.
+    term = (await db.execute(text("""
+        SELECT count(*) FILTER (WHERE valid_until IS NOT NULL),
+               count(*) FILTER (WHERE valid_until IS NOT NULL
+                                  AND substr(valid_until, 1, 10) < to_char(CURRENT_DATE, 'YYYY-MM-DD')
+                                  AND coalesce(is_closed, false) = false),
+               count(*)
+          FROM contracts WHERE company_id = :cid"""), {"cid": str(cid)})).one()
+    if not term[0]:
+        add("contract_term", "Срок действия договоров",
+            "info", "не заполняется",
+            "Реквизит «Срок действия» пуст у всех %d договоров — просрочку проверить "
+            "нечем. Это состояние базы клиента, а не ошибка загрузки" % term[2])
+    else:
+        add("contract_term", "Договоры с истёкшим сроком",
+            "ok" if not term[1] else "warn", term[1],
+            "Срок из карточки 1С; проверено %d договоров из %d — у остальных реквизит "
+            "не заполнен" % (term[0], term[2]))
+
     dup_code = await _count("""
         SELECT count(*) FROM (SELECT external_ref FROM nomenclature
          WHERE company_id = :cid AND external_ref IS NOT NULL
@@ -5438,7 +5482,7 @@ async def settlements(
 
     rows = (await db.execute(
         select(GlBalance.account, GlBalance.account_name, GlBalance.sub1, GlBalance.sub2,
-               GlBalance.debit, GlBalance.credit)
+               GlBalance.debit, GlBalance.credit, GlBalance.counterparty_id)
         .where(GlBalance.company_id == cid, GlBalance.as_of == as_of,
                GlBalance.account.like(f"{prefix}%"))
         .order_by((GlBalance.debit + GlBalance.credit).desc()))).all()
@@ -5460,6 +5504,9 @@ async def settlements(
         "rows": [{
             "account": r[0], "accountName": r[1],
             "counterparty": r[2], "contract": r[3],
+            # Ссылка на карточку: строка сальдо сведена со справочником при загрузке,
+            # и список расчётов перестаёт быть тупиком — из него открывается карточка.
+            "counterpartyId": str(r[6]) if r[6] else None,
             "debit": _num(r[4]), "credit": _num(r[5]),
             "net": _num(r[4]) - _num(r[5]),
         } for r in rows],

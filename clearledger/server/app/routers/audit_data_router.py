@@ -194,6 +194,17 @@ async def get_reference_integrity(
         "counterparty_id": c.counterparty_id, "type": c.type,
     } for c in contracts if not (c.date or "").strip()]
 
+    # Просрочка — по реквизиту «Срок действия» из карточки 1С. Пока его не грузили,
+    # здесь стояла эвристика «заключён больше года назад», и она объявляла
+    # просроченными 22 договора из 55, включая действующие.
+    today_iso = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    expired = [{
+        "id": str(c.id), "number": c.number, "date": c.date,
+        "valid_until": c.valid_until, "counterparty_id": c.counterparty_id, "type": c.type,
+    } for c in contracts
+        if (c.valid_until or "")[:10] and (c.valid_until or "")[:10] < today_iso]
+    with_term = sum(1 for c in contracts if c.valid_until)
+
     # ИНН без КПП (для ЮЛ)
     invalid_inn = []
     for cp in counterparties:
@@ -209,12 +220,15 @@ async def get_reference_integrity(
         "contracts_total": len(contracts),
         "counterparties_without_contracts": len(no_contract),
         "undated_contracts": len(undated),
-        "expiry_known": False,
-        "expiry_note": "срок действия договора в выгрузке 1С отсутствует — просрочку не проверяем",
+        "expired_contracts": len(expired),
+        "contracts_with_term": with_term,
+        "expiry_note": ("срок действия заполнен у %d договоров из %d — у остальных "
+                        "просрочку проверить нечем" % (with_term, len(contracts))),
         "invalid_inn_count": len(invalid_inn),
         "items": {
             "no_contract": no_contract[:50],
             "undated": undated[:50],
+            "expired": expired[:50],
             "invalid_inn": invalid_inn[:50],
         },
     }

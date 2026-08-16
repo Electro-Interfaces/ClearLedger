@@ -1035,6 +1035,13 @@ class Contract(Base):
     )
     number: Mapped[str] = mapped_column(String(100), nullable=False)
     date: Mapped[str] = mapped_column(String(20), nullable=False)
+    # Представление договора в 1С («№ 06/21 от 22.06.2021»): ИМЕННО ЭТА строка стоит
+    # в субконто оборотов и в реквизитах документов. Без неё связь восстанавливается
+    # разбором строки, а он спотыкается на «233\2011-пост от 20.06.11».
+    title: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    # Срок действия из карточки 1С. Пока его не грузили, «просроченные договоры»
+    # считались эвристикой «заключён больше года назад» — 22 из 55 ложных.
+    valid_until: Mapped[str | None] = mapped_column(String(20), nullable=True)
     counterparty_id: Mapped[str] = mapped_column(String(100), nullable=False)
     organization_id: Mapped[str] = mapped_column(String(100), nullable=False)
     type: Mapped[str] = mapped_column(String(100), nullable=False)
@@ -1356,6 +1363,10 @@ class GlAccount(Base):
     currency: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     parent_code: Mapped[str | None] = mapped_column(String(20), nullable=True)
     is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Виды субконто счёта ПО ПОРЯДКУ: ["Контрагенты", "Договоры"]. Без них аналитика
+    # оборота — просто строка: по счёту 62.01 первое субконто контрагент, по 20.01 —
+    # номенклатурная группа, и понять это можно только из плана счетов.
+    subconto: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -1495,6 +1506,27 @@ class GlTurnover(Base):
     dt2: Mapped[str | None] = mapped_column(String(500), nullable=True)
     kt1: Mapped[str | None] = mapped_column(String(500), nullable=True)
     kt2: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # Разобранная аналитика: субконто приходит ПРЕДСТАВЛЕНИЕМ, и пока это строка,
+    # оборот нельзя связать ни с карточкой контрагента, ни с договором. Вид субконто
+    # известен из плана счетов (`gl_accounts.subconto`), значение ищется в своём
+    # справочнике по имени — см. `tools/onec/first-run/link-subconto.py`.
+    dt_counterparty_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("counterparties.id"), nullable=True
+    )
+    kt_counterparty_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("counterparties.id"), nullable=True
+    )
+    dt_contract_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("contracts.id"), nullable=True
+    )
+    kt_contract_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("contracts.id"), nullable=True
+    )
+    # Остальные виды (номенклатура, статьи затрат и ДДС, склады, банковские счета,
+    # работники) — одной картой, а не колонкой на каждый: колонок было бы двенадцать,
+    # а витрины ходят по контрагенту и договору.
+    #   {"dt1": {"kind": "Номенклатура", "table": "nomenclature", "id": "..."}, ...}
+    sub_links: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     amount: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False, default=0)
     qty_dt: Mapped[float | None] = mapped_column(Numeric(18, 3), nullable=True)
     qty_kt: Mapped[float | None] = mapped_column(Numeric(18, 3), nullable=True)
@@ -1507,6 +1539,8 @@ class GlTurnover(Base):
     __table_args__ = (
         Index("idx_gl_turnovers_period", "company_id", "period_year", "period_month"),
         Index("idx_gl_turnovers_accounts", "company_id", "account_dt", "account_kt"),
+        Index("idx_gl_turnovers_dt_cp", "company_id", "dt_counterparty_id"),
+        Index("idx_gl_turnovers_kt_cp", "company_id", "kt_counterparty_id"),
         Index("uq_gl_turnover_external", "company_id", "external_key", unique=True),
     )
 
