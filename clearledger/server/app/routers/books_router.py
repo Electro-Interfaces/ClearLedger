@@ -325,6 +325,19 @@ async def profile(
             "periodsClosed": per[0], "periodsTotal": per[1], "lastClosed": per[2],
         },
         "volumes": volumes,
+        # Нужен ли предрасчёт. В бухгалтерском слое агрегатов НЕТ намеренно: свёртка
+        # всей истории самой большой компании (37 тыс. проводок) занимает 8–46 мс, и
+        # материализованная витрина добавила бы задачу синхронизации ради выигрыша,
+        # которого нет. Порог оценён линейно: около миллиона проводок свёртка выходит
+        # за секунду — тогда заводится витрина, как `mv_charge_daily` у зарядных
+        # сессий (там 155 тыс. записей и ежедневный поток).
+        "scale": {
+            "entries": period[2],
+            "aggregatesNeeded": period[2] >= 500_000,
+            "note": ("объёма мало, показатели считаются запросом на лету"
+                     if period[2] < 500_000 else
+                     "пора заводить помесячную витрину: свёртка на лету станет заметной"),
+        },
         # Контрагентов в справочнике больше, чем в списке «Контрагенты»: там только
         # те, у кого есть документы или сальдо. Обе цифры рядом, чтобы разница не
         # выглядела расхождением.
@@ -6213,6 +6226,83 @@ def _policy_has(meta: dict[str, dict], kind: str, key: str) -> bool:
 
 
 _CHECKS: list[tuple] = [
+    ("tax_profit_underpaid", "policy", "Налог на прибыль меньше расчётного",
+     "За закрытый год начислено меньше, чем выходит из прибыли по данным учёта: "
+     "проверьте декларацию — обычно эти цифры сходятся до рубля", """
+        WITH fin AS (
+            -- Только организации, которые налог на прибыль ПЛАТЯТ: у упрощенца его
+            -- нет вовсе, и «начислено 0» там означает порядок, а не недоимку.
+            SELECT e.period_year AS year,
+                   coalesce(sum(e.amount) FILTER (WHERE e.account_kt LIKE '90.01%'), 0)
+                 - coalesce(sum(e.amount) FILTER (WHERE e.account_dt LIKE '90.03%'), 0)
+                 - coalesce(sum(e.amount) FILTER (WHERE e.account_dt LIKE '90.02%'
+                                                     OR e.account_dt LIKE '90.07%'
+                                                     OR e.account_dt LIKE '90.08%'), 0)
+                 - coalesce(sum(e.amount) FILTER (WHERE e.account_dt LIKE '91.02%'), 0)
+                 + coalesce(sum(e.amount) FILTER (WHERE e.account_kt LIKE '91.01%'), 0) AS profit,
+                   coalesce(sum(e.amount) FILTER (WHERE e.account_kt LIKE '68.04%'), 0)
+                 - coalesce(sum(e.amount) FILTER (WHERE e.account_dt LIKE '68.04%'
+                                                    AND e.account_kt NOT LIKE '51%'
+                                                    AND e.account_kt NOT LIKE '68.90%'), 0) AS accrued
+              FROM gl_entries e
+              JOIN organization_tax_regimes t ON t.organization_id = e.organization_id
+               AND t.is_primary
+               AND t.valid_from <= make_date(e.period_year, 12, 31)
+               AND (t.valid_to IS NULL OR t.valid_to >= make_date(e.period_year, 1, 1))
+              JOIN tax_regimes r ON r.code = t.regime_code AND r.pays_profit_tax
+             WHERE e.company_id = :cid
+               AND (CAST(:org AS uuid) IS NULL OR e.organization_id IS NULL
+                    OR e.organization_id = CAST(:org AS uuid))
+             GROUP BY 1
+        )
+        SELECT f.year::text, f.year || '-12-31',
+               'прибыль ' || round(f.profit) || ' ₽',
+               'расчётный ' || round(f.profit * (CASE WHEN f.year >= 2025 THEN 0.25 ELSE 0.20 END))
+                 || ' ₽ против начисленного ' || round(f.accrued) || ' ₽',
+               round(f.profit * (CASE WHEN f.year >= 2025 THEN 0.25 ELSE 0.20 END) - f.accrued)
+          FROM fin f
+         WHERE f.year < date_part('year', CURRENT_DATE)
+           AND f.profit > 0
+           AND f.profit * (CASE WHEN f.year >= 2025 THEN 0.25 ELSE 0.20 END) - f.accrued
+               > greatest(1000, f.accrued * 0.1)"""),
+
+    # Сверка начисленного налога с расчётным по КУДиР. Правило только для
+    # ЗАКРЫТЫХ лет: в идущем году начислены авансы, и меньшая сумма там законна.
+    # На пилоте нашло реальный случай: у РТИ за 2024 год база по книге 31 430 ₽
+    # (налог 4 714 ₽), а начислен минимальный — 2 356 ₽, хотя платить положено
+    # больший из двух.
+    ("tax_usn_underpaid", "policy", "Налог по УСН меньше расчётного по книге",
+     "По КУДиР налог за закрытый год выходит больше начисленного: проверьте, "
+     "не применён ли минимальный налог там, где база положительна", """
+        WITH book AS (
+            SELECT left(r.meta->>'Период', 4) AS year,
+                   sum((r.meta->>'ДоходыУчитываемые')::numeric) AS income,
+                   sum((r.meta->>'РасходыУчитываемые')::numeric) AS expense
+              FROM gl_references r
+             WHERE r.company_id = :cid AND r.kind = 'kudir'
+             GROUP BY 1
+        ), accrued AS (
+            SELECT e.period_year::text AS year,
+                   sum(e.amount) FILTER (WHERE e.account_kt LIKE '68.12%')
+                 - coalesce(sum(e.amount) FILTER (WHERE e.account_dt LIKE '68.12%'
+                                                    AND e.account_kt NOT LIKE '51%'
+                                                    AND e.account_kt NOT LIKE '68.90%'), 0) AS tax
+              FROM gl_entries e
+             WHERE e.company_id = :cid
+               AND (CAST(:org AS uuid) IS NULL OR e.organization_id IS NULL
+                    OR e.organization_id = CAST(:org AS uuid))
+             GROUP BY 1
+        )
+        SELECT b.year, b.year || '-12-31',
+               'база ' || round(b.income - b.expense) || ' ₽',
+               'расчётный ' || round(greatest(b.income - b.expense, 0) * 0.15)
+                 || ' ₽ против начисленного ' || round(coalesce(a.tax, 0)) || ' ₽',
+               round(greatest(b.income - b.expense, 0) * 0.15 - coalesce(a.tax, 0))
+          FROM book b LEFT JOIN accrued a ON a.year = b.year
+         WHERE b.year < to_char(CURRENT_DATE, 'YYYY')
+           AND b.income - b.expense > 0
+           AND greatest(b.income - b.expense, 0) * 0.15 - coalesce(a.tax, 0) > 1000"""),
+
     # ── Режим налогообложения против документов ─────────────────────────────
     # Условие сверяется с ЗАЯВЛЕННЫМ режимом организации: у клиента на ОСНО эти
     # проверки просто не срабатывают, а не выдают ложную тревогу.
@@ -8629,3 +8719,57 @@ async def set_contribution_rate(
          "df": body.due_fixed, "de": body.due_extra, "note": body.note})
     await db.commit()
     return {"ok": True, "year": year}
+
+
+@router.get("/checks-across")
+async def checks_across_companies(
+    only_warnings: bool = Query(True),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Сверка по всем компаниям пространства разом.
+
+    `company_id` намеренно не принимается: смысл ручки в том, чтобы не выбирать
+    компанию — иначе она повторяет обычные проверки.
+    """
+    rows = (await db.execute(text("""
+        SELECT c.id, c.name FROM companies c
+          JOIN user_companies uc ON uc.company_id = c.id
+         WHERE uc.user_id = CAST(:uid AS uuid)
+         ORDER BY c.name"""), {"uid": str(current_user.id)})).all()
+    if current_user.is_superadmin and not rows:
+        rows = (await db.execute(text(
+            "SELECT id, name FROM companies ORDER BY name"))).all()
+
+    out: list[dict[str, Any]] = []
+    total_found = 0
+    for c in rows:
+        res = await checks(str(c.id), db, current_user)
+        groups = res.get("groups") or []
+        items: list[dict[str, Any]] = []
+        for g in groups:
+            for chk in g.get("checks", []):
+                n = chk.get("count") or len(chk.get("rows") or [])
+                # Фильтр по СТАТУСУ, а не по числу строк: часть проверок
+                # положительные («дата запрета установлена»), и у них строки
+                # означают порядок, а не проблему. По числу строк сводка выдавала
+                # 16 983 «находки» — столько же, сколько строк во всех проверках.
+                if only_warnings and chk.get("status") not in ("warn", "error"):
+                    continue
+                items.append({
+                    "key": chk.get("key"), "title": chk.get("title"),
+                    "status": chk.get("status"), "count": n,
+                    "why": chk.get("why"),
+                    # Первые строки — чтобы понять суть, не открывая компанию.
+                    "sample": (chk.get("rows") or [])[:3],
+                })
+                total_found += 1
+        out.append({"companyId": str(c.id), "company": c.name,
+                    "findings": items, "clean": not items})
+
+    return {
+        "companies": out,
+        "totalFindings": total_found,
+        "note": ("Сверка идёт по каждой компании отдельно: данные изолированы, "
+                 "и общий запрос смешал бы клиентов."),
+    }
