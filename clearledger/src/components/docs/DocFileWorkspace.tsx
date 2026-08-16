@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useId, useMemo, useState } from 'react'
 import {
   Download, ExternalLink, FileQuestion, FileText, Image as ImageIcon,
   Loader2, Paperclip, Trash2,
@@ -7,6 +7,7 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import {
   downloadAttachment, humanSize, openAuthAttachment, useAuthBlob, useAuthText,
 } from '@/lib/authFiles'
@@ -21,15 +22,18 @@ const ROLE_LABEL: Record<string, string> = {
 }
 
 function previewKind(version: DocVersion): 'image' | 'pdf' | 'text' | 'unsupported' {
-  const mime = (version.mime ?? '').toLowerCase()
+  const mime = (version.mime ?? '').toLowerCase().split(';', 1)[0].trim()
   const name = version.file_name.toLowerCase()
-  if (['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/bmp'].includes(mime)) {
-    return 'image'
+  if (mime) {
+    if (['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/bmp'].includes(mime)) {
+      return 'image'
+    }
+    if (mime === 'application/pdf') return 'pdf'
+    if (mime === 'text/plain') return 'text'
+    return 'unsupported'
   }
-  if (mime === 'application/pdf' || name.endsWith('.pdf')) return 'pdf'
-  if (mime === 'text/plain' || (!mime && /\.(txt|csv|json|xml|md|log)$/.test(name))) {
-    return 'text'
-  }
+  if (name.endsWith('.pdf')) return 'pdf'
+  if (/\.(txt|csv|json|xml|md|log)$/.test(name)) return 'text'
   return 'unsupported'
 }
 
@@ -47,6 +51,7 @@ export function DocFileWorkspace({ versions, canRemove, removing, onRemove }: {
   const [selectedId, setSelectedId] = useState<string | null>(initial?.id ?? null)
   const [removingId, setRemovingId] = useState<string | null>(null)
   const [reason, setReason] = useState('')
+  const reasonId = useId()
 
   const selected = versions.find((version) => version.id === selectedId) ?? initial
   const path = selected ? `/api/files/${selected.file_id}` : null
@@ -122,8 +127,10 @@ export function DocFileWorkspace({ versions, canRemove, removing, onRemove }: {
                 </div>
                 {removingId === version.id && (
                   <div className="mt-2 space-y-2 pl-1">
+                    <Label htmlFor={reasonId} className="sr-only">Причина удаления редакции</Label>
                     <Input value={reason} onChange={(event) => setReason(event.target.value)}
-                      placeholder="Причина удаления из работы" className="h-8 text-xs" autoFocus />
+                      id={reasonId} placeholder="Причина удаления из работы"
+                      className="h-8 text-xs" autoFocus />
                     <div className="flex gap-1.5">
                       <Button size="sm" variant="destructive" className="h-8"
                         disabled={reason.trim().length < 3 || removing}

@@ -80,6 +80,26 @@ async def test_мои_документы_не_подменяются_общим_
     assert me["id"] != str(other.id)
 
 
+async def test_мои_документы_можно_листать(auth_client: AsyncClient):
+    _, cid, kind = await _context(auth_client)
+    marker = f"ПРОВЕРКА-листание-{uuid.uuid4().hex}"
+    for index in range(3):
+        created = await auth_client.post("/api/docs", json={
+            "company_id": cid, "kind_id": kind["id"],
+            "title": f"{marker}-{index}",
+        })
+        assert created.status_code == 201, created.text
+
+    first = (await auth_client.get("/api/docs", params={
+        "company_id": cid, "mine": "true", "q": marker, "limit": 1,
+    })).json()["docs"]
+    second = (await auth_client.get("/api/docs", params={
+        "company_id": cid, "mine": "true", "q": marker, "limit": 1, "offset": 1,
+    })).json()["docs"]
+    assert len(first) == len(second) == 1
+    assert first[0]["id"] != second[0]["id"]
+
+
 async def test_право_на_документ_и_вид_открывает_закрытую_карточку(
         auth_client: AsyncClient, db: AsyncSession):
     me, cid_raw, kind = await _context(auth_client)

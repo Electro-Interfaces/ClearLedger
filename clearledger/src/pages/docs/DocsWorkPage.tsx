@@ -6,7 +6,7 @@
  * мне», а не «что у меня в документах и отдельно в поручениях».
  */
 import { lazy, Suspense, useState, type ReactNode } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
 import { RotateCw, Stamp } from 'lucide-react'
 import { useCompany } from '@/contexts/CompanyContext'
@@ -20,6 +20,7 @@ import { useDocsView } from './DocsLayout'
 
 const TasksWorkPage = lazy(() => import('@/pages/tasks/TasksWorkPage')
   .then((module) => ({ default: module.TasksWorkPage })))
+const MINE_PAGE_SIZE = 200
 
 export function DocsWorkPage() {
   const { company } = useCompany()
@@ -40,9 +41,17 @@ export function DocsWorkPage() {
     queryFn: () => docsService.myApprovals(companyId),
     enabled: !!companyId && view === 'approvals',
   })
-  const docsQ = useQuery({
+  const docsQ = useInfiniteQuery({
     queryKey: ['docs-mine', companyId],
-    queryFn: () => docsService.listDocs(companyId, { mine: true, limit: 200 }),
+    queryFn: ({ pageParam }) => docsService.listDocs(companyId, {
+      mine: true,
+      limit: MINE_PAGE_SIZE,
+      offset: pageParam,
+    }),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, pages) => (
+      lastPage.docs.length < MINE_PAGE_SIZE ? undefined : pages.length * MINE_PAGE_SIZE
+    ),
     enabled: !!companyId && view === 'mine',
   })
 
@@ -122,7 +131,7 @@ export function DocsWorkPage() {
   }
 
   if (view === 'mine') {
-    const docs = docsQ.data?.docs ?? []
+    const docs = docsQ.data?.pages.flatMap((page) => page.docs) ?? []
     return withDocument(
       <QueuePage title="Мои документы"
         subtitle={docsQ.isLoading ? 'Загрузка…' : `Показано: ${docs.length}`}>
@@ -147,6 +156,15 @@ export function DocsWorkPage() {
                 </span>
               </button>
             ))}
+            {docsQ.hasNextPage && (
+              <div className="p-3 text-center">
+                <Button type="button" size="sm" variant="outline"
+                  disabled={docsQ.isFetchingNextPage}
+                  onClick={() => docsQ.fetchNextPage()}>
+                  {docsQ.isFetchingNextPage ? 'Загрузка…' : 'Показать ещё'}
+                </Button>
+              </div>
+            )}
             {docsQ.isSuccess && docs.length === 0 && <Empty>Документов пока нет</Empty>}
           </Card>
         )}

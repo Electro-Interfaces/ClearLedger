@@ -245,6 +245,7 @@ export interface DocFilters {
   q?: string
   mine?: boolean
   limit?: number
+  offset?: number
 }
 
 /** Состояния документа: имя для человека и тон плашки. */

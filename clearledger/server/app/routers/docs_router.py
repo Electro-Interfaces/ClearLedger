@@ -727,6 +727,7 @@ async def list_docs(
     q: str | None = Query(None),
     mine: bool = Query(False),
     limit: int = Query(200, ge=1, le=_LIST_LIMIT),
+    offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -775,7 +776,7 @@ async def list_docs(
                               DocCard.counterparty_name.ilike(like),
                               version_match))
     stmt = stmt.order_by(DocCard.reg_date.desc().nullslast(),
-                         DocCard.created_at.desc()).limit(limit)
+                         DocCard.created_at.desc()).offset(offset).limit(limit)
     rows = await _readable_docs(db, cid, (await db.execute(stmt)).scalars().all(),
                                 current_user)
     names = dict((await db.execute(select(DocKind.id, DocKind.name).where(
