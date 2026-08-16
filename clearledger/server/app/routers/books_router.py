@@ -288,12 +288,18 @@ async def profile(
         volumes[key] = int((await db.execute(text(
             "SELECT count(*) FROM %s WHERE company_id = :cid" % table), p)).scalar_one() or 0)
 
-    money = (await db.execute(text("""
-        SELECT coalesce(sum(amount) FILTER (WHERE account_kt = :kt), 0),
-               coalesce(sum(amount) FILTER (WHERE account_dt LIKE '90.02%'
-                                              OR account_dt LIKE '90.07%'
-                                              OR account_dt LIKE '90.08%'), 0)
-          FROM gl_entries WHERE company_id = :cid"""), {**p, "kt": REVENUE_KT})).one()
+    # Итоги берём У «ОБЗОРА», а не считаем своей формулой. Своя уже разошлась: она
+    # складывала 90.02, 90.07 и 90.08 (всё, что списано на финрезультат) и называла
+    # это себестоимостью — у НПК получалось на 57 млн больше, чем в «Обзоре» и ОФР,
+    # где себестоимость это 90.02. Одна цифра — один расчёт.
+    ov = await overview(company_id, db, current_user)
+
+    active_cp = int((await db.execute(text("""
+        SELECT count(*) FROM counterparties k
+         WHERE k.company_id = :cid
+           AND (EXISTS (SELECT 1 FROM accounting_docs d WHERE d.counterparty_id = k.id)
+             OR EXISTS (SELECT 1 FROM gl_balances b WHERE b.counterparty_id = k.id))"""),
+        p)).scalar_one() or 0)
 
     # Качество берём у ЭКРАНА качества, а не считаем заново: две реализации одной
     # проверки разойдутся на первой же правке, и паспорт начнёт спорить с экраном.
@@ -314,7 +320,12 @@ async def profile(
             "periodsClosed": per[0], "periodsTotal": per[1], "lastClosed": per[2],
         },
         "volumes": volumes,
-        "totals": {"revenue": _num(money[0]), "cost": _num(money[1])},
+        # Контрагентов в справочнике больше, чем в списке «Контрагенты»: там только
+        # те, у кого есть документы или сальдо. Обе цифры рядом, чтобы разница не
+        # выглядела расхождением.
+        "activeCounterparties": active_cp,
+        "totals": {"revenue": ov["revenue"], "revenueNet": ov["revenueNet"],
+                   "vat": ov["vat"], "cost": ov["cost"], "grossProfit": ov["grossProfit"]},
         "quality": {
             "checks": len(checks), "problems": len(bad),
             "worst": [{"key": c["key"], "label": c["label"], "value": c["value"]}
@@ -334,7 +345,19 @@ async def overview(
 
     revenue = await _turnover(db, cid, kt=REVENUE_KT)
     vat = await _turnover(db, cid, dt=VAT_DT, kt=VAT_KT)
-    cost = await _turnover(db, cid, dt=COST_DT)
+    # Себестоимость — 90.02 БЕЗ списаний с 25 и 26: при директ-костинге общехозяйственные
+    # расходы закрываются прямо на 90.02, и отчёт о результате относит их в
+    # «Управленческие», а не в себестоимость. Пока сводка считала весь оборот 90.02,
+    # две «себестоимости» продукта расходились: у ПРОМИЗОЛ на 954 294,94 ₽.
+    money = (await db.execute(text("""
+        SELECT coalesce(sum(amount) FILTER (
+                 WHERE account_kt NOT LIKE '25%' AND account_kt NOT LIKE '26%'), 0),
+               coalesce(sum(amount) FILTER (
+                 WHERE account_kt LIKE '25%' OR account_kt LIKE '26%'), 0)
+          FROM gl_entries
+         WHERE company_id = :cid AND account_dt LIKE '90.02%'"""),
+        {"cid": str(cid)})).one()
+    cost, admin_cost = _num(money[0]), _num(money[1])
 
     years = [
         {"year": y, "revenue": _num(a)}
@@ -361,7 +384,10 @@ async def overview(
         "vat": vat,
         "revenueNet": revenue - vat,
         "cost": cost,
-        "grossProfit": revenue - vat - cost,
+        # Общехозяйственные, закрытые прямо на 90.02: не себестоимость, но и не ноль —
+        # без этой строки цифра просто исчезала бы из сводки.
+        "adminCost": admin_cost,
+        "grossProfit": round(revenue - vat - cost, 2),
         "entries": entries,
         "firstEntry": first.isoformat() if first else None,
         "lastEntry": last.isoformat() if last else None,
@@ -8278,3 +8304,213 @@ async def delete_patent(
         {"id": patent_id, "cid": str(cid)})
     await db.commit()
     return {"ok": True}
+
+
+@router.get("/tax-schedule")
+async def tax_schedule(
+    company_id: str,
+    organization_id: str | None = Query(None),
+    year: int | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Сроки уплаты и отчётности, вытекающие из режима организации.
+
+    Это не замена календарю из 1С, а дополнение к нему: тот показывает задачи,
+    заведённые бухгалтером, а этот — обязанности, которые следуют из режима и
+    существуют независимо от того, вспомнил о них человек или нет.
+    """
+    cid = await assert_company_member(company_id, current_user, db)
+    oid = organization_id or _org_param()
+    y = year or date.today().year
+
+    if not oid:
+        return {"year": y, "organization": None, "items": [],
+                "note": "Выберите организацию: сроки зависят от её режима."}
+
+    org = (await db.execute(text("""
+        SELECT id, name, legal_form FROM organizations
+         WHERE id = CAST(:oid AS uuid) AND company_id = CAST(:cid AS uuid)"""),
+        {"oid": oid, "cid": str(cid)})).first()
+    if org is None:
+        raise HTTPException(status_code=404, detail="Организация не найдена")
+
+    reg = await tax_regime.regime_of(db, str(cid), str(oid), date(y, 12, 31))
+    if reg is None:
+        return {"year": y, "organization": {"name": org.name}, "items": [],
+                "note": "Режим не указан — сроки не выводятся. Укажите систему "
+                        "налогообложения в карточке организации."}
+
+    codes = [reg.code] + list(reg.combined)
+    rows = (await db.execute(text("""
+        SELECT regime_code, kind, title, period, day, month_offset, note, sort
+          FROM tax_deadlines
+         WHERE (regime_code = ANY(:codes) OR regime_code IS NULL)
+           AND (legal_form IS NULL OR legal_form = :form)
+         ORDER BY sort"""),
+        {"codes": codes, "form": org.legal_form or "legal"})).all()
+
+    today = date.today()
+    items: list[dict[str, Any]] = []
+    for r in rows:
+        # Из шаблона строим конкретные даты года: у месячного срока их двенадцать,
+        # у квартального четыре, у годового одна.
+        starts = (range(1, 13) if r.period == "month"
+                  else [3, 6, 9, 12] if r.period == "quarter" else [12])
+        for m in starts:
+            # Смещение отсчитывается от конца периода: декларация УСН за год
+            # сдаётся в марте следующего, аванс — в месяце после квартала.
+            month = m + r.month_offset
+            yy, mm = (y + (month - 1) // 12, (month - 1) % 12 + 1)
+            try:
+                due = date(yy, mm, min(r.day, 28))
+            except ValueError:
+                continue
+            items.append({
+                "due": due.isoformat(),
+                "title": r.title,
+                "kind": r.kind,
+                "regime": r.regime_code,
+                "note": r.note,
+                "state": ("прошёл" if due < today
+                          else "на этой неделе" if (due - today).days <= 7
+                          else "впереди"),
+            })
+
+    items.sort(key=lambda x: x["due"])
+    ahead = [i for i in items if i["state"] != "прошёл"]
+
+    # Взносы ИП: сумма к уплате известна заранее и влияет на налог, поэтому
+    # выводится рядом со сроками, а не отдельным разделом.
+    contrib = None
+    if (org.legal_form or "") == "ip":
+        income = float((await db.execute(text("""
+            SELECT coalesce(sum(amount) FILTER (WHERE account_kt LIKE '90.01%'), 0)
+              FROM gl_entries
+             WHERE organization_id = CAST(:oid AS uuid) AND period_year = :y"""),
+            {"oid": str(oid), "y": y})).scalar() or 0)
+        contrib = await tax_regime.contributions_of(db, str(cid), str(oid), y, income)
+
+    return {
+        "year": y,
+        "organization": {"id": str(org.id), "name": org.name,
+                         "legalForm": org.legal_form},
+        "regime": {"code": reg.code, "short": reg.short_name,
+                   "combined": reg.combined},
+        "items": items,
+        "next": ahead[0] if ahead else None,
+        "contributions": contrib,
+    }
+
+
+class ContributionIn(BaseModel):
+    kind: str = "fixed"          # fixed · extra · employees
+    amount: float
+    paid_on: str
+    year: int
+    note: str | None = None
+
+
+@router.get("/organizations/{organization_id}/contributions")
+async def organization_contributions(
+    organization_id: str,
+    company_id: str,
+    year: int | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Взносы ИП: сколько должен по закону, что уплачено, чем уменьшается налог."""
+    cid = await assert_company_member(company_id, current_user, db)
+    y = year or date.today().year
+
+    income = float((await db.execute(text("""
+        SELECT coalesce(sum(amount) FILTER (WHERE account_kt LIKE '90.01%'), 0)
+          FROM gl_entries
+         WHERE organization_id = CAST(:oid AS uuid) AND period_year = :y"""),
+        {"oid": organization_id, "y": y})).scalar() or 0)
+
+    due = await tax_regime.contributions_of(db, str(cid), organization_id, y, income)
+
+    payments = [{
+        "id": str(r.id), "kind": r.kind, "amount": float(r.amount),
+        "paidOn": r.paid_on.isoformat(), "year": r.year, "note": r.note,
+    } for r in (await db.execute(text("""
+        SELECT id, kind, amount, paid_on, year, note
+          FROM ip_contribution_payments
+         WHERE organization_id = CAST(:oid AS uuid) AND year = :y
+         ORDER BY paid_on DESC"""), {"oid": organization_id, "y": y})).all()]
+
+    return {"year": y, "income": income, "due": due, "payments": payments}
+
+
+@router.post("/organizations/{organization_id}/contributions")
+async def add_contribution(
+    organization_id: str,
+    company_id: str,
+    body: ContributionIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Записать уплаченный взнос. Уменьшает налог с даты платежа, а не начисления."""
+    cid = await assert_company_member(company_id, current_user, db)
+    await db.execute(text("""
+        INSERT INTO ip_contribution_payments
+            (company_id, organization_id, kind, amount, paid_on, year, note)
+        VALUES (CAST(:cid AS uuid), CAST(:oid AS uuid), :kind, :amount,
+                CAST(:paid AS date), :year, :note)"""),
+        {"cid": str(cid), "oid": organization_id, "kind": body.kind,
+         "amount": body.amount, "paid": date.fromisoformat(body.paid_on),
+         "year": body.year, "note": body.note})
+    await db.commit()
+    return {"ok": True}
+
+
+@router.delete("/contributions/{payment_id}")
+async def delete_contribution(
+    payment_id: str,
+    company_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Удалить ошибочно введённый платёж."""
+    cid = await assert_company_member(company_id, current_user, db)
+    await db.execute(text("""
+        DELETE FROM ip_contribution_payments
+         WHERE id = CAST(:id AS uuid) AND company_id = CAST(:cid AS uuid)"""),
+        {"id": payment_id, "cid": str(cid)})
+    await db.commit()
+    return {"ok": True}
+
+
+# ── Региональные ставки ─────────────────────────────────────────────────────
+
+
+@router.get("/tax-region-rates")
+async def tax_region_rates(
+    company_id: str,
+    regime_code: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Льготные ставки субъектов РФ: что выбрать вместо федеральной.
+
+    Список заведомо неполный — регионы меняют ставки своими законами, и держать
+    все 89 субъектов в актуальном виде нельзя. Поэтому список подсказывает, а
+    ввести можно любую ставку руками.
+    """
+    await assert_company_member(company_id, current_user, db)
+    rows = (await db.execute(text("""
+        SELECT region_code, region_name, regime_code, rate, condition, valid_from,
+               valid_to, note
+          FROM tax_region_rates
+         -- CAST обязателен: asyncpg не выводит тип параметра из «IS NULL» и
+         -- падает с «could not determine data type of parameter».
+         WHERE (CAST(:code AS text) IS NULL OR regime_code = CAST(:code AS text))
+           AND (valid_to IS NULL OR valid_to >= CURRENT_DATE)
+         ORDER BY region_name, regime_code"""), {"code": regime_code})).all()
+    return {"rates": [{
+        "regionCode": r.region_code, "region": r.region_name,
+        "regime": r.regime_code, "rate": float(r.rate),
+        "condition": r.condition, "from": r.valid_from.isoformat(),
+        "note": r.note,
+    } for r in rows]}

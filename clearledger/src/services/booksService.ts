@@ -13,6 +13,8 @@ export interface BooksOverview {
   vat: number
   revenueNet: number
   cost: number
+  /** Общехозяйственные, закрытые прямо на 90.02 (директ-костинг): не себестоимость. */
+  adminCost?: number
   grossProfit: number
   entries: number
   firstEntry: string | null
@@ -112,6 +114,29 @@ export interface SliceData {
   }[]
   topItems: { code: string | null; name: string; amount: number; qty: number }[]
 }
+
+/** Паспорт компании: с чего начинается разбор — что за компания и что загружено. */
+export interface CompanyProfile {
+  company: { name: string; slug: string; inn: string | null }
+  organizations: { name: string; inn: string | null; docs: number }[]
+  /** «УСН», «ОСНО», «УСН + патент»; null — налог с дохода не начислялся. */
+  taxMode: string | null
+  vat: boolean
+  /** Комиссионная торговля: выручка чужого товара на 90.01.1 не попадает. */
+  commission: boolean
+  data: {
+    from: string | null; to: string | null; entries: number
+    balanceAsOf: string | null
+    periodsClosed: number; periodsTotal: number; lastClosed: string | null
+  }
+  volumes: Record<string, number>
+  activeCounterparties: number
+  totals: { revenue: number; revenueNet: number; vat: number; cost: number; grossProfit: number }
+  quality: { checks: number; problems: number; worst: { key: string; label: string; value: unknown }[] }
+}
+
+export const getCompanyProfile = (companyId: string) =>
+  get<CompanyProfile>(`/api/books/profile?company_id=${companyId}`)
 
 export const getBooksOverview = (companyId: string) =>
   get<BooksOverview>(`/api/books/overview?company_id=${companyId}`)

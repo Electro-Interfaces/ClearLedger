@@ -20,7 +20,8 @@ import { useCompany } from '@/contexts/CompanyContext'
 import { QueryError } from '@/components/common/QueryError'
 import { Card, CardContent } from '@/components/ui/card'
 import { MetricTile } from '@/components/ui/metric-tile'
-import { getDataset, getQuality, getSources, type QualityCheck } from '@/services/booksService'
+import { getCompanyProfile, getDataset, getQuality, getSources, type QualityCheck }
+  from '@/services/booksService'
 import { getSpaceDataModel } from '@/services/spaceObjectsService'
 import { CentralPanelLayout, type CentralMenuItem } from './CentralPanelLayout'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -156,6 +157,76 @@ function DatasetTab({ dsKey }: { dsKey: string }) {
   )
 }
 
+/**
+ * Паспорт компании — то же, что читает агент первым навыком.
+ *
+ * Стоит над источниками, потому что отвечает на вопрос, который человек задаёт
+ * раньше остальных: что за компания, какой режим, за какой период данные и чему
+ * верить. Свой запрос, а не сборка из чужих ответов: одна цифра — один расчёт.
+ */
+function ProfileCard() {
+  const { companyId } = useCompany()
+  const q = useQuery({ queryKey: ['books', 'profile', companyId],
+    queryFn: () => getCompanyProfile(companyId), enabled: !!companyId })
+  if (!q.data) return null
+  const d = q.data
+  const ru = (iso: string | null) => (iso ? new Date(iso + 'T00:00:00').toLocaleDateString('ru') : '—')
+
+  return (
+    <Card>
+      <CardContent className="p-4 space-y-3">
+        <div className="flex items-baseline justify-between gap-3 flex-wrap">
+          <div>
+            <div className="font-medium">{d.company.name}</div>
+            <div className="text-xs text-muted-foreground">
+              ИНН {d.company.inn ?? '—'}
+              {d.organizations.length > 1 && <> · юрлиц в учёте: {d.organizations.length}</>}
+            </div>
+          </div>
+          <div className="flex items-center gap-2 text-xs">
+            {d.taxMode && (
+              <span className="rounded-full border px-2 py-0.5">{d.taxMode}</span>
+            )}
+            <span className="rounded-full border px-2 py-0.5">
+              {d.vat ? 'с НДС' : 'без НДС'}
+            </span>
+            {d.commission && (
+              <span className="rounded-full border px-2 py-0.5" title={
+                'Часть продаж — товар комитента: покупателю выставлен наш документ, ' +
+                'а выручка чужая и на 90.01.1 не попадает'}>
+                комиссионная торговля
+              </span>
+            )}
+          </div>
+        </div>
+
+        <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
+          <MetricTile label="Данные за период"
+            value={`${ru(d.data.from)} — ${ru(d.data.to)}`}
+            hint={`${num.format(d.data.entries)} проводок`} />
+          <MetricTile label="Периодов закрыто"
+            value={`${d.data.periodsClosed} из ${d.data.periodsTotal}`}
+            hint={d.data.lastClosed ? `последний — ${ru(d.data.lastClosed)}` : 'закрытых нет'} />
+          <MetricTile label="Остатки на дату" value={ru(d.data.balanceAsOf)}
+            hint="срез сальдо из источника" />
+          <MetricTile label="Замечаний к данным"
+            value={`${d.quality.problems} из ${d.quality.checks}`}
+            tone={d.quality.problems ? 'warning' : 'success'}
+            hint={d.quality.worst.map((w) => w.label).slice(0, 2).join(' · ') || 'проверки сходятся'} />
+        </div>
+
+        <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
+          {Object.entries(d.volumes).map(([k, v]) => (
+            <span key={k}>{k}: <span className="tabular-nums">{num.format(v)}</span></span>
+          ))}
+          <span>контрагентов с движением: <span className="tabular-nums">
+            {num.format(d.activeCounterparties)}</span></span>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
 function SourcesTab({ onOpen }: { onOpen?: (key: string) => void }) {
   const { companyId } = useCompany()
   const q = useQuery({ queryKey: ['books', 'sources', companyId], queryFn: () => getSources(companyId) })
@@ -164,6 +235,7 @@ function SourcesTab({ onOpen }: { onOpen?: (key: string) => void }) {
 
   return (
     <div className="space-y-3">
+      <ProfileCard />
       {q.data.sources.map((s) => (
         <Card key={s.kind}>
           <CardContent className="p-4 space-y-3">
