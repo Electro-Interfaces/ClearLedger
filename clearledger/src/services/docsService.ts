@@ -17,11 +17,20 @@ export interface DocKind {
   number_template: string
   number_scope: string    // kind | kind_year | kind_org | kind_org_year
   number_prefix: string
-  fields: Array<Record<string, unknown>>
+  fields: DocKindField[]
+  route: Array<Record<string, unknown>>
   errand_type_id: string | null
   requires_registration: boolean
   is_active: boolean
   sort_order: number
+}
+
+export interface DocKindField {
+  code: string
+  label: string
+  type: 'text' | 'textarea' | 'number' | 'date' | 'boolean' | 'select'
+  options?: string[]
+  required: boolean
 }
 
 export interface DocCard {
@@ -98,8 +107,10 @@ export interface DocApprovalRow {
   round: number
   step_no: number
   step_name: string
-  status: string          // pending | approved | rejected | skipped
+  status: string          // waiting | pending | approved | rejected | skipped
   assignee_id: string | null
+  can_decide: boolean
+  snapshot_sha256: string | null
   comment: string | null
   decided_at: string | null
   due_at: string | null
@@ -114,13 +125,36 @@ export interface DocApprovalStep {
   decided: number
   total: number
   passed: boolean
+  active: boolean
   waiting: string[]
+  queued: string[]
   rejected: boolean
+}
+
+export interface DocApprovalSnapshot {
+  card: {
+    id: string
+    title: string
+    reg_number: string | null
+    current_revision: number
+    attrs: Record<string, unknown>
+  }
+  files: Array<{
+    id: string
+    file_id: string
+    role: string
+    revision: number
+    file_name: string
+    size_bytes: number
+    sha256: string
+  }>
 }
 
 export interface DocApprovalState {
   status: string          // none | pending | approved | rejected
   round: number
+  snapshot: DocApprovalSnapshot | null
+  snapshot_sha256: string | null
   steps: DocApprovalStep[]
   rows: DocApprovalRow[]
 }
@@ -134,6 +168,7 @@ export interface MyApproval {
   due_at: string | null
   doc_title: string
   doc_number: string | null
+  acting_for?: string | null
 }
 
 export interface DocCase {
@@ -176,6 +211,7 @@ export interface Substitution {
 
 export interface DocDetails extends DocCard {
   kind: DocKind | null
+  available_actions: string[]
   versions: DocVersion[]
   events: DocEvent[]
   relations: DocRelation[]
@@ -331,8 +367,14 @@ export async function createErrand(
 /** Запустить круг согласования. Без маршрута берётся маршрут вида документа. */
 export async function startApproval(
   companyId: string, id: string, route?: Array<Record<string, unknown>>,
-): Promise<{ round: number; approvals: number; steps: number }> {
+): Promise<{ round: number; approvals: number; steps: number; snapshot_sha256: string }> {
   return post(`/api/docs/${id}/approval/start`, { company_id: companyId, route: route ?? null })
+}
+
+export async function cancelApproval(
+  companyId: string, id: string, reason: string,
+): Promise<{ cancelled: number; round: number }> {
+  return post(`/api/docs/${id}/approval/cancel`, { company_id: companyId, reason })
 }
 
 /** Поставить визу. Отказ обязан нести причину: без неё автор не поймёт, что править. */

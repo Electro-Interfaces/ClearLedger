@@ -6,10 +6,14 @@
 пересчитанный задним числом.
 """
 import asyncio
+import hashlib
 import uuid
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models import User, UserCompany
 
 pytestmark = pytest.mark.asyncio(loop_scope="session")
 
@@ -151,9 +155,148 @@ async def test_отказ_возвращает_документ_и_требуе�
 
     card = (await auth_client.get(f"/api/docs/{doc['id']}",
                                   params={"company_id": cid})).json()
-    assert card["status"] == "draft", "документ не вернулся в черновики"
+    assert card["status"] == "registered", "зарегистрированный документ потерял состояние"
     assert card["reg_number"], "номер потерялся при возврате"
     assert card["approval_status"] == "rejected"
+
+
+async def test_последовательный_маршрут_не_открывает_будущий_шаг(
+        auth_client: AsyncClient):
+    cid = await _company(auth_client)
+    me = (await auth_client.get("/api/auth/me")).json()
+    memo = next(k for k in await _kinds(auth_client, cid) if k["code"] == "memo")
+    doc = (await auth_client.post("/api/docs", json={
+        "company_id": cid, "kind_id": memo["id"], "title": "Два шага",
+    })).json()
+    await auth_client.post(f"/api/docs/{doc['id']}/register", json={"company_id": cid})
+    route = [
+        {"code": "legal", "name": "Юрист", "mode": "serial", "quorum": "all",
+         "actors": [{"by": "user", "ref": me["id"]}]},
+        {"code": "director", "name": "Директор", "mode": "serial", "quorum": "all",
+         "actors": [{"by": "user", "ref": me["id"]}]},
+    ]
+    started = await auth_client.post(f"/api/docs/{doc['id']}/approval/start", json={
+        "company_id": cid, "route": route,
+    })
+    assert started.status_code == 201, started.text
+    mine = (await auth_client.get("/api/docs/approvals/mine",
+                                  params={"company_id": cid})).json()["approvals"]
+    active = [item for item in mine if item["doc_id"] == doc["id"]]
+    assert [item["step_name"] for item in active] == ["Юрист"]
+
+    decided = await auth_client.post(f"/api/docs/approvals/{active[0]['id']}", json={
+        "company_id": cid, "approved": True,
+    })
+    assert decided.status_code == 200, decided.text
+    mine = (await auth_client.get("/api/docs/approvals/mine",
+                                  params={"company_id": cid})).json()["approvals"]
+    active = [item for item in mine if item["doc_id"] == doc["id"]]
+    assert [item["step_name"] for item in active] == ["Директор"]
+
+
+async def test_кворум_any_закрывает_параллельный_шаг(
+        auth_client: AsyncClient, db: AsyncSession):
+    cid = await _company(auth_client)
+    me = (await auth_client.get("/api/auth/me")).json()
+    other = User(
+        company_id=uuid.UUID(cid), email=f"approval-{uuid.uuid4().hex}@example.org",
+        name="Второй согласующий", password_hash="!",
+    )
+    db.add(other)
+    await db.flush()
+    db.add(UserCompany(user_id=other.id, company_id=uuid.UUID(cid),
+                       role="user", modules=["docs"]))
+    await db.commit()
+    kind = next(k for k in await _kinds(auth_client, cid) if k["code"] == "doc_out")
+    doc = (await auth_client.post("/api/docs", json={
+        "company_id": cid, "kind_id": kind["id"], "title": "Кворум один из двух",
+    })).json()
+    await auth_client.post(f"/api/docs/{doc['id']}/register", json={"company_id": cid})
+    started = await auth_client.post(f"/api/docs/{doc['id']}/approval/start", json={
+        "company_id": cid,
+        "route": [{
+            "code": "owners", "name": "Владельцы", "mode": "parallel", "quorum": "any",
+            "actors": [{"by": "user", "ref": me["id"]},
+                       {"by": "user", "ref": str(other.id)}],
+        }],
+    })
+    assert started.status_code == 201, started.text
+    mine = (await auth_client.get("/api/docs/approvals/mine",
+                                  params={"company_id": cid})).json()["approvals"]
+    own = next(item for item in mine if item["doc_id"] == doc["id"])
+    decided = await auth_client.post(f"/api/docs/approvals/{own['id']}", json={
+        "company_id": cid, "approved": True,
+    })
+    assert decided.status_code == 200 and decided.json()["status"] == "approved"
+    card = (await auth_client.get(f"/api/docs/{doc['id']}",
+                                  params={"company_id": cid})).json()
+    statuses = {row["status"] for row in card["approval"]["rows"]
+                if row["round"] == card["approval_round"]}
+    assert statuses == {"approved", "skipped"}
+
+
+async def test_пакет_согласования_фиксирует_файл_и_блокирует_новую_редакцию(
+        auth_client: AsyncClient):
+    cid = await _company(auth_client)
+    me = (await auth_client.get("/api/auth/me")).json()
+    kind = next(k for k in await _kinds(auth_client, cid) if k["code"] == "order")
+    doc = (await auth_client.post("/api/docs", json={
+        "company_id": cid, "kind_id": kind["id"], "title": "Зафиксированный файл",
+    })).json()
+    body = b"%PDF-1.4\napproval-body\n"
+    uploaded = await auth_client.post(f"/api/docs/{doc['id']}/versions",
+        params={"company_id": cid, "role": "body"},
+        files={"file": ("body.pdf", body, "application/pdf")})
+    assert uploaded.status_code == 201, uploaded.text
+    await auth_client.post(f"/api/docs/{doc['id']}/register", json={"company_id": cid})
+    started = await auth_client.post(f"/api/docs/{doc['id']}/approval/start", json={
+        "company_id": cid,
+        "route": [{"code": "one", "name": "Один", "mode": "serial", "quorum": "all",
+                   "actors": [{"by": "user", "ref": me["id"]}]}],
+    })
+    assert started.status_code == 201 and len(started.json()["snapshot_sha256"]) == 64
+    card = (await auth_client.get(f"/api/docs/{doc['id']}",
+                                  params={"company_id": cid})).json()
+    assert card["approval"]["snapshot"]["files"][0]["sha256"] == hashlib.sha256(
+        body).hexdigest()
+
+    blocked = await auth_client.post(f"/api/docs/{doc['id']}/versions",
+        params={"company_id": cid, "role": "body"},
+        files={"file": ("body-v2.pdf", b"%PDF-1.4\nchanged\n", "application/pdf")})
+    assert blocked.status_code == 409
+    cancelled = await auth_client.post(f"/api/docs/{doc['id']}/approval/cancel", json={
+        "company_id": cid, "reason": "Нужна новая редакция",
+    })
+    assert cancelled.status_code == 200, cancelled.text
+
+
+async def test_обязательный_реквизит_проверяется_при_регистрации(
+        auth_client: AsyncClient):
+    cid = await _company(auth_client)
+    code = f"required_{uuid.uuid4().hex[:8]}"
+    kind = await auth_client.post("/api/docs/kinds", json={
+        "company_id": cid, "code": code, "name": "Документ с суммой",
+        "fields": [{"code": "amount", "label": "Сумма", "type": "number",
+                    "required": True}],
+    })
+    assert kind.status_code == 201, kind.text
+    doc = (await auth_client.post("/api/docs", json={
+        "company_id": cid, "kind_id": kind.json()["id"], "title": "Без суммы",
+    })).json()
+    missing = await auth_client.post(f"/api/docs/{doc['id']}/register",
+                                     json={"company_id": cid})
+    assert missing.status_code == 409
+    wrong = await auth_client.post(f"/api/docs/{doc['id']}/action", json={
+        "company_id": cid, "attrs": {"amount": "сто"},
+    })
+    assert wrong.status_code == 400
+    fixed = await auth_client.post(f"/api/docs/{doc['id']}/action", json={
+        "company_id": cid, "attrs": {"amount": 100},
+    })
+    assert fixed.status_code == 200, fixed.text
+    registered = await auth_client.post(f"/api/docs/{doc['id']}/register",
+                                        json={"company_id": cid})
+    assert registered.status_code == 200, registered.text
 
 
 async def test_ссылка_наружу_только_после_регистрации(auth_client: AsyncClient):

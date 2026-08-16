@@ -12,6 +12,8 @@
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -20,7 +22,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
-    CompanyRole, Department, DocApproval, DocCard, DocEvent, User, UserCompany,
+    CompanyRole, Department, DocApproval, DocCard, DocEvent, DocVersion, User,
+    UserCompany,
 )
 
 # Из чего резолвится согласующий. Незнакомый способ отбрасывается санитайзером:
@@ -94,9 +97,11 @@ async def resolve_actors(db: AsyncSession, cid: uuid.UUID,
         by, ref = a.get("by"), a.get("ref")
         if by == "user":
             try:
-                add("user", ref, uuid.UUID(ref))
+                uid = uuid.UUID(ref)
             except (ValueError, TypeError):
                 continue
+            if await db.get(UserCompany, (uid, cid)) is not None:
+                add("user", ref, uid)
         elif by == "head_of":
             try:
                 dep = await db.get(Department, uuid.UUID(ref))
@@ -156,6 +161,21 @@ async def active_deputy_for(db: AsyncSession, cid: uuid.UUID,
     return list(rows)
 
 
+async def active_principals_for(db: AsyncSession, cid: uuid.UUID,
+                                deputy_id: uuid.UUID, on_date=None) -> list[uuid.UUID]:
+    """Кого этот человек сегодня официально замещает."""
+    from app.models import UserSubstitution
+
+    day = on_date or datetime.now(timezone.utc).date()
+    rows = (await db.execute(select(UserSubstitution.user_id).where(
+        UserSubstitution.company_id == cid,
+        UserSubstitution.deputy_id == deputy_id,
+        UserSubstitution.is_active.is_(True),
+        UserSubstitution.starts_on <= day,
+        UserSubstitution.ends_on >= day))).scalars().all()
+    return list(rows)
+
+
 async def may_decide(db: AsyncSession, cid: uuid.UUID, row: DocApproval,
                      actor: User) -> bool:
     """Вправе ли этот человек поставить визу: сам адресат или его заместитель."""
@@ -164,6 +184,59 @@ async def may_decide(db: AsyncSession, cid: uuid.UUID, row: DocApproval,
     if row.assignee_id is None:
         return False
     return actor.id in await active_deputy_for(db, cid, row.assignee_id)
+
+
+async def _document_snapshot(db: AsyncSession, doc: DocCard) -> tuple[dict, str]:
+    """Зафиксировать реквизиты и точный набор файлов текущего документа."""
+    versions = (await db.execute(select(DocVersion).where(
+        DocVersion.doc_id == doc.id,
+        DocVersion.is_current.is_(True),
+        DocVersion.tombstoned_at.is_(None),
+    ).order_by(DocVersion.role, DocVersion.revision, DocVersion.id))).scalars().all()
+    snapshot = {
+        "card": {
+            "id": str(doc.id),
+            "kind_id": str(doc.kind_id),
+            "title": doc.title,
+            "summary": doc.summary,
+            "reg_number": doc.reg_number,
+            "reg_date": doc.reg_date.isoformat() if doc.reg_date else None,
+            "organization_id": str(doc.organization_id) if doc.organization_id else None,
+            "counterparty_id": str(doc.counterparty_id) if doc.counterparty_id else None,
+            "counterparty_name": doc.counterparty_name,
+            "external_number": doc.external_number,
+            "external_date": doc.external_date.isoformat() if doc.external_date else None,
+            "responsible_id": str(doc.responsible_id) if doc.responsible_id else None,
+            "signatory_id": str(doc.signatory_id) if doc.signatory_id else None,
+            "attrs": doc.attrs or {},
+            "current_revision": doc.current_revision,
+        },
+        "files": [{
+            "id": str(v.id),
+            "file_id": str(v.file_id),
+            "role": v.role,
+            "revision": v.revision,
+            "file_name": v.file_name,
+            "size_bytes": v.size_bytes,
+            "sha256": v.sha256,
+        } for v in versions],
+    }
+    canonical = json.dumps(
+        snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")
+    return snapshot, hashlib.sha256(canonical).hexdigest()
+
+
+def _activate(rows: list[DocApproval], now: datetime) -> int:
+    """Открыть шаг: параллельный целиком, последовательный по одному человеку."""
+    waiting = [row for row in rows if row.status == "waiting"]
+    if not waiting:
+        return 0
+    selected = waiting if rows[0].mode == "parallel" else waiting[:1]
+    for row in selected:
+        row.status = "pending"
+        row.due_at = now + timedelta(hours=row.sla_hours) if row.sla_hours else None
+    return len(selected)
 
 
 async def start(db: AsyncSession, cid: uuid.UUID, doc: DocCard, route: list[dict],
@@ -177,31 +250,49 @@ async def start(db: AsyncSession, cid: uuid.UUID, doc: DocCard, route: list[dict
     if not steps:
         return {"error": "у вида документа не задан маршрут согласования"}
 
-    round_no = (doc.approval_round or 0) + 1
-    now = datetime.now(timezone.utc)
-    created = 0
+    prepared: list[tuple[int, dict, list[tuple[str, str, uuid.UUID]]]] = []
     for i, step in enumerate(steps, start=1):
         people = await resolve_actors(db, cid, step["actors"])
         if not people:
             # Пустой шаг — не молчаливый пропуск: маршрут ссылается на роль или
             # отдел, в котором никого нет, и человек должен об этом узнать.
             return {"error": f"на шаге «{step['name']}» некому согласовывать"}
-        due = now + timedelta(hours=step["sla_hours"]) if step.get("sla_hours") else None
+        if step["quorum"].isdigit() and int(step["quorum"]) > len(people):
+            return {"error": f"на шаге «{step['name']}» кворум больше числа согласующих"}
+        prepared.append((i, step, people))
+
+    round_no = (doc.approval_round or 0) + 1
+    now = datetime.now(timezone.utc)
+    snapshot, snapshot_hash = await _document_snapshot(db, doc)
+    created = 0
+    first_step: list[DocApproval] = []
+    for i, step, people in prepared:
         for kind, ref, uid in people:
-            db.add(DocApproval(
+            row = DocApproval(
                 company_id=cid, doc_id=doc.id, round=round_no, step_no=i,
                 step_code=step["code"], step_name=step["name"], mode=step["mode"],
                 quorum=step["quorum"], actor_kind=kind, actor_ref=ref,
-                assignee_id=uid, required=step["required"], due_at=due))
+                assignee_id=uid, required=step["required"], status="waiting",
+                sla_hours=step.get("sla_hours"), document_snapshot=snapshot,
+                snapshot_sha256=snapshot_hash)
+            db.add(row)
+            if i == 1:
+                first_step.append(row)
             created += 1
+
+    _activate(first_step, now)
 
     doc.approval_round = round_no
     doc.approval_status = "pending"
     db.add(DocEvent(doc_id=doc.id, kind="approval", user_id=actor.id,
                     actor_name=actor.name or actor.email,
-                    to_value=f"круг {round_no}", note=f"согласующих: {created}"))
+                    to_value=f"круг {round_no}",
+                    note=f"согласующих: {created}; пакет: {snapshot_hash[:12]}"))
     await db.flush()
-    return {"round": round_no, "approvals": created, "steps": len(steps)}
+    return {
+        "round": round_no, "approvals": created, "steps": len(steps),
+        "snapshot_sha256": snapshot_hash,
+    }
 
 
 def step_passed(rows: list[DocApproval]) -> bool:
@@ -209,12 +300,13 @@ def step_passed(rows: list[DocApproval]) -> bool:
     if not rows:
         return True
     quorum = rows[0].quorum
-    approved = sum(1 for r in rows if r.status == "approved")
+    participants = [row for row in rows if row.required] or rows
+    approved = sum(1 for r in participants if r.status == "approved")
     if quorum == "any":
         return approved >= 1
     if quorum.isdigit():
         return approved >= int(quorum)
-    return all(r.status in ("approved", "skipped") for r in rows)
+    return all(r.status == "approved" for r in participants)
 
 
 async def decide(db: AsyncSession, cid: uuid.UUID, doc: DocCard, row: DocApproval,
@@ -253,26 +345,58 @@ async def decide(db: AsyncSession, cid: uuid.UUID, doc: DocCard, row: DocApprova
         # пока остальные ещё смотрят, значит согласовывать уже неактуальное.
         pend = (await db.execute(select(DocApproval).where(
             DocApproval.doc_id == doc.id, DocApproval.round == row.round,
-            DocApproval.status == "pending"))).scalars().all()
+            DocApproval.status.in_(("pending", "waiting"))))).scalars().all()
         for p in pend:
             p.status = "skipped"
         doc.approval_status = "rejected"
-        if doc.status == "registered":
-            doc.status = "draft"
         await db.flush()
         return {"status": "rejected", "returned": True}
 
     rows = (await db.execute(select(DocApproval).where(
         DocApproval.doc_id == doc.id,
-        DocApproval.round == row.round))).scalars().all()
-    left = [r for r in rows if r.status == "pending"]
-    if not left:
+        DocApproval.round == row.round).order_by(
+            DocApproval.step_no, DocApproval.created_at, DocApproval.id))).scalars().all()
+    current = [item for item in rows if item.step_no == row.step_no]
+    if step_passed(current):
+        for item in current:
+            if item.status in ("pending", "waiting"):
+                item.status = "skipped"
+        next_no = next((item.step_no for item in rows if item.step_no > row.step_no), None)
+        if next_no is None:
+            doc.approval_status = "approved"
+        else:
+            _activate([item for item in rows if item.step_no == next_no],
+                      datetime.now(timezone.utc))
+    elif row.mode == "serial":
+        _activate(current, datetime.now(timezone.utc))
+
+    left = [item for item in rows if item.status == "pending"]
+    if doc.approval_status == "approved":
         doc.approval_status = "approved"
         db.add(DocEvent(doc_id=doc.id, kind="approval", user_id=actor.id,
                         actor_name=actor.name or actor.email,
                         to_value="круг пройден"))
     await db.flush()
-    return {"status": "approved", "left": len(left)}
+    return {"status": doc.approval_status, "left": len(left)}
+
+
+async def cancel(db: AsyncSession, doc: DocCard, actor: User,
+                 reason: str) -> dict[str, Any]:
+    """Остановить живой круг с явной причиной, не стирая его историю."""
+    rows = (await db.execute(select(DocApproval).where(
+        DocApproval.doc_id == doc.id,
+        DocApproval.round == doc.approval_round,
+        DocApproval.status.in_(("pending", "waiting")),
+    ))).scalars().all()
+    for row in rows:
+        row.status = "skipped"
+    doc.approval_status = "none"
+    db.add(DocEvent(
+        doc_id=doc.id, kind="approval", user_id=actor.id,
+        actor_name=actor.name or actor.email, to_value="круг отменён", note=reason,
+    ))
+    await db.flush()
+    return {"cancelled": len(rows), "round": doc.approval_round}
 
 
 def progress(rows: list[DocApproval]) -> list[dict[str, Any]]:
@@ -292,10 +416,12 @@ def progress(rows: list[DocApproval]) -> list[dict[str, Any]]:
             "name": group[0].step_name,
             "mode": group[0].mode,
             "quorum": group[0].quorum,
-            "decided": sum(1 for r in group if r.status != "pending"),
+            "decided": sum(1 for r in group if r.status in ("approved", "rejected")),
             "total": len(group),
             "passed": step_passed(group),
+            "active": any(r.status == "pending" for r in group),
             "waiting": [str(r.assignee_id) for r in group if r.status == "pending"],
+            "queued": [str(r.assignee_id) for r in group if r.status == "waiting"],
             "rejected": any(r.status == "rejected" for r in group),
         })
     return out

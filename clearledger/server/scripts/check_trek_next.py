@@ -18,7 +18,9 @@ from app.models import (
     MailMessage, User, UserCompany,
 )
 from app.routers import docs_router
-from app.services import doc_exchange, file_store, mail_routing, task_scheduler
+from app.services import (
+    doc_approvals, doc_exchange, file_store, mail_routing, task_scheduler,
+)
 
 
 async def main() -> None:
@@ -57,10 +59,16 @@ async def main() -> None:
                 "SELECT to_regclass('idx_doc_versions_text') IS NOT NULL"))
             columns = set((await db.execute(text(
                 "SELECT column_name FROM information_schema.columns "
-                "WHERE table_name IN ('doc_versions','doc_acquaints','doc_exchange_targets') "
-                "AND column_name IN ('content_text','reminded_at','scan_enabled','scan_interval_min')"
+                "WHERE table_name IN "
+                "('doc_versions','doc_acquaints','doc_exchange_targets','doc_approvals') "
+                "AND column_name IN "
+                "('content_text','reminded_at','scan_enabled','scan_interval_min',"
+                "'sla_hours','document_snapshot','snapshot_sha256')"
             ))).scalars().all())
-            assert columns == {"content_text", "reminded_at", "scan_enabled", "scan_interval_min"}
+            assert columns == {
+                "content_text", "reminded_at", "scan_enabled", "scan_interval_min",
+                "sla_hours", "document_snapshot", "snapshot_sha256",
+            }
 
             owner = User(
                 company_id=cid, email=f"{uuid.uuid4().hex}@check.invalid",
@@ -76,9 +84,10 @@ async def main() -> None:
             )
             db.add_all([owner, person, kind])
             await db.flush()
-            db.add(UserCompany(
-                user_id=person.id, company_id=cid, role="user", modules=["docs"],
-            ))
+            db.add_all([
+                UserCompany(user_id=owner.id, company_id=cid, role="admin", modules=["docs"]),
+                UserCompany(user_id=person.id, company_id=cid, role="user", modules=["docs"]),
+            ])
 
             private_doc = DocCard(
                 company_id=cid, kind_id=kind.id, kind_code=kind.code,
@@ -93,6 +102,47 @@ async def main() -> None:
             )
             db.add_all([private_doc, report_doc])
             await db.flush()
+
+            workflow_doc = DocCard(
+                company_id=cid, kind_id=kind.id, kind_code=kind.code,
+                family=kind.family, direction=kind.direction,
+                title=f"{marker}-маршрут", status="registered",
+                reg_number=f"ЧЕК-{uuid.uuid4().hex[:12]}", reg_date=now.date(),
+                author_id=owner.id, signatory_id=owner.id,
+            )
+            db.add(workflow_doc)
+            await db.flush()
+            workflow_body = marker.encode()
+            db.add(DocVersion(
+                company_id=cid, doc_id=workflow_doc.id, revision=1, role="body",
+                file_id=uuid.uuid4(), file_name="маршрут.txt", mime="text/plain",
+                size_bytes=len(workflow_body), sha256=hashlib.sha256(workflow_body).hexdigest(),
+                content_text=marker,
+            ))
+            await db.flush()
+            route = [
+                {"code": "first", "name": "Первый", "mode": "serial", "quorum": "all",
+                 "actors": [{"by": "user", "ref": str(owner.id)}]},
+                {"code": "second", "name": "Второй", "mode": "serial", "quorum": "all",
+                 "actors": [{"by": "user", "ref": str(owner.id)}]},
+            ]
+            started = await doc_approvals.start(db, cid, workflow_doc, route, owner)
+            assert len(started["snapshot_sha256"]) == 64
+            await db.flush()
+            workflow_rows = (await db.execute(select(DocApproval).where(
+                DocApproval.doc_id == workflow_doc.id,
+            ).order_by(DocApproval.step_no))).scalars().all()
+            assert [row.status for row in workflow_rows] == ["pending", "waiting"]
+            assert workflow_rows[0].document_snapshot["files"][0]["sha256"] == hashlib.sha256(
+                workflow_body).hexdigest()
+            await doc_approvals.decide(
+                db, cid, workflow_doc, workflow_rows[0], owner, True, None,
+            )
+            assert workflow_rows[1].status == "pending"
+            await doc_approvals.decide(
+                db, cid, workflow_doc, workflow_rows[1], owner, True, None,
+            )
+            assert workflow_doc.approval_status == "approved"
 
             extracted = await mail_routing.doc_text.extract(
                 f"содержимое {marker}".encode(), "text/plain", "проверка.txt")
@@ -115,6 +165,8 @@ async def main() -> None:
             assert found == version.id
 
             assert not await docs_router._can_doc(db, cid, private_doc, person, "read")
+            assert await docs_router._can_doc(db, cid, workflow_doc, person, "read")
+            assert not await docs_router._can_doc(db, cid, workflow_doc, person, "edit")
             db.add(DocAccessGrant(
                 company_id=cid, scope_type="doc", scope_id=private_doc.id,
                 subject_type="user", subject_id=person.id, permissions=["read", "edit"],
@@ -197,7 +249,7 @@ async def main() -> None:
                     DocInboxItem).where(DocInboxItem.target_id == target.id))
                 assert inbox_count == 2
 
-            print("OK: schema search access discipline acquaint mail exchange")
+            print("OK: schema workflow snapshot access discipline acquaint mail exchange")
             await db.rollback()
     finally:
         file_store.put = original_put

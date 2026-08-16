@@ -2696,6 +2696,11 @@ async def create_all() -> None:
             "VARCHAR(15) NOT NULL DEFAULT 'none'",
             "ALTER TABLE doc_cards ADD COLUMN IF NOT EXISTS approval_round "
             "INTEGER NOT NULL DEFAULT 0",
+            # Волна достоверности: существующая таблица виз должна научиться
+            # отличать будущий шаг от активного и хранить пакет согласования.
+            "ALTER TABLE doc_approvals ADD COLUMN IF NOT EXISTS sla_hours INTEGER",
+            "ALTER TABLE doc_approvals ADD COLUMN IF NOT EXISTS document_snapshot JSONB",
+            "ALTER TABLE doc_approvals ADD COLUMN IF NOT EXISTS snapshot_sha256 CHAR(64)",
             # Волна 4: механизмы трекера работают и с документами. Шаблон умеет
             # порождать документ, время тратится на документ, у представлений
             # появилась область. Таблицы уже существуют — значит только ALTER.

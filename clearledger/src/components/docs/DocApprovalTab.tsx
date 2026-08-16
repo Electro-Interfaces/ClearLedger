@@ -5,9 +5,12 @@
  * кто молчит. Именно этого не хватает в гибридах трекера и документооборота —
  * при параллельных визах документ висит, и непонятно, на ком.
  */
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import { CheckCircle2, CircleDashed, PlayCircle, XCircle } from 'lucide-react'
+import {
+  CheckCircle2, CircleDashed, Clock3, Copy, FileCheck2, PlayCircle, ShieldCheck,
+  XCircle,
+} from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -17,6 +20,7 @@ import type { DocDetails } from '@/services/docsService'
 import { useAuth } from '@/contexts/AuthContext'
 
 const ROW_STATUS: Record<string, { label: string; icon: typeof CheckCircle2 }> = {
+  waiting: { label: 'этап ещё не начат', icon: Clock3 },
   pending: { label: 'ждём', icon: CircleDashed },
   approved: { label: 'согласовано', icon: CheckCircle2 },
   rejected: { label: 'отказано', icon: XCircle },
@@ -31,13 +35,6 @@ export function DocApprovalTab({ doc, companyId, onChanged }: {
   const { user } = useAuth()
   const qc = useQueryClient()
   const [comment, setComment] = useState('')
-
-  const peopleQ = useQuery({
-    queryKey: ['doc-people', companyId],
-    queryFn: () => docsService.myApprovals(companyId),
-    enabled: false,
-  })
-  void peopleQ
 
   const start = useMutation({
     mutationFn: () => docsService.startApproval(companyId, doc.id),
@@ -59,12 +56,13 @@ export function DocApprovalTab({ doc, companyId, onChanged }: {
 
   const state = doc.approval
   const live = state.rows.filter((r) => r.round === state.round)
-  const mine = live.find((r) => r.status === 'pending' && r.assignee_id === user?.id)
+  const mine = live.find((r) => r.status === 'pending' && r.can_decide)
   const past = state.rows.filter((r) => r.round !== state.round)
+  const canStart = doc.available_actions.includes('start_approval')
 
   return (
     <div className="space-y-3 pt-3">
-      {state.status === 'none' && (
+      {state.status === 'none' && canStart && (
         <Card className="flex flex-wrap items-center justify-between gap-3 p-4">
           <div>
             <div className="text-sm font-medium">Согласование не запускалось</div>
@@ -79,8 +77,52 @@ export function DocApprovalTab({ doc, companyId, onChanged }: {
         </Card>
       )}
 
+      {state.snapshot && state.snapshot_sha256 && (
+        <Card className="p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="flex min-w-0 items-start gap-2.5">
+              <div className="rounded-md bg-primary/10 p-2 text-primary">
+                <ShieldCheck className="h-4 w-4" />
+              </div>
+              <div className="min-w-0">
+                <div className="text-sm font-medium">Пакет согласования зафиксирован</div>
+                <div className="mt-0.5 text-xs text-muted-foreground">
+                  Реквизиты и {state.snapshot.files.length} файл(а) · редакция{' '}
+                  {state.snapshot.card.current_revision || 'без основного файла'}
+                </div>
+                <div className="mt-1 truncate font-mono text-[11px] text-muted-foreground"
+                  title={state.snapshot_sha256}>
+                  SHA-256 {state.snapshot_sha256}
+                </div>
+              </div>
+            </div>
+            <Button size="sm" variant="ghost" onClick={() => {
+              navigator.clipboard.writeText(state.snapshot_sha256 ?? '')
+              toast.success('Хеш пакета скопирован')
+            }}>
+              <Copy className="mr-1.5 h-3.5 w-3.5" />Копировать хеш
+            </Button>
+          </div>
+          {state.snapshot.files.length > 0 && (
+            <div className="mt-3 divide-y divide-border/60 border-t border-border/60">
+              {state.snapshot.files.map((file) => (
+                <div key={file.id} className="flex items-center justify-between gap-3 py-2 text-xs">
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    <FileCheck2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    <span className="truncate">{file.file_name}</span>
+                    <span className="shrink-0 text-muted-foreground">ред. {file.revision}</span>
+                  </span>
+                  <span className="shrink-0 font-mono text-[10px] text-muted-foreground"
+                    title={file.sha256}>{file.sha256.slice(0, 12)}…</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+      )}
+
       {state.steps.map((s) => (
-        <Card key={s.step_no} className="p-4">
+        <Card key={s.step_no} className={s.active ? 'border-primary/40 p-4' : 'p-4'}>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="text-sm font-medium">
               {s.step_no}. {s.name}
@@ -91,8 +133,13 @@ export function DocApprovalTab({ doc, companyId, onChanged }: {
             </div>
             <span className={s.rejected
               ? 'rounded-md bg-destructive/10 px-1.5 py-0.5 text-xs text-destructive'
-              : 'rounded-md bg-muted px-1.5 py-0.5 text-xs'}>
-              решили {s.decided} из {s.total}
+              : s.passed
+                ? 'rounded-md bg-emerald-500/10 px-1.5 py-0.5 text-xs text-emerald-700 dark:text-emerald-300'
+                : s.active
+                  ? 'rounded-md bg-primary/10 px-1.5 py-0.5 text-xs text-primary'
+                  : 'rounded-md bg-muted px-1.5 py-0.5 text-xs text-muted-foreground'}>
+              {s.rejected ? 'возвращён' : s.passed ? 'пройден' : s.active ? 'текущий шаг' : 'ещё не начат'}
+              {' · '}{s.decided} из {s.total}
             </span>
           </div>
           <div className="mt-2 space-y-1">
@@ -107,8 +154,8 @@ export function DocApprovalTab({ doc, companyId, onChanged }: {
                       ? 'mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive'
                       : 'mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground'} />
                   <div className="min-w-0">
-                    <span className={r.assignee_id === user?.id ? 'font-medium' : ''}>
-                      {r.assignee_id === user?.id ? 'вы' : 'согласующий'}
+                    <span className={r.can_decide ? 'font-medium' : ''}>
+                      {r.assignee_id === user?.id ? 'вы' : r.can_decide ? 'вы как заместитель' : 'согласующий'}
                     </span>
                     <span className="text-muted-foreground"> · {meta.label}</span>
                     {r.due_at && r.status === 'pending' && (
@@ -143,7 +190,7 @@ export function DocApprovalTab({ doc, companyId, onChanged }: {
         </Card>
       )}
 
-      {state.status === 'rejected' && (
+      {state.status === 'rejected' && canStart && (
         <Card className="flex flex-wrap items-center justify-between gap-3 p-4">
           <div className="text-sm">
             Документ возвращён автору. Исправьте и запустите новый круг —

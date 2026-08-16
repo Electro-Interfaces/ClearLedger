@@ -17,6 +17,7 @@
 правкой полей нельзя.
 """
 import hashlib
+import re
 import uuid
 from datetime import date as date_type, datetime, timedelta, timezone
 from typing import Any
@@ -61,6 +62,8 @@ _MIME_ALLOWED = {
 }
 _MAX_FILE_BYTES = 25 * 1024 * 1024
 _RUSSIAN_TEXT_SEARCH = literal_column("'russian'::regconfig")
+_FIELD_TYPES = {"text", "textarea", "number", "date", "boolean", "select"}
+_FIELD_CODE = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
 
 # Заготовки видов: то, что есть в любой компании. Заводятся кнопкой из раздела
 # «Виды», а не молча при первом запросе: справочник компании создаёт человек.
@@ -87,6 +90,95 @@ def _uuid_or_400(value: str, field: str) -> uuid.UUID:
         return uuid.UUID(str(value))
     except (ValueError, TypeError):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Неверный {field}")
+
+
+def _clean_fields(value: Any) -> list[dict[str, Any]]:
+    """Оставить исполнимую схему реквизитов, а не произвольный JSON."""
+    if not isinstance(value, list):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Схема реквизитов должна быть списком")
+    result: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for raw in value:
+        if not isinstance(raw, dict):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "Каждый реквизит должен быть объектом")
+        code = str(raw.get("code") or "").strip()
+        label = str(raw.get("label") or "").strip()[:120]
+        field_type = str(raw.get("type") or "text").strip()
+        if field_type == "string":
+            field_type = "text"
+        if not _FIELD_CODE.fullmatch(code):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                f"Неверный код реквизита: {code or 'пусто'}")
+        if code in seen:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                f"Реквизит {code} задан дважды")
+        if not label:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                f"У реквизита {code} нет названия")
+        if field_type not in _FIELD_TYPES:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                f"Неизвестный тип реквизита {field_type}")
+        field = {
+            "code": code, "label": label, "type": field_type,
+            "required": bool(raw.get("required", False)),
+        }
+        if field_type == "select":
+            options = [str(item).strip()[:120] for item in (raw.get("options") or [])
+                       if str(item).strip()]
+            if not options:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                    f"У списка {label} нет вариантов")
+            field["options"] = list(dict.fromkeys(options))
+        seen.add(code)
+        result.append(field)
+    return result
+
+
+def _validate_attrs(kind: DocKind, attrs: Any, *, required: bool) -> dict[str, Any]:
+    """Проверить значения по схеме вида перед регистрацией и согласованием."""
+    values = attrs or {}
+    if not isinstance(values, dict):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Реквизиты документа должны быть объектом")
+    fields = kind.fields or []
+    if not fields:
+        return values
+    allowed = {field["code"] for field in fields}
+    unknown = sorted(set(values) - allowed)
+    if unknown:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Неизвестные реквизиты: {', '.join(unknown)}")
+    for field in fields:
+        code = field["code"]
+        value = values.get(code)
+        missing = value is None or value == "" or value == []
+        if required and field.get("required") and missing:
+            raise HTTPException(status.HTTP_409_CONFLICT,
+                                f"Заполните обязательный реквизит «{field['label']}»")
+        if missing:
+            continue
+        field_type = field.get("type", "text")
+        valid = (
+            (field_type in ("text", "textarea", "select") and isinstance(value, str))
+            or (field_type == "number" and isinstance(value, (int, float))
+                and not isinstance(value, bool))
+            or (field_type == "boolean" and isinstance(value, bool))
+        )
+        if field_type == "date" and isinstance(value, str):
+            try:
+                date_type.fromisoformat(value)
+                valid = True
+            except ValueError:
+                valid = False
+        if not valid:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                f"Неверное значение реквизита «{field['label']}»")
+        if field_type == "select" and value not in (field.get("options") or []):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                f"Выберите допустимое значение «{field['label']}»")
+    return values
 
 
 async def _kind_or_404(db: AsyncSession, cid: uuid.UUID, kind_id) -> DocKind:
@@ -158,14 +250,40 @@ async def _can_doc(db: AsyncSession, cid: uuid.UUID, d: DocCard,
                 DocAcquaint.user_id == user.id,
             ).exists(),
         )))
-        return bool(assigned)
+        if assigned:
+            return True
+        principals = await doc_approvals.active_principals_for(db, cid, user.id)
+        if not principals:
+            return False
+        deputy_assignment = await db.scalar(select(DocApproval.id).where(
+            DocApproval.doc_id == d.id,
+            DocApproval.assignee_id.in_(principals),
+        ).limit(1))
+        return deputy_assignment is not None
 
-    scoped = [row for row in rows if permission in (row.permissions or [])]
-    if scoped:
-        return any(matches(row) for row in scoped)
+    granted = any(matches(row) and permission in (row.permissions or []) for row in rows)
+    membership = await db.get(UserCompany, (user.id, cid))
+    if permission == "edit":
+        return granted or user.id in {d.author_id, d.responsible_id} or bool(
+            membership and membership.role == "admin")
     if permission == "approve":
-        return True
-    return _visible(d, user)
+        assignees = (await db.execute(select(DocApproval.assignee_id).where(
+            DocApproval.doc_id == d.id,
+            DocApproval.status == "pending",
+        ))).scalars().all()
+        if granted or user.id in assignees:
+            return True
+        for assignee_id in {item for item in assignees if item}:
+            if user.id in await doc_approvals.active_deputy_for(db, cid, assignee_id):
+                return True
+        return False
+    if permission == "sign":
+        if user.id == d.signatory_id:
+            return True
+        deputies = (await doc_approvals.active_deputy_for(db, cid, d.signatory_id)
+                    if d.signatory_id else [])
+        return granted or user.id in deputies
+    return granted
 
 
 async def _assert_doc_permission(db: AsyncSession, cid: uuid.UUID, d: DocCard,
@@ -173,6 +291,39 @@ async def _assert_doc_permission(db: AsyncSession, cid: uuid.UUID, d: DocCard,
     if not await _can_doc(db, cid, d, user, permission):
         message = "Документ закрыт" if permission == "read" else "Недостаточно прав на документ"
         raise HTTPException(status.HTTP_403_FORBIDDEN, message)
+
+
+async def _available_actions(db: AsyncSession, cid: uuid.UUID, d: DocCard,
+                             kind: DocKind | None, user: User) -> list[str]:
+    actions: list[str] = []
+    can_edit = await _can_doc(db, cid, d, user, "edit")
+    can_sign = await _can_doc(db, cid, d, user, "sign")
+    if can_sign and d.signatory_id != user.id:
+        deputies = (await doc_approvals.active_deputy_for(db, cid, d.signatory_id)
+                    if d.signatory_id else [])
+        can_sign = user.id in deputies
+    if can_edit and d.status in ("draft", "registered") and d.approval_status != "pending":
+        actions.append("edit")
+    if can_edit and d.status == "draft" and not d.reg_number:
+        actions.append("register")
+    if (can_edit and kind and kind.route and d.status in ("draft", "registered")
+            and d.approval_status != "pending"
+            and (not kind.requires_registration or bool(d.reg_number))):
+        actions.append("start_approval")
+    if can_edit and d.approval_status == "pending":
+        actions.append("cancel_approval")
+    if (can_sign and d.status in ("draft", "registered")
+            and (not kind or not kind.requires_registration or bool(d.reg_number))
+            and (not kind or (not kind.route and not d.approval_round)
+                 or d.approval_status == "approved")):
+        actions.append("put_in_force")
+    if can_edit and d.status == "in_force":
+        actions.append("execute")
+    if can_edit and d.status == "executed" and d.case_id:
+        actions.append("archive")
+    if can_edit and d.status in ("draft", "registered", "in_force"):
+        actions.append("cancel")
+    return actions
 
 
 async def _readable_docs(db: AsyncSession, cid: uuid.UUID, rows: list[DocCard],
@@ -199,10 +350,12 @@ async def _readable_docs(db: AsyncSession, cid: uuid.UUID, rows: list[DocCard],
     kind_scopes = {g.scope_id for g in matching if g.scope_type == "kind"}
     visible.update(d.id for d in hidden
                    if d.id in doc_scopes or d.kind_id in kind_scopes)
+    principals = await doc_approvals.active_principals_for(db, cid, user.id)
+    assignee_ids = [user.id, *principals]
     assigned = set((await db.execute(select(DocApproval.doc_id).where(
         DocApproval.company_id == cid,
         DocApproval.doc_id.in_([d.id for d in hidden]),
-        DocApproval.assignee_id == user.id,
+        DocApproval.assignee_id.in_(assignee_ids),
     ))).scalars().all())
     assigned.update((await db.execute(select(DocAcquaint.doc_id).where(
         DocAcquaint.company_id == cid,
@@ -284,10 +437,10 @@ class KindIn(BaseModel):
     number_template: str = Field("{prefix}-{yyyy}-{n:04d}", max_length=80)
     number_scope: str = Field("kind_org_year", pattern="^(kind|kind_year|kind_org|kind_org_year)$")
     number_prefix: str = Field("", max_length=20)
-    fields: list[dict] = []
+    fields: list[dict] = Field(default_factory=list)
     # Маршрут согласования вида. Санитайзер оставляет только известные ключи:
     # иначе в JSONB копится то, что никто не читает, но все боятся удалить.
-    route: list[dict] = []
+    route: list[dict] = Field(default_factory=list)
     default_case_id: str | None = None
     errand_type_id: str | None = None
     requires_registration: bool = True
@@ -324,7 +477,7 @@ async def create_kind(
         description=payload.description, family=payload.family,
         direction=payload.direction, number_template=payload.number_template,
         number_scope=payload.number_scope, number_prefix=payload.number_prefix,
-        fields=payload.fields or None,
+        fields=_clean_fields(payload.fields) or None,
         route=doc_approvals.clean_route(payload.route) or None,
         default_case_id=_uuid_or_400(payload.default_case_id, "default_case_id")
         if payload.default_case_id else None,
@@ -352,7 +505,7 @@ async def update_kind(
                   "number_scope", "number_prefix", "requires_registration",
                   "is_active", "sort_order"):
         setattr(k, field, getattr(payload, field))
-    k.fields = payload.fields or None
+    k.fields = _clean_fields(payload.fields) or None
     k.route = doc_approvals.clean_route(payload.route) or None
     k.default_case_id = (_uuid_or_400(payload.default_case_id, "default_case_id")
                          if payload.default_case_id else None)
@@ -646,7 +799,7 @@ class DocIn(BaseModel):
     signatory_id: str | None = None
     due_at: datetime | None = None
     confidentiality: str = Field("company", pattern="^(company|private)$")
-    attrs: dict = {}
+    attrs: dict = Field(default_factory=dict)
     source: str = Field("manual", pattern="^(manual|intake|mail|chat|edo|api)$")
     source_ref: str | None = None
 
@@ -661,6 +814,7 @@ async def create_doc(
     и черновик обязан отличаться от зарегистрированного документа."""
     cid = await assert_company_product(payload.company_id, current_user, db, "docs")
     kind = await _kind_or_404(db, cid, payload.kind_id)
+    attrs = _validate_attrs(kind, payload.attrs, required=False)
 
     name = payload.counterparty_name.strip()
     if payload.counterparty_id and not name:
@@ -687,7 +841,7 @@ async def create_doc(
         signatory_id=_uuid_or_400(payload.signatory_id, "signatory_id")
         if payload.signatory_id else None,
         due_at=payload.due_at, confidentiality=payload.confidentiality,
-        attrs=payload.attrs or None, source=payload.source, source_ref=payload.source_ref)
+        attrs=attrs or None, source=payload.source, source_ref=payload.source_ref)
     db.add(d)
     await db.flush()
     db.add(DocEvent(doc_id=d.id, kind="created", user_id=current_user.id,
@@ -724,8 +878,13 @@ async def register_doc(
     if d.reg_number:
         raise HTTPException(status.HTTP_409_CONFLICT,
                             f"Документ уже зарегистрирован под номером {d.reg_number}")
+    if d.approval_status == "pending":
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Во время согласования реквизиты зафиксированы. "
+                            "Сначала отмените круг")
 
     kind = await _kind_or_404(db, cid, d.kind_id)
+    _validate_attrs(kind, d.attrs, required=True)
     on_date = payload.reg_date or datetime.now(timezone.utc).date()
 
     if payload.reg_number:
@@ -747,6 +906,8 @@ async def register_doc(
     d.registered_by = current_user.id
     if d.status == "draft":
         d.status = "registered"
+    if d.approval_status in ("approved", "rejected"):
+        d.approval_status = "none"
 
     # Дело и срок хранения фиксируются ЗДЕСЬ и больше не пересчитываются: правка
     # справочника сроков не должна задним числом делать вчерашние документы
@@ -793,6 +954,34 @@ class ActionIn(BaseModel):
     note: str | None = None
 
 
+_STATUS_TRANSITIONS = {
+    "draft": {"in_force", "cancelled"},
+    "registered": {"in_force", "cancelled"},
+    "in_force": {"executed", "cancelled"},
+    "executed": {"archived"},
+    "archived": set(),
+    "cancelled": set(),
+}
+
+
+async def _assert_signatory_identity(db: AsyncSession, cid: uuid.UUID,
+                                     d: DocCard, user: User) -> None:
+    if d.signatory_id is None:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Назначьте подписанта документа")
+    if user.id == d.signatory_id:
+        return
+    deputies = await doc_approvals.active_deputy_for(db, cid, d.signatory_id)
+    if user.id not in deputies:
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Ввести документ в действие может только назначенный "
+                            "подписант или его действующий заместитель")
+
+
+def _material_action_fields(payload: ActionIn) -> set[str]:
+    return set(payload.model_fields_set) - {"company_id", "note", "status"}
+
+
 @router.post("/{doc_id}/action")
 async def doc_action(
     doc_id: str,
@@ -805,15 +994,45 @@ async def doc_action(
     след, иначе половина изменений остаётся без автора."""
     cid = await assert_company_product(payload.company_id, current_user, db, "docs")
     d = await _doc_or_404(db, cid, doc_id)
-    await _assert_doc_permission(db, cid, d, current_user, "edit")
-    if payload.status == "in_force":
+    material_fields = _material_action_fields(payload)
+    if payload.status == "in_force" and not material_fields:
         await _assert_doc_permission(db, cid, d, current_user, "sign")
+    else:
+        await _assert_doc_permission(db, cid, d, current_user, "edit")
+    if payload.status and material_fields:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Смена состояния и правка реквизитов выполняются отдельно")
+    if material_fields and d.status not in ("draft", "registered"):
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Действующий или закрытый документ изменяют новой редакцией")
+    if material_fields and d.approval_status == "pending":
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Во время согласования реквизиты зафиксированы. "
+                            "Сначала отмените круг")
     who = current_user.name or current_user.email
+    kind = await _kind_or_404(db, cid, d.kind_id)
 
     if payload.status and payload.status != d.status:
-        if d.status == "cancelled":
+        if payload.status not in _STATUS_TRANSITIONS.get(d.status, set()):
             raise HTTPException(status.HTTP_409_CONFLICT,
-                                "Отменённый документ не оживает: заведите новый")
+                                f"Переход {d.status} → {payload.status} не разрешён")
+        if d.status == "draft" and payload.status == "in_force" and kind.requires_registration:
+            raise HTTPException(status.HTTP_409_CONFLICT,
+                                "Сначала зарегистрируйте документ")
+        if payload.status == "in_force":
+            _validate_attrs(kind, d.attrs, required=True)
+            if (kind.route or d.approval_round) and d.approval_status != "approved":
+                raise HTTPException(status.HTTP_409_CONFLICT,
+                                    "Сначала завершите согласование текущей редакции")
+            await _assert_signatory_identity(db, cid, d, current_user)
+        if payload.status == "archived" and d.case_id is None:
+            raise HTTPException(status.HTTP_409_CONFLICT,
+                                "Перед передачей в архив поместите документ в дело")
+        if payload.status == "cancelled" and not (payload.note or "").strip():
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "Укажите причину отмены документа")
+        if payload.status == "cancelled" and d.approval_status == "pending":
+            await doc_approvals.cancel(db, d, current_user, payload.note.strip())
         db.add(DocEvent(doc_id=d.id, kind="status", user_id=current_user.id,
                         actor_name=who, from_value=d.status, to_value=payload.status,
                         note=payload.note))
@@ -827,6 +1046,7 @@ async def doc_action(
         "counterparty_name": payload.counterparty_name,
         "confidentiality": payload.confidentiality,
     }
+    changed_material = False
     for field, value in simple.items():
         if value is None:
             continue
@@ -834,6 +1054,7 @@ async def doc_action(
         if str(old or "") == str(value):
             continue
         setattr(d, field, value)
+        changed_material = True
         db.add(DocEvent(doc_id=d.id, kind="field", user_id=current_user.id,
                         actor_name=who, from_value=str(old or "")[:200],
                         to_value=str(value)[:200], note=field))
@@ -847,21 +1068,33 @@ async def doc_action(
         if getattr(d, field) == value:
             continue
         setattr(d, field, value)
+        changed_material = True
         db.add(DocEvent(doc_id=d.id, kind="field", user_id=current_user.id,
                         actor_name=who, to_value=str(value or ""), note=field))
 
     # Объект сети опознаётся строковым ключом, поэтому идёт отдельно от полей-UUID.
     if payload.object_id is not None and d.object_id != (payload.object_id or None):
         d.object_id = payload.object_id or None
+        changed_material = True
         db.add(DocEvent(doc_id=d.id, kind="field", user_id=current_user.id,
                         actor_name=who, to_value=payload.object_id or "", note="object_id"))
 
-    if payload.due_at is not None:
+    if payload.due_at is not None and d.due_at != payload.due_at:
         d.due_at = payload.due_at
-    if payload.external_date is not None:
+        changed_material = True
+    if payload.external_date is not None and d.external_date != payload.external_date:
         d.external_date = payload.external_date
+        changed_material = True
     if payload.attrs is not None:
-        d.attrs = payload.attrs
+        attrs = _validate_attrs(kind, payload.attrs, required=False)
+        if d.attrs != attrs:
+            d.attrs = attrs
+            changed_material = True
+    if changed_material and d.approval_status in ("approved", "rejected"):
+        d.approval_status = "none"
+        db.add(DocEvent(doc_id=d.id, kind="approval", user_id=current_user.id,
+                        actor_name=who, to_value="нужно согласовать заново",
+                        note="изменены реквизиты документа"))
     if payload.note and payload.status is None:
         db.add(DocEvent(doc_id=d.id, kind="comment", user_id=current_user.id,
                         actor_name=who, note=payload.note))
@@ -902,12 +1135,43 @@ async def approval_start(
                             "Согласование уже идёт: дождитесь виз или отмените круг")
 
     kind = await db.get(DocKind, d.kind_id)
+    if kind is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Вид документа не найден")
+    if d.status not in ("draft", "registered"):
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Согласовать можно только рабочую редакцию документа")
+    if kind.requires_registration and not d.reg_number:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Сначала зарегистрируйте документ")
+    _validate_attrs(kind, d.attrs, required=True)
     route = payload.route if payload.route is not None else (kind.route if kind else None)
     res = await doc_approvals.start(db, cid, d, route or [], current_user)
     if "error" in res:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, res["error"])
     await db.commit()
     return res
+
+
+class ApprovalCancelIn(BaseModel):
+    company_id: str
+    reason: str = Field(..., min_length=3, max_length=500)
+
+
+@router.post("/{doc_id}/approval/cancel")
+async def approval_cancel(
+    doc_id: str,
+    payload: ApprovalCancelIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cid = await assert_company_product(payload.company_id, current_user, db, "docs")
+    d = await _doc_or_404(db, cid, doc_id)
+    await _assert_doc_permission(db, cid, d, current_user, "edit")
+    if d.approval_status != "pending":
+        raise HTTPException(status.HTTP_409_CONFLICT, "Активного круга нет")
+    result = await doc_approvals.cancel(db, d, current_user, payload.reason.strip())
+    await db.commit()
+    return result
 
 
 class ApprovalDecideIn(BaseModel):
@@ -960,8 +1224,10 @@ async def approvals_mine(
     """Что ждёт моей визы. Экран «На мне» — единственный канал, на который можно
     опереться: оповещения уходят без гарантии доставки."""
     cid = await assert_company_product(company_id, current_user, db, "docs")
+    principals = await doc_approvals.active_principals_for(db, cid, current_user.id)
     rows = (await db.execute(select(DocApproval).where(
-        DocApproval.company_id == cid, DocApproval.assignee_id == current_user.id,
+        DocApproval.company_id == cid,
+        DocApproval.assignee_id.in_([current_user.id, *principals]),
         DocApproval.status == "pending").order_by(DocApproval.due_at.asc().nullslast())
     )).scalars().all()
     if not rows:
@@ -971,6 +1237,7 @@ async def approvals_mine(
     return {"approvals": [{
         "id": str(r.id), "doc_id": str(r.doc_id),
         "step_name": r.step_name, "mode": r.mode,
+        "acting_for": str(r.assignee_id) if r.assignee_id != current_user.id else None,
         "due_at": r.due_at.isoformat() if r.due_at else None,
         "doc_title": docs[r.doc_id].title if r.doc_id in docs else "",
         "doc_number": docs[r.doc_id].reg_number if r.doc_id in docs else None,
@@ -1217,8 +1484,6 @@ async def send_doc(
                     actor_name=current_user.name or current_user.email,
                     to_value=", ".join(payload.to)[:200],
                     note=f"письмом, файлов: {len(files)}"))
-    if d.status == "registered":
-        d.status = "in_force"
     await db.commit()
     return {"sent": True, "attachments": len(files), **res}
 
@@ -2106,10 +2371,18 @@ async def get_doc(
         DocApproval.doc_id == d.id).order_by(
         DocApproval.round.desc(), DocApproval.step_no))).scalars().all()
     live = [a for a in approvals if a.round == d.approval_round]
+    snapshot = live[0].document_snapshot if live else None
+    snapshot_sha256 = live[0].snapshot_sha256 if live else None
+    decidable = {
+        a.id for a in live
+        if a.status == "pending"
+        and await doc_approvals.may_decide(db, cid, a, current_user)
+    }
 
     return {
         **_card_out(d, {str(kind.id): kind.name} if kind else None),
         "kind": _kind_out(kind) if kind else None,
+        "available_actions": await _available_actions(db, cid, d, kind, current_user),
         "versions": [{
             "id": str(v.id), "revision": v.revision, "role": v.role,
             "file_id": str(v.file_id), "file_name": v.file_name, "mime": v.mime,
@@ -2139,11 +2412,15 @@ async def get_doc(
         # «идёт согласование», но не видно, на ком оно стоит.
         "approval": {
             "status": d.approval_status, "round": d.approval_round,
+            "snapshot": snapshot,
+            "snapshot_sha256": snapshot_sha256,
             "steps": doc_approvals.progress(live),
             "rows": [{
                 "id": str(a.id), "round": a.round, "step_no": a.step_no,
                 "step_name": a.step_name, "status": a.status,
                 "assignee_id": str(a.assignee_id) if a.assignee_id else None,
+                "can_decide": a.id in decidable,
+                "snapshot_sha256": a.snapshot_sha256,
                 "comment": a.comment,
                 "decided_at": a.decided_at.isoformat() if a.decided_at else None,
                 "due_at": a.due_at.isoformat() if a.due_at else None,
@@ -2174,6 +2451,14 @@ async def upload_version(
     cid = await assert_company_product(company_id, current_user, db, "docs")
     d = await _doc_or_404(db, cid, doc_id)
     await _assert_doc_permission(db, cid, d, current_user, "edit")
+    if d.approval_status == "pending":
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Во время согласования набор файлов зафиксирован. "
+                            "Сначала отмените круг")
+    if d.status not in ("draft", "registered") and not (
+            d.status == "in_force" and role == "signed_scan"):
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Для действующего или закрытого документа заведите новую редакцию")
 
     content = await file.read()
     if not content:
@@ -2213,6 +2498,12 @@ async def upload_version(
     d.has_files = True
     if role == "body":
         d.current_revision = v.revision
+    if d.approval_status in ("approved", "rejected"):
+        d.approval_status = "none"
+        db.add(DocEvent(doc_id=d.id, kind="approval", user_id=current_user.id,
+                        actor_name=current_user.name or current_user.email,
+                        to_value="нужно согласовать заново",
+                        note="изменён набор файлов документа"))
     db.add(DocEvent(doc_id=d.id, kind="version", user_id=current_user.id,
                     actor_name=current_user.name or current_user.email,
                     to_value=f"{role} ред. {v.revision}", note=sf.file_name))
@@ -2244,10 +2535,23 @@ async def tombstone_version(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Редакция не найдена")
     d = await _doc_or_404(db, cid, v.doc_id)
     await _assert_doc_permission(db, cid, d, current_user, "edit")
+    if d.approval_status == "pending":
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Во время согласования набор файлов зафиксирован. "
+                            "Сначала отмените круг")
+    if d.status not in ("draft", "registered"):
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Файлы действующего или закрытого документа неизменяемы")
     v.tombstoned_at = datetime.now(timezone.utc)
     v.tombstoned_by = current_user.id
     v.tombstone_reason = payload.reason
     v.is_current = False
+    if d.approval_status in ("approved", "rejected"):
+        d.approval_status = "none"
+        db.add(DocEvent(doc_id=d.id, kind="approval", user_id=current_user.id,
+                        actor_name=current_user.name or current_user.email,
+                        to_value="нужно согласовать заново",
+                        note="изменён набор файлов документа"))
     db.add(DocEvent(doc_id=d.id, kind="version", user_id=current_user.id,
                     actor_name=current_user.name or current_user.email,
                     from_value=f"{v.role} ред. {v.revision}", note=payload.reason))

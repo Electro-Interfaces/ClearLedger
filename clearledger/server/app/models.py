@@ -9863,8 +9863,17 @@ class DocApproval(Base):
     assignee_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    # pending | approved | rejected | skipped
+    # waiting | pending | approved | rejected | skipped. Будущие шаги ждут:
+    # иначе последовательный маршрут фактически становится параллельным.
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    # SLA хранится отдельно от срока: due_at появляется только при активации
+    # шага, поэтому время будущих шагов не уходит, пока документ до них не дошёл.
+    sla_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Доказательство того, что именно согласовывали: реквизиты карточки и точный
+    # набор текущих файлов с их SHA-256. Снимок дублируется в строках круга,
+    # чтобы история оставалась самодостаточной без отдельной сущности процесса.
+    document_snapshot: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    snapshot_sha256: Mapped[str | None] = mapped_column(CHAR(64), nullable=True)
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     decided_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
