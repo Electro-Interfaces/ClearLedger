@@ -46,7 +46,9 @@ async def main() -> None:
             company = (await db.execute(select(Company).where(
                 Company.slug == slug))).scalar_one_or_none()
             if company is None:
-                raise AssertionError(f"Компания {slug!r} не найдена")
+                available = (await db.execute(select(Company.slug))).scalars().all()
+                raise AssertionError(
+                    f"Компания {slug!r} не найдена; доступны: {', '.join(available)}")
             cid = company.id
 
             assert await db.scalar(text(
