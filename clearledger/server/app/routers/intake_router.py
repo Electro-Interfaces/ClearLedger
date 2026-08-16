@@ -113,6 +113,11 @@ async def download_file(
     from app.routers.store_documents_router import authorize_store_file_download
     await authorize_store_file_download(db, current_user, uid)
 
+    # Файл документа «Дела»: закрытую карточку видят только автор, ответственный
+    # и подписант, поэтому одной принадлежности компании здесь недостаточно.
+    from app.routers.docs_router import authorize_docs_file_download
+    await authorize_docs_file_download(db, current_user, uid)
+
     # Вложение чата принадлежит РАЗГОВОРУ, а не компании: членства мало. Иначе любой
     # сотрудник, которому попался адрес файла (переслали ссылку, увидел в логе), качает
     # снимок из чужой личной переписки. Тем же запросом закрывается и мягкое удаление:

@@ -446,6 +446,9 @@ class SendIn(BaseModel):
     body: str
     thread_id: str | None = None
     reply_to_message_id: str | None = None
+    # Идентификаторы файлов пространства (`source_files`): контрагенту уходит тот
+    # же файл, что лежит у документа, а не его копия, сделанная ради отправки.
+    attachments: list[str] = []
 
 
 @router.post("/send")
@@ -460,7 +463,8 @@ async def send(
     return await mail_send.send_message(
         db, cid, account_id=body.account_id, to=body.to, subject=body.subject,
         body=body.body, thread_id=body.thread_id,
-        reply_to_message_id=body.reply_to_message_id, author=current_user.email)
+        reply_to_message_id=body.reply_to_message_id, author=current_user.email,
+        attachments=body.attachments)
 
 
 @router.get("/by-counterparty")

@@ -2685,6 +2685,17 @@ async def create_all() -> None:
             "ON gl_turnovers (company_id, dt_counterparty_id)",
             "CREATE INDEX IF NOT EXISTS idx_gl_turnovers_kt_cp "
             "ON gl_turnovers (company_id, kt_counterparty_id)",
+            # «Дело», вторая волна: визы и номенклатура дел. Таблицы create_all
+            # заводит сам, а колонки в уже существующие — нет, и на живом стенде
+            # это падает как «column does not exist» при первой же записи.
+            "ALTER TABLE doc_kinds ADD COLUMN IF NOT EXISTS route JSONB",
+            "ALTER TABLE doc_kinds ADD COLUMN IF NOT EXISTS default_case_id UUID",
+            "ALTER TABLE doc_cards ADD COLUMN IF NOT EXISTS case_id UUID",
+            "ALTER TABLE doc_cards ADD COLUMN IF NOT EXISTS storage_until DATE",
+            "ALTER TABLE doc_cards ADD COLUMN IF NOT EXISTS approval_status "
+            "VARCHAR(15) NOT NULL DEFAULT 'none'",
+            "ALTER TABLE doc_cards ADD COLUMN IF NOT EXISTS approval_round "
+            "INTEGER NOT NULL DEFAULT 0",
         ):
             await conn.execute(_sa.text(stmt))
 

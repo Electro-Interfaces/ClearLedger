@@ -18,7 +18,7 @@ import {
   Archive, Megaphone, MessagesSquare, UserRound, Users2,
   BookOpen, Compass, Scale, FileSignature, HelpCircle,
   Activity, TrendingUp, Users, CalendarDays, LayoutDashboard,
-  ListChecks, Building2, BarChart3, Settings2,
+  ListChecks, Building2, BarChart3, Settings2, FolderOpen,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -103,14 +103,20 @@ export function NavItem({ to, icon: Icon, label, end, collapsed, onNavigate, act
  * первым стоит в меню «Управления» (`AdminSidebar`). Кнопок «Стол» и «Приложения»
  * в шапках больше нет — уберёшь пункт здесь, и уйти из приложения станет некуда.
  */
-export function AppsNavItem({ collapsed }: { collapsed?: boolean }) {
+export function AppsNavItem({ collapsed, onNavigate }: {
+  collapsed?: boolean
+  /** Мобильная шторка закрывается: плашки открываются под ней, и меню поверх них
+      мешает выбрать приложение — ровно тот же жест, что у обычного пункта. */
+  onNavigate?: () => void
+}) {
   const { open, toggle } = useAppsPanel()
   return (
     <SidebarMenuItem>
       <Tooltip>
         <TooltipTrigger asChild>
           <SidebarMenuButton asChild>
-            <button type="button" onClick={toggle} aria-expanded={open}
+            <button type="button" onClick={() => { toggle(); onNavigate?.() }}
+              aria-expanded={open}
               className={`relative flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
                 open
                   ? 'bg-primary/15 font-semibold text-primary before:absolute before:left-0 before:top-1.5 before:bottom-1.5 before:w-0.5 before:rounded-full before:bg-primary'
@@ -177,6 +183,17 @@ const TASKS_SECTIONS: { to: string; label: string; icon: typeof Activity }[] = [
   { to: '/tasks/setup', label: 'Настройка', icon: Settings2 },
 ]
 
+/**
+ * Разделы «Дела»: сначала реестры (за ними приходят чаще всего), потом своя
+ * работа и настройка. Порядок тот же, что у «Задач»: человек открывает продукт,
+ * чтобы найти документ, а не чтобы посмотреть справочник видов.
+ */
+const DOCS_SECTIONS: { to: string; label: string; icon: typeof Activity }[] = [
+  { to: '/docs', label: 'Реестры', icon: FolderOpen },
+  { to: '/docs/work', label: 'Моя работа', icon: ListChecks },
+  { to: '/docs/setup', label: 'Настройка', icon: Settings2 },
+]
+
 const CHAT_VIEWS: { key: string; label: string; icon: typeof MessagesSquare }[] = [
   { key: 'all', label: 'Все чаты', icon: MessagesSquare },
   { key: 'channel', label: 'Каналы', icon: Megaphone },
@@ -204,7 +221,7 @@ export function SidebarNavContent(props: { collapsed?: boolean; onNavigate?: () 
         <>
           <SidebarGroup className="py-0">
             <SidebarMenu>
-              <AppsNavItem collapsed={props.collapsed} />
+              <AppsNavItem collapsed={props.collapsed} onNavigate={props.onNavigate} />
             </SidebarMenu>
           </SidebarGroup>
           {/* Черта отделяет вход в пространство от разделов самого приложения:
@@ -304,6 +321,47 @@ function SidebarNavBody({ collapsed = false, onNavigate }: {
                 // иначе «Моя работа» горит и в «Работе компании».
                 active={pathname === s.to
                   || (s.to === '/tasks' && pathname === '/tasks/')} />
+            ))}
+          </SidebarMenu>
+        </SidebarGroup>
+
+        <SidebarSeparator className="my-2" />
+        <SidebarGroup className="py-0">
+          {!collapsed && (
+            <p className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/60">
+              Пространство
+            </p>
+          )}
+          <SidebarMenu>
+            {spaceItems.map((item) => (
+              <NavItem key={item.to} to={item.to} icon={item.icon} label={item.label}
+                collapsed={collapsed} onNavigate={onNavigate} />
+            ))}
+            {spaceLinksFor(company.profileId).filter((l) => canApp(l.app)).map((l) => (
+              <NavItem key={l.to} to={l.to} icon={l.icon} label={l.label}
+                collapsed={collapsed} onNavigate={onNavigate} />
+            ))}
+          </SidebarMenu>
+        </SidebarGroup>
+      </>
+    )
+  }
+
+  // «Дело» — документооборот: такое же приложение Ядра, как «Задачи», и
+  // раскладка у него такая же. Без своей ветки на экране висело бы меню Учёта.
+  if (pathname === '/docs' || pathname.startsWith('/docs/')) {
+    const spaceItems = SPACE_PAGES
+      .filter((p) => navByPath[p])
+      .map((p) => navByPath[p])
+    return (
+      <>
+        <SidebarGroup className="py-0">
+          <SidebarMenu>
+            {DOCS_SECTIONS.map((s) => (
+              <NavItem key={s.to} to={s.to} icon={s.icon} label={s.label}
+                collapsed={collapsed} onNavigate={onNavigate}
+                active={pathname === s.to
+                  || (s.to === '/docs' && pathname === '/docs/')} />
             ))}
           </SidebarMenu>
         </SidebarGroup>

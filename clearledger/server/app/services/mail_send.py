@@ -21,16 +21,27 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import MailAccount, MailAttachment, MailMessage, MailThread
+from app.models import MailAccount, MailAttachment, MailMessage, MailThread, SourceFile
+from app.services import file_store
 
 logger = logging.getLogger("clearledger.mail")
+
+# Потолок на письмо целиком. Больше не пропускают почтовые серверы получателей, и
+# упереться в это лучше у нас с понятным текстом, чем получить отлуп по SMTP.
+MAX_ATTACHMENTS_BYTES = 25 * 1024 * 1024
 
 
 async def send_message(db: AsyncSession, cid, *, account_id, to: list[str],
                        subject: str, body: str, thread_id=None,
                        reply_to_message_id=None, author: str | None = None,
+                       attachments: list[Any] | None = None,
                        ) -> dict[str, Any]:
-    """Отправить письмо и сохранить его копию в нити."""
+    """Отправить письмо и сохранить его копию в нити.
+
+    `attachments` — идентификаторы файлов пространства (`source_files`). Документ
+    уходит контрагенту тем же путём, каким лежит внутри: второй копии файла ради
+    отправки не заводим.
+    """
     account = (await db.execute(select(MailAccount).where(
         MailAccount.company_id == cid, MailAccount.id == account_id))).scalar_one_or_none()
     if account is None:
@@ -39,6 +50,28 @@ async def send_message(db: AsyncSession, cid, *, account_id, to: list[str],
         return {"error": "ящик настроен только на приём"}
     if not to:
         return {"error": "не указан получатель"}
+
+    # Файлы читаем ДО отправки: сорваться на нечитаемом вложении лучше здесь, чем
+    # после того, как письмо уже ушло получателю наполовину собранным.
+    files: list[tuple[SourceFile, bytes]] = []
+    if attachments:
+        rows = (await db.execute(select(SourceFile).where(
+            SourceFile.company_id == cid,
+            SourceFile.id.in_([str(a) for a in attachments])))).scalars().all()
+        missing = len(set(str(a) for a in attachments)) - len(rows)
+        if missing > 0:
+            return {"error": "файл вложения не найден"}
+        total = 0
+        for sf in rows:
+            try:
+                data = file_store.read(sf)
+            except OSError:
+                return {"error": f"файл «{sf.file_name}» не читается в хранилище"}
+            total += len(data)
+            if total > MAX_ATTACHMENTS_BYTES:
+                return {"error": (f"вложения тяжелее {MAX_ATTACHMENTS_BYTES // 1024 // 1024} МБ: "
+                                  "почтовые серверы такое письмо не пропустят")}
+            files.append((sf, data))
 
     parent = None
     if reply_to_message_id:
@@ -64,6 +97,11 @@ async def send_message(db: AsyncSession, cid, *, account_id, to: list[str],
     # Подпись ящика приклеивается к каждому письму: контрагент должен видеть, с кем
     # разговаривает, а сотрудник — не набирать её руками каждый раз.
     msg.set_content(body + (f"\n\n--\n{account.signature}" if account.signature else ""))
+
+    for sf, data in files:
+        maintype, _, subtype = (sf.mime_type or "application/octet-stream").partition("/")
+        msg.add_attachment(data, maintype=maintype or "application",
+                           subtype=subtype or "octet-stream", filename=sf.file_name)
 
     host = account.smtp_host or os.environ.get("SMTP_HOST", "")
     port = account.smtp_port or int(os.environ.get("SMTP_PORT", "587"))
@@ -124,8 +162,19 @@ async def send_message(db: AsyncSession, cid, *, account_id, to: list[str],
         to_emails=to, sent_at=datetime.now(timezone.utc), body_text=body,
         status="accepted",
         counterparty_id=thread.counterparty_id,
+        has_attachments=bool(files),
+        # Отправленное письмо целиком. У входящих оригинал хранится с самого
+        # начала, у исходящих его не было — а спор «что именно мы отправили и с
+        # чем» решается тем же способом: письмом, а не нашим пересказом.
+        raw_eml=msg.as_bytes(),
     )
     db.add(row)
+    await db.flush()
+    for sf, data in files:
+        db.add(MailAttachment(
+            company_id=cid, message_id=row.id, file_name=sf.file_name,
+            content_type=sf.mime_type, size=len(data),
+            sha256=sf.fingerprint, content=data))
     thread.messages_count = (thread.messages_count or 0) + 1
     thread.last_message_at = row.sent_at
     await db.commit()

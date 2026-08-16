@@ -26,7 +26,11 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import ChatMessage, ChatParticipant, ChatRoom, MailMessage, Task, User
+from app.models import (
+    ChatMessage, ChatParticipant, ChatRoom, MailAttachment, MailMessage,
+    Task, TaskAttachment, TaskEvent, TaskParticipant, User,
+)
+from app.services import file_store
 
 logger = logging.getLogger("clearledger.mail")
 
@@ -104,17 +108,81 @@ async def to_chat_room(db: AsyncSession, cid, row: MailMessage, room_id) -> bool
 
 
 async def to_task(db: AsyncSession, cid, row: MailMessage, number: int) -> bool:
-    """Дописать письмо в задачу как её событие (ответ почтового исполнителя)."""
+    """Положить письмо в ленту задачи её событием и перенести вложения.
+
+    Раньше письмо дописывалось в конец описания задачи, а вложения терялись совсем.
+    При этом рядом, в `POST /api/tasks/{номер}/inbound-email`, та же работа сделана
+    правильно: событие с автором, идемпотентность по `Message-ID` и возврат мяча.
+    Два пути разошлись, здесь они сведены к одному — иначе входящий документ,
+    который почти всегда приезжает вложением, пропадал молча.
+    """
     task = (await db.execute(select(Task).where(
         Task.company_id == cid, Task.number == number))).scalar_one_or_none()
     if task is None:
         logger.warning("письмо %s: задача №%s не найдена", row.id, number)
         return False
+
+    # Пишет только тот, кого в задачу приглашали: плюс-адрес виден в письме и
+    # утекает пересылкой. Правило то же, что у `/inbound-email`, и ослаблять его
+    # здесь нельзя — иначе через общий вход в задачу пишет посторонний.
+    email = (row.from_email or "").strip().lower()
+    author = (await db.execute(
+        select(User).join(TaskParticipant, TaskParticipant.user_id == User.id)
+        .where(TaskParticipant.task_id == task.id, func.lower(User.email) == email)
+    )).scalar_one_or_none()
+    if author is None:
+        logger.warning("письмо %s: %s не участник задачи №%s",
+                       row.id, email or "(без адреса)", number)
+        return False
+
+    # Повтор ловим по Message-ID: поллер перечитывает ящик после смены UIDVALIDITY.
+    if row.message_id:
+        dup = (await db.execute(select(TaskEvent.id).where(
+            TaskEvent.task_id == task.id,
+            TaskEvent.from_value == row.message_id))).scalar_one_or_none()
+        if dup is not None:
+            return True
+
     text = (row.body_text or "").strip() or "(письмо без текста)"
-    task.description = ((task.description or "")
-                        + f"\n\n--- письмо от {row.from_email or '—'} ---\n{text[:4000]}")
+    ev = TaskEvent(
+        task_id=task.id, kind="mail", user_id=author.id,
+        actor_name=row.from_name or author.name or email,
+        from_value=row.message_id, note=text)
+    db.add(ev)
+    await db.flush()
+
+    await _attachments_to_task(db, cid, row, task, ev, author.id)
+    # Ответ пришёл — мяч снова у нас.
+    task.waiting_for = "us"
     await db.flush()
     return True
+
+
+async def _attachments_to_task(db: AsyncSession, cid, row: MailMessage, task: Task,
+                               event: TaskEvent, author_id) -> int:
+    """Перенести вложения письма в файлы задачи.
+
+    Содержимое вложения лежит в самой строке письма, поэтому файл появляется в
+    общем хранилище только здесь. Вложение без содержимого пропускаем: строка о
+    нём в переписке остаётся, а пустой файл в задаче выглядел бы как испорченный
+    документ.
+    """
+    rows = (await db.execute(select(MailAttachment).where(
+        MailAttachment.company_id == cid,
+        MailAttachment.message_id == row.id))).scalars().all()
+    count = 0
+    for att in rows:
+        if not att.content:
+            continue
+        sf = file_store.put(db, cid, att.content,
+                            file_name=att.file_name, mime=att.content_type)
+        await db.flush()
+        db.add(TaskAttachment(task_id=task.id, file_id=sf.id,
+                              event_id=event.id, uploaded_by=author_id))
+        count += 1
+    if count:
+        await db.flush()
+    return count
 
 
 async def to_ticket(db: AsyncSession, cid, row: MailMessage, object_id: str) -> bool:

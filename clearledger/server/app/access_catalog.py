@@ -49,14 +49,14 @@ SYSTEM_ROLES: list[dict] = [
 # меню продуктов (`config/productAccess.ts` на фронте).
 SYSTEM_ROLES_ENERGY: list[dict] = [
     {"name": "Полный доступ", "modules": None},
-    {"name": "Проектный офис", "modules": ["projects"]},
+    {"name": "Проектный офис", "modules": ["projects", "docs"]},
     {"name": "Инженер эксплуатации", "modules": ["ops"]},
     {"name": "Коммерция", "modules": ["sales", "corp"]},
     # Маркетолог смотрит сегментацию сети и веб-аналитику — они живут разделами
     # «Продаж» (28.07.2026); ключ `marketing` оставлен на будущий продукт.
     {"name": "Маркетолог", "modules": [
         "marketing", "sales:cs_abcxyz", "sales:cs_trend", "sales:metrika"]},
-    {"name": "Бухгалтер", "modules": ["finance"]},
+    {"name": "Бухгалтер", "modules": ["finance", "docs"]},
     {"name": "Оператор данных", "modules": ["data"]},
     {"name": "Диспетчер поддержки", "modules": ["support", "chat"]},
     # Внешний участник: заявки и состояние железа — без коммерции, денег и данных.
@@ -89,13 +89,13 @@ SYSTEM_ROLES_FUEL: list[dict] = [
 SYSTEM_ROLES_OFFICE: list[dict] = [
     {"name": "Полный доступ", "modules": None},
     # Руководитель практики: картина по людям и работам плюс канал с клиентами.
-    {"name": "Руководитель", "modules": ["pulse", "plan", "support", "chat", "books", "revenue"]},
+    {"name": "Руководитель", "modules": ["pulse", "plan", "support", "chat", "books", "revenue", "docs"]},
     # Бухгалтер видит эталон целиком; реализация — его же данные под другим углом.
-    {"name": "Бухгалтер", "modules": ["books", "revenue", "chat"]},
+    {"name": "Бухгалтер", "modules": ["books", "revenue", "chat", "docs"]},
     # Коммерсант — только реализация: кому продаём и что оказываем. Регистр ему не нужен.
     {"name": "Коммерсант", "modules": ["revenue", "chat"]},
     # Специалист ведёт свои работы и переписку; обращения клиентов идут через них.
-    {"name": "Специалист", "modules": ["plan", "chat", "conf"]},
+    {"name": "Специалист", "modules": ["plan", "chat", "conf", "docs"]},
     # Клиентская служба: приём обращений и переписка, без картины по людям.
     {"name": "Клиентская служба", "modules": ["support", "chat"]},
     {"name": "Наблюдатель", "modules": ["pulse"]},

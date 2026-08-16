@@ -14,6 +14,7 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 import { Toaster } from '@/components/ui/sonner'
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute'
 import { MainLayout } from '@/components/layout/MainLayout'
+import { InstallApp, UpdateBanner } from '@/components/common/MobileShell'
 import { TabFilterSync } from '@/components/layout/TabFilterSync'
 import { DocumentTitle } from '@/components/layout/DocumentTitle'
 import { OneCAutoSync } from '@/components/onec/OneCAutoSync'
@@ -45,6 +46,10 @@ const TasksWorkPage = lazy(() => import('@/pages/tasks/TasksWorkPage').then((m) 
 const TasksCompanyPage = lazy(() => import('@/pages/tasks/TasksWorkPage').then((m) => ({ default: m.TasksCompanyPage })))
 const TasksOverviewPage = lazy(() => import('@/pages/tasks/TasksOverviewPage').then((m) => ({ default: m.TasksOverviewPage })))
 const TasksSetupPage = lazy(() => import('@/pages/tasks/TasksSetupPage').then((m) => ({ default: m.TasksSetupPage })))
+const DocsLayout = lazy(() => import('@/pages/docs/DocsLayout').then((m) => ({ default: m.DocsLayout })))
+const DocsRegistryPage = lazy(() => import('@/pages/docs/DocsRegistryPage').then((m) => ({ default: m.DocsRegistryPage })))
+const DocsSetupPage = lazy(() => import('@/pages/docs/DocsSetupPage').then((m) => ({ default: m.DocsSetupPage })))
+const DocsWorkPage = lazy(() => import('@/pages/docs/DocsWorkPage').then((m) => ({ default: m.DocsWorkPage })))
 const PulseAppPage = lazy(() => import('@/pulse/PulseAppPage').then((m) => ({ default: m.PulseAppPage })))
 const PulseBusinessPage = lazy(() => import('@/pulse/PulseSections').then((m) => ({ default: m.PulseBusinessPage })))
 const PulseTeamPage = lazy(() => import('@/pulse/PulseSections').then((m) => ({ default: m.PulseTeamPage })))
@@ -71,6 +76,7 @@ const EcosystemHomePage = lazy(() => import('@/pages/EcosystemHomePage').then((m
 const LoginPage = lazy(() => import('@/pages/LoginPage').then((m) => ({ default: m.LoginPage })))
 const AcceptInvitePage = lazy(() => import('@/pages/AcceptInvitePage').then((m) => ({ default: m.AcceptInvitePage })))
 const ResetPasswordPage = lazy(() => import('@/pages/ResetPasswordPage').then((m) => ({ default: m.ResetPasswordPage })))
+const DocSharePage = lazy(() => import('@/pages/DocSharePage').then((m) => ({ default: m.DocSharePage })))
 const ShowcaseLinkPage = lazy(() => import('@/pages/ShowcaseLinkPage')
   .then((m) => ({ default: m.ShowcaseLinkPage })))
 // ShiftReportsPage не используется как отдельная страница — просмотр через RawPanel
@@ -157,6 +163,11 @@ function CompanyScopedProviders() {
             <DocumentTitle />
             <OneCAutoSync />
             <Outlet />
+            {/* Установка приложением и уведомление о выкатке — здесь, а не в
+                оболочке приложений: рабочий стол и «Управление» рисуются своими
+                маршрутами, и на первом же экране обвязка терялась. */}
+            <InstallApp />
+            <UpdateBanner />
             <Toaster position="bottom-right" richColors closeButton />
           </TooltipProvider>
         </SupportProvider>
@@ -192,6 +203,9 @@ const router = createBrowserRouter([
       // Витрина по ссылке: стоит рядом с приглашением и сбросом пароля — это
       // третий вход без учётки, и открывать его должен кто угодно с токеном.
       { path: '/showcase/:token', element: <LazyPage><ShowcaseLinkPage /></LazyPage> },
+      // Документ по ссылке: четвёртый вход без учётки. Контрагент смотрит
+      // реквизиты, скачивает файлы и подтверждает получение.
+      { path: '/doc-share/:token', element: <LazyPage><DocSharePage /></LazyPage> },
       {
         path: '/',
         element: <ProtectedRoute><LazyPage><EcosystemHomePage /></LazyPage></ProtectedRoute>,
@@ -257,6 +271,18 @@ const router = createBrowserRouter([
               { path: 'company', element: <LazyPage><TasksCompanyPage /></LazyPage> },
               { path: 'overview', element: <LazyPage><TasksOverviewPage /></LazyPage> },
               { path: 'setup', element: <LazyPage><TasksSetupPage /></LazyPage> },
+            ],
+          },
+          // «Дело» — документооборот пространства: реестры корреспонденции и
+          // приказов, регистрация с номером, редакции файлов. Поручение по
+          // документу ставится «Задачами», поэтому продукты разные, а движок общий.
+          {
+            path: '/docs',
+            element: <RequireApp code="docs"><LazyPage><DocsLayout /></LazyPage></RequireApp>,
+            children: [
+              { index: true, element: <LazyPage><DocsRegistryPage /></LazyPage> },
+              { path: 'work', element: <LazyPage><DocsWorkPage /></LazyPage> },
+              { path: 'setup', element: <LazyPage><DocsSetupPage /></LazyPage> },
             ],
           },
           // «Пульс» — рабочее место руководителя (ecosystem-deploy/docs/PULSE.md):

@@ -87,6 +87,8 @@ from app.routers import (
     source_types_router,
     perimeter_router,
     pulse_router,
+    doc_share_router,
+    docs_router,
     tasks_router,
     tickets_router,
     users_router,
@@ -289,6 +291,9 @@ app.include_router(auth_router.router, prefix=API_PREFIX)
 app.include_router(station_console_router.router, prefix=API_PREFIX)
 app.include_router(tickets_router.router, prefix=API_PREFIX)
 app.include_router(tasks_router.router, prefix=API_PREFIX)  # «Задачи»: свой движок с маршрутами
+app.include_router(docs_router.router, prefix=API_PREFIX)  # «Дело»: документооборот пространства
+# Показ документа контрагенту по ссылке: без авторизации, намеренно скупо.
+app.include_router(doc_share_router.router, prefix=API_PREFIX)
 app.include_router(pulse_router.router, prefix=API_PREFIX)
 # Витрина по ссылке: без авторизации, доступ по токену самой ссылки.
 app.include_router(pulse_router.public_router, prefix=API_PREFIX)

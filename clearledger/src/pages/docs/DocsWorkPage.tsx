@@ -1,0 +1,136 @@
+/**
+ * Раздел «Моя работа»: что ждёт моей визы и мои документы.
+ *
+ * Экран «На мне» — единственный канал, на который можно опереться: оповещения
+ * уходят без гарантии доставки, и виза, о которой не узнали, останавливает
+ * документ молча.
+ */
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useSearchParams } from 'react-router-dom'
+import { Stamp } from 'lucide-react'
+import { useCompany } from '@/contexts/CompanyContext'
+import { Card } from '@/components/ui/card'
+import * as docsService from '@/services/docsService'
+import { DOC_STATUS } from '@/services/docsService'
+import { DocCardPanel } from '@/components/docs/DocCardPanel'
+import { useDocsView } from './DocsLayout'
+
+export function DocsWorkPage() {
+  const { company } = useCompany()
+  const qc = useQueryClient()
+  const [params, setParams] = useSearchParams()
+  const view = useDocsView('/docs/work')
+  const companyId = company?.id ?? ''
+  const openId = params.get('doc')
+
+  const mineQ = useQuery({
+    queryKey: ['docs-my-approvals', companyId],
+    queryFn: () => docsService.myApprovals(companyId),
+    enabled: !!companyId && view === 'mine',
+  })
+  const docsQ = useQuery({
+    queryKey: ['docs-mine', companyId],
+    queryFn: () => docsService.listDocs(companyId, { limit: 200 }),
+    enabled: !!companyId,
+  })
+
+  const open = (id: string) => setParams((p) => {
+    const n = new URLSearchParams(p); n.set('doc', id); return n
+  }, { replace: true })
+  const close = () => setParams((p) => {
+    const n = new URLSearchParams(p); n.delete('doc'); return n
+  }, { replace: true })
+
+  if (!companyId) return null
+
+  if (openId) {
+    return (
+      <div className="px-4 py-4">
+        <DocCardPanel id={openId} companyId={companyId} onBack={close}
+          onChanged={() => {
+            qc.invalidateQueries({ queryKey: ['docs-my-approvals', companyId] })
+            qc.invalidateQueries({ queryKey: ['docs-mine', companyId] })
+          }} />
+      </div>
+    )
+  }
+
+  const approvals = mineQ.data ?? []
+  const docs = docsQ.data?.docs ?? []
+
+  return (
+    <div className="space-y-4 px-4 py-4">
+      {view === 'mine' && (
+        <>
+          <div>
+            <h1 className="text-base font-semibold">Ждут моей визы</h1>
+            <p className="text-xs text-muted-foreground">
+              {mineQ.isLoading ? 'Загрузка…' : `Документов: ${approvals.length}`}
+            </p>
+          </div>
+          <Card className="divide-y divide-border/60">
+            {approvals.map((a) => (
+              <button key={a.id} type="button" onClick={() => open(a.doc_id)}
+                className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left hover:bg-accent/40">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 text-sm">
+                    <Stamp className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    <span className="truncate">{a.doc_title}</span>
+                  </div>
+                  <div className="text-[11px] text-muted-foreground">
+                    {a.doc_number ? `${a.doc_number} · ` : ''}шаг «{a.step_name}»
+                    {a.mode === 'parallel' ? ' · параллельно' : ''}
+                  </div>
+                </div>
+                {a.due_at && (
+                  <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-xs">
+                    до {a.due_at.slice(0, 10)}
+                  </span>
+                )}
+              </button>
+            ))}
+            {!mineQ.isLoading && approvals.length === 0 && (
+              <div className="px-3 py-8 text-center text-sm text-muted-foreground">
+                Виз на вас нет
+              </div>
+            )}
+          </Card>
+        </>
+      )}
+
+      <div>
+        <h1 className="text-base font-semibold">
+          {view === 'mine' ? 'Последние документы' : 'Поручения по документам'}
+        </h1>
+        <p className="text-xs text-muted-foreground">
+          {view === 'errands'
+            ? 'Документы, по которым поставлены поручения, ищите в карточке на вкладке «Связи»'
+            : `Всего: ${docs.length}`}
+        </p>
+      </div>
+      <Card className="divide-y divide-border/60">
+        {docs.slice(0, 30).map((d) => (
+          <button key={d.id} type="button" onClick={() => open(d.id)}
+            className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left hover:bg-accent/40">
+            <div className="min-w-0">
+              <div className="truncate text-sm">{d.title}</div>
+              <div className="text-[11px] text-muted-foreground">
+                {d.reg_number ?? 'без номера'} · {d.kind_name}
+              </div>
+            </div>
+            <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-xs">
+              {DOC_STATUS[d.status]?.label ?? d.status}
+            </span>
+          </button>
+        ))}
+        {docs.length === 0 && (
+          <div className="px-3 py-8 text-center text-sm text-muted-foreground">
+            Документов пока нет
+          </div>
+        )}
+      </Card>
+    </div>
+  )
+}
+
+export default DocsWorkPage

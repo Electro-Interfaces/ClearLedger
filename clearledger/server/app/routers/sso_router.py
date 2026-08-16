@@ -42,6 +42,8 @@ INTERNAL_ROUTES = {"admin": "/admin", "ledger": "/workspace", "chat": "/messages
                    # Поддержки осталась на /tickets — её открывают из «Пульса»,
                    # Центра управления и карточки объекта, продуктом она больше не числится.
                    "plan": "/tasks",
+                   # «Дело» — документооборот пространства.
+                   "docs": "/docs",
                    # Продукты в подключении: маршрут есть, за ним заставка.
                    "netlink": "/netlink", "accounting": "/accounting", "diag": "/diagnostics",
                    # Рабочие места компании без объектов (профиль `office`): бухгалтерия-
@@ -56,7 +58,7 @@ INTERNAL_ROUTES = {"admin": "/admin", "ledger": "/workspace", "chat": "/messages
 # Слой рабочего стола: управление пространством и служебная кухня стоят отдельно от
 # прикладных продуктов. «Данные» — служебное: ошибка там ломает все продукты сразу.
 INTERNAL_LAYERS = {"admin": "admin", "data": "admin", "info": "admin", "connect": "admin",
-                   "chat": "service", "plan": "service",
+                   "chat": "service", "plan": "service", "docs": "app",
                    "pulse": "app",
                    "ledger": "app", "projects": "app", "ops": "app",
                    "sales": "app", "corp": "app", "shop": "app", "marketing": "app",
@@ -69,7 +71,7 @@ INTERNAL_SORT = {"admin": 5, "pulse": 8, "ledger": 10, "projects": 12, "ops": 14
                  "corp": 17, "shop": 18, "marketing": 19, "support": 20, "netlink": 22,
                  "finance": 25, "accounting": 26,
                  "books": 20, "revenue": 21,
-                 "chat": 30, "auditor": 31, "plan": 40, "conf": 50, "connect": 59, "data": 60,
+                 "chat": 30, "auditor": 31, "plan": 40, "docs": 41, "conf": 50, "connect": 59, "data": 60,
                  "diag": 61, "info": 62}
 
 

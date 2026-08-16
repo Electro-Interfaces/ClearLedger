@@ -76,6 +76,13 @@ CATEGORIES: list[NotifyCategory] = [
         default_on=False,
     ),
     NotifyCategory(
+        code="docs",
+        label="Документы",
+        description="Документ зарегистрирован, изменено его состояние, "
+                    "приложена новая редакция файла, документ отменён.",
+        prefixes=("doc.",),
+    ),
+    NotifyCategory(
         code="other",
         label="Прочие события",
         description="Всё остальное, что попадает в журнал организации.",

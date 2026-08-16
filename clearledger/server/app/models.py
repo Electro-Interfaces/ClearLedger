@@ -9460,3 +9460,450 @@ class OffLedgerReminder(Base):
     __table_args__ = (
         Index("idx_off_reminder_company", "company_id", "happened_on"),
     )
+
+
+# ---------------------------------------------------------------------------
+# «Дело» — документооборот пространства
+#
+# Документ здесь самостоятельный объект с реквизитами и регистрационным номером,
+# а не вложение задачи. Причина простая: реестр входящих за квартал, отбор по
+# корреспонденту и срок хранения из файла, приложенного к поручению, не строятся.
+# Поручение по документу ставится существующими «Задачами» — второй движок работы
+# заводить незачем.
+#
+# Все таблицы с префиксом `doc_`: рядом со схемой `core` в той же базе живёт
+# `public` контура Поддержки, и совпадающее имя молча резолвится в чужую схему
+# (на этом уже спотыкались — отсюда `org_departments` и `space_inbound_keys`).
+# Поле называется `doc_id`, а не `document_id`: последнее в системе означает
+# идентификатор канонического факта товарного контура.
+# ---------------------------------------------------------------------------
+class DocKind(Base):
+    """Вид документа компании: приказ, входящее письмо, договор.
+
+    Вид несёт правило нумерации и схему предметных реквизитов. Маршрут
+    согласования появится здесь же второй волной, поэтому справочник заведён
+    сразу отдельной таблицей, а не набором констант в коде.
+    """
+    __tablename__ = "doc_kinds"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    code: Mapped[str] = mapped_column(String(40), nullable=False)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # ord (приказы и распоряжения) | incoming | outgoing | internal | contract | other
+    family: Mapped[str] = mapped_column(String(20), nullable=False, default="internal")
+    # in | out | none — по нему делится реестр корреспонденции.
+    direction: Mapped[str] = mapped_column(String(10), nullable=False, default="none")
+    # Шаблон номера: «{prefix}-{yyyy}-{n:04d}». Переменные подставляет
+    # services/doc_numbers.py; str.format по строке от пользователя не применяем.
+    number_template: Mapped[str] = mapped_column(
+        String(80), nullable=False, default="{prefix}-{yyyy}-{n:04d}")
+    # Область непрерывной нумерации: kind | kind_year | kind_org | kind_org_year.
+    number_scope: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="kind_org_year")
+    number_prefix: Mapped[str] = mapped_column(String(20), nullable=False, default="")
+    # Схема предметных реквизитов вида: [{code,label,type,options,required}].
+    # У приказа это гриф и основание, у входящего — способ доставки. Заводить под
+    # каждый вид свою таблицу незачем: в реестр эти поля не попадают.
+    fields: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    # Маршрут согласования: [{code,name,mode,quorum,sla_hours,actors:[{by,ref}]}].
+    # Своё поле, а не маршрут задачи: тот сознательно линеен, а виза бывает
+    # параллельной, и стадия задачи такого состояния не выражает.
+    route: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    # Дело, в которое ложится документ этого вида по умолчанию.
+    default_case_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("doc_cases.id", ondelete="SET NULL"), nullable=True)
+    # Каким типом задачи ставится поручение по документу: резолюция живёт в
+    # «Задачах» со своим сроком, эскалацией и почтой.
+    errand_type_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("task_types.id", ondelete="SET NULL"), nullable=True)
+    requires_registration: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), onupdate=func.now(), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("company_id", "code", name="uq_doc_kinds_code"),
+    )
+
+
+class DocCard(Base):
+    """Карточка документа: то, что регистрируют, ищут и хранят.
+
+    Реквизиты корреспонденции (корреспондент, направление, их исходящий номер)
+    вынесены в колонки, а не в JSONB: по ним строится реестр и отбор, а по
+    содержимому JSONB отбор пришлось бы делать перебором.
+    """
+    __tablename__ = "doc_cards"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    kind_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("doc_kinds.id", ondelete="RESTRICT"), nullable=False)
+    # Копия кода вида: реестр рисуется без соединения со справочником.
+    kind_code: Mapped[str] = mapped_column(String(40), nullable=False, default="")
+    family: Mapped[str] = mapped_column(String(20), nullable=False, default="internal")
+    direction: Mapped[str] = mapped_column(String(10), nullable=False, default="none")
+    title: Mapped[str] = mapped_column(String(500), nullable=False)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # draft | registered | in_force | executed | archived | cancelled
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft")
+
+    reg_number: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    reg_date: Mapped[date_type | None] = mapped_column(Date, nullable=True)
+    registered_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    # Номер введён руками: так регистрируют чужой документ, пришедший со своим
+    # номером. Счётчик при этом не двигается.
+    number_manual: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    # Наше юрлицо: ось нумерации и шапка печатной формы.
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True)
+    counterparty_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("counterparties.id", ondelete="SET NULL"), nullable=True)
+    # Имя корреспондента строкой — как в реестре первички: письмо приходит и от
+    # того, кого в справочнике ещё нет, и терять отправителя из-за этого нельзя.
+    counterparty_name: Mapped[str] = mapped_column(String(500), nullable=False, default="")
+    external_number: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    external_date: Mapped[date_type | None] = mapped_column(Date, nullable=True)
+
+    # Предмет документа в чужой модели: `contract:<uuid>`, `article:<uuid>`.
+    # Реквизиты договора остаются в `contracts`, здесь только делопроизводство.
+    subject_ref: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    # Ключ объекта сети строковый (`ezs-…`, `rh-…`), а не UUID: три четверти парка
+    # достались от первой загрузки, и переприсваивать ключи нельзя.
+    object_id: Mapped[str | None] = mapped_column(
+        String(40), ForeignKey("service_locations.id", ondelete="SET NULL"),
+        nullable=True)
+    department_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("org_departments.id", ondelete="SET NULL"),
+        nullable=True)
+
+    author_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    responsible_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    signatory_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # company | private — та же механика, что у видимости задачи. Прав уровня
+    # записи пока нет, поэтому кадровые и денежные приказы сюда не кладут.
+    confidentiality: Mapped[str] = mapped_column(String(20), nullable=False, default="company")
+    attrs: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # Откуда документ появился: manual | intake | mail | chat | edo | api.
+    source: Mapped[str] = mapped_column(String(20), nullable=False, default="manual")
+    source_ref: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    current_revision: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    has_files: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    case_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("doc_cases.id", ondelete="SET NULL"), nullable=True)
+    # Хранить до этой даты. Считается при регистрации и потом не пересчитывается:
+    # правка справочника сроков не должна задним числом списывать старые документы.
+    storage_until: Mapped[date_type | None] = mapped_column(Date, nullable=True)
+    # Идёт ли по документу согласование прямо сейчас: none | pending | approved | rejected.
+    approval_status: Mapped[str] = mapped_column(String(15), nullable=False, default="none")
+    approval_round: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True)
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), onupdate=func.now(), nullable=True)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        # Номер уникален среди зарегистрированных; у черновика номера нет вовсе.
+        Index("uq_doc_cards_reg_number", "company_id", "reg_number",
+              unique=True, postgresql_where=text("reg_number IS NOT NULL")),
+        # Две карточки на один договор — это две правды о нём.
+        Index("uq_doc_cards_subject", "company_id", "subject_ref",
+              unique=True, postgresql_where=text("subject_ref IS NOT NULL")),
+        Index("idx_doc_cards_registry", "company_id", "family", "reg_date"),
+        Index("idx_doc_cards_counterparty", "company_id", "counterparty_id"),
+        CheckConstraint(
+            "family IN ('ord','incoming','outgoing','internal','contract','other')",
+            name="ck_doc_cards_family"),
+        CheckConstraint(
+            "status IN ('draft','registered','in_force','executed','archived','cancelled')",
+            name="ck_doc_cards_status"),
+    )
+
+
+class DocVersion(Base):
+    """Файл документа и его редакция.
+
+    Дисциплина повторяет `StoreDocFile`: содержимое опознаётся хешем, замена
+    оформляется новой редакцией со ссылкой на предшественника, удаление — только
+    отметкой с обязательной причиной. Спор «какую редакцию согласовали» иначе не
+    разрешить.
+    """
+    __tablename__ = "doc_versions"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    doc_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("doc_cards.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    # body (сам документ) | appendix | signed_scan | attachment
+    role: Mapped[str] = mapped_column(String(30), nullable=False, default="body")
+    # Ссылка на общее хранилище файлов. Внешнего ключа нет по той же причине, что
+    # в `StoreDocFile`: файл живёт дольше карточки и переживает её пересборку.
+    file_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    file_name: Mapped[str] = mapped_column(String(500), nullable=False)
+    mime: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    sha256: Mapped[str] = mapped_column(CHAR(64), nullable=False)
+    title: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    note: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    supersedes_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("doc_versions.id", ondelete="RESTRICT"), nullable=True)
+    is_current: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    author_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    uploaded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+    tombstoned_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    tombstoned_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    tombstone_reason: Mapped[str | None] = mapped_column(String(300), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("doc_id", "revision", "role", "sha256",
+                         name="uq_doc_versions_content"),
+        Index("idx_doc_versions_live", "company_id", "doc_id", "tombstoned_at"),
+        CheckConstraint("sha256 ~ '^[0-9a-f]{64}$'", name="ck_doc_versions_sha256"),
+        CheckConstraint("revision > 0", name="ck_doc_versions_revision"),
+    )
+
+
+class DocEvent(Base):
+    """След карточки: кто, когда и что сделал с документом.
+
+    Форма повторяет ленту задачи, включая имя автора без учётки: письмо от
+    контрагента должно ложиться в след с его подписью, а не «от системы».
+    """
+    __tablename__ = "doc_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    doc_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("doc_cards.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    # created | registered | version | status | field | approval | sign |
+    # dispatch | comment | errand | relation | mail
+    kind: Mapped[str] = mapped_column(String(20), nullable=False, default="comment")
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    actor_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    from_value: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    to_value: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    pinned: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+
+class DocRelation(Base):
+    """Связь документа с чем угодно в пространстве.
+
+    Адресат хранится строкой (`task:<uuid>`, `doc:<uuid>`, `contract:<uuid>`):
+    контуров много, и внешний ключ на каждый означал бы правку таблицы при
+    появлении следующего. Для связи документа с документом ключ всё же есть — по
+    нему идёт соединение в карточке.
+    """
+    __tablename__ = "doc_relations"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    doc_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("doc_cards.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    # reply_to | annex_of | amends | cancels | basis | errand | related
+    kind: Mapped[str] = mapped_column(String(30), nullable=False, default="related")
+    target_ref: Mapped[str] = mapped_column(String(200), nullable=False)
+    target_doc_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("doc_cards.id", ondelete="SET NULL"), nullable=True)
+    meta: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("company_id", "doc_id", "kind", "target_ref",
+                         name="uq_doc_relations"),
+        # Обратный вопрос «по какому документу эта задача» задают не реже прямого.
+        Index("idx_doc_relations_target", "company_id", "target_ref"),
+    )
+
+
+class DocCounter(Base):
+    """Счётчик регистрационных номеров.
+
+    Транзакционный, а не последовательность базы: последовательность не
+    откатывается, и отменённая регистрация оставила бы дыру в журнале. Дыру
+    первым делом спрашивает проверяющий, поэтому цена в виде сериализации
+    регистраций одного вида здесь оправдана.
+    """
+    __tablename__ = "doc_counters"
+
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        primary_key=True)
+    # <код вида>|<юрлицо или «-»>|<год или «-»>
+    scope_key: Mapped[str] = mapped_column(String(120), primary_key=True)
+    next_value: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), onupdate=func.now(), nullable=True)
+
+
+class DocCase(Base):
+    """Дело номенклатуры: куда документ ложится и сколько там хранится.
+
+    Срок хранения берётся отсюда один раз, при регистрации, и дальше живёт в самой
+    карточке. Считать его на лету нельзя: правка справочника задним числом сделала
+    бы вчерашние документы подлежащими уничтожению.
+    """
+    __tablename__ = "doc_cases"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True)
+    year: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Индекс дела по номенклатуре: «01-15», «02-03».
+    index: Mapped[str] = mapped_column(String(20), nullable=False)
+    title: Mapped[str] = mapped_column(String(300), nullable=False)
+    # Срок словами, как в перечне: «5 лет», «75 лет ЭПК», «Постоянно».
+    storage_term: Mapped[str] = mapped_column(String(60), nullable=False, default="5 лет")
+    # Он же числом для расчёта. NULL — хранение постоянное, срок не наступает.
+    storage_years: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    epk: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    department_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("org_departments.id", ondelete="SET NULL"), nullable=True)
+    # open | closed — закрытое дело новых документов не принимает.
+    status: Mapped[str] = mapped_column(String(10), nullable=False, default="open")
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    note: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("company_id", "organization_id", "year", "index",
+                         name="uq_doc_cases_index"),
+    )
+
+
+class DocApproval(Base):
+    """Виза: кто согласует шаг маршрута и чем это кончилось.
+
+    Отдельная строка на каждого согласующего, потому что параллельное визирование
+    это несколько одновременных состояний одного документа, а не одна стадия.
+    Исполнитель фиксируется снимком при запуске: человек может уйти из отдела, а
+    виза должна остаться на нём, а не исчезнуть вместе с его должностью.
+    """
+    __tablename__ = "doc_approvals"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    doc_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("doc_cards.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    # Круг согласования. После правки по замечанию открывается следующий, прошлые
+    # остаются: лист согласования показывает всю историю, а не последнее состояние.
+    round: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    step_no: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    step_code: Mapped[str] = mapped_column(String(40), nullable=False, default="")
+    step_name: Mapped[str] = mapped_column(String(120), nullable=False, default="")
+    # serial (шаг за шагом) | parallel (все визируют одновременно)
+    mode: Mapped[str] = mapped_column(String(10), nullable=False, default="serial")
+    # all | any | число — сколько виз нужно, чтобы шаг считался пройденным.
+    quorum: Mapped[str] = mapped_column(String(10), nullable=False, default="all")
+    # user | role | department | head_of | position — из чего резолвился человек.
+    actor_kind: Mapped[str] = mapped_column(String(20), nullable=False, default="user")
+    actor_ref: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    assignee_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # pending | approved | rejected | skipped
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    decided_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    # При отказе обязателен: возврат без причины бессмыслен, автор не поймёт, что править.
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("doc_id", "round", "step_no", "assignee_id",
+                         name="uq_doc_approvals_actor"),
+        # Экран «на мне»: одним индексом отвечает на главный вопрос согласующего.
+        Index("idx_doc_approvals_mine", "company_id", "assignee_id", "status"),
+    )
+
+
+class DocShareLink(Base):
+    """Показ документа контрагенту по ссылке, без учётки в пространстве.
+
+    Срок обязателен: вечная ссылка на документ это утечка, отложенная во времени.
+    Подтверждение получения хранится вместе с текстом, который человеку показали:
+    через два года вопрос будет «с чем именно он согласился», и наш пересказ на
+    него не отвечает.
+
+    Юридический предел назван прямо: это простая электронная подпись, и она
+    работает, только если порядок её использования согласован сторонами в
+    договоре. Без такой оговорки запись остаётся счётчиком открытий.
+    """
+    __tablename__ = "doc_share_links"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    doc_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("doc_cards.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    token: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    recipient_name: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    recipient_email: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    revoked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    opened_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_opened_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    last_ip: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    acknowledged_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    acknowledged_by_name: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    # Снимок момента подтверждения: адрес, время и ДОСЛОВНЫЙ текст согласия.
+    ack_evidence: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
