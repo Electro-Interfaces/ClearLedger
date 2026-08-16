@@ -27,21 +27,22 @@ from urllib.parse import quote
 from fastapi import Response
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, literal_column, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import log_audit
 from app.auth import assert_company_product, get_current_user
 from app.database import get_db
 from app.models import (
-    Counterparty, DocApproval, DocCard, DocCase, DocEvent, DocKind, DocRelation,
-    DocAcquaint, DocExchangeTarget, DocExport, DocInboxItem, DocLabelLink,
+    CompanyRole, Counterparty, Department, DocAccessGrant, DocApproval, DocCard,
+    DocCase, DocEvent, DocKind, DocRelation, DocAcquaint, DocExchangeTarget,
+    DocExport, DocInboxItem, DocLabelLink,
     DocShareLink, UserSubstitution,
     DocVersion, Organization, SourceFile, Task, TaskEvent, TaskLabel,
     TaskType, TaskWorkItem, User, UserCompany,
 )
 from app.routers import doc_share_router
-from app.services import doc_approvals, doc_exchange, doc_print, file_store, mail_send
+from app.services import doc_approvals, doc_exchange, doc_print, doc_text, file_store, mail_send
 from app.services.doc_numbers import next_number, render, scope_key
 
 router = APIRouter(prefix="/docs", tags=["Трек"])
@@ -59,6 +60,7 @@ _MIME_ALLOWED = {
     "application/msword", "application/vnd.ms-excel", "text/plain",
 }
 _MAX_FILE_BYTES = 25 * 1024 * 1024
+_RUSSIAN_TEXT_SEARCH = literal_column("'russian'::regconfig")
 
 # Заготовки видов: то, что есть в любой компании. Заводятся кнопкой из раздела
 # «Виды», а не молча при первом запросе: справочник компании создаёт человек.
@@ -106,19 +108,109 @@ async def _doc_or_404(db: AsyncSession, cid: uuid.UUID, doc_id) -> DocCard:
 
 
 def _visible(d: DocCard, user: User) -> bool:
-    """Закрытый документ виден автору, ответственному и подписанту.
-
-    Полноценных прав уровня записи пока нет; это отсечка того же рода, что
-    `visibility` у задачи, и на ней держится единственная защита от чужих глаз.
-    """
+    """Базовая видимость до правил карточки и рабочих назначений."""
     if d.confidentiality != "private":
         return True
     return user.is_superadmin or user.id in {d.author_id, d.responsible_id, d.signatory_id}
 
+async def _access_rows(db: AsyncSession, cid: uuid.UUID,
+                       d: DocCard) -> list[DocAccessGrant]:
+    return (await db.execute(select(DocAccessGrant).where(
+        DocAccessGrant.company_id == cid,
+        or_(
+            (DocAccessGrant.scope_type == "doc") & (DocAccessGrant.scope_id == d.id),
+            (DocAccessGrant.scope_type == "kind") & (DocAccessGrant.scope_id == d.kind_id),
+        )))).scalars().all()
 
-def _assert_visible(d: DocCard, user: User) -> None:
-    if not _visible(d, user):
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Документ закрыт")
+
+async def _subject_ids(db: AsyncSession, cid: uuid.UUID,
+                       user: User) -> dict[str, uuid.UUID | None]:
+    membership = await db.get(UserCompany, (user.id, cid))
+    return {
+        "user": user.id,
+        "role": membership.role_id if membership else None,
+        "department": membership.department_id if membership else None,
+    }
+
+
+async def _can_doc(db: AsyncSession, cid: uuid.UUID, d: DocCard,
+                   user: User, permission: str) -> bool:
+    if user.is_superadmin:
+        return True
+    rows = await _access_rows(db, cid, d)
+    subjects = await _subject_ids(db, cid, user)
+
+    def matches(row: DocAccessGrant) -> bool:
+        return subjects.get(row.subject_type) == row.subject_id
+
+    if permission == "read":
+        inherited = {"read", "edit", "approve", "sign"}
+        if _visible(d, user) or any(
+                matches(row) and inherited.intersection(row.permissions or []) for row in rows):
+            return True
+        assigned = await db.scalar(select(or_(
+            select(DocApproval.id).where(
+                DocApproval.doc_id == d.id,
+                DocApproval.assignee_id == user.id,
+            ).exists(),
+            select(DocAcquaint.id).where(
+                DocAcquaint.doc_id == d.id,
+                DocAcquaint.user_id == user.id,
+            ).exists(),
+        )))
+        return bool(assigned)
+
+    scoped = [row for row in rows if permission in (row.permissions or [])]
+    if scoped:
+        return any(matches(row) for row in scoped)
+    if permission == "approve":
+        return True
+    return _visible(d, user)
+
+
+async def _assert_doc_permission(db: AsyncSession, cid: uuid.UUID, d: DocCard,
+                                 user: User, permission: str) -> None:
+    if not await _can_doc(db, cid, d, user, permission):
+        message = "Документ закрыт" if permission == "read" else "Недостаточно прав на документ"
+        raise HTTPException(status.HTTP_403_FORBIDDEN, message)
+
+
+async def _readable_docs(db: AsyncSession, cid: uuid.UUID, rows: list[DocCard],
+                         user: User) -> list[DocCard]:
+    if user.is_superadmin:
+        return rows
+    visible = {d.id for d in rows if _visible(d, user)}
+    hidden = [d for d in rows if d.id not in visible]
+    if not hidden:
+        return rows
+    subjects = await _subject_ids(db, cid, user)
+    grants = (await db.execute(select(DocAccessGrant).where(
+        DocAccessGrant.company_id == cid,
+        or_(
+            (DocAccessGrant.scope_type == "doc")
+            & DocAccessGrant.scope_id.in_([d.id for d in hidden]),
+            (DocAccessGrant.scope_type == "kind")
+            & DocAccessGrant.scope_id.in_([d.kind_id for d in hidden]),
+        )))).scalars().all()
+    inherited = {"read", "edit", "approve", "sign"}
+    matching = [g for g in grants if subjects.get(g.subject_type) == g.subject_id
+                and inherited.intersection(g.permissions or [])]
+    doc_scopes = {g.scope_id for g in matching if g.scope_type == "doc"}
+    kind_scopes = {g.scope_id for g in matching if g.scope_type == "kind"}
+    visible.update(d.id for d in hidden
+                   if d.id in doc_scopes or d.kind_id in kind_scopes)
+    assigned = set((await db.execute(select(DocApproval.doc_id).where(
+        DocApproval.company_id == cid,
+        DocApproval.doc_id.in_([d.id for d in hidden]),
+        DocApproval.assignee_id == user.id,
+    ))).scalars().all())
+    assigned.update((await db.execute(select(DocAcquaint.doc_id).where(
+        DocAcquaint.company_id == cid,
+        DocAcquaint.doc_id.in_([d.id for d in hidden]),
+        DocAcquaint.user_id == user.id,
+    ))).scalars().all())
+    visible.update(assigned)
+    return [d for d in rows if d.id in visible]
 
 
 def _card_out(d: DocCard, names: dict[str, str] | None = None) -> dict[str, Any]:
@@ -304,6 +396,170 @@ async def create_starter_kinds(
 # ── Реестр ───────────────────────────────────────────────────────────────────
 
 
+# ── Права уровня записи ──────────────────────────────────────────────────────
+
+
+class AccessGrantIn(BaseModel):
+    company_id: str
+    scope_type: str = Field(..., pattern="^(doc|kind)$")
+    scope_id: str
+    subject_type: str = Field(..., pattern="^(user|role|department)$")
+    subject_id: str
+    permissions: list[str]
+
+
+async def _check_access_refs(db: AsyncSession, cid: uuid.UUID,
+                             payload: AccessGrantIn) -> tuple[uuid.UUID, uuid.UUID]:
+    scope_id = _uuid_or_400(payload.scope_id, "scope_id")
+    subject_id = _uuid_or_400(payload.subject_id, "subject_id")
+    scope_model = DocCard if payload.scope_type == "doc" else DocKind
+    scope = await db.get(scope_model, scope_id)
+    if scope is None or scope.company_id != cid:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Область доступа не найдена")
+    if payload.subject_type == "user":
+        subject = await db.get(UserCompany, (subject_id, cid))
+    elif payload.subject_type == "role":
+        subject = await db.get(CompanyRole, subject_id)
+    else:
+        subject = await db.get(Department, subject_id)
+    if subject is None or (payload.subject_type != "user" and subject.company_id != cid):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Получатель доступа не найден")
+    return scope_id, subject_id
+
+
+@router.get("/access")
+async def list_access_grants(
+    company_id: str = Query(...),
+    doc_id: str | None = Query(None),
+    kind_id: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cid = await assert_company_product(company_id, current_user, db, "docs")
+    scopes: list[tuple[str, uuid.UUID]] = []
+    if doc_id:
+        doc = await _doc_or_404(db, cid, doc_id)
+        await _assert_doc_permission(db, cid, doc, current_user, "read")
+        scopes.extend((("doc", doc.id), ("kind", doc.kind_id)))
+    elif kind_id:
+        kind = await _kind_or_404(db, cid, kind_id)
+        scopes.append(("kind", kind.id))
+    else:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Нужен doc_id или kind_id")
+
+    rows = (await db.execute(select(DocAccessGrant).where(
+        DocAccessGrant.company_id == cid,
+        or_(*[(DocAccessGrant.scope_type == scope_type)
+              & (DocAccessGrant.scope_id == scope_id)
+              for scope_type, scope_id in scopes])))).scalars().all()
+    names: dict[tuple[str, uuid.UUID], str] = {}
+    for subject_type, model in (("user", User), ("role", CompanyRole),
+                                ("department", Department)):
+        ids = {row.subject_id for row in rows if row.subject_type == subject_type}
+        if ids:
+            for value in (await db.execute(select(model).where(model.id.in_(ids)))).scalars():
+                names[(subject_type, value.id)] = value.name
+    return {"grants": [{
+        "id": str(row.id), "scope_type": row.scope_type,
+        "scope_id": str(row.scope_id), "subject_type": row.subject_type,
+        "subject_id": str(row.subject_id),
+        "subject_name": names.get((row.subject_type, row.subject_id), ""),
+        "permissions": row.permissions or [],
+        "inherited": bool(doc_id and row.scope_type == "kind"),
+    } for row in rows]}
+
+
+@router.post("/access", status_code=status.HTTP_201_CREATED)
+async def save_access_grant(
+    payload: AccessGrantIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cid = await assert_company_product(payload.company_id, current_user, db, "docs")
+    await _assert_admin(db, cid, current_user)
+    scope_id, subject_id = await _check_access_refs(db, cid, payload)
+    allowed = {"read", "edit", "approve", "sign"}
+    permissions = [value for value in dict.fromkeys(payload.permissions) if value in allowed]
+    if not permissions:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Не выбрано ни одного права")
+    row = (await db.execute(select(DocAccessGrant).where(
+        DocAccessGrant.company_id == cid,
+        DocAccessGrant.scope_type == payload.scope_type,
+        DocAccessGrant.scope_id == scope_id,
+        DocAccessGrant.subject_type == payload.subject_type,
+        DocAccessGrant.subject_id == subject_id))).scalar_one_or_none()
+    if row is None:
+        row = DocAccessGrant(
+            company_id=cid, scope_type=payload.scope_type, scope_id=scope_id,
+            subject_type=payload.subject_type, subject_id=subject_id,
+            created_by=current_user.id)
+        db.add(row)
+    row.permissions = permissions
+    await db.commit()
+    await db.refresh(row)
+    return {"id": str(row.id), "permissions": row.permissions}
+
+
+@router.delete("/access/{grant_id}")
+async def delete_access_grant(
+    grant_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cid = await assert_company_product(company_id, current_user, db, "docs")
+    await _assert_admin(db, cid, current_user)
+    row = (await db.execute(select(DocAccessGrant).where(
+        DocAccessGrant.company_id == cid,
+        DocAccessGrant.id == _uuid_or_400(grant_id, "grant_id")))).scalar_one_or_none()
+    if row is not None:
+        await db.delete(row)
+        await db.commit()
+    return {"deleted": row is not None}
+
+
+@router.post("/search/reindex")
+async def reindex_doc_versions(
+    company_id: str = Query(...),
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Дозаполнить текст у старых редакций после включения полнотекстового поиска."""
+    cid = await assert_company_product(company_id, current_user, db, "docs")
+    await _assert_admin(db, cid, current_user)
+    rows = (await db.execute(select(DocVersion).where(
+        DocVersion.company_id == cid, DocVersion.content_text.is_(None),
+        DocVersion.tombstoned_at.is_(None)).order_by(DocVersion.uploaded_at).limit(limit)
+    )).scalars().all()
+    indexed = 0
+    skipped = 0
+    for version in rows:
+        source = await db.get(SourceFile, version.file_id)
+        if source is None:
+            skipped += 1
+            continue
+        try:
+            content = file_store.read(source)
+        except OSError:
+            skipped += 1
+            continue
+        extracted = await doc_text.extract(
+            content, version.mime or source.mime_type or "application/octet-stream",
+            version.file_name)
+        version.content_text = extracted or ""
+        if extracted:
+            indexed += 1
+        else:
+            skipped += 1
+    await db.commit()
+    remaining = await db.scalar(select(func.count()).select_from(DocVersion).where(
+        DocVersion.company_id == cid, DocVersion.content_text.is_(None),
+        DocVersion.tombstoned_at.is_(None)))
+    return {"processed": len(rows), "indexed": indexed, "skipped": skipped,
+            "remaining": remaining or 0}
+
+
 @router.get("")
 async def list_docs(
     company_id: str = Query(...),
@@ -346,15 +602,25 @@ async def list_docs(
         stmt = stmt.where(func.coalesce(DocCard.reg_date,
                                         func.date(DocCard.created_at)) <= date_to)
     if q:
-        like = f"%{q.strip()}%"
+        query = q.strip()
+        like = f"%{query}%"
+        version_match = select(DocVersion.id).where(
+            DocVersion.doc_id == DocCard.id,
+            DocVersion.tombstoned_at.is_(None),
+            func.to_tsvector(
+                _RUSSIAN_TEXT_SEARCH,
+                func.coalesce(DocVersion.content_text, literal_column("''")),
+            ).op("@@")(func.plainto_tsquery(_RUSSIAN_TEXT_SEARCH, query)),
+        ).exists()
         stmt = stmt.where(or_(DocCard.title.ilike(like),
                               DocCard.reg_number.ilike(like),
                               DocCard.external_number.ilike(like),
-                              DocCard.counterparty_name.ilike(like)))
+                              DocCard.counterparty_name.ilike(like),
+                              version_match))
     stmt = stmt.order_by(DocCard.reg_date.desc().nullslast(),
                          DocCard.created_at.desc()).limit(limit)
-    rows = [d for d in (await db.execute(stmt)).scalars().all()
-            if _visible(d, current_user)]
+    rows = await _readable_docs(db, cid, (await db.execute(stmt)).scalars().all(),
+                                current_user)
     names = dict((await db.execute(select(DocKind.id, DocKind.name).where(
         DocKind.company_id == cid))).all())
     names = {str(k): v for k, v in names.items()}
@@ -454,7 +720,7 @@ async def register_doc(
     """
     cid = await assert_company_product(payload.company_id, current_user, db, "docs")
     d = await _doc_or_404(db, cid, doc_id)
-    _assert_visible(d, current_user)
+    await _assert_doc_permission(db, cid, d, current_user, "edit")
     if d.reg_number:
         raise HTTPException(status.HTTP_409_CONFLICT,
                             f"Документ уже зарегистрирован под номером {d.reg_number}")
@@ -539,7 +805,9 @@ async def doc_action(
     след, иначе половина изменений остаётся без автора."""
     cid = await assert_company_product(payload.company_id, current_user, db, "docs")
     d = await _doc_or_404(db, cid, doc_id)
-    _assert_visible(d, current_user)
+    await _assert_doc_permission(db, cid, d, current_user, "edit")
+    if payload.status == "in_force":
+        await _assert_doc_permission(db, cid, d, current_user, "sign")
     who = current_user.name or current_user.email
 
     if payload.status and payload.status != d.status:
@@ -628,7 +896,7 @@ async def approval_start(
     """
     cid = await assert_company_product(payload.company_id, current_user, db, "docs")
     d = await _doc_or_404(db, cid, doc_id)
-    _assert_visible(d, current_user)
+    await _assert_doc_permission(db, cid, d, current_user, "edit")
     if d.approval_status == "pending":
         raise HTTPException(status.HTTP_409_CONFLICT,
                             "Согласование уже идёт: дождитесь виз или отмените круг")
@@ -674,6 +942,7 @@ async def approval_decide(
                             "Визу ставит тот, кому она адресована, "
                             "либо назначенный заместитель на время отсутствия")
     d = await _doc_or_404(db, cid, row.doc_id)
+    await _assert_doc_permission(db, cid, d, current_user, "approve")
     res = await doc_approvals.decide(db, cid, d, row, current_user,
                                      payload.approved, payload.comment)
     if "error" in res:
@@ -705,7 +974,7 @@ async def approvals_mine(
         "due_at": r.due_at.isoformat() if r.due_at else None,
         "doc_title": docs[r.doc_id].title if r.doc_id in docs else "",
         "doc_number": docs[r.doc_id].reg_number if r.doc_id in docs else None,
-    } for r in rows if r.doc_id in docs and _visible(docs[r.doc_id], current_user)]}
+    } for r in rows if r.doc_id in docs]}
 
 
 # ── Номенклатура дел ─────────────────────────────────────────────────────────
@@ -831,7 +1100,7 @@ async def create_share(
     """
     cid = await assert_company_product(payload.company_id, current_user, db, "docs")
     d = await _doc_or_404(db, cid, doc_id)
-    _assert_visible(d, current_user)
+    await _assert_doc_permission(db, cid, d, current_user, "edit")
     if not d.reg_number:
         raise HTTPException(status.HTTP_409_CONFLICT,
                             "Сначала зарегистрируйте документ: наружу уходит номер")
@@ -862,7 +1131,7 @@ async def list_shares(
 ):
     cid = await assert_company_product(company_id, current_user, db, "docs")
     d = await _doc_or_404(db, cid, doc_id)
-    _assert_visible(d, current_user)
+    await _assert_doc_permission(db, cid, d, current_user, "read")
     rows = (await db.execute(select(DocShareLink).where(
         DocShareLink.doc_id == d.id).order_by(
         DocShareLink.created_at.desc()))).scalars().all()
@@ -921,7 +1190,7 @@ async def send_doc(
     """
     cid = await assert_company_product(payload.company_id, current_user, db, "docs")
     d = await _doc_or_404(db, cid, doc_id)
-    _assert_visible(d, current_user)
+    await _assert_doc_permission(db, cid, d, current_user, "edit")
     if not d.reg_number:
         raise HTTPException(status.HTTP_409_CONFLICT,
                             "Сначала зарегистрируйте документ: наружу уходит номер")
@@ -968,7 +1237,7 @@ async def print_doc(
     """
     cid = await assert_company_product(company_id, current_user, db, "docs")
     d = await _doc_or_404(db, cid, doc_id)
-    _assert_visible(d, current_user)
+    await _assert_doc_permission(db, cid, d, current_user, "read")
     return HTMLResponse(await doc_print.render_card(db, d))
 
 
@@ -1034,7 +1303,7 @@ async def toggle_doc_label(
     снятие означала бы две проверки прав на одно и то же."""
     cid = await assert_company_product(payload.company_id, current_user, db, "docs")
     d = await _doc_or_404(db, cid, doc_id)
-    _assert_visible(d, current_user)
+    await _assert_doc_permission(db, cid, d, current_user, "edit")
     lid = _uuid_or_400(payload.label_id, "label_id")
     link = await db.get(DocLabelLink, (d.id, lid))
     if payload.on and link is None:
@@ -1066,7 +1335,7 @@ async def add_doc_time(
     """
     cid = await assert_company_product(payload.company_id, current_user, db, "docs")
     d = await _doc_or_404(db, cid, doc_id)
-    _assert_visible(d, current_user)
+    await _assert_doc_permission(db, cid, d, current_user, "edit")
     row = TaskWorkItem(
         doc_id=d.id, user_id=current_user.id, created_by=current_user.id,
         work_date=payload.work_date or datetime.now(timezone.utc).date(),
@@ -1097,8 +1366,8 @@ async def docs_board(
                                  DocCard.status.notin_(("archived", "cancelled")))
     if family:
         stmt = stmt.where(DocCard.family == family)
-    docs = [d for d in (await db.execute(stmt.limit(_LIST_LIMIT))).scalars().all()
-            if _visible(d, current_user)]
+    docs = await _readable_docs(
+        db, cid, (await db.execute(stmt.limit(_LIST_LIMIT))).scalars().all(), current_user)
     if not docs:
         return {"columns": []}
 
@@ -1137,6 +1406,105 @@ async def docs_board(
                                   c["key"].split(":")[1]) if ":" in c["key"] else 50))}
 
 
+# ── Исполнительская дисциплина ───────────────────────────────────────────────
+
+
+@router.get("/reports/discipline")
+async def approval_discipline(
+    company_id: str = Query(...),
+    date_from: date_type | None = Query(None),
+    date_to: date_type | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Длительность согласований, задержки и доля прохождения с первого круга."""
+    cid = await assert_company_product(company_id, current_user, db, "docs")
+    stmt = (select(DocApproval, DocCard, DocKind.name)
+            .join(DocCard, DocCard.id == DocApproval.doc_id)
+            .join(DocKind, DocKind.id == DocCard.kind_id)
+            .where(DocApproval.company_id == cid))
+    if date_from:
+        stmt = stmt.where(DocApproval.created_at >= datetime.combine(
+            date_from, datetime.min.time(), tzinfo=timezone.utc))
+    if date_to:
+        stmt = stmt.where(DocApproval.created_at < datetime.combine(
+            date_to + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc))
+    rows = (await db.execute(stmt)).all()
+    if not rows:
+        return {"summary": {"documents": 0, "completed": 0, "pending": 0,
+                            "first_pass_rate": 0}, "by_kind": [], "people": []}
+
+    users = {approval.assignee_id for approval, _, _ in rows if approval.assignee_id}
+    names = {user.id: (user.name or user.email) for user in (await db.execute(
+        select(User).where(User.id.in_(users)))).scalars().all()}
+    by_doc: dict[uuid.UUID, dict[str, Any]] = {}
+    by_person: dict[uuid.UUID, dict[str, Any]] = {}
+    now = datetime.now(timezone.utc)
+    for approval, doc, kind_name in rows:
+        group = by_doc.setdefault(doc.id, {
+            "doc": doc, "kind": kind_name, "created": approval.created_at,
+            "decided": approval.decided_at, "pending": False, "round": approval.round,
+        })
+        group["created"] = min(group["created"], approval.created_at)
+        if approval.decided_at and (group["decided"] is None
+                                    or approval.decided_at > group["decided"]):
+            group["decided"] = approval.decided_at
+        group["pending"] = group["pending"] or approval.status == "pending"
+        group["round"] = max(group["round"], approval.round)
+
+        if approval.assignee_id:
+            person = by_person.setdefault(approval.assignee_id, {
+                "name": names.get(approval.assignee_id, "Участник пространства"),
+                "decisions": 0, "hours": 0.0, "overdue": 0, "pending": 0,
+            })
+            if approval.status == "pending":
+                person["pending"] += 1
+                if approval.due_at and approval.due_at < now:
+                    person["overdue"] += 1
+            elif approval.decided_at:
+                person["decisions"] += 1
+                person["hours"] += max(
+                    0.0, (approval.decided_at - approval.created_at).total_seconds() / 3600)
+
+    kind_groups: dict[str, list[float]] = {}
+    completed = 0
+    first_pass = 0
+    pending = 0
+    for group in by_doc.values():
+        if group["pending"]:
+            pending += 1
+            continue
+        if group["doc"].approval_status != "approved" or group["decided"] is None:
+            continue
+        hours = max(0.0, (group["decided"] - group["created"]).total_seconds() / 3600)
+        kind_groups.setdefault(group["kind"], []).append(hours)
+        completed += 1
+        if group["round"] == 1:
+            first_pass += 1
+
+    by_kind = [{
+        "kind": name, "documents": len(values),
+        "average_hours": round(sum(values) / len(values), 1),
+    } for name, values in kind_groups.items()]
+    by_kind.sort(key=lambda value: value["average_hours"], reverse=True)
+    people = [{
+        "user_id": str(user_id), "name": value["name"],
+        "decisions": value["decisions"], "pending": value["pending"],
+        "overdue": value["overdue"],
+        "average_hours": round(value["hours"] / value["decisions"], 1)
+        if value["decisions"] else 0,
+    } for user_id, value in by_person.items()]
+    people.sort(key=lambda value: (value["overdue"], value["average_hours"]), reverse=True)
+    return {
+        "summary": {
+            "documents": len(by_doc), "completed": completed, "pending": pending,
+            "first_pass_rate": round(first_pass * 100 / completed, 1) if completed else 0,
+        },
+        "by_kind": by_kind,
+        "people": people,
+    }
+
+
 # ── Обмен с корпоративными системами головной компании ───────────────────────
 
 
@@ -1149,6 +1517,8 @@ class TargetIn(BaseModel):
     inbox_path: str = Field("", max_length=500)
     as_archive: bool = True
     is_active: bool = True
+    scan_enabled: bool = False
+    scan_interval_min: int = Field(30, ge=5, le=1440)
     note: str | None = None
 
 
@@ -1166,6 +1536,7 @@ async def list_targets(
         "id": str(t.id), "code": t.code, "name": t.name, "system": t.system,
         "outbox_path": t.outbox_path, "inbox_path": t.inbox_path,
         "as_archive": t.as_archive, "is_active": t.is_active, "note": t.note,
+        "scan_enabled": t.scan_enabled, "scan_interval_min": t.scan_interval_min,
         "last_export_at": t.last_export_at.isoformat() if t.last_export_at else None,
         "last_scan_at": t.last_scan_at.isoformat() if t.last_scan_at else None,
         "last_error": t.last_error,
@@ -1182,6 +1553,9 @@ async def create_target(
     это настройка пространства, а не личное предпочтение."""
     cid = await assert_company_product(payload.company_id, current_user, db, "docs")
     await _assert_admin(db, cid, current_user)
+    if payload.scan_enabled:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Сначала проверьте папку вручную")
     dup = (await db.execute(select(DocExchangeTarget.id).where(
         DocExchangeTarget.company_id == cid,
         DocExchangeTarget.code == payload.code))).scalar_one_or_none()
@@ -1190,11 +1564,45 @@ async def create_target(
     t = DocExchangeTarget(
         company_id=cid, code=payload.code, name=payload.name, system=payload.system,
         outbox_path=payload.outbox_path.strip(), inbox_path=payload.inbox_path.strip(),
-        as_archive=payload.as_archive, is_active=payload.is_active, note=payload.note)
+        as_archive=payload.as_archive, is_active=payload.is_active,
+        scan_enabled=payload.scan_enabled, scan_interval_min=payload.scan_interval_min,
+        note=payload.note)
     db.add(t)
     await db.commit()
     await db.refresh(t)
     return {"id": str(t.id), "code": t.code, "name": t.name}
+
+
+class TargetScheduleIn(BaseModel):
+    company_id: str
+    enabled: bool
+    interval_min: int = Field(30, ge=5, le=1440)
+
+
+@router.put("/exchange/targets/{target_id}/schedule")
+async def update_target_schedule(
+    target_id: str,
+    payload: TargetScheduleIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Включить расписание только после ручной проверки папки обмена."""
+    cid = await assert_company_product(payload.company_id, current_user, db, "docs")
+    await _assert_admin(db, cid, current_user)
+    target = (await db.execute(select(DocExchangeTarget).where(
+        DocExchangeTarget.company_id == cid,
+        DocExchangeTarget.id == _uuid_or_400(target_id, "target_id")))).scalar_one_or_none()
+    if target is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Точка обмена не найдена")
+    if payload.enabled and not target.inbox_path:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Не указана папка приёма")
+    if payload.enabled and target.last_scan_at is None:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Сначала проверьте папку вручную кнопкой «Проверить папку»")
+    target.scan_enabled = payload.enabled
+    target.scan_interval_min = payload.interval_min
+    await db.commit()
+    return {"enabled": target.scan_enabled, "interval_min": target.scan_interval_min}
 
 
 @router.post("/{doc_id}/export", status_code=status.HTTP_201_CREATED)
@@ -1213,7 +1621,7 @@ async def export_doc(
     """
     cid = await assert_company_product(company_id, current_user, db, "docs")
     d = await _doc_or_404(db, cid, doc_id)
-    _assert_visible(d, current_user)
+    await _assert_doc_permission(db, cid, d, current_user, "edit")
     if not d.reg_number:
         raise HTTPException(status.HTTP_409_CONFLICT,
                             "Сначала зарегистрируйте документ: наружу уходит номер")
@@ -1268,7 +1676,7 @@ async def download_package(
     """Скачать тот же пакет файлом — когда папка недоступна или нужен разовый обмен."""
     cid = await assert_company_product(company_id, current_user, db, "docs")
     d = await _doc_or_404(db, cid, doc_id)
-    _assert_visible(d, current_user)
+    await _assert_doc_permission(db, cid, d, current_user, "edit")
     data, content = await doc_exchange.build_package(db, d)
     name = doc_exchange.package_name(d)
     db.add(DocExport(
@@ -1296,7 +1704,7 @@ async def list_exports(
     ответ строкой журнала, а не памятью."""
     cid = await assert_company_product(company_id, current_user, db, "docs")
     d = await _doc_or_404(db, cid, doc_id)
-    _assert_visible(d, current_user)
+    await _assert_doc_permission(db, cid, d, current_user, "read")
     rows = (await db.execute(select(DocExport).where(
         DocExport.doc_id == d.id).order_by(DocExport.created_at.desc()))).scalars().all()
     names = {str(t.id): t.name for t in (await db.execute(select(DocExchangeTarget).where(
@@ -1332,31 +1740,16 @@ async def scan_targets(
     targets = [t for t in (await db.execute(stmt)).scalars().all() if t.inbox_path]
 
     added = 0
+    errors: list[dict[str, str]] = []
     for t in targets:
         try:
-            found = doc_exchange.scan_inbox(t)
-            t.last_error = None
+            added += await doc_exchange.collect_inbox(db, t)
         except OSError as e:
             t.last_error = str(e)[:500]
+            errors.append({"target": t.name, "error": t.last_error})
             continue
-        t.last_scan_at = datetime.now(timezone.utc)
-        for item in found:
-            dup = (await db.execute(select(DocInboxItem.id).where(
-                DocInboxItem.company_id == cid,
-                DocInboxItem.sha256 == item["sha256"]))).scalar_one_or_none()
-            if dup is not None:
-                continue
-            sf = file_store.put(db, cid, item["data"],
-                                file_name=item["file_name"], mime=None)
-            await db.flush()
-            db.add(DocInboxItem(
-                company_id=cid, target_id=t.id, file_name=item["file_name"],
-                source_path=item["source_path"], size_bytes=item["size"],
-                sha256=item["sha256"], file_id=sf.id,
-                parsed=item["parsed"] or None))
-            added += 1
     await db.commit()
-    return {"targets": len(targets), "added": added}
+    return {"targets": len(targets), "added": added, "errors": errors}
 
 
 @router.get("/exchange/inbox")
@@ -1453,11 +1846,17 @@ async def decide_inbox(
     if item.file_id:
         sf = await db.get(SourceFile, item.file_id)
         if sf is not None:
+            try:
+                source_content = file_store.read(sf)
+                content_text = await doc_text.extract(
+                    source_content, sf.mime_type or "application/octet-stream", sf.file_name)
+            except OSError:
+                content_text = None
             db.add(DocVersion(
                 company_id=cid, doc_id=d.id, revision=1, role="body",
                 file_id=sf.id, file_name=sf.file_name, mime=sf.mime_type,
                 size_bytes=sf.size or 0, sha256=item.sha256,
-                author_id=current_user.id))
+                author_id=current_user.id, content_text=content_text or ""))
             d.has_files = True
             d.current_revision = 1
 
@@ -1492,26 +1891,38 @@ async def add_acquaint(
     """
     cid = await assert_company_product(payload.company_id, current_user, db, "docs")
     d = await _doc_or_404(db, cid, doc_id)
-    _assert_visible(d, current_user)
+    await _assert_doc_permission(db, cid, d, current_user, "edit")
 
     people: set[uuid.UUID] = {_uuid_or_400(u, "user_id") for u in payload.user_ids}
-    reason = "manual"
+    department_people: set[uuid.UUID] = set()
     if payload.department_id:
         dep = _uuid_or_400(payload.department_id, "department_id")
-        rows = (await db.execute(select(UserCompany.user_id).where(
+        department = await db.get(Department, dep)
+        if department is None or department.company_id != cid:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Подразделение не найдено")
+        department_people = set((await db.execute(select(UserCompany.user_id).where(
             UserCompany.company_id == cid,
-            UserCompany.department_id == dep))).scalars().all()
-        people.update(rows)
-        reason = "department"
+            UserCompany.department_id == dep))).scalars().all())
+        people.update(department_people)
     if not people:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Некого знакомить")
+    members = set((await db.execute(select(UserCompany.user_id).where(
+        UserCompany.company_id == cid,
+        UserCompany.user_id.in_(people),
+    ))).scalars().all())
+    if members != people:
+        raise HTTPException(status.HTTP_404_NOT_FOUND,
+                            "Один из получателей не состоит в компании")
 
     have = set((await db.execute(select(DocAcquaint.user_id).where(
         DocAcquaint.doc_id == d.id))).scalars().all())
     added = 0
     for uid in people - have:
-        db.add(DocAcquaint(company_id=cid, doc_id=d.id, user_id=uid, reason=reason,
-                           due_at=payload.due_at, created_by=current_user.id))
+        db.add(DocAcquaint(
+            company_id=cid, doc_id=d.id, user_id=uid,
+            reason="department" if uid in department_people else "manual",
+            due_at=payload.due_at, created_by=current_user.id,
+        ))
         added += 1
     if added:
         db.add(DocEvent(doc_id=d.id, kind="field", user_id=current_user.id,
@@ -1679,7 +2090,7 @@ async def get_doc(
     """Карточка целиком: реквизиты, редакции файлов, связи и след."""
     cid = await assert_company_product(company_id, current_user, db, "docs")
     d = await _doc_or_404(db, cid, doc_id)
-    _assert_visible(d, current_user)
+    await _assert_doc_permission(db, cid, d, current_user, "read")
     kind = await db.get(DocKind, d.kind_id)
 
     versions = (await db.execute(select(DocVersion).where(
@@ -1718,8 +2129,10 @@ async def get_doc(
         # Лист ознакомления: приказ, с которым никого не ознакомили, не работает.
         "acquaints": [{
             "id": str(a.id), "user_id": str(a.user_id), "status": a.status,
+            "reason": a.reason,
             "read_at": a.read_at.isoformat() if a.read_at else None,
             "due_at": a.due_at.isoformat() if a.due_at else None,
+            "reminded_at": a.reminded_at.isoformat() if a.reminded_at else None,
             "note": a.note,
         } for a in acquaints],
         # Кого именно ждут — то, чего не показывают гибриды рынка: там видно
@@ -1760,7 +2173,7 @@ async def upload_version(
     """
     cid = await assert_company_product(company_id, current_user, db, "docs")
     d = await _doc_or_404(db, cid, doc_id)
-    _assert_visible(d, current_user)
+    await _assert_doc_permission(db, cid, d, current_user, "edit")
 
     content = await file.read()
     if not content:
@@ -1793,6 +2206,7 @@ async def upload_version(
         role=role, file_id=sf.id, file_name=sf.file_name, mime=mime,
         size_bytes=len(content), sha256=digest, title=title,
         supersedes_id=last.id if last else None, author_id=current_user.id)
+    v.content_text = await doc_text.extract(content, mime, sf.file_name) or ""
     if last is not None:
         last.is_current = False
     db.add(v)
@@ -1829,7 +2243,7 @@ async def tombstone_version(
     if v is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Редакция не найдена")
     d = await _doc_or_404(db, cid, v.doc_id)
-    _assert_visible(d, current_user)
+    await _assert_doc_permission(db, cid, d, current_user, "edit")
     v.tombstoned_at = datetime.now(timezone.utc)
     v.tombstoned_by = current_user.id
     v.tombstone_reason = payload.reason
@@ -1868,7 +2282,7 @@ async def create_errand(
     """
     cid = await assert_company_product(payload.company_id, current_user, db, "docs")
     d = await _doc_or_404(db, cid, doc_id)
-    _assert_visible(d, current_user)
+    await _assert_doc_permission(db, cid, d, current_user, "edit")
     kind = await db.get(DocKind, d.kind_id)
 
     label = d.reg_number or d.title[:60]
@@ -1908,7 +2322,7 @@ async def add_relation(
 ):
     cid = await assert_company_product(payload.company_id, current_user, db, "docs")
     d = await _doc_or_404(db, cid, doc_id)
-    _assert_visible(d, current_user)
+    await _assert_doc_permission(db, cid, d, current_user, "edit")
     target_doc = None
     if payload.target_ref.startswith("doc:"):
         target_doc = _uuid_or_400(payload.target_ref.split(":", 1)[1], "target_ref")
@@ -1945,6 +2359,6 @@ async def authorize_docs_file_download(db: AsyncSession, user: User,
         return
     docs = (await db.execute(select(DocCard).where(
         DocCard.id.in_(set(rows))))).scalars().all()
-    if any(_visible(d, user) for d in docs):
+    if any([await _can_doc(db, d.company_id, d, user, "read") for d in docs]):
         return
     raise HTTPException(status.HTTP_404_NOT_FOUND, "Не найдено")

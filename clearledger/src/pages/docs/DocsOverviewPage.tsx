@@ -6,11 +6,11 @@
  * срок. По поручениям показываем готовую сводку трекера — второй такой считать
  * незачем.
  */
-import { lazy, Suspense, useMemo } from 'react'
+import { lazy, Suspense, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { useCompany } from '@/contexts/CompanyContext'
-import { Card } from '@/components/ui/card'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import * as docsService from '@/services/docsService'
 import { DOC_FAMILY } from '@/services/docsService'
 import { useDocsView } from './DocsLayout'
@@ -23,6 +23,8 @@ export function DocsOverviewPage() {
   const navigate = useNavigate()
   const view = useDocsView('/docs/overview')
   const companyId = company?.id ?? ''
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
 
   const listQ = useQuery({
     queryKey: ['docs-overview', companyId],
@@ -33,6 +35,12 @@ export function DocsOverviewPage() {
     queryKey: ['docs-board', companyId, 'overview'],
     queryFn: () => docsService.board(companyId),
     enabled: !!companyId && view === 'docs',
+  })
+  const disciplineQ = useQuery({
+    queryKey: ['docs-discipline', companyId, dateFrom, dateTo],
+    queryFn: () => docsService.approvalDiscipline(
+      companyId, dateFrom || undefined, dateTo || undefined),
+    enabled: !!companyId && view === 'discipline',
   })
 
   const stats = useMemo(() => {
@@ -59,6 +67,10 @@ export function DocsOverviewPage() {
         <TasksOverviewPage />
       </Suspense>
     )
+  }
+  if (view === 'discipline') {
+    return <Discipline report={disciplineQ.data} loading={disciplineQ.isLoading}
+      dateFrom={dateFrom} dateTo={dateTo} setDateFrom={setDateFrom} setDateTo={setDateTo} />
   }
 
   const columns = boardQ.data?.columns ?? []
@@ -127,6 +139,122 @@ export function DocsOverviewPage() {
         </div>
       </Card>
     </div>
+  )
+}
+
+function Discipline({ report, loading, dateFrom, dateTo, setDateFrom, setDateTo }: {
+  report: docsService.ApprovalDisciplineReport | undefined
+  loading: boolean
+  dateFrom: string
+  dateTo: string
+  setDateFrom: (value: string) => void
+  setDateTo: (value: string) => void
+}) {
+  const summary = report?.summary
+  return (
+    <div className="flex flex-col gap-4 px-4 py-4">
+      <div>
+        <h1 className="text-base font-semibold">Исполнительская дисциплина</h1>
+        <p className="text-xs text-muted-foreground">
+          {loading ? 'Загрузка…' : 'Скорость согласования считается от запуска до последней визы.'}
+        </p>
+      </div>
+
+      <div className="flex flex-wrap gap-3">
+        <label className="flex items-center gap-2 text-xs text-muted-foreground">
+          С
+          <input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)}
+            className="h-9 rounded-md border border-input bg-background px-2 text-sm text-foreground" />
+        </label>
+        <label className="flex items-center gap-2 text-xs text-muted-foreground">
+          По
+          <input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)}
+            className="h-9 rounded-md border border-input bg-background px-2 text-sm text-foreground" />
+        </label>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <Metric label="Документов с визами" value={summary?.documents ?? 0} />
+        <Metric label="Завершено" value={summary?.completed ?? 0} />
+        <Metric label="Сейчас ждут" value={summary?.pending ?? 0} />
+        <Metric label="С первого круга" value={`${summary?.first_pass_rate ?? 0}%`} />
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle>Скорость по видам</CardTitle>
+            <CardDescription>Среднее время полного согласования документа</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <table className="w-full text-sm">
+              <thead className="text-xs text-muted-foreground">
+                <tr><th className="pb-2 text-left font-medium">Вид</th>
+                  <th className="pb-2 text-right font-medium">Документов</th>
+                  <th className="pb-2 text-right font-medium">Часов</th></tr>
+              </thead>
+              <tbody>
+                {(report?.by_kind ?? []).map((row) => (
+                  <tr key={row.kind} className="border-t border-border">
+                    <td className="py-2">{row.kind}</td>
+                    <td className="py-2 text-right">{row.documents}</td>
+                    <td className="py-2 text-right font-medium">{row.average_hours}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {!loading && !report?.by_kind.length && (
+              <p className="py-4 text-center text-sm text-muted-foreground">
+                Завершённых согласований пока нет
+              </p>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>По согласующим</CardTitle>
+            <CardDescription>Просроченные визы и среднее время решения</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <table className="w-full text-sm">
+              <thead className="text-xs text-muted-foreground">
+                <tr><th className="pb-2 text-left font-medium">Человек</th>
+                  <th className="pb-2 text-right font-medium">Ждут</th>
+                  <th className="pb-2 text-right font-medium">Просрочено</th>
+                  <th className="pb-2 text-right font-medium">Часов</th></tr>
+              </thead>
+              <tbody>
+                {(report?.people ?? []).map((row) => (
+                  <tr key={row.user_id} className="border-t border-border">
+                    <td className="py-2">{row.name}</td>
+                    <td className="py-2 text-right">{row.pending}</td>
+                    <td className="py-2 text-right">{row.overdue}</td>
+                    <td className="py-2 text-right font-medium">{row.average_hours}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {!loading && !report?.people.length && (
+              <p className="py-4 text-center text-sm text-muted-foreground">
+                Виз пока нет
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  )
+}
+
+function Metric({ label, value }: { label: string; value: number | string }) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardDescription>{label}</CardDescription>
+        <CardTitle className="text-2xl">{value}</CardTitle>
+      </CardHeader>
+    </Card>
   )
 }
 

@@ -2091,7 +2091,7 @@ class MailRule(Base):
     subject_like: Mapped[str | None] = mapped_column(String(300), nullable=True)
     has_attachment: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     unknown_sender: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
-    # Действие: intake | ticket | chat | task | archive | quarantine | reject.
+    # Действие: intake | ticket | chat | task | doc | archive | quarantine | reject.
     action: Mapped[str] = mapped_column(String(20), nullable=False, default="archive")
     # Что правило проставляет письму помимо действия: контрагента и договор.
     set_counterparty_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -2260,7 +2260,7 @@ class MailMessage(Base):
     # Письмо целиком, как пришло. Тело и заголовки разобраны в колонках выше, но
     # спор «что именно было в письме» решается оригиналом, а не нашим разбором.
     raw_eml: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
-    # Куда письмо доехало: chat | task | ticket | intake. Пусто — осталось в переписке.
+    # Куда письмо доехало: chat | task | ticket | intake | doc. Пусто — осталось в переписке.
     routed_to: Mapped[str | None] = mapped_column(String(20), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -9611,8 +9611,8 @@ class DocCard(Base):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    # company | private — та же механика, что у видимости задачи. Прав уровня
-    # записи пока нет, поэтому кадровые и денежные приказы сюда не кладут.
+    # company | private. Закрытую карточку дополнительно открывают правила
+    # doc_access_grants и назначение на визу/ознакомление.
     confidentiality: Mapped[str] = mapped_column(String(20), nullable=False, default="company")
     attrs: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     # Откуда документ появился: manual | intake | mail | chat | edo | api.
@@ -9694,6 +9694,9 @@ class DocVersion(Base):
     tombstoned_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     tombstone_reason: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    # Текст файла для полнотекстового поиска. Для сканов его даёт OCR, для
+    # текстовых и офисных форматов — извлечение без распознавания.
+    content_text: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     __table_args__ = (
         UniqueConstraint("doc_id", "revision", "role", "sha256",
@@ -9939,6 +9942,45 @@ class DocLabelLink(Base):
         DateTime(timezone=True), server_default=func.now())
 
 
+class DocAccessGrant(Base):
+    """Права уровня записи: документ или вид × субъект × действия.
+
+    `scope_id` и `subject_id` намеренно полиморфны: областью бывает карточка или
+    вид, субъектом — человек, роль или подразделение. Их принадлежность компании
+    проверяет сервис при записи, а одна таблица не плодит три параллельных
+    механизма доступа.
+    """
+    __tablename__ = "doc_access_grants"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    # doc | kind
+    scope_type: Mapped[str] = mapped_column(String(10), nullable=False)
+    scope_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    # user | role | department
+    subject_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    subject_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    # read | edit | approve | sign
+    permissions: Mapped[list] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb"))
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("company_id", "scope_type", "scope_id", "subject_type",
+                         "subject_id", name="uq_doc_access_grant"),
+        Index("idx_doc_access_scope", "company_id", "scope_type", "scope_id"),
+        CheckConstraint("scope_type IN ('doc','kind')", name="ck_doc_access_scope"),
+        CheckConstraint("subject_type IN ('user','role','department')",
+                        name="ck_doc_access_subject"),
+    )
+
+
 class DocExchangeTarget(Base):
     """Точка обмена с корпоративной системой: папка туда и папка обратно.
 
@@ -9973,6 +10015,9 @@ class DocExchangeTarget(Base):
         DateTime(timezone=True), nullable=True)
     last_scan_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True)
+    # Автосканирование включается только после ручной обкатки конкретной папки.
+    scan_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    scan_interval_min: Mapped[int] = mapped_column(Integer, nullable=False, default=30)
     last_error: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now())
@@ -10089,6 +10134,8 @@ class DocAcquaint(Base):
     # pending | done
     status: Mapped[str] = mapped_column(String(10), nullable=False, default="pending")
     read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reminded_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
     # Отметка ставится только за себя, поэтому автора отдельно не храним.
     note: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_by: Mapped[uuid.UUID | None] = mapped_column(

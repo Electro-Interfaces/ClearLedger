@@ -37,9 +37,13 @@ export function DocsInboxPanel() {
   const scan = useMutation({
     mutationFn: () => docsService.scanInbox(companyId),
     onSuccess: (r) => {
-      toast.success(r.added
-        ? `Найдено новых файлов: ${r.added}`
-        : 'Новых файлов в папке нет')
+      if (r.errors?.length) {
+        toast.error(r.errors.map((item) => `${item.target}: ${item.error}`).join('; '))
+      } else {
+        toast.success(r.added
+          ? `Найдено новых файлов: ${r.added}`
+          : 'Новых файлов в папке нет')
+      }
       qc.invalidateQueries({ queryKey: ['docs-inbox', companyId] })
     },
     onError: (e) => toast.error((e as Error).message),

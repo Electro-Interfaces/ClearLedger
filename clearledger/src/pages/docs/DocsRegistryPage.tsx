@@ -5,7 +5,7 @@
  * карточка живёт в адресе (`?doc=`), поэтому на конкретный документ можно дать
  * ссылку, а возврат браузером ведёт обратно в список, а не из приложения.
  */
-import { useMemo, useState } from 'react'
+import { useDeferredValue, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { FilePlus2, Search } from 'lucide-react'
@@ -35,15 +35,16 @@ export function DocsRegistryPage() {
   const [params, setParams] = useSearchParams()
   const view = useDocsView('/docs')
   const [q, setQ] = useState('')
+  const deferredQ = useDeferredValue(q.trim())
   const [creating, setCreating] = useState(false)
 
   const companyId = company?.id ?? ''
   const openId = params.get('doc')
   const filters = useMemo(
-    () => ({ ...(VIEW_FILTER[view] ?? {}), q: q.trim() || undefined }), [view, q])
+    () => ({ ...(VIEW_FILTER[view] ?? {}), q: deferredQ || undefined }), [view, deferredQ])
 
   const listQ = useQuery({
-    queryKey: ['docs', companyId, view, q.trim()],
+    queryKey: ['docs', companyId, view, deferredQ],
     queryFn: () => docsService.listDocs(companyId, filters),
     enabled: !!companyId,
   })
@@ -102,7 +103,7 @@ export function DocsRegistryPage() {
           <div className="relative">
             <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input value={q} onChange={(e) => setQ(e.target.value)}
-              placeholder="Номер, заголовок, корреспондент"
+              placeholder="Номер, заголовок или текст файла"
               className="h-9 w-64 pl-7 text-sm" />
           </div>
           <Button size="sm" onClick={() => setCreating(true)} disabled={kinds.length === 0}>
@@ -166,7 +167,7 @@ export function DocsRegistryPage() {
             {!listQ.isLoading && docs.length === 0 && (
               <tr>
                 <td colSpan={7} className="px-3 py-8 text-center text-sm text-muted-foreground">
-                  {q ? 'По этому запросу ничего нет' : 'Документов пока нет'}
+                  {deferredQ ? 'По этому запросу ничего нет' : 'Документов пока нет'}
                 </td>
               </tr>
             )}

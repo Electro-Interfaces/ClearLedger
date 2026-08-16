@@ -54,6 +54,10 @@ export interface DocCard {
   source_ref: string | null
   current_revision: number
   has_files: boolean
+  case_id: string | null
+  storage_until: string | null
+  approval_status: string
+  approval_round: number
   created_at: string | null
 }
 
@@ -149,8 +153,10 @@ export interface DocAcquaint {
   id: string
   user_id: string
   status: string          // pending | done
+  reason: string
   read_at: string | null
   due_at: string | null
+  reminded_at: string | null
   note: string | null
 }
 
@@ -175,10 +181,17 @@ export interface DocDetails extends DocCard {
   relations: DocRelation[]
   approval: DocApprovalState
   acquaints: DocAcquaint[]
-  case_id: string | null
-  storage_until: string | null
-  approval_status: string
-  approval_round: number
+}
+
+export interface DocAccessGrant {
+  id: string
+  scope_type: 'doc' | 'kind'
+  scope_id: string
+  subject_type: 'user' | 'role' | 'department'
+  subject_id: string
+  subject_name: string
+  permissions: Array<'read' | 'edit' | 'approve' | 'sign'>
+  inherited: boolean
 }
 
 export interface DocFilters {
@@ -248,6 +261,31 @@ export async function createDoc(
   companyId: string, body: Record<string, unknown>,
 ): Promise<DocCard> {
   return post<DocCard>('/api/docs', { ...body, company_id: companyId })
+}
+
+export async function listAccessGrants(
+  companyId: string, docId: string,
+): Promise<DocAccessGrant[]> {
+  const result = await get<{ grants: DocAccessGrant[] }>('/api/docs/access', {
+    company_id: companyId, doc_id: docId,
+  })
+  return result.grants ?? []
+}
+
+export async function saveAccessGrant(companyId: string, body: {
+  scope_type: 'doc' | 'kind'
+  scope_id: string
+  subject_type: 'user' | 'role' | 'department'
+  subject_id: string
+  permissions: string[]
+}): Promise<{ id: string; permissions: string[] }> {
+  return post('/api/docs/access', { ...body, company_id: companyId })
+}
+
+export async function deleteAccessGrant(
+  companyId: string, id: string,
+): Promise<{ deleted: boolean }> {
+  return del(`/api/docs/access/${id}?company_id=${companyId}`)
 }
 
 /** Присвоить номер. Без `regNumber` номер выдаёт счётчик компании. */
@@ -352,6 +390,33 @@ export async function board(
 }
 
 
+export interface ApprovalDisciplineReport {
+  summary: {
+    documents: number
+    completed: number
+    pending: number
+    first_pass_rate: number
+  }
+  by_kind: Array<{ kind: string; documents: number; average_hours: number }>
+  people: Array<{
+    user_id: string
+    name: string
+    decisions: number
+    pending: number
+    overdue: number
+    average_hours: number
+  }>
+}
+
+export async function approvalDiscipline(
+  companyId: string, dateFrom?: string, dateTo?: string,
+): Promise<ApprovalDisciplineReport> {
+  return get<ApprovalDisciplineReport>('/api/docs/reports/discipline', {
+    company_id: companyId, date_from: dateFrom, date_to: dateTo,
+  })
+}
+
+
 /** Точка обмена с корпоративной системой головной компании: папка туда и обратно. */
 export interface DocExchangeTarget {
   id: string
@@ -362,6 +427,8 @@ export interface DocExchangeTarget {
   inbox_path: string
   as_archive: boolean
   is_active: boolean
+  scan_enabled: boolean
+  scan_interval_min: number
   note: string | null
   last_export_at: string | null
   last_scan_at: string | null
@@ -404,6 +471,14 @@ export async function createExchangeTarget(
   return post('/api/docs/exchange/targets', { ...body, company_id: companyId })
 }
 
+export async function updateExchangeSchedule(
+  companyId: string, id: string, enabled: boolean, intervalMin: number,
+): Promise<{ enabled: boolean; interval_min: number }> {
+  return put(`/api/docs/exchange/targets/${id}/schedule`, {
+    company_id: companyId, enabled, interval_min: intervalMin,
+  })
+}
+
 /** Выгрузить документ в папку головной компании. */
 export async function exportDoc(
   companyId: string, id: string, targetId: string,
@@ -420,7 +495,7 @@ export async function listExports(companyId: string, id: string): Promise<DocExp
 /** Посмотреть, что головная компания положила нам в папку. */
 export async function scanInbox(
   companyId: string,
-): Promise<{ targets: number; added: number }> {
+): Promise<{ targets: number; added: number; errors: Array<{ target: string; error: string }> }> {
   return post(`/api/docs/exchange/scan?company_id=${companyId}`, {})
 }
 

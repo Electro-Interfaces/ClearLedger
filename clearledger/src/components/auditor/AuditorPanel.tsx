@@ -10,7 +10,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { Bot, CornerDownLeft, Loader2, Paperclip, RotateCcw, ShieldOff, Square, ThumbsDown, ThumbsUp, TriangleAlert } from 'lucide-react'
+import { Bot, CornerDownLeft, Loader2, Paperclip, ShieldOff, Square, ThumbsDown, ThumbsUp, TriangleAlert } from 'lucide-react'
 import { toast } from 'sonner'
 import { DictateButton } from './DictateButton'
 import { Button } from '@/components/ui/button'
@@ -131,7 +131,6 @@ export function AuditorPanel() {
   const [files, setFiles] = useState<auditor.AuditorFile[]>([])
   const [uploading, setUploading] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
-  const [reloading, setReloading] = useState(false)
   const ctrlRef = useRef<AbortController | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
 

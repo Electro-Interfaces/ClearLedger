@@ -877,6 +877,7 @@ const ACTIONS: { key: MailRule['action']; label: string }[] = [
   { key: 'ticket', label: 'в заявку' },
   { key: 'chat', label: 'в чат' },
   { key: 'task', label: 'в задачу' },
+  { key: 'doc', label: 'в документ «Трека»' },
   { key: 'archive', label: 'в архив' },
   { key: 'quarantine', label: 'в карантин' },
   { key: 'reject', label: 'отклонить' },

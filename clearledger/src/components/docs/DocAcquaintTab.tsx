@@ -15,6 +15,7 @@ import { Label } from '@/components/ui/label'
 import { useAuth } from '@/contexts/AuthContext'
 import * as docsService from '@/services/docsService'
 import * as tasksService from '@/services/tasksService'
+import { listDepartments } from '@/services/departmentsService'
 import type { DocDetails } from '@/services/docsService'
 
 export function DocAcquaintTab({ doc, companyId, onChanged }: {
@@ -25,6 +26,8 @@ export function DocAcquaintTab({ doc, companyId, onChanged }: {
   const { user } = useAuth()
   const qc = useQueryClient()
   const [picked, setPicked] = useState<string[]>([])
+  const [departmentId, setDepartmentId] = useState('')
+  const [dueDate, setDueDate] = useState('')
 
   // Люди пространства — тот же справочник, что у поручений: второго списка
   // сотрудников в одном продукте быть не должно.
@@ -33,12 +36,23 @@ export function DocAcquaintTab({ doc, companyId, onChanged }: {
     queryFn: () => tasksService.listTaskPeople(companyId),
     staleTime: 5 * 60 * 1000,
   })
+  const departmentsQ = useQuery({
+    queryKey: ['departments', companyId],
+    queryFn: () => listDepartments(companyId),
+    staleTime: 5 * 60 * 1000,
+  })
 
   const add = useMutation({
-    mutationFn: () => docsService.addAcquaint(companyId, doc.id, { user_ids: picked }),
+    mutationFn: () => docsService.addAcquaint(companyId, doc.id, {
+      user_ids: picked,
+      department_id: departmentId || null,
+      due_at: dueDate ? `${dueDate}T23:59:00` : null,
+    }),
     onSuccess: (r) => {
       toast.success(r.added ? `Направлено: ${r.added}` : 'Эти люди уже в листе')
       setPicked([])
+      setDepartmentId('')
+      setDueDate('')
       onChanged()
     },
     onError: (e) => toast.error((e as Error).message),
@@ -54,7 +68,8 @@ export function DocAcquaintTab({ doc, companyId, onChanged }: {
     onError: (e) => toast.error((e as Error).message),
   })
 
-  const people = peopleQ.data ?? []
+  const people = peopleQ.data?.people ?? []
+  const departments = departmentsQ.data ?? []
   const nameOf = (id: string) =>
     people.find((p) => p.id === id)?.name ?? 'участник пространства'
 
@@ -110,9 +125,36 @@ export function DocAcquaintTab({ doc, companyId, onChanged }: {
         </div>
       </Card>
 
-      <Card className="space-y-2 p-4">
+      <Card className="flex flex-col gap-3 p-4">
         <Label className="text-xs">Направить на ознакомление</Label>
-        <select multiple value={picked} size={Math.min(6, Math.max(3, people.length))}
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="acquaint-department" className="text-xs text-muted-foreground">
+              Подразделение целиком
+            </Label>
+            <select id="acquaint-department" value={departmentId}
+              onChange={(e) => setDepartmentId(e.target.value)}
+              className="h-9 rounded-md border border-input bg-background px-2 text-sm">
+              <option value="">Не выбрано</option>
+              {departments.map((department) => (
+                <option key={department.id} value={department.id}>{department.name}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="acquaint-due" className="text-xs text-muted-foreground">
+              Ознакомиться до
+            </Label>
+            <input id="acquaint-due" type="date" value={dueDate}
+              onChange={(e) => setDueDate(e.target.value)}
+              className="h-9 rounded-md border border-input bg-background px-2 text-sm" />
+          </div>
+        </div>
+        <Label htmlFor="acquaint-people" className="text-xs text-muted-foreground">
+          Или отдельные люди
+        </Label>
+        <select id="acquaint-people" multiple value={picked}
+          size={Math.min(6, Math.max(3, people.length))}
           onChange={(e) => setPicked(
             Array.from(e.target.selectedOptions).map((o) => o.value))}
           className="w-full rounded-md border border-input bg-background p-2 text-sm">
@@ -120,7 +162,8 @@ export function DocAcquaintTab({ doc, companyId, onChanged }: {
             <option key={p.id} value={p.id}>{p.name}</option>
           ))}
         </select>
-        <Button size="sm" variant="outline" disabled={!picked.length || add.isPending}
+        <Button size="sm" variant="outline"
+          disabled={(!picked.length && !departmentId) || add.isPending}
           onClick={() => add.mutate()}>
           <UserPlus className="mr-1.5 h-4 w-4" />Направить
         </Button>

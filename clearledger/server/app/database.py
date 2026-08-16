@@ -2709,6 +2709,24 @@ async def create_all() -> None:
             # кандидатам нужен экрану приёма.
             "CREATE INDEX IF NOT EXISTS idx_doc_inbox_new ON doc_inbox_items "
             "(company_id, status, found_at)",
+            # Полнотекстовый поиск по содержимому редакций. Колонка нужна через
+            # ALTER: doc_versions уже есть на обоих пилотах.
+            "ALTER TABLE doc_versions ADD COLUMN IF NOT EXISTS content_text TEXT",
+            "CREATE INDEX IF NOT EXISTS idx_doc_versions_text ON doc_versions "
+            "USING gin (to_tsvector('russian', coalesce(content_text, '')))",
+            # Волна 7: напоминания об ознакомлении и управляемое расписание
+            # приёма из СЭД. По умолчанию автоскан выключен до ручной обкатки.
+            "ALTER TABLE doc_acquaints ADD COLUMN IF NOT EXISTS reminded_at TIMESTAMPTZ",
+            "CREATE INDEX IF NOT EXISTS idx_doc_acquaints_due ON doc_acquaints "
+            "(company_id, status, due_at)",
+            "ALTER TABLE doc_exchange_targets ADD COLUMN IF NOT EXISTS scan_enabled "
+            "BOOLEAN NOT NULL DEFAULT false",
+            "ALTER TABLE doc_exchange_targets ADD COLUMN IF NOT EXISTS scan_interval_min "
+            "INTEGER NOT NULL DEFAULT 30",
+            # Повторно прочитанное письмо не должно завести вторую карточку.
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_doc_cards_mail_source "
+            "ON doc_cards (company_id, source_ref) WHERE source = 'mail' "
+            "AND source_ref IS NOT NULL",
         ):
             await conn.execute(_sa.text(stmt))
 

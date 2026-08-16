@@ -1,4 +1,4 @@
-"""Куда письмо едет дальше: комната, задача, заявка (docs/MAIL.md).
+"""Куда письмо едет дальше: комната, задача, документ, заявка (docs/MAIL.md).
 
 Приём письма и его дальнейшая судьба — разные вещи. Приём разбирает и сохраняет,
 здесь письмо доезжает до места, где с ним работают: в комнату чата, в задачу, в
@@ -27,10 +27,11 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
-    ChatMessage, ChatParticipant, ChatRoom, MailAttachment, MailMessage,
-    Task, TaskAttachment, TaskEvent, TaskParticipant, User,
+    ChatMessage, ChatParticipant, ChatRoom, Counterparty, DocCard, DocEvent,
+    DocKind, DocVersion, MailAttachment, MailMessage, Task, TaskAttachment,
+    TaskEvent, TaskParticipant, User,
 )
-from app.services import file_store
+from app.services import doc_text, file_store
 
 logger = logging.getLogger("clearledger.mail")
 
@@ -207,6 +208,73 @@ async def to_ticket(db: AsyncSession, cid, row: MailMessage, object_id: str) -> 
         return False
 
 
+async def to_doc(db: AsyncSession, cid, row: MailMessage) -> bool:
+    """Завести входящий документ из письма известного корреспондента.
+
+    Регистрационный номер не присваивается: автоматизация доставляет документ в
+    реестр черновиком, а регистрацию по-прежнему выполняет человек.
+    """
+    if row.counterparty_id is None:
+        logger.warning("письмо %s: документ не создан, корреспондент не опознан", row.id)
+        return False
+    attachments = (await db.execute(select(MailAttachment).where(
+        MailAttachment.company_id == cid,
+        MailAttachment.message_id == row.id))).scalars().all()
+    attachments = [item for item in attachments if item.content]
+    if not attachments:
+        logger.warning("письмо %s: документ не создан, нет непустого вложения", row.id)
+        return False
+
+    source_ref = f"mail:{row.message_id or row.id}"[:200]
+    duplicate = (await db.execute(select(DocCard.id).where(
+        DocCard.company_id == cid, DocCard.source == "mail",
+        DocCard.source_ref == source_ref))).scalar_one_or_none()
+    if duplicate is not None:
+        return True
+    kind = (await db.execute(select(DocKind).where(
+        DocKind.company_id == cid, DocKind.family == "incoming",
+        DocKind.is_active.is_(True)).order_by(DocKind.sort_order))).scalars().first()
+    if kind is None:
+        logger.warning("письмо %s: документ не создан, нет входящего вида", row.id)
+        return False
+    counterparty = await db.get(Counterparty, row.counterparty_id)
+    if counterparty is None or counterparty.company_id != cid:
+        logger.warning("письмо %s: корреспондент принадлежит другой компании", row.id)
+        return False
+
+    doc = DocCard(
+        company_id=cid, kind_id=kind.id, kind_code=kind.code,
+        family=kind.family, direction=kind.direction,
+        title=(row.subject or attachments[0].file_name or "Входящий документ")[:500],
+        summary=(row.body_text or "")[:4000] or None,
+        counterparty_id=counterparty.id, counterparty_name=counterparty.name or "",
+        external_date=row.sent_at.date() if row.sent_at else None,
+        source="mail", source_ref=source_ref, has_files=True, current_revision=1)
+    db.add(doc)
+    await db.flush()
+    db.add(DocEvent(
+        doc_id=doc.id, kind="mail", actor_name=row.from_name or row.from_email,
+        to_value=kind.name, note=f"автоматически из письма {row.from_email or '—'}"))
+
+    role_revisions = {"body": 0, "attachment": 0}
+    for index, attachment in enumerate(attachments):
+        role = "body" if index == 0 else "attachment"
+        role_revisions[role] += 1
+        mime = attachment.content_type or "application/octet-stream"
+        stored = file_store.put(
+            db, cid, attachment.content, file_name=attachment.file_name, mime=mime)
+        await db.flush()
+        db.add(DocVersion(
+            company_id=cid, doc_id=doc.id, revision=role_revisions[role], role=role,
+            file_id=stored.id, file_name=stored.file_name, mime=mime,
+            size_bytes=len(attachment.content),
+            sha256=attachment.sha256 or stored.fingerprint,
+            content_text=(await doc_text.extract(
+                attachment.content, mime, stored.file_name)) or ""))
+    await db.flush()
+    return True
+
+
 async def route(db: AsyncSession, cid, row: MailMessage, rule) -> str | None:
     """Доставить письмо по плюс-адресу или по правилу. Возвращает, куда доехало."""
     # Плюс-адрес сильнее правила: это прямой ответ в конкретную комнату или задачу,
@@ -225,4 +293,6 @@ async def route(db: AsyncSession, cid, row: MailMessage, rule) -> str | None:
         return "chat" if await to_chat_room(db, cid, row, rule.set_room_id) else None
     if rule.action == "ticket" and rule.set_object_id:
         return "ticket" if await to_ticket(db, cid, row, rule.set_object_id) else None
+    if rule.action == "doc":
+        return "doc" if await to_doc(db, cid, row) else None
     return None

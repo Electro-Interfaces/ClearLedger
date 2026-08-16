@@ -28,8 +28,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
-    DocApproval, DocCard, DocExchangeTarget, DocKind, DocVersion, Organization,
-    SourceFile, User,
+    DocApproval, DocCard, DocExchangeTarget, DocInboxItem, DocKind, DocVersion,
+    Organization, SourceFile, User,
 )
 from app.services import doc_print, file_store
 
@@ -208,7 +208,9 @@ def scan_inbox(target: DocExchangeTarget) -> list[dict[str, Any]]:
     """
     folder = Path(target.inbox_path)
     if not folder.exists():
-        return []
+        raise FileNotFoundError(f"Папка обмена не найдена: {folder}")
+    if not folder.is_dir():
+        raise NotADirectoryError(f"Путь обмена не является папкой: {folder}")
     found: list[dict[str, Any]] = []
     for path in sorted(folder.iterdir()):
         if not path.is_file() or path.name.startswith("."):
@@ -238,3 +240,27 @@ def scan_inbox(target: DocExchangeTarget) -> list[dict[str, Any]]:
             "parsed": parsed,
         })
     return found
+
+
+async def collect_inbox(db: AsyncSession, target: DocExchangeTarget) -> int:
+    """Перенести новые файлы папки в очередь разбора, не принимая их документами."""
+    found = scan_inbox(target)
+    target.last_scan_at = datetime.now(timezone.utc)
+    target.last_error = None
+    added = 0
+    for item in found:
+        duplicate = (await db.execute(select(DocInboxItem.id).where(
+            DocInboxItem.company_id == target.company_id,
+            DocInboxItem.sha256 == item["sha256"]))).scalar_one_or_none()
+        if duplicate is not None:
+            continue
+        stored = file_store.put(
+            db, target.company_id, item["data"], file_name=item["file_name"], mime=None)
+        await db.flush()
+        db.add(DocInboxItem(
+            company_id=target.company_id, target_id=target.id,
+            file_name=item["file_name"], source_path=item["source_path"],
+            size_bytes=item["size"], sha256=item["sha256"], file_id=stored.id,
+            parsed=item["parsed"] or None))
+        added += 1
+    return added

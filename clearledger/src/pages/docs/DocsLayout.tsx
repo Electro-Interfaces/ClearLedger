@@ -42,6 +42,7 @@ export const DOCS_VIEWS: Record<string, DocsView[]> = {
   ],
   '/docs/overview': [
     { key: 'docs', label: 'По документам', hint: 'сколько на регистрации, на визах, просрочено' },
+    { key: 'discipline', label: 'Исполнительская дисциплина', hint: 'скорость согласования и задержки по людям' },
     { key: 'errands', label: 'По поручениям', hint: 'итоги и разрезы по людям, типам и объектам' },
   ],
   '/docs/regulation': [

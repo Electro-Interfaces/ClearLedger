@@ -11,6 +11,8 @@
 * **эскалация** сообщает старшему, что на задачу не откликнулись за отведённое
   типом время. Смысл не в наказании: работа, которую никто не взял, обязана
   всплыть до срока, а не после.
+* **ознакомление** напоминает человеку о непрочитанном документе к сроку;
+* **обмен с СЭД** проверяет только явно включённые и уже обкатанные папки.
 
 Устройство повторяет планировщик каналов (`channel_scheduler`): фоновый цикл из
 lifespan, advisory-lock от двойного запуска в кластере, ошибка одной компании не
@@ -29,9 +31,10 @@ from sqlalchemy import or_, select, text
 
 from app.database import async_session_factory
 from app.models import (
-    Task, TaskChecklistItem, TaskEvent, TaskRecurrence, TaskTemplate, TaskType, User,
+    DocAcquaint, DocCard, DocExchangeTarget, Task, TaskChecklistItem, TaskEvent,
+    TaskRecurrence, TaskTemplate, TaskType, User,
 )
-from app.services import task_mail
+from app.services import doc_exchange, task_mail
 
 log = logging.getLogger("clearledger.tasks.scheduler")
 
@@ -39,6 +42,8 @@ log = logging.getLogger("clearledger.tasks.scheduler")
 # проходы по всем задачам пространства ничего не улучшают.
 TICK_SECONDS = 300
 LOCK_NAMESPACE = 0x1A5C5ED
+ACQUAINT_LOCK_KEY = 0x0AC011
+EXCHANGE_LOCK_KEY = 0x0ED011
 
 
 def _tz(rule: dict) -> ZoneInfo:
@@ -238,14 +243,72 @@ async def run_escalations(db, now: datetime) -> int:
     return sent
 
 
+async def run_acquaint_reminders(db, now: datetime) -> int:
+    """Напомнить о документе за сутки до срока и затем не чаще раза в сутки."""
+    got = await db.scalar(text("SELECT pg_try_advisory_xact_lock(:ns, :key)"),
+                          {"ns": LOCK_NAMESPACE, "key": ACQUAINT_LOCK_KEY})
+    if not got:
+        return 0
+    soon = now + timedelta(days=1)
+    rows = (await db.execute(
+        select(DocAcquaint, DocCard, User)
+        .join(DocCard, DocCard.id == DocAcquaint.doc_id)
+        .join(User, User.id == DocAcquaint.user_id)
+        .where(DocAcquaint.status == "pending", DocAcquaint.due_at.is_not(None),
+               DocAcquaint.due_at <= soon,
+               or_(DocAcquaint.reminded_at.is_(None),
+                   DocAcquaint.reminded_at <= now - timedelta(days=1))))).all()
+    sent = 0
+    for acquaint, doc, user in rows:
+        if not user.email:
+            continue
+        overdue = acquaint.due_at < now
+        number = doc.reg_number or "без номера"
+        task_mail.send_notice_async(
+            [user.email],
+            f"{'Просрочено ознакомление' if overdue else 'Нужно ознакомиться'}: {doc.title}",
+            f"Документ {number}\nСрок: {acquaint.due_at.strftime('%d.%m.%Y')}\n\n"
+            "Откройте «Трек» → «На мне» → «Ознакомиться».")
+        acquaint.reminded_at = now
+        sent += 1
+    return sent
+
+
+async def run_exchange_scans(db, now: datetime) -> int:
+    """Проверить включённые папки СЭД; принятие найденного остаётся ручным."""
+    got = await db.scalar(text("SELECT pg_try_advisory_xact_lock(:ns, :key)"),
+                          {"ns": LOCK_NAMESPACE, "key": EXCHANGE_LOCK_KEY})
+    if not got:
+        return 0
+    targets = (await db.execute(select(DocExchangeTarget).where(
+        DocExchangeTarget.is_active.is_(True),
+        DocExchangeTarget.scan_enabled.is_(True),
+        DocExchangeTarget.inbox_path != ""))).scalars().all()
+    added = 0
+    for target in targets:
+        interval = timedelta(minutes=max(5, target.scan_interval_min or 30))
+        if target.last_scan_at and target.last_scan_at > now - interval:
+            continue
+        try:
+            added += await doc_exchange.collect_inbox(db, target)
+        except OSError as exc:
+            target.last_scan_at = now
+            target.last_error = str(exc)[:500]
+            log.warning("автоскан СЭД %s: %s", target.id, exc)
+    return added
+
+
 async def tick() -> dict[str, int]:
     """Один проход регламента. Ошибка одной части не отменяет остальные."""
     now = datetime.now(timezone.utc)
-    out = {"recurrences": 0, "reminders": 0, "escalations": 0}
+    out = {"recurrences": 0, "reminders": 0, "escalations": 0,
+           "acquaints": 0, "exchange": 0}
     async with async_session_factory() as db:
         for key, fn in (("recurrences", run_recurrences),
                         ("reminders", run_due_reminders),
-                        ("escalations", run_escalations)):
+                        ("escalations", run_escalations),
+                        ("acquaints", run_acquaint_reminders),
+                        ("exchange", run_exchange_scans)):
             try:
                 out[key] = await fn(db, now)
                 await db.commit()

@@ -19,6 +19,7 @@ import { toast } from 'sonner'
 import * as docsService from '@/services/docsService'
 import { DOC_STATUS } from '@/services/docsService'
 import { DocAcquaintTab } from './DocAcquaintTab'
+import { DocAccessTab } from './DocAccessTab'
 import { DocApprovalTab } from './DocApprovalTab'
 import { DocSendTab } from './DocSendTab'
 
@@ -153,6 +154,7 @@ export function DocCardPanel({ id, companyId, onBack, onChanged }: {
             Связи{d.relations.length ? ` (${d.relations.length})` : ''}
           </TabsTrigger>
           <TabsTrigger value="send">Отправка</TabsTrigger>
+          <TabsTrigger value="access">Доступ</TabsTrigger>
           <TabsTrigger value="feed">История</TabsTrigger>
         </TabsList>
 
@@ -191,7 +193,7 @@ export function DocCardPanel({ id, companyId, onBack, onChanged }: {
                 className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
                 onChange={(e) => act.mutate({ confidentiality: e.target.value })}>
                 <option value="company">Всё пространство</option>
-                <option value="private">Только автор, ответственный и подписант</option>
+                <option value="private">Ограниченный доступ</option>
               </select>
             </Field>
             <div className="sm:col-span-2">
@@ -284,6 +286,10 @@ export function DocCardPanel({ id, companyId, onBack, onChanged }: {
 
         <TabsContent value="send">
           <DocSendTab doc={d} companyId={companyId} onChanged={refresh} />
+        </TabsContent>
+
+        <TabsContent value="access">
+          <DocAccessTab doc={d} companyId={companyId} />
         </TabsContent>
 
         <TabsContent value="feed" className="pt-3">

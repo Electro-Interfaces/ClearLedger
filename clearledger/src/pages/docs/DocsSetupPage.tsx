@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { toast } from 'sonner'
 import * as docsService from '@/services/docsService'
+import * as tasksService from '@/services/tasksService'
 import { DOC_FAMILY } from '@/services/docsService'
 import { useDocsView } from './DocsLayout'
 
@@ -170,7 +171,7 @@ function Substitutions({ companyId }: { companyId: string }) {
   })
 
   const rows = rowsQ.data ?? []
-  const people = peopleQ.data ?? []
+  const people = peopleQ.data?.people ?? []
 
   return (
     <div className="space-y-3 px-4 py-4">
@@ -255,6 +256,7 @@ function Substitutions({ companyId }: { companyId: string }) {
 
 function ExchangeTargets({ companyId }: { companyId: string }) {
   const qc = useQueryClient()
+  const [intervals, setIntervals] = useState<Record<string, string>>({})
   const [form, setForm] = useState({
     code: '', name: '', system: 'sedo', outbox_path: '', inbox_path: '',
   })
@@ -274,8 +276,19 @@ function ExchangeTargets({ companyId }: { companyId: string }) {
     },
     onError: (e) => toast.error((e as Error).message),
   })
+  const schedule = useMutation({
+    mutationFn: ({ id, enabled, interval }: { id: string; enabled: boolean; interval: number }) =>
+      docsService.updateExchangeSchedule(companyId, id, enabled, interval),
+    onSuccess: () => {
+      toast.success('Расписание сохранено')
+      qc.invalidateQueries({ queryKey: ['doc-exchange-targets', companyId] })
+    },
+    onError: (e) => toast.error((e as Error).message),
+  })
 
   const targets = targetsQ.data ?? []
+  const intervalFor = (target: docsService.DocExchangeTarget) =>
+    Number(intervals[target.id] ?? target.scan_interval_min)
 
   return (
     <div className="space-y-3 px-4 py-4">
@@ -299,6 +312,37 @@ function ExchangeTargets({ companyId }: { companyId: string }) {
             </div>
             <div className="text-[11px] text-muted-foreground">
               приём: {t.inbox_path || 'не указан'}
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <Label htmlFor={`scan-${t.id}`} className="text-xs text-muted-foreground">
+                Интервал, минут
+              </Label>
+              <Input id={`scan-${t.id}`} type="number" min={5} max={1440}
+                value={intervals[t.id] ?? String(t.scan_interval_min)}
+                onChange={(e) => setIntervals((current) => ({
+                  ...current, [t.id]: e.target.value,
+                }))} className="h-8 w-24" />
+              <Button size="sm" variant="outline" disabled={schedule.isPending
+                || !Number.isInteger(intervalFor(t))
+                || intervalFor(t) < 5 || intervalFor(t) > 1440}
+                onClick={() => schedule.mutate({
+                  id: t.id, enabled: true,
+                  interval: intervalFor(t),
+                })}>
+                {t.scan_enabled ? 'Сохранить интервал' : 'Включить автопроверку'}
+              </Button>
+              {t.scan_enabled && (
+                <Button size="sm" variant="ghost" disabled={schedule.isPending}
+                  onClick={() => schedule.mutate({
+                    id: t.id, enabled: false, interval: t.scan_interval_min,
+                  })}>
+                  Отключить
+                </Button>
+              )}
+            </div>
+            <div className="text-[11px] text-muted-foreground">
+              {t.scan_enabled ? 'Автопроверка включена' : 'Автопроверка выключена'}
+              {t.last_scan_at ? ` · последняя ${t.last_scan_at.slice(0, 16).replace('T', ' ')}` : ''}
             </div>
             {t.last_error && (
               <div className="text-[11px] text-destructive">ошибка: {t.last_error}</div>
