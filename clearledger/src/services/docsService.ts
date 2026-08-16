@@ -109,6 +109,9 @@ export interface DocApprovalRow {
   step_name: string
   status: string          // waiting | pending | approved | rejected | skipped
   assignee_id: string | null
+  assignee_name: string | null
+  decided_by_id: string | null
+  decided_by_name: string | null
   can_decide: boolean
   snapshot_sha256: string | null
   comment: string | null

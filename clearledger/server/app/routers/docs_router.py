@@ -2378,6 +2378,18 @@ async def get_doc(
         if a.status == "pending"
         and await doc_approvals.may_decide(db, cid, a, current_user)
     }
+    approval_user_ids = {
+        user_id for a in approvals
+        for user_id in (a.assignee_id, a.decided_by)
+        if user_id is not None
+    }
+    approval_people = {}
+    if approval_user_ids:
+        approval_people = {
+            row.id: row.name or row.email
+            for row in (await db.execute(select(User).where(
+                User.id.in_(approval_user_ids)))).scalars()
+        }
 
     return {
         **_card_out(d, {str(kind.id): kind.name} if kind else None),
@@ -2419,6 +2431,9 @@ async def get_doc(
                 "id": str(a.id), "round": a.round, "step_no": a.step_no,
                 "step_name": a.step_name, "status": a.status,
                 "assignee_id": str(a.assignee_id) if a.assignee_id else None,
+                "assignee_name": approval_people.get(a.assignee_id),
+                "decided_by_id": str(a.decided_by) if a.decided_by else None,
+                "decided_by_name": approval_people.get(a.decided_by),
                 "can_decide": a.id in decidable,
                 "snapshot_sha256": a.snapshot_sha256,
                 "comment": a.comment,

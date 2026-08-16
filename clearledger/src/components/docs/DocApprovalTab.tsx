@@ -60,6 +60,15 @@ export function DocApprovalTab({ doc, companyId, onChanged }: {
   const past = state.rows.filter((r) => r.round !== state.round)
   const canStart = doc.available_actions.includes('start_approval')
 
+  const copyHash = async () => {
+    try {
+      await navigator.clipboard.writeText(state.snapshot_sha256 ?? '')
+      toast.success('Хеш пакета скопирован')
+    } catch {
+      toast.error('Не удалось скопировать хеш')
+    }
+  }
+
   return (
     <div className="space-y-3 pt-3">
       {state.status === 'none' && canStart && (
@@ -96,10 +105,7 @@ export function DocApprovalTab({ doc, companyId, onChanged }: {
                 </div>
               </div>
             </div>
-            <Button size="sm" variant="ghost" onClick={() => {
-              navigator.clipboard.writeText(state.snapshot_sha256 ?? '')
-              toast.success('Хеш пакета скопирован')
-            }}>
+            <Button size="sm" variant="ghost" onClick={copyHash}>
               <Copy className="mr-1.5 h-3.5 w-3.5" />Копировать хеш
             </Button>
           </div>
@@ -155,7 +161,7 @@ export function DocApprovalTab({ doc, companyId, onChanged }: {
                       : 'mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground'} />
                   <div className="min-w-0">
                     <span className={r.can_decide ? 'font-medium' : ''}>
-                      {r.assignee_id === user?.id ? 'вы' : r.can_decide ? 'вы как заместитель' : 'согласующий'}
+                      {approvalPerson(r, user?.id)}
                     </span>
                     <span className="text-muted-foreground"> · {meta.label}</span>
                     {r.due_at && r.status === 'pending' && (
@@ -176,13 +182,17 @@ export function DocApprovalTab({ doc, companyId, onChanged }: {
         <Card className="space-y-2 p-4">
           <div className="text-sm font-medium">Ваша виза по шагу «{mine.step_name}»</div>
           <Input value={comment} onChange={(e) => setComment(e.target.value)}
-            placeholder="Замечание (обязательно при отказе)" className="h-9" />
+            placeholder="Замечание (обязательно при отказе)" className="h-9"
+            aria-describedby="approval-reject-hint" />
+          <div id="approval-reject-hint" className="text-xs text-muted-foreground">
+            Для согласования комментарий необязателен. Для возврата укажите, что исправить.
+          </div>
           <div className="flex gap-2">
             <Button size="sm" disabled={decide.isPending}
               onClick={() => decide.mutate({ id: mine.id, approved: true })}>
               Согласовать
             </Button>
-            <Button size="sm" variant="outline" disabled={decide.isPending}
+            <Button size="sm" variant="outline" disabled={decide.isPending || !comment.trim()}
               onClick={() => decide.mutate({ id: mine.id, approved: false })}>
               Вернуть с замечанием
             </Button>
@@ -209,7 +219,8 @@ export function DocApprovalTab({ doc, companyId, onChanged }: {
           <div className="mt-1.5 space-y-1">
             {past.map((r) => (
               <div key={r.id} className="text-[13px] text-muted-foreground">
-                круг {r.round} · {r.step_name} · {ROW_STATUS[r.status]?.label ?? r.status}
+                круг {r.round} · {r.step_name} · {approvalPerson(r, user?.id)} ·{' '}
+                {ROW_STATUS[r.status]?.label ?? r.status}
                 {r.comment ? ` · ${r.comment}` : ''}
               </div>
             ))}
@@ -218,6 +229,19 @@ export function DocApprovalTab({ doc, companyId, onChanged }: {
       )}
     </div>
   )
+}
+
+function approvalPerson(row: docsService.DocApprovalRow, currentUserId?: string): string {
+  const assigned = row.assignee_name || 'Согласующий не найден'
+  if (row.decided_by_name && row.decided_by_id !== row.assignee_id) {
+    return `${row.decided_by_name} (замещает ${assigned})`
+  }
+  if (row.decided_by_name) return row.decided_by_name
+  if (row.can_decide && row.assignee_id !== currentUserId) {
+    return `Вы как заместитель (${assigned})`
+  }
+  if (row.assignee_id === currentUserId) return `Вы · ${assigned}`
+  return assigned
 }
 
 export default DocApprovalTab

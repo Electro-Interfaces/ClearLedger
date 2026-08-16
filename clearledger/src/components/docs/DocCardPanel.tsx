@@ -47,6 +47,40 @@ const EVENT_LABEL: Record<string, string> = {
   mail: 'письмо',
 }
 
+const FIELD_LABEL: Record<string, string> = {
+  title: 'Заголовок',
+  summary: 'Краткое содержание',
+  external_number: 'Их номер',
+  external_date: 'Дата их документа',
+  counterparty_name: 'Корреспондент',
+  counterparty_id: 'Карточка корреспондента',
+  confidentiality: 'Доступ',
+  responsible_id: 'Ответственный',
+  signatory_id: 'Подписант',
+  object_id: 'Объект',
+  attrs: 'Реквизиты вида',
+}
+
+const EVENT_VALUE: Record<string, string> = {
+  draft: 'Черновик',
+  registered: 'Зарегистрирован',
+  in_force: 'Действует',
+  executed: 'Исполнен',
+  archived: 'В архиве',
+  cancelled: 'Отменён',
+  approved: 'Согласовано',
+  rejected: 'Отказано',
+  pending: 'Ожидает решения',
+  waiting: 'Этап ещё не начат',
+  skipped: 'Снято',
+  company: 'Всё пространство',
+  private: 'Ограниченный доступ',
+  body: 'Документ',
+  appendix: 'Приложение',
+  signed_scan: 'Подписанный экземпляр',
+  attachment: 'Вложение',
+}
+
 const APPROVAL_LABEL: Record<string, string> = {
   none: 'Не запускалось',
   pending: 'Идёт согласование',
@@ -157,7 +191,7 @@ export function DocCardPanel({ id, companyId, onBack, onChanged }: {
 
   return (
     <div className="space-y-4">
-      <header className="sticky top-0 z-20 border-b border-border bg-background py-3">
+      <header className="border-b border-border bg-background py-3 md:sticky md:top-0 md:z-20">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="flex min-w-0 items-start gap-2">
             <Button variant="ghost" size="sm" onClick={onBack} className="mt-0.5 shrink-0"
@@ -300,29 +334,36 @@ export function DocCardPanel({ id, companyId, onBack, onChanged }: {
           )}
           <Card className="grid gap-3 p-4 sm:grid-cols-2">
             <Field label="Заголовок">
-              <Input defaultValue={d.title} className="h-9" disabled={!editable}
+              <Input defaultValue={d.title}
+                className="h-9 disabled:cursor-default disabled:opacity-100 disabled:text-foreground"
+                disabled={!editable}
                 onBlur={(event) => event.target.value.trim() !== d.title
                   && act.mutate({ title: event.target.value.trim() })} />
             </Field>
             <Field label={d.direction === 'in' ? 'От кого' : 'Кому'}>
-              <Input defaultValue={d.counterparty_name} className="h-9" disabled={!editable}
+              <Input defaultValue={d.counterparty_name}
+                className="h-9 disabled:cursor-default disabled:opacity-100 disabled:text-foreground"
+                disabled={!editable}
                 onBlur={(event) => event.target.value !== d.counterparty_name
                   && act.mutate({ counterparty_name: event.target.value })} />
             </Field>
             <Field label="Их номер">
-              <Input defaultValue={d.external_number ?? ''} className="h-9" disabled={!editable}
+              <Input defaultValue={d.external_number ?? ''}
+                className="h-9 disabled:cursor-default disabled:opacity-100 disabled:text-foreground"
+                disabled={!editable}
                 onBlur={(event) => event.target.value !== (d.external_number ?? '')
                   && act.mutate({ external_number: event.target.value })} />
             </Field>
             <Field label="Дата их документа">
-              <Input type="date" defaultValue={d.external_date ?? ''} className="h-9"
+              <Input type="date" defaultValue={d.external_date ?? ''}
+                className="h-9 disabled:cursor-default disabled:opacity-100 disabled:text-foreground"
                 disabled={!editable}
                 onBlur={(event) => event.target.value !== (d.external_date ?? '')
                   && act.mutate({ external_date: event.target.value || null })} />
             </Field>
             <Field label="Доступ">
               <select value={d.confidentiality} disabled={!editable}
-                className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm disabled:opacity-60"
+                className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm disabled:cursor-default disabled:opacity-100 disabled:text-foreground"
                 onChange={(event) => act.mutate({ confidentiality: event.target.value })}>
                 <option value="company">Всё пространство</option>
                 <option value="private">Ограниченный доступ</option>
@@ -340,6 +381,7 @@ export function DocCardPanel({ id, companyId, onBack, onChanged }: {
             <div className="sm:col-span-2">
               <Field label="Краткое содержание">
                 <Textarea defaultValue={d.summary ?? ''} rows={3} disabled={!editable}
+                  className="disabled:cursor-default disabled:opacity-100 disabled:text-foreground"
                   onBlur={(event) => event.target.value !== (d.summary ?? '')
                     && act.mutate({ summary: event.target.value })} />
               </Field>
@@ -438,13 +480,27 @@ export function DocCardPanel({ id, companyId, onBack, onChanged }: {
               <div key={event.id} className="px-3 py-2 text-sm">
                 <div className="flex flex-wrap items-baseline gap-2">
                   <span className="text-xs text-muted-foreground">
-                    {(event.created_at ?? '').slice(0, 16).replace('T', ' ')}
+                    {formatEventTime(event.created_at)}
                   </span>
                   <span className="font-medium">{event.actor ?? 'Система'}</span>
-                  <span className="text-muted-foreground">{EVENT_LABEL[event.kind] ?? event.kind}</span>
-                  {event.to && <span className="text-xs">{event.to}</span>}
+                  <span className="text-muted-foreground">
+                    {event.kind === 'field' && event.note
+                      ? `изменил: ${FIELD_LABEL[event.note] ?? event.note}`
+                      : EVENT_LABEL[event.kind] ?? event.kind}
+                  </span>
                 </div>
-                {event.note && <div className="pt-0.5 text-[13px]">{event.note}</div>}
+                {(event.from !== null || event.to !== null) && (
+                  <div className="pt-1 text-[13px]">
+                    {event.from !== null && <span>{formatEventValue(event.from)}</span>}
+                    {event.from !== null && event.to !== null && (
+                      <span className="px-1.5 text-muted-foreground" aria-label="стало">→</span>
+                    )}
+                    {event.to !== null && <span>{formatEventValue(event.to)}</span>}
+                  </div>
+                )}
+                {event.note && event.kind !== 'field' && (
+                  <div className="pt-0.5 text-[13px] text-muted-foreground">{event.note}</div>
+                )}
               </div>
             ))}
           </Card>
@@ -526,7 +582,7 @@ function AttrField({ field, value, disabled, onCommit }: {
     return (
       <Field label={label}>
         <select defaultValue={String(value ?? '')} disabled={disabled}
-          className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm disabled:opacity-60"
+          className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm disabled:cursor-default disabled:opacity-100 disabled:text-foreground"
           onChange={(event) => onCommit(event.target.value)}>
           <option value="">Не выбрано</option>
           {(field.options ?? []).map((option) => <option key={option}>{option}</option>)}
@@ -550,6 +606,7 @@ function AttrField({ field, value, disabled, onCommit }: {
       <div className="sm:col-span-2">
         <Field label={label}>
           <Textarea defaultValue={String(value ?? '')} rows={2} disabled={disabled}
+            className="disabled:cursor-default disabled:opacity-100 disabled:text-foreground"
             onBlur={(event) => event.target.value !== String(value ?? '')
               && onCommit(event.target.value)} />
         </Field>
@@ -559,7 +616,9 @@ function AttrField({ field, value, disabled, onCommit }: {
   return (
     <Field label={label}>
       <Input type={field.type === 'number' ? 'number' : field.type === 'date' ? 'date' : 'text'}
-        defaultValue={String(value ?? '')} className="h-9" disabled={disabled}
+        defaultValue={String(value ?? '')}
+        className="h-9 disabled:cursor-default disabled:opacity-100 disabled:text-foreground"
+        disabled={disabled}
         onBlur={(event) => {
           if (event.target.value === String(value ?? '')) return
           onCommit(field.type === 'number'
@@ -577,6 +636,20 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       {children}
     </div>
   )
+}
+
+function formatEventTime(value: string | null): string {
+  if (!value) return 'время не указано'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return new Intl.DateTimeFormat('ru-RU', {
+    dateStyle: 'short', timeStyle: 'short', timeZone: 'Europe/Moscow',
+  }).format(date)
+}
+
+function formatEventValue(value: string): string {
+  if (!value) return 'не заполнено'
+  return EVENT_VALUE[value] ?? value
 }
 
 export default DocCardPanel

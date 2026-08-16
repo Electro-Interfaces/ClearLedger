@@ -133,6 +133,9 @@ async def main() -> None:
                 DocApproval.doc_id == workflow_doc.id,
             ).order_by(DocApproval.step_no))).scalars().all()
             assert [row.status for row in workflow_rows] == ["pending", "waiting"]
+            card = await docs_router.get_doc(
+                str(workflow_doc.id), str(cid), db, owner)
+            assert card["approval"]["rows"][0]["assignee_name"] == owner.name
             assert workflow_rows[0].document_snapshot["files"][0]["sha256"] == hashlib.sha256(
                 workflow_body).hexdigest()
             await doc_approvals.decide(
