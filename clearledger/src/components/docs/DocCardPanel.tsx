@@ -4,7 +4,7 @@
  * Состояние меняется только контекстными действиями. Регистрационный номер,
  * пакет согласования и редакции файла показываются как факты, а не поля формы.
  */
-import { useRef, useState } from 'react'
+import { useId, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Archive, ArrowLeft, Ban, CheckCheck, FileCheck2, FileUp, KeyRound, Link2,
@@ -171,18 +171,38 @@ export function DocCardPanel({ id, companyId, onBack, onChanged }: {
     onError: (e) => toast.error(`Редакция не убрана: ${(e as Error).message}`),
   })
 
-  if (q.isLoading) return <div className="p-6 text-sm text-muted-foreground">Загрузка…</div>
-  if (q.isError) {
-    return <div className="p-6 text-sm text-destructive">{(q.error as Error).message}</div>
-  }
+  if (q.isLoading) return <DocLoadState onBack={onBack} />
+  if (q.isError) return (
+    <DocLoadState onBack={onBack} error={(q.error as Error).message} onRetry={() => q.refetch()} />
+  )
   const d = q.data
-  if (!d) return <div className="p-6 text-sm text-muted-foreground">Документ не найден</div>
+  if (!d) return <DocLoadState onBack={onBack} error="Документ не найден" />
 
   const registered = Boolean(d.reg_number)
   const actions = new Set(d.available_actions ?? [])
   const editable = actions.has('edit')
   const approvalLocked = d.approval_status === 'pending'
   const canChangeFiles = editable && !approvalLocked && ['draft', 'registered'].includes(d.status)
+  const headerActions = (
+    <>
+      {registered && (
+        <Button size="sm" onClick={() => setActiveTab('send')}>
+          <Send className="mr-1.5 h-4 w-4" />Отправка
+        </Button>
+      )}
+      <Button size="sm" variant="outline" onClick={() => setActiveTab('access')}>
+        <KeyRound className="mr-1.5 h-4 w-4" />Доступ
+      </Button>
+      {registered && (
+        <Button size="sm" variant="ghost" title="Печатная форма" aria-label="Печатная форма"
+          onClick={() => openAuthAttachment(
+            `/api/docs/${d.id}/print?company_id=${companyId}`,
+          ).catch((error) => toast.error(`Печатная форма не открыта: ${error.message}`))}>
+          <Printer className="h-4 w-4 md:mr-1.5" /><span className="hidden md:inline">Печать</span>
+        </Button>
+      )}
+    </>
+  )
 
   const updateAttr = (field: DocKindField, value: unknown) => {
     act.mutate({ attrs: { ...d.attrs, [field.code]: value } })
@@ -198,8 +218,8 @@ export function DocCardPanel({ id, companyId, onBack, onChanged }: {
   }
 
   return (
-    <div className="space-y-4">
-      <header className="border-b border-border bg-background py-3 md:sticky md:top-0 md:z-20">
+    <div className="space-y-4 pb-20 md:pb-0">
+      <header className="sticky top-0 z-20 border-b border-border bg-background py-2 md:py-3">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="flex min-w-0 items-start gap-2">
             <Button variant="ghost" size="sm" onClick={onBack} className="mt-0.5 shrink-0"
@@ -223,27 +243,13 @@ export function DocCardPanel({ id, companyId, onBack, onChanged }: {
               </p>
             </div>
           </div>
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            {registered && (
-              <Button size="sm" variant="outline" onClick={() => setActiveTab('send')}>
-                <Send className="mr-1.5 h-4 w-4" />Отправка
-              </Button>
-            )}
-            <Button size="sm" variant="outline" onClick={() => setActiveTab('access')}>
-              <KeyRound className="mr-1.5 h-4 w-4" />Доступ
-            </Button>
-            {registered && (
-              <Button size="sm" variant="outline" title="Печатная форма"
-                onClick={() => openAuthAttachment(
-                  `/api/docs/${d.id}/print?company_id=${companyId}`,
-                ).catch((error) => toast.error(`Печатная форма не открыта: ${error.message}`))}>
-                <Printer className="mr-1.5 h-4 w-4" />Печать
-              </Button>
-            )}
-          </div>
+          <div className="hidden flex-wrap items-center justify-end gap-2 md:flex">{headerActions}</div>
         </div>
+      </header>
 
-        <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+      <section aria-label="Состояние и действия" className="space-y-3">
+        <div className="flex flex-wrap items-center gap-2 md:hidden">{headerActions}</div>
+        <div className="grid grid-cols-2 gap-px overflow-hidden rounded-md border border-border bg-border lg:grid-cols-4">
           <Fact label="Текущая редакция"
             value={d.current_revision ? `Редакция ${d.current_revision}` : 'Основной файл не приложен'} />
           <Fact label="Согласование" value={APPROVAL_LABEL[d.approval_status] ?? d.approval_status} />
@@ -254,11 +260,12 @@ export function DocCardPanel({ id, companyId, onBack, onChanged }: {
 
         <Lifecycle status={d.status} />
 
-        <div className="mt-3 flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {actions.has('register') && (
             <>
               <Input value={manualNumber} onChange={(event) => setManualNumber(event.target.value)}
-                placeholder="или номер вручную" className="h-9 w-44 text-sm" />
+                placeholder="или номер вручную" aria-label="Регистрационный номер вручную"
+                className="h-9 w-44 text-sm" />
               <Button size="sm" onClick={() => register.mutate()} disabled={register.isPending}>
                 <Stamp className="mr-1.5 h-4 w-4" />Зарегистрировать
               </Button>
@@ -302,9 +309,10 @@ export function DocCardPanel({ id, companyId, onBack, onChanged }: {
         </div>
 
         {reasonMode && (
-          <div className="mt-2 flex max-w-2xl flex-wrap items-center gap-2 rounded-md border border-border bg-muted/30 p-2">
+          <div className="flex max-w-2xl flex-wrap items-center gap-2 rounded-md border border-border bg-muted/30 p-2">
             <Input value={reason} onChange={(event) => setReason(event.target.value)}
               placeholder={reasonMode === 'cancel' ? 'Причина отмены документа' : 'Почему отменяется круг'}
+              aria-label={reasonMode === 'cancel' ? 'Причина отмены документа' : 'Причина отмены круга'}
               className="h-9 min-w-64 flex-1" autoFocus />
             <Button size="sm" variant={reasonMode === 'cancel' ? 'destructive' : 'default'}
               onClick={submitReason} disabled={act.isPending || cancelApproval.isPending}>
@@ -316,10 +324,10 @@ export function DocCardPanel({ id, companyId, onBack, onChanged }: {
             }}>Не отменять</Button>
           </div>
         )}
-      </header>
+      </section>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="h-auto max-w-full justify-start overflow-x-auto">
+        <TabsList className="h-auto max-w-full scroll-px-2 justify-start overflow-x-auto px-2">
           <TabsTrigger value="document">Документ</TabsTrigger>
           <TabsTrigger value="processing">
             Обработка{approvalLocked || d.acquaints.some((item) => item.status === 'pending') ? ' •' : ''}
@@ -343,64 +351,66 @@ export function DocCardPanel({ id, companyId, onBack, onChanged }: {
           )}
           <Card className="grid gap-3 p-4 sm:grid-cols-2">
             <Field label="Заголовок">
-              <Input defaultValue={d.title}
+              {(controlId) => <Input id={controlId} defaultValue={d.title} required aria-required="true"
                 className="h-9 disabled:cursor-default disabled:opacity-100 disabled:text-foreground"
                 disabled={!editable}
                 onBlur={(event) => event.target.value.trim() !== d.title
-                  && act.mutate({ title: event.target.value.trim() })} />
+                  && act.mutate({ title: event.target.value.trim() })} />}
             </Field>
             <Field label={d.direction === 'in' ? 'От кого' : 'Кому'}>
-              <Input defaultValue={d.counterparty_name}
+              {(controlId) => <Input id={controlId} defaultValue={d.counterparty_name}
                 className="h-9 disabled:cursor-default disabled:opacity-100 disabled:text-foreground"
                 disabled={!editable}
                 onBlur={(event) => event.target.value !== d.counterparty_name
-                  && act.mutate({ counterparty_name: event.target.value })} />
+                  && act.mutate({ counterparty_name: event.target.value })} />}
             </Field>
             <Field label="Их номер">
-              <Input defaultValue={d.external_number ?? ''}
+              {(controlId) => <Input id={controlId} defaultValue={d.external_number ?? ''}
                 className="h-9 disabled:cursor-default disabled:opacity-100 disabled:text-foreground"
                 disabled={!editable}
                 onBlur={(event) => event.target.value !== (d.external_number ?? '')
-                  && act.mutate({ external_number: event.target.value })} />
+                  && act.mutate({ external_number: event.target.value })} />}
             </Field>
             <Field label="Дата их документа">
-              <Input type="date" defaultValue={d.external_date ?? ''}
+              {(controlId) => <Input id={controlId} type="date" defaultValue={d.external_date ?? ''}
                 className="h-9 disabled:cursor-default disabled:opacity-100 disabled:text-foreground"
                 disabled={!editable}
                 onBlur={(event) => event.target.value !== (d.external_date ?? '')
-                  && act.mutate({ external_date: event.target.value || null })} />
+                  && act.mutate({ external_date: event.target.value || null })} />}
             </Field>
             <Field label="Доступ">
-              <select value={d.confidentiality} disabled={!editable}
+              {(controlId) => <select id={controlId} value={d.confidentiality} disabled={!editable}
                 className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm disabled:cursor-default disabled:opacity-100 disabled:text-foreground"
                 onChange={(event) => act.mutate({ confidentiality: event.target.value })}>
                 <option value="company">Всё пространство</option>
                 <option value="private">Ограниченный доступ</option>
-              </select>
+              </select>}
             </Field>
-            <Field label="Состояние">
+            <div className="space-y-1.5">
+              <div className="text-xs text-muted-foreground">Состояние</div>
               <div className="flex h-9 items-center rounded-md border border-input bg-muted/30 px-3 text-sm">
                 {DOC_STATUS[d.status]?.label ?? d.status}
               </div>
-            </Field>
+            </div>
             {(d.kind?.fields ?? []).map((field) => (
               <AttrField key={field.code} field={field} value={d.attrs[field.code]}
                 disabled={!editable} onCommit={(value) => updateAttr(field, value)} />
             ))}
             <div className="sm:col-span-2">
               <Field label="Краткое содержание">
-                <Textarea defaultValue={d.summary ?? ''} rows={3} disabled={!editable}
+                {(controlId) => <Textarea id={controlId} defaultValue={d.summary ?? ''}
+                  rows={3} disabled={!editable}
                   className="disabled:cursor-default disabled:opacity-100 disabled:text-foreground"
                   onBlur={(event) => event.target.value !== (d.summary ?? '')
-                    && act.mutate({ summary: event.target.value })} />
+                    && act.mutate({ summary: event.target.value })} />}
               </Field>
             </div>
           </Card>
 
           <Card className="space-y-2 p-4">
-            <Label className="text-xs">Реплика в историю</Label>
+            <Label htmlFor={`doc-note-${d.id}`} className="text-xs">Реплика в историю</Label>
             <div className="flex flex-col gap-2 sm:flex-row">
-              <Input value={note} onChange={(event) => setNote(event.target.value)}
+              <Input id={`doc-note-${d.id}`} value={note} onChange={(event) => setNote(event.target.value)}
                 placeholder="Что важно зафиксировать по документу" className="h-9"
                 disabled={!editable} />
               <Button size="sm" variant="outline" disabled={!editable || !note.trim() || act.isPending}
@@ -527,9 +537,9 @@ function StatusPill({ status }: { status: string }) {
 
 function Fact({ label, value }: { label: string; value: string }) {
   return (
-    <div className="min-w-0 rounded-md border border-border bg-card px-3 py-2">
-      <div className="text-[11px] text-muted-foreground">{label}</div>
-      <div className="truncate text-xs font-medium" title={value}>{value}</div>
+    <div className="min-w-0 bg-card px-3 py-2">
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="truncate text-[13px] font-medium" title={value}>{value}</div>
     </div>
   )
 }
@@ -538,8 +548,8 @@ function Lifecycle({ status }: { status: string }) {
   const normal = ['draft', 'registered', 'in_force', 'executed', 'archived']
   const current = normal.indexOf(status)
   return (
-    <div className="mt-3 overflow-x-auto" aria-label="Жизненный цикл документа">
-      <ol className="flex min-w-max items-center gap-1">
+    <div className="scroll-px-2 overflow-x-auto px-2" aria-label="Жизненный цикл документа">
+      <ol className="flex min-w-max items-center gap-1 pr-3">
         {normal.map((item, index) => {
           const reached = current >= index
           const active = status === item
@@ -577,23 +587,26 @@ function AttrField({ field, value, disabled, onCommit }: {
   if (field.type === 'select') {
     return (
       <Field label={label}>
-        <select defaultValue={String(value ?? '')} disabled={disabled}
+        {(controlId) => <select id={controlId} defaultValue={String(value ?? '')}
+          disabled={disabled} required={field.required} aria-required={field.required}
           className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm disabled:cursor-default disabled:opacity-100 disabled:text-foreground"
           onChange={(event) => onCommit(event.target.value)}>
           <option value="">Не выбрано</option>
           {(field.options ?? []).map((option) => <option key={option}>{option}</option>)}
-        </select>
+        </select>}
       </Field>
     )
   }
   if (field.type === 'boolean') {
     return (
       <Field label={label}>
-        <label className="flex h-9 items-center gap-2 rounded-md border border-input px-3 text-sm">
-          <input type="checkbox" defaultChecked={value === true} disabled={disabled}
+        {(controlId) => <label htmlFor={controlId}
+          className="flex h-9 items-center gap-2 rounded-md border border-input px-3 text-sm">
+          <input id={controlId} type="checkbox" defaultChecked={value === true}
+            disabled={disabled} aria-required={field.required}
             onChange={(event) => onCommit(event.target.checked)} />
           {value === true ? 'Да' : 'Нет'}
-        </label>
+        </label>}
       </Field>
     )
   }
@@ -601,35 +614,64 @@ function AttrField({ field, value, disabled, onCommit }: {
     return (
       <div className="sm:col-span-2">
         <Field label={label}>
-          <Textarea defaultValue={String(value ?? '')} rows={2} disabled={disabled}
+          {(controlId) => <Textarea id={controlId} defaultValue={String(value ?? '')}
+            rows={2} disabled={disabled} required={field.required} aria-required={field.required}
             className="disabled:cursor-default disabled:opacity-100 disabled:text-foreground"
             onBlur={(event) => event.target.value !== String(value ?? '')
-              && onCommit(event.target.value)} />
+              && onCommit(event.target.value)} />}
         </Field>
       </div>
     )
   }
   return (
     <Field label={label}>
-      <Input type={field.type === 'number' ? 'number' : field.type === 'date' ? 'date' : 'text'}
+      {(controlId) => <Input id={controlId}
+        type={field.type === 'number' ? 'number' : field.type === 'date' ? 'date' : 'text'}
         defaultValue={String(value ?? '')}
         className="h-9 disabled:cursor-default disabled:opacity-100 disabled:text-foreground"
-        disabled={disabled}
+        disabled={disabled} required={field.required} aria-required={field.required}
         onBlur={(event) => {
           if (event.target.value === String(value ?? '')) return
           onCommit(field.type === 'number'
             ? event.target.value === '' ? null : Number(event.target.value)
             : event.target.value)
-        }} />
+        }} />}
     </Field>
   )
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, children }: {
+  label: string
+  children: (controlId: string) => React.ReactNode
+}) {
+  const controlId = useId()
   return (
     <div className="space-y-1.5">
-      <Label className="text-xs text-muted-foreground">{label}</Label>
-      {children}
+      <Label htmlFor={controlId} className="text-xs text-muted-foreground">{label}</Label>
+      {children(controlId)}
+    </div>
+  )
+}
+
+function DocLoadState({ onBack, error, onRetry }: {
+  onBack: () => void
+  error?: string
+  onRetry?: () => void
+}) {
+  return (
+    <div className="space-y-3 p-4">
+      <Button variant="ghost" size="sm" onClick={onBack}>
+        <ArrowLeft className="mr-1.5 h-4 w-4" />Вернуться в реестр
+      </Button>
+      {error ? (
+        <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 p-4">
+          <div className="text-sm font-medium text-destructive">Документ не загрузился</div>
+          <div className="mt-1 text-sm text-muted-foreground">{error}</div>
+          {onRetry && <Button size="sm" variant="outline" className="mt-3" onClick={onRetry}>Повторить</Button>}
+        </div>
+      ) : (
+        <div className="text-sm text-muted-foreground">Загрузка документа…</div>
+      )}
     </div>
   )
 }

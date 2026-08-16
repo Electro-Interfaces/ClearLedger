@@ -5,12 +5,14 @@
 import * as sourceService from './sourceService'
 import * as channelService from './channelService'
 import * as locationService from './locationService'
+import { clearAuthFileCache } from '@/lib/authFiles'
 
 /** Полный сброс модульных кэшей (при смене компании / выходе). */
 export function resetServiceCaches() {
   sourceService.resetCache()
   channelService.resetCache()
   locationService.resetCache()
+  clearAuthFileCache()
 }
 
 /** Прокинуть активную компанию в сервисы (ключи localStorage / _companyId). */

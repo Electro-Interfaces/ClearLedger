@@ -5,11 +5,12 @@
  * какой движок за ним стоит, бессмысленно: человек приходит с вопросом «что на
  * мне», а не «что у меня в документах и отдельно в поручениях».
  */
-import { lazy, Suspense, useState } from 'react'
+import { lazy, Suspense, useState, type ReactNode } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
-import { Stamp } from 'lucide-react'
+import { RotateCw, Stamp } from 'lucide-react'
 import { useCompany } from '@/contexts/CompanyContext'
+import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 import * as docsService from '@/services/docsService'
@@ -18,7 +19,7 @@ import { DocCardPanel } from '@/components/docs/DocCardPanel'
 import { useDocsView } from './DocsLayout'
 
 const TasksWorkPage = lazy(() => import('@/pages/tasks/TasksWorkPage')
-  .then((m) => ({ default: m.TasksWorkPage })))
+  .then((module) => ({ default: module.TasksWorkPage })))
 
 export function DocsWorkPage() {
   const { company } = useCompany()
@@ -45,28 +46,41 @@ export function DocsWorkPage() {
     enabled: !!companyId && view === 'mine',
   })
 
-  const open = (id: string) => setParams((p) => {
-    const n = new URLSearchParams(p); n.set('doc', id); return n
+  const open = (id: string) => setParams((current) => {
+    const next = new URLSearchParams(current)
+    next.set('doc', id)
+    return next
   }, { replace: true })
-  const close = () => setParams((p) => {
-    const n = new URLSearchParams(p); n.delete('doc'); return n
+  const close = () => setParams((current) => {
+    const next = new URLSearchParams(current)
+    next.delete('doc')
+    return next
   }, { replace: true })
-
-  if (!companyId) return null
-
-  if (openId) {
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ['docs-my-approvals', companyId] })
+    qc.invalidateQueries({ queryKey: ['docs-my-acquaints', companyId] })
+    qc.invalidateQueries({ queryKey: ['docs-mine', companyId] })
+  }
+  const withDocument = (content: ReactNode) => {
+    if (!openId) return content
     return (
-      <div className="px-4 py-4">
-        <DocCardPanel id={openId} companyId={companyId} onBack={close}
-          onChanged={() => {
-            qc.invalidateQueries({ queryKey: ['docs-my-approvals', companyId] })
-            qc.invalidateQueries({ queryKey: ['docs-mine', companyId] })
-          }} />
-      </div>
+      <>
+        <div className="h-full min-h-0 overflow-y-auto px-4 py-4 lg:hidden">
+          <DocCardPanel id={openId} companyId={companyId} onBack={close} onChanged={refresh} />
+        </div>
+        <div className="hidden h-full min-h-0 gap-3 lg:grid lg:grid-cols-[minmax(280px,0.66fr)_minmax(520px,1.4fr)]">
+          <div className="min-h-0 overflow-y-auto">{content}</div>
+          <section aria-label="Открытый документ"
+            className="my-4 mr-4 min-h-0 overflow-y-auto rounded-lg border border-border bg-background px-4">
+            <DocCardPanel id={openId} companyId={companyId} onBack={close} onChanged={refresh} />
+          </section>
+        </div>
+      </>
     )
   }
 
-  // Поручения ведёт тот же движок, что и раньше: экран переиспользуется целиком.
+  if (!companyId) return null
+
   if (view === 'errands') {
     return (
       <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">Загрузка…</div>}>
@@ -77,111 +91,139 @@ export function DocsWorkPage() {
 
   if (view === 'acquaints') {
     const rows = acquaintsQ.data ?? []
-    return (
-      <div className="space-y-3 px-4 py-4">
-        <div>
-          <h1 className="text-base font-semibold">Ознакомиться</h1>
-          <p className="text-xs text-muted-foreground">
-            {acquaintsQ.isLoading ? 'Загрузка…' : `Документов: ${rows.length}`}
-          </p>
-        </div>
-        <Card className="divide-y divide-border/60">
-          {rows.map((a) => (
-            <button key={a.id} type="button" onClick={() => open(a.doc_id)}
-              className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left hover:bg-accent/40">
-              <div className="min-w-0">
-                <div className="truncate text-sm">{a.doc_title}</div>
-                <div className="text-[11px] text-muted-foreground">
-                  {a.doc_number ?? 'без номера'}
+    return withDocument(
+      <QueuePage title="Ознакомиться"
+        subtitle={acquaintsQ.isLoading ? 'Загрузка…' : `Документов: ${rows.length}`}>
+        {acquaintsQ.isError && (
+          <QueueError message={(acquaintsQ.error as Error).message} onRetry={() => acquaintsQ.refetch()} />
+        )}
+        {!acquaintsQ.isError && (
+          <Card className="divide-y divide-border/60">
+            {rows.map((item) => (
+              <button key={item.id} type="button" onClick={() => open(item.doc_id)}
+                aria-current={item.doc_id === openId ? 'true' : undefined}
+                className={queueRow(item.doc_id === openId)}>
+                <div className="min-w-0">
+                  <div className="truncate text-sm">{item.doc_title}</div>
+                  <div className="text-[13px] text-muted-foreground">
+                    {item.doc_number ?? 'без номера'}
+                  </div>
                 </div>
-              </div>
-              {a.due_at && (
-                <DueBadge value={a.due_at} now={now} />
-              )}
-            </button>
-          ))}
-          {!acquaintsQ.isLoading && rows.length === 0 && (
-            <div className="px-3 py-8 text-center text-sm text-muted-foreground">
-              Ознакомиться не с чем
-            </div>
-          )}
-        </Card>
-      </div>
+                {item.due_at && <DueBadge value={item.due_at} now={now} />}
+              </button>
+            ))}
+            {acquaintsQ.isSuccess && rows.length === 0 && (
+              <Empty>Ознакомиться не с чем</Empty>
+            )}
+          </Card>
+        )}
+      </QueuePage>,
     )
   }
 
   if (view === 'mine') {
     const docs = docsQ.data?.docs ?? []
-    return (
-      <div className="space-y-3 px-4 py-4">
-        <div>
-          <h1 className="text-base font-semibold">Мои документы</h1>
-          <p className="text-xs text-muted-foreground">
-            {docsQ.isLoading ? 'Загрузка…' : `Всего: ${docs.length}`}
-          </p>
-        </div>
-        <Card className="divide-y divide-border/60">
-          {docs.map((d) => (
-            <button key={d.id} type="button" onClick={() => open(d.id)}
-              className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left hover:bg-accent/40">
-              <div className="min-w-0">
-                <div className="truncate text-sm">{d.title}</div>
-                <div className="text-[11px] text-muted-foreground">
-                  {d.reg_number ?? 'без номера'} · {d.kind_name}
-                  {d.counterparty_name ? ` · ${d.counterparty_name}` : ''}
+    return withDocument(
+      <QueuePage title="Мои документы"
+        subtitle={docsQ.isLoading ? 'Загрузка…' : `Показано: ${docs.length}`}>
+        {docsQ.isError && (
+          <QueueError message={(docsQ.error as Error).message} onRetry={() => docsQ.refetch()} />
+        )}
+        {!docsQ.isError && (
+          <Card className="divide-y divide-border/60">
+            {docs.map((doc) => (
+              <button key={doc.id} type="button" onClick={() => open(doc.id)}
+                aria-current={doc.id === openId ? 'true' : undefined}
+                className={queueRow(doc.id === openId)}>
+                <div className="min-w-0">
+                  <div className="truncate text-sm">{doc.title}</div>
+                  <div className="text-[13px] text-muted-foreground">
+                    {doc.reg_number ?? 'без номера'} · {doc.kind_name}
+                    {doc.counterparty_name ? ` · ${doc.counterparty_name}` : ''}
+                  </div>
                 </div>
-              </div>
-              <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-xs">
-                {DOC_STATUS[d.status]?.label ?? d.status}
-              </span>
-            </button>
-          ))}
-          {!docsQ.isLoading && docs.length === 0 && (
-            <div className="px-3 py-8 text-center text-sm text-muted-foreground">
-              Документов пока нет
-            </div>
-          )}
-        </Card>
-      </div>
+                <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-xs">
+                  {DOC_STATUS[doc.status]?.label ?? doc.status}
+                </span>
+              </button>
+            ))}
+            {docsQ.isSuccess && docs.length === 0 && <Empty>Документов пока нет</Empty>}
+          </Card>
+        )}
+      </QueuePage>,
     )
   }
 
   const approvals = approvalsQ.data ?? []
+  return withDocument(
+    <QueuePage title="Ждут моей визы"
+      subtitle={approvalsQ.isLoading ? 'Загрузка…' : `Документов: ${approvals.length}`}>
+      {approvalsQ.isError && (
+        <QueueError message={(approvalsQ.error as Error).message} onRetry={() => approvalsQ.refetch()} />
+      )}
+      {!approvalsQ.isError && (
+        <Card className="divide-y divide-border/60">
+          {approvals.map((approval) => (
+            <button key={approval.id} type="button" onClick={() => open(approval.doc_id)}
+              aria-current={approval.doc_id === openId ? 'true' : undefined}
+              className={queueRow(approval.doc_id === openId)}>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 text-sm">
+                  <Stamp className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <span className="truncate">{approval.doc_title}</span>
+                </div>
+                <div className="text-[13px] text-muted-foreground">
+                  {approval.doc_number ? `${approval.doc_number} · ` : ''}шаг «{approval.step_name}»
+                  {approval.mode === 'parallel' ? ' · параллельно' : ''}
+                  {approval.acting_for ? ` · замещаете ${approval.acting_for}` : ''}
+                </div>
+              </div>
+              {approval.due_at && <DueBadge value={approval.due_at} now={now} />}
+            </button>
+          ))}
+          {approvalsQ.isSuccess && approvals.length === 0 && <Empty>Виз на вас нет</Empty>}
+        </Card>
+      )}
+    </QueuePage>,
+  )
+}
+
+function QueuePage({ title, subtitle, children }: {
+  title: string
+  subtitle: string
+  children: ReactNode
+}) {
   return (
     <div className="space-y-3 px-4 py-4">
       <div>
-        <h1 className="text-base font-semibold">Ждут моей визы</h1>
-        <p className="text-xs text-muted-foreground">
-          {approvalsQ.isLoading ? 'Загрузка…' : `Документов: ${approvals.length}`}
-        </p>
+        <h1 className="text-base font-semibold">{title}</h1>
+        <p className="text-xs text-muted-foreground">{subtitle}</p>
       </div>
-      <Card className="divide-y divide-border/60">
-        {approvals.map((a) => (
-          <button key={a.id} type="button" onClick={() => open(a.doc_id)}
-            className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left hover:bg-accent/40">
-            <div className="min-w-0">
-              <div className="flex items-center gap-2 text-sm">
-                <Stamp className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                <span className="truncate">{a.doc_title}</span>
-              </div>
-              <div className="text-[11px] text-muted-foreground">
-                {a.doc_number ? `${a.doc_number} · ` : ''}шаг «{a.step_name}»
-                {a.mode === 'parallel' ? ' · параллельно' : ''}
-                {a.acting_for ? ` · замещаете ${a.acting_for}` : ''}
-              </div>
-            </div>
-            {a.due_at && (
-              <DueBadge value={a.due_at} now={now} />
-            )}
-          </button>
-        ))}
-        {!approvalsQ.isLoading && approvals.length === 0 && (
-          <div className="px-3 py-8 text-center text-sm text-muted-foreground">
-            Виз на вас нет
-          </div>
-        )}
-      </Card>
+      {children}
     </div>
+  )
+}
+
+function QueueError({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 p-4">
+      <div className="text-sm font-medium text-destructive">Очередь не загрузилась</div>
+      <div className="mt-1 text-sm text-muted-foreground">{message}</div>
+      <Button size="sm" variant="outline" className="mt-3" onClick={onRetry}>
+        <RotateCw className="mr-1.5 h-3.5 w-3.5" />Повторить
+      </Button>
+    </div>
+  )
+}
+
+function Empty({ children }: { children: ReactNode }) {
+  return <div className="px-3 py-8 text-center text-sm text-muted-foreground">{children}</div>
+}
+
+function queueRow(active: boolean) {
+  return cn(
+    'flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left transition-colors hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
+    active && 'bg-primary/5',
   )
 }
 

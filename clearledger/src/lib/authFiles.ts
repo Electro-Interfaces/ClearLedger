@@ -2,6 +2,25 @@ import { useEffect, useState } from 'react'
 import { downloadBlob } from '@/services/apiClient'
 
 const blobCache = new Map<string, string>()
+const CACHE_LIMIT = 12
+
+function rememberBlob(path: string, url: string) {
+  const previous = blobCache.get(path)
+  if (previous && previous !== url) URL.revokeObjectURL(previous)
+  blobCache.delete(path)
+  blobCache.set(path, url)
+  while (blobCache.size > CACHE_LIMIT) {
+    const oldest = blobCache.entries().next().value as [string, string] | undefined
+    if (!oldest) break
+    blobCache.delete(oldest[0])
+    URL.revokeObjectURL(oldest[1])
+  }
+}
+
+export function clearAuthFileCache() {
+  blobCache.forEach((url) => URL.revokeObjectURL(url))
+  blobCache.clear()
+}
 
 export function useAuthBlob(path: string | null): {
   url: string | null
@@ -23,7 +42,7 @@ export function useAuthBlob(path: string | null): {
       .then((blob) => {
         if (!alive) return
         const objUrl = URL.createObjectURL(blob)
-        blobCache.set(path, objUrl)
+        rememberBlob(path, objUrl)
         setResult({ path, url: objUrl, error: false })
       })
       .catch(() => {
@@ -39,6 +58,39 @@ export function useAuthBlob(path: string | null): {
   }
 }
 
+export function useAuthText(path: string | null, enabled: boolean): {
+  text: string | null
+  error: boolean
+  loading: boolean
+} {
+  const [result, setResult] = useState<{
+    path: string | null
+    text: string | null
+    error: boolean
+  }>({ path: null, text: null, error: false })
+  const current = enabled && result.path === path ? result : null
+
+  useEffect(() => {
+    if (!path || !enabled) return
+    let alive = true
+    downloadBlob(path)
+      .then((blob) => blob.text())
+      .then((text) => {
+        if (alive) setResult({ path, text, error: false })
+      })
+      .catch(() => {
+        if (alive) setResult({ path, text: null, error: true })
+      })
+    return () => { alive = false }
+  }, [enabled, path])
+
+  return {
+    text: current?.text ?? null,
+    error: current?.error ?? false,
+    loading: Boolean(path && enabled && !current),
+  }
+}
+
 export function useAuthBlobUrl(path: string | null): string | null {
   return useAuthBlob(path).url
 }
@@ -46,7 +98,7 @@ export function useAuthBlobUrl(path: string | null): string | null {
 export async function downloadAttachment(path: string, name?: string): Promise<void> {
   const cached = blobCache.get(path)
   const objUrl = cached ?? URL.createObjectURL(await downloadBlob(path))
-  if (!cached) blobCache.set(path, objUrl)
+  if (!cached) rememberBlob(path, objUrl)
   const anchor = document.createElement('a')
   anchor.href = objUrl
   anchor.download = name || 'файл'
@@ -58,10 +110,11 @@ export async function downloadAttachment(path: string, name?: string): Promise<v
 export async function openAuthAttachment(path: string): Promise<void> {
   const target = window.open('', '_blank')
   if (!target) throw new Error('Браузер заблокировал новую вкладку')
+  target.opener = null
   try {
     const cached = blobCache.get(path)
     const objUrl = cached ?? URL.createObjectURL(await downloadBlob(path))
-    if (!cached) blobCache.set(path, objUrl)
+    if (!cached) rememberBlob(path, objUrl)
     target.location.href = objUrl
   } catch (error) {
     target.close()

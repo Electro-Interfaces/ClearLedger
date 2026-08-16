@@ -8,7 +8,7 @@
 import { useDeferredValue, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { FilePlus2, Search, SlidersHorizontal, X } from 'lucide-react'
+import { FilePlus2, RotateCw, Search, SlidersHorizontal, X } from 'lucide-react'
 import { useCompany } from '@/contexts/CompanyContext'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -131,7 +131,7 @@ export function DocsRegistryPage() {
             )}
           </button>
         ))}
-        {!listQ.isLoading && docs.length === 0 && (
+        {listQ.isSuccess && docs.length === 0 && (
           <div className="px-3 py-8 text-center text-sm text-muted-foreground">{emptyText}</div>
         )}
       </div>
@@ -175,7 +175,7 @@ export function DocsRegistryPage() {
                   <td className="whitespace-nowrap px-3 py-2"><StatusPill status={doc.status} /></td>
                 </tr>
               ))}
-              {!listQ.isLoading && docs.length === 0 && (
+              {listQ.isSuccess && docs.length === 0 && (
                 <tr>
                   <td colSpan={7} className="px-3 py-8 text-center text-sm text-muted-foreground">
                     {emptyText}
@@ -192,7 +192,7 @@ export function DocsRegistryPage() {
   return (
     <>
       {openId && (
-        <div className="h-full min-h-0 overflow-y-auto px-4 py-4 xl:hidden">
+        <div className="h-full min-h-0 overflow-y-auto px-4 py-4 lg:hidden">
           <DocCardPanel id={openId} companyId={companyId} onBack={close}
             onChanged={() => qc.invalidateQueries({ queryKey: ['docs', companyId] })} />
         </div>
@@ -200,13 +200,13 @@ export function DocsRegistryPage() {
 
       <div data-wave="trek-workspace" className={cn(
         'h-full min-h-0 flex-col gap-3 px-4 py-4',
-        openId ? 'hidden xl:flex' : 'flex',
+        openId ? 'hidden lg:flex' : 'flex',
       )}>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h1 className="text-base font-semibold">{title}</h1>
             <p className="text-xs text-muted-foreground">
-              {listQ.isLoading ? 'Загрузка…' : `Документов: ${listQ.data?.count ?? docs.length}`}
+              {listQ.isLoading ? 'Загрузка…' : `Показано: ${listQ.data?.count ?? docs.length}`}
             </p>
           </div>
           <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto">
@@ -278,11 +278,21 @@ export function DocsRegistryPage() {
           </Card>
         )}
 
+        {listQ.isError && (
+          <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 p-4">
+            <div className="text-sm font-medium text-destructive">Реестр не загрузился</div>
+            <div className="mt-1 text-sm text-muted-foreground">{(listQ.error as Error).message}</div>
+            <Button size="sm" variant="outline" className="mt-3" onClick={() => listQ.refetch()}>
+              <RotateCw className="mr-1.5 h-3.5 w-3.5" />Повторить
+            </Button>
+          </div>
+        )}
+
         <div className={cn(
           'min-h-0 flex-1',
-          openId && 'grid gap-3 xl:grid-cols-[minmax(340px,0.72fr)_minmax(620px,1.45fr)]',
+          openId && 'grid gap-3 lg:grid-cols-[minmax(280px,0.66fr)_minmax(520px,1.4fr)]',
         )}>
-          {registry}
+          {!listQ.isError && registry}
           {openId && (
             <section aria-label="Открытый документ"
               className="min-h-0 overflow-y-auto rounded-lg border border-border bg-background px-4">

@@ -7,7 +7,9 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
-import { downloadAttachment, humanSize, openAuthAttachment, useAuthBlob } from '@/lib/authFiles'
+import {
+  downloadAttachment, humanSize, openAuthAttachment, useAuthBlob, useAuthText,
+} from '@/lib/authFiles'
 import { cn } from '@/lib/utils'
 import type { DocVersion } from '@/services/docsService'
 
@@ -21,9 +23,13 @@ const ROLE_LABEL: Record<string, string> = {
 function previewKind(version: DocVersion): 'image' | 'pdf' | 'text' | 'unsupported' {
   const mime = (version.mime ?? '').toLowerCase()
   const name = version.file_name.toLowerCase()
-  if (mime.startsWith('image/')) return 'image'
+  if (['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/bmp'].includes(mime)) {
+    return 'image'
+  }
   if (mime === 'application/pdf' || name.endsWith('.pdf')) return 'pdf'
-  if (mime.startsWith('text/') || /\.(txt|csv|json|xml|md|log)$/.test(name)) return 'text'
+  if (mime === 'text/plain' || (!mime && /\.(txt|csv|json|xml|md|log)$/.test(name))) {
+    return 'text'
+  }
   return 'unsupported'
 }
 
@@ -44,8 +50,9 @@ export function DocFileWorkspace({ versions, canRemove, removing, onRemove }: {
 
   const selected = versions.find((version) => version.id === selectedId) ?? initial
   const path = selected ? `/api/files/${selected.file_id}` : null
-  const blob = useAuthBlob(path)
   const kind = selected ? previewKind(selected) : 'unsupported'
+  const blob = useAuthBlob(kind === 'text' ? null : path)
+  const textPreview = useAuthText(path, kind === 'text')
 
   const download = async () => {
     if (!selected || !path) return
@@ -79,7 +86,7 @@ export function DocFileWorkspace({ versions, canRemove, removing, onRemove }: {
 
   return (
     <div className="grid min-h-0 gap-3 lg:grid-cols-[minmax(260px,0.75fr)_minmax(420px,1.25fr)]">
-      <Card className="min-h-0 overflow-hidden">
+      <Card className="order-2 min-h-0 overflow-hidden lg:order-1">
         <div className="border-b border-border px-3 py-2">
           <div className="text-sm font-medium">Редакции и приложения</div>
           <div className="text-xs text-muted-foreground">Выберите файл для просмотра</div>
@@ -134,7 +141,7 @@ export function DocFileWorkspace({ versions, canRemove, removing, onRemove }: {
         </div>
       </Card>
 
-      <Card className="min-h-[24rem] overflow-hidden">
+      <Card className="order-1 min-h-[18rem] overflow-hidden lg:order-2 lg:min-h-[24rem]">
         {selected && (
           <>
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-2">
@@ -148,18 +155,20 @@ export function DocFileWorkspace({ versions, canRemove, removing, onRemove }: {
                 <Button type="button" size="sm" variant="ghost" onClick={download}>
                   <Download className="mr-1.5 h-3.5 w-3.5" />Скачать
                 </Button>
-                <Button type="button" size="sm" variant="outline" onClick={open}>
-                  <ExternalLink className="mr-1.5 h-3.5 w-3.5" />Открыть
-                </Button>
+                {(kind === 'image' || kind === 'pdf') && (
+                  <Button type="button" size="sm" variant="outline" onClick={open}>
+                    <ExternalLink className="mr-1.5 h-3.5 w-3.5" />Открыть
+                  </Button>
+                )}
               </div>
             </div>
-            <div className="flex min-h-[20rem] items-center justify-center bg-muted/20 p-3 lg:min-h-[31rem]">
-              {blob.loading && (
+            <div className="flex min-h-[15rem] items-center justify-center bg-muted/20 p-3 lg:min-h-[31rem]">
+              {(kind === 'text' ? textPreview.loading : blob.loading) && (
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                   <Loader2 className="h-4 w-4 animate-spin" />Загружаем защищённый файл…
                 </div>
               )}
-              {blob.error && (
+              {(kind === 'text' ? textPreview.error : blob.error) && (
                 <div className="max-w-sm text-center">
                   <FileQuestion className="mx-auto mb-2 h-7 w-7 text-destructive" />
                   <div className="text-sm font-medium">Предпросмотр не загрузился</div>
@@ -172,9 +181,16 @@ export function DocFileWorkspace({ versions, canRemove, removing, onRemove }: {
                 <img src={blob.url} alt={selected.file_name}
                   className="max-h-[31rem] max-w-full object-contain" />
               )}
-              {blob.url && !blob.loading && !blob.error && (kind === 'pdf' || kind === 'text') && (
+              {blob.url && !blob.loading && !blob.error && kind === 'pdf' && (
                 <iframe src={blob.url} title={`Предпросмотр ${selected.file_name}`}
-                  className="h-[31rem] w-full rounded-md border border-border bg-background" />
+                  sandbox="" className="h-80 w-full rounded-md border border-border bg-background lg:h-[31rem]" />
+              )}
+              {textPreview.text !== null && !textPreview.loading && !textPreview.error
+                && kind === 'text' && (
+                <pre data-testid="doc-text-preview"
+                  className="h-80 w-full overflow-auto whitespace-pre-wrap rounded-md border border-border bg-background p-3 font-sans text-sm leading-5 lg:h-[31rem]">
+                  {textPreview.text}
+                </pre>
               )}
               {!blob.loading && !blob.error && kind === 'unsupported' && (
                 <div className="max-w-sm text-center">
