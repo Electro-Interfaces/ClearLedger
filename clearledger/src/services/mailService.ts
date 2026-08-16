@@ -175,7 +175,7 @@ export const getMailAddresses = (companyId: string) =>
 
 /** Разобрать вложения письма как документы приёмки (в учёт — отдельным шагом). */
 export const mailToIntake = (companyId: string, messageId: string) =>
-  post<{ batches: number; items: number }>(
+  post<{ batches: number; items: number; skipped?: string[] }>(
     `/api/mail/to-intake?company_id=${companyId}&message_id=${messageId}`, {})
 
 

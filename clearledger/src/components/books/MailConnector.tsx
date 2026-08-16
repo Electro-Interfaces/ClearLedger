@@ -75,7 +75,8 @@ const MODES: { key: MailAccountInput['mode']; label: string }[] = [
 export function MailConnector({ mode = 'all' }: { mode?: 'setup' | 'work' | 'all' }) {
   const showSetup = mode === 'setup' || mode === 'all'
   const showWork = mode === 'work' || mode === 'all'
-  const { companyId } = useCompany()
+  const { companyId, companies } = useCompany()
+  const companyName = companies.find((c) => c.id === companyId)?.name ?? ''
   const qc = useQueryClient()
   const [form, setForm] = useState<(MailAccountInput & { id?: string }) | null>(null)
   const [threadId, setThreadId] = useState<string | null>(null)
@@ -214,7 +215,10 @@ export function MailConnector({ mode = 'all' }: { mode?: 'setup' | 'work' | 'all
       qc.invalidateQueries({ queryKey: ['intake-docs'] })
       toast.success(r.items
         ? `Разобрано документов: ${r.items} — смотрите вкладку «Первичные документы»`
-        : 'В письме нет таблиц для разбора')
+        // Называем сами файлы: «нет таблиц» при видимом вложении читается как сбой.
+        : r.skipped?.length
+          ? `Разбирать нечего: ${r.skipped.join(', ')} — не таблица (xlsx/csv)`
+          : 'В письме нет вложений для разбора')
     },
     onError: () => toast.error('Не удалось разобрать вложения'),
   })
@@ -267,11 +271,17 @@ export function MailConnector({ mode = 'all' }: { mode?: 'setup' | 'work' | 'all
               // Пустое состояние учит работе: что завести первым и что случится
               // дальше. «Ящиков пока нет» сообщает факт и оставляет человека одного.
               <div className="rounded-lg border border-dashed p-4">
-                <div className="text-sm font-medium">Ящиков пока нет</div>
+                {/* Компания названа прямо тут: ящики заводятся НА компанию, и,
+                    глядя на пустой список, администратор решал, что подключение не
+                    сохранилось — хотя ящики стоят у соседней компании пространства. */}
+                <div className="text-sm font-medium">
+                  Ящиков пока нет{companyName ? ` — у компании «${companyName}»` : ''}
+                </div>
                 <p className="mt-1 max-w-prose text-[13px] leading-relaxed text-muted-foreground">
                   Начните с того, куда контрагенты присылают закрывающие документы.
                   После проверки подключения письма начнут приходить сами, а вложения
                   можно будет разбирать в документы — на вкладке «Загрузка».
+                  {companies.length > 1 && ' Ящики у каждой компании свои — переключатель в шапке.'}
                 </p>
                 <Button size="sm" className="mt-3" onClick={() => setForm({ ...EMPTY })}>
                   <Plus className="size-4 mr-1.5" /> Завести ящик

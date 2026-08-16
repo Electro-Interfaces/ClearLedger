@@ -278,7 +278,9 @@ function MobileWorkspace() {
             на телефоне это лишняя строка поверх и без того узкого экрана. */}
         {sections.length > 1 && (
           <Select value={coreMode} onValueChange={(v) => setCoreMode(v as typeof coreMode)}>
-            <SelectTrigger size="sm" className="h-8 w-auto shrink-0 gap-1.5 text-xs font-medium">
+            <SelectTrigger size="sm"
+              className="h-9 min-w-0 flex-1 basis-0 gap-1.5 text-xs font-medium
+                         [&>span]:truncate">
               {/* иконка приезжает из выбранного SelectItem через SelectValue */}
               <SelectValue />
             </SelectTrigger>
@@ -295,22 +297,25 @@ function MobileWorkspace() {
           </Select>
         )}
 
-        {/* Под-виды активного режима — свайп без видимого скроллбара */}
+        {/* Пункты раздела — ВТОРЫМ селектором, зависимым от первого.
+            Была свайп-строка, и на телефоне она подводила: пункты уезжали за край,
+            сколько их всего — неизвестно, а выбранный приходилось искать прокруткой
+            (замечание МАГа 15.08.2026). Список показывает набор целиком, цель под
+            палец, и пара «раздел → пункт» читается как одна мысль, а не как строка
+            вкладок, у которой не видно конца. */}
         {items.length > 0 && (
-          <div className="flex min-w-0 flex-1 gap-1 overflow-x-auto scrollbar-hide">
-            {items.map((it) => {
-              const on = it.key === activeSub
-              return (
-                <button key={it.key} onClick={() => setSub(it.key)}
-                  ref={(el) => { if (on && el) el.scrollIntoView({ inline: 'nearest', block: 'nearest' }) }}
-                  // 28 px по высоте — мимо пальца. Ниже sm поднимаем цель до 40 px,
-                  // на десктопе строка остаётся компактной.
-                  className={`min-h-10 whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs transition-colors sm:min-h-0 ${on ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground'}`}>
-                  {it.label}
-                </button>
-              )
-            })}
-          </div>
+          <Select value={activeSub} onValueChange={setSub}>
+            <SelectTrigger size="sm"
+              className="h-9 min-w-0 flex-1 basis-0 gap-1.5 text-xs font-medium
+                         [&>span]:truncate">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {items.map((it) => (
+                <SelectItem key={it.key} value={it.key}>{it.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         )}
       </div>
 

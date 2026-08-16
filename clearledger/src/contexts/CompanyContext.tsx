@@ -23,7 +23,7 @@ import { resetServiceCaches, setServicesCompany } from '@/services/cacheReset'
 import { getApiOrganization, setApiCompany, setApiOrganization } from '@/services/apiClient'
 import * as referenceService from '@/services/referenceService'
 import { useQuery } from '@tanstack/react-query'
-import { useRegistryModules, intersectAccess } from '@/hooks/useCompanyRegistry'
+import { useDisabledApps, useRegistryModules, intersectAccess } from '@/hooks/useCompanyRegistry'
 
 interface CompanyContextType {
   company: Company
@@ -177,6 +177,10 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
 
   // Состав поставки компании из серверного реестра Ядра (до ранних return — правило хуков).
   const registryModules = useRegistryModules(companyId)
+  // Продукты, выключенные компании в реестре: их нет в поставке, и показывать их
+  // нельзя никому — ни по роли, ни суперадмину (решение МАГа 16.08.2026 про
+  // «Аудитора» в сетевых пространствах).
+  const disabledApps = useDisabledApps(companyId)
 
   // Нет доступных компаний (обычный юзер без членства) — заглушка.
   if (!authLoading && user && companies.length === 0) {
@@ -215,6 +219,10 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
   // Права на продукты пространства (Управление, Координатор, Чаты…) считаются по сырым
   // ключам роли: `companyModules` — про модули Учёта и для этого не годится.
   const canApp = (appCode: string) => {
+    // Сначала состав поставки: выключенного продукта нет ни у кого. Раньше здесь
+    // стояли только права, и у администратора кнопка выключенного «Аудитора»
+    // оставалась в шапке — потому что права ему ничего не запрещают.
+    if (disabledApps.includes(appCode)) return false
     if (rbacModules === null) return true
     return rbacModules.includes(appCode) || rbacModules.some((k) => k.startsWith(`${appCode}:`))
   }

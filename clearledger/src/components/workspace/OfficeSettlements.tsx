@@ -21,8 +21,10 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { MetricTile } from '@/components/ui/metric-tile'
 import { cn } from '@/lib/utils'
+import { useCompany } from '@/contexts/CompanyContext'
 import {
-  applyExportRules, createRequestsFromGaps, decideFinding, getChecks, getClosing,
+  applyExportRules, createRequestsFromGaps, decideFinding, getChecks, getChecksAcross,
+  getClosing,
   getExportLayer,
   getPayroll, getRequestLetter, getRequests, getTaxCalendar, getTrends,
   sendRequestLetter,
@@ -591,6 +593,42 @@ const CHECK_MARK: Record<string, string> = {
  * Каждая проверка обязана показать НАРУШИТЕЛЕЙ: правило без списка документов
  * человек всё равно пойдёт проверять руками, и смысл проверки теряется.
  */
+
+/** Что сработало в остальных компаниях пространства — строкой, без ухода с экрана. */
+function AcrossCompanies({ current }: { current: string }) {
+  const { setCompanyId } = useCompany()
+  const q = useQuery({
+    queryKey: ['books', 'checks-across'],
+    queryFn: () => getChecksAcross(),
+    // Обход всех компаний дороже одной: обновляем реже, чем сам экран.
+    staleTime: 5 * 60_000,
+  })
+  const rows = (q.data?.companies ?? []).filter((c) => c.companyId !== current)
+  if (!rows.length) return null
+
+  return (
+    <div className="rounded-lg border border-border bg-card/40 px-3 py-2">
+      <div className="mb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+        Другие компании пространства
+      </div>
+      <div className="flex flex-wrap gap-x-4 gap-y-1 text-[13px]">
+        {rows.map((c) => (
+          <button key={c.companyId} type="button"
+            className="hover:underline"
+            onClick={() => setCompanyId(c.companyId)}>
+            {c.company}
+            {c.clean
+              ? <span className="ml-1.5 text-muted-foreground">чисто</span>
+              : <span className="ml-1.5 text-amber-600 dark:text-amber-400">
+                  {c.findings.length} к разбору
+                </span>}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export function BooksChecks({ companyId }: { companyId: string }) {
   const [open, setOpen] = useState<string | null>(null)
   const q = useQuery({
@@ -605,6 +643,11 @@ export function BooksChecks({ companyId }: { companyId: string }) {
 
   return (
     <div className="p-4 space-y-4">
+      {/* Сводка по ВСЕМ компаниям: у бухгалтера их несколько, и обходить экраны
+          поодиночке он не станет. Так однажды чуть не потерялась находка по
+          налогу — сверка шла по соседней компании и молчала. */}
+      <AcrossCompanies current={companyId} />
+
       <div className="grid gap-3 sm:grid-cols-3">
         <MetricTile label="Требует исправления" value={String(d.errors)}
           tone={d.errors ? 'danger' : undefined} hint="учёт считается неверным" />

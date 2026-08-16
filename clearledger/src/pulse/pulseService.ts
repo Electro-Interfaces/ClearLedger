@@ -412,6 +412,11 @@ export const getPulseView = (companyId: string, id: string) =>
 export const getPulseViewData = (companyId: string, id: string) =>
   get<PulseViewData>(`/api/pulse/views/${id}/data`, { company_id: companyId })
 
+/** Готовые блоки для экрана — те же, что уходят в витрину, но без самой витрины. */
+export const getPulseBlocks = (companyId: string, keys: string[], period = 'month') =>
+  get<{ blocks: PulseViewData['blocks']; asOf: string }>(
+    '/api/pulse/blocks', { company_id: companyId, keys: keys.join(','), period })
+
 export const getPulseMyViews = (companyId: string) =>
   get<{ views: { id: string; name: string; audience: string; owner: string | null }[] }>(
     '/api/pulse/my-views', { company_id: companyId })

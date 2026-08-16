@@ -24,6 +24,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { HeaderUserMenu } from '@/components/layout/HeaderUserMenu'
 import { MobileContextBar } from '@/components/layout/MobileContextBar'
+import { MobileShell } from '@/components/common/MobileShell'
 import { HeaderInteractionButtons } from '@/components/layout/HeaderInteractionButtons'
 import { CompanySelector } from '@/components/company/CompanySelector'
 import { ECOSYSTEM_BRAND } from '@/config/brand'
@@ -110,6 +111,15 @@ const COMMERCE_APPS = [
 // вверху стола, а не «чем владеем и как считаем» (ecosystem-deploy/docs/PULSE.md).
 // Круг узкий: у кого права нет, тот этой строки не увидит вовсе.
 const LEAD_APPS = ['pulse']
+// Слой «Планы» — ниже ядра системы (решение МАГа 16.08.2026). Продукты заведены
+// в реестре и когда-нибудь заработают, но сегодня в них нечего делать. Держать их
+// среди рабочих значит каждый день предлагать человеку четыре двери, за которыми
+// заставка: он перестаёт читать стол целиком.
+//
+// Список ведётся руками, а не по признаку готовности: «в подключении» бывает и у
+// продукта, который вот-вот поедет, — решать, что показывать клиенту, должен
+// человек, а не флаг в конфиге.
+const PLANNED_APPS = ['netlink', 'diag', 'shop', 'corp', 'marketing']
 
 /**
  * Карточка продукта: имя, точка готовности и короткое пояснение.
@@ -232,10 +242,17 @@ export function EcosystemHomePage({ embedded, onNavigate }: {
   // Слой каталога говорит, ЧТО это (ядро/сервис/приложение), но место на столе
   // задаёт рабочий контур: «Поддержка» числится сервисом, «Диагностика» — ядром,
   // а работают с ними в общей строке дня (решение МАГа 01.08.2026).
+  // Планируемые вынимаются из общего потока до раскладки по слоям: иначе они
+  // остались бы и внизу, и в «Клиентах и продажах» одновременно.
+  const planned = PLANNED_APPS
+    .map((code) => all.find((a) => a.code === code))
+    .filter((a): a is SsoApp => !!a)
+  const isPlanned = (code: string) => PLANNED_APPS.includes(code)
+
   const management = all.filter((a) => a.layer === 'admin' && !COMMERCE_APPS.includes(a.code))
   const services = all.filter((a) => a.layer === 'service' && !COMMERCE_APPS.includes(a.code))
-  const apps = all.filter((a) => COMMERCE_APPS.includes(a.code)
-    || (a.layer !== 'admin' && a.layer !== 'service'))
+  const apps = all.filter((a) => !isPlanned(a.code) && (COMMERCE_APPS.includes(a.code)
+    || (a.layer !== 'admin' && a.layer !== 'service')))
   // Два контура приложений: обращённый к клиенту (продать, обслужить) и внутренний
   // (построить, содержать, посчитать).
   const lead = apps.filter((a) => LEAD_APPS.includes(a.code))
@@ -348,6 +365,11 @@ export function EcosystemHomePage({ embedded, onNavigate }: {
             {management.map((a) => <ProductTile key={a.code} a={a} />)}
           </Section>
         )}
+        {planned.length > 0 && (
+          <Section title="Планы" hint="заведены, но ещё не работают" divider>
+            {planned.map((a) => <ProductTile key={a.code} a={a} />)}
+          </Section>
+        )}
       </>
     )
   }
@@ -427,7 +449,8 @@ export function EcosystemHomePage({ embedded, onNavigate }: {
       {/* Прокручивается вся область стола, а не один слой: слоёв четыре, продуктов
           двенадцать и число их растёт — при нехватке высоты верхние слои иначе просто
           обрезаются, и добраться до них нечем. Шапка остаётся на месте. */}
-      <main className="mx-auto flex w-full min-h-0 max-w-[1600px] flex-1 flex-col gap-5 overflow-y-auto px-4 py-5 sm:px-8">
+      <MobileShell className="mx-auto flex w-full min-h-0 max-w-[1600px] flex-1 flex-col gap-5
+                             overflow-y-auto px-4 py-5 sm:px-8">
         {/* Приветствие — одна строка: компания уже названа в шапке, повторять её
             отдельным абзацем значит занять высоту ради того же слова. */}
         <h1 className="shrink-0 text-lg font-semibold">
@@ -437,7 +460,7 @@ export function EcosystemHomePage({ embedded, onNavigate }: {
         {/* Все слои — из ОДНОГО каталога продуктов пространства (`Layers`), тем же
             составом, что и панель «Приложения» в рабочей области приложений. */}
         <Layers />
-      </main>
+      </MobileShell>
 
       {/* Окно «Взаимодействие» — то же, что открывают кнопки шапки в приложениях.
           Стол живёт вне AdminLayout, который его монтирует, и без этой строки

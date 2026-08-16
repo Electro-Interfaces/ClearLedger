@@ -26,7 +26,66 @@ import {
 } from './pulseService'
 import { PulseError, PulseLoading } from './parts'
 
-/** Витрина по id: тело без выбора — используется и в предпросмотре конструктора. */
+/** Сетка блоков: то же полотно, что у витрины, но без её рамки.
+ *
+ * Экраны «Бизнеса» в бухгалтерском пространстве показывают ровно эти карточки:
+ * данные считает одна ручка, а второй набор вёрстки разошёлся бы с первым.
+ */
+export function BlockGrid({ blocks, onReply }: {
+  blocks: PulseViewData['blocks']
+  onReply?: (requestId: string) => React.ReactNode
+}) {
+  return (
+      <div className="grid gap-3 md:grid-cols-2">
+          {blocks.map((b) => (
+            <Card key={b.key}>
+              <CardContent className="p-3 space-y-2">
+                <div className="text-sm font-medium">{b.title}</div>
+                {b.hint && <div className="text-[11px] text-muted-foreground">{b.hint}</div>}
+  
+                {b.metrics.length > 0 && (
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {b.metrics.map((m) => (
+                      <MetricTile key={m.label} label={m.label} value={m.value}
+                        tone={m.tone ?? undefined} hint={m.delta?.text} />
+                    ))}
+                  </div>
+                )}
+  
+                {b.items.length > 0 && (
+                  <div className="divide-y divide-border/60">
+                    {b.items.map((it, i) => (
+                      <div key={i} className="flex flex-wrap items-start justify-between gap-2 py-1.5">
+                        <div className="min-w-0 flex-1">
+                          <div className="text-[13px]">{it.title}</div>
+                          {it.detail && (
+                            <div className="text-[11px] text-muted-foreground">{it.detail}</div>
+                          )}
+                        </div>
+                        {it.amount && (
+                          <div className="shrink-0 text-[13px] tabular-nums">{it.amount}</div>
+                        )}
+                        {it.requestId && onReply ? onReply(it.requestId) : null}
+                      </div>
+                    ))}
+                  </div>
+                )}
+  
+                {b.note && <div className="text-[11px] text-muted-foreground">{b.note}</div>}
+                {b.link && (
+                  <a href={b.link.href}
+                    className="inline-flex items-center gap-1 text-[12px] text-primary
+                               hover:underline">
+                    {b.link.title} →
+                  </a>
+                )}
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+  )
+}
+
 /**
  * Полотно витрины: то, что видит получатель.
  *
@@ -54,53 +113,7 @@ export function ShowcaseCanvas({ data, onReply, onRefresh }: {
         </div>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-2">
-        {d.blocks.map((b) => (
-          <Card key={b.key}>
-            <CardContent className="p-3 space-y-2">
-              <div className="text-sm font-medium">{b.title}</div>
-              {b.hint && <div className="text-[11px] text-muted-foreground">{b.hint}</div>}
-
-              {b.metrics.length > 0 && (
-                <div className="grid gap-2 sm:grid-cols-2">
-                  {b.metrics.map((m) => (
-                    <MetricTile key={m.label} label={m.label} value={m.value}
-                      tone={m.tone ?? undefined} hint={m.delta?.text} />
-                  ))}
-                </div>
-              )}
-
-              {b.items.length > 0 && (
-                <div className="divide-y divide-border/60">
-                  {b.items.map((it, i) => (
-                    <div key={i} className="flex flex-wrap items-start justify-between gap-2 py-1.5">
-                      <div className="min-w-0 flex-1">
-                        <div className="text-[13px]">{it.title}</div>
-                        {it.detail && (
-                          <div className="text-[11px] text-muted-foreground">{it.detail}</div>
-                        )}
-                      </div>
-                      {it.amount && (
-                        <div className="shrink-0 text-[13px] tabular-nums">{it.amount}</div>
-                      )}
-                      {it.requestId && onReply ? onReply(it.requestId) : null}
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {b.note && <div className="text-[11px] text-muted-foreground">{b.note}</div>}
-              {b.link && (
-                <a href={b.link.href}
-                  className="inline-flex items-center gap-1 text-[12px] text-primary
-                             hover:underline">
-                  {b.link.title} →
-                </a>
-              )}
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+      <BlockGrid blocks={d.blocks} onReply={onReply} />
 
       {d.canWrite && onRefresh !== undefined && <FeedbackBox viewId={d.id} />}
 

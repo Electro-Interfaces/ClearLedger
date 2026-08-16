@@ -18,6 +18,10 @@ import { PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useMaxWidth } from '@/hooks/use-mobile'
 import { cn } from '@/lib/utils'
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select'
+import { MobileShell } from '@/components/common/MobileShell'
 
 export interface PulseView { key: string; label: string; hint: string }
 
@@ -59,6 +63,19 @@ export const PULSE_VIEWS: Record<string, PulseView[]> = {
     { key: 'objects', label: 'Где болит', hint: 'точки, где сошлось несколько проблем сразу' },
     { key: 'summary', label: 'Коротко', hint: 'выжимка для куратора: цифры и вехи' },
   ],
+  // Тот же раздел в бухгалтерском пространстве: сети там нет вовсе, и сетевые
+  // пункты стояли пустыми — «Продажи» без сессий, «Эксплуатация» без хозяйства.
+  // Предмет другой (деньги учёта, документы, сроки), жанр тот же: разрез
+  // руководителя, а глубже — в «Бухгалтерию» и «Экономику» ссылкой.
+  '/pulse/business#office': [
+    { key: 'money', label: 'Деньги', hint: 'выручка, прибыль и взаиморасчёты по данным учёта' },
+    { key: 'accounting', label: 'Учёт', hint: 'что доехало из 1С и закрыты ли периоды' },
+    { key: 'taxes', label: 'Налоги', hint: 'НДС и налог на прибыль заранее, до закрытия' },
+    { key: 'requests', label: 'Чего ждём', hint: 'документы, без которых период не закрыть' },
+    { key: 'deadlines', label: 'Сроки', hint: 'календарь отчётности и долг перед бюджетом' },
+    { key: 'tasks', label: 'Задачи', hint: 'работа компании: успеваем ли, у кого затор' },
+    { key: 'summary', label: 'Коротко', hint: 'вся картина одним экраном' },
+  ],
   '/pulse/team': [
     { key: 'people', label: 'Люди', hint: 'нагрузка и присутствие' },
     { key: 'departments', label: 'Подразделения', hint: 'структура и руководители' },
@@ -75,10 +92,17 @@ export const PULSE_VIEWS: Record<string, PulseView[]> = {
 
 const COLLAPSE_KEY = 'cl-pulse-views-collapsed'
 
+/** Пункты раздела с учётом профиля пространства. */
+export function pulseViews(route: string, profileId?: string): PulseView[] {
+  const byProfile = profileId ? PULSE_VIEWS[`${route}#${profileId}`] : undefined
+  return byProfile ?? PULSE_VIEWS[route] ?? []
+}
+
 /** Активный пункт раздела: из `?view=`, иначе первый. */
 export function usePulseView(route: string): string {
   const [params] = useSearchParams()
-  const views = PULSE_VIEWS[route] ?? []
+  const { company } = useCompany()
+  const views = pulseViews(route, company.profileId)
   const v = params.get('view')
   return v && views.some((x) => x.key === v) ? v : (views[0]?.key ?? '')
 }
@@ -89,7 +113,7 @@ export function PulseLayout() {
   // Порог тот же, что у рабочего места (`WorkspaceLayout`): боковая колонка
   // оправдана только на настоящем десктопе. При 640 «Пульс» разворачивался в
   // десктопный вид на планшете и на телефоне, повёрнутом в альбом (844 px).
-  const { canModule } = useCompany()
+  const { canModule, company } = useCompany()
   const narrow = useMaxWidth(1024)
   const [collapsed, setCollapsed] = useState(
     () => localStorage.getItem(COLLAPSE_KEY) === '1')
@@ -99,7 +123,7 @@ export function PulseLayout() {
   // Ключ права пункта = раздел + пункт («business.sales»), как в реестре
   // приложения. `canModule` уже умеет читать `pulse:...` из роли.
   const section = route.replace('/pulse', '').replace('/', '')
-  const views = (PULSE_VIEWS[route] ?? []).filter(
+  const views = pulseViews(route, company.profileId).filter(
     (v) => canModule('pulse', section ? `${section}.${v.key}` : v.key))
   // Тем же правилом, что и сами экраны (`usePulseView`): иначе подсветка в меню
   // и открытый пункт разъезжались бы, стоило одному из двух мест измениться.
@@ -123,26 +147,38 @@ export function PulseLayout() {
     return (
       <div className="flex h-full min-h-0 flex-col">
         {views.length > 0 && (
+          // Пункты раздела списком, а не свайп-строкой: та уезжала за край экрана,
+          // и было не видно ни всего набора, ни того, где стоишь (замечание МАГа
+          // 15.08.2026). У «Пульса» к каждому пункту есть пояснение — в списке оно
+          // помещается второй строкой, а во вкладках пропадало вовсе.
           <div data-zone="Пункты раздела"
-            className="flex shrink-0 gap-1 overflow-x-auto border-b border-border bg-card px-2 py-1.5 scrollbar-hide">
-            {views.map((v) => (
-              // Подсветка активного — та же, что в свайп-строке рабочего места
-              // (`WorkspaceLayout`): `bg-primary/10 text-primary`. Нейтральный
-              // `accent` читался как «просто наведено», и было неясно, где стоишь.
-              <button key={v.key} type="button" onClick={() => open(v.key)} title={v.hint}
-                aria-current={v.key === active ? 'page' : undefined}
-                className={cn('min-h-10 shrink-0 whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs transition-colors sm:min-h-0',
-                  v.key === active
-                    ? 'bg-primary/10 font-medium text-primary'
-                    : 'text-muted-foreground')}>
-                {v.label}
-              </button>
-            ))}
+            className="shrink-0 border-b border-border bg-card px-2 py-1.5">
+            <Select value={active} onValueChange={open}>
+              <SelectTrigger size="sm" className="h-9 w-full gap-1.5 text-[13px] font-medium">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {views.map((v) => (
+                  <SelectItem key={v.key} value={v.key}>
+                    <span className="flex flex-col items-start leading-tight">
+                      <span>{v.label}</span>
+                      <span className="text-[11px] text-muted-foreground">{v.hint}</span>
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         )}
-        <div className="min-w-0 flex-1 overflow-y-auto px-3 py-3">
+        {/* Жест «потянуть — обновить» и слежение за выкаткой: на телефоне вкладку
+            не закрывают неделями, и без этого человек смотрит вчерашние цифры
+            вчерашней сборкой, не подозревая об этом. */}
+        <MobileShell className="min-w-0 flex-1 space-y-3 overflow-y-auto px-3 py-3">
+          {/* Предложение поставить приложением — только в компактной раскладке:
+              на десктопе «Пульс» и так открыт вкладкой, а на телефоне его держат
+              под рукой. Ставится один раз, дальше плашка не показывается. */}
           <Outlet />
-        </div>
+        </MobileShell>
       </div>
     )
   }

@@ -16,7 +16,7 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
       </div>
     )
   }
-  // Путь относительный — basename (/ClearLedger/) роутер применяет сам.
+  // Путь относительный — базу сборки роутер применяет сам.
   if (!isAuthenticated) return <Navigate to="/login" replace />
   return <>{children}</>
 }

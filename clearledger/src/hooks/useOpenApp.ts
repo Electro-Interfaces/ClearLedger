@@ -16,7 +16,7 @@ import { startMeeting } from '@/services/conferenceService'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useMaxWidth } from '@/hooks/use-mobile'
 
-/** Маршрут SPA → абсолютный адрес с учётом базы сборки (`/ClearLedger/`).
+/** Маршрут SPA → абсолютный адрес с учётом базы сборки (по умолчанию корень).
  *  Без неё новая вкладка открыла бы `/finance` мимо приложения — на 404 кромки. */
 function routeUrl(route: string): string {
   const base = import.meta.env.BASE_URL.replace(/\/$/, '')

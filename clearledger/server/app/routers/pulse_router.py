@@ -3997,6 +3997,20 @@ async def _office_block_data(db: AsyncSession, cid: str, key: str,
 
             tax = float(await income_tax_for(since, till) or 0)
             tax_was = float(await income_tax_for(prev_since, prev_till) or 0)
+
+            # Расчёт по базе режима рядом с начисленным: расхождение на закрытом
+            # периоде — повод посмотреть декларацию, а не молча поверить одной из
+            # двух цифр (сверка 16.08.2026, docs/TAXES.md §11).
+            gap_note = ""
+            if p.get("org"):
+                est = await tax_regime.estimate_tax(
+                    db, p["cid"], p["org"], since, till,
+                    income=0.0, expense=0.0, vat_accrued=0.0)
+                calc = next((l["amount"] for l in est.get("lines", [])
+                             if l["key"] in ("usn", "psn")), None)
+                if calc is not None and abs(calc - tax) > max(1000, tax * 0.05):
+                    gap_note = (" По базе периода выходит %s — разница с начисленным "
+                                "%s." % (_money(calc), _money(abs(calc - tax))))
             tax_label = ("НДФЛ предпринимателя" if mode.get("osnoIp") and not mode["usn"]
                          else "Налог по патенту" if mode["patent"] and not mode["usn"]
                          else "Налог УСН с оборота" if mode.get("usnRevenueBased")
@@ -4004,7 +4018,7 @@ async def _office_block_data(db: AsyncSession, cid: str, key: str,
                          else "Налог по УСН")
             note = ("Режим: %s. Начислено по учёту за период — авансовый платёж "
                     "приходится не на каждый месяц. Декларацию формирует бухгалтерия."
-                    % mode["label"])
+                    % mode["label"]) + gap_note
 
         # Плитку НДС не убираем: исчезнувшая строка читается как поломка экрана.
         # Вместо этого прямо сказано, почему на этом режиме там ноль.

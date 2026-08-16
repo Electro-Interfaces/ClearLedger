@@ -27,8 +27,10 @@ import { STAGE_META, type SiteStage } from '@/services/sitesService'
 // Витрины продуктов — as is там, где чужой экран отвечает на тот же вопрос.
 import { AnalyticsSection as TicketsAnalyticsSection } from '@/pages/TicketsAppPage'
 import {
-  getPulseBusiness, getPulsePerson, getPulseTeam, getPulseWeek, type PulsePerson,
+  getPulseBlocks, getPulseBusiness, getPulsePerson, getPulseTeam, getPulseWeek,
+  type PulsePerson,
 } from './pulseService'
+import { BlockGrid } from './ShowcaseView'
 import { ContactCenterView } from './ContactCenter'
 import { SalesView } from './SalesView'
 import { ProjectsView } from './ProjectsView'
@@ -73,16 +75,67 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 
 /* ── «Бизнес»: как идут дела вообще ───────────────────────────────────── */
 
+/** Какие блоки витрины показывает каждый пункт «Бизнеса» в офисном пространстве. */
+const OFFICE_VIEW_BLOCKS: Record<string, { title: string; hint: string; keys: string[] }> = {
+  money: {
+    title: 'Деньги', hint: 'Сколько заработали и кто кому должен — по данным учёта',
+    keys: ['books.result', 'books.settlements'],
+  },
+  accounting: {
+    title: 'Учёт', hint: 'Что доехало из 1С и в каком состоянии закрытие периодов',
+    keys: ['books.state', 'books.closing'],
+  },
+  taxes: {
+    title: 'Налоги', hint: 'НДС и налог на прибыль заранее, до закрытия месяца',
+    keys: ['books.taxes'],
+  },
+  requests: {
+    title: 'Чего ждём', hint: 'Документы, без которых период не закрыть и вычет не заявить',
+    keys: ['books.requests'],
+  },
+  deadlines: {
+    title: 'Сроки', hint: 'Календарь отчётности, долг перед бюджетом и что уже сдано',
+    keys: ['books.calendar', 'books.trends'],
+  },
+  summary: {
+    title: 'Коротко', hint: 'Вся картина одним экраном: деньги, учёт, налоги и сроки',
+    keys: ['books.result', 'books.state', 'books.taxes', 'books.requests',
+           'books.calendar', 'books.settlements'],
+  },
+}
+
+/** «Бизнес» бухгалтерского пространства: те же блоки, что уходят в витрину. */
+function OfficeBusinessView({ view }: { view: string }) {
+  const { companyId } = useCompany()
+  const cfg = OFFICE_VIEW_BLOCKS[view] ?? OFFICE_VIEW_BLOCKS.summary
+  const q = useQuery({
+    queryKey: ['pulse-blocks', companyId, cfg.keys.join(',')],
+    queryFn: () => getPulseBlocks(companyId, cfg.keys),
+    refetchInterval: 5 * 60_000,
+  })
+  return (
+    <div className="space-y-4">
+      <Title icon={TrendingUp} title={cfg.title} hint={cfg.hint} aside="за текущий месяц" />
+      {q.isLoading && <PulseLoading what="картины дела" />}
+      {q.isError && <PulseError what="картину дела" onRetry={() => q.refetch()} />}
+      {q.data && <BlockGrid blocks={q.data.blocks} />}
+    </div>
+  )
+}
+
 export function PulseBusinessPage() {
   const { company } = useCompany()
   const view = usePulseView('/pulse/business')
+  // Профиль решает предмет разреза: у сети это продажи и объекты, у бухгалтерского
+  // пространства — деньги учёта, документы и сроки. «Задачи» общие для обоих.
+  const office = company.profileId === 'office'
   const q = useQuery({
     queryKey: ['pulse-business', company.id],
     queryFn: () => getPulseBusiness(company.id),
     refetchInterval: 5 * 60_000,
     // Своя сводка нужна только на «Коротко» — остальные четыре пункта показывают
     // витрины продуктов. Раньше запрос уходил на всех пяти и на четырёх падал молча.
-    enabled: view === 'summary',
+    enabled: view === 'summary' && !office,
   })
   const d = q.data
   const maxTrend = Math.max(1, ...(d?.trend ?? []).map((t) => t.revenue))
@@ -98,6 +151,8 @@ export function PulseBusinessPage() {
     objects: { title: 'Где болит', hint: 'Точки сети, где сошлось несколько проблем сразу — выручка, расходы, документы' },
     summary: { title: 'Коротко', hint: 'Выжимка для куратора: цифры сети, воронка и вехи' },
   }[view] ?? { title: 'Бизнес', hint: 'В каком состоянии дело' }
+
+  if (office && view !== 'tasks') return <OfficeBusinessView view={view} />
 
   // Чужие витрины открываются КАК ЕСТЬ (`embedded`: без своей шапки и своего
   // внешнего отступа — заголовок экрана здесь один, «Пульса»). Свой разрез

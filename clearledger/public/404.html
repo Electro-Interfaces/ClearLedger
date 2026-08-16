@@ -3,13 +3,9 @@
 <head>
   <meta charset="utf-8">
   <script>
-    // GitHub Pages SPA redirect
-    var path = window.location.pathname;
-    var repo = '/ClearLedger';
-    if (path.startsWith(repo)) {
-      var route = path.slice(repo.length) || '/';
-      window.location.replace(repo + '/?route=' + encodeURIComponent(route));
-    }
+    // SPA-fallback: статика отдаётся с корня домена, любой маршрут открывает index.
+    window.location.replace('/?route=' + encodeURIComponent(
+      window.location.pathname + window.location.search))
   </script>
 </head>
 <body></body>

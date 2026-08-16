@@ -1288,6 +1288,15 @@ export interface ChecksData {
   ok: number
 }
 
+export interface AcrossCompany {
+  companyId: string; company: string; clean: boolean
+  findings: { key: string; title: string; status: string; count: number }[]
+}
+
+/** Сверка по всем компаниям пространства: company_id намеренно не передаётся. */
+export const getChecksAcross = () =>
+  get<{ companies: AcrossCompany[]; totalFindings: number }>('/api/books/checks-across')
+
 export const getChecks = (companyId: string) =>
   get<ChecksData>(`/api/books/checks?company_id=${companyId}`)
 

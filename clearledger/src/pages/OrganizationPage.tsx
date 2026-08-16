@@ -6,6 +6,8 @@
  * без 1С (например РусГидро) — заполняются вручную.
  */
 import { useState, useEffect } from 'react'
+import { TaxRegimeCard } from '@/components/books/TaxRegimeCard'
+import { TaxScheduleCard } from '@/components/books/TaxScheduleCard'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -243,6 +245,12 @@ export function OrganizationPage() {
               </div>
             </CardContent>
           </Card>
+
+          {/* Система налогообложения: рядом с реквизитами, потому что это такая же
+              характеристика юрлица — и притом та, от которой зависят все расчёты
+              налогов (docs/TAXES.md). */}
+          {org?.id && <TaxRegimeCard organizationId={org.id} />}
+          {org?.id && <TaxScheduleCard organizationId={org.id} />}
 
           {/* Банковские счета */}
           <BankAccountsCard companyId={companyId} organizationId={org?.id} disabled={!org} />

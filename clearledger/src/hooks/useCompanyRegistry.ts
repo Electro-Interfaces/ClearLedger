@@ -66,6 +66,27 @@ export function useAppEnabled(companyId: string, code: string): boolean | null {
 }
 
 /**
+ * Коды продуктов, ЯВНО выключенных компании в реестре.
+ *
+ * Нужен отдельно от прав: право говорит «этому человеку можно», реестр — «этой
+ * компании поставлено». Продукт, выключенный компании, не показывается никому,
+ * включая администратора: он не запрещён ему лично, его просто нет в поставке.
+ *
+ * Пустой массив, пока реестр не ответил: молчание — не запрет (тот же fail-open,
+ * что и у меню), иначе на секунду загрузки исчезала бы половина шапки.
+ */
+export function useDisabledApps(companyId: string): string[] {
+  const q = useQuery({
+    queryKey: ['company-apps', companyId],
+    queryFn: () => listCompanyApps(companyId),
+    enabled: isApiEnabled() && !!companyId,
+    staleTime: 5 * 60_000,
+    retry: false,
+  })
+  return (q.data ?? []).filter((a) => !a.enabled).map((a) => a.code)
+}
+
+/**
  * Итоговый набор ключей для гейтинга меню Ledger: состав поставки ∩ права роли.
  * `null` с любой стороны = «эта сторона не ограничивает».
  *

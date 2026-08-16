@@ -2,10 +2,14 @@
 <html lang="ru">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- viewport-fit=cover обязателен вместе с safe-area: без него env(safe-area-inset-*)
+         всегда 0, и в установленном приложении на iPhone нижняя навигация ложится на
+         домашний индикатор, а шапка при прозрачном статус-баре уезжает под «чёлку». -->
+    <meta name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <!-- Иконки вкладки не было вовсе: браузер спрашивал /favicon.ico, получал 404 и рисовал
-         глобус. Путь через %BASE_URL% — SPA живёт под базой (/ClearLedger/), и относительная
-         ссылка ломалась бы на вложенных маршрутах вроде /finance/objects. -->
+         глобус. Путь через %BASE_URL% — на случай сборки под путь; относительная ссылка
+         ломалась бы на вложенных маршрутах вроде /finance/objects. -->
     <link rel="icon" type="image/svg+xml" href="%BASE_URL%favicon.svg" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -19,7 +23,11 @@
     <link rel="manifest" href="/pulse.webmanifest" />
     <meta name="theme-color" content="#1d4ed8" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Пульс" />
+    <!-- iOS манифест не читает: иконку для «На экран «Домой»» берёт только отсюда. -->
+    <link rel="apple-touch-icon" href="/icon-192.png" />
   </head>
   <body>
     <div id="root"></div>

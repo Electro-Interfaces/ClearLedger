@@ -186,7 +186,7 @@ def _переписать(html: str, prefix: str) -> str:
 
     Правится ровно то, что ведёт на корень: href/action/src, адрес кликабельной
     строки data-открыть, fetch и JS-навигация location='/…'. Без этого клик по
-    строке смены уходил в /ClearLedger/shift центральной SPA и давал 404. Схемы
+    строке смены уходил в /shift центральной SPA и давал 404. Схемы
     (http://, //, mailto:) и якоря не трогаем.
     """
     html = re.sub(r'(href|action|src|data-открыть)="/(?!/)', rf'\1="{prefix}/', html)

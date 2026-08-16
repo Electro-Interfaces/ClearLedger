@@ -149,10 +149,9 @@ class Settings(BaseSettings):
     # Пусто = почтовых участников в чатах нет, письма из комнат не уходят.
     chat_mail_inbox: str = ""
 
-    # Публичный URL приложения для ссылок в письмах (с base-path).
-    # ⚠ Путь = /ClearLedger (vite base + nginx), хотя имя продукта TradeLedger.
-    # Переименование пути /ClearLedger→/TradeLedger — отдельная риск-миграция.
-    app_public_url: str = "https://ledger.dataworker.ru/ClearLedger"
+    # Публичный URL пространства для ссылок в письмах. Пространство живёт в корне
+    # своего домена: внутреннее имя репозитория в адресах заказчика не появляется.
+    app_public_url: str = "https://ledger.dataworker.ru"
 
     # Сверки — внешние API (прокси на стороне сервера, секреты не уходят на фронт)
     tradecorp_api_url: str = ""

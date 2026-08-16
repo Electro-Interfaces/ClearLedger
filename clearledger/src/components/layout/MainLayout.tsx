@@ -4,9 +4,11 @@ import { Sheet, SheetContent, SheetTitle, SheetDescription } from '@/components/
 import { AppSidebar, SidebarNavContent } from './AppSidebar'
 import { ActiveModeProvider } from '@/contexts/ActiveModeContext'
 import { MobileBottomNav } from './MobileBottomNav'
+import { MobileContextBar } from './MobileContextBar'
 import { Header } from './Header'
 import { WorkspaceTabBar } from './WorkspaceTabBar'
 import { KeepAliveOutlet } from './KeepAliveOutlet'
+import { MobileShell } from '@/components/common/MobileShell'
 import { AppsPanelProvider, AppsPanelSurface } from './AppsPanel'
 import InteractionHost from '@/components/support/InteractionHost'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
@@ -119,14 +121,21 @@ export function MainLayout() {
         isMobile={isMobile}
       />
 
+      {/* Компания, юрлицо и текущее приложение — строкой под шапкой: в саму шапку
+          телефона они не помещаются (см. MobileContextBar). */}
+      <MobileContextBar />
+
       <div className="flex flex-1 min-h-0">
         {!isMobile && <AppSidebar />}
 
         {isMobile && (
           <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
             <SheetContent side="left" className="p-0 w-72 mobile-safe-left">
-              <SheetTitle className="sr-only">Меню навигации</SheetTitle>
-              <SheetDescription className="sr-only">Навигация TradeLedger</SheetDescription>
+              <SheetTitle className="flex h-12 shrink-0 items-center border-b border-border
+                                     px-4 text-sm font-semibold">
+                Меню
+              </SheetTitle>
+              <SheetDescription className="sr-only">Разделы пространства</SheetDescription>
               {/* Именно контент, НЕ <AppSidebar>: ui-Sidebar на мобиле рендерит
                   собственный (закрытый) Sheet — шторка получалась пустой. */}
               <div className="h-full overflow-y-auto px-1.5 py-3">
@@ -150,9 +159,12 @@ export function MainLayout() {
               </div>
             ) : (
               // pb-20 — запас под нижнюю навигацию (h-14, <768px); ≥768 её нет → pb-12
-              <div className="flex-1 min-h-0 overflow-y-auto px-4 md:px-6 pt-4 pb-20 md:pb-12">
+              // MobileShell даёт жест «потянуть — обновить» и следит за выкаткой:
+              // вкладку на телефоне не закрывают неделями, и без этого человек
+              // работает во вчерашней сборке со вчерашними цифрами.
+              <MobileShell className="flex-1 min-h-0 overflow-y-auto px-4 md:px-6 pt-4 pb-20 md:pb-12">
                 <Outlet />
-              </div>
+              </MobileShell>
             )
           ) : (
             // Десктоп: полоса вкладок + keep-alive рабочая область.

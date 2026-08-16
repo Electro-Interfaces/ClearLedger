@@ -22,7 +22,7 @@ import uuid
 from typing import Any
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -302,6 +302,21 @@ async def list_connectors(db: AsyncSession, company_id: uuid.UUID) -> dict[str, 
     accounts = (await db.execute(
         select(MailAccount).where(MailAccount.company_id == company_id)
         .order_by(MailAccount.address))).scalars().all()
+    # Сколько через ящик реально прошло: у остальных коннекторов в витрине стоит
+    # объём, и без него почта выглядела подключением «на бумаге».
+    # Таблица есть не в каждом пространстве (на gig схема почты не накатана), а
+    # витрина подключений не должна падать целиком из-за одной колонки.
+    mail_stat: dict[Any, tuple[int, int]] = {}
+    if (await db.execute(text("select to_regclass('mail_messages')"))).scalar():
+        mail_stat = {r.account_id: (r.n, r.files) for r in (await db.execute(text("""
+        select m.account_id, count(*) as n,
+               count(*) filter (where a.id is not null) as files
+          from mail_messages m
+          left join lateral (select id from mail_attachments x
+                              where x.message_id = m.id limit 1) a on true
+         where m.company_id = :cid
+         group by m.account_id
+    """), {"cid": str(company_id)})).all()}
     if not accounts:
         # Пока ящиков нет, коннектора не было в списке ВООБЩЕ — и выходило, что почта
         # компании не считается подключением наравне с остальными. Показываем его как
@@ -312,8 +327,11 @@ async def list_connectors(db: AsyncSession, company_id: uuid.UUID) -> dict[str, 
             "provider": "mailbox",
             "kind": "Почта компании",
             "label": "Почта компании — ящики не заведены",
+            # Ящики привязаны к компании: у соседней компании пространства они могут
+            # быть заведены, и «не заведены» здесь означает ровно эту компанию.
             "brings": "Деловая переписка: письма контрагентов, вложения-документы, "
-                      "ответы из пространства. Заведите первый ящик — приём пойдёт сам",
+                      "ответы из пространства. Ящики у каждой компании свои — "
+                      "заведите первый, и приём пойдёт сам",
             "direction": "both", "status": "off", "enabled": False,
             "last_sync_at": None, "last_error": None, "records": None, "files": 0,
             "initiator": "both",
@@ -336,8 +354,8 @@ async def list_connectors(db: AsyncSession, company_id: uuid.UUID) -> dict[str, 
             "enabled": a.is_active,
             "last_sync_at": a.last_sync_at.isoformat() if a.last_sync_at else None,
             "last_error": a.last_error,
-            "records": None,
-            "files": 0,
+            "records": mail_stat.get(a.id, (0, 0))[0],
+            "files": mail_stat.get(a.id, (0, 0))[1],
             # Настройка живёт там, где заводят все подключения пространства
             # (решение МАГа 13.08.2026): «Подключения» → «Коннекторы» → «Почта
             # компании». В «Загрузке» осталась только работа с самими письмами.

@@ -574,7 +574,10 @@ async def attachments_to_intake(db: AsyncSession, cid, message: MailMessage,
     table_atts = [a for a in attachments
                   if a.file_name.lower().endswith((".xlsx", ".xlsm", ".csv"))]
     if not table_atts:
-        return {"batches": 0, "items": 0}
+        # Счёт в PDF или скан таблицей не разобрать. Возвращаем имена: без них
+        # ответ «ничего не разобрано» читается как поломка, а не как отказ по сути.
+        return {"batches": 0, "items": 0,
+                "skipped": [a.file_name for a in attachments]}
 
     made = items_total = 0
     for att in table_atts:

@@ -31,15 +31,15 @@ export function Header({ onMobileMenuToggle, isMobile }: HeaderProps) {
   return (
     <header className="mobile-safe-top box-content h-[var(--header-height)] shrink-0
                        border-b border-border/50 bg-card/95 backdrop-blur-xl">
-      <div className="flex h-full items-center justify-between gap-3 px-4 md:px-6">
+      <div className="flex h-full items-center justify-between gap-2 px-2 sm:gap-3 sm:px-4 md:px-6">
         {/* Левый блок: бургер (моб.) + лого + бренд + свёртка сайдбара */}
         <div className="flex min-w-0 items-center gap-3 md:gap-4">
           {isMobile && (
             <Button variant="ghost" size="icon"
-              className="h-10 w-10 shrink-0 rounded-xl"
+              className="-ml-1 size-11 shrink-0 rounded-xl"
               aria-label="Меню разделов"
               onClick={onMobileMenuToggle}>
-              <Menu className="h-5 w-5" />
+              <Menu className="size-6" />
             </Button>
           )}
 
@@ -64,14 +64,7 @@ export function Header({ onMobileMenuToggle, isMobile }: HeaderProps) {
             </div>
           </Link>
 
-          {/* Телефон: имя экрана словом вместо ряда пиктограмм. Раньше здесь стояли
-              семь безымянных иконок, две из них — одинаковые сетки («Стол» и
-              «Приложения»), а название текущего продукта пряталось на sm:. Человек
-              не видел главного — где он находится. */}
-          <span className="min-w-0 truncate text-base font-semibold tracking-tight text-foreground lg:hidden">
-            {product ? productLabel(product, company.profileId)
-              : coreTitle ?? `${ECOSYSTEM_BRAND} Учёт`}
-          </span>
+
         </div>
 
         {/* Центр: переключатель компании + кнопки взаимодействия.

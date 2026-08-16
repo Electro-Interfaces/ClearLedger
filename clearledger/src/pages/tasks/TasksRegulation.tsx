@@ -10,6 +10,7 @@
  * шаблон — содержание. Поэтому шаблон ссылается на тип, а не заменяет его.
  */
 import { useState } from 'react'
+import { useCompany } from '@/contexts/CompanyContext'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { CalendarClock, Loader2, Play, Plus, Trash2, Users2 } from 'lucide-react'
@@ -448,6 +449,25 @@ export function RecurrencesSection({ companyId }: { companyId: string }) {
           ))}
         </div>
       )}
+    </div>
+  )
+}
+
+/**
+ * Страница «Регламент» — три секции подряд: виды задач, шаблоны, расписания.
+ *
+ * Секции экспортируются по отдельности (их переиспользует настройка приложения),
+ * но маршрут `/tasks/regulation` ждёт готовую страницу. Пока её не было, раздел
+ * открывался пустым: динамический импорт находил модуль, но не находил в нём
+ * компонента.
+ */
+export function TasksRegulation() {
+  const { companyId } = useCompany()
+  return (
+    <div className="space-y-6 p-4 lg:p-6">
+      <ViewsSection companyId={companyId} />
+      <TemplatesSection companyId={companyId} />
+      <RecurrencesSection companyId={companyId} />
     </div>
   )
 }
