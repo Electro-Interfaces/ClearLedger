@@ -5,12 +5,13 @@
  * какой движок за ним стоит, бессмысленно: человек приходит с вопросом «что на
  * мне», а не «что у меня в документах и отдельно в поручениях».
  */
-import { lazy, Suspense } from 'react'
+import { lazy, Suspense, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
 import { Stamp } from 'lucide-react'
 import { useCompany } from '@/contexts/CompanyContext'
 import { Card } from '@/components/ui/card'
+import { cn } from '@/lib/utils'
 import * as docsService from '@/services/docsService'
 import { DOC_STATUS } from '@/services/docsService'
 import { DocCardPanel } from '@/components/docs/DocCardPanel'
@@ -26,6 +27,7 @@ export function DocsWorkPage() {
   const view = useDocsView('/docs/work')
   const companyId = company?.id ?? ''
   const openId = params.get('doc')
+  const [now] = useState(Date.now)
 
   const acquaintsQ = useQuery({
     queryKey: ['docs-my-acquaints', companyId],
@@ -39,7 +41,7 @@ export function DocsWorkPage() {
   })
   const docsQ = useQuery({
     queryKey: ['docs-mine', companyId],
-    queryFn: () => docsService.listDocs(companyId, { limit: 200 }),
+    queryFn: () => docsService.listDocs(companyId, { mine: true, limit: 200 }),
     enabled: !!companyId && view === 'mine',
   })
 
@@ -94,9 +96,7 @@ export function DocsWorkPage() {
                 </div>
               </div>
               {a.due_at && (
-                <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-xs">
-                  до {a.due_at.slice(0, 10)}
-                </span>
+                <DueBadge value={a.due_at} now={now} />
               )}
             </button>
           ))}
@@ -167,12 +167,11 @@ export function DocsWorkPage() {
               <div className="text-[11px] text-muted-foreground">
                 {a.doc_number ? `${a.doc_number} · ` : ''}шаг «{a.step_name}»
                 {a.mode === 'parallel' ? ' · параллельно' : ''}
+                {a.acting_for ? ` · замещаете ${a.acting_for}` : ''}
               </div>
             </div>
             {a.due_at && (
-              <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-xs">
-                до {a.due_at.slice(0, 10)}
-              </span>
+              <DueBadge value={a.due_at} now={now} />
             )}
           </button>
         ))}
@@ -183,6 +182,19 @@ export function DocsWorkPage() {
         )}
       </Card>
     </div>
+  )
+}
+
+function DueBadge({ value, now }: { value: string; now: number }) {
+  const date = new Date(value)
+  const overdue = !Number.isNaN(date.getTime()) && date.getTime() < now
+  return (
+    <span className={cn(
+      'shrink-0 rounded-md px-1.5 py-0.5 text-xs',
+      overdue ? 'bg-destructive/10 text-destructive' : 'bg-muted text-muted-foreground',
+    )} title={Number.isNaN(date.getTime()) ? value : date.toLocaleString('ru-RU')}>
+      {overdue ? 'просрочено' : 'до'} {value.slice(0, 10)}
+    </span>
   )
 }
 

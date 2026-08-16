@@ -8,7 +8,7 @@ import { useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Archive, ArrowLeft, Ban, CheckCheck, FileCheck2, FileUp, KeyRound, Link2,
-  ListChecks, LockKeyhole, Paperclip, Printer, Send, Stamp, Workflow,
+  ListChecks, LockKeyhole, Printer, Send, Stamp, Workflow,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -23,14 +23,9 @@ import type { DocKindField } from '@/services/docsService'
 import { DocAcquaintTab } from './DocAcquaintTab'
 import { DocAccessTab } from './DocAccessTab'
 import { DocApprovalTab } from './DocApprovalTab'
+import { DocFileWorkspace } from './DocFileWorkspace'
 import { DocSendTab } from './DocSendTab'
-
-const ROLE_LABEL: Record<string, string> = {
-  body: 'Документ',
-  appendix: 'Приложение',
-  signed_scan: 'Подписанный экземпляр',
-  attachment: 'Вложение',
-}
+import { openAuthAttachment } from '@/lib/authFiles'
 
 const EVENT_LABEL: Record<string, string> = {
   created: 'заведён',
@@ -99,6 +94,7 @@ export function DocCardPanel({ id, companyId, onBack, onChanged }: {
   const [manualNumber, setManualNumber] = useState('')
   const [note, setNote] = useState('')
   const [activeTab, setActiveTab] = useState('document')
+  const [fileRole, setFileRole] = useState('body')
   const [reasonMode, setReasonMode] = useState<'cancel' | 'cancel_approval' | null>(null)
   const [reason, setReason] = useState('')
 
@@ -156,12 +152,23 @@ export function DocCardPanel({ id, companyId, onBack, onChanged }: {
   })
 
   const attach = useMutation({
-    mutationFn: (file: File) => docsService.uploadVersion(companyId, id, file),
+    mutationFn: ({ file, role }: { file: File; role: string }) =>
+      docsService.uploadVersion(companyId, id, file, role),
     onSuccess: (result) => {
       toast.success(result.duplicate ? 'Такой файл уже приложен' : `Редакция ${result.revision}`)
       refresh()
     },
     onError: (e) => toast.error(`Файл не принят: ${(e as Error).message}`),
+  })
+
+  const tombstone = useMutation({
+    mutationFn: ({ versionId, reason }: { versionId: string; reason: string }) =>
+      docsService.tombstoneVersion(companyId, versionId, reason),
+    onSuccess: () => {
+      toast.success('Редакция убрана из работы; причина сохранена в истории')
+      refresh()
+    },
+    onError: (e) => toast.error(`Редакция не убрана: ${(e as Error).message}`),
   })
 
   if (q.isLoading) return <div className="p-6 text-sm text-muted-foreground">Загрузка…</div>
@@ -175,6 +182,7 @@ export function DocCardPanel({ id, companyId, onBack, onChanged }: {
   const actions = new Set(d.available_actions ?? [])
   const editable = actions.has('edit')
   const approvalLocked = d.approval_status === 'pending'
+  const canChangeFiles = editable && !approvalLocked && ['draft', 'registered'].includes(d.status)
 
   const updateAttr = (field: DocKindField, value: unknown) => {
     act.mutate({ attrs: { ...d.attrs, [field.code]: value } })
@@ -226,8 +234,9 @@ export function DocCardPanel({ id, companyId, onBack, onChanged }: {
             </Button>
             {registered && (
               <Button size="sm" variant="outline" title="Печатная форма"
-                onClick={() => window.open(
-                  `/api/docs/${d.id}/print?company_id=${companyId}`, '_blank')}>
+                onClick={() => openAuthAttachment(
+                  `/api/docs/${d.id}/print?company_id=${companyId}`,
+                ).catch((error) => toast.error(`Печатная форма не открыта: ${error.message}`))}>
                 <Printer className="mr-1.5 h-4 w-4" />Печать
               </Button>
             )}
@@ -417,9 +426,18 @@ export function DocCardPanel({ id, companyId, onBack, onChanged }: {
           <div className="flex flex-wrap items-center gap-2">
             <input ref={fileRef} type="file" className="hidden" onChange={(event) => {
               const file = event.target.files?.[0]
-              if (file) attach.mutate(file)
+              if (file) attach.mutate({ file, role: fileRole })
               event.target.value = ''
             }} />
+            <select value={fileRole} onChange={(event) => setFileRole(event.target.value)}
+              aria-label="Роль прикладываемого файла"
+              className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+              disabled={!editable || attach.isPending}>
+              <option value="body">Основной документ</option>
+              <option value="appendix">Приложение</option>
+              <option value="signed_scan">Подписанный экземпляр</option>
+              <option value="attachment">Вложение</option>
+            </select>
             <Button size="sm" variant="outline" onClick={() => fileRef.current?.click()}
               disabled={!editable || attach.isPending}>
               <FileUp className="mr-1.5 h-4 w-4" />Приложить файл
@@ -428,31 +446,9 @@ export function DocCardPanel({ id, companyId, onBack, onChanged }: {
               Каждый файл опознаётся SHA-256; во время согласования набор неизменяем.
             </span>
           </div>
-          <Card className="divide-y divide-border/60">
-            {d.versions.map((version) => (
-              <div key={version.id} className="flex items-center justify-between gap-3 px-3 py-2">
-                <div className="min-w-0">
-                  <a href={`/api/files/${version.file_id}`} target="_blank" rel="noreferrer"
-                    className="flex items-center gap-1.5 text-sm hover:underline">
-                    <Paperclip className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                    <span className="truncate">{version.file_name}</span>
-                  </a>
-                  <div className="text-[11px] text-muted-foreground">
-                    {ROLE_LABEL[version.role] ?? version.role} · редакция {version.revision}
-                    {version.is_current ? ' · действующая' : ''}
-                    {' · '}{Math.round(version.size / 1024)} КБ
-                  </div>
-                </div>
-                <span className="shrink-0 font-mono text-[10px] text-muted-foreground"
-                  title={version.sha256}>{version.sha256.slice(0, 12)}…</span>
-              </div>
-            ))}
-            {d.versions.length === 0 && (
-              <div className="px-3 py-8 text-center text-sm text-muted-foreground">
-                Файлов пока нет
-              </div>
-            )}
-          </Card>
+          <DocFileWorkspace versions={d.versions} canRemove={canChangeFiles}
+            removing={tombstone.isPending}
+            onRemove={(versionId, reason) => tombstone.mutate({ versionId, reason })} />
         </TabsContent>
 
         <TabsContent value="links" className="pt-3">

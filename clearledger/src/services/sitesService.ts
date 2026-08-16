@@ -5,7 +5,7 @@
  * пайплайн развития сети. НЕ путать с /equipment (склад железа).
  */
 import { get, post, patch, put, del, upload } from './apiClient'
-import { downloadAttachment } from '@/components/chat/AuthMedia'
+import { downloadAttachment } from '@/lib/authFiles'
 
 /**
  * Стадии — воронка подбора недвижимости с гейтами. Порядок = порядок гейтов;

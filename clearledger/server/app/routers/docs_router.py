@@ -725,6 +725,7 @@ async def list_docs(
     date_from: date_type | None = Query(None),
     date_to: date_type | None = Query(None),
     q: str | None = Query(None),
+    mine: bool = Query(False),
     limit: int = Query(200, ge=1, le=_LIST_LIMIT),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -734,6 +735,9 @@ async def list_docs(
     из любого отбора и теряются."""
     cid = await assert_company_product(company_id, current_user, db, "docs")
     stmt = select(DocCard).where(DocCard.company_id == cid)
+    if mine:
+        stmt = stmt.where(or_(DocCard.author_id == current_user.id,
+                              DocCard.responsible_id == current_user.id))
     if family:
         stmt = stmt.where(DocCard.family == family)
     if direction:

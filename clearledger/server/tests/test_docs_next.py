@@ -47,6 +47,39 @@ async def test_реестр_ищет_по_тексту_файла(auth_client: A
     assert doc["id"] in {item["id"] for item in found.json()["docs"]}
 
 
+async def test_мои_документы_не_подменяются_общим_реестром(
+        auth_client: AsyncClient, db: AsyncSession):
+    me, cid_raw, kind = await _context(auth_client)
+    cid = uuid.UUID(cid_raw)
+    mine = (await auth_client.post("/api/docs", json={
+        "company_id": cid_raw, "kind_id": kind["id"],
+        "title": f"ПРОВЕРКА-мой-{uuid.uuid4().hex}",
+    })).json()
+    company = (await auth_client.post("/api/docs", json={
+        "company_id": cid_raw, "kind_id": kind["id"],
+        "title": f"ПРОВЕРКА-чужой-{uuid.uuid4().hex}",
+    })).json()
+    other = User(
+        company_id=cid, email=f"other-{uuid.uuid4().hex}@example.org",
+        name="Другой автор", password_hash="!",
+    )
+    db.add(other)
+    await db.flush()
+    company_doc = await db.get(DocCard, uuid.UUID(company["id"]))
+    company_doc.author_id = other.id
+    company_doc.responsible_id = None
+    await db.commit()
+
+    result = await auth_client.get("/api/docs", params={
+        "company_id": cid_raw, "mine": "true",
+    })
+    assert result.status_code == 200, result.text
+    ids = {item["id"] for item in result.json()["docs"]}
+    assert mine["id"] in ids
+    assert company["id"] not in ids
+    assert me["id"] != str(other.id)
+
+
 async def test_право_на_документ_и_вид_открывает_закрытую_карточку(
         auth_client: AsyncClient, db: AsyncSession):
     me, cid_raw, kind = await _context(auth_client)

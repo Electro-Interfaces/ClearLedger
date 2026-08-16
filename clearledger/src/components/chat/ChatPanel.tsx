@@ -46,7 +46,8 @@ import {
   getUserColor, getDateLabel, formatTime, computeGrouping, bubbleRadius,
   type GroupingInfo,
 } from './telegram-helpers'
-import { AuthImage, AuthVideo, AuthFileChip, useAuthBlobUrl, downloadAttachment, humanSize } from './AuthMedia'
+import { AuthImage, AuthVideo, AuthFileChip } from './AuthMedia'
+import { downloadAttachment, humanSize, useAuthBlobUrl } from '@/lib/authFiles'
 import { RegionCapture } from './RegionCapture'
 import { ensurePushSubscription, pushPreview, pushSupported, requestPushPermission, setPushPreview } from '@/lib/chatPush'
 import * as chat from '@/services/chatService'

@@ -243,6 +243,7 @@ export interface DocFilters {
   date_from?: string
   date_to?: string
   q?: string
+  mine?: boolean
   limit?: number
 }
 

@@ -100,7 +100,12 @@ async def main() -> None:
                 title=f"{marker}-отчёт", approval_status="approved", approval_round=1,
                 author_id=owner.id,
             )
-            db.add_all([private_doc, report_doc])
+            company_doc = DocCard(
+                company_id=cid, kind_id=kind.id, kind_code=kind.code,
+                family=kind.family, direction=kind.direction,
+                title=f"{marker}-чужой", author_id=person.id,
+            )
+            db.add_all([private_doc, report_doc, company_doc])
             await db.flush()
 
             workflow_doc = DocCard(
@@ -166,6 +171,23 @@ async def main() -> None:
                 ).op("@@")(func.plainto_tsquery(ru, marker)),
             ))
             assert found == version.id
+
+            mine = await docs_router.list_docs(
+                company_id=str(cid), family=None, direction=None, status_=None,
+                kind_id=None, counterparty_id=None, responsible_id=None,
+                date_from=None, date_to=None, q=None, mine=True, limit=200,
+                db=db, current_user=owner,
+            )
+            mine_ids = {row["id"] for row in mine["docs"]}
+            assert str(private_doc.id) in mine_ids
+            assert str(company_doc.id) not in mine_ids
+            search = await docs_router.list_docs(
+                company_id=str(cid), family=None, direction=None, status_=None,
+                kind_id=None, counterparty_id=None, responsible_id=None,
+                date_from=None, date_to=None, q=marker, mine=False, limit=200,
+                db=db, current_user=owner,
+            )
+            assert str(private_doc.id) in {row["id"] for row in search["docs"]}
 
             assert not await docs_router._can_doc(db, cid, private_doc, person, "read")
             assert await docs_router._can_doc(db, cid, workflow_doc, person, "read")
@@ -252,7 +274,7 @@ async def main() -> None:
                     DocInboxItem).where(DocInboxItem.target_id == target.id))
                 assert inbox_count == 2
 
-            print("OK: schema workflow snapshot access discipline acquaint mail exchange")
+            print("OK: schema workflow snapshot workspace search access discipline acquaint mail exchange")
             await db.rollback()
     finally:
         file_store.put = original_put
