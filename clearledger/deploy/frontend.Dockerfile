@@ -68,6 +68,11 @@ server {
         try_files $uri $uri/ /index.html;
     }
 
+    location ~* \.webmanifest$ {
+        default_type application/manifest+json;
+        add_header Cache-Control "no-cache";
+    }
+
     location / {
         add_header Cache-Control "no-cache";
         try_files $uri $uri/ /index.html;
