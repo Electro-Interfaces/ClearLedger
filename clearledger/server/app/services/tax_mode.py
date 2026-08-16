@@ -38,11 +38,17 @@ SQL = """
 # Юрлицо или предприниматель — из справочника организаций: в 1С это реквизит
 # «ЮридическоеФизическоеЛицо», он приезжает в `organizations.vid`.
 FORM_SQL = """
-    SELECT count(*) FILTER (WHERE coalesce(vid, '') ILIKE '%предпринимател%'
-                              OR coalesce(vid, '') ILIKE '%ИП%'
-                              OR coalesce(legal_form, '') ILIKE '%предпринимател%'),
+    SELECT count(*) FILTER (WHERE coalesce(legal_form, '') = 'ip'
+                              OR coalesce(vid, '') ILIKE '%предпринимател%'
+                              OR coalesce(vid, '') ILIKE '%ИП%'),
            count(*)
-      FROM organizations WHERE company_id = CAST(:cid AS uuid)
+      FROM organizations o
+     WHERE o.company_id = CAST(:cid AS uuid)
+       -- Только юрлица, за которыми ЕСТЬ учёт: в справочнике живут и заготовки
+       -- («ИП Проверочный (временно)» у ПРОМИЗОЛ), и по ним компания объявлялась
+       -- предпринимательской, хотя ни одного документа за карточкой нет.
+       AND (EXISTS (SELECT 1 FROM gl_entries e WHERE e.organization_id = o.id)
+         OR EXISTS (SELECT 1 FROM accounting_docs d WHERE d.organization_id = o.id))
 """
 
 
@@ -60,17 +66,46 @@ async def tax_mode(db: AsyncSession, cid, org=None) -> dict[str, Any]:
     p = {"cid": str(cid), "org": str(org) if org else None}
     row = (await db.execute(text(SQL), p)).one()
 
-    # Объект упрощёнки — из НАСТРОЕК 1С, а не из проводок: по счёту 68.12 не видно,
-    # налог это с оборота или с разницы, а бизнес за этими двумя вариантами разный.
-    # Берём последнюю по дате запись, где упрощёнка включена: у компании на общем
-    # режиме объект тоже заполнен (остаётся от шаблона) и врал бы.
-    obj = (await db.execute(text("""
-        SELECT meta->>'usnObject' FROM gl_references
-         WHERE company_id = CAST(:cid AS uuid) AND kind = 'tax_system'
-           AND coalesce((meta->>'usn')::boolean, false)
-           AND coalesce(meta->>'usnObject', '') <> ''
-         ORDER BY code DESC LIMIT 1"""), {"cid": str(cid)})).scalar()
+    # ГЛАВНЫЙ источник — таблица режимов организаций (`organization_tax_regimes` +
+    # справочник `tax_regimes` со ставками). Она в слое уже есть, ведётся по юрлицам с
+    # периодом действия и знает объект упрощёнки. Проводки ниже остаются ЗАПАСНЫМ
+    # вариантом: на них видно, какой налог начислен, но не видно, налог это с оборота
+    # или с разницы, — а от этого зависит смысл половины экранов.
+    regimes = [(r[0], r[1], r[2]) for r in (await db.execute(text("""
+        SELECT t.regime_code, r.object, t.is_primary
+          FROM organization_tax_regimes t
+          JOIN tax_regimes r ON r.code = t.regime_code
+         WHERE t.company_id = CAST(:cid AS uuid)
+           AND (CAST(:org AS uuid) IS NULL OR t.organization_id = CAST(:org AS uuid))
+           AND t.valid_from <= CURRENT_DATE
+           AND (t.valid_to IS NULL OR t.valid_to >= CURRENT_DATE)
+         ORDER BY t.is_primary DESC, t.valid_from DESC"""), p)).all()]
+    codes = {c for c, _, _ in regimes}
+
+    # Объект упрощёнки: сначала из режима слоя, затем из настроек 1С (справочник
+    # `tax_system` — сырой факт выгрузки). У компании на общем режиме объект в 1С тоже
+    # заполнен (остаётся от шаблона), поэтому читается только при включённой упрощёнке.
+    obj = next((o for c, o, _ in regimes if c.startswith('usn') or c.startswith('ausn')), None)
+    if obj == 'income':
+        obj = 'Доходы'
+    elif obj == 'income_minus_expense':
+        obj = 'Доходы, уменьшенные на величину расходов'
+    if not obj:
+        obj = (await db.execute(text("""
+            SELECT meta->>'usnObject' FROM gl_references
+             WHERE company_id = CAST(:cid AS uuid) AND kind = 'tax_system'
+               AND coalesce((meta->>'usn')::boolean, false)
+               AND coalesce(meta->>'usnObject', '') <> ''
+             ORDER BY code DESC LIMIT 1"""), {"cid": str(cid)})).scalar()
     osno, usn, patent, vat, commission, ndfl_ip, own_contrib = (bool(x) for x in row)
+
+    # Заведённый режим сильнее наблюдения по проводкам: проводок может не быть вовсе
+    # (компания только заведена), а режим бухгалтер уже указал.
+    if codes:
+        osno = osno or 'osno' in codes
+        usn = usn or any(c.startswith('usn') or c.startswith('ausn') for c in codes)
+        patent = patent or 'psn' in codes
+
     forms = (await db.execute(text(FORM_SQL), {"cid": str(cid)})).one()
     # «ИП» здесь означает «в учёте есть предприниматель», а не «все юрлица — ИП»:
     # у аутсорсера в одной базе рядом живут ООО и ИП одного владельца.
@@ -99,6 +134,9 @@ async def tax_mode(db: AsyncSession, cid, org=None) -> dict[str, Any]:
         "usnObject": usn_object,
         "usnRevenueBased": usn_object == 'доходы',
         "organizations": forms[1], "ipOrganizations": forms[0],
+        # Коды режимов из слоя — то, чем пользуется расчёт налога (`services/tax_regime`).
+        # Пусто означает «режим не заведён», и это не то же самое, что «ОСНО».
+        "codes": sorted(codes),
         "label": " + ".join(names) if names else None,
         # Доход у УСН и у предпринимателя считается ПО ОПЛАТЕ (кассовый метод), а
         # витрины выручки строятся по отгрузке (90.01.1). Это не ошибка ни там, ни
