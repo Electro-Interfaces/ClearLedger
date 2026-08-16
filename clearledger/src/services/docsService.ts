@@ -5,7 +5,7 @@
  * редакции файла и след. Поручение по документу — обычная задача, поэтому здесь
  * только заведение связи, а сама работа живёт в «Задачах».
  */
-import { get, post, put, upload } from './apiClient'
+import { del, get, post, put, upload } from './apiClient'
 
 export interface DocKind {
   id: string
@@ -144,12 +144,37 @@ export interface DocCase {
   organization_id: string | null
 }
 
+/** Строка листа ознакомления: кому направлен документ и расписался ли он. */
+export interface DocAcquaint {
+  id: string
+  user_id: string
+  status: string          // pending | done
+  read_at: string | null
+  due_at: string | null
+  note: string | null
+}
+
+/** Замещение: кто работает за человека, пока его нет. */
+export interface Substitution {
+  id: string
+  user: string
+  user_id: string
+  deputy: string
+  deputy_id: string
+  starts_on: string
+  ends_on: string
+  basis: string | null
+  is_active: boolean
+  now: boolean
+}
+
 export interface DocDetails extends DocCard {
   kind: DocKind | null
   versions: DocVersion[]
   events: DocEvent[]
   relations: DocRelation[]
   approval: DocApprovalState
+  acquaints: DocAcquaint[]
   case_id: string | null
   storage_until: string | null
   approval_status: string
@@ -411,4 +436,48 @@ export async function decideInbox(
   companyId: string, itemId: string, body: Record<string, unknown>,
 ): Promise<{ status: string; doc_id?: string }> {
   return post(`/api/docs/exchange/inbox/${itemId}`, { ...body, company_id: companyId })
+}
+
+
+/** Направить документ на ознакомление: поимённо или всему подразделению. */
+export async function addAcquaint(
+  companyId: string, id: string, body: Record<string, unknown>,
+): Promise<{ added: number; total: number }> {
+  return post(`/api/docs/${id}/acquaint`, { ...body, company_id: companyId })
+}
+
+/** Отметиться ознакомленным. Только за себя. */
+export async function markAcquainted(
+  companyId: string, id: string, note?: string,
+): Promise<{ status: string; read_at: string | null }> {
+  return post(`/api/docs/${id}/acquaint/read`, { company_id: companyId, note: note ?? null })
+}
+
+export async function myAcquaints(companyId: string): Promise<Array<{
+  id: string; doc_id: string; doc_title: string; doc_number: string | null
+  due_at: string | null
+}>> {
+  const r = await get<{ acquaints: Array<{
+    id: string; doc_id: string; doc_title: string; doc_number: string | null
+    due_at: string | null
+  }> }>('/api/docs/acquaints/mine', { company_id: companyId })
+  return r.acquaints ?? []
+}
+
+export async function listSubstitutions(companyId: string): Promise<Substitution[]> {
+  const r = await get<{ substitutions: Substitution[] }>('/api/docs/substitutions',
+    { company_id: companyId })
+  return r.substitutions ?? []
+}
+
+export async function createSubstitution(
+  companyId: string, body: Record<string, unknown>,
+): Promise<{ id: string }> {
+  return post('/api/docs/substitutions', { ...body, company_id: companyId })
+}
+
+export async function stopSubstitution(
+  companyId: string, id: string,
+): Promise<{ stopped: string }> {
+  return del(`/api/docs/substitutions/${id}?company_id=${companyId}`)
 }

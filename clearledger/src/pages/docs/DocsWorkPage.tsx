@@ -27,6 +27,11 @@ export function DocsWorkPage() {
   const companyId = company?.id ?? ''
   const openId = params.get('doc')
 
+  const acquaintsQ = useQuery({
+    queryKey: ['docs-my-acquaints', companyId],
+    queryFn: () => docsService.myAcquaints(companyId),
+    enabled: !!companyId && view === 'acquaints',
+  })
   const approvalsQ = useQuery({
     queryKey: ['docs-my-approvals', companyId],
     queryFn: () => docsService.myApprovals(companyId),
@@ -65,6 +70,43 @@ export function DocsWorkPage() {
       <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">Загрузка…</div>}>
         <TasksWorkPage />
       </Suspense>
+    )
+  }
+
+  if (view === 'acquaints') {
+    const rows = acquaintsQ.data ?? []
+    return (
+      <div className="space-y-3 px-4 py-4">
+        <div>
+          <h1 className="text-base font-semibold">Ознакомиться</h1>
+          <p className="text-xs text-muted-foreground">
+            {acquaintsQ.isLoading ? 'Загрузка…' : `Документов: ${rows.length}`}
+          </p>
+        </div>
+        <Card className="divide-y divide-border/60">
+          {rows.map((a) => (
+            <button key={a.id} type="button" onClick={() => open(a.doc_id)}
+              className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left hover:bg-accent/40">
+              <div className="min-w-0">
+                <div className="truncate text-sm">{a.doc_title}</div>
+                <div className="text-[11px] text-muted-foreground">
+                  {a.doc_number ?? 'без номера'}
+                </div>
+              </div>
+              {a.due_at && (
+                <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-xs">
+                  до {a.due_at.slice(0, 10)}
+                </span>
+              )}
+            </button>
+          ))}
+          {!acquaintsQ.isLoading && rows.length === 0 && (
+            <div className="px-3 py-8 text-center text-sm text-muted-foreground">
+              Ознакомиться не с чем
+            </div>
+          )}
+        </Card>
+      </div>
     )
   }
 

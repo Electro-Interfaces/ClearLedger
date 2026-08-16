@@ -46,6 +46,10 @@ export function DocsSetupPage() {
 
   const kinds = kindsQ.data ?? []
 
+  if (view === 'substitutions') {
+    return <Substitutions companyId={companyId} />
+  }
+
   if (view === 'exchange') {
     return <ExchangeTargets companyId={companyId} />
   }
@@ -124,6 +128,126 @@ export function DocsSetupPage() {
             служебная записка.
           </div>
         )}
+      </Card>
+    </div>
+  )
+}
+
+function Substitutions({ companyId }: { companyId: string }) {
+  const qc = useQueryClient()
+  const [form, setForm] = useState({
+    user_id: '', deputy_id: '', starts_on: '', ends_on: '', basis: '',
+  })
+
+  const rowsQ = useQuery({
+    queryKey: ['doc-substitutions', companyId],
+    queryFn: () => docsService.listSubstitutions(companyId),
+    enabled: !!companyId,
+  })
+  const peopleQ = useQuery({
+    queryKey: ['task-people', companyId],
+    queryFn: () => tasksService.listTaskPeople(companyId),
+    staleTime: 5 * 60 * 1000,
+  })
+
+  const create = useMutation({
+    mutationFn: () => docsService.createSubstitution(companyId, form),
+    onSuccess: () => {
+      toast.success('Замещение назначено')
+      setForm({ user_id: '', deputy_id: '', starts_on: '', ends_on: '', basis: '' })
+      qc.invalidateQueries({ queryKey: ['doc-substitutions', companyId] })
+    },
+    onError: (e) => toast.error((e as Error).message),
+  })
+
+  const stop = useMutation({
+    mutationFn: (id: string) => docsService.stopSubstitution(companyId, id),
+    onSuccess: () => {
+      toast.success('Замещение прекращено')
+      qc.invalidateQueries({ queryKey: ['doc-substitutions', companyId] })
+    },
+    onError: (e) => toast.error((e as Error).message),
+  })
+
+  const rows = rowsQ.data ?? []
+  const people = peopleQ.data ?? []
+
+  return (
+    <div className="space-y-3 px-4 py-4">
+      <div>
+        <h1 className="text-base font-semibold">Замещения</h1>
+        <p className="text-xs text-muted-foreground">
+          Визу за другого поставить нельзя - это подделка согласования. Но отпуск
+          не должен останавливать документ: заместитель визирует от своего имени,
+          и в листе видно обоих.
+        </p>
+      </div>
+
+      <Card className="divide-y divide-border/60">
+        {rows.map((r) => (
+          <div key={r.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5">
+            <div className="min-w-0">
+              <div className="text-sm">
+                {r.deputy} <span className="text-muted-foreground">замещает</span> {r.user}
+              </div>
+              <div className="text-[11px] text-muted-foreground">
+                {r.starts_on} - {r.ends_on}
+                {r.basis ? ` · ${r.basis}` : ''}
+                {r.now ? ' · действует сейчас' : ''}
+                {!r.is_active ? ' · прекращено' : ''}
+              </div>
+            </div>
+            {r.is_active && (
+              <Button size="sm" variant="ghost" onClick={() => stop.mutate(r.id)}
+                disabled={stop.isPending}>
+                Прекратить
+              </Button>
+            )}
+          </div>
+        ))}
+        {rows.length === 0 && (
+          <div className="px-3 py-6 text-center text-sm text-muted-foreground">
+            Замещений нет
+          </div>
+        )}
+      </Card>
+
+      <Card className="space-y-3 p-4">
+        <div className="text-sm font-medium">Новое замещение</div>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <div className="space-y-1">
+            <Label className="text-xs">Кого замещают</Label>
+            <select value={form.user_id}
+              onChange={(e) => setForm({ ...form, user_id: e.target.value })}
+              className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm">
+              <option value="">выберите</option>
+              {people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Кто замещает</Label>
+            <select value={form.deputy_id}
+              onChange={(e) => setForm({ ...form, deputy_id: e.target.value })}
+              className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm">
+              <option value="">выберите</option>
+              {people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          </div>
+          <Field label="С какой даты" value={form.starts_on}
+            onChange={(v) => setForm({ ...form, starts_on: v })} type="date" />
+          <Field label="По какую дату" value={form.ends_on}
+            onChange={(v) => setForm({ ...form, ends_on: v })} type="date" />
+          <div className="sm:col-span-2">
+            <Field label="Основание" value={form.basis}
+              onChange={(v) => setForm({ ...form, basis: v })}
+              placeholder="Приказ №12 от 14.08.2026 о возложении обязанностей" />
+          </div>
+        </div>
+        <Button size="sm" onClick={() => create.mutate()}
+          disabled={!form.user_id || !form.deputy_id || !form.starts_on
+            || !form.ends_on || create.isPending}>
+          Назначить
+        </Button>
       </Card>
     </div>
   )
@@ -213,13 +337,14 @@ function ExchangeTargets({ companyId }: { companyId: string }) {
   )
 }
 
-function Field({ label, value, onChange, placeholder }: {
-  label: string; value: string; onChange: (v: string) => void; placeholder?: string
+function Field({ label, value, onChange, placeholder, type }: {
+  label: string; value: string; onChange: (v: string) => void
+  placeholder?: string; type?: string
 }) {
   return (
     <div className="space-y-1">
       <Label className="text-xs">{label}</Label>
-      <Input value={value} onChange={(e) => onChange(e.target.value)}
+      <Input type={type} value={value} onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder} className="h-9" />
     </div>
   )

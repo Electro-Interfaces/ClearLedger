@@ -136,6 +136,36 @@ async def resolve_actors(db: AsyncSession, cid: uuid.UUID,
     return out
 
 
+async def active_deputy_for(db: AsyncSession, cid: uuid.UUID,
+                            user_id: uuid.UUID, on_date=None) -> list[uuid.UUID]:
+    """Кто сегодня замещает этого человека.
+
+    Виза за другого запрещена, но отпуск не должен останавливать документ.
+    Заместитель ставит визу ОТ СВОЕГО ИМЕНИ на основании замещения, и в листе
+    видно обоих: за кого и кто фактически.
+    """
+    from app.models import UserSubstitution
+
+    day = on_date or datetime.now(timezone.utc).date()
+    rows = (await db.execute(select(UserSubstitution.deputy_id).where(
+        UserSubstitution.company_id == cid,
+        UserSubstitution.user_id == user_id,
+        UserSubstitution.is_active.is_(True),
+        UserSubstitution.starts_on <= day,
+        UserSubstitution.ends_on >= day))).scalars().all()
+    return list(rows)
+
+
+async def may_decide(db: AsyncSession, cid: uuid.UUID, row: DocApproval,
+                     actor: User) -> bool:
+    """Вправе ли этот человек поставить визу: сам адресат или его заместитель."""
+    if row.assignee_id == actor.id:
+        return True
+    if row.assignee_id is None:
+        return False
+    return actor.id in await active_deputy_for(db, cid, row.assignee_id)
+
+
 async def start(db: AsyncSession, cid: uuid.UUID, doc: DocCard, route: list[dict],
                 actor: User) -> dict[str, Any]:
     """Запустить круг согласования по маршруту вида.
@@ -205,8 +235,15 @@ async def decide(db: AsyncSession, cid: uuid.UUID, doc: DocCard, row: DocApprova
     row.comment = (comment or "").strip() or None
     await db.flush()
 
+    # Кто фактически расписался. Если это заместитель, лист согласования обязан
+    # показывать обоих: иначе через полгода непонятно, чья это виза.
+    who = actor.name or actor.email
+    if row.assignee_id and row.assignee_id != actor.id:
+        boss = await db.get(User, row.assignee_id)
+        if boss is not None:
+            who = f"{who} (замещает {boss.name or boss.email})"
     db.add(DocEvent(doc_id=doc.id, kind="approval", user_id=actor.id,
-                    actor_name=actor.name or actor.email,
+                    actor_name=who,
                     from_value=row.step_name,
                     to_value="согласовано" if approved else "отказано",
                     note=row.comment))

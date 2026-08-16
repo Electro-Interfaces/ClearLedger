@@ -10058,3 +10058,83 @@ class DocInboxItem(Base):
     __table_args__ = (
         UniqueConstraint("company_id", "sha256", name="uq_doc_inbox_sha"),
     )
+
+
+class DocAcquaint(Base):
+    """Ознакомление с документом: кому направлен и кто расписался.
+
+    Классика распорядительной документации: приказ не действует «вообще», он
+    доводится до людей под подпись. Без листа ознакомления вопрос «а он знал?»
+    решается словами, а через полгода не решается никак.
+
+    Отдельно от согласования: виза это «я не возражаю» до подписания, а
+    ознакомление — «я прочитал» после. Смешивать их значит терять оба смысла.
+    """
+    __tablename__ = "doc_acquaints"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    doc_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("doc_cards.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    # Как человек попал в лист: сам, по подразделению, по роли.
+    reason: Mapped[str] = mapped_column(String(20), nullable=False, default="manual")
+    required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # pending | done
+    status: Mapped[str] = mapped_column(String(10), nullable=False, default="pending")
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Отметка ставится только за себя, поэтому автора отдельно не храним.
+    note: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("doc_id", "user_id", name="uq_doc_acquaints_person"),
+        Index("idx_doc_acquaints_mine", "company_id", "user_id", "status"),
+    )
+
+
+class UserSubstitution(Base):
+    """Замещение: кто работает за человека, пока его нет.
+
+    Виза за другого запрещена — это подделка согласования. Но человек уходит в
+    отпуск, и без замещения документ встаёт до его возвращения. Разница
+    принципиальная: заместитель ставит визу ОТ СВОЕГО ИМЕНИ на основании
+    замещения, и в листе согласования видно обоих — за кого и кто фактически.
+    """
+    __tablename__ = "user_substitutions"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    # Кого замещают.
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    # Кто замещает.
+    deputy_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    starts_on: Mapped[date_type] = mapped_column(Date, nullable=False)
+    ends_on: Mapped[date_type] = mapped_column(Date, nullable=False)
+    # Основание: приказ о возложении обязанностей, номер и дата.
+    basis: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("idx_substitutions_period", "company_id", "user_id", "starts_on", "ends_on"),
+        CheckConstraint("ends_on >= starts_on", name="ck_substitution_period"),
+        CheckConstraint("user_id <> deputy_id", name="ck_substitution_self"),
+    )

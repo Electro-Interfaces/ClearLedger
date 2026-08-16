@@ -35,7 +35,8 @@ from app.auth import assert_company_product, get_current_user
 from app.database import get_db
 from app.models import (
     Counterparty, DocApproval, DocCard, DocCase, DocEvent, DocKind, DocRelation,
-    DocExchangeTarget, DocExport, DocInboxItem, DocLabelLink, DocShareLink,
+    DocAcquaint, DocExchangeTarget, DocExport, DocInboxItem, DocLabelLink,
+    DocShareLink, UserSubstitution,
     DocVersion, Organization, SourceFile, Task, TaskEvent, TaskLabel,
     TaskType, TaskWorkItem, User, UserCompany,
 )
@@ -668,9 +669,10 @@ async def approval_decide(
         DocApproval.id == _uuid_or_400(approval_id, "approval_id")))).scalar_one_or_none()
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Виза не найдена")
-    if row.assignee_id != current_user.id:
+    if not await doc_approvals.may_decide(db, cid, row, current_user):
         raise HTTPException(status.HTTP_403_FORBIDDEN,
-                            "Визу ставит тот, кому она адресована")
+                            "Визу ставит тот, кому она адресована, "
+                            "либо назначенный заместитель на время отсутствия")
     d = await _doc_or_404(db, cid, row.doc_id)
     res = await doc_approvals.decide(db, cid, d, row, current_user,
                                      payload.approved, payload.comment)
@@ -1465,6 +1467,208 @@ async def decide_inbox(
     return {"status": "accepted", "doc_id": str(d.id)}
 
 
+# ── Ознакомление и замещение ─────────────────────────────────────────────────
+
+
+class AcquaintIn(BaseModel):
+    company_id: str
+    user_ids: list[str] = []
+    department_id: str | None = None
+    due_at: datetime | None = None
+
+
+@router.post("/{doc_id}/acquaint", status_code=status.HTTP_201_CREATED)
+async def add_acquaint(
+    doc_id: str,
+    payload: AcquaintIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Направить документ на ознакомление.
+
+    Отдельно от согласования: виза это «не возражаю» до подписания, ознакомление
+    — «прочитал» после. Приказ, с которым никого не ознакомили, не работает, и
+    вопрос «а он знал» должен решаться списком, а не памятью.
+    """
+    cid = await assert_company_product(payload.company_id, current_user, db, "docs")
+    d = await _doc_or_404(db, cid, doc_id)
+    _assert_visible(d, current_user)
+
+    people: set[uuid.UUID] = {_uuid_or_400(u, "user_id") for u in payload.user_ids}
+    reason = "manual"
+    if payload.department_id:
+        dep = _uuid_or_400(payload.department_id, "department_id")
+        rows = (await db.execute(select(UserCompany.user_id).where(
+            UserCompany.company_id == cid,
+            UserCompany.department_id == dep))).scalars().all()
+        people.update(rows)
+        reason = "department"
+    if not people:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Некого знакомить")
+
+    have = set((await db.execute(select(DocAcquaint.user_id).where(
+        DocAcquaint.doc_id == d.id))).scalars().all())
+    added = 0
+    for uid in people - have:
+        db.add(DocAcquaint(company_id=cid, doc_id=d.id, user_id=uid, reason=reason,
+                           due_at=payload.due_at, created_by=current_user.id))
+        added += 1
+    if added:
+        db.add(DocEvent(doc_id=d.id, kind="field", user_id=current_user.id,
+                        actor_name=current_user.name or current_user.email,
+                        to_value=f"ознакомление: {added} чел.", note="лист ознакомления"))
+    await db.commit()
+    return {"added": added, "total": len(have) + added}
+
+
+class AcquaintReadIn(BaseModel):
+    company_id: str
+    note: str | None = None
+
+
+@router.post("/{doc_id}/acquaint/read")
+async def mark_acquainted(
+    doc_id: str,
+    payload: AcquaintReadIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Отметиться ознакомленным. Только за себя: отметка за другого — это ровно
+    та подделка, от которой лист ознакомления и должен защищать."""
+    cid = await assert_company_product(payload.company_id, current_user, db, "docs")
+    d = await _doc_or_404(db, cid, doc_id)
+    row = (await db.execute(select(DocAcquaint).where(
+        DocAcquaint.doc_id == d.id,
+        DocAcquaint.user_id == current_user.id))).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND,
+                            "Вас не направляли на ознакомление с этим документом")
+    if row.status == "done":
+        return {"status": "done", "read_at": row.read_at.isoformat()
+                if row.read_at else None, "repeated": True}
+    row.status = "done"
+    row.read_at = datetime.now(timezone.utc)
+    row.note = (payload.note or "").strip() or None
+    db.add(DocEvent(doc_id=d.id, kind="field", user_id=current_user.id,
+                    actor_name=current_user.name or current_user.email,
+                    to_value="ознакомлен", note=row.note))
+    await db.commit()
+    return {"status": "done", "read_at": row.read_at.isoformat()}
+
+
+@router.get("/acquaints/mine")
+async def my_acquaints(
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """С чем мне нужно ознакомиться."""
+    cid = await assert_company_product(company_id, current_user, db, "docs")
+    rows = (await db.execute(select(DocAcquaint).where(
+        DocAcquaint.company_id == cid, DocAcquaint.user_id == current_user.id,
+        DocAcquaint.status == "pending").order_by(
+        DocAcquaint.due_at.asc().nullslast()))).scalars().all()
+    if not rows:
+        return {"acquaints": []}
+    docs = {d.id: d for d in (await db.execute(select(DocCard).where(
+        DocCard.id.in_({r.doc_id for r in rows})))).scalars().all()}
+    return {"acquaints": [{
+        "id": str(r.id), "doc_id": str(r.doc_id),
+        "doc_title": docs[r.doc_id].title if r.doc_id in docs else "",
+        "doc_number": docs[r.doc_id].reg_number if r.doc_id in docs else None,
+        "due_at": r.due_at.isoformat() if r.due_at else None,
+    } for r in rows if r.doc_id in docs]}
+
+
+class SubstitutionIn(BaseModel):
+    company_id: str
+    user_id: str
+    deputy_id: str
+    starts_on: date_type
+    ends_on: date_type
+    basis: str | None = None
+
+
+@router.get("/substitutions")
+async def list_substitutions(
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cid = await assert_company_product(company_id, current_user, db, "docs")
+    rows = (await db.execute(select(UserSubstitution).where(
+        UserSubstitution.company_id == cid).order_by(
+        UserSubstitution.starts_on.desc()))).scalars().all()
+    ids = {r.user_id for r in rows} | {r.deputy_id for r in rows}
+    names = {str(u.id): (u.name or u.email) for u in (await db.execute(
+        select(User).where(User.id.in_(ids)))).scalars().all()} if ids else {}
+    today = datetime.now(timezone.utc).date()
+    return {"substitutions": [{
+        "id": str(r.id),
+        "user": names.get(str(r.user_id), ""), "user_id": str(r.user_id),
+        "deputy": names.get(str(r.deputy_id), ""), "deputy_id": str(r.deputy_id),
+        "starts_on": r.starts_on.isoformat(), "ends_on": r.ends_on.isoformat(),
+        "basis": r.basis, "is_active": r.is_active,
+        "now": r.is_active and r.starts_on <= today <= r.ends_on,
+    } for r in rows]}
+
+
+@router.post("/substitutions", status_code=status.HTTP_201_CREATED)
+async def create_substitution(
+    payload: SubstitutionIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Назначить замещение на время отсутствия.
+
+    Заводит администратор пространства: замещение это полномочие, а не личная
+    настройка, и основанием обычно служит приказ о возложении обязанностей.
+    """
+    cid = await assert_company_product(payload.company_id, current_user, db, "docs")
+    await _assert_admin(db, cid, current_user)
+    if payload.ends_on < payload.starts_on:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Дата окончания раньше даты начала")
+    uid = _uuid_or_400(payload.user_id, "user_id")
+    did = _uuid_or_400(payload.deputy_id, "deputy_id")
+    if uid == did:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Человек не может замещать сам себя")
+    row = UserSubstitution(
+        company_id=cid, user_id=uid, deputy_id=did,
+        starts_on=payload.starts_on, ends_on=payload.ends_on,
+        basis=payload.basis, created_by=current_user.id)
+    db.add(row)
+    await log_audit(db, actor=current_user, company_id=cid, action="doc.substitution",
+                    target=str(row.id),
+                    details={"from": payload.starts_on.isoformat(),
+                             "to": payload.ends_on.isoformat()})
+    await db.commit()
+    await db.refresh(row)
+    return {"id": str(row.id)}
+
+
+@router.delete("/substitutions/{sub_id}")
+async def stop_substitution(
+    sub_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Прекратить замещение. Запись остаётся: по ней объясняется, кто и на каком
+    основании расписывался в прошлом."""
+    cid = await assert_company_product(company_id, current_user, db, "docs")
+    await _assert_admin(db, cid, current_user)
+    row = (await db.execute(select(UserSubstitution).where(
+        UserSubstitution.company_id == cid,
+        UserSubstitution.id == _uuid_or_400(sub_id, "sub_id")))).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Замещение не найдено")
+    row.is_active = False
+    await db.commit()
+    return {"stopped": str(row.id)}
+
+
 @router.get("/{doc_id}")
 async def get_doc(
     doc_id: str,
@@ -1485,6 +1689,8 @@ async def get_doc(
                                .order_by(DocEvent.created_at.desc()).limit(200))).scalars().all()
     relations = (await db.execute(select(DocRelation).where(
         DocRelation.doc_id == d.id))).scalars().all()
+    acquaints = (await db.execute(select(DocAcquaint).where(
+        DocAcquaint.doc_id == d.id))).scalars().all()
     approvals = (await db.execute(select(DocApproval).where(
         DocApproval.doc_id == d.id).order_by(
         DocApproval.round.desc(), DocApproval.step_no))).scalars().all()
@@ -1509,6 +1715,13 @@ async def get_doc(
             "id": str(r.id), "kind": r.kind, "target_ref": r.target_ref,
             "target_doc_id": str(r.target_doc_id) if r.target_doc_id else None,
         } for r in relations],
+        # Лист ознакомления: приказ, с которым никого не ознакомили, не работает.
+        "acquaints": [{
+            "id": str(a.id), "user_id": str(a.user_id), "status": a.status,
+            "read_at": a.read_at.isoformat() if a.read_at else None,
+            "due_at": a.due_at.isoformat() if a.due_at else None,
+            "note": a.note,
+        } for a in acquaints],
         # Кого именно ждут — то, чего не показывают гибриды рынка: там видно
         # «идёт согласование», но не видно, на ком оно стоит.
         "approval": {

@@ -18,6 +18,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { toast } from 'sonner'
 import * as docsService from '@/services/docsService'
 import { DOC_STATUS } from '@/services/docsService'
+import { DocAcquaintTab } from './DocAcquaintTab'
 import { DocApprovalTab } from './DocApprovalTab'
 import { DocSendTab } from './DocSendTab'
 
@@ -142,6 +143,9 @@ export function DocCardPanel({ id, companyId, onBack, onChanged }: {
           <TabsTrigger value="approval">
             Согласование{d.approval?.status === 'pending' ? ' •' : ''}
           </TabsTrigger>
+          <TabsTrigger value="acquaint">
+            Ознакомление{(d.acquaints ?? []).some((a) => a.status === 'pending') ? ' •' : ''}
+          </TabsTrigger>
           <TabsTrigger value="files">
             Файлы{d.versions.length ? ` (${d.versions.length})` : ''}
           </TabsTrigger>
@@ -214,6 +218,10 @@ export function DocCardPanel({ id, companyId, onBack, onChanged }: {
 
         <TabsContent value="approval">
           <DocApprovalTab doc={d} companyId={companyId} onChanged={refresh} />
+        </TabsContent>
+
+        <TabsContent value="acquaint">
+          <DocAcquaintTab doc={d} companyId={companyId} onChanged={refresh} />
         </TabsContent>
 
         <TabsContent value="files" className="space-y-3 pt-3">
