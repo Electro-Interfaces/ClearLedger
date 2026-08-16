@@ -9,6 +9,16 @@ import path from 'path'
 const BUILD = new Date().toISOString().slice(0, 16).replace('T', ' ')
 const BASE_PATH = process.env.VITE_BASE_PATH || '/'
 const PWA_BRAND = process.env.VITE_ECOSYSTEM_BRAND?.trim() || 'Рабочее пространство'
+const PWA_APPEARANCES: Record<string, {
+  assetDir: string
+  themeColor: string
+  backgroundColor: string
+}> = {
+  'Аудит': { assetDir: 'office', themeColor: '#293991', backgroundColor: '#f3f5ff' },
+  'РусГидро': { assetDir: 'rushydro', themeColor: '#006a9f', backgroundColor: '#eefaff' },
+  'ГИГ': { assetDir: 'gig', themeColor: '#a84312', backgroundColor: '#fff7ed' },
+}
+const PWA_APPEARANCE = PWA_APPEARANCES[PWA_BRAND]
 
 function baseUrl(pathname = '') {
   const base = `/${BASE_PATH.replace(/^\/+|\/+$/g, '')}`.replace('//', '/')
@@ -43,8 +53,8 @@ function pwaFiles() {
     scope: baseUrl(),
     display: 'standalone',
     display_override: ['standalone'],
-    background_color: '#f4f6fb',
-    theme_color: '#1d4ed8',
+    background_color: PWA_APPEARANCE?.backgroundColor ?? '#f4f6fb',
+    theme_color: PWA_APPEARANCE?.themeColor ?? '#1d4ed8',
     lang: 'ru',
     categories: ['business', 'productivity'],
     prefer_related_applications: false,
@@ -68,13 +78,26 @@ function pwaFiles() {
         .replaceAll('"', '&quot;')
         .replaceAll('<', '&lt;')
         .replaceAll('>', '&gt;')
-      return html.replaceAll('__PWA_SHORT_NAME__', shortName)
+      return html
+        .replaceAll('__PWA_SHORT_NAME__', shortName)
+        .replaceAll('__PWA_THEME_COLOR__', PWA_APPEARANCE?.themeColor ?? '#1d4ed8')
     },
     writeBundle() {
       const contents = `${JSON.stringify(manifest, null, 2)}\n`
       fs.writeFileSync(path.resolve(__dirname, 'dist/manifest.webmanifest'), contents)
       // Старый адрес оставляем совместимым для уже установленных первых PWA.
       fs.writeFileSync(path.resolve(__dirname, 'dist/pulse.webmanifest'), contents)
+
+      // Имена файлов снаружи одинаковы, но содержимое своё для каждого пространства:
+      // старые установки, push-уведомления и iOS продолжают обращаться к корню домена.
+      if (PWA_APPEARANCE) {
+        const sourceDir = path.resolve(__dirname, 'public/pwa', PWA_APPEARANCE.assetDir)
+        for (const name of ['icon-192.png', 'icon-512.png', 'icon-maskable-512.png',
+          'apple-touch-icon.png']) {
+          fs.copyFileSync(path.join(sourceDir, name), path.resolve(__dirname, 'dist', name))
+        }
+        fs.copyFileSync(path.join(sourceDir, 'icon.svg'), path.resolve(__dirname, 'dist/favicon.svg'))
+      }
     },
   }
 }
