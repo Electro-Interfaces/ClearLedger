@@ -3999,6 +3999,8 @@ async def _office_block_data(db: AsyncSession, cid: str, key: str,
             tax_was = float(await income_tax_for(prev_since, prev_till) or 0)
             tax_label = ("НДФЛ предпринимателя" if mode.get("osnoIp") and not mode["usn"]
                          else "Налог по патенту" if mode["patent"] and not mode["usn"]
+                         else "Налог УСН с оборота" if mode.get("usnRevenueBased")
+                         else "Налог УСН с разницы" if mode.get("usnObject")
                          else "Налог по УСН")
             note = ("Режим: %s. Начислено по учёту за период — авансовый платёж "
                     "приходится не на каждый месяц. Декларацию формирует бухгалтерия."

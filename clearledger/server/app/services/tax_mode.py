@@ -59,6 +59,17 @@ async def tax_mode(db: AsyncSession, cid, org=None) -> dict[str, Any]:
     """
     p = {"cid": str(cid), "org": str(org) if org else None}
     row = (await db.execute(text(SQL), p)).one()
+
+    # Объект упрощёнки — из НАСТРОЕК 1С, а не из проводок: по счёту 68.12 не видно,
+    # налог это с оборота или с разницы, а бизнес за этими двумя вариантами разный.
+    # Берём последнюю по дате запись, где упрощёнка включена: у компании на общем
+    # режиме объект тоже заполнен (остаётся от шаблона) и врал бы.
+    obj = (await db.execute(text("""
+        SELECT meta->>'usnObject' FROM gl_references
+         WHERE company_id = CAST(:cid AS uuid) AND kind = 'tax_system'
+           AND coalesce((meta->>'usn')::boolean, false)
+           AND coalesce(meta->>'usnObject', '') <> ''
+         ORDER BY code DESC LIMIT 1"""), {"cid": str(cid)})).scalar()
     osno, usn, patent, vat, commission, ndfl_ip, own_contrib = (bool(x) for x in row)
     forms = (await db.execute(text(FORM_SQL), {"cid": str(cid)})).one()
     # «ИП» здесь означает «в учёте есть предприниматель», а не «все юрлица — ИП»:
@@ -69,12 +80,24 @@ async def tax_mode(db: AsyncSession, cid, org=None) -> dict[str, Any]:
     # Отдельная метка нужна, чтобы экраны не звали его «налогом на прибыль» и не
     # считали по ставке 25 %: база у НДФЛ другая (доход минус профессиональный вычет).
     osno_ip = is_ip and ndfl_ip and not osno
+
+    # «Доходы» — налог с ОБОРОТА: расходы на него не влияют вовсе, и показывать
+    # рядом рентабельность как основание налога бессмысленно. «Доходы минус расходы» —
+    # налог с разницы, там каждый принятый расход уменьшает платёж.
+    usn_object = None
+    if usn and obj:
+        usn_object = 'доходы минус расходы' if 'уменьшен' in obj.lower() else 'доходы'
+    usn_name = 'УСН (%s)' % usn_object if usn_object else 'УСН'
     names = [n for n, on in (("ОСНО", osno), ("ОСНО (НДФЛ)", osno_ip),
-                             ("УСН", usn), ("патент", patent)) if on]
+                             (usn_name, usn), ("патент", patent)) if on]
     return {
         "osno": osno, "usn": usn, "patent": patent,
         "vat": vat, "commission": commission,
         "ip": is_ip, "osnoIp": osno_ip, "ownContributions": own_contrib,
+        # `usnObject`: «доходы» | «доходы минус расходы» | None (настройки не загружены).
+        # `usnRevenueBased` — короткий ответ на вопрос «налог считается от оборота?».
+        "usnObject": usn_object,
+        "usnRevenueBased": usn_object == 'доходы',
         "organizations": forms[1], "ipOrganizations": forms[0],
         "label": " + ".join(names) if names else None,
         # Доход у УСН и у предпринимателя считается ПО ОПЛАТЕ (кассовый метод), а

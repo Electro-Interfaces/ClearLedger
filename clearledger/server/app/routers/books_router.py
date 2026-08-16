@@ -2674,10 +2674,12 @@ async def taxes(
     # иначе сумма групп не сходится с собственным итогом экрана. 68.04 — налог на прибыль
     # (ОСНО), 68.12 — налог при УСН, 68.45 — патент. Режимы совмещаются: компания на УСН
     # может докупать патенты под отдельные виды деятельности.
-    profit_tax = match(("68.04", "68.12", "68.45"))
-    modes = [name for name, accs in (("ОСНО", ("68.04",)), ("УСН", ("68.12",)),
-                                     ("патент", ("68.45",))) if match(accs) > 0]
-    osno = "ОСНО" in modes
+    profit_tax = match(("68.04", "68.12", "68.45", "68.10"))
+    # Режим — общим определением пространства: оно знает и объект упрощёнки, и
+    # предпринимателя, а список счетов здесь отвечает только за суммы.
+    mode = await space_tax_mode(db, cid, _org_param())
+    modes = [m for m in [mode["label"]] if m]
+    osno = mode["osno"]
     other_taxes = round(accrued - vat - ndfl - contributions - profit_tax, 2)
     return {
         "rows": rows,
@@ -2692,7 +2694,17 @@ async def taxes(
         "loadNote": "все уплаченные налоги и взносы (ЕНС не разделяется по видам)",
         # Режим налогообложения — по тому, какой налог с дохода начислен. Их может быть
         # несколько сразу: «УСН + патент».
-        "taxMode": " + ".join(modes) if modes else None,
+        "taxMode": mode["label"],
+        "usnObject": mode["usnObject"],
+        # Ставка к базе: на «доходах» база — оборот, на «доходах минус расходы» —
+        # разница, на общем режиме — прибыль до налога. Один процент вместо трёх
+        # разных, посчитанных по одной формуле, — это и есть разница между
+        # «показателем» и цифрой, которой можно верить.
+        "taxBaseLabel": ("выручка" if mode["usnRevenueBased"]
+                         else "доходы минус расходы" if mode["usnObject"]
+                         else "прибыль до налога" if osno else None),
+        "taxBasePct": (round(profit_tax / totals["net"] * 100, 1)
+                       if mode["usnRevenueBased"] and totals["net"] else None),
         "groups": {
             "profitTax": profit_tax,     # налог с дохода: 68.04 (ОСНО) либо 68.12 (УСН)
             "vat": vat,                  # транзитный: не расход компании

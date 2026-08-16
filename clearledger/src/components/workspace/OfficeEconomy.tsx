@@ -1278,12 +1278,16 @@ function EconTaxes({ companyId, period, view }: {
       <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
         {/* Имя налога — по режиму компании: на УСН «налога на прибыль» не бывает,
             а плитка НДС у неуплачивающего его показывает вечный ноль. */}
+        {/* База налога названа прямо: на «доходах» расходы на платёж не влияют вовсе,
+            на «доходах минус расходах» — влияет каждый принятый расход. Раньше обе
+            упрощёнки выглядели одинаково, а это два разных способа вести дело. */}
         <MetricTile
           label={d.taxMode && d.taxMode !== 'ОСНО'
             ? `Налог с дохода (${d.taxMode})` : 'Налог на прибыль'}
           value={money.format(g.profitTax) + ' ₽'}
-          hint={d.taxMode && d.taxMode !== 'ОСНО'
-            ? 'спецрежим: считается от дохода, а не от прибыли'
+          hint={d.taxBaseLabel
+            ? `база — ${d.taxBaseLabel}${d.taxBasePct !== null && d.taxBasePct !== undefined
+                ? ` · ${d.taxBasePct} % от выручки` : ''}`
             : 'строка отчёта о результате'} />
         {(g.vat > 0 || !d.taxMode || d.taxMode === 'ОСНО') && (
           <MetricTile label="НДС" value={money.format(g.vat) + ' ₽'}

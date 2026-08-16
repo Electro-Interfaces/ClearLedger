@@ -58,7 +58,7 @@ SETS = [
     'queries-first/09-fin', 'queries-first/10-policy', 'queries-first/11-bank',
     'queries', 'queries-docs', 'queries-contracts', 'queries-payroll', 'queries-payroll2',
     'queries-tax', 'queries-balances', 'queries-books', 'queries-wave3', 'queries-gap',
-    'queries-gap2', 'queries-subconto',
+    'queries-gap2', 'queries-subconto', 'queries-policy',
 ]
 
 # ── Разбор: JSON собирается из одного или нескольких наборов. ──────────────────
@@ -74,6 +74,7 @@ JSONS = {
     'onec-gap': ['queries-gap'],
     'onec-gap2': ['queries-gap2'],
     'onec-subconto': ['queries-subconto'],
+    'onec-taxsys': ['queries-policy'],
 }
 
 # ── Генераторы: сначала кладём дампы под именами, которые они ждут. ────────────
@@ -106,6 +107,7 @@ LOAD_ORDER = [
     'load-gap.py',        # УСН, кадры, НМА, уставный капитал, реквизиты первички
     'load-gap2.py',       # агентская схема, НДС, кадры компании-агента
     'load-subconto.py',   # виды субконто по счетам — карта для сведения аналитики
+    'load-tax-system.py', # система налогообложения и ОБЪЕКТ УСН из настроек 1С
 ]
 # Сгенерированные загрузчики едут отдельно: они везут данные внутри себя.
 GENERATED_ORDER = ['load-pull.py', 'load-enrich.py', 'load-wave2.py',

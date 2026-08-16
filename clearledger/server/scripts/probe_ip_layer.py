@@ -21,7 +21,7 @@ SLUG = 'ip-probe-tmp'
 
 
 async def cleanup(s, cid):
-    for t in ('gl_entries', 'gl_accounts', 'organizations', 'periods',
+    for t in ('gl_entries', 'gl_accounts', 'organizations', 'periods', 'gl_references',
               'accounting_docs', 'counterparties', 'company_roles', 'user_companies'):
         try:
             await s.execute(text("DELETE FROM %s WHERE company_id = CAST(:c AS uuid)" % t),
@@ -90,14 +90,42 @@ async def main():
                 {"c": str(cid), "o": str(oid), "dt": dt, "kt": kt, "a": amount, "txt": content})
         await s.commit()
 
+        # Настройки налогообложения: объект упрощёнки берётся ИЗ НИХ, а не из проводок —
+        # по счёту 68.12 не видно, налог с оборота или с разницы.
+        await s.execute(text("""
+            INSERT INTO gl_references (id, company_id, kind, code, name, meta,
+                                       is_group, is_deleted, created_at)
+            VALUES (gen_random_uuid(), CAST(:c AS uuid), 'tax_system', '2026-01-01 · ИП',
+                    'Упрощенная · доходы', CAST(:m AS jsonb), false, false, now())"""),
+            {"c": str(cid),
+             "m": '{"usn": true, "usnObject": "Доходы", "system": "Упрощенная"}'})
+        await s.commit()
+
         print('== что слой понял про предпринимателя')
         m = await tax_mode(s, cid)
         for k in ('label', 'ip', 'osno', 'osnoIp', 'usn', 'patent', 'vat',
-                  'cashBasis', 'ownContributions', 'organizations', 'ipOrganizations'):
+                  'usnObject', 'usnRevenueBased', 'cashBasis', 'ownContributions',
+                  'organizations', 'ipOrganizations'):
             print('   %-18s %s' % (k, m[k]))
 
-        ok = m['ip'] and m['osnoIp'] and m['usn'] and m['cashBasis'] and not m['osno']
+        ok = (m['ip'] and m['osnoIp'] and m['usn'] and m['cashBasis'] and not m['osno']
+              and m['usnObject'] == 'доходы' and m['usnRevenueBased'])
         print('\n   режим прочитан верно:', 'ДА' if ok else 'НЕТ')
+
+        # Второй объект упрощёнки — налог с РАЗНИЦЫ. Проверяем, что слой их различает,
+        # а не показывает «УСН» в обоих случаях: расходы влияют на платёж только здесь.
+        await s.execute(text(
+            "UPDATE gl_references SET meta = jsonb_set(meta, '{usnObject}',"
+            " '\"Доходы, уменьшенные на величину расходов\"')"
+            " WHERE company_id = CAST(:c AS uuid) AND kind = 'tax_system'"),
+            {"c": str(cid)})
+        await s.commit()
+        m2 = await tax_mode(s, cid)
+        print('   второй объект: «%s» · налог с оборота: %s · метка «%s»'
+              % (m2['usnObject'], m2['usnRevenueBased'], m2['label']))
+        print('   объекты различаются:',
+              'ДА' if m2['usnObject'] == 'доходы минус расходы'
+              and not m2['usnRevenueBased'] else 'НЕТ')
 
         # Проверяем то, ради чего всё: налог считается по НАЧИСЛЕНИЮ, а не ставкой 25 %.
         tax = (await s.execute(text("""
