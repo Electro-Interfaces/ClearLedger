@@ -311,6 +311,11 @@ async def profile(
         "organizations": orgs,
         "taxMode": mode["label"],
         "vat": mode["vat"],
+        # Форма ведения дела и метод признания дохода: у предпринимателя и на УСН
+        # доход считается по ОПЛАТЕ, а витрины выручки — по отгрузке. Обе цифры верны,
+        # но это разные вопросы, и паспорт обязан предупредить.
+        "isEntrepreneur": mode["ip"],
+        "cashBasis": mode["cashBasis"],
         # Комиссионная торговля меняет чтение почти всех витрин выручки, поэтому
         # стоит в паспорте, а не прячется в одной проверке.
         "commission": mode["commission"],
@@ -8514,3 +8519,101 @@ async def tax_region_rates(
         "condition": r.condition, "from": r.valid_from.isoformat(),
         "note": r.note,
     } for r in rows]}
+
+
+@router.post("/organizations/{organization_id}/contributions/sync")
+async def sync_contributions(
+    organization_id: str,
+    company_id: str,
+    year: int | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Забрать уплаченные взносы из проводок: платёж уже есть в учёте."""
+    cid = await assert_company_member(company_id, current_user, db)
+    return await tax_regime.sync_contributions(
+        db, str(cid), organization_id, year or date.today().year)
+
+
+@router.get("/patent-activities")
+async def patent_activities(
+    company_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Виды деятельности для патента (ст. 346.43 НК) — сгруппированные."""
+    await assert_company_member(company_id, current_user, db)
+    rows = (await db.execute(text("""
+        SELECT code, name, group_name, note FROM patent_activities
+         ORDER BY group_name, code"""))).all()
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for r in rows:
+        groups.setdefault(r.group_name, []).append(
+            {"code": r.code, "name": r.name, "note": r.note})
+    return {"groups": [{"name": g, "items": items} for g, items in groups.items()]}
+
+
+class ContribRefIn(BaseModel):
+    fixed_amount: float
+    extra_max: float | None = None
+    extra_threshold: float = 300000
+    extra_rate: float = 1.0
+    due_fixed: str | None = None
+    due_extra: str | None = None
+    note: str | None = None
+
+
+@router.get("/contribution-rates")
+async def contribution_rates(
+    company_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Суммы взносов ИП по годам — с пометкой, насколько цифра надёжна."""
+    await assert_company_member(company_id, current_user, db)
+    rows = (await db.execute(text("""
+        SELECT year, fixed_amount, extra_rate, extra_threshold, extra_max,
+               due_fixed, due_extra, confidence, note
+          FROM ip_contributions ORDER BY year DESC"""))).all()
+    return {"years": [{
+        "year": r.year, "fixed": float(r.fixed_amount),
+        "extraRate": float(r.extra_rate), "extraThreshold": float(r.extra_threshold),
+        "extraMax": float(r.extra_max) if r.extra_max is not None else None,
+        "dueFixed": r.due_fixed.isoformat() if r.due_fixed else None,
+        "dueExtra": r.due_extra.isoformat() if r.due_extra else None,
+        "confidence": r.confidence, "note": r.note,
+    } for r in rows]}
+
+
+@router.put("/contribution-rates/{year}")
+async def set_contribution_rate(
+    year: int,
+    company_id: str,
+    body: ContribRefIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Поправить суммы взносов года по опубликованному закону.
+
+    После правки человеком запись помечается `law`: цифра сверена, и предупреждение
+    «требует сверки» с экрана уходит.
+    """
+    await assert_company_member(company_id, current_user, db)
+    await db.execute(text("""
+        INSERT INTO ip_contributions
+            (year, fixed_amount, extra_rate, extra_threshold, extra_max,
+             due_fixed, due_extra, confidence, note)
+        VALUES (:y, :fixed, :rate, :thr, :max,
+                CAST(:df AS date), CAST(:de AS date), 'law', :note)
+        ON CONFLICT (year) DO UPDATE SET
+            fixed_amount = EXCLUDED.fixed_amount,
+            extra_rate = EXCLUDED.extra_rate,
+            extra_threshold = EXCLUDED.extra_threshold,
+            extra_max = EXCLUDED.extra_max,
+            due_fixed = EXCLUDED.due_fixed, due_extra = EXCLUDED.due_extra,
+            confidence = 'law', note = EXCLUDED.note"""),
+        {"y": year, "fixed": body.fixed_amount, "rate": body.extra_rate,
+         "thr": body.extra_threshold, "max": body.extra_max,
+         "df": body.due_fixed, "de": body.due_extra, "note": body.note})
+    await db.commit()
+    return {"ok": True, "year": year}

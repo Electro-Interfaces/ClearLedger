@@ -3950,7 +3950,9 @@ async def _office_block_data(db: AsyncSession, cid: str, key: str,
         vat_was = float(await vat_for(prev_since, prev_till) or 0)
         mode = await _tax_mode(db, p)
 
-        if mode["osno"] or not (mode["usn"] or mode["patent"]):
+        # Ставку 25 % применяем только к настоящему налогу на прибыль. У предпринимателя
+        # её нет ни на общем режиме (там НДФЛ), ни тем более на УСН и патенте.
+        if mode["osno"] or not (mode["usn"] or mode["patent"] or mode.get("osnoIp")):
             # ОСНО: налог СЧИТАЕМ, а не ждём проводки закрытия — в незакрытом месяце
             # её нет, и блок показывал бы ноль вместо реальной оценки.
             _, profit = await _result_window(db, p, since, till)
@@ -3973,11 +3975,15 @@ async def _office_block_data(db: AsyncSession, cid: str, key: str,
             # либо доход минус расходы, у патента вменённая). Берём НАЧИСЛЕННОЕ по
             # 68.12 и 68.45: это факт учёта, а не наша модель чужого режима.
             async def income_tax_for(a, b):
+                # 68.10 здесь ради предпринимателя на общем режиме: его налог с дохода
+                # живёт там, и без этого счёта блок показал бы ему ноль.
                 return (await db.execute(text("""
                     SELECT coalesce(sum(amount) FILTER (
-                             WHERE account_kt LIKE '68.12%' OR account_kt LIKE '68.45%'), 0)
+                             WHERE account_kt LIKE '68.12%' OR account_kt LIKE '68.45%'
+                                OR account_kt LIKE '68.10%'), 0)
                          - coalesce(sum(amount) FILTER (
-                             WHERE (account_dt LIKE '68.12%' OR account_dt LIKE '68.45%')
+                             WHERE (account_dt LIKE '68.12%' OR account_dt LIKE '68.45%'
+                                 OR account_dt LIKE '68.10%')
                                AND account_kt NOT LIKE '51%'
                                AND account_kt NOT LIKE '68.90%'), 0)
                       FROM gl_entries
@@ -3991,7 +3997,9 @@ async def _office_block_data(db: AsyncSession, cid: str, key: str,
 
             tax = float(await income_tax_for(since, till) or 0)
             tax_was = float(await income_tax_for(prev_since, prev_till) or 0)
-            tax_label = "Налог по патенту" if mode["patent"] and not mode["usn"] else "Налог по УСН"
+            tax_label = ("НДФЛ предпринимателя" if mode.get("osnoIp") and not mode["usn"]
+                         else "Налог по патенту" if mode["patent"] and not mode["usn"]
+                         else "Налог по УСН")
             note = ("Режим: %s. Начислено по учёту за период — авансовый платёж "
                     "приходится не на каждый месяц. Декларацию формирует бухгалтерия."
                     % mode["label"])
