@@ -42,7 +42,7 @@ export function TasksQuickPanel() {
 
   const open = (id?: string) => {
     closeInteraction()
-    navigate(id ? `/docs/errands?task=${id}` : '/docs/errands')
+    navigate(id ? `/docs/work?view=errands&task=${id}` : '/docs/work?view=errands')
   }
 
   return (

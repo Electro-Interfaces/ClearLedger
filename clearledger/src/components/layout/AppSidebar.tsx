@@ -190,8 +190,8 @@ const TASKS_SECTIONS: { to: string; label: string; icon: typeof Activity }[] = [
  */
 const DOCS_SECTIONS: { to: string; label: string; icon: typeof Activity }[] = [
   { to: '/docs', label: 'Реестры', icon: FolderOpen },
-  { to: '/docs/work', label: 'Моя работа', icon: ListChecks },
-  { to: '/docs/errands', label: 'Поручения', icon: Building2 },
+  { to: '/docs/work', label: 'На мне', icon: ListChecks },
+  { to: '/docs/company', label: 'Компания', icon: Building2 },
   { to: '/docs/overview', label: 'Обзор', icon: BarChart3 },
   { to: '/docs/regulation', label: 'Регламент', icon: Settings2 },
   { to: '/docs/setup', label: 'Настройка', icon: Settings2 },

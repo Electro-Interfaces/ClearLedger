@@ -1,10 +1,11 @@
 /**
- * Раздел «Моя работа»: что ждёт моей визы и мои документы.
+ * Раздел «На мне»: всё, что ждёт лично меня.
  *
- * Экран «На мне» — единственный канал, на который можно опереться: оповещения
- * уходят без гарантии доставки, и виза, о которой не узнали, останавливает
- * документ молча.
+ * Визы, поручения и мои документы лежат рядом намеренно. Делить личное по тому,
+ * какой движок за ним стоит, бессмысленно: человек приходит с вопросом «что на
+ * мне», а не «что у меня в документах и отдельно в поручениях».
  */
+import { lazy, Suspense } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
 import { Stamp } from 'lucide-react'
@@ -13,8 +14,10 @@ import { Card } from '@/components/ui/card'
 import * as docsService from '@/services/docsService'
 import { DOC_STATUS } from '@/services/docsService'
 import { DocCardPanel } from '@/components/docs/DocCardPanel'
-import { DocsInboxPanel } from '@/components/docs/DocsInboxPanel'
 import { useDocsView } from './DocsLayout'
+
+const TasksWorkPage = lazy(() => import('@/pages/tasks/TasksWorkPage')
+  .then((m) => ({ default: m.TasksWorkPage })))
 
 export function DocsWorkPage() {
   const { company } = useCompany()
@@ -24,15 +27,15 @@ export function DocsWorkPage() {
   const companyId = company?.id ?? ''
   const openId = params.get('doc')
 
-  const mineQ = useQuery({
+  const approvalsQ = useQuery({
     queryKey: ['docs-my-approvals', companyId],
     queryFn: () => docsService.myApprovals(companyId),
-    enabled: !!companyId && view === 'mine',
+    enabled: !!companyId && view === 'approvals',
   })
   const docsQ = useQuery({
     queryKey: ['docs-mine', companyId],
     queryFn: () => docsService.listDocs(companyId, { limit: 200 }),
-    enabled: !!companyId,
+    enabled: !!companyId && view === 'mine',
   })
 
   const open = (id: string) => setParams((p) => {
@@ -56,81 +59,84 @@ export function DocsWorkPage() {
     )
   }
 
-  const approvals = mineQ.data ?? []
-  const docs = docsQ.data?.docs ?? []
-
-  if (view === 'inbox') {
-    return <div className="px-4 py-4"><DocsInboxPanel /></div>
+  // Поручения ведёт тот же движок, что и раньше: экран переиспользуется целиком.
+  if (view === 'errands') {
+    return (
+      <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">Загрузка…</div>}>
+        <TasksWorkPage />
+      </Suspense>
+    )
   }
 
-  return (
-    <div className="space-y-4 px-4 py-4">
-      {view === 'mine' && (
-        <>
-          <div>
-            <h1 className="text-base font-semibold">Ждут моей визы</h1>
-            <p className="text-xs text-muted-foreground">
-              {mineQ.isLoading ? 'Загрузка…' : `Документов: ${approvals.length}`}
-            </p>
-          </div>
-          <Card className="divide-y divide-border/60">
-            {approvals.map((a) => (
-              <button key={a.id} type="button" onClick={() => open(a.doc_id)}
-                className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left hover:bg-accent/40">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2 text-sm">
-                    <Stamp className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                    <span className="truncate">{a.doc_title}</span>
-                  </div>
-                  <div className="text-[11px] text-muted-foreground">
-                    {a.doc_number ? `${a.doc_number} · ` : ''}шаг «{a.step_name}»
-                    {a.mode === 'parallel' ? ' · параллельно' : ''}
-                  </div>
+  if (view === 'mine') {
+    const docs = docsQ.data?.docs ?? []
+    return (
+      <div className="space-y-3 px-4 py-4">
+        <div>
+          <h1 className="text-base font-semibold">Мои документы</h1>
+          <p className="text-xs text-muted-foreground">
+            {docsQ.isLoading ? 'Загрузка…' : `Всего: ${docs.length}`}
+          </p>
+        </div>
+        <Card className="divide-y divide-border/60">
+          {docs.map((d) => (
+            <button key={d.id} type="button" onClick={() => open(d.id)}
+              className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left hover:bg-accent/40">
+              <div className="min-w-0">
+                <div className="truncate text-sm">{d.title}</div>
+                <div className="text-[11px] text-muted-foreground">
+                  {d.reg_number ?? 'без номера'} · {d.kind_name}
+                  {d.counterparty_name ? ` · ${d.counterparty_name}` : ''}
                 </div>
-                {a.due_at && (
-                  <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-xs">
-                    до {a.due_at.slice(0, 10)}
-                  </span>
-                )}
-              </button>
-            ))}
-            {!mineQ.isLoading && approvals.length === 0 && (
-              <div className="px-3 py-8 text-center text-sm text-muted-foreground">
-                Виз на вас нет
               </div>
-            )}
-          </Card>
-        </>
-      )}
+              <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-xs">
+                {DOC_STATUS[d.status]?.label ?? d.status}
+              </span>
+            </button>
+          ))}
+          {!docsQ.isLoading && docs.length === 0 && (
+            <div className="px-3 py-8 text-center text-sm text-muted-foreground">
+              Документов пока нет
+            </div>
+          )}
+        </Card>
+      </div>
+    )
+  }
 
+  const approvals = approvalsQ.data ?? []
+  return (
+    <div className="space-y-3 px-4 py-4">
       <div>
-        <h1 className="text-base font-semibold">
-          {view === 'mine' ? 'Последние документы' : 'Поручения по документам'}
-        </h1>
+        <h1 className="text-base font-semibold">Ждут моей визы</h1>
         <p className="text-xs text-muted-foreground">
-          {view === 'errands'
-            ? 'Документы, по которым поставлены поручения, ищите в карточке на вкладке «Связи»'
-            : `Всего: ${docs.length}`}
+          {approvalsQ.isLoading ? 'Загрузка…' : `Документов: ${approvals.length}`}
         </p>
       </div>
       <Card className="divide-y divide-border/60">
-        {docs.slice(0, 30).map((d) => (
-          <button key={d.id} type="button" onClick={() => open(d.id)}
-            className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left hover:bg-accent/40">
+        {approvals.map((a) => (
+          <button key={a.id} type="button" onClick={() => open(a.doc_id)}
+            className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left hover:bg-accent/40">
             <div className="min-w-0">
-              <div className="truncate text-sm">{d.title}</div>
+              <div className="flex items-center gap-2 text-sm">
+                <Stamp className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                <span className="truncate">{a.doc_title}</span>
+              </div>
               <div className="text-[11px] text-muted-foreground">
-                {d.reg_number ?? 'без номера'} · {d.kind_name}
+                {a.doc_number ? `${a.doc_number} · ` : ''}шаг «{a.step_name}»
+                {a.mode === 'parallel' ? ' · параллельно' : ''}
               </div>
             </div>
-            <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-xs">
-              {DOC_STATUS[d.status]?.label ?? d.status}
-            </span>
+            {a.due_at && (
+              <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-xs">
+                до {a.due_at.slice(0, 10)}
+              </span>
+            )}
           </button>
         ))}
-        {docs.length === 0 && (
+        {!approvalsQ.isLoading && approvals.length === 0 && (
           <div className="px-3 py-8 text-center text-sm text-muted-foreground">
-            Документов пока нет
+            Виз на вас нет
           </div>
         )}
       </Card>
