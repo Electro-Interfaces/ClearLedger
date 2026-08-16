@@ -15,7 +15,6 @@ import {
 } from '@/lib/pwaInstall'
 import { ECOSYSTEM_BRAND } from '@/config/brand'
 import { cn } from '@/lib/utils'
-import { useAuth } from '@/contexts/AuthContext'
 
 /** Индикатор жеста: тянется вместе с экраном, а не появляется скачком. */
 function PullHint({ state, distance }: { state: string; distance: number }) {
@@ -121,7 +120,9 @@ const isIos = () =>
   // iPadOS 13+ представляется Mac: отличаем по наличию тач-ввода.
   || (/mac/i.test(navigator.userAgent) && navigator.maxTouchPoints > 1)
 
-const DISMISS_KEY = 'cl-install-dismissed-at:v2'
+const isAndroid = () => /android/i.test(navigator.userAgent)
+
+const DISMISS_KEY = 'cl-install-dismissed-at:v3'
 const DISMISS_FOR_MS = 24 * 60 * 60 * 1000
 
 function wasRecentlyDismissed(): boolean {
@@ -135,7 +136,6 @@ function wasRecentlyDismissed(): boolean {
 }
 
 export function InstallApp() {
-  const { isAuthenticated } = useAuth()
   const [promptAvailable, setPromptAvailable] = useState(hasPwaInstallPrompt)
   const [hidden, setHidden] = useState(wasRecentlyDismissed)
   const [installed, setInstalled] = useState(isPwaInstalled)
@@ -151,13 +151,18 @@ export function InstallApp() {
 
   // Уже открыто приложением — предлагать нечего: это не спрятанный по условию
   // элемент, а завершённое действие. «Позже» скрывает плашку на сутки, но не навсегда.
-  // Показываем после входа на любом экране: человек может открыть прямую ссылку на
-  // «Аудит» или другой продукт и вообще не попадать на рабочий стол.
-  if (!isAuthenticated || installed || hidden) return null
+  // Не прячем установку за авторизацией: системное событие может прийти уже на
+  // экране входа, и это нормальная точка установки, как в Monitor TradeFrame.
+  if (installed || hidden) return null
 
   const dismiss = () => {
     try { localStorage.setItem(DISMISS_KEY, String(Date.now())) } catch { /* storage недоступен */ }
     setHidden(true)
+  }
+
+  const install = async () => {
+    const outcome = await requestPwaInstall()
+    if (outcome === 'dismissed') dismiss()
   }
 
   return (
@@ -174,7 +179,7 @@ export function InstallApp() {
           <button
             className="min-h-9 rounded-md bg-primary px-3 text-[13px] font-medium
                        text-primary-foreground"
-            onClick={() => { void requestPwaInstall() }}>
+            onClick={() => { void install() }}>
             Установить
           </button>
         ) : (
@@ -195,10 +200,13 @@ export function InstallApp() {
           {isIos() ? (
             <>Safari: кнопка <b>«Поделиться»</b> внизу экрана → <b>«На экран «Домой»»</b> →
               «Добавить». Приложение встанет иконкой рядом с остальными.</>
+          ) : isAndroid() ? (
+            <>Для полноценного приложения без значка браузера откройте сайт в Google Chrome
+              и используйте только <b>«Установить приложение»</b>. Пункт <b>«Добавить на
+              главный экран»</b> создаёт обычный ярлык сайта.</>
           ) : (
-            <>Меню браузера (⋮) → <b>«Установить приложение»</b> или <b>«Добавить на главный
-              экран»</b>. В Firefox пункт называется «Установить», в Samsung Internet —
-              «Добавить страницу на» → «Главный экран».</>
+            <>Для отдельного приложения используйте пункт браузера <b>«Установить
+              приложение»</b>. Если его нет, откройте сайт в Chrome или Edge.</>
           )}
         </div>
       )}

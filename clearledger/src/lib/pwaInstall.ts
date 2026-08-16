@@ -1,4 +1,7 @@
-export type PwaInstallPrompt = Event & { prompt: () => Promise<void> }
+export type PwaInstallPrompt = Event & {
+  prompt: () => Promise<void>
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>
+}
 
 type InstallState = {
   installed: boolean
@@ -55,10 +58,15 @@ export function hasPwaInstallPrompt(): boolean {
   return pendingPrompt !== null
 }
 
-export async function requestPwaInstall(): Promise<void> {
+export async function requestPwaInstall(): Promise<'accepted' | 'dismissed' | null> {
   const prompt = pendingPrompt
-  if (!prompt) return
-  pendingPrompt = null
-  notify()
-  await prompt.prompt()
+  if (!prompt) return null
+  try {
+    await prompt.prompt()
+    const choice = await prompt.userChoice
+    return choice.outcome
+  } finally {
+    pendingPrompt = null
+    notify()
+  }
 }

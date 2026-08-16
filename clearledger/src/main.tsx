@@ -56,16 +56,16 @@ if (!isApiEnabled()) {
 // Service worker регистрируем ЗДЕСЬ, а не при включении уведомлений: Chrome
 // предлагает поставить приложение на телефон только сайту с активным SW, и
 // «Пульс» не предлагался никому, кто не включил пуши в чате. Пуш-подписка
-// (`lib/chatPush`) переиспользует эту же регистрацию.
+// (`lib/chatPush`) переиспользует эту же регистрацию. Не ждём window.load:
+// чем раньше SW активируется и возьмёт страницу под контроль, тем раньше браузер
+// выдаст настоящее beforeinstallprompt вместо сценария обычного ярлыка сайта.
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`, {
-      scope: import.meta.env.BASE_URL,
-      updateViaCache: 'none',
-    }).catch((err) => {
-      // Не повод ронять приложение: без SW работает всё, кроме установки и пушей.
-      console.warn('[Пространство] service worker не зарегистрирован:', err)
-    })
+  navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`, {
+    scope: import.meta.env.BASE_URL,
+    updateViaCache: 'none',
+  }).catch((err) => {
+    // Не повод ронять приложение: без SW работает всё, кроме установки и пушей.
+    console.warn('[Пространство] service worker не зарегистрирован:', err)
   })
 }
 
