@@ -136,8 +136,82 @@ async def seed_data(db: AsyncSession) -> None:
     # --- Системные роли доступа (RBAC) для всех компаний ---
     await _seed_system_roles(db)
 
+    # --- Канцелярия «Трека»: виды документов и номенклатура дел ---
+    await _seed_doc_kinds(db)
+
     await db.commit()
     logger.info("Seed завершён")
+
+
+# Стартовая канцелярия. Четыре вида покрывают то, с чего начинается любое
+# делопроизводство: переписка в обе стороны, распорядительный документ и
+# внутренняя записка. Дела и сроки — по Перечню типовых документов
+# (приказ Росархива № 236 от 20.12.2019).
+_DOC_CASES_SEED = [
+    {"index": "01-01", "title": "Приказы по основной деятельности",
+     "storage_term": "Постоянно", "storage_years": None, "epk": False},
+    {"index": "01-02", "title": "Переписка по основной деятельности",
+     "storage_term": "5 лет ЭПК", "storage_years": 5, "epk": True},
+    {"index": "01-03", "title": "Служебные и докладные записки",
+     "storage_term": "5 лет", "storage_years": 5, "epk": False},
+]
+
+_DOC_KINDS_SEED = [
+    {"code": "doc_in", "name": "Входящее письмо", "family": "incoming",
+     "direction": "in", "number_prefix": "ВХ", "case": "01-02", "sort_order": 10},
+    {"code": "doc_out", "name": "Исходящее письмо", "family": "outgoing",
+     "direction": "out", "number_prefix": "ИСХ", "case": "01-02", "sort_order": 20},
+    {"code": "order", "name": "Приказ", "family": "ord",
+     "direction": "none", "number_prefix": "ПР", "case": "01-01", "sort_order": 30},
+    {"code": "memo", "name": "Служебная записка", "family": "internal",
+     "direction": "none", "number_prefix": "СЗ", "case": "01-03", "sort_order": 40},
+]
+
+
+async def _seed_doc_kinds(db: AsyncSession) -> None:
+    """Заводит стартовую канцелярию компаниям, у которых её нет.
+
+    Условие — «нет ни одного вида», а не «нет вида с таким кодом»: удалённый
+    делопроизводителем вид возвращать нельзя, это его решение. Пустой же
+    справочник делает продукт нерабочим — зарегистрировать нечем.
+    """
+    from datetime import datetime, timezone
+
+    from app.models import DocCase, DocKind
+
+    year = datetime.now(timezone.utc).year
+    by_code = {row["code"]: row["case"] for row in _DOC_KINDS_SEED}
+    companies = (await db.execute(select(Company.id, Company.name))).all()
+    for cid, cname in companies:
+        cases = {c.index: c for c in (await db.execute(
+            select(DocCase).where(DocCase.company_id == cid))).scalars().all()}
+        if not cases:
+            for row in _DOC_CASES_SEED:
+                case = DocCase(company_id=cid, organization_id=None, year=year, **row)
+                db.add(case)
+                cases[row["index"]] = case
+            await db.flush()
+            logger.info("Номенклатура дел заведена: %s (%d дела)", cname, len(cases))
+
+        kinds = (await db.execute(
+            select(DocKind).where(DocKind.company_id == cid))).scalars().all()
+        if not kinds:
+            for row in _DOC_KINDS_SEED:
+                spec = dict(row)
+                case = cases.get(spec.pop("case"))
+                db.add(DocKind(company_id=cid, default_case_id=case.id if case else None,
+                               requires_registration=True, is_active=True, **spec))
+            logger.info("Виды документов заведены: %s (%d вида)", cname, len(_DOC_KINDS_SEED))
+            continue
+
+        # Вид, заведённый руками до появления номенклатуры, остаётся без дела —
+        # тогда срок хранения при регистрации взять неоткуда. Привязываем по коду,
+        # но только пустое поле: выбор делопроизводителя не переписываем.
+        for kind in kinds:
+            if kind.default_case_id is None and kind.code in by_code:
+                case = cases.get(by_code[kind.code])
+                if case is not None:
+                    kind.default_case_id = case.id
 
 
 async def _seed_system_roles(db: AsyncSession) -> None:
