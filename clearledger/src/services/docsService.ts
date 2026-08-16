@@ -1,5 +1,5 @@
 /**
- * Приложение «Дело» — документооборот пространства.
+ * Приложение «Трек» — документооборот и работа компании.
  *
  * Документ здесь самостоятельный объект: вид, реквизиты, регистрационный номер,
  * редакции файла и след. Поручение по документу — обычная задача, поэтому здесь
@@ -305,4 +305,110 @@ export async function rolloverCases(
   companyId: string, year: number,
 ): Promise<{ added: number; year: number }> {
   return post(`/api/docs/cases/rollover?company_id=${companyId}&year=${year}`, {})
+}
+
+
+/** Доска: колонки — шаги маршрута согласования, а не состояния карточки. */
+export interface DocBoardColumn {
+  key: string
+  name: string
+  docs: Array<{
+    id: string; title: string; reg_number: string | null; status: string
+    kind_name: string; waiting: number; due_at: string | null
+  }>
+}
+
+export async function board(
+  companyId: string, family?: string,
+): Promise<{ columns: DocBoardColumn[] }> {
+  const params: Record<string, string> = { company_id: companyId }
+  if (family) params.family = family
+  return get<{ columns: DocBoardColumn[] }>('/api/docs/board', params)
+}
+
+
+/** Точка обмена с корпоративной системой головной компании: папка туда и обратно. */
+export interface DocExchangeTarget {
+  id: string
+  code: string
+  name: string
+  system: string          // sedo | naumen | other
+  outbox_path: string
+  inbox_path: string
+  as_archive: boolean
+  is_active: boolean
+  note: string | null
+  last_export_at: string | null
+  last_scan_at: string | null
+  last_error: string | null
+}
+
+export interface DocExportRow {
+  id: string
+  status: string          // placed | downloaded | failed
+  package: string
+  path: string | null
+  size: number
+  target: string
+  files: number
+  error: string | null
+  created_at: string | null
+}
+
+export interface DocInboxItem {
+  id: string
+  file_name: string
+  size: number
+  file_id: string | null
+  target: string
+  parsed: Record<string, string>
+  status: string
+  doc_id: string | null
+  found_at: string | null
+}
+
+export async function exchangeTargets(companyId: string): Promise<DocExchangeTarget[]> {
+  const r = await get<{ targets: DocExchangeTarget[] }>('/api/docs/exchange/targets',
+    { company_id: companyId })
+  return r.targets ?? []
+}
+
+export async function createExchangeTarget(
+  companyId: string, body: Record<string, unknown>,
+): Promise<{ id: string; code: string; name: string }> {
+  return post('/api/docs/exchange/targets', { ...body, company_id: companyId })
+}
+
+/** Выгрузить документ в папку головной компании. */
+export async function exportDoc(
+  companyId: string, id: string, targetId: string,
+): Promise<{ id: string; package: string; path: string; files: number }> {
+  return post(`/api/docs/${id}/export?company_id=${companyId}&target_id=${targetId}`, {})
+}
+
+export async function listExports(companyId: string, id: string): Promise<DocExportRow[]> {
+  const r = await get<{ exports: DocExportRow[] }>(`/api/docs/${id}/exports`,
+    { company_id: companyId })
+  return r.exports ?? []
+}
+
+/** Посмотреть, что головная компания положила нам в папку. */
+export async function scanInbox(
+  companyId: string,
+): Promise<{ targets: number; added: number }> {
+  return post(`/api/docs/exchange/scan?company_id=${companyId}`, {})
+}
+
+export async function listInbox(
+  companyId: string, status = 'new',
+): Promise<DocInboxItem[]> {
+  const r = await get<{ items: DocInboxItem[] }>('/api/docs/exchange/inbox',
+    { company_id: companyId, status })
+  return r.items ?? []
+}
+
+export async function decideInbox(
+  companyId: string, itemId: string, body: Record<string, unknown>,
+): Promise<{ status: string; doc_id?: string }> {
+  return post(`/api/docs/exchange/inbox/${itemId}`, { ...body, company_id: companyId })
 }

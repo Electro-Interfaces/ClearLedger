@@ -18,9 +18,9 @@ import { AuditorPanel } from '@/components/auditor/AuditorPanel'
 import { useCompany } from '@/contexts/CompanyContext'
 
 // Ключ секции остался `tickets` (он в localStorage у людей), а подпись — «Поддержка»:
-// это разговор с поставщиком программы, а не заявки компании и не «Задачи».
+// это разговор с поставщиком программы, а не заявки компании и не «Трек».
 const TITLES: Record<string, string> = {
-  chat: 'Чат', tasks: 'Задачи', tickets: 'Поддержка', help: 'Инфо', auditor: 'Аудитор',
+  chat: 'Чат', tasks: 'Трек', tickets: 'Поддержка', help: 'Инфо', auditor: 'Аудитор',
 }
 
 export function InteractionModal() {

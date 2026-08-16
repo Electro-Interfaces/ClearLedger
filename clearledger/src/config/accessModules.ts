@@ -51,7 +51,10 @@ export const ACCESS_PRESETS: AccessPreset[] = [
  *  `plan`/`conf`, не по движку. Имена — те же, что в реестре. */
 export const APP_LABELS: Record<string, string> = {
   admin: 'Управление', ledger: 'Учёт', support: 'Поддержка',
-  chat: 'Чаты', plan: 'Задачи', conf: 'Конференции',
+  chat: 'Чаты', docs: 'Трек', conf: 'Конференции',
+  // Ключ `plan` остаётся ради старых ролей: поручения живут в «Деле»,
+  // но выданный когда-то доступ не должен молча пропасть из матрицы.
+  plan: 'Поручения (старый ключ)',
   // Продукты разреза Учёта (config/spaceProducts.ts).
   projects: 'Проекты', ops: 'Эксплуатация', sales: 'Продажи',
   finance: 'Финансы', data: 'Данные',

@@ -14,6 +14,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { get, post } from '@/services/apiClient'
 import type { DocDetails } from '@/services/docsService'
+import { DocExchangeBlock } from './DocExchangeBlock'
 
 interface ShareRow {
   id: string
@@ -105,6 +106,8 @@ export function DocSendTab({ doc, companyId, onChanged }: {
 
   return (
     <div className="space-y-3 pt-3">
+      <DocExchangeBlock doc={doc} companyId={companyId} />
+
       <Card className="space-y-3 p-4">
         <div className="flex items-center gap-2 text-sm font-medium">
           <Link2 className="h-4 w-4" />Ссылка на просмотр

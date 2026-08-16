@@ -1,5 +1,5 @@
 """
-Приложение «Дело» — документооборот пространства.
+Приложение «Трек» — документооборот и работа компании.
 
 Документ здесь самостоятельный объект: у него вид, реквизиты, регистрационный
 номер, редакции файла и след. Поручение по документу ставится «Задачами» — там
@@ -22,6 +22,9 @@ from datetime import date as date_type, datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from urllib.parse import quote
+
+from fastapi import Response
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
@@ -32,13 +35,15 @@ from app.auth import assert_company_product, get_current_user
 from app.database import get_db
 from app.models import (
     Counterparty, DocApproval, DocCard, DocCase, DocEvent, DocKind, DocRelation,
-    DocShareLink, DocVersion, Organization, Task, TaskEvent, TaskType, User, UserCompany,
+    DocExchangeTarget, DocExport, DocInboxItem, DocLabelLink, DocShareLink,
+    DocVersion, Organization, SourceFile, Task, TaskEvent, TaskLabel,
+    TaskType, TaskWorkItem, User, UserCompany,
 )
 from app.routers import doc_share_router
-from app.services import doc_approvals, doc_print, file_store, mail_send
+from app.services import doc_approvals, doc_exchange, doc_print, file_store, mail_send
 from app.services.doc_numbers import next_number, render, scope_key
 
-router = APIRouter(prefix="/docs", tags=["Дело"])
+router = APIRouter(prefix="/docs", tags=["Трек"])
 
 _LIST_LIMIT = 500
 _FAMILIES = ("ord", "incoming", "outgoing", "internal", "contract", "other")
@@ -963,6 +968,501 @@ async def print_doc(
     d = await _doc_or_404(db, cid, doc_id)
     _assert_visible(d, current_user)
     return HTMLResponse(await doc_print.render_card(db, d))
+
+
+# ── Регламент и разрезы: то же, что у поручений, но по документам ────────────
+#
+# Справочники общие с поручениями (метки, шаблоны, расписания, представления):
+# в одном продукте человек не должен видеть два разных списка меток и два места
+# для регламента. Отличается только область применения.
+
+
+@router.get("/labels")
+async def list_doc_labels(
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Справочник меток пространства — общий с поручениями."""
+    cid = await assert_company_product(company_id, current_user, db, "docs")
+    rows = (await db.execute(select(TaskLabel).where(
+        TaskLabel.company_id == cid).order_by(TaskLabel.name))).scalars().all()
+    return {"labels": [{"id": str(r.id), "name": r.name, "color": r.color} for r in rows]}
+
+
+class LabelIn(BaseModel):
+    company_id: str
+    name: str = Field(..., min_length=1, max_length=60)
+    color: str = Field("slate", max_length=20)
+
+
+@router.post("/labels", status_code=status.HTTP_201_CREATED)
+async def create_doc_label(
+    payload: LabelIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cid = await assert_company_product(payload.company_id, current_user, db, "docs")
+    dup = (await db.execute(select(TaskLabel.id).where(
+        TaskLabel.company_id == cid,
+        func.lower(TaskLabel.name) == payload.name.strip().lower()))).scalar_one_or_none()
+    if dup is not None:
+        return {"id": str(dup), "duplicate": True}
+    row = TaskLabel(company_id=cid, name=payload.name.strip(), color=payload.color)
+    db.add(row)
+    await db.commit()
+    await db.refresh(row)
+    return {"id": str(row.id), "name": row.name, "color": row.color}
+
+
+class DocLabelIn(BaseModel):
+    company_id: str
+    label_id: str
+    on: bool = True
+
+
+@router.post("/{doc_id}/labels")
+async def toggle_doc_label(
+    doc_id: str,
+    payload: DocLabelIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Повесить или снять метку. Одна ручка на оба действия: отдельная ручка на
+    снятие означала бы две проверки прав на одно и то же."""
+    cid = await assert_company_product(payload.company_id, current_user, db, "docs")
+    d = await _doc_or_404(db, cid, doc_id)
+    _assert_visible(d, current_user)
+    lid = _uuid_or_400(payload.label_id, "label_id")
+    link = await db.get(DocLabelLink, (d.id, lid))
+    if payload.on and link is None:
+        db.add(DocLabelLink(doc_id=d.id, label_id=lid))
+    elif not payload.on and link is not None:
+        await db.delete(link)
+    await db.commit()
+    return {"on": payload.on}
+
+
+class WorkItemIn(BaseModel):
+    company_id: str
+    minutes: int = Field(..., ge=1, le=24 * 60)
+    work_date: date_type | None = None
+    description: str | None = None
+
+
+@router.post("/{doc_id}/time", status_code=status.HTTP_201_CREATED)
+async def add_doc_time(
+    doc_id: str,
+    payload: WorkItemIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Записать время по документу.
+
+    Дата работы отдельно от даты записи: время вносят задним числом, и «когда
+    сделал» не равно «когда вспомнил записать».
+    """
+    cid = await assert_company_product(payload.company_id, current_user, db, "docs")
+    d = await _doc_or_404(db, cid, doc_id)
+    _assert_visible(d, current_user)
+    row = TaskWorkItem(
+        doc_id=d.id, user_id=current_user.id, created_by=current_user.id,
+        work_date=payload.work_date or datetime.now(timezone.utc).date(),
+        minutes=payload.minutes, description=payload.description)
+    db.add(row)
+    db.add(DocEvent(doc_id=d.id, kind="field", user_id=current_user.id,
+                    actor_name=current_user.name or current_user.email,
+                    to_value=f"{payload.minutes} мин", note="учёт времени"))
+    await db.commit()
+    return {"id": str(row.id), "minutes": row.minutes}
+
+
+@router.get("/board")
+async def docs_board(
+    company_id: str = Query(...),
+    family: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Доска: как идёт дело по процессу.
+
+    Колонки — шаги маршрута согласования, а не состояния карточки: вопрос «где
+    документ застрял» это вопрос о шаге и о том, кого ждут. Документы без
+    запущенного согласования собраны отдельной колонкой.
+    """
+    cid = await assert_company_product(company_id, current_user, db, "docs")
+    stmt = select(DocCard).where(DocCard.company_id == cid,
+                                 DocCard.status.notin_(("archived", "cancelled")))
+    if family:
+        stmt = stmt.where(DocCard.family == family)
+    docs = [d for d in (await db.execute(stmt.limit(_LIST_LIMIT))).scalars().all()
+            if _visible(d, current_user)]
+    if not docs:
+        return {"columns": []}
+
+    rows = (await db.execute(select(DocApproval).where(
+        DocApproval.company_id == cid,
+        DocApproval.doc_id.in_([d.id for d in docs])))).scalars().all()
+    live: dict[uuid.UUID, list[DocApproval]] = {}
+    for r in rows:
+        doc = next((x for x in docs if x.id == r.doc_id), None)
+        if doc is not None and r.round == doc.approval_round:
+            live.setdefault(r.doc_id, []).append(r)
+
+    columns: dict[str, dict[str, Any]] = {}
+    for d in docs:
+        group = live.get(d.id, [])
+        pending = [r for r in group if r.status == "pending"]
+        if not group:
+            key, name = "no_route", "Без согласования"
+        elif pending:
+            step = min(pending, key=lambda r: r.step_no)
+            key, name = f"step:{step.step_no}", step.step_name
+        elif any(r.status == "rejected" for r in group):
+            key, name = "rejected", "Возвращены"
+        else:
+            key, name = "approved", "Согласованы"
+        col = columns.setdefault(key, {"key": key, "name": name, "docs": []})
+        col["docs"].append({
+            "id": str(d.id), "title": d.title, "reg_number": d.reg_number,
+            "status": d.status, "kind_name": d.kind_code,
+            "waiting": len(pending),
+            "due_at": d.due_at.isoformat() if d.due_at else None,
+        })
+    order = {"no_route": 0, "rejected": 90, "approved": 99}
+    return {"columns": sorted(columns.values(),
+                              key=lambda c: order.get(c["key"], int(
+                                  c["key"].split(":")[1]) if ":" in c["key"] else 50))}
+
+
+# ── Обмен с корпоративными системами головной компании ───────────────────────
+
+
+class TargetIn(BaseModel):
+    company_id: str
+    code: str = Field(..., min_length=1, max_length=40)
+    name: str = Field(..., min_length=1, max_length=160)
+    system: str = Field("other", pattern="^(sedo|naumen|other)$")
+    outbox_path: str = Field("", max_length=500)
+    inbox_path: str = Field("", max_length=500)
+    as_archive: bool = True
+    is_active: bool = True
+    note: str | None = None
+
+
+@router.get("/exchange/targets")
+async def list_targets(
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cid = await assert_company_product(company_id, current_user, db, "docs")
+    rows = (await db.execute(select(DocExchangeTarget).where(
+        DocExchangeTarget.company_id == cid).order_by(
+        DocExchangeTarget.name))).scalars().all()
+    return {"targets": [{
+        "id": str(t.id), "code": t.code, "name": t.name, "system": t.system,
+        "outbox_path": t.outbox_path, "inbox_path": t.inbox_path,
+        "as_archive": t.as_archive, "is_active": t.is_active, "note": t.note,
+        "last_export_at": t.last_export_at.isoformat() if t.last_export_at else None,
+        "last_scan_at": t.last_scan_at.isoformat() if t.last_scan_at else None,
+        "last_error": t.last_error,
+    } for t in rows]}
+
+
+@router.post("/exchange/targets", status_code=status.HTTP_201_CREATED)
+async def create_target(
+    payload: TargetIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Завести точку обмена. Правит администратор: путь к папке головной компании
+    это настройка пространства, а не личное предпочтение."""
+    cid = await assert_company_product(payload.company_id, current_user, db, "docs")
+    await _assert_admin(db, cid, current_user)
+    dup = (await db.execute(select(DocExchangeTarget.id).where(
+        DocExchangeTarget.company_id == cid,
+        DocExchangeTarget.code == payload.code))).scalar_one_or_none()
+    if dup is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Точка с таким кодом уже есть")
+    t = DocExchangeTarget(
+        company_id=cid, code=payload.code, name=payload.name, system=payload.system,
+        outbox_path=payload.outbox_path.strip(), inbox_path=payload.inbox_path.strip(),
+        as_archive=payload.as_archive, is_active=payload.is_active, note=payload.note)
+    db.add(t)
+    await db.commit()
+    await db.refresh(t)
+    return {"id": str(t.id), "code": t.code, "name": t.name}
+
+
+@router.post("/{doc_id}/export", status_code=status.HTTP_201_CREATED)
+async def export_doc(
+    doc_id: str,
+    company_id: str = Query(...),
+    target_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Выгрузить документ в папку головной компании.
+
+    Только зарегистрированный: наружу уходит номер, по нему принимающая сторона
+    и опознаёт документ. Повторная выгрузка разрешена — версия могла измениться,
+    и прежний пакет при этом не затирается.
+    """
+    cid = await assert_company_product(company_id, current_user, db, "docs")
+    d = await _doc_or_404(db, cid, doc_id)
+    _assert_visible(d, current_user)
+    if not d.reg_number:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Сначала зарегистрируйте документ: наружу уходит номер")
+
+    target = (await db.execute(select(DocExchangeTarget).where(
+        DocExchangeTarget.company_id == cid,
+        DocExchangeTarget.id == _uuid_or_400(target_id, "target_id")))).scalar_one_or_none()
+    if target is None or not target.is_active:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Точка обмена не найдена")
+    if not target.outbox_path:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "У точки обмена не указана папка выгрузки")
+
+    data, content = await doc_exchange.build_package(db, d)
+    name = doc_exchange.package_name(d)
+    row = DocExport(
+        company_id=cid, doc_id=d.id, target_id=target.id, package_name=f"{name}.zip",
+        package_sha256=hashlib.sha256(data).hexdigest(), size_bytes=len(data),
+        content=content, created_by=current_user.id)
+    try:
+        row.package_path = doc_exchange.place_package(target, name, data)
+        row.status = "placed"
+        target.last_export_at = datetime.now(timezone.utc)
+        target.last_error = None
+    except OSError as e:
+        # Папка недоступна — не молчим и не теряем пакет: пишем отказ в журнал,
+        # человек скачает архив кнопкой рядом.
+        row.status = "failed"
+        row.error = str(e)[:500]
+        target.last_error = str(e)[:500]
+    db.add(row)
+    db.add(DocEvent(doc_id=d.id, kind="dispatch", user_id=current_user.id,
+                    actor_name=current_user.name or current_user.email,
+                    to_value=target.name,
+                    note=("выгружен в папку" if row.status == "placed"
+                          else f"папка недоступна: {row.error}")))
+    await db.commit()
+    if row.status == "failed":
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY,
+                            f"Папка недоступна: {row.error}")
+    return {"id": str(row.id), "package": row.package_name, "path": row.package_path,
+            "files": len(content.get("files", []))}
+
+
+@router.get("/{doc_id}/export/download")
+async def download_package(
+    doc_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Скачать тот же пакет файлом — когда папка недоступна или нужен разовый обмен."""
+    cid = await assert_company_product(company_id, current_user, db, "docs")
+    d = await _doc_or_404(db, cid, doc_id)
+    _assert_visible(d, current_user)
+    data, content = await doc_exchange.build_package(db, d)
+    name = doc_exchange.package_name(d)
+    db.add(DocExport(
+        company_id=cid, doc_id=d.id, status="downloaded",
+        package_name=f"{name}.zip", package_sha256=hashlib.sha256(data).hexdigest(),
+        size_bytes=len(data), content=content, created_by=current_user.id))
+    db.add(DocEvent(doc_id=d.id, kind="dispatch", user_id=current_user.id,
+                    actor_name=current_user.name or current_user.email,
+                    to_value="скачан пакет", note="выгрузка файлом"))
+    await db.commit()
+    return Response(
+        content=data, media_type="application/zip",
+        headers={"Content-Disposition":
+                 "attachment; filename*=UTF-8''" + quote(f"{name}.zip")})
+
+
+@router.get("/{doc_id}/exports")
+async def list_exports(
+    doc_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Что и когда уходило по этому документу. Вопрос сверки «отдавали ли» имеет
+    ответ строкой журнала, а не памятью."""
+    cid = await assert_company_product(company_id, current_user, db, "docs")
+    d = await _doc_or_404(db, cid, doc_id)
+    _assert_visible(d, current_user)
+    rows = (await db.execute(select(DocExport).where(
+        DocExport.doc_id == d.id).order_by(DocExport.created_at.desc()))).scalars().all()
+    names = {str(t.id): t.name for t in (await db.execute(select(DocExchangeTarget).where(
+        DocExchangeTarget.company_id == cid))).scalars().all()}
+    return {"exports": [{
+        "id": str(r.id), "status": r.status, "package": r.package_name,
+        "path": r.package_path, "size": r.size_bytes,
+        "target": names.get(str(r.target_id), "файлом"),
+        "files": len((r.content or {}).get("files", [])),
+        "error": r.error,
+        "created_at": r.created_at.isoformat() if r.created_at else None,
+    } for r in rows]}
+
+
+@router.post("/exchange/scan")
+async def scan_targets(
+    company_id: str = Query(...),
+    target_id: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Посмотреть, что головная компания положила нам в папку.
+
+    Файлы не удаляются и не перекладываются: папка чужая. Найденное становится
+    кандидатом, решение о заведении карточки принимает человек.
+    """
+    cid = await assert_company_product(company_id, current_user, db, "docs")
+    stmt = select(DocExchangeTarget).where(
+        DocExchangeTarget.company_id == cid,
+        DocExchangeTarget.is_active.is_(True))
+    if target_id:
+        stmt = stmt.where(DocExchangeTarget.id == _uuid_or_400(target_id, "target_id"))
+    targets = [t for t in (await db.execute(stmt)).scalars().all() if t.inbox_path]
+
+    added = 0
+    for t in targets:
+        try:
+            found = doc_exchange.scan_inbox(t)
+            t.last_error = None
+        except OSError as e:
+            t.last_error = str(e)[:500]
+            continue
+        t.last_scan_at = datetime.now(timezone.utc)
+        for item in found:
+            dup = (await db.execute(select(DocInboxItem.id).where(
+                DocInboxItem.company_id == cid,
+                DocInboxItem.sha256 == item["sha256"]))).scalar_one_or_none()
+            if dup is not None:
+                continue
+            sf = file_store.put(db, cid, item["data"],
+                                file_name=item["file_name"], mime=None)
+            await db.flush()
+            db.add(DocInboxItem(
+                company_id=cid, target_id=t.id, file_name=item["file_name"],
+                source_path=item["source_path"], size_bytes=item["size"],
+                sha256=item["sha256"], file_id=sf.id,
+                parsed=item["parsed"] or None))
+            added += 1
+    await db.commit()
+    return {"targets": len(targets), "added": added}
+
+
+@router.get("/exchange/inbox")
+async def list_inbox(
+    company_id: str = Query(...),
+    status_: str = Query("new", alias="status"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cid = await assert_company_product(company_id, current_user, db, "docs")
+    stmt = select(DocInboxItem).where(DocInboxItem.company_id == cid)
+    if status_ != "all":
+        stmt = stmt.where(DocInboxItem.status == status_)
+    rows = (await db.execute(stmt.order_by(
+        DocInboxItem.found_at.desc()).limit(_LIST_LIMIT))).scalars().all()
+    names = {str(t.id): t.name for t in (await db.execute(select(DocExchangeTarget).where(
+        DocExchangeTarget.company_id == cid))).scalars().all()}
+    return {"items": [{
+        "id": str(r.id), "file_name": r.file_name, "size": r.size_bytes,
+        "file_id": str(r.file_id) if r.file_id else None,
+        "target": names.get(str(r.target_id), ""),
+        "parsed": r.parsed or {}, "status": r.status,
+        "doc_id": str(r.doc_id) if r.doc_id else None,
+        "found_at": r.found_at.isoformat() if r.found_at else None,
+    } for r in rows]}
+
+
+class InboxDecisionIn(BaseModel):
+    company_id: str
+    accept: bool = True
+    kind_id: str | None = None
+    title: str | None = None
+    counterparty_name: str | None = None
+    note: str | None = None
+
+
+@router.post("/exchange/inbox/{item_id}")
+async def decide_inbox(
+    item_id: str,
+    payload: InboxDecisionIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Принять файл из папки документом или отклонить.
+
+    Принятый заводится карточкой-черновиком: номер ему присвоит человек при
+    регистрации, потому что чужой регистрационный номер нашим журналом не
+    управляет.
+    """
+    cid = await assert_company_product(payload.company_id, current_user, db, "docs")
+    item = (await db.execute(select(DocInboxItem).where(
+        DocInboxItem.company_id == cid,
+        DocInboxItem.id == _uuid_or_400(item_id, "item_id")))).scalar_one_or_none()
+    if item is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Кандидат не найден")
+    if item.status != "new":
+        raise HTTPException(status.HTTP_409_CONFLICT, "По кандидату уже решили")
+
+    item.decided_by = current_user.id
+    item.decided_at = datetime.now(timezone.utc)
+    item.note = payload.note
+
+    if not payload.accept:
+        item.status = "rejected"
+        await db.commit()
+        return {"status": "rejected"}
+
+    parsed = item.parsed or {}
+    kind = await _kind_or_404(db, cid, payload.kind_id) if payload.kind_id else None
+    if kind is None:
+        kind = (await db.execute(select(DocKind).where(
+            DocKind.company_id == cid, DocKind.family == "incoming",
+            DocKind.is_active.is_(True)).order_by(DocKind.sort_order))).scalars().first()
+    if kind is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Не выбран вид документа, а входящих видов в справочнике нет")
+
+    d = DocCard(
+        company_id=cid, kind_id=kind.id, kind_code=kind.code, family=kind.family,
+        direction=kind.direction,
+        title=(payload.title or parsed.get("title") or item.file_name)[:500],
+        summary=parsed.get("summary"),
+        counterparty_name=(payload.counterparty_name
+                           or parsed.get("counterparty_name") or "")[:500],
+        external_number=parsed.get("reg_number"),
+        author_id=current_user.id, source="edo",
+        source_ref=f"inbox:{item.id}")
+    db.add(d)
+    await db.flush()
+    db.add(DocEvent(doc_id=d.id, kind="created", user_id=current_user.id,
+                    actor_name=current_user.name or current_user.email,
+                    to_value=kind.name, note=f"принят из папки: {item.file_name}"))
+
+    if item.file_id:
+        sf = await db.get(SourceFile, item.file_id)
+        if sf is not None:
+            db.add(DocVersion(
+                company_id=cid, doc_id=d.id, revision=1, role="body",
+                file_id=sf.id, file_name=sf.file_name, mime=sf.mime_type,
+                size_bytes=sf.size or 0, sha256=item.sha256,
+                author_id=current_user.id))
+            d.has_files = True
+            d.current_revision = 1
+
+    item.status = "accepted"
+    item.doc_id = d.id
+    await db.commit()
+    return {"status": "accepted", "doc_id": str(d.id)}
 
 
 @router.get("/{doc_id}")

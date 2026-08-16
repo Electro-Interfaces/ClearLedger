@@ -26,12 +26,12 @@ import { TasksQuickPanel } from '@/components/tasks/TasksQuickPanel'
 import { InfoContextPanel } from '@/components/info/InfoContextPanel'
 import { AuditorPanel } from '@/components/auditor/AuditorPanel'
 import { useCompany } from '@/contexts/CompanyContext'
-import { useTasksApp } from '@/hooks/useTasksApp'
+import { useDocsApp } from '@/hooks/useDocsApp'
 
 type Tab = { key: InteractionSection; label: string; icon: typeof MessageCircle }
 const TABS: Tab[] = [
   { key: 'chat', label: 'Чат', icon: MessageCircle },
-  { key: 'tasks', label: 'Задачи', icon: ListChecks },
+  { key: 'tasks', label: 'Трек', icon: ListChecks },
   // «Аудитор» стоит рядом с «Инфо» осознанно: и то, и другое отвечает на вопрос
   // «что здесь происходит», только справка знает продукт, а аудитор — данные.
   { key: 'auditor', label: 'Аудитор', icon: Bot },
@@ -86,7 +86,7 @@ export function RightDock() {
   // «Задачи» в рейле — по тому же праву, что и маршрут: иначе вкладка вела бы в 403.
   // «Аудитор» — по включённости продукта: пространство без него не должно показывать
   // вкладку, которая ответит «сервис не настроен».
-  const tasksOn = useTasksApp()
+  const tasksOn = useDocsApp()
   const { canApp } = useCompany()
   const tabs = TABS.filter((t) => (t.key !== 'tasks' || tasksOn) && (t.key !== 'auditor' || canApp('auditor')))
 

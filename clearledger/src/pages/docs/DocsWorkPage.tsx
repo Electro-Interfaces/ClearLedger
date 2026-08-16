@@ -13,6 +13,7 @@ import { Card } from '@/components/ui/card'
 import * as docsService from '@/services/docsService'
 import { DOC_STATUS } from '@/services/docsService'
 import { DocCardPanel } from '@/components/docs/DocCardPanel'
+import { DocsInboxPanel } from '@/components/docs/DocsInboxPanel'
 import { useDocsView } from './DocsLayout'
 
 export function DocsWorkPage() {
@@ -57,6 +58,10 @@ export function DocsWorkPage() {
 
   const approvals = mineQ.data ?? []
   const docs = docsQ.data?.docs ?? []
+
+  if (view === 'inbox') {
+    return <div className="px-4 py-4"><DocsInboxPanel /></div>
+  }
 
   return (
     <div className="space-y-4 px-4 py-4">

@@ -184,13 +184,16 @@ const TASKS_SECTIONS: { to: string; label: string; icon: typeof Activity }[] = [
 ]
 
 /**
- * Разделы «Дела»: сначала реестры (за ними приходят чаще всего), потом своя
+ * Разделы «Трека»: сначала реестры (за ними приходят чаще всего), потом своя
  * работа и настройка. Порядок тот же, что у «Задач»: человек открывает продукт,
  * чтобы найти документ, а не чтобы посмотреть справочник видов.
  */
 const DOCS_SECTIONS: { to: string; label: string; icon: typeof Activity }[] = [
   { to: '/docs', label: 'Реестры', icon: FolderOpen },
   { to: '/docs/work', label: 'Моя работа', icon: ListChecks },
+  { to: '/docs/errands', label: 'Поручения', icon: Building2 },
+  { to: '/docs/overview', label: 'Обзор', icon: BarChart3 },
+  { to: '/docs/regulation', label: 'Регламент', icon: Settings2 },
   { to: '/docs/setup', label: 'Настройка', icon: Settings2 },
 ]
 
@@ -347,7 +350,7 @@ function SidebarNavBody({ collapsed = false, onNavigate }: {
     )
   }
 
-  // «Дело» — документооборот: такое же приложение Ядра, как «Задачи», и
+  // «Трек» — документооборот и работа: такое же приложение Ядра, как «Пульс», и
   // раскладка у него такая же. Без своей ветки на экране висело бы меню Учёта.
   if (pathname === '/docs' || pathname.startsWith('/docs/')) {
     const spaceItems = SPACE_PAGES

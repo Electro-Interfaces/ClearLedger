@@ -1,0 +1,240 @@
+"""Обмен документами с корпоративными системами головной компании.
+
+Как устроено. Наружу — папка: система кладёт туда пакет, корпоративная СЭД
+(SEDO, Naumen) его забирает. Обратно так же: их система кладёт файлы в свою
+папку, мы показываем находки человеку, и он решает, заводить ли карточку.
+
+Почему папка, а не обращение к их системе напрямую. Доступа к API корпоративных
+СЭД у нас нет и не предвидится, а каталог на диске есть всегда и переживает
+смену версии на той стороне.
+
+Про формат описи честно. Точных схем SEDO и Naumen нам не давали, поэтому опись
+пишется своим форматом со всеми реквизитами карточки. Когда заказчик даст
+спецификацию, меняется только `build_manifest`, а весь остальной контур —
+сборка, журнал, приём — остаётся.
+"""
+from __future__ import annotations
+
+import hashlib
+import io
+import re
+import zipfile
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+from xml.etree import ElementTree as ET
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models import (
+    DocApproval, DocCard, DocExchangeTarget, DocKind, DocVersion, Organization,
+    SourceFile, User,
+)
+from app.services import doc_print, file_store
+
+# Что кладём в пакет: сам документ, приложения и подписанный экземпляр. Служебные
+# вложения переписки наружу не отдаём — головной компании нужен документ, а не
+# наша внутренняя кухня.
+EXPORT_ROLES = ("body", "appendix", "signed_scan")
+
+# Имя пакета: по нему человек на той стороне опознаёт документ, не открывая.
+_BAD_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+
+
+def safe_name(value: str, limit: int = 80) -> str:
+    """Имя файла, которое переживёт любую файловую систему."""
+    cleaned = _BAD_CHARS.sub("_", (value or "").strip())
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" .")
+    return (cleaned or "документ")[:limit]
+
+
+def package_name(doc: DocCard) -> str:
+    number = safe_name(doc.reg_number or "без-номера", 40)
+    date = doc.reg_date.strftime("%Y-%m-%d") if doc.reg_date else "без-даты"
+    return f"{date}_{number}_{safe_name(doc.title, 60)}"
+
+
+async def build_manifest(db: AsyncSession, doc: DocCard,
+                         versions: list[DocVersion]) -> bytes:
+    """Опись пакета: реквизиты карточки машиночитаемо.
+
+    Без описи принимающая сторона вбивает номер, дату и корреспондента руками —
+    то есть обмен файлами не экономит ничего.
+    """
+    kind = await db.get(DocKind, doc.kind_id)
+    org = await db.get(Organization, doc.organization_id) if doc.organization_id else None
+    author = await db.get(User, doc.author_id) if doc.author_id else None
+
+    root = ET.Element("Документ", {"версияОписи": "1.0"})
+    ET.SubElement(root, "Вид").text = kind.name if kind else ""
+    ET.SubElement(root, "КодВида").text = doc.kind_code or ""
+    ET.SubElement(root, "Поток").text = doc.family
+    ET.SubElement(root, "Направление").text = doc.direction
+    ET.SubElement(root, "РегистрационныйНомер").text = doc.reg_number or ""
+    ET.SubElement(root, "ДатаРегистрации").text = (
+        doc.reg_date.isoformat() if doc.reg_date else "")
+    ET.SubElement(root, "Заголовок").text = doc.title
+    if doc.summary:
+        ET.SubElement(root, "Содержание").text = doc.summary
+
+    if org is not None:
+        node = ET.SubElement(root, "Организация")
+        ET.SubElement(node, "Наименование").text = org.name or ""
+        ET.SubElement(node, "ИНН").text = org.inn or ""
+        ET.SubElement(node, "КПП").text = org.kpp or ""
+
+    if doc.counterparty_name or doc.external_number:
+        node = ET.SubElement(root, "Корреспондент")
+        ET.SubElement(node, "Наименование").text = doc.counterparty_name or ""
+        ET.SubElement(node, "ИсходящийНомер").text = doc.external_number or ""
+        ET.SubElement(node, "ДатаИсходящего").text = (
+            doc.external_date.isoformat() if doc.external_date else "")
+
+    if author is not None:
+        ET.SubElement(root, "Автор").text = author.name or author.email or ""
+    if doc.storage_until:
+        ET.SubElement(root, "ХранитьДо").text = doc.storage_until.isoformat()
+
+    approvals = (await db.execute(select(DocApproval).where(
+        DocApproval.doc_id == doc.id).order_by(
+        DocApproval.round, DocApproval.step_no))).scalars().all()
+    if approvals:
+        people = {str(u.id): (u.name or u.email) for u in (await db.execute(
+            select(User).where(User.id.in_(
+                {a.assignee_id for a in approvals if a.assignee_id})))).scalars().all()}
+        node = ET.SubElement(root, "ЛистСогласования",
+                             {"состояние": doc.approval_status})
+        for a in approvals:
+            row = ET.SubElement(node, "Виза", {"круг": str(a.round)})
+            ET.SubElement(row, "Шаг").text = a.step_name
+            ET.SubElement(row, "Согласующий").text = people.get(str(a.assignee_id), "")
+            ET.SubElement(row, "Решение").text = a.status
+            ET.SubElement(row, "Дата").text = (
+                a.decided_at.isoformat() if a.decided_at else "")
+            if a.comment:
+                ET.SubElement(row, "Замечание").text = a.comment
+
+    files_node = ET.SubElement(root, "Файлы")
+    for v in versions:
+        ET.SubElement(files_node, "Файл", {
+            "роль": v.role, "редакция": str(v.revision), "хеш": v.sha256,
+        }).text = v.file_name
+
+    ET.SubElement(root, "СформированоСистемой").text = datetime.now(
+        timezone.utc).isoformat(timespec="seconds")
+
+    return ET.tostring(root, encoding="utf-8", xml_declaration=True)
+
+
+async def build_package(db: AsyncSession, doc: DocCard) -> tuple[bytes, dict[str, Any]]:
+    """Собрать пакет: файлы документа, опись и лист согласования.
+
+    Возвращает архив и состав. Состав пишется в журнал: через полгода вопрос
+    «что именно мы отдали» решается им, а не памятью.
+    """
+    versions = (await db.execute(select(DocVersion).where(
+        DocVersion.doc_id == doc.id, DocVersion.is_current.is_(True),
+        DocVersion.tombstoned_at.is_(None),
+        DocVersion.role.in_(EXPORT_ROLES)).order_by(DocVersion.role))).scalars().all()
+
+    manifest = await build_manifest(db, doc, versions)
+    sheet = await doc_print.render_card(db, doc)
+
+    buf = io.BytesIO()
+    content: dict[str, Any] = {"files": [], "manifest": "опись.xml",
+                               "sheet": "лист-согласования.html"}
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("опись.xml", manifest)
+        z.writestr("лист-согласования.html", sheet.encode("utf-8"))
+        for v in versions:
+            sf = await db.get(SourceFile, v.file_id)
+            if sf is None:
+                continue
+            try:
+                data = file_store.read(sf)
+            except OSError:
+                # Файл потерялся в хранилище — не тихо пропускаем, а называем в
+                # составе: пакет без документа лучше, чем пакет, который врёт.
+                content["files"].append({"name": v.file_name, "role": v.role,
+                                         "error": "файл не читается"})
+                continue
+            name = f"{v.role}_{safe_name(v.file_name, 100)}"
+            z.writestr(name, data)
+            content["files"].append({"name": name, "role": v.role,
+                                     "sha256": v.sha256, "size": len(data)})
+    return buf.getvalue(), content
+
+
+def place_package(target: DocExchangeTarget, name: str, data: bytes) -> str:
+    """Положить пакет в папку обмена. Возвращает путь.
+
+    Повторная выгрузка того же документа не затирает прежнюю: к имени
+    добавляется отметка времени. Затирать — значит терять доказательство того,
+    что и когда уходило.
+    """
+    folder = Path(target.outbox_path)
+    folder.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    path = folder / f"{name}_{stamp}.zip"
+    path.write_bytes(data)
+    return str(path)
+
+
+def parse_manifest(data: bytes) -> dict[str, Any]:
+    """Вытащить реквизиты из описи, если она пришла вместе с файлом."""
+    try:
+        root = ET.fromstring(data)
+    except ET.ParseError:
+        return {}
+    out: dict[str, Any] = {}
+    for tag, key in (("Вид", "kind"), ("РегистрационныйНомер", "reg_number"),
+                     ("ДатаРегистрации", "reg_date"), ("Заголовок", "title"),
+                     ("Содержание", "summary")):
+        node = root.find(tag)
+        if node is not None and node.text:
+            out[key] = node.text.strip()
+    cp = root.find("Корреспондент/Наименование")
+    if cp is not None and cp.text:
+        out["counterparty_name"] = cp.text.strip()
+    return out
+
+
+def scan_inbox(target: DocExchangeTarget) -> list[dict[str, Any]]:
+    """Посмотреть, что лежит во входящей папке.
+
+    Читаем, но ничего не удаляем и не перекладываем: папка принадлежит той
+    стороне, и хозяйничать в ней мы не вправе. Повтор ловится хешем.
+    """
+    folder = Path(target.inbox_path)
+    if not folder.exists():
+        return []
+    found: list[dict[str, Any]] = []
+    for path in sorted(folder.iterdir()):
+        if not path.is_file() or path.name.startswith("."):
+            continue
+        try:
+            data = path.read_bytes()
+        except OSError:
+            continue
+        parsed: dict[str, Any] = {}
+        if path.suffix.lower() == ".zip":
+            try:
+                with zipfile.ZipFile(io.BytesIO(data)) as z:
+                    for inner in z.namelist():
+                        if inner.lower().endswith(".xml"):
+                            parsed = parse_manifest(z.read(inner))
+                            break
+            except zipfile.BadZipFile:
+                parsed = {}
+        elif path.suffix.lower() == ".xml":
+            parsed = parse_manifest(data)
+        found.append({
+            "file_name": path.name,
+            "source_path": str(path),
+            "size": len(data),
+            "sha256": hashlib.sha256(data).hexdigest(),
+            "data": data,
+            "parsed": parsed,
+        })
+    return found

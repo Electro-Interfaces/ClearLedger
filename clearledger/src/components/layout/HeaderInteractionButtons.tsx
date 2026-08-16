@@ -1,5 +1,5 @@
 /**
- * Кнопки взаимодействия в шапке: Чат · Задачи · Инфо (+ Конференция там, где она
+ * Кнопки взаимодействия в шапке: Чат · Трек · Инфо (+ Конференция там, где она
  * уместна) пилюлями, поддержка поставщика — иконкой следом. Общий блок продуктов
  * контейнера: в Учёте и в «Управлении» он выглядит и работает одинаково, а не
  * находится каждый раз заново.
@@ -13,7 +13,7 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { startMeeting } from '@/services/conferenceService'
 import { useSupportContext } from '@/contexts/SupportContext'
-import { useTasksApp } from '@/hooks/useTasksApp'
+import { useDocsApp } from '@/hooks/useDocsApp'
 import { useCompany } from '@/contexts/CompanyContext'
 
 /** Пилюля-кнопка: синий акцент, активное состояние — как у остальных кнопок шапки. */
@@ -41,7 +41,7 @@ export function HeaderInteractionButtons({ conference = false }: { conference?: 
   const { canApp } = useCompany()
   const { interactionSection, toggleInteraction, unreadCounts } = useSupportContext()
   const [confBusy, setConfBusy] = useState(false)
-  const tasksOn = useTasksApp()
+  const tasksOn = useDocsApp()
 
   async function startConference() {
     if (confBusy) return
@@ -65,7 +65,8 @@ export function HeaderInteractionButtons({ conference = false }: { conference?: 
     <div className="flex items-center gap-1.5 pl-1 md:gap-2">
       <div className="hidden h-6 w-px bg-border/50 md:block" />
       {conference && canApp('conf') && (
-        <Button variant="outline" size="sm" onClick={startConference} disabled={confBusy} className={btnCls(false)} title="Видеоконференция">
+        <Button variant="outline" size="sm" onClick={startConference} disabled={confBusy}
+          className={btnCls(false)} title="Видеоконференция">
           <Video className="h-4 w-4" />
           <span className="hidden lg:inline">Конференция</span>
         </Button>
@@ -75,14 +76,14 @@ export function HeaderInteractionButtons({ conference = false }: { conference?: 
         <span className="hidden lg:inline">Чат</span>
         <Badge count={unreadCounts.chat} />
       </Button>
-      {/* «Задачи» — как чат рядом: кнопка открывает окно «что на мне сейчас», а не
-          уводит со страницы. Полноценный трекер (типы, маршруты, чужие задачи, след)
-          живёт приложением, и в него ведёт «Все задачи» из этого же окна. Поддержка
-          поставщика ушла иконкой ниже: туда ходят редко и по случаю. */}
+      {/* «Трек» — как чат рядом: кнопка открывает окно «что на мне сейчас» (визы и
+          поручения), а не уводит со страницы. Полноценное рабочее место —
+          реестры, маршруты, регламент — живёт приложением, и в него ведёт
+          «Открыть Трек» из этого же окна. */}
       {tasksOn && (
-        <Button variant="outline" size="sm" onClick={() => toggleInteraction('tasks')} className={btnCls(interactionSection === 'tasks')} title="Задачи: что на мне сейчас">
+        <Button variant="outline" size="sm" onClick={() => toggleInteraction('tasks')} className={btnCls(interactionSection === 'tasks')} title="Трек: что на мне сейчас">
           <ListChecks className="h-4 w-4" />
-          <span className="hidden lg:inline">Задачи</span>
+          <span className="hidden lg:inline">Трек</span>
           <Badge count={unreadCounts.tasks} />
         </Button>
       )}
@@ -90,14 +91,17 @@ export function HeaderInteractionButtons({ conference = false }: { conference?: 
           текущий экран. Показывается только там, где продукт включён компании: иначе
           человек звал бы агента, которого в стеке нет. */}
       {canApp('auditor') && (
-        <Button variant="outline" size="sm" onClick={() => toggleInteraction('auditor')} className={btnCls(interactionSection === 'auditor')} title="Аудитор: спросить про этот экран">
+        <Button variant="outline" size="sm" onClick={() => toggleInteraction('auditor')}
+          className={`hidden lg:inline-flex ${btnCls(interactionSection === 'auditor')}`}
+          title="Аудитор: спросить про этот экран">
           <Bot className="h-4 w-4" />
           <span className="hidden lg:inline">Аудитор</span>
         </Button>
       )}
       {/* «Инфо» — четвёртая кнопка, на телефоне уже теснит имя экрана. Справка
           доступна оттуда же, куда ведёт плитка «Инфо» на столе. */}
-      <Button variant="outline" size="sm" onClick={() => toggleInteraction('help')} className={`hidden sm:inline-flex ${btnCls(interactionSection === 'help')}`} title="Инфо (Ctrl+K)">
+      <Button variant="outline" size="sm" onClick={() => toggleInteraction('help')}
+        className={btnCls(interactionSection === 'help')} title="Инфо (Ctrl+K)">
         <HelpCircle className="h-4 w-4" />
         <span className="hidden lg:inline">Инфо</span>
       </Button>

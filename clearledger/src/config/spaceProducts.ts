@@ -435,7 +435,7 @@ const ROUTE_APPS: [string, string][] = [
  */
 const CORE_APP_TITLES: Record<string, string> = {
   chat: 'Чаты', admin: 'Управление', data: 'Данные', info: 'Инфо', pulse: 'Пульс',
-  plan: 'Задачи', support: 'Заявки', auditor: 'Аудитор', docs: 'Дело',
+  plan: 'Задачи', support: 'Заявки', auditor: 'Аудитор', docs: 'Трек',
 }
 
 /** Имя приложения Ядра по адресу; null — адрес принадлежит Учёту или продукту. */

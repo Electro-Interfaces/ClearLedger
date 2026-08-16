@@ -58,7 +58,11 @@ INTERNAL_ROUTES = {"admin": "/admin", "ledger": "/workspace", "chat": "/messages
 # Слой рабочего стола: управление пространством и служебная кухня стоят отдельно от
 # прикладных продуктов. «Данные» — служебное: ошибка там ломает все продукты сразу.
 INTERNAL_LAYERS = {"admin": "admin", "data": "admin", "info": "admin", "connect": "admin",
-                   "chat": "service", "plan": "service", "docs": "app",
+                   "chat": "service", "plan": "service",
+                   # «Дело» — сервис контейнера, как чаты и конференции:
+                   # документооборот нужен любому приложению пространства,
+                   # а не только тому, кто ведёт сеть или учёт.
+                   "docs": "service",
                    "pulse": "app",
                    "ledger": "app", "projects": "app", "ops": "app",
                    "sales": "app", "corp": "app", "shop": "app", "marketing": "app",
@@ -71,7 +75,7 @@ INTERNAL_SORT = {"admin": 5, "pulse": 8, "ledger": 10, "projects": 12, "ops": 14
                  "corp": 17, "shop": 18, "marketing": 19, "support": 20, "netlink": 22,
                  "finance": 25, "accounting": 26,
                  "books": 20, "revenue": 21,
-                 "chat": 30, "auditor": 31, "plan": 40, "docs": 41, "conf": 50, "connect": 59, "data": 60,
+                 "chat": 30, "auditor": 31, "docs": 32, "plan": 40, "conf": 50, "connect": 59, "data": 60,
                  "diag": 61, "info": 62}
 
 

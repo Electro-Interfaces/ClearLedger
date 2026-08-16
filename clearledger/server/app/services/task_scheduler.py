@@ -79,9 +79,43 @@ def next_run(rule: dict, after: datetime) -> datetime:
     return nxt.astimezone(timezone.utc)
 
 
+async def spawn_doc_from_template(db, rec: TaskRecurrence, tpl: TaskTemplate):
+    """Породить ДОКУМЕНТ по шаблону: «акт сверки к 5 числу каждого месяца».
+
+    Второго планировщика под документы не заводим: расписание одно на
+    пространство, а чем оно кончится, решает шаблон. Номер здесь не выдаётся —
+    регистрация остаётся решением человека, и черновик обязан отличаться от
+    зарегистрированного даже когда появился сам.
+    """
+    from app.models import DocCard, DocEvent, DocKind
+
+    kind = await db.get(DocKind, tpl.doc_kind_id)
+    if kind is None:
+        log.warning("расписание %s: вид документа не найден", rec.id)
+        return None
+    now = datetime.now(timezone.utc)
+    days = tpl.due_days
+    d = DocCard(
+        company_id=rec.company_id, kind_id=kind.id, kind_code=kind.code,
+        family=kind.family, direction=kind.direction, title=tpl.title,
+        summary=tpl.description, author_id=rec.created_by,
+        responsible_id=tpl.assignee_id, object_id=tpl.object_id,
+        source="api", source_ref=f"recurrence:{rec.id}",
+        due_at=now + timedelta(days=days) if days is not None else None)
+    db.add(d)
+    await db.flush()
+    db.add(DocEvent(doc_id=d.id, kind="created", user_id=rec.created_by,
+                    to_value=kind.name, note=f"по расписанию «{tpl.name}»"))
+    return d
+
+
 async def spawn_from_template(db, rec: TaskRecurrence, tpl: TaskTemplate) -> Task | None:
     """Породить задачу по шаблону. Возвращает её или None, если шаблон пуст."""
     if not tpl.title:
+        return None
+    # Шаблон с видом документа порождает документ, а не поручение.
+    if getattr(tpl, "doc_kind_id", None):
+        await spawn_doc_from_template(db, rec, tpl)
         return None
     now = datetime.now(timezone.utc)
     ttype = await db.get(TaskType, tpl.type_id) if tpl.type_id else None

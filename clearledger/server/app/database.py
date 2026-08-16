@@ -2696,6 +2696,19 @@ async def create_all() -> None:
             "VARCHAR(15) NOT NULL DEFAULT 'none'",
             "ALTER TABLE doc_cards ADD COLUMN IF NOT EXISTS approval_round "
             "INTEGER NOT NULL DEFAULT 0",
+            # Волна 4: механизмы трекера работают и с документами. Шаблон умеет
+            # порождать документ, время тратится на документ, у представлений
+            # появилась область. Таблицы уже существуют — значит только ALTER.
+            "ALTER TABLE task_templates ADD COLUMN IF NOT EXISTS doc_kind_id UUID",
+            "ALTER TABLE task_work_items ADD COLUMN IF NOT EXISTS doc_id UUID",
+            "ALTER TABLE task_work_items ALTER COLUMN task_id DROP NOT NULL",
+            "ALTER TABLE task_views ADD COLUMN IF NOT EXISTS list_scope "
+            "VARCHAR(10) NOT NULL DEFAULT 'task'",
+            # Волна 5: обмен с корпоративными системами головной компании.
+            # Таблицы новые, их заводит create_all; индекс по неразобранным
+            # кандидатам нужен экрану приёма.
+            "CREATE INDEX IF NOT EXISTS idx_doc_inbox_new ON doc_inbox_items "
+            "(company_id, status, found_at)",
         ):
             await conn.execute(_sa.text(stmt))
 

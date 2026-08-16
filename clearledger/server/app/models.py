@@ -8578,9 +8578,13 @@ class TaskWorkItem(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    task_id: Mapped[uuid.UUID] = mapped_column(
+    # Одно из двух: время тратится либо на поручение, либо на документ.
+    task_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="CASCADE"),
-        nullable=False, index=True)
+        nullable=True, index=True)
+    doc_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("doc_cards.id", ondelete="CASCADE"),
+        nullable=True, index=True)
     # Чья работа. Отделено от `created_by`: руководитель может записать время за
     # человека, и в отчёте оно должно лечь на того, кто работал.
     user_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -8614,6 +8618,11 @@ class TaskTemplate(Base):
     name: Mapped[str] = mapped_column(String(160), nullable=False)
     type_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("task_types.id", ondelete="SET NULL"), nullable=True)
+    # Заполнен — шаблон порождает ДОКУМЕНТ этого вида, а не поручение. Так
+    # описывается «акт сверки к 5 числу каждого месяца»: работа и документ
+    # заводятся одним механизмом, и второй планировщик не нужен.
+    doc_kind_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("doc_kinds.id", ondelete="SET NULL"), nullable=True)
     title: Mapped[str] = mapped_column(String(300), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     # ["пункт", …] — чек-лист заготовки, разворачивается при постановке.
@@ -8677,6 +8686,9 @@ class TaskView(Base):
     user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
+    # task | doc — к какому списку относится отбор. Справочник один на оба:
+    # в «Деле» человек видит свои представления в одном месте, а не в двух.
+    list_scope: Mapped[str] = mapped_column(String(10), nullable=False, default="task")
     # Тот же набор параметров, что в адресе реестра: {"scope","assignee",…}.
     query: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
@@ -9907,3 +9919,142 @@ class DocShareLink(Base):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now())
+
+
+class DocLabelLink(Base):
+    """Метка на документе.
+
+    Справочник меток общий с поручениями (`task_labels`): в одном продукте
+    человек не должен видеть два разных списка меток. Здесь только связь.
+    """
+    __tablename__ = "doc_label_links"
+
+    doc_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("doc_cards.id", ondelete="CASCADE"),
+        primary_key=True)
+    label_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("task_labels.id", ondelete="CASCADE"),
+        primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+
+class DocExchangeTarget(Base):
+    """Точка обмена с корпоративной системой: папка туда и папка обратно.
+
+    Обмен файловый, через каталог на диске: у головной компании свои СЭД (SEDO,
+    Naumen), API к ним нам не дают, а папка есть всегда. Адрес папки — настройка
+    пространства, а не секрет: в ней лежат наши же документы.
+
+    Формат описи назван отдельно, потому что у каждой принимающей системы он
+    свой. Пока пишем свой полный формат; когда заказчик даст спецификацию, меняем
+    генератор описи, а не весь контур обмена.
+    """
+    __tablename__ = "doc_exchange_targets"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    code: Mapped[str] = mapped_column(String(40), nullable=False)
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    # sedo | naumen | other — чей формат описи готовим.
+    system: Mapped[str] = mapped_column(String(20), nullable=False, default="other")
+    # Куда кладём пакеты для головной компании.
+    outbox_path: Mapped[str] = mapped_column(String(500), nullable=False, default="")
+    # Откуда забираем то, что головная компания прислала нам.
+    inbox_path: Mapped[str] = mapped_column(String(500), nullable=False, default="")
+    # Складывать ли пакет одной папкой или zip-архивом.
+    as_archive: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    note: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    last_export_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    last_scan_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("company_id", "code", name="uq_doc_exchange_targets_code"),
+    )
+
+
+class DocExport(Base):
+    """Выгрузка документа в корпоративную систему: что, куда и когда ушло.
+
+    Журнал нужен не для красоты: вопрос «отдавали ли мы этот приказ в головную»
+    возникает на каждой сверке, и ответ «кажется, да» её не закрывает. Хеш
+    пакета отвечает и на второй вопрос — ту ли редакцию отдали.
+    """
+    __tablename__ = "doc_exports"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    doc_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("doc_cards.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    target_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("doc_exchange_targets.id", ondelete="SET NULL"),
+        nullable=True)
+    # placed (лежит в папке) | downloaded (человек забрал файлом) | failed
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="placed")
+    package_name: Mapped[str] = mapped_column(String(300), nullable=False, default="")
+    package_path: Mapped[str | None] = mapped_column(String(700), nullable=True)
+    package_sha256: Mapped[str | None] = mapped_column(CHAR(64), nullable=True)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Что вошло в пакет: файлы, опись, лист согласования.
+    content: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+
+class DocInboxItem(Base):
+    """Файл, пришедший от головной компании и ждущий решения человека.
+
+    Приём устроен как приёмка первички: система показывает, что нашла, человек
+    смотрит и решает. Автоматическое заведение карточек означало бы, что чужой
+    мусор и дубли попадают в реестр без разбора, а чистить реестр документов
+    дороже, чем разобрать десяток файлов.
+    """
+    __tablename__ = "doc_inbox_items"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    target_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("doc_exchange_targets.id", ondelete="SET NULL"),
+        nullable=True)
+    file_name: Mapped[str] = mapped_column(String(500), nullable=False)
+    source_path: Mapped[str] = mapped_column(String(700), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Хеш содержимого: тот же файл, замеченный второй раз, кандидата не плодит.
+    sha256: Mapped[str] = mapped_column(CHAR(64), nullable=False)
+    file_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    # Реквизиты, вычитанные из описи, если она была рядом с файлом.
+    parsed: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # new | accepted | rejected
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="new")
+    doc_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("doc_cards.id", ondelete="SET NULL"), nullable=True)
+    decided_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    decided_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    note: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    found_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("company_id", "sha256", name="uq_doc_inbox_sha"),
+    )

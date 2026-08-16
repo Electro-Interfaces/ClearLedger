@@ -45,10 +45,13 @@ const TasksLayout = lazy(() => import('@/pages/tasks/TasksLayout').then((m) => (
 const TasksWorkPage = lazy(() => import('@/pages/tasks/TasksWorkPage').then((m) => ({ default: m.TasksWorkPage })))
 const TasksCompanyPage = lazy(() => import('@/pages/tasks/TasksWorkPage').then((m) => ({ default: m.TasksCompanyPage })))
 const TasksOverviewPage = lazy(() => import('@/pages/tasks/TasksOverviewPage').then((m) => ({ default: m.TasksOverviewPage })))
+const TasksRegulation = lazy(() => import('@/pages/tasks/TasksRegulation').then((m) => ({ default: m.TasksRegulation })))
 const TasksSetupPage = lazy(() => import('@/pages/tasks/TasksSetupPage').then((m) => ({ default: m.TasksSetupPage })))
 const DocsLayout = lazy(() => import('@/pages/docs/DocsLayout').then((m) => ({ default: m.DocsLayout })))
 const DocsRegistryPage = lazy(() => import('@/pages/docs/DocsRegistryPage').then((m) => ({ default: m.DocsRegistryPage })))
 const DocsSetupPage = lazy(() => import('@/pages/docs/DocsSetupPage').then((m) => ({ default: m.DocsSetupPage })))
+const DocsErrandsPage = lazy(() => import('@/pages/docs/DocsErrandsPage').then((m) => ({ default: m.DocsErrandsPage })))
+const DocsOverviewPage = lazy(() => import('@/pages/docs/DocsOverviewPage').then((m) => ({ default: m.DocsOverviewPage })))
 const DocsWorkPage = lazy(() => import('@/pages/docs/DocsWorkPage').then((m) => ({ default: m.DocsWorkPage })))
 const PulseAppPage = lazy(() => import('@/pulse/PulseAppPage').then((m) => ({ default: m.PulseAppPage })))
 const PulseBusinessPage = lazy(() => import('@/pulse/PulseSections').then((m) => ({ default: m.PulseBusinessPage })))
@@ -263,8 +266,13 @@ const router = createBrowserRouter([
           // (TasksLayout), как у «Пульса»: это тоже приложение Ядра, а не продукт
           // разреза, и в CoreMode его разделы не заводятся.
           // Гард по продукту: задачи видят только те, кому продукт подключён.
+          // «Задачи» переехали в «Дело» (решение МАГа 16.08.2026). Адрес
+          // оставлен ведущим на новое место: закладки и ссылки в письмах не
+          // должны приводить в пустоту.
+          { path: '/tasks', element: <Navigate to="/docs/errands" replace /> },
+          { path: '/tasks/*', element: <Navigate to="/docs/errands" replace /> },
           {
-            path: '/tasks',
+            path: '/tasks-legacy',
             element: <RequireApp code="plan"><LazyPage><TasksLayout /></LazyPage></RequireApp>,
             children: [
               { index: true, element: <LazyPage><TasksWorkPage /></LazyPage> },
@@ -282,6 +290,9 @@ const router = createBrowserRouter([
             children: [
               { index: true, element: <LazyPage><DocsRegistryPage /></LazyPage> },
               { path: 'work', element: <LazyPage><DocsWorkPage /></LazyPage> },
+              { path: 'errands', element: <LazyPage><DocsErrandsPage /></LazyPage> },
+              { path: 'overview', element: <LazyPage><DocsOverviewPage /></LazyPage> },
+              { path: 'regulation', element: <LazyPage><TasksRegulation /></LazyPage> },
               { path: 'setup', element: <LazyPage><DocsSetupPage /></LazyPage> },
             ],
           },

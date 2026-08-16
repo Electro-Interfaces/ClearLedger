@@ -1,0 +1,146 @@
+/**
+ * Приём документов из папки корпоративной системы.
+ *
+ * Устроено как приёмка первички: система показывает, что нашла в папке, человек
+ * смотрит и решает. Автоматически карточки не заводим — чужой мусор и дубли
+ * чистить из реестра документов дороже, чем разобрать десяток файлов.
+ *
+ * Файлы в папке не трогаем: она принадлежит той стороне.
+ */
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useNavigate } from 'react-router-dom'
+import { FileDown, FolderSearch } from 'lucide-react'
+import { toast } from 'sonner'
+import { useCompany } from '@/contexts/CompanyContext'
+import { Button } from '@/components/ui/button'
+import { Card } from '@/components/ui/card'
+import * as docsService from '@/services/docsService'
+
+export function DocsInboxPanel() {
+  const { company } = useCompany()
+  const qc = useQueryClient()
+  const navigate = useNavigate()
+  const companyId = company?.id ?? ''
+
+  const itemsQ = useQuery({
+    queryKey: ['docs-inbox', companyId],
+    queryFn: () => docsService.listInbox(companyId),
+    enabled: !!companyId,
+  })
+  const kindsQ = useQuery({
+    queryKey: ['doc-kinds', companyId],
+    queryFn: () => docsService.listKinds(companyId),
+    enabled: !!companyId,
+    staleTime: 5 * 60 * 1000,
+  })
+
+  const scan = useMutation({
+    mutationFn: () => docsService.scanInbox(companyId),
+    onSuccess: (r) => {
+      toast.success(r.added
+        ? `Найдено новых файлов: ${r.added}`
+        : 'Новых файлов в папке нет')
+      qc.invalidateQueries({ queryKey: ['docs-inbox', companyId] })
+    },
+    onError: (e) => toast.error((e as Error).message),
+  })
+
+  const decide = useMutation({
+    mutationFn: (v: { id: string; accept: boolean; kindId?: string }) =>
+      docsService.decideInbox(companyId, v.id, {
+        accept: v.accept, kind_id: v.kindId ?? null,
+      }),
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ['docs-inbox', companyId] })
+      qc.invalidateQueries({ queryKey: ['docs', companyId] })
+      if (r.status === 'accepted' && r.doc_id) {
+        toast.success('Документ заведён')
+        navigate(`/docs?view=all&doc=${r.doc_id}`)
+      } else {
+        toast.success('Файл отклонён')
+      }
+    },
+    onError: (e) => toast.error((e as Error).message),
+  })
+
+  const items = itemsQ.data ?? []
+  const incomingKinds = (kindsQ.data ?? []).filter((k) => k.family === 'incoming')
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h1 className="text-base font-semibold">Приём из корпоративной системы</h1>
+          <p className="text-xs text-muted-foreground">
+            {itemsQ.isLoading ? 'Загрузка…' : `Ждут решения: ${items.length}`}
+          </p>
+        </div>
+        <Button size="sm" variant="outline" onClick={() => scan.mutate()}
+          disabled={scan.isPending}>
+          <FolderSearch className="mr-1.5 h-4 w-4" />Проверить папку
+        </Button>
+      </div>
+
+      <Card className="divide-y divide-border/60">
+        {items.map((it) => (
+          <div key={it.id} className="space-y-2 px-3 py-2.5">
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div className="min-w-0">
+                <a href={it.file_id ? `/api/files/${it.file_id}` : undefined}
+                  target="_blank" rel="noreferrer"
+                  className="flex items-center gap-1.5 text-sm hover:underline">
+                  <FileDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <span className="truncate">{it.file_name}</span>
+                </a>
+                <div className="text-[11px] text-muted-foreground">
+                  {it.target ? `${it.target} · ` : ''}
+                  {Math.max(1, Math.round(it.size / 1024))} КБ
+                  {it.found_at ? ` · ${it.found_at.slice(0, 16).replace('T', ' ')}` : ''}
+                </div>
+                {Object.keys(it.parsed).length > 0 && (
+                  <div className="pt-1 text-[12px]">
+                    {it.parsed.title && <div>{it.parsed.title}</div>}
+                    <div className="text-muted-foreground">
+                      {[it.parsed.kind, it.parsed.reg_number, it.parsed.counterparty_name]
+                        .filter(Boolean).join(' · ')}
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div className="flex shrink-0 items-center gap-1.5">
+                <select id={`kind-${it.id}`}
+                  className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+                  defaultValue="">
+                  <option value="">вид по умолчанию</option>
+                  {incomingKinds.map((k) => (
+                    <option key={k.id} value={k.id}>{k.name}</option>
+                  ))}
+                </select>
+                <Button size="sm" disabled={decide.isPending}
+                  onClick={() => {
+                    const el = document.getElementById(
+                      `kind-${it.id}`) as HTMLSelectElement | null
+                    decide.mutate({ id: it.id, accept: true, kindId: el?.value || undefined })
+                  }}>
+                  Принять
+                </Button>
+                <Button size="sm" variant="ghost" disabled={decide.isPending}
+                  onClick={() => decide.mutate({ id: it.id, accept: false })}>
+                  Отклонить
+                </Button>
+              </div>
+            </div>
+          </div>
+        ))}
+        {!itemsQ.isLoading && items.length === 0 && (
+          <div className="px-3 py-8 text-center text-sm text-muted-foreground">
+            Новых файлов нет. Нажмите «Проверить папку», если головная компания
+            только что выложила документы.
+          </div>
+        )}
+      </Card>
+    </div>
+  )
+}
+
+export default DocsInboxPanel

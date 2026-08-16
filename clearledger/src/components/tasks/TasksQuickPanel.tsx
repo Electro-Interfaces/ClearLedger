@@ -1,7 +1,7 @@
 /**
  * Быстрый взгляд на задачи из шапки — как окно чата рядом: что на мне сейчас, что
  * горит, и одним кликом в саму задачу. Полная работа (типы, маршруты, история, чужие
- * задачи) живёт в приложении «Задачи» (`/tasks`), сюда её не тащим.
+ * задачи) живёт в «Треке» (`/docs`), сюда её не тащим.
  */
 import { useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -42,7 +42,7 @@ export function TasksQuickPanel() {
 
   const open = (id?: string) => {
     closeInteraction()
-    navigate(id ? `/tasks?task=${id}` : '/tasks')
+    navigate(id ? `/docs/errands?task=${id}` : '/docs/errands')
   }
 
   return (
@@ -57,7 +57,7 @@ export function TasksQuickPanel() {
           )}
         </div>
         <Button size="sm" variant="outline" className="gap-1.5" onClick={() => open()}>
-          Все задачи
+          Открыть «Трек»
           <ArrowUpRight className="h-3.5 w-3.5" />
         </Button>
       </div>

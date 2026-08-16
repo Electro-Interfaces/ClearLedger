@@ -38,6 +38,21 @@ from app.services import space_connectors, task_mail, task_scheduler
 
 router = APIRouter(prefix="/tasks", tags=["Задачи"])
 
+async def _assert_work(company_ref: str, user: User, db: AsyncSession) -> uuid.UUID:
+    """Право на работу компании: «Трек» либо, для старых пространств, «Задачи».
+
+    Поручения переехали в «Трек» (решение МАГа 16.08.2026), и продукт `plan` с
+    лаунчера снят. Но ручки остались теми же: их зовёт и карточка документа, и
+    экран поручений внутри «Трека». Гейт проверяет сначала новый продукт, потом
+    старый — иначе после переименования у людей закрылась бы их же работа.
+    """
+    try:
+        return await assert_company_product(company_ref, user, db, "docs")
+    except HTTPException:
+        return await assert_company_product(company_ref, user, db, "plan")
+
+
+
 _LIST_LIMIT = 500
 _PRIORITY = "^(low|medium|high|critical)$"
 # Виды связи. `subtask`: task_id — родитель, related_task_id — подзадача.
@@ -355,7 +370,7 @@ async def list_tasks(
     горит сегодня (просрочено, срок сегодня-завтра), open/closed/all/overdue —
     состояние. Остальное — фильтры реестра; они складываются со scope.
     """
-    cid = await assert_company_product(company_id, current_user, db, "plan")
+    cid = await _assert_work(company_id, current_user, db)
     now = datetime.now(timezone.utc)
     sel = select(Task).where(Task.company_id == cid,
                              _visible_to(current_user, await _is_admin(db, cid, current_user)))
@@ -457,7 +472,7 @@ async def list_people(
     """Кому можно поручить: члены пространства. Своя ручка, а не `/users` — тот
     список админский (роли, модули, скоуп), а переадресовать задачу должен уметь
     любой исполнитель, не только администратор."""
-    cid = await assert_company_product(company_id, current_user, db, "plan")
+    cid = await _assert_work(company_id, current_user, db)
     # Принадлежность отдаём вместе с именем: поручая работу, надо видеть, свой это
     # человек или подрядчик, — задача внешнему участнику раскрывает ему внутреннее.
     rows = (await db.execute(
@@ -479,7 +494,7 @@ async def list_types(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    cid = await assert_company_product(company_id, current_user, db, "plan")
+    cid = await _assert_work(company_id, current_user, db)
     rows = (await db.execute(select(TaskType).where(TaskType.company_id == cid)
                              .order_by(TaskType.sort_order, TaskType.name))).scalars().all()
     return {"types": [_type_out(t) for t in rows], "default_route": DEFAULT_ROUTE}
@@ -526,7 +541,7 @@ async def create_type(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    cid = await assert_company_product(payload.company_id, current_user, db, "plan")
+    cid = await _assert_work(payload.company_id, current_user, db)
     await _assert_admin(db, cid, current_user)
     exists = (await db.execute(select(TaskType).where(
         TaskType.company_id == cid, TaskType.code == payload.code))).scalar_one_or_none()
@@ -553,7 +568,7 @@ async def update_type(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    cid = await assert_company_product(payload.company_id, current_user, db, "plan")
+    cid = await _assert_work(payload.company_id, current_user, db)
     await _assert_admin(db, cid, current_user)
     t = await db.get(TaskType, _uuid_or_400(type_id, "type_id"))
     if t is None or t.company_id != cid:
@@ -578,7 +593,7 @@ async def create_starter_types(
 ):
     """Завести заготовки типов. Идемпотентно: уже существующие коды пропускаются,
     повторное нажатие не плодит дублей и не трогает правки компании."""
-    cid = await assert_company_product(company_id, current_user, db, "plan")
+    cid = await _assert_work(company_id, current_user, db)
     await _assert_admin(db, cid, current_user)
     have = {c for (c,) in (await db.execute(
         select(TaskType.code).where(TaskType.company_id == cid))).all()}
@@ -614,7 +629,7 @@ async def create_task(
 ):
     """Поставить задачу. Тип задаёт маршрут, срочность и срок по умолчанию —
     поставивший может их перебить, но не обязан ничего знать о маршруте."""
-    cid = await assert_company_product(payload.company_id, current_user, db, "plan")
+    cid = await _assert_work(payload.company_id, current_user, db)
     ttype = None
     if payload.type_id:
         ttype = await db.get(TaskType, _uuid_or_400(payload.type_id, "type_id"))
@@ -674,7 +689,7 @@ async def tasks_summary(
     отдельным `group_by` — четыре похода в базу вместо одного. Потолок понятный —
     задач в пространстве сотни; на десятках тысяч разрезы уедут в SQL.
     """
-    cid = await assert_company_product(company_id, current_user, db, "plan")
+    cid = await _assert_work(company_id, current_user, db)
     now = datetime.now(timezone.utc)
     since = now - timedelta(days=days)
     # Живые задачи целиком плюс закрытые за период: закрытые год назад в обзоре
@@ -766,7 +781,7 @@ async def list_views(
     current_user: User = Depends(get_current_user),
 ):
     """Мои представления и общие компании — одним списком, как их видит панель."""
-    cid = await assert_company_product(company_id, current_user, db, "plan")
+    cid = await _assert_work(company_id, current_user, db)
     rows = (await db.execute(select(TaskView).where(
         TaskView.company_id == cid,
         or_(TaskView.user_id.is_(None), TaskView.user_id == current_user.id))
@@ -785,7 +800,7 @@ async def create_view(
 ):
     """Сохранить отбор. Общее представление заводит администратор: иначе список
     компании зарастает чужими черновиками."""
-    cid = await assert_company_product(payload.company_id, current_user, db, "plan")
+    cid = await _assert_work(payload.company_id, current_user, db)
     if payload.shared:
         await _assert_admin(db, cid, current_user)
     v = TaskView(company_id=cid, user_id=None if payload.shared else current_user.id,
@@ -805,7 +820,7 @@ async def delete_view(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    cid = await assert_company_product(company_id, current_user, db, "plan")
+    cid = await _assert_work(company_id, current_user, db)
     v = await db.get(TaskView, _uuid_or_400(view_id, "view_id"))
     if v is None or v.company_id != cid:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Представление не найдено")
@@ -828,6 +843,9 @@ class TemplateIn(BaseModel):
     title: str = Field(min_length=3, max_length=300)
     description: str | None = Field(None, max_length=8000)
     type_id: str | None = None
+    # Заполнен — шаблон порождает ДОКУМЕНТ этого вида, а не поручение: так
+    # описывается «акт сверки к 5 числу». Расписание при этом одно на оба.
+    doc_kind_id: str | None = None
     assignee_id: str | None = None
     object_id: str | None = None
     priority: str | None = Field(None, pattern=_PRIORITY)
@@ -840,6 +858,7 @@ def _template_out(t: TaskTemplate) -> dict[str, Any]:
         "id": str(t.id), "name": t.name, "title": t.title,
         "description": t.description,
         "type_id": str(t.type_id) if t.type_id else None,
+        "doc_kind_id": str(t.doc_kind_id) if t.doc_kind_id else None,
         "assignee_id": str(t.assignee_id) if t.assignee_id else None,
         "object_id": t.object_id, "priority": t.priority, "due_days": t.due_days,
         "checklist": t.checklist or [],
@@ -852,7 +871,7 @@ async def list_templates(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    cid = await assert_company_product(company_id, current_user, db, "plan")
+    cid = await _assert_work(company_id, current_user, db)
     rows = (await db.execute(select(TaskTemplate).where(TaskTemplate.company_id == cid)
                              .order_by(TaskTemplate.name))).scalars().all()
     return {"templates": [_template_out(t) for t in rows]}
@@ -864,11 +883,13 @@ async def create_template(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    cid = await assert_company_product(payload.company_id, current_user, db, "plan")
+    cid = await _assert_work(payload.company_id, current_user, db)
     tpl = TaskTemplate(
         company_id=cid, name=payload.name.strip(), title=payload.title.strip(),
         description=payload.description,
         type_id=_uuid_or_400(payload.type_id, "type_id") if payload.type_id else None,
+        doc_kind_id=(_uuid_or_400(payload.doc_kind_id, "doc_kind_id")
+                     if payload.doc_kind_id else None),
         assignee_id=(_uuid_or_400(payload.assignee_id, "assignee_id")
                      if payload.assignee_id else None),
         object_id=payload.object_id or None, priority=payload.priority,
@@ -887,7 +908,7 @@ async def delete_template(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    cid = await assert_company_product(company_id, current_user, db, "plan")
+    cid = await _assert_work(company_id, current_user, db)
     tpl = await db.get(TaskTemplate, _uuid_or_400(template_id, "template_id"))
     if tpl is None or tpl.company_id != cid:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Шаблон не найден")
@@ -910,7 +931,7 @@ async def use_template(
     Один путь порождения на оба случая: иначе задача «руками» и задача «по
     расписанию» разъезжаются по составу чек-листа при первой же правке.
     """
-    cid = await assert_company_product(company_id, current_user, db, "plan")
+    cid = await _assert_work(company_id, current_user, db)
     tpl = await db.get(TaskTemplate, _uuid_or_400(template_id, "template_id"))
     if tpl is None or tpl.company_id != cid:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Шаблон не найден")
@@ -940,7 +961,7 @@ async def list_recurrences(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    cid = await assert_company_product(company_id, current_user, db, "plan")
+    cid = await _assert_work(company_id, current_user, db)
     rows = (await db.execute(
         select(TaskRecurrence, TaskTemplate.name)
         .join(TaskTemplate, TaskTemplate.id == TaskRecurrence.template_id)
@@ -968,7 +989,7 @@ async def create_recurrence(
     не станет. Регулярную работу ДРУГОМУ человеку ставит администратор
     пространства: иначе кто угодно навесит на коллегу еженедельную задачу.
     """
-    cid = await assert_company_product(payload.company_id, current_user, db, "plan")
+    cid = await _assert_work(payload.company_id, current_user, db)
     tpl = await db.get(TaskTemplate, _uuid_or_400(payload.template_id, "template_id"))
     if tpl is None or tpl.company_id != cid:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Шаблон не найден")
@@ -994,7 +1015,7 @@ async def delete_recurrence(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    cid = await assert_company_product(company_id, current_user, db, "plan")
+    cid = await _assert_work(company_id, current_user, db)
     rec = await db.get(TaskRecurrence, _uuid_or_400(rec_id, "rec_id"))
     if rec is None or rec.company_id != cid:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Расписание не найдено")
@@ -1016,7 +1037,7 @@ async def list_labels(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    cid = await assert_company_product(company_id, current_user, db, "plan")
+    cid = await _assert_work(company_id, current_user, db)
     rows = (await db.execute(select(TaskLabel).where(TaskLabel.company_id == cid)
                              .order_by(TaskLabel.name))).scalars().all()
     return {"labels": [{"id": str(r.id), "name": r.name, "color": r.color} for r in rows]}
@@ -1036,7 +1057,7 @@ async def create_label(
 ):
     """Завести метку. Метку заводит любой участник: ярлык — рабочий инструмент,
     а не элемент регламента, и поход к администратору за ним никто не сделает."""
-    cid = await assert_company_product(payload.company_id, current_user, db, "plan")
+    cid = await _assert_work(payload.company_id, current_user, db)
     name = payload.name.strip()
     exists = (await db.execute(select(TaskLabel).where(
         TaskLabel.company_id == cid, TaskLabel.name == name))).scalar_one_or_none()
@@ -1056,7 +1077,7 @@ async def delete_label(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    cid = await assert_company_product(company_id, current_user, db, "plan")
+    cid = await _assert_work(company_id, current_user, db)
     await _assert_admin(db, cid, current_user)
     lab = await db.get(TaskLabel, _uuid_or_400(label_id, "label_id"))
     if lab is None or lab.company_id != cid:
@@ -1075,7 +1096,7 @@ async def download_attachment(
 ):
     """Отдать файл вложения. Проверяем не сам файл, а задачу, к которой он привязан:
     доступ к файлу — это доступ к работе, в которой он лежит."""
-    cid = await assert_company_product(company_id, current_user, db, "plan")
+    cid = await _assert_work(company_id, current_user, db)
     att = await db.get(TaskAttachment, _uuid_or_400(attachment_id, "attachment_id"))
     if att is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Вложение не найдено")
@@ -1097,7 +1118,7 @@ async def task_details(
     current_user: User = Depends(get_current_user),
 ):
     """Карточка задачи: поля, маршрут, лента и всё, что к работе прицеплено."""
-    cid = await assert_company_product(company_id, current_user, db, "plan")
+    cid = await _assert_work(company_id, current_user, db)
     t = await _task_or_404(db, cid, task_id)
     # Ссылку на закрытую задачу могут переслать — проверяем причастность, а не
     # только знание идентификатора.
@@ -1211,7 +1232,7 @@ async def task_action(
     двигает тот, у кого она в руках, — согласование каждого шага у постановщика
     убило бы смысл маршрута.
     """
-    cid = await assert_company_product(payload.company_id, current_user, db, "plan")
+    cid = await _assert_work(payload.company_id, current_user, db)
     t = await _task_or_404(db, cid, task_id)
     # Реплика — не действие над задачей. Кто задачу видит, тот может в неё
     # написать: коллега, заметивший «это уже сделано», не должен молчать
@@ -1404,7 +1425,7 @@ async def bulk_action(
     права, пропускаются с перечислением — падать целиком из-за одной чужой строки
     значит заставить человека вычислять её вручную.
     """
-    cid = await assert_company_product(payload.company_id, current_user, db, "plan")
+    cid = await _assert_work(payload.company_id, current_user, db)
     done, skipped = 0, []
     for raw in payload.task_ids:
         t = await db.get(Task, _uuid_or_400(raw, "task_id"))
@@ -1464,7 +1485,7 @@ async def add_checklist_item(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    cid = await assert_company_product(payload.company_id, current_user, db, "plan")
+    cid = await _assert_work(payload.company_id, current_user, db)
     t = await _task_or_404(db, cid, task_id)
     await _assert_actor(db, cid, current_user, t)
     last = (await db.execute(select(func.coalesce(func.max(TaskChecklistItem.position), 0))
@@ -1493,7 +1514,7 @@ async def update_checklist_item(
     """Отметить пункт или переписать его. Отметка не пишется в ленту событий:
     ход по чек-листу — это работа внутри одного шага, а не движение задачи, и
     двадцать записей «отметил пункт» утопили бы след."""
-    cid = await assert_company_product(payload.company_id, current_user, db, "plan")
+    cid = await _assert_work(payload.company_id, current_user, db)
     t = await _task_or_404(db, cid, task_id)
     await _assert_actor(db, cid, current_user, t)
     item = await db.get(TaskChecklistItem, _uuid_or_400(item_id, "item_id"))
@@ -1517,7 +1538,7 @@ async def delete_checklist_item(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    cid = await assert_company_product(company_id, current_user, db, "plan")
+    cid = await _assert_work(company_id, current_user, db)
     t = await _task_or_404(db, cid, task_id)
     await _assert_actor(db, cid, current_user, t)
     item = await db.get(TaskChecklistItem, _uuid_or_400(item_id, "item_id"))
@@ -1546,7 +1567,7 @@ async def add_link(
 ):
     """Связать две задачи. Подзадача — та же связь вида `subtask`, где `task_id`
     родитель: отдельного дерева не заводим."""
-    cid = await assert_company_product(payload.company_id, current_user, db, "plan")
+    cid = await _assert_work(payload.company_id, current_user, db)
     t = await _task_or_404(db, cid, task_id)
     await _assert_actor(db, cid, current_user, t)
     other = await _task_or_404(db, cid, payload.related_task_id)
@@ -1581,7 +1602,7 @@ async def delete_link(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    cid = await assert_company_product(company_id, current_user, db, "plan")
+    cid = await _assert_work(company_id, current_user, db)
     t = await _task_or_404(db, cid, task_id)
     await _assert_actor(db, cid, current_user, t)
     link = await db.get(TaskLink, _uuid_or_400(link_id, "link_id"))
@@ -1611,7 +1632,7 @@ async def add_watcher(
 ):
     """Подписаться на задачу или добавить наблюдателя. Подписать себя может любой,
     кто видит задачу: следить за чужой работой — не привилегия."""
-    cid = await assert_company_product(payload.company_id, current_user, db, "plan")
+    cid = await _assert_work(payload.company_id, current_user, db)
     t = await _task_or_404(db, cid, task_id)
     uid = _uuid_or_400(payload.user_id, "user_id") if payload.user_id else current_user.id
     if uid != current_user.id:
@@ -1633,7 +1654,7 @@ async def delete_watcher(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    cid = await assert_company_product(company_id, current_user, db, "plan")
+    cid = await _assert_work(company_id, current_user, db)
     t = await _task_or_404(db, cid, task_id)
     uid = _uuid_or_400(user_id, "user_id")
     if uid != current_user.id:
@@ -1659,7 +1680,7 @@ async def upload_attachment(
 ):
     """Приложить файл к задаче или к реплике. Хранение общее с остальными файлами
     Ядра: запись в `source_files`, сам файл в `UPLOAD_DIR` (как у документов проекта)."""
-    cid = await assert_company_product(company_id, current_user, db, "plan")
+    cid = await _assert_work(company_id, current_user, db)
     t = await _task_or_404(db, cid, task_id)
     await _assert_actor(db, cid, current_user, t)
     content = await file.read()
@@ -1695,7 +1716,7 @@ async def delete_attachment(
 ):
     """Отцепить файл от задачи. Сам файл в хранилище остаётся: на него может
     ссылаться другая запись, а чистка хранилища — отдельная работа."""
-    cid = await assert_company_product(company_id, current_user, db, "plan")
+    cid = await _assert_work(company_id, current_user, db)
     t = await _task_or_404(db, cid, task_id)
     await _assert_actor(db, cid, current_user, t)
     att = await db.get(TaskAttachment, _uuid_or_400(attachment_id, "attachment_id"))
@@ -1720,7 +1741,7 @@ async def pin_event(
     должна тонуть в тридцати событиях. Закрепление — переключатель: повторное
     нажатие снимает.
     """
-    cid = await assert_company_product(company_id, current_user, db, "plan")
+    cid = await _assert_work(company_id, current_user, db)
     t = await _task_or_404(db, cid, task_id)
     await _assert_actor(db, cid, current_user, t)
     ev = await db.get(TaskEvent, _uuid_or_400(event_id, "event_id"))
@@ -1791,7 +1812,7 @@ async def apply_command(
     половину команды хуже, чем сказать «этого я не понял»: человек уверен, что
     срок поставлен, а он нет.
     """
-    cid = await assert_company_product(payload.company_id, current_user, db, "plan")
+    cid = await _assert_work(payload.company_id, current_user, db)
     words = payload.command.split()
     action: dict[str, Any] = {}
     unknown: list[str] = []
@@ -1968,7 +1989,7 @@ async def add_work_item(
     участник задачи или администратор — иначе учёт становится местом, где можно
     приписать работу кому угодно.
     """
-    cid = await assert_company_product(payload.company_id, current_user, db, "plan")
+    cid = await _assert_work(payload.company_id, current_user, db)
     t = await _task_or_404(db, cid, task_id)
     minutes = parse_duration(payload.duration)
     if minutes is None:
@@ -2010,7 +2031,7 @@ async def delete_work_item(
     current_user: User = Depends(get_current_user),
 ):
     """Убрать свою запись о работе; чужую — участник задачи или администратор."""
-    cid = await assert_company_product(company_id, current_user, db, "plan")
+    cid = await _assert_work(company_id, current_user, db)
     t = await _task_or_404(db, cid, task_id)
     item = await db.get(TaskWorkItem, _uuid_or_400(item_id, "item_id"))
     if item is None or item.task_id != t.id:
@@ -2049,7 +2070,7 @@ async def delegate_task(
 
     Мяч переходит внешней стороне: задача не брошена, но и не висит «на мне».
     """
-    cid = await assert_company_product(payload.company_id, current_user, db, "plan")
+    cid = await _assert_work(payload.company_id, current_user, db)
     t = await _task_or_404(db, cid, task_id)
     await _assert_actor(db, cid, current_user, t)
     email = payload.email.strip().lower()
@@ -2109,7 +2130,7 @@ async def remove_participant(
     current_user: User = Depends(get_current_user),
 ):
     """Убрать внешнего участника. Мяч возвращается нам: ждать больше некого."""
-    cid = await assert_company_product(company_id, current_user, db, "plan")
+    cid = await _assert_work(company_id, current_user, db)
     t = await _task_or_404(db, cid, task_id)
     await _assert_actor(db, cid, current_user, t)
     uid = _uuid_or_400(user_id, "user_id")
@@ -2153,7 +2174,7 @@ async def link_external(
     реестра в Ядре нет), поэтому здесь мы фиксируем связь с уже существующей у
     них работой. Автосоздание появится, когда приложение-владелец отдаст ручку.
     """
-    cid = await assert_company_product(payload.company_id, current_user, db, "plan")
+    cid = await _assert_work(payload.company_id, current_user, db)
     t = await _task_or_404(db, cid, task_id)
     await _assert_actor(db, cid, current_user, t)
 
@@ -2187,7 +2208,7 @@ async def unlink_external(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    cid = await assert_company_product(company_id, current_user, db, "plan")
+    cid = await _assert_work(company_id, current_user, db)
     t = await _task_or_404(db, cid, task_id)
     await _assert_actor(db, cid, current_user, t)
     ref = await db.get(TaskExternalRef, _uuid_or_400(ref_id, "ref_id"))
@@ -2220,7 +2241,7 @@ async def sync_external(
     показываем выдуманный статус: неверная отметка о чужой работе хуже её
     отсутствия.
     """
-    cid = await assert_company_product(company_id, current_user, db, "plan")
+    cid = await _assert_work(company_id, current_user, db)
     t = await _task_or_404(db, cid, task_id)
     ref = await db.get(TaskExternalRef, _uuid_or_400(ref_id, "ref_id"))
     if ref is None or ref.task_id != t.id:
