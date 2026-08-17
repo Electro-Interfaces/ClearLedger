@@ -16,7 +16,8 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import DocApproval, DocCard, DocKind, Organization, User
+from app.models import DocApproval, DocCard, DocKind, DocVersion, Organization, User
+from app.services import doc_verify
 
 _STATUS_RU = {
     "draft": "черновик", "registered": "зарегистрирован", "in_force": "действует",
@@ -24,7 +25,11 @@ _STATUS_RU = {
 }
 _APPROVAL_RU = {
     "pending": "ожидает", "approved": "согласовано",
-    "rejected": "отказано", "skipped": "снято",
+    "rejected": "отказано", "skipped": "снято", "waiting": "ещё не начато",
+}
+_ROLE_RU = {
+    "body": "основной документ", "appendix": "приложение",
+    "signed_scan": "подписанный экземпляр", "attachment": "вложение",
 }
 
 _CSS = """
@@ -41,6 +46,9 @@ th { background: #eee; }
 .sign td { border: none; padding: 10pt 6pt 0; }
 .rule { border-bottom: 1px solid #000; width: 60mm; display: inline-block; }
 .note { color: #555; font-size: 9pt; margin-top: 14pt; }
+.verify { margin-top: 18pt; border-top: 1px solid #bbb; padding-top: 8pt; }
+.verify-url { font-family: Consolas, monospace; font-size: 8pt; overflow-wrap: anywhere; }
+.hash { font-family: Consolas, monospace; font-size: 7.5pt; word-break: break-all; }
 """
 
 
@@ -57,7 +65,8 @@ async def render_card(db: AsyncSession, doc: DocCard) -> str:
         DocApproval.doc_id == doc.id).order_by(
         DocApproval.round, DocApproval.step_no))).scalars().all()
     people: dict[str, str] = {}
-    ids = {a.assignee_id for a in rows if a.assignee_id}
+    ids = {user_id for row in rows for user_id in (row.assignee_id, row.decided_by)
+           if user_id}
     if ids:
         people = {str(u.id): (u.name or u.email) for u in (await db.execute(
             select(User).where(User.id.in_(ids)))).scalars().all()}
@@ -71,13 +80,19 @@ async def render_card(db: AsyncSession, doc: DocCard) -> str:
 
     approvals_html = ""
     if rows:
-        body = "".join(
-            f"<tr><td>{a.round}</td><td>{_esc(a.step_name)}</td>"
-            f"<td>{_esc(people.get(str(a.assignee_id), ''))}</td>"
-            f"<td>{_APPROVAL_RU.get(a.status, a.status)}</td>"
-            f"<td>{a.decided_at.strftime('%d.%m.%Y') if a.decided_at else ''}</td>"
-            f"<td>{_esc(a.comment)}</td></tr>"
-            for a in rows)
+        body = ""
+        for approval in rows:
+            assigned = people.get(str(approval.assignee_id), "")
+            decided = people.get(str(approval.decided_by), "")
+            participant = assigned
+            if decided and approval.decided_by != approval.assignee_id:
+                participant = f"{decided} (замещает {assigned})"
+            body += (
+                f"<tr><td>{approval.round}</td><td>{_esc(approval.step_name)}</td>"
+                f"<td>{_esc(participant)}</td>"
+                f"<td>{_APPROVAL_RU.get(approval.status, approval.status)}</td>"
+                f"<td>{approval.decided_at.strftime('%d.%m.%Y') if approval.decided_at else ''}</td>"
+                f"<td>{_esc(approval.comment)}</td></tr>")
         approvals_html = (
             "<h1>Лист согласования</h1>"
             "<table><tr><th>Круг</th><th>Шаг</th><th>Согласующий</th>"
@@ -100,6 +115,31 @@ async def render_card(db: AsyncSession, doc: DocCard) -> str:
     if doc.storage_until:
         storage = (f"<tr><td>Хранить до</td>"
                    f"<td>{doc.storage_until.strftime('%d.%m.%Y')}</td></tr>")
+
+    versions = (await db.execute(select(DocVersion).where(
+        DocVersion.doc_id == doc.id, DocVersion.is_current.is_(True),
+        DocVersion.tombstoned_at.is_(None)).order_by(
+        DocVersion.role, DocVersion.revision))).scalars().all()
+    hashes = ""
+    if versions:
+        hash_rows = "".join(
+            f"<tr><td>{_esc(_ROLE_RU.get(version.role, version.role))}</td>"
+            f"<td>{version.revision}</td>"
+            f"<td class=\"hash\">SHA-256: {_esc(version.sha256)}</td></tr>"
+            for version in versions)
+        hashes = ("<h1>Редакции файлов</h1><table><tr><th>Роль</th>"
+                  "<th>Редакция</th><th>Контрольная сумма</th></tr>"
+                  f"{hash_rows}</table>")
+
+    verification_url = await doc_verify.public_url(db, doc) if doc.reg_number else ""
+    verification = ""
+    if verification_url:
+        verification = (
+            "<div class=\"verify\"><strong>Проверка записи в реестре</strong>"
+            f"<div class=\"verify-url\">{_esc(verification_url)}</div>"
+            "<div class=\"note\">Ссылка подтверждает наличие записи с указанными "
+            "реквизитами. Она не проверяет электронную подпись и не подтверждает "
+            "юридическую силу бумажной копии.</div></div>")
 
     return f"""<!doctype html>
 <html lang="ru"><head><meta charset="utf-8">
@@ -127,6 +167,8 @@ async def render_card(db: AsyncSession, doc: DocCard) -> str:
 
   {approvals_html}
 
+  {hashes}
+
   <table class="sign">
     <tr>
       <td>{_esc(org.director_position if org and org.director_position else 'Руководитель')}</td>
@@ -138,4 +180,5 @@ async def render_card(db: AsyncSession, doc: DocCard) -> str:
   <p class="note">Отпечатано из системы {date.today().strftime('%d.%m.%Y')}.
   Документ подписывается собственноручно либо электронной подписью вне системы:
   своей криптографии система не имеет и подпись не создаёт.</p>
+  {verification}
 </body></html>"""

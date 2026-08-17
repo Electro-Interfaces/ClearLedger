@@ -11,6 +11,7 @@ import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
 import { toast } from 'sonner'
+import { useCompany } from '@/contexts/CompanyContext'
 import * as docsService from '@/services/docsService'
 import type { DocKind } from '@/services/docsService'
 
@@ -21,6 +22,7 @@ export function NewDocDialog({ companyId, kinds, defaultFamily, onClose, onCreat
   onClose: () => void
   onCreated: (id: string) => void
 }) {
+  const { organizations, organizationId } = useCompany()
   // Вид подставляем по разделу, из которого пришли: в «Входящих» заводят входящее.
   const suited = defaultFamily ? kinds.filter((k) => k.family === defaultFamily) : kinds
   const [kindId, setKindId] = useState(suited[0]?.id ?? kinds[0]?.id ?? '')
@@ -28,6 +30,9 @@ export function NewDocDialog({ companyId, kinds, defaultFamily, onClose, onCreat
   const [counterparty, setCounterparty] = useState('')
   const [externalNumber, setExternalNumber] = useState('')
   const [externalDate, setExternalDate] = useState('')
+  const [docOrganizationId, setDocOrganizationId] = useState(
+    organizationId ?? (organizations.length === 1 ? organizations[0].id : ''),
+  )
 
   const kind = kinds.find((k) => k.id === kindId)
   const incoming = kind?.direction === 'in'
@@ -36,6 +41,7 @@ export function NewDocDialog({ companyId, kinds, defaultFamily, onClose, onCreat
     mutationFn: () => docsService.createDoc(companyId, {
       kind_id: kindId,
       title: title.trim(),
+      organization_id: docOrganizationId || null,
       counterparty_name: counterparty.trim(),
       external_number: externalNumber.trim() || null,
       external_date: externalDate || null,
@@ -63,6 +69,22 @@ export function NewDocDialog({ companyId, kinds, defaultFamily, onClose, onCreat
               </p>
             )}
           </div>
+
+          {organizations.length > 0 && (
+            <div className="space-y-1.5">
+              <Label htmlFor="new-doc-organization" className="text-xs">Наше юрлицо</Label>
+              <select id="new-doc-organization" value={docOrganizationId}
+                onChange={(event) => setDocOrganizationId(event.target.value)}
+                className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm">
+                <option value="">выберите юрлицо</option>
+                {organizations.map((organization) => (
+                  <option key={organization.id} value={organization.id}>
+                    {organization.name}{organization.inn ? ` · ИНН ${organization.inn}` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <div className="space-y-1.5">
             <Label className="text-xs">Заголовок</Label>
@@ -96,7 +118,8 @@ export function NewDocDialog({ companyId, kinds, defaultFamily, onClose, onCreat
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Отмена</Button>
           <Button onClick={() => create.mutate()}
-            disabled={!kindId || !title.trim() || create.isPending}>
+            disabled={!kindId || !title.trim() ||
+              (organizations.length > 0 && !docOrganizationId) || create.isPending}>
             Завести
           </Button>
         </DialogFooter>

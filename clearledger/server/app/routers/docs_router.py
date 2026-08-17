@@ -21,6 +21,7 @@ import re
 import uuid
 from datetime import date as date_type, datetime, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from urllib.parse import quote
@@ -29,6 +30,7 @@ from fastapi import Response
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, literal_column, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import log_audit
@@ -43,7 +45,9 @@ from app.models import (
     TaskType, TaskWorkItem, User, UserCompany,
 )
 from app.routers import doc_share_router
-from app.services import doc_approvals, doc_exchange, doc_print, doc_text, file_store, mail_send
+from app.services import (
+    doc_approvals, doc_exchange, doc_print, doc_text, doc_verify, file_store, mail_send,
+)
 from app.services.doc_numbers import next_number, render, scope_key
 
 router = APIRouter(prefix="/docs", tags=["Трек"])
@@ -64,6 +68,7 @@ _MAX_FILE_BYTES = 25 * 1024 * 1024
 _RUSSIAN_TEXT_SEARCH = literal_column("'russian'::regconfig")
 _FIELD_TYPES = {"text", "textarea", "number", "date", "boolean", "select"}
 _FIELD_CODE = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
+_BUSINESS_TIMEZONE = ZoneInfo("Europe/Moscow")
 
 # Заготовки видов: то, что есть в любой компании. Заводятся кнопкой из раздела
 # «Виды», а не молча при первом запросе: справочник компании создаёт человек.
@@ -197,6 +202,19 @@ async def _doc_or_404(db: AsyncSession, cid: uuid.UUID, doc_id) -> DocCard:
     if d is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Документ не найден")
     return d
+
+
+async def _organization_id(db: AsyncSession, cid: uuid.UUID,
+                           value: str | None) -> uuid.UUID | None:
+    if not value:
+        return None
+    organization_id = _uuid_or_400(value, "organization_id")
+    exists = await db.scalar(select(Organization.id).where(
+        Organization.company_id == cid, Organization.id == organization_id))
+    if exists is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Юрлицо не принадлежит выбранной компании")
+    return organization_id
 
 
 def _visible(d: DocCard, user: User) -> bool:
@@ -366,8 +384,10 @@ async def _readable_docs(db: AsyncSession, cid: uuid.UUID, rows: list[DocCard],
     return [d for d in rows if d.id in visible]
 
 
-def _card_out(d: DocCard, names: dict[str, str] | None = None) -> dict[str, Any]:
+def _card_out(d: DocCard, names: dict[str, str] | None = None,
+              organizations: dict[str, str] | None = None) -> dict[str, Any]:
     names = names or {}
+    organizations = organizations or {}
     return {
         "id": str(d.id), "kind_id": str(d.kind_id), "kind_code": d.kind_code,
         "kind_name": names.get(str(d.kind_id), ""),
@@ -377,6 +397,7 @@ def _card_out(d: DocCard, names: dict[str, str] | None = None) -> dict[str, Any]
         "reg_date": d.reg_date.isoformat() if d.reg_date else None,
         "number_manual": d.number_manual,
         "organization_id": str(d.organization_id) if d.organization_id else None,
+        "organization_name": organizations.get(str(d.organization_id), ""),
         "counterparty_id": str(d.counterparty_id) if d.counterparty_id else None,
         "counterparty_name": d.counterparty_name,
         "external_number": d.external_number,
@@ -782,7 +803,10 @@ async def list_docs(
     names = dict((await db.execute(select(DocKind.id, DocKind.name).where(
         DocKind.company_id == cid))).all())
     names = {str(k): v for k, v in names.items()}
-    return {"docs": [_card_out(d, names) for d in rows], "count": len(rows)}
+    organizations = {str(key): value for key, value in (await db.execute(select(
+        Organization.id, Organization.name).where(
+        Organization.company_id == cid))).all()}
+    return {"docs": [_card_out(d, names, organizations) for d in rows], "count": len(rows)}
 
 
 # ── Карточка ─────────────────────────────────────────────────────────────────
@@ -831,8 +855,7 @@ async def create_doc(
         company_id=cid, kind_id=kind.id, kind_code=kind.code,
         family=kind.family, direction=kind.direction,
         title=payload.title.strip(), summary=payload.summary,
-        organization_id=_uuid_or_400(payload.organization_id, "organization_id")
-        if payload.organization_id else None,
+        organization_id=await _organization_id(db, cid, payload.organization_id),
         counterparty_id=_uuid_or_400(payload.counterparty_id, "counterparty_id")
         if payload.counterparty_id else None,
         counterparty_name=name,
@@ -859,10 +882,11 @@ async def create_doc(
 
 class RegisterIn(BaseModel):
     company_id: str
-    # Номер чужого документа вводят руками: он пришёл со своим, и выдавать ему наш
-    # из счётчика нельзя — счётчик описывает наши документы.
-    reg_number: str | None = None
+    # Ручной номер нужен только при переносе нашего прежнего журнала. Номер
+    # корреспондента хранится в external_number и в наш журнал не попадает.
+    reg_number: str | None = Field(None, max_length=60)
     reg_date: date_type | None = None
+    manual_reason: str | None = Field(None, max_length=500)
 
 
 @router.post("/{doc_id}/register")
@@ -883,6 +907,9 @@ async def register_doc(
     if d.reg_number:
         raise HTTPException(status.HTTP_409_CONFLICT,
                             f"Документ уже зарегистрирован под номером {d.reg_number}")
+    if d.status != "draft":
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Зарегистрировать можно только черновик")
     if d.approval_status == "pending":
         raise HTTPException(status.HTTP_409_CONFLICT,
                             "Во время согласования реквизиты зафиксированы. "
@@ -890,12 +917,35 @@ async def register_doc(
 
     kind = await _kind_or_404(db, cid, d.kind_id)
     _validate_attrs(kind, d.attrs, required=True)
-    on_date = payload.reg_date or datetime.now(timezone.utc).date()
+    today = datetime.now(_BUSINESS_TIMEZONE).date()
+    on_date = payload.reg_date or today
+    if on_date > today:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Дата регистрации не может быть в будущем")
 
-    if payload.reg_number:
-        number = payload.reg_number.strip()
+    if "org" in kind.number_scope and d.organization_id is None:
+        organizations = list((await db.execute(select(Organization.id).where(
+            Organization.company_id == cid).order_by(Organization.id))).scalars().all())
+        if len(organizations) == 1:
+            d.organization_id = organizations[0]
+        elif len(organizations) > 1:
+            raise HTTPException(status.HTTP_409_CONFLICT,
+                                "Выберите юрлицо: у компании несколько журналов")
+
+    manual_number = payload.reg_number.strip() if payload.reg_number is not None else ""
+    if payload.reg_number is not None and not manual_number:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Ручной регистрационный номер не может быть пустым")
+    if manual_number:
+        await _assert_admin(db, cid, current_user)
+        reason = (payload.manual_reason or "").strip()
+        if len(reason) < 3:
+            raise HTTPException(status.HTTP_409_CONFLICT,
+                                "Укажите причину переноса номера из прежнего журнала")
+        number = manual_number
         d.number_manual = True
     else:
+        reason = ""
         scope = scope_key(kind.code, d.organization_id, on_date, kind.number_scope)
         n = await next_number(db, cid, scope)
         org_code = ""
@@ -908,6 +958,7 @@ async def register_doc(
 
     d.reg_number = number
     d.reg_date = on_date
+    await doc_verify.ensure_token(db, d)
     d.registered_by = current_user.id
     if d.status == "draft":
         d.status = "registered"
@@ -926,12 +977,14 @@ async def register_doc(
             d.storage_until = date_type(on_date.year + case.storage_years, 12, 31)
     db.add(DocEvent(doc_id=d.id, kind="registered", user_id=current_user.id,
                     actor_name=current_user.name or current_user.email,
-                    to_value=number))
+                    to_value=number, note=reason or None))
     await log_audit(db, actor=current_user, company_id=cid, action="doc.register",
-                    target=number, details={"title": d.title[:200], "kind": kind.code})
+                    target=number, details={"title": d.title[:200], "kind": kind.code,
+                                             "manual": bool(manual_number),
+                                             "manual_reason": reason or None})
     try:
         await db.commit()
-    except Exception:
+    except IntegrityError:
         await db.rollback()
         # Номер занят: так бывает при ручном вводе. Счётчик при этом откатился
         # вместе с транзакцией, поэтому пропуска в нумерации не остаётся.
@@ -946,6 +999,7 @@ class ActionIn(BaseModel):
     status: str | None = Field(None, pattern="^(draft|registered|in_force|executed|archived|cancelled)$")
     title: str | None = None
     summary: str | None = None
+    organization_id: str | None = None
     responsible_id: str | None = None
     signatory_id: str | None = None
     due_at: datetime | None = None
@@ -1076,6 +1130,19 @@ async def doc_action(
         changed_material = True
         db.add(DocEvent(doc_id=d.id, kind="field", user_id=current_user.id,
                         actor_name=who, to_value=str(value or ""), note=field))
+
+    if payload.organization_id is not None:
+        if d.reg_number:
+            raise HTTPException(status.HTTP_409_CONFLICT,
+                                "Юрлицо зарегистрированного документа не меняется")
+        value = await _organization_id(db, cid, payload.organization_id)
+        if d.organization_id != value:
+            old = d.organization_id
+            d.organization_id = value
+            changed_material = True
+            db.add(DocEvent(doc_id=d.id, kind="field", user_id=current_user.id,
+                            actor_name=who, from_value=str(old or ""),
+                            to_value=str(value or ""), note="organization_id"))
 
     # Объект сети опознаётся строковым ключом, поэтому идёт отдельно от полей-UUID.
     if payload.object_id is not None and d.object_id != (payload.object_id or None):
@@ -1383,6 +1450,20 @@ async def create_share(
         recipient_email=(payload.recipient_email or "").strip() or None,
         expires_at=datetime.now(timezone.utc) + timedelta(days=payload.days),
         created_by=current_user.id)
+    versions = (await db.execute(select(DocVersion).where(
+        DocVersion.doc_id == d.id, DocVersion.is_current.is_(True),
+        DocVersion.tombstoned_at.is_(None)).order_by(
+        DocVersion.role, DocVersion.revision))).scalars().all()
+    link.version_snapshot = [{
+        "id": str(version.id), "role": version.role,
+        "revision": version.revision, "file_name": version.file_name,
+        "size": version.size_bytes, "sha256": version.sha256,
+    } for version in versions]
+    link.card_snapshot = {
+        "title": d.title, "reg_number": d.reg_number,
+        "reg_date": d.reg_date.isoformat() if d.reg_date else None,
+        "summary": d.summary,
+    }
     db.add(link)
     db.add(DocEvent(doc_id=d.id, kind="dispatch", user_id=current_user.id,
                     actor_name=current_user.name or current_user.email,
@@ -1433,6 +1514,8 @@ async def revoke_share(
         DocShareLink.id == _uuid_or_400(link_id, "link_id")))).scalar_one_or_none()
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Ссылка не найдена")
+    d = await _doc_or_404(db, cid, str(row.doc_id))
+    await _assert_doc_permission(db, cid, d, current_user, "edit")
     row.revoked = True
     await db.commit()
     return {"revoked": str(row.id)}
@@ -1509,6 +1592,23 @@ async def print_doc(
     d = await _doc_or_404(db, cid, doc_id)
     await _assert_doc_permission(db, cid, d, current_user, "read")
     return HTMLResponse(await doc_print.render_card(db, d))
+
+
+@router.post("/{doc_id}/verification")
+async def verification_link(
+    doc_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Стабильная ссылка на проверку записи, не ссылка получателя на файлы."""
+    cid = await assert_company_product(company_id, current_user, db, "docs")
+    d = await _doc_or_404(db, cid, doc_id)
+    await _assert_doc_permission(db, cid, d, current_user, "edit")
+    if not d.reg_number:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Проверка доступна после регистрации")
+    return {"url": await doc_verify.public_url(db, d), "code": d.verify_token}
 
 
 # ── Регламент и разрезы: то же, что у поручений, но по документам ────────────
@@ -2362,6 +2462,8 @@ async def get_doc(
     d = await _doc_or_404(db, cid, doc_id)
     await _assert_doc_permission(db, cid, d, current_user, "read")
     kind = await db.get(DocKind, d.kind_id)
+    organization = (await db.get(Organization, d.organization_id)
+                    if d.organization_id else None)
 
     versions = (await db.execute(select(DocVersion).where(
         DocVersion.doc_id == d.id, DocVersion.tombstoned_at.is_(None))
@@ -2397,7 +2499,8 @@ async def get_doc(
         }
 
     return {
-        **_card_out(d, {str(kind.id): kind.name} if kind else None),
+        **_card_out(d, {str(kind.id): kind.name} if kind else None,
+                    {str(organization.id): organization.name} if organization else None),
         "kind": _kind_out(kind) if kind else None,
         "available_actions": await _available_actions(db, cid, d, kind, current_user),
         "versions": [{
@@ -2471,6 +2574,9 @@ async def upload_version(
     cid = await assert_company_product(company_id, current_user, db, "docs")
     d = await _doc_or_404(db, cid, doc_id)
     await _assert_doc_permission(db, cid, d, current_user, "edit")
+    d = (await db.execute(select(DocCard).where(
+        DocCard.id == d.id).execution_options(
+            populate_existing=True).with_for_update())).scalar_one()
     if d.approval_status == "pending":
         raise HTTPException(status.HTTP_409_CONFLICT,
                             "Во время согласования набор файлов зафиксирован. "
@@ -2503,17 +2609,20 @@ async def upload_version(
         DocVersion.doc_id == d.id, DocVersion.role == role,
         DocVersion.is_current.is_(True),
         DocVersion.tombstoned_at.is_(None)))).scalars().first()
+    latest_revision = (await db.execute(select(func.max(DocVersion.revision)).where(
+        DocVersion.doc_id == d.id, DocVersion.role == role))).scalar_one() or 0
 
     sf = file_store.put(db, cid, content, file_name=file.filename or "файл", mime=mime)
     await db.flush()
     v = DocVersion(
-        company_id=cid, doc_id=d.id, revision=(last.revision + 1) if last else 1,
+        company_id=cid, doc_id=d.id, revision=latest_revision + 1,
         role=role, file_id=sf.id, file_name=sf.file_name, mime=mime,
         size_bytes=len(content), sha256=digest, title=title,
         supersedes_id=last.id if last else None, author_id=current_user.id)
     v.content_text = await doc_text.extract(content, mime, sf.file_name) or ""
     if last is not None:
         last.is_current = False
+        await db.flush()
     db.add(v)
     d.has_files = True
     if role == "body":
@@ -2555,6 +2664,15 @@ async def tombstone_version(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Редакция не найдена")
     d = await _doc_or_404(db, cid, v.doc_id)
     await _assert_doc_permission(db, cid, d, current_user, "edit")
+    d = (await db.execute(select(DocCard).where(
+        DocCard.id == d.id).execution_options(
+            populate_existing=True).with_for_update())).scalar_one()
+    v = (await db.execute(select(DocVersion).where(
+        DocVersion.id == v.id).execution_options(
+            populate_existing=True))).scalar_one()
+    if v.tombstoned_at is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Редакция уже выведена из работы")
     if d.approval_status == "pending":
         raise HTTPException(status.HTTP_409_CONFLICT,
                             "Во время согласования набор файлов зафиксирован. "
@@ -2562,10 +2680,24 @@ async def tombstone_version(
     if d.status not in ("draft", "registered"):
         raise HTTPException(status.HTTP_409_CONFLICT,
                             "Файлы действующего или закрытого документа неизменяемы")
+    was_current = v.is_current
     v.tombstoned_at = datetime.now(timezone.utc)
     v.tombstoned_by = current_user.id
     v.tombstone_reason = payload.reason
     v.is_current = False
+    await db.flush()
+    if was_current:
+        previous = (await db.execute(select(DocVersion).where(
+            DocVersion.doc_id == d.id, DocVersion.role == v.role,
+            DocVersion.id != v.id, DocVersion.tombstoned_at.is_(None),
+        ).order_by(DocVersion.revision.desc()).limit(1))).scalar_one_or_none()
+        if previous:
+            previous.is_current = True
+        if v.role == "body":
+            d.current_revision = previous.revision if previous else 0
+    d.has_files = (await db.execute(select(DocVersion.id).where(
+        DocVersion.doc_id == d.id, DocVersion.id != v.id,
+        DocVersion.tombstoned_at.is_(None)).limit(1))).scalar_one_or_none() is not None
     if d.approval_status in ("approved", "rejected"):
         d.approval_status = "none"
         db.add(DocEvent(doc_id=d.id, kind="approval", user_id=current_user.id,

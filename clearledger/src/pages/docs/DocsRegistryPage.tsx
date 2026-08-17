@@ -125,6 +125,7 @@ export function DocsRegistryPage() {
               <span>{doc.reg_number ?? 'без номера'}</span>
               <span>{doc.reg_date ?? (doc.created_at ?? '').slice(0, 10)}</span>
               <span>{doc.kind_name}</span>
+              {doc.organization_name && <span>{doc.organization_name}</span>}
             </div>
             {doc.counterparty_name && (
               <span className="truncate text-xs text-muted-foreground">{doc.counterparty_name}</span>
@@ -143,6 +144,7 @@ export function DocsRegistryPage() {
               <tr>
                 <th className="px-3 py-2 text-left font-medium">Рег. номер</th>
                 <th className="px-3 py-2 text-left font-medium">Дата</th>
+                <th className="px-3 py-2 text-left font-medium">Юрлицо</th>
                 <th className="px-3 py-2 text-left font-medium">Вид</th>
                 <th className="px-3 py-2 text-left font-medium">Заголовок</th>
                 <th className="px-3 py-2 text-left font-medium">Корреспондент</th>
@@ -166,6 +168,7 @@ export function DocsRegistryPage() {
                   <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">
                     {doc.reg_date ?? (doc.created_at ?? '').slice(0, 10)}
                   </td>
+                  <td className="px-3 py-2 text-muted-foreground">{doc.organization_name || '—'}</td>
                   <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">{doc.kind_name}</td>
                   <td className="px-3 py-2">{doc.title}</td>
                   <td className="px-3 py-2 text-muted-foreground">{doc.counterparty_name || '—'}</td>
@@ -177,7 +180,7 @@ export function DocsRegistryPage() {
               ))}
               {listQ.isSuccess && docs.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-3 py-8 text-center text-sm text-muted-foreground">
+                  <td colSpan={8} className="px-3 py-8 text-center text-sm text-muted-foreground">
                     {emptyText}
                   </td>
                 </tr>

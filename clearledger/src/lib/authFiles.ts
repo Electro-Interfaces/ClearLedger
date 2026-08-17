@@ -107,15 +107,19 @@ export async function downloadAttachment(path: string, name?: string): Promise<v
   anchor.remove()
 }
 
-export async function openAuthAttachment(path: string): Promise<void> {
+export async function openAuthAttachment(
+  path: string, options: { cache?: boolean } = {},
+): Promise<void> {
   const target = window.open('', '_blank')
   if (!target) throw new Error('Браузер заблокировал новую вкладку')
   target.opener = null
   try {
-    const cached = blobCache.get(path)
+    const useCache = options.cache !== false
+    const cached = useCache ? blobCache.get(path) : undefined
     const objUrl = cached ?? URL.createObjectURL(await downloadBlob(path))
-    if (!cached) rememberBlob(path, objUrl)
+    if (!cached && useCache) rememberBlob(path, objUrl)
     target.location.href = objUrl
+    if (!useCache) window.setTimeout(() => URL.revokeObjectURL(objUrl), 60_000)
   } catch (error) {
     target.close()
     throw error

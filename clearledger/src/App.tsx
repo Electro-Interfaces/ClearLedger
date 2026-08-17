@@ -80,6 +80,7 @@ const LoginPage = lazy(() => import('@/pages/LoginPage').then((m) => ({ default:
 const AcceptInvitePage = lazy(() => import('@/pages/AcceptInvitePage').then((m) => ({ default: m.AcceptInvitePage })))
 const ResetPasswordPage = lazy(() => import('@/pages/ResetPasswordPage').then((m) => ({ default: m.ResetPasswordPage })))
 const DocSharePage = lazy(() => import('@/pages/DocSharePage').then((m) => ({ default: m.DocSharePage })))
+const DocVerifyPage = lazy(() => import('@/pages/DocVerifyPage').then((m) => ({ default: m.DocVerifyPage })))
 const ShowcaseLinkPage = lazy(() => import('@/pages/ShowcaseLinkPage')
   .then((m) => ({ default: m.ShowcaseLinkPage })))
 // ShiftReportsPage не используется как отдельная страница — просмотр через RawPanel
@@ -209,6 +210,7 @@ const router = createBrowserRouter([
       // Документ по ссылке: четвёртый вход без учётки. Контрагент смотрит
       // реквизиты, скачивает файлы и подтверждает получение.
       { path: '/doc-share/:token', element: <LazyPage><DocSharePage /></LazyPage> },
+      { path: '/doc-verify/:token', element: <LazyPage><DocVerifyPage /></LazyPage> },
       {
         path: '/',
         element: <ProtectedRoute><LazyPage><EcosystemHomePage /></LazyPage></ProtectedRoute>,

@@ -9574,10 +9574,13 @@ class DocCard(Base):
 
     reg_number: Mapped[str | None] = mapped_column(String(60), nullable=True)
     reg_date: Mapped[date_type | None] = mapped_column(Date, nullable=True)
+    # Случайный публичный код проверки записи. UUID карточки наружу не отдаём:
+    # он внутренний идентификатор, а не capability-токен.
+    verify_token: Mapped[str | None] = mapped_column(String(64), nullable=True)
     registered_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
-    # Номер введён руками: так регистрируют чужой документ, пришедший со своим
-    # номером. Счётчик при этом не двигается.
+    # Номер введён руками только при переносе нашего прежнего бумажного журнала.
+    # Чужой исходящий номер хранится отдельно в external_number.
     number_manual: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     # Наше юрлицо: ось нумерации и шапка печатной формы.
@@ -9636,9 +9639,15 @@ class DocCard(Base):
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
-        # Номер уникален среди зарегистрированных; у черновика номера нет вовсе.
-        Index("uq_doc_cards_reg_number", "company_id", "reg_number",
-              unique=True, postgresql_where=text("reg_number IS NOT NULL")),
+        # У каждого юрлица свой журнал. NULL сводим к одному значению, чтобы у
+        # карточек без юрлица номер тоже оставался уникальным.
+        Index("uq_doc_cards_reg_number", "company_id",
+              text("COALESCE(organization_id, "
+                   "'00000000-0000-0000-0000-000000000000'::uuid)"),
+              "reg_number", unique=True,
+              postgresql_where=text("reg_number IS NOT NULL")),
+        Index("uq_doc_cards_verify_token", "verify_token", unique=True,
+              postgresql_where=text("verify_token IS NOT NULL")),
         # Две карточки на один договор — это две правды о нём.
         Index("uq_doc_cards_subject", "company_id", "subject_ref",
               unique=True, postgresql_where=text("subject_ref IS NOT NULL")),
@@ -9701,6 +9710,9 @@ class DocVersion(Base):
     __table_args__ = (
         UniqueConstraint("doc_id", "revision", "role", "sha256",
                          name="uq_doc_versions_content"),
+        Index("uq_doc_versions_current_role", "doc_id", "role", unique=True,
+              postgresql_where=text(
+                  "is_current = true AND tombstoned_at IS NULL")),
         Index("idx_doc_versions_live", "company_id", "doc_id", "tombstoned_at"),
         CheckConstraint("sha256 ~ '^[0-9a-f]{64}$'", name="ck_doc_versions_sha256"),
         CheckConstraint("revision > 0", name="ck_doc_versions_revision"),
@@ -9925,6 +9937,10 @@ class DocShareLink(Base):
     acknowledged_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True)
     acknowledged_by_name: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    # Редакции, которые были показаны при выпуске ссылки. Без снимка замена файла
+    # задним числом меняет содержание уже подтверждённого получения.
+    version_snapshot: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    card_snapshot: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     # Снимок момента подтверждения: адрес, время и ДОСЛОВНЫЙ текст согласия.
     ack_evidence: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     created_by: Mapped[uuid.UUID | None] = mapped_column(

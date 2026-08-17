@@ -2696,6 +2696,83 @@ async def create_all() -> None:
             "VARCHAR(15) NOT NULL DEFAULT 'none'",
             "ALTER TABLE doc_cards ADD COLUMN IF NOT EXISTS approval_round "
             "INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE doc_cards ADD COLUMN IF NOT EXISTS verify_token VARCHAR(64)",
+            "UPDATE doc_cards SET verify_token = replace(gen_random_uuid()::text, '-', '') "
+            "WHERE reg_number IS NOT NULL AND verify_token IS NULL",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_doc_cards_verify_token "
+            "ON doc_cards (verify_token) WHERE verify_token IS NOT NULL",
+            # До выбора юрлица UI заводил карточки без organization_id. Если у
+            # компании одно юрлицо, двусмысленности нет: переносим карточки и
+            # продолжаем прежний счётчик уже под ключом этого юрлица.
+            "WITH single_org AS (SELECT company_id, "
+            "(array_agg(id ORDER BY id))[1]::text AS org_id "
+            "FROM organizations GROUP BY company_id HAVING count(*) = 1), "
+            "migrated AS (SELECT counter.company_id, counter.scope_key, "
+            "split_part(counter.scope_key, '|', 1) || '|' || single_org.org_id || "
+            "'|' || split_part(counter.scope_key, '|', 3) AS new_scope, "
+            "counter.next_value FROM doc_counters AS counter "
+            "JOIN single_org ON single_org.company_id = counter.company_id "
+            "JOIN doc_kinds AS kind ON kind.company_id = counter.company_id "
+            "AND kind.code = split_part(counter.scope_key, '|', 1) "
+            "WHERE kind.number_scope LIKE '%org%' "
+            "AND split_part(counter.scope_key, '|', 2) = '-') "
+            "INSERT INTO doc_counters (company_id, scope_key, next_value) "
+            "SELECT company_id, new_scope, next_value FROM migrated "
+            "ON CONFLICT (company_id, scope_key) DO UPDATE SET next_value = "
+            "GREATEST(doc_counters.next_value, EXCLUDED.next_value)",
+            "WITH single_org AS (SELECT company_id FROM organizations "
+            "GROUP BY company_id HAVING count(*) = 1) DELETE FROM doc_counters AS counter "
+            "USING single_org, doc_kinds AS kind WHERE single_org.company_id = counter.company_id "
+            "AND kind.company_id = counter.company_id "
+            "AND kind.code = split_part(counter.scope_key, '|', 1) "
+            "AND kind.number_scope LIKE '%org%' "
+            "AND split_part(counter.scope_key, '|', 2) = '-'",
+            "WITH single_org AS (SELECT company_id, "
+            "(array_agg(id ORDER BY id))[1] AS organization_id "
+            "FROM organizations GROUP BY company_id HAVING count(*) = 1) "
+            "UPDATE doc_cards AS card SET organization_id = single_org.organization_id "
+            "FROM single_org WHERE card.company_id = single_org.company_id "
+            "AND card.organization_id IS NULL",
+            # Видимый номер уникален внутри юрлица. У разных юрлиц свои журналы и
+            # счётчики; прежний индекс по компании ошибочно запрещал им одинаковый
+            # номер. NULL сводим к нулевому UUID, чтобы документы без юрлица тоже
+            # не задваивались.
+            "DO $$ BEGIN IF EXISTS (SELECT 1 FROM pg_indexes "
+            "WHERE schemaname = current_schema() "
+            "AND indexname = 'uq_doc_cards_reg_number' "
+            "AND indexdef NOT LIKE '%COALESCE%') THEN "
+            "EXECUTE 'DROP INDEX ' || quote_ident(current_schema()) || "
+            "'.uq_doc_cards_reg_number'; END IF; END $$",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_doc_cards_reg_number "
+            "ON doc_cards (company_id, COALESCE(organization_id, "
+            "'00000000-0000-0000-0000-000000000000'::uuid), reg_number) "
+            "WHERE reg_number IS NOT NULL",
+            "ALTER TABLE doc_share_links ADD COLUMN IF NOT EXISTS version_snapshot JSONB",
+            "ALTER TABLE doc_share_links ADD COLUMN IF NOT EXISTS card_snapshot JSONB",
+            # Старую ссылку нельзя достоверно связать с редакцией задним числом.
+            # Сохраняем её в аудите, но для показа требуется перевыпуск.
+            "UPDATE doc_share_links SET revoked = true "
+            "WHERE revoked = false AND (version_snapshot IS NULL OR card_snapshot IS NULL)",
+            # Исправляем возможный старый дубль current до включения страховочного
+            # индекса. Текущей остаётся последняя живая редакция каждой роли.
+            "WITH ranked AS (SELECT id, row_number() OVER (PARTITION BY doc_id, role "
+            "ORDER BY revision DESC, uploaded_at DESC, id DESC) AS position "
+            "FROM doc_versions WHERE is_current = true AND tombstoned_at IS NULL) "
+            "UPDATE doc_versions AS version SET is_current = false FROM ranked "
+            "WHERE version.id = ranked.id AND ranked.position > 1",
+            "WITH state AS (SELECT card.id, COALESCE(max(version.revision) FILTER (WHERE "
+            "version.role = 'body' AND version.is_current = true "
+            "AND version.tombstoned_at IS NULL), 0) AS current_revision, "
+            "bool_or(version.id IS NOT NULL AND version.tombstoned_at IS NULL) AS has_files "
+            "FROM doc_cards AS card LEFT JOIN doc_versions AS version "
+            "ON version.doc_id = card.id GROUP BY card.id) "
+            "UPDATE doc_cards AS card SET current_revision = state.current_revision, "
+            "has_files = state.has_files FROM state WHERE card.id = state.id "
+            "AND (card.current_revision IS DISTINCT FROM state.current_revision "
+            "OR card.has_files IS DISTINCT FROM state.has_files)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_doc_versions_current_role "
+            "ON doc_versions (doc_id, role) WHERE is_current = true "
+            "AND tombstoned_at IS NULL",
             # Волна достоверности: существующая таблица виз должна научиться
             # отличать будущий шаг от активного и хранить пакет согласования.
             "ALTER TABLE doc_approvals ADD COLUMN IF NOT EXISTS sla_hours INTEGER",

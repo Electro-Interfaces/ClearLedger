@@ -8,11 +8,12 @@
  */
 import { useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { CheckCircle2, Download, FileText } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { get, post } from '@/services/apiClient'
 
 interface SharedDoc {
@@ -28,6 +29,7 @@ interface SharedDoc {
 
 export function DocSharePage() {
   const { token = '' } = useParams()
+  const queryClient = useQueryClient()
   const [name, setName] = useState('')
 
   const q = useQuery({
@@ -39,7 +41,8 @@ export function DocSharePage() {
   const ack = useMutation({
     mutationFn: () => post<{ acknowledged_at: string }>(
       `/api/doc-share/${token}/ack`, { name: name.trim() }),
-    onSuccess: () => q.refetch(),
+    onSuccess: (result) => queryClient.setQueryData<SharedDoc>(['doc-share', token],
+      (current) => current ? { ...current, acknowledged_at: result.acknowledged_at } : current),
   })
 
   if (q.isLoading) {
@@ -108,9 +111,13 @@ export function DocSharePage() {
           <div className="space-y-2 border-t border-border pt-4">
             <p className="text-sm">{d.ack_text}</p>
             <div className="flex flex-wrap gap-2">
-              <Input value={name} onChange={(e) => setName(e.target.value)}
+              <div className="w-full max-w-xs space-y-1.5">
+                <Label htmlFor="doc-share-name">Фамилия и инициалы</Label>
+                <Input id="doc-share-name" value={name} onChange={(e) => setName(e.target.value)}
                 placeholder="Фамилия и инициалы" className="h-9 max-w-xs" />
+              </div>
               <Button size="sm" disabled={name.trim().length < 2 || ack.isPending}
+                className="self-end"
                 onClick={() => ack.mutate()}>
                 Подтвердить получение
               </Button>

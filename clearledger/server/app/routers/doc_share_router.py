@@ -19,14 +19,16 @@ import secrets
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models import DocCard, DocEvent, DocShareLink, DocVersion, SourceFile
+from app.models import (
+    DocCard, DocEvent, DocKind, DocShareLink, DocVersion, Organization, SourceFile,
+)
 
 router = APIRouter(prefix="/doc-share", tags=["Документ по ссылке"])
 
@@ -34,33 +36,111 @@ router = APIRouter(prefix="/doc-share", tags=["Документ по ссылк�
 # через два года спор будет не о факте нажатия, а о том, с чем согласились.
 ACK_TEXT = ("Подтверждаю получение документа и ознакомление с его содержанием. "
             "Подтверждение равнозначно отметке о получении.")
+PUBLIC_ERROR_HEADERS = {
+    "Cache-Control": "no-store",
+    "Referrer-Policy": "no-referrer",
+    "X-Robots-Tag": "noindex, nofollow",
+}
 
 
 def new_token() -> str:
     return secrets.token_urlsafe(24)
 
 
-async def _link_or_404(db: AsyncSession, token: str) -> DocShareLink:
-    row = (await db.execute(select(DocShareLink).where(
-        DocShareLink.token == token))).scalar_one_or_none()
+async def _link_or_404(db: AsyncSession, token: str,
+                       for_update: bool = False) -> DocShareLink:
+    statement = select(DocShareLink).where(DocShareLink.token == token)
+    if for_update:
+        statement = statement.execution_options(
+            populate_existing=True).with_for_update()
+    row = (await db.execute(statement)).scalar_one_or_none()
     now = datetime.now(timezone.utc)
-    if row is None or row.revoked or row.expires_at < now:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Ссылка недействительна")
+    if (row is None or row.revoked or row.expires_at < now or
+            row.version_snapshot is None or row.card_snapshot is None):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Ссылка недействительна",
+                            headers=PUBLIC_ERROR_HEADERS)
     return row
 
 
+async def _shared_versions(db: AsyncSession,
+                           link: DocShareLink) -> list[tuple[DocVersion, dict]]:
+    snapshot = link.version_snapshot or []
+    ids = [item.get("id") for item in snapshot if item.get("id")]
+    if not ids:
+        return []
+    rows = (await db.execute(select(DocVersion).where(
+        DocVersion.doc_id == link.doc_id, DocVersion.id.in_(ids)))).scalars().all()
+    by_id = {str(row.id): row for row in rows}
+    return [(by_id[item["id"]], item) for item in snapshot if item["id"] in by_id]
+
+
+@router.get("/verify/{token}")
+async def verify_registration(token: str, response: Response,
+                              db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+    """Проверить только запись в журнале, без доступа к карточке и файлам."""
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    if len(token) > 64:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Запись не найдена",
+                            headers=PUBLIC_ERROR_HEADERS)
+    doc = (await db.execute(select(DocCard).where(
+        DocCard.verify_token == token, DocCard.reg_number.is_not(None)
+    ))).scalar_one_or_none()
+    if doc is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Запись не найдена",
+                            headers=PUBLIC_ERROR_HEADERS)
+
+    checked_at = datetime.now(timezone.utc).isoformat()
+    if doc.confidentiality == "private":
+        return {
+            "record_status": "restricted", "checked_at": checked_at,
+            "message": "Сведения о документе ограничены политикой доступа организации.",
+            "disclaimer": "Код подтверждает только обращение к записи в системе и не является электронной подписью.",
+        }
+
+    organization = (await db.get(Organization, doc.organization_id)
+                    if doc.organization_id else None)
+    kind = await db.get(DocKind, doc.kind_id)
+    versions = (await db.execute(select(DocVersion).where(
+        DocVersion.doc_id == doc.id, DocVersion.tombstoned_at.is_(None),
+        DocVersion.is_current.is_(True)).order_by(
+        DocVersion.role, DocVersion.revision))).scalars().all()
+    return {
+        "record_status": "cancelled" if doc.status == "cancelled" else "registered",
+        "organization": ({"name": organization.name, "inn": organization.inn,
+                          "kpp": organization.kpp} if organization else None),
+        "kind": kind.name if kind else doc.kind_code,
+        "reg_number": doc.reg_number,
+        "reg_date": doc.reg_date.isoformat() if doc.reg_date else None,
+        "document_status": doc.status,
+        "current_revision": doc.current_revision,
+        "files": [{"role": row.role, "revision": row.revision,
+                   "algorithm": "SHA-256", "sha256": row.sha256} for row in versions],
+        "signature_status": "not_checked",
+        "checked_at": checked_at,
+        "disclaimer": ("Найдена запись с указанными реквизитами. Это не проверка "
+                       "электронной подписи и не подтверждение юридической силы копии."),
+    }
+
+
 @router.get("/{token}")
-async def open_link(token: str, request: Request,
+async def open_link(token: str, request: Request, response: Response,
                     db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     """Карточка документа для получателя: реквизиты и файлы на скачивание."""
+    response.headers.update(PUBLIC_ERROR_HEADERS)
     link = await _link_or_404(db, token)
     doc = await db.get(DocCard, link.doc_id)
     if doc is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Ссылка недействительна")
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Ссылка недействительна",
+                            headers=PUBLIC_ERROR_HEADERS)
 
-    versions = (await db.execute(select(DocVersion).where(
-        DocVersion.doc_id == doc.id, DocVersion.tombstoned_at.is_(None),
-        DocVersion.is_current.is_(True)).order_by(DocVersion.role))).scalars().all()
+    versions = await _shared_versions(db, link)
+    card = link.card_snapshot or {
+        "title": doc.title, "reg_number": doc.reg_number,
+        "reg_date": doc.reg_date.isoformat() if doc.reg_date else None,
+        "summary": doc.summary,
+    }
 
     link.opened_count += 1
     link.last_opened_at = datetime.now(timezone.utc)
@@ -68,16 +148,18 @@ async def open_link(token: str, request: Request,
     await db.commit()
 
     return {
-        "title": doc.title,
-        "reg_number": doc.reg_number,
-        "reg_date": doc.reg_date.isoformat() if doc.reg_date else None,
-        "summary": doc.summary,
+        "title": card.get("title"),
+        "reg_number": card.get("reg_number"),
+        "reg_date": card.get("reg_date"),
+        "summary": card.get("summary"),
         "recipient_name": link.recipient_name,
         "acknowledged_at": link.acknowledged_at.isoformat()
         if link.acknowledged_at else None,
         "ack_text": ACK_TEXT,
-        "files": [{"id": str(v.id), "file_name": v.file_name,
-                   "size": v.size_bytes} for v in versions],
+        "files": [{"id": str(v.id),
+                   "file_name": snapshot.get("file_name") or v.file_name,
+                   "size": snapshot.get("size") or v.size_bytes}
+                  for v, snapshot in versions],
     }
 
 
@@ -86,16 +168,25 @@ async def download(token: str, version_id: str, db: AsyncSession = Depends(get_d
     """Скачать файл документа. Отдаём только действующие редакции этого документа:
     ссылка не должна становиться входом в хранилище файлов пространства."""
     link = await _link_or_404(db, token)
+    allowed = ({item.get("id") for item in link.version_snapshot}
+               if link.version_snapshot is not None else
+               {str(v.id) for v, _ in await _shared_versions(db, link)})
+    if version_id not in allowed:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Файл не найден",
+                            headers=PUBLIC_ERROR_HEADERS)
     v = (await db.execute(select(DocVersion).where(
         DocVersion.id == version_id, DocVersion.doc_id == link.doc_id,
-        DocVersion.tombstoned_at.is_(None)))).scalar_one_or_none()
+    ))).scalar_one_or_none()
     if v is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Файл не найден")
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Файл не найден",
+                            headers=PUBLIC_ERROR_HEADERS)
     sf = await db.get(SourceFile, v.file_id)
     if sf is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Файл не найден")
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Файл не найден",
+                            headers=PUBLIC_ERROR_HEADERS)
     return FileResponse(path=sf.storage_path, media_type=sf.mime_type or
-                        "application/octet-stream", filename=v.file_name)
+                        "application/octet-stream", filename=v.file_name,
+                        headers=PUBLIC_ERROR_HEADERS)
 
 
 class AckIn(BaseModel):
@@ -103,14 +194,15 @@ class AckIn(BaseModel):
 
 
 @router.post("/{token}/ack")
-async def acknowledge(token: str, payload: AckIn, request: Request,
+async def acknowledge(token: str, payload: AckIn, request: Request, response: Response,
                       db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     """Подтвердить получение.
 
     Повторное нажатие ничего не меняет: отметка о получении ставится один раз, и
     переписывать её более поздним временем нельзя.
     """
-    link = await _link_or_404(db, token)
+    response.headers.update(PUBLIC_ERROR_HEADERS)
+    link = await _link_or_404(db, token, for_update=True)
     if link.acknowledged_at:
         return {"acknowledged_at": link.acknowledged_at.isoformat(), "repeated": True}
 
@@ -124,6 +216,8 @@ async def acknowledge(token: str, payload: AckIn, request: Request,
         "name": payload.name.strip(),
         # Дословный текст, который человеку показали. Наш пересказ спор не решит.
         "text": ACK_TEXT,
+        "files": link.version_snapshot,
+        "card": link.card_snapshot,
     }
     db.add(DocEvent(doc_id=link.doc_id, kind="dispatch",
                     actor_name=payload.name.strip(),

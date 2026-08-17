@@ -60,9 +60,14 @@ export function DocSendTab({ doc, companyId, onChanged }: {
       recipient_name: recipient.trim() || null,
       recipient_email: email.trim() || null,
     }),
-    onSuccess: (r) => {
-      navigator.clipboard?.writeText(`${window.location.origin}/doc-share/${r.token}`)
-      toast.success('Ссылка создана и скопирована')
+    onSuccess: async (r) => {
+      const url = `${window.location.origin}/doc-share/${r.token}`
+      try {
+        await navigator.clipboard.writeText(url)
+        toast.success('Ссылка создана и скопирована')
+      } catch {
+        window.prompt('Ссылка создана. Скопируйте её вручную', url)
+      }
       setRecipient(''); setEmail('')
       qc.invalidateQueries({ queryKey: ['doc-shares', doc.id, companyId] })
       onChanged()
@@ -93,6 +98,7 @@ export function DocSendTab({ doc, companyId, onChanged }: {
   })
 
   const links = linksQ.data?.links ?? []
+  const linksCheckedAt = linksQ.dataUpdatedAt
   const boxes = (boxesQ.data?.rows ?? []).filter((a) => a.mode !== 'in')
 
   if (!doc.reg_number) {
@@ -140,7 +146,9 @@ export function DocSendTab({ doc, companyId, onChanged }: {
 
       {links.length > 0 && (
         <Card className="divide-y divide-border/60">
-          {links.map((l) => (
+          {links.map((l) => {
+            const expired = new Date(l.expires_at).getTime() <= linksCheckedAt
+            return (
             <div key={l.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
               <div className="min-w-0 text-sm">
                 <div>{l.recipient || 'без имени'}</div>
@@ -150,16 +158,21 @@ export function DocSendTab({ doc, companyId, onChanged }: {
                     ? ` · получение подтвердил ${l.acknowledged_by}`
                     : ''}
                   {l.revoked ? ' · отозвана' : ''}
+                  {expired && !l.revoked ? ' · срок истёк' : ''}
                 </div>
               </div>
               <div className="flex shrink-0 gap-1">
-                {!l.revoked && (
+                {!l.revoked && !expired && (
                   <>
                     <Button size="sm" variant="ghost" title="Скопировать ссылку"
-                      onClick={() => {
-                        navigator.clipboard?.writeText(
-                          `${window.location.origin}/doc-share/${l.token}`)
-                        toast.success('Скопировано')
+                      onClick={async () => {
+                        const url = `${window.location.origin}/doc-share/${l.token}`
+                        try {
+                          await navigator.clipboard.writeText(url)
+                          toast.success('Скопировано')
+                        } catch {
+                          window.prompt('Скопируйте ссылку вручную', url)
+                        }
                       }}>
                       <Copy className="h-3.5 w-3.5" />
                     </Button>
@@ -171,7 +184,8 @@ export function DocSendTab({ doc, companyId, onChanged }: {
                 )}
               </div>
             </div>
-          ))}
+            )
+          })}
         </Card>
       )}
 

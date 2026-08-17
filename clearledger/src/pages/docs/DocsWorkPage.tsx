@@ -148,6 +148,7 @@ export function DocsWorkPage() {
                   <div className="truncate text-sm">{doc.title}</div>
                   <div className="text-[13px] text-muted-foreground">
                     {doc.reg_number ?? 'без номера'} · {doc.kind_name}
+                    {doc.organization_name ? ` · ${doc.organization_name}` : ''}
                     {doc.counterparty_name ? ` · ${doc.counterparty_name}` : ''}
                   </div>
                 </div>

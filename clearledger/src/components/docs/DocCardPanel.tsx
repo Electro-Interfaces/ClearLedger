@@ -8,7 +8,7 @@ import { useId, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Archive, ArrowLeft, Ban, CheckCheck, FileCheck2, FileUp, KeyRound, Link2,
-  ListChecks, LockKeyhole, Printer, Send, Stamp, Workflow,
+  ListChecks, LockKeyhole, Printer, Send, ShieldCheck, Stamp, Workflow,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -26,6 +26,8 @@ import { DocApprovalTab } from './DocApprovalTab'
 import { DocFileWorkspace } from './DocFileWorkspace'
 import { DocSendTab } from './DocSendTab'
 import { openAuthAttachment } from '@/lib/authFiles'
+import { useCompany } from '@/contexts/CompanyContext'
+import { DocRegisterDialog, type DocRegisterValues } from './DocRegisterDialog'
 
 const EVENT_LABEL: Record<string, string> = {
   created: 'заведён',
@@ -54,6 +56,7 @@ const FIELD_LABEL: Record<string, string> = {
   signatory_id: 'Подписант',
   object_id: 'Объект',
   attrs: 'Реквизиты вида',
+  organization_id: 'Наше юрлицо',
 }
 
 const EVENT_VALUE: Record<string, string> = {
@@ -90,8 +93,9 @@ export function DocCardPanel({ id, companyId, onBack, onChanged }: {
   onChanged: () => void
 }) {
   const qc = useQueryClient()
+  const { organizations, isCompanyAdmin } = useCompany()
   const fileRef = useRef<HTMLInputElement>(null)
-  const [manualNumber, setManualNumber] = useState('')
+  const [registerOpen, setRegisterOpen] = useState(false)
   const [note, setNote] = useState('')
   const [activeTab, setActiveTab] = useState('document')
   const [fileRole, setFileRole] = useState('body')
@@ -109,13 +113,30 @@ export function DocCardPanel({ id, companyId, onBack, onChanged }: {
   }
 
   const register = useMutation({
-    mutationFn: () => docsService.registerDoc(companyId, id, manualNumber.trim() || undefined),
+    mutationFn: (values: DocRegisterValues) => docsService.registerDoc(companyId, id, {
+      regDate: values.regDate,
+      regNumber: values.regNumber,
+      manualReason: values.manualReason,
+    }),
     onSuccess: (d) => {
       toast.success(`Зарегистрирован: ${d.reg_number}`)
-      setManualNumber('')
+      setRegisterOpen(false)
       refresh()
     },
     onError: (e) => toast.error(`Не зарегистрирован: ${(e as Error).message}`),
+  })
+
+  const verification = useMutation({
+    mutationFn: () => docsService.getVerificationLink(companyId, id),
+    onSuccess: async (result) => {
+      try {
+        await navigator.clipboard.writeText(result.url)
+        toast.success('Ссылка проверки скопирована')
+      } catch {
+        window.prompt('Скопируйте ссылку проверки', result.url)
+      }
+    },
+    onError: (e) => toast.error(`Ссылка не получена: ${(e as Error).message}`),
   })
 
   const act = useMutation({
@@ -193,10 +214,19 @@ export function DocCardPanel({ id, companyId, onBack, onChanged }: {
       <Button size="sm" variant="outline" onClick={() => setActiveTab('access')}>
         <KeyRound className="mr-1.5 h-4 w-4" />Доступ
       </Button>
+      {registered && editable && (
+        <Button size="sm" variant="ghost" title="Ссылка проверки записи"
+          aria-label="Ссылка проверки записи" onClick={() => verification.mutate()}
+          disabled={verification.isPending}>
+          <ShieldCheck className="h-4 w-4 md:mr-1.5" />
+          <span className="hidden md:inline">Проверка</span>
+        </Button>
+      )}
       {registered && (
         <Button size="sm" variant="ghost" title="Печатная форма" aria-label="Печатная форма"
           onClick={() => openAuthAttachment(
             `/api/docs/${d.id}/print?company_id=${companyId}`,
+            { cache: false },
           ).catch((error) => toast.error(`Печатная форма не открыта: ${error.message}`))}>
           <Printer className="h-4 w-4 md:mr-1.5" /><span className="hidden md:inline">Печать</span>
         </Button>
@@ -239,6 +269,7 @@ export function DocCardPanel({ id, companyId, onBack, onChanged }: {
               <p className="mt-0.5 text-xs text-muted-foreground">
                 {d.kind_name || d.kind_code}
                 {registered ? ` · ${d.reg_number} от ${d.reg_date}` : ' · номер не присвоен'}
+                {d.organization_name ? ` · ${d.organization_name}` : ''}
                 {d.counterparty_name ? ` · ${d.counterparty_name}` : ''}
               </p>
             </div>
@@ -262,14 +293,9 @@ export function DocCardPanel({ id, companyId, onBack, onChanged }: {
 
         <div className="flex flex-wrap items-center gap-2">
           {actions.has('register') && (
-            <>
-              <Input value={manualNumber} onChange={(event) => setManualNumber(event.target.value)}
-                placeholder="или номер вручную" aria-label="Регистрационный номер вручную"
-                className="h-9 w-44 text-sm" />
-              <Button size="sm" onClick={() => register.mutate()} disabled={register.isPending}>
-                <Stamp className="mr-1.5 h-4 w-4" />Зарегистрировать
-              </Button>
-            </>
+            <Button size="sm" onClick={() => setRegisterOpen(true)} disabled={register.isPending}>
+              <Stamp className="mr-1.5 h-4 w-4" />Зарегистрировать
+            </Button>
           )}
           {actions.has('start_approval') && (
             <Button size="sm" variant="outline" onClick={() => startApproval.mutate()}
@@ -350,6 +376,17 @@ export function DocCardPanel({ id, companyId, onBack, onChanged }: {
             </Card>
           )}
           <Card className="grid gap-3 p-4 sm:grid-cols-2">
+            <Field label="Наше юрлицо">
+              {(controlId) => <select id={controlId} value={d.organization_id ?? ''}
+                disabled={!editable || registered}
+                className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm disabled:cursor-default disabled:opacity-100 disabled:text-foreground"
+                onChange={(event) => act.mutate({ organization_id: event.target.value })}>
+                <option value="">Не выбрано</option>
+                {organizations.map((organization) => (
+                  <option key={organization.id} value={organization.id}>{organization.name}</option>
+                ))}
+              </select>}
+            </Field>
             <Field label="Заголовок">
               {(controlId) => <Input id={controlId} defaultValue={d.title} required aria-required="true"
                 className="h-9 disabled:cursor-default disabled:opacity-100 disabled:text-foreground"
@@ -519,6 +556,11 @@ export function DocCardPanel({ id, companyId, onBack, onChanged }: {
           <DocAccessTab doc={d} companyId={companyId} />
         </TabsContent>
       </Tabs>
+      {registerOpen && (
+        <DocRegisterDialog pending={register.isPending} allowManual={isCompanyAdmin}
+          onClose={() => setRegisterOpen(false)}
+          onConfirm={(values) => register.mutate(values)} />
+      )}
     </div>
   )
 }

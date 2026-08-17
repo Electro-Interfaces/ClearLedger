@@ -47,6 +47,7 @@ export interface DocCard {
   reg_date: string | null
   number_manual: boolean
   organization_id: string | null
+  organization_name: string
   counterparty_id: string | null
   counterparty_name: string
   external_number: string | null
@@ -331,13 +332,24 @@ export async function deleteAccessGrant(
 
 /** Присвоить номер. Без `regNumber` номер выдаёт счётчик компании. */
 export async function registerDoc(
-  companyId: string, id: string, regNumber?: string, regDate?: string,
+  companyId: string, id: string, input: {
+    regNumber?: string
+    regDate?: string
+    manualReason?: string
+  } = {},
 ): Promise<DocCard> {
   return post<DocCard>(`/api/docs/${id}/register`, {
     company_id: companyId,
-    reg_number: regNumber || null,
-    reg_date: regDate || null,
+    reg_number: input.regNumber ?? null,
+    reg_date: input.regDate ?? null,
+    manual_reason: input.manualReason ?? null,
   })
+}
+
+export async function getVerificationLink(
+  companyId: string, id: string,
+): Promise<{ url: string; code: string }> {
+  return post(`/api/docs/${id}/verification?company_id=${companyId}`, {})
 }
 
 export async function docAction(

@@ -95,7 +95,9 @@ export function isNetworkError(err: unknown): boolean {
 let isRedirecting = false
 
 /** Страницы, доступные без сессии: увести отсюда на вход — значит сломать вход. */
-const PUBLIC_PAGES = ['/login', '/invite/', '/reset-password/']
+const PUBLIC_PAGES = [
+  '/login', '/invite/', '/reset-password/', '/showcase/', '/doc-share/', '/doc-verify/',
+]
 export function isPublicPage(pathname: string): boolean {
   const p = pathname.replace(/\/$/, '')
   return PUBLIC_PAGES.some((s) => p.endsWith(s.replace(/\/$/, '')) || p.includes(s))
