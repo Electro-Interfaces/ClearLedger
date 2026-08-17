@@ -11,6 +11,7 @@ import {
   ListChecks, LockKeyhole, Printer, Send, ShieldCheck, Stamp, Workflow,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { ConfirmActionDialog } from '@/components/common/ConfirmActionDialog'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -22,6 +23,7 @@ import { DOC_STATUS } from '@/services/docsService'
 import type { DocKindField } from '@/services/docsService'
 import { DocAcquaintTab } from './DocAcquaintTab'
 import { DocAccessTab } from './DocAccessTab'
+import { DocArchiveTab } from './DocArchiveTab'
 import { DocApprovalTab } from './DocApprovalTab'
 import { DocFileWorkspace } from './DocFileWorkspace'
 import { DocSendTab } from './DocSendTab'
@@ -75,6 +77,7 @@ const EVENT_VALUE: Record<string, string> = {
   skipped: 'Снято',
   company: 'Всё пространство',
   private: 'Ограниченный доступ',
+  strict: 'Строгий доступ',
   body: 'Документ',
   appendix: 'Приложение',
   signed_scan: 'Подписанный экземпляр',
@@ -88,21 +91,25 @@ const APPROVAL_LABEL: Record<string, string> = {
   rejected: 'На доработке',
 }
 
-export function DocCardPanel({ id, companyId, onBack, onChanged }: {
+export function DocCardPanel({ id, companyId, onBack, onChanged, initialTab }: {
   id: string
   companyId: string
   onBack: () => void
   onChanged: () => void
+  initialTab?: 'document' | 'processing' | 'files' | 'links' | 'archive' | 'feed'
 }) {
   const qc = useQueryClient()
   const { organizations, isCompanyAdmin } = useCompany()
   const fileRef = useRef<HTMLInputElement>(null)
   const [registerOpen, setRegisterOpen] = useState(false)
   const [note, setNote] = useState('')
-  const [activeTab, setActiveTab] = useState('document')
+  const [activeTab, setActiveTab] = useState<string>(initialTab ?? 'document')
   const [fileRole, setFileRole] = useState('body')
   const [reasonMode, setReasonMode] = useState<'cancel' | 'cancel_approval' | null>(null)
   const [reason, setReason] = useState('')
+  const [emergencyPassword, setEmergencyPassword] = useState('')
+  const [emergencyReason, setEmergencyReason] = useState('')
+  const [emergencyTtl, setEmergencyTtl] = useState(15)
 
   const q = useQuery({
     queryKey: ['doc', id, companyId],
@@ -112,6 +119,27 @@ export function DocCardPanel({ id, companyId, onBack, onChanged }: {
     queryKey: ['doc-cases', companyId],
     queryFn: () => docsService.listCases(companyId),
     enabled: !!companyId,
+  })
+  const securityQ = useQuery({
+    queryKey: ['doc-security', companyId, id],
+    queryFn: () => docsService.getDocSecurity(companyId, id),
+    enabled: q.isError,
+    retry: false,
+  })
+  const emergencyAccess = useMutation({
+    mutationFn: () => docsService.activateBreakGlass(companyId, id, {
+      password: emergencyPassword,
+      reason: emergencyReason.trim(),
+      ttl_minutes: emergencyTtl,
+    }),
+    onSuccess: async () => {
+      setEmergencyPassword('')
+      setEmergencyReason('')
+      toast.success('Временный аварийный доступ открыт')
+      await securityQ.refetch()
+      await q.refetch()
+    },
+    onError: (error) => toast.error((error as Error).message),
   })
 
   const refresh = () => {
@@ -209,8 +237,26 @@ export function DocCardPanel({ id, companyId, onBack, onChanged }: {
   })
 
   if (q.isLoading) return <DocLoadState onBack={onBack} />
+  if (q.isError && securityQ.data?.can_break_glass) return (
+    <StrictAccessGate
+      security={securityQ.data}
+      password={emergencyPassword}
+      reason={emergencyReason}
+      ttl={emergencyTtl}
+      pending={emergencyAccess.isPending}
+      onBack={onBack}
+      onPassword={setEmergencyPassword}
+      onReason={setEmergencyReason}
+      onTtl={setEmergencyTtl}
+      onActivate={() => emergencyAccess.mutate()} />
+  )
   if (q.isError) return (
-    <DocLoadState onBack={onBack} error={(q.error as Error).message} onRetry={() => q.refetch()} />
+    <DocLoadState onBack={onBack}
+      error={securityQ.isLoading ? 'Проверяем режим доступа…' : (q.error as Error).message}
+      onRetry={() => {
+        securityQ.refetch()
+        q.refetch()
+      }} />
   )
   const d = q.data
   if (!d) return <DocLoadState onBack={onBack} error="Документ не найден" />
@@ -231,7 +277,7 @@ export function DocCardPanel({ id, companyId, onBack, onChanged }: {
   )
   const headerActions = (
     <>
-      {registered && editable && (
+      {registered && d.capabilities.send && (
         <Button size="sm" onClick={() => setActiveTab('send')}>
           <Send className="mr-1.5 h-4 w-4" />Отправка
         </Button>
@@ -239,7 +285,7 @@ export function DocCardPanel({ id, companyId, onBack, onChanged }: {
       <Button size="sm" variant="outline" onClick={() => setActiveTab('access')}>
         <KeyRound className="mr-1.5 h-4 w-4" />Доступ
       </Button>
-      {registered && editable && (
+      {registered && d.capabilities.send && (
         <Button size="sm" variant="ghost" title="Ссылка проверки записи"
           aria-label="Ссылка проверки записи" onClick={() => verification.mutate()}
           disabled={verification.isPending}>
@@ -247,7 +293,7 @@ export function DocCardPanel({ id, companyId, onBack, onChanged }: {
           <span className="hidden md:inline">Проверка</span>
         </Button>
       )}
-      {registered && (
+      {registered && d.capabilities.print && (
         <Button size="sm" variant="ghost" title="Печатная форма" aria-label="Печатная форма"
           onClick={() => openAuthAttachment(
             `/api/docs/${d.id}/print?company_id=${companyId}`,
@@ -311,7 +357,8 @@ export function DocCardPanel({ id, companyId, onBack, onChanged }: {
           <Fact label="Согласование" value={APPROVAL_LABEL[d.approval_status] ?? d.approval_status} />
           <Fact label="Хранение" value={d.storage_until ? `До ${d.storage_until}` : 'Срок не зафиксирован'} />
           <Fact label="Доступ"
-            value={d.confidentiality === 'private' ? 'Ограниченный' : 'Всё пространство'} />
+            value={d.confidentiality === 'strict' ? 'Строгий'
+              : d.confidentiality === 'private' ? 'Ограниченный' : 'Всё пространство'} />
         </div>
 
         <Lifecycle status={d.status} />
@@ -385,6 +432,7 @@ export function DocCardPanel({ id, companyId, onBack, onChanged }: {
           </TabsTrigger>
           <TabsTrigger value="files">Файлы и подписи{d.versions.length ? ` (${d.versions.length})` : ''}</TabsTrigger>
           <TabsTrigger value="links">Связи{d.relations.length ? ` (${d.relations.length})` : ''}</TabsTrigger>
+          <TabsTrigger value="archive">Архив</TabsTrigger>
           <TabsTrigger value="feed">История</TabsTrigger>
         </TabsList>
 
@@ -440,15 +488,18 @@ export function DocCardPanel({ id, companyId, onBack, onChanged }: {
                 onBlur={(event) => event.target.value !== (d.external_date ?? '')
                   && act.mutate({ external_date: event.target.value || null })} />}
             </Field>
-            <Field label="Доступ">
-              {(controlId) => <select id={controlId} value={d.confidentiality}
-                disabled={!editable || !d.can_manage_access}
-                className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm disabled:cursor-default disabled:opacity-100 disabled:text-foreground"
-                onChange={(event) => act.mutate({ confidentiality: event.target.value })}>
-                <option value="company">Всё пространство</option>
-                <option value="private">Ограниченный доступ</option>
-              </select>}
-            </Field>
+            <div className="space-y-1.5">
+              <div className="text-xs text-muted-foreground">Доступ</div>
+              <div className="flex min-h-9 items-center rounded-md border border-input bg-muted/30 px-3 text-sm">
+                {d.confidentiality === 'strict' ? 'Строгий — только явные разрешения'
+                  : d.confidentiality === 'private' ? 'Ограниченный — участники и правила'
+                    : 'Всё пространство'}
+              </div>
+              {d.can_manage_access && (
+                <button type="button" className="text-xs text-primary underline underline-offset-2"
+                  onClick={() => setActiveTab('access')}>Изменить политику доступа</button>
+              )}
+            </div>
             <Field label="Дело номенклатуры">
               {(controlId) => <div className="space-y-1.5">
                 <select id={controlId} value={d.case_id ?? ''}
@@ -545,7 +596,9 @@ export function DocCardPanel({ id, companyId, onBack, onChanged }: {
               Каждый файл опознаётся SHA-256; во время согласования набор неизменяем.
             </span>
           </div>
-          <DocFileWorkspace versions={d.versions} canRemove={canChangeFiles}
+          <DocFileWorkspace versions={d.versions} canDownload={d.capabilities.download}
+            sensitive={d.confidentiality === 'strict'}
+            canRemove={canChangeFiles}
             removing={tombstone.isPending}
             onRemove={(versionId, reason) => tombstone.mutate({ versionId, reason })} />
         </TabsContent>
@@ -603,6 +656,9 @@ export function DocCardPanel({ id, companyId, onBack, onChanged }: {
 
         <TabsContent value="send">
           <DocSendTab doc={d} companyId={companyId} onChanged={refresh} />
+        </TabsContent>
+        <TabsContent value="archive">
+          <DocArchiveTab doc={d} companyId={companyId} />
         </TabsContent>
         <TabsContent value="access">
           <DocAccessTab doc={d} companyId={companyId} />
@@ -766,6 +822,85 @@ function DocLoadState({ onBack, error, onRetry }: {
       ) : (
         <div className="text-sm text-muted-foreground">Загрузка документа…</div>
       )}
+    </div>
+  )
+}
+
+function StrictAccessGate({ security, password, reason, ttl, pending, onBack,
+  onPassword, onReason, onTtl, onActivate }: {
+  security: docsService.DocSecurityState
+  password: string
+  reason: string
+  ttl: number
+  pending: boolean
+  onBack: () => void
+  onPassword: (value: string) => void
+  onReason: (value: string) => void
+  onTtl: (value: number) => void
+  onActivate: () => void
+}) {
+  const ready = password.length > 0 && reason.trim().length >= 20
+  return (
+    <div className="mx-auto max-w-2xl space-y-4 p-4">
+      <Button variant="ghost" size="sm" onClick={onBack}>
+        <ArrowLeft className="mr-1.5 h-4 w-4" />Вернуться в реестр
+      </Button>
+      <Card className="border-destructive/40">
+        <div className="space-y-4 p-5">
+          <div className="flex items-start gap-3">
+            <LockKeyhole className="mt-0.5 h-5 w-5 text-destructive" />
+            <div>
+              <div className="font-semibold">Содержимое закрыто строгой политикой</div>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {security.kind_code} · {security.reg_number || 'без регистрационного номера'} · {security.status}
+              </p>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Аварийный режим разрешает только чтение, скачивание и печать. Правка,
+                отправка, экспорт, согласование и управление доступом останутся запрещены.
+              </p>
+            </div>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label htmlFor={`emergency-password-${security.id}`}>Подтвердите пароль</Label>
+              <Input id={`emergency-password-${security.id}`} type="password"
+                autoComplete="current-password" value={password}
+                onChange={(event) => onPassword(event.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor={`emergency-ttl-${security.id}`}>Срок доступа</Label>
+              <select id={`emergency-ttl-${security.id}`} value={ttl}
+                onChange={(event) => onTtl(Number(event.target.value))}
+                className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm">
+                <option value={5}>5 минут</option>
+                <option value={15}>15 минут</option>
+                <option value={30}>30 минут</option>
+                <option value={60}>60 минут</option>
+              </select>
+            </div>
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label htmlFor={`emergency-reason-${security.id}`}>
+                Причина, не менее 20 символов
+              </Label>
+              <Textarea id={`emergency-reason-${security.id}`} value={reason}
+                onChange={(event) => onReason(event.target.value)} rows={3}
+                placeholder="Опишите инцидент и почему штатного доступа недостаточно" />
+            </div>
+          </div>
+          <ConfirmActionDialog
+            trigger={(
+              <Button variant="destructive" disabled={!ready || pending}>
+                <KeyRound className="mr-1.5 h-4 w-4" />Открыть аварийный доступ
+              </Button>
+            )}
+            title={`Открыть доступ на ${ttl} минут?`}
+            description="Действие и каждое использование будут записаны в аудит. Ответственные получат уведомление."
+            confirmLabel="Открыть доступ"
+            destructive
+            onConfirm={onActivate}
+          />
+        </div>
+      </Card>
     </div>
   )
 }

@@ -151,4 +151,5 @@ async def download_file(
         path=str(file_path),
         media_type=source.mime_type,
         filename=source.file_name,
+        headers={"Cache-Control": "private, no-store"},
     )

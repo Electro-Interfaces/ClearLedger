@@ -32,8 +32,9 @@ from sqlalchemy import and_, or_, select, text
 from app.auth import resolve_member_modules
 from app.database import async_session_factory
 from app.models import (
-    DocAcquaint, DocCard, DocExchangeTarget, Task, TaskChecklistItem, TaskEvent,
-    TaskRecurrence, TaskTemplate, TaskType, User, UserCompany,
+    DocAcquaint, DocBreakGlassAccess, DocCard, DocExchangeTarget, Task,
+    TaskChecklistItem, TaskEvent, TaskRecurrence, TaskTemplate, TaskType, User,
+    UserCompany,
 )
 from app.services import doc_exchange, task_mail
 
@@ -45,6 +46,7 @@ TICK_SECONDS = 300
 LOCK_NAMESPACE = 0x1A5C5ED
 ACQUAINT_LOCK_KEY = 0x0AC011
 EXCHANGE_LOCK_KEY = 0x0ED011
+BREAK_GLASS_LOCK_KEY = 0x0B6A55
 
 
 def _tz(rule: dict) -> ZoneInfo:
@@ -314,17 +316,44 @@ async def run_exchange_scans(db, now: datetime) -> int:
     return added
 
 
+async def run_break_glass_notifications(db, now: datetime) -> int:
+    got = await db.scalar(text("SELECT pg_try_advisory_xact_lock(:ns, :key)"),
+                          {"ns": LOCK_NAMESPACE, "key": BREAK_GLASS_LOCK_KEY})
+    if not got:
+        return 0
+    rows = list((await db.execute(select(DocBreakGlassAccess).where(
+        DocBreakGlassAccess.notification_status.in_(("pending", "error")),
+        DocBreakGlassAccess.created_at >= now - timedelta(days=7),
+    ).order_by(DocBreakGlassAccess.created_at).limit(100)
+        .with_for_update(skip_locked=True))).scalars().all())
+    sent = 0
+    for row in rows:
+        ok, error = await task_mail.send_notice_checked(
+            row.notification_recipients or [],
+            "Трек: активирован аварийный доступ",
+            "Суперадминистратор активировал временный доступ к закрытому документу.\n"
+            f"Код карточки: {row.doc_id}\n"
+            f"Срок: {row.expires_at.isoformat()}\n"
+            f"Причина: {row.reason}",
+        )
+        row.notification_status = "sent" if ok else "error"
+        row.notification_error = error
+        sent += int(ok)
+    return sent
+
+
 async def tick() -> dict[str, int]:
     """Один проход регламента. Ошибка одной части не отменяет остальные."""
     now = datetime.now(timezone.utc)
     out = {"recurrences": 0, "reminders": 0, "escalations": 0,
-           "acquaints": 0, "exchange": 0}
+           "acquaints": 0, "exchange": 0, "break_glass": 0}
     async with async_session_factory() as db:
         for key, fn in (("recurrences", run_recurrences),
                         ("reminders", run_due_reminders),
                         ("escalations", run_escalations),
                         ("acquaints", run_acquaint_reminders),
-                        ("exchange", run_exchange_scans)):
+                        ("exchange", run_exchange_scans),
+                        ("break_glass", run_break_glass_notifications)):
             try:
                 out[key] = await fn(db, now)
                 await db.commit()

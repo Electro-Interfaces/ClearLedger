@@ -29,15 +29,19 @@ from urllib.parse import quote
 from fastapi import Response
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import Integer, and_, case, cast, func, literal_column, or_, select
+from sqlalchemy import Integer, and_, case, cast, false, func, literal_column, or_, select, true
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import log_audit
-from app.auth import assert_company_product, get_current_user, resolve_member_modules
+from app.auth import (
+    assert_company_product, get_current_user, resolve_member_modules,
+    verify_password,
+)
 from app.database import get_db
 from app.models import (
-    CompanyRole, Counterparty, Department, DocAccessGrant, DocApproval, DocCard,
+    CompanyRole, Counterparty, Department, DocAccessGrant, DocApproval,
+    DocBreakGlassAccess, DocCard,
     DocCase, DocEvent, DocKind, DocRelation, DocAcquaint, DocExchangeTarget,
     DocExport, DocInboxItem, DocLabelLink,
     DocShareLink, UserSubstitution,
@@ -47,7 +51,7 @@ from app.models import (
 from app.routers import doc_share_router
 from app.services import (
     doc_approvals, doc_exchange, doc_print, doc_text, doc_verify, file_safety,
-    file_store, mail_send,
+    file_store, mail_send, task_mail,
 )
 from app.services.doc_numbers import next_number, render, scope_key
 
@@ -70,6 +74,11 @@ _RUSSIAN_TEXT_SEARCH = literal_column("'russian'::regconfig")
 _FIELD_TYPES = {"text", "textarea", "number", "date", "boolean", "select"}
 _FIELD_CODE = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
 _BUSINESS_TIMEZONE = ZoneInfo("Europe/Moscow")
+_CONTENT_PERMISSIONS = {
+    "read", "download", "print", "edit", "export", "send", "approve",
+    "sign", "archive",
+}
+_BREAK_GLASS_PERMISSIONS = {"read", "download", "print"}
 
 # Заготовки видов: то, что есть в любой компании. Заводятся кнопкой из раздела
 # «Виды», а не молча при первом запросе: справочник компании создаёт человек.
@@ -288,6 +297,19 @@ def _set_storage_until(doc: DocCard, case_row: DocCase,
             and case_row.storage_years is not None):
         doc.storage_until = date_type(
             effective_date.year + case_row.storage_years, 12, 31)
+    if not doc.retention_snapshot:
+        doc.retention_class = case_row.retention_class
+        doc.retention_snapshot = {
+            "case_id": str(case_row.id),
+            "case_year": case_row.year,
+            "case_index": case_row.index,
+            "storage_term": case_row.storage_term,
+            "storage_years": case_row.storage_years,
+            "epk": case_row.epk,
+            "retention_basis": case_row.retention_basis,
+            "retention_class": case_row.retention_class,
+            "registered_on": effective_date.isoformat() if effective_date else None,
+        }
 
 
 async def _default_case_id(db: AsyncSession, cid: uuid.UUID,
@@ -315,18 +337,23 @@ async def _company_user_id(db: AsyncSession, cid: uuid.UUID,
 
 def _visible(d: DocCard, user: User) -> bool:
     """Базовая видимость до правил карточки и рабочих назначений."""
-    if d.confidentiality != "private":
+    if d.confidentiality == "company":
         return True
-    return user.is_superadmin or user.id in {d.author_id, d.responsible_id, d.signatory_id}
+    return user.id in {d.author_id, d.responsible_id, d.signatory_id}
 
 async def _access_rows(db: AsyncSession, cid: uuid.UUID,
                        d: DocCard) -> list[DocAccessGrant]:
+    scopes = [
+        (DocAccessGrant.scope_type == "doc") & (DocAccessGrant.scope_id == d.id),
+    ]
+    if d.inherit_kind_acl:
+        scopes.append(
+            (DocAccessGrant.scope_type == "kind")
+            & (DocAccessGrant.scope_id == d.kind_id)
+        )
     return (await db.execute(select(DocAccessGrant).where(
         DocAccessGrant.company_id == cid,
-        or_(
-            (DocAccessGrant.scope_type == "doc") & (DocAccessGrant.scope_id == d.id),
-            (DocAccessGrant.scope_type == "kind") & (DocAccessGrant.scope_id == d.kind_id),
-        )))).scalars().all()
+        or_(*scopes)))).scalars().all()
 
 
 async def _subject_ids(db: AsyncSession, cid: uuid.UUID,
@@ -339,10 +366,54 @@ async def _subject_ids(db: AsyncSession, cid: uuid.UUID,
     }
 
 
+def _matches_subject(row: DocAccessGrant,
+                     subjects: dict[str, uuid.UUID | None]) -> bool:
+    return subjects.get(row.subject_type) == row.subject_id
+
+
+def _denied(rows: list[DocAccessGrant],
+            subjects: dict[str, uuid.UUID | None], permission: str) -> bool:
+    denied = {permission}
+    if permission in _CONTENT_PERMISSIONS:
+        denied.add("read")
+    return any(
+        _matches_subject(row, subjects)
+        and denied.intersection(row.denied_permissions or [])
+        for row in rows
+    )
+
+
+async def _active_break_glass(db: AsyncSession, cid: uuid.UUID, d: DocCard,
+                              user: User, permission: str,
+                              *, record_use: bool = True) -> bool:
+    if permission not in _BREAK_GLASS_PERMISSIONS:
+        return False
+    row = (await db.execute(select(DocBreakGlassAccess).where(
+        DocBreakGlassAccess.company_id == cid,
+        DocBreakGlassAccess.doc_id == d.id,
+        DocBreakGlassAccess.user_id == user.id,
+        DocBreakGlassAccess.revoked_at.is_(None),
+        DocBreakGlassAccess.expires_at > func.now(),
+        DocBreakGlassAccess.permissions.contains([permission]),
+    ).order_by(DocBreakGlassAccess.created_at.desc()).limit(1))).scalar_one_or_none()
+    if row is None:
+        return False
+    if record_use:
+        row.last_used_at = datetime.now(timezone.utc)
+        row.use_count = int(row.use_count or 0) + 1
+        await log_audit(
+            db, actor=user, company_id=cid, action="doc.break_glass.use",
+            target=str(d.id), details={"permission": permission,
+                                       "access_id": str(row.id)},
+        )
+    return True
+
+
 async def _action_policy_allows(db: AsyncSession, cid: uuid.UUID,
                                 rows: list[DocAccessGrant], action: str,
                                 principal_id: uuid.UUID | None) -> bool:
-    policies = [row for row in rows if action in (row.permissions or [])]
+    policies = [row for row in rows if action in (row.permissions or [])
+                or action in (row.denied_permissions or [])]
     if not policies:
         return True
     if principal_id is None:
@@ -353,25 +424,48 @@ async def _action_policy_allows(db: AsyncSession, cid: uuid.UUID,
         "role": membership.role_id if membership else None,
         "department": membership.department_id if membership else None,
     }
-    return any(subjects.get(row.subject_type) == row.subject_id for row in policies)
+    matched = [row for row in policies
+               if subjects.get(row.subject_type) == row.subject_id]
+    if any(action in (row.denied_permissions or []) for row in matched):
+        return False
+    allow_policies = [row for row in policies if action in (row.permissions or [])]
+    return not allow_policies or any(
+        action in (row.permissions or []) for row in matched)
 
 
 async def _can_doc(db: AsyncSession, cid: uuid.UUID, d: DocCard,
-                   user: User, permission: str) -> bool:
-    if user.is_superadmin:
-        return True
-    if permission != "read" and not await _can_doc(db, cid, d, user, "read"):
+                   user: User, permission: str,
+                   *, record_break_glass_use: bool = True) -> bool:
+    if (d.retention_state == "destruction_authorized"
+            and permission in {"download", "print", "send", "export"}):
+        return False
+    if (d.retention_state in {"primary_purged", "destroyed"}
+            and permission in _CONTENT_PERMISSIONS - {"read", "archive"}):
         return False
     rows = await _access_rows(db, cid, d)
     subjects = await _subject_ids(db, cid, user)
-
-    def matches(row: DocAccessGrant) -> bool:
-        return subjects.get(row.subject_type) == row.subject_id
+    if user.is_superadmin:
+        if permission == "archive":
+            return False
+        if d.confidentiality != "strict":
+            return True
+        return await _active_break_glass(
+            db, cid, d, user, permission,
+            record_use=record_break_glass_use,
+        )
+    if permission != "read" and permission != "manage_acl":
+        if not await _can_doc(
+                db, cid, d, user, "read",
+                record_break_glass_use=record_break_glass_use):
+            return False
+    if _denied(rows, subjects, permission):
+        return False
 
     if permission == "read":
         inherited = {"read", "edit"}
         if _visible(d, user) or any(
-                matches(row) and inherited.intersection(row.permissions or []) for row in rows):
+                _matches_subject(row, subjects)
+                and inherited.intersection(row.permissions or []) for row in rows):
             return True
         assigned = await db.scalar(select(or_(
             select(DocApproval.id).where(
@@ -399,7 +493,9 @@ async def _can_doc(db: AsyncSession, cid: uuid.UUID, d: DocCard,
         ).limit(1))
         return deputy_assignment is not None
 
-    granted = any(matches(row) and permission in (row.permissions or []) for row in rows)
+    granted = any(
+        _matches_subject(row, subjects)
+        and permission in (row.permissions or []) for row in rows)
     membership = await db.get(UserCompany, (user.id, cid))
     if permission == "edit":
         return granted or user.id in {d.author_id, d.responsible_id} or bool(
@@ -427,6 +523,21 @@ async def _can_doc(db: AsyncSession, cid: uuid.UUID, d: DocCard,
             and await _action_policy_allows(
                 db, cid, rows, "sign", d.signatory_id)
         )
+    if permission == "manage_acl":
+        return granted or user.id in {d.author_id, d.responsible_id} or bool(
+            membership and membership.role == "admin")
+    if permission == "archive":
+        return granted or bool(membership and membership.role == "admin")
+    if permission in {"download", "print", "send", "export"}:
+        if granted:
+            return True
+        if d.confidentiality == "strict":
+            return False
+        fallback = "read" if permission in {"download", "print"} else "edit"
+        return await _can_doc(
+            db, cid, d, user, fallback,
+            record_break_glass_use=record_break_glass_use,
+        )
     return granted
 
 
@@ -439,10 +550,7 @@ async def _assert_doc_permission(db: AsyncSession, cid: uuid.UUID, d: DocCard,
 
 async def _can_manage_doc_access(db: AsyncSession, cid: uuid.UUID, d: DocCard,
                                  user: User) -> bool:
-    if user.is_superadmin or user.id in {d.author_id, d.responsible_id}:
-        return True
-    membership = await db.get(UserCompany, (user.id, cid))
-    return bool(membership and membership.role == "admin")
+    return await _can_doc(db, cid, d, user, "manage_acl")
 
 
 async def _assert_manage_doc_access(db: AsyncSession, cid: uuid.UUID, d: DocCard,
@@ -456,8 +564,6 @@ async def _can_process_inbox(db: AsyncSession, cid: uuid.UUID, user: User) -> bo
     if user.is_superadmin:
         return True
     membership = await db.get(UserCompany, (user.id, cid))
-    if membership is not None and membership.role == "admin":
-        return True
     subjects = await _subject_ids(db, cid, user)
     subject_filters = [
         and_(DocAccessGrant.subject_type == subject_type,
@@ -466,6 +572,25 @@ async def _can_process_inbox(db: AsyncSession, cid: uuid.UUID, user: User) -> bo
     ]
     if not subject_filters:
         return False
+    denied = await db.scalar(select(DocAccessGrant.id).join(
+        DocKind,
+        and_(DocAccessGrant.scope_type == "kind",
+             DocAccessGrant.scope_id == DocKind.id),
+    ).where(
+        DocAccessGrant.company_id == cid,
+        DocKind.company_id == cid,
+        DocKind.family == "incoming",
+        DocKind.is_active.is_(True),
+        or_(*subject_filters),
+        or_(
+            DocAccessGrant.denied_permissions.contains(["read"]),
+            DocAccessGrant.denied_permissions.contains(["edit"]),
+        ),
+    ).limit(1))
+    if denied is not None:
+        return False
+    if membership is not None and membership.role == "admin":
+        return True
     grant = await db.scalar(select(DocAccessGrant.id).join(
         DocKind,
         and_(DocAccessGrant.scope_type == "kind",
@@ -529,59 +654,19 @@ async def _available_actions(db: AsyncSession, cid: uuid.UUID, d: DocCard,
 async def _readable_docs(db: AsyncSession, cid: uuid.UUID, rows: list[DocCard],
                          user: User) -> list[DocCard]:
     if user.is_superadmin:
-        return rows
-    visible = {d.id for d in rows if _visible(d, user)}
-    hidden = [d for d in rows if d.id not in visible]
-    if not hidden:
-        return rows
-    subjects = await _subject_ids(db, cid, user)
-    grants = (await db.execute(select(DocAccessGrant).where(
-        DocAccessGrant.company_id == cid,
-        or_(
-            (DocAccessGrant.scope_type == "doc")
-            & DocAccessGrant.scope_id.in_([d.id for d in hidden]),
-            (DocAccessGrant.scope_type == "kind")
-            & DocAccessGrant.scope_id.in_([d.kind_id for d in hidden]),
-        )))).scalars().all()
-    inherited = {"read", "edit"}
-    matching = [g for g in grants if subjects.get(g.subject_type) == g.subject_id
-                and inherited.intersection(g.permissions or [])]
-    doc_scopes = {g.scope_id for g in matching if g.scope_type == "doc"}
-    kind_scopes = {g.scope_id for g in matching if g.scope_type == "kind"}
-    visible.update(d.id for d in hidden
-                   if d.id in doc_scopes or d.kind_id in kind_scopes)
-    principals = await doc_approvals.active_principals_for(db, cid, user.id)
-    assigned = set((await db.execute(select(DocApproval.doc_id).where(
-        DocApproval.company_id == cid,
-        DocApproval.doc_id.in_([d.id for d in hidden]),
-        DocApproval.assignee_id == user.id,
-    ))).scalars().all())
-    if principals:
-        visible.update(d.id for d in hidden
-                       if d.signatory_id in principals
-                       and d.status in ("draft", "registered"))
-        assigned.update((await db.execute(select(DocApproval.doc_id).join(
-            DocCard, DocCard.id == DocApproval.doc_id).where(
-            DocApproval.company_id == cid,
-            DocApproval.doc_id.in_([d.id for d in hidden]),
-            DocApproval.assignee_id.in_(principals),
-            DocApproval.round == DocCard.approval_round,
-            DocApproval.status == "pending",
-        ))).scalars().all())
-    assigned.update((await db.execute(select(DocAcquaint.doc_id).where(
-        DocAcquaint.company_id == cid,
-        DocAcquaint.doc_id.in_([d.id for d in hidden]),
-        DocAcquaint.user_id == user.id,
-    ))).scalars().all())
-    visible.update(assigned)
-    return [d for d in rows if d.id in visible]
+        return [row for row in rows if row.confidentiality != "strict"]
+    result: list[DocCard] = []
+    for row in rows:
+        if await _can_doc(db, cid, row, user, "read"):
+            result.append(row)
+    return result
 
 
 async def _readable_doc_clause(
     db: AsyncSession, cid: uuid.UUID, user: User,
 ) -> Any:
     if user.is_superadmin:
-        return literal_column("true")
+        return DocCard.confidentiality != "strict"
     subjects = await _subject_ids(db, cid, user)
     subject_filters = [
         and_(DocAccessGrant.subject_type == subject_type,
@@ -591,7 +676,7 @@ async def _readable_doc_clause(
     inherited = {"read", "edit"}
     principals = await doc_approvals.active_principals_for(db, cid, user.id)
     clauses = [
-        DocCard.confidentiality != "private",
+        DocCard.confidentiality == "company",
         DocCard.author_id == user.id,
         DocCard.responsible_id == user.id,
         DocCard.signatory_id == user.id,
@@ -630,10 +715,62 @@ async def _readable_doc_clause(
                 and_(DocAccessGrant.scope_type == "doc",
                      DocAccessGrant.scope_id == DocCard.id),
                 and_(DocAccessGrant.scope_type == "kind",
-                     DocAccessGrant.scope_id == DocCard.kind_id),
+                     DocAccessGrant.scope_id == DocCard.kind_id,
+                     DocCard.inherit_kind_acl.is_(True)),
             ),
         ).correlate(DocCard).exists())
+        denied = select(DocAccessGrant.id).where(
+            DocAccessGrant.company_id == cid,
+            or_(*subject_filters),
+            DocAccessGrant.denied_permissions.contains(["read"]),
+            or_(
+                and_(DocAccessGrant.scope_type == "doc",
+                     DocAccessGrant.scope_id == DocCard.id),
+                and_(DocAccessGrant.scope_type == "kind",
+                     DocAccessGrant.scope_id == DocCard.kind_id,
+                     DocCard.inherit_kind_acl.is_(True)),
+            ),
+        ).correlate(DocCard).exists()
+        return and_(or_(*clauses), ~denied)
     return or_(*clauses)
+
+
+async def _archiveable_doc_clause(
+    db: AsyncSession, cid: uuid.UUID, user: User,
+) -> Any:
+    if user.is_superadmin:
+        return false()
+    readable = await _readable_doc_clause(db, cid, user)
+    subjects = await _subject_ids(db, cid, user)
+    subject_filters = [
+        and_(DocAccessGrant.subject_type == subject_type,
+             DocAccessGrant.subject_id == subject_id)
+        for subject_type, subject_id in subjects.items() if subject_id
+    ]
+    scope = or_(
+        and_(DocAccessGrant.scope_type == "doc",
+             DocAccessGrant.scope_id == DocCard.id),
+        and_(DocAccessGrant.scope_type == "kind",
+             DocAccessGrant.scope_id == DocCard.kind_id,
+             DocCard.inherit_kind_acl.is_(True)),
+    )
+    denied = select(DocAccessGrant.id).where(
+        DocAccessGrant.company_id == cid,
+        or_(*subject_filters),
+        DocAccessGrant.denied_permissions.contains(["archive"]),
+        scope,
+    ).correlate(DocCard).exists()
+    membership = await db.get(UserCompany, (user.id, cid))
+    if membership is not None and membership.role == "admin":
+        allowed = true()
+    else:
+        allowed = select(DocAccessGrant.id).where(
+            DocAccessGrant.company_id == cid,
+            or_(*subject_filters),
+            DocAccessGrant.permissions.contains(["archive"]),
+            scope,
+        ).correlate(DocCard).exists()
+    return and_(readable, allowed, ~denied)
 
 
 def _card_out(d: DocCard, names: dict[str, str] | None = None,
@@ -666,6 +803,12 @@ def _card_out(d: DocCard, names: dict[str, str] | None = None,
         "current_revision": d.current_revision, "has_files": d.has_files,
         "case_id": str(d.case_id) if d.case_id else None,
         "storage_until": d.storage_until.isoformat() if d.storage_until else None,
+        "retention_state": d.retention_state,
+        "retention_class": d.retention_class,
+        "retention_extended_until": (d.retention_extended_until.isoformat()
+                                     if d.retention_extended_until else None),
+        "inherit_kind_acl": d.inherit_kind_acl,
+        "acl_revision": d.acl_revision,
         "approval_status": d.approval_status, "approval_round": d.approval_round,
         "created_at": d.created_at.isoformat() if d.created_at else None,
     }
@@ -699,6 +842,21 @@ async def _assert_admin(
     m = await db.get(UserCompany, (user.id, cid))
     if m is None or m.role != "admin":
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail)
+
+
+async def _is_company_acl_admin(db: AsyncSession, cid: uuid.UUID,
+                                user: User) -> bool:
+    membership = await db.get(UserCompany, (user.id, cid))
+    return bool(membership and membership.role == "admin")
+
+
+async def _assert_company_acl_admin(db: AsyncSession, cid: uuid.UUID,
+                                    user: User) -> None:
+    if not await _is_company_acl_admin(db, cid, user):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Правила вида меняет администратор, состоящий в компании",
+        )
 
 
 # ── Виды документов ──────────────────────────────────────────────────────────
@@ -834,6 +992,39 @@ class AccessGrantIn(BaseModel):
     subject_type: str = Field(..., pattern="^(user|role|department)$")
     subject_id: str
     permissions: list[str]
+    denied_permissions: list[str] = Field(default_factory=list)
+    expected_acl_revision: int | None = Field(None, ge=0)
+
+
+class AccessPolicyIn(BaseModel):
+    company_id: str
+    inherit_kind_acl: bool
+    confidentiality: str | None = Field(None, pattern="^(company|private|strict)$")
+    expected_acl_revision: int = Field(..., ge=0)
+
+
+class BreakGlassIn(BaseModel):
+    company_id: str
+    password: str = Field(..., min_length=1, max_length=500)
+    reason: str = Field(..., min_length=20, max_length=500)
+    ttl_minutes: int = Field(15, ge=5, le=60)
+
+
+async def _assert_acl_manager_remains(db: AsyncSession, cid: uuid.UUID,
+                                      doc: DocCard) -> None:
+    ids = {value for value in (doc.author_id, doc.responsible_id) if value}
+    ids.update((await db.execute(select(UserCompany.user_id).where(
+        UserCompany.company_id == cid,
+        UserCompany.role == "admin",
+    ))).scalars().all())
+    for user_id in ids:
+        user = await db.get(User, user_id)
+        if user and await _can_doc(db, cid, doc, user, "manage_acl"):
+            return
+    raise HTTPException(
+        status.HTTP_409_CONFLICT,
+        "Изменение оставит документ без управляющего доступом",
+    )
 
 
 async def _check_access_refs(db: AsyncSession, cid: uuid.UUID,
@@ -873,8 +1064,7 @@ async def list_access_grants(
             await _assert_doc_permission(db, cid, doc, current_user, "read")
         scopes.extend((("doc", doc.id), ("kind", doc.kind_id)))
     elif kind_id:
-        await _assert_admin(db, cid, current_user,
-                            "Правила вида доступны администратору пространства")
+        await _assert_company_acl_admin(db, cid, current_user)
         kind = await _kind_or_404(db, cid, kind_id)
         scopes.append(("kind", kind.id))
     else:
@@ -902,8 +1092,12 @@ async def list_access_grants(
         "subject_id": str(row.subject_id),
         "subject_name": names.get((row.subject_type, row.subject_id), ""),
         "permissions": row.permissions or [],
+        "denied_permissions": row.denied_permissions or [],
         "inherited": bool(doc_id and row.scope_type == "kind"),
-    } for row in rows]}
+    } for row in rows],
+        "inherit_kind_acl": doc.inherit_kind_acl if doc_id else None,
+        "acl_revision": doc.acl_revision if doc_id else None,
+    }
 
 
 @router.get("/access/subjects")
@@ -941,21 +1135,37 @@ async def save_access_grant(
 ):
     cid = await assert_company_product(payload.company_id, current_user, db, "docs")
     if payload.scope_type == "doc":
+        if payload.expected_acl_revision is None:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "Укажите редакцию правил доступа")
         doc = await _doc_or_404(db, cid, payload.scope_id)
         await _assert_manage_doc_access(db, cid, doc, current_user)
+        doc = (await db.execute(select(DocCard).where(
+            DocCard.id == doc.id).execution_options(
+                populate_existing=True).with_for_update())).scalar_one()
+        await _assert_manage_doc_access(db, cid, doc, current_user)
+        if payload.expected_acl_revision != doc.acl_revision:
+            raise HTTPException(status.HTTP_409_CONFLICT,
+                                "Права уже изменились; обновите карточку")
     else:
-        await _assert_admin(db, cid, current_user,
-                            "Правила вида меняет администратор пространства")
+        await _assert_company_acl_admin(db, cid, current_user)
     scope_id, subject_id = await _check_access_refs(db, cid, payload)
-    allowed = {"read", "edit", "approve", "sign"}
-    unknown = set(payload.permissions) - allowed
+    allowed = {
+        "read", "edit", "approve", "sign", "download", "print", "export",
+        "send", "manage_acl", "archive",
+    }
+    unknown = (set(payload.permissions) | set(payload.denied_permissions)) - allowed
     if unknown:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
             "Неизвестное право доступа",
         )
     permissions = list(dict.fromkeys(payload.permissions))
-    if not permissions:
+    denied_permissions = list(dict.fromkeys(payload.denied_permissions))
+    if set(permissions).intersection(denied_permissions):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Одно право нельзя одновременно разрешить и запретить")
+    if not permissions and not denied_permissions:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Не выбрано ни одного права")
     row = (await db.execute(select(DocAccessGrant).where(
         DocAccessGrant.company_id == cid,
@@ -970,13 +1180,20 @@ async def save_access_grant(
             created_by=current_user.id)
         db.add(row)
     previous = list(row.permissions or [])
+    previous_denied = list(row.denied_permissions or [])
     row.permissions = permissions
+    row.denied_permissions = denied_permissions
+    if payload.scope_type == "doc":
+        doc.acl_revision += 1
+        await db.flush()
+        await _assert_acl_manager_remains(db, cid, doc)
     await log_audit(
         db, actor=current_user, company_id=cid, action="doc.access.save",
         target=f"{payload.scope_type}:{scope_id}",
         details={
             "subject_type": payload.subject_type, "subject_id": str(subject_id),
-            "before": previous, "after": permissions,
+            "before": {"allow": previous, "deny": previous_denied},
+            "after": {"allow": permissions, "deny": denied_permissions},
         },
     )
     if payload.scope_type == "doc":
@@ -984,18 +1201,23 @@ async def save_access_grant(
             doc_id=scope_id, kind="access", user_id=current_user.id,
             actor_name=current_user.name or current_user.email,
             from_value=", ".join(previous) or None,
-            to_value=", ".join(permissions),
+            to_value=(", ".join(permissions)
+                      + (f"; запрет: {', '.join(denied_permissions)}"
+                         if denied_permissions else "")),
             note=f"{payload.subject_type}:{subject_id}",
         ))
     await db.commit()
     await db.refresh(row)
-    return {"id": str(row.id), "permissions": row.permissions}
+    return {"id": str(row.id), "permissions": row.permissions,
+            "denied_permissions": row.denied_permissions,
+            "acl_revision": doc.acl_revision if payload.scope_type == "doc" else None}
 
 
 @router.delete("/access/{grant_id}")
 async def delete_access_grant(
     grant_id: str,
     company_id: str = Query(...),
+    expected_acl_revision: int | None = Query(None, ge=0),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -1005,11 +1227,20 @@ async def delete_access_grant(
         DocAccessGrant.id == _uuid_or_400(grant_id, "grant_id")))).scalar_one_or_none()
     if row is not None:
         if row.scope_type == "doc":
+            if expected_acl_revision is None:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                    "Укажите редакцию правил доступа")
             doc = await _doc_or_404(db, cid, row.scope_id)
             await _assert_manage_doc_access(db, cid, doc, current_user)
+            doc = (await db.execute(select(DocCard).where(
+                DocCard.id == doc.id).execution_options(
+                    populate_existing=True).with_for_update())).scalar_one()
+            await _assert_manage_doc_access(db, cid, doc, current_user)
+            if expected_acl_revision != doc.acl_revision:
+                raise HTTPException(status.HTTP_409_CONFLICT,
+                                    "Права уже изменились; обновите карточку")
         else:
-            await _assert_admin(db, cid, current_user,
-                                "Правила вида меняет администратор пространства")
+            await _assert_company_acl_admin(db, cid, current_user)
         await log_audit(
             db, actor=current_user, company_id=cid, action="doc.access.delete",
             target=f"{row.scope_type}:{row.scope_id}",
@@ -1026,8 +1257,225 @@ async def delete_access_grant(
                 note=f"{row.subject_type}:{row.subject_id}",
             ))
         await db.delete(row)
+        if row.scope_type == "doc":
+            await db.flush()
+            doc.acl_revision += 1
+            await _assert_acl_manager_remains(db, cid, doc)
         await db.commit()
     return {"deleted": row is not None}
+
+
+@router.put("/{doc_id}/access-policy")
+async def update_access_policy(
+    doc_id: str,
+    payload: AccessPolicyIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cid = await assert_company_product(payload.company_id, current_user, db, "docs")
+    doc = await _doc_or_404(db, cid, doc_id)
+    await _assert_manage_doc_access(db, cid, doc, current_user)
+    doc = (await db.execute(select(DocCard).where(
+        DocCard.id == doc.id).execution_options(
+            populate_existing=True).with_for_update())).scalar_one()
+    await _assert_manage_doc_access(db, cid, doc, current_user)
+    if payload.expected_acl_revision != doc.acl_revision:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Права уже изменились; обновите карточку")
+    before = {
+        "inherit_kind_acl": doc.inherit_kind_acl,
+        "confidentiality": doc.confidentiality,
+    }
+    switching_to_strict = (
+        payload.confidentiality == "strict"
+        and doc.confidentiality != "strict"
+    )
+    doc.inherit_kind_acl = payload.inherit_kind_acl
+    if payload.confidentiality is not None:
+        doc.confidentiality = payload.confidentiality
+    revoked_links = 0
+    if switching_to_strict:
+        links = list((await db.execute(select(DocShareLink).where(
+            DocShareLink.doc_id == doc.id,
+            DocShareLink.revoked.is_(False),
+        ).with_for_update())).scalars().all())
+        for link in links:
+            link.revoked = True
+        revoked_links = len(links)
+    doc.acl_revision += 1
+    await db.flush()
+    await _assert_acl_manager_remains(db, cid, doc)
+    after = {
+        "inherit_kind_acl": doc.inherit_kind_acl,
+        "confidentiality": doc.confidentiality,
+    }
+    db.add(DocEvent(
+        doc_id=doc.id, kind="access", user_id=current_user.id,
+        actor_name=current_user.name or current_user.email,
+        from_value=str(before), to_value=str(after), note="policy",
+    ))
+    await log_audit(db, actor=current_user, company_id=cid,
+                    action="doc.access.policy", target=str(doc.id),
+                    details={"before": before, "after": after,
+                             "acl_revision": doc.acl_revision,
+                             "share_links_revoked": revoked_links})
+    await db.commit()
+    return {**after, "acl_revision": doc.acl_revision}
+
+
+@router.get("/{doc_id}/security")
+async def get_doc_security(
+    doc_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cid = await assert_company_product(company_id, current_user, db, "docs")
+    doc = await _doc_or_404(db, cid, doc_id)
+    can_manage = await _can_manage_doc_access(db, cid, doc, current_user)
+    if not current_user.is_superadmin and not can_manage:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Недостаточно прав")
+    active = (await db.execute(select(DocBreakGlassAccess).where(
+        DocBreakGlassAccess.company_id == cid,
+        DocBreakGlassAccess.doc_id == doc.id,
+        DocBreakGlassAccess.user_id == current_user.id,
+        DocBreakGlassAccess.revoked_at.is_(None),
+        DocBreakGlassAccess.expires_at > func.now(),
+    ).order_by(DocBreakGlassAccess.created_at.desc()).limit(1))).scalar_one_or_none()
+    return {
+        "id": str(doc.id), "kind_code": doc.kind_code,
+        "status": doc.status, "reg_number": doc.reg_number,
+        "confidentiality": doc.confidentiality,
+        "can_manage_access": can_manage,
+        "can_break_glass": bool(current_user.is_superadmin
+                                and doc.confidentiality == "strict"),
+        "active_break_glass": ({
+            "id": str(active.id),
+            "expires_at": active.expires_at.isoformat(),
+            "permissions": active.permissions or [],
+            "reason": active.reason,
+            "notification_status": active.notification_status,
+            "notification_error": active.notification_error,
+        } if active else None),
+    }
+
+
+@router.post("/{doc_id}/break-glass", status_code=status.HTTP_201_CREATED)
+async def activate_break_glass(
+    doc_id: str,
+    payload: BreakGlassIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cid = await assert_company_product(payload.company_id, current_user, db, "docs")
+    if not current_user.is_superadmin:
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Аварийный доступ доступен только суперадминистратору")
+    if not verify_password(payload.password, current_user.password_hash):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Пароль не подтверждён")
+    doc = (await db.execute(select(DocCard).where(
+        DocCard.company_id == cid,
+        DocCard.id == _uuid_or_400(doc_id, "doc_id"),
+    ).with_for_update())).scalar_one_or_none()
+    if doc is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Документ не найден")
+    if doc.confidentiality != "strict":
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Аварийный доступ применяется только к строгому документу")
+    now = datetime.now(timezone.utc)
+    previous = list((await db.execute(select(DocBreakGlassAccess).where(
+        DocBreakGlassAccess.company_id == cid,
+        DocBreakGlassAccess.doc_id == doc.id,
+        DocBreakGlassAccess.user_id == current_user.id,
+        DocBreakGlassAccess.revoked_at.is_(None),
+        DocBreakGlassAccess.expires_at > func.now(),
+    ).with_for_update())).scalars().all())
+    for old in previous:
+        old.revoked_at = now
+        old.revoked_by = current_user.id
+    recipient_ids = {value for value in (doc.author_id, doc.responsible_id) if value}
+    recipient_ids.update((await db.execute(select(UserCompany.user_id).where(
+        UserCompany.company_id == cid,
+        UserCompany.role == "admin",
+    ))).scalars().all())
+    recipients = list((await db.execute(select(User.email).where(
+        User.id.in_(recipient_ids), User.email.is_not(None),
+    ))).scalars().all()) if recipient_ids else []
+    row = DocBreakGlassAccess(
+        company_id=cid, doc_id=doc.id, user_id=current_user.id,
+        permissions=sorted(_BREAK_GLASS_PERMISSIONS),
+        reason=payload.reason.strip(),
+        expires_at=now + timedelta(minutes=payload.ttl_minutes),
+        notification_recipients=recipients,
+        notification_status="pending",
+    )
+    db.add(row)
+    await db.flush()
+    db.add(DocEvent(
+        doc_id=doc.id, kind="access", user_id=current_user.id,
+        actor_name=current_user.name or current_user.email,
+        to_value="break-glass", note=payload.reason.strip(), pinned=True,
+    ))
+    await log_audit(
+        db, actor=current_user, company_id=cid, action="doc.break_glass.activate",
+        target=str(doc.id), details={
+            "access_id": str(row.id), "ttl_minutes": payload.ttl_minutes,
+            "reason": row.reason, "permissions": row.permissions,
+        },
+    )
+    await db.commit()
+    ok, error = await task_mail.send_notice_checked(
+        recipients,
+        "Трек: активирован аварийный доступ",
+        "Суперадминистратор активировал временный доступ к закрытому документу.\n"
+        f"Код карточки: {doc.id}\n"
+        f"Срок: {row.expires_at.isoformat()}\n"
+        f"Причина: {row.reason}",
+    )
+    row = await db.get(DocBreakGlassAccess, row.id)
+    row.notification_status = "sent" if ok else "error"
+    row.notification_error = error
+    await db.commit()
+    return {
+        "id": str(row.id), "expires_at": row.expires_at.isoformat(),
+        "permissions": row.permissions,
+        "notification_status": row.notification_status,
+        "notification_error": row.notification_error,
+    }
+
+
+@router.post("/break-glass/{access_id}/revoke")
+async def revoke_break_glass(
+    access_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cid = await assert_company_product(company_id, current_user, db, "docs")
+    if not current_user.is_superadmin:
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Аварийный доступ отзывает суперадминистратор")
+    row = (await db.execute(select(DocBreakGlassAccess).where(
+        DocBreakGlassAccess.company_id == cid,
+        DocBreakGlassAccess.id == _uuid_or_400(access_id, "access_id"),
+        DocBreakGlassAccess.user_id == current_user.id,
+    ).with_for_update())).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Аварийный доступ не найден")
+    if row.revoked_at is None:
+        row.revoked_at = datetime.now(timezone.utc)
+        row.revoked_by = current_user.id
+        await log_audit(
+            db, actor=current_user, company_id=cid, action="doc.break_glass.revoke",
+            target=str(row.doc_id), details={"access_id": str(row.id)},
+        )
+        db.add(DocEvent(
+            doc_id=row.doc_id, kind="access", user_id=current_user.id,
+            actor_name=current_user.name or current_user.email,
+            from_value="break-glass", to_value="revoked", pinned=True,
+        ))
+        await db.commit()
+    return {"id": str(row.id), "revoked_at": row.revoked_at.isoformat()}
 
 
 @router.post("/search/reindex")
@@ -1043,7 +1491,9 @@ async def reindex_doc_versions(
     needs_text = or_(DocVersion.content_text.is_(None), DocVersion.content_text == "")
     rows = (await db.execute(select(DocVersion).where(
         DocVersion.company_id == cid, needs_text,
-        DocVersion.tombstoned_at.is_(None)).order_by(DocVersion.uploaded_at).limit(limit)
+        DocVersion.tombstoned_at.is_(None),
+        DocVersion.archive_purged_at.is_(None),
+    ).order_by(DocVersion.uploaded_at).limit(limit)
     )).scalars().all()
     indexed = 0
     skipped = 0
@@ -1068,7 +1518,8 @@ async def reindex_doc_versions(
     await db.commit()
     remaining = await db.scalar(select(func.count()).select_from(DocVersion).where(
         DocVersion.company_id == cid, needs_text,
-        DocVersion.tombstoned_at.is_(None)))
+        DocVersion.tombstoned_at.is_(None),
+        DocVersion.archive_purged_at.is_(None)))
     return {"processed": len(rows), "indexed": indexed, "skipped": skipped,
             "remaining": remaining or 0}
 
@@ -1126,6 +1577,7 @@ async def list_docs(
             DocVersion.doc_id == DocCard.id,
             DocVersion.is_current.is_(True),
             DocVersion.tombstoned_at.is_(None),
+            DocVersion.archive_purged_at.is_(None),
             func.to_tsvector(
                 _RUSSIAN_TEXT_SEARCH,
                 func.coalesce(DocVersion.content_text, literal_column("''")),
@@ -1169,7 +1621,7 @@ class DocIn(BaseModel):
     responsible_id: str | None = None
     signatory_id: str | None = None
     due_at: datetime | None = None
-    confidentiality: str = Field("company", pattern="^(company|private)$")
+    confidentiality: str = Field("company", pattern="^(company|private|strict)$")
     attrs: dict = Field(default_factory=dict)
     source: str = Field("manual", pattern="^(manual|intake|mail|chat|edo|api)$")
     source_ref: str | None = None
@@ -1249,6 +1701,7 @@ async def register_doc(
     d = (await db.execute(select(DocCard).where(
         DocCard.id == d.id).execution_options(
             populate_existing=True).with_for_update())).scalar_one()
+    await _assert_doc_permission(db, cid, d, current_user, "edit")
     if d.reg_number:
         raise HTTPException(status.HTTP_409_CONFLICT,
                             f"Документ уже зарегистрирован под номером {d.reg_number}")
@@ -1354,7 +1807,7 @@ class ActionIn(BaseModel):
     external_number: str | None = None
     external_date: date_type | None = None
     object_id: str | None = None
-    confidentiality: str | None = Field(None, pattern="^(company|private)$")
+    confidentiality: str | None = Field(None, pattern="^(company|private|strict)$")
     attrs: dict | None = None
     note: str | None = None
 
@@ -1410,9 +1863,16 @@ async def doc_action(
     d = (await db.execute(select(DocCard).where(
         DocCard.id == d.id).execution_options(
             populate_existing=True).with_for_update())).scalar_one()
+    if payload.status == "in_force" and not material_fields:
+        await _assert_doc_permission(db, cid, d, current_user, "sign")
+    else:
+        await _assert_doc_permission(db, cid, d, current_user, "edit")
     if (payload.confidentiality is not None
             and payload.confidentiality != d.confidentiality):
-        await _assert_manage_doc_access(db, cid, d, current_user)
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Режим доступа меняется во вкладке «Доступ» с контролем версии прав",
+        )
     if payload.status and material_fields:
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             "Смена состояния и правка реквизитов выполняются отдельно")
@@ -1442,6 +1902,8 @@ async def doc_action(
         if payload.status == "archived" and d.case_id is None:
             raise HTTPException(status.HTTP_409_CONFLICT,
                                 "Перед передачей в архив поместите документ в дело")
+        if payload.status == "archived" and d.case_id:
+            _set_storage_until(d, await _case_or_404(db, cid, d.case_id))
         if payload.status == "cancelled" and not (payload.note or "").strip():
             raise HTTPException(status.HTTP_400_BAD_REQUEST,
                                 "Укажите причину отмены документа")
@@ -1456,6 +1918,10 @@ async def doc_action(
         d.status = payload.status
         if payload.status in ("executed", "archived", "cancelled"):
             d.closed_at = datetime.now(timezone.utc)
+        if payload.status == "archived":
+            d.retention_state = "archived"
+            d.archive_accepted_at = datetime.now(timezone.utc)
+            d.archive_accepted_by = current_user.id
 
     simple = {
         "title": payload.title, "summary": payload.summary,
@@ -1692,6 +2158,10 @@ async def approvals_mine(
         return {"approvals": []}
     docs = {d.id: d for d in (await db.execute(select(DocCard).where(
         DocCard.id.in_({r.doc_id for r in rows})))).scalars().all()}
+    docs = {
+        doc_id: doc for doc_id, doc in docs.items()
+        if await _can_doc(db, cid, doc, current_user, "read")
+    }
     return {"approvals": [{
         "id": str(r.id), "doc_id": str(r.doc_id),
         "step_name": r.step_name, "mode": r.mode,
@@ -1721,6 +2191,7 @@ async def assign_doc_case(
     current = await _doc_or_404(db, cid, doc_id)
     await _assert_doc_permission(db, cid, current, current_user, "edit")
     d = await _locked_doc_or_404(db, cid, doc_id)
+    await _assert_doc_permission(db, cid, d, current_user, "edit")
     if d.status in ("archived", "cancelled"):
         raise HTTPException(status.HTTP_409_CONFLICT,
                             "Закрытый документ не перемещают между делами")
@@ -1770,6 +2241,9 @@ class CaseIn(BaseModel):
     epk: bool = False
     organization_id: str | None = None
     department_id: str | None = None
+    retention_basis: str | None = Field(None, max_length=300)
+    retention_class: str = Field(
+        "temporary", pattern="^(temporary|epk|permanent|unclassified)$")
 
 
 @router.get("/cases")
@@ -1788,6 +2262,8 @@ async def list_cases(
         "id": str(c.id), "year": c.year, "index": c.index, "title": c.title,
         "storage_term": c.storage_term, "storage_years": c.storage_years,
         "epk": c.epk, "status": c.status,
+        "retention_basis": c.retention_basis,
+        "retention_class": c.retention_class,
         "organization_id": str(c.organization_id) if c.organization_id else None,
         "department_id": str(c.department_id) if c.department_id else None,
         "closed_at": c.closed_at.isoformat() if c.closed_at else None,
@@ -1823,6 +2299,8 @@ async def create_case(
         company_id=cid, year=payload.year, index=case_index,
         title=payload.title.strip(), storage_term=payload.storage_term,
         storage_years=payload.storage_years, epk=payload.epk,
+        retention_basis=(payload.retention_basis or "").strip() or None,
+        retention_class=payload.retention_class,
         organization_id=organization_id, department_id=department_id)
     db.add(c)
     try:
@@ -1957,7 +2435,15 @@ async def create_share(
     """
     cid = await assert_company_product(payload.company_id, current_user, db, "docs")
     d = await _doc_or_404(db, cid, doc_id)
-    await _assert_doc_permission(db, cid, d, current_user, "edit")
+    await _assert_doc_permission(db, cid, d, current_user, "send")
+    d = (await db.execute(select(DocCard).where(
+        DocCard.company_id == cid, DocCard.id == d.id,
+    ).execution_options(populate_existing=True).with_for_update())).scalar_one()
+    await _assert_doc_permission(db, cid, d, current_user, "send")
+    if d.retention_state in {
+            "destruction_authorized", "primary_purged", "destroyed"}:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Файлы документа выведены из рабочего хранения")
     if not d.reg_number:
         raise HTTPException(status.HTTP_409_CONFLICT,
                             "Сначала зарегистрируйте документ: наружу уходит номер")
@@ -2002,7 +2488,7 @@ async def list_shares(
 ):
     cid = await assert_company_product(company_id, current_user, db, "docs")
     d = await _doc_or_404(db, cid, doc_id)
-    await _assert_doc_permission(db, cid, d, current_user, "edit")
+    await _assert_doc_permission(db, cid, d, current_user, "send")
     rows = (await db.execute(select(DocShareLink).where(
         DocShareLink.doc_id == d.id).order_by(
         DocShareLink.created_at.desc()))).scalars().all()
@@ -2033,7 +2519,7 @@ async def revoke_share(
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Ссылка не найдена")
     d = await _doc_or_404(db, cid, str(row.doc_id))
-    await _assert_doc_permission(db, cid, d, current_user, "edit")
+    await _assert_doc_permission(db, cid, d, current_user, "send")
     row.revoked = True
     await db.commit()
     return {"revoked": str(row.id)}
@@ -2063,7 +2549,15 @@ async def send_doc(
     """
     cid = await assert_company_product(payload.company_id, current_user, db, "docs")
     d = await _doc_or_404(db, cid, doc_id)
-    await _assert_doc_permission(db, cid, d, current_user, "edit")
+    await _assert_doc_permission(db, cid, d, current_user, "send")
+    d = (await db.execute(select(DocCard).where(
+        DocCard.company_id == cid, DocCard.id == d.id,
+    ).execution_options(populate_existing=True).with_for_update())).scalar_one()
+    await _assert_doc_permission(db, cid, d, current_user, "send")
+    if d.retention_state in {
+            "destruction_authorized", "primary_purged", "destroyed"}:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Файлы документа выведены из рабочего хранения")
     if not d.reg_number:
         raise HTTPException(status.HTTP_409_CONFLICT,
                             "Сначала зарегистрируйте документ: наружу уходит номер")
@@ -2079,12 +2573,47 @@ async def send_doc(
     default_body = "\n\n".join([
         f"Направляем документ {d.reg_number} от {date_part}.", d.title])
     body = (payload.body or default_body).strip()
+    export_id: uuid.UUID | None = None
+    if files:
+        export = DocExport(
+            company_id=cid, doc_id=d.id, status="pending",
+            package_name=f"Письмо: {subject[:240]}",
+            content={
+                "channel": "mail", "to": payload.to,
+                "file_ids": [str(value) for value in files],
+            },
+            created_by=current_user.id,
+        )
+        db.add(export)
+        await db.flush()
+        export_id = export.id
+        await db.commit()
     res = await mail_send.send_message(
         db, cid, account_id=_uuid_or_400(payload.account_id, "account_id"),
         to=payload.to, subject=subject, body=body,
         author=current_user.name or current_user.email, attachments=files)
     if "error" in res:
+        if export_id:
+            export = (await db.execute(select(DocExport).where(
+                DocExport.id == export_id,
+            ).with_for_update())).scalar_one()
+            export.status = ("unknown" if res.get("deliveryUnknown")
+                             else "failed")
+            export.error = str(res["error"])[:500]
+            await db.commit()
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, res["error"])
+
+    if export_id:
+        export = (await db.execute(select(DocExport).where(
+            DocExport.id == export_id,
+        ).with_for_update())).scalar_one()
+        export.status = "placed"
+        export.error = None
+        export.content = {
+            **(export.content or {}),
+            "mail_message_id": res.get("messageId"),
+            "rfc_message_id": res.get("rfcMessageId"),
+        }
 
     db.add(DocEvent(doc_id=d.id, kind="dispatch", user_id=current_user.id,
                     actor_name=current_user.name or current_user.email,
@@ -2108,8 +2637,11 @@ async def print_doc(
     """
     cid = await assert_company_product(company_id, current_user, db, "docs")
     d = await _doc_or_404(db, cid, doc_id)
-    await _assert_doc_permission(db, cid, d, current_user, "read")
-    return HTMLResponse(await doc_print.render_card(db, d))
+    await _assert_doc_permission(db, cid, d, current_user, "print")
+    return HTMLResponse(
+        await doc_print.render_card(db, d),
+        headers={"Cache-Control": "private, no-store"},
+    )
 
 
 @router.post("/{doc_id}/verification")
@@ -2122,7 +2654,15 @@ async def verification_link(
     """Стабильная ссылка на проверку записи, не ссылка получателя на файлы."""
     cid = await assert_company_product(company_id, current_user, db, "docs")
     d = await _doc_or_404(db, cid, doc_id)
-    await _assert_doc_permission(db, cid, d, current_user, "edit")
+    await _assert_doc_permission(db, cid, d, current_user, "send")
+    d = (await db.execute(select(DocCard).where(
+        DocCard.company_id == cid, DocCard.id == d.id,
+    ).execution_options(populate_existing=True).with_for_update())).scalar_one()
+    await _assert_doc_permission(db, cid, d, current_user, "send")
+    if d.retention_state in {
+            "destruction_authorized", "primary_purged", "destroyed"}:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Файлы документа выведены из рабочего хранения")
     if not d.reg_number:
         raise HTTPException(status.HTTP_409_CONFLICT,
                             "Проверка доступна после регистрации")
@@ -2887,7 +3427,15 @@ async def export_doc(
     """
     cid = await assert_company_product(company_id, current_user, db, "docs")
     d = await _doc_or_404(db, cid, doc_id)
-    await _assert_doc_permission(db, cid, d, current_user, "edit")
+    await _assert_doc_permission(db, cid, d, current_user, "export")
+    d = (await db.execute(select(DocCard).where(
+        DocCard.company_id == cid, DocCard.id == d.id,
+    ).execution_options(populate_existing=True).with_for_update())).scalar_one()
+    await _assert_doc_permission(db, cid, d, current_user, "export")
+    if d.retention_state in {
+            "destruction_authorized", "primary_purged", "destroyed"}:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Файлы документа выведены из рабочего хранения")
     if not d.reg_number:
         raise HTTPException(status.HTTP_409_CONFLICT,
                             "Сначала зарегистрируйте документ: наружу уходит номер")
@@ -2906,7 +3454,9 @@ async def export_doc(
     row = DocExport(
         company_id=cid, doc_id=d.id, target_id=target.id, package_name=f"{name}.zip",
         package_sha256=hashlib.sha256(data).hexdigest(), size_bytes=len(data),
-        content=content, created_by=current_user.id)
+        content=content, created_by=current_user.id, status="pending")
+    db.add(row)
+    await db.commit()
     try:
         row.package_path = doc_exchange.place_package(target, name, data)
         row.status = "placed"
@@ -2918,7 +3468,6 @@ async def export_doc(
         row.status = "failed"
         row.error = str(e)[:500]
         target.last_error = str(e)[:500]
-    db.add(row)
     db.add(DocEvent(doc_id=d.id, kind="dispatch", user_id=current_user.id,
                     actor_name=current_user.name or current_user.email,
                     to_value=target.name,
@@ -2942,7 +3491,17 @@ async def download_package(
     """Скачать тот же пакет файлом — когда папка недоступна или нужен разовый обмен."""
     cid = await assert_company_product(company_id, current_user, db, "docs")
     d = await _doc_or_404(db, cid, doc_id)
-    await _assert_doc_permission(db, cid, d, current_user, "edit")
+    await _assert_doc_permission(db, cid, d, current_user, "export")
+    await _assert_doc_permission(db, cid, d, current_user, "download")
+    d = (await db.execute(select(DocCard).where(
+        DocCard.company_id == cid, DocCard.id == d.id,
+    ).execution_options(populate_existing=True).with_for_update())).scalar_one()
+    await _assert_doc_permission(db, cid, d, current_user, "export")
+    await _assert_doc_permission(db, cid, d, current_user, "download")
+    if d.retention_state in {
+            "destruction_authorized", "primary_purged", "destroyed"}:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Файлы документа выведены из рабочего хранения")
     data, content = await doc_exchange.build_package(db, d)
     name = doc_exchange.package_name(d)
     db.add(DocExport(
@@ -2955,8 +3514,11 @@ async def download_package(
     await db.commit()
     return Response(
         content=data, media_type="application/zip",
-        headers={"Content-Disposition":
-                 "attachment; filename*=UTF-8''" + quote(f"{name}.zip")})
+        headers={
+            "Content-Disposition":
+                "attachment; filename*=UTF-8''" + quote(f"{name}.zip"),
+            "Cache-Control": "private, no-store",
+        })
 
 
 @router.get("/{doc_id}/exports")
@@ -3322,6 +3884,7 @@ async def mark_acquainted(
     d = (await db.execute(select(DocCard).where(
         DocCard.id == d.id).execution_options(
             populate_existing=True).with_for_update())).scalar_one()
+    await _assert_doc_permission(db, cid, d, current_user, "read")
     statement = select(DocAcquaint).where(
         DocAcquaint.doc_id == d.id,
         DocAcquaint.user_id == current_user.id)
@@ -3375,6 +3938,10 @@ async def my_acquaints(
         return {"acquaints": []}
     docs = {d.id: d for d in (await db.execute(select(DocCard).where(
         DocCard.id.in_({r.doc_id for r in rows})))).scalars().all()}
+    docs = {
+        doc_id: doc for doc_id, doc in docs.items()
+        if await _can_doc(db, cid, doc, current_user, "read")
+    }
     return {"acquaints": [{
         "id": str(r.id), "doc_id": str(r.doc_id),
         "doc_title": docs[r.doc_id].title if r.doc_id in docs else "",
@@ -3486,7 +4053,7 @@ async def get_doc_history(
     """Полный постраничный след и все редакции, включая выведенные."""
     cid = await assert_company_product(company_id, current_user, db, "docs")
     d = await _doc_or_404(db, cid, doc_id)
-    await _assert_manage_doc_access(db, cid, d, current_user)
+    await _assert_doc_permission(db, cid, d, current_user, "read")
     total = await db.scalar(select(func.count()).select_from(DocEvent).where(
         DocEvent.doc_id == d.id))
     events = (await db.execute(select(DocEvent).where(
@@ -3533,7 +4100,8 @@ async def get_doc(
                     if d.organization_id else None)
 
     versions = (await db.execute(select(DocVersion).where(
-        DocVersion.doc_id == d.id, DocVersion.tombstoned_at.is_(None))
+        DocVersion.doc_id == d.id, DocVersion.tombstoned_at.is_(None),
+        DocVersion.archive_purged_at.is_(None))
         .order_by(DocVersion.role, DocVersion.revision.desc()))).scalars().all()
     events = (await db.execute(select(DocEvent).where(DocEvent.doc_id == d.id)
                                .order_by(DocEvent.created_at.desc()).limit(200))).scalars().all()
@@ -3564,11 +4132,24 @@ async def get_doc(
             for row in (await db.execute(select(User).where(
                 User.id.in_(approval_user_ids)))).scalars()
         }
+    capabilities = {
+        permission: await _can_doc(
+            db, cid, d, current_user, permission,
+            record_break_glass_use=False,
+        )
+        for permission in (
+            "read", "download", "print", "edit", "export", "send",
+            "manage_acl", "approve", "sign", "archive",
+        )
+    }
 
     return {
         **_card_out(d, {str(kind.id): kind.name} if kind else None,
                     {str(organization.id): organization.name} if organization else None),
         "can_manage_access": await _can_manage_doc_access(db, cid, d, current_user),
+        "can_manage_kind_access": await _is_company_acl_admin(
+            db, cid, current_user),
+        "capabilities": capabilities,
         "kind": _kind_out(kind) if kind else None,
         "available_actions": await _available_actions(db, cid, d, kind, current_user),
         "versions": [{
@@ -3647,9 +4228,16 @@ async def upload_version(
     cid = await assert_company_product(company_id, current_user, db, "docs")
     d = await _doc_or_404(db, cid, doc_id)
     await _assert_doc_permission(db, cid, d, current_user, "edit")
+    if d.retention_state in {"primary_purged", "destroyed"}:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Файлы документа выведены из рабочего хранения")
     d = (await db.execute(select(DocCard).where(
         DocCard.id == d.id).execution_options(
             populate_existing=True).with_for_update())).scalar_one()
+    await _assert_doc_permission(db, cid, d, current_user, "edit")
+    if d.retention_state in {"primary_purged", "destroyed"}:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Файлы документа выведены из рабочего хранения")
     if d.approval_status == "pending":
         raise HTTPException(status.HTTP_409_CONFLICT,
                             "Во время согласования набор файлов зафиксирован. "
@@ -3742,9 +4330,13 @@ async def tombstone_version(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Редакция не найдена")
     d = await _doc_or_404(db, cid, v.doc_id)
     await _assert_doc_permission(db, cid, d, current_user, "edit")
+    if d.retention_state in {"primary_purged", "destroyed"}:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Файлы документа выведены из рабочего хранения")
     d = (await db.execute(select(DocCard).where(
         DocCard.id == d.id).execution_options(
             populate_existing=True).with_for_update())).scalar_one()
+    await _assert_doc_permission(db, cid, d, current_user, "edit")
     v = (await db.execute(select(DocVersion).where(
         DocVersion.id == v.id).execution_options(
             populate_existing=True))).scalar_one()
@@ -3900,11 +4492,10 @@ async def authorize_docs_file_download(db: AsyncSession, user: User,
             doc = by_id.get(version.doc_id)
             if doc is None:
                 continue
-            if version.tombstoned_at is None:
-                if await _can_doc(db, doc.company_id, doc, user, "read"):
+            if (version.tombstoned_at is None
+                    and version.archive_purged_at is None):
+                if await _can_doc(db, doc.company_id, doc, user, "download"):
                     return
-            elif await _can_manage_doc_access(db, doc.company_id, doc, user):
-                return
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Не найдено")
 
     inbox = (await db.execute(select(DocInboxItem).where(
@@ -3915,8 +4506,43 @@ async def authorize_docs_file_download(db: AsyncSession, user: User,
         if item.doc_id:
             doc = await db.get(DocCard, item.doc_id)
             if doc is not None and await _can_doc(
-                    db, item.company_id, doc, user, "read"):
+                    db, item.company_id, doc, user, "download"):
                 return
         elif await _can_process_inbox(db, item.company_id, user):
             return
     raise HTTPException(status.HTTP_404_NOT_FOUND, "Не найдено")
+
+
+async def authorize_docs_file_egress(db: AsyncSession, user: User,
+                                     file_ids: list[uuid.UUID]) -> list[DocCard]:
+    if not file_ids:
+        return []
+    rows = list((await db.execute(select(DocVersion).where(
+        DocVersion.file_id.in_(file_ids),
+    ))).scalars().all())
+    if not rows:
+        return []
+    docs = list((await db.execute(select(DocCard).where(
+        DocCard.id.in_({row.doc_id for row in rows}),
+    ).order_by(DocCard.id).with_for_update())).scalars().all())
+    by_id = {doc.id: doc for doc in docs}
+    authorized_docs: dict[uuid.UUID, DocCard] = {}
+    for file_id in set(file_ids):
+        related = [row for row in rows if row.file_id == file_id]
+        if not related:
+            continue
+        allowed = False
+        for version in related:
+            doc = by_id.get(version.doc_id)
+            if (doc is None or version.tombstoned_at is not None
+                    or version.archive_purged_at is not None
+                    or doc.retention_state in {
+                        "destruction_authorized", "primary_purged", "destroyed"}):
+                continue
+            if await _can_doc(db, doc.company_id, doc, user, "send"):
+                allowed = True
+                authorized_docs[doc.id] = doc
+                break
+        if not allowed:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Файл вложения не найден")
+    return [authorized_docs[key] for key in sorted(authorized_docs)]

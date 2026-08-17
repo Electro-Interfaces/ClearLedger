@@ -95,16 +95,20 @@ export function useAuthBlobUrl(path: string | null): string | null {
   return useAuthBlob(path).url
 }
 
-export async function downloadAttachment(path: string, name?: string): Promise<void> {
-  const cached = blobCache.get(path)
+export async function downloadAttachment(
+  path: string, name?: string, options: { cache?: boolean } = {},
+): Promise<void> {
+  const useCache = options.cache !== false
+  const cached = useCache ? blobCache.get(path) : undefined
   const objUrl = cached ?? URL.createObjectURL(await downloadBlob(path))
-  if (!cached) rememberBlob(path, objUrl)
+  if (!cached && useCache) rememberBlob(path, objUrl)
   const anchor = document.createElement('a')
   anchor.href = objUrl
   anchor.download = name || 'файл'
   document.body.appendChild(anchor)
   anchor.click()
   anchor.remove()
+  if (!useCache) window.setTimeout(() => URL.revokeObjectURL(objUrl), 60_000)
 }
 
 export async function openAuthAttachment(

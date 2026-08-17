@@ -9625,6 +9625,10 @@ class DocCard(Base):
     # company | private. Закрытую карточку дополнительно открывают правила
     # doc_access_grants и назначение на визу/ознакомление.
     confidentiality: Mapped[str] = mapped_column(String(20), nullable=False, default="company")
+    inherit_kind_acl: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=text("true"))
+    acl_revision: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0"))
     attrs: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     # Откуда документ появился: manual | intake | mail | chat | edo | api.
     source: Mapped[str] = mapped_column(String(20), nullable=False, default="manual")
@@ -9636,6 +9640,23 @@ class DocCard(Base):
     # Хранить до этой даты. Считается при регистрации и потом не пересчитывается:
     # правка справочника сроков не должна задним числом списывать старые документы.
     storage_until: Mapped[date_type | None] = mapped_column(Date, nullable=True)
+    retention_state: Mapped[str] = mapped_column(
+        String(30), nullable=False, default="working", server_default=text("'working'"))
+    retention_class: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="unclassified",
+        server_default=text("'unclassified'"))
+    retention_snapshot: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    retention_extended_until: Mapped[date_type | None] = mapped_column(Date, nullable=True)
+    archive_accepted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    archive_accepted_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey(
+            "users.id", ondelete="SET NULL", name="fk_doc_cards_archive_accepted_by"),
+        nullable=True)
+    primary_purged_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    destroyed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
     # Идёт ли по документу согласование прямо сейчас: none | pending | approved | rejected.
     approval_status: Mapped[str] = mapped_column(String(15), nullable=False, default="none")
     approval_round: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -9664,12 +9685,23 @@ class DocCard(Base):
                   "source = 'mail' AND source_ref IS NOT NULL")),
         Index("idx_doc_cards_registry", "company_id", "family", "reg_date"),
         Index("idx_doc_cards_counterparty", "company_id", "counterparty_id"),
+        Index("idx_doc_cards_retention", "company_id", "retention_state",
+              "storage_until", "id"),
         CheckConstraint(
             "family IN ('ord','incoming','outgoing','internal','contract','other')",
             name="ck_doc_cards_family"),
         CheckConstraint(
             "status IN ('draft','registered','in_force','executed','archived','cancelled')",
             name="ck_doc_cards_status"),
+        CheckConstraint(
+            "retention_state IN ('working','archive_pending','archived','legacy_review',"
+            "'under_expertise','permanent','destruction_ready','destruction_authorized',"
+            "'primary_purged','destroyed')",
+            name="ck_doc_cards_retention_state"),
+        CheckConstraint(
+            "retention_class IN ('temporary','epk','permanent','unclassified')",
+            name="ck_doc_cards_retention_class"),
+        CheckConstraint("acl_revision >= 0", name="ck_doc_cards_acl_revision"),
     )
 
 
@@ -9714,6 +9746,14 @@ class DocVersion(Base):
     tombstoned_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     tombstone_reason: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    archive_purged_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    purge_result: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    destruction_act_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey(
+            "doc_destruction_acts.id", ondelete="SET NULL",
+            name="fk_doc_versions_destruction_act"),
+        nullable=True)
     # Текст файла для полнотекстового поиска. Для сканов его даёт OCR, для
     # текстовых и офисных форматов — извлечение без распознавания.
     content_text: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -9725,6 +9765,7 @@ class DocVersion(Base):
               postgresql_where=text(
                   "is_current = true AND tombstoned_at IS NULL")),
         Index("idx_doc_versions_live", "company_id", "doc_id", "tombstoned_at"),
+        Index("idx_doc_versions_destruction_act", "destruction_act_id"),
         Index("idx_doc_versions_text",
               text("to_tsvector('russian', coalesce(content_text, ''))"),
               postgresql_using="gin"),
@@ -9841,6 +9882,10 @@ class DocCase(Base):
     # Он же числом для расчёта. NULL — хранение постоянное, срок не наступает.
     storage_years: Mapped[int | None] = mapped_column(Integer, nullable=True)
     epk: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    retention_basis: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    retention_class: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="temporary",
+        server_default=text("'temporary'"))
     department_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("org_departments.id", ondelete="SET NULL"), nullable=True)
     # open | closed — закрытое дело новых документов не принимает.
@@ -9859,6 +9904,9 @@ class DocCase(Base):
             "index",
             unique=True,
         ),
+        CheckConstraint(
+            "retention_class IN ('temporary','epk','permanent','unclassified')",
+            name="ck_doc_cases_retention_class"),
     )
 
 
@@ -10015,8 +10063,12 @@ class DocAccessGrant(Base):
     # user | role | department
     subject_type: Mapped[str] = mapped_column(String(20), nullable=False)
     subject_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    # read | edit | approve | sign
+    # read | edit | approve | sign | download | print | export | send |
+    # manage_acl | archive. Запреты на унаследованные действия лежат отдельно:
+    # отсутствие разрешения не должно означать явный deny.
     permissions: Mapped[list] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb"))
+    denied_permissions: Mapped[list] = mapped_column(
         JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb"))
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
@@ -10030,6 +10082,254 @@ class DocAccessGrant(Base):
         CheckConstraint("scope_type IN ('doc','kind')", name="ck_doc_access_scope"),
         CheckConstraint("subject_type IN ('user','role','department')",
                         name="ck_doc_access_subject"),
+    )
+
+
+class DocLegalHold(Base):
+    __tablename__ = "doc_legal_holds"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    doc_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("doc_cards.id", ondelete="CASCADE"), nullable=False)
+    authority: Mapped[str] = mapped_column(String(300), nullable=False)
+    reference: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    placed_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    placed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now())
+    released_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    release_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (
+        Index("idx_doc_legal_holds_active", "company_id", "doc_id", "placed_at",
+              postgresql_where=text("released_at IS NULL")),
+        Index("idx_doc_legal_holds_doc", "doc_id", "placed_at"),
+        CheckConstraint(
+            "released_at IS NULL OR release_reason IS NOT NULL",
+            name="ck_doc_legal_holds_release_reason"),
+    )
+
+
+class DocRetentionDecision(Base):
+    __tablename__ = "doc_retention_decisions"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    doc_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("doc_cards.id", ondelete="CASCADE"), nullable=False)
+    decision: Mapped[str] = mapped_column(String(20), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    epk_reference: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    new_storage_until: Mapped[date_type | None] = mapped_column(Date, nullable=True)
+    snapshot: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    snapshot_sha256: Mapped[str] = mapped_column(CHAR(64), nullable=False)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    __table_args__ = (
+        Index("idx_doc_retention_decisions_doc", "company_id", "doc_id", "created_at"),
+        CheckConstraint(
+            "decision IN ('destroy','extend','permanent')",
+            name="ck_doc_retention_decisions_decision"),
+        CheckConstraint(
+            "(decision = 'extend' AND new_storage_until IS NOT NULL) OR "
+            "(decision <> 'extend' AND new_storage_until IS NULL)",
+            name="ck_doc_retention_decisions_extension"),
+        CheckConstraint(
+            "snapshot_sha256 ~ '^[0-9a-f]{64}$'",
+            name="ck_doc_retention_decisions_sha256"),
+    )
+
+
+class DocDestructionAct(Base):
+    __tablename__ = "doc_destruction_acts"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True)
+    act_number: Mapped[str] = mapped_column(String(80), nullable=False)
+    act_date: Mapped[date_type] = mapped_column(Date, nullable=False)
+    basis: Mapped[str | None] = mapped_column(Text, nullable=True)
+    committee: Mapped[list] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb"))
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="draft", server_default=text("'draft'"))
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now())
+    approved_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    executed_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    executed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    backup_attested_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    backup_attested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    backup_evidence: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sealed_snapshot: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    sealed_sha256: Mapped[str | None] = mapped_column(CHAR(64), nullable=True)
+
+    __table_args__ = (
+        Index(
+            "uq_doc_destruction_acts_number",
+            "company_id",
+            text("COALESCE(organization_id, "
+                 "'00000000-0000-0000-0000-000000000000'::uuid)"),
+            "act_number",
+            unique=True,
+        ),
+        Index("idx_doc_destruction_acts_status", "company_id", "status", "act_date"),
+        CheckConstraint(
+            "status IN ('draft','approved','executing','primary_purged','destroyed','failed','cancelled')",
+            name="ck_doc_destruction_acts_status"),
+        CheckConstraint(
+            "sealed_sha256 IS NULL OR sealed_sha256 ~ '^[0-9a-f]{64}$'",
+            name="ck_doc_destruction_acts_sha256"),
+        CheckConstraint(
+            "status IN ('draft','cancelled') OR "
+            "(sealed_snapshot IS NOT NULL AND sealed_sha256 IS NOT NULL)",
+            name="ck_doc_destruction_acts_sealed"),
+        CheckConstraint(
+            "status <> 'destroyed' OR backup_attested_at IS NOT NULL",
+            name="ck_doc_destruction_acts_backup_attested"),
+    )
+
+
+class DocDestructionItem(Base):
+    __tablename__ = "doc_destruction_items"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    act_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("doc_destruction_acts.id", ondelete="CASCADE"),
+        nullable=False)
+    doc_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("doc_cards.id", ondelete="CASCADE"), nullable=False)
+    decision_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("doc_retention_decisions.id", ondelete="RESTRICT"),
+        nullable=False)
+    snapshot: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    snapshot_sha256: Mapped[str] = mapped_column(CHAR(64), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="pending", server_default=text("'pending'"))
+    purged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("act_id", "doc_id", name="uq_doc_destruction_items_act_doc"),
+        Index(
+            "uq_doc_destruction_items_active_doc",
+            "company_id", "doc_id", unique=True,
+            postgresql_where=text(
+                "status IN ('pending','primary_purged','failed')"),
+        ),
+        Index("idx_doc_destruction_items_act", "act_id", "status", "doc_id"),
+        Index("idx_doc_destruction_items_decision", "decision_id"),
+        CheckConstraint(
+            "status IN ('pending','primary_purged','destroyed','failed','cancelled')",
+            name="ck_doc_destruction_items_status"),
+        CheckConstraint(
+            "snapshot_sha256 ~ '^[0-9a-f]{64}$'",
+            name="ck_doc_destruction_items_sha256"),
+        CheckConstraint(
+            "status NOT IN ('primary_purged','destroyed') OR purged_at IS NOT NULL",
+            name="ck_doc_destruction_items_purged_at"),
+    )
+
+
+class DocArchiveEvent(Base):
+    __tablename__ = "doc_archive_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    doc_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("doc_cards.id", ondelete="SET NULL"), nullable=True)
+    act_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("doc_destruction_acts.id", ondelete="SET NULL"),
+        nullable=True)
+    actor_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    actor_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    kind: Mapped[str] = mapped_column(String(60), nullable=False)
+    payload: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb"))
+    prev_hash: Mapped[str | None] = mapped_column(CHAR(64), nullable=True)
+    event_hash: Mapped[str] = mapped_column(CHAR(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    __table_args__ = (
+        Index("idx_doc_archive_events_company", "company_id", "created_at", "id"),
+        Index("idx_doc_archive_events_doc", "doc_id", "created_at"),
+        Index("idx_doc_archive_events_act", "act_id", "created_at"),
+        CheckConstraint(
+            "prev_hash IS NULL OR prev_hash ~ '^[0-9a-f]{64}$'",
+            name="ck_doc_archive_events_prev_hash"),
+        CheckConstraint(
+            "event_hash ~ '^[0-9a-f]{64}$'",
+            name="ck_doc_archive_events_event_hash"),
+    )
+
+
+class DocBreakGlassAccess(Base):
+    __tablename__ = "doc_break_glass_accesses"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    doc_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("doc_cards.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    permissions: Mapped[list] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb"))
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    use_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0"))
+    notification_recipients: Mapped[list] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb"))
+    notification_status: Mapped[str] = mapped_column(
+        String(10), nullable=False, default="pending", server_default=text("'pending'"))
+    notification_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    __table_args__ = (
+        Index("idx_doc_break_glass_active", "company_id", "doc_id", "user_id",
+              "expires_at", postgresql_where=text("revoked_at IS NULL")),
+        Index("idx_doc_break_glass_user", "company_id", "user_id", "created_at"),
+        CheckConstraint("use_count >= 0", name="ck_doc_break_glass_use_count"),
+        CheckConstraint(
+            "notification_status IN ('pending','sent','error')",
+            name="ck_doc_break_glass_notification_status"),
+        CheckConstraint("expires_at > created_at", name="ck_doc_break_glass_expiry"),
     )
 
 
@@ -10102,7 +10402,8 @@ class DocExport(Base):
     target_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("doc_exchange_targets.id", ondelete="SET NULL"),
         nullable=True)
-    # placed (лежит в папке) | downloaded (человек забрал файлом) | failed
+    # pending | placed | downloaded | failed | unknown. pending/unknown означают,
+    # что внешняя доставка могла состояться и блокируют финальное уничтожение.
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="placed")
     package_name: Mapped[str] = mapped_column(String(300), nullable=False, default="")
     package_path: Mapped[str | None] = mapped_column(String(700), nullable=True)

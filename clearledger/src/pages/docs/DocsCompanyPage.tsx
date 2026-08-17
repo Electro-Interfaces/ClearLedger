@@ -13,6 +13,7 @@ import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import * as docsService from '@/services/docsService'
 import { DocsInboxPanel } from '@/components/docs/DocsInboxPanel'
+import { DocsArchiveQueue } from '@/components/docs/DocsArchiveQueue'
 import { useDocsView } from './DocsLayout'
 
 const TasksCompanyPage = lazy(() => import('@/pages/tasks/TasksWorkPage')
@@ -84,6 +85,9 @@ export function DocsCompanyPage() {
   }
   if (view === 'inbox') {
     return <div className="px-4 py-4"><DocsInboxPanel /></div>
+  }
+  if (view === 'archive') {
+    return <DocsArchiveQueue companyId={companyId} />
   }
 
   const columns = boardQ.data?.columns ?? []

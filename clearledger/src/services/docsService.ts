@@ -59,7 +59,7 @@ export interface DocCard {
   responsible_id: string | null
   signatory_id: string | null
   due_at: string | null
-  confidentiality: string  // company | private
+  confidentiality: 'company' | 'private' | 'strict'
   attrs: Record<string, unknown>
   source: string
   source_ref: string | null
@@ -67,6 +67,11 @@ export interface DocCard {
   has_files: boolean
   case_id: string | null
   storage_until: string | null
+  retention_state: string
+  retention_class: string
+  retention_extended_until: string | null
+  inherit_kind_acl: boolean
+  acl_revision: number
   approval_status: string
   approval_round: number
   created_at: string | null
@@ -226,12 +231,17 @@ export interface DocDetails extends DocCard {
   kind: DocKind | null
   available_actions: string[]
   can_manage_access: boolean
+  can_manage_kind_access: boolean
+  capabilities: Record<DocPermission, boolean>
   versions: DocVersion[]
   events: DocEvent[]
   relations: DocRelation[]
   approval: DocApprovalState
   acquaints: DocAcquaint[]
 }
+
+export type DocPermission = 'read' | 'edit' | 'approve' | 'sign' | 'download'
+  | 'print' | 'export' | 'send' | 'manage_acl' | 'archive'
 
 export interface DocAccessGrant {
   id: string
@@ -240,8 +250,15 @@ export interface DocAccessGrant {
   subject_type: 'user' | 'role' | 'department'
   subject_id: string
   subject_name: string
-  permissions: Array<'read' | 'edit' | 'approve' | 'sign'>
+  permissions: DocPermission[]
+  denied_permissions: DocPermission[]
   inherited: boolean
+}
+
+export interface DocAccessRules {
+  grants: DocAccessGrant[]
+  inherit_kind_acl: boolean | null
+  acl_revision: number | null
 }
 
 export interface DocFilters {
@@ -317,11 +334,15 @@ export async function createDoc(
 
 export async function listAccessGrants(
   companyId: string, docId: string,
-): Promise<DocAccessGrant[]> {
-  const result = await get<{ grants: DocAccessGrant[] }>('/api/docs/access', {
+): Promise<DocAccessRules> {
+  const result = await get<DocAccessRules>('/api/docs/access', {
     company_id: companyId, doc_id: docId,
   })
-  return result.grants ?? []
+  return {
+    grants: result.grants ?? [],
+    inherit_kind_acl: result.inherit_kind_acl,
+    acl_revision: result.acl_revision,
+  }
 }
 
 export async function listAccessSubjects(
@@ -339,15 +360,290 @@ export async function saveAccessGrant(companyId: string, body: {
   scope_id: string
   subject_type: 'user' | 'role' | 'department'
   subject_id: string
-  permissions: string[]
-}): Promise<{ id: string; permissions: string[] }> {
+  permissions: DocPermission[]
+  denied_permissions: DocPermission[]
+  expected_acl_revision?: number
+}): Promise<{
+  id: string
+  permissions: DocPermission[]
+  denied_permissions: DocPermission[]
+  acl_revision?: number
+}> {
   return post('/api/docs/access', { ...body, company_id: companyId })
 }
 
+export async function updateAccessPolicy(companyId: string, docId: string, body: {
+  inherit_kind_acl: boolean
+  confidentiality?: 'company' | 'private' | 'strict'
+  expected_acl_revision: number
+}): Promise<{
+  inherit_kind_acl: boolean
+  confidentiality: 'company' | 'private' | 'strict'
+  acl_revision: number
+}> {
+  return put(`/api/docs/${docId}/access-policy`, { ...body, company_id: companyId })
+}
+
 export async function deleteAccessGrant(
-  companyId: string, id: string,
+  companyId: string, id: string, expectedAclRevision?: number,
 ): Promise<{ deleted: boolean }> {
-  return del(`/api/docs/access/${id}?company_id=${companyId}`)
+  const revision = expectedAclRevision === undefined
+    ? '' : `&expected_acl_revision=${expectedAclRevision}`
+  return del(`/api/docs/access/${id}?company_id=${companyId}${revision}`)
+}
+
+export interface DocBreakGlassAccess {
+  id: string
+  expires_at: string
+  permissions: DocPermission[]
+  reason: string
+  notification_status: string
+  notification_error: string | null
+}
+
+export interface DocSecurityState {
+  id: string
+  kind_code: string
+  status: string
+  reg_number: string | null
+  confidentiality: 'company' | 'private' | 'strict'
+  can_manage_access: boolean
+  can_break_glass: boolean
+  active_break_glass: DocBreakGlassAccess | null
+}
+
+export async function getDocSecurity(companyId: string, docId: string): Promise<DocSecurityState> {
+  return get(`/api/docs/${docId}/security`, { company_id: companyId })
+}
+
+export async function activateBreakGlass(companyId: string, docId: string, body: {
+  password: string
+  reason: string
+  ttl_minutes: number
+}): Promise<Omit<DocBreakGlassAccess, 'reason'>> {
+  return post(`/api/docs/${docId}/break-glass`, { ...body, company_id: companyId })
+}
+
+export async function revokeBreakGlass(companyId: string, accessId: string): Promise<{
+  revoked: boolean
+}> {
+  return post(`/api/docs/break-glass/${accessId}/revoke?company_id=${companyId}`, {})
+}
+
+export type DocRetentionState = 'working' | 'archive_pending' | 'archived' | 'legacy_review'
+  | 'under_expertise' | 'permanent' | 'destruction_ready' | 'destruction_authorized'
+  | 'primary_purged' | 'destroyed'
+
+export interface DocArchiveHold {
+  id: string
+  authority: string
+  reference: string | null
+  reason: string
+  placed_by: string | null
+  placed_at: string
+  released_by: string | null
+  released_at: string | null
+  release_reason: string | null
+}
+
+export interface DocArchiveDecision {
+  id: string
+  decision: 'destroy' | 'extend' | 'permanent'
+  reason: string
+  epk_reference: string | null
+  new_storage_until: string | null
+  snapshot_sha256: string
+  created_by: string | null
+  created_at: string
+}
+
+export interface DocArchiveEvent {
+  id: string
+  kind: string
+  doc_id: string | null
+  act_id: string | null
+  actor_id: string | null
+  actor_name: string
+  payload: Record<string, unknown>
+  prev_hash: string | null
+  event_hash: string
+  created_at: string
+}
+
+export interface DocArchiveUnresolvedExport {
+  id: string
+  status: 'pending' | 'unknown'
+  package_name: string
+  channel: string | null
+  error: string | null
+  created_at: string
+}
+
+export interface DocDestructionAct {
+  id: string
+  organization_id: string | null
+  act_number: string
+  act_date: string
+  basis: string
+  committee: string[]
+  status: string
+  created_by: string | null
+  created_at: string
+  approved_by: string | null
+  approved_at: string | null
+  executed_by: string | null
+  executed_at: string | null
+  backup_attested_by: string | null
+  backup_attested_at: string | null
+  backup_evidence: {
+    evidence: string
+    external_copies_evidence?: string | null
+    known_external_copies?: boolean
+  } | null
+  sealed_sha256: string | null
+  error: string | null
+  cancellation_reason: string | null
+  items: number | null
+  item_status?: string | null
+  item_error?: string | null
+  has_known_external_copies?: boolean
+}
+
+export interface DocArchiveState {
+  retention_state: DocRetentionState
+  retention_class: 'temporary' | 'epk' | 'permanent' | 'unclassified'
+  retention_snapshot: Record<string, unknown> | null
+  storage_until: string | null
+  retention_extended_until: string | null
+  archive_accepted_at: string | null
+  primary_purged_at: string | null
+  destroyed_at: string | null
+  can_manage: boolean
+  blocker: string | null
+  holds: DocArchiveHold[]
+  decisions: DocArchiveDecision[]
+  unresolved_exports: DocArchiveUnresolvedExport[]
+  acts: DocDestructionAct[]
+  events: DocArchiveEvent[]
+}
+
+export interface DocArchiveQueueItem {
+  id: string
+  title: string
+  reg_number: string | null
+  organization_id: string | null
+  storage_until: string | null
+  retention_extended_until: string | null
+  retention_state: DocRetentionState
+  retention_class: 'temporary' | 'epk' | 'permanent' | 'unclassified'
+  hold: boolean
+  blocker: string | null
+}
+
+export interface DocArchiveQueuePage {
+  documents: DocArchiveQueueItem[]
+  next_cursor: string | null
+}
+
+export async function getArchiveQueue(
+  companyId: string,
+  cursor?: string,
+  limit = 100,
+): Promise<DocArchiveQueuePage> {
+  return get('/api/docs/archive/queue', {
+    company_id: companyId, cursor, limit,
+  })
+}
+
+export async function getDocArchive(companyId: string, docId: string): Promise<DocArchiveState> {
+  return get(`/api/docs/${docId}/archive`, { company_id: companyId })
+}
+
+export async function placeArchiveHold(companyId: string, docId: string, body: {
+  authority: string
+  reference?: string | null
+  reason: string
+}): Promise<DocArchiveHold> {
+  return post(`/api/docs/${docId}/archive/holds`, { ...body, company_id: companyId })
+}
+
+export async function releaseArchiveHold(companyId: string, holdId: string, reason: string): Promise<{
+  id: string
+  released_at: string | null
+}> {
+  return post(`/api/docs/archive/holds/${holdId}/release`, { company_id: companyId, reason })
+}
+
+export async function resolveArchiveExport(
+  companyId: string,
+  exportId: string,
+  resolution: 'placed' | 'failed',
+  evidence: string,
+  noLocalCopy = false,
+): Promise<{ id: string; status: string }> {
+  return post(`/api/docs/archive/exports/${exportId}/resolve`, {
+    company_id: companyId, resolution, evidence, no_local_copy: noLocalCopy,
+  })
+}
+
+export async function makeArchiveDecision(companyId: string, docId: string, body: {
+  decision: 'destroy' | 'extend' | 'permanent'
+  reason: string
+  epk_reference?: string | null
+  new_storage_until?: string | null
+}): Promise<DocArchiveDecision> {
+  return post(`/api/docs/${docId}/archive/decisions`, { ...body, company_id: companyId })
+}
+
+export async function confirmLegacyArchive(companyId: string, docId: string, body: {
+  retention_class: 'temporary' | 'epk' | 'permanent' | 'unclassified'
+  basis: string
+  reason: string
+}): Promise<Pick<DocArchiveState, 'retention_state' | 'retention_class' | 'retention_snapshot'>> {
+  return post(`/api/docs/${docId}/archive/confirm-legacy`, { ...body, company_id: companyId })
+}
+
+export async function listDestructionActs(companyId: string): Promise<DocDestructionAct[]> {
+  const result = await get<{ acts: DocDestructionAct[] }>('/api/docs/archive/acts', {
+    company_id: companyId,
+  })
+  return result.acts ?? []
+}
+
+export async function createDestructionAct(companyId: string, body: {
+  act_number: string
+  act_date: string
+  basis: string
+  committee: string[]
+  doc_ids: string[]
+}): Promise<DocDestructionAct> {
+  return post('/api/docs/archive/acts', { ...body, company_id: companyId })
+}
+
+export async function approveDestructionAct(companyId: string, actId: string): Promise<DocDestructionAct> {
+  return post(`/api/docs/archive/acts/${actId}/approve`, { company_id: companyId })
+}
+
+export async function cancelDestructionAct(
+  companyId: string, actId: string, reason: string,
+): Promise<DocDestructionAct> {
+  return post(`/api/docs/archive/acts/${actId}/cancel`, {
+    company_id: companyId, reason,
+  })
+}
+
+export async function executeDestructionAct(companyId: string, actId: string): Promise<DocDestructionAct> {
+  return post(`/api/docs/archive/acts/${actId}/execute`, { company_id: companyId })
+}
+
+export async function confirmBackupPurge(
+  companyId: string, actId: string, evidence: string, externalCopiesEvidence?: string,
+): Promise<DocDestructionAct> {
+  return post(`/api/docs/archive/acts/${actId}/confirm-backup-purge`, {
+    company_id: companyId,
+    evidence,
+    external_copies_evidence: externalCopiesEvidence?.trim() || null,
+  })
 }
 
 /** Присвоить номер. Без `regNumber` номер выдаёт счётчик компании. */

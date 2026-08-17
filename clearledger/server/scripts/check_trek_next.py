@@ -57,11 +57,37 @@ async def main() -> None:
 
             assert await db.scalar(text(
                 "SELECT to_regclass('doc_access_grants') IS NOT NULL"))
+            required_archive_tables = {
+                "doc_legal_holds", "doc_retention_decisions",
+                "doc_destruction_acts", "doc_destruction_items",
+                "doc_archive_events", "doc_break_glass_accesses",
+            }
+            archive_tables = set((await db.execute(text(
+                "SELECT table_name FROM information_schema.tables "
+                "WHERE table_schema = current_schema() AND table_name IN "
+                "('doc_legal_holds','doc_retention_decisions','doc_destruction_acts',"
+                "'doc_destruction_items','doc_archive_events','doc_break_glass_accesses')"
+            ))).scalars().all())
+            assert archive_tables == required_archive_tables
+            assert await db.scalar(text(
+                "SELECT count(*) = 3 FROM pg_trigger t "
+                "JOIN pg_class table_ref ON table_ref.oid = t.tgrelid "
+                "JOIN pg_namespace n ON n.oid = table_ref.relnamespace "
+                "WHERE n.nspname = current_schema() "
+                "AND (table_ref.relname, t.tgname) IN "
+                "(('doc_archive_events','doc_archive_events_immutable_trg'),"
+                "('doc_destruction_acts','doc_destruction_acts_sealed_trg'),"
+                "('doc_destruction_items','doc_destruction_items_sealed_trg')) "
+                "AND NOT t.tgisinternal"))
             required_indexes = {
                 "idx_doc_versions_text", "uq_doc_versions_current_role",
                 "uq_doc_acquaints_snapshot", "uq_doc_cases_index",
                 "uq_doc_cards_mail_source",
                 "uq_mail_messages_company_msgid",
+                "idx_doc_cards_retention", "idx_doc_versions_destruction_act",
+                "idx_doc_legal_holds_active", "uq_doc_destruction_acts_number",
+                "uq_doc_destruction_items_active_doc",
+                "idx_doc_archive_events_company", "idx_doc_break_glass_active",
             }
             index_rows = (await db.execute(text(
                 "SELECT c.relname, i.indisunique, i.indisvalid, pg_get_indexdef(i.indexrelid) "
@@ -70,7 +96,11 @@ async def main() -> None:
                 "WHERE n.nspname = current_schema() "
                 "AND c.relname IN ('idx_doc_versions_text','uq_doc_versions_current_role',"
                 "'uq_doc_acquaints_snapshot','uq_doc_cases_index',"
-                "'uq_doc_cards_mail_source','uq_mail_messages_company_msgid')"
+                "'uq_doc_cards_mail_source','uq_mail_messages_company_msgid',"
+                "'idx_doc_cards_retention','idx_doc_versions_destruction_act',"
+                "'idx_doc_legal_holds_active','uq_doc_destruction_acts_number',"
+                "'uq_doc_destruction_items_active_doc','idx_doc_archive_events_company',"
+                "'idx_doc_break_glass_active')"
             ))).all()
             indexes = {row[0] for row in index_rows}
             assert indexes == required_indexes
@@ -81,15 +111,20 @@ async def main() -> None:
                 if name.startswith("uq_"):
                     assert by_name[name][1], f"Индекс {name} не уникальный"
             assert "COALESCE(organization_id" in by_name["uq_doc_cases_index"][3]
+            assert "COALESCE(organization_id" in by_name["uq_doc_destruction_acts_number"][3]
             columns = set((await db.execute(text(
                 "SELECT table_name || '.' || column_name FROM information_schema.columns "
                 "WHERE table_schema = current_schema() AND table_name IN "
                 "('doc_versions','doc_acquaints','doc_exchange_targets','doc_approvals',"
-                "'mail_messages') AND column_name IN "
+                "'mail_messages','doc_cards','doc_cases','doc_access_grants') AND column_name IN "
                 "('content_text','reminded_at','reminder_attempted_at','reminder_error',"
                 "'scan_enabled','scan_interval_min','scan_cursor','sla_hours','activated_at',"
                 "'activation_estimated','document_snapshot','snapshot_sha256','reason_ref',"
-                "'reason_name','route_error','route_attempts','route_attempted_at')"
+                "'reason_name','route_error','route_attempts','route_attempted_at',"
+                "'inherit_kind_acl','acl_revision','retention_state','retention_class',"
+                "'retention_snapshot','retention_extended_until','archive_accepted_at',"
+                "'archive_accepted_by','primary_purged_at','destroyed_at','retention_basis',"
+                "'archive_purged_at','purge_result','destruction_act_id','denied_permissions')"
             ))).scalars().all())
             assert columns == {
                 "doc_versions.content_text",
@@ -105,6 +140,15 @@ async def main() -> None:
                 "doc_approvals.snapshot_sha256",
                 "mail_messages.route_error", "mail_messages.route_attempts",
                 "mail_messages.route_attempted_at",
+                "doc_cards.inherit_kind_acl", "doc_cards.acl_revision",
+                "doc_cards.retention_state", "doc_cards.retention_class",
+                "doc_cards.retention_snapshot", "doc_cards.retention_extended_until",
+                "doc_cards.archive_accepted_at", "doc_cards.archive_accepted_by",
+                "doc_cards.primary_purged_at", "doc_cards.destroyed_at",
+                "doc_cases.retention_basis", "doc_cases.retention_class",
+                "doc_versions.archive_purged_at", "doc_versions.purge_result",
+                "doc_versions.destruction_act_id",
+                "doc_access_grants.denied_permissions",
             }
 
             owner = User(

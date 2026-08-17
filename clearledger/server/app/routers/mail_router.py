@@ -20,8 +20,8 @@ from app.auth import assert_company_product, get_current_user
 from app.routers.users_router import require_company_admin
 from app.database import get_db
 from app.models import (
-    ChatRoom, Contract, Counterparty, CounterpartyEmail, DocCard, MailAccount,
-    MailAttachment, MailMessage, MailRule, MailThread, User,
+    ChatRoom, Contract, Counterparty, CounterpartyEmail, DocCard, DocExport,
+    MailAccount, MailAttachment, MailMessage, MailRule, MailThread, User,
 )
 from app.services import mail_intake, mail_secrets, mail_send
 
@@ -560,11 +560,62 @@ async def send(
 ) -> dict[str, Any]:
     """Написать или ответить — с того же ящика, в ту же нить."""
     cid = await _mail_scope(company_id, current_user, db)
-    return await mail_send.send_message(
+    export_ids: list[uuid.UUID] = []
+    if body.attachments:
+        try:
+            attachment_ids = [uuid.UUID(value) for value in body.attachments]
+        except ValueError:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "Неверный идентификатор вложения")
+        from app.routers.docs_router import authorize_docs_file_egress
+        track_docs = await authorize_docs_file_egress(
+            db, current_user, attachment_ids)
+        for doc in track_docs:
+            export = DocExport(
+                company_id=cid, doc_id=doc.id, status="pending",
+                package_name=f"Письмо: {body.subject[:240]}",
+                content={
+                    "channel": "mail", "to": body.to,
+                    "file_ids": [str(value) for value in attachment_ids],
+                },
+                created_by=current_user.id,
+            )
+            db.add(export)
+            await db.flush()
+            export_ids.append(export.id)
+        # Сначала фиксируем намерение отправки. Если процесс упадёт после SMTP,
+        # pending останется доказательством возможной внешней копии.
+        await db.commit()
+    result = await mail_send.send_message(
         db, cid, account_id=body.account_id, to=body.to, subject=body.subject,
         body=body.body, thread_id=body.thread_id,
         reply_to_message_id=body.reply_to_message_id, author=current_user.email,
         attachments=body.attachments)
+    if "error" in result:
+        if export_ids:
+            exports = list((await db.execute(select(DocExport).where(
+                DocExport.id.in_(export_ids),
+            ).with_for_update())).scalars().all())
+            for export in exports:
+                export.status = ("unknown" if result.get("deliveryUnknown")
+                                 else "failed")
+                export.error = str(result["error"])[:500]
+            await db.commit()
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, result["error"])
+    if export_ids:
+        exports = list((await db.execute(select(DocExport).where(
+            DocExport.id.in_(export_ids),
+        ).with_for_update())).scalars().all())
+        for export in exports:
+            export.status = "placed"
+            export.error = None
+            export.content = {
+                **(export.content or {}),
+                "mail_message_id": result.get("messageId"),
+                "rfc_message_id": result.get("rfcMessageId"),
+            }
+        await db.commit()
+    return result
 
 
 @router.get("/by-counterparty")

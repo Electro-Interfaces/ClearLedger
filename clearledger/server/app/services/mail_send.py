@@ -31,6 +31,21 @@ logger = logging.getLogger("clearledger.mail")
 MAX_ATTACHMENTS_BYTES = 25 * 1024 * 1024
 
 
+def delivery_outcome_unknown(error: Exception) -> bool:
+    from aiosmtplib.errors import (
+        SMTPAuthenticationError, SMTPConnectError, SMTPConnectResponseError,
+        SMTPConnectTimeoutError, SMTPDataError, SMTPHeloError,
+        SMTPNotSupported, SMTPRecipientRefused, SMTPRecipientsRefused,
+        SMTPSenderRefused,
+    )
+    return not isinstance(error, (
+        SMTPAuthenticationError, SMTPConnectError,
+        SMTPConnectResponseError, SMTPConnectTimeoutError, SMTPDataError,
+        SMTPHeloError, SMTPNotSupported, SMTPRecipientRefused,
+        SMTPRecipientsRefused, SMTPSenderRefused,
+    ))
+
+
 async def send_message(db: AsyncSession, cid, *, account_id, to: list[str],
                        subject: str, body: str, thread_id=None,
                        reply_to_message_id=None, author: str | None = None,
@@ -137,8 +152,10 @@ async def send_message(db: AsyncSession, cid, *, account_id, to: list[str],
             kwargs["start_tls"] = False
         await aiosmtplib.send(msg, **kwargs)
     except Exception as e:  # noqa: BLE001 — причину показываем человеку, а не в лог
+        delivery_unknown = delivery_outcome_unknown(e)
         logger.exception("письмо не отправлено: %s", e)
-        return {"error": f"SMTP: {str(e)[:200]}"}
+        return {"error": f"SMTP: {str(e)[:200]}",
+                "deliveryUnknown": delivery_unknown}
 
     thread = None
     if thread_id:
@@ -178,4 +195,5 @@ async def send_message(db: AsyncSession, cid, *, account_id, to: list[str],
     thread.messages_count = (thread.messages_count or 0) + 1
     thread.last_message_at = row.sent_at
     await db.commit()
-    return {"sent": True, "messageId": str(row.id), "threadId": str(thread.id)}
+    return {"sent": True, "messageId": str(row.id),
+            "rfcMessageId": own_id, "threadId": str(thread.id)}

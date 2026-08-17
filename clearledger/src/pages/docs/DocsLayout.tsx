@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 /**
  * Оболочка приложения «Трек»: вторая вертикальная панель — пункты активного
  * раздела.
@@ -40,6 +41,7 @@ export const DOCS_VIEWS: Record<string, DocsView[]> = {
     { key: 'errands', label: 'Поручения компании', hint: 'вся работа с отбором, поиском и выгрузкой' },
     { key: 'board', label: 'Доска поручений', hint: 'канбан по стадиям маршрута' },
     { key: 'inbox', label: 'Приём из СЭД', hint: 'что головная компания положила нам в папку' },
+    { key: 'archive', label: 'Архив', hint: 'сроки хранения, запреты и акты уничтожения' },
   ],
   '/docs/overview': [
     { key: 'docs', label: 'По документам', hint: 'сколько на регистрации, на визах, просрочено' },

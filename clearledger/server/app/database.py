@@ -2776,6 +2776,160 @@ async def create_all() -> None:
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_doc_cases_index ON doc_cases "
             "(company_id, COALESCE(organization_id, "
             "'00000000-0000-0000-0000-000000000000'::uuid), year, index)",
+            # Юридический архив: старые сроки не пересчитываем. Состояние и
+            # основание хранения живут в карточке как зафиксированный снимок, а
+            # прежний `archived` требует ручной экспертизы перед уничтожением.
+            "ALTER TABLE doc_cards ADD COLUMN IF NOT EXISTS inherit_kind_acl BOOLEAN "
+            "NOT NULL DEFAULT true",
+            "ALTER TABLE doc_cards ADD COLUMN IF NOT EXISTS acl_revision INTEGER "
+            "NOT NULL DEFAULT 0",
+            "ALTER TABLE doc_cards ADD COLUMN IF NOT EXISTS retention_state VARCHAR(30)",
+            "UPDATE doc_cards SET retention_state = CASE WHEN status = 'archived' "
+            "THEN 'legacy_review' ELSE 'working' END WHERE retention_state IS NULL",
+            "ALTER TABLE doc_cards ALTER COLUMN retention_state SET DEFAULT 'working'",
+            "ALTER TABLE doc_cards ALTER COLUMN retention_state SET NOT NULL",
+            "ALTER TABLE doc_cards ADD COLUMN IF NOT EXISTS retention_class VARCHAR(20)",
+            "UPDATE doc_cards SET retention_class = 'unclassified' "
+            "WHERE retention_class IS NULL",
+            "ALTER TABLE doc_cards ALTER COLUMN retention_class SET DEFAULT 'unclassified'",
+            "ALTER TABLE doc_cards ALTER COLUMN retention_class SET NOT NULL",
+            "ALTER TABLE doc_cards ADD COLUMN IF NOT EXISTS retention_snapshot JSONB",
+            "ALTER TABLE doc_cards ADD COLUMN IF NOT EXISTS retention_extended_until DATE",
+            "ALTER TABLE doc_cards ADD COLUMN IF NOT EXISTS archive_accepted_at TIMESTAMPTZ",
+            "ALTER TABLE doc_cards ADD COLUMN IF NOT EXISTS archive_accepted_by UUID",
+            "ALTER TABLE doc_cards ADD COLUMN IF NOT EXISTS primary_purged_at TIMESTAMPTZ",
+            "ALTER TABLE doc_cards ADD COLUMN IF NOT EXISTS destroyed_at TIMESTAMPTZ",
+            "ALTER TABLE doc_cases ADD COLUMN IF NOT EXISTS retention_basis VARCHAR(300)",
+            "ALTER TABLE doc_cases ADD COLUMN IF NOT EXISTS retention_class VARCHAR(20)",
+            "UPDATE doc_cases SET retention_class = CASE WHEN epk THEN 'epk' "
+            "WHEN storage_years IS NULL THEN 'unclassified' ELSE 'temporary' END "
+            "WHERE retention_class IS NULL",
+            "ALTER TABLE doc_cases ALTER COLUMN retention_class SET DEFAULT 'temporary'",
+            "ALTER TABLE doc_cases ALTER COLUMN retention_class SET NOT NULL",
+            "ALTER TABLE doc_versions ADD COLUMN IF NOT EXISTS archive_purged_at TIMESTAMPTZ",
+            "ALTER TABLE doc_versions ADD COLUMN IF NOT EXISTS purge_result VARCHAR(40)",
+            "ALTER TABLE doc_versions ADD COLUMN IF NOT EXISTS destruction_act_id UUID",
+            "ALTER TABLE doc_access_grants ADD COLUMN IF NOT EXISTS denied_permissions JSONB "
+            "NOT NULL DEFAULT '[]'::jsonb",
+            "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE "
+            "conname = 'fk_doc_cards_archive_accepted_by' AND "
+            "conrelid = 'doc_cards'::regclass) THEN ALTER TABLE doc_cards ADD CONSTRAINT "
+            "fk_doc_cards_archive_accepted_by FOREIGN KEY (archive_accepted_by) "
+            "REFERENCES users(id) ON DELETE SET NULL; END IF; END $$",
+            "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE "
+            "conname = 'fk_doc_versions_destruction_act' AND "
+            "conrelid = 'doc_versions'::regclass) THEN ALTER TABLE doc_versions ADD CONSTRAINT "
+            "fk_doc_versions_destruction_act FOREIGN KEY (destruction_act_id) "
+            "REFERENCES doc_destruction_acts(id) ON DELETE SET NULL; END IF; END $$",
+            "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE "
+            "conname = 'ck_doc_cards_retention_state' AND "
+            "conrelid = 'doc_cards'::regclass) THEN ALTER TABLE doc_cards ADD CONSTRAINT "
+            "ck_doc_cards_retention_state CHECK (retention_state IN "
+            "('working','archive_pending','archived','legacy_review','under_expertise',"
+            "'permanent','destruction_ready','destruction_authorized','primary_purged',"
+            "'destroyed')); "
+            "END IF; END $$",
+            "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE "
+            "conname = 'ck_doc_cards_retention_class' AND "
+            "conrelid = 'doc_cards'::regclass) THEN ALTER TABLE doc_cards ADD CONSTRAINT "
+            "ck_doc_cards_retention_class CHECK (retention_class IN "
+            "('temporary','epk','permanent','unclassified')); END IF; END $$",
+            "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE "
+            "conname = 'ck_doc_cards_acl_revision' AND "
+            "conrelid = 'doc_cards'::regclass) THEN ALTER TABLE doc_cards ADD CONSTRAINT "
+            "ck_doc_cards_acl_revision CHECK (acl_revision >= 0); END IF; END $$",
+            "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE "
+            "conname = 'ck_doc_cases_retention_class' AND "
+            "conrelid = 'doc_cases'::regclass) THEN ALTER TABLE doc_cases ADD CONSTRAINT "
+            "ck_doc_cases_retention_class CHECK (retention_class IN "
+            "('temporary','epk','permanent','unclassified')); END IF; END $$",
+            "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE "
+            "conname = 'ck_doc_destruction_acts_status' AND "
+            "conrelid = 'doc_destruction_acts'::regclass AND "
+            "pg_get_constraintdef(oid) LIKE '%cancelled%') THEN ALTER TABLE "
+            "doc_destruction_acts DROP CONSTRAINT IF EXISTS "
+            "ck_doc_destruction_acts_status; ALTER TABLE doc_destruction_acts "
+            "ADD CONSTRAINT ck_doc_destruction_acts_status CHECK (status IN "
+            "('draft','approved','executing','primary_purged','destroyed','failed',"
+            "'cancelled')); END IF; END $$",
+            "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE "
+            "conname = 'ck_doc_destruction_acts_sealed' AND "
+            "conrelid = 'doc_destruction_acts'::regclass AND "
+            "pg_get_constraintdef(oid) LIKE '%cancelled%') THEN ALTER TABLE "
+            "doc_destruction_acts DROP CONSTRAINT IF EXISTS "
+            "ck_doc_destruction_acts_sealed; ALTER TABLE doc_destruction_acts "
+            "ADD CONSTRAINT ck_doc_destruction_acts_sealed CHECK (status IN "
+            "('draft','cancelled') OR (sealed_snapshot IS NOT NULL AND "
+            "sealed_sha256 IS NOT NULL)); END IF; END $$",
+            "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE "
+            "conname = 'ck_doc_destruction_items_status' AND "
+            "conrelid = 'doc_destruction_items'::regclass AND "
+            "pg_get_constraintdef(oid) LIKE '%cancelled%') THEN ALTER TABLE "
+            "doc_destruction_items DROP CONSTRAINT IF EXISTS "
+            "ck_doc_destruction_items_status; ALTER TABLE doc_destruction_items "
+            "ADD CONSTRAINT ck_doc_destruction_items_status CHECK (status IN "
+            "('pending','primary_purged','destroyed','failed','cancelled')); "
+            "END IF; END $$",
+            "CREATE INDEX IF NOT EXISTS idx_doc_cards_retention ON doc_cards "
+            "(company_id, retention_state, storage_until, id)",
+            "CREATE INDEX IF NOT EXISTS idx_doc_versions_destruction_act ON doc_versions "
+            "(destruction_act_id)",
+            "CREATE INDEX IF NOT EXISTS idx_doc_legal_holds_active ON doc_legal_holds "
+            "(company_id, doc_id, placed_at) WHERE released_at IS NULL",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_doc_destruction_acts_number "
+            "ON doc_destruction_acts (company_id, COALESCE(organization_id, "
+            "'00000000-0000-0000-0000-000000000000'::uuid), act_number)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_doc_destruction_items_active_doc "
+            "ON doc_destruction_items (company_id, doc_id) WHERE status IN "
+            "('pending','primary_purged','failed')",
+            "CREATE INDEX IF NOT EXISTS idx_doc_archive_events_company "
+            "ON doc_archive_events (company_id, created_at, id)",
+            "CREATE INDEX IF NOT EXISTS idx_doc_break_glass_active ON doc_break_glass_accesses "
+            "(company_id, doc_id, user_id, expires_at) WHERE revoked_at IS NULL",
+            "CREATE OR REPLACE FUNCTION protect_doc_archive_event() RETURNS trigger AS $$ "
+            "BEGIN RAISE EXCEPTION 'doc archive events are append-only'; END; "
+            "$$ LANGUAGE plpgsql",
+            "DROP TRIGGER IF EXISTS doc_archive_events_immutable_trg ON doc_archive_events",
+            "CREATE TRIGGER doc_archive_events_immutable_trg BEFORE UPDATE OR DELETE "
+            "ON doc_archive_events FOR EACH ROW EXECUTE FUNCTION protect_doc_archive_event()",
+            "CREATE OR REPLACE FUNCTION protect_doc_destruction_act_seal() "
+            "RETURNS trigger AS $$ BEGIN IF TG_OP = 'DELETE' THEN IF "
+            "OLD.sealed_sha256 IS NOT NULL THEN RAISE EXCEPTION 'sealed destruction act "
+            "is immutable'; END IF; RETURN OLD; END IF; IF OLD.sealed_sha256 IS NOT NULL "
+            "AND (NEW.company_id IS DISTINCT FROM OLD.company_id OR "
+            "NEW.organization_id IS DISTINCT FROM OLD.organization_id OR "
+            "NEW.act_number IS DISTINCT FROM OLD.act_number OR "
+            "NEW.act_date IS DISTINCT FROM OLD.act_date OR NEW.basis IS DISTINCT FROM "
+            "OLD.basis OR NEW.committee IS DISTINCT FROM OLD.committee OR "
+            "NEW.created_by IS DISTINCT FROM OLD.created_by OR "
+            "NEW.created_at IS DISTINCT FROM OLD.created_at OR "
+            "NEW.sealed_snapshot IS DISTINCT FROM OLD.sealed_snapshot OR "
+            "NEW.sealed_sha256 IS DISTINCT FROM OLD.sealed_sha256) THEN RAISE EXCEPTION "
+            "'sealed destruction act is immutable'; END IF; RETURN NEW; END; "
+            "$$ LANGUAGE plpgsql",
+            "DROP TRIGGER IF EXISTS doc_destruction_acts_sealed_trg "
+            "ON doc_destruction_acts",
+            "CREATE TRIGGER doc_destruction_acts_sealed_trg BEFORE UPDATE OR DELETE "
+            "ON doc_destruction_acts FOR EACH ROW EXECUTE FUNCTION "
+            "protect_doc_destruction_act_seal()",
+            "CREATE OR REPLACE FUNCTION protect_doc_destruction_item_snapshot() "
+            "RETURNS trigger AS $$ DECLARE is_sealed boolean; BEGIN SELECT "
+            "sealed_sha256 IS NOT NULL INTO is_sealed FROM doc_destruction_acts "
+            "WHERE id = OLD.act_id; IF TG_OP = 'DELETE' THEN IF "
+            "COALESCE(is_sealed, false) THEN RAISE EXCEPTION 'sealed destruction "
+            "item is immutable'; END IF; RETURN OLD; END IF; IF "
+            "COALESCE(is_sealed, false) AND "
+            "(NEW.company_id IS DISTINCT FROM OLD.company_id OR "
+            "NEW.act_id IS DISTINCT FROM OLD.act_id OR NEW.doc_id IS DISTINCT FROM "
+            "OLD.doc_id OR NEW.decision_id IS DISTINCT FROM OLD.decision_id OR "
+            "NEW.snapshot IS DISTINCT FROM OLD.snapshot OR NEW.snapshot_sha256 IS "
+            "DISTINCT FROM OLD.snapshot_sha256) THEN RAISE EXCEPTION 'sealed destruction "
+            "item is immutable'; END IF; RETURN NEW; END; $$ LANGUAGE plpgsql",
+            "DROP TRIGGER IF EXISTS doc_destruction_items_sealed_trg "
+            "ON doc_destruction_items",
+            "CREATE TRIGGER doc_destruction_items_sealed_trg BEFORE UPDATE OR DELETE "
+            "ON doc_destruction_items FOR EACH ROW EXECUTE FUNCTION "
+            "protect_doc_destruction_item_snapshot()",
             "ALTER TABLE doc_share_links ADD COLUMN IF NOT EXISTS version_snapshot JSONB",
             "ALTER TABLE doc_share_links ADD COLUMN IF NOT EXISTS card_snapshot JSONB",
             # Старую ссылку нельзя достоверно связать с редакцией задним числом.

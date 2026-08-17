@@ -97,6 +97,7 @@ from app.routers import (
     perimeter_router,
     pulse_router,
     doc_share_router,
+    docs_archive_router,
     docs_router,
     tasks_router,
     tickets_router,
@@ -332,6 +333,7 @@ app.include_router(auth_router.router, prefix=API_PREFIX)
 app.include_router(station_console_router.router, prefix=API_PREFIX)
 app.include_router(tickets_router.router, prefix=API_PREFIX)
 app.include_router(tasks_router.router, prefix=API_PREFIX)  # «Задачи»: свой движок с маршрутами
+app.include_router(docs_archive_router.router, prefix=API_PREFIX)
 app.include_router(docs_router.router, prefix=API_PREFIX)  # «Трек»: документооборот и работа
 # Показ документа контрагенту по ссылке: без авторизации, намеренно скупо.
 app.include_router(doc_share_router.router, prefix=API_PREFIX)
@@ -445,7 +447,7 @@ async def readiness_check(db: AsyncSession = Depends(get_db)):
     """Readiness: рабочая БД, обязательная схема и доступное хранилище файлов."""
     try:
         schema_ready = await db.scalar(text("""
-            SELECT count(*) = 6
+            SELECT count(*) = 19
               FROM pg_class AS c
               JOIN pg_namespace AS n ON n.oid = c.relnamespace
              WHERE n.nspname = current_schema()
@@ -455,11 +457,24 @@ async def readiness_check(db: AsyncSession = Depends(get_db)):
                    'idx_doc_versions_text',
                    'uq_doc_cases_index',
                    'uq_doc_cards_mail_source',
-                   'uq_mail_messages_company_msgid'
+                   'uq_mail_messages_company_msgid',
+                   'doc_legal_holds',
+                   'doc_retention_decisions',
+                   'doc_destruction_acts',
+                   'doc_destruction_items',
+                   'doc_archive_events',
+                   'doc_break_glass_accesses',
+                   'idx_doc_cards_retention',
+                   'idx_doc_versions_destruction_act',
+                   'idx_doc_legal_holds_active',
+                   'uq_doc_destruction_acts_number',
+                   'uq_doc_destruction_items_active_doc',
+                   'idx_doc_archive_events_company',
+                   'idx_doc_break_glass_active'
                )
         """))
         unique_ready = await db.scalar(text("""
-            SELECT count(*) = 4
+            SELECT count(*) = 6
               FROM pg_class AS c
               JOIN pg_namespace AS n ON n.oid = c.relnamespace
               JOIN pg_index AS i ON i.indexrelid = c.oid
@@ -468,25 +483,63 @@ async def readiness_check(db: AsyncSession = Depends(get_db)):
                    'uq_doc_versions_current_role',
                    'uq_doc_cases_index',
                    'uq_doc_cards_mail_source',
-                   'uq_mail_messages_company_msgid'
+                   'uq_mail_messages_company_msgid',
+                   'uq_doc_destruction_acts_number',
+                   'uq_doc_destruction_items_active_doc'
                )
                AND i.indisunique
                AND i.indisvalid
         """))
-        case_expression_ready = await db.scalar(text("""
-            SELECT coalesce(bool_or(
-                       pg_get_indexdef(i.indexrelid) ILIKE
-                       '%COALESCE(organization_id%'
-                   ), false)
+        expression_indexes_ready = await db.scalar(text("""
+            SELECT count(*) = 2
               FROM pg_class AS c
               JOIN pg_namespace AS n ON n.oid = c.relnamespace
               JOIN pg_index AS i ON i.indexrelid = c.oid
              WHERE n.nspname = current_schema()
-               AND c.relname = 'uq_doc_cases_index'
+               AND c.relname IN (
+                   'uq_doc_cases_index',
+                   'uq_doc_destruction_acts_number'
+               )
                AND i.indisunique
                AND i.indisvalid
+               AND pg_get_indexdef(i.indexrelid) ILIKE '%COALESCE(organization_id%'
         """))
-        if not schema_ready or not unique_ready or not case_expression_ready:
+        archive_columns_ready = await db.scalar(text("""
+            SELECT count(*) = 16
+              FROM information_schema.columns
+             WHERE table_schema = current_schema()
+               AND (
+                   (table_name = 'doc_cards' AND column_name IN (
+                       'inherit_kind_acl', 'acl_revision', 'retention_state',
+                       'retention_class', 'retention_snapshot',
+                       'retention_extended_until', 'archive_accepted_at',
+                       'archive_accepted_by', 'primary_purged_at', 'destroyed_at'
+                   ))
+                   OR (table_name = 'doc_cases' AND column_name IN (
+                       'retention_basis', 'retention_class'
+                   ))
+                   OR (table_name = 'doc_versions' AND column_name IN (
+                       'archive_purged_at', 'purge_result', 'destruction_act_id'
+                   ))
+                   OR (table_name = 'doc_access_grants'
+                       AND column_name = 'denied_permissions')
+               )
+        """))
+        archive_evidence_triggers_ready = await db.scalar(text("""
+            SELECT count(*) = 3
+                FROM pg_trigger AS t
+                JOIN pg_class AS table_ref ON table_ref.oid = t.tgrelid
+                JOIN pg_namespace AS n ON n.oid = table_ref.relnamespace
+               WHERE n.nspname = current_schema()
+                 AND (table_ref.relname, t.tgname) IN (
+                     ('doc_archive_events', 'doc_archive_events_immutable_trg'),
+                     ('doc_destruction_acts', 'doc_destruction_acts_sealed_trg'),
+                     ('doc_destruction_items', 'doc_destruction_items_sealed_trg')
+                 )
+                 AND NOT t.tgisinternal
+        """))
+        if (not schema_ready or not unique_ready or not expression_indexes_ready
+                or not archive_columns_ready or not archive_evidence_triggers_ready):
             raise RuntimeError("обязательные объекты схемы не созданы")
 
         from app.services import file_store

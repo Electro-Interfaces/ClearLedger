@@ -59,6 +59,10 @@ async def _link_or_404(db: AsyncSession, token: str,
             row.version_snapshot is None or row.card_snapshot is None):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Ссылка недействительна",
                             headers=PUBLIC_ERROR_HEADERS)
+    doc = await db.get(DocCard, row.doc_id)
+    if doc is None or doc.confidentiality == "strict":
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Ссылка недействительна",
+                            headers=PUBLIC_ERROR_HEADERS)
     return row
 
 
@@ -92,7 +96,7 @@ async def verify_registration(token: str, response: Response,
                             headers=PUBLIC_ERROR_HEADERS)
 
     checked_at = datetime.now(timezone.utc).isoformat()
-    if doc.confidentiality == "private":
+    if doc.confidentiality in {"private", "strict"}:
         return {
             "record_status": "restricted", "checked_at": checked_at,
             "message": "Сведения о документе ограничены политикой доступа организации.",
@@ -129,7 +133,7 @@ async def open_link(token: str, request: Request, response: Response,
                     db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     """Карточка документа для получателя: реквизиты и файлы на скачивание."""
     response.headers.update(PUBLIC_ERROR_HEADERS)
-    link = await _link_or_404(db, token)
+    link = await _link_or_404(db, token, for_update=True)
     doc = await db.get(DocCard, link.doc_id)
     if doc is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Ссылка недействительна",
@@ -167,7 +171,7 @@ async def open_link(token: str, request: Request, response: Response,
 async def download(token: str, version_id: str, db: AsyncSession = Depends(get_db)):
     """Скачать файл документа. Отдаём только действующие редакции этого документа:
     ссылка не должна становиться входом в хранилище файлов пространства."""
-    link = await _link_or_404(db, token)
+    link = await _link_or_404(db, token, for_update=True)
     allowed = ({item.get("id") for item in link.version_snapshot}
                if link.version_snapshot is not None else
                {str(v.id) for v, _ in await _shared_versions(db, link)})
@@ -176,6 +180,7 @@ async def download(token: str, version_id: str, db: AsyncSession = Depends(get_d
                             headers=PUBLIC_ERROR_HEADERS)
     v = (await db.execute(select(DocVersion).where(
         DocVersion.id == version_id, DocVersion.doc_id == link.doc_id,
+        DocVersion.archive_purged_at.is_(None),
     ))).scalar_one_or_none()
     if v is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Файл не найден",

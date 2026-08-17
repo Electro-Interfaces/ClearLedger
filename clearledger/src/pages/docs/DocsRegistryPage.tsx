@@ -43,6 +43,7 @@ export function DocsRegistryPage() {
 
   const companyId = company?.id ?? ''
   const openId = params.get('doc')
+  const initialTab = params.get('tab') === 'archive' ? 'archive' : undefined
   const q = params.get('q') ?? ''
   const deferredQ = useDeferredValue(q.trim())
   const statusFilter = params.get('status') ?? ''
@@ -107,11 +108,13 @@ export function DocsRegistryPage() {
   const open = (id: string) => setParams((current) => {
     const next = new URLSearchParams(current)
     next.set('doc', id)
+    next.delete('tab')
     return next
   }, { replace: true })
   const close = () => setParams((current) => {
     const next = new URLSearchParams(current)
     next.delete('doc')
+    next.delete('tab')
     return next
   }, { replace: true })
 
@@ -226,7 +229,9 @@ export function DocsRegistryPage() {
     <>
       {openId && (
         <div className="h-full min-h-0 overflow-y-auto px-4 py-4 lg:hidden">
-          <DocCardPanel id={openId} companyId={companyId} onBack={close}
+          <DocCardPanel key={`${openId}:${initialTab ?? ''}`}
+            id={openId} companyId={companyId} onBack={close}
+            initialTab={initialTab}
             onChanged={() => qc.invalidateQueries({ queryKey: ['docs', companyId] })} />
         </div>
       )}
@@ -329,7 +334,9 @@ export function DocsRegistryPage() {
           {openId && (
             <section aria-label="Открытый документ"
               className="min-h-0 overflow-y-auto rounded-lg border border-border bg-background px-4">
-              <DocCardPanel id={openId} companyId={companyId} onBack={close}
+              <DocCardPanel key={`${openId}:${initialTab ?? ''}`}
+                id={openId} companyId={companyId} onBack={close}
+                initialTab={initialTab}
                 onChanged={() => qc.invalidateQueries({ queryKey: ['docs', companyId] })} />
             </section>
           )}

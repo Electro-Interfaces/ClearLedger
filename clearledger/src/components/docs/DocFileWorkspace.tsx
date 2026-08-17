@@ -1,7 +1,7 @@
 import { useId, useMemo, useState } from 'react'
 import {
   Download, ExternalLink, FileQuestion, FileText, Image as ImageIcon,
-  Loader2, Paperclip, Trash2,
+  Loader2, Paperclip, ShieldAlert, Trash2,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -37,8 +37,10 @@ function previewKind(version: DocVersion): 'image' | 'pdf' | 'text' | 'unsupport
   return 'unsupported'
 }
 
-export function DocFileWorkspace({ versions, canRemove, removing, onRemove }: {
+export function DocFileWorkspace({ versions, canDownload, sensitive, canRemove, removing, onRemove }: {
   versions: DocVersion[]
+  canDownload: boolean
+  sensitive: boolean
   canRemove: boolean
   removing: boolean
   onRemove: (versionId: string, reason: string) => void
@@ -54,15 +56,16 @@ export function DocFileWorkspace({ versions, canRemove, removing, onRemove }: {
   const reasonId = useId()
 
   const selected = versions.find((version) => version.id === selectedId) ?? initial
-  const path = selected ? `/api/files/${selected.file_id}` : null
+  const path = selected && canDownload ? `/api/files/${selected.file_id}` : null
   const kind = selected ? previewKind(selected) : 'unsupported'
-  const blob = useAuthBlob(kind === 'text' ? null : path)
-  const textPreview = useAuthText(path, kind === 'text')
+  const previewPath = sensitive ? null : path
+  const blob = useAuthBlob(kind === 'text' ? null : previewPath)
+  const textPreview = useAuthText(previewPath, kind === 'text')
 
   const download = async () => {
     if (!selected || !path) return
     try {
-      await downloadAttachment(path, selected.file_name)
+      await downloadAttachment(path, selected.file_name, { cache: !sensitive })
     } catch (error) {
       toast.error(`Файл не скачан: ${(error as Error).message}`)
     }
@@ -71,7 +74,7 @@ export function DocFileWorkspace({ versions, canRemove, removing, onRemove }: {
   const open = async () => {
     if (!path) return
     try {
-      await openAuthAttachment(path)
+      await openAuthAttachment(path, { cache: !sensitive })
     } catch (error) {
       toast.error(`Файл не открыт: ${(error as Error).message}`)
     }
@@ -158,7 +161,7 @@ export function DocFileWorkspace({ versions, canRemove, removing, onRemove }: {
                   {ROLE_LABEL[selected.role] ?? selected.role} · SHA-256 {selected.sha256.slice(0, 12)}…
                 </div>
               </div>
-              <div className="flex items-center gap-1">
+              {canDownload && <div className="flex items-center gap-1">
                 <Button type="button" size="sm" variant="ghost" onClick={download}>
                   <Download className="mr-1.5 h-3.5 w-3.5" />Скачать
                 </Button>
@@ -167,15 +170,33 @@ export function DocFileWorkspace({ versions, canRemove, removing, onRemove }: {
                     <ExternalLink className="mr-1.5 h-3.5 w-3.5" />Открыть
                   </Button>
                 )}
-              </div>
+              </div>}
             </div>
             <div className="flex min-h-[15rem] items-center justify-center bg-muted/20 p-3 lg:min-h-[31rem]">
-              {(kind === 'text' ? textPreview.loading : blob.loading) && (
+              {!canDownload && (
+                <div className="max-w-sm text-center">
+                  <FileQuestion className="mx-auto mb-2 h-7 w-7 text-muted-foreground" />
+                  <div className="text-sm font-medium">Содержимое файла закрыто</div>
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    Право чтения карточки не включает скачивание и предпросмотр в строгом режиме.
+                  </div>
+                </div>
+              )}
+              {canDownload && sensitive && (
+                <div className="max-w-sm text-center">
+                  <ShieldAlert className="mx-auto mb-2 h-7 w-7 text-amber-600" />
+                  <div className="text-sm font-medium">Предпросмотр строгого файла отключён</div>
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    Открытие и скачивание каждый раз повторно проверяют аварийный доступ и не сохраняют blob в кэше приложения.
+                  </div>
+                </div>
+              )}
+              {canDownload && !sensitive && (kind === 'text' ? textPreview.loading : blob.loading) && (
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                   <Loader2 className="h-4 w-4 animate-spin" />Загружаем защищённый файл…
                 </div>
               )}
-              {(kind === 'text' ? textPreview.error : blob.error) && (
+              {canDownload && !sensitive && (kind === 'text' ? textPreview.error : blob.error) && (
                 <div className="max-w-sm text-center">
                   <FileQuestion className="mx-auto mb-2 h-7 w-7 text-destructive" />
                   <div className="text-sm font-medium">Предпросмотр не загрузился</div>
@@ -184,22 +205,22 @@ export function DocFileWorkspace({ versions, canRemove, removing, onRemove }: {
                   </div>
                 </div>
               )}
-              {blob.url && !blob.loading && !blob.error && kind === 'image' && (
+              {canDownload && !sensitive && blob.url && !blob.loading && !blob.error && kind === 'image' && (
                 <img src={blob.url} alt={selected.file_name}
                   className="max-h-[31rem] max-w-full object-contain" />
               )}
-              {blob.url && !blob.loading && !blob.error && kind === 'pdf' && (
+              {canDownload && !sensitive && blob.url && !blob.loading && !blob.error && kind === 'pdf' && (
                 <iframe src={blob.url} title={`Предпросмотр ${selected.file_name}`}
                   sandbox="" className="h-80 w-full rounded-md border border-border bg-background lg:h-[31rem]" />
               )}
-              {textPreview.text !== null && !textPreview.loading && !textPreview.error
+              {canDownload && !sensitive && textPreview.text !== null && !textPreview.loading && !textPreview.error
                 && kind === 'text' && (
                 <pre data-testid="doc-text-preview"
                   className="h-80 w-full overflow-auto whitespace-pre-wrap rounded-md border border-border bg-background p-3 font-sans text-sm leading-5 lg:h-[31rem]">
                   {textPreview.text}
                 </pre>
               )}
-              {!blob.loading && !blob.error && kind === 'unsupported' && (
+              {canDownload && !sensitive && !blob.loading && !blob.error && kind === 'unsupported' && (
                 <div className="max-w-sm text-center">
                   {selected.mime?.startsWith('image/')
                     ? <ImageIcon className="mx-auto mb-2 h-7 w-7 text-muted-foreground" />
