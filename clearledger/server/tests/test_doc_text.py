@@ -8,7 +8,57 @@ import zipfile
 import pytest
 
 from app.models import DocExchangeTarget
-from app.services import doc_exchange, doc_text
+from app.services import doc_exchange, doc_text, file_safety
+
+
+def test_подменённый_pdf_и_eicar_отклоняются():
+    with pytest.raises(ValueError):
+        file_safety.validate(b"MZ" + b"0" * 100, "invoice.pdf", "application/pdf")
+    with pytest.raises(ValueError):
+        file_safety.validate(b"not a pdf", "invoice.pdf")
+    with pytest.raises(ValueError):
+        file_safety.validate(b"plain text", "invoice.pdf", "text/plain")
+    with pytest.raises(ValueError):
+        file_safety.validate(b"not a pdf", "invoice.pdf", "application/x-msdownload")
+    with pytest.raises(ValueError):
+        file_safety.validate(b"echo unsafe", "invoice.cmd ", "text/plain")
+    with pytest.raises(ValueError):
+        file_safety.validate(b"<script/>", "invoice.hta", "text/plain")
+    with pytest.raises(ValueError):
+        file_safety.validate(
+            b"X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE",
+            "invoice.txt",
+            "text/plain",
+        )
+
+
+def test_office_zip_не_может_скрыть_exe():
+    with pytest.raises(ValueError):
+        file_safety.validate(b"not a zip", "invoice.docx")
+    stream = io.BytesIO()
+    with zipfile.ZipFile(stream, "w") as archive:
+        archive.writestr("word/document.xml", "<w:document/>")
+        archive.writestr("payload.cmd ", b"echo unsafe")
+    with pytest.raises(ValueError):
+        file_safety.validate(
+            stream.getvalue(),
+            "invoice.docx",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+
+
+def test_зашифрованный_zip_отклоняется_как_файл_а_не_роняет_приём():
+    stream = io.BytesIO()
+    with zipfile.ZipFile(stream, "w") as archive:
+        archive.writestr("safe.txt", "content")
+    encrypted = bytearray(stream.getvalue())
+    for signature, flag_offset in ((b"PK\x03\x04", 6), (b"PK\x01\x02", 8)):
+        position = encrypted.find(signature)
+        assert position >= 0
+        flags = int.from_bytes(encrypted[position + flag_offset:position + flag_offset + 2], "little")
+        encrypted[position + flag_offset:position + flag_offset + 2] = (flags | 1).to_bytes(2, "little")
+    with pytest.raises(ValueError):
+        file_safety.validate(bytes(encrypted), "incoming.zip")
 
 
 @pytest.mark.asyncio

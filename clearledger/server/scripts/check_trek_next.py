@@ -32,17 +32,19 @@ async def main() -> None:
     written: set[Path] = set()
     notices: list[str] = []
     original_put = file_store.put
-    original_notice = task_scheduler.task_mail.send_notice_async
+    original_notice = task_scheduler.task_mail.send_notice_checked
 
     def tracked_put(*args, **kwargs):
         row = original_put(*args, **kwargs)
         written.add(Path(row.storage_path))
         return row
 
+    async def checked_notice(emails, subject, _body):
+        notices.append(f"{','.join(emails)}:{subject}")
+        return True, None
+
     file_store.put = tracked_put
-    task_scheduler.task_mail.send_notice_async = (
-        lambda emails, subject, body: notices.append(f"{','.join(emails)}:{subject}")
-    )
+    task_scheduler.task_mail.send_notice_checked = checked_notice
     try:
         async with async_session_factory() as db:
             company = (await db.execute(select(Company).where(
@@ -55,19 +57,54 @@ async def main() -> None:
 
             assert await db.scalar(text(
                 "SELECT to_regclass('doc_access_grants') IS NOT NULL"))
-            assert await db.scalar(text(
-                "SELECT to_regclass('idx_doc_versions_text') IS NOT NULL"))
+            required_indexes = {
+                "idx_doc_versions_text", "uq_doc_versions_current_role",
+                "uq_doc_acquaints_snapshot", "uq_doc_cases_index",
+                "uq_doc_cards_mail_source",
+                "uq_mail_messages_company_msgid",
+            }
+            index_rows = (await db.execute(text(
+                "SELECT c.relname, i.indisunique, i.indisvalid, pg_get_indexdef(i.indexrelid) "
+                "FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+                "JOIN pg_index i ON i.indexrelid = c.oid "
+                "WHERE n.nspname = current_schema() "
+                "AND c.relname IN ('idx_doc_versions_text','uq_doc_versions_current_role',"
+                "'uq_doc_acquaints_snapshot','uq_doc_cases_index',"
+                "'uq_doc_cards_mail_source','uq_mail_messages_company_msgid')"
+            ))).all()
+            indexes = {row[0] for row in index_rows}
+            assert indexes == required_indexes
+            by_name = {row[0]: row for row in index_rows}
+            for name in required_indexes:
+                assert by_name[name][2], f"Индекс {name} невалиден"
+            for name in required_indexes:
+                if name.startswith("uq_"):
+                    assert by_name[name][1], f"Индекс {name} не уникальный"
+            assert "COALESCE(organization_id" in by_name["uq_doc_cases_index"][3]
             columns = set((await db.execute(text(
-                "SELECT column_name FROM information_schema.columns "
-                "WHERE table_name IN "
-                "('doc_versions','doc_acquaints','doc_exchange_targets','doc_approvals') "
-                "AND column_name IN "
-                "('content_text','reminded_at','scan_enabled','scan_interval_min',"
-                "'sla_hours','document_snapshot','snapshot_sha256')"
+                "SELECT table_name || '.' || column_name FROM information_schema.columns "
+                "WHERE table_schema = current_schema() AND table_name IN "
+                "('doc_versions','doc_acquaints','doc_exchange_targets','doc_approvals',"
+                "'mail_messages') AND column_name IN "
+                "('content_text','reminded_at','reminder_attempted_at','reminder_error',"
+                "'scan_enabled','scan_interval_min','scan_cursor','sla_hours','activated_at',"
+                "'activation_estimated','document_snapshot','snapshot_sha256','reason_ref',"
+                "'reason_name','route_error','route_attempts','route_attempted_at')"
             ))).scalars().all())
             assert columns == {
-                "content_text", "reminded_at", "scan_enabled", "scan_interval_min",
-                "sla_hours", "document_snapshot", "snapshot_sha256",
+                "doc_versions.content_text",
+                "doc_acquaints.reminded_at", "doc_acquaints.reminder_attempted_at",
+                "doc_acquaints.reminder_error", "doc_acquaints.document_snapshot",
+                "doc_acquaints.snapshot_sha256", "doc_acquaints.reason_ref",
+                "doc_acquaints.reason_name",
+                "doc_exchange_targets.scan_enabled",
+                "doc_exchange_targets.scan_interval_min",
+                "doc_exchange_targets.scan_cursor",
+                "doc_approvals.sla_hours", "doc_approvals.activated_at",
+                "doc_approvals.activation_estimated", "doc_approvals.document_snapshot",
+                "doc_approvals.snapshot_sha256",
+                "mail_messages.route_error", "mail_messages.route_attempts",
+                "mail_messages.route_attempted_at",
             }
 
             owner = User(
@@ -255,30 +292,51 @@ async def main() -> None:
             ))
             assert mail_docs == 1
 
-            with tempfile.TemporaryDirectory(prefix="trek-check-") as folder:
-                inbox = Path(folder)
-                (inbox / f"{marker}-1.txt").write_text(marker, encoding="utf-8")
-                target = DocExchangeTarget(
-                    company_id=cid, code=f"check-{uuid.uuid4().hex[:8]}", name=marker,
-                    system="other", inbox_path=str(inbox), outbox_path="",
-                    scan_enabled=False, scan_interval_min=5,
-                )
-                db.add(target)
-                await db.flush()
-                assert await doc_exchange.collect_inbox(db, target) == 1
-                target.scan_enabled = True
-                target.last_scan_at = now - timedelta(minutes=10)
-                (inbox / f"{marker}-2.txt").write_text(marker + "2", encoding="utf-8")
-                assert await task_scheduler.run_exchange_scans(db, now) >= 1
-                inbox_count = await db.scalar(select(func.count()).select_from(
-                    DocInboxItem).where(DocInboxItem.target_id == target.id))
-                assert inbox_count == 2
+            exchange_root = doc_exchange.exchange_roots()[0]
+            tenant_root = (exchange_root / str(cid)).resolve(strict=False)
+            if not tenant_root.is_relative_to(exchange_root):
+                raise AssertionError("Корень стендовой проверки вышел за tenant-папку")
+            tenant_root_existed = tenant_root.exists()
+            tenant_root.mkdir(parents=True, exist_ok=True)
+            try:
+                with tempfile.TemporaryDirectory(
+                        prefix="trek-check-", dir=tenant_root) as folder:
+                    inbox = Path(folder).resolve(strict=True)
+                    if not inbox.is_relative_to(tenant_root):
+                        raise AssertionError("Временная папка вышла за tenant-корень")
+                    first_path = inbox / f"{marker}-1.txt"
+                    first_path.write_text(marker, encoding="utf-8")
+                    stable_at = now.timestamp() - doc_exchange.MIN_STABLE_AGE_SECONDS - 1
+                    os.utime(first_path, (stable_at, stable_at))
+                    target = DocExchangeTarget(
+                        company_id=cid, code=f"check-{uuid.uuid4().hex[:8]}", name=marker,
+                        system="other", inbox_path=str(inbox), outbox_path="",
+                        scan_enabled=False, scan_interval_min=5,
+                    )
+                    db.add(target)
+                    await db.flush()
+                    assert await doc_exchange.collect_inbox(db, target) == 1
+                    target.scan_enabled = True
+                    target.last_scan_at = now - timedelta(minutes=10)
+                    second_path = inbox / f"{marker}-2.txt"
+                    second_path.write_text(marker + "2", encoding="utf-8")
+                    os.utime(second_path, (stable_at, stable_at))
+                    assert await task_scheduler.run_exchange_scans(db, now) >= 1
+                    inbox_count = await db.scalar(select(func.count()).select_from(
+                        DocInboxItem).where(DocInboxItem.target_id == target.id))
+                    assert inbox_count == 2
+            finally:
+                if not tenant_root_existed:
+                    try:
+                        tenant_root.rmdir()
+                    except OSError:
+                        pass
 
             print("OK: schema workflow snapshot workspace search access discipline acquaint mail exchange")
             await db.rollback()
     finally:
         file_store.put = original_put
-        task_scheduler.task_mail.send_notice_async = original_notice
+        task_scheduler.task_mail.send_notice_checked = original_notice
         root = file_store.upload_dir().resolve()
         for path in written:
             resolved = path.resolve()

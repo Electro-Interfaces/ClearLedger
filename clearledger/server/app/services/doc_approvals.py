@@ -304,6 +304,18 @@ async def start(db: AsyncSession, cid: uuid.UUID, doc: DocCard, route: list[dict
     }
 
 
+async def lock_round(db: AsyncSession, cid: uuid.UUID, doc_id: uuid.UUID,
+                     round_no: int) -> list[DocApproval]:
+    if round_no <= 0:
+        return []
+    return list((await db.execute(select(DocApproval).where(
+        DocApproval.company_id == cid,
+        DocApproval.doc_id == doc_id,
+        DocApproval.round == round_no,
+    ).order_by(DocApproval.id).execution_options(
+        populate_existing=True).with_for_update())).scalars().all())
+
+
 def step_passed(rows: list[DocApproval]) -> bool:
     """Пройден ли шаг по своему кворуму."""
     if not rows:
@@ -319,7 +331,8 @@ def step_passed(rows: list[DocApproval]) -> bool:
 
 
 async def decide(db: AsyncSession, cid: uuid.UUID, doc: DocCard, row: DocApproval,
-                 actor: User, approved: bool, comment: str | None) -> dict[str, Any]:
+                 actor: User, approved: bool, comment: str | None,
+                 round_rows: list[DocApproval] | None = None) -> dict[str, Any]:
     """Поставить визу или вернуть документ с замечанием.
 
     Отказ обязан нести причину: без неё автор не понимает, что править, и круг
@@ -352,19 +365,27 @@ async def decide(db: AsyncSession, cid: uuid.UUID, doc: DocCard, row: DocApprova
     if not approved:
         # Отказ гасит текущий круг целиком: возвращать документ по одному шагу,
         # пока остальные ещё смотрят, значит согласовывать уже неактуальное.
-        pend = (await db.execute(select(DocApproval).where(
-            DocApproval.doc_id == doc.id, DocApproval.round == row.round,
-            DocApproval.status.in_(("pending", "waiting"))))).scalars().all()
+        pend = [item for item in round_rows or []
+                if item.status in ("pending", "waiting")]
+        if round_rows is None:
+            pend = (await db.execute(select(DocApproval).where(
+                DocApproval.doc_id == doc.id, DocApproval.round == row.round,
+                DocApproval.status.in_(("pending", "waiting"))))).scalars().all()
         for p in pend:
             p.status = "skipped"
         doc.approval_status = "rejected"
         await db.flush()
         return {"status": "rejected", "returned": True}
 
-    rows = (await db.execute(select(DocApproval).where(
-        DocApproval.doc_id == doc.id,
-        DocApproval.round == row.round).order_by(
-            DocApproval.step_no, DocApproval.created_at, DocApproval.id))).scalars().all()
+    rows = round_rows
+    if rows is None:
+        rows = (await db.execute(select(DocApproval).where(
+            DocApproval.doc_id == doc.id,
+            DocApproval.round == row.round).order_by(
+                DocApproval.step_no, DocApproval.created_at, DocApproval.id))).scalars().all()
+    else:
+        rows = sorted(rows, key=lambda item: (
+            item.step_no, item.created_at or datetime.min.replace(tzinfo=timezone.utc), item.id))
     current = [item for item in rows if item.step_no == row.step_no]
     if step_passed(current):
         for item in current:
@@ -390,13 +411,16 @@ async def decide(db: AsyncSession, cid: uuid.UUID, doc: DocCard, row: DocApprova
 
 
 async def cancel(db: AsyncSession, doc: DocCard, actor: User,
-                 reason: str) -> dict[str, Any]:
+                 reason: str, round_rows: list[DocApproval] | None = None) -> dict[str, Any]:
     """Остановить живой круг с явной причиной, не стирая его историю."""
-    rows = (await db.execute(select(DocApproval).where(
-        DocApproval.doc_id == doc.id,
-        DocApproval.round == doc.approval_round,
-        DocApproval.status.in_(("pending", "waiting")),
-    ))).scalars().all()
+    rows = [row for row in round_rows or []
+            if row.status in ("pending", "waiting")]
+    if round_rows is None:
+        rows = (await db.execute(select(DocApproval).where(
+            DocApproval.doc_id == doc.id,
+            DocApproval.round == doc.approval_round,
+            DocApproval.status.in_(("pending", "waiting")),
+        ))).scalars().all()
     for row in rows:
         row.status = "skipped"
     doc.approval_status = "none"

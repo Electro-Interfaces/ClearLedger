@@ -58,6 +58,7 @@ const FIELD_LABEL: Record<string, string> = {
   object_id: 'Объект',
   attrs: 'Реквизиты вида',
   organization_id: 'Наше юрлицо',
+  case_id: 'Дело номенклатуры',
 }
 
 const EVENT_VALUE: Record<string, string> = {
@@ -106,6 +107,11 @@ export function DocCardPanel({ id, companyId, onBack, onChanged }: {
   const q = useQuery({
     queryKey: ['doc', id, companyId],
     queryFn: () => docsService.getDoc(companyId, id),
+  })
+  const casesQ = useQuery({
+    queryKey: ['doc-cases', companyId],
+    queryFn: () => docsService.listCases(companyId),
+    enabled: !!companyId,
   })
 
   const refresh = () => {
@@ -193,6 +199,15 @@ export function DocCardPanel({ id, companyId, onBack, onChanged }: {
     onError: (e) => toast.error(`Редакция не убрана: ${(e as Error).message}`),
   })
 
+  const assignCase = useMutation({
+    mutationFn: (caseId: string | null) => docsService.assignCase(companyId, id, caseId),
+    onSuccess: (_, caseId) => {
+      toast.success(caseId ? 'Документ подшит в дело' : 'Документ извлечён из дела')
+      refresh()
+    },
+    onError: (e) => toast.error(`Дело не изменено: ${(e as Error).message}`),
+  })
+
   if (q.isLoading) return <DocLoadState onBack={onBack} />
   if (q.isError) return (
     <DocLoadState onBack={onBack} error={(q.error as Error).message} onRetry={() => q.refetch()} />
@@ -205,6 +220,15 @@ export function DocCardPanel({ id, companyId, onBack, onChanged }: {
   const editable = actions.has('edit')
   const approvalLocked = d.approval_status === 'pending'
   const canChangeFiles = editable && !approvalLocked && ['draft', 'registered'].includes(d.status)
+  const cases = casesQ.data ?? []
+  const caseOptions = cases.filter((item) => (
+    item.id === d.case_id || (item.status === 'open'
+      && (!item.organization_id || item.organization_id === d.organization_id)
+      && (!d.reg_date || item.year === Number(d.reg_date.slice(0, 4))))
+  ))
+  const currentCaseMissing = Boolean(
+    d.case_id && !caseOptions.some((item) => item.id === d.case_id),
+  )
   const headerActions = (
     <>
       {registered && editable && (
@@ -424,6 +448,32 @@ export function DocCardPanel({ id, companyId, onBack, onChanged }: {
                 <option value="company">Всё пространство</option>
                 <option value="private">Ограниченный доступ</option>
               </select>}
+            </Field>
+            <Field label="Дело номенклатуры">
+              {(controlId) => <div className="space-y-1.5">
+                <select id={controlId} value={d.case_id ?? ''}
+                  disabled={!actions.has('manage_case') || assignCase.isPending
+                    || casesQ.isLoading || casesQ.isError}
+                  className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm disabled:cursor-default disabled:opacity-100 disabled:text-foreground"
+                  onChange={(event) => assignCase.mutate(event.target.value || null)}>
+                  <option value="">Не подшит</option>
+                  {currentCaseMissing && (
+                    <option value={d.case_id ?? ''}>Текущее дело недоступно</option>
+                  )}
+                  {caseOptions.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.year} · {item.index} · {item.title}{item.status === 'closed' ? ' (закрыто)' : ''}
+                    </option>
+                  ))}
+                </select>
+                {casesQ.isError && (
+                  <div role="alert" className="flex items-center justify-between gap-2 text-xs text-destructive">
+                    <span>Дела не загрузились</span>
+                    <button type="button" className="underline underline-offset-2"
+                      onClick={() => casesQ.refetch()}>Повторить</button>
+                  </div>
+                )}
+              </div>}
             </Field>
             <div className="space-y-1.5">
               <div className="text-xs text-muted-foreground">Состояние</div>

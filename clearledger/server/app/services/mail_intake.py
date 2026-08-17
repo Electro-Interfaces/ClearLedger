@@ -41,6 +41,7 @@ from app.models import (
     Counterparty, CounterpartyEmail, IntakeBatch, MailAccount, MailAttachment,
     MailMessage, MailRule, MailThread, Task,
 )
+from app.services import file_safety
 
 logger = logging.getLogger("clearledger.mail")
 
@@ -101,6 +102,11 @@ def _attachments(msg: Message) -> list[dict[str, Any]]:
             continue
         if len(payload) > MAX_ATTACH_BYTES:
             logger.warning("вложение %s отклонено по размеру (%s)", name, len(payload))
+            continue
+        try:
+            file_safety.validate(payload, name, part.get_content_type())
+        except ValueError as exc:
+            logger.warning("вложение %s отклонено: %s", name, exc)
             continue
         out.append({
             "name": name,
@@ -194,7 +200,9 @@ def _connect_imap(account: dict[str, Any], password: str):
     return conn
 
 
-def _fetch_sync(account: dict[str, Any]) -> tuple[list[tuple[int, bytes]], int | None, str | None]:
+def _fetch_sync(
+    account: dict[str, Any],
+) -> tuple[list[tuple[int, bytes | None, str | None]], int | None, str | None]:
     """Синхронный заход в ящик: вернуть новые письма, UIDVALIDITY и ошибку."""
     password = account.get("password") or ""
     if not (account["imap_host"] and account["login"] and password):
@@ -218,14 +226,44 @@ def _fetch_sync(account: dict[str, Any]) -> tuple[list[tuple[int, bytes]], int |
 
         typ, data = conn.uid("search", None, f"UID {last_uid + 1}:*")
         uids = [int(u) for u in (data[0] or b"").split() if int(u) > last_uid]
-        out: list[tuple[int, bytes]] = []
+        out: list[tuple[int, bytes | None, str | None]] = []
         for uid in uids[:BATCH]:
+            typ, size_data = conn.uid("fetch", str(uid), "(RFC822.SIZE)")
+            if typ != "OK" or not size_data:
+                conn.logout()
+                return [], validity, (
+                    f"Размер письма UID {uid} не прочитан; курсор оставлен до повтора")
+            size_match = re.search(
+                rb"RFC822\.SIZE\s+(\d+)",
+                b" ".join(
+                    part if isinstance(part, bytes) else part[0]
+                    for part in size_data if part
+                    if isinstance(part, bytes) or (
+                        isinstance(part, tuple) and part and isinstance(part[0], bytes))
+                ),
+                re.IGNORECASE,
+            )
+            declared_size = int(size_match.group(1)) if size_match else None
+            if declared_size is not None and declared_size > MAX_MESSAGE_BYTES:
+                out.append((uid, None, (
+                    f"Письмо UID {uid} отклонено: размер {declared_size} байт "
+                    f"превышает предел {MAX_MESSAGE_BYTES} байт")))
+                continue
             typ, msg_data = conn.uid("fetch", str(uid), "(RFC822)")
             if typ != "OK" or not msg_data or not msg_data[0]:
-                continue
+                conn.logout()
+                return [], validity, (
+                    f"Письмо UID {uid} не прочитано; курсор оставлен до повтора")
             raw = msg_data[0][1]
-            if raw and len(raw) <= MAX_MESSAGE_BYTES:
-                out.append((uid, raw))
+            if not raw:
+                out.append((uid, None, f"Письмо UID {uid} отклонено: пустое содержимое"))
+                continue
+            if len(raw) > MAX_MESSAGE_BYTES:
+                out.append((uid, None, (
+                    f"Письмо UID {uid} отклонено: размер {len(raw)} байт "
+                    f"превышает предел {MAX_MESSAGE_BYTES} байт")))
+                continue
+            out.append((uid, raw, None))
         conn.logout()
         return out, validity, None
     except Exception as e:  # noqa: BLE001 — ошибку показываем в карточке ящика
@@ -346,10 +384,16 @@ async def poll_account(db: AsyncSession, account: MailAccount) -> dict[str, Any]
         return {"fetched": 0, "saved": 0, "error": error}
 
     saved = 0
-    for uid, raw in letters:
+    rejected = 0
+    rejection_error = None
+    for uid, raw, rejection_reason in letters:
         try:
             async with db.begin_nested():
-                if await _save_message(db, account, uid, raw):
+                if rejection_reason:
+                    if await _save_rejected_message(db, account, uid, rejection_reason):
+                        rejected += 1
+                    rejection_error = rejection_error or rejection_reason
+                elif raw is not None and await _save_message(db, account, uid, raw):
                     saved += 1
         except Exception as e:  # noqa: BLE001 — одно кривое письмо не рвёт приём
             # UID нельзя продвигать мимо письма, которое не сохранилось: иначе
@@ -359,8 +403,10 @@ async def poll_account(db: AsyncSession, account: MailAccount) -> dict[str, Any]
             logger.exception("письмо uid=%s не сохранено: %s", uid, e)
             break
         account.last_uid = max(account.last_uid or 0, uid)
+    if rejection_error:
+        account.last_error = rejection_error
     await db.commit()
-    return {"fetched": len(letters), "saved": saved}
+    return {"fetched": len(letters), "saved": saved, "rejected": rejected}
 
 
 # Сколько писем от одного адреса принимаем за сутки: сорвавшийся автоответчик
@@ -370,6 +416,36 @@ DAILY_LIMIT_PER_SENDER = 200
 # Пространство имён блокировки опроса: своё, чтобы не пересечься с
 # планировщиками задач и каналов.
 POLL_LOCK_NS = 4711
+
+
+async def _save_rejected_message(
+    db: AsyncSession, account: MailAccount, uid: int, reason: str,
+) -> bool:
+    message_id = (
+        f"<elsy-imap-rejected:{account.id}:{account.uid_validity or 0}:{uid}>"
+    )
+    exists = await db.scalar(select(MailMessage.id).where(
+        MailMessage.company_id == account.company_id,
+        MailMessage.message_id == message_id,
+    ))
+    if exists:
+        return False
+    db.add(MailMessage(
+        company_id=account.company_id,
+        account_id=account.id,
+        direction="in",
+        uid=uid,
+        message_id=message_id,
+        subject=f"Письмо UID {uid} отклонено при получении",
+        sent_at=datetime.now(timezone.utc),
+        status="rejected",
+        headers={"_auth_status": "unknown", "_auth_verdict": reason},
+        has_attachments=False,
+        routed_to="imap_rejected",
+        route_error=reason[:500],
+    ))
+    await db.flush()
+    return True
 
 
 async def _save_message(db: AsyncSession, account: MailAccount, uid: int,
@@ -560,7 +636,7 @@ async def _save_message(db: AsyncSession, account: MailAccount, uid: int,
 
 async def retry_doc_route(db: AsyncSession, cid, row: MailMessage) -> bool:
     """Повторить неуспешный mail→doc после исправления справочника или вида."""
-    if (row.company_id != cid or row.routed_to == "duplicate"
+    if (row.company_id != cid or row.routed_to in ("duplicate", "imap_rejected")
             or row.status in ("quarantine", "rejected")):
         return False
     account = await db.get(MailAccount, row.account_id) if row.account_id else None

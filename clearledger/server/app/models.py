@@ -9659,6 +9659,9 @@ class DocCard(Base):
         # Две карточки на один договор — это две правды о нём.
         Index("uq_doc_cards_subject", "company_id", "subject_ref",
               unique=True, postgresql_where=text("subject_ref IS NOT NULL")),
+        Index("uq_doc_cards_mail_source", "company_id", "source_ref", unique=True,
+              postgresql_where=text(
+                  "source = 'mail' AND source_ref IS NOT NULL")),
         Index("idx_doc_cards_registry", "company_id", "family", "reg_date"),
         Index("idx_doc_cards_counterparty", "company_id", "counterparty_id"),
         CheckConstraint(
@@ -9722,6 +9725,9 @@ class DocVersion(Base):
               postgresql_where=text(
                   "is_current = true AND tombstoned_at IS NULL")),
         Index("idx_doc_versions_live", "company_id", "doc_id", "tombstoned_at"),
+        Index("idx_doc_versions_text",
+              text("to_tsvector('russian', coalesce(content_text, ''))"),
+              postgresql_using="gin"),
         CheckConstraint("sha256 ~ '^[0-9a-f]{64}$'", name="ck_doc_versions_sha256"),
         CheckConstraint("revision > 0", name="ck_doc_versions_revision"),
     )
@@ -9845,8 +9851,14 @@ class DocCase(Base):
         DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
-        UniqueConstraint("company_id", "organization_id", "year", "index",
-                         name="uq_doc_cases_index"),
+        Index(
+            "uq_doc_cases_index",
+            "company_id",
+            text("COALESCE(organization_id, '00000000-0000-0000-0000-000000000000'::uuid)"),
+            "year",
+            "index",
+            unique=True,
+        ),
     )
 
 

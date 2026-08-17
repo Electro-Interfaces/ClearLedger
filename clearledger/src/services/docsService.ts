@@ -19,6 +19,7 @@ export interface DocKind {
   number_prefix: string
   fields: DocKindField[]
   route: Array<Record<string, unknown>>
+  default_case_id: string | null
   errand_type_id: string | null
   requires_registration: boolean
   is_active: boolean
@@ -185,6 +186,9 @@ export interface DocCase {
   epk: boolean
   status: string
   organization_id: string | null
+  department_id: string | null
+  closed_at: string | null
+  note: string | null
 }
 
 /** Строка листа ознакомления: кому направлен документ и расписался ли он. */
@@ -438,10 +442,24 @@ export async function createCase(
   return post('/api/docs/cases', { ...body, company_id: companyId })
 }
 
+export async function assignCase(
+  companyId: string, docId: string, caseId: string | null,
+): Promise<DocCard> {
+  return put(`/api/docs/${docId}/case`, { company_id: companyId, case_id: caseId })
+}
+
+export async function closeCase(
+  companyId: string, caseId: string, note?: string,
+): Promise<{ id: string; status: string; closed_at: string }> {
+  return post(`/api/docs/cases/${caseId}/close`, {
+    company_id: companyId, note: note ?? null,
+  })
+}
+
 /** Перенести номенклатуру на следующий год. Идемпотентно. */
 export async function rolloverCases(
   companyId: string, year: number,
-): Promise<{ added: number; year: number }> {
+): Promise<{ added: number; defaults_updated: number; year: number }> {
   return post(`/api/docs/cases/rollover?company_id=${companyId}&year=${year}`, {})
 }
 

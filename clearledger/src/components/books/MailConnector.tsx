@@ -477,20 +477,29 @@ export function MailConnector({ mode = 'all' }: { mode?: 'setup' | 'work' | 'all
               читаются по порядку — первое подходящее решает судьбу письма
             </span>
             {isCompanyAdmin && <Button size="sm" variant="outline" className="ml-auto"
+              disabled={accounts.isLoading || accounts.isError}
               onClick={() => setRuleForm({
                 name: '', accountId: null,
                 sort: Math.max(0, ...(rules.data?.rows ?? []).map((rule) => rule.sort)) + 10,
                 fromEmail: null, fromDomain: null,
                 subjectLike: null, hasAttachment: null, unknownSender: null,
                 action: 'archive', setCounterpartyId: null, setContractId: null,
-                setRoomId: null, setObjectId: null, isActive: true,
+                setRoomId: null, setObjectId: null, isActive: false,
               })}>
               <Plus className="size-4 mr-1.5" /> Правило
             </Button>}
           </div>
 
+          {accounts.isError && (
+            <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-destructive/30 p-3 text-sm">
+              <span className="text-destructive">Почтовые ящики не загрузились. Правила нельзя включать.</span>
+              <Button size="sm" variant="outline" onClick={() => accounts.refetch()}>Повторить</Button>
+            </div>
+          )}
+
           {(rules.data?.rows ?? []).map((r) => (
             <RuleRow key={r.id} r={r} counterparties={counterparties}
+              accounts={accounts.data?.rows ?? []}
               canManage={isCompanyAdmin} deleting={removeRule.isPending}
               onEdit={() => setRuleForm({ ...r })}
               onDelete={() => removeRule.mutate(r.id)} />
@@ -524,6 +533,19 @@ export function MailConnector({ mode = 'all' }: { mode?: 'setup' | 'work' | 'all
                   <Input type="number" value={ruleForm.sort}
                     onChange={(e) => setRuleForm({ ...ruleForm, sort: Number(e.target.value) })} />
                 </Field>
+                <Field label="Почтовый ящик" hint="пусто — правило действует для всех ящиков">
+                  <select aria-label="Почтовый ящик правила"
+                    className="w-full rounded-md border bg-background px-2 py-1.5 text-sm"
+                    disabled={accounts.isLoading || accounts.isError}
+                    value={ruleForm.accountId ?? ''}
+                    onChange={(e) => setRuleForm({ ...ruleForm,
+                      accountId: e.target.value || null })}>
+                    <option value="">— все ящики —</option>
+                    {(accounts.data?.rows ?? []).map((account) => (
+                      <option key={account.id} value={account.id}>{account.address}</option>
+                    ))}
+                  </select>
+                </Field>
                 <Field label="Адрес отправителя">
                   <Input value={ruleForm.fromEmail ?? ''} placeholder="sales@tsm.ru"
                     onChange={(e) => setRuleForm({ ...ruleForm, fromEmail: e.target.value })} />
@@ -553,6 +575,13 @@ export function MailConnector({ mode = 'all' }: { mode?: 'setup' | 'work' | 'all
                         onClick={() => setRuleForm({ ...ruleForm, action: a.key })} />
                     ))}
                   </div>
+                </Field>
+                <Field label="Состояние" hint="новое правило безопасно сохраняется выключенным">
+                  <Toggle on={ruleForm.isActive}
+                    label={ruleForm.isActive ? 'Включено' : 'Выключено'}
+                    disabled={accounts.isLoading || accounts.isError}
+                    onClick={() => setRuleForm({ ...ruleForm,
+                      isActive: !ruleForm.isActive })} />
                 </Field>
                 {ruleForm.action === 'doc' && (
                   <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-2 text-[11px] text-muted-foreground sm:col-span-2">
@@ -594,8 +623,10 @@ export function MailConnector({ mode = 'all' }: { mode?: 'setup' | 'work' | 'all
                 </Field>
               </div>
               <div className="flex gap-2">
-                <Button size="sm" disabled={saveRule.isPending}
-                  onClick={() => saveRule.mutate(ruleForm)}>Сохранить</Button>
+                <Button size="sm" disabled={saveRule.isPending || !accounts.isSuccess}
+                  onClick={() => saveRule.mutate(ruleForm)}>
+                  {ruleForm.isActive ? 'Сохранить и включить' : 'Сохранить выключенным'}
+                </Button>
                 <Button size="sm" variant="ghost" onClick={() => setRuleForm(null)}>Отмена</Button>
               </div>
             </div>
@@ -931,10 +962,13 @@ const ACTIONS: { key: MailRule['action']; label: string }[] = [
   { key: 'reject', label: 'отклонить' },
 ]
 
-function Toggle({ on, label, onClick }: { on: boolean; label: string; onClick: () => void }) {
+function Toggle({ on, label, onClick, disabled = false }: {
+  on: boolean; label: string; onClick: () => void; disabled?: boolean
+}) {
   return (
-    <button type="button" onClick={onClick} aria-pressed={on}
+    <button type="button" onClick={onClick} aria-pressed={on} disabled={disabled}
       className={cn('rounded-md border px-2 py-1 text-xs transition-colors',
+        'disabled:cursor-not-allowed disabled:opacity-50',
         on ? 'border-primary bg-primary/10 text-primary'
            : 'text-muted-foreground hover:bg-muted')}>
       {label}
@@ -942,8 +976,9 @@ function Toggle({ on, label, onClick }: { on: boolean; label: string; onClick: (
   )
 }
 
-function RuleRow({ r, counterparties, canManage, deleting, onEdit, onDelete }: {
+function RuleRow({ r, counterparties, accounts, canManage, deleting, onEdit, onDelete }: {
   r: MailRule; counterparties: { id: string; name: string }[]
+  accounts: MailAccount[]
   onEdit: () => void; onDelete: () => void; canManage: boolean; deleting: boolean
 }) {
   const cond = [
@@ -954,6 +989,7 @@ function RuleRow({ r, counterparties, canManage, deleting, onEdit, onDelete }: {
     r.unknownSender && 'отправитель неизвестен',
   ].filter(Boolean).join(' · ') || 'любое письмо'
   const cp = counterparties.find((c) => c.id === r.setCounterpartyId)
+  const account = accounts.find((item) => item.id === r.accountId)
   return (
     <div className="rounded-md border p-2.5 flex flex-wrap items-center gap-2">
       <span className="text-[11px] tabular-nums text-muted-foreground w-8">{r.sort}</span>
@@ -965,6 +1001,14 @@ function RuleRow({ r, counterparties, canManage, deleting, onEdit, onDelete }: {
       <span className="rounded border px-1.5 py-0.5 text-[10px] border-primary/40 text-primary">
         {ACTIONS.find((a) => a.key === r.action)?.label ?? r.action}
       </span>
+      <span className="text-[11px] text-muted-foreground">
+        {account ? `ящик ${account.address}` : 'все ящики'}
+      </span>
+      {!r.isActive && (
+        <span className="rounded border px-1.5 py-0.5 text-[10px] text-muted-foreground">
+          выключено
+        </span>
+      )}
       {cp && <span className="text-[11px] text-muted-foreground">→ {cp.name}</span>}
       {r.setRoomId && <span className="text-[11px] text-muted-foreground">→ в комнату</span>}
       {r.setObjectId && (

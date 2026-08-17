@@ -308,9 +308,9 @@ async def retry_route(
         MailMessage.id == message_id))).scalar_one_or_none()
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Письмо не найдено")
-    if row.routed_to == "duplicate":
+    if row.routed_to in ("duplicate", "imap_rejected"):
         raise HTTPException(status.HTTP_409_CONFLICT,
-                            "Системный дубль письма повторно не маршрутизируется")
+                            "Системно отклонённое письмо повторно не маршрутизируется")
     if row.status in ("quarantine", "rejected"):
         raise HTTPException(status.HTTP_409_CONFLICT,
                             "Сначала примите письмо из карантина")
@@ -382,6 +382,12 @@ async def _validate_rule_refs(db: AsyncSession, cid, body: RuleIn) -> None:
             and not body.set_counterparty_id:
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             "Неизвестному отправителю нельзя создавать документ без контрагента")
+    if body.action == "doc" and body.is_active \
+            and not mail_intake.settings.mail_authserv_ids.strip():
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Сначала настройте MAIL_AUTHSERV_IDS и проверьте DMARC на контрольном письме",
+        )
 
 
 @router.get("/rules")
@@ -634,9 +640,9 @@ async def decide(
         MailMessage.company_id == cid,
         MailMessage.id.in_(body.message_ids)))).scalars().all()
     if body.decision == "accept" and any(
-            message.routed_to == "duplicate" for message in rows):
+            message.routed_to in ("duplicate", "imap_rejected") for message in rows):
         raise HTTPException(status.HTTP_409_CONFLICT,
-                            "Системный дубль письма нельзя принять повторно")
+                            "Системно отклонённое письмо нельзя принять повторно")
     status = "accepted" if body.decision == "accept" else "rejected"
     for m in rows:
         m.status = status

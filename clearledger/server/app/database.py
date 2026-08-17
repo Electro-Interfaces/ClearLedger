@@ -2,8 +2,10 @@
 Подключение к PostgreSQL через asyncpg + SQLAlchemy 2.0 async.
 """
 
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, AsyncIterator
+from contextlib import asynccontextmanager
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -32,6 +34,18 @@ async_session_factory = async_sessionmaker(
 class Base(DeclarativeBase):
     """Базовый класс для всех моделей."""
     pass
+
+
+@asynccontextmanager
+async def database_startup_lock() -> AsyncIterator[None]:
+    """Один процесс меняет схему и выполняет seed, остальные ждут."""
+    async with engine.connect() as conn:
+        async with conn.begin():
+            await conn.execute(text("SELECT pg_advisory_xact_lock(:namespace, :key)"), {
+                "namespace": 434_532,
+                "key": 1,
+            })
+            yield
 
 
 STORE_RECEIPT_MIGRATION_DDL = (
@@ -2747,6 +2761,21 @@ async def create_all() -> None:
             "ON doc_cards (company_id, COALESCE(organization_id, "
             "'00000000-0000-0000-0000-000000000000'::uuid), reg_number) "
             "WHERE reg_number IS NOT NULL",
+            # PostgreSQL считает NULL различными в обычном UNIQUE. Для общего дела
+            # без юрлица это позволяло повторить тот же индекс в том же году.
+            "WITH ranked AS (SELECT id, index AS old_index, row_number() OVER ("
+            "PARTITION BY company_id, COALESCE(organization_id, "
+            "'00000000-0000-0000-0000-000000000000'::uuid), year, index "
+            "ORDER BY created_at, id) AS position FROM doc_cases) "
+            "UPDATE doc_cases AS item SET index = left(ranked.old_index, 9) || '~' || "
+            "left(replace(item.id::text, '-', ''), 10), note = left(concat_ws(' · ', "
+            "nullif(item.note, ''), 'Миграция: прежний дубликат индекса ' || "
+            "ranked.old_index), 300) FROM ranked WHERE ranked.id = item.id "
+            "AND ranked.position > 1",
+            "ALTER TABLE doc_cases DROP CONSTRAINT IF EXISTS uq_doc_cases_index",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_doc_cases_index ON doc_cases "
+            "(company_id, COALESCE(organization_id, "
+            "'00000000-0000-0000-0000-000000000000'::uuid), year, index)",
             "ALTER TABLE doc_share_links ADD COLUMN IF NOT EXISTS version_snapshot JSONB",
             "ALTER TABLE doc_share_links ADD COLUMN IF NOT EXISTS card_snapshot JSONB",
             # Старую ссылку нельзя достоверно связать с редакцией задним числом.

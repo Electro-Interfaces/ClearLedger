@@ -37,7 +37,7 @@ from app.models import (
     Organization, SourceFile, User,
 )
 from app.config import settings
-from app.services import doc_print, file_store
+from app.services import doc_print, file_safety, file_store
 
 # Что кладём в пакет: сам документ, приложения и подписанный экземпляр. Служебные
 # вложения переписки наружу не отдаём — головной компании нужен документ, а не
@@ -299,6 +299,10 @@ def _read_candidate(path: Path) -> dict[str, Any] | None:
     if (len(data) > MAX_INBOX_FILE_BYTES or before.st_size != after.st_size
             or before.st_mtime_ns != after.st_mtime_ns
             or len(data) != after.st_size):
+        return None
+    try:
+        file_safety.validate(data, path.name)
+    except ValueError:
         return None
     parsed: dict[str, Any] = {}
     if path.suffix.lower() == ".zip":

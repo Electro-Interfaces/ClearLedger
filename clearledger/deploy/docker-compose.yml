@@ -47,6 +47,7 @@ services:
       # backend брал небезопасный дефолт и токены подделывались.
       SECRET_KEY: ${JWT_SECRET}
       CORS_ORIGINS: ${CORS_ORIGINS:-https://ledger.dataworker.ru}
+      APP_ENV: prod
       # Суперадмин на старте создаётся ТОЛЬКО при заданных обеих переменных.
       # Пусто → дефолтного бэкдора admin@clearledger.ru/admin123 не будет.
       SEED_SUPERADMIN_EMAIL: ${SEED_SUPERADMIN_EMAIL:-}
@@ -85,8 +86,10 @@ services:
       HUBEX_APP_ID: ${HUBEX_APP_ID:-5}
     expose:
       - "8000"
+    volumes:
+      - ./data/uploads:/app/uploads
     healthcheck:
-      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/api/health', timeout=3)"]
+      test: ["CMD", "python", "-c", "import httpx; r=httpx.get('http://localhost:8000/api/ready', timeout=3); r.raise_for_status()"]
       interval: 30s
       timeout: 5s
       retries: 3

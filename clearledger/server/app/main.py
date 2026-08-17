@@ -5,17 +5,26 @@ FastAPI приложение с CORS, роутерами, startup seed.
 
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
+from datetime import datetime, timezone
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException, status
 import uuid
 
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user
 from app.config import get_settings
-from app.database import async_session_factory, create_all
+from app.database import (
+    async_session_factory,
+    create_all,
+    database_startup_lock,
+    get_db,
+)
 from app.routers import (
     accounting_docs_router,
     audit_data_router,
@@ -107,10 +116,60 @@ logger = logging.getLogger("clearledger")
 settings = get_settings()
 
 
+async def _prepare_database(started_before: datetime) -> None:
+    await create_all()
+    logger.info("Таблицы БД созданы/проверены")
+
+    async with async_session_factory() as session:
+        await seed_data(session)
+
+    async with async_session_factory() as session:
+        try:
+            from app.services.tz_offsets import backfill_region_offsets
+            n = await backfill_region_offsets(session)
+            logger.info(f"Часовые пояса регионов проставлены: {n}")
+        except Exception as e:  # noqa: BLE001 — не валим старт из-за НСИ
+            logger.warning(f"backfill region offsets пропущен: {e}")
+
+    async with async_session_factory() as session:
+        try:
+            from app.routers.perimeter_router import ensure_perimeter_schema
+            await ensure_perimeter_schema(session)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"схема периметра не дотянута: {e}")
+
+    async with async_session_factory() as session:
+        try:
+            from app.services.app_registry import seed_apps
+            await seed_apps(session)
+            logger.info("Каталог приложений экосистемы засеян")
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"seed_apps пропущен: {e}")
+
+    async with async_session_factory() as session:
+        try:
+            from app.services.info_seed import seed_info
+            res = await seed_info(session)
+            await session.commit()
+            logger.info(f"Знание отрасли засеяно: {res}")
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"seed_info пропущен: {e}")
+
+    async with async_session_factory() as session:
+        await session.execute(text(
+            "UPDATE channel_sync_logs SET status='error', finished_at=now(), "
+            "events='[{\"level\":\"error\",\"event\":\"run\",\"message\":"
+            "\"прогон прерван перезапуском сервера\"}]'::jsonb "
+            "WHERE status='running' AND started_at < :started_before"
+        ), {"started_before": started_before})
+        await session.commit()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Startup/shutdown: создание таблиц + seed данных."""
     logger.info("Запуск TradeLedger Server...")
+    started_at = datetime.now(timezone.utc)
 
     # Скоуп данных по объектам — автоматическое сужение ORM-запросов участника
     # (app/scope.py). Ставится один раз на класс сессии: иначе фильтр приходится
@@ -126,62 +185,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             "JWT можно подделать. Задайте SECRET_KEY (или JWT_SECRET) в окружении."
         )
 
-    # Создание таблиц
-    await create_all()
-    logger.info("Таблицы БД созданы/проверены")
+    # Gunicorn запускает два процесса. Без общего лока оба одновременно меняют
+    # схему и делают check-then-insert seed, что даёт гонки на DDL и unique.
+    async with database_startup_lock():
+        await _prepare_database(started_at)
 
-    # Seed начальных данных
-    async with async_session_factory() as session:
-        await seed_data(session)
-
-    # Часовые пояса регионов (смещение от МСК) — для анализа сессий ЭЗС по
-    # местному времени. Идемпотентно (~1с); самозаживление для новых регионов.
-    async with async_session_factory() as session:
-        try:
-            from app.services.tz_offsets import backfill_region_offsets
-            n = await backfill_region_offsets(session)
-            logger.info(f"Часовые пояса регионов проставлены: {n}")
-        except Exception as e:  # noqa: BLE001 — не валим старт из-за НСИ
-            logger.warning(f"backfill region offsets пропущен: {e}")
-
-    # «Периметр»: колонки, добавленные после первого создания таблиц.
-    async with async_session_factory() as session:
-        try:
-            from app.routers.perimeter_router import ensure_perimeter_schema
-            await ensure_perimeter_schema(session)
-        except Exception as e:  # noqa: BLE001
-            logger.warning(f"схема периметра не дотянута: {e}")
-
-    # Каталог приложений экосистемы (ElsyPlus Core) — идемпотентный сид.
-    async with async_session_factory() as session:
-        try:
-            from app.services.app_registry import seed_apps
-            await seed_apps(session)
-            logger.info("Каталог приложений экосистемы засеян")
-        except Exception as e:  # noqa: BLE001
-            logger.warning(f"seed_apps пропущен: {e}")
-
-    # Знание пространства: платформенные статьи отрасли (docs/INFO.md). Документы
-    # самой компании сюда не входят — их заводят в пространстве.
-    async with async_session_factory() as session:
-        try:
-            from app.services.info_seed import seed_info
-            res = await seed_info(session)
-            await session.commit()
-            logger.info(f"Знание отрасли засеяно: {res}")
-        except Exception as e:  # noqa: BLE001
-            logger.warning(f"seed_info пропущен: {e}")
-
-    # Сброс зависших прогонов: при рестарте фоновые задачи прерываются, их
-    # ChannelSyncLog остаётся в 'running' навсегда — помечаем как прерванные.
-    async with async_session_factory() as session:
-        from sqlalchemy import text
-        await session.execute(text(
-            "UPDATE channel_sync_logs SET status='error', finished_at=now(), "
-            "events='[{\"level\":\"error\",\"event\":\"run\",\"message\":\"прогон прерван перезапуском сервера\"}]'::jsonb "
-            "WHERE status='running'"
-        ))
-        await session.commit()
+    from app.services.chat_ws import manager as chat_ws_manager
+    await chat_ws_manager.start(settings.database_url)
 
     # Планировщик каналов приёма: исполняет Channel.schedule (ночные автозапуски).
     # Без него расписание в UI — просто запись в JSON, а данные ждут ручной кнопки.
@@ -229,10 +239,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         tasks_task.cancel()
     if digest_task is not None:
         digest_task.cancel()
-    if docsync_task is not None:
-        docsync_task.cancel()
     if scheduler_task is not None:
         scheduler_task.cancel()
+    await chat_ws_manager.stop()
     logger.info("TradeLedger Server остановлен")
 
 
@@ -386,11 +395,90 @@ app.include_router(mail_router.router, prefix=API_PREFIX)
 
 @app.get("/api/health")
 async def health_check():
-    """Проверка работоспособности сервера."""
+    """Liveness: процесс отвечает; зависимости проверяет /api/ready."""
     return {
         "status": "ok",
         "version": APP_VERSION,
         "service": "TradeLedger API",
+    }
+
+
+@app.get("/api/live")
+async def live_check():
+    return await health_check()
+
+
+@app.get("/api/ready")
+async def readiness_check(db: AsyncSession = Depends(get_db)):
+    """Readiness: рабочая БД, обязательная схема и доступное хранилище файлов."""
+    try:
+        schema_ready = await db.scalar(text("""
+            SELECT count(*) = 6
+              FROM pg_class AS c
+              JOIN pg_namespace AS n ON n.oid = c.relnamespace
+             WHERE n.nspname = current_schema()
+               AND c.relname IN (
+                   'doc_cards',
+                   'uq_doc_versions_current_role',
+                   'idx_doc_versions_text',
+                   'uq_doc_cases_index',
+                   'uq_doc_cards_mail_source',
+                   'uq_mail_messages_company_msgid'
+               )
+        """))
+        unique_ready = await db.scalar(text("""
+            SELECT count(*) = 4
+              FROM pg_class AS c
+              JOIN pg_namespace AS n ON n.oid = c.relnamespace
+              JOIN pg_index AS i ON i.indexrelid = c.oid
+             WHERE n.nspname = current_schema()
+               AND c.relname IN (
+                   'uq_doc_versions_current_role',
+                   'uq_doc_cases_index',
+                   'uq_doc_cards_mail_source',
+                   'uq_mail_messages_company_msgid'
+               )
+               AND i.indisunique
+               AND i.indisvalid
+        """))
+        case_expression_ready = await db.scalar(text("""
+            SELECT coalesce(bool_or(
+                       pg_get_indexdef(i.indexrelid) ILIKE
+                       '%COALESCE(organization_id%'
+                   ), false)
+              FROM pg_class AS c
+              JOIN pg_namespace AS n ON n.oid = c.relnamespace
+              JOIN pg_index AS i ON i.indexrelid = c.oid
+             WHERE n.nspname = current_schema()
+               AND c.relname = 'uq_doc_cases_index'
+               AND i.indisunique
+               AND i.indisvalid
+        """))
+        if not schema_ready or not unique_ready or not case_expression_ready:
+            raise RuntimeError("обязательные объекты схемы не созданы")
+
+        from app.services import file_store
+        root = file_store.upload_dir().resolve()
+        if settings.app_env == "prod" and not os.path.ismount(root):
+            raise RuntimeError(f"каталог загрузок не смонтирован: {root}")
+        probe = root / f".ready-{uuid.uuid4().hex}"
+        try:
+            with probe.open("x", encoding="ascii") as handle:
+                handle.write("ok")
+        finally:
+            probe.unlink(missing_ok=True)
+    except Exception as exc:
+        logger.warning("readiness: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="База, схема или файловое хранилище не готовы",
+        ) from exc
+    return {
+        "status": "ready",
+        "version": APP_VERSION,
+        "service": "TradeLedger API",
+        "database": "ok",
+        "storage": "ok",
     }
 
 

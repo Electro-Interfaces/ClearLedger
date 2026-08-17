@@ -8,20 +8,21 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.auth import assert_company_member, get_current_user
 from app.database import get_db
-from app.models import AuditEvent, User, UserCompany
-from app.schemas import AuditEventResponse
+from app.models import AuditEvent, DataEntry, User, UserCompany
+from app.schemas import AuditActionType, AuditEventResponse
 
 
 class AuditEventCreate(BaseModel):
-    """Схема создания аудит-события (camelCase от фронтенда)."""
+    """Неавторитетная UI-телеметрия (camelCase от фронтенда)."""
     companyId: str
     entryId: str | None = None
-    action: str
-    details: str | None = None
+    action: AuditActionType
+    details: str | None = Field(None, max_length=2000)
+    # Старые клиенты присылают эти поля. Сервер намеренно их игнорирует.
     userId: str | None = None
     userName: str | None = None
 
@@ -48,7 +49,7 @@ async def create_audit_event(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Создать событие аудита (используется фронтендом для логирования действий)."""
+    """Записать UI-телеметрию без права подделать системное действие или автора."""
     cid = await assert_company_member(body.companyId, current_user, db)
 
     entry_id = None
@@ -56,14 +57,18 @@ async def create_audit_event(
         try:
             entry_id = uuid.UUID(body.entryId)
         except ValueError:
-            pass
+            raise HTTPException(status_code=400, detail="Невалидный ID записи")
+        belongs = await db.scalar(select(DataEntry.id).where(
+            DataEntry.id == entry_id, DataEntry.company_id == cid))
+        if belongs is None:
+            raise HTTPException(status_code=404, detail="Запись не найдена")
 
     event = AuditEvent(
         company_id=cid,
         entry_id=entry_id,
-        user_id=body.userId or str(current_user.id),
-        user_name=body.userName or current_user.name,
-        action=body.action,
+        user_id=str(current_user.id),
+        user_name=current_user.name or current_user.email,
+        action=f"client.{body.action}",
         details=body.details,
     )
     db.add(event)

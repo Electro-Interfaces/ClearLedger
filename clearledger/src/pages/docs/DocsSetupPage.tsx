@@ -9,6 +9,11 @@ import { useCompany } from '@/contexts/CompanyContext'
 import { Button } from '@/components/ui/button'
 import { useState } from 'react'
 import { Card } from '@/components/ui/card'
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader,
+  AlertDialogTitle, AlertDialogTrigger,
+} from '@/components/ui/alert-dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { toast } from 'sonner'
@@ -63,6 +68,10 @@ export function DocsSetupPage() {
 
   if (view === 'exchange') {
     return <ExchangeTargets companyId={companyId} />
+  }
+
+  if (view === 'cases') {
+    return <Cases companyId={companyId} />
   }
 
   if (view === 'counters') {
@@ -139,6 +148,187 @@ export function DocsSetupPage() {
             служебная записка.
           </div>
         )}
+      </Card>
+    </div>
+  )
+}
+
+function Cases({ companyId }: { companyId: string }) {
+  const qc = useQueryClient()
+  const { organizations } = useCompany()
+  const currentYear = new Date().getFullYear()
+  const [form, setForm] = useState({
+    year: String(currentYear), index: '', title: '', storage_term: '5 лет',
+    storage_years: '5', organization_id: '', epk: false,
+  })
+
+  const rowsQ = useQuery({
+    queryKey: ['doc-cases', companyId],
+    queryFn: () => docsService.listCases(companyId),
+    enabled: !!companyId,
+  })
+  const create = useMutation({
+    mutationFn: () => docsService.createCase(companyId, {
+      year: Number(form.year), index: form.index.trim(), title: form.title.trim(),
+      storage_term: form.storage_term.trim(),
+      storage_years: form.storage_years === '' ? null : Number(form.storage_years),
+      organization_id: form.organization_id || null, epk: form.epk,
+    }),
+    onSuccess: () => {
+      toast.success('Дело заведено')
+      setForm((current) => ({ ...current, index: '', title: '' }))
+      qc.invalidateQueries({ queryKey: ['doc-cases', companyId] })
+    },
+    onError: (e) => toast.error((e as Error).message),
+  })
+  const close = useMutation({
+    mutationFn: (caseId: string) => docsService.closeCase(companyId, caseId),
+    onSuccess: () => {
+      toast.success('Дело закрыто для новых документов')
+      qc.invalidateQueries({ queryKey: ['doc-cases', companyId] })
+    },
+    onError: (e) => toast.error((e as Error).message),
+  })
+  const rollover = useMutation({
+    mutationFn: () => docsService.rolloverCases(companyId, currentYear + 1),
+    onSuccess: (result) => {
+      toast.success(
+        `На ${currentYear + 1} год: новых дел ${result.added}, видов обновлено ${result.defaults_updated}`,
+      )
+      qc.invalidateQueries({ queryKey: ['doc-cases', companyId] })
+      qc.invalidateQueries({ queryKey: ['doc-kinds', companyId] })
+    },
+    onError: (e) => toast.error((e as Error).message),
+  })
+
+  const rows = rowsQ.data ?? []
+  const organizationName = new Map(organizations.map((item) => [item.id, item.name]))
+  const year = Number(form.year)
+  const storageYears = form.storage_years === '' ? null : Number(form.storage_years)
+  const valid = Number.isInteger(year) && year >= 2000 && year <= 2100
+    && (storageYears === null || (Number.isInteger(storageYears)
+      && storageYears >= 0 && storageYears <= 100))
+    && !!form.index.trim() && !!form.title.trim() && !!form.storage_term.trim()
+
+  return (
+    <div className="space-y-3 px-4 py-4">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <h1 className="text-base font-semibold">Номенклатура дел</h1>
+          <p className="text-xs text-muted-foreground">
+            Закрытое дело остаётся в истории, но больше не принимает документы.
+          </p>
+        </div>
+        <AlertDialog>
+          <AlertDialogTrigger asChild>
+            <Button size="sm" variant="outline" disabled={rollover.isPending}>
+              Создать дела на {currentYear + 1}
+            </Button>
+          </AlertDialogTrigger>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Перенести номенклатуру на {currentYear + 1} год?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Открытые дела будут скопированы, а виды документов переключены на новые дела.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Отмена</AlertDialogCancel>
+              <AlertDialogAction onClick={() => rollover.mutate()}>
+                Создать номенклатуру
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </div>
+      {rowsQ.isError && (
+        <Card role="alert" className="flex items-center justify-between gap-3 border-destructive/30 p-3 text-sm">
+          <span>Номенклатура не загрузилась. Подшивка документов временно недоступна.</span>
+          <Button size="sm" variant="outline" onClick={() => rowsQ.refetch()}>Повторить</Button>
+        </Card>
+      )}
+      <Card className="divide-y divide-border/60">
+        {rowsQ.isLoading && (
+          <div className="px-3 py-6 text-center text-sm text-muted-foreground">Загрузка дел…</div>
+        )}
+        {rows.map((item) => (
+          <div key={item.id} className="flex flex-wrap items-center justify-between gap-3 px-3 py-2.5">
+            <div className="min-w-0">
+              <div className="text-sm font-medium">{item.year} · {item.index} · {item.title}</div>
+              <div className="text-[11px] text-muted-foreground">
+                {item.storage_term}{item.epk ? ' · ЭПК' : ''}
+                {item.organization_id
+                  ? ` · ${organizationName.get(item.organization_id) ?? 'юрлицо'}` : ' · вся компания'}
+                {item.status === 'closed' ? ' · закрыто' : ''}
+              </div>
+            </div>
+            {item.status === 'open' && (
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button size="sm" variant="ghost" disabled={close.isPending}>
+                    Закрыть дело
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Закрыть дело {item.index}?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      Оно останется в истории, но новые документы подшить в него будет нельзя.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Не закрывать</AlertDialogCancel>
+                    <AlertDialogAction onClick={() => close.mutate(item.id)}>
+                      Закрыть дело
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            )}
+          </div>
+        ))}
+        {rowsQ.isSuccess && rows.length === 0 && (
+          <div className="px-3 py-6 text-center text-sm text-muted-foreground">Дел пока нет</div>
+        )}
+      </Card>
+
+      <Card className="space-y-3 p-4">
+        <div className="text-sm font-medium">Новое дело</div>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <Field label="Год" value={form.year}
+            onChange={(value) => setForm({ ...form, year: value })} type="number" />
+          <Field label="Индекс" value={form.index}
+            onChange={(value) => setForm({ ...form, index: value })} placeholder="01-15" />
+          <div className="sm:col-span-2">
+            <Field label="Название" value={form.title}
+              onChange={(value) => setForm({ ...form, title: value })}
+              placeholder="Переписка по основной деятельности" />
+          </div>
+          <Field label="Срок хранения" value={form.storage_term}
+            onChange={(value) => setForm({ ...form, storage_term: value })} />
+          <Field label="Лет (пусто — постоянно)" value={form.storage_years}
+            onChange={(value) => setForm({ ...form, storage_years: value })} type="number" />
+          <div className="space-y-1">
+            <Label htmlFor="case-organization" className="text-xs">Юрлицо</Label>
+            <select id="case-organization" value={form.organization_id}
+              onChange={(event) => setForm({ ...form, organization_id: event.target.value })}
+              className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm">
+              <option value="">Вся компания</option>
+              {organizations.map((item) => (
+                <option key={item.id} value={item.id}>{item.name}</option>
+              ))}
+            </select>
+          </div>
+          <label className="flex h-9 items-center gap-2 self-end text-sm">
+            <input type="checkbox" checked={form.epk}
+              onChange={(event) => setForm({ ...form, epk: event.target.checked })} />
+            Экспертная комиссия
+          </label>
+        </div>
+        <Button size="sm" disabled={!valid || create.isPending}
+          onClick={() => create.mutate()}>
+          Завести дело
+        </Button>
       </Card>
     </div>
   )

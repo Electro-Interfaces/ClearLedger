@@ -46,7 +46,8 @@ from app.models import (
 )
 from app.routers import doc_share_router
 from app.services import (
-    doc_approvals, doc_exchange, doc_print, doc_text, doc_verify, file_store, mail_send,
+    doc_approvals, doc_exchange, doc_print, doc_text, doc_verify, file_safety,
+    file_store, mail_send,
 )
 from app.services.doc_numbers import next_number, render, scope_key
 
@@ -204,6 +205,16 @@ async def _doc_or_404(db: AsyncSession, cid: uuid.UUID, doc_id) -> DocCard:
     return d
 
 
+async def _locked_doc_or_404(db: AsyncSession, cid: uuid.UUID, doc_id) -> DocCard:
+    d = (await db.execute(select(DocCard).where(
+        DocCard.company_id == cid,
+        DocCard.id == _uuid_or_400(doc_id, "doc_id"),
+    ).execution_options(populate_existing=True).with_for_update())).scalar_one_or_none()
+    if d is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Документ не найден")
+    return d
+
+
 async def _organization_id(db: AsyncSession, cid: uuid.UUID,
                            value: str | None) -> uuid.UUID | None:
     if not value:
@@ -215,6 +226,80 @@ async def _organization_id(db: AsyncSession, cid: uuid.UUID,
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             "Юрлицо не принадлежит выбранной компании")
     return organization_id
+
+
+async def _department_id(db: AsyncSession, cid: uuid.UUID,
+                         value: str | None) -> uuid.UUID | None:
+    if not value:
+        return None
+    department_id = _uuid_or_400(value, "department_id")
+    exists = await db.scalar(select(Department.id).where(
+        Department.company_id == cid, Department.id == department_id))
+    if exists is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Подразделение не принадлежит выбранной компании")
+    return department_id
+
+
+async def _case_or_404(db: AsyncSession, cid: uuid.UUID, case_id) -> DocCase:
+    row = (await db.execute(select(DocCase).where(
+        DocCase.company_id == cid,
+        DocCase.id == _uuid_or_400(case_id, "case_id"),
+    ))).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Дело не найдено")
+    return row
+
+
+async def _locked_case_or_404(db: AsyncSession, cid: uuid.UUID, case_id) -> DocCase:
+    row = (await db.execute(select(DocCase).where(
+        DocCase.company_id == cid,
+        DocCase.id == _uuid_or_400(case_id, "case_id"),
+    ).execution_options(populate_existing=True).with_for_update())).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Дело не найдено")
+    return row
+
+
+async def _lock_case_catalog(db: AsyncSession, cid: uuid.UUID) -> None:
+    await db.execute(select(func.pg_advisory_xact_lock(
+        435_223, cid.int % (2 ** 31))))
+
+
+def _assert_case_accepts_doc(case_row: DocCase, doc: DocCard,
+                             registration_date: date_type | None = None) -> None:
+    if case_row.status != "open":
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Закрытое дело не принимает новые документы")
+    if (case_row.organization_id is not None
+            and case_row.organization_id != doc.organization_id):
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Юрлицо документа не совпадает с юрлицом дела")
+    effective_date = registration_date or doc.reg_date
+    if effective_date is not None and case_row.year != effective_date.year:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Год дела должен совпадать с годом регистрации документа")
+
+
+def _set_storage_until(doc: DocCard, case_row: DocCase,
+                       registration_date: date_type | None = None) -> None:
+    effective_date = registration_date or doc.reg_date
+    if (doc.storage_until is None and effective_date is not None
+            and case_row.storage_years is not None):
+        doc.storage_until = date_type(
+            effective_date.year + case_row.storage_years, 12, 31)
+
+
+async def _default_case_id(db: AsyncSession, cid: uuid.UUID,
+                           value: str | None) -> uuid.UUID | None:
+    if not value:
+        return None
+    await _lock_case_catalog(db, cid)
+    case_row = await _case_or_404(db, cid, value)
+    if case_row.status != "open":
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Закрытое дело нельзя назначить делом по умолчанию")
+    return case_row.id
 
 
 async def _company_user_id(db: AsyncSession, cid: uuid.UUID,
@@ -431,6 +516,9 @@ async def _available_actions(db: AsyncSession, cid: uuid.UUID, d: DocCard,
         actions.append("put_in_force")
     if can_edit and d.status == "in_force":
         actions.append("execute")
+    if (can_edit and d.status not in ("archived", "cancelled")
+            and d.approval_status != "pending"):
+        actions.append("manage_case")
     if can_edit and d.status == "executed" and d.case_id:
         actions.append("archive")
     if can_edit and d.status in ("draft", "registered", "in_force"):
@@ -668,8 +756,7 @@ async def create_kind(
         number_scope=payload.number_scope, number_prefix=payload.number_prefix,
         fields=_clean_fields(payload.fields) or None,
         route=doc_approvals.clean_route(payload.route) or None,
-        default_case_id=_uuid_or_400(payload.default_case_id, "default_case_id")
-        if payload.default_case_id else None,
+        default_case_id=await _default_case_id(db, cid, payload.default_case_id),
         errand_type_id=_uuid_or_400(payload.errand_type_id, "errand_type_id")
         if payload.errand_type_id else None,
         requires_registration=payload.requires_registration,
@@ -696,8 +783,7 @@ async def update_kind(
         setattr(k, field, getattr(payload, field))
     k.fields = _clean_fields(payload.fields) or None
     k.route = doc_approvals.clean_route(payload.route) or None
-    k.default_case_id = (_uuid_or_400(payload.default_case_id, "default_case_id")
-                         if payload.default_case_id else None)
+    k.default_case_id = await _default_case_id(db, cid, payload.default_case_id)
     k.errand_type_id = (_uuid_or_400(payload.errand_type_id, "errand_type_id")
                         if payload.errand_type_id else None)
     await db.commit()
@@ -954,8 +1040,9 @@ async def reindex_doc_versions(
     """Дозаполнить текст у старых редакций после включения полнотекстового поиска."""
     cid = await assert_company_product(company_id, current_user, db, "docs")
     await _assert_admin(db, cid, current_user)
+    needs_text = or_(DocVersion.content_text.is_(None), DocVersion.content_text == "")
     rows = (await db.execute(select(DocVersion).where(
-        DocVersion.company_id == cid, DocVersion.content_text.is_(None),
+        DocVersion.company_id == cid, needs_text,
         DocVersion.tombstoned_at.is_(None)).order_by(DocVersion.uploaded_at).limit(limit)
     )).scalars().all()
     indexed = 0
@@ -980,7 +1067,7 @@ async def reindex_doc_versions(
             skipped += 1
     await db.commit()
     remaining = await db.scalar(select(func.count()).select_from(DocVersion).where(
-        DocVersion.company_id == cid, DocVersion.content_text.is_(None),
+        DocVersion.company_id == cid, needs_text,
         DocVersion.tombstoned_at.is_(None)))
     return {"processed": len(rows), "indexed": indexed, "skipped": skipped,
             "remaining": remaining or 0}
@@ -1037,6 +1124,7 @@ async def list_docs(
         like = f"%{query}%"
         version_match = select(DocVersion.id).where(
             DocVersion.doc_id == DocCard.id,
+            DocVersion.is_current.is_(True),
             DocVersion.tombstoned_at.is_(None),
             func.to_tsvector(
                 _RUSSIAN_TEXT_SEARCH,
@@ -1227,11 +1315,11 @@ async def register_doc(
     # подлежащими уничтожению.
     if d.case_id is None and kind.default_case_id:
         d.case_id = kind.default_case_id
-    if d.case_id and d.storage_until is None:
-        case = await db.get(DocCase, d.case_id)
-        if case is not None and case.storage_years is not None:
-            # Срок считается от конца года регистрации, как в перечне.
-            d.storage_until = date_type(on_date.year + case.storage_years, 12, 31)
+    if d.case_id:
+        case_row = await _locked_case_or_404(db, cid, d.case_id)
+        _assert_case_accepts_doc(case_row, d, on_date)
+        # Срок считается от конца года регистрации, как в перечне.
+        _set_storage_until(d, case_row, on_date)
     await _supersede_pending_acquaints(db, d.id)
     db.add(DocEvent(doc_id=d.id, kind="registered", user_id=current_user.id,
                     actor_name=current_user.name or current_user.email,
@@ -1358,7 +1446,10 @@ async def doc_action(
             raise HTTPException(status.HTTP_400_BAD_REQUEST,
                                 "Укажите причину отмены документа")
         if payload.status == "cancelled" and d.approval_status == "pending":
-            await doc_approvals.cancel(db, d, current_user, payload.note.strip())
+            round_rows = await doc_approvals.lock_round(
+                db, cid, d.id, d.approval_round)
+            await doc_approvals.cancel(
+                db, d, current_user, payload.note.strip(), round_rows)
         db.add(DocEvent(doc_id=d.id, kind="status", user_id=current_user.id,
                         actor_name=who, from_value=d.status, to_value=payload.status,
                         note=payload.note))
@@ -1475,6 +1566,8 @@ async def approval_start(
     cid = await assert_company_product(payload.company_id, current_user, db, "docs")
     d = await _doc_or_404(db, cid, doc_id)
     await _assert_doc_permission(db, cid, d, current_user, "edit")
+    d = await _locked_doc_or_404(db, cid, doc_id)
+    await doc_approvals.lock_round(db, cid, d.id, d.approval_round)
     if d.approval_status == "pending":
         raise HTTPException(status.HTTP_409_CONFLICT,
                             "Согласование уже идёт: дождитесь виз или отмените круг")
@@ -1512,9 +1605,13 @@ async def approval_cancel(
     cid = await assert_company_product(payload.company_id, current_user, db, "docs")
     d = await _doc_or_404(db, cid, doc_id)
     await _assert_doc_permission(db, cid, d, current_user, "edit")
+    d = await _locked_doc_or_404(db, cid, doc_id)
+    round_rows = await doc_approvals.lock_round(
+        db, cid, d.id, d.approval_round)
     if d.approval_status != "pending":
         raise HTTPException(status.HTTP_409_CONFLICT, "Активного круга нет")
-    result = await doc_approvals.cancel(db, d, current_user, payload.reason.strip())
+    result = await doc_approvals.cancel(
+        db, d, current_user, payload.reason.strip(), round_rows)
     await db.commit()
     return result
 
@@ -1551,13 +1648,25 @@ async def approval_decide(
                             "Визу ставит тот, кому она адресована, "
                             "либо назначенный заместитель на время отсутствия")
     d = await _doc_or_404(db, cid, row.doc_id)
+    d = await _locked_doc_or_404(db, cid, d.id)
+    round_rows = await doc_approvals.lock_round(db, cid, d.id, row.round)
+    row = next((item for item in round_rows if item.id == row.id), None)
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Виза не найдена")
+    if row.status != "pending":
+        raise HTTPException(status.HTTP_409_CONFLICT, "Виза уже поставлена или снята")
+    if not await doc_approvals.may_decide(db, cid, row, current_user):
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Визу ставит тот, кому она адресована, "
+                            "либо назначенный заместитель на время отсутствия")
     if not await _action_policy_allows(
             db, cid, await _access_rows(db, cid, d), "approve", row.assignee_id):
         raise HTTPException(status.HTTP_403_FORBIDDEN,
                             "Назначенный согласующий не входит в допуск к визе")
     await _assert_doc_permission(db, cid, d, current_user, "approve")
-    res = await doc_approvals.decide(db, cid, d, row, current_user,
-                                     payload.approved, payload.comment)
+    res = await doc_approvals.decide(
+        db, cid, d, row, current_user, payload.approved, payload.comment,
+        round_rows)
     if "error" in res:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, res["error"])
     await db.commit()
@@ -1596,6 +1705,61 @@ async def approvals_mine(
 # ── Номенклатура дел ─────────────────────────────────────────────────────────
 
 
+class CaseAssignIn(BaseModel):
+    company_id: str
+    case_id: str | None
+
+
+@router.put("/{doc_id}/case")
+async def assign_doc_case(
+    doc_id: str,
+    payload: CaseAssignIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cid = await assert_company_product(payload.company_id, current_user, db, "docs")
+    current = await _doc_or_404(db, cid, doc_id)
+    await _assert_doc_permission(db, cid, current, current_user, "edit")
+    d = await _locked_doc_or_404(db, cid, doc_id)
+    if d.status in ("archived", "cancelled"):
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Закрытый документ не перемещают между делами")
+    if d.approval_status == "pending":
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Во время согласования место хранения зафиксировано")
+
+    target = (await _locked_case_or_404(db, cid, payload.case_id)
+              if payload.case_id else None)
+    if target is not None:
+        _assert_case_accepts_doc(target, d)
+    if d.case_id == (target.id if target else None):
+        return _card_out(d)
+
+    old = (await _case_or_404(db, cid, d.case_id)) if d.case_id else None
+    old_value = f"{old.index} · {old.title}" if old else ""
+    new_value = f"{target.index} · {target.title}" if target else ""
+    old_case_id = d.case_id
+    d.case_id = target.id if target else None
+    if target is not None and old_case_id is None:
+        _set_storage_until(d, target)
+    if d.status in ("draft", "registered") and d.approval_status in ("approved", "rejected"):
+        d.approval_status = "none"
+        db.add(DocEvent(
+            doc_id=d.id, kind="approval", user_id=current_user.id,
+            actor_name=current_user.name or current_user.email,
+            to_value="нужно согласовать заново", note="изменено дело документа",
+        ))
+    await _supersede_pending_acquaints(db, d.id)
+    db.add(DocEvent(
+        doc_id=d.id, kind="field", user_id=current_user.id,
+        actor_name=current_user.name or current_user.email,
+        from_value=old_value, to_value=new_value, note="case_id",
+    ))
+    await db.commit()
+    await db.refresh(d)
+    return _card_out(d)
+
+
 class CaseIn(BaseModel):
     company_id: str
     year: int = Field(..., ge=2000, le=2100)
@@ -1625,6 +1789,9 @@ async def list_cases(
         "storage_term": c.storage_term, "storage_years": c.storage_years,
         "epk": c.epk, "status": c.status,
         "organization_id": str(c.organization_id) if c.organization_id else None,
+        "department_id": str(c.department_id) if c.department_id else None,
+        "closed_at": c.closed_at.isoformat() if c.closed_at else None,
+        "note": c.note,
     } for c in rows]}
 
 
@@ -1636,23 +1803,73 @@ async def create_case(
 ):
     cid = await assert_company_product(payload.company_id, current_user, db, "docs")
     await _assert_admin(db, cid, current_user)
+    await _lock_case_catalog(db, cid)
+    case_index = payload.index.strip()
+    organization_id = await _organization_id(db, cid, payload.organization_id)
+    department_id = await _department_id(db, cid, payload.department_id)
+    organization_filter = (DocCase.organization_id == organization_id
+                           if organization_id is not None
+                           else DocCase.organization_id.is_(None))
+    duplicate = await db.scalar(select(DocCase.id).where(
+        DocCase.company_id == cid,
+        organization_filter,
+        DocCase.year == payload.year,
+        DocCase.index == case_index,
+    ).limit(1))
+    if duplicate is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            f"Дело с индексом {case_index} за {payload.year} год уже есть")
     c = DocCase(
-        company_id=cid, year=payload.year, index=payload.index.strip(),
+        company_id=cid, year=payload.year, index=case_index,
         title=payload.title.strip(), storage_term=payload.storage_term,
         storage_years=payload.storage_years, epk=payload.epk,
-        organization_id=_uuid_or_400(payload.organization_id, "organization_id")
-        if payload.organization_id else None,
-        department_id=_uuid_or_400(payload.department_id, "department_id")
-        if payload.department_id else None)
+        organization_id=organization_id, department_id=department_id)
     db.add(c)
     try:
         await db.commit()
-    except Exception:
+    except IntegrityError:
         await db.rollback()
         raise HTTPException(status.HTTP_409_CONFLICT,
-                            f"Дело с индексом {payload.index} за {payload.year} год уже есть")
+                            f"Дело с индексом {case_index} за {payload.year} год уже есть")
     await db.refresh(c)
     return {"id": str(c.id), "index": c.index, "title": c.title}
+
+
+class CaseCloseIn(BaseModel):
+    company_id: str
+    note: str | None = Field(None, max_length=300)
+
+
+@router.post("/cases/{case_id}/close")
+async def close_case(
+    case_id: str,
+    payload: CaseCloseIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cid = await assert_company_product(payload.company_id, current_user, db, "docs")
+    await _assert_admin(db, cid, current_user)
+    await _lock_case_catalog(db, cid)
+    row = await _locked_case_or_404(db, cid, case_id)
+    if row.status != "open":
+        raise HTTPException(status.HTTP_409_CONFLICT, "Дело уже закрыто")
+    default_kind = await db.scalar(select(DocKind.id).where(
+        DocKind.company_id == cid, DocKind.default_case_id == row.id).limit(1))
+    if default_kind is not None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Дело назначено по умолчанию виду документа. Сначала перенесите номенклатуру",
+        )
+    row.status = "closed"
+    row.closed_at = datetime.now(timezone.utc)
+    row.note = (payload.note or "").strip() or None
+    await log_audit(
+        db, actor=current_user, company_id=cid, action="doc.case.close",
+        target=f"{row.index} · {row.title}", details={"year": row.year},
+    )
+    await db.commit()
+    return {"id": str(row.id), "status": row.status,
+            "closed_at": row.closed_at.isoformat()}
 
 
 @router.post("/cases/rollover")
@@ -1669,24 +1886,48 @@ async def rollover_cases(
     """
     cid = await assert_company_product(company_id, current_user, db, "docs")
     await _assert_admin(db, cid, current_user)
+    await _lock_case_catalog(db, cid)
     src = (await db.execute(select(DocCase).where(
         DocCase.company_id == cid, DocCase.year == year - 1,
         DocCase.status == "open"))).scalars().all()
-    have = {(c.organization_id, c.index) for c in (await db.execute(select(DocCase).where(
-        DocCase.company_id == cid, DocCase.year == year))).scalars().all()}
+    have = {(c.organization_id, c.index): c for c in (await db.execute(
+        select(DocCase).where(
+            DocCase.company_id == cid, DocCase.year == year)
+    )).scalars().all()}
     added = 0
+    replacements: dict[uuid.UUID, uuid.UUID] = {}
     for c in src:
-        if (c.organization_id, c.index) in have:
-            continue
-        db.add(DocCase(
-            company_id=cid, organization_id=c.organization_id, year=year,
-            index=c.index, title=c.title, storage_term=c.storage_term,
-            storage_years=c.storage_years, epk=c.epk,
-            department_id=c.department_id))
-        added += 1
-    if added:
+        key = (c.organization_id, c.index)
+        target = have.get(key)
+        if target is not None and target.status != "open":
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                f"Дело {target.index} за {year} год уже закрыто",
+            )
+        if target is None:
+            target = DocCase(
+                company_id=cid, organization_id=c.organization_id, year=year,
+                index=c.index, title=c.title, storage_term=c.storage_term,
+                storage_years=c.storage_years, epk=c.epk,
+                department_id=c.department_id,
+            )
+            db.add(target)
+            await db.flush()
+            have[key] = target
+            added += 1
+        replacements[c.id] = target.id
+    defaults_updated = 0
+    if replacements:
+        kinds = (await db.execute(select(DocKind).where(
+            DocKind.company_id == cid,
+            DocKind.default_case_id.in_(set(replacements)),
+        ))).scalars().all()
+        for kind in kinds:
+            kind.default_case_id = replacements[kind.default_case_id]
+            defaults_updated += 1
+    if added or defaults_updated:
         await db.commit()
-    return {"added": added, "year": year}
+    return {"added": added, "defaults_updated": defaults_updated, "year": year}
 
 
 # ── Отправка контрагенту (третья волна) ──────────────────────────────────────
@@ -3233,6 +3474,49 @@ async def stop_substitution(
     return {"stopped": str(row.id)}
 
 
+@router.get("/{doc_id}/history")
+async def get_doc_history(
+    doc_id: str,
+    company_id: str = Query(...),
+    limit: int = Query(200, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Полный постраничный след и все редакции, включая выведенные."""
+    cid = await assert_company_product(company_id, current_user, db, "docs")
+    d = await _doc_or_404(db, cid, doc_id)
+    await _assert_manage_doc_access(db, cid, d, current_user)
+    total = await db.scalar(select(func.count()).select_from(DocEvent).where(
+        DocEvent.doc_id == d.id))
+    events = (await db.execute(select(DocEvent).where(
+        DocEvent.doc_id == d.id).order_by(
+        DocEvent.created_at.desc(), DocEvent.id.desc()).offset(offset).limit(limit)
+    )).scalars().all()
+    versions = (await db.execute(select(DocVersion).where(
+        DocVersion.doc_id == d.id).order_by(
+        DocVersion.role, DocVersion.revision.desc()))).scalars().all()
+    return {
+        "count": total or 0,
+        "events": [{
+            "id": str(e.id), "kind": e.kind, "actor": e.actor_name,
+            "user_id": str(e.user_id) if e.user_id else None,
+            "from": e.from_value, "to": e.to_value, "note": e.note,
+            "created_at": e.created_at.isoformat() if e.created_at else None,
+        } for e in events],
+        "versions": [{
+            "id": str(v.id), "revision": v.revision, "role": v.role,
+            "file_id": str(v.file_id), "file_name": v.file_name,
+            "sha256": v.sha256, "is_current": v.is_current,
+            "uploaded_at": v.uploaded_at.isoformat() if v.uploaded_at else None,
+            "tombstoned_at": (v.tombstoned_at.isoformat()
+                               if v.tombstoned_at else None),
+            "tombstoned_by": str(v.tombstoned_by) if v.tombstoned_by else None,
+            "tombstone_reason": v.tombstone_reason,
+        } for v in versions],
+    }
+
+
 @router.get("/{doc_id}")
 async def get_doc(
     doc_id: str,
@@ -3375,7 +3659,7 @@ async def upload_version(
         raise HTTPException(status.HTTP_409_CONFLICT,
                             "Для действующего или закрытого документа заведите новую редакцию")
 
-    content = await file.read()
+    content = await file.read(_MAX_FILE_BYTES + 1)
     if not content:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Пустой файл")
     if len(content) > _MAX_FILE_BYTES:
@@ -3385,6 +3669,10 @@ async def upload_version(
     if mime not in _MIME_ALLOWED:
         raise HTTPException(status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
                             f"Тип {mime} не принимается")
+    try:
+        file_safety.validate(content, file.filename or "файл", mime)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, str(exc)) from exc
 
     digest = hashlib.sha256(content).hexdigest()
     same = (await db.execute(select(DocVersion).where(
@@ -3602,13 +3890,21 @@ async def authorize_docs_file_download(db: AsyncSession, user: User,
     сюда не попадают — у них нет строки в `doc_versions`, и проверка их не
     касается.
     """
-    rows = (await db.execute(select(DocVersion.doc_id).where(
+    rows = (await db.execute(select(DocVersion).where(
         DocVersion.file_id == file_id))).scalars().all()
     if rows:
         docs = (await db.execute(select(DocCard).where(
-            DocCard.id.in_(set(rows))))).scalars().all()
-        if any([await _can_doc(db, d.company_id, d, user, "read") for d in docs]):
-            return
+            DocCard.id.in_({row.doc_id for row in rows})))).scalars().all()
+        by_id = {doc.id: doc for doc in docs}
+        for version in rows:
+            doc = by_id.get(version.doc_id)
+            if doc is None:
+                continue
+            if version.tombstoned_at is None:
+                if await _can_doc(db, doc.company_id, doc, user, "read"):
+                    return
+            elif await _can_manage_doc_access(db, doc.company_id, doc, user):
+                return
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Не найдено")
 
     inbox = (await db.execute(select(DocInboxItem).where(

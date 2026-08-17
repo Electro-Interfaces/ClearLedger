@@ -1,4 +1,5 @@
 """Следующая очередь «Трека»: поиск, права и письмо в документ."""
+import asyncio
 import hashlib
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -11,8 +12,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
-    Counterparty, Department, DocAccessGrant, DocAcquaint, DocApproval, DocCard,
-    DocInboxItem, DocKind, DocVersion, MailAttachment, MailMessage, User, UserCompany,
+    Company, Counterparty, Department, DocAccessGrant, DocAcquaint, DocApproval,
+    DocCard, DocCase, DocEvent, DocInboxItem, DocKind, DocVersion, MailAttachment,
+    MailMessage, Organization, User, UserCompany,
 )
 from app.routers import docs_router
 from app.services import mail_routing, task_scheduler
@@ -830,3 +832,202 @@ async def test_расписание_сэд_включается_только_п�
         "company_id": cid, "enabled": True, "interval_min": 15,
     })
     assert after.status_code == 200 and after.json()["enabled"] is True
+
+
+async def test_дела_проверяют_тенант_юрлицо_и_ручную_подшивку(
+        auth_client: AsyncClient, db: AsyncSession):
+    _, cid_raw, kind = await _context(auth_client)
+    cid = uuid.UUID(cid_raw)
+    other_cid = await db.scalar(select(Company.id).where(Company.id != cid).limit(1))
+    assert other_cid is not None
+    foreign_org = Organization(
+        company_id=other_cid, inn=str(uuid.uuid4().int)[:12], name="Чужое юрлицо",
+    )
+    foreign_department = Department(company_id=other_cid, name="Чужой отдел")
+    foreign_case = DocCase(
+        company_id=other_cid, year=datetime.now(ZoneInfo("Europe/Moscow")).year,
+        index=f"X-{uuid.uuid4().hex[:6]}", title="Чужое дело",
+    )
+    db.add_all([foreign_org, foreign_department, foreign_case])
+    await db.commit()
+
+    rejected_org = await auth_client.post("/api/docs/cases", json={
+        "company_id": cid_raw, "year": foreign_case.year, "index": "01-01",
+        "title": "Дело с чужим юрлицом", "organization_id": str(foreign_org.id),
+    })
+    assert rejected_org.status_code == 400, rejected_org.text
+    rejected_department = await auth_client.post("/api/docs/cases", json={
+        "company_id": cid_raw, "year": foreign_case.year, "index": "01-02",
+        "title": "Дело с чужим отделом", "department_id": str(foreign_department.id),
+    })
+    assert rejected_department.status_code == 400, rejected_department.text
+    foreign_default = await auth_client.put(f"/api/docs/kinds/{kind['id']}", json={
+        **kind, "company_id": cid_raw, "default_case_id": str(foreign_case.id),
+    })
+    assert foreign_default.status_code == 404, foreign_default.text
+
+    suffix = uuid.uuid4().hex[:6]
+    first = await auth_client.post("/api/docs/cases", json={
+        "company_id": cid_raw, "year": foreign_case.year, "index": f"01-{suffix}",
+        "title": "Переписка", "storage_term": "5 лет", "storage_years": 5,
+    })
+    assert first.status_code == 201, first.text
+    duplicate = await auth_client.post("/api/docs/cases", json={
+        "company_id": cid_raw, "year": foreign_case.year, "index": f"01-{suffix}",
+        "title": "Дубликат", "storage_term": "5 лет", "storage_years": 5,
+    })
+    assert duplicate.status_code == 409, duplicate.text
+    second = await auth_client.post("/api/docs/cases", json={
+        "company_id": cid_raw, "year": foreign_case.year, "index": f"02-{suffix}",
+        "title": "Договоры", "storage_term": "10 лет", "storage_years": 10,
+    })
+    assert second.status_code == 201, second.text
+
+    doc = (await auth_client.post("/api/docs", json={
+        "company_id": cid_raw, "kind_id": kind["id"], "title": "Ручная подшивка",
+    })).json()
+    rejected_foreign_case = await auth_client.put(f"/api/docs/{doc['id']}/case", json={
+        "company_id": cid_raw, "case_id": str(foreign_case.id),
+    })
+    assert rejected_foreign_case.status_code == 404, rejected_foreign_case.text
+    filed = await auth_client.put(f"/api/docs/{doc['id']}/case", json={
+        "company_id": cid_raw, "case_id": first.json()["id"],
+    })
+    assert filed.status_code == 200 and filed.json()["case_id"] == first.json()["id"]
+    registered = await auth_client.post(f"/api/docs/{doc['id']}/register", json={
+        "company_id": cid_raw,
+    })
+    assert registered.status_code == 200, registered.text
+    assert registered.json()["storage_until"] == f"{foreign_case.year + 5}-12-31"
+    moved = await auth_client.put(f"/api/docs/{doc['id']}/case", json={
+        "company_id": cid_raw, "case_id": second.json()["id"],
+    })
+    assert moved.status_code == 200 and moved.json()["case_id"] == second.json()["id"]
+    assert moved.json()["storage_until"] == registered.json()["storage_until"]
+
+    closed = await auth_client.post(f"/api/docs/cases/{second.json()['id']}/close", json={
+        "company_id": cid_raw, "note": "Год завершён",
+    })
+    assert closed.status_code == 200 and closed.json()["status"] == "closed"
+    other_doc = (await auth_client.post("/api/docs", json={
+        "company_id": cid_raw, "kind_id": kind["id"], "title": "После закрытия",
+    })).json()
+    rejected_closed = await auth_client.put(f"/api/docs/{other_doc['id']}/case", json={
+        "company_id": cid_raw, "case_id": second.json()["id"],
+    })
+    assert rejected_closed.status_code == 409, rejected_closed.text
+
+
+async def test_дефолтное_дело_проверяется_и_подставляется_при_регистрации(
+        auth_client: AsyncClient):
+    _, cid, _ = await _context(auth_client)
+    year = datetime.now(ZoneInfo("Europe/Moscow")).year
+    case_row = await auth_client.post("/api/docs/cases", json={
+        "company_id": cid, "year": year, "index": f"D-{uuid.uuid4().hex[:6]}",
+        "title": "Дело по умолчанию", "storage_term": "3 года", "storage_years": 3,
+    })
+    assert case_row.status_code == 201, case_row.text
+    kind = await auth_client.post("/api/docs/kinds", json={
+        "company_id": cid, "code": f"default_{uuid.uuid4().hex[:8]}",
+        "name": "Вид с делом", "default_case_id": case_row.json()["id"],
+    })
+    assert kind.status_code == 201, kind.text
+    doc = (await auth_client.post("/api/docs", json={
+        "company_id": cid, "kind_id": kind.json()["id"], "title": "Автоподшивка",
+    })).json()
+    registered = await auth_client.post(f"/api/docs/{doc['id']}/register", json={
+        "company_id": cid,
+    })
+    assert registered.status_code == 200, registered.text
+    assert registered.json()["case_id"] == case_row.json()["id"]
+    assert registered.json()["storage_until"] == f"{year + 3}-12-31"
+
+
+async def test_конкурентный_дубль_общего_дела_останавливает_индекс(
+        auth_client: AsyncClient):
+    _, cid, _ = await _context(auth_client)
+    year = datetime.now(ZoneInfo("Europe/Moscow")).year
+    case_index = f"C-{uuid.uuid4().hex[:8]}"
+    payload = {
+        "company_id": cid,
+        "year": year,
+        "index": case_index,
+        "title": "Общее дело при конкурентном создании",
+        "storage_term": "5 лет",
+        "storage_years": 5,
+        "organization_id": None,
+    }
+    responses = await asyncio.gather(*[
+        auth_client.post("/api/docs/cases", json=payload) for _ in range(2)
+    ])
+    assert sorted(item.status_code for item in responses) == [201, 409]
+
+
+async def test_конкурентные_запуск_и_решение_согласования_дают_одного_победителя(
+        auth_client: AsyncClient, db: AsyncSession):
+    me, cid, kind = await _context(auth_client)
+    doc = (await auth_client.post("/api/docs", json={
+        "company_id": cid, "kind_id": kind["id"],
+        "title": f"ПРОВЕРКА-конкуренция-{uuid.uuid4().hex}",
+    })).json()
+    registered = await auth_client.post(f"/api/docs/{doc['id']}/register", json={
+        "company_id": cid,
+    })
+    assert registered.status_code == 200, registered.text
+    route = [{
+        "code": "one", "name": "Один согласующий", "mode": "serial", "quorum": "all",
+        "actors": [{"by": "user", "ref": me["id"]}],
+    }]
+
+    starts = await asyncio.gather(*[
+        auth_client.post(f"/api/docs/{doc['id']}/approval/start", json={
+            "company_id": cid, "route": route,
+        }) for _ in range(2)
+    ])
+    assert sorted(item.status_code for item in starts) == [201, 409]
+    rows = (await db.execute(select(DocApproval).where(
+        DocApproval.doc_id == uuid.UUID(doc["id"]),
+    ))).scalars().all()
+    assert len(rows) == 1 and rows[0].status == "pending"
+
+    decisions = await asyncio.gather(*[
+        auth_client.post(f"/api/docs/approvals/{rows[0].id}", json={
+            "company_id": cid, "approved": True,
+        }) for _ in range(2)
+    ])
+    assert sorted(item.status_code for item in decisions) == [200, 409]
+    db.expire_all()
+    approval = await db.get(DocApproval, rows[0].id)
+    assert approval.status == "approved"
+    events = (await db.execute(select(DocEvent).where(
+        DocEvent.doc_id == uuid.UUID(doc["id"]),
+        DocEvent.kind == "approval",
+        DocEvent.from_value == "Один согласующий",
+        DocEvent.to_value == "согласовано",
+    ))).scalars().all()
+    assert len(events) == 1
+
+    cancel_doc = (await auth_client.post("/api/docs", json={
+        "company_id": cid, "kind_id": kind["id"],
+        "title": f"ПРОВЕРКА-конкуренция-отмена-{uuid.uuid4().hex}",
+    })).json()
+    await auth_client.post(f"/api/docs/{cancel_doc['id']}/register", json={
+        "company_id": cid,
+    })
+    started = await auth_client.post(
+        f"/api/docs/{cancel_doc['id']}/approval/start",
+        json={"company_id": cid, "route": route},
+    )
+    assert started.status_code == 201, started.text
+    cancelled = await asyncio.gather(*[
+        auth_client.post(f"/api/docs/{cancel_doc['id']}/approval/cancel", json={
+            "company_id": cid, "reason": "Проверка гонки",
+        }) for _ in range(2)
+    ])
+    assert sorted(item.status_code for item in cancelled) == [200, 409]
+    cancel_events = (await db.execute(select(DocEvent).where(
+        DocEvent.doc_id == uuid.UUID(cancel_doc["id"]),
+        DocEvent.kind == "approval",
+        DocEvent.to_value == "круг отменён",
+    ))).scalars().all()
+    assert len(cancel_events) == 1
