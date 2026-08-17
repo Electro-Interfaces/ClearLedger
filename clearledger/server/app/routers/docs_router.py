@@ -4677,12 +4677,16 @@ async def create_errand(
     d = await _doc_or_404(db, cid, doc_id)
     await _assert_doc_permission(db, cid, d, current_user, "edit")
     kind = await db.get(DocKind, d.kind_id)
+    assignee_id = _uuid_or_400(payload.assignee_id, "assignee_id")
+    if await db.get(UserCompany, (assignee_id, cid)) is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Исполнитель не состоит в пространстве")
 
     label = d.reg_number or d.title[:60]
     t = Task(company_id=cid, title=payload.title.strip(),
              description=payload.description or f"Поручение по документу {label}",
              author_id=current_user.id,
-             assignee_id=_uuid_or_400(payload.assignee_id, "assignee_id"),
+             assignee_id=assignee_id,
              type_id=kind.errand_type_id if kind else None,
              due_at=payload.due_at, object_id=d.object_id, status="open")
     db.add(t)

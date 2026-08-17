@@ -722,7 +722,12 @@ export async function tombstoneVersion(
 }
 
 export async function createErrand(
-  companyId: string, id: string, body: Record<string, unknown>,
+  companyId: string, id: string, body: {
+    title: string
+    assignee_id: string
+    due_at?: string | null
+    description?: string | null
+  },
 ): Promise<{ task_id: string; number: number }> {
   return post(`/api/docs/${id}/errand`, { ...body, company_id: companyId })
 }

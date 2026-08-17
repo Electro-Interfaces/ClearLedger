@@ -5,6 +5,7 @@
  * пакет согласования и редакции файла показываются как факты, а не поля формы.
  */
 import { useId, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Archive, ArrowLeft, Ban, CheckCheck, FileCheck2, FileUp, KeyRound, Link2,
@@ -32,6 +33,7 @@ import { DocSendTab } from './DocSendTab'
 import { openAuthAttachment } from '@/lib/authFiles'
 import { useCompany } from '@/contexts/CompanyContext'
 import { DocRegisterDialog, type DocRegisterValues } from './DocRegisterDialog'
+import { DocErrandDialog } from './DocErrandDialog'
 
 const EVENT_LABEL: Record<string, string> = {
   created: 'заведён',
@@ -425,6 +427,12 @@ export function DocCardPanel({ id, companyId, onBack, onChanged, initialTab,
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          {editable && (
+            <DocErrandDialog companyId={companyId} doc={d} onCreated={() => {
+              setActiveTab('links')
+              refresh()
+            }} />
+          )}
           {actions.has('register') && (
             <Button size="sm" onClick={() => setRegisterOpen(true)} disabled={register.isPending}>
               <Stamp className="mr-1.5 h-4 w-4" />Зарегистрировать
@@ -732,13 +740,21 @@ export function DocCardPanel({ id, companyId, onBack, onChanged, initialTab,
         <TabsContent value="links" className="pt-3">
           <Card className="divide-y divide-border/60">
             {d.relations.map((relation) => (
-              <div key={relation.id} className="flex items-center gap-2 px-3 py-2 text-sm">
-                {relation.target_ref.startsWith('task:')
-                  ? <ListChecks className="h-3.5 w-3.5 text-muted-foreground" />
-                  : <Link2 className="h-3.5 w-3.5 text-muted-foreground" />}
-                <span className="text-muted-foreground">{relation.kind}</span>
-                <span className="font-mono text-xs">{relation.target_ref}</span>
-              </div>
+              relation.target_ref.startsWith('task:') ? (
+                <Link key={relation.id}
+                  to={`/docs/work?view=errands&task=${encodeURIComponent(relation.target_ref.slice(5))}`}
+                  className="flex min-h-11 items-center gap-2 px-3 py-2 text-sm hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
+                  <ListChecks className="h-3.5 w-3.5 text-muted-foreground" />
+                  <span className="font-medium">Открыть поручение</span>
+                  <span className="truncate font-mono text-xs text-muted-foreground">{relation.target_ref.slice(5)}</span>
+                </Link>
+              ) : (
+                <div key={relation.id} className="flex items-center gap-2 px-3 py-2 text-sm">
+                  <Link2 className="h-3.5 w-3.5 text-muted-foreground" />
+                  <span className="text-muted-foreground">{relation.kind}</span>
+                  <span className="font-mono text-xs">{relation.target_ref}</span>
+                </div>
+              )
             ))}
             {d.relations.length === 0 && (
               <div className="px-3 py-8 text-center text-sm text-muted-foreground">
