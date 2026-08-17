@@ -778,7 +778,7 @@ async def get_room(
                User.mail_only, User.email, User.avatar_url)
         .join(User, User.id == ChatParticipant.user_id)
         .where(ChatParticipant.room_id == rid))).all()
-    online = manager.online_user_ids()
+    online = await manager.online_user_ids()
     # Кто в разговоре: свой сотрудник или человек компании-партнёра — и какой именно.
     # В смешанной группе (наши плюс партнёры) без этого не понять, при ком говорим,
     # а это первое, что нужно знать перед тем, как написать.
@@ -2501,7 +2501,7 @@ async def search_users(
         like = f"%{q.strip()}%"
         stmt = stmt.where(or_(User.name.ilike(like), User.email.ilike(like)))
     rows = (await db.execute(stmt.order_by(User.name).limit(20))).all()
-    online = manager.online_user_ids()
+    online = await manager.online_user_ids()
     return [{"userId": str(uid), "name": nm, "email": em, "online": str(uid) in online,
              "avatarUrl": av, "partyType": party_type or "internal"}
             for uid, nm, em, av, party_type in rows]
@@ -2600,7 +2600,7 @@ async def presence(
         .join(ChatParticipant, ChatParticipant.user_id == User.id)
         .where(ChatParticipant.room_id.in_(my_rooms), User.id != current_user.id)
         .distinct())).all()
-    online = manager.online_user_ids()
+    online = await manager.online_user_ids()
     return [{"userId": str(uid), "name": nm, "online": str(uid) in online} for uid, nm in rows]
 
 

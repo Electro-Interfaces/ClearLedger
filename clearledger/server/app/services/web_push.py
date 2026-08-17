@@ -80,10 +80,11 @@ def push_room_async(room_id: uuid.UUID, title: str, body: str,
                 rows = (await db.execute(select(
                     ChatParticipant.user_id, ChatParticipant.muted_until,
                 ).where(ChatParticipant.room_id == room_id))).all()
+                online = await manager.online_user_ids()
                 targets = [uid for uid, mu in rows
                            if uid != exclude_user_id
                            and not (mu is not None and mu > now)
-                           and not manager.is_online(str(uid))]
+                           and str(uid) not in online]
                 if not targets:
                     return
                 subs = (await db.execute(select(ChatPushSubscription).where(

@@ -19,6 +19,8 @@ logger = logging.getLogger("clearledger.chat_ws")
 _NOTIFY_CHANNEL = "clearledger_chat_ws"
 _NOTIFY_MAX_BYTES = 7900
 _RECONNECT_DELAY = 2
+_PRESENCE_TTL_SECONDS = 60
+_PRESENCE_HEARTBEAT_SECONDS = 20
 
 
 class ChatConnectionManager:
@@ -27,6 +29,7 @@ class ChatConnectionManager:
         self._socket_channels: dict[WebSocket, set[str]] = defaultdict(set)
         self._meta: dict[WebSocket, dict] = {}
         self._online: dict[str, int] = defaultdict(int)
+        self._connection_ids: dict[WebSocket, str] = {}
         self._lock = asyncio.Lock()
         self._instance_id = str(uuid.uuid4())
         self._dsn: str | None = None
@@ -34,6 +37,8 @@ class ChatConnectionManager:
         self._listener_task: asyncio.Task | None = None
         self._listener_wakeup = asyncio.Event()
         self._delivery_tasks: set[asyncio.Task] = set()
+        self._presence_ready = False
+        self._presence_task: asyncio.Task | None = None
 
     async def start(self, database_url: str) -> None:
         """Подключить общий PostgreSQL LISTEN/NOTIFY для всех Gunicorn workers."""
@@ -41,12 +46,31 @@ class ChatConnectionManager:
             return
         self._dsn = database_url.replace("postgresql+asyncpg://", "postgresql://", 1)
         try:
+            await self._ensure_presence_table()
+            self._presence_task = asyncio.create_task(self._heartbeat_presence())
+        except Exception as exc:  # noqa: BLE001 — presence откатится к локальному счётчику
+            logger.error("Общий presence чата пока недоступен: %s", exc)
+        try:
             await self._connect_listener()
         except Exception as exc:  # noqa: BLE001 — локальная доставка остаётся доступна
             logger.error("Общий канал чата пока недоступен: %s", exc)
         self._listener_task = asyncio.create_task(self._monitor_listener())
 
     async def stop(self) -> None:
+        presence_task = self._presence_task
+        self._presence_task = None
+        if presence_task is not None:
+            presence_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await presence_task
+        if self._presence_ready:
+            with suppress(Exception):
+                async with async_session_factory() as db:
+                    await db.execute(
+                        text("DELETE FROM chat_ws_presence WHERE worker_id = :worker_id"),
+                        {"worker_id": self._instance_id},
+                    )
+                    await db.commit()
         task = self._listener_task
         self._listener_task = None
         if task is not None:
@@ -62,6 +86,47 @@ class ChatConnectionManager:
         pending = list(self._delivery_tasks)
         if pending:
             await asyncio.gather(*pending, return_exceptions=True)
+
+    async def _ensure_presence_table(self) -> None:
+        async with async_session_factory() as db:
+            await db.execute(text("SELECT pg_advisory_xact_lock(:namespace, :key)"), {
+                "namespace": 434_532,
+                "key": 2,
+            })
+            await db.execute(text(
+                "CREATE UNLOGGED TABLE IF NOT EXISTS chat_ws_presence ("
+                " connection_id uuid PRIMARY KEY, worker_id uuid NOT NULL,"
+                " user_id text NOT NULL, seen_at timestamptz NOT NULL DEFAULT now())"
+            ))
+            await db.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_chat_ws_presence_user_seen"
+                " ON chat_ws_presence (user_id, seen_at)"
+            ))
+            await db.execute(text(
+                "DELETE FROM chat_ws_presence"
+                " WHERE seen_at < now() - make_interval(secs => :ttl)"
+            ), {"ttl": _PRESENCE_TTL_SECONDS})
+            await db.commit()
+        self._presence_ready = True
+
+    async def _heartbeat_presence(self) -> None:
+        while True:
+            await asyncio.sleep(_PRESENCE_HEARTBEAT_SECONDS)
+            try:
+                async with async_session_factory() as db:
+                    await db.execute(text(
+                        "UPDATE chat_ws_presence SET seen_at = now()"
+                        " WHERE worker_id = :worker_id"
+                    ), {"worker_id": self._instance_id})
+                    await db.execute(text(
+                        "DELETE FROM chat_ws_presence"
+                        " WHERE seen_at < now() - make_interval(secs => :ttl)"
+                    ), {"ttl": _PRESENCE_TTL_SECONDS})
+                    await db.commit()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 — следующий heartbeat повторит
+                logger.error("Heartbeat presence чата не записан: %s", exc)
 
     async def _connect_listener(self) -> None:
         if not self._dsn:
@@ -149,19 +214,43 @@ class ChatConnectionManager:
     async def connect(self, ws: WebSocket, user_id: str, company_id: str | None) -> bool:
         """Регистрирует сокет. Возвращает True, если юзер стал online (0→1)."""
         await ws.accept()
+        connection_id = str(uuid.uuid4())
         async with self._lock:
             self._meta[ws] = {"user_id": user_id, "company_id": company_id}
+            self._connection_ids[ws] = connection_id
             self._online[user_id] += 1
             became_online = self._online[user_id] == 1
         self.subscribe(ws, f"user:{user_id}")
         if company_id:
             self.subscribe(ws, f"company:{company_id}")
+        if self._presence_ready:
+            try:
+                async with async_session_factory() as db:
+                    await db.execute(text(
+                        "INSERT INTO chat_ws_presence"
+                        " (connection_id, worker_id, user_id, seen_at)"
+                        " VALUES (:connection_id, :worker_id, :user_id, now())"
+                    ), {
+                        "connection_id": connection_id,
+                        "worker_id": self._instance_id,
+                        "user_id": user_id,
+                    })
+                    count = await db.scalar(text(
+                        "SELECT count(*) FROM chat_ws_presence"
+                        " WHERE user_id = :user_id"
+                        " AND seen_at >= now() - make_interval(secs => :ttl)"
+                    ), {"user_id": user_id, "ttl": _PRESENCE_TTL_SECONDS})
+                    await db.commit()
+                became_online = int(count or 0) == 1
+            except Exception as exc:  # noqa: BLE001 — локальный presence остаётся
+                logger.error("Presence подключения не записан: %s", exc)
         return became_online
 
     async def disconnect(self, ws: WebSocket) -> tuple[str | None, str | None, bool]:
         """Снимает сокет. Возвращает (user_id, company_id, стал ли offline 1→0)."""
         async with self._lock:
             meta = self._meta.pop(ws, {})
+            connection_id = self._connection_ids.pop(ws, None)
             uid = meta.get("user_id")
             cid = meta.get("company_id")
             for channel in self._socket_channels.pop(ws, set()):
@@ -174,6 +263,21 @@ class ChatConnectionManager:
                 if self._online[uid] <= 0:
                     self._online.pop(uid, None)
                     became_offline = True
+        if self._presence_ready and connection_id and uid:
+            try:
+                async with async_session_factory() as db:
+                    await db.execute(text(
+                        "DELETE FROM chat_ws_presence WHERE connection_id = :connection_id"
+                    ), {"connection_id": connection_id})
+                    remains = await db.scalar(text(
+                        "SELECT EXISTS (SELECT 1 FROM chat_ws_presence"
+                        " WHERE user_id = :user_id"
+                        " AND seen_at >= now() - make_interval(secs => :ttl))"
+                    ), {"user_id": uid, "ttl": _PRESENCE_TTL_SECONDS})
+                    await db.commit()
+                became_offline = not bool(remains)
+            except Exception as exc:  # noqa: BLE001 — локальный результат остаётся
+                logger.error("Presence отключения не удалён: %s", exc)
         return uid, cid, became_offline
 
     def subscribe(self, ws: WebSocket, channel: str) -> None:
@@ -190,11 +294,21 @@ class ChatConnectionManager:
     def channels_of(self, ws: WebSocket) -> set[str]:
         return set(self._socket_channels.get(ws, set()))
 
-    def online_user_ids(self) -> set[str]:
+    async def online_user_ids(self) -> set[str]:
+        if self._presence_ready:
+            try:
+                async with async_session_factory() as db:
+                    rows = await db.scalars(text(
+                        "SELECT DISTINCT user_id FROM chat_ws_presence"
+                        " WHERE seen_at >= now() - make_interval(secs => :ttl)"
+                    ), {"ttl": _PRESENCE_TTL_SECONDS})
+                    return set(rows) | set(self._online.keys())
+            except Exception as exc:  # noqa: BLE001 — локальный счётчик остаётся
+                logger.error("Общий presence не прочитан: %s", exc)
         return set(self._online.keys())
 
-    def is_online(self, user_id: str) -> bool:
-        return user_id in self._online
+    async def is_online(self, user_id: str) -> bool:
+        return user_id in await self.online_user_ids()
 
     async def _broadcast_local(
         self,
