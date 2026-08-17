@@ -2839,14 +2839,16 @@ async def create_all() -> None:
             "ALTER TABLE mail_messages ADD COLUMN IF NOT EXISTS route_attempts "
             "INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE mail_messages ADD COLUMN IF NOT EXISTS route_attempted_at TIMESTAMPTZ",
-            # Если в старых данных уже есть дубли Message-ID, запуск не блокируем:
-            # новые письма всё равно сериализует advisory-lock приёмщика.
-            "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = "
-            "current_schema() AND indexname = 'uq_mail_messages_company_msgid') "
-            "AND NOT EXISTS (SELECT 1 FROM mail_messages WHERE message_id IS NOT NULL "
-            "GROUP BY company_id, message_id HAVING count(*) > 1) THEN "
-            "CREATE UNIQUE INDEX uq_mail_messages_company_msgid ON mail_messages "
-            "(company_id, message_id) WHERE message_id IS NOT NULL; END IF; END $$",
+            # Старые конкурентные дубли сохраняем, но явно маркируем отдельным
+            # идентификатором; после этого инвариант БД создаётся безусловно.
+            "WITH ranked AS (SELECT id, row_number() OVER (PARTITION BY company_id, "
+            "message_id ORDER BY created_at, id) AS position FROM mail_messages "
+            "WHERE message_id IS NOT NULL) UPDATE mail_messages AS message SET "
+            "message_id = left(message.message_id, 430) || '#legacy-duplicate-' || "
+            "message.id::text FROM ranked WHERE ranked.id = message.id "
+            "AND ranked.position > 1",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_mail_messages_company_msgid "
+            "ON mail_messages (company_id, message_id) WHERE message_id IS NOT NULL",
         ):
             await conn.execute(_sa.text(stmt))
 

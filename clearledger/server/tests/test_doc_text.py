@@ -83,14 +83,16 @@ def test_сканер_берёт_только_стабильный_ограни�
     assert [row["file_name"] for row in rows] == ["stable.xml"]
 
 
-def test_переполненная_папка_требует_разбора(tmp_path, monkeypatch):
+def test_большая_папка_продвигается_страницами(tmp_path, monkeypatch):
     monkeypatch.setattr(doc_exchange.settings, "doc_exchange_roots", str(tmp_path))
-    monkeypatch.setattr(doc_exchange, "MAX_INBOX_ENTRIES", 2)
+    monkeypatch.setattr(doc_exchange, "MAX_INBOX_FILES", 2)
+    monkeypatch.setattr(doc_exchange, "MIN_STABLE_AGE_SECONDS", 0)
     cid = uuid.uuid4()
     folder = tmp_path / str(cid)
     folder.mkdir()
-    for index in range(3):
-        (folder / f"{index}.txt").write_text("x", encoding="utf-8")
-    with pytest.raises(ValueError, match="больше 2 объектов"):
-        doc_exchange.scan_inbox(DocExchangeTarget(
-            company_id=cid, inbox_path=str(folder)))
+    for index in range(1001):
+        (folder / f"{index:04d}.txt").write_text("x", encoding="utf-8")
+    target = DocExchangeTarget(
+        company_id=cid, inbox_path=str(folder), scan_cursor="0999.txt")
+    rows = doc_exchange.scan_inbox(target)
+    assert [row["file_name"] for row in rows] == ["1000.txt", "0000.txt"]

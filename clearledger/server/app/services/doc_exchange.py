@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import asyncio
+import heapq
 import hashlib
 import io
 import os
@@ -24,7 +25,6 @@ import stat
 import time
 import zipfile
 from datetime import datetime, timezone
-from itertools import islice
 from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree as ET
@@ -44,7 +44,6 @@ from app.services import doc_print, file_store
 # наша внутренняя кухня.
 EXPORT_ROLES = ("body", "appendix", "signed_scan")
 MAX_INBOX_FILES = 200
-MAX_INBOX_ENTRIES = 1000
 MAX_INBOX_FILE_BYTES = 50 * 1024 * 1024
 MAX_INBOX_TOTAL_BYTES = 250 * 1024 * 1024
 MAX_MANIFEST_BYTES = 2 * 1024 * 1024
@@ -254,24 +253,30 @@ def _candidate_paths(target: DocExchangeTarget) -> list[Path]:
         raise FileNotFoundError(f"Папка обмена не найдена: {folder}")
     if not folder.is_dir():
         raise NotADirectoryError(f"Путь обмена не является папкой: {folder}")
-    entries = list(islice(folder.iterdir(), MAX_INBOX_ENTRIES + 1))
-    if len(entries) > MAX_INBOX_ENTRIES:
-        raise ValueError(
-            f"В папке обмена больше {MAX_INBOX_ENTRIES} объектов; разберите её вручную")
-    paths: list[Path] = []
-    for path in entries:
-        if path.name.startswith(".") or path.is_symlink() or not path.is_file():
-            continue
-        resolved = path.resolve(strict=True)
-        if not resolved.is_relative_to(folder):
-            continue
-        paths.append(resolved)
-    ordered = sorted(paths, key=lambda item: item.name)
-    if target.scan_cursor and ordered:
-        split = next((index for index, item in enumerate(ordered)
-                      if item.name > target.scan_cursor), 0)
-        ordered = ordered[split:] + ordered[:split]
-    return ordered
+    cursor = target.scan_cursor or ""
+
+    def candidates(*, after_cursor: bool):
+        for path in folder.iterdir():
+            if path.name.startswith(".") or path.is_symlink() or not path.is_file():
+                continue
+            if cursor and ((path.name > cursor) != after_cursor):
+                continue
+            try:
+                resolved = path.resolve(strict=True)
+            except OSError:
+                continue
+            if resolved.is_relative_to(folder):
+                yield resolved
+
+    # heapq держит в памяти только страницу, даже если внешняя система годами не
+    # чистила папку. Курсор даёт гарантированный прогресс, а после конца делает wrap.
+    page = heapq.nsmallest(
+        MAX_INBOX_FILES, candidates(after_cursor=True), key=lambda item: item.name)
+    if cursor and len(page) < MAX_INBOX_FILES:
+        page.extend(heapq.nsmallest(
+            MAX_INBOX_FILES - len(page), candidates(after_cursor=False),
+            key=lambda item: item.name))
+    return page
 
 
 def _read_candidate(path: Path) -> dict[str, Any] | None:

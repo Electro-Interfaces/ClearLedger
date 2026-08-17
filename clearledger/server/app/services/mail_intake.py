@@ -143,6 +143,29 @@ def auth_verdict(msg: Message) -> tuple[str, str | None]:
     return "unknown", raw[:300]
 
 
+def message_dedup_key(msg: Message) -> str:
+    message_id = (msg.get("Message-ID") or "").strip()
+    if message_id:
+        return message_id
+    digest = hashlib.sha256()
+    for name in ("From", "To", "Cc", "Date", "Subject", "In-Reply-To"):
+        value = _decode(msg.get(name)).strip()
+        digest.update(name.lower().encode("ascii") + b"\0")
+        digest.update(value.encode("utf-8") + b"\0")
+    for part in msg.walk():
+        if part.is_multipart():
+            continue
+        digest.update(part.get_content_type().lower().encode("ascii") + b"\0")
+        digest.update(_decode(part.get_filename()).encode("utf-8") + b"\0")
+        payload = part.get_payload(decode=True)
+        if payload is None:
+            raw_payload = part.get_payload()
+            payload = (raw_payload if isinstance(raw_payload, str) else "").encode(
+                part.get_content_charset() or "utf-8", errors="replace")
+        digest.update(hashlib.sha256(payload).digest())
+    return f"fingerprint:{digest.hexdigest()}"
+
+
 def _refs(msg: Message) -> list[str]:
     """Цепочка предков письма: `References` + `In-Reply-To`."""
     raw = " ".join(filter(None, [msg.get("References", ""), msg.get("In-Reply-To", "")]))
@@ -352,8 +375,7 @@ POLL_LOCK_NS = 4711
 async def _save_message(db: AsyncSession, account: MailAccount, uid: int,
                         raw: bytes) -> bool:
     msg = email.message_from_bytes(raw)
-    message_id = ((msg.get("Message-ID") or "").strip()
-                  or f"sha256:{hashlib.sha256(raw).hexdigest()}")
+    message_id = message_dedup_key(msg)
 
     # Два ящика компании могут одновременно получить одно письмо. Блокировка по
     # компании+идентификатору закрывает check/insert даже на старой базе, где

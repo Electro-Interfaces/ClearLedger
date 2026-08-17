@@ -37,3 +37,15 @@ def test_без_списка_доверия_авторегистрация_за�
         b"From: sender@example.org\r\n"
         b"Authentication-Results: mx.company.ru; dmarc=pass header.from=example.org\r\n\r\n")
     assert mail_intake.auth_verdict(message) == ("unknown", None)
+
+
+def test_транспортные_заголовки_не_размножают_письмо_без_message_id():
+    first = email.message_from_bytes(
+        b"Received: from relay-a\r\nDelivered-To: one@example.org\r\n"
+        b"From: sender@example.org\r\nTo: docs@example.org\r\n"
+        b"Date: Mon, 17 Aug 2026 10:00:00 +0300\r\nSubject: Act\r\n\r\nbody")
+    second = email.message_from_bytes(
+        b"Received: from relay-b\r\nDelivered-To: two@example.org\r\n"
+        b"From: sender@example.org\r\nTo: docs@example.org\r\n"
+        b"Date: Mon, 17 Aug 2026 10:00:00 +0300\r\nSubject: Act\r\n\r\nbody")
+    assert mail_intake.message_dedup_key(first) == mail_intake.message_dedup_key(second)
