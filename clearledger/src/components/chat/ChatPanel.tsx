@@ -1615,6 +1615,7 @@ function ChatBubble({
   message, album, isOwn, grouping, canDelete, editingId, editText, searchHighlight,
   onReply, onEditStart, onEditCancel, onEditSave, onEditTextChange, onDelete,
   onAuthorClick, authorAvatar, withAvatar, selfId, onReact, onPin, onForward, onTicket, onTask, onImageClick,
+  actionsOpen, onToggleActions, onCloseActions,
 }: {
   message: ChatMessage
   album?: ChatMessage[]
@@ -1643,6 +1644,9 @@ function ChatBubble({
   onTicket?: () => void
   onTask?: () => void
   onImageClick?: (path: string) => void
+  actionsOpen: boolean
+  onToggleActions: () => void
+  onCloseActions: () => void
 }) {
   const { isFirstInGroup, isLastInGroup, showDate } = grouping
   const { shouldSend: editSend } = useSendMode()
@@ -1662,6 +1666,7 @@ function ChatBubble({
   const isEditing = editingId === message.id
   const fullTimestamp = formatFullDateTime(message.createdAt)
   const timestampLabel = `${message.userName || (isOwn ? 'Вы' : 'Пользователь')} · ${fullTimestamp}`
+  const actionsId = `chat-actions-${message.id}`
 
   // Служебная запись ленты — не чья-то реплика, а событие группы: кто пришёл и
   // чьими стараниями. Поэтому без пузыря и без стороны — плашка по центру.
@@ -1691,6 +1696,44 @@ function ChatBubble({
       </>
     )
   }
+
+  const runAction = (action: () => void) => {
+    action()
+    onCloseActions()
+  }
+  const actionButtons = (
+    <>
+      {onReact && QUICK_REACTIONS.map((emoji) => (
+        <button key={emoji} onClick={() => runAction(() => onReact(emoji))} title={emoji}
+          className="flex size-7 items-center justify-center rounded-md text-[18px] leading-none transition-transform hover:scale-110 hover:bg-accent active:scale-95 [@media(pointer:coarse)]:size-10 [@media(pointer:coarse)]:text-[20px]">
+          {emoji}
+        </button>
+      ))}
+      {onReact && <span className="mx-0.5 h-5 w-px bg-border [@media(pointer:coarse)]:h-8" />}
+      <button onClick={() => runAction(onReply)} title="Ответить"
+        className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground [@media(pointer:coarse)]:size-10"><Reply className="size-4" /></button>
+      {onForward && <button onClick={() => runAction(onForward)} title="Переслать"
+        className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground [@media(pointer:coarse)]:size-10"><Forward className="size-4" /></button>}
+      {onTicket && <button onClick={() => runAction(onTicket)} title="Создать заявку из сообщения"
+        className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground [@media(pointer:coarse)]:size-10"><ClipboardList className="size-4" /></button>}
+      {onTask && <button onClick={() => runAction(onTask)} title="Поставить задачу из сообщения"
+        className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground [@media(pointer:coarse)]:size-10"><ListChecks className="size-4" /></button>}
+      {onPin && <button onClick={() => runAction(onPin)} title="Закрепить"
+        className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground [@media(pointer:coarse)]:size-10"><Pin className="size-4" /></button>}
+      {isOwn && <button onClick={() => runAction(onEditStart)} title="Редактировать"
+        className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground [@media(pointer:coarse)]:size-10"><Pencil className="size-4" /></button>}
+      {canDelete && (
+        <ConfirmActionDialog
+          trigger={<button title="Удалить"
+            className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-red-500 [@media(pointer:coarse)]:size-10"><Trash2 className="size-4" /></button>}
+          title="Удалить сообщение?"
+          description={message.content
+            ? <>Будет удалено: «{message.content.slice(0, 120)}{message.content.length > 120 ? '…' : ''}». Восстановить нельзя.</>
+            : 'Сообщение с вложением будет удалено. Восстановить нельзя.'}
+          confirmLabel="Удалить" destructive onConfirm={() => runAction(onDelete)} />
+      )}
+    </>
+  )
 
   return (
     <>
@@ -1730,50 +1773,35 @@ function ChatBubble({
             touchRef.current = null
             setSwipeX(0)
           }}>
-          {/* Меню действий: hover на мыши, всегда видно на тач-устройствах */}
+          {/* На мыши действия появляются по hover. На телефоне эта панель скрыта:
+              там одна выбранная реплика открывает отдельную нижнюю панель. */}
           <div className={cn(
-            'absolute -top-5 z-10 flex items-center gap-0.5 rounded-lg border border-border bg-popover px-1 py-1 shadow-lg opacity-0 transition-opacity group-hover/bubble:opacity-100 [@media(pointer:coarse)]:opacity-100',
+            'pointer-events-none absolute -top-5 z-10 flex items-center gap-0.5 rounded-lg border border-border bg-popover px-1 py-1 shadow-lg opacity-0 transition-opacity group-hover/bubble:pointer-events-auto group-hover/bubble:opacity-100 [@media(pointer:coarse)]:hidden',
             isOwn ? 'right-0' : 'left-0',
           )}>
-            {/* Цель клика — 28px, а не размер самого символа: реакции ставят мышью на
-                ходу, и в 14-пиксельный эмодзи попасть нельзя. Символ крупнее рамки
-                кнопки не делаем — иначе панель выше самого сообщения. */}
-            {onReact && QUICK_REACTIONS.map((emoji) => (
-              <button key={emoji} onClick={() => onReact(emoji)} title={emoji}
-                className="flex size-7 items-center justify-center rounded-md text-[18px] leading-none transition-transform hover:scale-110 hover:bg-accent active:scale-95">
-                {emoji}
-              </button>
-            ))}
-            {onReact && <span className="mx-0.5 h-5 w-px bg-border" />}
-            <button onClick={onReply} title="Ответить"
-              className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"><Reply className="size-4" /></button>
-            {onForward && <button onClick={onForward} title="Переслать"
-              className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"><Forward className="size-4" /></button>}
-            {onTicket && <button onClick={onTicket} title="Создать заявку из сообщения"
-              className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"><ClipboardList className="size-4" /></button>}
-            {/* Задача ≠ заявка: заявка уходит в Поддержку про поломку у заявителя,
-                задача остаётся внутренней работой компании. Поэтому две кнопки, а
-                не одна с выбором — обсудили и сразу знаешь, что именно ставишь. */}
-            {onTask && <button onClick={onTask} title="Поставить задачу из сообщения"
-              className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"><ListChecks className="size-4" /></button>}
-            {onPin && <button onClick={onPin} title="Закрепить"
-              className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"><Pin className="size-4" /></button>}
-            {isOwn && <button onClick={onEditStart} title="Редактировать"
-              className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"><Pencil className="size-4" /></button>}
-            {/* Удаление — через подтверждение: на тач-устройствах панель действий
-                видна всегда и висит выше пузыря, промах пальцем стирает чужое
-                сообщение, а восстановления нет. */}
-            {canDelete && (
-              <ConfirmActionDialog
-                trigger={<button title="Удалить"
-                  className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-red-500"><Trash2 className="size-4" /></button>}
-                title="Удалить сообщение?"
-                description={message.content
-                  ? <>Будет удалено: «{message.content.slice(0, 120)}{message.content.length > 120 ? '…' : ''}». Восстановить нельзя.</>
-                  : 'Сообщение с вложением будет удалено. Восстановить нельзя.'}
-                confirmLabel="Удалить" destructive onConfirm={onDelete} />
-            )}
+            {actionButtons}
           </div>
+
+          <button type="button" onClick={onToggleActions} aria-expanded={actionsOpen}
+            aria-controls={actionsId} title="Действия с сообщением"
+            className={cn(
+              'absolute top-1/2 hidden size-8 -translate-y-1/2 items-center justify-center rounded-full border border-border/70 bg-background/95 text-muted-foreground shadow-sm [@media(pointer:coarse)]:flex',
+              isOwn ? '-left-10' : '-right-10',
+            )}>
+            <MoreVertical className="size-4" />
+          </button>
+
+          {actionsOpen && (
+            <>
+              <button type="button" aria-label="Закрыть действия с сообщением"
+                onClick={onCloseActions}
+                className="fixed inset-0 z-30 hidden bg-black/10 [@media(pointer:coarse)]:block" />
+              <div id={actionsId} role="toolbar" aria-label="Действия с сообщением"
+                className="fixed inset-x-2 bottom-[calc(env(safe-area-inset-bottom)+4.75rem)] z-40 hidden flex-wrap items-center justify-center gap-0.5 rounded-2xl border border-border bg-popover p-2 text-popover-foreground shadow-2xl [@media(pointer:coarse)]:flex">
+                {actionButtons}
+              </div>
+            </>
+          )}
 
           {!isOwn && isFirstInGroup && (
             <div className="mb-0.5 flex items-center gap-1.5">
@@ -2023,6 +2051,7 @@ export function ChatPanel({ compact, scopeProduct }: {
   const [replyTo, setReplyTo] = useState<ChatMessage | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editText, setEditText] = useState('')
+  const [mobileActionsFor, setMobileActionsFor] = useState<string | null>(null)
   const [typingUsers, setTypingUsers] = useState<Map<string, string>>(new Map())
 
   const mentionMapRef = useRef<Map<string, string>>(new Map())
@@ -2064,6 +2093,7 @@ export function ChatPanel({ compact, scopeProduct }: {
     () => (older.length ? [...older, ...pageMessages] : pageMessages),
     [older, pageMessages])
   const feedRef = useRef<HTMLDivElement>(null)
+  useEffect(() => setMobileActionsFor(null), [selectedRoom])
   // Куда вернуть прокрутку после вставки истории сверху: без этого лента
   // прыгает — браузер держит scrollTop, а контента над ним стало больше.
   const keepScrollRef = useRef<number | null>(null)
@@ -2987,6 +3017,7 @@ export function ChatPanel({ compact, scopeProduct }: {
               скрепку, и ровно так работают мессенджеры. */}
           <div ref={feedRef} className={cn('flex-1 overflow-y-auto', dragOver && 'ring-2 ring-inset ring-primary')}
             style={CHAT_SKINS[skin]?.style}
+            onScroll={() => { if (mobileActionsFor) setMobileActionsFor(null) }}
             onDragOver={(e) => { if (e.dataTransfer.types.includes('Files')) { e.preventDefault(); setDragOver(true) } }}
             onDragLeave={() => setDragOver(false)}
             onDrop={(e) => {
@@ -3054,7 +3085,10 @@ export function ChatPanel({ compact, scopeProduct }: {
                       onForward={() => setForwardMsg(msg)}
                       onTicket={activeRoom?.type !== 'direct' ? () => setTicketMsg(msg) : undefined}
                       onTask={tasksEnabled ? () => setTaskMsg(msg) : undefined}
-                      onImageClick={openImage} />
+                      onImageClick={openImage}
+                      actionsOpen={mobileActionsFor === msg.id}
+                      onToggleActions={() => setMobileActionsFor((id) => id === msg.id ? null : msg.id)}
+                      onCloseActions={() => setMobileActionsFor(null)} />
                     </div>
                     </Fragment>
                   )
