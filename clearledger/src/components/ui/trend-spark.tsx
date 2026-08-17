@@ -7,12 +7,14 @@ export const TrendSpark = memo(function TrendSpark({
   full = false,
   className,
   placeholder = null,
+  ariaLabel,
 }: {
   values: (number | null)[] | undefined
-  tone?: 'direction' | 'muted' | 'brand'
+  tone?: 'direction' | 'muted' | 'brand' | 'danger' | 'warning'
   full?: boolean
   className?: string
   placeholder?: ReactNode
+  ariaLabel?: string
 }) {
   const samples = (values ?? [])
     .map((value, index) => value == null ? null : { value, index })
@@ -36,10 +38,14 @@ export const TrendSpark = memo(function TrendSpark({
   const rising = samples[samples.length - 1].value >= samples[0].value
   const color = tone === 'direction'
     ? rising ? 'text-emerald-500' : 'text-red-500'
-    : tone === 'brand' ? 'text-primary' : 'text-muted-foreground/60'
+    : tone === 'brand' ? 'text-primary'
+      : tone === 'danger' ? 'text-red-500'
+        : tone === 'warning' ? 'text-amber-500'
+          : 'text-muted-foreground/60'
 
   return (
-    <svg viewBox="0 0 64 16" preserveAspectRatio="none" aria-hidden="true" focusable="false"
+    <svg viewBox="0 0 64 16" preserveAspectRatio="none" role={ariaLabel ? 'img' : undefined}
+      aria-label={ariaLabel} aria-hidden={ariaLabel ? undefined : true} focusable="false"
       className={cn(full ? 'h-7 w-full' : 'inline-block h-4 w-16 align-middle', color, className)}>
       <polyline points={points} fill="none" stroke="currentColor" strokeWidth="1.75"
         vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />

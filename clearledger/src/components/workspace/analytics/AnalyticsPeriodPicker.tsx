@@ -1,38 +1,16 @@
 /**
  * Компактный пресетный пикер периода для аналитических панелей.
- * Состояние хранит ID компании + текущий период в localStorage,
- * чтобы переключение между management/financial/tax сохраняло выбор.
+ * Период приходит из единого контура рабочей области.
  */
 
-import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Calendar } from 'lucide-react'
-import { type Period, PERIOD_PRESETS, monthFirstISO, todayISO } from './periodPresets'
+import { type Period, PERIOD_PRESETS } from './periodPresets'
 import { MetricHint } from './MetricHint'
-import { SparkLineChart } from '@/components/ui/spark-chart'
+import { TrendSpark } from '@/components/ui/trend-spark'
 
 export type { Period } from './periodPresets'
-
-const STORAGE_KEY = 'clearledger_analytics_period'
-
-export function loadPeriod(): Period {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (raw) return JSON.parse(raw)
-  } catch { /* ignore */ }
-  return { from: monthFirstISO(), to: todayISO() }
-}
-
-function savePeriod(p: Period) {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(p)) } catch { /* ignore */ }
-}
-
-export function useAnalyticsPeriod() {
-  const [period, setPeriodState] = useState<Period>(loadPeriod)
-  useEffect(() => { savePeriod(period) }, [period])
-  return [period, setPeriodState] as const
-}
 
 interface Props {
   period: Period
@@ -92,9 +70,7 @@ export function KpiCard({ label, value, hint, accent, info, spark, sparkLabel }:
     info:    'text-blue-600 dark:text-blue-400',
   }
   // Две точки — это не тренд, а отрезок: рисовать нечего.
-  const sparkData = spark && spark.length >= 3
-    ? spark.map((v, i) => ({ i, v }))
-    : null
+  const showSpark = spark && spark.length >= 3
   return (
     // Контракт выгрузки: первые три ребёнка — label/value/hint, спарклайн идёт после.
     <div data-kpi className="rounded-md border bg-card/40 p-3">
@@ -103,19 +79,12 @@ export function KpiCard({ label, value, hint, accent, info, spark, sparkLabel }:
       </div>
       <div className={`text-lg font-semibold mt-1 ${accent ? accentCls[accent] : ''}`}>{value}</div>
       {hint && <div className="text-xs text-muted-foreground mt-0.5">{hint}</div>}
-      {sparkData && (
+      {showSpark && (
         // Линия без заливки — как спарклайны на «Обзорах»: у одинаковых по смыслу
         // элементов на соседних экранах должен быть один вид.
-        <SparkLineChart
-          className="mt-2 h-8 w-full"
-          data={sparkData}
-          index="i"
-          categories={['v']}
-          colors={[accent === 'danger' ? 'error' : accent === 'warning' ? 'warning' : 'brand']}
-          connectNulls
-          autoMinValue
-          aria-label={sparkLabel ?? `Динамика: ${label}`}
-        />
+        <TrendSpark values={spark} full className="mt-2 h-8"
+          tone={accent === 'danger' ? 'danger' : accent === 'warning' ? 'warning' : 'brand'}
+          ariaLabel={sparkLabel ?? `Динамика: ${label}`} />
       )}
     </div>
   )

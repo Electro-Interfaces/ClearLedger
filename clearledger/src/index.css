@@ -22,9 +22,9 @@
   }
 
   [data-sales-surface] .leaflet-control-zoom a {
-    width: 2.75rem;
-    height: 2.75rem;
-    line-height: 2.75rem;
+    width: 2.75rem !important;
+    height: 2.75rem !important;
+    line-height: 2.75rem !important;
   }
 
   [data-sales-surface] input,
