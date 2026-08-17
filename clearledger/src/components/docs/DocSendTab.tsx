@@ -8,6 +8,7 @@ import { useId, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Copy, Link2, Mail, Ban } from 'lucide-react'
 import { toast } from 'sonner'
+import { ConfirmActionDialog } from '@/components/common/ConfirmActionDialog'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -178,11 +179,21 @@ export function DocSendTab({ doc, companyId, onChanged }: {
                       }}>
                       <Copy className="h-3.5 w-3.5" />
                     </Button>
-                    <Button size="sm" variant="ghost" title="Отозвать"
-                      aria-label={`Отозвать ссылку для ${l.recipient || 'получателя'}`}
-                      onClick={() => revoke.mutate(l.id)} disabled={revoke.isPending}>
-                      <Ban className="h-3.5 w-3.5" />
-                    </Button>
+                    <ConfirmActionDialog
+                      trigger={(
+                        <Button size="sm" variant="ghost" title="Отозвать"
+                          aria-label={`Отозвать ссылку для ${l.recipient || 'получателя'}`}
+                          disabled={revoke.isPending}>
+                          <Ban className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
+                      title="Отозвать публичную ссылку?"
+                      description={`Получатель «${l.recipient || 'без имени'}» больше не сможет открыть документ или подтвердить получение по этой ссылке.`}
+                      confirmLabel="Отозвать ссылку"
+                      destructive
+                      pending={revoke.isPending}
+                      onConfirm={() => revoke.mutateAsync(l.id)}
+                    />
                   </>
                 )}
               </div>
@@ -219,10 +230,20 @@ export function DocSendTab({ doc, companyId, onChanged }: {
                   placeholder="buh@example.ru" className="h-9" />
               </div>
             </div>
-            <Button size="sm" onClick={() => send.mutate()}
-              disabled={!accountId || !to.trim() || send.isPending}>
-              Отправить с файлами
-            </Button>
+            <ConfirmActionDialog
+              trigger={(
+                <Button size="sm" disabled={!accountId || !to.trim() || send.isPending}>
+                  Отправить с файлами
+                </Button>
+              )}
+              title="Отправить документ наружу?"
+              description={`Письмо с текущими файлами уйдёт с ящика ${
+                boxes.find((box) => box.id === accountId)?.address ?? 'пространства'
+              } получателям: ${to.split(/[,;\s]+/).filter(Boolean).join(', ')}.`}
+              confirmLabel="Отправить"
+              pending={send.isPending}
+              onConfirm={() => send.mutateAsync()}
+            />
           </>
         )}
       </Card>

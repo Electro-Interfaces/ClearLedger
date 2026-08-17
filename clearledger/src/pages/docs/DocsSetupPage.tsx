@@ -14,6 +14,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader,
   AlertDialogTitle, AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
+import { ConfirmActionDialog } from '@/components/common/ConfirmActionDialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { toast } from 'sonner'
@@ -568,10 +569,19 @@ function Substitutions({ companyId }: { companyId: string }) {
               </div>
             </div>
             {r.is_active && (
-              <Button size="sm" variant="ghost" onClick={() => stop.mutate(r.id)}
-                disabled={stop.isPending}>
-                Прекратить
-              </Button>
+              <ConfirmActionDialog
+                trigger={(
+                  <Button size="sm" variant="ghost" disabled={stop.isPending}>
+                    Прекратить
+                  </Button>
+                )}
+                title="Прекратить замещение?"
+                description={`${r.deputy} больше не сможет принимать решения за ${r.user}. Уже поставленные визы останутся в истории от имени заместителя.`}
+                confirmLabel="Прекратить"
+                destructive
+                pending={stop.isPending}
+                onConfirm={() => stop.mutateAsync(r.id)}
+              />
             )}
           </div>
         ))}

@@ -105,6 +105,7 @@ export function DocCardPanel({ id, companyId, onBack, onChanged, initialTab,
   const fileRef = useRef<HTMLInputElement>(null)
   const [registerOpen, setRegisterOpen] = useState(false)
   const [note, setNote] = useState('')
+  const [transitionNote, setTransitionNote] = useState('')
   const [activeTab, setActiveTab] = useState<string>(initialTab ?? 'document')
   const [fileRole, setFileRole] = useState('body')
   const [reasonMode, setReasonMode] = useState<'cancel' | 'cancel_approval' | null>(null)
@@ -373,10 +374,18 @@ export function DocCardPanel({ id, companyId, onBack, onChanged, initialTab,
             </Button>
           )}
           {actions.has('start_approval') && (
-            <Button size="sm" variant="outline" onClick={() => startApproval.mutate()}
-              disabled={startApproval.isPending}>
-              <Workflow className="mr-1.5 h-4 w-4" />На согласование
-            </Button>
+            <ConfirmActionDialog
+              trigger={(
+                <Button size="sm" variant="outline" disabled={startApproval.isPending}>
+                  <Workflow className="mr-1.5 h-4 w-4" />На согласование
+                </Button>
+              )}
+              title="Запустить согласование?"
+              description="Текущая редакция и реквизиты войдут в зафиксированный пакет. До завершения или отмены круга менять их нельзя."
+              confirmLabel="Запустить"
+              pending={startApproval.isPending}
+              onConfirm={() => startApproval.mutateAsync()}
+            />
           )}
           {actions.has('cancel_approval') && (
             <Button size="sm" variant="outline" onClick={() => setReasonMode('cancel_approval')}>
@@ -384,22 +393,79 @@ export function DocCardPanel({ id, companyId, onBack, onChanged, initialTab,
             </Button>
           )}
           {actions.has('put_in_force') && (
-            <Button size="sm" onClick={() => act.mutate({ status: 'in_force' })}
-              disabled={act.isPending}>
-              <FileCheck2 className="mr-1.5 h-4 w-4" />Ввести в действие
-            </Button>
+            <ConfirmActionDialog
+              trigger={(
+                <Button size="sm" disabled={act.isPending}>
+                  <FileCheck2 className="mr-1.5 h-4 w-4" />Ввести в действие
+                </Button>
+              )}
+              title="Ввести документ в действие?"
+              description="Документ станет действующим. Система сохранит автора и время перехода в истории."
+              confirmLabel="Ввести в действие"
+              pending={act.isPending}
+              content={(
+                <div className="space-y-1.5">
+                  <Label htmlFor={`transition-in-force-${d.id}`}>Комментарий к переходу</Label>
+                  <Textarea id={`transition-in-force-${d.id}`} rows={2} value={transitionNote}
+                    onChange={(event) => setTransitionNote(event.target.value)}
+                    placeholder="Необязательно" />
+                </div>
+              )}
+              onOpenChange={(open) => { if (!open) setTransitionNote('') }}
+              onConfirm={() => act.mutateAsync({
+                status: 'in_force', note: transitionNote.trim() || undefined,
+              })}
+            />
           )}
           {actions.has('execute') && (
-            <Button size="sm" onClick={() => act.mutate({ status: 'executed' })}
-              disabled={act.isPending}>
-              <CheckCheck className="mr-1.5 h-4 w-4" />Отметить исполненным
-            </Button>
+            <ConfirmActionDialog
+              trigger={(
+                <Button size="sm" disabled={act.isPending}>
+                  <CheckCheck className="mr-1.5 h-4 w-4" />Отметить исполненным
+                </Button>
+              )}
+              title="Отметить документ исполненным?"
+              description="Документ перейдёт в завершённое состояние. Проверьте, что обязательства по нему действительно выполнены."
+              confirmLabel="Отметить исполненным"
+              pending={act.isPending}
+              content={(
+                <div className="space-y-1.5">
+                  <Label htmlFor={`transition-executed-${d.id}`}>Комментарий к исполнению</Label>
+                  <Textarea id={`transition-executed-${d.id}`} rows={2} value={transitionNote}
+                    onChange={(event) => setTransitionNote(event.target.value)}
+                    placeholder="Необязательно" />
+                </div>
+              )}
+              onOpenChange={(open) => { if (!open) setTransitionNote('') }}
+              onConfirm={() => act.mutateAsync({
+                status: 'executed', note: transitionNote.trim() || undefined,
+              })}
+            />
           )}
           {actions.has('archive') && (
-            <Button size="sm" onClick={() => act.mutate({ status: 'archived' })}
-              disabled={act.isPending}>
-              <Archive className="mr-1.5 h-4 w-4" />Передать в архив
-            </Button>
+            <ConfirmActionDialog
+              trigger={(
+                <Button size="sm" disabled={act.isPending}>
+                  <Archive className="mr-1.5 h-4 w-4" />Принять во внутренний архив
+                </Button>
+              )}
+              title="Принять документ во внутренний архив?"
+              description="Это фиксирует приём на хранение, но не разрешает уничтожение. Уничтожение оформляется отдельно через экспертизу и акт."
+              confirmLabel="Принять в архив"
+              pending={act.isPending}
+              content={(
+                <div className="space-y-1.5">
+                  <Label htmlFor={`transition-archived-${d.id}`}>Комментарий к приёму</Label>
+                  <Textarea id={`transition-archived-${d.id}`} rows={2} value={transitionNote}
+                    onChange={(event) => setTransitionNote(event.target.value)}
+                    placeholder="Необязательно" />
+                </div>
+              )}
+              onOpenChange={(open) => { if (!open) setTransitionNote('') }}
+              onConfirm={() => act.mutateAsync({
+                status: 'archived', note: transitionNote.trim() || undefined,
+              })}
+            />
           )}
           {actions.has('cancel') && (
             <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive"

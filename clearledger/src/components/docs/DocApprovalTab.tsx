@@ -12,6 +12,7 @@ import {
   XCircle,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { ConfirmActionDialog } from '@/components/common/ConfirmActionDialog'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -82,9 +83,18 @@ export function DocApprovalTab({ doc, companyId, onChanged }: {
               разворачиваются в конкретных людей в момент запуска.
             </div>
           </div>
-          <Button size="sm" onClick={() => start.mutate()} disabled={start.isPending}>
-            <PlayCircle className="mr-1.5 h-4 w-4" />Запустить
-          </Button>
+          <ConfirmActionDialog
+            trigger={(
+              <Button size="sm" disabled={start.isPending}>
+                <PlayCircle className="mr-1.5 h-4 w-4" />Запустить
+              </Button>
+            )}
+            title="Запустить согласование?"
+            description="Текущая редакция и реквизиты войдут в зафиксированный пакет. До завершения или отмены круга менять их нельзя."
+            confirmLabel="Запустить"
+            pending={start.isPending}
+            onConfirm={() => start.mutateAsync()}
+          />
         </Card>
       )}
 

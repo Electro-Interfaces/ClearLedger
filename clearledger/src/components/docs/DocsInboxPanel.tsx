@@ -8,12 +8,16 @@
  * Файлы в папке не трогаем: она принадлежит той стороне.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AlertCircle, FileDown, FolderSearch, RotateCw } from 'lucide-react'
 import { toast } from 'sonner'
 import { useCompany } from '@/contexts/CompanyContext'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
+import { ConfirmActionDialog } from '@/components/common/ConfirmActionDialog'
 import * as docsService from '@/services/docsService'
 import { openAuthAttachment } from '@/lib/authFiles'
 
@@ -22,6 +26,7 @@ export function DocsInboxPanel() {
   const qc = useQueryClient()
   const navigate = useNavigate()
   const companyId = company?.id ?? ''
+  const [rejectNote, setRejectNote] = useState('')
 
   const itemsQ = useQuery({
     queryKey: ['docs-inbox', companyId],
@@ -51,9 +56,9 @@ export function DocsInboxPanel() {
   })
 
   const decide = useMutation({
-    mutationFn: (v: { id: string; accept: boolean; kindId?: string }) =>
+    mutationFn: (v: { id: string; accept: boolean; kindId?: string; note?: string }) =>
       docsService.decideInbox(companyId, v.id, {
-        accept: v.accept, kind_id: v.kindId ?? null,
+        accept: v.accept, kind_id: v.kindId ?? null, note: v.note ?? null,
       }),
     onSuccess: (r) => {
       qc.invalidateQueries({ queryKey: ['docs-inbox', companyId] })
@@ -77,7 +82,8 @@ export function DocsInboxPanel() {
         <div>
           <h1 className="text-base font-semibold">Приём из корпоративной системы</h1>
           <p className="text-xs text-muted-foreground">
-            {itemsQ.isLoading ? 'Загрузка…' : `Ждут решения: ${items.length}`}
+            {itemsQ.isLoading ? 'Загрузка…'
+              : itemsQ.isError ? 'Количество не определено' : `Ждут решения: ${items.length}`}
           </p>
         </div>
         <Button size="sm" variant="outline" onClick={() => scan.mutate()}
@@ -93,7 +99,7 @@ export function DocsInboxPanel() {
               <AlertCircle className="h-4 w-4" />Приём из СЭД недоступен
             </div>
             <p className="mt-1 text-xs text-muted-foreground">
-              {(itemsQ.error as Error).message}
+              Не удалось получить список входящих файлов. Проверьте подключение и повторите запрос.
             </p>
           </div>
           <Button size="sm" variant="outline" onClick={() => itemsQ.refetch()}>
@@ -170,10 +176,31 @@ export function DocsInboxPanel() {
                   }}>
                   Принять
                 </Button>
-                <Button size="sm" variant="ghost" disabled={decide.isPending}
-                  onClick={() => decide.mutate({ id: it.id, accept: false })}>
-                  Отклонить
-                </Button>
+                <ConfirmActionDialog
+                  trigger={(
+                    <Button size="sm" variant="ghost" disabled={decide.isPending}>
+                      Отклонить
+                    </Button>
+                  )}
+                  title={`Отклонить файл «${it.file_name}»?`}
+                  description="Файл останется в источнике, но исчезнет из очереди приёма. Причина сохранится вместе с решением."
+                  confirmLabel="Отклонить файл"
+                  destructive
+                  pending={decide.isPending}
+                  confirmDisabled={rejectNote.trim().length < 3}
+                  content={(
+                    <div className="space-y-1.5">
+                      <Label htmlFor={`inbox-reject-${it.id}`}>Причина отклонения</Label>
+                      <Textarea id={`inbox-reject-${it.id}`} rows={3} value={rejectNote}
+                        onChange={(event) => setRejectNote(event.target.value)}
+                        placeholder="Не менее трёх символов" />
+                    </div>
+                  )}
+                  onOpenChange={(open) => { if (!open) setRejectNote('') }}
+                  onConfirm={() => decide.mutateAsync({
+                    id: it.id, accept: false, note: rejectNote.trim(),
+                  })}
+                />
               </div>
             </div>
           </div>
