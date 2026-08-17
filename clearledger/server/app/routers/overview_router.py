@@ -13,7 +13,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import assert_company_member, get_current_user
+from app.auth import assert_company_product, get_current_user
 from app.database import get_db
 from app.models import User
 from app.services.overview_service import OverviewService
@@ -42,7 +42,7 @@ async def port_efficiency_report(
     """Качество использования портов: idle (занят без зарядки), фактическая
     мощность против номинала, dwell time. Занятость ≠ работа — на быстрых
     портах простой стоит дороже всего (см. services/port_efficiency.py)."""
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await assert_company_product(company_id, current_user, db, "sales")
     from app.services.port_efficiency import port_efficiency
 
     codes = [x.strip() for x in stations.split(",") if x.strip()] if stations else None
@@ -67,7 +67,7 @@ async def silent_stations_list(
 
     Разделены на «не работали никогда» (вопрос запуска) и «замолчали» (вопрос
     поломки или демонтажа): это разные задачи для разных служб."""
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await assert_company_product(company_id, current_user, db, "sales")
     from app.services.overview_insights import silent_stations
 
     codes = [x.strip() for x in stations.split(",") if x.strip()] if stations else None
@@ -91,7 +91,7 @@ async def charge_overview(
 ) -> dict[str, Any]:
     """Executive-сводка сети ЭЗС за период с дельтами к прошлому периоду.
     tz=local — профиль активности (часы/дни недели) по местному времени станций."""
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await assert_company_product(company_id, current_user, db, "sales")
     codes = [x.strip() for x in stations.split(",") if x.strip()] if stations else None
     regs = [x.strip() for x in regions.split(",") if x.strip()] if regions else None
     # today передаём явно → входит в ключ кэша: run_rate пересчитывается при смене
@@ -112,7 +112,7 @@ async def station_metrics(
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Агрегаты сессий по станции (location_id) за период — для раскраски/размера точек на карте."""
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await assert_company_product(company_id, current_user, db, "sales")
     codes = [x.strip() for x in stations.split(",") if x.strip()] if stations else None
     regs = [x.strip() for x in regions.split(",") if x.strip()] if regions else None
     return await OverviewService(db).station_metrics(
@@ -132,7 +132,7 @@ async def owners_breakdown(
 ) -> dict[str, Any]:
     """Парк по владельцу: свои (РусГидро) vs партнёрские (СНК) — станции, простой,
     сессии, надёжность за период."""
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await assert_company_product(company_id, current_user, db, "sales")
     codes = [x.strip() for x in stations.split(",") if x.strip()] if stations else None
     regs = [x.strip() for x in regions.split(",") if x.strip()] if regions else None
     return await OverviewService(db).owners_breakdown(
@@ -152,7 +152,7 @@ async def speed_breakdown(
 ) -> dict[str, Any]:
     """Парк по скорости: медленные (AC) vs быстрые (DC) — станции, простой,
     сессии, надёжность за период."""
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await assert_company_product(company_id, current_user, db, "sales")
     codes = [x.strip() for x in stations.split(",") if x.strip()] if stations else None
     regs = [x.strip() for x in regions.split(",") if x.strip()] if regions else None
     return await OverviewService(db).speed_breakdown(
@@ -170,7 +170,7 @@ async def speed_stations_list(
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Список станций одной скорости (fast|slow|unknown) — по клику с карточки «Парк по скорости»."""
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await assert_company_product(company_id, current_user, db, "sales")
     return await OverviewService(db).speed_stations(
         cid, _d(date_from, "date_from"), _d(date_to, "date_to"), cls)
 
@@ -193,7 +193,7 @@ async def abc_xyz_report(
 ) -> dict[str, Any]:
     """ABC-XYZ классификация станций: вклад в результат (ABC) × стабильность
     спроса (XYZ). measure=amount|energy, bucket=week|month (для XYZ)."""
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await assert_company_product(company_id, current_user, db, "sales")
     from app.services.station_abcxyz import station_abc_xyz
 
     codes = [x.strip() for x in stations.split(",") if x.strip()] if stations else None
@@ -215,6 +215,6 @@ async def owner_stations_list(
 ) -> dict[str, Any]:
     """Список станций одного владельца (own|partner|unknown) с их работой за
     период — раскрывается по клику с карточки «Парк по владельцу»."""
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await assert_company_product(company_id, current_user, db, "sales")
     return await OverviewService(db).owner_stations(
         cid, _d(date_from, "date_from"), _d(date_to, "date_to"), cls)

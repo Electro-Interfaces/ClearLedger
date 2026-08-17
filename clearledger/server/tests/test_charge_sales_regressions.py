@@ -8,10 +8,11 @@ from sqlalchemy import select
 from sqlalchemy.dialects import postgresql
 
 import app.auth as auth
-from app.routers import analytics_router
+from app.routers import analytics_router, overview_router
 from app.services.analytics_service import AnalyticsService
 from app.services.charge_payment_state import effective_paid_at
 from app.services.charge_reconciliation import _WHERE
+from app.services.overview_service import OverviewService
 
 
 def test_effective_payment_uses_confirmed_bank_transaction():
@@ -75,3 +76,21 @@ async def test_sales_registry_route_requires_sales_product(monkeypatch):
 
     assert filter_mock.await_args.args[-1] == "sales"
     rows_mock.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_sales_overview_route_requires_sales_product(monkeypatch):
+    company_id = uuid4()
+    access_mock = AsyncMock(return_value=company_id)
+    overview_mock = AsyncMock(return_value={"meta": {}})
+    monkeypatch.setattr(overview_router, "assert_company_product", access_mock)
+    monkeypatch.setattr(OverviewService, "overview", overview_mock)
+
+    await overview_router.charge_overview(
+        company_id="rushydro", date_from="2026-08-01", date_to="2026-08-17",
+        compare="prev", stations=None, regions=None, tz="msk",
+        db=SimpleNamespace(), current_user=SimpleNamespace(),
+    )
+
+    assert access_mock.await_args.args[-1] == "sales"
+    overview_mock.assert_awaited_once()
