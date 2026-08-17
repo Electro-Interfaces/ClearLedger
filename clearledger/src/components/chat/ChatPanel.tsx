@@ -43,7 +43,7 @@ import {
   ContextMenuTrigger, ContextMenuSeparator,
 } from '@/components/ui/context-menu'
 import {
-  getUserColor, getDateLabel, formatTime, computeGrouping, bubbleRadius,
+  getUserColor, getDateLabel, formatTime, formatFullDateTime, computeGrouping, bubbleRadius,
   type GroupingInfo,
 } from './telegram-helpers'
 import { AuthImage, AuthVideo, AuthFileChip } from './AuthMedia'
@@ -1660,6 +1660,8 @@ function ChatBubble({
   const isVideo = message.fileUrl && !message.isDeleted
     && (message.type === 'video' || /\.(mp4|webm|mov|m4v)$/i.test(message.fileName || message.fileUrl))
   const isEditing = editingId === message.id
+  const fullTimestamp = formatFullDateTime(message.createdAt)
+  const timestampLabel = `${message.userName || (isOwn ? 'Вы' : 'Пользователь')} · ${fullTimestamp}`
 
   // Служебная запись ленты — не чья-то реплика, а событие группы: кто пришёл и
   // чьими стараниями. Поэтому без пузыря и без стороны — плашка по центру.
@@ -1899,7 +1901,9 @@ function ChatBubble({
             </div>
           )}
 
-          <span className={cn('absolute bottom-1 right-2 flex items-center gap-0.5 text-[10px]', isOwn ? 'text-primary-foreground/80' : 'text-muted-foreground')}>
+          <span title={timestampLabel} aria-label={timestampLabel}
+            className={cn('absolute bottom-1 right-2 flex items-center gap-0.5 text-[11px] font-medium tabular-nums',
+              isOwn ? 'text-primary-foreground/90' : 'text-foreground/60')}>
             {message.isEdited && <span className="text-[10px] opacity-70">ред.</span>}
             {formatTime(message.createdAt)}
             {isOwn && (
@@ -1916,9 +1920,15 @@ function ChatBubble({
 }
 
 function DateChip({ iso }: { iso: string }) {
+  const label = getDateLabel(iso)
+  const fullDate = formatFullDateTime(iso)
   return (
-    <div className="my-2 flex justify-center">
-      <span className="rounded-full bg-muted px-3 py-1 text-[11px] text-muted-foreground">{getDateLabel(iso)}</span>
+    <div role="separator" aria-label={`Дата переписки: ${fullDate}`}
+      className="pointer-events-none sticky top-1 z-20 my-2 flex justify-center">
+      <time dateTime={iso} title={fullDate}
+        className="rounded-full border border-border/70 bg-background/95 px-3 py-1 text-[11px] font-medium text-foreground/75 shadow-sm backdrop-blur-sm">
+        {label}
+      </time>
     </div>
   )
 }

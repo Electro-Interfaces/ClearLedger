@@ -19,21 +19,47 @@ export function getUserColor(userId: string): string {
   return NAME_COLORS[Math.abs(hash) % NAME_COLORS.length]
 }
 
-/** Лейбл даты: «Сегодня», «Вчера», «15 февраля» */
+function isSameLocalDay(a: Date, b: Date): boolean {
+  return a.getFullYear() === b.getFullYear()
+    && a.getMonth() === b.getMonth()
+    && a.getDate() === b.getDate()
+}
+
+/** Лейбл даты: «Сегодня», «Вчера», «15 февраля», «15 февраля 2025 г.» */
 export function getDateLabel(dateStr: string): string {
   const d = new Date(dateStr)
   const now = new Date()
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-  const msgDay = new Date(d.getFullYear(), d.getMonth(), d.getDate())
-  const diff = today.getTime() - msgDay.getTime()
-  if (diff === 0) return 'Сегодня'
-  if (diff === 86400000) return 'Вчера'
-  return d.toLocaleDateString('ru', { day: 'numeric', month: 'long' })
+  if (Number.isNaN(d.getTime())) return 'Дата неизвестна'
+  if (isSameLocalDay(d, now)) return 'Сегодня'
+  const yesterday = new Date(now)
+  yesterday.setDate(now.getDate() - 1)
+  if (isSameLocalDay(d, yesterday)) return 'Вчера'
+  return d.toLocaleDateString('ru-RU', {
+    day: 'numeric',
+    month: 'long',
+    year: d.getFullYear() === now.getFullYear() ? undefined : 'numeric',
+  })
 }
 
 /** Форматировать время HH:MM */
 export function formatTime(dateStr: string): string {
-  return new Date(dateStr).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' })
+  const d = new Date(dateStr)
+  if (Number.isNaN(d.getTime())) return '—'
+  return d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
+}
+
+/** Полная дата для подсказки и скринридера. */
+export function formatFullDateTime(dateStr: string): string {
+  const d = new Date(dateStr)
+  if (Number.isNaN(d.getTime())) return 'Дата и время неизвестны'
+  return d.toLocaleString('ru-RU', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
 }
 
 export interface GroupingInfo {
