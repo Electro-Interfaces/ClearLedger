@@ -2832,6 +2832,13 @@ async def create_all() -> None:
             "INTEGER NOT NULL DEFAULT 30",
             "ALTER TABLE doc_exchange_targets ADD COLUMN IF NOT EXISTS scan_cursor VARCHAR(500)",
             # Повторно прочитанное письмо не должно завести вторую карточку.
+            # Уже возникшие карточки не удаляем: канонической остаётся первая,
+            # остальные получают явный legacy-ключ и сохраняют весь аудит.
+            "WITH ranked AS (SELECT id, row_number() OVER (PARTITION BY company_id, "
+            "source_ref ORDER BY created_at, id) AS position FROM doc_cards WHERE "
+            "source = 'mail' AND source_ref IS NOT NULL) UPDATE doc_cards AS card SET "
+            "source_ref = left(card.source_ref, 145) || '#legacy-duplicate-' || "
+            "card.id::text FROM ranked WHERE ranked.id = card.id AND ranked.position > 1",
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_doc_cards_mail_source "
             "ON doc_cards (company_id, source_ref) WHERE source = 'mail' "
             "AND source_ref IS NOT NULL",
@@ -2839,13 +2846,15 @@ async def create_all() -> None:
             "ALTER TABLE mail_messages ADD COLUMN IF NOT EXISTS route_attempts "
             "INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE mail_messages ADD COLUMN IF NOT EXISTS route_attempted_at TIMESTAMPTZ",
-            # Старые конкурентные дубли сохраняем, но явно маркируем отдельным
-            # идентификатором; после этого инвариант БД создаётся безусловно.
+            # Старые конкурентные дубли сохраняем, но делаем нероутируемыми:
+            # повтор по новому суффиксному ключу не должен создать третью карточку.
             "WITH ranked AS (SELECT id, row_number() OVER (PARTITION BY company_id, "
             "message_id ORDER BY created_at, id) AS position FROM mail_messages "
             "WHERE message_id IS NOT NULL) UPDATE mail_messages AS message SET "
             "message_id = left(message.message_id, 430) || '#legacy-duplicate-' || "
-            "message.id::text FROM ranked WHERE ranked.id = message.id "
+            "message.id::text, status = 'rejected', routed_to = 'duplicate', "
+            "route_error = 'Повтор письма из прежней версии; повтор маршрута запрещён' "
+            "FROM ranked WHERE ranked.id = message.id "
             "AND ranked.position > 1",
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_mail_messages_company_msgid "
             "ON mail_messages (company_id, message_id) WHERE message_id IS NOT NULL",
