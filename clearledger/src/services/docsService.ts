@@ -34,6 +34,20 @@ export interface DocKindField {
   required: boolean
 }
 
+export interface DocSavedView {
+  id: string
+  name: string
+  query: Record<string, string>
+  shared: boolean
+  position?: number
+}
+
+export interface DocLabel {
+  id: string
+  name: string
+  color: string
+}
+
 export interface DocCard {
   id: string
   kind_id: string
@@ -702,6 +716,48 @@ export async function startApproval(
   companyId: string, id: string, route?: Array<Record<string, unknown>>,
 ): Promise<{ round: number; approvals: number; steps: number; snapshot_sha256: string }> {
   return post(`/api/docs/${id}/approval/start`, { company_id: companyId, route: route ?? null })
+}
+
+export async function listDocViews(companyId: string) {
+  return get<{ views: DocSavedView[] }>('/api/docs/views', { company_id: companyId })
+}
+
+export async function createDocView(data: {
+  companyId: string
+  name: string
+  query: Record<string, string>
+  shared?: boolean
+}) {
+  return post<DocSavedView>('/api/docs/views', {
+    company_id: data.companyId,
+    name: data.name,
+    query: data.query,
+    shared: data.shared ?? false,
+  })
+}
+
+export async function deleteDocView(id: string, companyId: string) {
+  return del(`/api/docs/views/${id}?company_id=${encodeURIComponent(companyId)}`)
+}
+
+export async function listDocLabels(companyId: string) {
+  return get<{ labels: DocLabel[] }>('/api/docs/labels', { company_id: companyId })
+}
+
+export async function createDocLabel(companyId: string, name: string, color = 'slate') {
+  return post<DocLabel>('/api/docs/labels', { company_id: companyId, name, color })
+}
+
+export async function deleteDocLabel(companyId: string, id: string) {
+  return del(`/api/docs/labels/${id}?company_id=${encodeURIComponent(companyId)}`)
+}
+
+export async function toggleDocLabel(
+  companyId: string, docId: string, labelId: string, on: boolean,
+) {
+  return post<{ on: boolean }>(`/api/docs/${docId}/labels`, {
+    company_id: companyId, label_id: labelId, on,
+  })
 }
 
 export async function cancelApproval(

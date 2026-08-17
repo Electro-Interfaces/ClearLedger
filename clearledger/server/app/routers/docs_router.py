@@ -46,7 +46,7 @@ from app.models import (
     DocExport, DocInboxItem, DocLabelLink,
     DocShareLink, UserSubstitution,
     DocVersion, Organization, SourceFile, Task, TaskEvent, TaskLabel,
-    TaskType, TaskWorkItem, User, UserCompany,
+    TaskType, TaskView, TaskWorkItem, User, UserCompany,
 )
 from app.routers import doc_share_router
 from app.services import (
@@ -2676,6 +2676,81 @@ async def verification_link(
 # для регламента. Отличается только область применения.
 
 
+
+class DocViewIn(BaseModel):
+    company_id: str
+    name: str = Field(min_length=1, max_length=120)
+    query: dict = Field(default_factory=dict)
+    shared: bool = False
+    position: int = 100
+
+
+@router.get("/views")
+async def list_doc_views(
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cid = await assert_company_product(company_id, current_user, db, "docs")
+    rows = (await db.execute(select(TaskView).where(
+        TaskView.company_id == cid,
+        TaskView.list_scope == "doc",
+        or_(TaskView.user_id.is_(None), TaskView.user_id == current_user.id))
+        .order_by(TaskView.position, TaskView.name))).scalars().all()
+    return {"views": [{
+        "id": str(view.id), "name": view.name, "query": view.query or {},
+        "shared": view.user_id is None, "position": view.position,
+    } for view in rows]}
+
+
+@router.post("/views", status_code=status.HTTP_201_CREATED)
+async def create_doc_view(
+    payload: DocViewIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cid = await assert_company_product(payload.company_id, current_user, db, "docs")
+    if payload.shared:
+        await _assert_admin(db, cid, current_user,
+                            "Общее представление создаёт администратор пространства")
+    view = TaskView(
+        company_id=cid,
+        user_id=None if payload.shared else current_user.id,
+        name=payload.name.strip(),
+        list_scope="doc",
+        query=payload.query or {},
+        position=payload.position,
+    )
+    db.add(view)
+    await db.commit()
+    await db.refresh(view)
+    return {
+        "id": str(view.id), "name": view.name, "query": view.query,
+        "shared": view.user_id is None, "position": view.position,
+    }
+
+
+@router.delete("/views/{view_id}")
+async def delete_doc_view(
+    view_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cid = await assert_company_product(company_id, current_user, db, "docs")
+    view = await db.get(TaskView, _uuid_or_400(view_id, "view_id"))
+    if view is None or view.company_id != cid or view.list_scope != "doc":
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Представление не найдено")
+    if view.user_id is None:
+        await _assert_admin(db, cid, current_user,
+                            "Общее представление удаляет администратор пространства")
+    elif view.user_id != current_user.id and not current_user.is_superadmin:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Это чужое представление")
+    await db.delete(view)
+    await db.commit()
+    return {"deleted": view_id}
+
+
 @router.get("/labels")
 async def list_doc_labels(
     company_id: str = Query(...),
@@ -2712,6 +2787,24 @@ async def create_doc_label(
     await db.commit()
     await db.refresh(row)
     return {"id": str(row.id), "name": row.name, "color": row.color}
+
+
+@router.delete("/labels/{label_id}")
+async def delete_doc_label(
+    label_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cid = await assert_company_product(company_id, current_user, db, "docs")
+    await _assert_admin(db, cid, current_user,
+                        "Метки пространства удаляет администратор")
+    row = await db.get(TaskLabel, _uuid_or_400(label_id, "label_id"))
+    if row is None or row.company_id != cid:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Метка не найдена")
+    await db.delete(row)
+    await db.commit()
+    return {"deleted": label_id}
 
 
 class DocLabelIn(BaseModel):

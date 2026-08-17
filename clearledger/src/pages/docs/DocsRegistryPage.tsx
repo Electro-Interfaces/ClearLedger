@@ -9,7 +9,8 @@ import { useDeferredValue, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  ChevronLeft, ChevronRight, FilePlus2, RotateCw, Search, SlidersHorizontal, X,
+  BookmarkPlus, ChevronLeft, ChevronRight, FilePlus2, RotateCw, Search,
+  SlidersHorizontal, X,
 } from 'lucide-react'
 import { useCompany } from '@/contexts/CompanyContext'
 import { Button } from '@/components/ui/button'
@@ -35,7 +36,7 @@ const FILTER_KEYS = ['q', 'status', 'kind', 'date_from', 'date_to'] as const
 const PAGE_SIZE = 100
 
 export function DocsRegistryPage() {
-  const { company } = useCompany()
+  const { company, isCompanyAdmin } = useCompany()
   const qc = useQueryClient()
   const [params, setParams] = useSearchParams()
   const view = useDocsView('/docs')
@@ -53,6 +54,14 @@ export function DocsRegistryPage() {
   const pageValue = Number(params.get('page'))
   const page = Number.isSafeInteger(pageValue) && pageValue >= 1 ? pageValue : 1
   const hasFilters = FILTER_KEYS.some((key) => params.has(key))
+  const savedQuery = useMemo(() => {
+    const result: Record<string, string> = { view }
+    for (const key of FILTER_KEYS) {
+      const value = params.get(key)
+      if (value) result[key] = value
+    }
+    return result
+  }, [params, view])
   const filters = useMemo(() => ({
     ...(VIEW_FILTER[view] ?? {}),
     q: deferredQ || undefined,
@@ -295,6 +304,8 @@ export function DocsRegistryPage() {
               <X className="mr-1 h-3.5 w-3.5" />Сбросить
             </Button>
           )}
+          <SaveDocView companyId={companyId} query={savedQuery}
+            canShare={isCompanyAdmin} />
           {deferredQ && (
             <span className="text-xs text-muted-foreground">
               Поиск включает распознанный текст файлов
@@ -372,6 +383,66 @@ export function DocsRegistryPage() {
         )}
       </div>
     </>
+  )
+}
+
+function SaveDocView({ companyId, query, canShare }: {
+  companyId: string
+  query: Record<string, string>
+  canShare: boolean
+}) {
+  const qc = useQueryClient()
+  const [open, setOpen] = useState(false)
+  const [name, setName] = useState('')
+  const [shared, setShared] = useState(false)
+  const save = useMutation({
+    mutationFn: () => docsService.createDocView({
+      companyId, name: name.trim(), query, shared: canShare && shared,
+    }),
+    onSuccess: () => {
+      toast.success('Отбор сохранён в «Представлениях»')
+      setOpen(false)
+      setName('')
+      setShared(false)
+      qc.invalidateQueries({ queryKey: ['doc-views', companyId] })
+    },
+    onError: () => toast.error('Не удалось сохранить отбор. Повторите попытку.'),
+  })
+
+  if (!open) {
+    return (
+      <Button type="button" size="sm" variant="outline" className="h-8"
+        onClick={() => setOpen(true)}>
+        <BookmarkPlus className="mr-1.5 h-3.5 w-3.5" />Сохранить отбор
+      </Button>
+    )
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-md border border-border p-1.5">
+      <Input value={name} onChange={(event) => setName(event.target.value)} autoFocus
+        aria-label="Название представления" placeholder="Название отбора"
+        className="h-8 w-48 text-xs" maxLength={120}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' && name.trim()) save.mutate()
+          if (event.key === 'Escape') setOpen(false)
+        }} />
+      {canShare && (
+        <label className="flex min-h-8 items-center gap-2 px-1 text-xs text-muted-foreground">
+          <input type="checkbox" checked={shared}
+            onChange={(event) => setShared(event.target.checked)} />
+          Для компании
+        </label>
+      )}
+      <Button type="button" size="sm" className="h-8"
+        disabled={!name.trim() || save.isPending} onClick={() => save.mutate()}>
+        Сохранить
+      </Button>
+      <Button type="button" size="sm" variant="ghost" className="h-8 px-2"
+        aria-label="Отменить сохранение отбора" onClick={() => setOpen(false)}>
+        <X className="h-3.5 w-3.5" />
+      </Button>
+    </div>
   )
 }
 

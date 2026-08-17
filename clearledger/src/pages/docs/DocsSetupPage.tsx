@@ -17,6 +17,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { toast } from 'sonner'
+import { Trash2 } from 'lucide-react'
 import * as docsService from '@/services/docsService'
 import * as tasksService from '@/services/tasksService'
 import { DOC_FAMILY } from '@/services/docsService'
@@ -72,6 +73,10 @@ export function DocsSetupPage() {
 
   if (view === 'cases') {
     return <Cases companyId={companyId} />
+  }
+
+  if (view === 'labels') {
+    return <Labels companyId={companyId} />
   }
 
   if (view === 'counters') {
@@ -148,6 +153,135 @@ export function DocsSetupPage() {
             служебная записка.
           </div>
         )}
+      </Card>
+    </div>
+  )
+}
+
+const LABEL_COLORS = [
+  { value: 'slate', label: 'Серый', className: 'bg-slate-500' },
+  { value: 'blue', label: 'Синий', className: 'bg-blue-500' },
+  { value: 'green', label: 'Зелёный', className: 'bg-emerald-500' },
+  { value: 'amber', label: 'Жёлтый', className: 'bg-amber-500' },
+  { value: 'red', label: 'Красный', className: 'bg-red-500' },
+] as const
+
+function Labels({ companyId }: { companyId: string }) {
+  const qc = useQueryClient()
+  const [name, setName] = useState('')
+  const [color, setColor] = useState('slate')
+  const labelsQ = useQuery({
+    queryKey: ['doc-labels', companyId],
+    queryFn: () => docsService.listDocLabels(companyId),
+    enabled: !!companyId,
+  })
+  const create = useMutation({
+    mutationFn: () => docsService.createDocLabel(companyId, name.trim(), color),
+    onSuccess: () => {
+      toast.success('Метка добавлена')
+      setName('')
+      qc.invalidateQueries({ queryKey: ['doc-labels', companyId] })
+      qc.invalidateQueries({ queryKey: ['task-labels', companyId] })
+    },
+    onError: () => toast.error('Не удалось добавить метку. Повторите попытку.'),
+  })
+  const remove = useMutation({
+    mutationFn: (id: string) => docsService.deleteDocLabel(companyId, id),
+    onSuccess: () => {
+      toast.success('Метка удалена из документов и поручений')
+      qc.invalidateQueries({ queryKey: ['doc-labels', companyId] })
+      qc.invalidateQueries({ queryKey: ['task-labels', companyId] })
+    },
+    onError: () => toast.error('Не удалось удалить метку. Повторите попытку.'),
+  })
+  const labels = labelsQ.data?.labels ?? []
+
+  return (
+    <div className="space-y-3 px-4 py-4">
+      <div>
+        <h1 className="text-base font-semibold">Метки</h1>
+        <p className="text-xs text-muted-foreground">
+          Справочник общий для документов и поручений: одинаковая метка означает одно и то же.
+        </p>
+      </div>
+
+      {labelsQ.isError && (
+        <Card role="alert" className="flex flex-wrap items-center justify-between gap-3 p-4">
+          <span className="text-sm">Метки не загрузились. Справочник не изменён.</span>
+          <Button size="sm" variant="outline" onClick={() => labelsQ.refetch()}>Повторить</Button>
+        </Card>
+      )}
+
+      {!labelsQ.isError && (
+        <Card className="divide-y divide-border/60">
+          {labelsQ.isLoading && (
+            <div className="px-3 py-6 text-center text-sm text-muted-foreground">Загрузка меток…</div>
+          )}
+          {labels.map((label) => {
+            const tone = LABEL_COLORS.find((item) => item.value === label.color)
+              ?? LABEL_COLORS[0]
+            return (
+              <div key={label.id} className="flex items-center justify-between gap-3 px-3 py-2.5">
+                <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
+                  <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${tone.className}`}
+                    aria-hidden="true" />
+                  <span className="truncate">{label.name}</span>
+                  <span className="sr-only">Цвет: {tone.label}</span>
+                </div>
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button size="sm" variant="ghost" aria-label={`Удалить метку «${label.name}»`}>
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Удалить метку «{label.name}»?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        Она будет снята со всех документов и поручений. История самих объектов сохранится.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Не удалять</AlertDialogCancel>
+                      <AlertDialogAction onClick={() => remove.mutate(label.id)}>
+                        Удалить метку
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              </div>
+            )
+          })}
+          {labelsQ.isSuccess && labels.length === 0 && (
+            <div className="px-3 py-6 text-center text-sm text-muted-foreground">Меток пока нет</div>
+          )}
+        </Card>
+      )}
+
+      <Card className="space-y-3 p-4">
+        <div className="text-sm font-medium">Новая метка</div>
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="min-w-56 flex-1 space-y-1">
+            <Label htmlFor="doc-label-name" className="text-xs">Название</Label>
+            <Input id="doc-label-name" value={name}
+              onChange={(event) => setName(event.target.value)} maxLength={60}
+              placeholder="Например, особый контроль" />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="doc-label-color" className="text-xs">Цвет</Label>
+            <select id="doc-label-color" value={color}
+              onChange={(event) => setColor(event.target.value)}
+              className="h-9 rounded-md border border-input bg-background px-2 text-sm">
+              {LABEL_COLORS.map((item) => (
+                <option key={item.value} value={item.value}>{item.label}</option>
+              ))}
+            </select>
+          </div>
+          <Button size="sm" disabled={!name.trim() || create.isPending}
+            onClick={() => create.mutate()}>
+            Добавить
+          </Button>
+        </div>
       </Card>
     </div>
   )

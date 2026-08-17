@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 /**
  * Регламент «Задач»: сохранённые представления, шаблоны и расписания.
  *
@@ -11,7 +12,7 @@
  */
 import { useState } from 'react'
 import { useCompany } from '@/contexts/CompanyContext'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { CalendarClock, Loader2, Play, Plus, Trash2, Users2 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -25,6 +26,7 @@ import {
 import { QueryError } from '@/components/common/QueryError'
 import { cn } from '@/lib/utils'
 import * as tasksService from '@/services/tasksService'
+import * as docsService from '@/services/docsService'
 import { PRIORITY_LABEL, dtT } from '@/components/tasks/taskWords'
 
 const WEEKDAYS = ['понедельник', 'вторник', 'среду', 'четверг', 'пятницу', 'субботу', 'воскресенье']
@@ -39,16 +41,25 @@ export function ruleText(rule: { mode?: string; at?: string; weekday?: number; d
 
 /* ── Представления ───────────────────────────────────────────────────── */
 
-export function ViewsSection({ companyId }: { companyId: string }) {
+export function ViewsSection({ companyId, scope = 'task' }: {
+  companyId: string
+  scope?: 'task' | 'doc'
+}) {
   const qc = useQueryClient()
   const navigate = useNavigate()
   const q = useQuery({
-    queryKey: ['task-views', companyId],
-    queryFn: () => tasksService.listTaskViews(companyId),
+    queryKey: [scope === 'doc' ? 'doc-views' : 'task-views', companyId],
+    queryFn: () => scope === 'doc'
+      ? docsService.listDocViews(companyId)
+      : tasksService.listTaskViews(companyId),
   })
   const drop = useMutation({
-    mutationFn: (id: string) => tasksService.deleteTaskView(id, companyId),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['task-views'] }),
+    mutationFn: (id: string) => scope === 'doc'
+      ? docsService.deleteDocView(id, companyId)
+      : tasksService.deleteTaskView(id, companyId),
+    onSuccess: () => qc.invalidateQueries({
+      queryKey: [scope === 'doc' ? 'doc-views' : 'task-views'],
+    }),
     onError: (e) => toast.error((e as Error).message),
   })
   const views = q.data?.views ?? []
@@ -81,8 +92,8 @@ export function ViewsSection({ companyId }: { companyId: string }) {
             <div key={v.id}
               className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm">
               <button type="button"
-                onClick={() => navigate(`/tasks/company?${new URLSearchParams({
-                  view: 'registry', ...v.query,
+                onClick={() => navigate(`${scope === 'doc' ? '/docs' : '/tasks/company'}?${new URLSearchParams({
+                  view: scope === 'doc' ? 'all' : 'registry', ...v.query,
                 }).toString()}`)}
                 className="flex-1 text-left font-medium hover:underline">
                 {v.name}
@@ -463,11 +474,9 @@ export function RecurrencesSection({ companyId }: { companyId: string }) {
  */
 export function TasksRegulation() {
   const { companyId } = useCompany()
-  return (
-    <div className="space-y-6 p-4 lg:p-6">
-      <ViewsSection companyId={companyId} />
-      <TemplatesSection companyId={companyId} />
-      <RecurrencesSection companyId={companyId} />
-    </div>
-  )
+  const [params] = useSearchParams()
+  const view = params.get('view') ?? 'templates'
+  if (view === 'views') return <ViewsSection companyId={companyId} scope="doc" />
+  if (view === 'recurrences') return <RecurrencesSection companyId={companyId} />
+  return <TemplatesSection companyId={companyId} />
 }
