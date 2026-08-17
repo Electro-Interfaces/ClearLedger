@@ -98,6 +98,7 @@ export interface DocCard {
   approval_status: string
   approval_round: number
   created_at: string | null
+  labels?: DocLabel[]
 }
 
 export interface DocVersion {
@@ -261,6 +262,7 @@ export interface DocDetails extends DocCard {
   relations: DocRelation[]
   approval: DocApprovalState
   acquaints: DocAcquaint[]
+  labels: DocLabel[]
 }
 
 export type DocPermission = 'read' | 'edit' | 'approve' | 'sign' | 'download'
@@ -289,6 +291,7 @@ export interface DocFilters {
   direction?: string
   status?: string
   kind_id?: string
+  label_id?: string
   counterparty_id?: string
   responsible_id?: string
   object_ids?: string

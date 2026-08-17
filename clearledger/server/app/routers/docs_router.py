@@ -1624,6 +1624,7 @@ async def list_docs(
     direction: str | None = Query(None),
     status_: str | None = Query(None, alias="status"),
     kind_id: str | None = Query(None),
+    label_id: str | None = Query(None),
     counterparty_id: str | None = Query(None),
     responsible_id: str | None = Query(None),
     object_ids: str | None = Query(None, max_length=5000),
@@ -1700,7 +1701,25 @@ async def list_docs(
     organizations = {str(key): value for key, value in (await db.execute(select(
         Organization.id, Organization.name).where(
         Organization.company_id == cid))).all()}
-    return {"docs": [_card_out(d, names, organizations) for d in rows],
+    label_rows = []
+    if rows:
+        label_rows = (await db.execute(select(
+            DocLabelLink.doc_id, TaskLabel.id, TaskLabel.name, TaskLabel.color,
+        ).join(TaskLabel, TaskLabel.id == DocLabelLink.label_id).where(
+            DocLabelLink.doc_id.in_([row.id for row in rows]),
+            TaskLabel.company_id == cid,
+        ).order_by(TaskLabel.name))).all()
+    labels_by_doc: dict[uuid.UUID, list[dict[str, str]]] = {}
+    for doc_id_value, label_id_value, label_name, label_color in label_rows:
+        labels_by_doc.setdefault(doc_id_value, []).append({
+            "id": str(label_id_value), "name": label_name, "color": label_color,
+        })
+    docs = []
+    for row in rows:
+        card = _card_out(row, names, organizations)
+        card["labels"] = labels_by_doc.get(row.id, [])
+        docs.append(card)
+    return {"docs": docs,
             "count": total or 0}
 
 
@@ -2786,7 +2805,7 @@ class DocViewIn(BaseModel):
     position: int = 100
 
 
-_DOC_VIEW_KEYS = {"view", "q", "status", "kind", "date_from", "date_to", "f"}
+_DOC_VIEW_KEYS = {"view", "q", "status", "kind", "label", "date_from", "date_to", "f"}
 
 
 def _clean_doc_view_query(value: dict) -> dict[str, str]:
@@ -3150,6 +3169,12 @@ async def docs_board(
         stmt = stmt.where(DocCard.family == family)
     if kind_id:
         stmt = stmt.where(DocCard.kind_id == _uuid_or_400(kind_id, "kind_id"))
+    if label_id:
+        selected_label = _uuid_or_400(label_id, "label_id")
+        stmt = stmt.where(select(DocLabelLink.doc_id).where(
+            DocLabelLink.doc_id == DocCard.id,
+            DocLabelLink.label_id == selected_label,
+        ).exists())
     if pending_only or overdue_only or assignee_id:
         active_docs = select(DocApproval.doc_id).where(
             DocApproval.company_id == cid,
@@ -4340,6 +4365,12 @@ async def get_doc(
                                .order_by(DocEvent.created_at.desc()).limit(200))).scalars().all()
     relations = (await db.execute(select(DocRelation).where(
         DocRelation.doc_id == d.id))).scalars().all()
+    labels = (await db.execute(select(TaskLabel).join(
+        DocLabelLink, DocLabelLink.label_id == TaskLabel.id,
+    ).where(
+        DocLabelLink.doc_id == d.id,
+        TaskLabel.company_id == cid,
+    ).order_by(TaskLabel.name))).scalars().all()
     acquaints = (await db.execute(select(DocAcquaint).where(
         DocAcquaint.doc_id == d.id))).scalars().all()
     approvals = (await db.execute(select(DocApproval).where(
@@ -4401,6 +4432,8 @@ async def get_doc(
             "id": str(r.id), "kind": r.kind, "target_ref": r.target_ref,
             "target_doc_id": str(r.target_doc_id) if r.target_doc_id else None,
         } for r in relations],
+        "labels": [{"id": str(label.id), "name": label.name, "color": label.color}
+                   for label in labels],
         # Лист ознакомления: приказ, с которым никого не ознакомили, не работает.
         "acquaints": [{
             "id": str(a.id), "user_id": str(a.user_id), "status": a.status,

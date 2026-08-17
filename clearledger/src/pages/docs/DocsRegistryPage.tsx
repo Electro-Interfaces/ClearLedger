@@ -33,7 +33,7 @@ const VIEW_FILTER: Record<string, docsService.DocFilters> = {
   all: {},
 }
 
-const FILTER_KEYS = ['q', 'status', 'kind', 'date_from', 'date_to'] as const
+const FILTER_KEYS = ['q', 'status', 'kind', 'label', 'date_from', 'date_to'] as const
 const PAGE_SIZE = 100
 
 export function DocsRegistryPage() {
@@ -51,6 +51,7 @@ export function DocsRegistryPage() {
   const deferredQ = useDeferredValue(q.trim())
   const statusFilter = params.get('status') ?? ''
   const kindFilter = params.get('kind') ?? ''
+  const labelFilter = params.get('label') ?? ''
   const dateFrom = params.get('date_from') ?? ''
   const dateTo = params.get('date_to') ?? ''
   const effectiveDateFrom = dateFrom || scope.period.from
@@ -75,12 +76,13 @@ export function DocsRegistryPage() {
     q: deferredQ || undefined,
     status: statusFilter || undefined,
     kind_id: kindFilter || undefined,
+    label_id: labelFilter || undefined,
     date_from: effectiveDateFrom,
     date_to: effectiveDateTo,
     object_ids: scope.objectFilter,
     limit: PAGE_SIZE,
     offset: (page - 1) * PAGE_SIZE,
-  }), [deferredQ, effectiveDateFrom, effectiveDateTo, kindFilter, page,
+  }), [deferredQ, effectiveDateFrom, effectiveDateTo, kindFilter, labelFilter, page,
     scope.objectFilter, statusFilter, view])
 
   const listQ = useQuery({
@@ -91,6 +93,12 @@ export function DocsRegistryPage() {
   const kindsQ = useQuery({
     queryKey: ['doc-kinds', companyId],
     queryFn: () => docsService.listKinds(companyId),
+    enabled: !!companyId,
+    staleTime: 5 * 60 * 1000,
+  })
+  const labelsQ = useQuery({
+    queryKey: ['doc-labels', companyId],
+    queryFn: () => docsService.listDocLabels(companyId),
     enabled: !!companyId,
     staleTime: 5 * 60 * 1000,
   })
@@ -181,9 +189,18 @@ export function DocsRegistryPage() {
               <span>{doc.kind_name}</span>
               {doc.organization_name && <span>{doc.organization_name}</span>}
             </div>
-            {doc.counterparty_name && (
-              <span className="truncate text-xs text-muted-foreground">{doc.counterparty_name}</span>
-            )}
+              {doc.counterparty_name && (
+                <span className="truncate text-xs text-muted-foreground">{doc.counterparty_name}</span>
+              )}
+              {(doc.labels ?? []).length > 0 && (
+                <span className="flex flex-wrap gap-1">
+                  {(doc.labels ?? []).map((label) => (
+                    <span key={label.id} className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                      {label.name}
+                    </span>
+                  ))}
+                </span>
+              )}
           </button>
         ))}
         {listQ.isSuccess && docs.length === 0 && (
@@ -302,6 +319,17 @@ export function DocsRegistryPage() {
             <option value="">Все виды</option>
             {kinds.map((kind) => <option key={kind.id} value={kind.id}>{kind.name}</option>)}
           </select>
+          <select value={labelFilter} onChange={(event) => setFilter('label', event.target.value)}
+            aria-label="Метка документа" disabled={labelsQ.isLoading}
+            className="h-8 max-w-56 rounded-md border border-input bg-background px-2 text-xs">
+            <option value="">Все метки</option>
+            {labelFilter && !(labelsQ.data?.labels ?? []).some((label) => label.id === labelFilter) && (
+              <option value={labelFilter}>Выбранная метка</option>
+            )}
+            {(labelsQ.data?.labels ?? []).map((label) => (
+              <option key={label.id} value={label.id}>{label.name}</option>
+            ))}
+          </select>
           <label className="flex items-center gap-1 text-xs text-muted-foreground"
             title="По умолчанию используется период рабочего контура">
             с
@@ -339,8 +367,8 @@ export function DocsRegistryPage() {
             <div>
               <div className="text-sm font-medium">Виды документов ещё не заведены</div>
               <div className="text-xs text-muted-foreground">
-                Вид задаёт правило нумерации: входящее письмо получит номер ВХ-2026-0001,
-                приказ — ПР-2026-0001.
+                Вид задаёт правило нумерации: входящее письмо получит номер ВХ-ГИГ-2026-0001,
+                приказ — ПР-ГИГ-2026-0001.
               </div>
             </div>
             <Button size="sm" variant="outline" onClick={() => starter.mutate()}

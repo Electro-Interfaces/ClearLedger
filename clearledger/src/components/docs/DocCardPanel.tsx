@@ -8,7 +8,7 @@ import { useId, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Archive, ArrowLeft, Ban, CheckCheck, FileCheck2, FileUp, KeyRound, Link2,
-  ListChecks, LockKeyhole, Printer, Send, ShieldCheck, Stamp, Workflow,
+  ListChecks, LockKeyhole, Printer, Send, ShieldCheck, Stamp, Tag, Workflow,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { ConfirmActionDialog } from '@/components/common/ConfirmActionDialog'
@@ -17,6 +17,8 @@ import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import * as docsService from '@/services/docsService'
 import { DOC_STATUS } from '@/services/docsService'
@@ -129,6 +131,10 @@ export function DocCardPanel({ id, companyId, onBack, onChanged, initialTab,
     enabled: q.isError,
     retry: false,
   })
+  const labelsQ = useQuery({
+    queryKey: ['doc-labels', companyId],
+    queryFn: () => docsService.listDocLabels(companyId),
+  })
   const emergencyAccess = useMutation({
     mutationFn: () => docsService.activateBreakGlass(companyId, id, {
       password: emergencyPassword,
@@ -237,6 +243,15 @@ export function DocCardPanel({ id, companyId, onBack, onChanged, initialTab,
       refresh()
     },
     onError: (e) => toast.error(`Дело не изменено: ${(e as Error).message}`),
+  })
+  const toggleLabel = useMutation({
+    mutationFn: ({ labelId, on }: { labelId: string; on: boolean }) =>
+      docsService.toggleDocLabel(companyId, id, labelId, on),
+    onSuccess: () => {
+      toast.success('Метки документа обновлены')
+      refresh()
+    },
+    onError: (error) => toast.error((error as Error).message),
   })
 
   if (q.isLoading) return <DocLoadState onBack={onBack} />
@@ -366,6 +381,48 @@ export function DocCardPanel({ id, companyId, onBack, onChanged, initialTab,
         </div>
 
         <Lifecycle status={d.status} />
+
+        <div className="flex flex-wrap items-center gap-2" aria-label="Метки документа">
+          {(d.labels ?? []).map((label) => <DocLabelPill key={label.id} label={label} />)}
+          {(d.labels ?? []).length === 0 && (
+            <span className="text-xs text-muted-foreground">Меток нет</span>
+          )}
+          {editable && (
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button type="button" size="sm" variant="outline" disabled={!labelsQ.isSuccess}>
+                  <Tag className="mr-1.5 h-3.5 w-3.5" />Изменить метки
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="start" className="w-72 space-y-2 p-3">
+                <div className="text-sm font-medium">Метки документа</div>
+                {(labelsQ.data?.labels ?? []).map((label) => {
+                  const checked = (d.labels ?? []).some((item) => item.id === label.id)
+                  return (
+                    <div key={label.id} className="flex min-h-9 items-center gap-2 rounded-md px-2 hover:bg-accent">
+                      <Checkbox id={`doc-label-${d.id}-${label.id}`} checked={checked}
+                        disabled={toggleLabel.isPending}
+                        onCheckedChange={(value) => toggleLabel.mutate({
+                          labelId: label.id, on: value === true,
+                        })} />
+                      <Label htmlFor={`doc-label-${d.id}-${label.id}`} className="cursor-pointer font-normal">
+                        <DocLabelPill label={label} />
+                      </Label>
+                    </div>
+                  )
+                })}
+                {labelsQ.data?.labels.length === 0 && (
+                  <p className="text-xs text-muted-foreground">Справочник пуст. Метки создаются в регламенте Трека.</p>
+                )}
+              </PopoverContent>
+            </Popover>
+          )}
+          {labelsQ.isError && editable && (
+            <Button type="button" size="sm" variant="ghost" onClick={() => labelsQ.refetch()}>
+              Метки не загрузились · повторить
+            </Button>
+          )}
+        </div>
 
         <div className="flex flex-wrap items-center gap-2">
           {actions.has('register') && (
@@ -740,6 +797,20 @@ export function DocCardPanel({ id, companyId, onBack, onChanged, initialTab,
       )}
     </div>
   )
+}
+
+const DOC_LABEL_TONE: Record<string, string> = {
+  slate: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200',
+  blue: 'bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-200',
+  green: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-200',
+  amber: 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200',
+  red: 'bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-200',
+}
+
+function DocLabelPill({ label }: { label: docsService.DocLabel }) {
+  return <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+    DOC_LABEL_TONE[label.color] ?? DOC_LABEL_TONE.slate
+  }`}>{label.name}</span>
 }
 
 function StatusPill({ status }: { status: string }) {
