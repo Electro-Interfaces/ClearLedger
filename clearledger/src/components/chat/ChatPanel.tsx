@@ -3017,7 +3017,6 @@ export function ChatPanel({ compact, scopeProduct }: {
               скрепку, и ровно так работают мессенджеры. */}
           <div ref={feedRef} className={cn('flex-1 overflow-y-auto', dragOver && 'ring-2 ring-inset ring-primary')}
             style={CHAT_SKINS[skin]?.style}
-            onScroll={() => { if (mobileActionsFor) setMobileActionsFor(null) }}
             onDragOver={(e) => { if (e.dataTransfer.types.includes('Files')) { e.preventDefault(); setDragOver(true) } }}
             onDragLeave={() => setDragOver(false)}
             onDrop={(e) => {
