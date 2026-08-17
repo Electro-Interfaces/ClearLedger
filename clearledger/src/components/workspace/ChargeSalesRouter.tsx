@@ -25,25 +25,27 @@ export function ChargeSalesRouter({ tab, companyId, dateFrom, dateTo }: {
   tab: string; companyId: string; dateFrom: string; dateTo: string
 }) {
   const p = { companyId, dateFrom, dateTo }
+  let content = null
   switch (tab) {
-    case 'cs_dashboard':   return <OverviewDashboardPanel {...p} />
-    case 'cs_map':         return <ChargeMapPanel {...p} />
-    case 'cs_trend':       return <ChargeTrendPanel {...p} />
-    case 'cs_abcxyz':      return <AbcXyzPanel {...p} />
-    case 'cs_list':        return <ChargeListPanel {...p} />
+    case 'cs_dashboard':   content = <OverviewDashboardPanel {...p} />; break
+    case 'cs_map':         content = <ChargeMapPanel {...p} />; break
+    case 'cs_trend':       content = <ChargeTrendPanel {...p} />; break
+    case 'cs_abcxyz':      content = <AbcXyzPanel {...p} />; break
+    case 'cs_list':        content = <ChargeListPanel {...p} />; break
     // Виды сессий — свои пункты раздела «Сессии»; `cs_sessions` — старая ссылка.
     case 'cs_breakdown':
     case 'cs_time':
     case 'cs_dynamics':
     case 'cs_compare':
     case 'cs_sessions':
-    case 'cs_reliability': return <SessionsPanel tab={tab} {...p} />
-    case 'cs_clients':     return <TariffsPanel {...p} />
-    case 'cs_corporate':   return <CorporatePanel {...p} />
-    case 'cs_retail':      return <RetailPanel {...p} />
-    case 'cs_segments':    return <RetailPanel {...p} group="segments" />
-    case 'cs_payments':    return <PaymentsPanel {...p} />
-    case 'cs_recon':       return <ChargeReconciliationPanel {...p} />
-    default:               return null
+    case 'cs_reliability': content = <SessionsPanel tab={tab} {...p} />; break
+    case 'cs_clients':     content = <TariffsPanel {...p} />; break
+    case 'cs_corporate':   content = <CorporatePanel {...p} />; break
+    case 'cs_retail':      content = <RetailPanel {...p} />; break
+    case 'cs_segments':    content = <RetailPanel {...p} group="segments" />; break
+    case 'cs_payments':    content = <PaymentsPanel {...p} />; break
+    case 'cs_recon':       content = <ChargeReconciliationPanel {...p} />; break
+    default:               break
   }
+  return <div data-sales-surface className="h-full min-w-0">{content}</div>
 }

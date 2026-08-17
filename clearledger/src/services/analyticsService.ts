@@ -161,6 +161,7 @@ export interface ChargeSessionLine {
   revenue_port: number      // ₽ на порт за период
   unpaid_pct: number        // % заправок с отпуском, но без отметки оплаты
   unpaid_sessions?: number  // их количество — тревога поднимается только если оно > 0
+  error_sessions?: number   // исход явно помечен как ошибка (не «всё кроме Complete»)
 }
 export interface ChargeSessionsResponse {
   period: { from: string; to: string }
@@ -470,13 +471,27 @@ export interface ChargeSessionRow {
   /** Начислено минус списано: расхождение сессии с эквайрингом. */
   pay_gap?: number
 }
-export interface ChargeSessionRowsResponse { rows: ChargeSessionRow[]; total: number; truncated: boolean }
+export interface ChargeSessionRowsResponse {
+  rows: ChargeSessionRow[]
+  total: number
+  truncated: boolean
+  totals: { energy_kwh: number; revenue: number }
+  facets: { regions: string[]; connectors: string[]; results: string[] }
+}
 export async function getChargeSessionRows(p: {
-  companyId: string; dateFrom: string; dateTo: string; limit?: number
+  companyId: string; dateFrom: string; dateTo: string; limit?: number; offset?: number
   stations?: string[]; regions?: string[]
+  userType?: string | null; region?: string | null; connector?: string | null
+  result?: string | null; paid?: 'paid' | 'unpaid' | null; search?: string | null
+  sort?: string; sortDir?: 'asc' | 'desc'
 }): Promise<ChargeSessionRowsResponse> {
   return get<ChargeSessionRowsResponse>('/api/analytics/charge-sessions/rows', {
-    company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo, limit: p.limit ?? 100000,
+    company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo,
+    limit: p.limit ?? 100000, offset: p.offset ?? 0,
+    user_type: p.userType || undefined, region: p.region || undefined,
+    connector: p.connector || undefined, result: p.result || undefined,
+    paid: p.paid || undefined, search: p.search || undefined,
+    sort: p.sort || undefined, sort_dir: p.sortDir || undefined,
     ...narrowParams(p),
   })
 }

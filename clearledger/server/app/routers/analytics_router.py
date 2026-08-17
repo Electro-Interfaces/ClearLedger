@@ -17,7 +17,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import assert_company_member, assert_company_module, get_current_user
+from app.auth import assert_company_member, assert_company_module, assert_company_product, get_current_user
 from app.database import get_db
 from app.models import User
 from app.services.analytics_service import AnalyticsService, PeriodFilter
@@ -79,7 +79,10 @@ async def _filter_from_query(
     db: AsyncSession, current_user: User, module: str | None = None,
 ) -> PeriodFilter:
     cid = (
-        await assert_company_module(company_id, current_user, db, module) if module
+        await assert_company_product(company_id, current_user, db, "sales")
+        if module == "sales"
+        else await assert_company_module(company_id, current_user, db, module)
+        if module
         else await assert_company_member(company_id, current_user, db)
     )
     df = _parse_iso_date(date_from, "date_from")
@@ -248,7 +251,7 @@ async def get_charge_sessions(
     tz=local — почасовой разрез (group_by=hour) по местному времени станции.
     with_series=1 — плюс ряд сетевых тоталов по бакетам для спарклайнов плиток:
     это дополнительный скан периода, поэтому по умолчанию выключено."""
-    f = await _filter_from_query(company_id, date_from, date_to, station_id, db, current_user, "management")
+    f = await _filter_from_query(company_id, date_from, date_to, station_id, db, current_user, "sales")
     f.station_codes = _csv(stations); f.regions = _csv(regions)
     f.dim_by = dim; f.dim_val = dim_val
     svc = AnalyticsService(db)
@@ -273,7 +276,7 @@ async def get_charge_reliability_brands(
     успех визита, повторы, неудачи) — фронт группирует/сортирует/ищет сам.
     Считается на модели визитов (сходится с «Повторными попытками»). Сужение
     сети/ФЛ-ЮЛ — как у /charge-sessions (dim=user_type → фильтр типа клиента)."""
-    f = await _filter_from_query(company_id, date_from, date_to, None, db, current_user, "management")
+    f = await _filter_from_query(company_id, date_from, date_to, None, db, current_user, "sales")
     from app.services.brand_reliability import brand_reliability
 
     user_type = dim_val if dim == "user_type" else None
@@ -319,7 +322,7 @@ async def get_charge_sessions_grouped(
     Фильтры те же, что у списка, — иначе итоги группы не сойдутся со списком."""
     from app.services.charge_grouping import ChargeGroupingService
 
-    f = await _filter_from_query(company_id, date_from, date_to, None, db, current_user, "management")
+    f = await _filter_from_query(company_id, date_from, date_to, None, db, current_user, "sales")
     try:
         return await ChargeGroupingService(db).grouped(
             f.company_id, f.date_from, f.date_to, group_by,
@@ -351,7 +354,7 @@ async def get_charge_group_detail(
     """Сессии внутри одной группы — раскрытие строки итога до первички."""
     from app.services.charge_grouping import ChargeGroupingService
 
-    f = await _filter_from_query(company_id, date_from, date_to, None, db, current_user, "management")
+    f = await _filter_from_query(company_id, date_from, date_to, None, db, current_user, "sales")
     try:
         return await ChargeGroupingService(db).group_detail(
             f.company_id, f.date_from, f.date_to, group_by, key,
@@ -378,7 +381,7 @@ async def get_charge_visits(
     Сырая сессия ≠ попытка зарядки: CPO пишет отдельной строкой каждое касание
     разъёма. Здесь смежные попытки одного клиента на одной станции склеены в
     визит (см. services/charge_visits.py)."""
-    f = await _filter_from_query(company_id, date_from, date_to, None, db, current_user, "management")
+    f = await _filter_from_query(company_id, date_from, date_to, None, db, current_user, "sales")
     from app.services.charge_visits import visits_report
 
     return await visits_report(
@@ -400,7 +403,7 @@ async def get_charge_unpaid(
     """Отпуск энергии без оплаты, разложенный по природе: долг розницы (потеря),
     постоплата ЮЛ (дебиторка, нужен счёт) и неоплаченные пробы (в деньгах ноль).
     Складывать их в один счётчик нельзя — см. services/charge_unpaid.py."""
-    f = await _filter_from_query(company_id, date_from, date_to, None, db, current_user, "management")
+    f = await _filter_from_query(company_id, date_from, date_to, None, db, current_user, "sales")
     from app.services.charge_unpaid import unpaid_report
 
     return await unpaid_report(
@@ -419,7 +422,7 @@ async def get_charge_unpaid_station(
 ) -> dict[str, Any]:
     """Кто именно уехал со станции не заплатив + какие ЮЛ ждут счёта.
     Раскрывается по клику на строку станции в разборе неоплаты."""
-    f = await _filter_from_query(company_id, date_from, date_to, None, db, current_user, "management")
+    f = await _filter_from_query(company_id, date_from, date_to, None, db, current_user, "sales")
     from app.services.charge_unpaid import unpaid_station_detail
 
     return await unpaid_station_detail(db, f.company_id, date_from, date_to, code)
@@ -443,7 +446,7 @@ async def get_charge_timeseries(
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Динамика метрики зарядных сессий по бакетам времени (+ разбивка по разрезу — multi-series)."""
-    f = await _filter_from_query(company_id, date_from, date_to, station_id, db, current_user, "management")
+    f = await _filter_from_query(company_id, date_from, date_to, station_id, db, current_user, "sales")
     f.station_codes = _csv(stations); f.regions = _csv(regions)
     f.dim_by = dim; f.dim_val = dim_val
     svc = AnalyticsService(db)
@@ -469,7 +472,7 @@ async def get_charge_slice(
 ) -> dict[str, Any]:
     """Нарезка периода на интервалы (неделя/декада/месяц/квартал) и сравнение по разрезу.
     group_by отсутствует → «Вся сеть» (одна строка-итог)."""
-    f = await _filter_from_query(company_id, date_from, date_to, station_id, db, current_user, "management")
+    f = await _filter_from_query(company_id, date_from, date_to, station_id, db, current_user, "sales")
     f.station_codes = _csv(stations); f.regions = _csv(regions)
     f.dim_by = dim; f.dim_val = dim_val
     svc = AnalyticsService(db)
@@ -492,7 +495,7 @@ async def get_charge_new_clients(
     """НОВЫЕ клиенты по интервалам нарезки периода: впервые зарядились в интервале
     (первая сессия за всю историю). Активные/новые/вернувшиеся + вклад новых
     (сессии/кВт·ч/выручка/доля). Клиент = организация (ЮЛ) или телефон (ФЛ)."""
-    f = await _filter_from_query(company_id, date_from, date_to, None, db, current_user, "management")
+    f = await _filter_from_query(company_id, date_from, date_to, None, db, current_user, "sales")
     from app.services.charge_clients import new_clients_slice
     return await new_clients_slice(
         db, f.company_id, f.date_from, f.date_to, bucket,
@@ -514,7 +517,7 @@ async def get_charge_new_clients_list(
 ) -> dict[str, Any]:
     """Список конкретных НОВЫХ клиентов интервала: кто (ЮЛ-имя / телефон ФЛ),
     когда впервые, сессий/кВт·ч/выручка в интервале, станций охвачено."""
-    f = await _filter_from_query(company_id, date_from, date_to, None, db, current_user, "management")
+    f = await _filter_from_query(company_id, date_from, date_to, None, db, current_user, "sales")
     from app.services.charge_clients import new_clients_list
     return await new_clients_list(
         db, f.company_id, f.date_from, f.date_to,
@@ -539,7 +542,7 @@ async def get_charge_sessions_compare(
 ) -> dict[str, Any]:
     """Сравнение периодов зарядных сессий. periods=from:to,... (2–4) → мульти-режим;
     иначе — два периода a_from/a_to/b_from/b_to (обратная совместимость)."""
-    cid = await assert_company_module(company_id, current_user, db, "management")
+    cid = await assert_company_product(company_id, current_user, db, "sales")
     svc = AnalyticsService(db)
     if periods:
         return await svc.charge_sessions_compare_multi(
@@ -571,7 +574,7 @@ async def get_charge_heatmap(
 ) -> dict[str, Any]:
     """Загрузка час × день недели (heatmap) для ToU-анализа.
     tz=local — по местному времени станции (сдвиг на часовой пояс региона)."""
-    f = await _filter_from_query(company_id, date_from, date_to, station_id, db, current_user, "management")
+    f = await _filter_from_query(company_id, date_from, date_to, station_id, db, current_user, "sales")
     f.station_codes = _csv(stations); f.regions = _csv(regions)
     return await AnalyticsService(db).charge_heatmap(f, metric=metric, tz=tz)
 
@@ -583,7 +586,7 @@ async def get_charge_dimensions(
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Справочник фильтра раздела для ЭЗС: станции (код+имя) и каноничные регионы."""
-    cid = await assert_company_module(company_id, current_user, db, "management")
+    cid = await assert_company_product(company_id, current_user, db, "sales")
     return await AnalyticsService(db).charge_dimensions(cid)
 
 
@@ -605,7 +608,7 @@ async def get_charge_long_trend(
     Контур сужается по региону (обе серии — через `sl.region_id`) и станциям
     (сессии — `s.station_code`, сводная — `sl.code` объекта L2)."""
     from sqlalchemy import text as sa_text
-    cid = await assert_company_module(company_id, current_user, db, "management")
+    cid = await assert_company_product(company_id, current_user, db, "sales")
 
     scope_stations = _csv(stations)
     scope_regions = _csv(regions)
@@ -723,7 +726,7 @@ async def get_charge_model(
 ) -> dict[str, Any]:
     """Модель данных ЭЗС для раздела «Нормализация»: слои L1→L4, звёздная схема
     (факт + измерения), качество нормализации. По всему датасету компании."""
-    cid = await assert_company_module(company_id, current_user, db, "management")
+    cid = await assert_company_product(company_id, current_user, db, "sales")
     return await AnalyticsService(db).charge_model(cid)
 
 
@@ -736,7 +739,7 @@ async def get_stations_model(
     """Модель данных станций ЭЗС (объекты) для «Нормализации»: слои L1→L4, звёздная
     схема (факт «Станция» + измерения), качество паспорта. По всему датасету компании."""
     from app.services.stations_model_service import stations_model
-    cid = await assert_company_module(company_id, current_user, db, "management")
+    cid = await assert_company_product(company_id, current_user, db, "sales")
     return await stations_model(db, cid)
 
 
@@ -767,7 +770,7 @@ async def get_stations_linkage(
     """Связь каналов по станции (конформная размерность): покрытие и разрывы —
     сессии/оплаты/справочник ссылаются на общий объект-станцию."""
     from app.services.stations_model_service import stations_linkage
-    cid = await assert_company_module(company_id, current_user, db, "management")
+    cid = await assert_company_product(company_id, current_user, db, "sales")
     return await stations_linkage(db, cid)
 
 
@@ -787,7 +790,7 @@ async def get_charge_pivot(
 ) -> dict[str, Any]:
     """Сводная таблица сессий ЭЗС (строки × столбцы × мера) для экспорта из
     «Нормализации». cols пусто → одномерная. Оси — разрезы + временные бакеты."""
-    f = await _filter_from_query(company_id, date_from, date_to, station_id, db, current_user, "management")
+    f = await _filter_from_query(company_id, date_from, date_to, station_id, db, current_user, "sales")
     f.station_codes = _csv(stations); f.regions = _csv(regions)
     return await AnalyticsService(db).charge_pivot(f, rows=rows, cols=cols or None, metric=metric)
 
@@ -797,7 +800,16 @@ async def get_charge_rows(
     company_id: str,
     date_from: str,
     date_to: str,
-    limit: int = Query(100000, ge=1, le=500000),
+    limit: int = Query(100, ge=1, le=200000),
+    offset: int = Query(0, ge=0),
+    user_type: str | None = None,
+    region: str | None = None,
+    connector: str | None = None,
+    result: str | None = None,
+    paid: str | None = Query(None, pattern="^(paid|unpaid)$"),
+    search: str | None = Query(None, max_length=200),
+    sort: str = Query("started_at", pattern="^(started_at|station|region|connector|user_type|client|charge_type|energy_kwh|duration_min|tariff|revenue|result)$"),
+    sort_dir: str = Query("desc", pattern="^(asc|desc)$"),
     stations: str | None = None,
     regions: str | None = None,
     station_id: str | None = None,
@@ -806,9 +818,13 @@ async def get_charge_rows(
 ) -> dict[str, Any]:
     """Детальные строки нормализованных сессий (L2) за период — лист «Сессии»
     в шаблонах экспорта сводной из «Нормализации»."""
-    f = await _filter_from_query(company_id, date_from, date_to, station_id, db, current_user, "management")
+    f = await _filter_from_query(company_id, date_from, date_to, station_id, db, current_user, "sales")
     f.station_codes = _csv(stations); f.regions = _csv(regions)
-    return await AnalyticsService(db).charge_rows(f, limit=limit)
+    return await AnalyticsService(db).charge_rows(
+        f, limit=limit, offset=offset, user_type=user_type, region=region,
+        connector=connector, result=result, paid=paid, search=search,
+        sort=sort, sort_dir=sort_dir,
+    )
 
 
 @router.get("/payment-mix")

@@ -4,7 +4,7 @@
  * динамика (тренд) · сравнение периодов. Данные — /api/analytics/charge-sessions(/timeseries|/compare).
  */
 
-import { createContext, Fragment, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { createContext, Fragment, useContext, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useQueries, useQuery } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -54,6 +54,49 @@ function Loading() {
 }
 function Empty({ text = 'Нет сессий за период' }: { text?: string }) {
   return <div className="p-6 text-sm text-muted-foreground text-center">{text}</div>
+}
+
+function SortableHeader({ column, children, left, sort, onSort }: {
+  column: string
+  children: ReactNode
+  left?: boolean
+  sort: { key: string; dir: 'asc' | 'desc' }
+  onSort: (key: string) => void
+}) {
+  const active = sort.key === column
+  const Icon = active ? (sort.dir === 'asc' ? ArrowUp : ArrowDown) : ChevronsUpDown
+  const ariaSort: 'ascending' | 'descending' | 'none' = active
+    ? sort.dir === 'asc' ? 'ascending' : 'descending'
+    : 'none'
+  return (
+    <th aria-sort={ariaSort} className={`p-2 font-medium ${left ? 'text-left' : 'text-right'}`}>
+      <button type="button" onClick={() => onSort(column)} title="Сортировать по столбцу"
+        className={`group inline-flex min-h-8 items-center gap-1 cursor-pointer transition-colors hover:text-foreground ${left ? '' : 'flex-row-reverse'} ${active ? 'text-foreground' : ''}`}>
+        <span className="whitespace-nowrap">{children}</span>
+        <Icon className={`h-3 w-3 shrink-0 ${active ? 'text-primary opacity-100' : 'opacity-30 group-hover:opacity-70'}`} />
+      </button>
+    </th>
+  )
+}
+
+type ComparisonSortKey = 'label' | 'delta_prev' | 'delta_pct' | number
+
+function ComparisonSortButton({ column, children, left, sort, onSort }: {
+  column: ComparisonSortKey
+  children: ReactNode
+  left?: boolean
+  sort: { key: ComparisonSortKey; dir: 'asc' | 'desc' } | null
+  onSort: (key: ComparisonSortKey) => void
+}) {
+  const dir = sort && sort.key === column ? sort.dir : null
+  const Icon = dir === 'asc' ? ArrowUp : dir === 'desc' ? ArrowDown : ChevronsUpDown
+  return (
+    <button type="button" onClick={() => onSort(column)} title="Сортировать по столбцу"
+      className={`group inline-flex min-h-8 items-center gap-1 cursor-pointer transition-colors hover:text-foreground ${left ? '' : 'flex-row-reverse'} ${dir ? 'text-foreground' : ''}`}>
+      <span className="whitespace-nowrap">{children}</span>
+      <Icon className={`h-3 w-3 shrink-0 ${dir ? 'text-primary opacity-100' : 'opacity-30 group-hover:opacity-70'}`} />
+    </button>
+  )
 }
 
 /** Сегмент-переключатель типа клиента (Все / ФЛ / ЮЛ) — общий для пунктов сессий. */
@@ -222,7 +265,7 @@ function BreakdownTable({ companyId, dateFrom, dateTo, groupBy, firstCol, withKp
   const physical = PHYSICAL_GROUPS.includes(gb)
   const showStations = physical && gb !== 'station'   // число станций в группе; для разреза «станция» = 1, скрываем
   const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' }>({ key: 'amount', dir: 'desc' })
-  const lines = data?.lines ?? []
+  const lines = useMemo(() => data?.lines ?? [], [data?.lines])
   const sortedLines = useMemo(() => {
     const dir = sort.dir === 'asc' ? 1 : -1
     const get = (l: Record<string, unknown>) => l[sort.key]
@@ -256,22 +299,6 @@ function BreakdownTable({ companyId, dateFrom, dateTo, groupBy, firstCol, withKp
       ...(physical ? [t.utilization_pct, t.throughput_port] : []), t.avg_check, t.price_per_kwh, t.success_pct],
   ]
   const toggle = (key: string) => setSort((s) => (s.key === key ? { key, dir: s.dir === 'desc' ? 'asc' : 'desc' } : { key, dir: 'desc' }))
-  // Каждый столбец сортируемый: бледная ↕ всегда видна (ярче на hover), активный —
-  // цветная стрелка направления. Так понятно, что кликается любой заголовок.
-  const H = ({ k, children, left }: { k: string; children: ReactNode; left?: boolean }) => {
-    const active = sort.key === k
-    const Ico = active ? (sort.dir === 'asc' ? ArrowUp : ArrowDown) : ChevronsUpDown
-    const ariaSort: 'ascending' | 'descending' | 'none' = active ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'
-    return (
-      <th aria-sort={ariaSort} className={`p-2 font-medium ${left ? 'text-left' : 'text-right'}`}>
-        <button onClick={() => toggle(k)} title="Сортировать по столбцу"
-          className={`group inline-flex items-center gap-1 cursor-pointer transition-colors hover:text-foreground ${left ? '' : 'flex-row-reverse'} ${active ? 'text-foreground' : ''}`}>
-          <span className="whitespace-nowrap">{children}</span>
-          <Ico className={`h-3 w-3 shrink-0 ${active ? 'text-primary opacity-100' : 'opacity-30 group-hover:opacity-70'}`} />
-        </button>
-      </th>
-    )
-  }
   return (
     <div className="p-4 space-y-4">
       {controls && (
@@ -298,18 +325,18 @@ function BreakdownTable({ companyId, dateFrom, dateTo, groupBy, firstCol, withKp
           <table className="w-full text-xs" {...exportRows(col, exCols, exData)}>
             <thead>
               <tr className="border-b bg-muted/40 text-muted-foreground">
-                <H k="label" left>{col}</H>
-                {physical && <H k="ports">Портов</H>}
-                {showStations && <H k="stations">Станций</H>}
-                <H k="sessions">Сессий</H>
-                <H k="energy_kwh">Энергия, кВтч</H>
-                <H k="amount">Выручка</H>
-                <H k="share_pct">Доля</H>
-                {physical && <H k="utilization_pct">Загрузка</H>}
-                {physical && <H k="throughput_port">кВтч/д·порт</H>}
-                <H k="avg_check">Ср. чек</H>
-                <H k="price_per_kwh">₽/кВтч</H>
-                <H k="success_pct">Успех</H>
+                <SortableHeader column="label" left sort={sort} onSort={toggle}>{col}</SortableHeader>
+                {physical && <SortableHeader column="ports" sort={sort} onSort={toggle}>Портов</SortableHeader>}
+                {showStations && <SortableHeader column="stations" sort={sort} onSort={toggle}>Станций</SortableHeader>}
+                <SortableHeader column="sessions" sort={sort} onSort={toggle}>Сессий</SortableHeader>
+                <SortableHeader column="energy_kwh" sort={sort} onSort={toggle}>Энергия, кВтч</SortableHeader>
+                <SortableHeader column="amount" sort={sort} onSort={toggle}>Выручка</SortableHeader>
+                <SortableHeader column="share_pct" sort={sort} onSort={toggle}>Доля</SortableHeader>
+                {physical && <SortableHeader column="utilization_pct" sort={sort} onSort={toggle}>Загрузка</SortableHeader>}
+                {physical && <SortableHeader column="throughput_port" sort={sort} onSort={toggle}>кВтч/д·порт</SortableHeader>}
+                <SortableHeader column="avg_check" sort={sort} onSort={toggle}>Ср. чек</SortableHeader>
+                <SortableHeader column="price_per_kwh" sort={sort} onSort={toggle}>₽/кВтч</SortableHeader>
+                <SortableHeader column="success_pct" sort={sort} onSort={toggle}>Успех</SortableHeader>
                 {physical && <th className="p-2 font-medium text-right whitespace-nowrap">Тренд ₽</th>}
               </tr>
             </thead>
@@ -582,9 +609,12 @@ const shiftYearISO = (iso: string, delta: number): string => {
 function Dynamics({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom: string; dateTo: string }) {
   const [p, patch] = useTabParams('cs_dynamics', DYN_DEFAULTS)
   const [view, setView] = useChartView({ type: 'line' })
-  // Горизонт анализа: не персистится и сбрасывается при смене периода наверху.
-  const [horizon, setHorizon] = useState<Period | null>(null)
-  useEffect(() => { setHorizon(null) }, [dateFrom, dateTo])
+  // Горизонт привязан к текущему периоду: устаревшее локальное значение не
+  // применяется после смены рабочего контура и не требует каскадного effect.
+  const scopeKey = `${dateFrom}|${dateTo}`
+  const [horizonState, setHorizonState] = useState<{ scope: string; value: Period } | null>(null)
+  const horizon = horizonState?.scope === scopeKey ? horizonState.value : null
+  const setHorizon = (value: Period | null) => setHorizonState(value ? { scope: scopeKey, value } : null)
   const period = horizon ?? { from: dateFrom, to: dateTo }
   const seriesBy = p.seriesSel === '__net__' ? undefined : (p.seriesSel as ChargeSeriesBy)
   const n = useNarrow()
@@ -709,9 +739,10 @@ const ROWS_OPTS: { value: number; label: string }[] = [
 /** Нарезка одного периода на интервалы (неделя/декада/месяц/квартал) → сравнение. */
 function SliceCompare({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom: string; dateTo: string }) {
   const [p, patch] = useTabParams('cs_compare/slice', SLICE_DEFAULTS)
-  // Горизонт анализа: не персистится и сбрасывается при смене периода наверху.
-  const [horizon, setHorizon] = useState<Period | null>(null)
-  useEffect(() => { setHorizon(null) }, [dateFrom, dateTo])
+  const scopeKey = `${dateFrom}|${dateTo}`
+  const [horizonState, setHorizonState] = useState<{ scope: string; value: Period } | null>(null)
+  const horizon = horizonState?.scope === scopeKey ? horizonState.value : null
+  const setHorizon = (value: Period | null) => setHorizonState(value ? { scope: scopeKey, value } : null)
   const period = horizon ?? { from: dateFrom, to: dateTo }
   const groupBy = p.seriesSel === '__net__' ? undefined : (p.seriesSel as ChargeSeriesBy)
   const n = useNarrow()
@@ -1358,8 +1389,6 @@ function ManualCompare({ companyId, dateFrom, dateTo }: { companyId: string; dat
 
 /** Общая таблица сравнения: строки = разрез, колонки = интервалы/периоды + дельты.
  * Неполные интервалы (частично вне периода) приглушены и не идут в расчёт Δ. */
-type SortKey = 'label' | 'delta_prev' | 'delta_pct' | number
-
 function ComparisonTable({ columns, lines, totalsValues, metric, firstCol, onRow }: {
   columns: { label: string; hint?: string; partial?: boolean }[]
   lines: { label: string; values: (number | null)[]; delta_prev: number; delta_pct_prev: number }[]
@@ -1373,8 +1402,8 @@ function ComparisonTable({ columns, lines, totalsValues, metric, firstCol, onRow
   const hasPartial = columns.some((c) => c.partial)
 
   // Сортировка по клику на заголовок: desc → asc → сброс. «Прочие» всегда внизу.
-  const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' } | null>(null)
-  const toggleSort = (key: SortKey) =>
+  const [sort, setSort] = useState<{ key: ComparisonSortKey; dir: 'asc' | 'desc' } | null>(null)
+  const toggleSort = (key: ComparisonSortKey) =>
     setSort((s) => (s && s.key === key ? (s.dir === 'desc' ? { key, dir: 'asc' } : null) : { key, dir: 'desc' }))
 
   const sortedLines = useMemo(() => {
@@ -1389,18 +1418,6 @@ function ComparisonTable({ columns, lines, totalsValues, metric, firstCol, onRow
       sort.key === 'label' ? dir * a.label.localeCompare(b.label, 'ru') : dir * (norm(val(a)) - norm(val(b))))
     return [...rest, ...others]
   }, [lines, sort])
-
-  const HdBtn = ({ k, children, left }: { k: SortKey; children: ReactNode; left?: boolean }) => {
-    const dir = sort && sort.key === k ? sort.dir : null
-    const Ico = dir === 'asc' ? ArrowUp : dir === 'desc' ? ArrowDown : ChevronsUpDown
-    return (
-      <button onClick={() => toggleSort(k)} title="Сортировать по столбцу"
-        className={`group inline-flex items-center gap-1 cursor-pointer transition-colors hover:text-foreground ${left ? '' : 'flex-row-reverse'} ${dir ? 'text-foreground' : ''}`}>
-        <span className="whitespace-nowrap">{children}</span>
-        <Ico className={`h-3 w-3 shrink-0 ${dir ? 'text-primary opacity-100' : 'opacity-30 group-hover:opacity-70'}`} />
-      </button>
-    )
-  }
 
   // Выгрузка полного вида = интервалы + сводка (Итого/Среднее·Мин·Макс) + Δ — как в компактном.
   const isRatioC = RATIO_METRICS.includes(metric)
@@ -1425,15 +1442,15 @@ function ComparisonTable({ columns, lines, totalsValues, metric, firstCol, onRow
         <table className="w-full text-xs" {...exportRows(firstCol, exCols, exData)}>
           <thead>
             <tr className="border-b bg-muted/40 text-muted-foreground">
-              <th className="text-left p-2 font-medium sticky left-0 bg-muted/40 z-10"><HdBtn k="label" left>{firstCol}</HdBtn></th>
+              <th className="text-left p-2 font-medium sticky left-0 bg-muted/40 z-10"><ComparisonSortButton column="label" left sort={sort} onSort={toggleSort}>{firstCol}</ComparisonSortButton></th>
               {columns.map((c, i) => (
                 <th key={i} className={`text-right p-2 font-medium whitespace-nowrap ${c.partial ? 'text-muted-foreground/50' : ''}`}>
-                  <HdBtn k={i}>{c.label}{c.partial && <span className="text-amber-600/70 dark:text-amber-400/70"> *</span>}</HdBtn>
+                  <ComparisonSortButton column={i} sort={sort} onSort={toggleSort}>{c.label}{c.partial && <span className="text-amber-600/70 dark:text-amber-400/70"> *</span>}</ComparisonSortButton>
                   {c.hint && <div className="text-[10px] font-normal text-muted-foreground/70">{c.hint}{c.partial ? ' · неполн.' : ''}</div>}
                 </th>
               ))}
-              <th className="text-right p-2 font-medium whitespace-nowrap"><HdBtn k="delta_prev">Δ посл.</HdBtn></th>
-              <th className="text-right p-2 font-medium"><HdBtn k="delta_pct">Δ %</HdBtn></th>
+              <th className="text-right p-2 font-medium whitespace-nowrap"><ComparisonSortButton column="delta_prev" sort={sort} onSort={toggleSort}>Δ посл.</ComparisonSortButton></th>
+              <th className="text-right p-2 font-medium"><ComparisonSortButton column="delta_pct" sort={sort} onSort={toggleSort}>Δ %</ComparisonSortButton></th>
             </tr>
           </thead>
           <tbody>
@@ -2170,8 +2187,7 @@ function Reliability({ companyId, dateFrom, dateTo }: { companyId: string; dateF
   if (!outcomes.data || outcomes.data.lines.length === 0) return <Empty />
   const t = outcomes.data.totals
   const vt = visits.data?.totals
-  const complete = outcomes.data.lines.find((l) => l.label === 'Complete')?.sessions ?? 0
-  const errors = t.sessions - complete
+  const errors = t.error_sessions ?? 0
   const stations = byStation.data?.lines ?? []
   const risk = stations.filter((l) => l.sessions >= 30 && l.success_pct < 70)
   // Вторая причина вызывать сервис — не «люди уезжают незаряженными», а «счётчик
@@ -2207,9 +2223,9 @@ function Reliability({ companyId, dateFrom, dateTo }: { companyId: string; dateF
           hint={vt ? `${nf0.format(vt.charged)} из ${nf0.format(vt.visits)} визитов` : 'считаем визиты'}
           info={HINTS.visitSuccess} spark={netSpark} sparkLabel="Успешность по месяцам" />
         <KpiCard label="Сессий с ошибкой" value={nf0.format(errors)} accent="danger"
-          hint={`${(errors / t.sessions * 100).toFixed(1)}% из ${nf0.format(t.sessions)} сессий`} />
+          hint={`${(t.sessions ? errors / t.sessions * 100 : 0).toFixed(1)}% из ${nf0.format(t.sessions)} сессий`} />
         <KpiCard label="Станций риска" value={nf0.format(risk.length)} accent={risk.length ? 'warning' : 'success'} hint="success < 70% (≥30 сессий)" />
-        <KpiCard label="Без оплаты" value={t.unpaid_pct.toFixed(1) + '%'} accent={t.unpaid_pct >= 10 ? 'danger' : t.unpaid_pct >= 3 ? 'warning' : 'success'} hint="сессий без отметки оплаты" />
+        <KpiCard label="Без оплаты" value={t.unpaid_pct.toFixed(1) + '%'} accent={t.unpaid_pct >= 10 ? 'danger' : t.unpaid_pct >= 3 ? 'warning' : 'success'} hint="отпусков без подтверждённого платежа" />
       </div>
 
       {stations.filter((l) => l.sessions >= 30).length >= 3 && (
@@ -2441,7 +2457,7 @@ function BrandReliability({ companyId, dateFrom, dateTo }: { companyId: string; 
     ? { key: k, dir: s.dir === 'desc' ? 'asc' : 'desc' }
     : { key: k, dir: REL_ASC_DEFAULT.includes(k) ? 'asc' : 'desc' })
 
-  const all = q.data?.stations ?? []
+  const all = useMemo(() => q.data?.stations ?? [], [q.data?.stations])
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase()
     return all.filter((s) => s.visits >= view.minVisits

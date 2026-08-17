@@ -51,7 +51,7 @@ export function MobileShell({ children, className }: {
   const { ref, state, distance } = usePullToRefresh(() => qc.refetchQueries())
 
   return (
-    <div ref={ref} className={className}>
+    <div ref={ref} data-mobile-shell className={className}>
       <PullHint state={state} distance={distance} />
       {children}
     </div>
@@ -149,11 +149,18 @@ export function InstallApp() {
     })
   }, [])
 
+  const visible = !installed && !hidden
+  useEffect(() => {
+    if (visible) document.documentElement.dataset.pwaInstall = howto ? 'expanded' : 'compact'
+    else delete document.documentElement.dataset.pwaInstall
+    return () => { delete document.documentElement.dataset.pwaInstall }
+  }, [visible, howto])
+
   // Уже открыто приложением — предлагать нечего: это не спрятанный по условию
   // элемент, а завершённое действие. «Позже» скрывает плашку на сутки, но не навсегда.
   // Не прячем установку за авторизацией: системное событие может прийти уже на
   // экране входа, и это нормальная точка установки, как в Monitor TradeFrame.
-  if (installed || hidden) return null
+  if (!visible) return null
 
   const dismiss = () => {
     try { localStorage.setItem(DISMISS_KEY, String(Date.now())) } catch { /* storage недоступен */ }
@@ -177,18 +184,18 @@ export function InstallApp() {
         </span>
         {promptAvailable ? (
           <button
-            className="min-h-9 rounded-md bg-primary px-3 text-[13px] font-medium
+            className="min-h-11 rounded-md bg-primary px-3 text-[13px] font-medium
                        text-primary-foreground"
             onClick={() => { void install() }}>
             Установить
           </button>
         ) : (
-          <button className="min-h-9 text-[13px] text-primary hover:underline"
+          <button className="min-h-11 text-[13px] text-primary hover:underline"
             onClick={() => setHowto((v) => !v)}>
             {howto ? 'Свернуть' : 'Как поставить'}
           </button>
         )}
-        <button className="min-h-9 px-1 text-[13px] text-muted-foreground hover:underline"
+        <button className="min-h-11 px-2 text-[13px] text-muted-foreground hover:underline"
           onClick={dismiss}>
           Позже
         </button>

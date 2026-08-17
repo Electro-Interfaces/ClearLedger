@@ -27,6 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import ChargeSession, Region, ServiceLocation
 from app.services.analytics_cache import cached_report
+from app.services.charge_payment_state import effective_paid_at
 
 S = ChargeSession
 L = ServiceLocation
@@ -143,7 +144,8 @@ _BRAND_EXPR = case(
 )
 
 # Задержка оплаты = paid_at − finished_at, в минутах.
-_PAY_DELAY_MIN = func.extract("epoch", S.paid_at - S.finished_at) / 60.0
+_EFFECTIVE_PAID_AT = effective_paid_at(S)
+_PAY_DELAY_MIN = func.extract("epoch", _EFFECTIVE_PAID_AT - S.finished_at) / 60.0
 _DELAY_BANDS = [(5, "сразу (< 5 мин)"), (60, "< 1 часа"), (1440, "< 1 суток")]
 _DELAY_LAST = "> 1 суток"
 
@@ -153,7 +155,7 @@ _DELAY_LAST = "> 1 суток"
 # Ключи 7–9 идут после оплаченных полос 1–4, поэтому сортировка по ключу
 # ставит их в конец списка.
 _PAY_DELAY_EXPR = case(
-    (S.paid_at.is_not(None), _band(_PAY_DELAY_MIN, _DELAY_BANDS)),
+    (_EFFECTIVE_PAID_AT.is_not(None), _band(_PAY_DELAY_MIN, _DELAY_BANDS)),
     (S.energy_kwh <= 0, "7"),
     (S.client_name.is_not(None), "8"),
     else_="9",
@@ -183,7 +185,7 @@ GROUPS: dict[str, dict[str, Any]] = {
     "channel": {"label": "Канал запуска", "family": "процесс", "expr": S.charge_type},
     "result": {"label": "Исход", "family": "процесс", "expr": S.result},
     "paid": {"label": "Оплата", "family": "процесс",
-             "expr": case((S.paid_at.is_not(None), "Оплачено"), else_="Без оплаты")},
+             "expr": case((_EFFECTIVE_PAID_AT.is_not(None), "Оплачено"), else_="Без оплаты")},
     # ── время ──────────────────────────────────────────────────────────
     "day": {"label": "День", "family": "время",
             "expr": func.to_char(S.started_at, "YYYY-MM-DD")},
@@ -308,9 +310,9 @@ def _apply_filters(stmt: Select, *, user_type: str | None, region: str | None,
     if result:
         stmt = stmt.where(S.result == result)
     if paid == "paid":
-        stmt = stmt.where(S.paid_at.is_not(None))
+        stmt = stmt.where(_EFFECTIVE_PAID_AT.is_not(None))
     elif paid == "unpaid":
-        stmt = stmt.where(S.paid_at.is_(None))
+        stmt = stmt.where(_EFFECTIVE_PAID_AT.is_(None))
     if search:
         like = f"%{search.lower()}%"
         stmt = stmt.where(or_(
@@ -354,12 +356,13 @@ class ChargeGroupingService:
         # часть Complete отдала 0 кВтч, часть CompleteError — отдала (charge_visits).
         charged = case((S.energy_kwh > 0, 1), else_=0)
 
+        revenue_expr = func.coalesce(S.client_amount, S.amount)
         cols = [
             expr.label("key"),
             func.min(label_expr).label("label"),
             func.count().label("sessions"),
             func.coalesce(func.sum(S.energy_kwh), 0).label("energy_kwh"),
-            func.coalesce(func.sum(S.amount), 0).label("revenue"),
+            func.coalesce(func.sum(revenue_expr), 0).label("revenue"),
             func.coalesce(func.avg(S.duration_min), 0).label("avg_duration"),
             func.coalesce(func.sum(success), 0).label("success"),
             func.coalesce(func.sum(charged), 0).label("charged"),
@@ -383,7 +386,7 @@ class ChargeGroupingService:
                               search=search).group_by(expr)
 
         SORTS = {
-            "revenue": func.coalesce(func.sum(S.amount), 0),
+            "revenue": func.coalesce(func.sum(revenue_expr), 0),
             "energy_kwh": func.coalesce(func.sum(S.energy_kwh), 0),
             "sessions": func.count(),
             "label": func.min(label_expr),
@@ -448,7 +451,7 @@ class ChargeGroupingService:
         tot_stmt = _with_join(select(
             func.count().label("sessions"),
             func.coalesce(func.sum(S.energy_kwh), 0).label("energy_kwh"),
-            func.coalesce(func.sum(S.amount), 0).label("revenue"),
+            func.coalesce(func.sum(revenue_expr), 0).label("revenue"),
             func.coalesce(func.sum(success), 0).label("success"),
             func.count(func.distinct(expr)).label("groups"),
         ), group_by, region=region).where(
@@ -503,10 +506,13 @@ class ChargeGroupingService:
 
         lo = datetime.combine(date_from, datetime.min.time())
         hi = datetime.combine(date_to, datetime.max.time())
+        effective_payment_at = effective_paid_at(S)
         stmt = _with_join(select(
             S.session_ext_id, S.started_at, S.station_code, S.station_name, S.region,
             S.connector_type, S.user_type, S.client_name, S.user_id, S.charge_type,
-            S.energy_kwh, S.duration_min, S.tariff, S.amount, S.result, S.paid_at,
+            S.energy_kwh, S.duration_min, S.tariff,
+            func.coalesce(S.client_amount, S.amount).label("revenue"), S.result,
+            effective_payment_at.label("paid_at"),
             S.visit_seq, S.visit_size,
         ), group_by, region=region).where(
             S.company_id == company_id, S.started_at.is_not(None),
@@ -530,7 +536,7 @@ class ChargeGroupingService:
             "user_type": r.user_type, "client_name": r.client_name,
             "user_id": r.user_id, "charge_type": r.charge_type,
             "energy_kwh": float(r.energy_kwh or 0), "duration_min": r.duration_min,
-            "tariff": float(r.tariff or 0), "revenue": float(r.amount or 0),
+            "tariff": float(r.tariff or 0), "revenue": float(r.revenue or 0),
             "result": r.result, "paid_at": r.paid_at.isoformat() if r.paid_at else None,
             "visit_seq": r.visit_seq, "visit_size": r.visit_size,
         } for r in rows]}

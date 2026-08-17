@@ -52,6 +52,13 @@ WITH s AS (
       FROM charge_sessions
      WHERE company_id = :company_id
        AND paid_at IS NULL
+       AND NOT EXISTS (
+           SELECT 1
+             FROM charge_payments p
+            WHERE p.company_id = charge_sessions.company_id
+              AND p.session_ext_id = charge_sessions.session_ext_id
+              AND p.bank_txn_id IS NOT NULL
+       )
        AND started_at >= CAST(:date_from AS date)
        AND started_at < CAST(:date_to AS date) + 1
        {{station_filter}}

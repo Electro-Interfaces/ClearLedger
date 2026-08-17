@@ -32,11 +32,11 @@ export function CentralPanelLayout({ items, activeKey, onSelect, children }: Cen
   return (
     <div className="flex h-full min-w-0 flex-col lg:flex-row">
       {/* Вертикальное меню */}
-      <div className="scrollbar-hide flex min-w-0 shrink-0 gap-0.5 overflow-x-auto border-b border-border/30 bg-muted/20 px-1.5 py-1.5 lg:flex-col lg:overflow-x-hidden lg:overflow-y-auto lg:border-b-0 lg:border-r lg:py-2">
+      <div className="scrollbar-hide flex min-w-0 shrink-0 snap-x snap-proximity gap-0.5 overflow-x-auto border-b border-border/30 bg-muted/20 px-1.5 py-1.5 lg:flex-col lg:overflow-x-hidden lg:overflow-y-auto lg:border-b-0 lg:border-r lg:py-2">
         {items.map((item, i) => {
           const showHeader = !!item.group && item.group !== items[i - 1]?.group
           return (
-            <div key={item.key}>
+            <div key={item.key} className="shrink-0 snap-start lg:w-full">
               {showHeader && (
                 <div className="hidden whitespace-nowrap px-3 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/60 lg:block">
                   {item.group}
@@ -45,7 +45,7 @@ export function CentralPanelLayout({ items, activeKey, onSelect, children }: Cen
               <button
                 ref={activeKey === item.key ? activeItem : undefined}
                 onClick={() => onSelect(item.key)}
-                className={`w-auto shrink-0 whitespace-nowrap rounded-md px-3 py-2 text-left text-sm font-medium transition-colors lg:w-full ${item.group ? 'lg:pl-5' : ''} ${
+                className={`min-h-11 w-auto shrink-0 whitespace-nowrap rounded-md px-3 py-2 text-left text-sm font-medium transition-colors lg:min-h-0 lg:w-full ${item.group ? 'lg:pl-5' : ''} ${
                   activeKey === item.key
                     ? 'bg-primary/15 text-primary'
                     : item.disabled

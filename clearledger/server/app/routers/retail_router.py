@@ -10,7 +10,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import assert_company_member, get_current_user
+from app.auth import assert_company_product, get_current_user
 from app.database import get_db
 from app.models import User
 from app.services.retail_service import RetailService
@@ -41,7 +41,7 @@ async def retail_overview(
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """KPI розничной базы ФЛ: аккаунты/активные/новые, выручка, ARPA, средний чек."""
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await assert_company_product(company_id, current_user, db, "sales")
     return await RetailService(db).overview(
         cid, _d(date_from, "date_from"), _d(date_to, "date_to"),
         stations=_csv(stations), regions=_csv(regions))
@@ -55,7 +55,7 @@ async def retail_segments(
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """RFM-сегментация аккаунтов ФЛ (Чемпионы/Лояльные/Под риском/…/Отток)."""
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await assert_company_product(company_id, current_user, db, "sales")
     return await RetailService(db).segments(
         cid, _d(date_from, "date_from"), _d(date_to, "date_to"),
         stations=_csv(stations), regions=_csv(regions))
@@ -69,7 +69,7 @@ async def retail_economics(
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Концентрация выручки (Pareto топ-X%→Y%) + распределение сессий-на-аккаунт."""
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await assert_company_product(company_id, current_user, db, "sales")
     return await RetailService(db).economics(
         cid, _d(date_from, "date_from"), _d(date_to, "date_to"),
         stations=_csv(stations), regions=_csv(regions))
@@ -83,7 +83,7 @@ async def retail_geo(
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Гео-станционная привязка: моно- vs мульти-станция + топ-регионы розницы."""
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await assert_company_product(company_id, current_user, db, "sales")
     return await RetailService(db).geo(
         cid, _d(date_from, "date_from"), _d(date_to, "date_to"),
         stations=_csv(stations), regions=_csv(regions))
@@ -97,7 +97,7 @@ async def retail_cohorts(
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Удержание по когортам месяца первой сессии (retention-матрица, вся история)."""
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await assert_company_product(company_id, current_user, db, "sales")
     return await RetailService(db).cohorts(
         cid, months, stations=_csv(stations), regions=_csv(regions))
 
@@ -112,7 +112,7 @@ async def retail_customers(
 
     Не зависит от периода рабочей области: база — это состояние справочника, а
     не события за интервал."""
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await assert_company_product(company_id, current_user, db, "sales")
     return await RetailService(db).customers(cid, months)
 
 
@@ -127,7 +127,7 @@ async def retail_accounts(
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Реестр аккаунтов ФЛ: фильтры (сегмент/регион/станция/мин-сессий/поиск) + сортировка."""
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await assert_company_product(company_id, current_user, db, "sales")
     return await RetailService(db).accounts(
         cid, _d(date_from, "date_from"), _d(date_to, "date_to"),
         region=region, station=station, segment=segment, min_sessions=min_sessions,
@@ -143,7 +143,7 @@ async def retail_dimensions(
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Справочники для фильтров: регионы и станции (с числом аккаунтов/сессий)."""
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await assert_company_product(company_id, current_user, db, "sales")
     return await RetailService(db).dimensions(
         cid, _d(date_from, "date_from"), _d(date_to, "date_to"),
         stations=_csv(stations), regions=_csv(regions))
@@ -160,7 +160,7 @@ async def retail_profile(
 ) -> dict[str, Any]:
     """Разрез по станции/региону: KPI + профиль по часам/дням недели + топ аккаунтов.
     tz=local — профиль по местному времени станции."""
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await assert_company_product(company_id, current_user, db, "sales")
     return await RetailService(db).profile(
         cid, _d(date_from, "date_from"), _d(date_to, "date_to"), station=station, region=region,
         stations=_csv(stations), regions=_csv(regions), tz=tz if tz in ("msk", "local") else "msk")
@@ -174,7 +174,7 @@ async def retail_account(
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Детальная карточка аккаунта ФЛ (по хеш-ID): разбивки + последние сессии."""
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await assert_company_product(company_id, current_user, db, "sales")
     return await RetailService(db).account(
         cid, _d(date_from, "date_from"), _d(date_to, "date_to"), account,
         stations=_csv(stations), regions=_csv(regions))
@@ -188,7 +188,7 @@ async def retail_marketing(
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """B2C-KPI розничной базы + автоматические маркетинговые выводы."""
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await assert_company_product(company_id, current_user, db, "sales")
     return await RetailService(db).marketing(
         cid, _d(date_from, "date_from"), _d(date_to, "date_to"),
         stations=_csv(stations), regions=_csv(regions))
@@ -202,7 +202,7 @@ async def retail_dashboard(
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """BI-витрина «Обзора ФЛ»: динамика/дельты, retention, CLV, heatmap, поведение, концентрация."""
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await assert_company_product(company_id, current_user, db, "sales")
     return await RetailService(db).dashboard(
         cid, _d(date_from, "date_from"), _d(date_to, "date_to"),
         stations=_csv(stations), regions=_csv(regions))

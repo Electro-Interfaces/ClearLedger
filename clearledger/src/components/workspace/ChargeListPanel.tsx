@@ -1,13 +1,13 @@
 /**
  * «Список» — полноценный реестр транзакций ЭЗС (все загруженные ChargeSession).
  * Таблица построчных сессий с поиском, фильтрами, сортировкой, пагинацией и
- * выгрузкой в Excel. Всё на клиенте: данные — существующий /charge-sessions/rows,
- * без серверного поиска/пагинации (backend не трогаем).
+ * выгрузкой в Excel. Поиск, фильтры, сортировка и пагинация выполняются в БД,
+ * чтобы браузер не загружал целиком годовой реестр.
  */
 
-import { useEffect, useMemo, useState } from 'react'
+import { useDeferredValue, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Loader2, Search, Download, AlertTriangle, ChevronsUpDown, ArrowUp, ArrowDown, Layers } from 'lucide-react'
+import { Loader2, Search, Download, ChevronsUpDown, ArrowUp, ArrowDown, Layers } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -42,22 +42,6 @@ const CHARGE_TYPE_LABEL: Record<string, string> = {
 }
 const chargeTypeLabel = (v: string | null): string =>
   v ? (CHARGE_TYPE_LABEL[v.toUpperCase()] ?? v) : '—'
-
-const NUM_KEYS: SortKey[] = ['energy_kwh', 'duration_min', 'tariff', 'revenue']
-
-function rowVal(r: ChargeSessionRow, k: SortKey): string | number {
-  switch (k) {
-    case 'station': return r.station_name ?? r.station_code ?? ''
-    case 'region': return r.region ?? ''
-    case 'connector': return r.connector_type ?? ''
-    case 'user_type': return r.user_type ?? ''
-    case 'client': return r.client_name ?? ''
-    case 'charge_type': return r.charge_type ?? ''
-    case 'result': return r.result ?? ''
-    case 'started_at': return r.started_at ?? ''
-    default: return (r as unknown as Record<string, number>)[k] ?? 0
-  }
-}
 
 const DEFAULTS = {
   userType: 'all', region: ALL, connector: ALL, result: ALL, paid: 'all',
@@ -104,7 +88,7 @@ function FilterSelect({ value, onChange, allLabel, options, width = 'w-[150px]' 
 }) {
   return (
     <Select value={value} onValueChange={onChange}>
-      <SelectTrigger className={`h-8 ${width} text-xs`}><SelectValue /></SelectTrigger>
+      <SelectTrigger className={`h-11 ${width} max-sm:w-full text-sm sm:h-8 sm:text-xs`}><SelectValue /></SelectTrigger>
       <SelectContent>
         <SelectItem value={ALL} className="text-xs">{allLabel}</SelectItem>
         {options.map((o) => <SelectItem key={o} value={o} className="text-xs">{o}</SelectItem>)}
@@ -126,18 +110,13 @@ export function ChargeListPanel({ companyId, dateFrom, dateTo }: {
   const scopeRegions = regionIds.length ? regionIds : undefined
   const scopeKey = `${stationCodes.join(',')}|${regionIds.join(',')}`
   const [searchInput, setSearchInput] = useState('')
-  const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
   // Смена контура делает поиск и страницу бессмысленными (CLAUDE.md, правило 5).
-  useResetOnScopeChange(() => { setSearchInput(''); setSearch(''); setPage(1) })
+  useResetOnScopeChange(() => { setSearchInput(''); setPage(1) })
   const [pageSize, setPageSize] = useState(50)
   const [exporting, setExporting] = useState(false)
 
-  // debounce поиска
-  useEffect(() => {
-    const t = setTimeout(() => setSearch(searchInput.trim().toLowerCase()), 300)
-    return () => clearTimeout(t)
-  }, [searchInput])
+  const search = useDeferredValue(searchInput.trim().toLowerCase())
 
   const grouped = p.groupBy !== 'none'
   const { data: catalog } = useQuery({
@@ -145,73 +124,44 @@ export function ChargeListPanel({ companyId, dateFrom, dateTo }: {
     queryFn: getChargeGroupCatalog,
     staleTime: Infinity,   // справочник разрезов не меняется в рантайме
   })
-  // Плоский список грузим всегда: из него берутся опции фильтров (регионы,
-  // коннекторы, исходы), которые нужны и в разрезе. React Query кеширует его,
-  // поэтому переключение вида не перезапрашивает.
-  const { data, isLoading } = useQuery({
-    queryKey: ['charge-rows', companyId, period.from, period.to, scopeKey],
-    queryFn: () => getChargeSessionRows({ companyId, dateFrom: period.from, dateTo: period.to, limit: 200000, stations: scopeStations, regions: scopeRegions }),
+  const userType = p.userType === 'fl' ? 'ФЛ' : p.userType === 'ul' ? 'ЮЛ' : null
+  const paidFilter: 'paid' | 'unpaid' | null = p.paid === 'paid' || p.paid === 'unpaid' ? p.paid : null
+  const { data, isLoading, isFetching } = useQuery({
+    queryKey: ['charge-rows', companyId, period.from, period.to, scopeKey, page, pageSize,
+      p.userType, p.region, p.connector, p.result, p.paid, p.sortKey, p.sortDir, search],
+    queryFn: () => getChargeSessionRows({
+      companyId, dateFrom: period.from, dateTo: period.to,
+      limit: pageSize, offset: (page - 1) * pageSize,
+      stations: scopeStations, regions: scopeRegions,
+      userType, region: p.region === ALL ? null : p.region,
+      connector: p.connector === ALL ? null : p.connector,
+      result: p.result === ALL ? null : p.result,
+      paid: paidFilter,
+      search: search || null, sort: p.sortKey, sortDir: p.sortDir,
+    }),
+    placeholderData: (previous) => previous,
   })
-  const rows = useMemo(() => data?.rows ?? [], [data])
-
-  // distinct-опции фильтров (один проход)
-  const opts = useMemo(() => {
-    const reg = new Set<string>(), conn = new Set<string>(), res = new Set<string>()
-    for (const r of rows) {
-      if (r.region) reg.add(r.region)
-      if (r.connector_type) conn.add(r.connector_type)
-      if (r.result) res.add(r.result)
-    }
-    const s = (a: string, b: string) => a.localeCompare(b, 'ru')
-    return { regions: [...reg].sort(s), connectors: [...conn].sort(s), results: [...res].sort(s) }
-  }, [rows])
-
-  const filtered = useMemo(() => {
-    const wantType = p.userType === 'fl' ? 'ФЛ' : p.userType === 'ul' ? 'ЮЛ' : null
-    return rows.filter((r) => {
-      if (wantType && (r.user_type ?? '') !== wantType) return false
-      if (p.region !== ALL && (r.region ?? '') !== p.region) return false
-      if (p.connector !== ALL && (r.connector_type ?? '') !== p.connector) return false
-      if (p.result !== ALL && (r.result ?? '') !== p.result) return false
-      if (p.paid === 'paid' && !r.paid_at) return false
-      if (p.paid === 'unpaid' && r.paid_at) return false
-      if (search) {
-        const hay = `${r.session_ext_id} ${r.station_code ?? ''} ${r.station_name ?? ''} ${r.client_name ?? ''}`.toLowerCase()
-        if (!hay.includes(search)) return false
-      }
-      return true
-    })
-  }, [rows, p.userType, p.region, p.connector, p.result, p.paid, search])
-
-  const sorted = useMemo(() => {
-    const dir = p.sortDir === 'asc' ? 1 : -1
-    const numeric = NUM_KEYS.includes(p.sortKey)
-    return [...filtered].sort((a, b) => {
-      const va = rowVal(a, p.sortKey), vb = rowVal(b, p.sortKey)
-      if (numeric) return dir * ((va as number) - (vb as number))
-      return dir * String(va).localeCompare(String(vb), 'ru')
-    })
-  }, [filtered, p.sortKey, p.sortDir])
-
-  // Тоталы по ВСЕМУ отфильтрованному набору (не по странице) — сверяемо с Обзором:
-  // без фильтров Σ выручки == KPI «Выручка» раздела «Обзор».
-  const totals = useMemo(() => {
-    let revenue = 0, energy = 0
-    for (const r of filtered) { revenue += r.revenue || 0; energy += r.energy_kwh || 0 }
-    return { revenue, energy }
-  }, [filtered])
-
-  // сброс страницы при смене выборки
-  useEffect(() => { setPage(1) }, [search, p.userType, p.region, p.connector, p.result, p.paid, period.from, period.to])
-
-  const pageRows = useMemo(() => sorted.slice((page - 1) * pageSize, page * pageSize), [sorted, page, pageSize])
-  const toggleSort = (k: SortKey) => patch({ sortKey: k, sortDir: p.sortKey === k && p.sortDir === 'desc' ? 'asc' : 'desc' })
+  const rows = data?.rows ?? []
+  const opts = data?.facets ?? { regions: [], connectors: [], results: [] }
+  const totals = data?.totals ?? { revenue: 0, energy_kwh: 0 }
+  const total = data?.total ?? 0
+  const patchFilter = (next: Partial<typeof DEFAULTS>) => { setPage(1); patch(next) }
+  const toggleSort = (k: SortKey) => patchFilter({ sortKey: k, sortDir: p.sortKey === k && p.sortDir === 'desc' ? 'asc' : 'desc' })
 
   const doExport = async () => {
     setExporting(true)
     try {
       const XLSX = await loadXlsx()
-      const out = sorted.map((r) => ({
+      const exported = await getChargeSessionRows({
+        companyId, dateFrom: period.from, dateTo: period.to,
+        limit: Math.min(Math.max(total, 1), 200000), stations: scopeStations, regions: scopeRegions,
+        userType, region: p.region === ALL ? null : p.region,
+        connector: p.connector === ALL ? null : p.connector,
+        result: p.result === ALL ? null : p.result,
+        paid: paidFilter,
+        search: search || null, sort: p.sortKey, sortDir: p.sortDir,
+      })
+      const out = exported.rows.map((r: ChargeSessionRow) => ({
         'ID сессии': r.session_ext_id,
         'Начало': fmtDT(r.started_at),
         'Станция': r.station_name || r.station_code || '',
@@ -247,21 +197,21 @@ export function ChargeListPanel({ companyId, dateFrom, dateTo }: {
       <div className="flex flex-wrap items-center gap-2" data-export-ignore>
         <div className="relative">
           <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input value={searchInput} onChange={(e) => setSearchInput(e.target.value)} aria-label="Поиск транзакций" placeholder="Поиск: станция, клиент, ID…" className="h-8 w-[240px] pl-8 text-xs" />
+          <Input value={searchInput} onChange={(e) => { setSearchInput(e.target.value); setPage(1) }} aria-label="Поиск транзакций" placeholder="Поиск: станция, клиент, ID…" className="h-11 w-full pl-8 text-base sm:h-8 sm:w-[240px] sm:text-xs" />
         </div>
-        <Select value={p.userType} onValueChange={(v) => patch({ userType: v })}>
-          <SelectTrigger className="h-8 w-[110px] text-xs"><SelectValue /></SelectTrigger>
+        <Select value={p.userType} onValueChange={(v) => patchFilter({ userType: v })}>
+          <SelectTrigger className="h-11 w-full text-sm sm:h-8 sm:w-[110px] sm:text-xs"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all" className="text-xs">Все клиенты</SelectItem>
             <SelectItem value="fl" className="text-xs">ФЛ</SelectItem>
             <SelectItem value="ul" className="text-xs">ЮЛ</SelectItem>
           </SelectContent>
         </Select>
-        <FilterSelect value={p.region} onChange={(v) => patch({ region: v })} allLabel="Все регионы" options={opts.regions} />
-        <FilterSelect value={p.connector} onChange={(v) => patch({ connector: v })} allLabel="Все коннекторы" options={opts.connectors} width="w-[150px]" />
-        <FilterSelect value={p.result} onChange={(v) => patch({ result: v })} allLabel="Все исходы" options={opts.results} width="w-[130px]" />
-        <Select value={p.paid} onValueChange={(v) => patch({ paid: v })}>
-          <SelectTrigger className="h-8 w-[130px] text-xs"><SelectValue /></SelectTrigger>
+        <FilterSelect value={p.region} onChange={(v) => patchFilter({ region: v })} allLabel="Все регионы" options={opts.regions} />
+        <FilterSelect value={p.connector} onChange={(v) => patchFilter({ connector: v })} allLabel="Все коннекторы" options={opts.connectors} width="w-[150px]" />
+        <FilterSelect value={p.result} onChange={(v) => patchFilter({ result: v })} allLabel="Все исходы" options={opts.results} width="w-[130px]" />
+        <Select value={p.paid} onValueChange={(v) => patchFilter({ paid: v })}>
+          <SelectTrigger className="h-11 w-full text-sm sm:h-8 sm:w-[130px] sm:text-xs"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all" className="text-xs">Оплата: все</SelectItem>
             <SelectItem value="paid" className="text-xs">Оплачено</SelectItem>
@@ -271,7 +221,7 @@ export function ChargeListPanel({ companyId, dateFrom, dateTo }: {
         {/* Разрез: тот же набор данных под разными углами. Считает БД —
             свернуть 117 тыс. строк в браузере нечем. */}
         <Select value={p.groupBy} onValueChange={(v) => patch({ groupBy: v })}>
-          <SelectTrigger className={`h-8 w-[210px] text-xs ${grouped ? 'border-primary/60 text-foreground' : ''}`}>
+          <SelectTrigger className={`h-11 w-full text-sm sm:h-8 sm:w-[210px] sm:text-xs ${grouped ? 'border-primary/60 text-foreground' : ''}`}>
             <Layers className="h-3.5 w-3.5 shrink-0 opacity-70" />
             <SelectValue />
           </SelectTrigger>
@@ -293,7 +243,7 @@ export function ChargeListPanel({ companyId, dateFrom, dateTo }: {
             ))}
           </SelectContent>
         </Select>
-        <Button variant="outline" size="sm" className="ml-auto h-8 gap-1 px-2 text-xs" onClick={doExport} disabled={exporting || sorted.length === 0}>
+        <Button variant="outline" size="sm" className="ml-auto h-11 gap-1 px-3 text-sm sm:h-8 sm:px-2 sm:text-xs" onClick={doExport} disabled={exporting || total === 0}>
           {exporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}Выгрузить в Excel
         </Button>
       </div>
@@ -301,12 +251,8 @@ export function ChargeListPanel({ companyId, dateFrom, dateTo }: {
       {/* В разрезе счётчик строк списка не показываем: там свои итоги. */}
       {!grouped && (
         <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground" data-export-ignore>
-          <span>Показано <b className="text-foreground">{nf0.format(filtered.length)}</b> из {nf0.format(rows.length)} транзакций{filtered.length !== rows.length ? ' (после фильтров)' : ''}</span>
-          {data?.truncated && (
-            <span className="inline-flex items-center gap-1 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-amber-700 dark:text-amber-300">
-              <AlertTriangle className="h-3.5 w-3.5" />Показаны не все строки — сузьте период
-            </span>
-          )}
+          <span>Найдено <b className="text-foreground">{nf0.format(total)}</b> транзакций</span>
+          {isFetching && <span className="inline-flex items-center gap-1"><Loader2 className="h-3.5 w-3.5 animate-spin" />Обновляем…</span>}
         </div>
       )}
 
@@ -321,7 +267,7 @@ export function ChargeListPanel({ companyId, dateFrom, dateTo }: {
             paid: p.paid === 'all' ? null : p.paid,
             search: search || null,
           }} />
-      ) : isLoading ? <Loading /> : rows.length === 0 ? (
+      ) : isLoading ? <Loading /> : total === 0 ? (
         <div className="p-8 text-center text-sm text-muted-foreground">Нет транзакций за период</div>
       ) : (
         <>
@@ -350,7 +296,7 @@ export function ChargeListPanel({ companyId, dateFrom, dateTo }: {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {pageRows.map((r) => (
+                {rows.map((r) => (
                   <TableRow key={r.session_ext_id}>
                     <TableCell className="whitespace-nowrap font-mono text-muted-foreground">{fmtDT(r.started_at)}</TableCell>
                     {/* Канон подписи станции: «Имя (код)» — имена не уникальны и меняются, код стабилен */}
@@ -392,9 +338,9 @@ export function ChargeListPanel({ companyId, dateFrom, dateTo }: {
               <TableFooter>
                 <TableRow>
                   <TableCell colSpan={7} className="text-muted-foreground">
-                    Итого по фильтру: <span className="font-medium text-foreground">{nf0.format(filtered.length)}</span> транзакций
+                    Итого по фильтру: <span className="font-medium text-foreground">{nf0.format(total)}</span> транзакций
                   </TableCell>
-                  <TableCell className="text-right font-mono tabular-nums">{nf1.format(totals.energy)}</TableCell>
+                  <TableCell className="text-right font-mono tabular-nums">{nf1.format(totals.energy_kwh)}</TableCell>
                   <TableCell />
                   <TableCell />
                   <TableCell className="text-right font-mono tabular-nums">{fmtMoney(totals.revenue)}</TableCell>
@@ -403,7 +349,7 @@ export function ChargeListPanel({ companyId, dateFrom, dateTo }: {
               </TableFooter>
             </Table>
           </DualScrollX>
-          <PaginationWrapper total={filtered.length} page={page} pageSize={pageSize} onPageChange={setPage} onPageSizeChange={setPageSize} />
+          <PaginationWrapper total={total} page={page} pageSize={pageSize} onPageChange={setPage} onPageSizeChange={setPageSize} />
         </>
       )}
     </div>

@@ -25,7 +25,7 @@ from decimal import Decimal
 from types import SimpleNamespace
 from typing import Any
 
-from sqlalchemy import String, and_, case, distinct, func, select, text
+from sqlalchemy import String, and_, case, distinct, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
@@ -44,6 +44,7 @@ from app.models import (
     ServiceLocation,
 )
 from app.services.mapping import normalize_default
+from app.services.charge_payment_state import effective_paid_at
 from app.services.fuel_balance import build_fuel_balance
 from app.services.tz_offsets import shifted_started_at
 from app.utils import msk_day_end, msk_day_start
@@ -716,6 +717,9 @@ class AnalyticsService:
                             *, station_id=None, tz: str = "msk") -> list[Any]:
         S = ChargeSession
         gcol = self._cs_group_col(group_by, tz)
+        paid_at = effective_paid_at(S)
+        result_key = func.lower(func.btrim(func.coalesce(S.result, "")))
+        result_error = or_(result_key.like("%error%"), result_key.like("%ошиб%"))
         stmt = select(
             gcol.label("g"),
             func.count().label("cnt"),
@@ -725,6 +729,7 @@ class AnalyticsService:
             func.coalesce(func.sum(func.coalesce(S.client_amount, S.amount)), 0).label("amount"),
             func.coalesce(func.sum(S.duration_min), 0).label("duration"),
             func.coalesce(func.sum(case((S.result == "Complete", 1), else_=0)), 0).label("success"),
+            func.coalesce(func.sum(case((result_error, 1), else_=0)), 0).label("errors"),
             # ── Знаменатель средних: сессии, где ток ПОШЁЛ ──────────────────
             # Треть сессий — попытки подключения с нулевым отпуском. Пока они
             # стояли в знаменателе, «средний чек» показывал 184 ₽ вместо 296 ₽,
@@ -743,7 +748,7 @@ class AnalyticsService:
             func.coalesce(func.sum(case(
                 (S.user_type.is_distinct_from("ЮЛ"), 1), else_=0)), 0).label("cnt_retail"),
             func.coalesce(func.sum(case(
-                (and_(S.paid_at.is_not(None), S.user_type.is_distinct_from("ЮЛ")), 1),
+                (and_(paid_at.is_not(None), S.user_type.is_distinct_from("ЮЛ")), 1),
                 else_=0)), 0).label("paid"),
             # Настоящий долг розницы: ток отпущен, а оплаты нет. Без условия по
             # энергии сюда попадали сорвавшиеся попытки, и панель поднимала
@@ -753,7 +758,7 @@ class AnalyticsService:
                 else_=0)), 0).label("cnt_retail_charged"),
             func.coalesce(func.sum(case(
                 (and_(S.user_type.is_distinct_from("ЮЛ"), S.energy_kwh > 0,
-                      S.paid_at.is_(None)), 1), else_=0)), 0).label("unpaid_charged"),
+                      paid_at.is_(None)), 1), else_=0)), 0).label("unpaid_charged"),
             func.count(distinct(self._port_key())).label("ports"),
             func.count(distinct(S.station_code)).label("stations"),
         ).where(*self._cs_conds(company_id, date_from, date_to, station_codes, regions, dim_by, dim_val,
@@ -829,6 +834,7 @@ class AnalyticsService:
         visits_ok = int(getattr(r, "visits_ok", 0) or 0)
         retail_charged = int(getattr(r, "cnt_retail_charged", 0) or 0)
         unpaid_charged = int(getattr(r, "unpaid_charged", 0) or 0)
+        errors = int(getattr(r, "errors", 0) or 0)
         ports = int(getattr(r, "ports", 0) or 0)
         stations = int(getattr(r, "stations", 0) or 0)
         port_min = ports * period_days * 1440  # доступные порт-минуты за период
@@ -857,10 +863,12 @@ class AnalyticsService:
             # ток отпущен: за сорвавшуюся попытку платить не за что.
             "unpaid_pct": round(unpaid_charged / retail_charged * 100, 1) if retail_charged else 0.0,
             "unpaid_sessions": unpaid_charged,
+            "error_sessions": errors,
             "_dur_sum": dur, "_success": success, "_paid": paid, "_cnt_retail": cnt_retail,
             "_charged": charged, "_dur_charged": dur_charged,
             "_visits": visits, "_visits_ok": visits_ok,
             "_unpaid_charged": unpaid_charged, "_retail_charged": retail_charged,
+            "_errors": errors,
         }
 
     async def _cs_aggregate_2d(
@@ -996,6 +1004,7 @@ class AnalyticsService:
         tvisits = sum(l["_visits"] for l in lines)
         tvisits_ok = sum(l["_visits_ok"] for l in lines)
         tunpaid = sum(l["_unpaid_charged"] for l in lines)
+        terrors = sum(l["_errors"] for l in lines)
         tretail_charged = sum(l["_retail_charged"] for l in lines)
         # порты сети — distinct (не сумма строк: для нефизических разрезов порт делят
         # сегменты). 2 доп. distinct-скана; пропускаем, если totals не нужны.
@@ -1024,12 +1033,13 @@ class AnalyticsService:
             "revenue_port": round(total_amount / net_ports, 0) if net_ports else 0.0,
             "unpaid_pct": round(tunpaid / tretail_charged * 100, 1) if tretail_charged else 0.0,
             "unpaid_sessions": tunpaid,
+            "error_sessions": terrors,
             "share_pct": 100.0,
         }
         for l in lines:
             for k in ("_dur_sum", "_success", "_paid", "_cnt_retail", "_charged",
                       "_dur_charged", "_visits", "_visits_ok", "_unpaid_charged",
-                      "_retail_charged"):
+                      "_retail_charged", "_errors"):
                 l.pop(k, None)
         out: dict[str, Any] = {
             "period": {"from": f.date_from.isoformat(), "to": f.date_to.isoformat()},
@@ -1374,7 +1384,8 @@ class AnalyticsService:
           • качество нормализации: заполнение полей + канонизация (коннектор/ФЛ-ЮЛ/регион).
         """
         S = ChargeSession
-        paid_c = case((S.paid_at.is_not(None), 1), else_=0)
+        paid_at = effective_paid_at(S)
+        paid_c = case((paid_at.is_not(None), 1), else_=0)
         succ_c = case((S.result == "Complete", 1), else_=0)
         agg = (await self.session.execute(select(
             func.count().label("rows"),
@@ -1400,7 +1411,7 @@ class AnalyticsService:
             func.count(S.user_type).label("f_user_type"),
             func.count(S.user_id).label("f_user_id"),
             func.count(S.rfid).label("f_rfid"),
-            func.count(S.paid_at).label("f_paid"),
+            func.coalesce(func.sum(paid_c), 0).label("f_paid"),
             func.count(S.payment_id).label("f_payment_id"),
             # числовые меры считаем «непустыми» по >0 (колонки NOT NULL с дефолтом 0)
             func.coalesce(func.sum(case((S.energy_kwh > 0, 1), else_=0)), 0).label("f_energy"),
@@ -1528,7 +1539,7 @@ class AnalyticsService:
             {"key": "result", "label": "Результат", "field": "result",
              "cardinality": int(agg.d_result or 0), "fill_pct": pct(agg.f_result),
              "canonical": False, "members": m_result},
-            {"key": "payment", "label": "Оплата", "field": "paid_at",
+            {"key": "payment", "label": "Оплата", "field": "paid_at / charge_payments",
              "cardinality": 2, "fill_pct": pct(agg.f_paid),
              "canonical": True, "members": m_payment},
             {"key": "cut", "label": "Разрез расчёта", "field": "cut_key",
@@ -1553,7 +1564,7 @@ class AnalyticsService:
             {"field": "energy_kwh", "label": "Энергия, кВт·ч", "role": "мера (>0)", "fill_pct": pct(agg.f_energy)},
             {"field": "amount", "label": "Сумма списания", "role": "мера (>0)", "fill_pct": pct(agg.f_amount)},
             {"field": "tariff", "label": "Цена тарифа", "role": "мера (>0)", "fill_pct": pct(agg.f_tariff)},
-            {"field": "paid_at", "label": "Дата оплаты", "role": "измерение · оплата", "fill_pct": pct(agg.f_paid)},
+            {"field": "paid_at / charge_payments", "label": "Оплата", "role": "измерение · подтверждённый платёж", "fill_pct": pct(agg.f_paid)},
             {"field": "rfid", "label": "RFID-карта", "role": "атрибут (RFID-сессии)", "fill_pct": pct(agg.f_rfid)},
             {"field": "client_name", "label": "Клиент (ЮЛ)", "role": "измерение · обогащение", "fill_pct": pct(agg.f_client)},
             {"field": "cut_key", "label": "Разрез расчёта", "role": "разрез сверки", "fill_pct": pct(agg.f_cut)},
@@ -1569,7 +1580,7 @@ class AnalyticsService:
              "members": int(agg.d_region or 0), "coverage_pct": pct(agg.f_region)},
             {"name": "Длительность", "from": "начало / завершение сессии", "to": "минуты (вычислено)",
              "members": None, "coverage_pct": pct(agg.f_finished)},
-            {"name": "Оплата", "from": "дата оплаты (paid_at)", "to": "оплачено / без оплаты",
+            {"name": "Оплата", "from": "paid_at или подтверждённая банковская транзакция", "to": "оплачено / без оплаты",
              "members": 2, "coverage_pct": 100.0},
             {"name": "Дедупликация", "from": "ID сессии", "to": "UNIQUE(company, session_ext_id)",
              "members": rows, "coverage_pct": 100.0},
@@ -1659,9 +1670,14 @@ class AnalyticsService:
             "period": {"from": f.date_from.isoformat(), "to": f.date_to.isoformat()},
         }
 
-    async def charge_rows(self, f: PeriodFilter, limit: int = 100000) -> dict[str, Any]:
-        """Детальные строки нормализованных сессий (L2) за период — лист «Сессии»
-        в шаблонах экспорта. limit+1 для детекции усечения (без тихой потери)."""
+    async def charge_rows(
+        self, f: PeriodFilter, limit: int = 100, offset: int = 0,
+        *, user_type: str | None = None, region: str | None = None,
+        connector: str | None = None, result: str | None = None,
+        paid: str | None = None, search: str | None = None,
+        sort: str = "started_at", sort_dir: str = "desc",
+    ) -> dict[str, Any]:
+        """Страница нормализованных сессий с серверными фильтрами и итогами."""
         S = ChargeSession
         # Деньги эквайринга рядом со строкой сессии: сколько банк реально списал и
         # выбит ли чек. Деньгами считается платёж с банковской транзакцией — без
@@ -1676,22 +1692,91 @@ class AnalyticsService:
                 func.coalesce(func.sum(case(
                     (and_(_P.bank_txn_id.is_not(None), _P.receipt_url.is_not(None)), 1),
                     else_=0)), 0).label("receipts"),
+                func.max(case((_P.bank_txn_id.is_not(None), _P.paid_at))).label("paid_at"),
             )
             .where(_P.company_id == S.company_id, _P.session_ext_id == S.session_ext_id)
             .lateral("pay")
         )
+        base_conds = list(self._cs_conds(
+            f.company_id, f.date_from, f.date_to, f.station_codes, f.regions,
+            f.dim_by, f.dim_val, station_id=f.station_id,
+        ))
+        paid_at = effective_paid_at(S)
+        if user_type:
+            base_conds.append(S.user_type == user_type)
+        if region:
+            base_conds.append(self._region_label() == region)
+        if connector:
+            base_conds.append(S.connector_type == connector)
+        if result:
+            base_conds.append(S.result == result)
+        if paid == "paid":
+            base_conds.append(paid_at.is_not(None))
+        elif paid == "unpaid":
+            base_conds.append(paid_at.is_(None))
+        if search:
+            like = f"%{search.strip().lower()}%"
+            base_conds.append(or_(
+                func.lower(func.coalesce(S.session_ext_id, "")).like(like),
+                func.lower(func.coalesce(S.station_code, "")).like(like),
+                func.lower(func.coalesce(S.station_name, "")).like(like),
+                func.lower(func.coalesce(S.client_name, "")).like(like),
+            ))
+
+        revenue = func.coalesce(S.client_amount, S.amount)
+        sort_cols = {
+            "started_at": S.started_at,
+            "station": func.coalesce(S.station_name, S.station_code, ""),
+            "region": func.coalesce(S.region, ""),
+            "connector": func.coalesce(S.connector_type, ""),
+            "user_type": func.coalesce(S.user_type, ""),
+            "client": func.coalesce(S.client_name, ""),
+            "charge_type": func.coalesce(S.charge_type, ""),
+            "energy_kwh": S.energy_kwh,
+            "duration_min": S.duration_min,
+            "tariff": S.tariff,
+            "revenue": revenue,
+            "result": func.coalesce(S.result, ""),
+        }
+        order_col = sort_cols.get(sort, S.started_at)
+        order = order_col.asc().nulls_last() if sort_dir == "asc" else order_col.desc().nulls_last()
+
+        canonical_region = self._region_label()
         stmt = select(
-            S.session_ext_id, S.station_code, S.station_name, S.region, S.connector_type,
+            S.session_ext_id, S.station_code, S.station_name,
+            canonical_region.label("region"), S.connector_type,
             S.started_at, S.finished_at, S.duration_min, S.result, S.charge_type, S.user_type,
             S.client_name, S.energy_kwh, S.amount, S.client_amount, S.client_tariff,
-            S.tariff, S.paid_at, S.cut_key,
-            pay.c.paid, pay.c.pay_ok, pay.c.receipts,
-        ).select_from(S).outerjoin(pay, text("true")).where(
-            *self._cs_conds(f.company_id, f.date_from, f.date_to, f.station_codes, f.regions, f.dim_by, f.dim_val,
-                            station_id=f.station_id)
-        ).order_by(S.started_at, S.session_ext_id).limit(limit + 1)  # tie-break: started_at не уникален
+            S.tariff, S.paid_at.label("session_paid_at"), S.cut_key,
+            pay.c.paid, pay.c.pay_ok, pay.c.receipts, pay.c.paid_at.label("payment_paid_at"),
+        ).select_from(S)
+        stmt = self._apply_region_join(stmt)
+        stmt = stmt.outerjoin(pay, text("true")).where(*base_conds).order_by(
+            order, S.session_ext_id,
+        ).offset(offset).limit(limit + 1)
         res = (await self.session.execute(stmt)).all()
-        truncated = len(res) > limit
+        has_more = len(res) > limit
+
+        summary_stmt = select(
+            func.count().label("total"),
+            func.coalesce(func.sum(S.energy_kwh), 0).label("energy"),
+            func.coalesce(func.sum(revenue), 0).label("revenue"),
+        ).where(*base_conds)
+        if f.regions or region:
+            summary_stmt = self._apply_region_join(summary_stmt)
+        summary = (await self.session.execute(summary_stmt)).one()
+
+        scope_conds = list(self._cs_conds(
+            f.company_id, f.date_from, f.date_to, f.station_codes, f.regions,
+            f.dim_by, f.dim_val, station_id=f.station_id,
+        ))
+        facets_stmt = select(
+            func.array_agg(distinct(canonical_region)).label("regions"),
+            func.array_agg(distinct(S.connector_type)).label("connectors"),
+            func.array_agg(distinct(S.result)).label("results"),
+        ).where(*scope_conds)
+        facets_stmt = self._apply_region_join(facets_stmt)
+        facets = (await self.session.execute(facets_stmt)).one()
 
         def iso(dt):
             return dt.isoformat() if dt else None
@@ -1710,7 +1795,7 @@ class AnalyticsService:
             "tariff": float(r.tariff or 0),
             # договорной ₽/кВт·ч ЮЛ (NULL у розницы) — для биллинга и сверки скидок
             "client_tariff": float(r.client_tariff) if r.client_tariff is not None else None,
-            "paid_at": iso(r.paid_at),
+            "paid_at": iso(r.session_paid_at or r.payment_paid_at),
             "cut_key": r.cut_key,
             # Эквайринг по этой сессии: сколько списал банк, есть ли чек и не
             # разошлись ли деньги с начислением.
@@ -1721,7 +1806,23 @@ class AnalyticsService:
                 float(r.client_amount if r.client_amount is not None else (r.amount or 0))
                 - float(r.paid or 0), 2),
         } for r in res[:limit]]
-        return {"rows": out, "total": len(out), "truncated": truncated}
+        clean_facet = lambda values: sorted(
+            (str(v) for v in (values or []) if v), key=lambda v: v.casefold(),
+        )
+        return {
+            "rows": out,
+            "total": int(summary.total or 0),
+            "truncated": has_more,
+            "totals": {
+                "energy_kwh": round(float(summary.energy or 0), 1),
+                "revenue": round(float(summary.revenue or 0), 2),
+            },
+            "facets": {
+                "regions": clean_facet(facets.regions),
+                "connectors": clean_facet(facets.connectors),
+                "results": clean_facet(facets.results),
+            },
+        }
 
     # ─── financial: cash flow + дебиторка/кредиторка ──────────────────
 

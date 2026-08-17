@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, Up
 from sqlalchemy import and_ as sa_and, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import assert_company_member, get_current_user
+from app.auth import assert_company_product, get_current_user
 from app.database import get_db
 from app.models import ChargePayment, ChargeSession, User
 from app.services.export_audit import log_export
@@ -52,7 +52,7 @@ async def import_sessions(
 
     Парсинг и нормализация (коннектор/тип клиента, регион, дедуп, режим) — через
     общий сервис ingest_charge_sessions (тот же путь, что и у канала ЭЗС)."""
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await assert_company_product(company_id, current_user, db, "sales")
     from app.services.charge_sessions_normalize import ingest_charge_sessions, parse_sessions_xlsx
 
     data = await file.read()
@@ -83,7 +83,7 @@ async def enrich_sessions(
     """Обогащение сессий справочником «Организации» (xlsx): проставить
     наименование корпоративного клиента (client_name) ЮЛ-сессиям по телефону
     (user_id = телефон организации). Идемпотентно, отдельно от загрузки сессий."""
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await assert_company_product(company_id, current_user, db, "sales")
     from app.services.charge_sessions_normalize import enrich_sessions_with_orgs, parse_orgs_xlsx
 
     data = await file.read()
@@ -107,7 +107,7 @@ async def reenrich_sessions(
 ) -> dict[str, Any]:
     """Переприменить обогащение из сохранённого реестра corporate_clients (без файла).
     Нужно после перезагрузки таблицы сессий — восстанавливает распределение по ЮЛ."""
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await assert_company_product(company_id, current_user, db, "sales")
     from app.services.charge_sessions_normalize import enrich_from_registry
     result = await enrich_from_registry(db, cid)
     await db.commit()
@@ -120,7 +120,7 @@ async def count_sessions(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, int]:
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await assert_company_product(company_id, current_user, db, "sales")
     n = (await db.execute(
         select(func.count()).select_from(ChargeSession).where(ChargeSession.company_id == cid)
     )).scalar_one()
@@ -143,7 +143,7 @@ async def payments_summary(
 
     «Зависший холд» — строка, где деньги заблокированы, но ни списания, ни
     возврата не было: клиент заряжаться не начал, а средства у него удержаны."""
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await assert_company_product(company_id, current_user, db, "sales")
     df, dt = _day_bounds(date_from, date_to)
     scope = [ChargePayment.company_id == cid,
              ChargePayment.paid_at >= df, ChargePayment.paid_at < dt]
@@ -214,7 +214,7 @@ async def payments_list(
     current_user: User = Depends(get_current_user),
 ) -> list[dict[str, Any]]:
     """Реестр платежей за период (последние сверху). `only` — срез для разбора."""
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await assert_company_product(company_id, current_user, db, "sales")
     df, dt = _day_bounds(date_from, date_to)
     conds = [ChargePayment.company_id == cid,
              ChargePayment.paid_at >= df, ChargePayment.paid_at < dt]
@@ -247,7 +247,7 @@ async def charge_reconciliation_summary(
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Сверка «сессия ↔ платёж ↔ чек»: где данные о зарядках расходятся с деньгами."""
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await assert_company_product(company_id, current_user, db, "sales")
     from app.services.charge_reconciliation import reconciliation
     df, dt = _day_bounds(date_from, date_to)
     return await reconciliation(db, cid, df.date(), (dt - timedelta(days=1)).date())
@@ -264,7 +264,7 @@ async def charge_reconciliation_rows(
     current_user: User = Depends(get_current_user),
 ) -> list[dict[str, Any]]:
     """Строки одного расхождения — то, с чем идут разбираться."""
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await assert_company_product(company_id, current_user, db, "sales")
     from app.services.charge_reconciliation import reconciliation_list
     df, dt = _day_bounds(date_from, date_to)
     return await reconciliation_list(db, cid, df.date(), (dt - timedelta(days=1)).date(),
@@ -283,7 +283,7 @@ async def charge_reconciliation_by(
     current_user: User = Depends(get_current_user),
 ) -> list[dict[str, Any]]:
     """Где копятся расхождения: разрез сверки по станции или региону."""
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await assert_company_product(company_id, current_user, db, "sales")
     from app.services.charge_reconciliation import reconciliation_by
     df, dt = _day_bounds(date_from, date_to)
     return await reconciliation_by(db, cid, df.date(), (dt - timedelta(days=1)).date(), by, limit)
@@ -308,7 +308,7 @@ async def station_sales(
     период, за который платежи ещё не выгружены; поэтому считается и
     показывается отдельно от выручки.
     """
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await assert_company_product(company_id, current_user, db, "sales")
     # Скоуп данных участника: у кого выдано пять станций, чужой объект по прямой
     # ссылке не открывается — id объекта приходит из запроса, а не из его списка.
     from app.scope import current_object_scope
@@ -436,7 +436,7 @@ async def station_energy(
     Шаг ряда выбирается по длине периода: до 62 дней — по дням, дальше — по
     месяцам (иначе таблица за год превращается в 365 строк).
     """
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await assert_company_product(company_id, current_user, db, "sales")
     from app.scope import current_object_scope
     allowed = current_object_scope()
     if allowed and location_id not in allowed:
@@ -535,7 +535,7 @@ async def export_sessions(
     и договорной тариф ЮЛ + обе выручки + разница. Фильтры: период (обяз.),
     опц. тип клиента (ФЛ/ЮЛ), конкретный клиент (client_name), сужение по
     станциям/регионам (контур рабочей области)."""
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await assert_company_product(company_id, current_user, db, "sales")
     try:
         df = date.fromisoformat(date_from[:10])
         dt = date.fromisoformat(date_to[:10])
@@ -614,7 +614,7 @@ async def export_sessions_pivot(
     Сводная пересчитывается при открытии файла средствами Excel. В других
     редакторах (LibreOffice, Google Sheets, веб-Excel) она останется пустой —
     там работает лист «Транзакции» с полными данными."""
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await assert_company_product(company_id, current_user, db, "sales")
     wb, stats = await build_sessions_pivot(db, cid, date_from, date_to, limit)
 
     span = (f"{date_from[:10]} — {date_to[:10]}" if date_from and date_to
@@ -639,7 +639,7 @@ async def export_monthly_matrix(
     from sqlalchemy import text as sa_text
 
     from app.models import ServiceLocation
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await assert_company_product(company_id, current_user, db, "sales")
 
     file_rows = (await db.execute(sa_text(
         "SELECT location_id, period, SUM(dispense_kwh) AS kwh "

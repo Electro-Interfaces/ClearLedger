@@ -903,7 +903,17 @@ export function OverviewDashboardPanel({ companyId, dateFrom, dateTo, embedded }
         )}
         {/* Выгрузка остаётся и во встроенном виде: она относится к витрине, а не
             к экрану, и «Пульсу» её нечем заменить. */}
-        <ExportButton title="Обзор сети ЭЗС" subtitle={`Период: ${period.from} — ${period.to}`} getEl={() => ref.current} />
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {data?.meta.last_session_at && (
+            <span className={`rounded-md border px-2 py-1 text-xs ${data.meta.is_stale
+              ? 'border-amber-500/35 bg-amber-500/10 text-amber-800 dark:text-amber-300'
+              : 'border-border bg-muted/40 text-muted-foreground'}`}>
+              Данные по {formatPeriod(data.meta.last_session_at.slice(0, 10), data.meta.last_session_at.slice(0, 10))}
+              {data.meta.is_stale && data.meta.data_lag_days != null ? ` · отставание ${data.meta.data_lag_days} дн.` : ''}
+            </span>
+          )}
+          <ExportButton title="Обзор сети ЭЗС" subtitle={`Период: ${period.from} — ${period.to}`} getEl={() => ref.current} />
+        </div>
       </div>
 
       {isLoading ? <Loading />
@@ -1011,4 +1021,3 @@ function CorpMini({ c }: { c: OverviewCorporate }) {
     </Card>
   )
 }
-

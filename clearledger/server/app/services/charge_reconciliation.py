@@ -108,7 +108,7 @@ _WHERE = {
                   "and s.energy_kwh / (s.duration_min / 60.0) > :maxkw",
     "double": "pay.pay_ok > 1",
     "underpaid": "pay.pay_ok > 0 and s.amount - pay.paid > :eps",
-    "no_payment": "s.energy_kwh > 0 and pay.pay_all = 0 "
+    "no_payment": "s.energy_kwh > 0 and pay.pay_ok = 0 "
                   "and s.user_type is distinct from 'ЮЛ'",
     "no_receipt": "pay.pay_ok > 0 and pay.receipts = 0",
     "overpaid": "pay.pay_ok > 0 and pay.paid - s.amount > :eps",

@@ -2,6 +2,27 @@
 @import "tw-animate-css";
 @import "./shadcn-theme.css";
 
+@media (max-width: 767px) {
+  html[data-pwa-install="compact"] [data-mobile-shell] {
+    padding-bottom: max(10rem, calc(env(safe-area-inset-bottom) + 9rem));
+  }
+
+  html[data-pwa-install="expanded"] [data-mobile-shell] {
+    padding-bottom: max(17rem, calc(env(safe-area-inset-bottom) + 16rem));
+  }
+
+  [data-sales-surface] button,
+  [data-sales-surface] input,
+  [data-sales-surface] [role="combobox"] {
+    min-height: 2.75rem;
+  }
+
+  [data-sales-surface] input,
+  [data-sales-surface] [role="combobox"] {
+    font-size: 1rem;
+  }
+}
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {

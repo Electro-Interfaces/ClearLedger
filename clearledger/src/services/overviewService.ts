@@ -98,7 +98,14 @@ export interface WeekdayPoint { weekday: number; label: string; amount: number; 
 export interface OverviewWeekday { days: WeekdayPoint[]; best: number | null; worst: number | null }
 
 export interface OverviewAlert { level: string; message: string }
-export interface OverviewMeta { active_stations: number; ports: number; sessions: number }
+export interface OverviewMeta {
+  active_stations: number
+  ports: number
+  sessions: number
+  last_session_at: string | null
+  data_lag_days: number | null
+  is_stale: boolean
+}
 
 /** Состояние сети: не «сколько заработали», а «что с активом». Простаивающие
  * станции, концентрация выручки, ядро клиентов, регионы, сходимость с реестрами

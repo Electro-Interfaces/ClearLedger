@@ -11,7 +11,7 @@ import { useQuery } from '@tanstack/react-query'
 import { MapContainer, TileLayer, CircleMarker, Popup, useMap, useMapEvents } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
-import { Loader2, Search, MapPin, Zap, Plug, Hash, Gauge, Wallet, type LucideIcon } from 'lucide-react'
+import { Loader2, Search, MapPin, Zap, Plug, Hash, Gauge, Wallet, SlidersHorizontal, type LucideIcon } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { loadLocations } from '@/services/locationService'
@@ -130,6 +130,12 @@ interface Pt {
   manufacturer: string; stage: string; owner: string
   /** Паспортные классы из сводной контрагента (слот obshaya). */
   locClass: string; speedClass: string; isCorp: boolean; decommissioned: boolean
+}
+
+function sortedUnique(points: Pt[], selectValue: (point: Pt) => string): string[] {
+  return [...new Set(points.map(selectValue))]
+    .filter((value) => value !== '—')
+    .sort((a, b) => a.localeCompare(b, 'ru'))
 }
 
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null)
@@ -312,7 +318,7 @@ function FSelect({ value, onChange, all, options, w }: {
 }) {
   return (
     <Select value={value} onValueChange={onChange}>
-      <SelectTrigger className={`h-8 ${w} text-xs`}><SelectValue /></SelectTrigger>
+      <SelectTrigger className={`h-11 ${w} max-sm:w-full text-sm sm:h-8 sm:text-xs`}><SelectValue /></SelectTrigger>
       <SelectContent className="z-[1200]">
         <SelectItem value={ALL} className="text-xs">{all}</SelectItem>
         {options.map((o) => <SelectItem key={o.v} value={o.v} className="text-xs">{o.label}</SelectItem>)}
@@ -349,6 +355,7 @@ export function ChargeMapPanel({ companyId, dateFrom, dateTo }: {
   const [locClass, setLocClass] = useState(ALL)
   const [speed, setSpeed] = useState(ALL)
   const [lifecycle, setLifecycle] = useState(ALL)   // active | decommissioned | corp
+  const [filtersOpen, setFiltersOpen] = useState(false)
   const [colorBy, setColorBy] = useState<ColorBy>('single')
   const [sizeBy, setSizeBy] = useState<SizeBy>('fixed')
 
@@ -361,13 +368,12 @@ export function ChargeMapPanel({ companyId, dateFrom, dateTo }: {
   const cockpit = useMemo(() => (data ?? []).find((l) => l.id === cockpitId) ?? null, [data, cockpitId])
   const allPoints = useMemo(() => (data ?? []).filter((l) => !isTestStation(l))
     .map(toPoint).filter((p): p is Pt => p !== null), [data])
-  const uniq = (sel: (p: Pt) => string) => [...new Set(allPoints.map(sel))].filter((x) => x !== '—').sort((a, b) => a.localeCompare(b, 'ru'))
-  const regions = useMemo(() => uniq((p) => p.region), [allPoints])
+  const regions = useMemo(() => sortedUnique(allPoints, (p) => p.region), [allPoints])
   const statuses = useMemo(() => [...new Set(allPoints.map((p) => p.opStatus))], [allPoints])
   const links = useMemo(() => [...new Set(allPoints.map((p) => p.linkStatus))], [allPoints])
-  const manufs = useMemo(() => uniq((p) => p.manufacturer), [allPoints])
-  const stages = useMemo(() => uniq((p) => p.stage), [allPoints])
-  const owners = useMemo(() => uniq((p) => p.owner), [allPoints])
+  const manufs = useMemo(() => sortedUnique(allPoints, (p) => p.manufacturer), [allPoints])
+  const stages = useMemo(() => sortedUnique(allPoints, (p) => p.stage), [allPoints])
+  const owners = useMemo(() => sortedUnique(allPoints, (p) => p.owner), [allPoints])
 
   const points = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -395,7 +401,7 @@ export function ChargeMapPanel({ companyId, dateFrom, dateTo }: {
       if (q && !`${p.name} ${p.city} ${p.address} ${p.number}`.toLowerCase().includes(q)) return false
       return true
     })
-  }, [allPoints, search, region, status, link, power, manuf, stage, owner, locClass, speed, lifecycle, scopeKey, stationCodes, regionIds, locationIds])
+  }, [allPoints, search, region, status, link, power, manuf, stage, owner, locClass, speed, lifecycle, stationCodes, regionIds, locationIds])
 
   // пороги раскраски по метрике (квантили над видимыми точками)
   const colorTh = useMemo(() => {
@@ -448,14 +454,20 @@ export function ChargeMapPanel({ companyId, dateFrom, dateTo }: {
   return (
     <div className="flex h-full flex-col gap-3 p-4">
       {/* фильтры + слои */}
-      <div className="flex flex-wrap items-center gap-2 shrink-0">
-        <div className="relative">
+      <div className="grid grid-cols-2 items-center gap-2 shrink-0 sm:flex sm:flex-wrap">
+        <div className="relative col-span-2 sm:col-auto">
           <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Поиск: станция, город, адрес…" className="h-8 w-[210px] pl-8 text-xs" />
+          <Input value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Поиск станций на карте"
+            placeholder="Поиск: станция, город, адрес…" className="h-11 w-full pl-8 text-base sm:h-8 sm:w-[210px] sm:text-xs" />
         </div>
         <FSelect value={region} onChange={setRegion} all="Все регионы" options={regions.map((r) => ({ v: r, label: r }))} w="w-[170px]" />
         {/* Мостик: поднять выбранный регион в контур рабочей области. */}
         <ApplyToScope kind="regions" values={region !== ALL ? [region] : []} />
+        <button type="button" onClick={() => setFiltersOpen((open) => !open)}
+          className="col-span-2 inline-flex h-11 items-center justify-center gap-2 rounded-md border border-border px-3 text-sm text-muted-foreground sm:hidden">
+          <SlidersHorizontal className="h-4 w-4" />{filtersOpen ? 'Скрыть фильтры' : 'Ещё фильтры'}
+        </button>
+        <div className={`${filtersOpen ? 'grid' : 'hidden'} col-span-2 grid-cols-2 gap-2 sm:contents`}>
         <FSelect value={status} onChange={setStatus} all="Все статусы" options={statuses.map((s) => ({ v: s, label: opMeta(s).label }))} w="w-[140px]" />
         <FSelect value={link} onChange={setLink} all="Связь: все" options={links.map((s) => ({ v: s, label: linkMeta(s).label }))} w="w-[170px]" />
         <FSelect value={power} onChange={setPower} all="Мощность: все" options={[...POWER_BUCKETS, POWER_NA].map((b) => ({ v: b.key, label: b.label }))} w="w-[160px]" />
@@ -468,19 +480,20 @@ export function ChargeMapPanel({ companyId, dateFrom, dateTo }: {
           options={[{ v: 'fast', label: 'Быстрые' }, { v: 'slow', label: 'Медленные' }]} w="w-[140px]" />
         <FSelect value={lifecycle} onChange={setLifecycle} all="Контур: все"
           options={[{ v: 'active', label: 'Действующие' }, { v: 'decommissioned', label: 'Выведенные' }, { v: 'corp', label: 'Корп (каршеринг)' }]} w="w-[170px]" />
-        <div className="ml-auto flex items-center gap-2">
+        <div className="col-span-2 flex flex-wrap items-center gap-2 sm:ml-auto">
           <div className="flex items-center gap-1"><span className="text-xs text-muted-foreground">Цвет:</span>
             <Select value={colorBy} onValueChange={(v) => setColorBy(v as ColorBy)}>
-              <SelectTrigger className="h-8 w-[175px] text-xs"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="h-11 w-[175px] text-sm sm:h-8 sm:text-xs"><SelectValue /></SelectTrigger>
               <SelectContent className="z-[1200]">{COLOR_BY.map((o) => <SelectItem key={o.v} value={o.v} className="text-xs">{o.label}</SelectItem>)}</SelectContent>
             </Select>
           </div>
           <div className="flex items-center gap-1"><span className="text-xs text-muted-foreground">Размер:</span>
             <Select value={sizeBy} onValueChange={(v) => setSizeBy(v as SizeBy)}>
-              <SelectTrigger className="h-8 w-[140px] text-xs"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="h-11 w-[140px] text-sm sm:h-8 sm:text-xs"><SelectValue /></SelectTrigger>
               <SelectContent className="z-[1200]">{SIZE_BY.map((o) => <SelectItem key={o.v} value={o.v} className="text-xs">{o.label}</SelectItem>)}</SelectContent>
             </Select>
           </div>
+        </div>
         </div>
       </div>
 

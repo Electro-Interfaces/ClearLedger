@@ -1,53 +1,48 @@
-/**
- * Микро-график ряда: в строке таблицы или под цифрой плитки.
- *
- * Собран поверх `SparkLineChart` из чартовой базы. До него в проекте жили шесть
- * почти одинаковых `Sparkline` на голом `<polyline>`, и они успели разойтись:
- * где-то пропуски заменялись нулём (линия проваливалась к оси), где-то цвет
- * означал направление, где-то был нейтральный, а размеры задавались тремя
- * разными способами.
- *
- *   <TrendSpark values={row.values} />                     строка таблицы
- *   <TrendSpark values={k.spark} tone="muted" full />      под цифрой плитки
- */
-import { SparkLineChart } from "@/components/ui/spark-chart"
-import { cn } from "@/lib/utils"
+import { memo, type ReactNode } from 'react'
+import { cn } from '@/lib/utils'
 
-export function TrendSpark({
+export const TrendSpark = memo(function TrendSpark({
   values,
-  tone = "direction",
+  tone = 'direction',
   full = false,
   className,
   placeholder = null,
 }: {
   values: (number | null)[] | undefined
-  /** direction — зелёный на росте, красный на падении; muted — нейтральный. */
-  tone?: "direction" | "muted" | "brand"
-  /** Растянуть на ширину контейнера (плитка) вместо фиксированной (таблица). */
+  tone?: 'direction' | 'muted' | 'brand'
   full?: boolean
   className?: string
-  /** Что показать, когда ряда нет: в таблице — прочерк, в плитке — ничего. */
-  placeholder?: React.ReactNode
+  placeholder?: ReactNode
 }) {
-  const vals = (values ?? []).filter((v): v is number => v != null)
-  // Две точки — отрезок, а не тренд: рисовать нечего.
-  if (vals.length < 2) return <>{placeholder}</>
+  const samples = (values ?? [])
+    .map((value, index) => value == null ? null : { value, index })
+    .filter((sample): sample is { value: number; index: number } => sample !== null)
 
-  const rising = vals[vals.length - 1] >= vals[0]
-  const color = tone === "direction" ? (rising ? "green" : "error")
-    : tone === "brand" ? "brand" : "neutral"
+  if (samples.length < 2) return <>{placeholder}</>
+
+  let min = samples[0].value
+  let max = samples[0].value
+  for (const sample of samples) {
+    min = Math.min(min, sample.value)
+    max = Math.max(max, sample.value)
+  }
+  const range = max - min
+  const lastIndex = Math.max((values?.length ?? 1) - 1, 1)
+  const points = samples.map(({ value, index }) => {
+    const x = index / lastIndex * 62 + 1
+    const y = range === 0 ? 8 : 15 - (value - min) / range * 14
+    return `${x.toFixed(2)},${y.toFixed(2)}`
+  }).join(' ')
+  const rising = samples[samples.length - 1].value >= samples[0].value
+  const color = tone === 'direction'
+    ? rising ? 'text-emerald-500' : 'text-red-500'
+    : tone === 'brand' ? 'text-primary' : 'text-muted-foreground/60'
 
   return (
-    <SparkLineChart
-      className={cn(full ? "h-7 w-full" : "inline-block h-4 w-16 align-middle", className)}
-      data={(values ?? []).map((v, i) => ({ i, v }))}
-      index="i"
-      categories={["v"]}
-      colors={[color]}
-      // Пропуск соединяем, а не роняем в ноль: ноль в ряду цены читался бы как
-      // продажа по нулю, а в ряду успеха — как полный провал.
-      connectNulls
-      autoMinValue
-    />
+    <svg viewBox="0 0 64 16" preserveAspectRatio="none" aria-hidden="true" focusable="false"
+      className={cn(full ? 'h-7 w-full' : 'inline-block h-4 w-16 align-middle', color, className)}>
+      <polyline points={points} fill="none" stroke="currentColor" strokeWidth="1.75"
+        vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
   )
-}
+})

@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import assert_company_member, get_current_user
+from app.auth import assert_company_product, get_current_user
 from app.database import get_db
 from app.models import ChargeSession, User
 from app.services.corporate_service import CorporateService
@@ -46,7 +46,7 @@ async def corporate_overview(
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """KPI корп-направления + топ-клиенты + алерты."""
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await assert_company_product(company_id, current_user, db, "sales")
     return await CorporateService(db).overview(
         cid, _d(date_from, "date_from"), _d(date_to, "date_to"),
         stations=_csv(stations), regions=_csv(regions))
@@ -63,7 +63,7 @@ async def corporate_clients(
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Реестр клиентов + метрики/гэп/тариф за период (Клиенты/Тарифы/Рентабельность/Биллинг)."""
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await assert_company_product(company_id, current_user, db, "sales")
     return await CorporateService(db).clients(
         cid, _d(date_from, "date_from"), _d(date_to, "date_to"),
         stations=_csv(stations), regions=_csv(regions))
@@ -88,7 +88,7 @@ async def corporate_client_card(
     `history_months` > 0 удлиняет ТОЛЬКО ряд месяцев (динамика на коротком
     контуре не читается); итоги и разрезы остаются по периоду.
     tz=local — часы активности по местному времени станции."""
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await assert_company_product(company_id, current_user, db, "sales")
     return await CorporateService(db).client_card(
         cid, client, _d(date_from, "date_from"), _d(date_to, "date_to"),
         max(0, min(history_months, 36)),
@@ -109,7 +109,7 @@ async def corporate_billing(
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Данные к выставлению под УПД: сводка на клиента + номенклатура + разбивка НДС."""
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await assert_company_product(company_id, current_user, db, "sales")
     return await CorporateService(db).billing(
         cid, _d(date_from, "date_from"), _d(date_to, "date_to"), client, vat_rate,
         stations=_csv(stations), regions=_csv(regions))
@@ -130,7 +130,7 @@ async def corporate_billing_export(
     """Реестр к выставлению под УПД (xlsx, 2 листа): «Реестр» (сводка на клиента,
     НДС 20% выделен) + «Детализация» (номенклатура по договорному тарифу). Фильтры:
     период (обяз.), опц. конкретный клиент (один клиент = один УПД)."""
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await assert_company_product(company_id, current_user, db, "sales")
     st_codes, regs = _csv(stations), _csv(regions)
     data = await CorporateService(db).billing(
         cid, _d(date_from, "date_from"), _d(date_to, "date_to"), client, vat_rate,

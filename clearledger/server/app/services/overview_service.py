@@ -20,6 +20,7 @@ from app.models import ChargeSession
 from app.services.analytics_cache import cached_report
 from app.services.analytics_service import AnalyticsService, PeriodFilter
 from app.services.corporate_service import CorporateService
+from app.services.charge_payment_state import effective_paid_at
 from app.services.session_scope import session_scope_conds
 
 
@@ -100,6 +101,7 @@ class OverviewService:
         Совпадает с corporate_service (client_name) и retail_service (user_id) —
         поэтому Обзор смыкается с панелями «Корпоратив»/«Частные лица»."""
         S = ChargeSession
+        paid_at = effective_paid_at(S)
         seg = case(
             (S.client_name.is_not(None), "corp"),
             (S.user_id.is_not(None), "retail"),
@@ -109,13 +111,13 @@ class OverviewService:
             seg,
             func.count().label("cnt"),
             func.coalesce(func.sum(func.coalesce(S.client_amount, S.amount)), 0).label("amount"),
-            func.coalesce(func.sum(case((S.paid_at.is_not(None), 1), else_=0)), 0).label("paid"),
+            func.coalesce(func.sum(case((paid_at.is_not(None), 1), else_=0)), 0).label("paid"),
             # Отдельно — сессии, где ток ПОШЁЛ, и оплаченные среди них. Долг бывает
             # только за отпущенную энергию: за сорвавшуюся попытку платить не за что,
             # а без этого «Без оплаты» бил тревогу на 3,7 % при нулевой задолженности.
             func.coalesce(func.sum(case((S.energy_kwh > 0, 1), else_=0)), 0).label("charged"),
             func.coalesce(func.sum(case(
-                (and_(S.energy_kwh > 0, S.paid_at.is_not(None)), 1), else_=0)), 0).label("charged_paid"),
+                (and_(S.energy_kwh > 0, paid_at.is_not(None)), 1), else_=0)), 0).label("charged_paid"),
         ).where(*self.a._cs_conds(f.company_id, f.date_from, f.date_to, f.station_codes, f.regions)).group_by(seg)
         out = {k: {"amount": 0.0, "sessions": 0, "paid": 0, "charged": 0, "charged_paid": 0}
                for k in ("corp", "retail", "anon")}
@@ -358,6 +360,19 @@ class OverviewService:
         # застревал бы на прошлой дате в пределах TTL/версии при переходе через
         # полночь: цифра прогноза «прыгала» бы без действий пользователя.
         today = today or date.today()
+        freshness_stmt = select(func.max(ChargeSession.started_at)).where(
+            *self.a._cs_conds(
+                company_id, df, dt, f_cur.station_codes, f_cur.regions,
+            )
+        )
+        if f_cur.regions:
+            freshness_stmt = self.a._apply_region_join(freshness_stmt)
+        last_session_at = (await self.db.execute(freshness_stmt)).scalar_one_or_none()
+        freshness_ref = min(dt, today)
+        data_lag_days = (
+            max(0, (freshness_ref - last_session_at.date()).days)
+            if last_session_at is not None else None
+        )
         if df.year == dt.year and df.month == dt.month and dt >= today:
             days_done = (min(dt, today) - df).days + 1
             days_in_month = (date(df.year + (df.month // 12), df.month % 12 + 1, 1)
@@ -389,6 +404,12 @@ class OverviewService:
 
         # ─── алерты (пороги сети + корпоратив) ───
         alerts: list[dict[str, str]] = []
+        if data_lag_days is not None and data_lag_days > 1:
+            alerts.append({
+                "level": "warn",
+                "message": f"Данные загружены по {last_session_at:%d.%m.%Y} — "
+                           f"отставание {data_lag_days} дн.",
+            })
         # Простой парка — самая крупная потеря, поэтому первым алертом.
         if silent["silent"]:
             alerts.append({
@@ -495,6 +516,9 @@ class OverviewService:
                 "active_stations": active_cur,
                 "ports": int(tc["ports"]),
                 "sessions": tc["sessions"],
+                "last_session_at": last_session_at.isoformat() if last_session_at else None,
+                "data_lag_days": data_lag_days,
+                "is_stale": data_lag_days is not None and data_lag_days > 1,
             },
         }
 
