@@ -2262,6 +2262,12 @@ class MailMessage(Base):
     raw_eml: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     # Куда письмо доехало: chat | task | ticket | intake | doc. Пусто — осталось в переписке.
     routed_to: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Неудачная доставка не должна исчезать в логе: письмо остаётся в очереди,
+    # администратор видит причину и может повторить маршрут после исправления.
+    route_error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    route_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    route_attempted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -2269,6 +2275,8 @@ class MailMessage(Base):
     __table_args__ = (
         Index("idx_mail_messages_thread", "company_id", "thread_id"),
         Index("idx_mail_messages_msgid", "company_id", "message_id"),
+        Index("uq_mail_messages_company_msgid", "company_id", "message_id",
+              unique=True, postgresql_where=text("message_id IS NOT NULL")),
         Index("idx_mail_messages_account_uid", "account_id", "uid"),
     )
 
@@ -10050,6 +10058,9 @@ class DocExchangeTarget(Base):
     # Автосканирование включается только после ручной обкатки конкретной папки.
     scan_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     scan_interval_min: Mapped[int] = mapped_column(Integer, nullable=False, default=30)
+    # Следующий проход продолжает после последнего просмотренного имени: ведущие
+    # дубли и большая папка не должны навсегда закрывать хвост очереди.
+    scan_cursor: Mapped[str | None] = mapped_column(String(500), nullable=True)
     last_error: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now())
@@ -10161,6 +10172,8 @@ class DocAcquaint(Base):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     # Как человек попал в лист: сам, по подразделению, по роли.
     reason: Mapped[str] = mapped_column(String(20), nullable=False, default="manual")
+    reason_ref: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    reason_name: Mapped[str | None] = mapped_column(String(160), nullable=True)
     required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # pending | done
@@ -10168,6 +10181,13 @@ class DocAcquaint(Base):
     read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     reminded_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True)
+    reminder_attempted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    reminder_error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # Ознакомление относится к точным реквизитам и хешам файлов, а не к «карточке
+    # вообще»: следующая редакция требует нового цикла и не переписывает прошлый.
+    document_snapshot: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    snapshot_sha256: Mapped[str | None] = mapped_column(CHAR(64), nullable=True)
     # Отметка ставится только за себя, поэтому автора отдельно не храним.
     note: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_by: Mapped[uuid.UUID | None] = mapped_column(
@@ -10176,7 +10196,8 @@ class DocAcquaint(Base):
         DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
-        UniqueConstraint("doc_id", "user_id", name="uq_doc_acquaints_person"),
+        Index("uq_doc_acquaints_snapshot", "doc_id", "user_id", "snapshot_sha256",
+              unique=True, postgresql_where=text("snapshot_sha256 IS NOT NULL")),
         Index("idx_doc_acquaints_mine", "company_id", "user_id", "status"),
     )
 

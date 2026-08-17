@@ -467,7 +467,7 @@ export function DocCardPanel({ id, companyId, onBack, onChanged }: {
           </section>
           <section aria-labelledby="acquaint-heading">
             <h2 id="acquaint-heading" className="text-sm font-semibold">Ознакомление</h2>
-            <DocAcquaintTab doc={d} companyId={companyId} onChanged={refresh} />
+            <DocAcquaintTab doc={d} companyId={companyId} canEdit={editable} onChanged={refresh} />
           </section>
         </TabsContent>
 

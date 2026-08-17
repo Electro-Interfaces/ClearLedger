@@ -25,7 +25,7 @@ const SCOPE_LABEL: Record<string, string> = {
 }
 
 export function DocsSetupPage() {
-  const { company } = useCompany()
+  const { company, isCompanyAdmin } = useCompany()
   const qc = useQueryClient()
   const view = useDocsView('/docs/setup')
   const companyId = company?.id ?? ''
@@ -46,6 +46,16 @@ export function DocsSetupPage() {
   })
 
   const kinds = kindsQ.data ?? []
+
+  if (!isCompanyAdmin) {
+    return (
+      <div className="px-4 py-4">
+        <Card className="p-5 text-sm text-muted-foreground">
+          Настройку видов, нумераторов, обмена и замещений ведёт администратор пространства.
+        </Card>
+      </div>
+    )
+  }
 
   if (view === 'substitutions') {
     return <Substitutions companyId={companyId} />
@@ -285,6 +295,15 @@ function ExchangeTargets({ companyId }: { companyId: string }) {
     },
     onError: (e) => toast.error((e as Error).message),
   })
+  const scan = useMutation({
+    mutationFn: (id: string) => docsService.scanInbox(companyId, id),
+    onSuccess: (result) => {
+      qc.invalidateQueries({ queryKey: ['doc-exchange-targets', companyId] })
+      if (result.errors.length) toast.error(result.errors[0].error)
+      else toast.success(result.added ? `Новых файлов: ${result.added}` : 'Папка проверена, новых файлов нет')
+    },
+    onError: (error) => toast.error((error as Error).message),
+  })
 
   const targets = targetsQ.data ?? []
   const intervalFor = (target: docsService.DocExchangeTarget) =>
@@ -301,6 +320,15 @@ function ExchangeTargets({ companyId }: { companyId: string }) {
       </div>
 
       <Card className="divide-y divide-border/60">
+        {targetsQ.isLoading && (
+          <div className="px-3 py-6 text-center text-sm text-muted-foreground">Загрузка точек обмена…</div>
+        )}
+        {targetsQ.isError && (
+          <div role="alert" className="flex flex-wrap items-center justify-between gap-3 px-3 py-4">
+            <span className="text-sm text-destructive">Точки обмена не загрузились</span>
+            <Button size="sm" variant="outline" onClick={() => targetsQ.refetch()}>Повторить</Button>
+          </div>
+        )}
         {targets.map((t) => (
           <div key={t.id} className="px-3 py-2.5">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -314,6 +342,10 @@ function ExchangeTargets({ companyId }: { companyId: string }) {
               приём: {t.inbox_path || 'не указан'}
             </div>
             <div className="mt-2 flex flex-wrap items-center gap-2">
+              <Button size="sm" variant="outline" disabled={scan.isPending || !t.is_active
+                || !t.inbox_configured} onClick={() => scan.mutate(t.id)}>
+                Проверить сейчас
+              </Button>
               <Label htmlFor={`scan-${t.id}`} className="text-xs text-muted-foreground">
                 Интервал, минут
               </Label>
@@ -322,7 +354,7 @@ function ExchangeTargets({ companyId }: { companyId: string }) {
                 onChange={(e) => setIntervals((current) => ({
                   ...current, [t.id]: e.target.value,
                 }))} className="h-8 w-24" />
-              <Button size="sm" variant="outline" disabled={schedule.isPending
+              <Button size="sm" variant="outline" disabled={schedule.isPending || !t.is_active
                 || !Number.isInteger(intervalFor(t))
                 || intervalFor(t) < 5 || intervalFor(t) > 1440}
                 onClick={() => schedule.mutate({
@@ -349,7 +381,7 @@ function ExchangeTargets({ companyId }: { companyId: string }) {
             )}
           </div>
         ))}
-        {targets.length === 0 && (
+        {targetsQ.isSuccess && targets.length === 0 && (
           <div className="px-3 py-6 text-center text-sm text-muted-foreground">
             Точек обмена нет. Пакет всё равно можно забрать кнопкой «Скачать пакет»
             в карточке документа.
@@ -367,10 +399,10 @@ function ExchangeTargets({ companyId }: { companyId: string }) {
             placeholder="СЭД головной компании" />
           <Field label="Папка выгрузки" value={form.outbox_path}
             onChange={(v) => setForm({ ...form, outbox_path: v })}
-            placeholder="/mnt/sedo/out" />
+            placeholder={`/exchange/${companyId}/out`} />
           <Field label="Папка приёма" value={form.inbox_path}
             onChange={(v) => setForm({ ...form, inbox_path: v })}
-            placeholder="/mnt/sedo/in" />
+            placeholder={`/exchange/${companyId}/in`} />
         </div>
         <Button size="sm" onClick={() => create.mutate()}
           disabled={!form.code.trim() || !form.name.trim() || create.isPending}>

@@ -15,31 +15,78 @@
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import io
+import os
 import re
+import stat
+import time
 import zipfile
 from datetime import datetime, timezone
+from itertools import islice
 from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree as ET
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
     DocApproval, DocCard, DocExchangeTarget, DocInboxItem, DocKind, DocVersion,
     Organization, SourceFile, User,
 )
+from app.config import settings
 from app.services import doc_print, file_store
 
 # Что кладём в пакет: сам документ, приложения и подписанный экземпляр. Служебные
 # вложения переписки наружу не отдаём — головной компании нужен документ, а не
 # наша внутренняя кухня.
 EXPORT_ROLES = ("body", "appendix", "signed_scan")
+MAX_INBOX_FILES = 200
+MAX_INBOX_ENTRIES = 1000
+MAX_INBOX_FILE_BYTES = 50 * 1024 * 1024
+MAX_INBOX_TOTAL_BYTES = 250 * 1024 * 1024
+MAX_MANIFEST_BYTES = 2 * 1024 * 1024
+MIN_STABLE_AGE_SECONDS = 5
+SCAN_LOCK_NAMESPACE = 0x0ED012
 
 # Имя пакета: по нему человек на той стороне опознаёт документ, не открывая.
 _BAD_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+
+
+def exchange_roots() -> tuple[Path, ...]:
+    roots = []
+    for raw in settings.doc_exchange_roots.split(";"):
+        value = raw.strip()
+        if value:
+            root = Path(value)
+            if not root.is_absolute():
+                raise ValueError("Корень обмена должен быть абсолютным путём")
+            roots.append(root.resolve(strict=False))
+    if not roots:
+        raise ValueError("Не настроены разрешённые корни обмена с СЭД")
+    return tuple(roots)
+
+
+def exchange_path(value: str, company_id) -> Path:
+    """Канонический путь внутри смонтированного корня обмена."""
+    raw = (value or "").strip()
+    if not raw:
+        raise ValueError("Путь обмена не указан")
+    path = Path(raw)
+    if not path.is_absolute():
+        raise ValueError("Путь обмена должен быть абсолютным")
+    resolved = path.resolve(strict=False)
+    if company_id is None:
+        raise ValueError("У точки обмена не указана компания")
+    tenant_roots = tuple((root / str(company_id)).resolve(strict=False)
+                         for root in exchange_roots())
+    if not any(resolved == root or resolved.is_relative_to(root)
+               for root in tenant_roots):
+        raise ValueError(
+            f"Путь должен находиться в папке компании {tenant_roots[0]}")
+    return resolved
 
 
 def safe_name(value: str, limit: int = 80) -> str:
@@ -173,11 +220,12 @@ def place_package(target: DocExchangeTarget, name: str, data: bytes) -> str:
     добавляется отметка времени. Затирать — значит терять доказательство того,
     что и когда уходило.
     """
-    folder = Path(target.outbox_path)
+    folder = exchange_path(target.outbox_path, target.company_id)
     folder.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f")
     path = folder / f"{name}_{stamp}.zip"
-    path.write_bytes(data)
+    with path.open("xb") as stream:
+        stream.write(data)
     return str(path)
 
 
@@ -200,60 +248,120 @@ def parse_manifest(data: bytes) -> dict[str, Any]:
     return out
 
 
+def _candidate_paths(target: DocExchangeTarget) -> list[Path]:
+    folder = exchange_path(target.inbox_path, target.company_id)
+    if not folder.exists():
+        raise FileNotFoundError(f"Папка обмена не найдена: {folder}")
+    if not folder.is_dir():
+        raise NotADirectoryError(f"Путь обмена не является папкой: {folder}")
+    entries = list(islice(folder.iterdir(), MAX_INBOX_ENTRIES + 1))
+    if len(entries) > MAX_INBOX_ENTRIES:
+        raise ValueError(
+            f"В папке обмена больше {MAX_INBOX_ENTRIES} объектов; разберите её вручную")
+    paths: list[Path] = []
+    for path in entries:
+        if path.name.startswith(".") or path.is_symlink() or not path.is_file():
+            continue
+        resolved = path.resolve(strict=True)
+        if not resolved.is_relative_to(folder):
+            continue
+        paths.append(resolved)
+    ordered = sorted(paths, key=lambda item: item.name)
+    if target.scan_cursor and ordered:
+        split = next((index for index, item in enumerate(ordered)
+                      if item.name > target.scan_cursor), 0)
+        ordered = ordered[split:] + ordered[:split]
+    return ordered
+
+
+def _read_candidate(path: Path) -> dict[str, Any] | None:
+    descriptor = None
+    try:
+        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode) or before.st_size > MAX_INBOX_FILE_BYTES:
+            return None
+        if before.st_mtime > time.time() - MIN_STABLE_AGE_SECONDS:
+            return None
+        with os.fdopen(descriptor, "rb", closefd=False) as stream:
+            data = stream.read(MAX_INBOX_FILE_BYTES + 1)
+        after = os.fstat(descriptor)
+    except OSError:
+        return None
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+    if (len(data) > MAX_INBOX_FILE_BYTES or before.st_size != after.st_size
+            or before.st_mtime_ns != after.st_mtime_ns
+            or len(data) != after.st_size):
+        return None
+    parsed: dict[str, Any] = {}
+    if path.suffix.lower() == ".zip":
+        try:
+            with zipfile.ZipFile(io.BytesIO(data)) as archive:
+                for info in archive.infolist()[:1000]:
+                    if (info.filename.lower().endswith(".xml")
+                            and info.file_size <= MAX_MANIFEST_BYTES):
+                        parsed = parse_manifest(archive.read(info))
+                        break
+        except zipfile.BadZipFile:
+            parsed = {}
+    elif path.suffix.lower() == ".xml" and len(data) <= MAX_MANIFEST_BYTES:
+        parsed = parse_manifest(data)
+    return {
+        "file_name": path.name, "source_path": str(path), "size": len(data),
+        "sha256": hashlib.sha256(data).hexdigest(), "data": data,
+        "parsed": parsed,
+    }
+
+
 def scan_inbox(target: DocExchangeTarget) -> list[dict[str, Any]]:
     """Посмотреть, что лежит во входящей папке.
 
     Читаем, но ничего не удаляем и не перекладываем: папка принадлежит той
     стороне, и хозяйничать в ней мы не вправе. Повтор ловится хешем.
     """
-    folder = Path(target.inbox_path)
-    if not folder.exists():
-        raise FileNotFoundError(f"Папка обмена не найдена: {folder}")
-    if not folder.is_dir():
-        raise NotADirectoryError(f"Путь обмена не является папкой: {folder}")
     found: list[dict[str, Any]] = []
-    for path in sorted(folder.iterdir()):
-        if not path.is_file() or path.name.startswith("."):
+    total = 0
+    for path in _candidate_paths(target)[:MAX_INBOX_FILES]:
+        item = _read_candidate(path)
+        if item is None or total + item["size"] > MAX_INBOX_TOTAL_BYTES:
             continue
-        try:
-            data = path.read_bytes()
-        except OSError:
-            continue
-        parsed: dict[str, Any] = {}
-        if path.suffix.lower() == ".zip":
-            try:
-                with zipfile.ZipFile(io.BytesIO(data)) as z:
-                    for inner in z.namelist():
-                        if inner.lower().endswith(".xml"):
-                            parsed = parse_manifest(z.read(inner))
-                            break
-            except zipfile.BadZipFile:
-                parsed = {}
-        elif path.suffix.lower() == ".xml":
-            parsed = parse_manifest(data)
-        found.append({
-            "file_name": path.name,
-            "source_path": str(path),
-            "size": len(data),
-            "sha256": hashlib.sha256(data).hexdigest(),
-            "data": data,
-            "parsed": parsed,
-        })
+        found.append(item)
+        total += item["size"]
     return found
 
 
 async def collect_inbox(db: AsyncSession, target: DocExchangeTarget) -> int:
     """Перенести новые файлы папки в очередь разбора, не принимая их документами."""
-    found = scan_inbox(target)
+    if target.id is not None:
+        got = await db.scalar(text("SELECT pg_try_advisory_xact_lock(:ns, :key)"), {
+            "ns": SCAN_LOCK_NAMESPACE, "key": target.id.int % (2 ** 31),
+        })
+        if not got:
+            return 0
+    paths = await asyncio.to_thread(_candidate_paths, target)
     target.last_scan_at = datetime.now(timezone.utc)
     target.last_error = None
     added = 0
-    for item in found:
+    total = 0
+    processed = 0
+    for path in paths:
+        if processed >= MAX_INBOX_FILES:
+            break
+        processed += 1
+        item = await asyncio.to_thread(_read_candidate, path)
+        target.scan_cursor = path.name
+        if item is None:
+            continue
         duplicate = (await db.execute(select(DocInboxItem.id).where(
             DocInboxItem.company_id == target.company_id,
             DocInboxItem.sha256 == item["sha256"]))).scalar_one_or_none()
         if duplicate is not None:
             continue
+        if total + item["size"] > MAX_INBOX_TOTAL_BYTES:
+            break
+        total += item["size"]
         stored = file_store.put(
             db, target.company_id, item["data"], file_name=item["file_name"], mime=None)
         await db.flush()

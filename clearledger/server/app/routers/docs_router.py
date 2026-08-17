@@ -34,7 +34,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import log_audit
-from app.auth import assert_company_product, get_current_user
+from app.auth import assert_company_product, get_current_user, resolve_member_modules
 from app.database import get_db
 from app.models import (
     CompanyRole, Counterparty, Department, DocAccessGrant, DocApproval, DocCard,
@@ -1158,6 +1158,9 @@ async def register_doc(
     cid = await assert_company_product(payload.company_id, current_user, db, "docs")
     d = await _doc_or_404(db, cid, doc_id)
     await _assert_doc_permission(db, cid, d, current_user, "edit")
+    d = (await db.execute(select(DocCard).where(
+        DocCard.id == d.id).execution_options(
+            populate_existing=True).with_for_update())).scalar_one()
     if d.reg_number:
         raise HTTPException(status.HTTP_409_CONFLICT,
                             f"Документ уже зарегистрирован под номером {d.reg_number}")
@@ -1229,6 +1232,7 @@ async def register_doc(
         if case is not None and case.storage_years is not None:
             # Срок считается от конца года регистрации, как в перечне.
             d.storage_until = date_type(on_date.year + case.storage_years, 12, 31)
+    await _supersede_pending_acquaints(db, d.id)
     db.add(DocEvent(doc_id=d.id, kind="registered", user_id=current_user.id,
                     actor_name=current_user.name or current_user.email,
                     to_value=number, note=reason or None))
@@ -1315,6 +1319,9 @@ async def doc_action(
         await _assert_doc_permission(db, cid, d, current_user, "sign")
     else:
         await _assert_doc_permission(db, cid, d, current_user, "edit")
+    d = (await db.execute(select(DocCard).where(
+        DocCard.id == d.id).execution_options(
+            populate_existing=True).with_for_update())).scalar_one()
     if (payload.confidentiality is not None
             and payload.confidentiality != d.confidentiality):
         await _assert_manage_doc_access(db, cid, d, current_user)
@@ -1431,6 +1438,8 @@ async def doc_action(
         db.add(DocEvent(doc_id=d.id, kind="approval", user_id=current_user.id,
                         actor_name=who, to_value="нужно согласовать заново",
                         note="изменены реквизиты документа"))
+    if changed_material:
+        await _supersede_pending_acquaints(db, d.id)
     if payload.note and payload.status is None:
         db.add(DocEvent(doc_id=d.id, kind="comment", user_id=current_user.id,
                         actor_name=who, note=payload.note))
@@ -2528,12 +2537,17 @@ async def list_targets(
     current_user: User = Depends(get_current_user),
 ):
     cid = await assert_company_product(company_id, current_user, db, "docs")
+    membership = await db.get(UserCompany, (current_user.id, cid))
+    is_admin = current_user.is_superadmin or (
+        membership is not None and membership.role == "admin")
     rows = (await db.execute(select(DocExchangeTarget).where(
         DocExchangeTarget.company_id == cid).order_by(
         DocExchangeTarget.name))).scalars().all()
     return {"targets": [{
         "id": str(t.id), "code": t.code, "name": t.name, "system": t.system,
-        "outbox_path": t.outbox_path, "inbox_path": t.inbox_path,
+        "outbox_path": t.outbox_path if is_admin else "",
+        "inbox_path": t.inbox_path if is_admin else "",
+        "outbox_configured": bool(t.outbox_path), "inbox_configured": bool(t.inbox_path),
         "as_archive": t.as_archive, "is_active": t.is_active, "note": t.note,
         "scan_enabled": t.scan_enabled, "scan_interval_min": t.scan_interval_min,
         "last_export_at": t.last_export_at.isoformat() if t.last_export_at else None,
@@ -2560,6 +2574,15 @@ async def create_target(
         DocExchangeTarget.code == payload.code))).scalar_one_or_none()
     if dup is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, "Точка с таким кодом уже есть")
+    for field_name, value in (("папка выгрузки", payload.outbox_path),
+                              ("папка приёма", payload.inbox_path)):
+        if not value.strip():
+            continue
+        try:
+            doc_exchange.exchange_path(value, cid)
+        except ValueError as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                f"{field_name}: {exc}") from exc
     t = DocExchangeTarget(
         company_id=cid, code=payload.code, name=payload.name, system=payload.system,
         outbox_path=payload.outbox_path.strip(), inbox_path=payload.inbox_path.strip(),
@@ -2593,6 +2616,9 @@ async def update_target_schedule(
         DocExchangeTarget.id == _uuid_or_400(target_id, "target_id")))).scalar_one_or_none()
     if target is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Точка обмена не найдена")
+    if payload.enabled and not target.is_active:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Сначала включите саму точку обмена")
     if payload.enabled and not target.inbox_path:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Не указана папка приёма")
     if payload.enabled and target.last_scan_at is None:
@@ -2744,7 +2770,7 @@ async def scan_targets(
     for t in targets:
         try:
             added += await doc_exchange.collect_inbox(db, t)
-        except OSError as e:
+        except (OSError, ValueError) as e:
             t.last_error = str(e)[:500]
             errors.append({"target": t.name, "error": t.last_error})
             continue
@@ -2887,6 +2913,76 @@ class AcquaintIn(BaseModel):
     due_at: datetime | None = None
 
 
+async def _acquaint_snapshot(db: AsyncSession, doc: DocCard) -> tuple[dict, str]:
+    return await doc_approvals._document_snapshot(db, doc)
+
+
+async def _supersede_pending_acquaints(db: AsyncSession, doc_id: uuid.UUID) -> None:
+    rows = (await db.execute(select(DocAcquaint).where(
+        DocAcquaint.doc_id == doc_id,
+        DocAcquaint.status == "pending",
+    ))).scalars().all()
+    for row in rows:
+        row.status = "superseded"
+
+
+async def _docs_members(db: AsyncSession, cid: uuid.UUID,
+                        user_ids: set[uuid.UUID] | None = None,
+                        department_id: uuid.UUID | None = None) -> dict[uuid.UUID, User]:
+    statement = (select(User, UserCompany)
+                 .join(UserCompany, UserCompany.user_id == User.id)
+                 .where(UserCompany.company_id == cid, User.mail_only.is_(False)))
+    if user_ids is not None:
+        if not user_ids:
+            return {}
+        statement = statement.where(User.id.in_(user_ids))
+    if department_id is not None:
+        statement = statement.where(UserCompany.department_id == department_id)
+    allowed: dict[uuid.UUID, User] = {}
+    for user, membership in (await db.execute(statement)).all():
+        if user.is_superadmin or membership.role == "admin":
+            allowed[user.id] = user
+            continue
+        modules = await resolve_member_modules(membership, db)
+        if modules is None or "docs" in modules or any(
+                key.startswith("docs:") for key in modules):
+            allowed[user.id] = user
+    return allowed
+
+
+@router.get("/acquaint/subjects")
+async def acquaint_subjects(
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Люди, которые действительно смогут открыть назначенный им документ."""
+    cid = await assert_company_product(company_id, current_user, db, "docs")
+    people = await _docs_members(db, cid)
+    memberships = (await db.execute(select(
+        UserCompany.user_id, UserCompany.department_id,
+    ).where(UserCompany.company_id == cid,
+            UserCompany.user_id.in_(people)))).all() if people else []
+    department_by_user = {user_id: department_id for user_id, department_id in memberships}
+    departments = (await db.execute(select(Department).where(
+        Department.company_id == cid).order_by(Department.name))).scalars().all()
+    counts = {department.id: 0 for department in departments}
+    for department_id in department_by_user.values():
+        if department_id in counts:
+            counts[department_id] += 1
+    return {
+        "people": [{
+            "id": str(user.id), "name": user.name or user.email,
+            "department_id": (str(department_by_user[user.id])
+                              if department_by_user.get(user.id) else None),
+        } for user in sorted(people.values(), key=lambda item: item.name or item.email)],
+        "departments": [{
+            "id": str(department.id), "name": department.name,
+            "people": counts[department.id],
+        } for department in departments if counts[department.id] > 0],
+    }
+
+
 @router.post("/{doc_id}/acquaint", status_code=status.HTTP_201_CREATED)
 async def add_acquaint(
     doc_id: str,
@@ -2903,36 +2999,57 @@ async def add_acquaint(
     cid = await assert_company_product(payload.company_id, current_user, db, "docs")
     d = await _doc_or_404(db, cid, doc_id)
     await _assert_doc_permission(db, cid, d, current_user, "edit")
+    d = (await db.execute(select(DocCard).where(
+        DocCard.id == d.id).execution_options(
+            populate_existing=True).with_for_update())).scalar_one()
 
-    people: set[uuid.UUID] = {_uuid_or_400(u, "user_id") for u in payload.user_ids}
+    requested: set[uuid.UUID] = {_uuid_or_400(u, "user_id") for u in payload.user_ids}
+    explicit = await _docs_members(db, cid, requested)
+    if set(explicit) != requested:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Один из получателей не может открыть «Трек»")
+    people: set[uuid.UUID] = set(explicit)
     department_people: set[uuid.UUID] = set()
+    department: Department | None = None
+    skipped = 0
     if payload.department_id:
         dep = _uuid_or_400(payload.department_id, "department_id")
         department = await db.get(Department, dep)
         if department is None or department.company_id != cid:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Подразделение не найдено")
-        department_people = set((await db.execute(select(UserCompany.user_id).where(
+        department_all = set((await db.execute(select(UserCompany.user_id).where(
             UserCompany.company_id == cid,
             UserCompany.department_id == dep))).scalars().all())
+        department_people = set(await _docs_members(db, cid, department_all, dep))
+        skipped = len(department_all - department_people)
         people.update(department_people)
     if not people:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Некого знакомить")
-    members = set((await db.execute(select(UserCompany.user_id).where(
-        UserCompany.company_id == cid,
-        UserCompany.user_id.in_(people),
-    ))).scalars().all())
-    if members != people:
-        raise HTTPException(status.HTTP_404_NOT_FOUND,
-                            "Один из получателей не состоит в компании")
-
-    have = set((await db.execute(select(DocAcquaint.user_id).where(
-        DocAcquaint.doc_id == d.id))).scalars().all())
+    due_at = payload.due_at
+    if due_at is not None:
+        if due_at.tzinfo is None:
+            due_at = due_at.replace(tzinfo=_BUSINESS_TIMEZONE)
+        due_at = due_at.astimezone(timezone.utc)
+        if due_at <= datetime.now(timezone.utc):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "Срок ознакомления уже прошёл")
+    snapshot, snapshot_hash = await _acquaint_snapshot(db, d)
+    existing = (await db.execute(select(DocAcquaint).where(
+        DocAcquaint.doc_id == d.id,
+        DocAcquaint.user_id.in_(people)))).scalars().all()
+    have = {row.user_id for row in existing if row.snapshot_sha256 == snapshot_hash}
+    for row in existing:
+        if (row.status == "pending" and row.snapshot_sha256 != snapshot_hash):
+            row.status = "superseded"
     added = 0
     for uid in people - have:
         db.add(DocAcquaint(
             company_id=cid, doc_id=d.id, user_id=uid,
             reason="department" if uid in department_people else "manual",
-            due_at=payload.due_at, created_by=current_user.id,
+            reason_ref=(department.id if department and uid in department_people else None),
+            reason_name=(department.name if department and uid in department_people else None),
+            due_at=due_at, created_by=current_user.id,
+            document_snapshot=snapshot, snapshot_sha256=snapshot_hash,
         ))
         added += 1
     if added:
@@ -2940,11 +3057,13 @@ async def add_acquaint(
                         actor_name=current_user.name or current_user.email,
                         to_value=f"ознакомление: {added} чел.", note="лист ознакомления"))
     await db.commit()
-    return {"added": added, "total": len(have) + added}
+    return {"added": added, "total": len(have) + added, "skipped": skipped,
+            "snapshot_sha256": snapshot_hash}
 
 
 class AcquaintReadIn(BaseModel):
     company_id: str
+    acquaint_id: str | None = None
     note: str | None = None
 
 
@@ -2959,15 +3078,36 @@ async def mark_acquainted(
     та подделка, от которой лист ознакомления и должен защищать."""
     cid = await assert_company_product(payload.company_id, current_user, db, "docs")
     d = await _doc_or_404(db, cid, doc_id)
-    row = (await db.execute(select(DocAcquaint).where(
+    d = (await db.execute(select(DocCard).where(
+        DocCard.id == d.id).execution_options(
+            populate_existing=True).with_for_update())).scalar_one()
+    statement = select(DocAcquaint).where(
         DocAcquaint.doc_id == d.id,
-        DocAcquaint.user_id == current_user.id))).scalar_one_or_none()
+        DocAcquaint.user_id == current_user.id)
+    if payload.acquaint_id:
+        statement = statement.where(
+            DocAcquaint.id == _uuid_or_400(payload.acquaint_id, "acquaint_id"))
+    else:
+        statement = statement.order_by(
+            case((DocAcquaint.status == "pending", 0), else_=1),
+            DocAcquaint.created_at.desc()).limit(1)
+    row = (await db.execute(statement.with_for_update())).scalar_one_or_none()
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND,
                             "Вас не направляли на ознакомление с этим документом")
     if row.status == "done":
         return {"status": "done", "read_at": row.read_at.isoformat()
                 if row.read_at else None, "repeated": True}
+    if row.status != "pending":
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Это направление заменено новой редакцией")
+    snapshot, snapshot_hash = await _acquaint_snapshot(db, d)
+    if row.snapshot_sha256 and row.snapshot_sha256 != snapshot_hash:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Редакция документа изменилась. Попросите направить её заново")
+    if row.snapshot_sha256 is None:
+        row.document_snapshot = snapshot
+        row.snapshot_sha256 = snapshot_hash
     row.status = "done"
     row.read_at = datetime.now(timezone.utc)
     row.note = (payload.note or "").strip() or None
@@ -2999,6 +3139,8 @@ async def my_acquaints(
         "doc_title": docs[r.doc_id].title if r.doc_id in docs else "",
         "doc_number": docs[r.doc_id].reg_number if r.doc_id in docs else None,
         "due_at": r.due_at.isoformat() if r.due_at else None,
+        "snapshot_sha256": r.snapshot_sha256,
+        "revision": ((r.document_snapshot or {}).get("card") or {}).get("current_revision"),
     } for r in rows if r.doc_id in docs]}
 
 
@@ -3164,10 +3306,15 @@ async def get_doc(
         # Лист ознакомления: приказ, с которым никого не ознакомили, не работает.
         "acquaints": [{
             "id": str(a.id), "user_id": str(a.user_id), "status": a.status,
-            "reason": a.reason,
+            "reason": a.reason, "reason_name": a.reason_name,
             "read_at": a.read_at.isoformat() if a.read_at else None,
             "due_at": a.due_at.isoformat() if a.due_at else None,
             "reminded_at": a.reminded_at.isoformat() if a.reminded_at else None,
+            "reminder_attempted_at": (a.reminder_attempted_at.isoformat()
+                                      if a.reminder_attempted_at else None),
+            "reminder_error": a.reminder_error,
+            "snapshot_sha256": a.snapshot_sha256,
+            "revision": ((a.document_snapshot or {}).get("card") or {}).get("current_revision"),
             "note": a.note,
         } for a in acquaints],
         # Кого именно ждут — то, чего не показывают гибриды рынка: там видно
@@ -3269,6 +3416,7 @@ async def upload_version(
     d.has_files = True
     if role == "body":
         d.current_revision = v.revision
+    await _supersede_pending_acquaints(db, d.id)
     if d.approval_status in ("approved", "rejected"):
         d.approval_status = "none"
         db.add(DocEvent(doc_id=d.id, kind="approval", user_id=current_user.id,
@@ -3340,6 +3488,7 @@ async def tombstone_version(
     d.has_files = (await db.execute(select(DocVersion.id).where(
         DocVersion.doc_id == d.id, DocVersion.id != v.id,
         DocVersion.tombstoned_at.is_(None)).limit(1))).scalar_one_or_none() is not None
+    await _supersede_pending_acquaints(db, d.id)
     if d.approval_status in ("approved", "rejected"):
         d.approval_status = "none"
         db.add(DocEvent(doc_id=d.id, kind="approval", user_id=current_user.id,

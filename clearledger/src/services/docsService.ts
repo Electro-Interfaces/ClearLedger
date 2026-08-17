@@ -191,11 +191,16 @@ export interface DocCase {
 export interface DocAcquaint {
   id: string
   user_id: string
-  status: string          // pending | done
+  status: string          // pending | done | superseded
   reason: string
+  reason_name: string | null
   read_at: string | null
   due_at: string | null
   reminded_at: string | null
+  reminder_attempted_at: string | null
+  reminder_error: string | null
+  snapshot_sha256: string | null
+  revision: number | null
   note: string | null
 }
 
@@ -564,6 +569,8 @@ export interface DocExchangeTarget {
   system: string          // sedo | naumen | other
   outbox_path: string
   inbox_path: string
+  outbox_configured: boolean
+  inbox_configured: boolean
   as_archive: boolean
   is_active: boolean
   scan_enabled: boolean
@@ -633,9 +640,10 @@ export async function listExports(companyId: string, id: string): Promise<DocExp
 
 /** Посмотреть, что головная компания положила нам в папку. */
 export async function scanInbox(
-  companyId: string,
+  companyId: string, targetId?: string,
 ): Promise<{ targets: number; added: number; errors: Array<{ target: string; error: string }> }> {
-  return post(`/api/docs/exchange/scan?company_id=${companyId}`, {})
+  return post(`/api/docs/exchange/scan?company_id=${companyId}${
+    targetId ? `&target_id=${encodeURIComponent(targetId)}` : ''}`, {})
 }
 
 export async function listInbox(
@@ -656,24 +664,35 @@ export async function decideInbox(
 /** Направить документ на ознакомление: поимённо или всему подразделению. */
 export async function addAcquaint(
   companyId: string, id: string, body: Record<string, unknown>,
-): Promise<{ added: number; total: number }> {
+): Promise<{ added: number; total: number; skipped: number; snapshot_sha256: string }> {
   return post(`/api/docs/${id}/acquaint`, { ...body, company_id: companyId })
 }
 
 /** Отметиться ознакомленным. Только за себя. */
 export async function markAcquainted(
-  companyId: string, id: string, note?: string,
+  companyId: string, id: string, acquaintId?: string, note?: string,
 ): Promise<{ status: string; read_at: string | null }> {
-  return post(`/api/docs/${id}/acquaint/read`, { company_id: companyId, note: note ?? null })
+  return post(`/api/docs/${id}/acquaint/read`, {
+    company_id: companyId, acquaint_id: acquaintId ?? null, note: note ?? null,
+  })
+}
+
+export interface AcquaintSubjects {
+  people: { id: string; name: string; department_id: string | null }[]
+  departments: { id: string; name: string; people: number }[]
+}
+
+export function acquaintSubjects(companyId: string): Promise<AcquaintSubjects> {
+  return get('/api/docs/acquaint/subjects', { company_id: companyId })
 }
 
 export async function myAcquaints(companyId: string): Promise<Array<{
   id: string; doc_id: string; doc_title: string; doc_number: string | null
-  due_at: string | null
+  due_at: string | null; snapshot_sha256: string | null; revision: number | null
 }>> {
   const r = await get<{ acquaints: Array<{
     id: string; doc_id: string; doc_title: string; doc_number: string | null
-    due_at: string | null
+    due_at: string | null; snapshot_sha256: string | null; revision: number | null
   }> }>('/api/docs/acquaints/mine', { company_id: companyId })
   return r.acquaints ?? []
 }

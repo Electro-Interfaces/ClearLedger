@@ -140,6 +140,22 @@ def send_notice_async(emails: list[str], subject: str, text: str) -> None:
     _spawn(_run())
 
 
+async def send_notice_checked(emails: list[str], subject: str,
+                              text: str) -> tuple[bool, str | None]:
+    """Отправить регламентное письмо и вернуть подтверждённый результат."""
+    targets = [email for email in emails if email]
+    if not targets:
+        return False, "Не указан адрес получателя"
+    if not settings.smtp_host:
+        return False, "SMTP не настроен"
+    try:
+        await send_notice(targets, subject, text)
+        return True, None
+    except Exception as exc:  # noqa: BLE001 — планировщик сохранит ошибку для повтора
+        logger.warning("[task-mail] уведомление «%s»: %s", subject, exc)
+        return False, str(exc)[:500]
+
+
 def _spawn(coro) -> None:
     try:
         task = asyncio.get_running_loop().create_task(coro)

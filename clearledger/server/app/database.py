@@ -2814,16 +2814,39 @@ async def create_all() -> None:
             # Волна 7: напоминания об ознакомлении и управляемое расписание
             # приёма из СЭД. По умолчанию автоскан выключен до ручной обкатки.
             "ALTER TABLE doc_acquaints ADD COLUMN IF NOT EXISTS reminded_at TIMESTAMPTZ",
+            "ALTER TABLE doc_acquaints ADD COLUMN IF NOT EXISTS reminder_attempted_at TIMESTAMPTZ",
+            "ALTER TABLE doc_acquaints ADD COLUMN IF NOT EXISTS reminder_error VARCHAR(500)",
+            "ALTER TABLE doc_acquaints ADD COLUMN IF NOT EXISTS document_snapshot JSONB",
+            "ALTER TABLE doc_acquaints ADD COLUMN IF NOT EXISTS snapshot_sha256 CHAR(64)",
+            "ALTER TABLE doc_acquaints ADD COLUMN IF NOT EXISTS reason_ref UUID",
+            "ALTER TABLE doc_acquaints ADD COLUMN IF NOT EXISTS reason_name VARCHAR(160)",
+            "ALTER TABLE doc_acquaints DROP CONSTRAINT IF EXISTS uq_doc_acquaints_person",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_doc_acquaints_snapshot "
+            "ON doc_acquaints (doc_id, user_id, snapshot_sha256) "
+            "WHERE snapshot_sha256 IS NOT NULL",
             "CREATE INDEX IF NOT EXISTS idx_doc_acquaints_due ON doc_acquaints "
             "(company_id, status, due_at)",
             "ALTER TABLE doc_exchange_targets ADD COLUMN IF NOT EXISTS scan_enabled "
             "BOOLEAN NOT NULL DEFAULT false",
             "ALTER TABLE doc_exchange_targets ADD COLUMN IF NOT EXISTS scan_interval_min "
             "INTEGER NOT NULL DEFAULT 30",
+            "ALTER TABLE doc_exchange_targets ADD COLUMN IF NOT EXISTS scan_cursor VARCHAR(500)",
             # Повторно прочитанное письмо не должно завести вторую карточку.
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_doc_cards_mail_source "
             "ON doc_cards (company_id, source_ref) WHERE source = 'mail' "
             "AND source_ref IS NOT NULL",
+            "ALTER TABLE mail_messages ADD COLUMN IF NOT EXISTS route_error VARCHAR(500)",
+            "ALTER TABLE mail_messages ADD COLUMN IF NOT EXISTS route_attempts "
+            "INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE mail_messages ADD COLUMN IF NOT EXISTS route_attempted_at TIMESTAMPTZ",
+            # Если в старых данных уже есть дубли Message-ID, запуск не блокируем:
+            # новые письма всё равно сериализует advisory-lock приёмщика.
+            "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = "
+            "current_schema() AND indexname = 'uq_mail_messages_company_msgid') "
+            "AND NOT EXISTS (SELECT 1 FROM mail_messages WHERE message_id IS NOT NULL "
+            "GROUP BY company_id, message_id HAVING count(*) > 1) THEN "
+            "CREATE UNIQUE INDEX uq_mail_messages_company_msgid ON mail_messages "
+            "(company_id, message_id) WHERE message_id IS NOT NULL; END IF; END $$",
         ):
             await conn.execute(_sa.text(stmt))
 

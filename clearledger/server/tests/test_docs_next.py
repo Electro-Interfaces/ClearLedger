@@ -665,10 +665,18 @@ async def test_подразделение_получает_ознакомлен�
         company_id=cid, email=f"acquaint-{uuid.uuid4().hex}@example.org",
         name="Получатель ознакомления", password_hash="!",
     )
-    db.add_all([department, person])
+    excluded = User(
+        company_id=cid, email=f"no-docs-{uuid.uuid4().hex}@example.org",
+        name="Без доступа к Треку", password_hash="!",
+    )
+    db.add_all([department, person, excluded])
     await db.flush()
     db.add(UserCompany(
         user_id=person.id, company_id=cid, role="user", modules=["docs"],
+        department_id=department.id,
+    ))
+    db.add(UserCompany(
+        user_id=excluded.id, company_id=cid, role="user", modules=["tasks"],
         department_id=department.id,
     ))
     await db.commit()
@@ -682,11 +690,15 @@ async def test_подразделение_получает_ознакомлен�
         "due_at": (now + timedelta(hours=12)).isoformat(),
     })
     assert added.status_code == 201 and added.json()["added"] == 1, added.text
+    assert added.json()["skipped"] == 1
 
     notices: list[tuple[list[str], str, str]] = []
+    async def send_ok(emails, subject, text):
+        notices.append((emails, subject, text))
+        return True, None
+
     monkeypatch.setattr(
-        task_scheduler.task_mail, "send_notice_async",
-        lambda emails, subject, text: notices.append((emails, subject, text)),
+        task_scheduler.task_mail, "send_notice_checked", send_ok,
     )
     sent = await task_scheduler.run_acquaint_reminders(db, now)
     assert sent >= 1
@@ -698,16 +710,109 @@ async def test_подразделение_получает_ознакомлен�
     ))).scalar_one()
     assert row.reason == "department" and row.reminded_at is not None
     assert row.created_by == uuid.UUID(me["id"])
+
+    async def send_fail(emails, subject, text):
+        notices.append((emails, subject, text))
+        return False, "SMTP временно недоступен"
+
+    row.reminded_at = None
+    row.reminder_attempted_at = None
+    monkeypatch.setattr(task_scheduler.task_mail, "send_notice_checked", send_fail)
     await db.commit()
+    sent = await task_scheduler.run_acquaint_reminders(db, now)
+    assert sent == 0
+    await db.refresh(row)
+    assert row.reminded_at is None
+    assert row.reminder_error == "SMTP временно недоступен"
+
+    membership = await db.get(UserCompany, (person.id, cid))
+    await db.delete(membership)
+    row.reminder_attempted_at = None
+    notices.clear()
+    await db.commit()
+    sent = await task_scheduler.run_acquaint_reminders(db, now)
+    assert sent == 0 and notices == []
+
+
+async def test_новая_редакция_требует_нового_ознакомления(
+        auth_client: AsyncClient, db: AsyncSession):
+    _, cid_raw, kind = await _context(auth_client)
+    cid = uuid.UUID(cid_raw)
+    person = User(
+        company_id=cid, email=f"revision-{uuid.uuid4().hex}@example.org",
+        name="Читатель новой редакции", password_hash="!",
+    )
+    db.add(person)
+    await db.flush()
+    db.add(UserCompany(
+        user_id=person.id, company_id=cid, role="user", modules=["docs"],
+    ))
+    await db.commit()
+    doc = (await auth_client.post("/api/docs", json={
+        "company_id": cid_raw, "kind_id": kind["id"],
+        "title": f"ПРОВЕРКА-редакция-{uuid.uuid4().hex}",
+    })).json()
+    uploaded = await auth_client.post(
+        f"/api/docs/{doc['id']}/versions",
+        params={"company_id": cid_raw, "role": "body"},
+        files={"file": ("редакция-1.txt", b"version one", "text/plain")},
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    first = await auth_client.post(f"/api/docs/{doc['id']}/acquaint", json={
+        "company_id": cid_raw, "user_ids": [str(person.id)],
+    })
+    assert first.status_code == 201 and first.json()["added"] == 1, first.text
+
+    uploaded = await auth_client.post(
+        f"/api/docs/{doc['id']}/versions",
+        params={"company_id": cid_raw, "role": "body"},
+        files={"file": ("редакция-2.txt", b"version two", "text/plain")},
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    rows = (await db.execute(select(DocAcquaint).where(
+        DocAcquaint.doc_id == uuid.UUID(doc["id"]),
+        DocAcquaint.user_id == person.id,
+    ))).scalars().all()
+    assert len(rows) == 1 and rows[0].status == "superseded"
+
+    second = await auth_client.post(f"/api/docs/{doc['id']}/acquaint", json={
+        "company_id": cid_raw, "user_ids": [str(person.id)],
+    })
+    assert second.status_code == 201 and second.json()["added"] == 1, second.text
+    rows = (await db.execute(select(DocAcquaint).where(
+        DocAcquaint.doc_id == uuid.UUID(doc["id"]),
+        DocAcquaint.user_id == person.id,
+    ))).scalars().all()
+    assert len(rows) == 2
+    assert {row.status for row in rows} == {"pending", "superseded"}
+    assert len({row.snapshot_sha256 for row in rows}) == 2
+
+    changed = await auth_client.post(f"/api/docs/{doc['id']}/action", json={
+        "company_id": cid_raw, "title": f"Изменено-{uuid.uuid4().hex}",
+    })
+    assert changed.status_code == 200, changed.text
+    rows = (await db.execute(select(DocAcquaint).where(
+        DocAcquaint.doc_id == uuid.UUID(doc["id"]),
+        DocAcquaint.user_id == person.id,
+    ))).scalars().all()
+    assert all(row.status == "superseded" for row in rows)
 
 
 async def test_расписание_сэд_включается_только_после_ручной_проверки(
-        auth_client: AsyncClient, tmp_path):
+        auth_client: AsyncClient, tmp_path, monkeypatch):
+    from app.services import doc_exchange
+    monkeypatch.setattr(doc_exchange.settings, "doc_exchange_roots", str(tmp_path))
+    monkeypatch.setattr(doc_exchange, "MIN_STABLE_AGE_SECONDS", 0)
+    monkeypatch.setattr(doc_exchange, "MAX_INBOX_FILES", 2)
     _, cid, _ = await _context(auth_client)
+    inbox = tmp_path / cid
+    inbox.mkdir()
+    for index in range(3):
+        (inbox / f"{index}.txt").write_text(f"file-{index}", encoding="utf-8")
     code = f"test-{uuid.uuid4().hex[:8]}"
     created = await auth_client.post("/api/docs/exchange/targets", json={
         "company_id": cid, "code": code, "name": "Проверка папки",
-        "system": "other", "inbox_path": str(tmp_path), "outbox_path": "",
+        "system": "other", "inbox_path": str(inbox), "outbox_path": "",
     })
     assert created.status_code == 201, created.text
     target_id = created.json()["id"]
@@ -717,7 +822,10 @@ async def test_расписание_сэд_включается_только_п�
     assert before.status_code == 409
     scanned = await auth_client.post(
         "/api/docs/exchange/scan", params={"company_id": cid, "target_id": target_id})
-    assert scanned.status_code == 200 and scanned.json()["errors"] == [], scanned.text
+    assert scanned.status_code == 200 and scanned.json()["added"] == 2, scanned.text
+    scanned = await auth_client.post(
+        "/api/docs/exchange/scan", params={"company_id": cid, "target_id": target_id})
+    assert scanned.status_code == 200 and scanned.json()["added"] == 1, scanned.text
     after = await auth_client.put(f"/api/docs/exchange/targets/{target_id}/schedule", json={
         "company_id": cid, "enabled": True, "interval_min": 15,
     })

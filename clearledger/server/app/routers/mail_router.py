@@ -6,21 +6,22 @@
 from __future__ import annotations
 
 import os
+import uuid
 from typing import Any
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import log_audit
-from app.auth import assert_company_member, assert_company_product, get_current_user
+from app.auth import assert_company_product, get_current_user
 from app.routers.users_router import require_company_admin
 from app.database import get_db
 from app.models import (
-    Counterparty, CounterpartyEmail, MailAccount, MailAttachment, MailMessage,
-    MailRule, MailThread, User,
+    ChatRoom, Contract, Counterparty, CounterpartyEmail, DocCard, MailAccount,
+    MailAttachment, MailMessage, MailRule, MailThread, User,
 )
 from app.services import mail_intake, mail_secrets, mail_send
 
@@ -183,7 +184,7 @@ async def poll(
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Забрать почту сейчас: один ящик или все активные."""
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await _mail_scope(company_id, current_user, db)
     if account_id:
         a = (await db.execute(select(MailAccount).where(
             MailAccount.company_id == cid, MailAccount.id == account_id))).scalar_one_or_none()
@@ -231,7 +232,7 @@ async def thread(
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Письма нити с вложениями."""
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await _mail_scope(company_id, current_user, db)
     msgs = (await db.execute(select(MailMessage).where(
         MailMessage.company_id == cid, MailMessage.thread_id == thread_id)
         .order_by(MailMessage.sent_at))).scalars().all()
@@ -247,6 +248,15 @@ async def thread(
                 # документы из письма уже поехали в разбор.
                 "intakeBatchId": str(a.intake_batch_id) if a.intake_batch_id else None,
             })
+    doc_refs = {f"mail:{m.message_id or m.id}": m.id for m in msgs}
+    routed_docs = {
+        doc_refs[row.source_ref]: str(row.id)
+        for row in (await db.execute(select(DocCard).where(
+            DocCard.company_id == cid, DocCard.source == "mail",
+            DocCard.source_ref.in_(doc_refs),
+        ))).scalars().all()
+        if row.source_ref in doc_refs
+    } if doc_refs else {}
     return {"rows": [{
         "id": str(m.id), "direction": m.direction, "subject": m.subject,
         "fromName": m.from_name, "fromEmail": m.from_email, "to": m.to_emails or [],
@@ -255,6 +265,9 @@ async def thread(
         "counterpartyId": str(m.counterparty_id) if m.counterparty_id else None,
         # Куда письмо уехало: в комнату, задачу, заявку или приёмку.
         "routedTo": m.routed_to,
+        "routedDocId": routed_docs.get(m.id),
+        "routeError": m.route_error,
+        "routeAttempts": m.route_attempts,
         "attachments": atts.get(m.id, []),
     } for m in msgs]}
 
@@ -282,6 +295,31 @@ async def attachment(
     )
 
 
+@router.post("/messages/{message_id}/retry-route")
+async def retry_route(
+    message_id: str,
+    company_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    cid = await require_company_admin(company_id, current_user, db)
+    row = (await db.execute(select(MailMessage).where(
+        MailMessage.company_id == cid,
+        MailMessage.id == message_id))).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Письмо не найдено")
+    if row.status in ("quarantine", "rejected"):
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Сначала примите письмо из карантина")
+    delivered = await mail_intake.retry_doc_route(db, cid, row)
+    await log_audit(db, actor=current_user, company_id=cid,
+                    action="mail.route.retry", target=str(row.id),
+                    details={"delivered": delivered, "error": row.route_error})
+    await db.commit()
+    return {"delivered": delivered, "routedTo": row.routed_to,
+            "error": row.route_error}
+
+
 # ── Волна 2: опознание и правила ─────────────────────────────────────────────
 
 class RuleIn(BaseModel):
@@ -293,7 +331,7 @@ class RuleIn(BaseModel):
     subject_like: str | None = None
     has_attachment: bool | None = None
     unknown_sender: bool | None = None
-    action: str = "archive"
+    action: str = Field("archive", pattern="^(intake|ticket|chat|task|doc|archive|quarantine|reject)$")
     set_counterparty_id: str | None = None
     set_contract_id: str | None = None
     set_room_id: str | None = None
@@ -316,6 +354,33 @@ def _rule(r: MailRule) -> dict[str, Any]:
     }
 
 
+async def _validate_rule_refs(db: AsyncSession, cid, body: RuleIn) -> None:
+    for model, raw, label in (
+        (MailAccount, body.account_id, "Почтовый ящик"),
+        (Counterparty, body.set_counterparty_id, "Контрагент"),
+        (Contract, body.set_contract_id, "Договор"),
+        (ChatRoom, body.set_room_id, "Комната"),
+    ):
+        if not raw:
+            continue
+        try:
+            ref = uuid.UUID(str(raw))
+        except ValueError as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                f"{label}: неверный идентификатор") from exc
+        row = await db.get(model, ref)
+        if row is None or row.company_id != cid:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, f"{label} не найден")
+    if body.action == "chat" and not body.set_room_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Для правила «в чат» выберите комнату")
+    if body.action == "ticket" and not (body.set_object_id or "").strip():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Для заявки укажите объект")
+    if body.action == "doc" and body.unknown_sender is True \
+            and not body.set_counterparty_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Неизвестному отправителю нельзя создавать документ без контрагента")
+
+
 @router.get("/rules")
 async def rules(
     company_id: str,
@@ -323,9 +388,10 @@ async def rules(
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Правила по порядку: первое сработавшее решает судьбу письма."""
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await _mail_scope(company_id, current_user, db)
     rows = (await db.execute(select(MailRule).where(
-        MailRule.company_id == cid).order_by(MailRule.sort))).scalars().all()
+        MailRule.company_id == cid).order_by(
+            MailRule.sort, MailRule.created_at, MailRule.id))).scalars().all()
     return {"rows": [_rule(r) for r in rows]}
 
 
@@ -337,8 +403,13 @@ async def create_rule(
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     cid = await require_company_admin(company_id, current_user, db)
+    await _validate_rule_refs(db, cid, body)
     r = MailRule(company_id=cid, **body.model_dump())
     db.add(r)
+    await db.flush()
+    await log_audit(db, actor=current_user, company_id=cid,
+                    action="mail.rule.create", target=str(r.id),
+                    details={"name": r.name, "action": r.action, "sort": r.sort})
     await db.commit()
     return _rule(r)
 
@@ -352,12 +423,16 @@ async def update_rule(
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     cid = await require_company_admin(company_id, current_user, db)
+    await _validate_rule_refs(db, cid, body)
     r = (await db.execute(select(MailRule).where(
         MailRule.company_id == cid, MailRule.id == rule_id))).scalar_one_or_none()
     if r is None:
         return {"error": "not_found"}
     for k, v in body.model_dump().items():
         setattr(r, k, v)
+    await log_audit(db, actor=current_user, company_id=cid,
+                    action="mail.rule.update", target=str(r.id),
+                    details={"name": r.name, "action": r.action, "sort": r.sort})
     await db.commit()
     return _rule(r)
 
@@ -373,6 +448,9 @@ async def delete_rule(
     r = (await db.execute(select(MailRule).where(
         MailRule.company_id == cid, MailRule.id == rule_id))).scalar_one_or_none()
     if r is not None:
+        await log_audit(db, actor=current_user, company_id=cid,
+                        action="mail.rule.delete", target=str(r.id),
+                        details={"name": r.name, "action": r.action})
         await db.delete(r)
         await db.commit()
     return {"deleted": bool(r)}
@@ -391,9 +469,22 @@ async def learn_address(
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """«Это письмо от такого-то»: запомнить адрес и применить к прошлой переписке."""
-    cid = await assert_company_member(company_id, current_user, db)
-    return await mail_intake.learn_address(db, cid, body.address, body.counterparty_id,
-                                           current_user.email)
+    cid = await require_company_admin(company_id, current_user, db)
+    try:
+        counterparty_id = uuid.UUID(body.counterparty_id)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Неверный идентификатор контрагента") from exc
+    counterparty = await db.get(Counterparty, counterparty_id)
+    if counterparty is None or counterparty.company_id != cid:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Контрагент не найден")
+    result = await mail_intake.learn_address(
+        db, cid, body.address, counterparty_id, current_user.email)
+    await log_audit(db, actor=current_user, company_id=cid,
+                    action="mail.address.learn", target=result["address"],
+                    details={"counterparty_id": str(counterparty_id)})
+    await db.commit()
+    return result
 
 
 @router.get("/addresses")
@@ -403,7 +494,7 @@ async def addresses(
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Известные адреса контрагентов — что система уже знает о том, кто ей пишет."""
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await _mail_scope(company_id, current_user, db)
     rows = (await db.execute(select(CounterpartyEmail, Counterparty.name)
         .join(Counterparty, Counterparty.id == CounterpartyEmail.counterparty_id)
         .where(CounterpartyEmail.company_id == cid)
@@ -424,7 +515,7 @@ async def to_intake(
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Разобрать вложения письма как документы. Приём в учёт — отдельным шагом."""
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await _mail_scope(company_id, current_user, db)
     msg = (await db.execute(select(MailMessage).where(
         MailMessage.company_id == cid, MailMessage.id == message_id))).scalar_one_or_none()
     if msg is None:
@@ -459,7 +550,7 @@ async def send(
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Написать или ответить — с того же ящика, в ту же нить."""
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await _mail_scope(company_id, current_user, db)
     return await mail_send.send_message(
         db, cid, account_id=body.account_id, to=body.to, subject=body.subject,
         body=body.body, thread_id=body.thread_id,
@@ -535,7 +626,7 @@ async def decide(
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Решение по карантину: принять письма в работу или отклонить."""
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await _mail_scope(company_id, current_user, db)
     rows = (await db.execute(select(MailMessage).where(
         MailMessage.company_id == cid,
         MailMessage.id.in_(body.message_ids)))).scalars().all()

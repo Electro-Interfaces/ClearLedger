@@ -47,7 +47,7 @@ export function DocExchangeBlock({ doc, companyId }: {
     onError: (e) => toast.error((e as Error).message),
   })
 
-  const targets = (targetsQ.data ?? []).filter((t) => t.is_active && t.outbox_path)
+  const targets = (targetsQ.data ?? []).filter((t) => t.is_active && t.outbox_configured)
   const rows = exportsQ.data ?? []
 
   if (!doc.reg_number) return null

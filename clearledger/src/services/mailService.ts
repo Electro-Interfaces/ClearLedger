@@ -62,6 +62,9 @@ export interface MailMessageRow {
   counterpartyId: string | null
   /** Куда письмо уехало: chat | task | ticket | intake. */
   routedTo?: string | null
+  routedDocId?: string | null
+  routeError?: string | null
+  routeAttempts?: number
   attachments: {
     id: string; name: string; size: number; contentType: string | null
     /** Пакет приёмки, в который вложение уже разобрано. */
@@ -161,6 +164,10 @@ export const updateMailRule = (companyId: string, id: string, r: MailRuleInput) 
 
 export const deleteMailRule = (companyId: string, id: string) =>
   del<{ deleted: boolean }>(`/api/mail/rules/${id}?company_id=${companyId}`)
+
+export const retryMailRoute = (companyId: string, messageId: string) =>
+  post<{ delivered: boolean; routedTo: string | null; error: string | null }>(
+    `/api/mail/messages/${messageId}/retry-route?company_id=${companyId}`, {})
 
 /** «Это письмо от такого-то»: запомнить адрес и применить к прошлой переписке. */
 export const learnMailAddress = (companyId: string, address: string, counterpartyId: string) =>

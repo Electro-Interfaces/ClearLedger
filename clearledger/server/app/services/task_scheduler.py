@@ -27,12 +27,13 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import or_, select, text
+from sqlalchemy import and_, or_, select, text
 
+from app.auth import resolve_member_modules
 from app.database import async_session_factory
 from app.models import (
     DocAcquaint, DocCard, DocExchangeTarget, Task, TaskChecklistItem, TaskEvent,
-    TaskRecurrence, TaskTemplate, TaskType, User,
+    TaskRecurrence, TaskTemplate, TaskType, User, UserCompany,
 )
 from app.services import doc_exchange, task_mail
 
@@ -251,26 +252,40 @@ async def run_acquaint_reminders(db, now: datetime) -> int:
         return 0
     soon = now + timedelta(days=1)
     rows = (await db.execute(
-        select(DocAcquaint, DocCard, User)
-        .join(DocCard, DocCard.id == DocAcquaint.doc_id)
+        select(DocAcquaint, DocCard, User, UserCompany)
+        .join(DocCard, and_(DocCard.id == DocAcquaint.doc_id,
+                            DocCard.company_id == DocAcquaint.company_id))
         .join(User, User.id == DocAcquaint.user_id)
+        .join(UserCompany, and_(UserCompany.user_id == DocAcquaint.user_id,
+                                UserCompany.company_id == DocAcquaint.company_id))
         .where(DocAcquaint.status == "pending", DocAcquaint.due_at.is_not(None),
+               User.mail_only.is_(False),
                DocAcquaint.due_at <= soon,
                or_(DocAcquaint.reminded_at.is_(None),
-                   DocAcquaint.reminded_at <= now - timedelta(days=1))))).all()
+                   DocAcquaint.reminded_at <= now - timedelta(days=1)),
+               or_(DocAcquaint.reminder_attempted_at.is_(None),
+                   DocAcquaint.reminder_attempted_at <= now - timedelta(hours=1))))).all()
     sent = 0
-    for acquaint, doc, user in rows:
+    for acquaint, doc, user, membership in rows:
+        if not user.is_superadmin and membership.role != "admin":
+            modules = await resolve_member_modules(membership, db)
+            if (modules is not None and "docs" not in modules and not any(
+                    key.startswith("docs:") for key in modules)):
+                continue
         if not user.email:
             continue
         overdue = acquaint.due_at < now
         number = doc.reg_number or "без номера"
-        task_mail.send_notice_async(
+        ok, error = await task_mail.send_notice_checked(
             [user.email],
             f"{'Просрочено ознакомление' if overdue else 'Нужно ознакомиться'}: {doc.title}",
             f"Документ {number}\nСрок: {acquaint.due_at.strftime('%d.%m.%Y')}\n\n"
             "Откройте «Трек» → «На мне» → «Ознакомиться».")
-        acquaint.reminded_at = now
-        sent += 1
+        acquaint.reminder_attempted_at = now
+        acquaint.reminder_error = error
+        if ok:
+            acquaint.reminded_at = now
+            sent += 1
     return sent
 
 
@@ -290,8 +305,9 @@ async def run_exchange_scans(db, now: datetime) -> int:
         if target.last_scan_at and target.last_scan_at > now - interval:
             continue
         try:
-            added += await doc_exchange.collect_inbox(db, target)
-        except OSError as exc:
+            async with db.begin_nested():
+                added += await doc_exchange.collect_inbox(db, target)
+        except Exception as exc:  # noqa: BLE001 — одна папка не блокирует остальные
             target.last_scan_at = now
             target.last_error = str(exc)[:500]
             log.warning("автоскан СЭД %s: %s", target.id, exc)

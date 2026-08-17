@@ -19,11 +19,12 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
   AlertTriangle, CheckCircle2, ChevronDown, FileCheck, Inbox, Loader2, Mail, Paperclip,
-  PlugZap, Plus, RefreshCw, Send, Trash2,
+  PlugZap, Plus, RefreshCw, RotateCw, Send, Trash2,
 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
+import { ConfirmActionDialog } from '@/components/common/ConfirmActionDialog'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { useCompany } from '@/contexts/CompanyContext'
@@ -32,7 +33,7 @@ import {
   createMailAccount, createMailRule, deleteMailAccount, deleteMailRule, getMailAccounts,
   getMailAddresses, getMailRules, getMailThread, getMailThreads, learnMailAddress,
   decideMailQuarantine, getMailQuarantine, mailAttachmentUrl, mailToIntake, pollMail,
-  sendMail, testMailAccount, updateMailAccount, updateMailRule,
+  retryMailRoute, sendMail, testMailAccount, updateMailAccount, updateMailRule,
   type MailAccount, type MailAccountInput, type MailRule, type MailRuleInput,
 } from '@/services/mailService'
 import { useCounterparties } from '@/hooks/useReferences'
@@ -75,7 +76,7 @@ const MODES: { key: MailAccountInput['mode']; label: string }[] = [
 export function MailConnector({ mode = 'all' }: { mode?: 'setup' | 'work' | 'all' }) {
   const showSetup = mode === 'setup' || mode === 'all'
   const showWork = mode === 'work' || mode === 'all'
-  const { companyId, companies } = useCompany()
+  const { companyId, companies, isCompanyAdmin } = useCompany()
   const companyName = companies.find((c) => c.id === companyId)?.name ?? ''
   const qc = useQueryClient()
   const [form, setForm] = useState<(MailAccountInput & { id?: string }) | null>(null)
@@ -147,7 +148,8 @@ export function MailConnector({ mode = 'all' }: { mode?: 'setup' | 'work' | 'all
         r.smtp && `отправка: ${r.smtp.ok ? '✓' : '✗'} ${r.smtp.text}`,
       ].filter(Boolean).join('\n')
       const ok = !!r.imap?.ok
-      ok ? toast.success(parts) : toast.error(parts)
+      if (ok) toast.success(parts)
+      else toast.error(parts)
     },
     onError: () => toast.error('Проверка не выполнена'),
   })
@@ -170,10 +172,21 @@ export function MailConnector({ mode = 'all' }: { mode?: 'setup' | 'work' | 'all
       qc.invalidateQueries({ queryKey: ['mail'] })
       toast.success('Правило сохранено')
     },
+    onError: (error) => toast.error(`Правило не сохранено: ${(error as Error).message}`),
   })
   const removeRule = useMutation({
     mutationFn: (id: string) => deleteMailRule(companyId, id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['mail'] }),
+    onError: (error) => toast.error(`Правило не удалено: ${(error as Error).message}`),
+  })
+  const retryRoute = useMutation({
+    mutationFn: (messageId: string) => retryMailRoute(companyId, messageId),
+    onSuccess: (result) => {
+      qc.invalidateQueries({ queryKey: ['mail', 'thread', companyId, threadId] })
+      if (result.delivered) toast.success('Документ создан из письма')
+      else toast.error(result.error || 'Маршрут снова не выполнен')
+    },
+    onError: (error) => toast.error(`Повтор не выполнен: ${(error as Error).message}`),
   })
   // Ответ пишется в той же ленте, где читают письмо: уходить в почтовый клиент,
   // чтобы ответить на письмо, которое ты открыл здесь, — это разрыв работы.
@@ -248,9 +261,9 @@ export function MailConnector({ mode = 'all' }: { mode?: 'setup' | 'work' | 'all
                 <RefreshCw className={cn('size-4 mr-1.5', poll.isPending && 'animate-spin')} />
                 Забрать почту
               </Button>
-              <Button size="sm" onClick={() => setForm({ ...EMPTY })}>
+              {isCompanyAdmin && <Button size="sm" onClick={() => setForm({ ...EMPTY })}>
                 <Plus className="size-4 mr-1.5" /> Ящик
-              </Button>
+              </Button>}
             </div>
           </div>
           <p className="text-[11px] text-muted-foreground">
@@ -262,6 +275,7 @@ export function MailConnector({ mode = 'all' }: { mode?: 'setup' | 'work' | 'all
           <div className="space-y-2">
             {(accounts.data?.rows ?? []).map((a) => (
               <AccountRow key={a.id} a={a}
+                canManage={isCompanyAdmin}
                 onEdit={() => setForm({ ...a })}
                 onPoll={() => poll.mutate(a.id)}
                 onTest={() => test.mutate(a.id)}
@@ -283,9 +297,9 @@ export function MailConnector({ mode = 'all' }: { mode?: 'setup' | 'work' | 'all
                   можно будет разбирать в документы — на вкладке «Загрузка».
                   {companies.length > 1 && ' Ящики у каждой компании свои — переключатель в шапке.'}
                 </p>
-                <Button size="sm" className="mt-3" onClick={() => setForm({ ...EMPTY })}>
+                {isCompanyAdmin && <Button size="sm" className="mt-3" onClick={() => setForm({ ...EMPTY })}>
                   <Plus className="size-4 mr-1.5" /> Завести ящик
-                </Button>
+                </Button>}
               </div>
             )}
           </div>
@@ -462,23 +476,33 @@ export function MailConnector({ mode = 'all' }: { mode?: 'setup' | 'work' | 'all
             <span className="text-[11px] text-muted-foreground">
               читаются по порядку — первое подходящее решает судьбу письма
             </span>
-            <Button size="sm" variant="outline" className="ml-auto"
+            {isCompanyAdmin && <Button size="sm" variant="outline" className="ml-auto"
               onClick={() => setRuleForm({
-                name: '', accountId: null, sort: 100, fromEmail: null, fromDomain: null,
+                name: '', accountId: null,
+                sort: Math.max(0, ...(rules.data?.rows ?? []).map((rule) => rule.sort)) + 10,
+                fromEmail: null, fromDomain: null,
                 subjectLike: null, hasAttachment: null, unknownSender: null,
                 action: 'archive', setCounterpartyId: null, setContractId: null,
                 setRoomId: null, setObjectId: null, isActive: true,
               })}>
               <Plus className="size-4 mr-1.5" /> Правило
-            </Button>
+            </Button>}
           </div>
 
           {(rules.data?.rows ?? []).map((r) => (
             <RuleRow key={r.id} r={r} counterparties={counterparties}
+              canManage={isCompanyAdmin} deleting={removeRule.isPending}
               onEdit={() => setRuleForm({ ...r })}
               onDelete={() => removeRule.mutate(r.id)} />
           ))}
-          {(rules.data?.rows ?? []).length === 0 && (
+          {rules.isError && (
+            <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-destructive/30 p-3 text-sm">
+              <span className="text-destructive">Правила не загрузились</span>
+              <Button size="sm" variant="outline" onClick={() => rules.refetch()}>Повторить</Button>
+            </div>
+          )}
+          {rules.isLoading && <div className="text-sm text-muted-foreground">Загрузка правил…</div>}
+          {rules.isSuccess && (rules.data?.rows ?? []).length === 0 && (
             <div className="rounded-lg border border-dashed p-4">
               <div className="text-sm font-medium">Правил нет</div>
               <p className="mt-1 max-w-prose text-[13px] leading-relaxed text-muted-foreground">
@@ -530,6 +554,13 @@ export function MailConnector({ mode = 'all' }: { mode?: 'setup' | 'work' | 'all
                     ))}
                   </div>
                 </Field>
+                {ruleForm.action === 'doc' && (
+                  <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-2 text-[11px] text-muted-foreground sm:col-span-2">
+                    Создаётся черновик входящего документа — без автоматической регистрации.
+                    Нужны непустое вложение, известный контрагент и подтверждённая почтовым
+                    сервером подлинность письма. Ошибка останется в переписке для повтора.
+                  </div>
+                )}
                 {ruleForm.action === 'chat' && (
                   <Field label="Комната чата" hint="куда положить письмо">
                     <select className="w-full rounded-md border bg-background px-2 py-1.5 text-sm"
@@ -563,7 +594,8 @@ export function MailConnector({ mode = 'all' }: { mode?: 'setup' | 'work' | 'all
                 </Field>
               </div>
               <div className="flex gap-2">
-                <Button size="sm" onClick={() => saveRule.mutate(ruleForm)}>Сохранить</Button>
+                <Button size="sm" disabled={saveRule.isPending}
+                  onClick={() => saveRule.mutate(ruleForm)}>Сохранить</Button>
                 <Button size="sm" variant="ghost" onClick={() => setRuleForm(null)}>Отмена</Button>
               </div>
             </div>
@@ -732,13 +764,16 @@ export function MailConnector({ mode = 'all' }: { mode?: 'setup' | 'work' | 'all
               {(thread.data?.rows ?? []).map((m) => (
                 <div key={m.id} className="px-3 py-2 space-y-1">
                   <div className="flex flex-wrap items-baseline gap-2 text-sm">
-                    {m.routedTo && (
-                      <span className="rounded border border-emerald-500/40 px-1 text-[10px] text-emerald-600 dark:text-emerald-400">
+                    {m.routedTo && (m.routedDocId
+                      ? <a href={`/docs?view=all&doc=${m.routedDocId}`}
+                        className="rounded border border-emerald-500/40 px-1 text-[10px] text-emerald-600 hover:underline dark:text-emerald-400">
+                        в документ «Трека»
+                      </a>
+                      : <span className="rounded border border-emerald-500/40 px-1 text-[10px] text-emerald-600 dark:text-emerald-400">
                         {({ chat: 'в чат', task: 'в задачу', ticket: 'в заявку',
-                            intake: 'в приёмку' } as Record<string, string>)[m.routedTo]
+                            intake: 'в приёмку', doc: 'в документ «Трека»' } as Record<string, string>)[m.routedTo]
                           ?? m.routedTo}
-                      </span>
-                    )}
+                      </span>)}
                     {m.direction === 'out' && (
                       <span className="rounded border border-primary/40 px-1 text-[10px] text-primary">
                         мы
@@ -752,7 +787,7 @@ export function MailConnector({ mode = 'all' }: { mode?: 'setup' | 'work' | 'all
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     <div className="text-[11px] text-muted-foreground">{m.subject}</div>
-                    {!m.counterpartyId && m.fromEmail && (
+                    {!m.counterpartyId && m.fromEmail && isCompanyAdmin && (
                       // Опознание одним движением там, где человек и так смотрит на
                       // непонятое письмо: дальше все письма с адреса встают на место.
                       learning === m.fromEmail ? (
@@ -774,6 +809,18 @@ export function MailConnector({ mode = 'all' }: { mode?: 'setup' | 'work' | 'all
                       )
                     )}
                   </div>
+                  {m.routeError && (
+                    <div role="status" className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-2 py-1.5 text-[11px]">
+                      <span className="text-amber-800 dark:text-amber-300">{m.routeError}</span>
+                      {isCompanyAdmin && m.status !== 'quarantine' && m.status !== 'rejected' && (
+                        <Button size="sm" variant="outline" className="h-7"
+                          disabled={retryRoute.isPending}
+                          onClick={() => retryRoute.mutate(m.id)}>
+                          <RotateCw className="mr-1 h-3.5 w-3.5" />Повторить маршрут
+                        </Button>
+                      )}
+                    </div>
+                  )}
                   {m.text && (
                     <pre className="whitespace-pre-wrap text-sm font-sans text-foreground/90">
                       {m.text.slice(0, 4000)}
@@ -813,9 +860,9 @@ export function MailConnector({ mode = 'all' }: { mode?: 'setup' | 'work' | 'all
   )
 }
 
-function AccountRow({ a, onEdit, onPoll, onTest, onDelete }: {
+function AccountRow({ a, canManage, onEdit, onPoll, onTest, onDelete }: {
   a: MailAccount; onEdit: () => void; onPoll: () => void
-  onTest: () => void; onDelete: () => void
+  onTest: () => void; onDelete: () => void; canManage: boolean
 }) {
   // Ящик готов, если есть сервер и пароль — неважно, введён он сотрудником или
   // задан переменной окружения.
@@ -824,7 +871,8 @@ function AccountRow({ a, onEdit, onPoll, onTest, onDelete }: {
     <div className="group rounded-lg border p-3 transition-colors hover:border-border">
       <div className="flex flex-wrap items-center gap-2">
         <Inbox className="size-4 shrink-0 text-muted-foreground" />
-        <button onClick={onEdit} className="text-sm font-medium hover:text-primary">
+        <button onClick={canManage ? onEdit : undefined} disabled={!canManage}
+          className="text-sm font-medium enabled:hover:text-primary">
           {a.address}
         </button>
         {a.title && <span className="text-xs text-muted-foreground">{a.title}</span>}
@@ -836,17 +884,17 @@ function AccountRow({ a, onEdit, onPoll, onTest, onDelete }: {
           {ready ? 'настроен' : !a.imapHost ? 'нет сервера' : 'нет пароля'}
         </span>
         <div className="ml-auto flex items-center gap-1">
-          <Button size="sm" variant="ghost" className="h-7 px-2 text-[11px]" onClick={onTest}
+          {canManage && <Button size="sm" variant="ghost" className="h-7 px-2 text-[11px]" onClick={onTest}
             title="Проверить подключение к серверам">
             проверить
-          </Button>
+          </Button>}
           <Button size="sm" variant="ghost" className="h-7 px-2" onClick={onPoll}
             title="Забрать почту из этого ящика">
             <RefreshCw className="size-3.5" />
           </Button>
-          <Button size="sm" variant="ghost" className="h-7 px-2" onClick={onDelete}>
+          {canManage && <Button size="sm" variant="ghost" className="h-7 px-2" onClick={onDelete}>
             <Trash2 className="size-3.5" />
-          </Button>
+          </Button>}
         </div>
       </div>
       {a.purpose && <div className="mt-1 text-[11px] text-muted-foreground">{a.purpose}</div>}
@@ -885,7 +933,7 @@ const ACTIONS: { key: MailRule['action']; label: string }[] = [
 
 function Toggle({ on, label, onClick }: { on: boolean; label: string; onClick: () => void }) {
   return (
-    <button onClick={onClick}
+    <button type="button" onClick={onClick} aria-pressed={on}
       className={cn('rounded-md border px-2 py-1 text-xs transition-colors',
         on ? 'border-primary bg-primary/10 text-primary'
            : 'text-muted-foreground hover:bg-muted')}>
@@ -894,9 +942,9 @@ function Toggle({ on, label, onClick }: { on: boolean; label: string; onClick: (
   )
 }
 
-function RuleRow({ r, counterparties, onEdit, onDelete }: {
+function RuleRow({ r, counterparties, canManage, deleting, onEdit, onDelete }: {
   r: MailRule; counterparties: { id: string; name: string }[]
-  onEdit: () => void; onDelete: () => void
+  onEdit: () => void; onDelete: () => void; canManage: boolean; deleting: boolean
 }) {
   const cond = [
     r.fromEmail && `от ${r.fromEmail}`,
@@ -909,7 +957,8 @@ function RuleRow({ r, counterparties, onEdit, onDelete }: {
   return (
     <div className="rounded-md border p-2.5 flex flex-wrap items-center gap-2">
       <span className="text-[11px] tabular-nums text-muted-foreground w-8">{r.sort}</span>
-      <button onClick={onEdit} className="text-sm font-medium hover:text-primary">
+      <button onClick={canManage ? onEdit : undefined} disabled={!canManage}
+        className="text-sm font-medium enabled:hover:text-primary">
         {r.name || 'без названия'}
       </button>
       <span className="text-[11px] text-muted-foreground">{cond}</span>
@@ -924,9 +973,15 @@ function RuleRow({ r, counterparties, onEdit, onDelete }: {
       <span className="ml-auto text-[11px] text-muted-foreground tabular-nums">
         сработало {r.hits}
       </span>
-      <Button size="sm" variant="ghost" className="h-7 px-2" onClick={onDelete}>
-        <Trash2 className="size-3.5" />
-      </Button>
+      {canManage && <ConfirmActionDialog
+        trigger={<Button size="sm" variant="ghost" className="h-7 px-2"
+          aria-label={`Удалить правило «${r.name || 'без названия'}»`} disabled={deleting}>
+          <Trash2 className="size-3.5" />
+        </Button>}
+        title="Удалить почтовое правило?"
+        description={`Письма больше не будут обрабатываться правилом «${r.name || 'без названия'}».`}
+        confirmLabel="Удалить" destructive onConfirm={onDelete}
+      />}
     </div>
   )
 }

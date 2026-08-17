@@ -35,6 +35,7 @@ from typing import Any
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.net_guard import assert_external_host
 from app.models import (
     Counterparty, CounterpartyEmail, IntakeBatch, MailAccount, MailAttachment,
@@ -121,14 +122,24 @@ def auth_verdict(msg: Message) -> tuple[str, str | None]:
 
     Возвращает `pass` | `fail` | `unknown` и текст вердикта.
     """
-    raw = " ".join(v for k, v in msg.items() if k.lower() == "authentication-results")
+    values = [v for k, v in msg.items() if k.lower() == "authentication-results"]
+    trusted = {value.strip().lower() for value in settings.mail_authserv_ids.split(";")
+               if value.strip()}
+    raw = next((value for value in values
+                if value.split(";", 1)[0].strip().lower() in trusted), "")
     if not raw:
         return "unknown", None
     low = raw.lower()
-    if "dkim=fail" in low or "spf=fail" in low or "dmarc=fail" in low:
+    if "dmarc=fail" in low:
         return "fail", raw[:300]
-    if "dkim=pass" in low or "spf=pass" in low or "dmarc=pass" in low:
-        return "pass", raw[:300]
+    if "dmarc=pass" in low:
+        _, from_email = parseaddr(_decode(msg.get("From")))
+        from_domain = from_email.rsplit("@", 1)[-1].lower().rstrip(".") \
+            if "@" in from_email else ""
+        match = re.search(r"\bdmarc=pass\b[^;]*\bheader\.from=([^\s;]+)", low)
+        aligned = match.group(1).strip('"').rstrip(".") if match else ""
+        if from_domain and aligned == from_domain:
+            return "pass", raw[:300]
     return "unknown", raw[:300]
 
 
@@ -280,6 +291,10 @@ async def poll_account(db: AsyncSession, account: MailAccount) -> dict[str, Any]
     """Забрать новые письма ящика, разобрать и сохранить."""
     if account.mode == "out" or not account.is_active:
         return {"fetched": 0, "saved": 0, "skipped": "ящик не принимает почту"}
+    got = await db.scalar(text("SELECT pg_try_advisory_xact_lock(:ns, :key)"),
+                          {"ns": POLL_LOCK_NS, "key": account.id.int % (2 ** 31)})
+    if not got:
+        return {"fetched": 0, "saved": 0, "skipped": "ящик уже опрашивается"}
 
     from app.services.mail_secrets import password_of
 
@@ -310,16 +325,16 @@ async def poll_account(db: AsyncSession, account: MailAccount) -> dict[str, Any]
     saved = 0
     for uid, raw in letters:
         try:
-            if await _save_message(db, account, uid, raw):
-                saved += 1
+            async with db.begin_nested():
+                if await _save_message(db, account, uid, raw):
+                    saved += 1
         except Exception as e:  # noqa: BLE001 — одно кривое письмо не рвёт приём
-            # Откат обязателен: ошибка от БД (слишком длинный Message-ID и т.п.)
-            # отравляет сессию, и дальше падает ВСЁ, включая сохранение last_uid.
-            # Без него ящик застревал на одном письме и сыпал трейсбеком в лог
-            # каждую минуту, а остальные ящики компании в этот тик не опрашивались.
-            await db.rollback()
-            account = await db.merge(account)
+            # UID нельзя продвигать мимо письма, которое не сохранилось: иначе
+            # следующая синхронизация уже никогда его не увидит. SAVEPOINT выше
+            # оставляет основную транзакцию и блокировку ящика живыми.
+            account.last_error = f"Письмо UID {uid} не сохранено: {str(e)[:450]}"
             logger.exception("письмо uid=%s не сохранено: %s", uid, e)
+            break
         account.last_uid = max(account.last_uid or 0, uid)
     await db.commit()
     return {"fetched": len(letters), "saved": saved}
@@ -337,16 +352,22 @@ POLL_LOCK_NS = 4711
 async def _save_message(db: AsyncSession, account: MailAccount, uid: int,
                         raw: bytes) -> bool:
     msg = email.message_from_bytes(raw)
-    message_id = (msg.get("Message-ID") or "").strip() or None
+    message_id = ((msg.get("Message-ID") or "").strip()
+                  or f"sha256:{hashlib.sha256(raw).hexdigest()}")
 
-    # Повтор ловим по Message-ID: после смены UIDVALIDITY ящик перечитывается
-    # целиком, и без этой проверки лента задвоится.
-    if message_id:
-        exists = (await db.execute(select(MailMessage.id).where(
-            MailMessage.company_id == account.company_id,
-            MailMessage.message_id == message_id))).scalars().first()
-        if exists:
-            return False
+    # Два ящика компании могут одновременно получить одно письмо. Блокировка по
+    # компании+идентификатору закрывает check/insert даже на старой базе, где
+    # уникальный индекс не создался из-за прежних дублей. Для письма без
+    # Message-ID тем же стабильным ключом служит хеш исходника.
+    lock_digest = hashlib.sha256(
+        f"{account.company_id}:{message_id}".encode("utf-8")).digest()
+    lock_key = int.from_bytes(lock_digest[:8], "big", signed=True)
+    await db.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": lock_key})
+    exists = (await db.execute(select(MailMessage.id).where(
+        MailMessage.company_id == account.company_id,
+        MailMessage.message_id == message_id))).scalars().first()
+    if exists:
+        return False
 
     from_name, from_email = parseaddr(_decode(msg.get("From")))
 
@@ -400,6 +421,8 @@ async def _save_message(db: AsyncSession, account: MailAccount, uid: int,
     # отправителя несложно, а письмо «от контрагента» с новыми реквизитами для
     # оплаты — самая частая схема обмана в деловой переписке.
     verdict, auth_text = auth_verdict(msg)
+    row.headers = {**(row.headers or {}), "_auth_status": verdict,
+                   "_auth_verdict": auth_text or verdict}
     if verdict == "fail":
         row.status = "quarantine"
         row.headers = {**(row.headers or {}), "_auth_verdict": auth_text or "fail"}
@@ -416,7 +439,10 @@ async def _save_message(db: AsyncSession, account: MailAccount, uid: int,
         if rule.set_counterparty_id and not row.counterparty_id:
             row.counterparty_id = rule.set_counterparty_id
             cp_id = rule.set_counterparty_id
-        rule.hits = (rule.hits or 0) + 1
+        if rule.action == "doc" and verdict != "pass":
+            row.status = "quarantine"
+            row.route_error = ("Автосоздание документа остановлено: принимающий "
+                               "почтовый сервер не подтвердил подлинность письма")
 
     db.add(row)
     await db.flush()
@@ -439,24 +465,34 @@ async def _save_message(db: AsyncSession, account: MailAccount, uid: int,
     # чата, дописывалось в задачу и заводило заявку — то есть ровно то, ради чего
     # карантин и делался (подделанное письмо «от контрагента» с новыми реквизитами
     # оплаты), доезжало до людей другим путём.
+    route_actions = {"chat", "ticket", "task", "intake", "doc"}
+    if rule is not None and rule.action in route_actions:
+        row.route_attempts = (row.route_attempts or 0) + 1
+        row.route_attempted_at = datetime.now(timezone.utc)
     if row.status in ("quarantine", "rejected"):
         logger.info("письмо %s не доставляется: статус %s", row.id, row.status)
     else:
         try:
             from app.services import mail_routing
-            routed = await mail_routing.route(db, account.company_id, row, rule)
+            async with db.begin_nested():
+                routed = await mail_routing.route(db, account.company_id, row, rule)
             if routed:
                 row.routed_to = routed
+                row.route_error = None
         except Exception as e:  # noqa: BLE001
+            row.route_error = f"Маршрут не выполнен: {str(e)[:450]}"
             logger.exception("письмо %s не доставлено по маршруту: %s", row.id, e)
 
     # Правило сказало «в задачу» — заводим НОВУЮ задачу из письма. Ответ в
     # существующую задачу приходит плюс-адресом и обработан выше.
     if rule is not None and rule.action == "task" and row.routed_to is None:
         try:
-            await _task_from_message(db, account.company_id, row)
+            async with db.begin_nested():
+                await _task_from_message(db, account.company_id, row)
             row.routed_to = "task"
+            row.route_error = None
         except Exception as e:  # noqa: BLE001 — задача не заводится, письмо остаётся
+            row.route_error = f"Задача не создана: {str(e)[:450]}"
             logger.exception("задача из письма %s не создана: %s", row.id, e)
 
     # Правило сказало «в приёмку» — вложения сразу становятся кандидатами. В учёт
@@ -465,15 +501,72 @@ async def _save_message(db: AsyncSession, account: MailAccount, uid: int,
     if rule is not None and rule.action == "intake" and saved_atts:
         await db.flush()
         try:
-            await attachments_to_intake(db, account.company_id, row, saved_atts)
+            async with db.begin_nested():
+                await attachments_to_intake(db, account.company_id, row, saved_atts)
             row.routed_to = "intake"
+            row.route_error = None
         except Exception as e:  # noqa: BLE001 — разбор не должен рвать приём почты
+            row.route_error = f"Вложения не переданы в приёмку: {str(e)[:420]}"
             logger.exception("вложения письма %s не разобраны: %s", row.id, e)
+
+    if rule is not None and rule.action == "doc" and row.status not in (
+            "quarantine", "rejected") and row.routed_to is None and row.route_error is None:
+        if row.counterparty_id is None:
+            row.route_error = "Документ не создан: корреспондент не опознан"
+        elif not saved_atts:
+            row.route_error = "Документ не создан: нет непустого допустимого вложения"
+        else:
+            row.route_error = "Документ не создан: нет активного входящего вида"
+    if rule is not None and rule.action in ("chat", "ticket") \
+            and row.status not in ("quarantine", "rejected") \
+            and row.routed_to is None and row.route_error is None:
+        row.route_error = "Маршрут правила не настроен или цель недоступна"
+    if rule is not None and rule.action == "intake" and not saved_atts:
+        row.route_error = "В приёмку нечего передавать: допустимых вложений нет"
+
+    route_ok = (rule is not None and (
+        rule.action not in route_actions or row.routed_to is not None))
+    if route_ok:
+        rule.hits = (rule.hits or 0) + 1
 
     thread.messages_count = (thread.messages_count or 0) + 1
     thread.last_message_at = sent_at or datetime.now(timezone.utc)
     if cp_id and not thread.counterparty_id:
         thread.counterparty_id = cp_id
+    return True
+
+
+async def retry_doc_route(db: AsyncSession, cid, row: MailMessage) -> bool:
+    """Повторить неуспешный mail→doc после исправления справочника или вида."""
+    if row.company_id != cid or row.status in ("quarantine", "rejected"):
+        return False
+    account = await db.get(MailAccount, row.account_id) if row.account_id else None
+    if account is None or account.company_id != cid:
+        row.route_error = "Почтовый ящик маршрута больше недоступен"
+        return False
+    attachments = (await db.execute(select(MailAttachment).where(
+        MailAttachment.company_id == cid,
+        MailAttachment.message_id == row.id))).scalars().all()
+    rule = await apply_rules(db, account, row, bool(attachments))
+    if rule is None or rule.action != "doc":
+        row.route_error = "Подходящее правило «в документ» не найдено"
+        return False
+    row.route_attempts = (row.route_attempts or 0) + 1
+    row.route_attempted_at = datetime.now(timezone.utc)
+    try:
+        from app.services import mail_routing
+        async with db.begin_nested():
+            routed = await mail_routing.route(db, cid, row, rule)
+    except Exception as exc:  # noqa: BLE001 — ошибка остаётся retryable
+        row.route_error = f"Документ не создан: {str(exc)[:450]}"
+        return False
+    if routed != "doc":
+        row.route_error = ("Документ не создан: нужен известный корреспондент, "
+                           "непустое вложение и активный входящий вид")
+        return False
+    row.routed_to = "doc"
+    row.route_error = None
+    rule.hits = (rule.hits or 0) + 1
     return True
 
 
@@ -617,7 +710,8 @@ async def apply_rules(db: AsyncSession, account: MailAccount, row: MailMessage,
     """Найти первое подходящее правило. Пустое условие условием не считается."""
     rules = (await db.execute(select(MailRule).where(
         MailRule.company_id == account.company_id,
-        MailRule.is_active.is_(True)).order_by(MailRule.sort))).scalars().all()
+        MailRule.is_active.is_(True)).order_by(
+            MailRule.sort, MailRule.created_at, MailRule.id))).scalars().all()
 
     sender = (row.from_email or "").lower()
     domain = sender.split("@")[-1] if "@" in sender else ""
@@ -689,10 +783,6 @@ async def poll_due(db: AsyncSession) -> dict[str, Any]:
         due = (a.last_sync_at is None
                or (now - a.last_sync_at).total_seconds() >= a.poll_interval_min * 60)
         if not due:
-            continue
-        got = await db.scalar(text("SELECT pg_try_advisory_xact_lock(:ns, :key)"),
-                              {"ns": POLL_LOCK_NS, "key": a.id.int % (2 ** 31)})
-        if not got:
             continue
         try:
             await poll_account(db, a)
