@@ -40,6 +40,7 @@ export interface DocSavedView {
   query: Record<string, string>
   shared: boolean
   position?: number
+  can_delete?: boolean
 }
 
 export interface DocLabel {

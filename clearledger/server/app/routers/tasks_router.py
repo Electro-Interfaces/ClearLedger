@@ -784,11 +784,14 @@ async def list_views(
     cid = await _assert_work(company_id, current_user, db)
     rows = (await db.execute(select(TaskView).where(
         TaskView.company_id == cid,
+        TaskView.list_scope == "task",
         or_(TaskView.user_id.is_(None), TaskView.user_id == current_user.id))
         .order_by(TaskView.position, TaskView.name))).scalars().all()
+    can_manage_shared = await _is_admin(db, cid, current_user)
     return {"views": [{
         "id": str(v.id), "name": v.name, "query": v.query or {},
         "shared": v.user_id is None, "position": v.position,
+        "can_delete": v.user_id == current_user.id or can_manage_shared,
     } for v in rows]}
 
 
@@ -804,6 +807,7 @@ async def create_view(
     if payload.shared:
         await _assert_admin(db, cid, current_user)
     v = TaskView(company_id=cid, user_id=None if payload.shared else current_user.id,
+                 list_scope="task",
                  name=payload.name.strip(), query=payload.query or {},
                  position=payload.position)
     db.add(v)
@@ -822,7 +826,7 @@ async def delete_view(
 ):
     cid = await _assert_work(company_id, current_user, db)
     v = await db.get(TaskView, _uuid_or_400(view_id, "view_id"))
-    if v is None or v.company_id != cid:
+    if v is None or v.company_id != cid or v.list_scope != "task":
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Представление не найдено")
     # Своё снимает автор, общее — администратор.
     if v.user_id is None:

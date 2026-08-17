@@ -2685,6 +2685,22 @@ class DocViewIn(BaseModel):
     position: int = 100
 
 
+_DOC_VIEW_KEYS = {"view", "q", "status", "kind", "date_from", "date_to"}
+
+
+def _clean_doc_view_query(value: dict) -> dict[str, str]:
+    clean: dict[str, str] = {}
+    for key, item in value.items():
+        if key not in _DOC_VIEW_KEYS or not isinstance(item, str):
+            continue
+        text_value = item.strip()
+        if text_value:
+            clean[key] = text_value[:500]
+    if clean.get("view") not in {"incoming", "outgoing", "ord", "internal", "all"}:
+        clean["view"] = "all"
+    return clean
+
+
 @router.get("/views")
 async def list_doc_views(
     company_id: str = Query(...),
@@ -2697,9 +2713,13 @@ async def list_doc_views(
         TaskView.list_scope == "doc",
         or_(TaskView.user_id.is_(None), TaskView.user_id == current_user.id))
         .order_by(TaskView.position, TaskView.name))).scalars().all()
+    membership = await db.get(UserCompany, (current_user.id, cid))
+    can_manage_shared = current_user.is_superadmin or bool(
+        membership and membership.role == "admin")
     return {"views": [{
         "id": str(view.id), "name": view.name, "query": view.query or {},
         "shared": view.user_id is None, "position": view.position,
+        "can_delete": view.user_id == current_user.id or can_manage_shared,
     } for view in rows]}
 
 
@@ -2718,7 +2738,7 @@ async def create_doc_view(
         user_id=None if payload.shared else current_user.id,
         name=payload.name.strip(),
         list_scope="doc",
-        query=payload.query or {},
+        query=_clean_doc_view_query(payload.query),
         position=payload.position,
     )
     db.add(view)
@@ -2781,7 +2801,11 @@ async def create_doc_label(
         TaskLabel.company_id == cid,
         func.lower(TaskLabel.name) == payload.name.strip().lower()))).scalar_one_or_none()
     if dup is not None:
-        return {"id": str(dup), "duplicate": True}
+        existing = await db.get(TaskLabel, dup)
+        return {
+            "id": str(existing.id), "name": existing.name,
+            "color": existing.color, "duplicate": True,
+        }
     row = TaskLabel(company_id=cid, name=payload.name.strip(), color=payload.color)
     db.add(row)
     await db.commit()
@@ -2826,6 +2850,9 @@ async def toggle_doc_label(
     d = await _doc_or_404(db, cid, doc_id)
     await _assert_doc_permission(db, cid, d, current_user, "edit")
     lid = _uuid_or_400(payload.label_id, "label_id")
+    label = await db.get(TaskLabel, lid)
+    if label is None or label.company_id != cid:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Метка не найдена")
     link = await db.get(DocLabelLink, (d.id, lid))
     if payload.on and link is None:
         db.add(DocLabelLink(doc_id=d.id, label_id=lid))

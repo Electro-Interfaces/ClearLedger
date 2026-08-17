@@ -106,10 +106,12 @@ export function ViewsSection({ companyId, scope = 'task' }: {
               <span className="text-[11px] text-muted-foreground">
                 {Object.entries(v.query).map(([k, val]) => `${k}=${val}`).join(' · ') || 'без отбора'}
               </span>
-              <Button variant="ghost" size="sm" className="h-7 px-1.5"
-                aria-label={`Удалить ${v.name}`} onClick={() => drop.mutate(v.id)}>
-                <Trash2 className="h-3.5 w-3.5" />
-              </Button>
+              {v.can_delete !== false && (
+                <Button variant="ghost" size="sm" className="h-7 px-1.5"
+                  aria-label={`Удалить ${v.name}`} onClick={() => drop.mutate(v.id)}>
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              )}
             </div>
           ))}
         </div>

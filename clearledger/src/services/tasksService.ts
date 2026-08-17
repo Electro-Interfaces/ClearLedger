@@ -331,7 +331,7 @@ export async function removeWatcher(taskId: string, userId: string, companyId: s
 /** Сохранённый отбор реестра. `shared` — общее представление компании. */
 export interface TaskView {
   id: string; name: string; query: Record<string, string>; shared: boolean
-  position?: number
+  position?: number; can_delete?: boolean
 }
 
 export async function listTaskViews(companyId: string) {
