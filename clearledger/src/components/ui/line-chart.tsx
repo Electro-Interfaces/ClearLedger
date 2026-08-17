@@ -603,7 +603,7 @@ const LineChart = React.forwardRef<HTMLDivElement, LineChartProps>(
        
         {...other}
       >
-        <ResponsiveContainer>
+        <ResponsiveContainer minWidth={0} minHeight={1}>
           <RechartsLineChart
             data={data}
             onClick={

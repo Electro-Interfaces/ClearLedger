@@ -29,7 +29,7 @@ import { useScopeSubtitle } from '@/hooks/useScopeReset'
 import { PanelViewTabs } from './PanelViewTabs'
 import { ViewParamsBar } from './ViewParamsBar'
 import { HorizonControl } from './HorizonControl'
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RTooltip } from 'recharts'
+import { PieChart, Pie, Cell, Tooltip as RTooltip } from 'recharts'
 import { getReconciliationBy, type ReconByRow } from '@/services/chargePaymentsService'
 import {
   getChargeSessions, getChargeTimeseries, getChargeCompareMulti, getChargeSlice, getChargeHeatmap,
@@ -252,7 +252,7 @@ function BreakdownTable({ companyId, dateFrom, dateTo, groupBy, firstCol, withKp
 }) {
   // Только представление (метрика распределения + топ-N). Период — из контура
   // рабочей области: вид-срез не имеет своего периода (см. CLAUDE.md, ур. 2/4).
-  const [p, patch] = useTabParams(tabKey, { metric: 'amount' as ChargeMetric, rows: 0 })
+  const [p, patch] = useTabParams(tabKey, { metric: 'amount' as ChargeMetric, rows: 50 })
   // Разрез — ЛОКАЛЬНО (не в useTabParams): всегда стартует от groupBy таба. Иначе при
   // переиспользовании экземпляра между табами (станции↔коннекторы) разрез залипал.
   const [group, setGroup] = useState<ChargeGroupBy>(groupBy)
@@ -273,7 +273,8 @@ function BreakdownTable({ companyId, dateFrom, dateTo, groupBy, firstCol, withKp
       ? dir * a.label.localeCompare(b.label, 'ru')
       : dir * (((get(a as unknown as Record<string, unknown>) as number) ?? 0) - ((get(b as unknown as Record<string, unknown>) as number) ?? 0))))
   }, [lines, sort])
-  const shownLines = controls && p.rows > 0 ? sortedLines.slice(0, p.rows) : sortedLines
+  const rowLimit = [10, 25, 50, 1000].includes(p.rows) ? p.rows : 50
+  const shownLines = controls ? sortedLines.slice(0, rowLimit) : sortedLines
   // Батч-тренд по месяцам для sparkline в строке (только физические разрезы).
   const spark = useQuery({
     queryKey: ['charge-slice-spark', companyId, period.from, period.to, gb, n.key],
@@ -306,7 +307,7 @@ function BreakdownTable({ companyId, dateFrom, dateTo, groupBy, firstCol, withKp
           <Field label="Разрез"><SeriesSelect value={group} onChange={(v) => setGroup(v as ChargeGroupBy)} /></Field>
           <Field label="Метрика"><MetricSelect value={p.metric} onChange={(m) => patch({ metric: m })} /></Field>
           <Field label="Строк">
-            <Select value={String(p.rows)} onValueChange={(v) => patch({ rows: Number(v) })}>
+            <Select value={String(rowLimit)} onValueChange={(v) => patch({ rows: Number(v) })}>
               <SelectTrigger className="h-7 w-[110px] text-xs"><SelectValue /></SelectTrigger>
               <SelectContent>{ROWS_OPTS.map((o) => <SelectItem key={o.value} value={String(o.value)} className="text-xs">{o.label}</SelectItem>)}</SelectContent>
             </Select>
@@ -479,14 +480,12 @@ function ShareDonut({ title, rows }: { title: string; rows: ChargeSessionLine[] 
         <div className="text-xs uppercase tracking-wider text-muted-foreground mb-2">{title}</div>
         <div className="flex items-center gap-4">
           <div className="relative shrink-0" style={{ width: 132, height: 132 }} data-chart>
-            <ResponsiveContainer width={132} height={132}>
-              <PieChart>
-                <Pie data={data} dataKey="value" nameKey="name" innerRadius={44} outerRadius={62} paddingAngle={1.5} stroke="none" isAnimationActive={false}>
-                  {data.map((_, i) => <Cell key={i} fill={seriesColor(i, n)} />)}
-                </Pie>
-                <RTooltip formatter={(value) => `${fmtMoney(Number(value))} ₽`} />
-              </PieChart>
-            </ResponsiveContainer>
+            <PieChart width={132} height={132}>
+              <Pie data={data} dataKey="value" nameKey="name" innerRadius={44} outerRadius={62} paddingAngle={1.5} stroke="none" isAnimationActive={false}>
+                {data.map((_, i) => <Cell key={i} fill={seriesColor(i, n)} />)}
+              </Pie>
+              <RTooltip formatter={(value) => `${fmtMoney(Number(value))} ₽`} />
+            </PieChart>
             <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
               <div className="text-sm font-semibold tabular-nums">{fmtMoneyShort(total)}</div>
               <div className="text-[9px] text-muted-foreground">₽ итого</div>

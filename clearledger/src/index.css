@@ -17,6 +17,16 @@
     min-height: 2.75rem;
   }
 
+  [data-sales-surface] button {
+    min-width: 2.75rem;
+  }
+
+  [data-sales-surface] .leaflet-control-zoom a {
+    width: 2.75rem;
+    height: 2.75rem;
+    line-height: 2.75rem;
+  }
+
   [data-sales-surface] input,
   [data-sales-surface] [role="combobox"] {
     font-size: 1rem;

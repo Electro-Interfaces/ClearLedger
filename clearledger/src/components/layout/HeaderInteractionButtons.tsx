@@ -18,7 +18,7 @@ import { useCompany } from '@/contexts/CompanyContext'
 
 /** Пилюля-кнопка: синий акцент, активное состояние — как у остальных кнопок шапки. */
 const btnCls = (active: boolean) =>
-  `relative h-11 px-3 gap-2 rounded-xl transition-all duration-200 font-medium border ${
+  `relative h-11 min-w-11 px-3 gap-2 rounded-xl transition-all duration-200 font-medium border ${
     active
       ? 'bg-primary text-white border-primary'
       : 'bg-primary/10 dark:bg-primary/20 hover:bg-primary text-primary dark:text-primary/80 hover:text-white border-primary/30 dark:border-primary/50 hover:border-primary'
@@ -113,7 +113,7 @@ export function HeaderInteractionButtons({ conference = false }: { conference?: 
         size="icon"
         aria-pressed={interactionSection === 'tickets'}
         onClick={() => toggleInteraction('tickets')}
-        className={`h-10 w-10 rounded-xl ${interactionSection === 'tickets' ? 'bg-primary/10 text-primary hover:bg-primary/15' : 'text-muted-foreground hover:text-foreground'}`}
+        className={`h-11 w-11 rounded-xl ${interactionSection === 'tickets' ? 'bg-primary/10 text-primary hover:bg-primary/15' : 'text-muted-foreground hover:text-foreground'}`}
         title="Поддержка платформы: вопросы и ошибки по программе"
       >
         <LifeBuoy className="h-[18px] w-[18px]" />
