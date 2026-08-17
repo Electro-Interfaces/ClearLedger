@@ -18,17 +18,29 @@ function fmtDate(iso?: string): string {
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString('ru-RU')
 }
 
+/**
+ * Номер станции у карточек, где паспорт его не несёт: зеркала реестра Поддержки
+ * (тип `ezs`) и объекты, заведённые до сверки с витриной. Берём числовой код
+ * (у старых карточек code = номер) либо «№ 295» из названия — идентификатор
+ * источника вида «nsp_0064» номером не считаем. Правда о номере живёт в
+ * паспорте: это подпорка выгрузки, а не замена сверке реестра.
+ */
+export function numberFallback(l: ServiceLocation): string {
+  if (/^\d+$/.test(l.code)) return l.code
+  return l.name.match(/№\s*(\d+)/)?.[1] ?? ''
+}
+
 export const LOCATION_COLUMNS: LocationColumn[] = [
-  // Серийник паспорта, а не внутренний код: у объектов, заведённых до сверки с
-  // витриной, code = номер станции, и графа «Код / серийник» повторяла «Номер».
-  { key: 'code', label: 'Код / серийник', get: (l) => m(l, 'serialNumber') || l.code },
-  { key: 'number', label: 'Номер', get: (l) => m(l, 'number') },
+  // Первые две графы — то, чем станцию называет заказчик: номер и серийник.
+  // «Код» — внутренний ключ карточки, читателю выгрузки он ничего не говорит,
+  // поэтому уехал вниз под своим именем и вне набора по умолчанию.
+  { key: 'number', label: 'Номер станции', get: (l) => m(l, 'number') || numberFallback(l) },
+  { key: 'serialNumber', label: 'Серийный номер', get: (l) => m(l, 'serialNumber') },
   { key: 'name', label: 'Название', get: (l) => l.name },
   { key: 'type', label: 'Тип', get: (l, c) => c.typeByCode.get(l.type)?.name ?? l.type },
   { key: 'status', label: 'Жизненный статус', get: (l) => LOCATION_STATUS_META[l.status]?.label ?? l.status },
   { key: 'operationalStatus', label: 'Операц. статус', get: (l) => OP_META[l.operationalStatus ?? 'unknown']?.label ?? (l.operationalStatus ?? '') },
   { key: 'address', label: 'Адрес', get: (l) => l.address ?? '' },
-  { key: 'serialNumber', label: 'Серийный номер', get: (l) => m(l, 'serialNumber') },
   { key: 'ownerTitle', label: 'Владелец', get: (l) => m(l, 'ownerTitle') },
   { key: 'federalSubject', label: 'Регион', get: (l) => m(l, 'federalSubject') },
   { key: 'cityName', label: 'Город', get: (l) => m(l, 'cityName') },
@@ -38,18 +50,22 @@ export const LOCATION_COLUMNS: LocationColumn[] = [
   { key: 'connectorCount', label: 'Коннекторов', get: (l) => m(l, 'connectorCount') },
   { key: 'connectorTypes', label: 'Типы коннекторов', get: (l) => m(l, 'connectorTypes') },
   { key: 'protocolOcpp', label: 'Протокол OCPP', get: (l) => m(l, 'protocolOcpp') },
+  { key: 'code', label: 'Код в системе', get: (l) => l.code },
   { key: 'hubexAssetId', label: 'HubEx asset_id', get: (l) => m(l, 'hubexAssetId') },
   { key: 'linkStatus', label: 'Связка HubEx', get: (l) => m(l, 'linkStatus') },
   { key: 'latitude', label: 'Широта', get: (l) => m(l, 'latitude') },
   { key: 'longitude', label: 'Долгота', get: (l) => m(l, 'longitude') },
   { key: 'bindingsCount', label: 'Привязок к источникам', get: (l) => String(l.sourceBindings.length) },
   { key: 'description', label: 'Описание', get: (l) => l.description ?? '' },
-  { key: 'createdAt', label: 'Создана', get: (l) => fmtDate(l.createdAt) },
-  { key: 'updatedAt', label: 'Изменена', get: (l) => fmtDate(l.updatedAt) },
+  // Даты про карточку в Учёте, а не про станцию в поле: заведение и последняя
+  // правка записи. Прежние «Создана / Изменена» читались как ввод в эксплуатацию.
+  { key: 'createdAt', label: 'Карточка заведена', get: (l) => fmtDate(l.createdAt) },
+  { key: 'updatedAt', label: 'Карточка изменена', get: (l) => fmtDate(l.updatedAt) },
 ]
 
 export const DEFAULT_EXPORT_COLUMNS = [
-  'code', 'number', 'name', 'type', 'operationalStatus', 'ownerTitle', 'federalSubject', 'linkStatus',
+  'number', 'serialNumber', 'name', 'type', 'operationalStatus', 'ownerTitle',
+  'federalSubject', 'linkStatus',
 ]
 
 function triggerDownload(blob: Blob, fileName: string) {
