@@ -58,10 +58,12 @@ export function InteractionModal() {
           className={
             'p-0 gap-0 bg-card border-border text-foreground shadow-2xl ring-1 ring-black/5 dark:ring-white/10 '
             + 'w-screen h-[100dvh] max-w-none max-h-none rounded-none sm:rounded-xl overflow-hidden flex flex-col '
-            // Аудитору нужна ширина чата: в ответах таблицы и карточки находок, в узком
-            // окне они переносятся по слогам.
-            + (section === 'chat' || section === 'auditor'
-              ? 'sm:w-[94vw] sm:max-w-5xl sm:h-[84vh] sm:max-h-[84vh]'
+            + (section === 'chat'
+              ? 'sm:w-[96vw] sm:max-w-[1600px] sm:h-[92dvh] sm:max-h-[92dvh]'
+              // Аудитору нужна ширина чата: в ответах таблицы и карточки находок, в узком
+              // окне они переносятся по слогам.
+              : section === 'auditor'
+                ? 'sm:w-[94vw] sm:max-w-5xl sm:h-[84dvh] sm:max-h-[84dvh]'
               : 'sm:w-[92vw] sm:max-w-2xl sm:h-[70vh] sm:max-h-[70vh]')
           }
         >

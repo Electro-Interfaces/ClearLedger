@@ -36,7 +36,8 @@ import {
 import { Label } from '@/components/ui/label'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
-  DropdownMenuTrigger, DropdownMenuSeparator,
+  DropdownMenuTrigger, DropdownMenuSeparator, DropdownMenuLabel,
+  DropdownMenuRadioGroup, DropdownMenuRadioItem,
 } from '@/components/ui/dropdown-menu'
 import {
   ContextMenu, ContextMenuContent, ContextMenuItem,
@@ -63,6 +64,12 @@ import type {
 
 // ── константы ────────────────────────────────────────────────────────────────
 const QUICK_REACTIONS = ['👍', '❤️', '🔥', '😂', '😮', '👏']
+const CHAT_TEXT_SIZES = {
+  compact: { label: 'Компактный', hint: '13 px', className: 'text-[13px]' },
+  normal: { label: 'Обычный', hint: '15 px', className: 'text-[15px]' },
+  large: { label: 'Крупный', hint: '17 px', className: 'text-[17px]' },
+} as const
+type ChatTextSize = keyof typeof CHAT_TEXT_SIZES
 /**
  * Разделы списка — как в Telegram: канал, группа и личный чат это разные сущности,
  * а не «чат с разными настройками». Канал односторонний (новости, рассылка, слово
@@ -1615,7 +1622,7 @@ function ChatBubble({
   message, album, isOwn, grouping, canDelete, editingId, editText, searchHighlight,
   onReply, onEditStart, onEditCancel, onEditSave, onEditTextChange, onDelete,
   onAuthorClick, authorAvatar, withAvatar, selfId, onReact, onPin, onForward, onTicket, onTask, onImageClick,
-  actionsOpen, onToggleActions, onCloseActions,
+  actionsOpen, onToggleActions, onCloseActions, textSizeClass,
 }: {
   message: ChatMessage
   album?: ChatMessage[]
@@ -1647,6 +1654,7 @@ function ChatBubble({
   actionsOpen: boolean
   onToggleActions: () => void
   onCloseActions: () => void
+  textSizeClass: string
 }) {
   const { isFirstInGroup, isLastInGroup, showDate } = grouping
   const { shouldSend: editSend } = useSendMode()
@@ -1689,7 +1697,7 @@ function ChatBubble({
       <>
         {showDate && <DateChip iso={message.createdAt} />}
         <div className={cn('flex', isOwn ? 'justify-end' : 'justify-start', isLastInGroup ? 'mb-2' : 'mb-[2px]')}>
-          <div className={cn('max-w-[85%] px-2.5 py-1.5', bubbleRadius(isOwn, isFirstInGroup, isLastInGroup), 'bg-muted/50')}>
+          <div className={cn('max-w-[85%] px-2.5 py-1.5 xl:max-w-[52rem]', bubbleRadius(isOwn, isFirstInGroup, isLastInGroup), 'bg-muted/50')}>
             <p className="text-[11px] italic text-muted-foreground">Сообщение удалено</p>
           </div>
         </div>
@@ -1751,7 +1759,7 @@ function ChatBubble({
             : <span className="w-[26px] shrink-0" />
         )}
         <div className={cn(
-          'relative max-w-[85%] px-2.5 py-1.5',
+          'relative max-w-[85%] px-2.5 py-1.5 xl:max-w-[52rem]',
           bubbleRadius(isOwn, isFirstInGroup, isLastInGroup),
           isOwn ? 'bg-primary text-primary-foreground' : 'bg-muted',
         )}
@@ -1860,7 +1868,7 @@ function ChatBubble({
                   if (editSend(e)) { e.preventDefault(); onEditSave() }
                   if (e.key === 'Escape') onEditCancel()
                 }}
-                className="min-h-[28px] w-full resize-none rounded border border-border bg-transparent p-1 text-[13px] outline-none focus:border-primary" rows={2} />
+                className={cn('min-h-[28px] w-full resize-none rounded border border-border bg-transparent p-1 outline-none focus:border-primary', textSizeClass)} rows={2} />
               <div className="flex justify-end gap-1">
                 <button onClick={onEditCancel} className="rounded p-0.5 text-muted-foreground hover:bg-accent"><X className="size-3.5" /></button>
                 <button onClick={onEditSave} className="rounded p-0.5 text-emerald-500 hover:bg-accent"><Check className="size-3.5" /></button>
@@ -1871,7 +1879,7 @@ function ChatBubble({
               <PollCard poll={message.poll} isOwn={isOwn} selfId={selfId} />
             ) : message.content && (
               <>
-                <p className="whitespace-pre-wrap break-words text-[13px] leading-[1.45]">
+                <p className={cn('whitespace-pre-wrap break-words leading-[1.5]', textSizeClass)}>
                   {searchHighlight ? highlightText(message.content, searchHighlight) : linkifyText(message.content)}
                   <span className={cn('inline-block', isOwn ? 'w-16' : 'w-11')} />
                 </p>
@@ -2019,6 +2027,10 @@ export function ChatPanel({ compact, scopeProduct }: {
     () => (pushSupported() ? Notification.permission : 'unsupported'))
   const [preview, setPreview] = useState(pushPreview)
   const [tabVisible, setTabVisible] = useState(() => !document.hidden)
+  const [textSize, setTextSize] = useState<ChatTextSize>(() => {
+    const saved = localStorage.getItem('cl-chat-text-size')
+    return saved && saved in CHAT_TEXT_SIZES ? saved as ChatTextSize : 'normal'
+  })
   // Ширина колонки списка: тянется разделителем, помнится между сессиями.
   const [listWidth, setListWidth] = useState(() => {
     const saved = Number(localStorage.getItem('cl-chat-list-width'))
@@ -2943,12 +2955,27 @@ export function ChatPanel({ compact, scopeProduct }: {
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="text-[13px]">
+            <DropdownMenuLabel className="text-[11px] text-muted-foreground">Фон переписки</DropdownMenuLabel>
             {Object.entries(CHAT_SKINS).map(([key, s]) => (
               <DropdownMenuItem key={key} className="gap-2 text-xs" onClick={() => setSkin(key)}>
                 {skin === key ? <Check className="size-3.5" /> : <span className="size-3.5" />}
                 {s.label}
               </DropdownMenuItem>
             ))}
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel className="text-[11px] text-muted-foreground">Размер сообщений</DropdownMenuLabel>
+            <DropdownMenuRadioGroup value={textSize} onValueChange={(value) => {
+              const next = value as ChatTextSize
+              setTextSize(next)
+              localStorage.setItem('cl-chat-text-size', next)
+            }}>
+              {Object.entries(CHAT_TEXT_SIZES).map(([key, option]) => (
+                <DropdownMenuRadioItem key={key} value={key} className="text-xs">
+                  <span>{option.label}</span>
+                  <span className="ml-auto text-[10px] tabular-nums text-muted-foreground">{option.hint}</span>
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
             <DropdownMenuSeparator />
             {/* Звук здесь же: и фон, и сигнал — про то, как чат ощущается лично мне. */}
             <DropdownMenuItem className="gap-2 text-xs" onClick={() => setSoundOn((v) => !v)}>
@@ -3087,7 +3114,8 @@ export function ChatPanel({ compact, scopeProduct }: {
                       onImageClick={openImage}
                       actionsOpen={mobileActionsFor === msg.id}
                       onToggleActions={() => setMobileActionsFor((id) => id === msg.id ? null : msg.id)}
-                      onCloseActions={() => setMobileActionsFor(null)} />
+                      onCloseActions={() => setMobileActionsFor(null)}
+                      textSizeClass={CHAT_TEXT_SIZES[textSize].className} />
                     </div>
                     </Fragment>
                   )
@@ -3190,7 +3218,7 @@ export function ChatPanel({ compact, scopeProduct }: {
                   onPaste={handlePaste}
                   title={sendHint}
                   placeholder="Сообщение… (Ctrl+V — вставить скриншот)" rows={1}
-                  className="min-h-[32px] flex-1 resize-none overflow-y-auto rounded-2xl border border-border bg-muted/40 px-3 py-1.5 text-[13px] leading-[1.45] outline-none focus:ring-1 focus:ring-primary" />
+                  className={cn('min-h-[32px] flex-1 resize-none overflow-y-auto rounded-2xl border border-border bg-muted/40 px-3 py-1.5 leading-[1.5] outline-none focus:ring-1 focus:ring-primary', CHAT_TEXT_SIZES[textSize].className)} />
                 <button onClick={handleSend} disabled={(!messageText.trim() && !pendingFiles.length) || sendMutation.isPending || uploading}
                   className="inline-flex size-8 max-md:size-10 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50" title="Отправить">
                   {uploading || sendMutation.isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}
