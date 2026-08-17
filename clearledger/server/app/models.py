@@ -9881,6 +9881,10 @@ class DocApproval(Base):
     # SLA хранится отдельно от срока: due_at появляется только при активации
     # шага, поэтому время будущих шагов не уходит, пока документ до них не дошёл.
     sla_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    activated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    activation_estimated: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false"))
     # Доказательство того, что именно согласовывали: реквизиты карточки и точный
     # набор текущих файлов с их SHA-256. Снимок дублируется в строках круга,
     # чтобы история оставалась самодостаточной без отдельной сущности процесса.
@@ -9900,6 +9904,9 @@ class DocApproval(Base):
                          name="uq_doc_approvals_actor"),
         # Экран «на мне»: одним индексом отвечает на главный вопрос согласующего.
         Index("idx_doc_approvals_mine", "company_id", "assignee_id", "status"),
+        Index("idx_doc_approvals_report", "company_id", "round", "created_at", "doc_id"),
+        Index("idx_doc_approvals_pending_due", "company_id", "due_at",
+              postgresql_where=text("status = 'pending'")),
     )
 
 

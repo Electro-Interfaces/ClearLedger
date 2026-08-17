@@ -437,33 +437,102 @@ export interface DocBoardColumn {
   docs: Array<{
     id: string; title: string; reg_number: string | null; status: string
     kind_name: string; waiting: number; due_at: string | null
+    approval_due_at: string | null
+    approval_overdue: boolean
+    waiting_people: Array<{ user_id: string; name: string; due_at: string | null }>
   }>
 }
 
-export async function board(
-  companyId: string, family?: string,
-): Promise<{ columns: DocBoardColumn[] }> {
+export interface DocBoard {
+  columns: DocBoardColumn[]
+  total: number
+  page: number
+  page_size: number
+  pages: number
+  filter: { assignee_name: string | null; decision_name: string | null }
+}
+
+export type DocBoardReportMetric = 'started' | 'completed' | 'returned' | 'cancelled'
+  | 'first_pass' | 'decisions' | 'late_decisions'
+
+export async function board(companyId: string, filters: {
+  family?: string
+  kindId?: string
+  assigneeId?: string
+  pendingOnly?: boolean
+  overdueOnly?: boolean
+  cohortFrom?: string
+  cohortTo?: string
+  reportMetric?: DocBoardReportMetric
+  decisionBy?: string
+  page?: number
+  pageSize?: number
+} = {}): Promise<DocBoard> {
   const params: Record<string, string> = { company_id: companyId }
-  if (family) params.family = family
-  return get<{ columns: DocBoardColumn[] }>('/api/docs/board', params)
+  if (filters.family) params.family = filters.family
+  if (filters.kindId) params.kind_id = filters.kindId
+  if (filters.assigneeId) params.assignee_id = filters.assigneeId
+  if (filters.pendingOnly) params.pending_only = 'true'
+  if (filters.overdueOnly) params.overdue_only = 'true'
+  if (filters.cohortFrom) params.cohort_from = filters.cohortFrom
+  if (filters.cohortTo) params.cohort_to = filters.cohortTo
+  if (filters.reportMetric) params.report_metric = filters.reportMetric
+  if (filters.decisionBy) params.decision_by = filters.decisionBy
+  if (filters.page) params.page = String(filters.page)
+  if (filters.pageSize) params.page_size = String(filters.pageSize)
+  return get<DocBoard>('/api/docs/board', params)
 }
 
 
 export interface ApprovalDisciplineReport {
+  period: {
+    date_from: string
+    date_to: string
+    cohort: 'first_approval_start'
+    time_zone: string
+    as_of: string
+  }
   summary: {
     documents: number
     completed: number
-    pending: number
+    returned: number
+    cancelled: number
     first_pass_rate: number
+    first_pass_documents: number
+    first_pass_sample: number
   }
-  by_kind: Array<{ kind: string; documents: number; average_hours: number }>
+  backlog: {
+    scope: 'company'
+    as_of: string
+    pending: number
+    overdue: number
+    people: Array<{
+      user_id: string
+      name: string
+      pending: number
+      overdue: number
+    }>
+  }
+  by_kind: Array<{
+    kind_id: string
+    kind: string
+    documents: number
+    average_hours: number
+    median_hours: number
+    p90_hours: number
+  }>
   people: Array<{
     user_id: string
     name: string
     decisions: number
-    pending: number
-    overdue: number
+    documents: number
+    late_documents: number
+    late_decisions: number
+    delegated_decisions: number
+    estimated_decisions: number
     average_hours: number
+    median_hours: number
+    p90_hours: number
   }>
 }
 

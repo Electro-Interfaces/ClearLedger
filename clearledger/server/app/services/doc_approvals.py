@@ -17,6 +17,7 @@ import json
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,6 +31,7 @@ from app.models import (
 # иначе в справочнике копится мусор, за которым ничего не стоит.
 ACTOR_KINDS = ("user", "role", "department", "head_of", "position")
 MODES = ("serial", "parallel")
+BUSINESS_TIMEZONE = ZoneInfo("Europe/Moscow")
 
 
 def clean_route(route: Any) -> list[dict]:
@@ -151,7 +153,7 @@ async def active_deputy_for(db: AsyncSession, cid: uuid.UUID,
     """
     from app.models import UserSubstitution
 
-    day = on_date or datetime.now(timezone.utc).date()
+    day = on_date or datetime.now(BUSINESS_TIMEZONE).date()
     rows = (await db.execute(select(UserSubstitution.deputy_id).where(
         UserSubstitution.company_id == cid,
         UserSubstitution.user_id == user_id,
@@ -166,7 +168,7 @@ async def active_principals_for(db: AsyncSession, cid: uuid.UUID,
     """Кого этот человек сегодня официально замещает."""
     from app.models import UserSubstitution
 
-    day = on_date or datetime.now(timezone.utc).date()
+    day = on_date or datetime.now(BUSINESS_TIMEZONE).date()
     rows = (await db.execute(select(UserSubstitution.user_id).where(
         UserSubstitution.company_id == cid,
         UserSubstitution.deputy_id == deputy_id,
@@ -235,6 +237,8 @@ def _activate(rows: list[DocApproval], now: datetime) -> int:
     selected = waiting if rows[0].mode == "parallel" else waiting[:1]
     for row in selected:
         row.status = "pending"
+        row.activated_at = now
+        row.activation_estimated = False
         row.due_at = now + timedelta(hours=row.sla_hours) if row.sla_hours else None
     return len(selected)
 

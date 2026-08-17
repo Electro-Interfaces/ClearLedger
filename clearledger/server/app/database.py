@@ -2776,8 +2776,23 @@ async def create_all() -> None:
             # Волна достоверности: существующая таблица виз должна научиться
             # отличать будущий шаг от активного и хранить пакет согласования.
             "ALTER TABLE doc_approvals ADD COLUMN IF NOT EXISTS sla_hours INTEGER",
+            "ALTER TABLE doc_approvals ADD COLUMN IF NOT EXISTS activated_at TIMESTAMPTZ",
+            "ALTER TABLE doc_approvals ADD COLUMN IF NOT EXISTS activation_estimated "
+            "BOOLEAN NOT NULL DEFAULT false",
+            # У старых строк отдельного события активации нет. SLA даёт точный
+            # момент, для остальных остаётся консервативная оценка от запуска
+            # круга; новые строки всегда получают activated_at в движке.
+            "UPDATE doc_approvals SET activated_at = CASE "
+            "WHEN due_at IS NOT NULL AND sla_hours IS NOT NULL "
+            "THEN due_at - (sla_hours * INTERVAL '1 hour') ELSE created_at END, "
+            "activation_estimated = NOT (due_at IS NOT NULL AND sla_hours IS NOT NULL) "
+            "WHERE activated_at IS NULL AND status IN ('pending','approved','rejected')",
             "ALTER TABLE doc_approvals ADD COLUMN IF NOT EXISTS document_snapshot JSONB",
             "ALTER TABLE doc_approvals ADD COLUMN IF NOT EXISTS snapshot_sha256 CHAR(64)",
+            "CREATE INDEX IF NOT EXISTS idx_doc_approvals_report "
+            "ON doc_approvals (company_id, round, created_at, doc_id)",
+            "CREATE INDEX IF NOT EXISTS idx_doc_approvals_pending_due "
+            "ON doc_approvals (company_id, due_at) WHERE status = 'pending'",
             # Волна 4: механизмы трекера работают и с документами. Шаблон умеет
             # порождать документ, время тратится на документ, у представлений
             # появилась область. Таблицы уже существуют — значит только ALTER.

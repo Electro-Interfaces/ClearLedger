@@ -29,7 +29,7 @@ from urllib.parse import quote
 from fastapi import Response
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import func, literal_column, or_, select
+from sqlalchemy import Integer, and_, case, cast, func, literal_column, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -384,6 +384,55 @@ async def _readable_docs(db: AsyncSession, cid: uuid.UUID, rows: list[DocCard],
     return [d for d in rows if d.id in visible]
 
 
+async def _readable_doc_clause(
+    db: AsyncSession, cid: uuid.UUID, user: User,
+) -> Any:
+    if user.is_superadmin:
+        return literal_column("true")
+    subjects = await _subject_ids(db, cid, user)
+    subject_filters = [
+        and_(DocAccessGrant.subject_type == subject_type,
+             DocAccessGrant.subject_id == subject_id)
+        for subject_type, subject_id in subjects.items() if subject_id
+    ]
+    grants = (await db.execute(select(DocAccessGrant).where(
+        DocAccessGrant.company_id == cid,
+        or_(*subject_filters),
+    ))).scalars().all() if subject_filters else []
+    inherited = {"read", "edit", "approve", "sign"}
+    doc_scopes = {
+        grant.scope_id for grant in grants
+        if grant.scope_type == "doc" and inherited.intersection(grant.permissions or [])
+    }
+    kind_scopes = {
+        grant.scope_id for grant in grants
+        if grant.scope_type == "kind" and inherited.intersection(grant.permissions or [])
+    }
+    principals = await doc_approvals.active_principals_for(db, cid, user.id)
+    assignee_ids = [user.id, *principals]
+    clauses = [
+        DocCard.confidentiality != "private",
+        DocCard.author_id == user.id,
+        DocCard.responsible_id == user.id,
+        DocCard.signatory_id == user.id,
+        select(DocApproval.id).where(
+            DocApproval.company_id == cid,
+            DocApproval.doc_id == DocCard.id,
+            DocApproval.assignee_id.in_(assignee_ids),
+        ).exists(),
+        select(DocAcquaint.id).where(
+            DocAcquaint.company_id == cid,
+            DocAcquaint.doc_id == DocCard.id,
+            DocAcquaint.user_id == user.id,
+        ).exists(),
+    ]
+    if doc_scopes:
+        clauses.append(DocCard.id.in_(doc_scopes))
+    if kind_scopes:
+        clauses.append(DocCard.kind_id.in_(kind_scopes))
+    return or_(*clauses)
+
+
 def _card_out(d: DocCard, names: dict[str, str] | None = None,
               organizations: dict[str, str] | None = None) -> dict[str, Any]:
     names = names or {}
@@ -433,7 +482,12 @@ def _kind_out(k: DocKind) -> dict[str, Any]:
     }
 
 
-async def _assert_admin(db: AsyncSession, cid: uuid.UUID, user: User) -> None:
+async def _assert_admin(
+    db: AsyncSession,
+    cid: uuid.UUID,
+    user: User,
+    detail: str = "Виды документов правит администратор пространства",
+) -> None:
     """Справочник видов и нумерацию правит администратор пространства: от них
     зависит номер, который потом стоит в документе и нигде не переписывается."""
     from app.models import UserCompany
@@ -441,8 +495,7 @@ async def _assert_admin(db: AsyncSession, cid: uuid.UUID, user: User) -> None:
         return
     m = await db.get(UserCompany, (user.id, cid))
     if m is None or m.role != "admin":
-        raise HTTPException(status.HTTP_403_FORBIDDEN,
-                            "Виды документов правит администратор пространства")
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail)
 
 
 # ── Виды документов ──────────────────────────────────────────────────────────
@@ -1718,10 +1771,126 @@ async def add_doc_time(
     return {"id": str(row.id), "minutes": row.minutes}
 
 
+def _discipline_bounds(
+    date_from: date_type | None,
+    date_to: date_type | None,
+) -> tuple[date_type, date_type, datetime, datetime]:
+    today = datetime.now(_BUSINESS_TIMEZONE).date()
+    selected_to = date_to or today
+    selected_from = date_from or selected_to - timedelta(days=89)
+    if selected_from > selected_to:
+        raise HTTPException(400, "Дата начала периода позже даты окончания")
+    if (selected_to - selected_from).days > 366:
+        raise HTTPException(400, "Период отчёта не может превышать 367 дней")
+    start_at = datetime.combine(
+        selected_from, datetime.min.time(), tzinfo=_BUSINESS_TIMEZONE,
+    ).astimezone(timezone.utc)
+    end_at = datetime.combine(
+        selected_to + timedelta(days=1), datetime.min.time(),
+        tzinfo=_BUSINESS_TIMEZONE,
+    ).astimezone(timezone.utc)
+    return selected_from, selected_to, start_at, end_at
+
+
+def _discipline_report_doc_ids(
+    cid: uuid.UUID,
+    start_at: datetime,
+    end_at: datetime,
+    metric: str,
+    performer_id: uuid.UUID | None,
+) -> Any:
+    cohort = select(DocApproval.doc_id.label("doc_id")).where(
+        DocApproval.company_id == cid,
+        DocApproval.round == 1,
+        DocApproval.created_at >= start_at,
+        DocApproval.created_at < end_at,
+    ).distinct().subquery()
+    if metric == "started":
+        return select(cohort.c.doc_id)
+    if metric in ("decisions", "late_decisions"):
+        conditions = [
+            DocApproval.company_id == cid,
+            DocApproval.doc_id.in_(select(cohort.c.doc_id)),
+            DocApproval.status.in_(("approved", "rejected")),
+            func.coalesce(DocApproval.decided_by, DocApproval.assignee_id) == performer_id,
+        ]
+        if metric == "late_decisions":
+            conditions.extend((
+                DocApproval.decided_at.is_not(None),
+                DocApproval.due_at.is_not(None),
+                DocApproval.decided_at > DocApproval.due_at,
+            ))
+        return select(DocApproval.doc_id).where(*conditions).distinct()
+
+    required_count = func.count().filter(DocApproval.required.is_(True))
+    approved_required = func.count().filter(and_(
+        DocApproval.required.is_(True), DocApproval.status == "approved",
+    ))
+    approved_all = func.count().filter(DocApproval.status == "approved")
+    step_stats = select(
+        DocApproval.doc_id.label("doc_id"),
+        DocApproval.round.label("round"),
+        DocApproval.step_no.label("step_no"),
+        func.min(DocApproval.quorum).label("quorum"),
+        func.bool_or(DocApproval.status.in_(("pending", "waiting"))).label("pending"),
+        func.bool_or(DocApproval.status == "rejected").label("rejected"),
+        case((required_count > 0, required_count), else_=func.count()).label("participants"),
+        case((required_count > 0, approved_required), else_=approved_all).label("approved"),
+    ).where(
+        DocApproval.company_id == cid,
+        DocApproval.doc_id.in_(select(cohort.c.doc_id)),
+    ).group_by(
+        DocApproval.doc_id, DocApproval.round, DocApproval.step_no,
+    ).subquery()
+    step_passed = case(
+        (step_stats.c.quorum == "any", step_stats.c.approved >= 1),
+        (step_stats.c.quorum.op("~")(r"^\d+$"),
+         step_stats.c.approved >= cast(step_stats.c.quorum, Integer)),
+        else_=step_stats.c.approved == step_stats.c.participants,
+    )
+    round_stats = select(
+        step_stats.c.doc_id.label("doc_id"),
+        step_stats.c.round.label("round"),
+        func.bool_or(step_stats.c.pending).label("pending"),
+        func.bool_or(step_stats.c.rejected).label("rejected"),
+        func.bool_and(step_passed).label("passed"),
+    ).group_by(step_stats.c.doc_id, step_stats.c.round).subquery()
+    if metric == "first_pass":
+        target = select(round_stats).where(round_stats.c.round == 1).subquery()
+    else:
+        latest = select(
+            round_stats.c.doc_id.label("doc_id"),
+            func.max(round_stats.c.round).label("round"),
+        ).group_by(round_stats.c.doc_id).subquery()
+        target = select(round_stats).join(latest, and_(
+            latest.c.doc_id == round_stats.c.doc_id,
+            latest.c.round == round_stats.c.round,
+        )).subquery()
+    outcomes = {
+        "completed": and_(~target.c.pending, ~target.c.rejected, target.c.passed),
+        "returned": and_(~target.c.pending, target.c.rejected),
+        "cancelled": and_(~target.c.pending, ~target.c.rejected, ~target.c.passed),
+        "first_pass": and_(~target.c.pending, ~target.c.rejected, target.c.passed),
+    }
+    return select(target.c.doc_id).where(outcomes[metric])
+
+
 @router.get("/board")
 async def docs_board(
     company_id: str = Query(...),
     family: str | None = Query(None),
+    kind_id: str | None = Query(None),
+    assignee_id: str | None = Query(None),
+    pending_only: bool = Query(False),
+    overdue_only: bool = Query(False),
+    cohort_from: date_type | None = Query(None),
+    cohort_to: date_type | None = Query(None),
+    report_metric: str | None = Query(
+        None, pattern="^(started|completed|returned|cancelled|first_pass|decisions|late_decisions)$",
+    ),
+    decision_by: str | None = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -1732,14 +1901,70 @@ async def docs_board(
     запущенного согласования собраны отдельной колонкой.
     """
     cid = await assert_company_product(company_id, current_user, db, "docs")
-    stmt = select(DocCard).where(DocCard.company_id == cid,
-                                 DocCard.status.notin_(("archived", "cancelled")))
+    assignee_uuid = _uuid_or_400(assignee_id, "assignee_id") if assignee_id else None
+    decision_uuid = _uuid_or_400(decision_by, "decision_by") if decision_by else None
+    if decision_uuid and not report_metric:
+        raise HTTPException(400, "Фактический согласующий применяется только к отчёту")
+    stmt = select(DocCard).where(DocCard.company_id == cid)
+    if not report_metric:
+        stmt = stmt.where(DocCard.status.notin_(("archived", "cancelled")))
     if family:
         stmt = stmt.where(DocCard.family == family)
-    docs = await _readable_docs(
-        db, cid, (await db.execute(stmt.limit(_LIST_LIMIT))).scalars().all(), current_user)
+    if kind_id:
+        stmt = stmt.where(DocCard.kind_id == _uuid_or_400(kind_id, "kind_id"))
+    if pending_only or overdue_only or assignee_id:
+        active_docs = select(DocApproval.doc_id).where(
+            DocApproval.company_id == cid,
+            DocApproval.status == "pending",
+        )
+        if assignee_uuid:
+            active_docs = active_docs.where(DocApproval.assignee_id == assignee_uuid)
+        if overdue_only:
+            active_docs = active_docs.where(
+                DocApproval.due_at < datetime.now(timezone.utc))
+        stmt = stmt.where(DocCard.id.in_(active_docs))
+    if report_metric:
+        await _assert_admin(
+            db, cid, current_user,
+            "Детализация отчёта по дисциплине доступна администратору пространства",
+        )
+        _, _, start_at, end_at = _discipline_bounds(cohort_from, cohort_to)
+        performer_id = decision_uuid
+        if report_metric in ("decisions", "late_decisions") and performer_id is None:
+            raise HTTPException(400, "Для решений укажите фактического согласующего")
+        stmt = stmt.where(DocCard.id.in_(_discipline_report_doc_ids(
+            cid, start_at, end_at, report_metric, performer_id,
+        )))
+    stmt = stmt.where(await _readable_doc_clause(db, cid, current_user))
+    total = int((await db.execute(select(func.count()).select_from(
+        stmt.order_by(None).subquery()))).scalar_one())
+    pages = max(1, (total + page_size - 1) // page_size)
+    page = min(page, pages)
+    offset = (page - 1) * page_size
+    docs = (await db.execute(stmt.order_by(
+        DocCard.created_at.desc()).offset(offset).limit(page_size))).scalars().all()
+    assignee_name = None
+    if assignee_uuid:
+        selected_user = (await db.execute(select(User).join(
+            UserCompany, UserCompany.user_id == User.id,
+        ).where(
+            User.id == assignee_uuid, UserCompany.company_id == cid,
+        ))).scalar_one_or_none()
+        assignee_name = (selected_user.name or selected_user.email) if selected_user else None
+    decision_name = None
+    if decision_uuid:
+        selected_user = (await db.execute(select(User).join(
+            UserCompany, UserCompany.user_id == User.id,
+        ).where(
+            User.id == decision_uuid, UserCompany.company_id == cid,
+        ))).scalar_one_or_none()
+        decision_name = (selected_user.name or selected_user.email) if selected_user else None
     if not docs:
-        return {"columns": []}
+        return {
+            "columns": [], "total": total, "page": page, "page_size": page_size,
+            "pages": pages,
+            "filter": {"assignee_name": assignee_name, "decision_name": decision_name},
+        }
 
     rows = (await db.execute(select(DocApproval).where(
         DocApproval.company_id == cid,
@@ -1749,34 +1974,107 @@ async def docs_board(
         doc = next((x for x in docs if x.id == r.doc_id), None)
         if doc is not None and r.round == doc.approval_round:
             live.setdefault(r.doc_id, []).append(r)
+    pending_user_ids = {
+        row.assignee_id for group in live.values() for row in group
+        if row.status == "pending" and row.assignee_id
+    }
+    pending_names = {user.id: (user.name or user.email) for user in (
+        await db.execute(select(User).join(
+            UserCompany, UserCompany.user_id == User.id,
+        ).where(
+            User.id.in_(pending_user_ids), UserCompany.company_id == cid,
+        ))
+    ).scalars().all()} if pending_user_ids else {}
 
     columns: dict[str, dict[str, Any]] = {}
     for d in docs:
         group = live.get(d.id, [])
         pending = [r for r in group if r.status == "pending"]
+        outcome = _approval_round_outcome([{
+            "step_no": row.step_no, "quorum": row.quorum,
+            "required": row.required, "status": row.status,
+        } for row in group]) if group else None
         if not group:
             key, name = "no_route", "Без согласования"
-        elif pending:
+        elif outcome == "pending":
             step = min(pending, key=lambda r: r.step_no)
             key, name = f"step:{step.step_no}", step.step_name
-        elif any(r.status == "rejected" for r in group):
+        elif outcome == "rejected":
             key, name = "rejected", "Возвращены"
-        else:
+        elif outcome == "approved":
             key, name = "approved", "Согласованы"
+        else:
+            key, name = "cancelled", "Согласование отменено"
         col = columns.setdefault(key, {"key": key, "name": name, "docs": []})
+        approval_due_at = min(
+            (row.due_at for row in pending if row.due_at), default=None,
+        )
         col["docs"].append({
             "id": str(d.id), "title": d.title, "reg_number": d.reg_number,
             "status": d.status, "kind_name": d.kind_code,
             "waiting": len(pending),
             "due_at": d.due_at.isoformat() if d.due_at else None,
+            "approval_due_at": approval_due_at.isoformat() if approval_due_at else None,
+            "approval_overdue": bool(approval_due_at and approval_due_at < datetime.now(timezone.utc)),
+            "waiting_people": [{
+                "user_id": str(row.assignee_id),
+                "name": pending_names.get(row.assignee_id, "Участник пространства"),
+                "due_at": row.due_at.isoformat() if row.due_at else None,
+            } for row in sorted(pending, key=lambda item: (item.due_at is None, item.due_at))],
         })
-    order = {"no_route": 0, "rejected": 90, "approved": 99}
-    return {"columns": sorted(columns.values(),
-                              key=lambda c: order.get(c["key"], int(
-                                  c["key"].split(":")[1]) if ":" in c["key"] else 50))}
+    order = {"no_route": 0, "rejected": 90, "cancelled": 95, "approved": 99}
+    return {
+        "columns": sorted(columns.values(), key=lambda c: order.get(
+            c["key"], int(c["key"].split(":")[1]) if ":" in c["key"] else 50)),
+        "total": total, "page": page, "page_size": page_size,
+        "pages": pages,
+        "filter": {"assignee_name": assignee_name, "decision_name": decision_name},
+    }
 
 
 # ── Исполнительская дисциплина ───────────────────────────────────────────────
+
+
+def _percentile(values: list[float], fraction: float) -> float:
+    ordered = sorted(values)
+    if not ordered:
+        return 0.0
+    if len(ordered) == 1:
+        return ordered[0]
+    position = (len(ordered) - 1) * fraction
+    lower = int(position)
+    upper = min(lower + 1, len(ordered) - 1)
+    weight = position - lower
+    return ordered[lower] * (1 - weight) + ordered[upper] * weight
+
+
+def _duration_stats(values: list[float]) -> dict[str, float]:
+    return {
+        "average_hours": round(sum(values) / len(values), 1) if values else 0,
+        "median_hours": round(_percentile(values, 0.5), 1),
+        "p90_hours": round(_percentile(values, 0.9), 1),
+    }
+
+
+def _approval_round_outcome(rows: list[dict[str, Any]]) -> str:
+    statuses = {row["status"] for row in rows}
+    if statuses.intersection(("pending", "waiting")):
+        return "pending"
+    if "rejected" in statuses:
+        return "rejected"
+    by_step: dict[int, list[dict[str, Any]]] = {}
+    for row in rows:
+        by_step.setdefault(row["step_no"], []).append(row)
+    for step in by_step.values():
+        participants = [row for row in step if row["required"]] or step
+        approved = sum(row["status"] == "approved" for row in participants)
+        quorum = step[0]["quorum"]
+        passed = (approved >= 1 if quorum == "any" else
+                  approved >= int(quorum) if quorum.isdigit() else
+                  approved == len(participants))
+        if not passed:
+            return "cancelled"
+    return "approved"
 
 
 @router.get("/reports/discipline")
@@ -1789,86 +2087,202 @@ async def approval_discipline(
 ):
     """Длительность согласований, задержки и доля прохождения с первого круга."""
     cid = await assert_company_product(company_id, current_user, db, "docs")
-    stmt = (select(DocApproval, DocCard, DocKind.name)
-            .join(DocCard, DocCard.id == DocApproval.doc_id)
-            .join(DocKind, DocKind.id == DocCard.kind_id)
-            .where(DocApproval.company_id == cid))
-    if date_from:
-        stmt = stmt.where(DocApproval.created_at >= datetime.combine(
-            date_from, datetime.min.time(), tzinfo=timezone.utc))
-    if date_to:
-        stmt = stmt.where(DocApproval.created_at < datetime.combine(
-            date_to + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc))
-    rows = (await db.execute(stmt)).all()
-    if not rows:
-        return {"summary": {"documents": 0, "completed": 0, "pending": 0,
-                            "first_pass_rate": 0}, "by_kind": [], "people": []}
+    await _assert_admin(
+        db, cid, current_user,
+        "Поимённый отчёт по дисциплине доступен администратору пространства",
+    )
+    selected_from, selected_to, start_at, end_at = _discipline_bounds(date_from, date_to)
+    readable_clause = await _readable_doc_clause(db, cid, current_user)
 
-    users = {approval.assignee_id for approval, _, _ in rows if approval.assignee_id}
+    cohort = (select(
+        DocApproval.doc_id.label("doc_id"),
+        func.min(DocApproval.created_at).label("first_started"),
+    ).where(
+        DocApproval.company_id == cid,
+        DocApproval.round == 1,
+        DocApproval.created_at >= start_at,
+        DocApproval.created_at < end_at,
+    )
+      .group_by(DocApproval.doc_id).subquery())
+    stmt = (select(
+        DocApproval.doc_id.label("doc_id"),
+        DocApproval.round.label("round"),
+        DocApproval.step_no.label("step_no"),
+        DocApproval.quorum.label("quorum"),
+        DocApproval.required.label("required"),
+        DocApproval.status.label("status"),
+        DocApproval.assignee_id.label("assignee_id"),
+        DocApproval.decided_by.label("decided_by"),
+        DocApproval.created_at.label("created_at"),
+        DocApproval.activated_at.label("activated_at"),
+        DocApproval.activation_estimated.label("activation_estimated"),
+        DocApproval.decided_at.label("decided_at"),
+        DocApproval.due_at.label("due_at"),
+        DocCard.kind_id.label("kind_id"),
+        DocKind.name.label("kind_name"),
+        cohort.c.first_started.label("first_started"),
+    ).join(cohort, cohort.c.doc_id == DocApproval.doc_id)
+      .join(DocCard, DocCard.id == DocApproval.doc_id)
+      .join(DocKind, DocKind.id == DocCard.kind_id)
+      .where(
+          DocApproval.company_id == cid,
+          DocCard.company_id == cid,
+          DocKind.company_id == cid,
+          readable_clause,
+      ).order_by(DocApproval.doc_id, DocApproval.round,
+                 DocApproval.step_no, DocApproval.created_at))
+    rows = [dict(row) for row in (await db.execute(stmt)).mappings().all()]
+    active_stmt = (select(
+        DocApproval.doc_id.label("doc_id"),
+        DocApproval.assignee_id.label("assignee_id"),
+        DocApproval.due_at.label("due_at"),
+    ).join(DocCard, DocCard.id == DocApproval.doc_id).where(
+        DocApproval.company_id == cid,
+        DocCard.company_id == cid,
+        DocApproval.status == "pending",
+        readable_clause,
+    ))
+    active_rows = [dict(row) for row in (
+        await db.execute(active_stmt)).mappings().all()]
+    period = {
+        "date_from": selected_from.isoformat(),
+        "date_to": selected_to.isoformat(),
+        "cohort": "first_approval_start",
+        "time_zone": "Europe/Moscow",
+        "as_of": datetime.now(timezone.utc).isoformat(),
+    }
+    users = {
+        row["decided_by"] or row["assignee_id"] for row in rows
+        if row["decided_by"] or row["assignee_id"]
+    }
+    users.update(row["assignee_id"] for row in active_rows if row["assignee_id"])
     names = {user.id: (user.name or user.email) for user in (await db.execute(
-        select(User).where(User.id.in_(users)))).scalars().all()}
+        select(User).join(UserCompany, UserCompany.user_id == User.id).where(
+            User.id.in_(users), UserCompany.company_id == cid,
+        ))).scalars().all()} if users else {}
     by_doc: dict[uuid.UUID, dict[str, Any]] = {}
     by_person: dict[uuid.UUID, dict[str, Any]] = {}
+    backlog_by_person: dict[uuid.UUID, dict[str, Any]] = {}
     now = datetime.now(timezone.utc)
-    for approval, doc, kind_name in rows:
-        group = by_doc.setdefault(doc.id, {
-            "doc": doc, "kind": kind_name, "created": approval.created_at,
-            "decided": approval.decided_at, "pending": False, "round": approval.round,
+    for row in rows:
+        group = by_doc.setdefault(row["doc_id"], {
+            "kind_id": row["kind_id"], "kind": row["kind_name"],
+            "created": row["first_started"], "rounds": {},
         })
-        group["created"] = min(group["created"], approval.created_at)
-        if approval.decided_at and (group["decided"] is None
-                                    or approval.decided_at > group["decided"]):
-            group["decided"] = approval.decided_at
-        group["pending"] = group["pending"] or approval.status == "pending"
-        group["round"] = max(group["round"], approval.round)
+        group["rounds"].setdefault(row["round"], []).append(row)
 
-        if approval.assignee_id:
-            person = by_person.setdefault(approval.assignee_id, {
-                "name": names.get(approval.assignee_id, "Участник пространства"),
-                "decisions": 0, "hours": 0.0, "overdue": 0, "pending": 0,
-            })
-            if approval.status == "pending":
-                person["pending"] += 1
-                if approval.due_at and approval.due_at < now:
-                    person["overdue"] += 1
-            elif approval.decided_at:
+        if row["status"] in ("approved", "rejected") and row["decided_at"]:
+            performer_id = row["decided_by"] or row["assignee_id"]
+            if performer_id:
+                person = by_person.setdefault(performer_id, {
+                    "name": names.get(performer_id, "Участник пространства"),
+                    "decisions": 0, "durations": [], "late_decisions": 0,
+                    "delegated_decisions": 0, "estimated_decisions": 0,
+                    "documents": set(), "late_documents": set(),
+                })
                 person["decisions"] += 1
-                person["hours"] += max(
-                    0.0, (approval.decided_at - approval.created_at).total_seconds() / 3600)
+                person["documents"].add(row["doc_id"])
+                activated_at = row["activated_at"] or row["created_at"]
+                person["durations"].append(max(
+                    0.0, (row["decided_at"] - activated_at).total_seconds() / 3600))
+                if row["activation_estimated"]:
+                    person["estimated_decisions"] += 1
+                if row["due_at"] and row["decided_at"] > row["due_at"]:
+                    person["late_decisions"] += 1
+                    person["late_documents"].add(row["doc_id"])
+                if row["assignee_id"] and performer_id != row["assignee_id"]:
+                    person["delegated_decisions"] += 1
 
-    kind_groups: dict[str, list[float]] = {}
+    pending_docs: set[uuid.UUID] = set()
+    overdue_docs: set[uuid.UUID] = set()
+    for row in active_rows:
+        pending_docs.add(row["doc_id"])
+        if row["due_at"] and row["due_at"] < now:
+            overdue_docs.add(row["doc_id"])
+        assignee_id = row["assignee_id"]
+        if assignee_id:
+            person = backlog_by_person.setdefault(assignee_id, {
+                "name": names.get(assignee_id, "Участник пространства"),
+                "overdue": set(), "pending": set(),
+            })
+            person["pending"].add(row["doc_id"])
+            if row["due_at"] and row["due_at"] < now:
+                person["overdue"].add(row["doc_id"])
+
+    kind_groups: dict[tuple[uuid.UUID, str], list[float]] = {}
     completed = 0
     first_pass = 0
-    pending = 0
+    first_pass_sample = 0
+    returned = 0
+    cancelled = 0
     for group in by_doc.values():
-        if group["pending"]:
-            pending += 1
+        round_numbers = sorted(group["rounds"])
+        first_outcome = _approval_round_outcome(group["rounds"][round_numbers[0]])
+        if first_outcome in ("approved", "rejected"):
+            first_pass_sample += 1
+            if first_outcome == "approved":
+                first_pass += 1
+        latest_outcome = _approval_round_outcome(group["rounds"][round_numbers[-1]])
+        if latest_outcome == "pending":
             continue
-        if group["doc"].approval_status != "approved" or group["decided"] is None:
+        if latest_outcome == "rejected":
+            returned += 1
             continue
-        hours = max(0.0, (group["decided"] - group["created"]).total_seconds() / 3600)
-        kind_groups.setdefault(group["kind"], []).append(hours)
+        if latest_outcome != "approved":
+            cancelled += 1
+            continue
+        all_rows = [row for number in round_numbers for row in group["rounds"][number]]
+        decided = [row["decided_at"] for row in all_rows if row["decided_at"]]
+        if not decided:
+            cancelled += 1
+            continue
+        hours = max(0.0, (max(decided) - group["created"]).total_seconds() / 3600)
+        kind_groups.setdefault((group["kind_id"], group["kind"]), []).append(hours)
         completed += 1
-        if group["round"] == 1:
-            first_pass += 1
 
-    by_kind = [{
-        "kind": name, "documents": len(values),
-        "average_hours": round(sum(values) / len(values), 1),
-    } for name, values in kind_groups.items()]
-    by_kind.sort(key=lambda value: value["average_hours"], reverse=True)
-    people = [{
+    by_kind = []
+    for (kind_id, name), values in kind_groups.items():
+        by_kind.append({
+            "kind_id": str(kind_id), "kind": name, "documents": len(values),
+            **_duration_stats(values),
+        })
+    by_kind.sort(key=lambda value: value["p90_hours"], reverse=True)
+    people = []
+    for user_id, value in by_person.items():
+        people.append({
+            "user_id": str(user_id), "name": value["name"],
+            "decisions": value["decisions"],
+            "documents": len(value["documents"]),
+            "late_documents": len(value["late_documents"]),
+            "late_decisions": value["late_decisions"],
+            "delegated_decisions": value["delegated_decisions"],
+            "estimated_decisions": value["estimated_decisions"],
+            **_duration_stats(value["durations"]),
+        })
+    people.sort(key=lambda value: (
+        value["late_decisions"], value["p90_hours"],
+    ), reverse=True)
+    backlog_people = [{
         "user_id": str(user_id), "name": value["name"],
-        "decisions": value["decisions"], "pending": value["pending"],
-        "overdue": value["overdue"],
-        "average_hours": round(value["hours"] / value["decisions"], 1)
-        if value["decisions"] else 0,
-    } for user_id, value in by_person.items()]
-    people.sort(key=lambda value: (value["overdue"], value["average_hours"]), reverse=True)
+        "pending": len(value["pending"]), "overdue": len(value["overdue"]),
+    } for user_id, value in backlog_by_person.items()]
+    backlog_people.sort(key=lambda value: (
+        value["overdue"], value["pending"], value["name"],
+    ), reverse=True)
     return {
+        "period": period,
         "summary": {
-            "documents": len(by_doc), "completed": completed, "pending": pending,
-            "first_pass_rate": round(first_pass * 100 / completed, 1) if completed else 0,
+            "documents": len(by_doc), "completed": completed,
+            "returned": returned, "cancelled": cancelled,
+            "first_pass_rate": round(first_pass * 100 / first_pass_sample, 1)
+            if first_pass_sample else 0,
+            "first_pass_documents": first_pass,
+            "first_pass_sample": first_pass_sample,
+        },
+        "backlog": {
+            "scope": "company", "as_of": period["as_of"],
+            "pending": len(pending_docs), "overdue": len(overdue_docs),
+            "people": backlog_people,
         },
         "by_kind": by_kind,
         "people": people,

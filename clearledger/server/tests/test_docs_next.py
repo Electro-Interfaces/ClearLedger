@@ -2,15 +2,17 @@
 import hashlib
 import uuid
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import pytest
+from fastapi import HTTPException
 from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
-    Counterparty, Department, DocAccessGrant, DocAcquaint, DocCard, DocVersion,
-    MailAttachment, MailMessage, User, UserCompany,
+    Counterparty, Department, DocAccessGrant, DocAcquaint, DocApproval, DocCard,
+    DocKind, DocVersion, MailAttachment, MailMessage, User, UserCompany,
 )
 from app.routers import docs_router
 from app.services import mail_routing, task_scheduler
@@ -215,7 +217,7 @@ async def test_отчёт_считает_завершённое_согласов
     })
     assert decided.status_code == 200, decided.text
 
-    today = datetime.now(timezone.utc).date().isoformat()
+    today = datetime.now(ZoneInfo("Europe/Moscow")).date().isoformat()
     report = await auth_client.get("/api/docs/reports/discipline", params={
         "company_id": cid, "date_from": today, "date_to": today,
     })
@@ -224,6 +226,274 @@ async def test_отчёт_считает_завершённое_согласов
     assert data["summary"]["completed"] >= 1
     assert any(row["user_id"] == me["id"] and row["decisions"] >= 1
                for row in data["people"])
+
+
+async def test_отчёт_различает_круги_активацию_и_текущую_просрочку(
+        auth_client: AsyncClient, db: AsyncSession):
+    me, cid_raw, _ = await _context(auth_client)
+    cid = uuid.UUID(cid_raw)
+    user_id = uuid.UUID(me["id"])
+    cohort_day = datetime.now(timezone.utc).date() - timedelta(days=200)
+    started = datetime.combine(cohort_day, datetime.min.time(), tzinfo=timezone.utc)
+    deputy = User(
+        company_id=cid, email=f"deputy-{uuid.uuid4().hex}@example.org",
+        name="Заместитель", password_hash="!",
+    )
+    outsider = User(
+        email=f"outsider-{uuid.uuid4().hex}@example.org",
+        name="Чужой пользователь", password_hash="!",
+    )
+    kind = DocKind(
+        company_id=cid, code=f"report_{uuid.uuid4().hex[:10]}",
+        name=f"Проверка отчёта {uuid.uuid4().hex[:10]}", family="internal",
+        direction="none", fields=[], route=[],
+    )
+    db.add_all([kind, deputy, outsider])
+    await db.flush()
+    db.add(UserCompany(
+        user_id=deputy.id, company_id=cid, role="user", modules=["docs"],
+    ))
+    approved = DocCard(
+        company_id=cid, kind_id=kind.id, kind_code=kind.code, family=kind.family,
+        direction=kind.direction, title="Первый круг", status="archived",
+        approval_status="approved", approval_round=1,
+    )
+    repeated = DocCard(
+        company_id=cid, kind_id=kind.id, kind_code=kind.code, family=kind.family,
+        direction=kind.direction, title="Повторный круг", status="registered",
+        approval_status="approved", approval_round=2,
+    )
+    waiting = DocCard(
+        company_id=cid, kind_id=kind.id, kind_code=kind.code, family=kind.family,
+        direction=kind.direction, title="Старая текущая просрочка", status="registered",
+        approval_status="pending", approval_round=1,
+    )
+    outside = DocCard(
+        company_id=cid, kind_id=kind.id, kind_code=kind.code, family=kind.family,
+        direction=kind.direction, title="Просрочка вне когорты", status="registered",
+        approval_status="pending", approval_round=1,
+    )
+    cancelled = DocCard(
+        company_id=cid, kind_id=kind.id, kind_code=kind.code, family=kind.family,
+        direction=kind.direction, title="Отменённый круг", status="registered",
+        approval_status="none", approval_round=1,
+    )
+    db.add_all([approved, repeated, waiting, outside, cancelled])
+    await db.flush()
+
+    def approval(doc: DocCard, round_no: int, state: str, activated: datetime,
+                 decided: datetime | None = None, due: datetime | None = None,
+                 decided_by: uuid.UUID | None = None):
+        return DocApproval(
+            company_id=cid, doc_id=doc.id, round=round_no, step_no=1,
+            step_code="test", step_name="Проверка", mode="serial", quorum="all",
+            actor_kind="user", assignee_id=user_id, required=True, status=state,
+            created_at=activated, activated_at=activated, decided_at=decided,
+            decided_by=(decided_by or user_id) if decided else None, due_at=due,
+        )
+
+    db.add_all([
+        approval(approved, 1, "approved", started, started + timedelta(hours=2),
+                 started + timedelta(hours=1), deputy.id),
+        approval(repeated, 1, "rejected", started, started + timedelta(hours=1)),
+        approval(repeated, 2, "approved", started + timedelta(days=2),
+                 started + timedelta(days=2, hours=3)),
+        approval(waiting, 1, "pending", started,
+                 due=datetime.now(timezone.utc) - timedelta(hours=1)),
+        approval(outside, 1, "pending", started - timedelta(days=10),
+                 due=datetime.now(timezone.utc) - timedelta(hours=2)),
+        approval(cancelled, 1, "skipped", started),
+    ])
+    await db.commit()
+
+    report = await auth_client.get("/api/docs/reports/discipline", params={
+        "company_id": cid_raw,
+        "date_from": cohort_day.isoformat(),
+        "date_to": cohort_day.isoformat(),
+    })
+    assert report.status_code == 200, report.text
+    data = report.json()
+    kind_row = next(row for row in data["by_kind"] if row["kind_id"] == str(kind.id))
+    assert kind_row["documents"] == 2
+    assert kind_row["average_hours"] == 26.5
+    assert data["summary"]["first_pass_sample"] == 2
+    assert data["summary"]["first_pass_rate"] == 50
+    assert data["summary"]["documents"] == 4
+    assert data["backlog"]["pending"] >= 2
+    assert data["backlog"]["overdue"] >= 2
+    deputy_row = next(row for row in data["people"] if row["user_id"] == str(deputy.id))
+    assert deputy_row["decisions"] == 1
+    assert deputy_row["documents"] == 1
+    assert deputy_row["late_documents"] == 1
+    assert deputy_row["late_decisions"] == 1
+    assert deputy_row["delegated_decisions"] == 1
+
+    detail = await auth_client.get("/api/docs/board", params={
+        "company_id": cid_raw, "kind_id": str(kind.id),
+        "cohort_from": cohort_day.isoformat(), "cohort_to": cohort_day.isoformat(),
+        "report_metric": "late_decisions", "decision_by": str(deputy.id),
+    })
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["total"] == 1
+    assert detail.json()["columns"][0]["docs"][0]["id"] == str(approved.id)
+
+    completed_detail = await auth_client.get("/api/docs/board", params={
+        "company_id": cid_raw, "kind_id": str(kind.id),
+        "cohort_from": cohort_day.isoformat(), "cohort_to": cohort_day.isoformat(),
+        "report_metric": "completed",
+    })
+    assert completed_detail.status_code == 200, completed_detail.text
+    completed_ids = {
+        item["id"] for column in completed_detail.json()["columns"]
+        for item in column["docs"]
+    }
+    assert completed_ids == {str(approved.id), str(repeated.id)}
+
+    cancelled_detail = await auth_client.get("/api/docs/board", params={
+        "company_id": cid_raw, "kind_id": str(kind.id),
+        "cohort_from": cohort_day.isoformat(), "cohort_to": cohort_day.isoformat(),
+        "report_metric": "cancelled",
+    })
+    assert cancelled_detail.status_code == 200, cancelled_detail.text
+    assert cancelled_detail.json()["total"] == 1
+    assert cancelled_detail.json()["columns"][0]["key"] == "cancelled"
+
+    foreign_filter = await auth_client.get("/api/docs/board", params={
+        "company_id": cid_raw, "assignee_id": str(outsider.id),
+    })
+    assert foreign_filter.status_code == 200, foreign_filter.text
+    assert foreign_filter.json()["filter"]["assignee_name"] is None
+
+    backlog = await auth_client.get("/api/docs/board", params={
+        "company_id": cid_raw, "kind_id": str(kind.id),
+        "assignee_id": str(user_id), "overdue_only": "true",
+    })
+    assert backlog.status_code == 200, backlog.text
+    backlog_docs = [item for column in backlog.json()["columns"] for item in column["docs"]]
+    outside_row = next(item for item in backlog_docs if item["id"] == str(outside.id))
+    assert outside_row["approval_overdue"] is True
+    assert outside_row["waiting_people"][0]["user_id"] == str(user_id)
+
+
+async def test_последовательный_шаг_получает_свой_момент_активации(
+        auth_client: AsyncClient, db: AsyncSession):
+    me, cid, kind = await _context(auth_client)
+    doc = (await auth_client.post("/api/docs", json={
+        "company_id": cid, "kind_id": kind["id"],
+        "title": f"ПРОВЕРКА-активация-{uuid.uuid4().hex}",
+    })).json()
+    await auth_client.post(f"/api/docs/{doc['id']}/register", json={"company_id": cid})
+    route = [
+        {"code": "first", "name": "Первый", "mode": "serial", "quorum": "all",
+         "actors": [{"by": "user", "ref": me["id"]}]},
+        {"code": "second", "name": "Второй", "mode": "serial", "quorum": "all",
+         "actors": [{"by": "user", "ref": me["id"]}]},
+    ]
+    started = await auth_client.post(f"/api/docs/{doc['id']}/approval/start", json={
+        "company_id": cid, "route": route,
+    })
+    assert started.status_code == 201, started.text
+    db.expire_all()
+    rows = (await db.execute(select(DocApproval).where(
+        DocApproval.doc_id == uuid.UUID(doc["id"])).order_by(DocApproval.step_no)
+    )).scalars().all()
+    assert rows[0].status == "pending" and rows[0].activated_at is not None
+    assert rows[1].status == "waiting" and rows[1].activated_at is None
+
+    decided = await auth_client.post(f"/api/docs/approvals/{rows[0].id}", json={
+        "company_id": cid, "approved": True,
+    })
+    assert decided.status_code == 200, decided.text
+    db.expire_all()
+    second = await db.get(DocApproval, rows[1].id)
+    assert second.status == "pending" and second.activated_at is not None
+    assert second.activated_at >= rows[0].activated_at
+
+
+async def test_отчёт_и_детализация_одинаково_скрывают_закрытый_документ(
+        auth_client: AsyncClient, db: AsyncSession):
+    _, cid_raw, _ = await _context(auth_client)
+    cid = uuid.UUID(cid_raw)
+    cohort_day = datetime.now(timezone.utc).date() - timedelta(days=250)
+    started = datetime.combine(cohort_day, datetime.min.time(), tzinfo=timezone.utc)
+    admin = User(
+        company_id=cid, email=f"report-admin-{uuid.uuid4().hex}@example.org",
+        name="Администратор отчёта", password_hash="!",
+    )
+    assignee = User(
+        company_id=cid, email=f"private-assignee-{uuid.uuid4().hex}@example.org",
+        name="Согласующий закрытого документа", password_hash="!",
+    )
+    kind = DocKind(
+        company_id=cid, code=f"private_{uuid.uuid4().hex[:10]}",
+        name="Закрытый вид", family="internal", direction="none", fields=[], route=[],
+    )
+    db.add_all([admin, assignee, kind])
+    await db.flush()
+    db.add_all([
+        UserCompany(user_id=admin.id, company_id=cid, role="admin", modules=["docs"]),
+        UserCompany(user_id=assignee.id, company_id=cid, role="user", modules=["docs"]),
+    ])
+    doc = DocCard(
+        company_id=cid, kind_id=kind.id, kind_code=kind.code, family=kind.family,
+        direction=kind.direction, title="Закрытая аналитика", status="registered",
+        confidentiality="private", author_id=assignee.id,
+        approval_status="approved", approval_round=1,
+    )
+    db.add(doc)
+    await db.flush()
+    db.add(DocApproval(
+        company_id=cid, doc_id=doc.id, round=1, step_no=1,
+        step_code="private", step_name="Закрытая виза", mode="serial", quorum="all",
+        actor_kind="user", assignee_id=assignee.id, required=True, status="approved",
+        created_at=started, activated_at=started, decided_at=started + timedelta(hours=1),
+        decided_by=assignee.id,
+    ))
+    await db.commit()
+
+    report = await docs_router.approval_discipline(
+        company_id=cid_raw, date_from=cohort_day, date_to=cohort_day,
+        db=db, current_user=admin,
+    )
+    assert report["summary"]["documents"] == 0
+    detail = await docs_router.docs_board(
+        company_id=cid_raw, family=None, kind_id=str(kind.id), assignee_id=None,
+        pending_only=False, overdue_only=False, cohort_from=cohort_day,
+        cohort_to=cohort_day, report_metric="completed", decision_by=None,
+        page=1, page_size=50, db=db, current_user=admin,
+    )
+    assert detail["total"] == 0
+
+
+async def test_поимённый_отчёт_не_отдаётся_обычному_участнику(
+        auth_client: AsyncClient, db: AsyncSession):
+    _, cid_raw, _ = await _context(auth_client)
+    cid = uuid.UUID(cid_raw)
+    reader = User(
+        company_id=cid, email=f"discipline-{uuid.uuid4().hex}@example.org",
+        name="Обычный участник", password_hash="!",
+    )
+    db.add(reader)
+    await db.flush()
+    db.add(UserCompany(
+        user_id=reader.id, company_id=cid, role="user", modules=["docs"],
+    ))
+    await db.commit()
+    with pytest.raises(HTTPException) as error:
+        await docs_router.approval_discipline(
+            company_id=cid_raw, date_from=None, date_to=None,
+            db=db, current_user=reader,
+        )
+    assert error.value.status_code == 403
+
+
+async def test_период_отчёта_использует_московские_сутки():
+    selected_from, selected_to, start_at, end_at = docs_router._discipline_bounds(
+        datetime(2026, 8, 17).date(), datetime(2026, 8, 17).date(),
+    )
+    assert selected_from == selected_to == datetime(2026, 8, 17).date()
+    assert start_at == datetime(2026, 8, 16, 21, tzinfo=timezone.utc)
+    assert end_at == datetime(2026, 8, 17, 21, tzinfo=timezone.utc)
 
 
 async def test_подразделение_получает_ознакомление_и_напоминание(

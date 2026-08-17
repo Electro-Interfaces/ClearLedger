@@ -11,6 +11,7 @@ import { useState } from 'react'
 import { Outlet, useLocation, useSearchParams } from 'react-router-dom'
 import { PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { useMaxWidth } from '@/hooks/use-mobile'
+import { useCompany } from '@/contexts/CompanyContext'
 import { cn } from '@/lib/utils'
 
 export interface DocsView { key: string; label: string; hint: string }
@@ -72,7 +73,9 @@ export function docsRouteOf(pathname: string): string {
  *  подсветки в меню, и для содержимого экрана: два источника разъезжаются. */
 export function useDocsView(route: string): string {
   const [params] = useSearchParams()
-  const views = DOCS_VIEWS[route] ?? []
+  const { isCompanyAdmin } = useCompany()
+  const views = (DOCS_VIEWS[route] ?? []).filter(
+    (view) => view.key !== 'discipline' || isCompanyAdmin)
   const v = params.get('view')
   return v && views.some((x) => x.key === v) ? v : (views[0]?.key ?? '')
 }
@@ -80,12 +83,14 @@ export function useDocsView(route: string): string {
 export function DocsLayout() {
   const { pathname } = useLocation()
   const [, setParams] = useSearchParams()
+  const { isCompanyAdmin } = useCompany()
   const narrow = useMaxWidth(1024)
   const [collapsed, setCollapsed] = useState(
     () => localStorage.getItem(COLLAPSE_KEY) === '1')
 
   const route = docsRouteOf(pathname)
-  const views = DOCS_VIEWS[route] ?? []
+  const views = (DOCS_VIEWS[route] ?? []).filter(
+    (view) => view.key !== 'discipline' || isCompanyAdmin)
   const active = useDocsView(route)
 
   const toggle = () => setCollapsed((c) => {
@@ -109,7 +114,7 @@ export function DocsLayout() {
   if (narrow) {
     return (
       <div className="flex h-full min-h-0 flex-col">
-        <div data-zone="Пункты раздела"
+        <nav data-zone="Пункты раздела" aria-label="Пункты раздела Трека"
           className="flex shrink-0 gap-1 overflow-x-auto border-b border-border bg-card px-2 py-1.5 scrollbar-hide">
           {views.map((v) => (
             <button key={v.key} type="button" onClick={() => open(v.key)} title={v.hint}
@@ -121,7 +126,7 @@ export function DocsLayout() {
               {v.label}
             </button>
           ))}
-        </div>
+        </nav>
         <div className="min-w-0 flex-1 overflow-y-auto px-3 py-3">
           <Outlet />
         </div>
@@ -132,7 +137,7 @@ export function DocsLayout() {
   return (
     <div className="flex h-full min-h-0">
       {collapsed ? (
-        <nav data-zone="Пункты раздела" data-zone-side
+        <nav data-zone="Пункты раздела" data-zone-side aria-label="Пункты раздела Трека"
           className="flex w-14 shrink-0 flex-col items-center gap-1 border-r border-border bg-card px-1 py-3">
           <button type="button" onClick={toggle} title="Развернуть меню раздела"
             aria-label="Развернуть меню раздела"
@@ -141,7 +146,7 @@ export function DocsLayout() {
           </button>
         </nav>
       ) : (
-        <nav data-zone="Пункты раздела" data-zone-side
+        <nav data-zone="Пункты раздела" data-zone-side aria-label="Пункты раздела Трека"
           className="flex w-56 shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-border bg-card px-2.5 py-3">
           <div className="flex items-center justify-end px-1 pb-1">
             <button type="button" onClick={toggle} title="Свернуть меню"
