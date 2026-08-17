@@ -18,11 +18,12 @@ import { ConfirmActionDialog } from '@/components/common/ConfirmActionDialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { toast } from 'sonner'
-import { Trash2 } from 'lucide-react'
+import { Pencil, Plus, Trash2 } from 'lucide-react'
 import * as docsService from '@/services/docsService'
 import * as tasksService from '@/services/tasksService'
 import { DOC_FAMILY } from '@/services/docsService'
 import { useDocsView } from './DocsLayout'
+import { DocKindEditor } from '@/components/docs/DocKindEditor'
 
 const SCOPE_LABEL: Record<string, string> = {
   kind: 'сквозная по виду',
@@ -36,6 +37,7 @@ export function DocsSetupPage() {
   const qc = useQueryClient()
   const view = useDocsView('/docs/setup')
   const companyId = company?.id ?? ''
+  const [editingKindId, setEditingKindId] = useState<string | 'new' | null>(null)
 
   const kindsQ = useQuery({
     queryKey: ['doc-kinds', companyId],
@@ -53,6 +55,8 @@ export function DocsSetupPage() {
   })
 
   const kinds = kindsQ.data ?? []
+  const editingKind = editingKindId === 'new'
+    ? undefined : kinds.find((kind) => kind.id === editingKindId)
 
   if (!isCompanyAdmin) {
     return (
@@ -150,11 +154,21 @@ export function DocsSetupPage() {
             Вид задаёт поток, правило нумерации и то, каким типом ставится поручение
           </p>
         </div>
-        <Button size="sm" variant="outline" onClick={() => starter.mutate()}
-          disabled={starter.isPending}>
-          Завести обычный набор
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" onClick={() => setEditingKindId('new')}>
+            <Plus className="mr-1 h-4 w-4" />Новый вид
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => starter.mutate()}
+            disabled={starter.isPending}>
+            Завести обычный набор
+          </Button>
+        </div>
       </div>
+
+      {editingKindId && (
+        <DocKindEditor key={editingKindId} companyId={companyId} initial={editingKind}
+          onClose={() => setEditingKindId(null)} onSaved={() => setEditingKindId(null)} />
+      )}
 
       <Card className="divide-y divide-border/60">
         {kinds.map((k) => (
@@ -171,7 +185,12 @@ export function DocsSetupPage() {
                 <div className="pt-0.5 text-[11px] text-muted-foreground">{k.description}</div>
               )}
             </div>
-            <span className="font-mono text-xs text-muted-foreground">{k.code}</span>
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-xs text-muted-foreground">{k.code}</span>
+              <Button type="button" size="sm" variant="ghost" onClick={() => setEditingKindId(k.id)}>
+                <Pencil className="mr-1 h-3.5 w-3.5" />Изменить
+              </Button>
+            </div>
           </div>
         ))}
         {kinds.length === 0 && (

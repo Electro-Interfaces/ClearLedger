@@ -34,6 +34,14 @@ export interface DocKindField {
   required: boolean
 }
 
+export interface DocKindSubjects {
+  people: Array<{ id: string; name: string }>
+  roles: Array<{ id: string; name: string }>
+  departments: Array<{ id: string; name: string }>
+  positions: string[]
+  task_types: Array<{ id: string; name: string }>
+}
+
 export interface DocSavedView {
   id: string
   name: string
@@ -346,6 +354,10 @@ export async function createDoc(
   companyId: string, body: Record<string, unknown>,
 ): Promise<DocCard> {
   return post<DocCard>('/api/docs', { ...body, company_id: companyId })
+}
+
+export async function listKindSubjects(companyId: string): Promise<DocKindSubjects> {
+  return get<DocKindSubjects>('/api/docs/kinds/subjects', { company_id: companyId })
 }
 
 export async function listAccessGrants(

@@ -829,6 +829,60 @@ def _kind_out(k: DocKind) -> dict[str, Any]:
     }
 
 
+async def _kind_errand_type_id(
+    db: AsyncSession, cid: uuid.UUID, value: str | None,
+) -> uuid.UUID | None:
+    if not value:
+        return None
+    type_id = _uuid_or_400(value, "errand_type_id")
+    task_type = await db.get(TaskType, type_id)
+    if task_type is None or task_type.company_id != cid:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Тип поручения не принадлежит компании")
+    return type_id
+
+
+async def _kind_route(db: AsyncSession, cid: uuid.UUID,
+                      value: list[dict]) -> list[dict]:
+    route = doc_approvals.clean_route(value)
+    for step in route:
+        for actor in step["actors"]:
+            by, ref = actor["by"], actor["ref"]
+            if by == "user":
+                user_id = _uuid_or_400(ref, "route.actor.ref")
+                valid = await db.get(UserCompany, (user_id, cid))
+            elif by == "role":
+                role = await db.get(CompanyRole, _uuid_or_400(ref, "route.actor.ref"))
+                valid = role if role is not None and role.company_id == cid else None
+            elif by in ("department", "head_of"):
+                department = await db.get(
+                    Department, _uuid_or_400(ref, "route.actor.ref"))
+                valid = (department if department is not None
+                         and department.company_id == cid else None)
+            else:
+                valid = (await db.execute(select(UserCompany.user_id).where(
+                    UserCompany.company_id == cid,
+                    UserCompany.position == ref,
+                ).limit(1))).scalar_one_or_none()
+            if valid is None:
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    "Участник маршрута не принадлежит компании",
+                )
+    return route
+
+
+def _validate_kind_number(template: str, scope: str) -> None:
+    if "{n" not in template:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Шаблон номера должен содержать {n}")
+    if "org" in scope and "{org" not in template:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Номер с отдельным счётчиком по юрлицу должен содержать {org}",
+        )
+
+
 async def _assert_admin(
     db: AsyncSession,
     cid: uuid.UUID,
@@ -870,7 +924,7 @@ class KindIn(BaseModel):
     description: str | None = None
     family: str = Field("internal", pattern="^(ord|incoming|outgoing|internal|contract|other)$")
     direction: str = Field("none", pattern="^(in|out|none)$")
-    number_template: str = Field("{prefix}-{yyyy}-{n:04d}", max_length=80)
+    number_template: str = Field("{prefix}-{org}-{yyyy}-{n:04d}", max_length=80)
     number_scope: str = Field("kind_org_year", pattern="^(kind|kind_year|kind_org|kind_org_year)$")
     number_prefix: str = Field("", max_length=20)
     fields: list[dict] = Field(default_factory=list)
@@ -882,6 +936,43 @@ class KindIn(BaseModel):
     requires_registration: bool = True
     is_active: bool = True
     sort_order: int = 100
+
+
+@router.get("/kinds/subjects")
+async def list_kind_subjects(
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cid = await assert_company_product(company_id, current_user, db, "docs")
+    await _assert_admin(db, cid, current_user)
+    people = (await db.execute(select(User.id, User.name, User.email).join(
+        UserCompany, UserCompany.user_id == User.id,
+    ).where(UserCompany.company_id == cid).order_by(
+        User.name.asc().nullslast(), User.email))).all()
+    roles = (await db.execute(select(CompanyRole.id, CompanyRole.name).where(
+        CompanyRole.company_id == cid).order_by(CompanyRole.name))).all()
+    departments = (await db.execute(select(Department.id, Department.name).where(
+        Department.company_id == cid).order_by(Department.name))).all()
+    positions = (await db.execute(select(UserCompany.position).where(
+        UserCompany.company_id == cid,
+        UserCompany.position.is_not(None),
+        UserCompany.position != "",
+    ).distinct().order_by(UserCompany.position))).scalars().all()
+    task_types = (await db.execute(select(TaskType.id, TaskType.name).where(
+        TaskType.company_id == cid,
+        TaskType.is_active.is_(True),
+    ).order_by(TaskType.sort_order, TaskType.name))).all()
+    return {
+        "people": [{"id": str(row.id), "name": row.name or row.email}
+                   for row in people],
+        "roles": [{"id": str(row.id), "name": row.name} for row in roles],
+        "departments": [{"id": str(row.id), "name": row.name}
+                        for row in departments],
+        "positions": positions,
+        "task_types": [{"id": str(row.id), "name": row.name}
+                       for row in task_types],
+    }
 
 
 @router.get("/kinds")
@@ -904,6 +995,7 @@ async def create_kind(
 ):
     cid = await assert_company_product(payload.company_id, current_user, db, "docs")
     await _assert_admin(db, cid, current_user)
+    _validate_kind_number(payload.number_template, payload.number_scope)
     dup = (await db.execute(select(DocKind.id).where(
         DocKind.company_id == cid, DocKind.code == payload.code))).scalar_one_or_none()
     if dup is not None:
@@ -914,10 +1006,9 @@ async def create_kind(
         direction=payload.direction, number_template=payload.number_template,
         number_scope=payload.number_scope, number_prefix=payload.number_prefix,
         fields=_clean_fields(payload.fields) or None,
-        route=doc_approvals.clean_route(payload.route) or None,
+        route=await _kind_route(db, cid, payload.route) or None,
         default_case_id=await _default_case_id(db, cid, payload.default_case_id),
-        errand_type_id=_uuid_or_400(payload.errand_type_id, "errand_type_id")
-        if payload.errand_type_id else None,
+        errand_type_id=await _kind_errand_type_id(db, cid, payload.errand_type_id),
         requires_registration=payload.requires_registration,
         is_active=payload.is_active, sort_order=payload.sort_order)
     db.add(k)
@@ -935,16 +1026,16 @@ async def update_kind(
 ):
     cid = await assert_company_product(payload.company_id, current_user, db, "docs")
     await _assert_admin(db, cid, current_user)
+    _validate_kind_number(payload.number_template, payload.number_scope)
     k = await _kind_or_404(db, cid, kind_id)
     for field in ("name", "description", "family", "direction", "number_template",
                   "number_scope", "number_prefix", "requires_registration",
                   "is_active", "sort_order"):
         setattr(k, field, getattr(payload, field))
     k.fields = _clean_fields(payload.fields) or None
-    k.route = doc_approvals.clean_route(payload.route) or None
+    k.route = await _kind_route(db, cid, payload.route) or None
     k.default_case_id = await _default_case_id(db, cid, payload.default_case_id)
-    k.errand_type_id = (_uuid_or_400(payload.errand_type_id, "errand_type_id")
-                        if payload.errand_type_id else None)
+    k.errand_type_id = await _kind_errand_type_id(db, cid, payload.errand_type_id)
     await db.commit()
     await db.refresh(k)
     return _kind_out(k)
@@ -973,6 +1064,7 @@ async def create_starter_kinds(
             company_id=cid, code=spec["code"], name=spec["name"],
             description=spec.get("desc"), family=spec["family"],
             direction=spec["direction"], number_prefix=spec["number_prefix"],
+            number_template="{prefix}-{org}-{yyyy}-{n:04d}",
             errand_type_id=errand, sort_order=100 + added))
         added += 1
     if added:
