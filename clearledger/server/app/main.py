@@ -447,7 +447,7 @@ async def readiness_check(db: AsyncSession = Depends(get_db)):
     """Readiness: рабочая БД, обязательная схема и доступное хранилище файлов."""
     try:
         schema_ready = await db.scalar(text("""
-            SELECT count(*) = 19
+            SELECT count(*) = 20
               FROM pg_class AS c
               JOIN pg_namespace AS n ON n.oid = c.relnamespace
              WHERE n.nspname = current_schema()
@@ -463,6 +463,7 @@ async def readiness_check(db: AsyncSession = Depends(get_db)):
                    'doc_destruction_acts',
                    'doc_destruction_items',
                    'doc_archive_events',
+                   'doc_signature_evidence',
                    'doc_break_glass_accesses',
                    'idx_doc_cards_retention',
                    'idx_doc_versions_destruction_act',

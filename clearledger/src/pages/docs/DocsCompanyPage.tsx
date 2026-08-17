@@ -15,6 +15,7 @@ import * as docsService from '@/services/docsService'
 import { DocsInboxPanel } from '@/components/docs/DocsInboxPanel'
 import { DocsArchiveQueue } from '@/components/docs/DocsArchiveQueue'
 import { useDocsView } from './DocsLayout'
+import { DocsErrorState, DocsLoadingState } from '@/components/docs/DocsQueryState'
 
 const TasksCompanyPage = lazy(() => import('@/pages/tasks/TasksWorkPage')
   .then((m) => ({ default: m.TasksCompanyPage })))
@@ -129,20 +130,14 @@ export function DocsCompanyPage() {
       )}
 
       {boardQ.isLoading && (
-        <Card className="p-6 text-sm text-muted-foreground" aria-live="polite">
+        <DocsLoadingState>
           Загружаем доску…
-        </Card>
+        </DocsLoadingState>
       )}
       {boardQ.isError && (
-        <Card role="alert" className="flex flex-wrap items-center justify-between gap-3 p-4">
-          <div>
-            <div className="text-sm font-medium">Не удалось загрузить доску</div>
-            <div className="text-xs text-muted-foreground">Пустой результат не подставлен.</div>
-          </div>
-          <Button type="button" size="sm" variant="outline" onClick={() => boardQ.refetch()}>
-            Повторить
-          </Button>
-        </Card>
+        <DocsErrorState error={boardQ.error} title="Не удалось загрузить доску"
+          detail="Пустой результат не подставлен."
+          onRetry={() => { void boardQ.refetch() }} />
       )}
 
       {!boardQ.isLoading && !boardQ.isError && <div className="flex gap-3 overflow-x-auto pb-2">

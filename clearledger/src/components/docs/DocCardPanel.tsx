@@ -285,6 +285,7 @@ export function DocCardPanel({ id, companyId, onBack, onChanged, initialTab,
   const actions = new Set(d.available_actions ?? [])
   const editable = actions.has('edit')
   const approvalLocked = d.approval_status === 'pending'
+  const signatureEvidence = d.signatures ?? []
   const canChangeFiles = editable && !approvalLocked && ['draft', 'registered'].includes(d.status)
   const cases = casesQ.data ?? []
   const caseOptions = cases.filter((item) => (
@@ -465,7 +466,7 @@ export function DocCardPanel({ id, companyId, onBack, onChanged, initialTab,
                 </Button>
               )}
               title="Ввести документ в действие?"
-              description="Документ станет действующим. Система сохранит автора и время перехода в истории."
+              description="Документ станет действующим. Track зафиксирует вашу учётную запись, время и SHA-256 текущего пакета как внутреннее подтверждение подписи. Это не квалифицированная УКЭП."
               confirmLabel="Ввести в действие"
               pending={act.isPending}
               content={(
@@ -730,6 +731,65 @@ export function DocCardPanel({ id, companyId, onBack, onChanged, initialTab,
               Каждый файл опознаётся SHA-256; во время согласования набор неизменяем.
             </span>
           </div>
+          <Card className="p-4" aria-labelledby={`signature-evidence-${d.id}`}>
+            <div className="flex items-start gap-2.5">
+              <div className="rounded-md bg-primary/10 p-2 text-primary">
+                <ShieldCheck className="h-4 w-4" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <h2 id={`signature-evidence-${d.id}`} className="text-sm font-medium">
+                  Доказательства подписания
+                </h2>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Внутренняя подпись подтверждает действие пользователя в Track и не является
+                  квалифицированной УКЭП. Внешняя подпись появится после подключения провайдера.
+                </p>
+              </div>
+            </div>
+            {signatureEvidence.length === 0 ? (
+              <div className="mt-3 rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+                Подписание ещё не зафиксировано. Загруженный подписанный экземпляр остаётся
+                файлом и сам по себе не считается криптографической подписью.
+              </div>
+            ) : (
+              <div className="mt-3 divide-y divide-border/60 border-t border-border/60">
+                {signatureEvidence.map((signature) => (
+                  <div key={signature.id} className="grid gap-1 py-3 text-xs sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-x-4">
+                    <div className="min-w-0">
+                      <div className="font-medium text-foreground">
+                        {signature.method === 'qualified_external'
+                          ? `Квалифицированная подпись${signature.provider ? ` · ${signature.provider}` : ''}`
+                          : signature.method === 'internal_approval'
+                            ? 'Внутренняя подпись на маршруте'
+                            : 'Внутренняя подпись при вводе в действие'}
+                      </div>
+                      <div className="mt-0.5 text-muted-foreground">
+                        {signature.signer_name}
+                        {signature.represented_signer_name
+                          ? ` · замещает ${signature.represented_signer_name}` : ''}
+                        {' · '}{formatEventTime(signature.signed_at)}
+                      </div>
+                      <div className="mt-1 truncate font-mono text-[10px] text-muted-foreground"
+                        title={signature.snapshot_sha256}>
+                        SHA-256 {signature.snapshot_sha256}
+                      </div>
+                    </div>
+                    <div className="text-muted-foreground sm:text-right">
+                      <div>редакция {signature.revision ?? '—'} · файлов {signature.files_count}</div>
+                      <div className={signature.verification_status === 'verified'
+                        ? 'mt-0.5 text-emerald-700 dark:text-emerald-300'
+                        : signature.verification_status === 'failed'
+                          ? 'mt-0.5 text-destructive' : 'mt-0.5'}>
+                        {signature.verification_status === 'verified' ? 'проверено'
+                          : signature.verification_status === 'pending' ? 'проверяется'
+                            : signature.verification_status === 'revoked' ? 'отозвано' : 'ошибка проверки'}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
           <DocFileWorkspace versions={d.versions} canDownload={d.capabilities.download}
             sensitive={d.confidentiality === 'strict'}
             canRemove={canChangeFiles}

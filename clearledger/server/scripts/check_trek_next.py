@@ -57,6 +57,8 @@ async def main() -> None:
 
             assert await db.scalar(text(
                 "SELECT to_regclass('doc_access_grants') IS NOT NULL"))
+            assert await db.scalar(text(
+                "SELECT to_regclass('doc_signature_evidence') IS NOT NULL"))
             required_archive_tables = {
                 "doc_legal_holds", "doc_retention_decisions",
                 "doc_destruction_acts", "doc_destruction_items",

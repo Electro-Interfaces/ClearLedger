@@ -8,7 +8,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useId, useState } from 'react'
 import {
-  CheckCircle2, CircleDashed, Clock3, Copy, FileCheck2, PlayCircle, ShieldCheck,
+  CheckCircle2, CircleDashed, Clock3, Copy, FileCheck2, FileSignature, PlayCircle, ShieldCheck,
   XCircle,
 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -46,10 +46,11 @@ export function DocApprovalTab({ doc, companyId, onChanged }: {
   })
 
   const decide = useMutation({
-    mutationFn: (v: { id: string; approved: boolean }) =>
+    mutationFn: (v: { id: string; approved: boolean; stepKind: 'approve' | 'sign' }) =>
       docsService.decideApproval(companyId, v.id, v.approved, comment.trim() || undefined),
-    onSuccess: (r) => {
-      toast.success(r.returned ? 'Документ возвращён автору' : 'Виза поставлена')
+    onSuccess: (r, variables) => {
+      toast.success(r.returned ? 'Документ возвращён автору'
+        : variables.stepKind === 'sign' ? 'Внутренняя подпись зафиксирована' : 'Виза поставлена')
       setComment('')
       qc.invalidateQueries({ queryKey: ['docs-my-approvals', companyId] })
       onChanged()
@@ -144,6 +145,11 @@ export function DocApprovalTab({ doc, companyId, onChanged }: {
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="text-sm font-medium">
               {s.step_no}. {s.name}
+              {s.step_kind === 'sign' && (
+                <span className="ml-2 inline-flex items-center gap-1 rounded-md bg-primary/10 px-1.5 py-0.5 text-xs font-normal text-primary">
+                  <FileSignature className="h-3 w-3" />подписание
+                </span>
+              )}
               <span className="ml-2 text-xs font-normal text-muted-foreground">
                 {s.mode === 'parallel' ? 'параллельно' : 'по очереди'}
                 {s.quorum !== 'all' && `, кворум ${s.quorum}`}
@@ -192,7 +198,15 @@ export function DocApprovalTab({ doc, companyId, onChanged }: {
 
       {mine && (
         <Card className="space-y-2 p-4">
-          <div className="text-sm font-medium">Ваша виза по шагу «{mine.step_name}»</div>
+          <div className="text-sm font-medium">
+            {mine.step_kind === 'sign' ? 'Ваша подпись' : 'Ваша виза'} по шагу «{mine.step_name}»
+          </div>
+          {mine.step_kind === 'sign' && (
+            <div className="rounded-md border border-primary/20 bg-primary/5 p-2 text-xs text-muted-foreground">
+              Track зафиксирует вашу учётную запись, время и SHA-256 пакета. Это внутренняя
+              электронная подпись, не квалифицированная УКЭП.
+            </div>
+          )}
           <Label htmlFor={commentId} className="sr-only">Комментарий к визе</Label>
           <Input id={commentId} value={comment} onChange={(e) => setComment(e.target.value)}
             placeholder="Замечание (обязательно при отказе)" className="h-9"
@@ -202,11 +216,11 @@ export function DocApprovalTab({ doc, companyId, onChanged }: {
           </div>
           <div className="flex gap-2">
             <Button size="sm" disabled={decide.isPending}
-              onClick={() => decide.mutate({ id: mine.id, approved: true })}>
-              Согласовать
+              onClick={() => decide.mutate({ id: mine.id, approved: true, stepKind: mine.step_kind })}>
+              {mine.step_kind === 'sign' ? 'Подписать внутри Track' : 'Согласовать'}
             </Button>
             <Button size="sm" variant="outline" disabled={decide.isPending || !comment.trim()}
-              onClick={() => decide.mutate({ id: mine.id, approved: false })}>
+              onClick={() => decide.mutate({ id: mine.id, approved: false, stepKind: mine.step_kind })}>
               Вернуть с замечанием
             </Button>
           </div>

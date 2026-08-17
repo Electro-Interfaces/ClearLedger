@@ -8,7 +8,7 @@
 import { lazy, Suspense, useState, type ReactNode } from 'react'
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
-import { RotateCw, Stamp } from 'lucide-react'
+import { FileSignature, Stamp } from 'lucide-react'
 import { useCompany } from '@/contexts/CompanyContext'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -17,6 +17,7 @@ import * as docsService from '@/services/docsService'
 import { DOC_STATUS } from '@/services/docsService'
 import { DocCardPanel } from '@/components/docs/DocCardPanel'
 import { useDocsView } from './DocsLayout'
+import { DocsErrorState } from '@/components/docs/DocsQueryState'
 
 const TasksWorkPage = lazy(() => import('@/pages/tasks/TasksWorkPage')
   .then((module) => ({ default: module.TasksWorkPage })))
@@ -106,7 +107,8 @@ export function DocsWorkPage() {
       <QueuePage title="Ознакомиться"
         subtitle={acquaintsQ.isLoading ? 'Загрузка…' : `Документов: ${rows.length}`}>
         {acquaintsQ.isError && (
-          <QueueError onRetry={() => acquaintsQ.refetch()} />
+          <DocsErrorState error={acquaintsQ.error} title="Очередь не загрузилась"
+            onRetry={() => { void acquaintsQ.refetch() }} />
         )}
         {!acquaintsQ.isError && (
           <Card className="divide-y divide-border/60">
@@ -138,7 +140,8 @@ export function DocsWorkPage() {
       <QueuePage title="Мои документы"
         subtitle={docsQ.isLoading ? 'Загрузка…' : `Показано: ${docs.length}`}>
         {docsQ.isError && (
-          <QueueError onRetry={() => docsQ.refetch()} />
+          <DocsErrorState error={docsQ.error} title="Очередь не загрузилась"
+            onRetry={() => { void docsQ.refetch() }} />
         )}
         {!docsQ.isError && (
           <Card className="divide-y divide-border/60">
@@ -177,10 +180,11 @@ export function DocsWorkPage() {
 
   const approvals = approvalsQ.data ?? []
   return withDocument(
-    <QueuePage title="Ждут моей визы"
+    <QueuePage title="Ждут моего решения"
       subtitle={approvalsQ.isLoading ? 'Загрузка…' : `Документов: ${approvals.length}`}>
       {approvalsQ.isError && (
-        <QueueError onRetry={() => approvalsQ.refetch()} />
+        <DocsErrorState error={approvalsQ.error} title="Очередь не загрузилась"
+          onRetry={() => { void approvalsQ.refetch() }} />
       )}
       {!approvalsQ.isError && (
         <Card className="divide-y divide-border/60">
@@ -190,11 +194,14 @@ export function DocsWorkPage() {
               className={queueRow(approval.doc_id === openId)}>
               <div className="min-w-0">
                 <div className="flex items-center gap-2 text-sm">
-                  <Stamp className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  {approval.step_kind === 'sign'
+                    ? <FileSignature className="h-3.5 w-3.5 shrink-0 text-primary" />
+                    : <Stamp className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
                   <span className="truncate">{approval.doc_title}</span>
                 </div>
                 <div className="text-[13px] text-muted-foreground">
                   {approval.doc_number ? `${approval.doc_number} · ` : ''}шаг «{approval.step_name}»
+                  {approval.step_kind === 'sign' ? ' · подписание' : ' · согласование'}
                   {approval.mode === 'parallel' ? ' · параллельно' : ''}
                   {approval.acting_for ? ` · замещаете ${approval.acting_for}` : ''}
                 </div>
@@ -202,7 +209,7 @@ export function DocsWorkPage() {
               {approval.due_at && <DueBadge value={approval.due_at} now={now} />}
             </button>
           ))}
-          {approvalsQ.isSuccess && approvals.length === 0 && <Empty>Виз на вас нет</Empty>}
+          {approvalsQ.isSuccess && approvals.length === 0 && <Empty>Решений на вас нет</Empty>}
         </Card>
       )}
     </QueuePage>,
@@ -221,20 +228,6 @@ function QueuePage({ title, subtitle, children }: {
         <p className="text-xs text-muted-foreground">{subtitle}</p>
       </div>
       {children}
-    </div>
-  )
-}
-
-function QueueError({ onRetry }: { onRetry: () => void }) {
-  return (
-    <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 p-4">
-      <div className="text-sm font-medium text-destructive">Очередь не загрузилась</div>
-      <div className="mt-1 text-sm text-muted-foreground">
-        Данные не заменены пустым списком. Проверьте соединение и повторите запрос.
-      </div>
-      <Button size="sm" variant="outline" className="mt-3" onClick={onRetry}>
-        <RotateCw className="mr-1.5 h-3.5 w-3.5" />Повторить
-      </Button>
     </div>
   )
 }

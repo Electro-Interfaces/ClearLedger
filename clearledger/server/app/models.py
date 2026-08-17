@@ -7898,6 +7898,9 @@ class StoreCheque(Base):
     station_id: Mapped[int] = mapped_column(Integer, nullable=False)
     shift_number: Mapped[int] = mapped_column(Integer, nullable=False)
     number: Mapped[int] = mapped_column(Integer, nullable=False)
+    cash_no: Mapped[int] = mapped_column(Integer, nullable=False, default=0,
+                                         server_default=text("0"))
+    cash_key: Mapped[str] = mapped_column(String(200), nullable=False)
     # Фискальный номер документа: по нему чек ищут в ОФД и в кассе.
     fiscal_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
     at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -7915,7 +7918,7 @@ class StoreCheque(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     __table_args__ = (
-        UniqueConstraint("company_id", "station_id", "shift_number", "number",
+        UniqueConstraint("company_id", "station_id", "shift_number", "cash_key",
                          name="uq_store_cheque"),
         Index("ix_store_cheques_at", "company_id", "station_id", "at"),
         CheckConstraint("version > 0", name="ck_store_cheque_version"),
@@ -9975,6 +9978,50 @@ class DocApproval(Base):
         Index("idx_doc_approvals_report", "company_id", "round", "created_at", "doc_id"),
         Index("idx_doc_approvals_pending_due", "company_id", "due_at",
               postgresql_where=text("status = 'pending'")),
+    )
+
+
+class DocSignatureEvidence(Base):
+    __tablename__ = "doc_signature_evidence"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    doc_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("doc_cards.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    approval_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("doc_approvals.id", ondelete="RESTRICT"), nullable=True)
+    method: Mapped[str] = mapped_column(String(30), nullable=False)
+    provider: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    external_id: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    signer_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    signer_name: Mapped[str] = mapped_column(String(300), nullable=False)
+    represented_signer_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    snapshot_sha256: Mapped[str] = mapped_column(CHAR(64), nullable=False)
+    document_snapshot: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    verification_status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="verified")
+    verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    verification_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    evidence: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    signed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("approval_id", name="uq_doc_signature_evidence_approval"),
+        CheckConstraint(
+            "method IN ('internal_approval','internal_direct','qualified_external')",
+            name="ck_doc_signature_evidence_method"),
+        CheckConstraint(
+            "verification_status IN ('pending','verified','failed','revoked')",
+            name="ck_doc_signature_evidence_status"),
+        Index("idx_doc_signature_evidence_company_doc",
+              "company_id", "doc_id", "signed_at"),
     )
 
 

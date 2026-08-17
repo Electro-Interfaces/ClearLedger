@@ -13,8 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
     Company, Counterparty, Department, DocAccessGrant, DocAcquaint, DocApproval,
-    DocCard, DocCase, DocEvent, DocInboxItem, DocKind, DocVersion, MailAttachment,
-    MailMessage, Organization, User, UserCompany,
+    DocCard, DocCase, DocEvent, DocInboxItem, DocKind, DocSignatureEvidence,
+    DocVersion, MailAttachment, MailMessage, Organization, User, UserCompany,
 )
 from app.routers import docs_router
 from app.services import mail_routing, task_scheduler
@@ -388,6 +388,65 @@ async def test_отчёт_считает_завершённое_согласов
     assert data["summary"]["completed"] >= 1
     assert any(row["user_id"] == me["id"] and row["decisions"] >= 1
                for row in data["people"])
+
+
+async def test_подписание_отличается_от_визы_и_фиксирует_точный_пакет(
+        auth_client: AsyncClient, db: AsyncSession):
+    me, cid, kind = await _context(auth_client)
+    created = await auth_client.post("/api/docs", json={
+        "company_id": cid,
+        "kind_id": kind["id"],
+        "title": f"ПРОВЕРКА-подпись-{uuid.uuid4().hex}",
+        "signatory_id": me["id"],
+    })
+    assert created.status_code == 201, created.text
+    doc = created.json()
+    registered = await auth_client.post(
+        f"/api/docs/{doc['id']}/register", json={"company_id": cid})
+    assert registered.status_code == 200, registered.text
+    started = await auth_client.post(f"/api/docs/{doc['id']}/approval/start", json={
+        "company_id": cid,
+        "route": [{
+            "code": "sign", "name": "Подписание", "step_kind": "sign",
+            "mode": "serial", "quorum": "all",
+            "actors": [{"by": "user", "ref": me["id"]}],
+        }],
+    })
+    assert started.status_code == 201, started.text
+
+    mine = (await auth_client.get(
+        "/api/docs/approvals/mine", params={"company_id": cid})).json()["approvals"]
+    approval = next(item for item in mine if item["doc_id"] == doc["id"])
+    assert approval["step_kind"] == "sign"
+    decided = await auth_client.post(f"/api/docs/approvals/{approval['id']}", json={
+        "company_id": cid, "approved": True,
+    })
+    assert decided.status_code == 200, decided.text
+
+    card = (await auth_client.get(
+        f"/api/docs/{doc['id']}", params={"company_id": cid})).json()
+    row = next(item for item in card["approval"]["rows"]
+               if item["id"] == approval["id"])
+    assert row["step_kind"] == "sign"
+    route_evidence = next(item for item in card["signatures"]
+                          if item["method"] == "internal_approval")
+    assert route_evidence["approval_id"] == approval["id"]
+    assert route_evidence["snapshot_sha256"] == card["approval"]["snapshot_sha256"]
+    assert route_evidence["verification_status"] == "verified"
+
+    enacted = await auth_client.post(f"/api/docs/{doc['id']}/action", json={
+        "company_id": cid, "status": "in_force",
+    })
+    assert enacted.status_code == 200, enacted.text
+    evidence = (await db.execute(select(DocSignatureEvidence).where(
+        DocSignatureEvidence.doc_id == uuid.UUID(doc["id"]),
+    ))).scalars().all()
+    assert {item.method for item in evidence} == {
+        "internal_approval", "internal_direct",
+    }
+    assert all(item.signer_id == uuid.UUID(me["id"]) for item in evidence)
+    assert all(item.document_snapshot.get("card", {}).get("id") == doc["id"]
+               for item in evidence)
 
 
 async def test_отчёт_различает_круги_активацию_и_текущую_просрочку(

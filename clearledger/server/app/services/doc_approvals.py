@@ -23,8 +23,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
-    CompanyRole, Department, DocApproval, DocCard, DocEvent, DocVersion, User,
-    UserCompany,
+    CompanyRole, Department, DocApproval, DocCard, DocEvent,
+    DocSignatureEvidence, DocVersion, User, UserCompany,
 )
 
 # Из чего резолвится согласующий. Незнакомый способ отбрасывается санитайзером:
@@ -188,7 +188,8 @@ async def may_decide(db: AsyncSession, cid: uuid.UUID, row: DocApproval,
     return actor.id in await active_deputy_for(db, cid, row.assignee_id)
 
 
-async def _document_snapshot(db: AsyncSession, doc: DocCard) -> tuple[dict, str]:
+async def _document_snapshot(db: AsyncSession, doc: DocCard,
+                             route: list[dict] | None = None) -> tuple[dict, str]:
     """Зафиксировать реквизиты и точный набор файлов текущего документа."""
     versions = (await db.execute(select(DocVersion).where(
         DocVersion.doc_id == doc.id,
@@ -228,6 +229,16 @@ async def _document_snapshot(db: AsyncSession, doc: DocCard) -> tuple[dict, str]
             "sha256": v.sha256,
         } for v in versions],
     }
+    if route is not None:
+        snapshot["approval_route"] = [{
+            "step_no": index,
+            "code": step["code"],
+            "name": step["name"],
+            "step_kind": "sign" if step.get("step_kind") == "sign" else "approve",
+            "mode": step["mode"],
+            "quorum": step["quorum"],
+            "required": step["required"],
+        } for index, step in enumerate(route, start=1)]
     canonical = json.dumps(
         snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
     ).encode("utf-8")
@@ -272,7 +283,7 @@ async def start(db: AsyncSession, cid: uuid.UUID, doc: DocCard, route: list[dict
 
     round_no = (doc.approval_round or 0) + 1
     now = datetime.now(timezone.utc)
-    snapshot, snapshot_hash = await _document_snapshot(db, doc)
+    snapshot, snapshot_hash = await _document_snapshot(db, doc, steps)
     created = 0
     first_step: list[DocApproval] = []
     for i, step, people in prepared:
@@ -330,6 +341,15 @@ def step_passed(rows: list[DocApproval]) -> bool:
     return all(r.status == "approved" for r in participants)
 
 
+def step_kind(row: DocApproval) -> str:
+    route = (row.document_snapshot or {}).get("approval_route") or []
+    for step in route:
+        if (step.get("step_no") == row.step_no
+                or step.get("code") == row.step_code):
+            return "sign" if step.get("step_kind") == "sign" else "approve"
+    return "approve"
+
+
 async def decide(db: AsyncSession, cid: uuid.UUID, doc: DocCard, row: DocApproval,
                  actor: User, approved: bool, comment: str | None,
                  round_rows: list[DocApproval] | None = None) -> dict[str, Any]:
@@ -347,6 +367,29 @@ async def decide(db: AsyncSession, cid: uuid.UUID, doc: DocCard, row: DocApprova
     row.decided_at = datetime.now(timezone.utc)
     row.decided_by = actor.id
     row.comment = (comment or "").strip() or None
+    if approved and step_kind(row) == "sign":
+        db.add(DocSignatureEvidence(
+            company_id=cid,
+            doc_id=doc.id,
+            approval_id=row.id,
+            method="internal_approval",
+            provider="Track",
+            signer_id=actor.id,
+            signer_name=actor.name or actor.email,
+            represented_signer_id=(row.assignee_id
+                                   if row.assignee_id != actor.id else None),
+            snapshot_sha256=row.snapshot_sha256 or "0" * 64,
+            document_snapshot=row.document_snapshot or {},
+            verification_status="verified",
+            verified_at=row.decided_at,
+            evidence={
+                "step_code": row.step_code,
+                "step_name": row.step_name,
+                "decision": "approved",
+                "identity_source": "authenticated_session",
+            },
+            signed_at=row.decided_at,
+        ))
     await db.flush()
 
     # Кто фактически расписался. Если это заместитель, лист согласования обязан
@@ -447,6 +490,7 @@ def progress(rows: list[DocApproval]) -> list[dict[str, Any]]:
         out.append({
             "step_no": step_no,
             "name": group[0].step_name,
+            "step_kind": step_kind(group[0]),
             "mode": group[0].mode,
             "quorum": group[0].quorum,
             "decided": sum(1 for r in group if r.status in ("approved", "rejected")),

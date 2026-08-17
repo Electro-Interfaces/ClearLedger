@@ -9,7 +9,7 @@ import { useDeferredValue, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  BookmarkPlus, ChevronLeft, ChevronRight, FilePlus2, RotateCw, Search,
+  BookmarkPlus, ChevronLeft, ChevronRight, FilePlus2, Search,
   SlidersHorizontal, X,
 } from 'lucide-react'
 import { useCompany } from '@/contexts/CompanyContext'
@@ -26,6 +26,7 @@ import { NewDocDialog } from '@/components/docs/NewDocDialog'
 import { useDocsScope } from '@/hooks/useDocsScope'
 import { useDocsView } from './DocsLayout'
 import { DocsBulkBar } from '@/components/docs/DocsBulkBar'
+import { DocsErrorState, DocsLoadingState } from '@/components/docs/DocsQueryState'
 
 const VIEW_FILTER: Record<string, docsService.DocFilters> = {
   incoming: { family: 'incoming' },
@@ -418,15 +419,9 @@ export function DocsRegistryPage() {
         )}
 
         {listQ.isError && (
-          <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 p-4">
-            <div className="text-sm font-medium text-destructive">Реестр не загрузился</div>
-            <div className="mt-1 text-sm text-muted-foreground">
-              Данные не заменены пустым списком. Проверьте соединение и повторите запрос.
-            </div>
-            <Button size="sm" variant="outline" className="mt-3" onClick={() => listQ.refetch()}>
-              <RotateCw className="mr-1.5 h-3.5 w-3.5" />Повторить
-            </Button>
-          </div>
+          <DocsErrorState error={listQ.error} title="Реестр не загрузился"
+            detail="Данные не заменены пустым списком. Проверьте соединение и повторите запрос."
+            onRetry={() => { void listQ.refetch() }} />
         )}
 
         <div className={cn(
@@ -434,9 +429,9 @@ export function DocsRegistryPage() {
           openId && 'grid gap-3 lg:grid-cols-[minmax(280px,0.66fr)_minmax(520px,1.4fr)]',
         )}>
           {(listQ.isLoading || !scope.ready) && !scope.failed && (
-            <Card className="p-6 text-sm text-muted-foreground" role="status" aria-live="polite">
+            <DocsLoadingState>
               {scope.resolving ? 'Применяем область рабочего контура…' : 'Загружаем реестр…'}
-            </Card>
+            </DocsLoadingState>
           )}
           {listQ.isSuccess && registry}
           {openId && (

@@ -138,6 +138,7 @@ export interface DocApprovalRow {
   round: number
   step_no: number
   step_name: string
+  step_kind: 'approve' | 'sign'
   status: string          // waiting | pending | approved | rejected | skipped
   assignee_id: string | null
   assignee_name: string | null
@@ -154,6 +155,7 @@ export interface DocApprovalRow {
 export interface DocApprovalStep {
   step_no: number
   name: string
+  step_kind: 'approve' | 'sign'
   mode: string
   quorum: string
   decided: number
@@ -198,6 +200,7 @@ export interface MyApproval {
   id: string
   doc_id: string
   step_name: string
+  step_kind: 'approve' | 'sign'
   mode: string
   due_at: string | null
   doc_title: string
@@ -237,6 +240,25 @@ export interface DocAcquaint {
   note: string | null
 }
 
+export interface DocSignatureEvidence {
+  id: string
+  approval_id: string | null
+  method: 'internal_approval' | 'internal_direct' | 'qualified_external'
+  provider: string | null
+  external_id: string | null
+  signer_id: string | null
+  signer_name: string
+  represented_signer_id: string | null
+  represented_signer_name: string | null
+  snapshot_sha256: string
+  revision: number | null
+  files_count: number
+  verification_status: 'pending' | 'verified' | 'failed' | 'revoked'
+  verified_at: string | null
+  verification_error: string | null
+  signed_at: string
+}
+
 /** Замещение: кто работает за человека, пока его нет. */
 export interface Substitution {
   id: string
@@ -258,6 +280,7 @@ export interface DocDetails extends DocCard {
   can_manage_kind_access: boolean
   capabilities: Record<DocPermission, boolean>
   versions: DocVersion[]
+  signatures: DocSignatureEvidence[]
   events: DocEvent[]
   relations: DocRelation[]
   approval: DocApprovalState

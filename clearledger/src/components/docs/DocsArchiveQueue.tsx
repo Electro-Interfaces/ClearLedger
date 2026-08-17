@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react'
 import { useInfiniteQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { Archive, Loader2, RotateCw, ShieldAlert } from 'lucide-react'
+import { Archive, Loader2, ShieldAlert } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import * as docsService from '@/services/docsService'
+import { DocsErrorState, DocsLoadingState } from './DocsQueryState'
 
 type QueueFilter = 'all' | 'due' | 'hold' | 'legacy' | 'active'
 
@@ -80,20 +81,14 @@ export function DocsArchiveQueue({ companyId }: { companyId: string }) {
       </div>
 
       {queueQ.isLoading && (
-        <Card className="p-6 text-sm text-muted-foreground" aria-live="polite">
+        <DocsLoadingState>
           Загружаем архивную очередь…
-        </Card>
+        </DocsLoadingState>
       )}
       {queueQ.isError && !queueQ.data && (
-        <Card role="alert" className="flex flex-wrap items-center justify-between gap-3 p-4">
-          <div>
-            <div className="text-sm font-medium">Архивная очередь не загрузилась</div>
-            <div className="text-xs text-muted-foreground">Действия не подменены пустым списком.</div>
-          </div>
-          <Button type="button" size="sm" variant="outline" onClick={() => queueQ.refetch()}>
-            <RotateCw className="mr-1.5 h-3.5 w-3.5" />Повторить
-          </Button>
-        </Card>
+        <DocsErrorState error={queueQ.error} title="Архивная очередь не загрузилась"
+          detail="Действия не подменены пустым списком."
+          onRetry={() => { void queueQ.refetch() }} />
       )}
 
       {queueQ.data && (

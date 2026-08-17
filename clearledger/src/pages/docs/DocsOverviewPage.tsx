@@ -16,6 +16,7 @@ import * as docsService from '@/services/docsService'
 import { DOC_FAMILY } from '@/services/docsService'
 import { useDocsView } from './DocsLayout'
 import { useDocsScope } from '@/hooks/useDocsScope'
+import { DocsErrorState, DocsLoadingState } from '@/components/docs/DocsQueryState'
 
 const TasksOverviewPage = lazy(() => import('@/pages/tasks/TasksOverviewPage')
   .then((m) => ({ default: m.TasksOverviewPage })))
@@ -145,26 +146,16 @@ export function DocsOverviewPage() {
       </div>
 
       {(listQ.isError || boardQ.isError) && (
-        <Card role="alert" className="flex flex-wrap items-center justify-between gap-3 p-4">
-          <div>
-            <div className="text-sm font-medium">Обзор не загрузился</div>
-            <div className="text-xs text-muted-foreground">
-              Показатели не заменены нулями. Проверьте соединение и повторите запрос.
-            </div>
-          </div>
-          <Button type="button" size="sm" variant="outline" onClick={() => {
-            void listQ.refetch(); void boardQ.refetch()
-          }}>
-            Повторить
-          </Button>
-        </Card>
+        <DocsErrorState error={listQ.error ?? boardQ.error} title="Обзор не загрузился"
+          detail="Показатели не заменены нулями. Проверьте соединение и повторите запрос."
+          onRetry={() => { void listQ.refetch(); void boardQ.refetch() }} />
       )}
 
       {(!scope.ready || listQ.isLoading || boardQ.isLoading)
         && !scope.failed && !(listQ.isError || boardQ.isError) && (
-        <Card className="p-6 text-sm text-muted-foreground" aria-live="polite">
+        <DocsLoadingState>
           Собираем документы и текущие согласования…
-        </Card>
+        </DocsLoadingState>
       )}
 
       {scope.ready && listQ.isSuccess && boardQ.isSuccess && <>

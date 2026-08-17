@@ -45,7 +45,7 @@ from app.models import (
     DocBreakGlassAccess, DocCard,
     DocCase, DocEvent, DocKind, DocRelation, DocAcquaint, DocExchangeTarget,
     DocExport, DocInboxItem, DocLabelLink,
-    DocShareLink, UserSubstitution,
+    DocShareLink, DocSignatureEvidence, UserSubstitution,
     DocVersion, Organization, SourceFile, Task, TaskEvent, TaskLabel,
     TaskType, TaskView, TaskWorkItem, User, UserCompany,
 )
@@ -519,11 +519,31 @@ async def _can_doc(db: AsyncSession, cid: uuid.UUID, d: DocCard,
     if permission == "sign":
         deputies = (await doc_approvals.active_deputy_for(db, cid, d.signatory_id)
                     if d.signatory_id else [])
-        return bool(
+        if bool(
             (user.id == d.signatory_id or user.id in deputies)
             and await _action_policy_allows(
                 db, cid, rows, "sign", d.signatory_id)
-        )
+        ):
+            return True
+        sign_rows = list((await db.execute(select(DocApproval).where(
+            DocApproval.doc_id == d.id,
+            DocApproval.round == d.approval_round,
+            DocApproval.status == "pending",
+        ))).scalars().all())
+        for approval in sign_rows:
+            if doc_approvals.step_kind(approval) != "sign":
+                continue
+            is_assignee = user.id == approval.assignee_id
+            is_deputy = bool(
+                approval.assignee_id
+                and user.id in await doc_approvals.active_deputy_for(
+                    db, cid, approval.assignee_id)
+            )
+            if ((is_assignee or is_deputy)
+                    and await _action_policy_allows(
+                        db, cid, rows, "sign", approval.assignee_id)):
+                return True
+        return False
     if permission == "manage_acl":
         return granted or user.id in {d.author_id, d.responsible_id} or bool(
             membership and membership.role == "admin")
@@ -2019,6 +2039,33 @@ async def doc_action(
                 raise HTTPException(status.HTTP_409_CONFLICT,
                                     "Сначала завершите согласование текущей редакции")
             await _assert_signatory_identity(db, cid, d, current_user)
+            signature_snapshot, signature_hash = await doc_approvals._document_snapshot(db, d)
+            signed_at = datetime.now(timezone.utc)
+            db.add(DocSignatureEvidence(
+                company_id=cid,
+                doc_id=d.id,
+                method="internal_direct",
+                provider="Track",
+                signer_id=current_user.id,
+                signer_name=who,
+                represented_signer_id=(d.signatory_id
+                                       if d.signatory_id != current_user.id else None),
+                snapshot_sha256=signature_hash,
+                document_snapshot=signature_snapshot,
+                verification_status="verified",
+                verified_at=signed_at,
+                evidence={
+                    "action": "put_in_force",
+                    "identity_source": "authenticated_session",
+                    "note": (payload.note or "").strip() or None,
+                },
+                signed_at=signed_at,
+            ))
+            db.add(DocEvent(
+                doc_id=d.id, kind="sign", user_id=current_user.id,
+                actor_name=who, to_value="внутреннее подтверждение",
+                note=f"пакет {signature_hash[:12]}",
+            ))
         if payload.status == "archived" and d.case_id is None:
             raise HTTPException(status.HTTP_409_CONFLICT,
                                 "Перед передачей в архив поместите документ в дело")
@@ -2245,11 +2292,14 @@ async def approval_decide(
         raise HTTPException(status.HTTP_403_FORBIDDEN,
                             "Визу ставит тот, кому она адресована, "
                             "либо назначенный заместитель на время отсутствия")
+    decision_permission = doc_approvals.step_kind(row)
+    decision_permission = "sign" if decision_permission == "sign" else "approve"
     if not await _action_policy_allows(
-            db, cid, await _access_rows(db, cid, d), "approve", row.assignee_id):
+            db, cid, await _access_rows(db, cid, d),
+            decision_permission, row.assignee_id):
         raise HTTPException(status.HTTP_403_FORBIDDEN,
-                            "Назначенный согласующий не входит в допуск к визе")
-    await _assert_doc_permission(db, cid, d, current_user, "approve")
+                            "Назначенный участник не входит в допуск к этому шагу")
+    await _assert_doc_permission(db, cid, d, current_user, decision_permission)
     res = await doc_approvals.decide(
         db, cid, d, row, current_user, payload.approved, payload.comment,
         round_rows)
@@ -2282,14 +2332,23 @@ async def approvals_mine(
         doc_id: doc for doc_id, doc in docs.items()
         if await _can_doc(db, cid, doc, current_user, "read")
     }
+    rows = [
+        row for row in rows
+        if row.doc_id in docs and await _can_doc(
+            db, cid, docs[row.doc_id], current_user,
+            "sign" if doc_approvals.step_kind(row) == "sign" else "approve",
+            record_break_glass_use=False,
+        )
+    ]
     return {"approvals": [{
         "id": str(r.id), "doc_id": str(r.doc_id),
-        "step_name": r.step_name, "mode": r.mode,
+        "step_name": r.step_name, "step_kind": doc_approvals.step_kind(r),
+        "mode": r.mode,
         "acting_for": str(r.assignee_id) if r.assignee_id != current_user.id else None,
         "due_at": r.due_at.isoformat() if r.due_at else None,
         "doc_title": docs[r.doc_id].title if r.doc_id in docs else "",
         "doc_number": docs[r.doc_id].reg_number if r.doc_id in docs else None,
-    } for r in rows if r.doc_id in docs]}
+    } for r in rows]}
 
 
 # ── Номенклатура дел ─────────────────────────────────────────────────────────
@@ -4523,19 +4582,34 @@ async def get_doc(
     approvals = (await db.execute(select(DocApproval).where(
         DocApproval.doc_id == d.id).order_by(
         DocApproval.round.desc(), DocApproval.step_no))).scalars().all()
+    signatures = (await db.execute(select(DocSignatureEvidence).where(
+        DocSignatureEvidence.doc_id == d.id).order_by(
+        DocSignatureEvidence.signed_at.desc(),
+        DocSignatureEvidence.id.desc()))).scalars().all()
     live = [a for a in approvals if a.round == d.approval_round]
     snapshot = live[0].document_snapshot if live else None
     snapshot_sha256 = live[0].snapshot_sha256 if live else None
-    decidable = {
-        a.id for a in live
-        if a.status == "pending"
-        and await doc_approvals.may_decide(db, cid, a, current_user)
-    }
+    decidable = set()
+    for approval in live:
+        if approval.status != "pending":
+            continue
+        permission = "sign" if doc_approvals.step_kind(approval) == "sign" else "approve"
+        if (await doc_approvals.may_decide(db, cid, approval, current_user)
+                and await _can_doc(
+                    db, cid, d, current_user, permission,
+                    record_break_glass_use=False,
+                )):
+            decidable.add(approval.id)
     approval_user_ids = {
         user_id for a in approvals
         for user_id in (a.assignee_id, a.decided_by)
         if user_id is not None
     }
+    approval_user_ids.update(
+        signer_id for signature in signatures
+        for signer_id in (signature.signer_id, signature.represented_signer_id)
+        if signer_id is not None
+    )
     approval_people = {}
     if approval_user_ids:
         approval_people = {
@@ -4581,6 +4655,29 @@ async def get_doc(
         } for r in relations],
         "labels": [{"id": str(label.id), "name": label.name, "color": label.color}
                    for label in labels],
+        "signatures": [{
+            "id": str(signature.id),
+            "approval_id": (str(signature.approval_id)
+                            if signature.approval_id else None),
+            "method": signature.method,
+            "provider": signature.provider,
+            "external_id": signature.external_id,
+            "signer_id": str(signature.signer_id) if signature.signer_id else None,
+            "signer_name": signature.signer_name,
+            "represented_signer_id": (str(signature.represented_signer_id)
+                                      if signature.represented_signer_id else None),
+            "represented_signer_name": approval_people.get(
+                signature.represented_signer_id),
+            "snapshot_sha256": signature.snapshot_sha256,
+            "revision": ((signature.document_snapshot or {}).get("card") or {}).get(
+                "current_revision"),
+            "files_count": len((signature.document_snapshot or {}).get("files") or []),
+            "verification_status": signature.verification_status,
+            "verified_at": (signature.verified_at.isoformat()
+                            if signature.verified_at else None),
+            "verification_error": signature.verification_error,
+            "signed_at": signature.signed_at.isoformat(),
+        } for signature in signatures],
         # Лист ознакомления: приказ, с которым никого не ознакомили, не работает.
         "acquaints": [{
             "id": str(a.id), "user_id": str(a.user_id), "status": a.status,
@@ -4604,7 +4701,8 @@ async def get_doc(
             "steps": doc_approvals.progress(live),
             "rows": [{
                 "id": str(a.id), "round": a.round, "step_no": a.step_no,
-                "step_name": a.step_name, "status": a.status,
+                "step_name": a.step_name,
+                "step_kind": doc_approvals.step_kind(a), "status": a.status,
                 "assignee_id": str(a.assignee_id) if a.assignee_id else None,
                 "assignee_name": approval_people.get(a.assignee_id),
                 "decided_by_id": str(a.decided_by) if a.decided_by else None,

@@ -24,6 +24,7 @@ import * as tasksService from '@/services/tasksService'
 import { DOC_FAMILY } from '@/services/docsService'
 import { useDocsView } from './DocsLayout'
 import { DocKindEditor } from '@/components/docs/DocKindEditor'
+import { DocsErrorState, DocsLoadingState } from '@/components/docs/DocsQueryState'
 
 const SCOPE_LABEL: Record<string, string> = {
   kind: 'сквозная по виду',
@@ -57,10 +58,12 @@ export function DocsSetupPage() {
   const kinds = kindsQ.data ?? []
   const editingKind = editingKindId === 'new'
     ? undefined : kinds.find((kind) => kind.id === editingKindId)
+  const viewTitle = view === 'counters' ? 'Нумераторы' : 'Виды документов'
 
   if (!isCompanyAdmin) {
     return (
-      <div className="px-4 py-4">
+      <div className="space-y-3 px-4 py-4">
+        <h1 className="text-base font-semibold">Настройка Трека</h1>
         <Card className="p-5 text-sm text-muted-foreground">
           Настройку видов, нумераторов, обмена и замещений ведёт администратор пространства.
         </Card>
@@ -86,26 +89,22 @@ export function DocsSetupPage() {
 
   if ((view === 'kinds' || view === 'counters') && kindsQ.isLoading) {
     return (
-      <div className="px-4 py-4">
-        <Card className="p-6 text-sm text-muted-foreground" role="status" aria-live="polite">
+      <div className="space-y-3 px-4 py-4">
+        <h1 className="text-base font-semibold">{viewTitle}</h1>
+        <DocsLoadingState>
           Загружаем виды документов…
-        </Card>
+        </DocsLoadingState>
       </div>
     )
   }
 
   if ((view === 'kinds' || view === 'counters') && kindsQ.isError) {
     return (
-      <div className="px-4 py-4">
-        <Card role="alert" className="flex flex-wrap items-center justify-between gap-3 p-4">
-          <div>
-            <div className="text-sm font-medium">Виды документов не загрузились</div>
-            <div className="text-xs text-muted-foreground">
-              Справочник не заменён пустым списком. Нумерацию и виды пока нельзя менять.
-            </div>
-          </div>
-          <Button size="sm" variant="outline" onClick={() => kindsQ.refetch()}>Повторить</Button>
-        </Card>
+      <div className="space-y-3 px-4 py-4">
+        <h1 className="text-base font-semibold">{viewTitle}</h1>
+        <DocsErrorState error={kindsQ.error} title="Виды документов не загрузились"
+          detail="Справочник не заменён пустым списком. Нумерацию и виды пока нельзя менять."
+          onRetry={() => { void kindsQ.refetch() }} />
       </div>
     )
   }

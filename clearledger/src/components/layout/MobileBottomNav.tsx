@@ -101,6 +101,8 @@ export function MobileBottomNav() {
 
   return (
     <nav
+      aria-label={pathname === '/docs' || pathname.startsWith('/docs/')
+        ? 'Основные разделы Трека' : 'Основные разделы приложения'}
       className="fixed inset-x-0 bottom-0 z-50 md:hidden mobile-safe-bottom border-t bg-card"
       style={{ boxShadow: 'var(--shadow-medium)' }}
     >
@@ -112,7 +114,7 @@ export function MobileBottomNav() {
             end={item.path === '/'}
             className={({ isActive }) =>
               cn(
-                'relative flex flex-col items-center gap-0.5 px-2 py-1.5 rounded-lg text-[10px] font-medium transition-colors duration-200 min-w-[48px]',
+                'relative flex min-w-[48px] flex-col items-center gap-0.5 rounded-lg px-2 py-1.5 text-[10px] font-medium transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                 // Раздел продукта отличается от собрата только строкой запроса, а её
                 // NavLink в isActive не смотрит — сверяем сами.
                 (isActive && !item.path.includes('?')) || isCurrent(item.path, pathname, search)

@@ -10,7 +10,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { AlertCircle, FileDown, FolderSearch, RotateCw } from 'lucide-react'
+import { FileDown, FolderSearch } from 'lucide-react'
 import { toast } from 'sonner'
 import { useCompany } from '@/contexts/CompanyContext'
 import { Button } from '@/components/ui/button'
@@ -20,6 +20,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { ConfirmActionDialog } from '@/components/common/ConfirmActionDialog'
 import * as docsService from '@/services/docsService'
 import { openAuthAttachment } from '@/lib/authFiles'
+import { DocsErrorState, DocsLoadingState } from './DocsQueryState'
 
 export function DocsInboxPanel() {
   const { company } = useCompany()
@@ -92,34 +93,20 @@ export function DocsInboxPanel() {
         </Button>
       </div>
 
+      {itemsQ.isLoading && (
+        <DocsLoadingState>Загружаем очередь приёма…</DocsLoadingState>
+      )}
+
       {itemsQ.isError && (
-        <Card role="alert" className="flex flex-wrap items-center justify-between gap-3 border-destructive/30 p-4">
-          <div>
-            <div className="flex items-center gap-2 text-sm font-medium text-destructive">
-              <AlertCircle className="h-4 w-4" />Приём из СЭД недоступен
-            </div>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Не удалось получить список входящих файлов. Проверьте подключение и повторите запрос.
-            </p>
-          </div>
-          <Button size="sm" variant="outline" onClick={() => itemsQ.refetch()}>
-            <RotateCw className="mr-1.5 h-3.5 w-3.5" />Повторить
-          </Button>
-        </Card>
+        <DocsErrorState error={itemsQ.error} title="Приём из СЭД недоступен"
+          detail="Не удалось получить список входящих файлов. Проверьте подключение и повторите запрос."
+          onRetry={() => { void itemsQ.refetch() }} />
       )}
 
       {kindsQ.isError && !itemsQ.isError && (
-        <Card role="alert" className="flex flex-wrap items-center justify-between gap-3 border-destructive/30 p-4">
-          <div>
-            <div className="flex items-center gap-2 text-sm font-medium text-destructive">
-              <AlertCircle className="h-4 w-4" />Виды документов не загрузились
-            </div>
-            <p className="mt-1 text-xs text-muted-foreground">Принятие заблокировано до повторной загрузки.</p>
-          </div>
-          <Button size="sm" variant="outline" onClick={() => kindsQ.refetch()}>
-            <RotateCw className="mr-1.5 h-3.5 w-3.5" />Повторить
-          </Button>
-        </Card>
+        <DocsErrorState error={kindsQ.error} title="Виды документов не загрузились"
+          detail="Принятие заблокировано до повторной загрузки."
+          onRetry={() => { void kindsQ.refetch() }} />
       )}
       {kindsQ.isSuccess && incomingKinds.length === 0 && !itemsQ.isError && (
         <Card role="status" className="border-amber-500/30 p-4 text-sm text-muted-foreground">
@@ -127,7 +114,7 @@ export function DocsInboxPanel() {
         </Card>
       )}
 
-      {!itemsQ.isError && <Card className="divide-y divide-border/60">
+      {itemsQ.isSuccess && <Card className="divide-y divide-border/60">
         {items.map((it) => (
           <div key={it.id} className="space-y-2 px-3 py-2.5">
             <div className="flex flex-wrap items-start justify-between gap-2">
