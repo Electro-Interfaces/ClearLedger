@@ -5,10 +5,12 @@
  * живут в адресе. На широком экране карточка открывается рядом с реестром:
  * пользователь не теряет очередь и может последовательно разбирать документы.
  */
-import { useDeferredValue, useMemo, useState } from 'react'
+import { useDeferredValue, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { FilePlus2, RotateCw, Search, SlidersHorizontal, X } from 'lucide-react'
+import {
+  ChevronLeft, ChevronRight, FilePlus2, RotateCw, Search, SlidersHorizontal, X,
+} from 'lucide-react'
 import { useCompany } from '@/contexts/CompanyContext'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -30,6 +32,7 @@ const VIEW_FILTER: Record<string, docsService.DocFilters> = {
 }
 
 const FILTER_KEYS = ['q', 'status', 'kind', 'date_from', 'date_to'] as const
+const PAGE_SIZE = 100
 
 export function DocsRegistryPage() {
   const { company } = useCompany()
@@ -46,6 +49,8 @@ export function DocsRegistryPage() {
   const kindFilter = params.get('kind') ?? ''
   const dateFrom = params.get('date_from') ?? ''
   const dateTo = params.get('date_to') ?? ''
+  const pageValue = Number(params.get('page'))
+  const page = Number.isSafeInteger(pageValue) && pageValue >= 1 ? pageValue : 1
   const hasFilters = FILTER_KEYS.some((key) => params.has(key))
   const filters = useMemo(() => ({
     ...(VIEW_FILTER[view] ?? {}),
@@ -54,7 +59,9 @@ export function DocsRegistryPage() {
     kind_id: kindFilter || undefined,
     date_from: dateFrom || undefined,
     date_to: dateTo || undefined,
-  }), [dateFrom, dateTo, deferredQ, kindFilter, statusFilter, view])
+    limit: PAGE_SIZE,
+    offset: (page - 1) * PAGE_SIZE,
+  }), [dateFrom, dateTo, deferredQ, kindFilter, page, statusFilter, view])
 
   const listQ = useQuery({
     queryKey: ['docs', companyId, view, filters],
@@ -81,11 +88,20 @@ export function DocsRegistryPage() {
     const next = new URLSearchParams(current)
     if (value) next.set(key, value)
     else next.delete(key)
+    next.delete('page')
     return next
   }, { replace: true })
   const clearFilters = () => setParams((current) => {
     const next = new URLSearchParams(current)
     FILTER_KEYS.forEach((key) => next.delete(key))
+    next.delete('page')
+    return next
+  }, { replace: true })
+  const setPage = (value: number) => setParams((current) => {
+    const next = new URLSearchParams(current)
+    if (value > 1) next.set('page', String(value))
+    else next.delete('page')
+    next.delete('doc')
     return next
   }, { replace: true })
   const open = (id: string) => setParams((current) => {
@@ -99,9 +115,23 @@ export function DocsRegistryPage() {
     return next
   }, { replace: true })
 
+  const docs = listQ.data?.docs ?? []
+  const total = listQ.data?.count ?? 0
+  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+
+  useEffect(() => {
+    if (!listQ.isSuccess || page <= pages) return
+    setParams((current) => {
+      const next = new URLSearchParams(current)
+      if (pages > 1) next.set('page', String(pages))
+      else next.delete('page')
+      next.delete('doc')
+      return next
+    }, { replace: true })
+  }, [listQ.isSuccess, page, pages, setParams])
+
   if (!companyId) return null
 
-  const docs = listQ.data?.docs ?? []
   const kinds = kindsQ.data ?? []
   const noKinds = kindsQ.isSuccess && kinds.length === 0
   const title = DOC_FAMILY[VIEW_FILTER[view]?.family ?? ''] ?? 'Все документы'
@@ -209,7 +239,7 @@ export function DocsRegistryPage() {
           <div>
             <h1 className="text-base font-semibold">{title}</h1>
             <p className="text-xs text-muted-foreground">
-              {listQ.isLoading ? 'Загрузка…' : `Показано: ${listQ.data?.count ?? docs.length}`}
+              {listQ.isLoading ? 'Загрузка…' : `Найдено: ${total}`}
             </p>
           </div>
           <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto">
@@ -304,6 +334,24 @@ export function DocsRegistryPage() {
             </section>
           )}
         </div>
+
+        {listQ.isSuccess && total > PAGE_SIZE && !openId && (
+          <nav aria-label="Страницы реестра"
+            className="flex items-center justify-end gap-2 text-xs text-muted-foreground">
+            <span>
+              {Math.min((page - 1) * PAGE_SIZE + 1, total)}–{Math.min(page * PAGE_SIZE, total)} из {total}
+            </span>
+            <Button size="icon" variant="outline" aria-label="Предыдущая страница"
+              disabled={page <= 1} onClick={() => setPage(page - 1)}>
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <span className="min-w-12 text-center">{page} / {pages}</span>
+            <Button size="icon" variant="outline" aria-label="Следующая страница"
+              disabled={page >= pages} onClick={() => setPage(page + 1)}>
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </nav>
+        )}
 
         {creating && (
           <NewDocDialog companyId={companyId} kinds={kinds}

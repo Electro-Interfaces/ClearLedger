@@ -216,6 +216,7 @@ export interface Substitution {
 export interface DocDetails extends DocCard {
   kind: DocKind | null
   available_actions: string[]
+  can_manage_access: boolean
   versions: DocVersion[]
   events: DocEvent[]
   relations: DocRelation[]
@@ -312,6 +313,16 @@ export async function listAccessGrants(
     company_id: companyId, doc_id: docId,
   })
   return result.grants ?? []
+}
+
+export async function listAccessSubjects(
+  companyId: string, docId: string,
+): Promise<{
+  people: Array<{ id: string; name: string }>
+  roles: Array<{ id: string; name: string }>
+  departments: Array<{ id: string; name: string }>
+}> {
+  return get('/api/docs/access/subjects', { company_id: companyId, doc_id: docId })
 }
 
 export async function saveAccessGrant(companyId: string, body: {

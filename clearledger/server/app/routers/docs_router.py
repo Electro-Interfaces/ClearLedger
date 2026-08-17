@@ -217,6 +217,17 @@ async def _organization_id(db: AsyncSession, cid: uuid.UUID,
     return organization_id
 
 
+async def _company_user_id(db: AsyncSession, cid: uuid.UUID,
+                           value: str | None, field: str) -> uuid.UUID | None:
+    if not value:
+        return None
+    user_id = _uuid_or_400(value, field)
+    if await db.get(UserCompany, (user_id, cid)) is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Сотрудник не принадлежит выбранной компании")
+    return user_id
+
+
 def _visible(d: DocCard, user: User) -> bool:
     """Базовая видимость до правил карточки и рабочих назначений."""
     if d.confidentiality != "private":
@@ -243,10 +254,29 @@ async def _subject_ids(db: AsyncSession, cid: uuid.UUID,
     }
 
 
+async def _action_policy_allows(db: AsyncSession, cid: uuid.UUID,
+                                rows: list[DocAccessGrant], action: str,
+                                principal_id: uuid.UUID | None) -> bool:
+    policies = [row for row in rows if action in (row.permissions or [])]
+    if not policies:
+        return True
+    if principal_id is None:
+        return False
+    membership = await db.get(UserCompany, (principal_id, cid))
+    subjects = {
+        "user": principal_id,
+        "role": membership.role_id if membership else None,
+        "department": membership.department_id if membership else None,
+    }
+    return any(subjects.get(row.subject_type) == row.subject_id for row in policies)
+
+
 async def _can_doc(db: AsyncSession, cid: uuid.UUID, d: DocCard,
                    user: User, permission: str) -> bool:
     if user.is_superadmin:
         return True
+    if permission != "read" and not await _can_doc(db, cid, d, user, "read"):
+        return False
     rows = await _access_rows(db, cid, d)
     subjects = await _subject_ids(db, cid, user)
 
@@ -254,7 +284,7 @@ async def _can_doc(db: AsyncSession, cid: uuid.UUID, d: DocCard,
         return subjects.get(row.subject_type) == row.subject_id
 
     if permission == "read":
-        inherited = {"read", "edit", "approve", "sign"}
+        inherited = {"read", "edit"}
         if _visible(d, user) or any(
                 matches(row) and inherited.intersection(row.permissions or []) for row in rows):
             return True
@@ -271,11 +301,16 @@ async def _can_doc(db: AsyncSession, cid: uuid.UUID, d: DocCard,
         if assigned:
             return True
         principals = await doc_approvals.active_principals_for(db, cid, user.id)
+        if (d.signatory_id in principals
+                and d.status in ("draft", "registered")):
+            return True
         if not principals:
             return False
         deputy_assignment = await db.scalar(select(DocApproval.id).where(
             DocApproval.doc_id == d.id,
             DocApproval.assignee_id.in_(principals),
+            DocApproval.round == d.approval_round,
+            DocApproval.status == "pending",
         ).limit(1))
         return deputy_assignment is not None
 
@@ -283,24 +318,30 @@ async def _can_doc(db: AsyncSession, cid: uuid.UUID, d: DocCard,
     membership = await db.get(UserCompany, (user.id, cid))
     if permission == "edit":
         return granted or user.id in {d.author_id, d.responsible_id} or bool(
-            membership and membership.role == "admin")
+            d.confidentiality != "private"
+            and membership and membership.role == "admin")
     if permission == "approve":
         assignees = (await db.execute(select(DocApproval.assignee_id).where(
             DocApproval.doc_id == d.id,
             DocApproval.status == "pending",
         ))).scalars().all()
-        if granted or user.id in assignees:
-            return True
         for assignee_id in {item for item in assignees if item}:
-            if user.id in await doc_approvals.active_deputy_for(db, cid, assignee_id):
+            is_assignee = user.id == assignee_id
+            is_deputy = user.id in await doc_approvals.active_deputy_for(
+                db, cid, assignee_id)
+            if ((is_assignee or is_deputy)
+                    and await _action_policy_allows(
+                        db, cid, rows, "approve", assignee_id)):
                 return True
         return False
     if permission == "sign":
-        if user.id == d.signatory_id:
-            return True
         deputies = (await doc_approvals.active_deputy_for(db, cid, d.signatory_id)
                     if d.signatory_id else [])
-        return granted or user.id in deputies
+        return bool(
+            (user.id == d.signatory_id or user.id in deputies)
+            and await _action_policy_allows(
+                db, cid, rows, "sign", d.signatory_id)
+        )
     return granted
 
 
@@ -309,6 +350,59 @@ async def _assert_doc_permission(db: AsyncSession, cid: uuid.UUID, d: DocCard,
     if not await _can_doc(db, cid, d, user, permission):
         message = "Документ закрыт" if permission == "read" else "Недостаточно прав на документ"
         raise HTTPException(status.HTTP_403_FORBIDDEN, message)
+
+
+async def _can_manage_doc_access(db: AsyncSession, cid: uuid.UUID, d: DocCard,
+                                 user: User) -> bool:
+    if user.is_superadmin or user.id in {d.author_id, d.responsible_id}:
+        return True
+    membership = await db.get(UserCompany, (user.id, cid))
+    return bool(membership and membership.role == "admin")
+
+
+async def _assert_manage_doc_access(db: AsyncSession, cid: uuid.UUID, d: DocCard,
+                                    user: User) -> None:
+    if not await _can_manage_doc_access(db, cid, d, user):
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Права карточки меняет её владелец или администратор пространства")
+
+
+async def _can_process_inbox(db: AsyncSession, cid: uuid.UUID, user: User) -> bool:
+    if user.is_superadmin:
+        return True
+    membership = await db.get(UserCompany, (user.id, cid))
+    if membership is not None and membership.role == "admin":
+        return True
+    subjects = await _subject_ids(db, cid, user)
+    subject_filters = [
+        and_(DocAccessGrant.subject_type == subject_type,
+             DocAccessGrant.subject_id == subject_id)
+        for subject_type, subject_id in subjects.items() if subject_id
+    ]
+    if not subject_filters:
+        return False
+    grant = await db.scalar(select(DocAccessGrant.id).join(
+        DocKind,
+        and_(DocAccessGrant.scope_type == "kind",
+             DocAccessGrant.scope_id == DocKind.id),
+    ).where(
+        DocAccessGrant.company_id == cid,
+        DocKind.company_id == cid,
+        DocKind.family == "incoming",
+        DocKind.is_active.is_(True),
+        or_(*subject_filters),
+        DocAccessGrant.permissions.contains(["edit"]),
+    ).limit(1))
+    return grant is not None
+
+
+async def _assert_process_inbox(db: AsyncSession, cid: uuid.UUID, user: User) -> None:
+    if not await _can_process_inbox(db, cid, user):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Приём из СЭД доступен администратору или делопроизводителю "
+            "с правом правки входящего вида",
+        )
 
 
 async def _available_actions(db: AsyncSession, cid: uuid.UUID, d: DocCard,
@@ -361,7 +455,7 @@ async def _readable_docs(db: AsyncSession, cid: uuid.UUID, rows: list[DocCard],
             (DocAccessGrant.scope_type == "kind")
             & DocAccessGrant.scope_id.in_([d.kind_id for d in hidden]),
         )))).scalars().all()
-    inherited = {"read", "edit", "approve", "sign"}
+    inherited = {"read", "edit"}
     matching = [g for g in grants if subjects.get(g.subject_type) == g.subject_id
                 and inherited.intersection(g.permissions or [])]
     doc_scopes = {g.scope_id for g in matching if g.scope_type == "doc"}
@@ -369,12 +463,23 @@ async def _readable_docs(db: AsyncSession, cid: uuid.UUID, rows: list[DocCard],
     visible.update(d.id for d in hidden
                    if d.id in doc_scopes or d.kind_id in kind_scopes)
     principals = await doc_approvals.active_principals_for(db, cid, user.id)
-    assignee_ids = [user.id, *principals]
     assigned = set((await db.execute(select(DocApproval.doc_id).where(
         DocApproval.company_id == cid,
         DocApproval.doc_id.in_([d.id for d in hidden]),
-        DocApproval.assignee_id.in_(assignee_ids),
+        DocApproval.assignee_id == user.id,
     ))).scalars().all())
+    if principals:
+        visible.update(d.id for d in hidden
+                       if d.signatory_id in principals
+                       and d.status in ("draft", "registered"))
+        assigned.update((await db.execute(select(DocApproval.doc_id).join(
+            DocCard, DocCard.id == DocApproval.doc_id).where(
+            DocApproval.company_id == cid,
+            DocApproval.doc_id.in_([d.id for d in hidden]),
+            DocApproval.assignee_id.in_(principals),
+            DocApproval.round == DocCard.approval_round,
+            DocApproval.status == "pending",
+        ))).scalars().all())
     assigned.update((await db.execute(select(DocAcquaint.doc_id).where(
         DocAcquaint.company_id == cid,
         DocAcquaint.doc_id.in_([d.id for d in hidden]),
@@ -395,21 +500,8 @@ async def _readable_doc_clause(
              DocAccessGrant.subject_id == subject_id)
         for subject_type, subject_id in subjects.items() if subject_id
     ]
-    grants = (await db.execute(select(DocAccessGrant).where(
-        DocAccessGrant.company_id == cid,
-        or_(*subject_filters),
-    ))).scalars().all() if subject_filters else []
-    inherited = {"read", "edit", "approve", "sign"}
-    doc_scopes = {
-        grant.scope_id for grant in grants
-        if grant.scope_type == "doc" and inherited.intersection(grant.permissions or [])
-    }
-    kind_scopes = {
-        grant.scope_id for grant in grants
-        if grant.scope_type == "kind" and inherited.intersection(grant.permissions or [])
-    }
+    inherited = {"read", "edit"}
     principals = await doc_approvals.active_principals_for(db, cid, user.id)
-    assignee_ids = [user.id, *principals]
     clauses = [
         DocCard.confidentiality != "private",
         DocCard.author_id == user.id,
@@ -418,7 +510,7 @@ async def _readable_doc_clause(
         select(DocApproval.id).where(
             DocApproval.company_id == cid,
             DocApproval.doc_id == DocCard.id,
-            DocApproval.assignee_id.in_(assignee_ids),
+            DocApproval.assignee_id == user.id,
         ).correlate(DocCard).exists(),
         select(DocAcquaint.id).where(
             DocAcquaint.company_id == cid,
@@ -426,10 +518,33 @@ async def _readable_doc_clause(
             DocAcquaint.user_id == user.id,
         ).correlate(DocCard).exists(),
     ]
-    if doc_scopes:
-        clauses.append(DocCard.id.in_(doc_scopes))
-    if kind_scopes:
-        clauses.append(DocCard.kind_id.in_(kind_scopes))
+    if principals:
+        clauses.append(and_(
+            DocCard.signatory_id.in_(principals),
+            DocCard.status.in_(("draft", "registered")),
+        ))
+        clauses.append(select(DocApproval.id).where(
+            DocApproval.company_id == cid,
+            DocApproval.doc_id == DocCard.id,
+            DocApproval.assignee_id.in_(principals),
+            DocApproval.round == DocCard.approval_round,
+            DocApproval.status == "pending",
+        ).correlate(DocCard).exists())
+    if subject_filters:
+        clauses.append(select(DocAccessGrant.id).where(
+            DocAccessGrant.company_id == cid,
+            or_(*subject_filters),
+            or_(*[
+                DocAccessGrant.permissions.contains([permission])
+                for permission in inherited
+            ]),
+            or_(
+                and_(DocAccessGrant.scope_type == "doc",
+                     DocAccessGrant.scope_id == DocCard.id),
+                and_(DocAccessGrant.scope_type == "kind",
+                     DocAccessGrant.scope_id == DocCard.kind_id),
+            ),
+        ).correlate(DocCard).exists())
     return or_(*clauses)
 
 
@@ -664,11 +779,16 @@ async def list_access_grants(
 ):
     cid = await assert_company_product(company_id, current_user, db, "docs")
     scopes: list[tuple[str, uuid.UUID]] = []
+    can_manage = False
     if doc_id:
         doc = await _doc_or_404(db, cid, doc_id)
-        await _assert_doc_permission(db, cid, doc, current_user, "read")
+        can_manage = await _can_manage_doc_access(db, cid, doc, current_user)
+        if not can_manage:
+            await _assert_doc_permission(db, cid, doc, current_user, "read")
         scopes.extend((("doc", doc.id), ("kind", doc.kind_id)))
     elif kind_id:
+        await _assert_admin(db, cid, current_user,
+                            "Правила вида доступны администратору пространства")
         kind = await _kind_or_404(db, cid, kind_id)
         scopes.append(("kind", kind.id))
     else:
@@ -679,6 +799,10 @@ async def list_access_grants(
         or_(*[(DocAccessGrant.scope_type == scope_type)
               & (DocAccessGrant.scope_id == scope_id)
               for scope_type, scope_id in scopes])))).scalars().all()
+    if not can_manage:
+        subjects = await _subject_ids(db, cid, current_user)
+        rows = [row for row in rows
+                if subjects.get(row.subject_type) == row.subject_id]
     names: dict[tuple[str, uuid.UUID], str] = {}
     for subject_type, model in (("user", User), ("role", CompanyRole),
                                 ("department", Department)):
@@ -696,6 +820,33 @@ async def list_access_grants(
     } for row in rows]}
 
 
+@router.get("/access/subjects")
+async def list_access_subjects(
+    company_id: str = Query(...),
+    doc_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cid = await assert_company_product(company_id, current_user, db, "docs")
+    doc = await _doc_or_404(db, cid, doc_id)
+    await _assert_manage_doc_access(db, cid, doc, current_user)
+    people = (await db.execute(select(User.id, User.name, User.email).join(
+        UserCompany, UserCompany.user_id == User.id,
+    ).where(UserCompany.company_id == cid).order_by(
+        User.name.asc().nullslast(), User.email))).all()
+    roles = (await db.execute(select(CompanyRole.id, CompanyRole.name).where(
+        CompanyRole.company_id == cid).order_by(CompanyRole.name))).all()
+    departments = (await db.execute(select(Department.id, Department.name).where(
+        Department.company_id == cid).order_by(Department.name))).all()
+    return {
+        "people": [{"id": str(row.id), "name": row.name or row.email}
+                   for row in people],
+        "roles": [{"id": str(row.id), "name": row.name} for row in roles],
+        "departments": [{"id": str(row.id), "name": row.name}
+                        for row in departments],
+    }
+
+
 @router.post("/access", status_code=status.HTTP_201_CREATED)
 async def save_access_grant(
     payload: AccessGrantIn,
@@ -703,10 +854,21 @@ async def save_access_grant(
     current_user: User = Depends(get_current_user),
 ):
     cid = await assert_company_product(payload.company_id, current_user, db, "docs")
-    await _assert_admin(db, cid, current_user)
+    if payload.scope_type == "doc":
+        doc = await _doc_or_404(db, cid, payload.scope_id)
+        await _assert_manage_doc_access(db, cid, doc, current_user)
+    else:
+        await _assert_admin(db, cid, current_user,
+                            "Правила вида меняет администратор пространства")
     scope_id, subject_id = await _check_access_refs(db, cid, payload)
     allowed = {"read", "edit", "approve", "sign"}
-    permissions = [value for value in dict.fromkeys(payload.permissions) if value in allowed]
+    unknown = set(payload.permissions) - allowed
+    if unknown:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Неизвестное право доступа",
+        )
+    permissions = list(dict.fromkeys(payload.permissions))
     if not permissions:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Не выбрано ни одного права")
     row = (await db.execute(select(DocAccessGrant).where(
@@ -721,7 +883,24 @@ async def save_access_grant(
             subject_type=payload.subject_type, subject_id=subject_id,
             created_by=current_user.id)
         db.add(row)
+    previous = list(row.permissions or [])
     row.permissions = permissions
+    await log_audit(
+        db, actor=current_user, company_id=cid, action="doc.access.save",
+        target=f"{payload.scope_type}:{scope_id}",
+        details={
+            "subject_type": payload.subject_type, "subject_id": str(subject_id),
+            "before": previous, "after": permissions,
+        },
+    )
+    if payload.scope_type == "doc":
+        db.add(DocEvent(
+            doc_id=scope_id, kind="access", user_id=current_user.id,
+            actor_name=current_user.name or current_user.email,
+            from_value=", ".join(previous) or None,
+            to_value=", ".join(permissions),
+            note=f"{payload.subject_type}:{subject_id}",
+        ))
     await db.commit()
     await db.refresh(row)
     return {"id": str(row.id), "permissions": row.permissions}
@@ -735,11 +914,31 @@ async def delete_access_grant(
     current_user: User = Depends(get_current_user),
 ):
     cid = await assert_company_product(company_id, current_user, db, "docs")
-    await _assert_admin(db, cid, current_user)
     row = (await db.execute(select(DocAccessGrant).where(
         DocAccessGrant.company_id == cid,
         DocAccessGrant.id == _uuid_or_400(grant_id, "grant_id")))).scalar_one_or_none()
     if row is not None:
+        if row.scope_type == "doc":
+            doc = await _doc_or_404(db, cid, row.scope_id)
+            await _assert_manage_doc_access(db, cid, doc, current_user)
+        else:
+            await _assert_admin(db, cid, current_user,
+                                "Правила вида меняет администратор пространства")
+        await log_audit(
+            db, actor=current_user, company_id=cid, action="doc.access.delete",
+            target=f"{row.scope_type}:{row.scope_id}",
+            details={
+                "subject_type": row.subject_type, "subject_id": str(row.subject_id),
+                "permissions": list(row.permissions or []),
+            },
+        )
+        if row.scope_type == "doc":
+            db.add(DocEvent(
+                doc_id=row.scope_id, kind="access", user_id=current_user.id,
+                actor_name=current_user.name or current_user.email,
+                from_value=", ".join(row.permissions or []), to_value=None,
+                note=f"{row.subject_type}:{row.subject_id}",
+            ))
         await db.delete(row)
         await db.commit()
     return {"deleted": row is not None}
@@ -849,17 +1048,19 @@ async def list_docs(
                               DocCard.external_number.ilike(like),
                               DocCard.counterparty_name.ilike(like),
                               version_match))
+    stmt = stmt.where(await _readable_doc_clause(db, cid, current_user))
+    total = await db.scalar(select(func.count()).select_from(stmt.subquery()))
     stmt = stmt.order_by(DocCard.reg_date.desc().nullslast(),
                          DocCard.created_at.desc()).offset(offset).limit(limit)
-    rows = await _readable_docs(db, cid, (await db.execute(stmt)).scalars().all(),
-                                current_user)
+    rows = (await db.execute(stmt)).scalars().all()
     names = dict((await db.execute(select(DocKind.id, DocKind.name).where(
         DocKind.company_id == cid))).all())
     names = {str(k): v for k, v in names.items()}
     organizations = {str(key): value for key, value in (await db.execute(select(
         Organization.id, Organization.name).where(
         Organization.company_id == cid))).all()}
-    return {"docs": [_card_out(d, names, organizations) for d in rows], "count": len(rows)}
+    return {"docs": [_card_out(d, names, organizations) for d in rows],
+            "count": total or 0}
 
 
 # ── Карточка ─────────────────────────────────────────────────────────────────
@@ -917,10 +1118,10 @@ async def create_doc(
         # Ключ объекта сети строковый, приводить его к UUID нельзя.
         object_id=payload.object_id or None,
         author_id=current_user.id,
-        responsible_id=_uuid_or_400(payload.responsible_id, "responsible_id")
-        if payload.responsible_id else None,
-        signatory_id=_uuid_or_400(payload.signatory_id, "signatory_id")
-        if payload.signatory_id else None,
+        responsible_id=await _company_user_id(
+            db, cid, payload.responsible_id, "responsible_id"),
+        signatory_id=await _company_user_id(
+            db, cid, payload.signatory_id, "signatory_id"),
         due_at=payload.due_at, confidentiality=payload.confidentiality,
         attrs=attrs or None, source=payload.source, source_ref=payload.source_ref)
     db.add(d)
@@ -1081,13 +1282,16 @@ async def _assert_signatory_identity(db: AsyncSession, cid: uuid.UUID,
     if d.signatory_id is None:
         raise HTTPException(status.HTTP_409_CONFLICT,
                             "Назначьте подписанта документа")
-    if user.id == d.signatory_id:
-        return
-    deputies = await doc_approvals.active_deputy_for(db, cid, d.signatory_id)
-    if user.id not in deputies:
+    deputies = (await doc_approvals.active_deputy_for(db, cid, d.signatory_id)
+                if user.id != d.signatory_id else [])
+    if user.id != d.signatory_id and user.id not in deputies:
         raise HTTPException(status.HTTP_403_FORBIDDEN,
                             "Ввести документ в действие может только назначенный "
                             "подписант или его действующий заместитель")
+    if not await _action_policy_allows(
+            db, cid, await _access_rows(db, cid, d), "sign", d.signatory_id):
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Назначенный подписант не входит в допуск к подписанию")
 
 
 def _material_action_fields(payload: ActionIn) -> set[str]:
@@ -1111,6 +1315,9 @@ async def doc_action(
         await _assert_doc_permission(db, cid, d, current_user, "sign")
     else:
         await _assert_doc_permission(db, cid, d, current_user, "edit")
+    if (payload.confidentiality is not None
+            and payload.confidentiality != d.confidentiality):
+        await _assert_manage_doc_access(db, cid, d, current_user)
     if payload.status and material_fields:
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             "Смена состояния и правка реквизитов выполняются отдельно")
@@ -1176,9 +1383,13 @@ async def doc_action(
                        ("counterparty_id", payload.counterparty_id)):
         if raw is None:
             continue
-        value = _uuid_or_400(raw, field) if raw else None
+        value = (await _company_user_id(db, cid, raw, field)
+                 if field in {"responsible_id", "signatory_id"}
+                 else _uuid_or_400(raw, field) if raw else None)
         if getattr(d, field) == value:
             continue
+        if field in {"responsible_id", "signatory_id"}:
+            await _assert_manage_doc_access(db, cid, d, current_user)
         setattr(d, field, value)
         changed_material = True
         db.add(DocEvent(doc_id=d.id, kind="field", user_id=current_user.id,
@@ -1331,6 +1542,10 @@ async def approval_decide(
                             "Визу ставит тот, кому она адресована, "
                             "либо назначенный заместитель на время отсутствия")
     d = await _doc_or_404(db, cid, row.doc_id)
+    if not await _action_policy_allows(
+            db, cid, await _access_rows(db, cid, d), "approve", row.assignee_id):
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Назначенный согласующий не входит в допуск к визе")
     await _assert_doc_permission(db, cid, d, current_user, "approve")
     res = await doc_approvals.decide(db, cid, d, row, current_user,
                                      payload.approved, payload.comment)
@@ -1537,7 +1752,7 @@ async def list_shares(
 ):
     cid = await assert_company_product(company_id, current_user, db, "docs")
     d = await _doc_or_404(db, cid, doc_id)
-    await _assert_doc_permission(db, cid, d, current_user, "read")
+    await _assert_doc_permission(db, cid, d, current_user, "edit")
     rows = (await db.execute(select(DocShareLink).where(
         DocShareLink.doc_id == d.id).order_by(
         DocShareLink.created_at.desc()))).scalars().all()
@@ -2516,6 +2731,7 @@ async def scan_targets(
     кандидатом, решение о заведении карточки принимает человек.
     """
     cid = await assert_company_product(company_id, current_user, db, "docs")
+    await _assert_process_inbox(db, cid, current_user)
     stmt = select(DocExchangeTarget).where(
         DocExchangeTarget.company_id == cid,
         DocExchangeTarget.is_active.is_(True))
@@ -2544,9 +2760,16 @@ async def list_inbox(
     current_user: User = Depends(get_current_user),
 ):
     cid = await assert_company_product(company_id, current_user, db, "docs")
+    await _assert_process_inbox(db, cid, current_user)
     stmt = select(DocInboxItem).where(DocInboxItem.company_id == cid)
     if status_ != "all":
         stmt = stmt.where(DocInboxItem.status == status_)
+    readable_ids = select(DocCard.id).where(
+        DocCard.company_id == cid,
+        await _readable_doc_clause(db, cid, current_user),
+    )
+    stmt = stmt.where(or_(DocInboxItem.doc_id.is_(None),
+                          DocInboxItem.doc_id.in_(readable_ids)))
     rows = (await db.execute(stmt.order_by(
         DocInboxItem.found_at.desc()).limit(_LIST_LIMIT))).scalars().all()
     names = {str(t.id): t.name for t in (await db.execute(select(DocExchangeTarget).where(
@@ -2584,6 +2807,7 @@ async def decide_inbox(
     управляет.
     """
     cid = await assert_company_product(payload.company_id, current_user, db, "docs")
+    await _assert_process_inbox(db, cid, current_user)
     item = (await db.execute(select(DocInboxItem).where(
         DocInboxItem.company_id == cid,
         DocInboxItem.id == _uuid_or_400(item_id, "item_id")))).scalar_one_or_none()
@@ -2603,6 +2827,9 @@ async def decide_inbox(
 
     parsed = item.parsed or {}
     kind = await _kind_or_404(db, cid, payload.kind_id) if payload.kind_id else None
+    if kind is not None and (kind.family != "incoming" or not kind.is_active):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Для приёма нужен активный входящий вид документа")
     if kind is None:
         kind = (await db.execute(select(DocKind).where(
             DocKind.company_id == cid, DocKind.family == "incoming",
@@ -2915,6 +3142,7 @@ async def get_doc(
     return {
         **_card_out(d, {str(kind.id): kind.name} if kind else None,
                     {str(organization.id): organization.name} if organization else None),
+        "can_manage_access": await _can_manage_doc_access(db, cid, d, current_user),
         "kind": _kind_out(kind) if kind else None,
         "available_actions": await _available_actions(db, cid, d, kind, current_user),
         "versions": [{
@@ -3196,6 +3424,8 @@ async def add_relation(
     target_doc = None
     if payload.target_ref.startswith("doc:"):
         target_doc = _uuid_or_400(payload.target_ref.split(":", 1)[1], "target_ref")
+        target = await _doc_or_404(db, cid, target_doc)
+        await _assert_doc_permission(db, cid, target, current_user, "read")
     dup = (await db.execute(select(DocRelation.id).where(
         DocRelation.company_id == cid, DocRelation.doc_id == d.id,
         DocRelation.kind == payload.kind,
@@ -3225,10 +3455,23 @@ async def authorize_docs_file_download(db: AsyncSession, user: User,
     """
     rows = (await db.execute(select(DocVersion.doc_id).where(
         DocVersion.file_id == file_id))).scalars().all()
-    if not rows:
+    if rows:
+        docs = (await db.execute(select(DocCard).where(
+            DocCard.id.in_(set(rows))))).scalars().all()
+        if any([await _can_doc(db, d.company_id, d, user, "read") for d in docs]):
+            return
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Не найдено")
+
+    inbox = (await db.execute(select(DocInboxItem).where(
+        DocInboxItem.file_id == file_id))).scalars().all()
+    if not inbox:
         return
-    docs = (await db.execute(select(DocCard).where(
-        DocCard.id.in_(set(rows))))).scalars().all()
-    if any([await _can_doc(db, d.company_id, d, user, "read") for d in docs]):
-        return
+    for item in inbox:
+        if item.doc_id:
+            doc = await db.get(DocCard, item.doc_id)
+            if doc is not None and await _can_doc(
+                    db, item.company_id, doc, user, "read"):
+                return
+        elif await _can_process_inbox(db, item.company_id, user):
+            return
     raise HTTPException(status.HTTP_404_NOT_FOUND, "Не найдено")

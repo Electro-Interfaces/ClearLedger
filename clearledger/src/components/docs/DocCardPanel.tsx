@@ -40,6 +40,7 @@ const EVENT_LABEL: Record<string, string> = {
   dispatch: 'отправка',
   errand: 'поручение',
   relation: 'связь',
+  access: 'права доступа',
   comment: 'реплика',
   mail: 'письмо',
 }
@@ -206,7 +207,7 @@ export function DocCardPanel({ id, companyId, onBack, onChanged }: {
   const canChangeFiles = editable && !approvalLocked && ['draft', 'registered'].includes(d.status)
   const headerActions = (
     <>
-      {registered && (
+      {registered && editable && (
         <Button size="sm" onClick={() => setActiveTab('send')}>
           <Send className="mr-1.5 h-4 w-4" />Отправка
         </Button>
@@ -416,7 +417,8 @@ export function DocCardPanel({ id, companyId, onBack, onChanged }: {
                   && act.mutate({ external_date: event.target.value || null })} />}
             </Field>
             <Field label="Доступ">
-              {(controlId) => <select id={controlId} value={d.confidentiality} disabled={!editable}
+              {(controlId) => <select id={controlId} value={d.confidentiality}
+                disabled={!editable || !d.can_manage_access}
                 className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm disabled:cursor-default disabled:opacity-100 disabled:text-foreground"
                 onChange={(event) => act.mutate({ confidentiality: event.target.value })}>
                 <option value="company">Всё пространство</option>

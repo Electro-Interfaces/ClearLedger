@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
     Counterparty, Department, DocAccessGrant, DocAcquaint, DocApproval, DocCard,
-    DocKind, DocVersion, MailAttachment, MailMessage, User, UserCompany,
+    DocInboxItem, DocKind, DocVersion, MailAttachment, MailMessage, User, UserCompany,
 )
 from app.routers import docs_router
 from app.services import mail_routing, task_scheduler
@@ -147,6 +147,166 @@ async def test_право_на_документ_и_вид_открывает_з�
 
     assert await docs_router._can_doc(db, cid, doc, user, "read") is True
     assert await docs_router._can_doc(db, cid, doc, user, "edit") is True
+
+
+async def test_допуск_к_визе_и_подписанию_не_подменяет_назначение(
+        auth_client: AsyncClient, db: AsyncSession):
+    me, cid_raw, kind = await _context(auth_client)
+    cid = uuid.UUID(cid_raw)
+    principal = User(
+        company_id=cid, email=f"principal-{uuid.uuid4().hex}@example.org",
+        name="Назначенный участник", password_hash="!",
+    )
+    outsider = User(
+        company_id=cid, email=f"outsider-{uuid.uuid4().hex}@example.org",
+        name="Посторонний участник", password_hash="!",
+    )
+    db.add_all([principal, outsider])
+    await db.flush()
+    db.add_all([
+        UserCompany(user_id=principal.id, company_id=cid, role="user", modules=["docs"]),
+        UserCompany(user_id=outsider.id, company_id=cid, role="user", modules=["docs"]),
+    ])
+    doc = DocCard(
+        company_id=cid, kind_id=uuid.UUID(kind["id"]), kind_code=kind["code"],
+        family=kind["family"], direction=kind["direction"], title="Закрытый маршрут",
+        confidentiality="private", author_id=uuid.UUID(me["id"]),
+        signatory_id=principal.id, approval_status="pending", approval_round=1,
+    )
+    db.add(doc)
+    await db.flush()
+    approval = DocApproval(
+        company_id=cid, doc_id=doc.id, round=1, step_no=1,
+        step_code="legal", step_name="Юристы", mode="serial", quorum="all",
+        assignee_id=principal.id, status="pending",
+    )
+    db.add(approval)
+    await db.commit()
+
+    assert await docs_router._can_doc(db, cid, doc, principal, "approve") is True
+    assert await docs_router._can_doc(db, cid, doc, principal, "sign") is True
+
+    policy = DocAccessGrant(
+        company_id=cid, scope_type="doc", scope_id=doc.id,
+        subject_type="user", subject_id=outsider.id,
+        permissions=["approve", "sign"], created_by=uuid.UUID(me["id"]),
+    )
+    db.add(policy)
+    await db.commit()
+
+    assert await docs_router._can_doc(db, cid, doc, outsider, "read") is False
+    assert await docs_router._can_doc(db, cid, doc, principal, "approve") is False
+    assert await docs_router._can_doc(db, cid, doc, principal, "sign") is False
+    assert await docs_router._can_doc(db, cid, doc, outsider, "approve") is False
+    assert await docs_router._can_doc(db, cid, doc, outsider, "sign") is False
+
+    policy.subject_id = principal.id
+    await db.commit()
+    assert await docs_router._can_doc(db, cid, doc, principal, "approve") is True
+    assert await docs_router._can_doc(db, cid, doc, principal, "sign") is True
+
+
+async def test_администратор_управляет_acl_но_не_читает_закрытую_карточку(
+        auth_client: AsyncClient, db: AsyncSession):
+    me, cid_raw, kind = await _context(auth_client)
+    cid = uuid.UUID(cid_raw)
+    admin = User(
+        company_id=cid, email=f"acl-admin-{uuid.uuid4().hex}@example.org",
+        name="Администратор доступа", password_hash="!",
+    )
+    editor = User(
+        company_id=cid, email=f"acl-editor-{uuid.uuid4().hex}@example.org",
+        name="Редактор", password_hash="!",
+    )
+    db.add_all([admin, editor])
+    await db.flush()
+    db.add_all([
+        UserCompany(user_id=admin.id, company_id=cid, role="admin"),
+        UserCompany(user_id=editor.id, company_id=cid, role="user", modules=["docs"]),
+    ])
+    doc = DocCard(
+        company_id=cid, kind_id=uuid.UUID(kind["id"]), kind_code=kind["code"],
+        family=kind["family"], direction=kind["direction"], title="Кадровый приказ",
+        confidentiality="private", author_id=uuid.UUID(me["id"]),
+    )
+    db.add(doc)
+    await db.flush()
+    db.add(DocAccessGrant(
+        company_id=cid, scope_type="doc", scope_id=doc.id,
+        subject_type="user", subject_id=editor.id, permissions=["edit"],
+        created_by=uuid.UUID(me["id"]),
+    ))
+    await db.commit()
+
+    assert await docs_router._can_manage_doc_access(db, cid, doc, admin) is True
+    assert await docs_router._can_doc(db, cid, doc, admin, "read") is False
+    assert await docs_router._can_doc(db, cid, doc, admin, "edit") is False
+    assert await docs_router._can_doc(db, cid, doc, editor, "edit") is True
+    assert await docs_router._can_manage_doc_access(db, cid, doc, editor) is False
+    for field in ("responsible_id", "signatory_id"):
+        with pytest.raises(HTTPException) as denied:
+            await docs_router.doc_action(
+                str(doc.id),
+                docs_router.ActionIn(
+                    company_id=cid_raw, **{field: str(editor.id)}),
+                db, editor,
+            )
+        assert denied.value.status_code == 403
+
+async def test_сырой_файл_сэд_доступен_только_делопроизводителю(
+        auth_client: AsyncClient, db: AsyncSession):
+    me, cid_raw, kind = await _context(auth_client)
+    cid = uuid.UUID(cid_raw)
+    member = User(
+        company_id=cid, email=f"inbox-{uuid.uuid4().hex}@example.org",
+        name="Обычный участник", password_hash="!",
+    )
+    db.add(member)
+    await db.flush()
+    db.add(UserCompany(
+        user_id=member.id, company_id=cid, role="user", modules=["docs"],
+    ))
+    file_id = uuid.uuid4()
+    item = DocInboxItem(
+        company_id=cid, file_name="входящий.pdf", source_path="/tmp/incoming.pdf",
+        size_bytes=10, sha256=uuid.uuid4().hex * 2, file_id=file_id,
+        parsed={"title": "Сырые данные"}, status="new",
+    )
+    db.add(item)
+    await db.commit()
+
+    assert await docs_router._can_process_inbox(db, cid, member) is False
+    with pytest.raises(HTTPException) as denied:
+        await docs_router.authorize_docs_file_download(db, member, file_id)
+    assert denied.value.status_code == 404
+
+    db.add(DocAccessGrant(
+        company_id=cid, scope_type="kind", scope_id=uuid.UUID(kind["id"]),
+        subject_type="user", subject_id=member.id, permissions=["edit"],
+        created_by=uuid.UUID(me["id"]),
+    ))
+    await db.commit()
+    assert await docs_router._can_process_inbox(db, cid, member) is True
+    await docs_router.authorize_docs_file_download(db, member, file_id)
+
+    kinds = (await auth_client.get(
+        "/api/docs/kinds", params={"company_id": cid_raw})).json()["kinds"]
+    non_incoming = next(value for value in kinds if value["family"] != "incoming")
+    bad_item = DocInboxItem(
+        company_id=cid, file_name="неверный-вид.pdf", source_path="/tmp/wrong.pdf",
+        size_bytes=10, sha256=uuid.uuid4().hex * 2,
+        parsed={"title": "Не входящий"}, status="new",
+    )
+    db.add(bad_item)
+    await db.commit()
+    rejected_kind = await auth_client.post(
+        f"/api/docs/exchange/inbox/{bad_item.id}",
+        json={
+            "company_id": cid_raw, "accept": True,
+            "kind_id": non_incoming["id"],
+        },
+    )
+    assert rejected_kind.status_code == 400, rejected_kind.text
 
 
 async def test_письмо_известного_контрагента_становится_одним_черновиком(
