@@ -419,12 +419,12 @@ async def _readable_doc_clause(
             DocApproval.company_id == cid,
             DocApproval.doc_id == DocCard.id,
             DocApproval.assignee_id.in_(assignee_ids),
-        ).exists(),
+        ).correlate(DocCard).exists(),
         select(DocAcquaint.id).where(
             DocAcquaint.company_id == cid,
             DocAcquaint.doc_id == DocCard.id,
             DocAcquaint.user_id == user.id,
-        ).exists(),
+        ).correlate(DocCard).exists(),
     ]
     if doc_scopes:
         clauses.append(DocCard.id.in_(doc_scopes))
