@@ -47,10 +47,10 @@ export function AuthFileChip({ path, name, size, mine }: {
     <button
       type="button"
       onClick={() => downloadAttachment(path, name || undefined)}
-      className={`mt-1 flex items-center gap-1.5 text-xs hover:underline ${mine ? 'text-primary-foreground' : 'text-primary'}`}
+      className={`mb-4 mt-1 flex max-w-full min-w-0 items-center gap-1.5 text-xs hover:underline ${mine ? 'text-primary-foreground' : 'text-primary'}`}
     >
       <FileText className="size-4 shrink-0" />
-      <span className="truncate max-w-[220px]">{name || 'Файл'}</span>
+      <span className="min-w-0 max-w-[220px] truncate">{name || 'Файл'}</span>
       {/* Размер не сжимаем и не приглушаем: на своём сообщении (насыщенная заливка)
           мелкий полупрозрачный текст сливался с фоном и читался как каша. */}
       {size ? (

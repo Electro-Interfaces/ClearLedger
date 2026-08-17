@@ -36,15 +36,17 @@ export function useChatWs(
   const wsRef = useRef<WebSocket | null>(null)
   const subsRef = useRef<Set<string>>(new Set())
   const onEventRef = useRef(onEvent)
-  onEventRef.current = onEvent
   const channelsRef = useRef<string[]>(channels)
-  channelsRef.current = channels
   const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const aliveRef = useRef(true)
   const onReconnectRef = useRef(onReconnect)
-  onReconnectRef.current = onReconnect
   const wasOpenRef = useRef(false)
   const [connected, setConnected] = useState(false)
+
+  useEffect(() => {
+    onEventRef.current = onEvent
+    channelsRef.current = channels
+    onReconnectRef.current = onReconnect
+  }, [channels, onEvent, onReconnect])
 
   const subscribe = useCallback((ch: string) => {
     const ws = wsRef.current
@@ -59,41 +61,51 @@ export function useChatWs(
     if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'typing', channel: ch }))
   }, [])
 
-  const connect = useCallback(() => {
-    const url = wsUrl()
-    if (!url) return
-    const ws = new WebSocket(url)
-    wsRef.current = ws
-    ws.onopen = () => {
-      subsRef.current.clear()
-      channelsRef.current.forEach(subscribe)
-      setConnected(true)
-      if (wasOpenRef.current) onReconnectRef.current?.()
-      wasOpenRef.current = true
-    }
-    ws.onmessage = (ev) => {
-      try {
-        onEventRef.current(JSON.parse(ev.data))
-      } catch { /* невалидный кадр */ }
-    }
-    ws.onclose = () => {
-      wsRef.current = null
-      subsRef.current.clear()
-      setConnected(false)
-      if (aliveRef.current) reconnectRef.current = setTimeout(connect, 3000)
-    }
-    ws.onerror = () => ws.close()
-  }, [subscribe])
-
   useEffect(() => {
-    aliveRef.current = true
+    let disposed = false
+    let lastFrameAt = Date.now()
+    const connect = () => {
+      const url = wsUrl()
+      if (!url || disposed) return
+      const ws = new WebSocket(url)
+      wsRef.current = ws
+      ws.onopen = () => {
+        lastFrameAt = Date.now()
+        subsRef.current.clear()
+        channelsRef.current.forEach(subscribe)
+        setConnected(true)
+        if (wasOpenRef.current) onReconnectRef.current?.()
+        wasOpenRef.current = true
+      }
+      ws.onmessage = (ev) => {
+        lastFrameAt = Date.now()
+        try {
+          const event = JSON.parse(ev.data)
+          if (event.type !== 'pong') onEventRef.current(event)
+        } catch { /* невалидный кадр */ }
+      }
+      ws.onclose = () => {
+        if (wsRef.current === ws) wsRef.current = null
+        subsRef.current.clear()
+        setConnected(false)
+        if (!disposed) reconnectRef.current = setTimeout(connect, 3000)
+      }
+      ws.onerror = () => ws.close()
+    }
     connect()
+    const heartbeat = setInterval(() => {
+      const ws = wsRef.current
+      if (ws?.readyState !== WebSocket.OPEN) return
+      if (Date.now() - lastFrameAt > 70000) ws.close()
+      else ws.send(JSON.stringify({ type: 'ping' }))
+    }, 25000)
     return () => {
-      aliveRef.current = false
+      disposed = true
+      clearInterval(heartbeat)
       if (reconnectRef.current) clearTimeout(reconnectRef.current)
       wsRef.current?.close()
     }
-  }, [connect])
+  }, [subscribe])
 
   // подписка на актуальный набор каналов при их смене
   useEffect(() => {

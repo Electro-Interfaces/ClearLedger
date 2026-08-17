@@ -165,6 +165,38 @@ async def _prepare_database(started_before: datetime) -> None:
         await session.commit()
 
 
+async def _prepare_database_once(started_before: datetime) -> None:
+    """Выполнить DDL/seed один раз на контейнер, а не по разу на worker."""
+    instance_id = os.getenv("HOSTNAME", "").strip() if settings.app_env == "prod" else ""
+    if not instance_id:
+        await _prepare_database(started_before)
+        return
+
+    async with async_session_factory() as session:
+        await session.execute(text(
+            "CREATE TABLE IF NOT EXISTS app_startup_runs ("
+            " instance_id text PRIMARY KEY, completed_at timestamptz NOT NULL DEFAULT now())"
+        ))
+        completed = await session.scalar(text(
+            "SELECT 1 FROM app_startup_runs WHERE instance_id = :instance_id"
+        ), {"instance_id": instance_id})
+        await session.commit()
+    if completed:
+        logger.info("Подготовка БД уже выполнена другим worker этого контейнера")
+        return
+
+    await _prepare_database(started_before)
+    async with async_session_factory() as session:
+        await session.execute(text(
+            "INSERT INTO app_startup_runs (instance_id) VALUES (:instance_id) "
+            "ON CONFLICT (instance_id) DO NOTHING"
+        ), {"instance_id": instance_id})
+        await session.execute(text(
+            "DELETE FROM app_startup_runs WHERE completed_at < now() - interval '30 days'"
+        ))
+        await session.commit()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Startup/shutdown: создание таблиц + seed данных."""
@@ -188,7 +220,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Gunicorn запускает два процесса. Без общего лока оба одновременно меняют
     # схему и делают check-then-insert seed, что даёт гонки на DDL и unique.
     async with database_startup_lock():
-        await _prepare_database(started_at)
+        await _prepare_database_once(started_at)
 
     from app.services.chat_ws import manager as chat_ws_manager
     await chat_ws_manager.start(settings.database_url)
