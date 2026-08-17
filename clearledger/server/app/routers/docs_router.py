@@ -2990,8 +2990,155 @@ async def toggle_doc_label(
         db.add(DocLabelLink(doc_id=d.id, label_id=lid))
     elif not payload.on and link is not None:
         await db.delete(link)
+    if (payload.on and link is None) or (not payload.on and link is not None):
+        db.add(DocEvent(
+            doc_id=d.id, kind="field", user_id=current_user.id,
+            actor_name=current_user.name or current_user.email,
+            to_value=label.name if payload.on else "",
+            from_value=label.name if not payload.on else "", note="labels",
+        ))
     await db.commit()
     return {"on": payload.on}
+
+
+class DocBulkIn(BaseModel):
+    company_id: str
+    doc_ids: list[str] = Field(..., min_length=1, max_length=200)
+    action: str = Field(
+        ..., pattern="^(assign_responsible|set_due|assign_case|add_label|remove_label)$")
+    responsible_id: str | None = None
+    due_at: datetime | None = None
+    case_id: str | None = None
+    label_id: str | None = None
+
+
+@router.post("/bulk")
+async def bulk_docs(
+    payload: DocBulkIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cid = await assert_company_product(payload.company_id, current_user, db, "docs")
+    doc_ids = list(dict.fromkeys(
+        _uuid_or_400(value, "doc_ids") for value in payload.doc_ids))
+    docs = (await db.execute(select(DocCard).where(
+        DocCard.company_id == cid,
+        DocCard.id.in_(doc_ids),
+    ).order_by(DocCard.id).execution_options(
+        populate_existing=True).with_for_update())).scalars().all()
+    if len(docs) != len(doc_ids):
+        raise HTTPException(status.HTTP_404_NOT_FOUND,
+                            "Один или несколько документов не найдены")
+    for doc in docs:
+        await _assert_doc_permission(db, cid, doc, current_user, "edit")
+
+    responsible_id = None
+    target_case = None
+    label = None
+    if payload.action == "assign_responsible":
+        if not payload.responsible_id:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Выберите ответственного")
+        responsible_id = await _company_user_id(
+            db, cid, payload.responsible_id, "responsible_id")
+        for doc in docs:
+            await _assert_manage_doc_access(db, cid, doc, current_user)
+    elif payload.action == "set_due":
+        if payload.due_at is None:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Укажите срок")
+    elif payload.action == "assign_case":
+        if not payload.case_id:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Выберите дело")
+        target_case = await _locked_case_or_404(db, cid, payload.case_id)
+        for doc in docs:
+            _assert_case_accepts_doc(target_case, doc)
+    else:
+        if not payload.label_id:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Выберите метку")
+        label = await db.get(TaskLabel, _uuid_or_400(payload.label_id, "label_id"))
+        if label is None or label.company_id != cid:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Метка не найдена")
+
+    if payload.action in {"assign_responsible", "set_due", "assign_case"}:
+        for doc in docs:
+            if doc.status not in ("draft", "registered"):
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    "Ответственного, срок и дело массово меняют только у черновиков "
+                    "и зарегистрированных документов",
+                )
+            if doc.approval_status == "pending":
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    "В выборке есть документ с зафиксированным пакетом согласования",
+                )
+
+    changed = 0
+    actor = current_user.name or current_user.email
+    for doc in docs:
+        material = False
+        if payload.action == "assign_responsible" and doc.responsible_id != responsible_id:
+            old = doc.responsible_id
+            doc.responsible_id = responsible_id
+            material = True
+            db.add(DocEvent(
+                doc_id=doc.id, kind="field", user_id=current_user.id,
+                actor_name=actor, from_value=str(old or ""),
+                to_value=str(responsible_id), note="responsible_id",
+            ))
+        elif payload.action == "set_due" and doc.due_at != payload.due_at:
+            old = doc.due_at
+            doc.due_at = payload.due_at
+            material = True
+            db.add(DocEvent(
+                doc_id=doc.id, kind="field", user_id=current_user.id,
+                actor_name=actor,
+                from_value=old.isoformat() if old else "",
+                to_value=payload.due_at.isoformat(), note="due_at",
+            ))
+        elif payload.action == "assign_case" and doc.case_id != target_case.id:
+            old = await _case_or_404(db, cid, doc.case_id) if doc.case_id else None
+            old_case_id = doc.case_id
+            doc.case_id = target_case.id
+            if old_case_id is None:
+                _set_storage_until(doc, target_case)
+            material = True
+            db.add(DocEvent(
+                doc_id=doc.id, kind="field", user_id=current_user.id,
+                actor_name=actor,
+                from_value=f"{old.index} · {old.title}" if old else "",
+                to_value=f"{target_case.index} · {target_case.title}", note="case_id",
+            ))
+        elif payload.action in {"add_label", "remove_label"}:
+            link = await db.get(DocLabelLink, (doc.id, label.id))
+            turn_on = payload.action == "add_label"
+            if turn_on and link is None:
+                db.add(DocLabelLink(doc_id=doc.id, label_id=label.id))
+                changed += 1
+            elif not turn_on and link is not None:
+                await db.delete(link)
+                changed += 1
+            else:
+                continue
+            db.add(DocEvent(
+                doc_id=doc.id, kind="field", user_id=current_user.id,
+                actor_name=actor, to_value=label.name if turn_on else "",
+                from_value=label.name if not turn_on else "", note="labels",
+            ))
+            continue
+        if not material:
+            continue
+        changed += 1
+        if doc.approval_status in ("approved", "rejected"):
+            doc.approval_status = "none"
+            db.add(DocEvent(
+                doc_id=doc.id, kind="approval", user_id=current_user.id,
+                actor_name=actor, to_value="нужно согласовать заново",
+                note="массово изменены реквизиты документа",
+            ))
+        await _supersede_pending_acquaints(db, doc.id)
+    await db.commit()
+    return {"selected": len(docs), "updated": changed,
+            "unchanged": len(docs) - changed}
 
 
 class WorkItemIn(BaseModel):

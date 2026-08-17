@@ -782,6 +782,17 @@ export async function toggleDocLabel(
   })
 }
 
+export async function bulkDocs(companyId: string, body: {
+  doc_ids: string[]
+  action: 'assign_responsible' | 'set_due' | 'assign_case' | 'add_label' | 'remove_label'
+  responsible_id?: string
+  due_at?: string
+  case_id?: string
+  label_id?: string
+}): Promise<{ selected: number; updated: number; unchanged: number }> {
+  return post('/api/docs/bulk', { ...body, company_id: companyId })
+}
+
 export async function cancelApproval(
   companyId: string, id: string, reason: string,
 ): Promise<{ cancelled: number; round: number }> {

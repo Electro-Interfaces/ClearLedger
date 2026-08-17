@@ -16,6 +16,7 @@ import { useCompany } from '@/contexts/CompanyContext'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { Checkbox } from '@/components/ui/checkbox'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 import * as docsService from '@/services/docsService'
@@ -24,6 +25,7 @@ import { DocCardPanel } from '@/components/docs/DocCardPanel'
 import { NewDocDialog } from '@/components/docs/NewDocDialog'
 import { useDocsScope } from '@/hooks/useDocsScope'
 import { useDocsView } from './DocsLayout'
+import { DocsBulkBar } from '@/components/docs/DocsBulkBar'
 
 const VIEW_FILTER: Record<string, docsService.DocFilters> = {
   incoming: { family: 'incoming' },
@@ -43,6 +45,7 @@ export function DocsRegistryPage() {
   const view = useDocsView('/docs')
   const scope = useDocsScope()
   const [creating, setCreating] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
 
   const companyId = company?.id ?? ''
   const openId = params.get('doc')
@@ -112,26 +115,35 @@ export function DocsRegistryPage() {
     onError: () => toast.error('Не удалось завести базовые виды. Повторите попытку.'),
   })
 
-  const setFilter = (key: typeof FILTER_KEYS[number], value: string) => setParams((current) => {
-    const next = new URLSearchParams(current)
-    if (value) next.set(key, value)
-    else next.delete(key)
-    next.delete('page')
-    return next
-  }, { replace: true })
-  const clearFilters = () => setParams((current) => {
-    const next = new URLSearchParams(current)
-    FILTER_KEYS.forEach((key) => next.delete(key))
-    next.delete('page')
-    return next
-  }, { replace: true })
-  const setPage = (value: number) => setParams((current) => {
-    const next = new URLSearchParams(current)
-    if (value > 1) next.set('page', String(value))
-    else next.delete('page')
-    next.delete('doc')
-    return next
-  }, { replace: true })
+  const setFilter = (key: typeof FILTER_KEYS[number], value: string) => {
+    setSelectedIds(new Set())
+    setParams((current) => {
+      const next = new URLSearchParams(current)
+      if (value) next.set(key, value)
+      else next.delete(key)
+      next.delete('page')
+      return next
+    }, { replace: true })
+  }
+  const clearFilters = () => {
+    setSelectedIds(new Set())
+    setParams((current) => {
+      const next = new URLSearchParams(current)
+      FILTER_KEYS.forEach((key) => next.delete(key))
+      next.delete('page')
+      return next
+    }, { replace: true })
+  }
+  const setPage = (value: number) => {
+    setSelectedIds(new Set())
+    setParams((current) => {
+      const next = new URLSearchParams(current)
+      if (value > 1) next.set('page', String(value))
+      else next.delete('page')
+      next.delete('doc')
+      return next
+    }, { replace: true })
+  }
   const open = (id: string) => setParams((current) => {
     const next = new URLSearchParams(current)
     next.set('doc', id)
@@ -146,6 +158,16 @@ export function DocsRegistryPage() {
   }, { replace: true })
 
   const docs = listQ.data?.docs ?? []
+  const allPageSelected = docs.length > 0 && docs.every((doc) => selectedIds.has(doc.id))
+  const toggleSelected = (docId: string, on: boolean) => setSelectedIds((current) => {
+    const next = new Set(current)
+    if (on) next.add(docId)
+    else next.delete(docId)
+    return next
+  })
+  const togglePage = (on: boolean) => setSelectedIds(
+    on ? new Set(docs.map((doc) => doc.id)) : new Set(),
+  )
   const total = listQ.data?.count ?? 0
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
@@ -173,12 +195,15 @@ export function DocsRegistryPage() {
     <Card className="min-h-0 overflow-hidden">
       <div className={cn('h-full divide-y divide-border/60 overflow-y-auto', !openId && 'md:hidden')}>
         {docs.map((doc) => (
-          <button key={doc.id} type="button" onClick={() => open(doc.id)}
-            aria-current={doc.id === openId ? 'true' : undefined}
-            className={cn(
-              'flex w-full flex-col gap-1 px-3 py-3 text-left transition-colors hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
-              doc.id === openId && 'bg-primary/5',
-            )}>
+          <div key={doc.id} className={cn('flex items-start gap-1', doc.id === openId && 'bg-primary/5')}>
+            <div className="px-2 pt-3">
+              <Checkbox checked={selectedIds.has(doc.id)}
+                aria-label={`Выбрать документ ${doc.reg_number ?? doc.title}`}
+                onCheckedChange={(value) => toggleSelected(doc.id, value === true)} />
+            </div>
+            <button type="button" onClick={() => open(doc.id)}
+              aria-current={doc.id === openId ? 'true' : undefined}
+              className="flex min-w-0 flex-1 flex-col gap-1 px-2 py-3 text-left transition-colors hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
             <div className="flex w-full items-start justify-between gap-3">
               <span className="min-w-0 truncate text-sm font-medium">{doc.title}</span>
               <StatusPill status={doc.status} />
@@ -201,7 +226,8 @@ export function DocsRegistryPage() {
                   ))}
                 </span>
               )}
-          </button>
+            </button>
+          </div>
         ))}
         {listQ.isSuccess && docs.length === 0 && (
           <div className="px-3 py-8 text-center text-sm text-muted-foreground">{emptyText}</div>
@@ -213,6 +239,11 @@ export function DocsRegistryPage() {
           <table className="w-full text-sm">
             <thead className="sticky top-0 z-10 bg-muted text-xs text-muted-foreground">
               <tr>
+                <th className="w-10 px-3 py-2 text-left font-medium">
+                  <Checkbox checked={allPageSelected}
+                    aria-label={allPageSelected ? 'Снять выбор со страницы' : 'Выбрать все документы на странице'}
+                    onCheckedChange={(value) => togglePage(value === true)} />
+                </th>
                 <th className="px-3 py-2 text-left font-medium">Рег. номер</th>
                 <th className="px-3 py-2 text-left font-medium">Дата</th>
                 <th className="px-3 py-2 text-left font-medium">Юрлицо</th>
@@ -225,14 +256,12 @@ export function DocsRegistryPage() {
             </thead>
             <tbody>
               {docs.map((doc) => (
-                <tr key={doc.id} onClick={() => open(doc.id)} tabIndex={0} role="button"
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' || event.key === ' ') {
-                      event.preventDefault()
-                      open(doc.id)
-                    }
-                  }}
-                  className="cursor-pointer border-t border-border/60 transition-colors hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
+                <tr key={doc.id} className="border-t border-border/60 transition-colors hover:bg-accent/40">
+                  <td className="px-3 py-2">
+                    <Checkbox checked={selectedIds.has(doc.id)}
+                      aria-label={`Выбрать документ ${doc.reg_number ?? doc.title}`}
+                      onCheckedChange={(value) => toggleSelected(doc.id, value === true)} />
+                  </td>
                   <td className="whitespace-nowrap px-3 py-2 font-medium">
                     {doc.reg_number ?? <span className="text-muted-foreground">без номера</span>}
                   </td>
@@ -241,7 +270,10 @@ export function DocsRegistryPage() {
                   </td>
                   <td className="px-3 py-2 text-muted-foreground">{doc.organization_name || '—'}</td>
                   <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">{doc.kind_name}</td>
-                  <td className="px-3 py-2">{doc.title}</td>
+                  <td className="px-3 py-2">
+                    <button type="button" className="text-left font-medium hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      onClick={() => open(doc.id)}>{doc.title}</button>
+                  </td>
                   <td className="px-3 py-2 text-muted-foreground">{doc.counterparty_name || '—'}</td>
                   <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">
                     {doc.external_number || '—'}
@@ -251,7 +283,7 @@ export function DocsRegistryPage() {
               ))}
               {listQ.isSuccess && docs.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-3 py-8 text-center text-sm text-muted-foreground">
+                  <td colSpan={9} className="px-3 py-8 text-center text-sm text-muted-foreground">
                     {emptyText}
                   </td>
                 </tr>
@@ -361,6 +393,15 @@ export function DocsRegistryPage() {
             <span className="text-xs text-muted-foreground">Период взят из рабочего контура</span>
           )}
         </div>
+
+        {selectedIds.size > 0 && (
+          <DocsBulkBar companyId={companyId} selectedIds={[...selectedIds]}
+            onClear={() => setSelectedIds(new Set())}
+            onDone={() => {
+              setSelectedIds(new Set())
+              void listQ.refetch()
+            }} />
+        )}
 
         {noKinds && (
           <Card className="flex flex-wrap items-center justify-between gap-3 p-4">
