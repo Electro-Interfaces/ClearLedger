@@ -381,9 +381,19 @@ export function LocationsPage({ cockpitVariant = 'full' }: { cockpitVariant?: Co
   )
 
   // Единый отбор парка (поднят со страницы — общий для таблицы/карточек/дашборда/экспорта).
-  const [filters, setFilters] = useState<LocationFilters>(EMPTY_LOCATION_FILTERS)
+  const [filters, setFilters] = useState<LocationFilters>(() => ({
+    ...EMPTY_LOCATION_FILTERS,
+    types: isEnergy ? ['ev_charging'] : [],
+  }))
   const [fleetMode, setFleetMode] = useState<'list' | 'dashboard'>('list')
   const [exportOpen, setExportOpen] = useState(false)
+
+  useEffect(() => {
+    setFilters({
+      ...EMPTY_LOCATION_FILTERS,
+      types: isEnergy ? ['ev_charging'] : [],
+    })
+  }, [companyId, isEnergy])
 
   const filtered = useMemo(() => applyLocationFilters(locations, filters), [locations, filters])
   const stats = useMemo(() => computeFleetStats(filtered, typeByCode), [filtered, typeByCode])

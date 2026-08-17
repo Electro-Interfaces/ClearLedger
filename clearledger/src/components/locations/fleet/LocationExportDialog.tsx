@@ -58,6 +58,9 @@ export function LocationExportDialog({
         </DialogHeader>
 
         <div className="space-y-4 pt-2">
+          <p className="text-xs text-muted-foreground">
+            В файл попадёт текущая выборка с учётом фильтров страницы.
+          </p>
           <div className="space-y-1.5">
             <Label>Формат</Label>
             <Select value={format} onValueChange={(v) => setFormat(v as 'excel' | 'csv')}>
