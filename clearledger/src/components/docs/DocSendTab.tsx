@@ -4,7 +4,7 @@
  * Ссылка со сроком и отзывом — для тех, у кого нет учётки; письмо — когда нужен
  * сам файл у адресата в почте. Оба следа ложатся в историю документа.
  */
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Copy, Link2, Mail, Ban } from 'lucide-react'
 import { toast } from 'sonner'
@@ -36,6 +36,7 @@ export function DocSendTab({ doc, companyId, onChanged }: {
   onChanged: () => void
 }) {
   const qc = useQueryClient()
+  const controlPrefix = useId()
   const [recipient, setRecipient] = useState('')
   const [email, setEmail] = useState('')
   const [days, setDays] = useState(14)
@@ -120,18 +121,18 @@ export function DocSendTab({ doc, companyId, onChanged }: {
         </div>
         <div className="grid gap-2 sm:grid-cols-3">
           <div className="space-y-1">
-            <Label className="text-xs">Получатель</Label>
-            <Input value={recipient} onChange={(e) => setRecipient(e.target.value)}
+            <Label htmlFor={`${controlPrefix}-recipient`} className="text-xs">Получатель</Label>
+            <Input id={`${controlPrefix}-recipient`} value={recipient} onChange={(e) => setRecipient(e.target.value)}
               placeholder="Иванов И. И." className="h-9" />
           </div>
           <div className="space-y-1">
-            <Label className="text-xs">Почта (для себя)</Label>
-            <Input value={email} onChange={(e) => setEmail(e.target.value)}
+            <Label htmlFor={`${controlPrefix}-email`} className="text-xs">Почта (для себя)</Label>
+            <Input id={`${controlPrefix}-email`} value={email} onChange={(e) => setEmail(e.target.value)}
               placeholder="ivanov@example.ru" className="h-9" />
           </div>
           <div className="space-y-1">
-            <Label className="text-xs">Срок, дней</Label>
-            <Input type="number" min={1} max={180} value={days}
+            <Label htmlFor={`${controlPrefix}-days`} className="text-xs">Срок, дней</Label>
+            <Input id={`${controlPrefix}-days`} type="number" min={1} max={180} value={days}
               onChange={(e) => setDays(Number(e.target.value) || 14)} className="h-9" />
           </div>
         </div>
@@ -165,6 +166,7 @@ export function DocSendTab({ doc, companyId, onChanged }: {
                 {!l.revoked && !expired && (
                   <>
                     <Button size="sm" variant="ghost" title="Скопировать ссылку"
+                      aria-label={`Скопировать ссылку для ${l.recipient || 'получателя'}`}
                       onClick={async () => {
                         const url = `${window.location.origin}/doc-share/${l.token}`
                         try {
@@ -177,6 +179,7 @@ export function DocSendTab({ doc, companyId, onChanged }: {
                       <Copy className="h-3.5 w-3.5" />
                     </Button>
                     <Button size="sm" variant="ghost" title="Отозвать"
+                      aria-label={`Отозвать ссылку для ${l.recipient || 'получателя'}`}
                       onClick={() => revoke.mutate(l.id)} disabled={revoke.isPending}>
                       <Ban className="h-3.5 w-3.5" />
                     </Button>
@@ -201,8 +204,8 @@ export function DocSendTab({ doc, companyId, onChanged }: {
           <>
             <div className="grid gap-2 sm:grid-cols-2">
               <div className="space-y-1">
-                <Label className="text-xs">С ящика</Label>
-                <select value={accountId} onChange={(e) => setAccountId(e.target.value)}
+                <Label htmlFor={`${controlPrefix}-account`} className="text-xs">С ящика</Label>
+                <select id={`${controlPrefix}-account`} value={accountId} onChange={(e) => setAccountId(e.target.value)}
                   className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm">
                   <option value="">выберите ящик</option>
                   {boxes.map((b) => (
@@ -211,8 +214,8 @@ export function DocSendTab({ doc, companyId, onChanged }: {
                 </select>
               </div>
               <div className="space-y-1">
-                <Label className="text-xs">Кому</Label>
-                <Input value={to} onChange={(e) => setTo(e.target.value)}
+                <Label htmlFor={`${controlPrefix}-to`} className="text-xs">Кому</Label>
+                <Input id={`${controlPrefix}-to`} value={to} onChange={(e) => setTo(e.target.value)}
                   placeholder="buh@example.ru" className="h-9" />
               </div>
             </div>

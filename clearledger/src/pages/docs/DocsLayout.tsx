@@ -8,12 +8,13 @@
  * «Пульса» — это такое же приложение Ядра, и человек, перешедший оттуда, не
  * должен заметить смены правил.
  */
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Outlet, useLocation, useSearchParams } from 'react-router-dom'
-import { PanelLeftClose, PanelLeftOpen } from 'lucide-react'
+import { ChevronRight, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { useMaxWidth } from '@/hooks/use-mobile'
 import { useCompany } from '@/contexts/CompanyContext'
 import { cn } from '@/lib/utils'
+import { DocsScopeBar } from '@/components/docs/DocsScopeBar'
 
 export interface DocsView { key: string; label: string; hint: string }
 
@@ -84,16 +85,37 @@ export function useDocsView(route: string): string {
 
 export function DocsLayout() {
   const { pathname } = useLocation()
-  const [, setParams] = useSearchParams()
+  const [params, setParams] = useSearchParams()
   const { isCompanyAdmin } = useCompany()
   const narrow = useMaxWidth(1024)
   const [collapsed, setCollapsed] = useState(
     () => localStorage.getItem(COLLAPSE_KEY) === '1')
+  const mobileNavRef = useRef<HTMLElement>(null)
 
   const route = docsRouteOf(pathname)
   const views = (DOCS_VIEWS[route] ?? []).filter(
     (view) => view.key !== 'discipline' || isCompanyAdmin)
   const active = useDocsView(route)
+
+  useEffect(() => {
+    const requested = params.get('view')
+    if (!requested || views.some((view) => view.key === requested)) return
+    setParams((current) => {
+      const next = new URLSearchParams(current)
+      next.set('view', active)
+      next.delete('doc')
+      next.delete('task')
+      next.delete('tab')
+      next.delete('page')
+      return next
+    }, { replace: true })
+  }, [active, params, setParams, views])
+
+  useEffect(() => {
+    if (!narrow) return
+    const current = mobileNavRef.current?.querySelector<HTMLElement>('[aria-current="page"]')
+    current?.scrollIntoView({ block: 'nearest', inline: 'center' })
+  }, [active, narrow])
 
   const toggle = () => setCollapsed((c) => {
     localStorage.setItem(COLLAPSE_KEY, c ? '0' : '1')
@@ -106,6 +128,9 @@ export function DocsLayout() {
     const n = new URLSearchParams(p)
     n.set('view', key)
     n.delete('doc')
+    n.delete('task')
+    n.delete('tab')
+    n.delete('page')
     return n
   }, { replace: true })
 
@@ -116,19 +141,30 @@ export function DocsLayout() {
   if (narrow) {
     return (
       <div className="flex h-full min-h-0 flex-col">
-        <nav data-zone="Пункты раздела" aria-label="Пункты раздела Трека"
-          className="flex shrink-0 gap-1 overflow-x-auto border-b border-border bg-card px-2 py-1.5 scrollbar-hide">
-          {views.map((v) => (
-            <button key={v.key} type="button" onClick={() => open(v.key)} title={v.hint}
-              aria-current={v.key === active ? 'page' : undefined}
-              className={cn('min-h-10 shrink-0 whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs transition-colors sm:min-h-0',
-                v.key === active
-                  ? 'bg-primary/10 font-medium text-primary'
-                  : 'text-muted-foreground')}>
-              {v.label}
+        <div className="relative shrink-0 border-b border-border bg-card">
+          <nav ref={mobileNavRef} data-zone="Пункты раздела"
+            aria-label="Пункты раздела Трека"
+            className="flex gap-1 overflow-x-auto px-2 py-1.5 pr-12 scrollbar-hide">
+            {views.map((v) => (
+              <button key={v.key} type="button" onClick={() => open(v.key)} title={v.hint}
+                aria-current={v.key === active ? 'page' : undefined}
+                className={cn('min-h-11 shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                  v.key === active
+                    ? 'bg-primary/10 font-medium text-primary'
+                    : 'text-muted-foreground')}>
+                {v.label}
+              </button>
+            ))}
+          </nav>
+          <div className="pointer-events-none absolute inset-y-0 right-0 flex w-12 items-center justify-end bg-gradient-to-l from-card via-card/90 to-transparent pr-1">
+            <button type="button" aria-label="Показать следующие пункты раздела"
+              className="pointer-events-auto flex size-10 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+              onClick={() => mobileNavRef.current?.scrollBy({ left: 180, behavior: 'smooth' })}>
+              <ChevronRight className="h-4 w-4" />
             </button>
-          ))}
-        </nav>
+          </div>
+        </div>
+        <DocsScopeBar />
         <div className="min-w-0 flex-1 overflow-y-auto px-3 py-3">
           <Outlet />
         </div>
@@ -169,8 +205,11 @@ export function DocsLayout() {
           ))}
         </nav>
       )}
-      <div className="min-w-0 flex-1 overflow-y-auto">
-        <Outlet />
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <DocsScopeBar />
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <Outlet />
+        </div>
       </div>
     </div>
   )

@@ -56,8 +56,8 @@ export function NewDocDialog({ companyId, kinds, defaultFamily, onClose, onCreat
         <DialogHeader><DialogTitle>Новый документ</DialogTitle></DialogHeader>
         <div className="space-y-3">
           <div className="space-y-1.5">
-            <Label className="text-xs">Вид документа</Label>
-            <select value={kindId} onChange={(e) => setKindId(e.target.value)}
+            <Label htmlFor="new-doc-kind" className="text-xs">Вид документа</Label>
+            <select id="new-doc-kind" value={kindId} onChange={(e) => setKindId(e.target.value)}
               className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm">
               {(suited.length ? suited : kinds).map((k) => (
                 <option key={k.id} value={k.id}>{k.name}</option>
@@ -87,29 +87,29 @@ export function NewDocDialog({ companyId, kinds, defaultFamily, onClose, onCreat
           )}
 
           <div className="space-y-1.5">
-            <Label className="text-xs">Заголовок</Label>
-            <Input value={title} onChange={(e) => setTitle(e.target.value)}
+            <Label htmlFor="new-doc-title" className="text-xs">Заголовок</Label>
+            <Input id="new-doc-title" value={title} onChange={(e) => setTitle(e.target.value)}
               placeholder="О чём документ" className="h-9" />
           </div>
 
           <div className="space-y-1.5">
-            <Label className="text-xs">
+            <Label htmlFor="new-doc-counterparty" className="text-xs">
               {incoming ? 'От кого' : 'Кому'}
             </Label>
-            <Input value={counterparty} onChange={(e) => setCounterparty(e.target.value)}
+            <Input id="new-doc-counterparty" value={counterparty} onChange={(e) => setCounterparty(e.target.value)}
               placeholder="Наименование организации" className="h-9" />
           </div>
 
           {incoming && (
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <Label className="text-xs">Их исходящий номер</Label>
-                <Input value={externalNumber} onChange={(e) => setExternalNumber(e.target.value)}
+                <Label htmlFor="new-doc-external-number" className="text-xs">Их исходящий номер</Label>
+                <Input id="new-doc-external-number" value={externalNumber} onChange={(e) => setExternalNumber(e.target.value)}
                   placeholder="исх-2210" className="h-9" />
               </div>
               <div className="space-y-1.5">
-                <Label className="text-xs">Дата их документа</Label>
-                <Input type="date" value={externalDate}
+                <Label htmlFor="new-doc-external-date" className="text-xs">Дата их документа</Label>
+                <Input id="new-doc-external-date" type="date" value={externalDate}
                   onChange={(e) => setExternalDate(e.target.value)} className="h-9" />
               </div>
             </div>

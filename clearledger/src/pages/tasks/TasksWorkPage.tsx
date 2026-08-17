@@ -48,13 +48,20 @@ const VIEW_SCOPE: Record<string, TaskScope> = {
   watching: 'watching', closed: 'closed', registry: 'all', objects: 'all',
 }
 
-export function TasksWorkPage() {
+export function TasksWorkPage({ embeddedView }: {
+  embeddedView?: 'mine' | 'registry'
+} = {}) {
   const { company } = useCompany()
   const navigate = useNavigate()
   const { pathname } = useLocation()
   const route = tasksRouteOf(pathname)
-  const view = useTasksView(route)
-  const meta = (TASKS_VIEWS[route] ?? []).find((v) => v.key === view)
+  const routedView = useTasksView(route)
+  const view = embeddedView ?? routedView
+  const meta = embeddedView === 'mine'
+    ? { label: 'Поручения', hint: 'Работа, которую выполняю я' }
+    : embeddedView === 'registry'
+      ? { label: 'Поручения компании', hint: 'Вся работа с отбором, поиском и выгрузкой' }
+      : (TASKS_VIEWS[route] ?? []).find((item) => item.key === view)
   const scope = VIEW_SCOPE[view] ?? 'open'
   // Фильтры и группировка — свойство пункта, а не переключатель на экране:
   // «Сегодня» с фильтром по автору перестало бы отвечать на свой вопрос.
@@ -371,7 +378,8 @@ function TasksTable({ tasks, sort, onSort, picked, onPick, groupByObject, onOpen
 
   const toggle = (id: string) => {
     const next = new Set(picked)
-    next.has(id) ? next.delete(id) : next.add(id)
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
     onPick(next)
   }
 
@@ -819,12 +827,15 @@ function Pick({ value, onChange, items, placeholder, allLabel, width }: {
 /** Раздел «Работа компании»: реестр и «По объектам» — тот же список, «Доска» —
  *  своя раскладка. Переключатель здесь, а не в маршруте: пункт раздела живёт в
  *  `?view=`, и отдельный путь под доску завёл бы второе правило навигации. */
-export function TasksCompanyPage() {
+export function TasksCompanyPage({ embeddedView }: {
+  embeddedView?: 'registry' | 'board' | 'views'
+} = {}) {
   const { company } = useCompany()
-  const view = useTasksView(tasksRouteOf(useLocation().pathname))
+  const routedView = useTasksView(tasksRouteOf(useLocation().pathname))
+  const view = embeddedView ?? routedView
   if (view === 'board') return <TasksBoardPage />
   if (view === 'views') return <ViewsSection companyId={company.id} />
-  return <TasksWorkPage />
+  return <TasksWorkPage embeddedView={embeddedView === 'registry' ? 'registry' : undefined} />
 }
 
 export default TasksWorkPage

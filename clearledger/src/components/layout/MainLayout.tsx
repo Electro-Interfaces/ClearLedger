@@ -114,6 +114,10 @@ export function MainLayout() {
       className="flex flex-col h-dvh max-h-dvh overflow-hidden"
       style={{ '--header-height': '5rem' } as React.CSSProperties}
     >
+      <a href="#workspace-area"
+        className="fixed left-3 top-3 z-[100] -translate-y-20 rounded-md bg-background px-3 py-2 text-sm font-medium shadow-lg transition-transform focus:translate-y-0 focus:outline-none focus:ring-2 focus:ring-ring">
+        К рабочей области
+      </a>
       {/* Header — первый child в flex-col, sibling sidebar+inset группы.
           Так sidebar занимает только высоту ПОД header. */}
       <Header
@@ -145,7 +149,7 @@ export function MainLayout() {
           </Sheet>
         )}
 
-        <SidebarInset id="workspace-area" className="overflow-hidden">
+        <SidebarInset id="workspace-area" tabIndex={-1} className="overflow-hidden">
           {/* «Приложения» — меню пространства в рабочей области: плашки поверх
               текущего экрана, переход только по плашке (решение МАГа 06.08.2026). */}
           <AppsPanelSurface />

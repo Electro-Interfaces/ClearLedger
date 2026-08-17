@@ -72,6 +72,7 @@ export function DocsArchiveQueue({ companyId }: { companyId: string }) {
         {FILTERS.map((item) => (
           <Button key={item.key} type="button" size="sm"
             variant={filter === item.key ? 'default' : 'outline'}
+            aria-pressed={filter === item.key}
             onClick={() => setFilter(item.key)}>
             {item.label}
           </Button>

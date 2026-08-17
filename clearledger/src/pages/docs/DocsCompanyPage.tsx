@@ -78,7 +78,9 @@ export function DocsCompanyPage() {
   if (!companyId) return null
 
   if (view === 'errands') {
-    return <Suspense fallback={<Loading />}><TasksCompanyPage /></Suspense>
+    return <Suspense fallback={<Loading />}>
+      <TasksCompanyPage embeddedView="registry" />
+    </Suspense>
   }
   if (view === 'board') {
     return <Suspense fallback={<Loading />}><TasksBoardPage /></Suspense>

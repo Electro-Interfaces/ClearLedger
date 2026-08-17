@@ -35,6 +35,7 @@ const WORKSPACE_PATHS = new Set<string>([
   // пути перечислены руками. Без них `KeepAliveOutlet` кладёт поверх собственной
   // раскладки второй паддинг и второй `overflow-y-auto`.
   '/tasks', '/tasks/company', '/tasks/overview', '/tasks/setup',
+  '/docs', '/docs/work', '/docs/company', '/docs/overview', '/docs/regulation', '/docs/setup',
   // «Аудитор» — две колонки со своим скроллом внутри: разговор и каталог навыков.
   '/auditor',
   ...SPACE_PRODUCTS.map((p) => p.route),
@@ -131,6 +132,13 @@ export interface ViewDescriptor {
   title: string
 }
 
+export function viewKey(pathname: string, search: string): string {
+  const params = new URLSearchParams(search)
+  params.delete('f')
+  const query = params.toString()
+  return `${pathname}${query ? `?${query}` : ''}`
+}
+
 /**
  * Описать ТЕКУЩИЙ вид для закрепления во вкладку. Для «Рабочего стола» берёт
  * короткое имя активного пункта меню («Операции», «Карта», «Дебиторка»).
@@ -147,9 +155,9 @@ export function describeView(
     const title = modeRaw || sub
       ? workspaceTitle(isCoreMode(modeRaw) ? modeRaw : 'management', sub)
       : 'Рабочий стол'
-    return { key: pathname + search, pathname, title }
+    return { key: viewKey(pathname, search), pathname, title }
   }
   const resolved = resolveTab(pathname, profileId)
   if (!resolved) return null
-  return { key: pathname + search, pathname, title: resolved.title }
+  return { key: viewKey(pathname, search), pathname, title: resolved.title }
 }

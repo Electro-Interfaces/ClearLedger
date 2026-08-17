@@ -9,6 +9,7 @@ import {
   TrendingUp,
   Users,
   CalendarDays,
+  ListChecks,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useCompany } from '@/contexts/CompanyContext'
@@ -44,7 +45,7 @@ const PULSE_ITEMS: BottomNavItem[] = [
  */
 export function MobileBottomNav() {
   const { company, companyModules, canApp, canModule } = useCompany()
-  const { pathname } = useLocation()
+  const { pathname, search } = useLocation()
   // Разделы рабочей области: без фильтра lockedModes (он живёт в контексте самой
   // области), поэтому продукт отбирает свои режимы сам — по списку из реестра.
   const sections = useWorkspaceSections()
@@ -71,6 +72,14 @@ export function MobileBottomNav() {
 
   if (pathname === '/pulse' || pathname.startsWith('/pulse/')) {
     items = PULSE_ITEMS
+  } else if (pathname === '/docs' || pathname.startsWith('/docs/')) {
+    items = [
+      { label: 'Реестры', path: '/docs?view=incoming', icon: FileText },
+      { label: 'На мне', path: '/docs/work?view=approvals', icon: ListChecks },
+      { label: 'Компания', path: '/docs/company?view=docs', icon: Building2 },
+      { label: 'Обзор', path: '/docs/overview?view=docs', icon: Activity },
+      { label: 'Регламент', path: '/docs/regulation?view=templates', icon: CalendarDays },
+    ].map((item) => ({ ...item, path: withGlobalFilter(item.path, search) }))
   } else if (product) {
     // Раздел рабочей области живёт в URL (`?mode=`), поэтому полосе хватает ссылки —
     // контекст области ей не нужен.
@@ -106,7 +115,7 @@ export function MobileBottomNav() {
                 'relative flex flex-col items-center gap-0.5 px-2 py-1.5 rounded-lg text-[10px] font-medium transition-colors duration-200 min-w-[48px]',
                 // Раздел продукта отличается от собрата только строкой запроса, а её
                 // NavLink в isActive не смотрит — сверяем сами.
-                (isActive && !item.path.includes('?')) || isCurrent(item.path, pathname)
+                (isActive && !item.path.includes('?')) || isCurrent(item.path, pathname, search)
                   ? 'text-primary'
                   : 'text-muted-foreground hover:text-foreground',
               )
@@ -122,9 +131,21 @@ export function MobileBottomNav() {
 }
 
 /** Активен ли пункт с `?mode=` — сравниваем путь и режим с текущим адресом. */
-function isCurrent(to: string, pathname: string): boolean {
+function isCurrent(to: string, pathname: string, search: string): boolean {
   const [path, query] = to.split('?')
   if (path !== pathname || !query) return false
-  const mode = new URLSearchParams(query).get('mode')
-  return !!mode && new URLSearchParams(window.location.search).get('mode') === mode
+  const expected = new URLSearchParams(query)
+  const current = new URLSearchParams(search)
+  expected.delete('f')
+  return [...expected].every(([key, value]) => current.get(key) === value)
+}
+
+function withGlobalFilter(to: string, search: string): string {
+  const current = new URLSearchParams(search)
+  const globalFilter = current.get('f')
+  if (!globalFilter) return to
+  const [path, query = ''] = to.split('?')
+  const target = new URLSearchParams(query)
+  target.set('f', globalFilter)
+  return `${path}?${target.toString()}`
 }

@@ -91,12 +91,14 @@ const APPROVAL_LABEL: Record<string, string> = {
   rejected: 'На доработке',
 }
 
-export function DocCardPanel({ id, companyId, onBack, onChanged, initialTab }: {
+export function DocCardPanel({ id, companyId, onBack, onChanged, initialTab,
+  headingLevel = 1 }: {
   id: string
   companyId: string
   onBack: () => void
   onChanged: () => void
   initialTab?: 'document' | 'processing' | 'files' | 'links' | 'archive' | 'feed'
+  headingLevel?: 1 | 2
 }) {
   const qc = useQueryClient()
   const { organizations, isCompanyAdmin } = useCompany()
@@ -317,6 +319,7 @@ export function DocCardPanel({ id, companyId, onBack, onChanged, initialTab }: {
     if (reasonMode === 'cancel_approval') cancelApproval.mutate()
     if (reasonMode === 'cancel') act.mutate({ status: 'cancelled', note: reason.trim() })
   }
+  const Heading = headingLevel === 2 ? 'h2' : 'h1'
 
   return (
     <div className="space-y-4 pb-20 md:pb-0">
@@ -329,7 +332,7 @@ export function DocCardPanel({ id, companyId, onBack, onChanged, initialTab }: {
             </Button>
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <h1 className="min-w-0 text-base font-semibold leading-6">{d.title}</h1>
+                <Heading className="min-w-0 text-base font-semibold leading-6">{d.title}</Heading>
                 <StatusPill status={d.status} />
                 {approvalLocked && (
                   <span className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-2 py-1 text-xs text-primary">

@@ -12,7 +12,7 @@
  */
 import { useState } from 'react'
 import { useCompany } from '@/contexts/CompanyContext'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { CalendarClock, Loader2, Play, Plus, Trash2, Users2 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -28,6 +28,7 @@ import { cn } from '@/lib/utils'
 import * as tasksService from '@/services/tasksService'
 import * as docsService from '@/services/docsService'
 import { PRIORITY_LABEL, dtT } from '@/components/tasks/taskWords'
+import { useDocsView } from '@/pages/docs/DocsLayout'
 
 const WEEKDAYS = ['понедельник', 'вторник', 'среду', 'четверг', 'пятницу', 'субботу', 'воскресенье']
 
@@ -47,6 +48,7 @@ export function ViewsSection({ companyId, scope = 'task' }: {
 }) {
   const qc = useQueryClient()
   const navigate = useNavigate()
+  const location = useLocation()
   const q = useQuery({
     queryKey: [scope === 'doc' ? 'doc-views' : 'task-views', companyId],
     queryFn: () => scope === 'doc'
@@ -92,9 +94,21 @@ export function ViewsSection({ companyId, scope = 'task' }: {
             <div key={v.id}
               className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm">
               <button type="button"
-                onClick={() => navigate(`${scope === 'doc' ? '/docs' : '/tasks/company'}?${new URLSearchParams({
-                  view: scope === 'doc' ? 'all' : 'registry', ...v.query,
-                }).toString()}`)}
+                onClick={() => {
+                  const target = new URLSearchParams(location.search)
+                  for (const key of ['doc', 'task', 'tab', 'page', 'view', 'q', 'status',
+                    'kind', 'date_from', 'date_to']) target.delete(key)
+                  const allowed = new Set([
+                    'view', 'q', 'status', 'kind', 'date_from', 'date_to', 'f',
+                  ])
+                  for (const [key, value] of Object.entries(v.query)) {
+                    if (allowed.has(key) && value) target.set(key, value)
+                  }
+                  target.set('view', scope === 'doc'
+                    && ['incoming', 'outgoing', 'ord', 'internal', 'all'].includes(v.query.view)
+                    ? v.query.view : scope === 'doc' ? 'all' : 'errands')
+                  navigate(`${scope === 'doc' ? '/docs' : '/docs/company'}?${target.toString()}`)
+                }}
                 className="flex-1 text-left font-medium hover:underline">
                 {v.name}
               </button>
@@ -199,27 +213,27 @@ export function TemplatesSection({ companyId }: { companyId: string }) {
         <div className="space-y-3 rounded-lg border border-dashed p-3">
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">
-              <Label>Название шаблона</Label>
-              <Input value={name} onChange={(e) => setName(e.target.value)}
+              <Label htmlFor="task-template-name">Название шаблона</Label>
+              <Input id="task-template-name" value={name} onChange={(e) => setName(e.target.value)}
                 placeholder="Закрытие месяца" maxLength={160} />
             </div>
             <div className="space-y-1.5">
-              <Label>Заголовок задачи</Label>
-              <Input value={title} onChange={(e) => setTitle(e.target.value)}
+              <Label htmlFor="task-template-title">Заголовок задачи</Label>
+              <Input id="task-template-title" value={title} onChange={(e) => setTitle(e.target.value)}
                 placeholder="Закрыть месяц по объекту" maxLength={300} />
             </div>
           </div>
           <div className="space-y-1.5">
-            <Label>Описание</Label>
-            <Textarea value={description} onChange={(e) => setDescription(e.target.value)}
+            <Label htmlFor="task-template-description">Описание</Label>
+            <Textarea id="task-template-description" value={description} onChange={(e) => setDescription(e.target.value)}
               rows={2} maxLength={8000} />
           </div>
           <div className="grid gap-3 sm:grid-cols-4">
             <div className="space-y-1.5">
-              <Label>Тип</Label>
+              <Label htmlFor="task-template-type">Тип</Label>
               <Select value={typeId || 'none'}
                 onValueChange={(v) => setTypeId(v === 'none' ? '' : v)}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectTrigger id="task-template-type"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">Поручение</SelectItem>
                   {(typesQ.data?.types ?? []).filter((t) => t.is_active).map((t) => (
@@ -229,10 +243,10 @@ export function TemplatesSection({ companyId }: { companyId: string }) {
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label>Исполнитель</Label>
+              <Label htmlFor="task-template-assignee">Исполнитель</Label>
               <Select value={assigneeId || 'none'}
                 onValueChange={(v) => setAssigneeId(v === 'none' ? '' : v)}>
-                <SelectTrigger><SelectValue placeholder="Не назначен" /></SelectTrigger>
+                <SelectTrigger id="task-template-assignee"><SelectValue placeholder="Не назначен" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">Не назначен</SelectItem>
                   {(peopleQ.data?.people ?? []).map((p) => (
@@ -242,10 +256,10 @@ export function TemplatesSection({ companyId }: { companyId: string }) {
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label>Срочность</Label>
+              <Label htmlFor="task-template-priority">Срочность</Label>
               <Select value={priority || 'default'}
                 onValueChange={(v) => setPriority(v === 'default' ? '' : v)}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectTrigger id="task-template-priority"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="default">Как у типа</SelectItem>
                   {Object.entries(PRIORITY_LABEL).map(([k, v]) => (
@@ -255,14 +269,14 @@ export function TemplatesSection({ companyId }: { companyId: string }) {
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label>Срок, дней</Label>
-              <Input type="number" min={0} max={365} value={dueDays}
+              <Label htmlFor="task-template-due-days">Срок, дней</Label>
+              <Input id="task-template-due-days" type="number" min={0} max={365} value={dueDays}
                 onChange={(e) => setDueDays(e.target.value)} placeholder="как у типа" />
             </div>
           </div>
           <div className="space-y-1.5">
-            <Label>Чек-лист — по пункту на строку</Label>
-            <Textarea value={checklist} onChange={(e) => setChecklist(e.target.value)}
+            <Label htmlFor="task-template-checklist">Чек-лист — по пункту на строку</Label>
+            <Textarea id="task-template-checklist" value={checklist} onChange={(e) => setChecklist(e.target.value)}
               rows={3} placeholder={'Сверить остатки\nПодписать акт'} />
           </div>
           <Button size="sm" disabled={!name.trim() || title.trim().length < 3 || create.isPending}
@@ -357,7 +371,7 @@ export function RecurrencesSection({ companyId }: { companyId: string }) {
   return (
     <div className="space-y-3 p-4">
       <div>
-        <h1 className="text-lg font-semibold">Повторяющиеся</h1>
+        <h1 className="text-lg font-semibold">Расписания</h1>
         <p className="mt-0.5 text-xs text-muted-foreground">
           Что ставится само: еженедельные отчёты, ежемесячные сверки, ежедневные обходы.
           Каждое срабатывание порождает новую задачу по шаблону — старая остаётся в
@@ -377,9 +391,9 @@ export function RecurrencesSection({ companyId }: { companyId: string }) {
       ) : (
         <div className="flex flex-wrap items-end gap-2 rounded-lg border border-dashed p-3">
           <div className="space-y-1.5">
-            <Label className="text-xs">Шаблон</Label>
+            <Label htmlFor="task-schedule-template" className="text-xs">Шаблон</Label>
             <Select value={templateId} onValueChange={setTemplateId}>
-              <SelectTrigger className="h-8 w-[220px] text-xs">
+              <SelectTrigger id="task-schedule-template" className="h-8 w-[220px] text-xs">
                 <SelectValue placeholder="Что ставить" />
               </SelectTrigger>
               <SelectContent>
@@ -390,9 +404,9 @@ export function RecurrencesSection({ companyId }: { companyId: string }) {
             </Select>
           </div>
           <div className="space-y-1.5">
-            <Label className="text-xs">Когда</Label>
+            <Label htmlFor="task-schedule-mode" className="text-xs">Когда</Label>
             <Select value={mode} onValueChange={setMode}>
-              <SelectTrigger className="h-8 w-[150px] text-xs"><SelectValue /></SelectTrigger>
+              <SelectTrigger id="task-schedule-mode" className="h-8 w-[150px] text-xs"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="daily">каждый день</SelectItem>
                 <SelectItem value="weekly">каждую неделю</SelectItem>
@@ -402,9 +416,9 @@ export function RecurrencesSection({ companyId }: { companyId: string }) {
           </div>
           {mode === 'weekly' && (
             <div className="space-y-1.5">
-              <Label className="text-xs">День недели</Label>
+              <Label htmlFor="task-schedule-weekday" className="text-xs">День недели</Label>
               <Select value={weekday} onValueChange={setWeekday}>
-                <SelectTrigger className="h-8 w-[150px] text-xs"><SelectValue /></SelectTrigger>
+                <SelectTrigger id="task-schedule-weekday" className="h-8 w-[150px] text-xs"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {WEEKDAYS.map((w, i) => (
                     <SelectItem key={i} value={String(i)}>{w}</SelectItem>
@@ -415,14 +429,14 @@ export function RecurrencesSection({ companyId }: { companyId: string }) {
           )}
           {mode === 'monthly' && (
             <div className="space-y-1.5">
-              <Label className="text-xs">Число</Label>
-              <Input type="number" min={1} max={28} value={day} className="h-8 w-[90px] text-xs"
+              <Label htmlFor="task-schedule-day" className="text-xs">Число</Label>
+              <Input id="task-schedule-day" type="number" min={1} max={28} value={day} className="h-8 w-[90px] text-xs"
                 onChange={(e) => setDay(e.target.value)} />
             </div>
           )}
           <div className="space-y-1.5">
-            <Label className="text-xs">Время</Label>
-            <Input type="time" value={at} onChange={(e) => setAt(e.target.value)}
+            <Label htmlFor="task-schedule-time" className="text-xs">Время</Label>
+            <Input id="task-schedule-time" type="time" value={at} onChange={(e) => setAt(e.target.value)}
               className="h-8 w-[110px] text-xs" />
           </div>
           <Button size="sm" className="h-8" disabled={!templateId || create.isPending}
@@ -476,8 +490,7 @@ export function RecurrencesSection({ companyId }: { companyId: string }) {
  */
 export function TasksRegulation() {
   const { companyId } = useCompany()
-  const [params] = useSearchParams()
-  const view = params.get('view') ?? 'templates'
+  const view = useDocsView('/docs/regulation')
   if (view === 'views') return <ViewsSection companyId={companyId} scope="doc" />
   if (view === 'recurrences') return <RecurrencesSection companyId={companyId} />
   return <TemplatesSection companyId={companyId} />

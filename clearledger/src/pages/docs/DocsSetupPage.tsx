@@ -7,7 +7,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCompany } from '@/contexts/CompanyContext'
 import { Button } from '@/components/ui/button'
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { Card } from '@/components/ui/card'
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -77,6 +77,32 @@ export function DocsSetupPage() {
 
   if (view === 'labels') {
     return <Labels companyId={companyId} />
+  }
+
+  if ((view === 'kinds' || view === 'counters') && kindsQ.isLoading) {
+    return (
+      <div className="px-4 py-4">
+        <Card className="p-6 text-sm text-muted-foreground" role="status" aria-live="polite">
+          Загружаем виды документов…
+        </Card>
+      </div>
+    )
+  }
+
+  if ((view === 'kinds' || view === 'counters') && kindsQ.isError) {
+    return (
+      <div className="px-4 py-4">
+        <Card role="alert" className="flex flex-wrap items-center justify-between gap-3 p-4">
+          <div>
+            <div className="text-sm font-medium">Виды документов не загрузились</div>
+            <div className="text-xs text-muted-foreground">
+              Справочник не заменён пустым списком. Нумерацию и виды пока нельзя менять.
+            </div>
+          </div>
+          <Button size="sm" variant="outline" onClick={() => kindsQ.refetch()}>Повторить</Button>
+        </Card>
+      </div>
+    )
   }
 
   if (view === 'counters') {
@@ -383,6 +409,15 @@ function Cases({ companyId }: { companyId: string }) {
       )}
       <Card className="divide-y divide-border/60">
         {rowsQ.isLoading && (
+          <div className="px-3 py-6 text-center text-sm text-muted-foreground">Загрузка замещений…</div>
+        )}
+        {rowsQ.isError && (
+          <div role="alert" className="flex flex-wrap items-center justify-between gap-3 px-3 py-4">
+            <span className="text-sm">Замещения не загрузились</span>
+            <Button size="sm" variant="outline" onClick={() => rowsQ.refetch()}>Повторить</Button>
+          </div>
+        )}
+        {rowsQ.isLoading && (
           <div className="px-3 py-6 text-center text-sm text-muted-foreground">Загрузка дел…</div>
         )}
         {rows.map((item) => (
@@ -540,7 +575,7 @@ function Substitutions({ companyId }: { companyId: string }) {
             )}
           </div>
         ))}
-        {rows.length === 0 && (
+        {rowsQ.isSuccess && rows.length === 0 && (
           <div className="px-3 py-6 text-center text-sm text-muted-foreground">
             Замещений нет
           </div>
@@ -550,9 +585,20 @@ function Substitutions({ companyId }: { companyId: string }) {
       <Card className="space-y-3 p-4">
         <div className="text-sm font-medium">Новое замещение</div>
         <div className="grid gap-2 sm:grid-cols-2">
+          {peopleQ.isLoading && (
+            <div className="sm:col-span-2 text-sm text-muted-foreground" role="status">
+              Загружаем сотрудников…
+            </div>
+          )}
+          {peopleQ.isError && (
+            <div role="alert" className="flex flex-wrap items-center justify-between gap-3 sm:col-span-2">
+              <span className="text-sm text-destructive">Сотрудники не загрузились</span>
+              <Button size="sm" variant="outline" onClick={() => peopleQ.refetch()}>Повторить</Button>
+            </div>
+          )}
           <div className="space-y-1">
-            <Label className="text-xs">Кого замещают</Label>
-            <select value={form.user_id}
+            <Label htmlFor="substitution-user" className="text-xs">Кого замещают</Label>
+            <select id="substitution-user" value={form.user_id} disabled={!peopleQ.isSuccess}
               onChange={(e) => setForm({ ...form, user_id: e.target.value })}
               className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm">
               <option value="">выберите</option>
@@ -560,8 +606,8 @@ function Substitutions({ companyId }: { companyId: string }) {
             </select>
           </div>
           <div className="space-y-1">
-            <Label className="text-xs">Кто замещает</Label>
-            <select value={form.deputy_id}
+            <Label htmlFor="substitution-deputy" className="text-xs">Кто замещает</Label>
+            <select id="substitution-deputy" value={form.deputy_id} disabled={!peopleQ.isSuccess}
               onChange={(e) => setForm({ ...form, deputy_id: e.target.value })}
               className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm">
               <option value="">выберите</option>
@@ -579,7 +625,7 @@ function Substitutions({ companyId }: { companyId: string }) {
           </div>
         </div>
         <Button size="sm" onClick={() => create.mutate()}
-          disabled={!form.user_id || !form.deputy_id || !form.starts_on
+          disabled={!peopleQ.isSuccess || !form.user_id || !form.deputy_id || !form.starts_on
             || !form.ends_on || create.isPending}>
           Назначить
         </Button>
@@ -741,10 +787,11 @@ function Field({ label, value, onChange, placeholder, type }: {
   label: string; value: string; onChange: (v: string) => void
   placeholder?: string; type?: string
 }) {
+  const controlId = useId()
   return (
     <div className="space-y-1">
-      <Label className="text-xs">{label}</Label>
-      <Input type={type} value={value} onChange={(e) => onChange(e.target.value)}
+      <Label htmlFor={controlId} className="text-xs">{label}</Label>
+      <Input id={controlId} type={type} value={value} onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder} className="h-9" />
     </div>
   )

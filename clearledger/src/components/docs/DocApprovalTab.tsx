@@ -6,7 +6,7 @@
  * при параллельных визах документ висит, и непонятно, на ком.
  */
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import {
   CheckCircle2, CircleDashed, Clock3, Copy, FileCheck2, PlayCircle, ShieldCheck,
   XCircle,
@@ -15,6 +15,7 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import * as docsService from '@/services/docsService'
 import type { DocDetails } from '@/services/docsService'
 import { useAuth } from '@/contexts/AuthContext'
@@ -33,6 +34,7 @@ export function DocApprovalTab({ doc, companyId, onChanged }: {
   onChanged: () => void
 }) {
   const { user } = useAuth()
+  const commentId = useId()
   const qc = useQueryClient()
   const [comment, setComment] = useState('')
 
@@ -181,7 +183,8 @@ export function DocApprovalTab({ doc, companyId, onChanged }: {
       {mine && (
         <Card className="space-y-2 p-4">
           <div className="text-sm font-medium">Ваша виза по шагу «{mine.step_name}»</div>
-          <Input value={comment} onChange={(e) => setComment(e.target.value)}
+          <Label htmlFor={commentId} className="sr-only">Комментарий к визе</Label>
+          <Input id={commentId} value={comment} onChange={(e) => setComment(e.target.value)}
             placeholder="Замечание (обязательно при отказе)" className="h-9"
             aria-describedby="approval-reject-hint" />
           <div id="approval-reject-hint" className="text-xs text-muted-foreground">

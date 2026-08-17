@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 /**
  * Глобальные фильтры менеджера: компания, точки обслуживания, типы
  * документов. Применяются ко всему рабочему столу — менеджер сужает
@@ -8,7 +9,7 @@
  */
 
 import {
-  createContext, useCallback, useContext, useEffect, useMemo, useState,
+  createContext, useCallback, useContext, useEffect, useMemo, useRef, useState,
   type ReactNode,
 } from 'react'
 import { useSearchParams } from 'react-router-dom'
@@ -88,8 +89,10 @@ interface FilterContextType extends FilterState {
 
 function defaultPeriod(): Period {
   const d = new Date()
-  const first = new Date(d.getFullYear(), d.getMonth(), 1)
-  return { from: first.toISOString().slice(0, 10), to: d.toISOString().slice(0, 10) }
+  const year = String(d.getFullYear())
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return { from: `${year}-${month}-01`, to: `${year}-${month}-${day}` }
 }
 
 const HISTORY_LIMIT = 12
@@ -122,23 +125,24 @@ function coerceState(parsed: unknown): FilterState {
 
 // URL-персист фильтра (§11): выборка кодируется в query-параметр `f`, чтобы
 // состояние переживало F5 и ссылку на выборку можно было скопировать/поделиться.
-// URL читается ОДИН раз при первом монтировании приложения (флаг ниже) — при
-// перемонтировании (смена компании) берётся localStorage, а не чужой фильтр из
-// старого URL. Запись — merge-safe, не затирает ?mode/?sub.
+// Запись merge-safe и не затирает ?mode/?sub. Back/Forward тоже меняет фильтр:
+// URL — воспроизводимый снимок рабочего контура, а не одноразовый импорт.
 const URL_FILTER_PARAM = 'f'
-let urlFilterConsumed = false
-function consumeUrlFilter(): FilterState | null {
-  if (urlFilterConsumed) return null
-  urlFilterConsumed = true
+let lastFilterCompanyId: string | null = null
+function decodeFilterParam(raw: string | null): FilterState | null {
+  if (!raw) return null
   try {
-    const raw = new URLSearchParams(window.location.search).get(URL_FILTER_PARAM)
-    return raw ? coerceState(JSON.parse(decodeURIComponent(raw))) : null
+    return coerceState(JSON.parse(raw))
   } catch {
-    return null
+    try {
+      return coerceState(JSON.parse(decodeURIComponent(raw)))
+    } catch {
+      return null
+    }
   }
 }
 function encodeFilterParam(state: FilterState): string {
-  return encodeURIComponent(JSON.stringify(state))
+  return JSON.stringify(state)
 }
 
 function loadFilters(companyId: string): FilterState {
@@ -192,10 +196,24 @@ function savePresets(companyId: string, list: NamedPreset[]): void {
 
 export function FilterProvider({ children }: { children: ReactNode }) {
   const { companyId } = useCompany()
-  const [, setSearchParams] = useSearchParams()
-  const [state, setState] = useState<FilterState>(() => consumeUrlFilter() ?? loadFilters(companyId))
+  const [searchParams, setSearchParams] = useSearchParams()
+  const companyChanged = lastFilterCompanyId !== null && lastFilterCompanyId !== companyId
+  const ignoreInitialUrlRef = useRef(companyChanged)
+  const initialUrlState = companyChanged ? null
+    : decodeFilterParam(searchParams.get(URL_FILTER_PARAM))
+  const [state, setState] = useState<FilterState>(() => initialUrlState ?? loadFilters(companyId))
   const [history, setHistory] = useState<FilterState[]>(() => loadHistory(companyId))
   const [presets, setPresets] = useState<NamedPreset[]>(() => loadPresets(companyId))
+  const stateRef = useRef(state)
+  const pendingUrlStateRef = useRef<FilterState | null>(null)
+
+  useEffect(() => {
+    stateRef.current = state
+  }, [state])
+
+  useEffect(() => {
+    lastFilterCompanyId = companyId
+  }, [companyId])
 
   // Смена компании перемонтирует провайдер (TabsProvider key={companyId} в App),
   // поэтому init перечитает хранилище новой компании — отдельный reload-эффект не нужен.
@@ -205,15 +223,46 @@ export function FilterProvider({ children }: { children: ReactNode }) {
   useEffect(() => { saveHistory(companyId, history) }, [companyId, history])
   useEffect(() => { savePresets(companyId, presets) }, [companyId, presets])
 
-  // URL-персист текущей выборки: merge-safe (не затирает ?mode/?sub), replace — без спама history.
+  const rawUrlFilter = searchParams.get(URL_FILTER_PARAM)
+
+  // Ссылка и Back/Forward восстанавливают контур. При смене компании первое `f`
+  // принадлежит предыдущей компании — его один раз игнорируем и заменяем локальным.
   useEffect(() => {
+    if (ignoreInitialUrlRef.current) {
+      ignoreInitialUrlRef.current = false
+      return
+    }
+    if (!rawUrlFilter) return
+    const fromUrl = decodeFilterParam(rawUrlFilter)
+    if (!fromUrl) {
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev)
+        next.set(URL_FILTER_PARAM, encodeFilterParam(stateRef.current))
+        return next
+      }, { replace: true })
+      return
+    }
+    if (!sameFilterState(fromUrl, stateRef.current)) {
+      pendingUrlStateRef.current = fromUrl
+      // URL — внешний источник состояния: переход Back/Forward обязан восстановить контур.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setState(fromUrl)
+    }
+  }, [rawUrlFilter, setSearchParams])
+
+  // URL-персист текущей выборки: merge-safe, replace — без спама history.
+  useEffect(() => {
+    const pending = pendingUrlStateRef.current
+    if (pending && !sameFilterState(state, pending)) return
+    if (pending) pendingUrlStateRef.current = null
+    const encoded = encodeFilterParam(state)
+    if (rawUrlFilter === encoded) return
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev)
-      next.set(URL_FILTER_PARAM, encodeFilterParam(state))
+      next.set(URL_FILTER_PARAM, encoded)
       return next
     }, { replace: true })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state])
+  }, [rawUrlFilter, setSearchParams, state])
 
   const setPeriod = useCallback((p: Period) => {
     setState((prev) => ({ ...prev, period: p }))

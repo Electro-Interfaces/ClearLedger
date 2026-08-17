@@ -14,6 +14,7 @@ import { useLocation } from 'react-router-dom'
 import { useFilters, type FilterState } from '@/contexts/FilterContext'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useTabs } from '@/contexts/TabsContext'
+import { viewKey } from '@/config/tabRegistry'
 
 const storeKey = (companyId: string) => `gig-tab-filters-${companyId}`
 
@@ -55,7 +56,7 @@ function deleteOne(companyId: string, tabKey: string): void {
 
 export function TabFilterSync() {
   const location = useLocation()
-  const activeKey = location.pathname + location.search
+  const activeKey = viewKey(location.pathname, location.search)
   const { state, applyState } = useFilters()
   const { companyId } = useCompany()
   const { isPinned } = useTabs()

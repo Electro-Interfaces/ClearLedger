@@ -7,7 +7,7 @@ import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useTabs } from '@/contexts/TabsContext'
 import { useCompany } from '@/contexts/CompanyContext'
-import { resolveTab, describeView } from '@/config/tabRegistry'
+import { resolveTab, describeView, viewKey } from '@/config/tabRegistry'
 import { cn } from '@/lib/utils'
 
 export function WorkspaceTabBar() {
@@ -16,7 +16,7 @@ export function WorkspaceTabBar() {
   const location = useLocation()
   const { company } = useCompany()
   const tabRefs = useRef(new Map<string, HTMLButtonElement>())
-  const activeKey = location.pathname + location.search
+  const activeKey = viewKey(location.pathname, location.search)
   const current = describeView(location.pathname, location.search, company.profileId)
   const currentPinned = current ? isPinned(current.key) : false
   const canPin = !!current && !currentPinned

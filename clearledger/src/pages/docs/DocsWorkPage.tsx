@@ -75,13 +75,15 @@ export function DocsWorkPage() {
     return (
       <>
         <div className="h-full min-h-0 overflow-y-auto px-4 py-4 lg:hidden">
-          <DocCardPanel id={openId} companyId={companyId} onBack={close} onChanged={refresh} />
+          <DocCardPanel id={openId} companyId={companyId} onBack={close}
+            headingLevel={1} onChanged={refresh} />
         </div>
         <div className="hidden h-full min-h-0 gap-3 lg:grid lg:grid-cols-[minmax(280px,0.66fr)_minmax(520px,1.4fr)]">
           <div className="min-h-0 overflow-y-auto">{content}</div>
           <section aria-label="Открытый документ"
             className="my-4 mr-4 min-h-0 overflow-y-auto rounded-lg border border-border bg-background px-4">
-            <DocCardPanel id={openId} companyId={companyId} onBack={close} onChanged={refresh} />
+            <DocCardPanel id={openId} companyId={companyId} onBack={close}
+              headingLevel={2} onChanged={refresh} />
           </section>
         </div>
       </>
@@ -93,7 +95,7 @@ export function DocsWorkPage() {
   if (view === 'errands') {
     return (
       <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">Загрузка…</div>}>
-        <TasksWorkPage />
+        <TasksWorkPage embeddedView="mine" />
       </Suspense>
     )
   }
@@ -104,7 +106,7 @@ export function DocsWorkPage() {
       <QueuePage title="Ознакомиться"
         subtitle={acquaintsQ.isLoading ? 'Загрузка…' : `Документов: ${rows.length}`}>
         {acquaintsQ.isError && (
-          <QueueError message={(acquaintsQ.error as Error).message} onRetry={() => acquaintsQ.refetch()} />
+          <QueueError onRetry={() => acquaintsQ.refetch()} />
         )}
         {!acquaintsQ.isError && (
           <Card className="divide-y divide-border/60">
@@ -136,7 +138,7 @@ export function DocsWorkPage() {
       <QueuePage title="Мои документы"
         subtitle={docsQ.isLoading ? 'Загрузка…' : `Показано: ${docs.length}`}>
         {docsQ.isError && (
-          <QueueError message={(docsQ.error as Error).message} onRetry={() => docsQ.refetch()} />
+          <QueueError onRetry={() => docsQ.refetch()} />
         )}
         {!docsQ.isError && (
           <Card className="divide-y divide-border/60">
@@ -178,7 +180,7 @@ export function DocsWorkPage() {
     <QueuePage title="Ждут моей визы"
       subtitle={approvalsQ.isLoading ? 'Загрузка…' : `Документов: ${approvals.length}`}>
       {approvalsQ.isError && (
-        <QueueError message={(approvalsQ.error as Error).message} onRetry={() => approvalsQ.refetch()} />
+        <QueueError onRetry={() => approvalsQ.refetch()} />
       )}
       {!approvalsQ.isError && (
         <Card className="divide-y divide-border/60">
@@ -223,11 +225,13 @@ function QueuePage({ title, subtitle, children }: {
   )
 }
 
-function QueueError({ message, onRetry }: { message: string; onRetry: () => void }) {
+function QueueError({ onRetry }: { onRetry: () => void }) {
   return (
     <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 p-4">
       <div className="text-sm font-medium text-destructive">Очередь не загрузилась</div>
-      <div className="mt-1 text-sm text-muted-foreground">{message}</div>
+      <div className="mt-1 text-sm text-muted-foreground">
+        Данные не заменены пустым списком. Проверьте соединение и повторите запрос.
+      </div>
       <Button size="sm" variant="outline" className="mt-3" onClick={onRetry}>
         <RotateCw className="mr-1.5 h-3.5 w-3.5" />Повторить
       </Button>

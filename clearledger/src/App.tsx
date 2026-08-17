@@ -1,5 +1,7 @@
 import { lazy, Suspense } from 'react'
-import { createBrowserRouter, RouterProvider, Outlet, Link, Navigate, useParams } from 'react-router-dom'
+import {
+  createBrowserRouter, RouterProvider, Outlet, Link, Navigate, useLocation, useParams,
+} from 'react-router-dom'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { queryClient } from '@/lib/queryClient'
 import { AuthProvider } from '@/contexts/AuthContext'
@@ -83,6 +85,30 @@ const DocSharePage = lazy(() => import('@/pages/DocSharePage').then((m) => ({ de
 const DocVerifyPage = lazy(() => import('@/pages/DocVerifyPage').then((m) => ({ default: m.DocVerifyPage })))
 const ShowcaseLinkPage = lazy(() => import('@/pages/ShowcaseLinkPage')
   .then((m) => ({ default: m.ShowcaseLinkPage })))
+
+function LegacyTasksRedirect({ docsErrands = false }: { docsErrands?: boolean }) {
+  const { pathname, search } = useLocation()
+  const params = new URLSearchParams(search)
+  let target = '/docs/work'
+  let view = 'errands'
+  if (!docsErrands && pathname.startsWith('/tasks/company')) target = '/docs/company'
+  if (!docsErrands && pathname.startsWith('/tasks/overview')) target = '/docs/overview'
+  if (!docsErrands && pathname.startsWith('/tasks/setup')) {
+    const legacyView = params.get('view')
+    if (legacyView === 'labels') {
+      target = '/docs/setup'
+      view = 'labels'
+    } else {
+      target = '/docs/regulation'
+      view = legacyView === 'recurrences' ? 'recurrences' : 'templates'
+    }
+  }
+  params.set('view', view)
+  params.delete('doc')
+  params.delete('task')
+  params.delete('page')
+  return <Navigate to={`${target}?${params.toString()}`} replace />
+}
 // ShiftReportsPage не используется как отдельная страница — просмотр через RawPanel
 
 function LazyPage({ children }: { children: React.ReactNode }) {
@@ -271,8 +297,8 @@ const router = createBrowserRouter([
           // «Задачи» переехали в «Дело» (решение МАГа 16.08.2026). Адрес
           // оставлен ведущим на новое место: закладки и ссылки в письмах не
           // должны приводить в пустоту.
-          { path: '/tasks', element: <Navigate to="/docs/work?view=errands" replace /> },
-          { path: '/tasks/*', element: <Navigate to="/docs/work?view=errands" replace /> },
+          { path: '/tasks', element: <LegacyTasksRedirect /> },
+          { path: '/tasks/*', element: <LegacyTasksRedirect /> },
           {
             path: '/tasks-legacy',
             element: <RequireApp code="plan"><LazyPage><TasksLayout /></LazyPage></RequireApp>,
@@ -294,7 +320,7 @@ const router = createBrowserRouter([
               { path: 'work', element: <LazyPage><DocsWorkPage /></LazyPage> },
               { path: 'company', element: <LazyPage><DocsCompanyPage /></LazyPage> },
               // Прежний адрес поручений: ведёт в «На мне», где они теперь живут.
-              { path: 'errands', element: <Navigate to="/docs/work?view=errands" replace /> },
+              { path: 'errands', element: <LegacyTasksRedirect docsErrands /> },
               { path: 'overview', element: <LazyPage><DocsOverviewPage /></LazyPage> },
               { path: 'regulation', element: <LazyPage><TasksRegulation /></LazyPage> },
               { path: 'setup', element: <LazyPage><DocsSetupPage /></LazyPage> },

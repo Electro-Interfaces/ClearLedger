@@ -283,6 +283,7 @@ export interface DocFilters {
   kind_id?: string
   counterparty_id?: string
   responsible_id?: string
+  object_ids?: string
   date_from?: string
   date_to?: string
   q?: string

@@ -6,15 +6,16 @@
  * срок. По поручениям показываем готовую сводку трекера — второй такой считать
  * незачем.
  */
-import { lazy, Suspense, useMemo, useState } from 'react'
+import { lazy, Suspense, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useCompany } from '@/contexts/CompanyContext'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import * as docsService from '@/services/docsService'
 import { DOC_FAMILY } from '@/services/docsService'
 import { useDocsView } from './DocsLayout'
+import { useDocsScope } from '@/hooks/useDocsScope'
 
 const TasksOverviewPage = lazy(() => import('@/pages/tasks/TasksOverviewPage')
   .then((m) => ({ default: m.TasksOverviewPage })))
@@ -59,9 +60,17 @@ export function DocsOverviewPage() {
   const { company } = useCompany()
   const navigate = useNavigate()
   const view = useDocsView('/docs/overview')
+  const scope = useDocsScope()
+  const [params, setParams] = useSearchParams()
   const companyId = company?.id ?? ''
-  const [dateFrom, setDateFrom] = useState(() => businessDate(-89))
-  const [dateTo, setDateTo] = useState(() => businessDate())
+  const dateFrom = params.get('date_from') ?? scope.period.from
+  const dateTo = params.get('date_to') ?? scope.period.to
+  const setPeriodValue = (key: 'date_from' | 'date_to', value: string) => setParams((current) => {
+    const next = new URLSearchParams(current)
+    if (value) next.set(key, value)
+    else next.delete(key)
+    return next
+  }, { replace: true })
   const dateError = useMemo(() => {
     if (!dateFrom || !dateTo) return 'Укажите начало и окончание периода'
     if (dateFrom > dateTo) return 'Дата начала позже даты окончания'
@@ -70,14 +79,17 @@ export function DocsOverviewPage() {
   }, [dateFrom, dateTo])
 
   const listQ = useQuery({
-    queryKey: ['docs-overview', companyId],
-    queryFn: () => docsService.listDocs(companyId, { limit: 500 }),
-    enabled: !!companyId && view === 'docs',
+    queryKey: ['docs-overview', companyId, dateFrom, dateTo, scope.objectFilter],
+    queryFn: () => docsService.listDocs(companyId, {
+      limit: 500, date_from: dateFrom, date_to: dateTo,
+      object_ids: scope.objectFilter,
+    }),
+    enabled: !!companyId && view === 'docs' && scope.ready,
   })
   const boardQ = useQuery({
     queryKey: ['docs-board', companyId, 'overview'],
     queryFn: () => docsService.board(companyId),
-    enabled: !!companyId && view === 'docs',
+    enabled: !!companyId && view === 'docs' && scope.ready,
   })
   const disciplineQ = useQuery({
     queryKey: ['docs-discipline', companyId, dateFrom, dateTo],
@@ -88,7 +100,7 @@ export function DocsOverviewPage() {
 
   const stats = useMemo(() => {
     const docs = listQ.data?.docs ?? []
-    const today = new Date().toISOString().slice(0, 10)
+    const today = businessDate()
     return {
       total: docs.length,
       draft: docs.filter((d) => !d.reg_number).length,
@@ -115,7 +127,9 @@ export function DocsOverviewPage() {
     return <Discipline report={disciplineQ.data} loading={disciplineQ.isLoading}
       fetching={disciplineQ.isFetching} failed={disciplineQ.isError}
       retry={() => disciplineQ.refetch()} dateError={dateError}
-      dateFrom={dateFrom} dateTo={dateTo} setDateFrom={setDateFrom} setDateTo={setDateTo} />
+      dateFrom={dateFrom} dateTo={dateTo}
+      setDateFrom={(value) => setPeriodValue('date_from', value)}
+      setDateTo={(value) => setPeriodValue('date_to', value)} />
   }
 
   const columns = boardQ.data?.columns ?? []
@@ -125,10 +139,35 @@ export function DocsOverviewPage() {
       <div>
         <h1 className="text-base font-semibold">Документы</h1>
         <p className="text-xs text-muted-foreground">
-          {listQ.isLoading ? 'Загрузка…' : `Всего в работе: ${stats.total}`}
+          {!scope.ready ? 'Рабочий контур ещё не применён'
+            : listQ.isLoading || boardQ.isLoading ? 'Загрузка…' : `Всего в периоде: ${stats.total}`}
         </p>
       </div>
 
+      {(listQ.isError || boardQ.isError) && (
+        <Card role="alert" className="flex flex-wrap items-center justify-between gap-3 p-4">
+          <div>
+            <div className="text-sm font-medium">Обзор не загрузился</div>
+            <div className="text-xs text-muted-foreground">
+              Показатели не заменены нулями. Проверьте соединение и повторите запрос.
+            </div>
+          </div>
+          <Button type="button" size="sm" variant="outline" onClick={() => {
+            void listQ.refetch(); void boardQ.refetch()
+          }}>
+            Повторить
+          </Button>
+        </Card>
+      )}
+
+      {(!scope.ready || listQ.isLoading || boardQ.isLoading)
+        && !scope.failed && !(listQ.isError || boardQ.isError) && (
+        <Card className="p-6 text-sm text-muted-foreground" aria-live="polite">
+          Собираем документы и текущие согласования…
+        </Card>
+      )}
+
+      {scope.ready && listQ.isSuccess && boardQ.isSuccess && <>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Tile label="Без номера" value={stats.draft}
           hint="заведены, но не зарегистрированы"
@@ -183,6 +222,7 @@ export function DocsOverviewPage() {
           )}
         </div>
       </Card>
+      </>}
     </div>
   )
 }

@@ -17,6 +17,7 @@
 правкой полей нельзя.
 """
 import hashlib
+import json
 import re
 import uuid
 from datetime import date as date_type, datetime, timedelta, timezone
@@ -24,7 +25,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 from fastapi import Response
 from fastapi.responses import HTMLResponse
@@ -1533,6 +1534,7 @@ async def list_docs(
     kind_id: str | None = Query(None),
     counterparty_id: str | None = Query(None),
     responsible_id: str | None = Query(None),
+    object_ids: str | None = Query(None, max_length=5000),
     date_from: date_type | None = Query(None),
     date_to: date_type | None = Query(None),
     q: str | None = Query(None),
@@ -1564,6 +1566,13 @@ async def list_docs(
     if responsible_id:
         stmt = stmt.where(DocCard.responsible_id
                           == _uuid_or_400(responsible_id, "responsible_id"))
+    if object_ids is not None:
+        selected_objects = {
+            value.strip() for value in object_ids.split(",")
+            if value.strip() and value.strip() != "__none__"
+        }
+        stmt = stmt.where(
+            DocCard.object_id.in_(selected_objects) if selected_objects else false())
     if date_from:
         stmt = stmt.where(func.coalesce(DocCard.reg_date,
                                         func.date(DocCard.created_at)) >= date_from)
@@ -2685,7 +2694,7 @@ class DocViewIn(BaseModel):
     position: int = 100
 
 
-_DOC_VIEW_KEYS = {"view", "q", "status", "kind", "date_from", "date_to"}
+_DOC_VIEW_KEYS = {"view", "q", "status", "kind", "date_from", "date_to", "f"}
 
 
 def _clean_doc_view_query(value: dict) -> dict[str, str]:
@@ -2695,9 +2704,21 @@ def _clean_doc_view_query(value: dict) -> dict[str, str]:
             continue
         text_value = item.strip()
         if text_value:
-            clean[key] = text_value[:500]
+            clean[key] = text_value[:4000 if key == "f" else 500]
     if clean.get("view") not in {"incoming", "outgoing", "ord", "internal", "all"}:
         clean["view"] = "all"
+    if "f" in clean:
+        decoded = clean["f"]
+        try:
+            for _ in range(2):
+                candidate = unquote(decoded)
+                if candidate == decoded:
+                    break
+                decoded = candidate
+            if not isinstance(json.loads(decoded), dict):
+                clean.pop("f", None)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            clean.pop("f", None)
     return clean
 
 

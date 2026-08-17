@@ -54,10 +54,10 @@ export function Header({ onMobileMenuToggle, isMobile }: HeaderProps) {
             {/* Шапка называет ТЕКУЩИЙ продукт: там, где Учёт разрезан на рабочие места
                 («Финансы», «Данные»), надпись «Учёт» врала бы о том, где человек. */}
             <div className="flex flex-col leading-none">
-              <h1 className="font-semibold tracking-tight text-foreground text-lg">
+              <div className="font-semibold tracking-tight text-foreground text-lg">
                 {product ? productLabel(product, company.profileId)
                   : coreTitle ?? `${ECOSYSTEM_BRAND} Учёт`}
-              </h1>
+              </div>
               <p className="text-xs text-muted-foreground">
                 {product || coreTitle ? ECOSYSTEM_BRAND : `v${APP_VERSION}`}
               </p>

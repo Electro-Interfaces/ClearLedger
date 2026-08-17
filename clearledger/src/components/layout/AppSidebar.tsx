@@ -117,6 +117,7 @@ export function AppsNavItem({ collapsed, onNavigate }: {
           <SidebarMenuButton asChild>
             <button type="button" onClick={() => { toggle(); onNavigate?.() }}
               aria-expanded={open}
+              aria-label={collapsed ? 'Приложения' : undefined}
               className={`relative flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
                 open
                   ? 'bg-primary/15 font-semibold text-primary before:absolute before:left-0 before:top-1.5 before:bottom-1.5 before:w-0.5 before:rounded-full before:bg-primary'

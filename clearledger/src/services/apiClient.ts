@@ -151,7 +151,15 @@ async function handleResponse<T>(res: Response): Promise<T> {
   }
 
   if (res.status === 204) return undefined as T
-  return res.json()
+  const contentType = res.headers.get('content-type')?.toLowerCase() ?? ''
+  if (!contentType.includes('application/json')) {
+    throw new ApiError(502, 'Сервис вернул неожиданный ответ. Обновите страницу или повторите позже.')
+  }
+  try {
+    return await res.json()
+  } catch {
+    throw new ApiError(502, 'Сервис вернул повреждённые данные. Обновите страницу или повторите позже.')
+  }
 }
 
 function headers(extra?: Record<string, string>): Record<string, string> {

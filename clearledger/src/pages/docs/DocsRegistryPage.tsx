@@ -22,6 +22,7 @@ import * as docsService from '@/services/docsService'
 import { DOC_FAMILY, DOC_STATUS } from '@/services/docsService'
 import { DocCardPanel } from '@/components/docs/DocCardPanel'
 import { NewDocDialog } from '@/components/docs/NewDocDialog'
+import { useDocsScope } from '@/hooks/useDocsScope'
 import { useDocsView } from './DocsLayout'
 
 const VIEW_FILTER: Record<string, docsService.DocFilters> = {
@@ -40,6 +41,7 @@ export function DocsRegistryPage() {
   const qc = useQueryClient()
   const [params, setParams] = useSearchParams()
   const view = useDocsView('/docs')
+  const scope = useDocsScope()
   const [creating, setCreating] = useState(false)
 
   const companyId = company?.id ?? ''
@@ -51,32 +53,40 @@ export function DocsRegistryPage() {
   const kindFilter = params.get('kind') ?? ''
   const dateFrom = params.get('date_from') ?? ''
   const dateTo = params.get('date_to') ?? ''
+  const effectiveDateFrom = dateFrom || scope.period.from
+  const effectiveDateTo = dateTo || scope.period.to
   const pageValue = Number(params.get('page'))
   const page = Number.isSafeInteger(pageValue) && pageValue >= 1 ? pageValue : 1
   const hasFilters = FILTER_KEYS.some((key) => params.has(key))
   const savedQuery = useMemo(() => {
-    const result: Record<string, string> = { view }
+    const result: Record<string, string> = {
+      view, date_from: effectiveDateFrom, date_to: effectiveDateTo,
+    }
     for (const key of FILTER_KEYS) {
       const value = params.get(key)
       if (value) result[key] = value
     }
+    const globalFilter = params.get('f')
+    if (globalFilter) result.f = globalFilter
     return result
-  }, [params, view])
+  }, [effectiveDateFrom, effectiveDateTo, params, view])
   const filters = useMemo(() => ({
     ...(VIEW_FILTER[view] ?? {}),
     q: deferredQ || undefined,
     status: statusFilter || undefined,
     kind_id: kindFilter || undefined,
-    date_from: dateFrom || undefined,
-    date_to: dateTo || undefined,
+    date_from: effectiveDateFrom,
+    date_to: effectiveDateTo,
+    object_ids: scope.objectFilter,
     limit: PAGE_SIZE,
     offset: (page - 1) * PAGE_SIZE,
-  }), [dateFrom, dateTo, deferredQ, kindFilter, page, statusFilter, view])
+  }), [deferredQ, effectiveDateFrom, effectiveDateTo, kindFilter, page,
+    scope.objectFilter, statusFilter, view])
 
   const listQ = useQuery({
     queryKey: ['docs', companyId, view, filters],
     queryFn: () => docsService.listDocs(companyId, filters),
-    enabled: !!companyId,
+    enabled: !!companyId && scope.ready,
   })
   const kindsQ = useQuery({
     queryKey: ['doc-kinds', companyId],
@@ -91,7 +101,7 @@ export function DocsRegistryPage() {
       qc.invalidateQueries({ queryKey: ['doc-kinds', companyId] })
       toast.success(result.added ? `Заведено видов: ${result.added}` : 'Виды уже заведены')
     },
-    onError: (error) => toast.error((error as Error).message),
+    onError: () => toast.error('Не удалось завести базовые виды. Повторите попытку.'),
   })
 
   const setFilter = (key: typeof FILTER_KEYS[number], value: string) => setParams((current) => {
@@ -147,7 +157,9 @@ export function DocsRegistryPage() {
   const kinds = kindsQ.data ?? []
   const noKinds = kindsQ.isSuccess && kinds.length === 0
   const title = DOC_FAMILY[VIEW_FILTER[view]?.family ?? ''] ?? 'Все документы'
-  const emptyText = hasFilters ? 'По заданным условиям ничего не найдено' : 'Документов пока нет'
+  const emptyText = hasFilters
+    ? 'По заданным условиям ничего не найдено'
+    : 'В рабочем контуре документов пока нет'
 
   const registry = (
     <Card className="min-h-0 overflow-hidden">
@@ -240,6 +252,7 @@ export function DocsRegistryPage() {
         <div className="h-full min-h-0 overflow-y-auto px-4 py-4 lg:hidden">
           <DocCardPanel key={`${openId}:${initialTab ?? ''}`}
             id={openId} companyId={companyId} onBack={close}
+            headingLevel={1}
             initialTab={initialTab}
             onChanged={() => qc.invalidateQueries({ queryKey: ['docs', companyId] })} />
         </div>
@@ -253,7 +266,10 @@ export function DocsRegistryPage() {
           <div>
             <h1 className="text-base font-semibold">{title}</h1>
             <p className="text-xs text-muted-foreground">
-              {listQ.isLoading ? 'Загрузка…' : `Найдено: ${total}`}
+              {!scope.ready ? 'Рабочий контур ещё не применён'
+                : listQ.isLoading ? 'Загрузка…'
+                  : listQ.isError ? 'Количество не определено'
+                    : `Найдено: ${total}`}
             </p>
           </div>
           <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto">
@@ -286,15 +302,17 @@ export function DocsRegistryPage() {
             <option value="">Все виды</option>
             {kinds.map((kind) => <option key={kind.id} value={kind.id}>{kind.name}</option>)}
           </select>
-          <label className="flex items-center gap-1 text-xs text-muted-foreground">
+          <label className="flex items-center gap-1 text-xs text-muted-foreground"
+            title="По умолчанию используется период рабочего контура">
             с
-            <Input type="date" value={dateFrom}
+            <Input type="date" value={effectiveDateFrom}
               onChange={(event) => setFilter('date_from', event.target.value)}
               aria-label="Дата с" className="h-8 w-36 text-xs" />
           </label>
-          <label className="flex items-center gap-1 text-xs text-muted-foreground">
+          <label className="flex items-center gap-1 text-xs text-muted-foreground"
+            title="По умолчанию используется период рабочего контура">
             по
-            <Input type="date" value={dateTo}
+            <Input type="date" value={effectiveDateTo}
               onChange={(event) => setFilter('date_to', event.target.value)}
               aria-label="Дата по" className="h-8 w-36 text-xs" />
           </label>
@@ -310,6 +328,9 @@ export function DocsRegistryPage() {
             <span className="text-xs text-muted-foreground">
               Поиск включает распознанный текст файлов
             </span>
+          )}
+          {!dateFrom && !dateTo && (
+            <span className="text-xs text-muted-foreground">Период взят из рабочего контура</span>
           )}
         </div>
 
@@ -330,7 +351,9 @@ export function DocsRegistryPage() {
         {listQ.isError && (
           <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 p-4">
             <div className="text-sm font-medium text-destructive">Реестр не загрузился</div>
-            <div className="mt-1 text-sm text-muted-foreground">{(listQ.error as Error).message}</div>
+            <div className="mt-1 text-sm text-muted-foreground">
+              Данные не заменены пустым списком. Проверьте соединение и повторите запрос.
+            </div>
             <Button size="sm" variant="outline" className="mt-3" onClick={() => listQ.refetch()}>
               <RotateCw className="mr-1.5 h-3.5 w-3.5" />Повторить
             </Button>
@@ -341,12 +364,18 @@ export function DocsRegistryPage() {
           'min-h-0 flex-1',
           openId && 'grid gap-3 lg:grid-cols-[minmax(280px,0.66fr)_minmax(520px,1.4fr)]',
         )}>
-          {!listQ.isError && registry}
+          {(listQ.isLoading || !scope.ready) && !scope.failed && (
+            <Card className="p-6 text-sm text-muted-foreground" role="status" aria-live="polite">
+              {scope.resolving ? 'Применяем область рабочего контура…' : 'Загружаем реестр…'}
+            </Card>
+          )}
+          {listQ.isSuccess && registry}
           {openId && (
             <section aria-label="Открытый документ"
               className="min-h-0 overflow-y-auto rounded-lg border border-border bg-background px-4">
               <DocCardPanel key={`${openId}:${initialTab ?? ''}`}
                 id={openId} companyId={companyId} onBack={close}
+                headingLevel={2}
                 initialTab={initialTab}
                 onChanged={() => qc.invalidateQueries({ queryKey: ['docs', companyId] })} />
             </section>

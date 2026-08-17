@@ -5,7 +5,7 @@
  * кнопка «Скачать пакет»: обмен не должен вставать из-за сети, человек донесёт
  * файл руками. Журнал выгрузок отвечает на вопрос сверки «отдавали ли мы это».
  */
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Building2, Download, Upload } from 'lucide-react'
 import { toast } from 'sonner'
@@ -26,6 +26,7 @@ export function DocExchangeBlock({ doc, companyId }: {
   companyId: string
 }) {
   const qc = useQueryClient()
+  const targetControlId = useId()
   const [targetId, setTargetId] = useState('')
 
   const targetsQ = useQuery({
@@ -66,8 +67,8 @@ export function DocExchangeBlock({ doc, companyId }: {
       ) : (
         <div className="grid gap-2 sm:grid-cols-2">
           <div className="space-y-1">
-            <Label className="text-xs">Куда</Label>
-            <select value={targetId} onChange={(e) => setTargetId(e.target.value)}
+            <Label htmlFor={targetControlId} className="text-xs">Куда</Label>
+            <select id={targetControlId} value={targetId} onChange={(e) => setTargetId(e.target.value)}
               className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm">
               <option value="">выберите систему</option>
               {targets.map((t) => (
