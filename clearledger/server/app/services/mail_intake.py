@@ -560,7 +560,8 @@ async def _save_message(db: AsyncSession, account: MailAccount, uid: int,
 
 async def retry_doc_route(db: AsyncSession, cid, row: MailMessage) -> bool:
     """Повторить неуспешный mail→doc после исправления справочника или вида."""
-    if row.company_id != cid or row.status in ("quarantine", "rejected"):
+    if (row.company_id != cid or row.routed_to == "duplicate"
+            or row.status in ("quarantine", "rejected")):
         return False
     account = await db.get(MailAccount, row.account_id) if row.account_id else None
     if account is None or account.company_id != cid:

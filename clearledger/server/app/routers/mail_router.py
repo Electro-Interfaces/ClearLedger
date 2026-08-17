@@ -308,6 +308,9 @@ async def retry_route(
         MailMessage.id == message_id))).scalar_one_or_none()
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Письмо не найдено")
+    if row.routed_to == "duplicate":
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Системный дубль письма повторно не маршрутизируется")
     if row.status in ("quarantine", "rejected"):
         raise HTTPException(status.HTTP_409_CONFLICT,
                             "Сначала примите письмо из карантина")
@@ -630,6 +633,10 @@ async def decide(
     rows = (await db.execute(select(MailMessage).where(
         MailMessage.company_id == cid,
         MailMessage.id.in_(body.message_ids)))).scalars().all()
+    if body.decision == "accept" and any(
+            message.routed_to == "duplicate" for message in rows):
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Системный дубль письма нельзя принять повторно")
     status = "accepted" if body.decision == "accept" else "rejected"
     for m in rows:
         m.status = status

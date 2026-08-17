@@ -1,6 +1,10 @@
 """Границы доверия автоматической обработки входящей почты."""
 import email
+import uuid
 
+import pytest
+
+from app.models import MailMessage
 from app.services import mail_intake
 
 
@@ -49,3 +53,12 @@ def test_транспортные_заголовки_не_размножают_�
         b"From: sender@example.org\r\nTo: docs@example.org\r\n"
         b"Date: Mon, 17 Aug 2026 10:00:00 +0300\r\nSubject: Act\r\n\r\nbody")
     assert mail_intake.message_dedup_key(first) == mail_intake.message_dedup_key(second)
+
+
+@pytest.mark.asyncio
+async def test_системный_дубль_нельзя_маршрутизировать_повторно():
+    cid = uuid.uuid4()
+    duplicate = MailMessage(
+        company_id=cid, direction="in", status="accepted", routed_to="duplicate",
+    )
+    assert await mail_intake.retry_doc_route(None, cid, duplicate) is False
