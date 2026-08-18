@@ -183,6 +183,11 @@ def test_invariant_edge_and_onec_payments_use_one_fail_closed_mapper():
     assert onec["Документы"][2]["Содержимое"]["Оплаты"][0]["Вид"] == "Безнал"
     assert map_accounting_payment("Наличные") == "Наличные"
     assert map_accounting_payment("PayTerm") == "Безнал"
+    # На 208 касса пишет вид «Карты МПС» во множественном числе; маппер должен
+    # покрывать обе формы, иначе весь ОРП смены блокируется (поймано 19.08).
+    assert map_accounting_payment("Карты МПС") == "Безнал"
+    assert map_accounting_payment("карта мпс") == "Безнал"
+    assert map_accounting_payment("Прочие") == "Безнал"
     with pytest.raises(AccountingPaymentMappingBlocked) as error:
         map_accounting_payment("неизвестный QR-агрегатор")
     assert error.value.code == "blocked_mapping"

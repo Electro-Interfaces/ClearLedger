@@ -372,10 +372,21 @@ class BpPackageEmitter:
         if unknown_vat:
             if not isinstance(unknown_vat, list):
                 unknown_vat = [unknown_vat]
-            raise ValueError(
-                "Пакет БП не собран: неизвестна ставка НДС: "
-                + ", ".join(str(value) for value in unknown_vat[:5])
-            )
+            # Агент помечает товар «ставка неизвестна» на момент смены, когда
+            # карточка ещё не связана. Но item_line всё равно добирает ставку из
+            # справочника (card.vat), а справочник с тех пор пополнился. Оставляем
+            # в блоке только те товары, у которых ставки нет И в карточке — иначе
+            # ранние смены роняются из-за пометки, которая давно неактуальна
+            # (на 208 так падали смены 24.04 и 09.06, где все товары уже НДС22).
+            still_unknown = [
+                u for u in unknown_vat
+                if not _nds((nom.get(str(u)).vat if nom.get(str(u)) else "") or "")
+            ]
+            if still_unknown:
+                raise ValueError(
+                    "Пакет БП не собран: неизвестна ставка НДС: "
+                    + ", ".join(str(value) for value in still_unknown[:5])
+                )
         retail = {
             "Тип": "retail_sale_sidegoods",
             "ИсточникUUID": str(source_doc.get("ИсточникUUID") or sm.get("Смена") or ""),
