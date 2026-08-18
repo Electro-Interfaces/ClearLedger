@@ -17,10 +17,22 @@ from sqlalchemy import select, func, or_, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
-    CbInventoryDoc, CbMovementDoc, CbNomenclature, CbRef, Contract,
-    Counterparty, DataEntry, StockOnHand,
+    AccountingBusinessGroup, AccountingSourceDecision, AccountingSourcePolicy,
+    BusinessShiftAlias, CbInventoryDoc, CbMovementDoc, CbNomenclature, CbRef,
+    Contract, Counterparty, CutoverManifest, DataEntry, ExportPacket, StockOnHand,
 )
+from app.services.accounting_business_date import (
+    AccountingBusinessDateConflict,
+    resolve_accounting_business_date,
+)
+from app.services.accounting_contract_v3 import (
+    alias_hash, business_projection_hash, normalize_nfc_json,
+)
+from app.services.accounting_group_v3 import build_accounting_business_payload
 from app.services.bp_canon import packet_hash
+from app.services.accounting_payment import map_accounting_payment
+from app.services.business_shift import BusinessShiftConflict, BusinessShiftResolver
+from app.services.cutover_policy import CutoverPolicyError, decide_policy_axes
 from app.services.goods_dashboard import _day
 
 _log = _logging.getLogger("edge.bp_export")
@@ -51,8 +63,9 @@ _TRANSFER_DIRECTION = {
 
 _DOC_ORDER = {
     "recipe": 0, "purchase": 1, "production_release": 2,
-    "retail_sale_sidegoods": 3, "return_purchase": 4, "inventory": 5,
-    "gain": 6, "writeoff": 7, "transfer": 8,
+    "ingredients_writeoff": 3, "retail_sale_sidegoods": 4,
+    "return_sale": 5, "return_purchase": 6, "inventory": 7,
+    "gain": 8, "writeoff": 9, "transfer": 10,
 }
 
 
@@ -127,6 +140,9 @@ class BpPackageEmitter:
     def __init__(self, session: AsyncSession, company_id):
         self.session = session
         self.company_id = company_id
+        self._shift_targets: dict[str, DataEntry] = {}
+        self._shift_candidates_cache: dict[str, list[DataEntry]] = {}
+        self._accounting_context: dict[str, dict] = {}
 
     async def _nom_map(self) -> dict[str, CbNomenclature]:
         rows = (await self.session.execute(select(CbNomenclature).where(
@@ -232,6 +248,9 @@ class BpPackageEmitter:
             "Касса": str(sm.get("Касса") or ""),
             "ОСЭНомер": str(sm.get("ОСЭНомер") or sm.get("НомерСмены") or ""),
         }
+        edge_business_date = str((meta.get("Edge") or {}).get("BusinessDate") or "")
+        if edge_business_date:
+            shift["ДатаОСЭ"] = edge_business_date
 
         nsi_nom: set[str] = set()
         nsi_org = {org_uuid} if org_uuid else set()
@@ -308,7 +327,6 @@ class BpPackageEmitter:
         sec = meta.get("Секции") or {}
         retail_lines: list[dict] = []
         dishes: set[str] = set()
-        inline_recipes: dict[str, list[dict]] = {}
         for key, sku_class in (("продажа_сопутка", "Сопутка"),
                                ("продажа_общепит", "Общепит")):
             for line in (sec.get(key) or {}).get("строки") or []:
@@ -325,16 +343,39 @@ class BpPackageEmitter:
                     dish_uuid = str(result.get("Номенклатура") or "")
                     if dish_uuid:
                         dishes.add(dish_uuid)
-                        inline_recipes[dish_uuid] = result.pop("Ингредиенты", []) or []
+                    result.pop("Ингредиенты", None)
                 retail_lines.append(result)
-        returned = [item_line(line, index) for index, line in enumerate(
-            (sec.get("возвраты") or {}).get("строки") or [], 1)]
+        returned = []
+        for index, line in enumerate((sec.get("возвраты") or {}).get("строки") or [], 1):
+            result = item_line(line, index)
+            item_uuid = str(result.get("Номенклатура") or "")
+            card = nom.get(item_uuid)
+            is_food = (
+                result.get("КлассSKU") == "Общепит"
+                or bool(getattr(card, "is_dish", False))
+                or getattr(card, "sku_class", None) == "Общепит"
+            )
+            result["КлассSKU"] = "Общепит" if is_food else "Сопутка"
+            if item_uuid and is_food:
+                dishes.add(item_uuid)
+            returned.append(result)
         payments = []
         for payment in (sec.get("оплаты") or {}).get("строки") or []:
             kind = str(payment.get("ВидОплаты") or payment.get("ФормаОплатыКанон")
                        or payment.get("ФормаОплаты") or "")
-            payments.append({"ВидОплаты": kind, "Сумма": round(float(payment.get("Сумма") or 0), 2)})
+            payments.append({
+                "ВидОплаты": map_accounting_payment(kind),
+                "Сумма": round(float(payment.get("Сумма") or 0), 2),
+            })
         source_doc = meta.get("Документ") or {}
+        unknown_vat = source_doc.get("СтавкаНеизвестна") or []
+        if unknown_vat:
+            if not isinstance(unknown_vat, list):
+                unknown_vat = [unknown_vat]
+            raise ValueError(
+                "Пакет БП не собран: неизвестна ставка НДС: "
+                + ", ".join(str(value) for value in unknown_vat[:5])
+            )
         retail = {
             "Тип": "retail_sale_sidegoods",
             "ИсточникUUID": str(source_doc.get("ИсточникUUID") or sm.get("Смена") or ""),
@@ -386,31 +427,10 @@ class BpPackageEmitter:
 
         related = [entry for entry in entries if in_shift(entry) and entry.id != target.id]
 
-        # Документы, для которых приёмник TradeLedger.cfe пока не имеет раскладки
-        # (возврат покупателя, списание ингредиентов). Раньше их наличие роняло
-        # ValueError — и вся смена не выгружалась из-за одного возврата, хотя
-        # сопутка и топливо собраны. Возврат покупателя — штатная операция
-        # магазина, ронять из-за него всю смену нельзя.
-        #
-        # Правильная раскладка этих типов в БП требует стороны 1С (как их примет
-        # .cfe), поэтому здесь их не собираем, а откладываем: смена уходит без
-        # них, факт откладывания виден в логе, а сами документы остаются в
-        # DataEntry — перевыгрузка подхватит их, когда приёмник научится. Молча
-        # они не теряются, но и вслепую в пакет, который может уронить .cfe, не
-        # попадают.
-        DEFERRED_KINDS = {"return_sale", "ingredients_writeoff"}
-        отложено = [entry for entry in related if entry.doc_type_id in DEFERRED_KINDS]
-        related = [entry for entry in related if entry.doc_type_id not in DEFERRED_KINDS]
-        if отложено:
-            виды = sorted({e.doc_type_id for e in отложено})
-            _log.warning(
-                "смена %s: %d документ(ов) отложено (приёмник БП не поддерживает %s) — "
-                "смена выгружена без них, документы ждут в DataEntry",
-                shift_key, len(отложено), ", ".join(виды),
-            )
-
         purchases: list[dict] = []
         productions: list[dict] = []
+        ingredient_writeoffs: list[dict] = []
+        return_sales: list[dict] = []
         returns: list[dict] = []
         inventories: list[dict] = []
         gains: list[dict] = []
@@ -524,6 +544,23 @@ class BpPackageEmitter:
                 continue
             doc["Товары"] = [item_line(line, index, kind not in {"inventory", "writeoff", "transfer"})
                               for index, line in enumerate(doc.get("Товары") or [], 1)]
+            if kind == "ingredients_writeoff":
+                ingredient_writeoffs.append(doc)
+                continue
+            if kind == "return_sale":
+                for line in doc["Товары"]:
+                    item_uuid = str(line.get("Номенклатура") or "")
+                    card = nom.get(item_uuid)
+                    is_food = (
+                        line.get("КлассSKU") == "Общепит"
+                        or bool(getattr(card, "is_dish", False))
+                        or getattr(card, "sku_class", None) == "Общепит"
+                    )
+                    line["КлассSKU"] = "Общепит" if is_food else "Сопутка"
+                    if item_uuid and is_food:
+                        dishes.add(item_uuid)
+                return_sales.append(doc)
+                continue
             if kind == "purchase":
                 supplier_snapshot = str(doc.get("Контрагент") or "")
                 supplier_id = str(doc.get("supplier_id") or "").strip()
@@ -616,70 +653,75 @@ class BpPackageEmitter:
         # «последняя карта блюда» делает повторный экспорт старой смены
         # недостоверным после изменения ТТК.
         recipe_entries = [entry for entry in related if entry.doc_type_id == "recipe"]
-        recipe_by_dish = {}
+        recipe_by_dish: dict[str, list[dict]] = {}
         for entry in recipe_entries:
             doc = (entry.meta or {}).get("Документ") or {}
             dish_uuid = str(doc.get("БлюдоUUID") or "")
             if dish_uuid:
-                recipe_by_dish[dish_uuid] = doc
-        # Запасной источник состава — мастер-НСИ.
-        #
-        # ТТК берётся из контекста смены: карта, действовавшая тогда, а не сегодня.
-        # Но у смен до 4 августа такого документа нет вовсе — агент начал слать
-        # техкарты позже, — и блюдо уходило в бухгалтерию товаром без
-        # себестоимости, хотя состав у нас есть в справочнике. Берём его, когда
-        # своего нет: приблизительная карта лучше отсутствующей, а признак
-        # источника («ВидРецептуры») говорит, откуда она взята.
-        master_recipes: dict[str, list[dict]] = {}
-        if dishes:
-            for row in (await self.session.execute(text("""
-                SELECT r.dish_uuid::text AS dish, l.item_uuid::text AS item, l.qty, l.unit
-                FROM edge.recipe r JOIN edge.recipe_line l ON l.recipe_id = r.id
-                WHERE r.dish_uuid = ANY(CAST(:dishes AS uuid[]))
-            """), {"dishes": list(dishes)})).mappings().all():
-                master_recipes.setdefault(row["dish"], []).append({
-                    "НоменклатураUUID": row["item"],
-                    "Количество": float(row["qty"] or 0),
-                    "Единица": row["unit"] or "",
-                })
-
+                recipe_by_dish.setdefault(dish_uuid, []).append(doc)
         recipes = []
         for dish_uuid in sorted(dishes):
-            source_recipe = recipe_by_dish.get(dish_uuid) or {}
-            ingredients = (source_recipe.get("Ингредиенты")
-                           or inline_recipes.get(dish_uuid)
-                           or master_recipes.get(dish_uuid) or [])
-            output_ingredients = []
-            for ingredient in ingredients:
-                ingredient_uuid = str(ingredient.get("НоменклатураUUID") or ingredient.get("Номенклатура") or "")
-                if not ingredient_uuid:
+            for source_recipe in sorted(
+                recipe_by_dish.get(dish_uuid) or [],
+                key=lambda row: str(row.get("ИсточникUUID") or ""),
+            ):
+                recipe_id = str(source_recipe.get("ИсточникUUID") or "").strip()
+                bundle_id = str(source_recipe.get("ВерсияНабораТТК") or "").strip()
+                try:
+                    revision = int(source_recipe.get("ВерсияТТК") or 0)
+                except (TypeError, ValueError):
                     continue
-                nsi_nom.add(ingredient_uuid)
-                output_ingredients.append({
-                    "НоменклатураUUID": ingredient_uuid,
-                    "Количество": float(ingredient.get("Количество") or 0),
-                    "Единица": ingredient.get("Единица") or (nom[ingredient_uuid].unit if nom.get(ingredient_uuid) else ""),
+                if not recipe_id or not bundle_id or revision <= 0:
+                    continue
+                output_ingredients = []
+                for ingredient in source_recipe.get("Ингредиенты") or []:
+                    ingredient_uuid = str(
+                        ingredient.get("НоменклатураUUID")
+                        or ingredient.get("Номенклатура") or ""
+                    )
+                    if not ingredient_uuid:
+                        continue
+                    nsi_nom.add(ingredient_uuid)
+                    output_ingredients.append({
+                        "НоменклатураUUID": ingredient_uuid,
+                        "Количество": float(ingredient.get("Количество") or 0),
+                        "Единица": ingredient.get("Единица")
+                        or (nom[ingredient_uuid].unit if nom.get(ingredient_uuid) else ""),
+                    })
+                if not output_ingredients:
+                    continue
+                recipes.append({
+                    "Тип": "recipe", "ИсточникUUID": recipe_id,
+                    "БлюдоUUID": dish_uuid,
+                    "БлюдоНаименование": str(
+                        source_recipe.get("БлюдоНаименование")
+                        or (nom[dish_uuid].name if nom.get(dish_uuid) else "")
+                    ),
+                    "ВидРецептуры": source_recipe.get("ВидРецептуры") or "dish",
+                    "ВерсияТТК": revision,
+                    "ВерсияНабораТТК": bundle_id,
+                    "Выход": float(source_recipe.get("Выход") or 1),
+                    "ЕдиницаВыхода": str(source_recipe.get("ЕдиницаВыхода") or "шт"),
+                    "Ингредиенты": output_ingredients,
                 })
-            if not output_ingredients:
-                # Состава нет ни в мастере, ни в строке продажи — блюдо старого
-                # меню, техкарту которого мы не собирали. Пустую ТТК приёмник всё
-                # равно отбрасывает («пустой массив Ингредиенты» → откат), так что
-                # класть её в пакет незачем: она только создаёт видимость, будто
-                # себестоимость соберётся. Пропуск заметит сверка — проверка «все
-                # блюда смены имеют ТТК» назовёт блюдо поимённо.
-                continue
-            recipes.append({
-                "Тип": "recipe",
-                "ИсточникUUID": str(source_recipe.get("ИсточникUUID") or _stable_uuid(f"edge-recipe/{dish_uuid}")),
-                "БлюдоUUID": dish_uuid,
-                "БлюдоНаименование": str(source_recipe.get("БлюдоНаименование") or (nom[dish_uuid].name if nom.get(dish_uuid) else "")),
-                "ВидРецептуры": source_recipe.get("ВидРецептуры") or "dish",
-                "ВерсияТТК": int(source_recipe.get("ВерсияТТК") or 0),
-                "ВерсияНабораТТК": str(source_recipe.get("ВерсияНабораТТК") or ""),
-                "Выход": float(source_recipe.get("Выход") or 1),
-                "ЕдиницаВыхода": str(source_recipe.get("ЕдиницаВыхода") or "шт"),
-                "Ингредиенты": output_ingredients,
-            })
+
+        duplicate_recipes = sorted({
+            dish_uuid for dish_uuid in dishes
+            if sum(1 for row in recipes if row["БлюдоUUID"] == dish_uuid) > 1
+        })
+        if duplicate_recipes:
+            raise ValueError(
+                "Пакет БП не собран: для блюда найдено больше одной exact ТТК смены: "
+                + ", ".join(duplicate_recipes[:5])
+            )
+
+        recipe_dishes = {str(recipe.get("БлюдоUUID") or "") for recipe in recipes}
+        missing_recipes = sorted(dishes - recipe_dishes)
+        if missing_recipes:
+            raise ValueError(
+                "Пакет БП не собран: для проданных блюд нет точной ТТК этой смены: "
+                + ", ".join(missing_recipes[:5])
+            )
 
         released_dishes = {
             str(line.get("Номенклатура") or "")
@@ -694,7 +736,11 @@ class BpPackageEmitter:
                 + ", ".join(missing_release[:5])
             )
 
-        documents = [*recipes, *purchases, retail, *productions, *returns, *inventories, *gains, *writeoffs, *transfers]
+        documents = [
+            *recipes, *purchases, *productions, *ingredient_writeoffs,
+            retail, *return_sales, *returns, *inventories, *gains,
+            *writeoffs, *transfers,
+        ]
         documents.sort(key=_document_sort_key)
         for doc in documents:
             if doc.get("Тип") != "recipe":
@@ -754,6 +800,15 @@ class BpPackageEmitter:
             "Источник": "Ledger Edge → Ledger",
             "Смена": shift, "Документы": documents, "НСИ": nsi, "ХешПакета": "",
         }
+        edge_completeness = (meta.get("Edge") or {}).get("ShiftCompleteness")
+        if edge_completeness is not None:
+            packet["ProvisionalBusinessShiftID"] = str(
+                (meta.get("Edge") or {}).get("ProvisionalBusinessShiftID") or ""
+            )
+            packet["ShiftCompleteness"] = deepcopy(edge_completeness)
+            packet["CostEvidence"] = deepcopy(
+                (meta.get("Edge") or {}).get("CostEvidence")
+            )
         if skipped:
             # Служебное поле: приёмник его игнорирует (не «Документы»), а сверка и
             # экран показывают, чего в пакете нет и почему.
@@ -761,25 +816,264 @@ class BpPackageEmitter:
         packet["ХешПакета"] = packet_hash(packet)
         return packet
 
-    async def build_shift_package(self, shift_key: str) -> dict:
-        """Собрать пакет для одной смены (retail_sale + НСИ). shift_key = GUID смены."""
-        # найти retail-запись смены
+    @staticmethod
+    def _candidate_shift_key(target: DataEntry) -> str:
+        shift = (getattr(target, "meta", None) or {}).get("Смена") or {}
+        return str(
+            shift.get("Смена")
+            or f"{_day(shift)}|{shift.get('КодАЗС') or '—'}"
+        )
+
+    async def _shift_candidates(self, shift_key: str) -> list[DataEntry]:
+        if shift_key in self._shift_candidates_cache:
+            return self._shift_candidates_cache[shift_key]
+        if shift_key in self._shift_targets:
+            return [self._shift_targets[shift_key]]
         rows = (await self.session.execute(select(DataEntry).where(
             DataEntry.company_id == self.company_id, DataEntry.source.in_(("edge", "oneC")),
             DataEntry.doc_type_id == "retail_sale_sidegoods",
-            # Вытесненный документ описывает смену, которую уже описывает другой:
-            # выгрузить оба значило бы отдать в бухгалтерию двойную выручку —
-            # приёмник ищет соответствие только по ИсточникUUID и не склеит их.
-            DataEntry.status != "superseded"))).scalars().all()
-        target = None
-        for r in sorted(rows, key=lambda row: row.source != "edge"):
-            sm = (r.meta or {}).get("Смена") or {}
-            k = str(sm.get("Смена") or f"{_day(sm)}|{sm.get('КодАЗС') or '—'}")
-            if k == shift_key:
-                target = r
-                break
-        if target is None:
+        ))).scalars().all()
+        candidates = [row for row in rows if self._candidate_shift_key(row) == shift_key]
+        candidates.sort(key=lambda row: (
+            row.source != "edge", str(getattr(row, "id", "")),
+        ))
+        if not candidates:
             raise ValueError(f"смена не найдена: {shift_key}")
+        self._shift_candidates_cache[shift_key] = candidates
+        return candidates
+
+    async def _shift_target(self, shift_key: str) -> DataEntry:
+        if shift_key in self._shift_targets:
+            return self._shift_targets[shift_key]
+        return (await self._shift_candidates(shift_key))[0]
+
+    @staticmethod
+    def _target_fact_id(target: DataEntry) -> str:
+        return str(getattr(target, "source_id", None) or target.id)
+
+    @staticmethod
+    def _aliases(
+        *, company_key: str, station_id: str, business_date: str,
+        ose: str, internal_shift_no: str, include_edge: bool,
+    ) -> list[dict]:
+        aliases = []
+        if include_edge:
+            if not internal_shift_no:
+                raise ValueError("Edge-смена не содержит внутренний номер")
+            attributes = {
+                "company_id": company_key,
+                "station_id": station_id,
+                "internal_shift_no": internal_shift_no,
+                "business_date": business_date,
+            }
+            aliases.append({
+                "Algorithm": "business-shift-alias-v1",
+                "AliasHash": alias_hash("business-shift-alias-v1", attributes),
+                "Attributes": attributes,
+            })
+        common_attributes = {
+            "company_id": company_key,
+            "station_id": station_id,
+            "business_date": business_date,
+            "ose": ose,
+        }
+        aliases.append({
+            "Algorithm": "business-shift-common-alias-v1",
+            "AliasHash": alias_hash(
+                "business-shift-common-alias-v1", common_attributes,
+            ),
+            "Attributes": common_attributes,
+        })
+        return sorted(aliases, key=lambda row: (row["Algorithm"], row["AliasHash"]))
+
+    async def _existing_fact_origin(self, aliases: list[dict]) -> str | None:
+        keys = {(row["Algorithm"], row["AliasHash"]) for row in aliases}
+        stored_aliases = (await self.session.execute(
+            select(BusinessShiftAlias).where(
+                BusinessShiftAlias.company_id == self.company_id,
+                BusinessShiftAlias.alias_hash.in_([row[1] for row in keys]),
+            ).with_for_update()
+        )).scalars().all()
+        shift_ids = {
+            row.business_shift_id for row in stored_aliases
+            if (row.algorithm, row.alias_hash) in keys
+        }
+        if len(shift_ids) > 1:
+            raise ValueError("BusinessShift aliases указывают на разные смены")
+        if not shift_ids:
+            return None
+        shift_id = next(iter(shift_ids))
+        groups = (await self.session.execute(
+            select(AccountingBusinessGroup).where(
+                AccountingBusinessGroup.company_id == self.company_id,
+                AccountingBusinessGroup.business_shift_id == shift_id,
+            ).with_for_update()
+        )).scalars().all()
+        group = next((row for row in groups if row.business_shift_id == shift_id), None)
+        if group is None or group.current_packet_id is None:
+            return None
+        packets = (await self.session.execute(
+            select(ExportPacket).where(
+                ExportPacket.company_id == self.company_id,
+                ExportPacket.id == group.current_packet_id,
+            ).with_for_update()
+        )).scalars().all()
+        current = next((row for row in packets if row.id == group.current_packet_id), None)
+        if current is None or current.fact_origin not in {"edge", "onec_legacy"}:
+            raise ValueError("Текущая ревизия BusinessShift не содержит FactOrigin")
+        return current.fact_origin
+
+    async def _source_review(
+        self, *, reason: str, manifest=None, policy=None,
+        fact_origin: str | None = None, aliases: list[dict] | None = None,
+        loser_fact_ids: list[str] | None = None,
+    ) -> None:
+        self.session.add(AccountingSourceDecision(
+            id=_uuid.uuid4(), company_id=self.company_id,
+            business_shift_id=None, candidate_business_shift_ids=[],
+            winner_fact_id=None, loser_fact_ids=list(loser_fact_ids or []),
+            fact_origin=fact_origin,
+            policy_id=getattr(policy, "id", None),
+            policy_revision=getattr(policy, "revision", None),
+            policy_hash=getattr(manifest, "manifest_hash", None),
+            manifest_id=getattr(manifest, "id", None),
+            manifest_hash=getattr(manifest, "manifest_hash", None),
+            reason=reason[:300], shadow_status="blocked",
+            status="needs_review", aliases=list(aliases or []),
+        ))
+        await self.session.flush()
+
+    async def select_accounting_source(
+        self, shift_key: str, manifest_hash: str | None, *,
+        raw_packet: dict | None = None,
+    ) -> dict:
+        cached = self._accounting_context.get(shift_key)
+        if cached is not None and cached["manifest"].manifest_hash == manifest_hash:
+            return cached
+        if not manifest_hash:
+            raise ValueError("Не передан manifest_hash effective-policy")
+        initial = await self._shift_target(shift_key)
+        raw_shift = (
+            (raw_packet or {}).get("Смена")
+            or (getattr(initial, "meta", None) or {}).get("Смена")
+            or {}
+        )
+        raw_shift = deepcopy(raw_shift)
+        edge_business_date = str(
+            ((getattr(initial, "meta", None) or {}).get("Edge") or {}).get(
+                "BusinessDate"
+            ) or ""
+        )
+        if edge_business_date:
+            raw_shift.setdefault("ДатаОСЭ", edge_business_date)
+        station_id = str(raw_shift.get("КодАЗС") or "").strip()
+        ose = str(
+            raw_shift.get("ОСЭНомер") or raw_shift.get("НомерСмены") or ""
+        ).strip()
+        if not station_id.isdigit() or not ose:
+            raise ValueError("Смена не содержит StationID или ОСЭ")
+        manifest = (await self.session.execute(
+            select(CutoverManifest).where(
+                CutoverManifest.company_id == self.company_id,
+                CutoverManifest.station_id == int(station_id),
+                CutoverManifest.manifest_hash == manifest_hash,
+            ).with_for_update()
+        )).scalars().first()
+        if manifest is None:
+            raise ValueError("Не найден exact CutoverManifest для пакета")
+        policy = (await self.session.execute(
+            select(AccountingSourcePolicy).where(
+                AccountingSourcePolicy.company_id == self.company_id,
+                AccountingSourcePolicy.id == manifest.policy_id,
+            ).with_for_update()
+        )).scalars().first()
+        if policy is None:
+            raise ValueError("Не найдена policy CutoverManifest")
+        try:
+            resolved_date = resolve_accounting_business_date(
+                raw_shift, policy.station_timezone or "Europe/Moscow",
+            )
+        except AccountingBusinessDateConflict as exc:
+            await self._source_review(
+                reason=str(exc), manifest=manifest, policy=policy,
+            )
+            raise ValueError(f"BusinessDate требует проверки: {exc}") from exc
+        business_date = resolved_date.value.isoformat()
+        company_key = str(self.company_id).lower()
+        internal_shift_no = str(
+            raw_shift.get("НомерСменыВнутр") or ""
+        ).strip()
+        candidates = await self._shift_candidates(shift_key)
+        lookup_aliases = self._aliases(
+            company_key=company_key, station_id=station_id,
+            business_date=business_date, ose=ose,
+            internal_shift_no=internal_shift_no, include_edge=False,
+        )
+        existing_origin = await self._existing_fact_origin(lookup_aliases)
+        try:
+            axes = decide_policy_axes(
+                policy, business_date=resolved_date.value,
+                delivery_at=datetime.now(timezone.utc),
+                existing_fact_origin=existing_origin,
+            )
+        except CutoverPolicyError as exc:
+            await self._source_review(
+                reason=str(exc), manifest=manifest, policy=policy,
+                aliases=lookup_aliases,
+            )
+            raise ValueError(str(exc)) from exc
+        aliases = self._aliases(
+            company_key=company_key, station_id=station_id,
+            business_date=business_date, ose=ose,
+            internal_shift_no=internal_shift_no,
+            include_edge=axes.fact_origin == "edge",
+        )
+        fact_source = "edge" if axes.fact_origin == "edge" else "oneC"
+        winner = next((row for row in candidates if row.source == fact_source), None)
+        loser_ids = [
+            self._target_fact_id(row) for row in candidates if row is not winner
+        ]
+        if winner is None:
+            await self._source_review(
+                reason=f"Нет факта-победителя {axes.fact_origin}",
+                manifest=manifest, policy=policy,
+                fact_origin=axes.fact_origin, aliases=aliases,
+                loser_fact_ids=loser_ids,
+            )
+            raise ValueError(f"Нет факта-победителя {axes.fact_origin} для смены")
+        if axes.transport_producer != "central_ledger":
+            await self._source_review(
+                reason="TransportProducer=legacy_epf: central emission запрещён",
+                manifest=manifest, policy=policy,
+                fact_origin=axes.fact_origin, aliases=aliases,
+                loser_fact_ids=loser_ids,
+            )
+            raise ValueError("TransportProducer=legacy_epf: central emission запрещён")
+        self._shift_targets[shift_key] = winner
+        context = {
+            "manifest": manifest, "policy": policy, "axes": axes,
+            "business_date": business_date, "company_key": company_key,
+            "station_id": station_id, "aliases": aliases,
+            "winner": winner, "loser_fact_ids": loser_ids,
+            "raw_origin": (
+                "edge" if "Edge" in str((raw_packet or {}).get("Источник") or "")
+                else "onec_legacy" if raw_packet else None
+            ),
+        }
+        self._accounting_context[shift_key] = context
+        return context
+
+    async def resolve_shift_station(self, shift_key: str) -> int:
+        """Определить АЗС смены без сборки пакета и чтения бухгалтерской НСИ."""
+        target = await self._shift_target(shift_key)
+        raw = str(((target.meta or {}).get("Смена") or {}).get("КодАЗС") or "").strip()
+        if not raw.isdigit():
+            raise ValueError("у смены не указан числовой КодАЗС")
+        return int(raw)
+
+    async def build_shift_package(self, shift_key: str) -> dict:
+        """Собрать пакет для одной смены (retail_sale + НСИ). shift_key = GUID смены."""
+        target = await self._shift_target(shift_key)
         if target.source == "edge":
             return await self._build_edge_shift_package(target, shift_key)
 
@@ -800,7 +1094,6 @@ class BpPackageEmitter:
         nsi_contract: set[str] = set()
         contr_names: dict[str, str] = {}
         dish_uuids: set[str] = set()  # блюда общепита смены → эмитим их recipe (ТТК)
-        dish_inline_ings: dict[str, list] = {}  # OB-1: inline-ТТК из строк продаж (фолбэк)
 
         org_uuid = str(sm.get("Организация") or "")
         wh_uuid = str(sm.get("Склад") or "")
@@ -860,24 +1153,15 @@ class BpPackageEmitter:
                     строка["ЭтоБлюдо"] = True
                     if g:
                         dish_uuids.add(g)
-                        # OB-1: inline-ТТК из строки продажи (cb_normalize._expand_dish) —
-                        # фолбэк, если recipe-DataEntry для блюда нет (иначе блюдо ушло
-                        # бы в БП без ТТК и списалось с 41.02 в минус).
-                        inl = [{"НоменклатураUUID": str(i.get("Номенклатура") or ""),
-                                "Количество": float(i.get("Количество") or 0),
-                                "БлюдоНаименование": (nom[g].name if nom.get(g) else "")}
-                               for i in (ln.get("Ингредиенты") or [])
-                               if i.get("Номенклатура")]
-                        if inl:
-                            dish_inline_ings[g] = inl
                 товары.append(строка)
 
         оплаты = []
         for o in (sec.get("оплаты") or {}).get("строки") or []:
             вид = str(o.get("ФормаОплаты") or o.get("ФормаОплатыКанон") or "").strip()
-            if "нал" in вид.lower():
-                вид = "Наличные"
-            оплаты.append({"ВидОплаты": вид, "Сумма": round(float(o.get("Сумма") or 0), 2)})
+            оплаты.append({
+                "ВидОплаты": map_accounting_payment(вид),
+                "Сумма": round(float(o.get("Сумма") or 0), 2),
+            })
 
         # ── ВозвращенныеТовары (возвраты покупателей смены) — P1-фикс, раньше [] ──
         возвраты = []
@@ -885,6 +1169,16 @@ class BpPackageEmitter:
             g = ln.get("Номенклатура")
             if g:
                 nsi_nom.add(g)
+            item = nom.get(g)
+            item_kind = kinds.get(item.kind_ref) if item and item.kind_ref else None
+            is_food = (
+                g in dish_uuids
+                or ln.get("КлассSKU") == "Общепит"
+                or str(getattr(item_kind, "name", "") or "").strip()
+                == "Набор - комплект"
+            )
+            if g and is_food:
+                dish_uuids.add(g)
             возвраты.append({
                 "НомерСтроки": ln.get("НомерСтроки") or i,
                 "Номенклатура": g,
@@ -894,6 +1188,7 @@ class BpPackageEmitter:
                 "Сумма": round(float(ln.get("Сумма") or 0), 2),
                 "СтавкаНДС": _nds(ln.get("СтавкаНДС")) or _nds(nom[g].vat if nom.get(g) else ""),
                 "СуммаНДС": round(float(ln.get("СуммаНДС") or 0), 2),
+                "КлассSKU": "Общепит" if is_food else "Сопутка",
             })
 
         retail = {
@@ -1213,6 +1508,53 @@ class BpPackageEmitter:
                     "СуммаДокумента": round(float(r.total_amount or 0), 2),
                 })
 
+        group_context_entries = (await self.session.execute(select(DataEntry).where(
+            DataEntry.company_id == self.company_id,
+            DataEntry.source == "oneC",
+            DataEntry.doc_type_id.in_(("ingredients_writeoff", "return_sale")),
+        ))).scalars().all()
+        ingredient_writeoffs = []
+        return_sales = []
+        for entry in group_context_entries:
+            entry_meta = entry.meta or {}
+            if not _in_shift(entry_meta.get("Смена") or {}):
+                continue
+            document = deepcopy(entry_meta.get("Документ") or {})
+            if document.get("ПометкаУдаления"):
+                continue
+            kind = str(entry.doc_type_id or "")
+            document["Тип"] = kind
+            document["ИсточникUUID"] = str(
+                document.get("ИсточникUUID") or entry.source_id or ""
+            )
+            document["Дата"] = _iso(document.get("Дата"))
+            document["Проведен"] = False
+            for table_name in ("Товары", "ВозвращенныеТовары"):
+                for line in document.get(table_name) or []:
+                    item_id = str(line.get("Номенклатура") or "")
+                    if not item_id:
+                        continue
+                    nsi_nom.add(item_id)
+                    item = nom.get(item_id)
+                    item_kind = kinds.get(item.kind_ref) if item and item.kind_ref else None
+                    is_food = (
+                        line.get("КлассSKU") == "Общепит"
+                        or str(getattr(item_kind, "name", "") or "").strip()
+                        == "Набор - комплект"
+                    )
+                    line["КлассSKU"] = "Общепит" if is_food else "Сопутка"
+                    line["Единица"] = str(line.get("Единица") or (item.unit if item else ""))
+                    line["СтавкаНДС"] = (
+                        _nds(line.get("СтавкаНДС"))
+                        or _nds(item.vat if item else "")
+                    )
+                    if kind == "return_sale" and is_food:
+                        dish_uuids.add(item_id)
+            if kind == "ingredients_writeoff":
+                ingredient_writeoffs.append(document)
+            else:
+                return_sales.append(document)
+
         # ── recipe (ТТК блюд, модель B общепита) ──
         # Для блюд смены (общепит-строки retail) эмитим ТТК ПЕРВЫМИ: приёмник строит
         # Справочник.СпецификацияНоменклатуры, из неё генерит Комплектацию (собирает
@@ -1223,61 +1565,62 @@ class BpPackageEmitter:
             recipe_entries = (await self.session.execute(select(DataEntry).where(
                 DataEntry.company_id == self.company_id, DataEntry.source == "oneC",
                 DataEntry.doc_type_id == "recipe"))).scalars().all()
-            # У блюда бывает несколько ТТК-записей: ЦБ присылал их разными заходами, и
-            # часть приехала без `ИсточникUUID`. Приёмник на пустом ключе документ
-            # ОТБРАСЫВАЕТ (`ОбработатьРецепт`: «пустой ИсточникUUID» → ЗаписатьОшибкуНСИ),
-            # спецификация не создаётся, Комплектация не собирается, и блюдо уходит в
-            # ОРП товаром без себестоимости — 41.02 по нему в минус.
-            #
-            # Поэтому из дублей берём ту, у которой ключ есть; при прочих равных —
-            # свежую. Раньше побеждала просто последняя в выборке, и на боевых данных
-            # 484 ТТК из 511 уезжали с пустым ключом.
-            recipe_by_dish: dict[str, dict] = {}
+            recipe_by_dish: dict[str, list[dict]] = {}
             for re_ in recipe_entries:
-                rd = (re_.meta or {}).get("Документ") or {}
+                recipe_meta = re_.meta or {}
+                if not _in_shift(recipe_meta.get("Смена") or {}):
+                    continue
+                rd = recipe_meta.get("Документ") or {}
                 bu = str(rd.get("БлюдоUUID") or "")
                 if not bu:
                     continue
-                prev = recipe_by_dish.get(bu)
-                if prev is None or (not str(prev.get("ИсточникUUID") or "").strip()
-                                    and str(rd.get("ИсточникUUID") or "").strip()):
-                    recipe_by_dish[bu] = rd
+                recipe_by_dish.setdefault(bu, []).append(rd)
             for du in sorted(dish_uuids):
-                rd = recipe_by_dish.get(du)
-                # OB-1: нет recipe-DataEntry → фолбэк на inline-ТТК строки продажи.
-                src_ings = (rd.get("Ингредиенты") if rd else None) or dish_inline_ings.get(du) or []
-                ингредиенты = []
-                for ing in src_ings:
-                    iu = str(ing.get("НоменклатураUUID") or "")
-                    if not iu:
+                candidates = sorted(
+                    recipe_by_dish.get(du) or [],
+                    key=lambda row: str(row.get("ИсточникUUID") or ""),
+                )
+                for rd in candidates:
+                    recipe_id = str(rd.get("ИсточникUUID") or "").strip()
+                    bundle_id = str(rd.get("ВерсияНабораТТК") or "").strip()
+                    try:
+                        revision = int(rd.get("ВерсияТТК") or 0)
+                    except (TypeError, ValueError):
                         continue
-                    nsi_nom.add(iu)  # ингредиент → в НСИ
-                    ингредиенты.append({
-                        "НоменклатураUUID": iu,
-                        "Количество": float(ing.get("Количество") or 0),
-                        "Единица": (nom[iu].unit if nom.get(iu) else "") or "",
+                    if not recipe_id or not bundle_id or revision <= 0:
+                        continue
+                    ингредиенты = []
+                    for ing in rd.get("Ингредиенты") or []:
+                        iu = str(ing.get("НоменклатураUUID") or "")
+                        if not iu:
+                            continue
+                        nsi_nom.add(iu)
+                        ингредиенты.append({
+                            "НоменклатураUUID": iu,
+                            "Количество": float(ing.get("Количество") or 0),
+                            "Единица": (nom[iu].unit if nom.get(iu) else "") or "",
+                        })
+                    if not ингредиенты:
+                        continue
+                    nsi_nom.add(du)
+                    recipes.append({
+                        "Тип": "recipe", "ИсточникUUID": recipe_id,
+                        "БлюдоUUID": du,
+                        "БлюдоНаименование": str(
+                            rd.get("БлюдоНаименование")
+                            or (nom[du].name if nom.get(du) else "")
+                        ),
+                        "ВерсияТТК": revision,
+                        "ВерсияНабораТТК": bundle_id,
+                        "Ингредиенты": ингредиенты,
                     })
-                if not ингредиенты:
-                    continue
-                nsi_nom.add(du)  # блюдо → в НСИ
-                recipes.append({
-                    "Тип": "recipe",
-                    # Ключ обязателен: приёмник отбрасывает ТТК без него. Когда в ЦБ
-                    # ключа нет, считаем свой — но именно UUID, а не строку с
-                    # префиксом. Измерение `ИсточникUUID` регистра соответствий в 1С
-                    # это Строка(36): `inline:<uuid>` даёт 43 символа, платформа
-                    # молча усекает, и обратный поиск по ключу промахивается всегда.
-                    # UUID5 от блюда стабилен между выгрузками и в 36 символов влезает.
-                    "ИсточникUUID": (str(rd.get("ИсточникUUID") or "").strip() if rd else "")
-                                    or _stable_uuid(f"recipe/{self.company_id}/{du}"),
-                    "БлюдоUUID": du,
-                    "БлюдоНаименование": str((rd.get("БлюдоНаименование") if rd else None)
-                                             or (nom[du].name if nom.get(du) else "")),
-                    "Ингредиенты": ингредиенты,
-                })
 
         # Сначала собираем блюдо по ТТК, затем продаём его как сопутку.
-        документы = [*recipes, *purchases, retail, *productions, *returns, *inventories, *gains, *writeoffs, *transfers]
+        документы = [
+            *recipes, *purchases, retail, *productions,
+            *ingredient_writeoffs, *return_sales, *returns,
+            *inventories, *gains, *writeoffs, *transfers,
+        ]
         документы.sort(key=_document_sort_key)
         for документ in документы:
             if документ.get("Тип") != "recipe":
@@ -1372,17 +1715,106 @@ class BpPackageEmitter:
         пакет["ХешПакета"] = packet_hash(пакет)
         return пакет
 
+    async def prepare_accounting_packet(
+        self,
+        shift_key: str,
+        manifest_hash: str,
+        *,
+        raw_packet: dict | None = None,
+    ) -> dict:
+        context = await self.select_accounting_source(
+            shift_key, manifest_hash, raw_packet=raw_packet,
+        )
+        target = context["winner"]
+        fact_origin = context["axes"].fact_origin
+        if raw_packet is not None and context["raw_origin"] not in {None, fact_origin}:
+            raw_packet = None
+        raw = raw_packet or await self.build_shift_package(shift_key)
+        if raw.get("НеРазложено"):
+            raise ValueError("Accounting packet содержит НеРазложено")
+        company_key = context["company_key"]
+        station_id = context["station_id"]
+        business_date = context["business_date"]
+        aliases = context["aliases"]
+        manifest = context["manifest"]
+        policy = context["policy"]
+        business = build_accounting_business_payload(raw, accounting_scope={
+            "company_id": company_key,
+            "station_id": station_id,
+            "business_date": business_date,
+        })
+
+        try:
+            resolution = await BusinessShiftResolver(
+                self.session, self.company_id,
+            ).resolve(
+                company_key=company_key,
+                station_id=station_id,
+                business_date=business_date,
+                aliases=aliases,
+                winner_fact_id=self._target_fact_id(target),
+                loser_fact_ids=context["loser_fact_ids"],
+                fact_origin=fact_origin,
+                reason="bp_emitter_v3",
+                shadow_status=(
+                    "shadow" if context["loser_fact_ids"] else "winner"
+                ),
+                policy_id=policy.id,
+                policy_revision=policy.revision,
+                policy_hash=manifest.manifest_hash,
+                manifest_id=manifest.id,
+                manifest_hash=manifest.manifest_hash,
+            )
+        except BusinessShiftConflict as exc:
+            raise ValueError(str(exc)) from exc
+        if resolution.needs_review or resolution.shift is None or resolution.group is None:
+            raise ValueError("BusinessShift требует проверки")
+
+        packet = {
+            "ВерсияФормата": "3",
+            "ВерсияКонтракта": "3.0.0",
+            "ИдентификаторПакета": str(resolution.group.packet_uuid).lower(),
+            "BusinessShiftID": str(resolution.shift.id).lower(),
+            "BusinessShiftAliases": aliases,
+            "BusinessDate": business_date,
+            "CompanyID": company_key,
+            "StationID": station_id,
+            "BusinessKeyHash": resolution.group.business_key_hash,
+            "FactOrigin": fact_origin,
+            "TransportProducer": context["axes"].transport_producer,
+            "РевизияПакета": 1,
+            "ИдентификаторПолитики": str(policy.id).lower(),
+            "РевизияПолитики": policy.revision,
+            "ХешПолитики": manifest.manifest_hash,
+            "ХешПакета": "",
+            "UnicodeNormalization": "NFC",
+            **business,
+        }
+        packet = normalize_nfc_json(packet)
+        packet["ХешПакета"] = business_projection_hash(packet)
+        current_revision = resolution.group.current_revision
+        current_hash = resolution.group.current_content_hash
+        if current_revision is None:
+            packet["РевизияПакета"] = 1
+        elif current_hash == packet["ХешПакета"]:
+            packet["РевизияПакета"] = current_revision
+        else:
+            packet["РевизияПакета"] = current_revision + 1
+        return packet
+
     async def emit_to_dir(self, shift_key: str, directory: str) -> dict:
         """Legacy API оставлен только как fail-closed совместимый вызов."""
         from app.services.accounting_egress import AccountingEgressGuard
 
         AccountingEgressGuard.deny_direct_file_write()
 
-    async def verify_shift_package(self, shift_key: str) -> dict:
+    async def verify_shift_package(
+        self, shift_key: str, *, packet: dict | None = None,
+    ) -> dict:
         """Сверка сопутки: самосогласованность пакета + сверка с источником. Строит
         пакет и прогоняет проверки готовности к загрузке приёмником (без 1С-эталона):
         балансы документов, полнота НСИ, fail-fast НДС, хеш. Возвращает список проверок."""
-        pkt = await self.build_shift_package(shift_key)
+        pkt = packet or await self.build_shift_package(shift_key)
         docs = pkt["Документы"]
         нси = pkt["НСИ"]
         checks: list[dict] = []

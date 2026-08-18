@@ -19,6 +19,20 @@ SCOPE_NETWORK = "network"
 STORE_POLICY_KEY = "storePolicy"
 STORE_POLICY_VERSION = 1
 
+# Кто вправе менять коммерческие данные — рецептуры, цены, ассортимент.
+#
+# «station» — только администратор АЗС; центр показывает аналитику. Так было
+# в v1, и это остаётся умолчанием: станция ближе к товару, и молча включать
+# запись центра нельзя.
+#
+# «shared» — правят обе стороны. Это не «центр вместо станции»: локальная
+# работа на АЗС продолжается как была, у центра появляется своя. Спор
+# разрешается временем — чья версия пришла последней, та и действует, ровно
+# как две правки одного человека с разных экранов.
+OWNER_STATION = "station"
+OWNER_SHARED = "shared"
+STORE_POLICY_OWNERS = (OWNER_STATION, OWNER_SHARED)
+
 DEFAULT_STORE_POLICY = {
     "schema_version": STORE_POLICY_VERSION,
     "commercial_owner": "station",
@@ -80,18 +94,22 @@ def has_network_merchandiser(grants: list[dict] | None, network_id: str) -> bool
 def store_policy(customization: dict | None) -> dict:
     raw = dict((customization or {}).get(STORE_POLICY_KEY) or {})
     policy = {**DEFAULT_STORE_POLICY, **raw}
-    # v1 намеренно fail-closed: неподдержанный/старый режим не включает запись
-    # центра и не отключает локальную работу станции.
-    if policy.get("commercial_owner") != "station":
-        policy["commercial_owner"] = "station"
+    # Fail-closed: неизвестный или старый режим читается как «станция».
+    # Опечатка в настройке не должна открывать запись центра — но и не должна
+    # отключать локальную работу АЗС.
+    if policy.get("commercial_owner") not in STORE_POLICY_OWNERS:
+        policy["commercial_owner"] = OWNER_STATION
     policy["schema_version"] = STORE_POLICY_VERSION
     policy["central_mode"] = "projection"
     policy["fuel_mode"] = "analytics_only"
     return policy
 
 
-def new_store_policy() -> dict:
+def new_store_policy(commercial_owner: str = OWNER_STATION) -> dict:
+    if commercial_owner not in STORE_POLICY_OWNERS:
+        commercial_owner = OWNER_STATION
     return {
         **DEFAULT_STORE_POLICY,
+        "commercial_owner": commercial_owner,
         "revision": datetime.now(timezone.utc).isoformat(),
     }

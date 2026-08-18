@@ -42,6 +42,47 @@ export interface DocKindSubjects {
   task_types: Array<{ id: string; name: string }>
 }
 
+export interface ProcessTemplate {
+  id: string
+  kind: 'document' | 'task'
+  name: string
+  title: string
+  description: string | null
+  docKindId?: string
+  docKindName?: string
+  taskTypeId?: string | null
+  taskTypeName?: string
+  steps: number
+  requiresPreparation: boolean
+  preparationReason: string | null
+  defaultResponsibleId: string | null
+  dueDays: number | null
+  capabilities?: Array<'assign' | 'transfer' | 'comments' | 'files'>
+}
+
+interface ProcessLaunchBase {
+  title: string
+  templateId: string
+  templateName: string
+  started: boolean
+  steps: number
+  reason: string | null
+}
+
+export type ProcessLaunchResult = ProcessLaunchBase & ({
+  kind: 'document'
+  docId: string
+  state: 'preparation' | 'approval'
+  round?: number
+  approvals?: number
+} | {
+  kind: 'task'
+  taskId: string
+  taskNumber: number
+  state: 'task'
+  stage: string
+})
+
 export interface DocSavedView {
   id: string
   name: string
@@ -380,6 +421,23 @@ export async function createDoc(
   companyId: string, body: Record<string, unknown>,
 ): Promise<DocCard> {
   return post<DocCard>('/api/docs', { ...body, company_id: companyId })
+}
+
+export async function listProcessTemplates(companyId: string) {
+  return get<{ templates: ProcessTemplate[] }>('/api/docs/process-templates', {
+    company_id: companyId,
+  })
+}
+
+export async function startProcessTemplate(
+  id: string, companyId: string,
+  options?: { responsibleId?: string; title?: string },
+) {
+  return post<ProcessLaunchResult>(`/api/docs/process-templates/${id}/start`, {
+    company_id: companyId,
+    responsible_id: options?.responsibleId || undefined,
+    title: options?.title?.trim() || undefined,
+  })
 }
 
 export async function listKindSubjects(companyId: string): Promise<DocKindSubjects> {

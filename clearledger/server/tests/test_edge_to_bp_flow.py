@@ -119,6 +119,20 @@ def test_recipe_arriving_later_reclassifies_sale_and_expands_ingredients():
     }]
 
 
+def test_historical_shift_without_own_recipe_drops_approximate_ingredients():
+    package = _edge_package()
+    meta = normalize_shift_package(package, source="edge")["entries"][0]["meta"]
+    approximate = enrich_retail_meta(meta, {
+        "dish-coffee": [{"НоменклатураUUID": "milk", "Количество": 0.15}],
+    }, {"dish-coffee"})
+
+    exact = enrich_retail_meta(approximate, {}, {"dish-coffee"})
+
+    line = exact["Секции"]["продажа_общепит"]["строки"][0]
+    assert line["ЭтоБлюдо"] is True
+    assert "Ингредиенты" not in line
+
+
 def test_manual_package_identity_and_hash_are_deterministic():
     packet = _edge_package()
     packet["ИдентификаторПакета"] = _stable_uuid("bp-package/company/edge/shift")
@@ -178,6 +192,18 @@ class _NsiSession(_Session):
 
     def add(self, row):
         self.added.append(row)
+
+
+@pytest.mark.asyncio
+async def test_shift_station_resolves_without_building_bp_nsi():
+    target = SimpleNamespace(
+        source="edge", status="verified",
+        meta={"Смена": {"Смена": "shift-208", "КодАЗС": "208"}},
+    )
+    session = _Session([_Result(rows=[target])])
+    emitter = BpPackageEmitter(session, uuid.uuid4())
+    assert await emitter.resolve_shift_station("shift-208") == 208
+    assert session.results == [], "резолвер полез читать НСИ пакета до проверки прав"
 
 
 @pytest.mark.asyncio
@@ -247,6 +273,16 @@ async def test_edge_documents_build_manual_unposted_bp_package_with_ttk_and_line
     retail_meta = enrich_retail_meta(normalized["entries"][0]["meta"], {
         "dish-coffee": [{"НоменклатураUUID": "milk", "Количество": 0.15}],
     }, {"dish-coffee"})
+    edge_completeness = {
+        "version": "1", "provisional_business_shift_id": "edge:208:42",
+        "status": "complete", "sources": [],
+    }
+    cost_evidence = {"version": "1", "production": [], "ingredients": []}
+    retail_meta["Edge"] = {
+        "ProvisionalBusinessShiftID": "edge:208:42",
+        "ShiftCompleteness": edge_completeness,
+        "CostEvidence": cost_evidence,
+    }
     target = SimpleNamespace(id="retail", source_id="shift:retail", meta=retail_meta)
     recipe = SimpleNamespace(
         id="recipe", doc_type_id="recipe", source_id="recipe:dish-coffee",
@@ -323,6 +359,9 @@ async def test_edge_documents_build_manual_unposted_bp_package_with_ttk_and_line
     )._build_edge_shift_package(target, "retail-42")
 
     assert first["Источник"] == "Ledger Edge → Ledger"
+    assert first["ProvisionalBusinessShiftID"] == "edge:208:42"
+    assert first["ShiftCompleteness"] == edge_completeness
+    assert first["CostEvidence"] == cost_evidence
     assert first["ИдентификаторПакета"] == second["ИдентификаторПакета"]
     assert first["ХешПакета"] == second["ХешПакета"]
     assert {doc["Тип"] for doc in first["Документы"]} == {
@@ -372,4 +411,42 @@ async def test_edge_manual_package_refuses_catering_sale_without_release():
     with pytest.raises(ValueError, match="нет выпуска этой смены"):
         await BpPackageEmitter(
             _emitter_session([recipe]), uuid.uuid4(),
+        )._build_edge_shift_package(target, "retail-42")
+
+
+@pytest.mark.asyncio
+async def test_edge_manual_package_refuses_current_recipe_as_shift_recipe():
+    package = _edge_package()
+    normalized = normalize_shift_package(package, source="edge")
+    retail_meta = enrich_retail_meta(normalized["entries"][0]["meta"], {
+        "dish-coffee": [{"НоменклатураUUID": "milk", "Количество": 0.15}],
+    }, {"dish-coffee"})
+    target = SimpleNamespace(id="retail", source_id="shift:retail", meta=retail_meta)
+    production = SimpleNamespace(
+        id="production", doc_type_id="production_release", source_id="production-42",
+        meta={"Смена": retail_meta["Смена"], "Документ": {
+            "Тип": "production_release", "ИсточникUUID": "production-42",
+            "Номер": "СМ-42", "Дата": "2026-08-03T20:00:00+03:00",
+            "ВыпускБлюд": [{"Номенклатура": "dish-coffee", "Количество": 2}],
+            "Ингредиенты": [{"Номенклатура": "milk", "Количество": 0.3}],
+        }},
+    )
+
+    with pytest.raises(ValueError, match="нет точной ТТК этой смены"):
+        await BpPackageEmitter(
+            _emitter_session([production]), uuid.uuid4(),
+        )._build_edge_shift_package(target, "retail-42")
+
+
+@pytest.mark.asyncio
+async def test_edge_manual_package_refuses_unknown_vat():
+    package = _edge_package()
+    normalized = normalize_shift_package(package, source="edge")
+    retail_meta = normalized["entries"][0]["meta"]
+    retail_meta["Документ"]["СтавкаНеизвестна"] = ["dish-coffee"]
+    target = SimpleNamespace(id="retail", source_id="shift:retail", meta=retail_meta)
+
+    with pytest.raises(ValueError, match="неизвестна ставка НДС"):
+        await BpPackageEmitter(
+            _emitter_session([]), uuid.uuid4(),
         )._build_edge_shift_package(target, "retail-42")

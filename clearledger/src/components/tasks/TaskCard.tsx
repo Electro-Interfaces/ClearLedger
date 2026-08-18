@@ -262,7 +262,7 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
                   target="_blank" rel="noreferrer"
                   className="truncate text-primary hover:underline">{a.file_name}</a>
                 <span className="shrink-0 text-muted-foreground">{fileSize(a.size)}</span>
-                {live && (
+                {live && a.can_delete && (
                   <Button variant="ghost" size="sm" className="ml-auto h-6 px-1.5"
                     aria-label="Убрать файл"
                     onClick={() => tasksService.deleteTaskFile(t.id, a.id, companyId).then(reload)}>

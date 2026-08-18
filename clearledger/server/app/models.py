@@ -2515,6 +2515,258 @@ class AccountingDoc(Base):
         Index("idx_accounting_docs_date", "company_id", "date"),
     )
 
+
+class BusinessShift(Base):
+    __tablename__ = "business_shifts"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    company_key: Mapped[str] = mapped_column(String(120), nullable=False)
+    station_id: Mapped[str] = mapped_column(String(80), nullable=False)
+    business_date: Mapped[date_type] = mapped_column(Date, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="resolved")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(),
+        onupdate=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('resolved','needs_review')",
+            name="ck_business_shift_status",
+        ),
+        Index(
+            "ix_business_shift_scope",
+            "company_id", "station_id", "business_date",
+        ),
+    )
+
+
+class BusinessShiftAlias(Base):
+    __tablename__ = "business_shift_aliases"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    business_shift_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("business_shifts.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    algorithm: Mapped[str] = mapped_column(String(50), nullable=False)
+    alias_hash: Mapped[str] = mapped_column(CHAR(64), nullable=False)
+    attributes: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "algorithm IN ('business-shift-alias-v1',"
+            "'business-shift-common-alias-v1')",
+            name="ck_business_shift_alias_algorithm",
+        ),
+        CheckConstraint(
+            "alias_hash ~ '^[0-9a-f]{64}$'",
+            name="ck_business_shift_alias_hash",
+        ),
+        UniqueConstraint(
+            "company_id", "algorithm", "alias_hash",
+            name="uq_business_shift_alias_scope",
+        ),
+        Index(
+            "ix_business_shift_alias_shift",
+            "company_id", "business_shift_id",
+        ),
+    )
+
+
+class AccountingBusinessGroup(Base):
+    __tablename__ = "accounting_business_groups"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    business_shift_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("business_shifts.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    business_key_hash: Mapped[str] = mapped_column(CHAR(64), nullable=False)
+    packet_uuid: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    current_revision: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    current_content_hash: Mapped[str | None] = mapped_column(CHAR(64), nullable=True)
+    current_packet_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(),
+        onupdate=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "current_revision IS NULL OR current_revision > 0",
+            name="ck_accounting_business_group_revision",
+        ),
+        CheckConstraint(
+            "current_content_hash IS NULL OR "
+            "current_content_hash ~ '^[0-9a-f]{64}$'",
+            name="ck_accounting_business_group_hash",
+        ),
+        CheckConstraint(
+            "status IN ('active','needs_review')",
+            name="ck_accounting_business_group_status",
+        ),
+        UniqueConstraint(
+            "company_id", "business_shift_id",
+            name="uq_accounting_business_group_shift",
+        ),
+        UniqueConstraint(
+            "company_id", "business_key_hash",
+            name="uq_accounting_business_group_key",
+        ),
+        UniqueConstraint(
+            "company_id", "packet_uuid",
+            name="uq_accounting_business_group_packet",
+        ),
+    )
+
+
+class AccountingSourceDecision(Base):
+    __tablename__ = "accounting_source_decisions"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    business_shift_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("business_shifts.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    candidate_business_shift_ids: Mapped[list] = mapped_column(
+        JSONB, nullable=False, default=list
+    )
+    winner_fact_id: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    loser_fact_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    fact_origin: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    policy_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    policy_revision: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    policy_hash: Mapped[str | None] = mapped_column(CHAR(64), nullable=True)
+    manifest_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    manifest_hash: Mapped[str | None] = mapped_column(CHAR(64), nullable=True)
+    reason: Mapped[str] = mapped_column(String(300), nullable=False)
+    shadow_status: Mapped[str] = mapped_column(String(30), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    aliases: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('resolved','needs_review')",
+            name="ck_accounting_source_decision_status",
+        ),
+        CheckConstraint(
+            "shadow_status IN ('winner','shadow','blocked','not_applicable')",
+            name="ck_accounting_source_decision_shadow_status",
+        ),
+        Index(
+            "ix_accounting_source_decision_shift",
+            "company_id", "business_shift_id", "created_at",
+        ),
+    )
+
+
+class AccountingClaimRequest(Base):
+    __tablename__ = "accounting_claim_requests"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    consumer_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    claim_request_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    request_hash: Mapped[str] = mapped_column(CHAR(64), nullable=False)
+    lease_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
+    attempt_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    packet_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("export_packets.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    lease_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "lease_seconds BETWEEN 1 AND 3600",
+            name="ck_accounting_claim_lease",
+        ),
+        CheckConstraint(
+            "request_hash ~ '^[0-9a-f]{64}$'",
+            name="ck_accounting_claim_hash",
+        ),
+        UniqueConstraint(
+            "company_id", "consumer_id", "claim_request_id",
+            name="uq_accounting_claim_request",
+        ),
+    )
+
+
+class BusinessShiftMigrationCollision(Base):
+    __tablename__ = "business_shift_migration_collisions"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    collision_key: Mapped[str] = mapped_column(String(200), nullable=False)
+    collision_kind: Mapped[str] = mapped_column(String(50), nullable=False)
+    details: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "company_id", "collision_kind", "collision_key",
+            name="uq_business_shift_migration_collision",
+        ),
+    )
+
+
 class ExportPacket(Base):
     __tablename__ = "export_packets"
 
@@ -2562,6 +2814,11 @@ class ExportPacket(Base):
     content_hash: Mapped[str | None] = mapped_column(CHAR(64), nullable=True)
     fact_origin: Mapped[str | None] = mapped_column(String(20), nullable=True)
     transport_producer: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    accounting_group_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("accounting_business_groups.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
     attempt_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), nullable=True
     )
@@ -2612,7 +2869,8 @@ class ExportPacket(Base):
             "AND contract_version IS NOT NULL AND content_hash IS NOT NULL "
             "AND fact_origin IS NOT NULL AND transport_producer IS NOT NULL "
             "AND status IN ('draft','validated','queued','retry_wait','leased',"
-            "'sent_waiting_ack','accepted','rejected','needs_review'))",
+            "'sent_waiting_ack','accepted','rejected','blocked_mapping',"
+            "'needs_review'))",
             name="ck_export_packet_accounting_contract",
         ),
         Index(
@@ -2621,6 +2879,17 @@ class ExportPacket(Base):
             unique=True,
             postgresql_where=text(
                 "kind IN ('food_accounting_group','store_accounting_group')"
+            ),
+        ),
+        Index(
+            "uq_export_packets_active_business_group",
+            "company_id", "accounting_group_id",
+            unique=True,
+            postgresql_where=text(
+                "accounting_group_id IS NOT NULL AND kind IN "
+                "('food_accounting_group','store_accounting_group') AND status IN "
+                "('draft','validated','queued','retry_wait','leased',"
+                "'sent_waiting_ack','blocked_mapping')"
             ),
         ),
     )
@@ -2682,8 +2951,29 @@ class AccountingSourcePolicy(Base):
         String(50), nullable=False, default="sidegoods_foodservice"
     )
     revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    state: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="prepared", server_default="prepared"
+    )
+    fact_cutover_business_date: Mapped[date_type] = mapped_column(
+        Date, nullable=False
+    )
+    station_timezone: Mapped[str] = mapped_column(
+        String(80), nullable=False, default="Europe/Moscow"
+    )
+    fact_origin_before: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="onec_legacy"
+    )
+    fact_origin_after: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="edge"
+    )
     effective_from: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     effective_to: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    transport_cutover_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    transport_producer_before: Mapped[str] = mapped_column(
+        String(30), nullable=False, default="legacy_epf"
+    )
     transport_producer: Mapped[str] = mapped_column(String(30), nullable=False)
     shadow_validation_enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False
@@ -2700,6 +2990,20 @@ class AccountingSourcePolicy(Base):
         CheckConstraint(
             "transport_producer IN ('central_ledger', 'legacy_epf')",
             name="ck_accounting_source_policy_producer",
+        ),
+        CheckConstraint(
+            "transport_producer_before IN ('central_ledger', 'legacy_epf')",
+            name="ck_accounting_source_policy_producer_before",
+        ),
+        CheckConstraint(
+            "fact_origin_before IN ('edge', 'onec_legacy') AND "
+            "fact_origin_after IN ('edge', 'onec_legacy')",
+            name="ck_accounting_source_policy_fact_origins",
+        ),
+        CheckConstraint(
+            "state IN ('prepared', 'approved', 'armed', 'effective', "
+            "'expired', 'superseded')",
+            name="ck_accounting_source_policy_state",
         ),
         UniqueConstraint(
             "company_id", "station_id", "policy_group", "revision",
@@ -2756,7 +3060,8 @@ class CutoverManifest(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "state IN ('prepared', 'armed', 'effective', 'expired', 'superseded')",
+            "state IN ('prepared', 'approved', 'armed', 'effective', "
+            "'expired', 'superseded')",
             name="ck_cutover_manifest_state",
         ),
         CheckConstraint(
@@ -2775,6 +3080,40 @@ class CutoverManifest(Base):
         Index(
             "ix_cutover_manifest_lookup",
             "company_id", "station_id", "policy_group", "state",
+        ),
+    )
+
+
+class CutoverApproval(Base):
+    __tablename__ = "cutover_approvals"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    manifest_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("cutover_manifests.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    approved_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "manifest_id", "user_id", name="uq_cutover_approval_user"
+        ),
+        Index(
+            "ix_cutover_approval_manifest",
+            "company_id", "manifest_id", "approved_at",
         ),
     )
 

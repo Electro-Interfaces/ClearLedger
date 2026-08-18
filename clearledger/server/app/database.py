@@ -454,6 +454,49 @@ STORE_RECEIPT_MIGRATION_DDL = (
 
 
 ACCOUNTING_EGRESS_MIGRATION_DDL = (
+    "DROP TRIGGER IF EXISTS accounting_source_policy_overlap_trg ON accounting_source_policies",
+    "DROP TRIGGER IF EXISTS cutover_manifest_immutable_trg ON cutover_manifests",
+    "ALTER TABLE accounting_source_policies ADD COLUMN IF NOT EXISTS state "
+    "VARCHAR(20) NOT NULL DEFAULT 'effective'",
+    "ALTER TABLE accounting_source_policies ALTER COLUMN state SET DEFAULT 'prepared'",
+    "ALTER TABLE accounting_source_policies ADD COLUMN IF NOT EXISTS "
+    "fact_cutover_business_date DATE",
+    "ALTER TABLE accounting_source_policies ADD COLUMN IF NOT EXISTS station_timezone "
+    "VARCHAR(80) NOT NULL DEFAULT 'Europe/Moscow'",
+    "ALTER TABLE accounting_source_policies ADD COLUMN IF NOT EXISTS fact_origin_before "
+    "VARCHAR(20) NOT NULL DEFAULT 'onec_legacy'",
+    "ALTER TABLE accounting_source_policies ADD COLUMN IF NOT EXISTS fact_origin_after "
+    "VARCHAR(20) NOT NULL DEFAULT 'edge'",
+    "ALTER TABLE accounting_source_policies ADD COLUMN IF NOT EXISTS transport_cutover_at "
+    "TIMESTAMPTZ",
+    "ALTER TABLE accounting_source_policies ADD COLUMN IF NOT EXISTS "
+    "transport_producer_before VARCHAR(30) NOT NULL DEFAULT 'legacy_epf'",
+    "UPDATE accounting_source_policies SET fact_cutover_business_date = "
+    "(effective_from AT TIME ZONE station_timezone)::date "
+    "WHERE fact_cutover_business_date IS NULL",
+    "UPDATE accounting_source_policies SET transport_cutover_at = effective_from "
+    "WHERE transport_cutover_at IS NULL",
+    "ALTER TABLE accounting_source_policies ALTER COLUMN "
+    "fact_cutover_business_date SET NOT NULL",
+    "ALTER TABLE accounting_source_policies ALTER COLUMN transport_cutover_at SET NOT NULL",
+    "ALTER TABLE accounting_source_policies DROP CONSTRAINT IF EXISTS "
+    "ck_accounting_source_policy_state",
+    "ALTER TABLE accounting_source_policies ADD CONSTRAINT "
+    "ck_accounting_source_policy_state CHECK (state IN "
+    "('prepared','approved','armed','effective','expired','superseded'))",
+    "ALTER TABLE accounting_source_policies DROP CONSTRAINT IF EXISTS "
+    "ck_accounting_source_policy_fact_origins",
+    "ALTER TABLE accounting_source_policies ADD CONSTRAINT "
+    "ck_accounting_source_policy_fact_origins CHECK (fact_origin_before IN "
+    "('edge','onec_legacy') AND fact_origin_after IN ('edge','onec_legacy'))",
+    "ALTER TABLE accounting_source_policies DROP CONSTRAINT IF EXISTS "
+    "ck_accounting_source_policy_producer_before",
+    "ALTER TABLE accounting_source_policies ADD CONSTRAINT "
+    "ck_accounting_source_policy_producer_before CHECK "
+    "(transport_producer_before IN ('central_ledger','legacy_epf'))",
+    "ALTER TABLE cutover_manifests DROP CONSTRAINT IF EXISTS ck_cutover_manifest_state",
+    "ALTER TABLE cutover_manifests ADD CONSTRAINT ck_cutover_manifest_state CHECK "
+    "(state IN ('prepared','approved','armed','effective','expired','superseded'))",
     """
     CREATE OR REPLACE FUNCTION reject_accounting_source_policy_overlap()
     RETURNS trigger AS $$
@@ -465,23 +508,25 @@ ACCOUNTING_EGRESS_MIGRATION_DDL = (
             NEW.company_id::text || ':' || NEW.station_id::text || ':' || NEW.policy_group,
             0
         ));
-        IF EXISTS (
-            SELECT 1
-              FROM accounting_source_policies p
-             WHERE p.company_id = NEW.company_id
-               AND p.station_id = NEW.station_id
-               AND p.policy_group = NEW.policy_group
-               AND p.id <> NEW.id
-               AND p.effective_from < COALESCE(NEW.effective_to, 'infinity'::timestamptz)
-               AND NEW.effective_from < COALESCE(p.effective_to, 'infinity'::timestamptz)
-        ) THEN
-            RAISE EXCEPTION 'overlapping accounting source policy interval';
+        IF NEW.state = 'effective' THEN
+            IF EXISTS (
+                SELECT 1
+                  FROM accounting_source_policies p
+                 WHERE p.company_id = NEW.company_id
+                   AND p.station_id = NEW.station_id
+                   AND p.policy_group = NEW.policy_group
+                   AND p.id <> NEW.id
+                   AND p.state = 'effective'
+                   AND p.effective_from < COALESCE(NEW.effective_to, 'infinity'::timestamptz)
+                   AND NEW.effective_from < COALESCE(p.effective_to, 'infinity'::timestamptz)
+            ) THEN
+                RAISE EXCEPTION 'overlapping accounting source policy interval';
+            END IF;
         END IF;
         RETURN NEW;
     END;
     $$ LANGUAGE plpgsql
     """,
-    "DROP TRIGGER IF EXISTS accounting_source_policy_overlap_trg ON accounting_source_policies",
     """
     CREATE TRIGGER accounting_source_policy_overlap_trg
     BEFORE INSERT OR UPDATE ON accounting_source_policies
@@ -522,15 +567,44 @@ ACCOUNTING_EGRESS_MIGRATION_DDL = (
            OR NEW.arm_deadline IS DISTINCT FROM OLD.arm_deadline THEN
             RAISE EXCEPTION 'cutover manifest payload is immutable';
         END IF;
+        IF NEW.state IS DISTINCT FROM OLD.state AND NOT (
+               (OLD.state = 'prepared' AND NEW.state IN ('approved','expired'))
+            OR (OLD.state = 'approved' AND NEW.state IN ('armed','expired'))
+            OR (OLD.state = 'armed' AND NEW.state IN ('effective','expired'))
+            OR (OLD.state = 'effective' AND NEW.state = 'superseded')
+        ) THEN
+            RAISE EXCEPTION 'invalid cutover manifest state transition';
+        END IF;
+        IF NEW.state IS NOT DISTINCT FROM OLD.state AND (
+               NEW.prepare_ack_hash IS DISTINCT FROM OLD.prepare_ack_hash
+            OR NEW.arm_ack_hash IS DISTINCT FROM OLD.arm_ack_hash
+            OR NEW.armed_at IS DISTINCT FROM OLD.armed_at
+            OR NEW.effective_at IS DISTINCT FROM OLD.effective_at
+        ) THEN
+            RAISE EXCEPTION 'cutover transition fields require state transition';
+        END IF;
         RETURN NEW;
     END;
     $$ LANGUAGE plpgsql
     """,
-    "DROP TRIGGER IF EXISTS cutover_manifest_immutable_trg ON cutover_manifests",
     """
     CREATE TRIGGER cutover_manifest_immutable_trg
     BEFORE INSERT OR UPDATE OR DELETE ON cutover_manifests
     FOR EACH ROW EXECUTE FUNCTION protect_cutover_manifest_payload()
+    """,
+    """
+    CREATE OR REPLACE FUNCTION protect_cutover_approval()
+    RETURNS trigger AS $$
+    BEGIN
+        RAISE EXCEPTION 'cutover approval is append-only';
+    END;
+    $$ LANGUAGE plpgsql
+    """,
+    "DROP TRIGGER IF EXISTS cutover_approval_immutable_trg ON cutover_approvals",
+    """
+    CREATE TRIGGER cutover_approval_immutable_trg
+    BEFORE UPDATE OR DELETE ON cutover_approvals
+    FOR EACH ROW EXECUTE FUNCTION protect_cutover_approval()
     """,
     """
     CREATE OR REPLACE FUNCTION protect_accounting_shadow_result()
@@ -547,6 +621,293 @@ ACCOUNTING_EGRESS_MIGRATION_DDL = (
     FOR EACH ROW EXECUTE FUNCTION protect_accounting_shadow_result()
     """,
 )
+
+
+BUSINESS_SHIFT_MIGRATION_DDL = (
+    "ALTER TABLE export_packets ADD COLUMN IF NOT EXISTS accounting_group_id UUID",
+    "ALTER TABLE export_packets DROP CONSTRAINT IF EXISTS ck_export_packet_accounting_contract",
+    """
+    ALTER TABLE export_packets ADD CONSTRAINT ck_export_packet_accounting_contract
+    CHECK (
+        kind NOT IN ('food_accounting_group','store_accounting_group') OR (
+            packet_uuid IS NOT NULL AND revision IS NOT NULL
+            AND contract_version IS NOT NULL AND content_hash IS NOT NULL
+            AND fact_origin IS NOT NULL AND transport_producer IS NOT NULL
+            AND status IN ('draft','validated','queued','retry_wait','leased',
+                           'sent_waiting_ack','accepted','rejected',
+                           'blocked_mapping','needs_review')
+        )
+    ) NOT VALID
+    """,
+    """
+    INSERT INTO business_shift_migration_collisions (
+        id, company_id, collision_key, collision_kind, details
+    )
+    SELECT gen_random_uuid(), company_id, payload->>'BusinessShiftID',
+           'identity_mismatch',
+           jsonb_build_object(
+               'company_ids', jsonb_agg(DISTINCT payload->>'CompanyID'),
+               'station_ids', jsonb_agg(DISTINCT payload->>'StationID'),
+               'business_dates', jsonb_agg(DISTINCT payload->>'BusinessDate')
+           )
+      FROM export_packets
+     WHERE kind IN ('food_accounting_group','store_accounting_group')
+       AND payload ? 'BusinessShiftID'
+       AND payload->>'BusinessShiftID' ~
+           '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+     GROUP BY company_id, payload->>'BusinessShiftID'
+    HAVING count(DISTINCT jsonb_build_array(
+               payload->>'CompanyID', payload->>'StationID', payload->>'BusinessDate'
+           )) > 1
+    ON CONFLICT (company_id, collision_kind, collision_key) DO NOTHING
+    """,
+    """
+    INSERT INTO business_shift_migration_collisions (
+        id, company_id, collision_key, collision_kind, details
+    )
+    SELECT gen_random_uuid(), min(company_id::text)::uuid, payload->>'BusinessShiftID',
+           'uuid_cross_company',
+           jsonb_build_object('company_count', count(DISTINCT company_id))
+      FROM export_packets
+     WHERE kind IN ('food_accounting_group','store_accounting_group')
+       AND payload ? 'BusinessShiftID'
+     GROUP BY payload->>'BusinessShiftID'
+    HAVING count(DISTINCT company_id) > 1
+    ON CONFLICT (company_id, collision_kind, collision_key) DO NOTHING
+    """,
+    """
+    WITH aliases AS (
+        SELECT p.company_id, p.payload->>'BusinessShiftID' AS business_shift_id,
+               a->>'Algorithm' AS algorithm, a->>'AliasHash' AS alias_hash
+          FROM export_packets p
+          CROSS JOIN LATERAL jsonb_array_elements(
+              COALESCE(p.payload->'BusinessShiftAliases', '[]'::jsonb)
+          ) a
+         WHERE p.kind IN ('food_accounting_group','store_accounting_group')
+    )
+    INSERT INTO business_shift_migration_collisions (
+        id, company_id, collision_key, collision_kind, details
+    )
+    SELECT gen_random_uuid(), company_id, algorithm || ':' || alias_hash,
+           'alias_ambiguity',
+           jsonb_build_object(
+               'business_shift_ids', jsonb_agg(DISTINCT business_shift_id)
+           )
+      FROM aliases
+     GROUP BY company_id, algorithm, alias_hash
+    HAVING count(DISTINCT business_shift_id) > 1
+    ON CONFLICT (company_id, collision_kind, collision_key) DO NOTHING
+    """,
+    """
+    INSERT INTO business_shifts (
+        id, company_id, company_key, station_id, business_date, status
+    )
+    SELECT DISTINCT ON (p.company_id, p.payload->>'BusinessShiftID')
+           (p.payload->>'BusinessShiftID')::uuid, p.company_id,
+           p.payload->>'CompanyID', p.payload->>'StationID',
+           (p.payload->>'BusinessDate')::date, 'resolved'
+      FROM export_packets p
+     WHERE p.kind IN ('food_accounting_group','store_accounting_group')
+       AND p.payload->>'BusinessShiftID' ~
+           '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+       AND p.payload->>'BusinessDate' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+       AND COALESCE(p.payload->>'CompanyID', '') <> ''
+       AND COALESCE(p.payload->>'StationID', '') <> ''
+       AND NOT EXISTS (
+           SELECT 1 FROM business_shift_migration_collisions c
+            WHERE c.company_id = p.company_id
+              AND c.collision_key = p.payload->>'BusinessShiftID'
+       )
+       AND NOT EXISTS (
+           SELECT 1 FROM business_shifts s
+            WHERE s.id = (p.payload->>'BusinessShiftID')::uuid
+              AND s.company_id <> p.company_id
+       )
+    ON CONFLICT (id) DO NOTHING
+    """,
+    """
+    INSERT INTO business_shift_aliases (
+        id, company_id, business_shift_id, algorithm, alias_hash, attributes
+    )
+    SELECT gen_random_uuid(), p.company_id,
+           (p.payload->>'BusinessShiftID')::uuid,
+           a->>'Algorithm', a->>'AliasHash', a->'Attributes'
+      FROM export_packets p
+      JOIN business_shifts s
+        ON s.company_id = p.company_id
+       AND s.id::text = p.payload->>'BusinessShiftID'
+      CROSS JOIN LATERAL jsonb_array_elements(
+          COALESCE(p.payload->'BusinessShiftAliases', '[]'::jsonb)
+      ) a
+     WHERE p.kind IN ('food_accounting_group','store_accounting_group')
+       AND a->>'Algorithm' IN (
+           'business-shift-alias-v1', 'business-shift-common-alias-v1'
+       )
+       AND a->>'AliasHash' ~ '^[0-9a-f]{64}$'
+       AND jsonb_typeof(a->'Attributes') = 'object'
+       AND NOT EXISTS (
+           SELECT 1 FROM business_shift_migration_collisions c
+            WHERE c.company_id = p.company_id
+              AND c.collision_kind = 'alias_ambiguity'
+              AND c.collision_key = (a->>'Algorithm') || ':' || (a->>'AliasHash')
+       )
+    ON CONFLICT (company_id, algorithm, alias_hash) DO NOTHING
+    """,
+    """
+    INSERT INTO accounting_business_groups (
+        id, company_id, business_shift_id, business_key_hash, packet_uuid, status
+    )
+    SELECT gen_random_uuid(), p.company_id, s.id,
+           p.payload->>'BusinessKeyHash', p.packet_uuid, 'active'
+      FROM export_packets p
+      JOIN business_shifts s
+        ON s.company_id = p.company_id
+       AND s.id::text = p.payload->>'BusinessShiftID'
+     WHERE p.kind IN ('food_accounting_group','store_accounting_group')
+       AND p.payload->>'BusinessKeyHash' ~ '^[0-9a-f]{64}$'
+       AND p.packet_uuid IS NOT NULL
+    ON CONFLICT (company_id, business_shift_id) DO NOTHING
+    """,
+    """
+    UPDATE export_packets p
+       SET accounting_group_id = g.id
+      FROM accounting_business_groups g
+     WHERE p.accounting_group_id IS NULL
+       AND p.company_id = g.company_id
+       AND p.payload->>'BusinessShiftID' = g.business_shift_id::text
+       AND p.kind IN ('food_accounting_group','store_accounting_group')
+    """,
+    """
+    WITH latest AS (
+        SELECT DISTINCT ON (p.company_id, p.accounting_group_id)
+               p.company_id, p.accounting_group_id, p.id, p.revision, p.content_hash
+          FROM export_packets p
+         WHERE p.accounting_group_id IS NOT NULL
+         ORDER BY p.company_id, p.accounting_group_id, p.revision DESC
+    )
+    UPDATE accounting_business_groups g
+       SET current_revision = latest.revision,
+           current_content_hash = latest.content_hash,
+           current_packet_id = latest.id
+      FROM latest
+     WHERE g.current_revision IS NULL
+       AND latest.company_id = g.company_id
+       AND latest.accounting_group_id = g.id
+    """,
+    """
+    DO $$ BEGIN
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint
+             WHERE conname = 'fk_export_packet_accounting_group'
+        ) THEN
+            ALTER TABLE export_packets
+            ADD CONSTRAINT fk_export_packet_accounting_group
+            FOREIGN KEY (accounting_group_id)
+            REFERENCES accounting_business_groups(id) ON DELETE RESTRICT NOT VALID;
+        END IF;
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint
+             WHERE conname = 'ck_export_packet_business_group'
+        ) THEN
+            ALTER TABLE export_packets
+            ADD CONSTRAINT ck_export_packet_business_group
+            CHECK (
+                kind NOT IN ('food_accounting_group','store_accounting_group')
+                OR accounting_group_id IS NOT NULL
+            ) NOT VALID;
+        END IF;
+    END $$
+    """,
+    """
+    INSERT INTO business_shift_migration_collisions (
+        id, company_id, collision_key, collision_kind, details
+    )
+    SELECT gen_random_uuid(), company_id, accounting_group_id::text,
+           'active_group_duplicate',
+           jsonb_build_object(
+               'packet_ids', jsonb_agg(id ORDER BY revision, id),
+               'revisions', jsonb_agg(revision ORDER BY revision, id),
+               'statuses', jsonb_agg(status ORDER BY revision, id)
+           )
+      FROM export_packets
+     WHERE accounting_group_id IS NOT NULL
+       AND kind IN ('food_accounting_group','store_accounting_group')
+       AND status IN ('draft','validated','queued','retry_wait','leased',
+                      'sent_waiting_ack','blocked_mapping')
+     GROUP BY company_id, accounting_group_id
+    HAVING count(*) > 1
+    ON CONFLICT (company_id, collision_kind, collision_key) DO NOTHING
+    """,
+    """
+    DO $$ BEGIN
+        IF EXISTS (
+            SELECT 1 FROM business_shift_migration_collisions
+             WHERE collision_kind = 'active_group_duplicate'
+        ) THEN
+            RAISE EXCEPTION
+                'accounting migration readiness failed: active group duplicates';
+        END IF;
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_export_packets_active_business_group
+        ON export_packets(company_id, accounting_group_id)
+        WHERE accounting_group_id IS NOT NULL
+          AND kind IN ('food_accounting_group','store_accounting_group')
+          AND status IN ('draft','validated','queued','retry_wait','leased',
+                         'sent_waiting_ack','blocked_mapping');
+        IF to_regclass('uq_export_packets_active_business_group') IS NULL THEN
+            RAISE EXCEPTION
+                'accounting migration readiness failed: active group index missing';
+        END IF;
+    END $$
+    """,
+    """
+    CREATE OR REPLACE FUNCTION protect_accounting_source_decision()
+    RETURNS trigger AS $$
+    BEGIN
+        RAISE EXCEPTION 'accounting source decision is append-only';
+    END;
+    $$ LANGUAGE plpgsql
+    """,
+    "DROP TRIGGER IF EXISTS accounting_source_decision_immutable_trg "
+    "ON accounting_source_decisions",
+    """
+    CREATE TRIGGER accounting_source_decision_immutable_trg
+    BEFORE UPDATE OR DELETE ON accounting_source_decisions
+    FOR EACH ROW EXECUTE FUNCTION protect_accounting_source_decision()
+    """,
+    """
+    CREATE OR REPLACE FUNCTION protect_business_shift_migration_collision()
+    RETURNS trigger AS $$
+    BEGIN
+        RAISE EXCEPTION 'business shift migration collision report is append-only';
+    END;
+    $$ LANGUAGE plpgsql
+    """,
+    "DROP TRIGGER IF EXISTS business_shift_migration_collision_immutable_trg "
+    "ON business_shift_migration_collisions",
+    """
+    CREATE TRIGGER business_shift_migration_collision_immutable_trg
+    BEFORE UPDATE OR DELETE ON business_shift_migration_collisions
+    FOR EACH ROW EXECUTE FUNCTION protect_business_shift_migration_collision()
+    """,
+)
+
+ACTIVE_GROUP_COLLISION_REPORT_DDL = next(
+    statement for statement in BUSINESS_SHIFT_MIGRATION_DDL
+    if "INSERT INTO business_shift_migration_collisions" in statement
+    and "'active_group_duplicate'" in statement
+)
+ACTIVE_GROUP_READINESS_DDL = next(
+    statement for statement in BUSINESS_SHIFT_MIGRATION_DDL
+    if "uq_export_packets_active_business_group" in statement
+    and "DO $$ BEGIN" in statement
+)
+
+
+async def _ensure_active_group_readiness(db_engine) -> None:
+    async with db_engine.begin() as conn:
+        await conn.execute(text(ACTIVE_GROUP_COLLISION_REPORT_DDL))
+    async with db_engine.begin() as conn:
+        await conn.execute(text(ACTIVE_GROUP_READINESS_DDL))
 
 
 ACCOUNTING_REVISION_MIGRATION_DDL = (
@@ -625,7 +986,8 @@ ACCOUNTING_REVISION_MIGRATION_DDL = (
                     AND contract_version IS NOT NULL AND content_hash IS NOT NULL
                     AND fact_origin IS NOT NULL AND transport_producer IS NOT NULL
                     AND status IN ('draft','validated','queued','retry_wait','leased',
-                                   'sent_waiting_ack','accepted','rejected','needs_review')
+                                   'sent_waiting_ack','accepted','rejected',
+                                   'blocked_mapping','needs_review')
                 )
             ) NOT VALID;
         END IF;
@@ -800,8 +1162,11 @@ ACCOUNTING_REVISION_MIGRATION_DDL = (
              ORDER BY p.revision DESC
              LIMIT 1
              FOR UPDATE;
-            IF latest_revision IS NOT NULL AND NEW.revision <= latest_revision THEN
-                RAISE EXCEPTION 'accounting packet revision must increase';
+            IF latest_revision IS NULL AND NEW.revision <> 1 THEN
+                RAISE EXCEPTION 'accounting packet revision gap';
+            END IF;
+            IF latest_revision IS NOT NULL AND NEW.revision <> latest_revision + 1 THEN
+                RAISE EXCEPTION 'accounting packet revision must increase exactly by one';
             END IF;
             IF latest_kind IS NOT NULL AND NEW.kind <> latest_kind THEN
                 RAISE EXCEPTION 'accounting packet kind cannot change between revisions';
@@ -814,7 +1179,9 @@ ACCOUNTING_REVISION_MIGRATION_DDL = (
             OR (OLD.status IN ('queued','retry_wait') AND NEW.status = 'leased')
             OR (OLD.status = 'leased' AND NEW.status IN ('sent_waiting_ack','retry_wait'))
             OR (OLD.status = 'sent_waiting_ack'
-                AND NEW.status IN ('accepted','rejected','needs_review'))
+                AND NEW.status IN ('accepted','rejected','blocked_mapping',
+                                   'retry_wait','needs_review'))
+            OR (OLD.status = 'blocked_mapping' AND NEW.status = 'leased')
         ) THEN
             RAISE EXCEPTION 'invalid accounting outbox status transition: % -> %',
                 OLD.status, NEW.status;
@@ -831,6 +1198,7 @@ ACCOUNTING_REVISION_MIGRATION_DDL = (
             OR NEW.content_hash IS DISTINCT FROM OLD.content_hash
             OR NEW.fact_origin IS DISTINCT FROM OLD.fact_origin
             OR NEW.transport_producer IS DISTINCT FROM OLD.transport_producer
+            OR NEW.accounting_group_id IS DISTINCT FROM OLD.accounting_group_id
         ) THEN
             RAISE EXCEPTION 'validated accounting outbox core is immutable';
         END IF;
@@ -1299,6 +1667,18 @@ async def create_all() -> None:
             # Реквизиты документа, за которыми не заводят колонку: время проведения,
             # автор, договор, комментарий. Нужны срезу компании из бухгалтерии.
             "ALTER TABLE accounting_docs ADD COLUMN IF NOT EXISTS doc_meta JSONB",
+            # Реквизиты вида документа одним полем. Модель получила его
+            # 13.08.2026 («одно поле вместо полутора десятков колонок»),
+            # а миграцию не написали — и любое обращение к accounting_docs
+            # падало с «column details does not exist». Незаметно это было
+            # потому, что путь идёт только через перестроение проекций
+            # документов, а его запускают редко.
+            "ALTER TABLE accounting_docs ADD COLUMN IF NOT EXISTS details JSONB",
+            # Модель справочника уже читает признак группы. create_all не
+            # добавляет колонку в существующую таблицу, поэтому без этой
+            # миграции сборка пакета БП падает ещё до проверки его содержимого.
+            "ALTER TABLE counterparties ADD COLUMN IF NOT EXISTS is_group "
+            "BOOLEAN NOT NULL DEFAULT false",
             # Проводка → первичный документ: корень измерений «контрагент»,
             # «организация», «номенклатура» и разворота оборотки до первички.
             "ALTER TABLE gl_entries ADD COLUMN IF NOT EXISTS doc_id UUID "
@@ -2368,6 +2748,15 @@ async def create_all() -> None:
         for stmt in ACCOUNTING_REVISION_MIGRATION_DDL:
             await conn.execute(_sa.text(stmt))
 
+        # v2.43: BusinessShift identity, collision-safe backfill и current group.
+        for stmt in BUSINESS_SHIFT_MIGRATION_DDL:
+            if stmt in {
+                ACTIVE_GROUP_COLLISION_REPORT_DDL,
+                ACTIVE_GROUP_READINESS_DDL,
+            }:
+                continue
+            await conn.execute(_sa.text(stmt))
+
         # v2.42: кто завёл черновик на станции.
         #
         # У цены и заявки на правку канона автор обязателен — «представьтесь:
@@ -2482,6 +2871,18 @@ async def create_all() -> None:
         await conn.execute(_sa.text(
             "ALTER TABLE edge_packets ADD COLUMN IF NOT EXISTS wire_size_bytes INTEGER"))
 
+        # Версия с автоматическим коротким ARTDESC и правильным ключом чека.
+        # Явная настройка компании имела приоритет над default и оставляла парк
+        # на 1.79.0 даже после обновления кода сервера.
+        await conn.execute(_sa.text("""
+            UPDATE companies
+               SET customization = coalesce(customization, '{}'::jsonb)
+                   || jsonb_build_object(
+                        'edge', coalesce(customization->'edge', '{}'::jsonb)
+                                || jsonb_build_object('desired_agent_version', '1.99.0'))
+             WHERE customization #>> '{edge,desired_agent_version}' IN ('1.79.0', '1.98.2')
+        """))
+
         # v2.39: у документа станции появились сквозной номер центра и статус.
         #
         # Номер присваивает касса, и у двух АЗС он совпадает; в претензии
@@ -2490,6 +2891,22 @@ async def create_all() -> None:
         for stmt in (
             "ALTER TABLE store_cheques ADD COLUMN IF NOT EXISTS version "
             "INTEGER NOT NULL DEFAULT 1",
+            "ALTER TABLE store_cheques ADD COLUMN IF NOT EXISTS cash_no "
+            "INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE store_cheques ADD COLUMN IF NOT EXISTS cash_key VARCHAR(200)",
+            "UPDATE store_cheques SET cash_key = cash_no::text || ':' || number::text "
+            "WHERE cash_key IS NULL OR cash_key = ''",
+            "ALTER TABLE store_cheques ALTER COLUMN cash_key SET NOT NULL",
+            "DO $$ BEGIN "
+            "IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'uq_store_cheque' "
+            "AND conrelid = 'store_cheques'::regclass "
+            "AND pg_get_constraintdef(oid) NOT LIKE '%cash_key%') THEN "
+            "ALTER TABLE store_cheques DROP CONSTRAINT uq_store_cheque; END IF; "
+            "IF NOT EXISTS (SELECT 1 FROM pg_constraint "
+            "WHERE conname = 'uq_store_cheque' "
+            "AND conrelid = 'store_cheques'::regclass) THEN "
+            "ALTER TABLE store_cheques ADD CONSTRAINT uq_store_cheque UNIQUE "
+            "(company_id, station_id, shift_number, cash_key); END IF; END $$",
             "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint "
             "WHERE conname = 'ck_store_cheque_version') THEN "
             "ALTER TABLE store_cheques ADD CONSTRAINT ck_store_cheque_version "
@@ -3043,6 +3460,8 @@ async def create_all() -> None:
             "ON mail_messages (company_id, message_id) WHERE message_id IS NOT NULL",
         ):
             await conn.execute(_sa.text(stmt))
+
+    await _ensure_active_group_readiness(engine)
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:

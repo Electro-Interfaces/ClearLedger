@@ -403,6 +403,79 @@ def cheque_lines_with_legacy_provenance(
     ]
 
 
+async def load_item_catalog(db: AsyncSession) -> dict[str, dict]:
+    """Контур и ставка НДС из карточки станции.
+
+    Строка чека приезжает с `vat_rate: null`, а у чеков старше внедрения
+    фильтра нет и контура. Любая из этих двух дыр уводит в карантин ВЕСЬ чек,
+    а с ним и смену: на 208 так стояли 784 чека из 1155, и НДС не был посчитан
+    ни у одного.
+
+    Карточка — источник истины по обоим полям, поэтому добираем их здесь, а не
+    ждём перевыгрузки со станции: иначе уже приехавшие чеки не поднять. Это
+    заодно снимает зависимость от побайтового совпадения с сырым пакетом —
+    единственного, что до сих пор спасало контур старых чеков и делало чистку
+    архива пакетов операцией, обнуляющей выручку задним числом.
+    """
+    try:
+        rows = (await db.execute(text(
+            "SELECT external_uuid::text, vat_rate, sku_class, is_dish, purpose"
+            " FROM edge.item WHERE external_uuid IS NOT NULL"
+            " ORDER BY deleted DESC"  # живая карточка перезаписывает удалённый дубль
+        ))).all()
+    except Exception:
+        # Схемы edge может не быть вовсе (пространство без станций, тестовый
+        # SQLite). Обогащение необязательное: без него чек остаётся в карантине
+        # ровно как раньше, а не теряет сумму.
+        return {}
+    out: dict[str, dict] = {}
+    for uid, vat_rate, sku_class, is_dish, purpose in rows:
+        scope = _sku_scope(sku_class)
+        if scope is None and is_dish:
+            scope = "food"
+        if scope is None:
+            scope = _purpose_scope(purpose)
+        карточка = {}
+        if str(vat_rate or "").strip():
+            карточка["vat_rate"] = str(vat_rate)
+        if scope is not None:
+            карточка["scope"] = scope
+        if карточка:
+            out[str(uid)] = карточка
+    return out
+
+
+def cheque_lines_from_catalog(
+    lines: list[dict], catalog: dict[str, dict],
+) -> list[dict]:
+    """Добрать строкам чека контур и ставку из справочника, где станция их не дала.
+
+    Присланное станцией не трогаем: она ближе к кассе и знает лучше.
+    """
+    if not catalog:
+        return lines
+    out: list[dict] = []
+    for line in lines:
+        карточка = catalog.get(str(line.get("item_uuid") or "").strip())
+        if not карточка:
+            out.append(line)
+            continue
+        добавка: dict = {}
+        ставка_известна = (line.get("vat_amount") is not None
+                           or line.get("СуммаНДС") is not None
+                           or str(line.get("vat_rate")
+                                  or line.get("СтавкаНДС") or "").strip())
+        if not ставка_известна and карточка.get("vat_rate"):
+            добавка["vat_rate"] = карточка["vat_rate"]
+        if _line_scope(line) is None and карточка.get("scope"):
+            добавка["scope"] = карточка["scope"]
+        if not добавка:
+            out.append(line)
+            continue
+        out.append({**line, **добавка, "enriched_from": "catalog"})
+    return out
+
+
 EDGE_QUANTITY_ONLY_KINDS = frozenset({
     "transfer", "inventory", "writeoff", "production_release", "recipe",
     "ingredients_writeoff", "revaluation",
@@ -487,6 +560,28 @@ def _edge_sections(document: dict, kind: str) -> list[tuple[str, list[dict], int
         if isinstance(rows, list):
             sections.append((section, [row for row in rows if isinstance(row, dict)], sign))
     return sections
+
+
+def _projection_edge_document(document: dict) -> dict:
+    """Представить станционное изменение цены как документ переоценки."""
+    if str(document.get("Тип") or "").strip() != "price_change":
+        return document
+    source = str(document.get("ИсточникUUID") or "")
+    return {
+        **document,
+        "Тип": "revaluation",
+        "Номер": document.get("Номер") or (source[-12:] if source else None),
+        "Дата": document.get("Момент"),
+        "СуммаДокумента": 0,
+        "Товары": [{
+            "НоменклатураUUID": document.get("НоменклатураUUID"),
+            "ШтрихКод": document.get("Штрихкод"),
+            "ЦенаБыла": document.get("ЦенаБыла"),
+            "ЦенаСтала": document.get("ЦенаСтала"),
+            "Количество": 0,
+            "Сумма": 0,
+        }],
+    }
 
 
 def sanitize_edge_document(document: dict, *, trusted_station_packet: bool) -> dict:
@@ -690,6 +785,7 @@ async def _edge_adapter(db: AsyncSession, company_id: uuid.UUID) -> list[Project
         for index, document in enumerate((packet.payload or {}).get("Документы") or []):
             if not isinstance(document, dict):
                 continue
+            document = _projection_edge_document(document)
             kind = str(document.get("Тип") or "").strip()
             # чеки и смены приходят своим источником (архив кассы) и остаются
             # неучётным evidence: из пакета их сюда не пускаем вовсе
@@ -745,6 +841,11 @@ async def _edge_adapter(db: AsyncSession, company_id: uuid.UUID) -> list[Project
                     "goods_classification": (
                         "quarantined" if filtered["quarantined"] else "store_food"),
                     "classification_error": filtered["reason"],
+                    "item_uuid": document.get("НоменклатураUUID"),
+                    "barcode": document.get("Штрихкод"),
+                    "old_price": document.get("ЦенаБыла"),
+                    "new_price": document.get("ЦенаСтала"),
+                    "reason": document.get("Причина"),
                 },
             )
             candidate.lines, ambiguous = _candidate_lines(
@@ -769,12 +870,15 @@ async def _cheque_adapter(db: AsyncSession, company_id: uuid.UUID) -> list[Proje
         EdgePacket.packet_uuid.in_(packet_uuids),
     ))).scalars().all() if packet_uuids else []
     packets = {str(row.packet_uuid): row for row in packet_rows}
+    catalog = await load_item_catalog(db)
     out: list[ProjectionCandidate] = []
     shifts: dict[tuple[int, int], list[tuple[StoreCheque, ProjectionCandidate]]] = {}
     rows = sorted(rows, key=lambda row: (row.station_id, row.shift_number, row.at, str(row.id)))
     for row in rows:
-        classified_lines = cheque_lines_with_legacy_provenance(
-            row, packets.get(str(getattr(row, "packet_uuid", ""))))
+        classified_lines = cheque_lines_from_catalog(
+            cheque_lines_with_legacy_provenance(
+                row, packets.get(str(getattr(row, "packet_uuid", "")))),
+            catalog)
         totals = goods_only_cheque_totals(classified_lines, bool(row.had_fuel))
         if ((row.had_fuel and not row.lines)
                 or (row.lines and totals["fuel_lines"] == len(row.lines))):
@@ -803,6 +907,8 @@ async def _cheque_adapter(db: AsyncSession, company_id: uuid.UUID) -> list[Proje
             revision=max(1, int(row.version or 1)),
             header={
                 "shift_number": row.shift_number,
+                "cash_no": getattr(row, "cash_no", 0),
+                "cash_key": getattr(row, "cash_key", f"0:{row.number}"),
                 "fiscal_number": row.fiscal_number,
                 "pay_name": row.pay_name,
                 "is_return": row.is_return,
@@ -819,7 +925,14 @@ async def _cheque_adapter(db: AsyncSession, company_id: uuid.UUID) -> list[Proje
     for (station_id, shift_number), items in sorted(shifts.items()):
         items = sorted(items, key=lambda item: (item[0].at, str(item[0].id)))
         shift_document_id = _derived_uuid(company_id, "store_shift", f"{station_id}:{shift_number}")
-        quarantined = any(candidate.requires_attention for _, candidate in items)
+        # Смену уводит в карантин только НЕРАЗОБРАННАЯ классификация чека, а не
+        # любой повод обратить внимание. Иначе туда попадала каждая смена, где
+        # покупатель взял две одинаковых позиции: строки без своего
+        # идентификатора дают одинаковый ключ, и чек помечается
+        # «line_identity_ambiguous». Для розницы это норма, суммы при этом
+        # сходятся, и разводятся такие строки суффиксом порядка.
+        quarantined = any(candidate.discrepancy_status == "quarantined"
+                          for _, candidate in items)
         shift_vat = (None if any(candidate.vat_amount is None for _, candidate in items)
                      else sum((candidate.vat_amount for _, candidate in items), Decimal("0")))
         shift = ProjectionCandidate(
@@ -1497,7 +1610,8 @@ async def normalized_document_payload(
         ))).scalar_one_or_none()
         documents = (packet.payload or {}).get("Документы") or [] if packet else []
         index = int(index_raw)
-        return documents[index] if index < len(documents) else {"status": "source_missing"}
+        return (_projection_edge_document(documents[index])
+                if index < len(documents) else {"status": "source_missing"})
     if row.source_kind == "cheque":
         cheque = await db.get(StoreCheque, uuid.UUID(row.source_record_id))
         if cheque is None or cheque.company_id != row.company_id:
@@ -1510,7 +1624,10 @@ async def normalized_document_payload(
                 EdgePacket.station_id == cheque.station_id,
             ))).scalar_one_or_none()
         totals = goods_only_cheque_totals(
-            cheque_lines_with_legacy_provenance(cheque, packet), bool(cheque.had_fuel))
+            cheque_lines_from_catalog(
+                cheque_lines_with_legacy_provenance(cheque, packet),
+                await load_item_catalog(db)),
+            bool(cheque.had_fuel))
         return {
             "status": "quarantined" if totals["quarantined"] else "ready",
             "lines": totals["lines"], "has_fuel": bool(cheque.had_fuel),
@@ -1559,6 +1676,7 @@ def _safe_line(row: dict) -> dict:
             "НоменклатураUUID",
             "name", "Наименование", "barcode", "ШтрихКод", "qty", "Количество",
             "qty_expected", "КоличествоЗаявлено", "price", "Цена", "amount", "Сумма",
+            "ЦенаБыла", "ЦенаСтала",
             "КоличествоОтправлено", "КоличествоУчет", "Отклонение", "СуммаОтклонения",
             "vat_rate", "СтавкаНДС", "vat_amount", "СуммаНДС", "unit", "Единица",
         )

@@ -102,7 +102,7 @@ export interface TaskParticipant {
 }
 export interface TaskAttachment {
   id: string; event_id: string | null; file_name: string
-  mime_type: string; size: number; created_at: string | null
+  mime_type: string; size: number; can_delete: boolean; created_at: string | null
 }
 
 export interface TaskDetails extends SpaceTask {
@@ -353,7 +353,8 @@ export async function deleteTaskView(id: string, companyId: string) {
 
 export interface TaskTemplate {
   id: string; name: string; title: string; description: string | null
-  type_id: string | null; assignee_id: string | null; object_id: string | null
+  type_id: string | null; doc_kind_id: string | null
+  assignee_id: string | null; object_id: string | null
   priority: string | null; due_days: number | null; checklist: string[]
 }
 
@@ -363,12 +364,14 @@ export async function listTaskTemplates(companyId: string) {
 
 export async function createTaskTemplate(data: {
   companyId: string; name: string; title: string; description?: string
-  typeId?: string; assigneeId?: string; priority?: string; dueDays?: number | null
+  typeId?: string; docKindId?: string; assigneeId?: string
+  priority?: string; dueDays?: number | null
   checklist: string[]
 }) {
   return post<TaskTemplate>('/api/tasks/templates', {
     company_id: data.companyId, name: data.name, title: data.title,
     description: data.description || undefined, type_id: data.typeId || undefined,
+    doc_kind_id: data.docKindId || undefined,
     assignee_id: data.assigneeId || undefined, priority: data.priority || undefined,
     due_days: data.dueDays ?? undefined, checklist: data.checklist,
   })
@@ -378,9 +381,16 @@ export async function deleteTaskTemplate(id: string, companyId: string) {
   return del(`/api/tasks/templates/${id}?company_id=${encodeURIComponent(companyId)}`)
 }
 
-/** Поставить задачу по шаблону прямо сейчас. */
+export interface TemplateProcessLaunch {
+  kind: 'document'; docId: string; title: string
+  templateId: string; templateName: string
+  state: 'preparation' | 'approval'; started: boolean; steps: number
+  round?: number; approvals?: number; reason: string | null
+}
+
+/** Запустить задачу или документный процесс по шаблону прямо сейчас. */
 export async function useTaskTemplate(id: string, companyId: string) {
-  return post<SpaceTask>(
+  return post<SpaceTask | TemplateProcessLaunch>(
     `/api/tasks/templates/${id}/use?company_id=${encodeURIComponent(companyId)}`, {})
 }
 
