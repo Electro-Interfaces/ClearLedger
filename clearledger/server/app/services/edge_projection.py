@@ -160,7 +160,7 @@ async def refresh_retail_dishes(
     company_id: uuid.UUID,
     station_id: int | None = None,
 ) -> int:
-    recipes, recipes_by_shift, dish_ids = await _dish_context(db, company_id)
+    _, recipes_by_shift, dish_ids = await _dish_context(db, company_id)
     rows = (await db.execute(select(DataEntry).where(
         DataEntry.company_id == company_id,
         DataEntry.source == "edge",
@@ -171,7 +171,7 @@ async def refresh_retail_dishes(
         shift = (row.meta or {}).get("Смена") or {}
         if station_id is not None and str(shift.get("КодАЗС") or "") != str(station_id):
             continue
-        shift_recipes = recipes_by_shift.get(_shift_identity(row.meta or {}), recipes)
+        shift_recipes = recipes_by_shift.get(_shift_identity(row.meta or {}), {})
         enriched = enrich_retail_meta(row.meta or {}, shift_recipes, dish_ids)
         if enriched != row.meta:
             row.meta = enriched
@@ -202,6 +202,12 @@ async def project_packet(
         "packet_hash": str(payload.get("ХешПакета") or ""),
         "exported_at": payload.get("ВремяВыгрузки"),
         "station_id": station_id,
+        "ProvisionalBusinessShiftID": str(
+            payload.get("ProvisionalBusinessShiftID") or ""
+        ),
+        "ShiftCompleteness": copy.deepcopy(payload.get("ShiftCompleteness")),
+        "CostEvidence": copy.deepcopy(payload.get("CostEvidence")),
+        "BusinessDate": str(payload.get("BusinessDate") or ""),
         # Кто прислал факт: станция или выгрузка ЦБ. По этому признаку решается,
         # чей документ останется, когда одну смену описывают оба.
         "from_station": _from_station(payload),

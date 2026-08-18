@@ -13,7 +13,7 @@ import {
   ChevronLeft, ChevronRight, FileText, MoreVertical, Archive, ArchiveRestore,
   Trash2, Reply, Pencil, X, Check, Megaphone, Lock, Pin, Video, UserPlus,
   Folder, AtSign, Loader2, Paperclip, Camera, Search as SearchIcon,
-  Shield, ShieldOff, UserMinus, LogOut, Bell, BellOff, Forward, MapPin, ClipboardList, ListChecks,
+  Shield, ShieldOff, UserMinus, LogOut, Bell, BellOff, Forward, MapPin, ClipboardList, Workflow,
   Mail, Palette, Smile, Images, Volume2, VolumeX, Mic, BarChart3, WifiOff,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -31,7 +31,7 @@ import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import {
-  Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import {
@@ -52,10 +52,11 @@ import { downloadAttachment, humanSize, useAuthBlobUrl } from '@/lib/authFiles'
 import { RegionCapture } from './RegionCapture'
 import { ensurePushSubscription, pushPreview, pushSupported, requestPushPermission, setPushPreview } from '@/lib/chatPush'
 import * as chat from '@/services/chatService'
+import * as docsService from '@/services/docsService'
 import { isMuted } from '@/services/chatService'
 import { listSpaceObjects } from '@/services/spaceObjectsService'
-import { listTaskPeople, listTaskTypes } from '@/services/tasksService'
-import { useTasksApp } from '@/hooks/useTasksApp'
+import { listTaskPeople } from '@/services/tasksService'
+import { useDocsApp } from '@/hooks/useDocsApp'
 import { useSendMode } from '@/hooks/useSendMode'
 import { useSupportContext } from '@/contexts/SupportContext'
 import type {
@@ -1111,47 +1112,43 @@ function GlobalSearchResults({ q, onOpen }: {
 }
 
 // ── «В заявку»: обсудили — отправили на выполнение ───────────────────────────
-/**
- * «Задача из сообщения»: обсудили — записали, что надо сделать.
- *
- * Проще заявки намеренно: объект не обязателен (задача может быть ни про какую
- * точку сети), стадию и срок задаёт тип, остальное дописывается в карточке.
- * Лишний шаг в диалоге здесь дороже, чем правка потом: задачу ставят на ходу.
- */
-function TaskFromMessageDialog({ message, companyId, onClose, onDone }: {
+function ProcessFromMessageDialog({ message, companyId, onClose, onDone }: {
   message: ChatMessage
   companyId: string
   onClose: () => void
-  onDone: (taskNumber: number) => void
+  onDone: (result: Awaited<ReturnType<typeof chat.processFromMessage>>) => void
 }) {
   const src = (message.content || message.fileName || '').trim()
-  const [title, setTitle] = useState(src.slice(0, 300))
-  const [assigneeId, setAssigneeId] = useState('')
-  const [typeId, setTypeId] = useState('')
+  const [templateId, setTemplateId] = useState('')
+  const [responsibleId, setResponsibleId] = useState('')
+  const [title, setTitle] = useState(() => src.slice(0, 300))
   const [busy, setBusy] = useState(false)
 
+  const templatesQ = useQuery({
+    queryKey: ['process-templates', companyId],
+    queryFn: () => docsService.listProcessTemplates(companyId),
+    enabled: !!companyId, staleTime: 5 * 60 * 1000,
+  })
   const peopleQ = useQuery({
     queryKey: ['task-people', companyId],
     queryFn: () => listTaskPeople(companyId),
     enabled: !!companyId, staleTime: 5 * 60 * 1000,
   })
-  const typesQ = useQuery({
-    queryKey: ['task-types', companyId],
-    queryFn: () => listTaskTypes(companyId),
-    enabled: !!companyId, staleTime: 5 * 60 * 1000,
-  })
+  const templates = templatesQ.data?.templates ?? []
+  const selected = templates.find((template) => template.id === templateId)
 
   const send = async () => {
+    if (!templateId) return
     setBusy(true)
     try {
-      const res = await chat.taskFromMessage(message.id, {
-        title: title.trim() || undefined,
-        assigneeId: assigneeId || undefined,
-        typeId: typeId || undefined,
+      const res = await chat.processFromMessage(message.id, {
+        templateId,
+        responsibleId: responsibleId || undefined,
+        title: selected?.kind === 'task' ? title.trim() : undefined,
       })
-      onDone(res.taskNumber)
+      onDone(res)
     } catch (e) {
-      toast.error((e as Error).message || 'Не удалось поставить задачу')
+      toast.error((e as Error).message || 'Не удалось запустить процесс')
     } finally { setBusy(false) }
   }
 
@@ -1159,54 +1156,92 @@ function TaskFromMessageDialog({ message, companyId, onClose, onDone }: {
     <Dialog open onOpenChange={(o) => { if (!o) onClose() }}>
       <DialogContent className="max-w-sm gap-0 p-0 sm:max-w-sm">
         <DialogHeader className="border-b border-border/50 px-4 py-3">
-          <DialogTitle className="text-sm">Задача из сообщения</DialogTitle>
+          <DialogTitle className="text-sm">Запустить процесс из сообщения</DialogTitle>
+          <DialogDescription className="sr-only">
+            Выберите шаблон процесса и первого ответственного сотрудника.
+          </DialogDescription>
         </DialogHeader>
         <div className="space-y-3 p-4">
           <p className="max-h-20 overflow-hidden rounded-md bg-muted/40 px-2.5 py-1.5 text-xs text-muted-foreground">
             {message.userName ? `${message.userName}: ` : ''}{src || 'вложение'}
           </p>
           <div className="space-y-1">
-            <Label className="text-xs">Что сделать</Label>
-            <Input value={title} onChange={(e) => setTitle(e.target.value)}
-              maxLength={300} placeholder="Коротко: что нужно сделать" />
+            <Label className="text-xs">Шаблон процесса</Label>
+            <Select value={templateId} onValueChange={(value) => {
+              setTemplateId(value)
+              const template = templates.find((item) => item.id === value)
+              setResponsibleId(template?.defaultResponsibleId ?? '')
+              setTitle(template?.kind === 'task' ? src.slice(0, 300) : template?.title ?? '')
+            }}>
+              <SelectTrigger className="h-8 text-xs">
+                <SelectValue placeholder={templatesQ.isLoading ? 'Загрузка…' : 'Выберите шаблон'} />
+              </SelectTrigger>
+              <SelectContent>
+                {templates.map((template) => (
+                  <SelectItem key={template.id} value={template.id}>{template.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
-          <div className="grid grid-cols-2 gap-2">
-            <div className="space-y-1">
-              <Label className="text-xs">Исполнитель</Label>
-              <Select value={assigneeId || 'none'}
-                onValueChange={(v) => setAssigneeId(v === 'none' ? '' : v)}>
-                <SelectTrigger className="h-8 text-xs">
-                  <SelectValue placeholder="Не назначен" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Не назначен</SelectItem>
-                  {(peopleQ.data?.people ?? []).map((p) => (
-                    <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+          {templatesQ.isError && (
+            <p className="text-xs text-destructive">Не удалось загрузить доступные шаблоны.</p>
+          )}
+          {!templatesQ.isLoading && !templatesQ.isError && templates.length === 0 && (
+            <p className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
+              Доступных шаблонов процессов нет. Их создают в
+              «Трек → Регламент → Шаблоны».
+            </p>
+          )}
+          {selected && (
+            <div className="rounded-md bg-muted/40 px-2.5 py-2 text-xs">
+              <div className="font-medium">{selected.title}</div>
+              <div className="mt-0.5 text-muted-foreground">
+                {selected.kind === 'task' ? selected.taskTypeName : selected.docKindName}
+                {' · '}этапов: {selected.steps}
+                {selected.dueDays != null && ` · срок ${selected.dueDays} дн.`}
+              </div>
+              {selected.kind === 'task' && (
+                <div className="mt-1 text-muted-foreground">
+                  Исполнитель сможет передать работу дальше; комментарии и файлы останутся в истории.
+                </div>
+              )}
+              {selected.requiresPreparation && (
+                <div className="mt-1 text-amber-700 dark:text-amber-400">
+                  Сначала подготовка: {selected.preparationReason}.
+                </div>
+              )}
             </div>
+          )}
+          {selected?.kind === 'task' && (
             <div className="space-y-1">
-              <Label className="text-xs">Тип</Label>
-              <Select value={typeId || 'none'}
-                onValueChange={(v) => setTypeId(v === 'none' ? '' : v)}>
-                <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Поручение</SelectItem>
-                  {(typesQ.data?.types ?? []).filter((t) => t.is_active).map((t) => (
-                    <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Label className="text-xs">Тема задачи</Label>
+              <Input value={title} onChange={(event) => setTitle(event.target.value)}
+                maxLength={300} className="h-8 text-xs" placeholder="Что нужно сделать" />
             </div>
+          )}
+          <div className="space-y-1">
+            <Label className="text-xs">
+              {selected?.kind === 'task' ? 'Первый исполнитель' : 'Ответственный'}
+            </Label>
+            <Select value={responsibleId || 'self'}
+              onValueChange={(value) => setResponsibleId(value === 'self' ? '' : value)}>
+              <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="self">Я</SelectItem>
+                {(peopleQ.data?.people ?? []).map((person) => (
+                  <SelectItem key={person.id} value={person.id}>{person.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
           <p className="text-[11px] text-muted-foreground">
-            В чате останется отметка со ссылкой, в ленте задачи — откуда она взялась.
+            Сообщение попадёт в карточку как основание, а в чате останется ссылка на процесс.
           </p>
         </div>
         <DialogFooter className="border-t border-border/50 px-4 py-3">
-          <Button size="sm" disabled={busy || title.trim().length < 3} onClick={send}>
-            {busy && <Loader2 className="mr-1.5 size-3.5 animate-spin" />}Поставить
+          <Button size="sm" disabled={busy || !templateId
+              || (selected?.kind === 'task' && title.trim().length < 3)} onClick={send}>
+            {busy && <Loader2 className="mr-1.5 size-3.5 animate-spin" />}Запустить
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -1621,7 +1656,7 @@ function CreateChatDialog({ open, onOpenChange, onCreated, scopeProduct }: {
 function ChatBubble({
   message, album, isOwn, grouping, canDelete, editingId, editText, searchHighlight,
   onReply, onEditStart, onEditCancel, onEditSave, onEditTextChange, onDelete,
-  onAuthorClick, authorAvatar, withAvatar, selfId, onReact, onPin, onForward, onTicket, onTask, onImageClick,
+  onAuthorClick, authorAvatar, withAvatar, selfId, onReact, onPin, onForward, onTicket, onProcess, onImageClick,
   actionsOpen, onToggleActions, onCloseActions, textSizeClass,
 }: {
   message: ChatMessage
@@ -1649,7 +1684,7 @@ function ChatBubble({
   onPin?: () => void
   onForward?: () => void
   onTicket?: () => void
-  onTask?: () => void
+  onProcess?: () => void
   onImageClick?: (path: string) => void
   actionsOpen: boolean
   onToggleActions: () => void
@@ -1724,8 +1759,8 @@ function ChatBubble({
         className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground [@media(pointer:coarse)]:size-10"><Forward className="size-4" /></button>}
       {onTicket && <button onClick={() => runAction(onTicket)} title="Создать заявку из сообщения"
         className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground [@media(pointer:coarse)]:size-10"><ClipboardList className="size-4" /></button>}
-      {onTask && <button onClick={() => runAction(onTask)} title="Поставить задачу из сообщения"
-        className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground [@media(pointer:coarse)]:size-10"><ListChecks className="size-4" /></button>}
+      {onProcess && <button onClick={() => runAction(onProcess)} title="Запустить процесс из сообщения"
+        className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground [@media(pointer:coarse)]:size-10"><Workflow className="size-4" /></button>}
       {onPin && <button onClick={() => runAction(onPin)} title="Закрепить"
         className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground [@media(pointer:coarse)]:size-10"><Pin className="size-4" /></button>}
       {isOwn && <button onClick={() => runAction(onEditStart)} title="Редактировать"
@@ -2018,10 +2053,10 @@ export function ChatPanel({ compact, scopeProduct }: {
   const [forwardMsg, setForwardMsg] = useState<ChatMessage | null>(null)
   // «В заявку»: сообщение, из которого создаётся заявка.
   const [ticketMsg, setTicketMsg] = useState<ChatMessage | null>(null)
-  const [taskMsg, setTaskMsg] = useState<ChatMessage | null>(null)
+  const [processMsg, setProcessMsg] = useState<ChatMessage | null>(null)
   // Кнопку показываем только там, где продукт подключён: иначе человек жмёт и
   // получает отказ гарда — обещание, которого система не держит.
-  const tasksEnabled = useTasksApp()
+  const docsEnabled = useDocsApp()
   // Разрешение на браузерные уведомления — для кнопки-колокольчика в шапке списка.
   const [pushPerm, setPushPerm] = useState<NotificationPermission | 'unsupported'>(
     () => (pushSupported() ? Notification.permission : 'unsupported'))
@@ -3110,7 +3145,7 @@ export function ChatPanel({ compact, scopeProduct }: {
                       onPin={() => pinMutation.mutate(msg.id)}
                       onForward={() => setForwardMsg(msg)}
                       onTicket={activeRoom?.type !== 'direct' ? () => setTicketMsg(msg) : undefined}
-                      onTask={tasksEnabled ? () => setTaskMsg(msg) : undefined}
+                      onProcess={docsEnabled ? () => setProcessMsg(msg) : undefined}
                       onImageClick={openImage}
                       actionsOpen={mobileActionsFor === msg.id}
                       onToggleActions={() => setMobileActionsFor((id) => id === msg.id ? null : msg.id)}
@@ -3280,14 +3315,19 @@ export function ChatPanel({ compact, scopeProduct }: {
             qc.invalidateQueries({ queryKey: ['chat-rooms'] })
           }} />
       )}
-      {taskMsg && (
-        <TaskFromMessageDialog message={taskMsg} companyId={companyId ?? ''}
-          onClose={() => setTaskMsg(null)}
-          onDone={(num) => {
-            setTaskMsg(null)
-            toast.success(`Задача №${num} поставлена`)
+      {processMsg && (
+        <ProcessFromMessageDialog message={processMsg} companyId={companyId ?? ''}
+          onClose={() => setProcessMsg(null)}
+          onDone={(result) => {
+            setProcessMsg(null)
+            toast.success(result.kind === 'task'
+              ? `Задача №${result.taskNumber} поставлена`
+              : result.started
+                ? `Процесс «${result.templateName}» запущен`
+                : `Процесс «${result.templateName}» создан: нужна подготовка`)
             qc.invalidateQueries({ queryKey: ['chat-messages', selectedRoom] })
-            qc.invalidateQueries({ queryKey: ['tasks'] })
+            qc.invalidateQueries({ queryKey: ['docs'] })
+            if (result.kind === 'task') qc.invalidateQueries({ queryKey: ['tasks'] })
           }} />
       )}
       <CreateChatDialog open={createOpen} onOpenChange={setCreateOpen} scopeProduct={scope}

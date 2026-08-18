@@ -139,6 +139,9 @@ async def seed_data(db: AsyncSession) -> None:
     # --- Канцелярия «Трека»: виды документов и номенклатура дел ---
     await _seed_doc_kinds(db)
 
+    # --- Первый общий процесс: внутренняя задача с передачей между сотрудниками ---
+    await _seed_standard_task_process(db)
+
     await db.commit()
     logger.info("Seed завершён")
 
@@ -166,6 +169,58 @@ _DOC_KINDS_SEED = [
     {"code": "memo", "name": "Служебная записка", "family": "internal",
      "direction": "none", "number_prefix": "СЗ", "case": "01-03", "sort_order": 40},
 ]
+
+
+_STANDARD_TASK_ROUTE = [
+    {"code": "new", "name": "Постановка"},
+    {"code": "in_progress", "name": "В работе"},
+    {"code": "review", "name": "Проверка"},
+]
+
+
+async def _seed_standard_task_process(db: AsyncSession) -> None:
+    """Заводит универсальный внутренний процесс для каждой компании."""
+    from app.models import TaskTemplate, TaskType
+
+    companies = list((await db.execute(select(Company))).scalars())
+    for company in companies:
+        task_type = (await db.execute(select(TaskType).where(
+            TaskType.company_id == company.id,
+            TaskType.code == "errand",
+        ))).scalar_one_or_none()
+        if task_type is None:
+            task_type = TaskType(
+                company_id=company.id,
+                code="errand",
+                name="Поручение",
+                description="Внутренняя работа с исполнителем, сроком и передачей дальше",
+                route=_STANDARD_TASK_ROUTE,
+                default_priority="medium",
+                due_days=3,
+                is_active=True,
+                sort_order=10,
+            )
+            db.add(task_type)
+            await db.flush()
+        exists = (await db.execute(select(TaskTemplate.id).where(
+            TaskTemplate.company_id == company.id,
+            TaskTemplate.name == "Стандартное выполнение задачи",
+        ))).scalar_one_or_none()
+        if exists is not None:
+            continue
+        db.add(TaskTemplate(
+            company_id=company.id,
+            name="Стандартное выполнение задачи",
+            title="Выполнить задачу",
+            description=(
+                "Внутренняя задача компании. Текущий исполнитель выполняет работу "
+                "или передаёт её следующему сотруднику; комментарии, файлы и все "
+                "переходы сохраняются в общей истории."
+            ),
+            type_id=task_type.id,
+            priority="medium",
+            checklist=[],
+        ))
 
 
 async def _seed_doc_kinds(db: AsyncSession) -> None:

@@ -34,7 +34,7 @@ from app.models import (
     TaskRecurrence, TaskTemplate, TaskType, TaskView, TaskWatcher, TaskWorkItem,
     User, UserCompany,
 )
-from app.services import space_connectors, task_mail, task_scheduler
+from app.services import process_templates, space_connectors, task_mail, task_scheduler
 
 router = APIRouter(prefix="/tasks", tags=["Задачи"])
 
@@ -282,6 +282,14 @@ async def _assert_actor(db: AsyncSession, cid: uuid.UUID, user: User, t: Task) -
     m = await db.get(UserCompany, (user.id, cid))
     if m is None or m.role != "admin":
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Задача не ваша")
+
+
+async def _can_view_task(db: AsyncSession, cid: uuid.UUID, user: User, t: Task) -> bool:
+    if t.visibility != "private" or await _is_admin(db, cid, user):
+        return True
+    return user.id in (t.author_id, t.assignee_id) or bool(
+        await db.get(TaskWatcher, (t.id, user.id))
+        or await db.get(TaskParticipant, (t.id, user.id)))
 
 
 # Обратная сторона связи называется иначе: если А — родитель Б, то у Б это
@@ -878,7 +886,13 @@ async def list_templates(
     cid = await _assert_work(company_id, current_user, db)
     rows = (await db.execute(select(TaskTemplate).where(TaskTemplate.company_id == cid)
                              .order_by(TaskTemplate.name))).scalars().all()
-    return {"templates": [_template_out(t) for t in rows]}
+    available_process_ids = {
+        item["id"] for item in await process_templates.available_templates(
+            db, cid, current_user)
+    }
+    visible = [t for t in rows
+               if not t.doc_kind_id or str(t.id) in available_process_ids]
+    return {"templates": [_template_out(t) for t in visible]}
 
 
 @router.post("/templates", status_code=status.HTTP_201_CREATED)
@@ -888,14 +902,37 @@ async def create_template(
     current_user: User = Depends(get_current_user),
 ):
     cid = await _assert_work(payload.company_id, current_user, db)
+    if payload.type_id and payload.doc_kind_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Шаблон не может одновременно создавать задачу и документ")
+    doc_kind_id = (_uuid_or_400(payload.doc_kind_id, "doc_kind_id")
+                   if payload.doc_kind_id else None)
+    if doc_kind_id:
+        from app.models import DocKind
+
+        await _assert_admin(db, cid, current_user)
+        kind = await db.get(DocKind, doc_kind_id)
+        if kind is None or kind.company_id != cid or not kind.is_active:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "Вид документа шаблона недоступен")
+        if not kind.route:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "Сначала задайте маршрут у вида документа")
+    type_id = _uuid_or_400(payload.type_id, "type_id") if payload.type_id else None
+    if type_id:
+        task_type = await db.get(TaskType, type_id)
+        if task_type is None or task_type.company_id != cid:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "Тип задачи не принадлежит пространству")
+    assignee_id = (_uuid_or_400(payload.assignee_id, "assignee_id")
+                   if payload.assignee_id else None)
+    if assignee_id and await db.get(UserCompany, (assignee_id, cid)) is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Исполнитель не состоит в пространстве")
     tpl = TaskTemplate(
         company_id=cid, name=payload.name.strip(), title=payload.title.strip(),
         description=payload.description,
-        type_id=_uuid_or_400(payload.type_id, "type_id") if payload.type_id else None,
-        doc_kind_id=(_uuid_or_400(payload.doc_kind_id, "doc_kind_id")
-                     if payload.doc_kind_id else None),
-        assignee_id=(_uuid_or_400(payload.assignee_id, "assignee_id")
-                     if payload.assignee_id else None),
+        type_id=type_id, doc_kind_id=doc_kind_id, assignee_id=assignee_id,
         object_id=payload.object_id or None, priority=payload.priority,
         due_days=payload.due_days,
         checklist=[str(x).strip()[:500] for x in payload.checklist if str(x).strip()])
@@ -916,7 +953,8 @@ async def delete_template(
     tpl = await db.get(TaskTemplate, _uuid_or_400(template_id, "template_id"))
     if tpl is None or tpl.company_id != cid:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Шаблон не найден")
-    if tpl.assignee_id is not None and tpl.assignee_id != current_user.id:
+    if tpl.doc_kind_id or (tpl.assignee_id is not None
+                           and tpl.assignee_id != current_user.id):
         await _assert_admin(db, cid, current_user)
     await db.delete(tpl)
     await db.commit()
@@ -939,6 +977,19 @@ async def use_template(
     tpl = await db.get(TaskTemplate, _uuid_or_400(template_id, "template_id"))
     if tpl is None or tpl.company_id != cid:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Шаблон не найден")
+    if tpl.doc_kind_id:
+        try:
+            doc, result = await process_templates.launch(
+                db, cid, tpl, current_user,
+                source_note=f"по шаблону процесса «{tpl.name}»",
+            )
+        except process_templates.ProcessTemplateError as exc:
+            code = (status.HTTP_403_FORBIDDEN if "Недостаточно прав" in str(exc)
+                    else status.HTTP_400_BAD_REQUEST)
+            raise HTTPException(code, str(exc)) from exc
+        await db.commit()
+        await db.refresh(doc)
+        return process_templates.launch_out(doc, tpl, result)
     holder = TaskRecurrence(company_id=cid, template_id=tpl.id, rule={},
                             created_by=current_user.id)
     t = await task_scheduler.spawn_from_template(db, holder, tpl)
@@ -1126,12 +1177,8 @@ async def task_details(
     t = await _task_or_404(db, cid, task_id)
     # Ссылку на закрытую задачу могут переслать — проверяем причастность, а не
     # только знание идентификатора.
-    if t.visibility == "private" and not await _is_admin(db, cid, current_user):
-        allowed = current_user.id in (t.author_id, t.assignee_id) or bool(
-            await db.get(TaskWatcher, (t.id, current_user.id))
-            or await db.get(TaskParticipant, (t.id, current_user.id)))
-        if not allowed:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "Задача не найдена")
+    if not await _can_view_task(db, cid, current_user, t):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Задача не найдена")
     names = await _names(db, [t])
     extras = await _extras(db, [t])
     events = (await db.execute(
@@ -1165,6 +1212,8 @@ async def task_details(
         .where(TaskParticipant.task_id == t.id)
         .order_by(TaskParticipant.created_at))).all()
 
+    can_manage_files = (current_user.id in (t.author_id, t.assignee_id)
+                        or await _is_admin(db, cid, current_user))
     return {
         **_task_out(t, names[t.id]["route"], names[t.id], extras[t.id]),
         "description": t.description,
@@ -1195,6 +1244,7 @@ async def task_details(
         "attachments": [{
             "id": str(a.id), "event_id": str(a.event_id) if a.event_id else None,
             "file_name": sf.file_name, "mime_type": sf.mime_type, "size": sf.size,
+            "can_delete": can_manage_files or a.uploaded_by == current_user.id,
             "created_at": a.created_at.isoformat() if a.created_at else None,
         } for a, sf in attachments],
         "links": await _links_out(db, t),
@@ -1686,7 +1736,8 @@ async def upload_attachment(
     Ядра: запись в `source_files`, сам файл в `UPLOAD_DIR` (как у документов проекта)."""
     cid = await _assert_work(company_id, current_user, db)
     t = await _task_or_404(db, cid, task_id)
-    await _assert_actor(db, cid, current_user, t)
+    if not await _can_view_task(db, cid, current_user, t):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Задача не найдена")
     content = await file.read()
     if not content:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Пустой файл")
@@ -1722,10 +1773,11 @@ async def delete_attachment(
     ссылаться другая запись, а чистка хранилища — отдельная работа."""
     cid = await _assert_work(company_id, current_user, db)
     t = await _task_or_404(db, cid, task_id)
-    await _assert_actor(db, cid, current_user, t)
     att = await db.get(TaskAttachment, _uuid_or_400(attachment_id, "attachment_id"))
     if att is None or att.task_id != t.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Вложение не найдено")
+    if att.uploaded_by != current_user.id:
+        await _assert_actor(db, cid, current_user, t)
     await db.delete(att)
     await db.commit()
     return {"deleted": attachment_id}

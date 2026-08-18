@@ -548,7 +548,10 @@ def test_legacy_routes_share_document_rbac_and_reject_nonprojection_kinds():
 def test_cheque_version_and_projection_role_migrations_are_explicit():
     source = inspect.getsource(database.create_all)
     assert "store_cheques ADD COLUMN IF NOT EXISTS version" in source
+    assert "store_cheques ADD COLUMN IF NOT EXISTS cash_key" in source
+    assert "(company_id, station_id, shift_number, cash_key)" in source
     assert "ck_store_cheque_version" in source
+    assert "counterparties ADD COLUMN IF NOT EXISTS is_group" in source
     assert "accounting_group_id UUID" in source
     assert "document_role VARCHAR(30)" in source
     assert "source_document_id UUID" in source
@@ -587,7 +590,8 @@ def fiscal_payload(*, amount=100, scope="store", vat_amount=9.09):
         "Документы": [{
             "Тип": "fiscal_receipts",
             "Чеки": [{
-                "Номер": 1, "ФН": 1001, "Время": "2026-08-09T12:00:00+03:00",
+                "Номер": 1, "Пост": 1, "КлючЧека": "1:1",
+                "ФН": 1001, "Время": "2026-08-09T12:00:00+03:00",
                 "БылоТопливо": True, "Сумма": amount, "ВидОплаты": 2,
                 "ВидОплатыНазвание": "Карта",
                 "Товары": [{
@@ -721,6 +725,34 @@ async def test_operational_edge_document_needs_no_vat_but_rejects_unknown_lines(
 
 
 @pytest.mark.asyncio
+async def test_station_price_change_projects_as_revaluation():
+    company_id = uuid.uuid4()
+    source_uuid = str(uuid.uuid4())
+    packet = SimpleNamespace(
+        packet_uuid=str(uuid.uuid4()), station_id=208,
+        received_at=datetime.now(timezone.utc),
+        payload={"Документы": [{
+            "Тип": "price_change", "ИсточникUUID": source_uuid,
+            "НоменклатураUUID": str(uuid.uuid4()), "Штрихкод": "4600",
+            "ЦенаБыла": 100, "ЦенаСтала": 120, "Автор": "Товаровед",
+            "Причина": "новая закупка", "Момент": "2026-08-17T12:00:00+03:00",
+        }]},
+    )
+    projected = await store_documents._edge_adapter(
+        Session({EdgePacket: [packet], StoreReceipt: []}), company_id)
+    assert len(projected) == 1
+    row = projected[0]
+    assert row.document_kind == "revaluation"
+    assert row.header["old_price"] == 100
+    assert row.header["new_price"] == 120
+    detail = safe_document_detail(
+        SimpleNamespace(source_kind="edge_document", operational_status="received"),
+        store_documents._projection_edge_document(packet.payload["Документы"][0]),
+    )
+    assert detail["lines"][0]["ЦенаСтала"] == 120
+
+
+@pytest.mark.asyncio
 async def test_shift_revision_changes_when_second_v1_cheque_is_added():
     company_id = uuid.uuid4()
     first = cheque(had_fuel=False, number=1, lines=[
@@ -768,6 +800,38 @@ async def test_cheque_exact_replay_is_noop_and_correction_increments_version():
         fiscal_payload(amount=120, vat_amount=10.91), str(uuid.uuid4()))
     assert stored.version == 2
     assert stored.total == 120
+
+
+@pytest.mark.asyncio
+async def test_cheque_ingest_keeps_same_number_from_two_posts_and_zero_return():
+    company_id = uuid.uuid4()
+    payload = fiscal_payload()
+    first = payload["Документы"][0]["Чеки"][0]
+    second = dict(first, Пост=2, КлючЧека="2:1", ФН=2001)
+    returned = dict(first, Номер=0, КлючЧека="1:0:55:901:2026-08-09T12:00:00+03:00",
+                    Возврат=True, ФН=901)
+    payload["Документы"][0]["Чеки"] = [first, second, returned]
+
+    session = IngestSession()
+    accepted = await edge_router._ingest_cheques(
+        session, company_id, 208, payload, str(uuid.uuid4()))
+
+    assert accepted == 3
+    assert [row.cash_key for row in session.added] == [
+        "1:1", "2:1", "1:0:55:901:2026-08-09T12:00:00+03:00",
+    ]
+    assert session.added[-1].number == 0
+    assert session.added[-1].is_return is True
+
+
+def test_store_cheque_identity_contains_cash_key():
+    unique = next(
+        constraint for constraint in StoreCheque.__table__.constraints
+        if constraint.name == "uq_store_cheque"
+    )
+    assert tuple(column.name for column in unique.columns) == (
+        "company_id", "station_id", "shift_number", "cash_key",
+    )
 
 
 @pytest.mark.asyncio

@@ -47,12 +47,12 @@ from app.models import (
     DocExport, DocInboxItem, DocLabelLink,
     DocShareLink, DocSignatureEvidence, UserSubstitution,
     DocVersion, Organization, SourceFile, Task, TaskEvent, TaskLabel,
-    TaskType, TaskView, TaskWorkItem, User, UserCompany,
+    TaskTemplate, TaskType, TaskView, TaskWorkItem, User, UserCompany,
 )
 from app.routers import doc_share_router
 from app.services import (
     doc_approvals, doc_exchange, doc_print, doc_text, doc_verify, file_safety,
-    file_store, mail_send, task_mail,
+    file_store, mail_send, process_templates, task_mail,
 )
 from app.services.doc_numbers import next_number, render, scope_key
 
@@ -1090,6 +1090,59 @@ async def create_starter_kinds(
     if added:
         await db.commit()
     return {"added": added}
+
+
+class ProcessStartIn(BaseModel):
+    company_id: str
+    responsible_id: str | None = None
+    title: str | None = Field(None, min_length=3, max_length=300)
+
+
+@router.get("/process-templates")
+async def list_process_templates(
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cid = await assert_company_product(company_id, current_user, db, "docs")
+    return {"templates": await process_templates.available_templates(
+        db, cid, current_user)}
+
+
+@router.post("/process-templates/{template_id}/start",
+             status_code=status.HTTP_201_CREATED)
+async def start_process_template(
+    template_id: str,
+    payload: ProcessStartIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cid = await assert_company_product(payload.company_id, current_user, db, "docs")
+    tpl = await db.get(TaskTemplate, _uuid_or_400(template_id, "template_id"))
+    if tpl is None or tpl.company_id != cid:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Шаблон процесса не найден")
+    responsible = (_uuid_or_400(payload.responsible_id, "responsible_id")
+                   if payload.responsible_id else None)
+    try:
+        if tpl.doc_kind_id:
+            entity, result = await process_templates.launch(
+                db, cid, tpl, current_user, responsible_id=responsible,
+                source_note=f"по шаблону процесса «{tpl.name}»",
+            )
+        else:
+            entity, result = await process_templates.launch_task(
+                db, cid, tpl, current_user, responsible_id=responsible,
+                title=payload.title,
+                source_note=f"по шаблону процесса «{tpl.name}»",
+            )
+    except process_templates.ProcessTemplateError as exc:
+        code = (status.HTTP_403_FORBIDDEN if "Недостаточно прав" in str(exc)
+                else status.HTTP_400_BAD_REQUEST)
+        raise HTTPException(code, str(exc)) from exc
+    await db.commit()
+    await db.refresh(entity)
+    return (process_templates.launch_out(entity, tpl, result) if tpl.doc_kind_id
+            else process_templates.task_launch_out(entity, tpl, result))
 
 
 # ── Реестр ───────────────────────────────────────────────────────────────────

@@ -30,7 +30,7 @@ from app.models import (
     ChatPoll, ChatPollVote, ChatRoom, ChatTicketLink, Company, Counterparty,
     ServiceLocation, User, UserCompany,
 )
-from app.services import chat_mail, web_push
+from app.services import chat_mail, process_templates, web_push
 from app.services import link_preview as link_preview_service
 from app.services.space_projection import ProjectionError, create_object_ticket
 from app.services.chat_ws import manager
@@ -2177,27 +2177,22 @@ async def ticket_from_message(
     return {"ok": True, "ticketId": str(t_id) if t_id else None, "ticketNumber": t_num or None}
 
 
-class TaskFromMessageBody(BaseModel):
-    title: str | None = None
-    assigneeId: str | None = None
-    typeId: str | None = None
-    dueAt: datetime | None = None
+class ProcessFromMessageBody(BaseModel):
+    templateId: str
+    responsibleId: str | None = None
+    title: str | None = Field(None, min_length=3, max_length=300)
 
 
-@router.post("/messages/{message_id}/task")
-async def task_from_message(
-    message_id: str, body: TaskFromMessageBody,
+@router.post("/messages/{message_id}/process", status_code=status.HTTP_201_CREATED)
+async def process_from_message(
+    message_id: str, body: ProcessFromMessageBody,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Задача из сообщения: обсудили — записали, что надо сделать.
-
-    Отличие от заявки: заявка уходит в контур Поддержки через эко-канал, а задача
-    живёт в этой же схеме, поэтому создаётся напрямую. След остаётся с обеих
-    сторон: в чате — системное сообщение со ссылкой, в ленте задачи — событие
-    «из обсуждения» с адресом комнаты, чтобы можно было вернуться к разговору.
-    """
-    from app.models import Task, TaskEvent, TaskType
+    """Запустить из сообщения документный маршрут или внутреннюю задачу."""
+    from app.models import (
+        DocCard, SourceFile, Task, TaskAttachment, TaskEvent, TaskTemplate,
+    )
 
     try:
         mid = uuid.UUID(message_id)
@@ -2207,60 +2202,88 @@ async def task_from_message(
     if msg is None or msg.deleted_at is not None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Сообщение не найдено")
     room = await _assert_participant(msg.room_id, current_user, db)
-    await assert_company_product(str(room.company_id), current_user, db, "plan")
+    await assert_company_product(str(room.company_id), current_user, db, "docs")
+
+    try:
+        template_id = uuid.UUID(body.templateId)
+        responsible_id = uuid.UUID(body.responsibleId) if body.responsibleId else None
+    except (ValueError, TypeError):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID")
+    tpl = await db.get(TaskTemplate, template_id)
+    if tpl is None or tpl.company_id != room.company_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Шаблон процесса не найден")
+    source_ref = f"chat:{mid}:template:{tpl.id}"
+    if tpl.doc_kind_id:
+        duplicate = await db.scalar(select(DocCard.id).where(
+            DocCard.company_id == room.company_id,
+            DocCard.source == "chat",
+            DocCard.source_ref == source_ref,
+        ).limit(1))
+    else:
+        duplicate = await db.scalar(select(TaskEvent.id).join(
+            Task, Task.id == TaskEvent.task_id).where(
+                Task.company_id == room.company_id,
+                TaskEvent.kind == "created",
+                TaskEvent.from_value == source_ref,
+            ).limit(1))
+    if duplicate is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Этот процесс из сообщения уже запускали")
 
     src = (msg.content or msg.file_name or "").strip()
-    title = (body.title or "").strip() or src[:300] or "Задача из обсуждения"
-    ttype = None
-    if body.typeId:
-        try:
-            ttype = await db.get(TaskType, uuid.UUID(body.typeId))
-        except (ValueError, TypeError):
-            ttype = None
-        if ttype is not None and ttype.company_id != room.company_id:
-            ttype = None
-    route = (ttype.route if ttype and ttype.route else None) or [
-        {"code": "new", "name": "Постановка"}]
+    context = (f"{msg.user_name or 'Участник'}: {src}\n\n"
+               f"Из обсуждения «{room.name or 'чат'}».")
+    try:
+        if tpl.doc_kind_id:
+            entity, result = await process_templates.launch(
+                db, room.company_id, tpl, current_user,
+                responsible_id=responsible_id,
+                source="chat",
+                source_ref=source_ref,
+                source_note=f"из обсуждения «{room.name or 'чат'}»",
+                summary_suffix=context,
+                object_id=room.scope_object_id,
+            )
+        else:
+            entity, result = await process_templates.launch_task(
+                db, room.company_id, tpl, current_user,
+                responsible_id=responsible_id,
+                title=body.title or src[:300] or tpl.title,
+                source_ref=source_ref,
+                source_note=f"из обсуждения «{room.name or 'чат'}»",
+                summary_suffix=context,
+                object_id=room.scope_object_id,
+            )
+            if msg.file_url:
+                try:
+                    file_id = uuid.UUID(msg.file_url.rstrip("/").rsplit("/", 1)[-1])
+                except (ValueError, TypeError):
+                    file_id = None
+                source_file = await db.get(SourceFile, file_id) if file_id else None
+                if source_file is not None and source_file.company_id == room.company_id:
+                    db.add(TaskAttachment(
+                        task_id=entity.id,
+                        file_id=source_file.id,
+                        uploaded_by=current_user.id,
+                    ))
+    except process_templates.ProcessTemplateError as exc:
+        code = (status.HTTP_403_FORBIDDEN if "Недостаточно прав" in str(exc)
+                else status.HTTP_400_BAD_REQUEST)
+        raise HTTPException(code, str(exc)) from exc
 
-    assignee = None
-    if body.assigneeId:
-        try:
-            assignee = uuid.UUID(body.assigneeId)
-        except (ValueError, TypeError):
-            assignee = None
-        if assignee is not None and await db.get(UserCompany, (assignee, room.company_id)) is None:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST,
-                                "Исполнитель не состоит в пространстве")
-    due = body.dueAt
-    if due is None and ttype is not None and ttype.due_days is not None:
-        due = _now() + timedelta(days=ttype.due_days)
-
-    task = Task(
-        company_id=room.company_id, type_id=ttype.id if ttype else None,
-        title=title,
-        description=f"{msg.user_name or 'Участник'}: {src}\n\n"
-                    f"(из обсуждения «{room.name or 'чат'}»)",
-        priority=(ttype.default_priority if ttype else "medium"),
-        status="open", stage_code=route[0].get("code"),
-        assignee_id=assignee, author_id=current_user.id,
-        object_id=room.scope_object_id, due_at=due)
-    db.add(task)
-    await db.flush()
-    # Адрес комнаты в событии — обратная дорога к разговору: без неё «почему эта
-    # задача вообще появилась» остаётся только в тексте описания.
-    db.add(TaskEvent(task_id=task.id, kind="created", user_id=current_user.id,
-                     from_value=str(room.id), to_value=route[0].get("name"),
-                     note=f"из обсуждения «{room.name or 'чат'}»"))
-
-    # Отметка со ССЫЛКОЙ, а не с приглашением «открыть в „Задачах“»: панель чата
-    # делает адреса кликабельными сама (`linkifyText`), и обратная дорога к работе
-    # становится одним нажатием. Полный адрес, а не путь: то же сообщение уходит
-    # письмом почтовому участнику, а там относительная ссылка мертва.
-    task_url = f"{get_settings().app_public_url.rstrip('/')}/tasks?task={task.id}"
+    if tpl.doc_kind_id:
+        target_url = (f"{get_settings().app_public_url.rstrip('/')}"
+                      f"/docs?view=all&doc={entity.id}")
+        state = ("маршрут согласования запущен" if result["started"]
+                 else "этап подготовки создан")
+    else:
+        target_url = (f"{get_settings().app_public_url.rstrip('/')}"
+                      f"/docs/work?view=errands&task={entity.id}")
+        state = f"задача №{entity.number} поставлена"
     note = ChatMessage(
         room_id=room.id, user_id=current_user.id, user_name=current_user.name,
         type="text",
-        content=f"→ Поставлена задача №{task.number}: {title}\n{task_url}",
+        content=f"→ Запущен процесс «{tpl.name}»: {state}\n{target_url}",
         reply_to=mid)
     db.add(note)
     room.updated_at = _now()
@@ -2269,7 +2292,11 @@ async def task_from_message(
     payload = _msg_out(note, 0, msg, None, parties.get(current_user.id))
     await db.commit()
     await manager.broadcast(f"chat:{room.id}", _событие("chat:message", payload.model_dump()))
-    return {"ok": True, "taskId": str(task.id), "taskNumber": task.number}
+    if tpl.doc_kind_id:
+        return {"ok": True, **process_templates.launch_out(entity, tpl, result),
+                "documentUrl": target_url}
+    return {"ok": True, **process_templates.task_launch_out(entity, tpl, result),
+            "taskUrl": target_url}
 
 
 @router.post("/tasks/{task_id}/room", response_model=RoomDetailOut)

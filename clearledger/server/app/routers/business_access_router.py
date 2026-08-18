@@ -8,8 +8,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.audit import log_audit
 from app.auth import get_current_user
 from app.business_access import (
+    OWNER_SHARED,
+    OWNER_STATION,
     ROLE_STATION_ADMINISTRATOR,
     STORE_POLICY_KEY,
+    STORE_POLICY_OWNERS,
     has_network_merchandiser,
     new_store_policy,
     store_policy,
@@ -24,7 +27,8 @@ router = APIRouter(prefix="/store/access-policy", tags=["Магазин — до
 
 
 class StorePolicyUpdate(BaseModel):
-    commercial_owner: str = "station"
+    """Кто правит коммерческие данные: «station» или «shared» (обе стороны)."""
+    commercial_owner: str = OWNER_STATION
 
 
 async def _payload(db: AsyncSession, company: Company, user: User) -> dict:
@@ -36,14 +40,18 @@ async def _payload(db: AsyncSession, company: Company, user: User) -> dict:
         if g.get("role") == ROLE_STATION_ADMINISTRATOR
         and g.get("scope_type") == "station"
     })
+    товаровед_сети = has_network_merchandiser(grants, company.slug)
     return {
         **policy,
         "business_grants": grants,
         "capabilities": {
             "station_administrator": station_ids,
-            "network_merchandiser": has_network_merchandiser(grants, company.slug),
-            # v1: центр наблюдает и предлагает, коммерческие решения исполняет АЗС.
-            "central_commercial_write": False,
+            "network_merchandiser": товаровед_сети,
+            # Совместный режим: правит и центр, и станция. В режиме «station»
+            # центр наблюдает и предлагает, а решения исполняет АЗС.
+            "central_commercial_write": (
+                policy["commercial_owner"] == OWNER_SHARED and товаровед_сети
+            ),
         },
     }
 
@@ -68,16 +76,16 @@ async def update_store_access_policy(
 ) -> dict:
     cid = await scope_company_id(user, db)
     await require_company_admin(str(cid), user, db)
-    if body.commercial_owner != "station":
+    if body.commercial_owner not in STORE_POLICY_OWNERS:
         raise HTTPException(
-            409,
-            "Сетевое управление товарами ещё не включено: сначала нужны правила "
-            "по категориям/карточкам и безопасное разрешение конфликтов",
+            422,
+            "Владелец коммерческих решений: «station» — только администратор "
+            "АЗС, «shared» — правят обе стороны, центр и станция.",
         )
     company = await db.get(Company, cid)
     if company is None:
         raise HTTPException(404, "Организация не найдена")
-    policy = new_store_policy()
+    policy = new_store_policy(body.commercial_owner)
     company.customization = {**(company.customization or {}), STORE_POLICY_KEY: policy}
     await log_audit(
         db, actor=user, company_id=cid, action="store.access_policy",

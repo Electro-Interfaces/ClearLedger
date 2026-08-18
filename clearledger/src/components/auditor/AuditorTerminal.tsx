@@ -94,10 +94,11 @@ export function AuditorTerminal() {
     // Терминал грузится лениво: xterm и его стили нужны только тут, а тянуть их в общий
     // чанк ради раздела, куда заходит один админ, — лишние килобайты всем остальным.
     void (async () => {
-      const [{ Terminal }, { FitAddon }, { WebglAddon }] = await Promise.all([
+      const [{ Terminal }, { FitAddon }, { WebglAddon }, { ClipboardAddon }] = await Promise.all([
         import('@xterm/xterm'),
         import('@xterm/addon-fit'),
         import('@xterm/addon-webgl'),
+        import('@xterm/addon-clipboard'),
       ])
       if (disposed || !hostRef.current) return
 
@@ -127,6 +128,17 @@ export function AuditorTerminal() {
       })
       const fit = new FitAddon()
       term.loadAddon(fit)
+
+      // 🔴 Буфер обмена приложения (OSC 52) — без этого копирование ВНУТРИ мастерской
+      // никуда не доезжает.
+      //
+      // Когда копируешь в самом Claude Code, он просит терминал положить текст в буфер
+      // обмена. Просьба идёт до tmux, тот перехватывает её и кладёт СЕБЕ: в выводе
+      // видно «copied 2759 chars to tmux buffer». Дальше она не шла, потому что терминал
+      // не заявлял, что умеет принимать такое. Этот аддон и есть приёмник — он кладёт
+      // текст в буфер обмена браузера. Вторая половина правки — в tmux.conf образа.
+      term.loadAddon(new ClipboardAddon())
+
       term.open(hostRef.current)
 
       // 🔴 Рендерер по умолчанию (DOM) оставлял мусор в ячейках, ставших пустыми: после
@@ -216,7 +228,17 @@ export function AuditorTerminal() {
       // Ctrl+C двусмысленна: с выделением это «скопировать», без выделения — прерывание
       // работы агента. Различаем по наличию выделения, как делают все терминалы.
       // Ctrl+Shift+C / Ctrl+Shift+V — привычная пара, работает всегда.
-      const copy = () => { void navigator.clipboard.writeText(term.getSelection()) }
+      const copy = () => {
+        void navigator.clipboard.writeText(term.getSelection())
+          .then(() => toast.success('Скопировано'))
+          .catch(() => toast.error('Буфер обмена недоступен'))
+      }
+      // Выделил мышью с Shift — уже в буфере, без Ctrl+C. Лишним не будет: в терминале
+      // выделение делают именно чтобы скопировать.
+      term.onSelectionChange(() => {
+        const s = term.getSelection()
+        if (s.trim()) void navigator.clipboard.writeText(s).catch(() => { /* нет доступа */ })
+      })
       // Копирование всего экрана — обход того, что мышь занята приложением.
       //
       // Claude Code включает режим мыши (`mouse_any_flag=1`), чтобы ловить клики по своим
@@ -248,13 +270,20 @@ export function AuditorTerminal() {
         }
         if (e.type !== 'keydown' || !(e.ctrlKey || e.metaKey)) return true
 
-        // Ctrl+C и Ctrl+V — как везде.
+        // 🔴 Ctrl+C копирует ВСЕГДА, даже без выделения — тогда весь экран.
         //
-        // Ctrl+C в терминале исторически прерывает работу, поэтому его отдают копированию
-        // с оговоркой: копирует, когда есть что копировать, и прерывает, когда выделения
-        // нет. Работу агента это не лишает прерывания — у Claude Code для этого Esc, а
-        // Ctrl+C без выделения по-прежнему доходит до него.
-        if (e.code === 'KeyC' && (e.shiftKey || term.hasSelection())) { copy(); return false }
+        // Выделить мышью в мастерской нельзя: мышь занята приложением, оно ею листает
+        // (проверено — `mouse_any_flag=1`). Остаётся Shift+мышь, но требовать от человека
+        // помнить про Shift ради обычного копирования — это и есть «не работает».
+        // Поэтому: выделил — копируется выделенное, не выделил — копируется экран.
+        //
+        // Прерывание работы агента при этом не потеряно: у Claude Code для этого Esc, и
+        // он привычнее — Ctrl+C в TUI и так не всегда прерывает.
+        if (e.code === 'KeyC') {
+          if (term.hasSelection()) copy()
+          else copyScreenRef.current?.()
+          return false
+        }
         if (e.code === 'KeyV') { paste(); return false }
         // Insert-пара: Ctrl+Insert копирует, Shift+Insert вставляет — так привыкли в Windows.
         if (e.code === 'Insert' && term.hasSelection()) { copy(); return false }
@@ -315,7 +344,7 @@ export function AuditorTerminal() {
               {dictation.state === 'rec' ? (
                 <span className="text-foreground">говорите — отпустите Ctrl+Пробел, чтобы распознать</span>
               ) : dictation.state === 'busy' ? 'распознаю…'
-                : 'диктовка — Ctrl+Пробел · выделять с Shift · Ctrl+C / Ctrl+V'}
+                : 'Ctrl+C — копировать экран · Shift+мышь — выделить · Ctrl+V — вставить'}
             </span>
           </>
         )}

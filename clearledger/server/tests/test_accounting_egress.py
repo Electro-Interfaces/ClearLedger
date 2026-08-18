@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -8,11 +8,15 @@ from sqlalchemy.dialects import postgresql
 
 from app.database import ACCOUNTING_EGRESS_MIGRATION_DDL
 from app.models import (
+    AccountingBusinessGroup,
     AccountingShadowResult,
     AccountingSourcePolicy,
+    BusinessShift,
+    CutoverApproval,
     CutoverManifest,
     ExportPacket,
 )
+from tests.accounting_v3_fixtures import accounting_v3_fixture
 from app.routers import store_router
 from app.routers import export_packets_router
 from app.routers.export_packets_router import (
@@ -32,7 +36,6 @@ from app.services.accounting_egress import (
     canonical_manifest_hash,
     manifest_payload_for_policy,
 )
-from app.services.bp_canon import packet_hash
 
 
 class _Scalars:
@@ -55,10 +58,18 @@ class _Result:
 
 
 class _Session:
-    def __init__(self, policies=(), manifests=(), packets=()):
+    def __init__(
+        self, policies=(), manifests=(), packets=(), approvals=(),
+        shifts=(), groups=(),
+    ):
         self.policies = list(policies)
         self.manifests = list(manifests)
         self.packets = list(packets)
+        self.approvals = list(approvals)
+        self.shifts = list(shifts)
+        self.groups = list(groups)
+        for manifest in self.manifests:
+            self.approvals.extend(getattr(manifest, "_test_approvals", []))
         self.added = []
         self.deleted = []
         self.flush_count = 0
@@ -78,9 +89,18 @@ class _Session:
         elif entity is CutoverManifest:
             rows = self.manifests
             self.events.append("manifest_read")
+        elif entity is CutoverApproval:
+            rows = self.approvals
+            self.events.append("approval_read")
         elif entity is ExportPacket:
             rows = self.packets
             self.events.append("outbox_read")
+        elif entity is BusinessShift:
+            rows = self.shifts
+            self.events.append("shift_read")
+        elif entity is AccountingBusinessGroup:
+            rows = self.groups
+            self.events.append("group_read")
         else:
             raise AssertionError(f"unexpected statement: {statement}")
         if statement._for_update_arg is not None:
@@ -113,33 +133,23 @@ def _packet(
     version: str = "3",
     document_kind: str | None = None,
     revision: int = 1,
-    fact_origin: str = "store",
-) -> dict:
-    document = {
-        "Тип": document_kind or ("retail_sale_sidegoods" if food else "inventory"),
-        "ИсточникUUID": str(uuid.uuid4()),
-        "Дата": fact_at.isoformat(),
-        "Товары": [{"ЭтоБлюдо": True}] if food else [],
-    }
-    packet = {
-        "ВерсияФормата": version,
-        "ИдентификаторПакета": str(uuid.uuid4()),
-        "РевизияПакета": revision,
-        "ИсточникФакта": fact_origin,
-        "ИдентификаторПолитики": str(policy.id) if policy else str(uuid.uuid4()),
-        "РевизияПолитики": policy.revision if policy else 1,
-        "ХешПолитики": manifest.manifest_hash if manifest else "sha256:" + "0" * 64,
-        "Смена": {
-            "КодАЗС": str(station_id),
-            "Открытие": (fact_at - timedelta(hours=8)).isoformat(),
-            "Закрытие": fact_at.isoformat(),
-        },
-        "Документы": [document],
-        "НСИ": [],
-        "ХешПакета": "",
-    }
-    packet["ХешПакета"] = packet_hash(packet)
-    return packet
+    fact_origin: str = "edge",
+    with_identity: bool = False,
+):
+    fixture = accounting_v3_fixture(
+        company_id=policy.company_id if policy else uuid.uuid4(),
+        station_id=station_id,
+        fact_at=fact_at,
+        policy_id=policy.id if policy else uuid.uuid4(),
+        policy_revision=policy.revision if policy else 1,
+        policy_hash=manifest.manifest_hash if manifest else "0" * 64,
+        food=food,
+        document_kind=document_kind,
+        revision=revision,
+        fact_origin=fact_origin,
+    )
+    fixture.packet["ВерсияФормата"] = version
+    return fixture if with_identity else fixture.packet
 
 
 def _policy(
@@ -157,8 +167,15 @@ def _policy(
         station_id=station_id,
         policy_group="sidegoods_foodservice",
         revision=revision,
+        state="effective",
+        fact_cutover_business_date=effective_from.date(),
+        station_timezone="UTC",
+        fact_origin_before="onec_legacy",
+        fact_origin_after="edge",
         effective_from=effective_from,
         effective_to=effective_to,
+        transport_cutover_at=effective_from,
+        transport_producer_before="legacy_epf",
         transport_producer=producer,
         shadow_validation_enabled=True,
     )
@@ -172,15 +189,9 @@ def _effective_manifest(policy: AccountingSourcePolicy) -> CutoverManifest:
     operational = policy.effective_from - timedelta(minutes=5)
     accounting = policy.effective_from
     deadline = policy.effective_from - timedelta(minutes=1)
-    payload = manifest_payload_for_policy(
-        policy,
-        approvals=approvals,
-        operational_cutover_at=operational,
-        accounting_transport_cutover_at=accounting,
-        arm_deadline=deadline,
-    )
+    payload = manifest_payload_for_policy(policy)
     manifest_hash = canonical_manifest_hash(payload)
-    return CutoverManifest(
+    manifest = CutoverManifest(
         id=uuid.uuid4(),
         policy_id=policy.id,
         company_id=policy.company_id,
@@ -190,7 +201,7 @@ def _effective_manifest(policy: AccountingSourcePolicy) -> CutoverManifest:
         state="effective",
         canonical_payload=payload,
         manifest_hash=manifest_hash,
-        approvals=approvals,
+        approvals=[],
         operational_cutover_at=operational,
         accounting_transport_cutover_at=accounting,
         late_arrival_until=None,
@@ -200,6 +211,155 @@ def _effective_manifest(policy: AccountingSourcePolicy) -> CutoverManifest:
         armed_at=deadline,
         effective_at=accounting,
     )
+    manifest._test_approvals = [
+        CutoverApproval(
+            id=uuid.uuid4(), manifest_id=manifest.id,
+            company_id=policy.company_id, user_id=uuid.uuid4(),
+            approved_at=datetime(2026, 8, 1, 8, 0, tzinfo=timezone.utc),
+        ),
+        CutoverApproval(
+            id=uuid.uuid4(), manifest_id=manifest.id,
+            company_id=policy.company_id, user_id=uuid.uuid4(),
+            approved_at=datetime(2026, 8, 1, 8, 5, tzinfo=timezone.utc),
+        ),
+    ]
+    return manifest
+
+
+@pytest.mark.parametrize(("business_day", "fact_origin"), [
+    (date(2026, 8, 17), "onec_legacy"),
+    (date(2026, 8, 18), "edge"),
+])
+@pytest.mark.asyncio
+async def test_guard_applies_fact_axis_before_and_after_business_date_cutover(
+    business_day, fact_origin,
+):
+    company_id = uuid.uuid4()
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    policy = _policy(company_id, 9220, now - timedelta(days=2))
+    policy.fact_cutover_business_date = date(2026, 8, 18)
+    manifest = _effective_manifest(policy)
+    fixture = _packet(
+        9220,
+        datetime.combine(business_day, datetime.min.time(), tzinfo=timezone.utc)
+        + timedelta(hours=12),
+        policy=policy, manifest=manifest, fact_origin=fact_origin,
+        with_identity=True,
+    )
+    session = _Session(
+        [policy], [manifest], shifts=[fixture.shift], groups=[fixture.group],
+    )
+
+    decision = await AccountingEgressGuard(session, company_id).authorize_packet(
+        fixture.packet, manifest.manifest_hash,
+    )
+
+    assert decision.station_id == 9220
+
+
+@pytest.mark.asyncio
+async def test_guard_rejects_false_nfc_marker_with_decomposed_payload():
+    company_id = uuid.uuid4()
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    policy = _policy(company_id, 9220, now - timedelta(days=2))
+    manifest = _effective_manifest(policy)
+    fixture = _packet(
+        9220, now - timedelta(hours=1), policy=policy, manifest=manifest,
+        with_identity=True,
+    )
+    fixture.packet["Смена"]["ОСЭ"] = "Кафе\u0308"
+    session = _Session(
+        [policy], [manifest], shifts=[fixture.shift], groups=[fixture.group],
+    )
+
+    with pytest.raises(AccountingEgressDenied, match="не в NFC"):
+        await AccountingEgressGuard(session, company_id).authorize_packet(
+            fixture.packet, manifest.manifest_hash,
+        )
+
+    assert session.events == []
+
+
+@pytest.mark.parametrize("marker", [None, "NFD"])
+@pytest.mark.asyncio
+async def test_guard_requires_exact_nfc_contract_marker(marker):
+    company_id = uuid.uuid4()
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    policy = _policy(company_id, 9220, now - timedelta(days=2))
+    manifest = _effective_manifest(policy)
+    fixture = _packet(
+        9220, now - timedelta(hours=1), policy=policy, manifest=manifest,
+        with_identity=True,
+    )
+    if marker is None:
+        fixture.packet.pop("UnicodeNormalization")
+    else:
+        fixture.packet["UnicodeNormalization"] = marker
+    session = _Session(
+        [policy], [manifest], shifts=[fixture.shift], groups=[fixture.group],
+    )
+
+    with pytest.raises(AccountingEgressDenied, match="UnicodeNormalization"):
+        await AccountingEgressGuard(session, company_id).authorize_packet(
+            fixture.packet, manifest.manifest_hash,
+        )
+
+    assert session.events == []
+
+
+@pytest.mark.asyncio
+async def test_guard_rejects_packet_fact_origin_that_disagrees_with_policy_axis():
+    company_id = uuid.uuid4()
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    policy = _policy(company_id, 9221, now - timedelta(days=2))
+    policy.fact_cutover_business_date = date(2026, 8, 18)
+    manifest = _effective_manifest(policy)
+    fixture = _packet(
+        9221, datetime(2026, 8, 18, 12, tzinfo=timezone.utc),
+        policy=policy, manifest=manifest, fact_origin="onec_legacy",
+        with_identity=True,
+    )
+    session = _Session(
+        [policy], [manifest], shifts=[fixture.shift], groups=[fixture.group],
+    )
+
+    with pytest.raises(AccountingEgressDenied, match="FactOrigin.*policy axes"):
+        await AccountingEgressGuard(session, company_id).authorize_packet(
+            fixture.packet, manifest.manifest_hash,
+        )
+
+
+@pytest.mark.asyncio
+async def test_guard_preserves_existing_fact_origin_for_late_revision():
+    company_id = uuid.uuid4()
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    policy = _policy(company_id, 9222, now - timedelta(days=2))
+    policy.fact_cutover_business_date = date(2026, 8, 18)
+    manifest = _effective_manifest(policy)
+    fixture = _packet(
+        9222, datetime(2026, 8, 18, 12, tzinfo=timezone.utc),
+        policy=policy, manifest=manifest, fact_origin="onec_legacy",
+        with_identity=True,
+    )
+    current = ExportPacket(
+        id=uuid.uuid4(), company_id=company_id,
+        kind="store_accounting_group", status="accepted", payload={},
+        source_entry_ids=[], packet_uuid=fixture.group.packet_uuid,
+        revision=1, content_hash="a" * 64, fact_origin="onec_legacy",
+        transport_producer="central_ledger",
+        accounting_group_id=fixture.group.id,
+    )
+    fixture.group.current_packet_id = current.id
+    session = _Session(
+        [policy], [manifest], packets=[current],
+        shifts=[fixture.shift], groups=[fixture.group],
+    )
+
+    decision = await AccountingEgressGuard(session, company_id).authorize_packet(
+        fixture.packet, manifest.manifest_hash,
+    )
+
+    assert decision.station_id == 9222
 
 
 @pytest.mark.asyncio
@@ -297,7 +457,6 @@ async def test_v3_policy_identity_must_match_exactly(field, bad_value, message):
         9211, now - timedelta(hours=1), policy=policy, manifest=manifest,
     )
     packet[field] = bad_value
-    packet["ХешПакета"] = packet_hash(packet)
     session = _Session([policy], [manifest])
 
     with pytest.raises(AccountingEgressDenied, match=message):
@@ -352,7 +511,6 @@ async def test_invalid_packet_uuid_does_not_create_outbox():
         9213, now - timedelta(hours=1), policy=policy, manifest=manifest,
     )
     packet["ИдентификаторПакета"] = "not-a-uuid"
-    packet["ХешПакета"] = packet_hash(packet)
     session = _Session([policy], [manifest])
 
     with pytest.raises(AccountingEgressDenied, match="корректным UUID"):
@@ -369,11 +527,14 @@ async def test_guarded_queue_is_idempotent_and_food_kind_isolated():
     now = datetime.now(timezone.utc).replace(microsecond=0)
     policy = _policy(company_id, 9204, now - timedelta(days=1))
     manifest = _effective_manifest(policy)
-    packet = _packet(
+    fixture = _packet(
         9204, now - timedelta(hours=1), food=True,
-        policy=policy, manifest=manifest,
+        policy=policy, manifest=manifest, with_identity=True,
     )
-    session = _Session([policy], [manifest])
+    packet = fixture.packet
+    session = _Session(
+        [policy], [manifest], shifts=[fixture.shift], groups=[fixture.group],
+    )
     guard = AccountingEgressGuard(session, company_id)
 
     first = await guard.queue_packet(packet, manifest.manifest_hash)
@@ -463,10 +624,14 @@ async def test_guard_locks_then_reads_for_update_then_inserts_in_same_session():
     now = datetime.now(timezone.utc).replace(microsecond=0)
     policy = _policy(company_id, 9214, now - timedelta(days=1))
     manifest = _effective_manifest(policy)
-    packet = _packet(
+    fixture = _packet(
         9214, now - timedelta(hours=1), policy=policy, manifest=manifest,
+        with_identity=True,
     )
-    session = _Session([policy], [manifest])
+    packet = fixture.packet
+    session = _Session(
+        [policy], [manifest], shifts=[fixture.shift], groups=[fixture.group],
+    )
 
     result = await AccountingEgressGuard(session, company_id).queue_packet(
         packet, manifest.manifest_hash,
@@ -474,15 +639,16 @@ async def test_guard_locks_then_reads_for_update_then_inserts_in_same_session():
 
     assert result.created is True
     assert session.events == [
-        "scope_lock", "policy_read", "manifest_read", "scope_lock",
-        "outbox_read", "outbox_insert",
+        "scope_lock", "policy_read", "manifest_read", "approval_read",
+        "group_read", "scope_lock", "group_read", "shift_read", "outbox_insert",
     ]
     assert session.lock_scope_keys == [
         f"{company_id}:9214:sidegoods_foodservice",
-        f"accounting-outbox:{company_id}:{packet['ИдентификаторПакета']}",
+        f"accounting-outbox:{company_id}:{packet['BusinessShiftID']}",
     ]
     assert session.for_update_entities == [
-        AccountingSourcePolicy, CutoverManifest, ExportPacket,
+        AccountingSourcePolicy, CutoverManifest, CutoverApproval,
+        AccountingBusinessGroup, AccountingBusinessGroup, BusinessShift,
     ]
 
 
@@ -589,20 +755,43 @@ async def test_emit_route_queues_and_never_calls_file_writer(monkeypatch):
     now = datetime.now(timezone.utc).replace(microsecond=0)
     policy = _policy(company_id, 9207, now - timedelta(days=1))
     manifest = _effective_manifest(policy)
-    packet = _packet(
+    fixture = _packet(
         9207, now - timedelta(hours=1), policy=policy, manifest=manifest,
+        with_identity=True,
     )
-    session = _Session([policy], [manifest])
+    packet = fixture.packet
+    session = _Session(
+        [policy], [manifest], shifts=[fixture.shift], groups=[fixture.group],
+    )
     file_writer_called = False
+    emitter_calls = []
 
     class Emitter:
         def __init__(self, _db, _company_id):
             pass
 
-        async def verify_shift_package(self, _shift_key):
+        async def resolve_shift_station(self, _shift_key):
+            emitter_calls.append("station")
+            return 9207
+
+        async def verify_shift_package(self, _shift_key, *, packet=None):
+            emitter_calls.append("verify")
+            assert packet is not None
             return {"ok": True, "checks": []}
 
         async def build_shift_package(self, _shift_key):
+            emitter_calls.append("build")
+            return {"raw": True}
+
+        async def select_accounting_source(self, _shift_key, _manifest_hash):
+            emitter_calls.append("policy_axes")
+            return None
+
+        async def prepare_accounting_packet(
+            self, _shift_key, _manifest_hash, *, raw_packet=None,
+        ):
+            emitter_calls.append("resolver_versioner")
+            assert raw_packet == {"raw": True}
             return packet
 
         async def emit_to_dir(self, _shift_key, _directory):
@@ -631,6 +820,9 @@ async def test_emit_route_queues_and_never_calls_file_writer(monkeypatch):
     assert response["contract_version"] == "3"
     assert "file" not in response and "path" not in response
     assert file_writer_called is False
+    assert emitter_calls == [
+        "station", "policy_axes", "build", "verify", "resolver_versioner",
+    ]
 
 
 @pytest.mark.asyncio
@@ -648,6 +840,9 @@ async def test_emit_route_checks_station_scope_before_creating_packet(monkeypatc
     class Emitter:
         def __init__(self, _db, _company_id):
             pass
+
+        async def resolve_shift_station(self, _shift_key):
+            return 9208
 
         async def verify_shift_package(self, _shift_key):
             nonlocal verify_called
@@ -687,6 +882,9 @@ async def test_preview_and_verify_enforce_station_scope(monkeypatch, operation):
     class Emitter:
         def __init__(self, _db, _company_id):
             assert _company_id == company_id
+
+        async def resolve_shift_station(self, _shift_key):
+            return 9216
 
         async def build_shift_package(self, _shift_key):
             return packet

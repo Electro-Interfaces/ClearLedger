@@ -21,12 +21,16 @@ from __future__ import annotations
 
 import csv
 import io
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services import store_costs
+
+
+_BUSINESS_TZ = ZoneInfo("Europe/Moscow")
 
 
 def csv_bytes(header: list[str], rows: list[list]) -> bytes:
@@ -57,9 +61,9 @@ def csv_bytes(header: list[str], rows: list[list]) -> bytes:
 
 def _период(date_from: str | None, date_to: str | None) -> tuple[datetime, datetime]:
     d1 = date.fromisoformat(date_from) if date_from else date(2000, 1, 1)
-    d2 = date.fromisoformat(date_to) if date_to else date.today()
-    return (datetime.combine(d1, time.min, tzinfo=timezone.utc),
-            datetime.combine(d2, time.max, tzinfo=timezone.utc))
+    d2 = date.fromisoformat(date_to) if date_to else datetime.now(_BUSINESS_TZ).date()
+    return (datetime.combine(d1, time.min, tzinfo=_BUSINESS_TZ),
+            datetime.combine(d2, time.max, tzinfo=_BUSINESS_TZ))
 
 
 def _остатки_карточек(ф: str = "", доп: str = "") -> str:
@@ -121,7 +125,7 @@ async def documents(db: AsyncSession, cid, date_from, date_to,
              LATERAL jsonb_array_elements(coalesce(p.payload->'Документы','[]'::jsonb)) d
         WHERE p.company_id = :cid{фильтр}
           AND d->>'Тип' IN ('purchase','writeoff','transfer','inventory',
-                            'return_supplier','return_sale','production_release','revaluation')
+                            'return_purchase','return_sale','production_release','revaluation')
           AND coalesce((d->>'Дата')::timestamptz, p.received_at) BETWEEN :d1 AND :d2
           AND (d->>'Тип' <> 'purchase' OR NOT EXISTS (
               SELECT 1 FROM store_receipts r
@@ -144,7 +148,7 @@ async def documents(db: AsyncSession, cid, date_from, date_to,
     """), p)).mappings().all()]
 
     ВИДЫ = {"purchase": "Приёмка", "writeoff": "Списание", "transfer": "Перемещение",
-            "inventory": "Инвентаризация", "return_supplier": "Возврат поставщику",
+            "inventory": "Инвентаризация", "return_purchase": "Возврат поставщику",
             "return_sale": "Возврат покупателя", "production_release": "Производство",
             "revaluation": "Переоценка"}
     строки = []
@@ -548,9 +552,10 @@ async def stock(db: AsyncSession, cid, date_from, date_to,
     for r in rows:
         кол = float(r["quantity"] or 0)
         цена = float(r["retail_price"] or 0)
-        себе = float(r["cost_unit"] or 0)
-        источник = "приход станции" if себе > 0 else ""
-        if себе <= 0:
+        себе = (float(r["cost_unit"])
+                if r["cost_unit"] is not None and float(r["cost_unit"]) > 0 else None)
+        источник = "приход станции" if себе is not None else ""
+        if себе is None:
             о = оценки.get(str(r["item_uuid"] or ""))
             if о:
                 себе, источник = о["cost"], о["source"]
@@ -558,15 +563,18 @@ async def stock(db: AsyncSession, cid, date_from, date_to,
             "station_id": r["station_id"], "place": r["place_name"] or r["place"],
             "name": r["name"], "barcode": r["barcode"],
             "quantity": round(кол, 3), "price": цена,
-            "amount": round(кол * цена, 2), "cost": round(себе, 2),
-            "cost_amount": round(кол * себе, 2), "cost_source": источник or "нет данных",
+            "amount": round(кол * цена, 2),
+            "cost": round(себе, 2) if себе is not None else None,
+            "cost_amount": round(кол * себе, 2) if себе is not None else None,
+            "cost_source": источник or "нет данных",
             "snapshot_at": r["snapshot_at"],
         })
     строки.sort(key=lambda x: (x["station_id"], -x["amount"]))
-    с_ценой = [s for s in строки if s["cost_amount"] > 0]
+    с_ценой = [s for s in строки if s["cost_amount"] is not None]
     return {"rows": строки, "total": len(строки),
             "stock_amount": round(sum(s["amount"] for s in строки), 2),
-            "cost_amount": round(sum(s["cost_amount"] for s in строки), 2),
+            "cost_amount": (round(sum(s["cost_amount"] for s in с_ценой), 2)
+                            if с_ценой else None),
             # Покрытие себестоимостью — предмет отдельного разговора: пока часть
             # ассортимента живёт со снимка 1С, оценка есть не у всего.
             "cost_known": len(с_ценой),
@@ -716,11 +724,21 @@ async def shifts(db: AsyncSession, cid, date_from, date_to,
                  SELECT sum(coalesce((l->>'Сумма')::numeric, 0))
                  FROM jsonb_array_elements(coalesce(p.payload->'Документы','[]'::jsonb)) d,
                       jsonb_array_elements(coalesce(d->'Товары','[]'::jsonb)) l
+                 WHERE d->>'Тип' = 'retail_sale_sidegoods'), 0)
+               - coalesce((
+                 SELECT sum(abs(coalesce((l->>'Сумма')::numeric, 0)))
+                 FROM jsonb_array_elements(coalesce(p.payload->'Документы','[]'::jsonb)) d,
+                      jsonb_array_elements(coalesce(d->'ВозвращенныеТовары','[]'::jsonb)) l
                  WHERE d->>'Тип' = 'retail_sale_sidegoods'), 0) AS revenue,
                coalesce((
                  SELECT count(*)
                  FROM jsonb_array_elements(coalesce(p.payload->'Документы','[]'::jsonb)) d,
                       jsonb_array_elements(coalesce(d->'Товары','[]'::jsonb)) l
+                 WHERE d->>'Тип' = 'retail_sale_sidegoods'), 0)
+               + coalesce((
+                 SELECT count(*)
+                 FROM jsonb_array_elements(coalesce(p.payload->'Документы','[]'::jsonb)) d,
+                      jsonb_array_elements(coalesce(d->'ВозвращенныеТовары','[]'::jsonb)) l
                  WHERE d->>'Тип' = 'retail_sale_sidegoods'), 0) AS positions
         FROM edge_packets p
         WHERE p.company_id = :cid{ф_p} AND p.kind = 'shift'
@@ -795,11 +813,13 @@ async def visits(db: AsyncSession, cid, date_from, date_to,
 
     чеки = {(r["station"], r["shift"]): dict(r) for r in (await db.execute(text(f"""
         SELECT station_id AS station, shift_number AS shift,
-               count(*) AS cheques,
-               count(*) FILTER (WHERE had_fuel) AS mixed,
-               count(*) FILTER (WHERE NOT had_fuel) AS shop_only,
-               coalesce(sum(total), 0) AS shop_amount,
-               coalesce(sum(positions), 0) AS positions
+               count(*) FILTER (WHERE NOT is_return) AS cheques,
+               count(*) FILTER (WHERE NOT is_return AND had_fuel) AS mixed,
+               count(*) FILTER (WHERE NOT is_return AND NOT had_fuel) AS shop_only,
+               coalesce(sum(CASE WHEN is_return THEN -abs(total) ELSE total END), 0)
+                   AS shop_amount,
+               coalesce(sum(CASE WHEN is_return THEN -positions ELSE positions END), 0)
+                   AS positions
         FROM store_cheques
         WHERE company_id = :cid{ф_ч} AND at BETWEEN :d1 AND :d2
         GROUP BY 1, 2
@@ -958,8 +978,14 @@ async def returns(db: AsyncSession, cid, date_from, date_to,
     и оба вопроса задают именно по сети, а не по одной АЗС.
     """
     d1, d2 = _период(date_from, date_to)
-    доки = await _документы(db, cid, d1, d2, ["return_supplier", "return_sale"], stations)
-    ВИДЫ = {"return_supplier": "поставщику", "return_sale": "от покупателя"}
+    доки = await _документы(db, cid, d1, d2, ["return_purchase", "return_sale"], stations)
+    сменные = await _документы(
+        db, cid, d1, d2, ["retail_sale_sidegoods"], stations,
+        строки_поле="ВозвращенныеТовары",
+    )
+    доки.extend(d for d in сменные if d["lines"])
+    ВИДЫ = {"return_purchase": "поставщику", "return_sale": "от покупателя",
+             "retail_sale_sidegoods": "от покупателя (касса)"}
     строки = []
     for d in доки:
         сумма = sum(_строка(l, "Сумма", "amount") for l in d["lines"] or [])
@@ -1025,7 +1051,8 @@ async def pay_mix(db: AsyncSession, cid, date_from, date_to,
         SELECT station_id,
                coalesce(nullif(pay_name, ''), 'код ' || coalesce(pay_type, -1)::text) AS pay,
                count(*) FILTER (WHERE NOT is_return) AS cheques,
-               coalesce(sum(total) FILTER (WHERE NOT is_return), 0) AS amount,
+               coalesce(sum(CASE WHEN is_return THEN -abs(total) ELSE total END), 0)
+                   AS amount,
                count(*) FILTER (WHERE is_return) AS refunds,
                coalesce(abs(sum(total) FILTER (WHERE is_return)), 0) AS refund_amount
         FROM store_cheques
@@ -1033,12 +1060,12 @@ async def pay_mix(db: AsyncSession, cid, date_from, date_to,
         GROUP BY station_id, pay
         ORDER BY amount DESC
     """), p)).mappings().all()
-    всего = sum(float(r["amount"] or 0) for r in rows) or 1.0
+    всего = sum(float(r["amount"] or 0) for r in rows)
     строки = [{
         "station_id": r["station_id"], "pay": r["pay"],
         "cheques": int(r["cheques"] or 0),
         "amount": round(float(r["amount"] or 0), 2),
-        "share": round(float(r["amount"] or 0) / всего * 100, 1),
+        "share": round(float(r["amount"] or 0) / всего * 100, 1) if всего else 0.0,
         "avg_cheque": round(float(r["amount"] or 0) / int(r["cheques"]), 2)
         if int(r["cheques"] or 0) else 0.0,
         "refunds": int(r["refunds"] or 0),
@@ -1065,7 +1092,8 @@ async def stations_compare(db: AsyncSession, cid, date_from, date_to,
 
     чеки = {r["station_id"]: r for r in (await db.execute(text(f"""
         SELECT station_id, count(*) FILTER (WHERE NOT is_return) AS cheques,
-               coalesce(sum(total), 0) AS revenue,
+               coalesce(sum(CASE WHEN is_return THEN -abs(total) ELSE total END), 0)
+                   AS revenue,
                count(DISTINCT shift_number) AS shifts
         FROM store_cheques
         WHERE company_id = :cid{ф} AND at BETWEEN :d1 AND :d2

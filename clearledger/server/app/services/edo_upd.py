@@ -31,6 +31,20 @@ def _num(v: str) -> float:
         return 0.0
 
 
+def _fio(el) -> str:
+    """Имя предпринимателя: у ИП его нет в `НаимОрг`, оно в `СвИП` → `ФИО`.
+
+    Из-за этого накладные от ИП разбирались без продавца и оседали
+    нераспознанными — на пилоте так встали поставки от двух ИП.
+    """
+    if el.tag.rsplit("}", 1)[-1] != "ФИО":
+        return ""
+    части = [(el.get(n) or "").strip()
+             for n in ("Фамилия", "Имя", "Отчество")]
+    имя = " ".join(ч for ч in части if ч)
+    return f"ИП {имя}" if имя else ""
+
+
 def _find_all(root, tag: str):
     """Поиск по имени тега без учёта пространства имён.
 
@@ -56,7 +70,7 @@ def parse_upd(raw: bytes) -> dict:
     seller = ""
     for el in _find_all(root, "СвПрод"):
         for org in el.iter():
-            name = _text(org, "НаимОрг", "Наим")
+            name = _text(org, "НаимОрг", "Наим") or _fio(org)
             if name:
                 seller = name
                 break

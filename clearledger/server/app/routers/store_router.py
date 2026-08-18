@@ -20,10 +20,13 @@ from sqlalchemy import String, case, cast, func, or_, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import check_module_access, get_current_user
+from app.auth import check_module_access, get_company_by_api_key, get_current_user
 from app.business_access import (
+    OWNER_SHARED,
+    OWNER_STATION,
     ROLE_STATION_ADMINISTRATOR,
     SCOPE_STATION,
+    STORE_POLICY_KEY,
     has_network_merchandiser,
     store_policy as resolve_store_policy,
 )
@@ -51,8 +54,10 @@ from app.services.goods_dashboard import GoodsDashboardService
 from app.services.onec.crypto import encrypt_password
 from app.services.store_document_contract import PROJECTION_DOCUMENT_KINDS
 from app.services.store_documents import (
+    cheque_lines_from_catalog,
     cheque_lines_with_legacy_provenance,
     goods_only_cheque_totals,
+    load_item_catalog,
     sanitize_edge_document,
 )
 
@@ -79,20 +84,28 @@ router = APIRouter(prefix="/store", tags=["Магазин"],
 async def _require_central_commercial_control(user: User, db: AsyncSession) -> uuid.UUID:
     """Запись коммерческих решений из центра.
 
-    В v1 владелец — станция, поэтому центр остаётся витриной/аналитикой. Когда
-    появится сетевой режим, запись дополнительно потребует явный grant
-    network_merchandiser, а не техническую роль admin.
+    Открыта в режиме «shared»: правят обе стороны — товаровед сети из центра и
+    администратор АЗС на месте. Спор разрешается временем: чья версия пришла
+    последней, та и действует.
+
+    В режиме «station» центр остаётся витриной, и это умолчание — станция ближе
+    к товару, молча включать запись центра нельзя.
+
+    Роль «Товаровед сети» проверяется в обоих режимах. Раньше до неё просто не
+    доходило: режим был жёстко «station», и отказ случался строкой выше.
     """
     cid = await scope_company_id(user, db)
     company = await db.get(Company, cid)
     if company is None:
         raise HTTPException(404, "Организация не найдена")
     policy = resolve_store_policy(company.customization)
-    if policy["commercial_owner"] == "station":
+    if policy["commercial_owner"] == OWNER_STATION:
         raise HTTPException(
             409,
-            "Коммерческие решения v1 принадлежат администратору АЗС. "
-            "Центр показывает аналитику и предложения, но не перезаписывает станцию.",
+            "Коммерческие решения принадлежат администратору АЗС: центр "
+            "показывает аналитику и предложения, но не перезаписывает станцию. "
+            "Чтобы править и из центра, включите совместный режим политики "
+            "«Магазина».",
         )
     membership = await db.get(UserCompany, (user.id, cid))
     grants = list(getattr(membership, "business_grants", None) or []) if membership else []
@@ -2223,11 +2236,15 @@ async def store_cheques(
     ))).scalars().all() if packet_uuids else []
     packets = {str(row.packet_uuid): row for row in packet_rows}
 
+    catalog = await load_item_catalog(db)
+
     safe_rows = []
     for r in rows:
         totals = goods_only_cheque_totals(
-            cheque_lines_with_legacy_provenance(
-                r, packets.get(str(r.packet_uuid))),
+            cheque_lines_from_catalog(
+                cheque_lines_with_legacy_provenance(
+                    r, packets.get(str(r.packet_uuid))),
+                catalog),
             bool(r.had_fuel),
         )
         if ((r.had_fuel and not r.lines)
@@ -5845,11 +5862,18 @@ async def catalog_health(
           (SELECT count(*) FROM живой i
              WHERE i.group_id IN (SELECT id FROM edge.item_group WHERE path LIKE 'Табак%')
                AND i.mrc IS NULL)                                         AS табак_без_мрц,
-          (SELECT count(*) FROM edge.barcode WHERE status = 'rejected')   AS коллизии_шк,
-          (SELECT count(*) FROM edge.item i WHERE i.sku_class = 'Блюдо'
+          (SELECT count(*) FROM edge.barcode b
+             JOIN edge.item i ON i.id = b.item_id
+            WHERE b.status = 'rejected' AND NOT i.deleted)                AS коллизии_шк,
+          -- по «живой», а не по всей таблице: удалённые дубли карточек
+          -- («Американо 200 мл» против «Американо 200 мл.») давали восемь
+          -- несуществующих блюд без техкарты, и счётчик врал месяцами
+          (SELECT count(*) FROM живой i WHERE i.sku_class = 'Блюдо'
              AND NOT EXISTS (SELECT 1 FROM edge.recipe r WHERE r.dish_uuid = i.external_uuid))
                                                                           AS блюда_без_ттк,
-          (SELECT count(*) FROM edge.item_enrichment WHERE resolved_at IS NULL)
+          (SELECT count(*) FROM edge.item_enrichment e
+             JOIN edge.item i ON i.id = e.item_id
+            WHERE e.resolved_at IS NULL AND NOT i.deleted)
                                                                           AS предложений_ждёт
     """))).mappings().first()
 
@@ -5911,9 +5935,11 @@ async def catalog_enrichment(
         ORDER BY count(*) DESC, e.value
         LIMIT :lim
     """), {"f": field, "lim": limit})).mappings().all()
-    всего = (await db.execute(text(
-        "SELECT count(*) FROM edge.item_enrichment WHERE field = :f AND resolved_at IS NULL"
-    ), {"f": field})).scalar_one()
+    всего = (await db.execute(text("""
+        SELECT count(*) FROM edge.item_enrichment e
+        JOIN edge.item i ON i.id = e.item_id
+        WHERE e.field = :f AND e.resolved_at IS NULL AND NOT i.deleted
+    """), {"f": field})).scalar_one()
     return {"поле": field, "всего_предложений": int(всего),
             "значения": [dict(r) for r in строки]}
 
@@ -6311,18 +6337,22 @@ async def store_bp_package(
     db: AsyncSession = Depends(get_db),
 ):
     """Preview пакета «смена→БП» (эмиттер Ledger): все типы документов + НСИ + хеш."""
-    from app.services.accounting_egress import accounting_packet_station
     from app.services.bp_export import BpPackageEmitter
     access = await _receipt_access(user, db)
+    emitter = BpPackageEmitter(db, access.company_id)
     try:
-        packet = await BpPackageEmitter(db, access.company_id).build_shift_package(shift_key)
-        station_id = accounting_packet_station(packet)
+        station_id = await emitter.resolve_shift_station(shift_key)
     except ValueError as e:
         raise HTTPException(404 if str(e).startswith("смена не найдена") else 409, str(e))
     except Exception as e:
-        raise HTTPException(400, f"Сборка пакета: {e}")
+        raise HTTPException(400, f"Определение станции: {e}")
     _require_receipt_station(access, station_id)
-    return packet
+    try:
+        return await emitter.build_shift_package(shift_key)
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+    except Exception as e:
+        raise HTTPException(400, f"Сборка пакета: {e}")
 
 
 @router.post("/bp-package/emit")
@@ -6340,7 +6370,6 @@ async def store_bp_package_emit(
     from app.services.bp_export import BpPackageEmitter
     from app.services.accounting_egress import (
         AccountingEgressGuard,
-        accounting_packet_station,
     )
 
     access = await _receipt_access(user, db)
@@ -6348,8 +6377,7 @@ async def store_bp_package_emit(
     guard = AccountingEgressGuard(db, cid)
     try:
         emitter = BpPackageEmitter(db, cid)
-        packet = await emitter.build_shift_package(shift_key)
-        station_id = accounting_packet_station(packet)
+        station_id = await emitter.resolve_shift_station(shift_key)
     except ValueError as e:
         if str(e).startswith("смена не найдена"):
             raise HTTPException(404, "Смена не найдена")
@@ -6359,7 +6387,11 @@ async def store_bp_package_emit(
 
     _require_receipt_station(access, station_id)
     try:
-        verification = await emitter.verify_shift_package(shift_key)
+        await emitter.select_accounting_source(shift_key, manifest_hash)
+        raw_packet = await emitter.build_shift_package(shift_key)
+        verification = await emitter.verify_shift_package(
+            shift_key, packet=raw_packet,
+        )
         if not verification["ok"]:
             failed = [
                 check["Проверка"] for check in verification["checks"]
@@ -6368,7 +6400,9 @@ async def store_bp_package_emit(
             raise ValueError(
                 "Пакет не прошёл обязательную сверку: " + "; ".join(failed)
             )
-        await guard.authorize_packet(packet, manifest_hash)
+        packet = await emitter.prepare_accounting_packet(
+            shift_key, manifest_hash, raw_packet=raw_packet,
+        )
     except ValueError as e:
         raise HTTPException(409, str(e))
     except Exception as e:
@@ -6404,6 +6438,505 @@ async def store_bp_package_emit(
     }
 
 
+class BatchRowIn(BaseModel):
+    """Строка среза партий из центральной базы 1С."""
+    nomenclature_ref: str
+    quantity_remaining: float
+    amount_remaining: float
+    warehouse_ref: str | None = None
+    warehouse_name: str | None = None
+    nomenclature_name: str | None = None
+    organization_ref: str | None = None
+    batch_doc_type: str | None = None
+    batch_doc_ref: str | None = None
+    batch_doc_number: str | None = None
+    batch_doc_date: str | None = None
+
+
+@router.post("/stock/batches/import")
+async def store_stock_batches_import(
+    rows: list[BatchRowIn] = Body(...),
+    source: str = Query("1c_partii", description="откуда снят срез"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Загрузить срез партий из 1С — стартовую себестоимость запаса.
+
+    Единственный источник цифры по товару, который лежал на полке до нас:
+    закупок по нему в нашей системе нет и после отключения станционной 1С уже
+    не появится. Срез снимается ДО Дня X, иначе восстанавливать будет не из
+    чего.
+
+    Загрузка идемпотентна: повторная заливка того же среза обновляет строки,
+    а не удваивает их. Ключ — документ партии плюс товар и склад.
+    """
+    from app.models import InventoryBatch
+
+    access = await _receipt_access(user, db)
+    if not access.network:
+        raise HTTPException(403, "Срез партий загружает товаровед сети")
+    cid = access.company_id
+    момент = datetime.now(timezone.utc)
+    принято, пропущено = 0, 0
+    for строка in rows:
+        кол = float(строка.quantity_remaining or 0)
+        сумма = float(строка.amount_remaining or 0)
+        if not строка.nomenclature_ref or кол <= 0 or сумма <= 0:
+            # Партия без остатка или без суммы себестоимости не несёт;
+            # молча писать ноль значит выдать «товар бесплатный».
+            пропущено += 1
+            continue
+        ключ = строка.batch_doc_ref or f"{строка.batch_doc_type}|{строка.batch_doc_number}"
+        существующая = (await db.execute(
+            select(InventoryBatch).where(
+                InventoryBatch.company_id == cid,
+                InventoryBatch.batch_doc_ref == ключ,
+                InventoryBatch.nomenclature_ref == строка.nomenclature_ref,
+                InventoryBatch.warehouse_ref == (строка.warehouse_ref or ""),
+            ))).scalars().first()
+        цена = round(сумма / кол, 4)
+        if существующая is not None:
+            существующая.quantity_remaining = кол
+            существующая.amount_remaining = сумма
+            существующая.unit_price = цена
+            существующая.snapshot_at = момент
+            существующая.source = source
+        else:
+            db.add(InventoryBatch(
+                company_id=cid,
+                batch_doc_type=строка.batch_doc_type or "",
+                batch_doc_ref=ключ,
+                batch_doc_number=строка.batch_doc_number or "",
+                batch_doc_date=строка.batch_doc_date or "",
+                nomenclature_ref=строка.nomenclature_ref,
+                nomenclature_name=строка.nomenclature_name or "",
+                warehouse_ref=строка.warehouse_ref or "",
+                warehouse_name=строка.warehouse_name or "",
+                organization_ref=строка.organization_ref or "",
+                quantity_remaining=кол, amount_remaining=сумма,
+                unit_price=цена, source=source, snapshot_at=момент,
+            ))
+        принято += 1
+    log_export(db, cid, user,
+               f"Загружен срез партий 1С: {принято} строк, пропущено {пропущено}")
+    await db.commit()
+    return {"accepted": принято, "skipped": пропущено, "source": source,
+            "snapshot_at": момент.isoformat()}
+
+
+@router.get("/bp-package/cutover")
+async def store_bp_package_cutover_state(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Кто везёт первичку в бухгалтерию по каждой станции и с какого момента."""
+    from app.models import AccountingSourcePolicy, CutoverManifest
+
+    access = await _receipt_access(user, db)
+    условия = [AccountingSourcePolicy.company_id == access.company_id]
+    if not access.network:
+        условия.append(AccountingSourcePolicy.station_id.in_(access.station_ids))
+    политики = (await db.execute(
+        select(AccountingSourcePolicy)
+        .where(*условия)
+        .order_by(AccountingSourcePolicy.station_id,
+                  AccountingSourcePolicy.effective_from)
+    )).scalars().all()
+    манифесты = {
+        m.policy_id: m for m in (await db.execute(
+            select(CutoverManifest)
+            .where(CutoverManifest.company_id == access.company_id)
+        )).scalars().all()
+    }
+    return {
+        "policies": [{
+            "policy_id": str(p.id), "station_id": p.station_id,
+            "policy_group": p.policy_group, "revision": p.revision,
+            "state": p.state,
+            "fact_cutover_business_date": p.fact_cutover_business_date.isoformat(),
+            "station_timezone": p.station_timezone,
+            "fact_rule": {
+                "before": p.fact_origin_before,
+                "on_or_after": p.fact_origin_after,
+            },
+            "effective_from": p.effective_from.isoformat(),
+            "effective_to": p.effective_to.isoformat() if p.effective_to else None,
+            "transport_producer": p.transport_producer,
+            "transport_producer_before": p.transport_producer_before,
+            "transport_cutover_at": p.transport_cutover_at.isoformat(),
+            "shadow_validation_enabled": p.shadow_validation_enabled,
+            "manifest_state": (манифесты.get(p.id).state
+                               if манифесты.get(p.id) else None),
+            "manifest_hash": (манифесты.get(p.id).manifest_hash
+                              if манифесты.get(p.id) else None),
+        } for p in политики],
+    }
+
+
+class CutoverPrepareRequest(BaseModel):
+    station_id: int = Field(gt=0)
+    fact_cutover_business_date: date
+    transport_cutover_at: datetime
+    station_timezone: str = Field(default="Europe/Moscow", min_length=1, max_length=80)
+    arm_deadline: datetime | None = None
+    shadow_validation_enabled: bool = True
+
+
+class CutoverHashRequest(BaseModel):
+    manifest_hash: str = Field(min_length=64, max_length=64)
+
+
+def _cutover_http_error(exc) -> HTTPException:
+    return HTTPException(exc.status_code, exc.detail)
+
+
+@router.post("/bp-package/cutover/prepare")
+async def store_bp_package_cutover_prepare(
+    body: CutoverPrepareRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services.cutover_policy import CutoverPolicyError, CutoverPolicyService
+    access = await _receipt_access(user, db)
+    _require_receipt_station(access, body.station_id)
+    service = CutoverPolicyService(db, access.company_id)
+    try:
+        policy, manifest = await service.prepare(
+            station_id=body.station_id,
+            fact_cutover_business_date=body.fact_cutover_business_date,
+            transport_cutover_at=body.transport_cutover_at,
+            station_timezone=body.station_timezone,
+            arm_deadline=body.arm_deadline,
+            shadow_validation_enabled=body.shadow_validation_enabled,
+        )
+    except CutoverPolicyError as exc:
+        raise _cutover_http_error(exc) from exc
+    log_export(
+        db, access.company_id, user,
+        f"Подготовлен cutover станции {body.station_id}, revision {policy.revision}",
+    )
+    await db.commit()
+    return {
+        "policy_id": str(policy.id),
+        "manifest_id": str(manifest.id),
+        "station_id": body.station_id,
+        "revision": policy.revision,
+        "state": manifest.state,
+        "manifest_hash": manifest.manifest_hash,
+        "policy": manifest.canonical_payload,
+        "activated": False,
+    }
+
+
+@router.post("/bp-package/cutover/{manifest_id}/approve")
+async def store_bp_package_cutover_approve(
+    manifest_id: uuid.UUID,
+    station_id: int = Query(..., gt=0),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services.cutover_policy import CutoverPolicyError, CutoverPolicyService
+    access = await _receipt_access(user, db)
+    _require_receipt_station(access, station_id)
+    service = CutoverPolicyService(db, access.company_id)
+    try:
+        manifest, approvals, created = await service.approve(
+            manifest_id, user.id, datetime.now(timezone.utc), station_id=station_id,
+        )
+    except CutoverPolicyError as exc:
+        raise _cutover_http_error(exc) from exc
+    if created:
+        log_export(db, access.company_id, user,
+                   f"Согласован cutover станции {station_id}: {manifest_id}")
+    await db.commit()
+    return {
+        "manifest_id": str(manifest.id), "state": manifest.state,
+        "approval_count": len({row.user_id for row in approvals}),
+        "approval_created": created, "activated": False,
+    }
+
+
+@router.post("/bp-package/cutover/{manifest_id}/arm")
+async def store_bp_package_cutover_arm(
+    manifest_id: uuid.UUID,
+    body: CutoverHashRequest,
+    station_id: int = Query(..., gt=0),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services.cutover_policy import CutoverPolicyError, CutoverPolicyService
+    access = await _receipt_access(user, db)
+    _require_receipt_station(access, station_id)
+    service = CutoverPolicyService(db, access.company_id)
+    try:
+        _, manifest, approvals = await service.arm(
+            manifest_id, body.manifest_hash, datetime.now(timezone.utc),
+            station_id=station_id,
+        )
+    except CutoverPolicyError as exc:
+        raise _cutover_http_error(exc) from exc
+    log_export(db, access.company_id, user,
+               f"Cutover станции {station_id} переведён в armed: {manifest_id}")
+    await db.commit()
+    return {"manifest_id": str(manifest.id), "state": manifest.state,
+            "approval_count": len({row.user_id for row in approvals}),
+            "activated": False}
+
+
+@router.post("/bp-package/cutover/{manifest_id}/effective")
+async def store_bp_package_cutover_effective(
+    manifest_id: uuid.UUID,
+    body: CutoverHashRequest,
+    station_id: int = Query(..., gt=0),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services.cutover_policy import CutoverPolicyError, CutoverPolicyService
+    access = await _receipt_access(user, db)
+    _require_receipt_station(access, station_id)
+    service = CutoverPolicyService(db, access.company_id)
+    try:
+        policy, manifest, approvals = await service.make_effective(
+            manifest_id, body.manifest_hash, datetime.now(timezone.utc),
+            station_id=station_id,
+        )
+    except CutoverPolicyError as exc:
+        raise _cutover_http_error(exc) from exc
+    log_export(db, access.company_id, user,
+               f"Cutover станции {station_id} effective: revision {policy.revision}")
+    await db.commit()
+    return {"manifest_id": str(manifest.id), "state": manifest.state,
+            "approval_count": len({row.user_id for row in approvals}),
+            "activated": True, "effective_at": manifest.effective_at.isoformat()}
+
+
+@router.get("/bp-package/cutover/{manifest_id}/manifest")
+async def store_bp_package_cutover_manifest(
+    manifest_id: uuid.UUID,
+    station_id: int = Query(..., gt=0),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services.cutover_policy import CutoverPolicyError, CutoverPolicyService
+    access = await _receipt_access(user, db)
+    _require_receipt_station(access, station_id)
+    try:
+        _, _, exported = await CutoverPolicyService(
+            db, access.company_id
+        ).export_manifest(manifest_id, station_id=station_id)
+    except CutoverPolicyError as exc:
+        raise _cutover_http_error(exc) from exc
+    return exported
+
+
+@router.post("/bp-package/claim")
+async def store_bp_package_claim(
+    lease_seconds: int = Query(1800, ge=60, le=7200),
+    claim_body: dict | None = Body(None),
+    company: Company = Depends(get_company_by_api_key),
+    db: AsyncSession = Depends(get_db),
+):
+    """Забрать очередной пакет для доставки в бухгалтерию.
+
+    Ходит сюда доставщик — программа на машине с 1С, а не человек, поэтому
+    авторизация ключом компании, а не сессией.
+
+    Пакет выдаётся под аренду: если доставщик умрёт, не подтвердив отправку,
+    аренда истечёт и пакет вернётся в очередь сам. Умолчание 30 минут — столько
+    занимает одно COM-соединение с боевой бухгалтерией ГИГ (замер 15.08.2026:
+    16 минут только на подключение).
+    """
+    from app.services.accounting_outbox import (
+        AccountingOutboxService,
+        AccountingRevisionConflict,
+    )
+
+    svc = AccountingOutboxService(db, company.id)
+    if not isinstance(claim_body, dict):
+        claim_body = None
+    # Сначала возвращаем в очередь то, что зависло: доставщик перезапускается
+    # чаще, чем истекает аренда, и без этого очередь встанет на первом же сбое.
+    await svc.recover_expired_leases()
+    if claim_body is not None:
+        if (
+            claim_body.get("ТипСообщения") != "claim_request"
+            or claim_body.get("ВерсияКонтракта") != "3.0.0"
+        ):
+            raise HTTPException(409, "Claim должен соответствовать контракту 3.0.0")
+        try:
+            request_id = uuid.UUID(str(claim_body.get("ClaimRequestID") or ""))
+            requested_lease = int(claim_body.get("LeaseSeconds"))
+            result = await svc.claim_request(
+                consumer_id=str(claim_body.get("ConsumerID") or ""),
+                claim_request_id=request_id,
+                lease_seconds=requested_lease,
+            )
+        except (ValueError, TypeError, AccountingRevisionConflict) as e:
+            raise HTTPException(409, str(e))
+        await db.commit()
+        return {
+            "ТипСообщения": "claim_response",
+            "ВерсияКонтракта": "3.0.0",
+            "ConsumerID": result.consumer_id,
+            "ClaimRequestID": str(result.claim_request_id),
+            "AttemptID": str(result.attempt_id) if result.attempt_id else None,
+            "PacketID": str(result.packet.id) if result.packet else None,
+            "LeaseUntil": (
+                result.lease_until.isoformat().replace("+00:00", "Z")
+                if result.lease_until else None
+            ),
+            "Пакет": result.packet.payload if result.packet else None,
+        }
+    packet = await svc.claim_next(lease_seconds=lease_seconds)
+    if packet is None:
+        await db.commit()
+        return {"packet": None}
+    await db.commit()
+    return {
+        "packet": {
+            "packet_id": str(packet.id),
+            "attempt_id": str(packet.attempt_id),
+            "packet_uuid": str(packet.packet_uuid),
+            "kind": packet.kind,
+            "revision": packet.revision,
+            "content_hash": packet.content_hash,
+            "contract_version": packet.contract_version,
+            "lease_until": packet.lease_until.isoformat() if packet.lease_until else None,
+            "payload": packet.payload,
+        }
+    }
+
+
+@router.post("/bp-package/ack")
+async def store_bp_package_ack(
+    packet_id: uuid.UUID | None = Query(None),
+    attempt_id: uuid.UUID | None = Query(None),
+    content_hash: str | None = Query(None, description="хеш принятого пакета"),
+    result: str | None = Query(None, description="accepted | rejected"),
+    stage: str = Query("ack", description="sent — отправлен, ack — есть ответ"),
+    error_code: str | None = Query(None),
+    error_detail: str | None = Query(None),
+    ack_payload: dict | None = Body(None),
+    company: Company = Depends(get_company_by_api_key),
+    db: AsyncSession = Depends(get_db),
+):
+    """Подтвердить доставку пакета в бухгалтерию.
+
+    Два шага, а не один: `stage=sent` отмечает, что пакет ушёл в приёмник,
+    `stage=ack` — что приёмник ответил. Между ними может пройти час, и пакет,
+    отмеченный только как отправленный, повторно уже не выдаётся: загрузить
+    одну смену дважды значит удвоить выручку в бухгалтерии.
+    """
+    from app.services.accounting_outbox import (
+        AccountingOutboxService,
+        AccountingRevisionConflict,
+    )
+
+    svc = AccountingOutboxService(db, company.id)
+    if not isinstance(ack_payload, dict):
+        ack_payload = None
+    try:
+        if ack_payload and ack_payload.get("ТипСообщения") == "ack":
+            packet = await svc.apply_ack_contract(ack_payload)
+        elif packet_id is None or attempt_id is None or content_hash is None or result is None:
+            raise AccountingRevisionConflict("Legacy ACK не содержит обязательные query-поля")
+        elif stage == "sent":
+            packet = await svc.mark_sent(packet_id, attempt_id)
+        elif result == "rejected" and stage == "retry":
+            packet = await svc.fail_attempt(
+                packet_id, attempt_id,
+                retry_at=datetime.now(timezone.utc) + timedelta(minutes=30),
+                error_code=error_code or "delivery_failed",
+                error_detail=error_detail)
+        else:
+            packet = await svc.apply_ack(
+                packet_id, attempt_id=attempt_id, content_hash=content_hash,
+                result=result, ack_payload=ack_payload or {},
+                error_code=error_code, error_detail=error_detail)
+    except AccountingRevisionConflict as e:
+        raise HTTPException(409, str(e))
+    await db.commit()
+    return {
+        "status": packet.status,
+        "packet_id": str(packet.id),
+        "business_shift_id": (
+            ack_payload.get("BusinessShiftID")
+            if ack_payload and ack_payload.get("ТипСообщения") == "ack" else None
+        ),
+        "revision": packet.revision,
+        "components": packet.component_result or [],
+    }
+
+
+@router.get("/bp-package/identity/{business_shift_id}")
+async def store_bp_package_identity(
+    business_shift_id: uuid.UUID,
+    company: Company = Depends(get_company_by_api_key),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.models import (
+        AccountingBusinessGroup,
+        AccountingSourceDecision,
+        BusinessShift,
+        BusinessShiftAlias,
+        ExportPacket,
+    )
+
+    shift = (await db.execute(select(BusinessShift).where(
+        BusinessShift.company_id == company.id,
+        BusinessShift.id == business_shift_id,
+    ))).scalars().first()
+    if shift is None:
+        raise HTTPException(404, "BusinessShift не найден")
+    aliases = (await db.execute(select(BusinessShiftAlias).where(
+        BusinessShiftAlias.company_id == company.id,
+        BusinessShiftAlias.business_shift_id == shift.id,
+    ).order_by(BusinessShiftAlias.algorithm, BusinessShiftAlias.alias_hash))).scalars().all()
+    group = (await db.execute(select(AccountingBusinessGroup).where(
+        AccountingBusinessGroup.company_id == company.id,
+        AccountingBusinessGroup.business_shift_id == shift.id,
+    ))).scalars().first()
+    decision = (await db.execute(select(AccountingSourceDecision).where(
+        AccountingSourceDecision.company_id == company.id,
+        AccountingSourceDecision.business_shift_id == shift.id,
+    ).order_by(AccountingSourceDecision.created_at.desc()).limit(1))).scalars().first()
+    packet = None
+    if group is not None and group.current_packet_id is not None:
+        packet = (await db.execute(select(ExportPacket).where(
+            ExportPacket.company_id == company.id,
+            ExportPacket.id == group.current_packet_id,
+        ))).scalars().first()
+    return {
+        "identity": {
+            "BusinessShiftID": str(shift.id),
+            "CompanyID": shift.company_key,
+            "StationID": shift.station_id,
+            "BusinessDate": shift.business_date.isoformat(),
+            "status": shift.status,
+            "aliases": [{
+                "Algorithm": row.algorithm,
+                "AliasHash": row.alias_hash,
+                "Attributes": row.attributes,
+            } for row in aliases],
+        },
+        "decision": ({
+            "status": decision.status,
+            "winner_fact_id": decision.winner_fact_id,
+            "loser_fact_ids": decision.loser_fact_ids,
+            "fact_origin": decision.fact_origin,
+            "reason": decision.reason,
+            "shadow_status": decision.shadow_status,
+        } if decision else None),
+        "current_revision": ({
+            "revision": group.current_revision,
+            "content_hash": group.current_content_hash,
+            "packet_id": str(group.current_packet_id) if group.current_packet_id else None,
+            "status": packet.status if packet else None,
+            "components": packet.component_result if packet else None,
+        } if group else None),
+    }
+
+
 @router.get("/bp-package/verify")
 async def store_bp_package_verify(
     shift_key: str = Query(..., description="GUID смены или 'дата|станция'"),
@@ -6412,13 +6945,11 @@ async def store_bp_package_verify(
 ):
     """Сверка сопутки: самосогласованность пакета + готовность к загрузке (балансы,
     полнота НСИ, fail-fast НДС, хеш). Список проверок ok/детали."""
-    from app.services.accounting_egress import accounting_packet_station
     from app.services.bp_export import BpPackageEmitter
     access = await _receipt_access(user, db)
+    emitter = BpPackageEmitter(db, access.company_id)
     try:
-        emitter = BpPackageEmitter(db, access.company_id)
-        packet = await emitter.build_shift_package(shift_key)
-        station_id = accounting_packet_station(packet)
+        station_id = await emitter.resolve_shift_station(shift_key)
     except ValueError as e:
         raise HTTPException(404 if str(e).startswith("смена не найдена") else 409, str(e))
     except Exception as e:

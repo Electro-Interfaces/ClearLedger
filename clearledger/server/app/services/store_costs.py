@@ -18,6 +18,8 @@
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -100,5 +102,32 @@ async def ориентиры(db: AsyncSession, cid, stations: list[int] | None =
             цена = float(l.get("price") or 0)
             if кол > 0 and цена > 0:
                 предложить(str(l.get("nomenclature_ref") or ""), цена, r["doc_date"], "приёмка станции")
+
+    # Партии из 1С — стартовая себестоимость товара, который лежал на полке до
+    # нас. Закупок по нему в нашей системе нет и не будет: на 208 это 271
+    # позиция из 389 с непокрытой себестоимостью. После отключения станционной
+    # 1С взять цифру будет неоткуда, поэтому срез партий снимается ДО Дня X и
+    # загружается сюда один раз.
+    #
+    # Дата — дата документа партии, поэтому первая же наша приёмка того же
+    # товара перебьёт стартовую цифру как более свежая. Так и задумано.
+    for r in (await db.execute(text(f"""
+        SELECT nomenclature_ref AS uuid, unit_price AS cost, snapshot_at AS at,
+               batch_doc_date AS doc_date
+          FROM inventory_batches
+         WHERE company_id = :cid AND unit_price > 0
+           {"AND snapshot_at <= :on" if на_дату is not None else ""}
+    """), {k: v for k, v in p.items() if k != "st"})).mappings().all():
+        когда = r["at"]
+        if r["doc_date"]:
+            # Дата документа партии в выгрузке 1С — строка; если разбирается,
+            # она точнее момента снимка.
+            try:
+                разобрано = datetime.fromisoformat(str(r["doc_date"])[:19])
+                когда = (разобрано.replace(tzinfo=timezone.utc)
+                         if разобрано.tzinfo is None else разобрано)
+            except ValueError:
+                когда = r["at"]
+        предложить(str(r["uuid"] or ""), float(r["cost"] or 0), когда, "партия 1С")
 
     return итог

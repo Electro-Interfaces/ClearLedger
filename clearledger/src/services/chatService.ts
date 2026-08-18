@@ -280,11 +280,21 @@ export const ticketFromMessage = (messageId: string,
   post<{ ok: boolean; ticketId: string | null; ticketNumber: string | null }>(
     `/api/chat/messages/${messageId}/ticket`, body)
 
-/** Задача из сообщения: обсудили — записали, что надо сделать (docs/TASKS.md). */
-export const taskFromMessage = (messageId: string,
-  body: { title?: string; assigneeId?: string; typeId?: string; dueAt?: string }) =>
-  post<{ ok: boolean; taskId: string; taskNumber: number }>(
-    `/api/chat/messages/${messageId}/task`, body)
+export type ChatProcessLaunchResult = {
+  ok: boolean; title: string; templateId: string; templateName: string
+  started: boolean; steps: number; reason: string | null
+} & ({
+  kind: 'document'; docId: string; state: 'preparation' | 'approval'
+  round?: number; approvals?: number; documentUrl: string
+} | {
+  kind: 'task'; taskId: string; taskNumber: number; state: 'task'
+  stage: string; taskUrl: string
+})
+
+/** Процесс из сообщения: документный маршрут или внутренняя задача. */
+export const processFromMessage = (messageId: string,
+  body: { templateId: string; responsibleId?: string; title?: string }) =>
+  post<ChatProcessLaunchResult>(`/api/chat/messages/${messageId}/process`, body)
 
 /** Чат задачи (скрытая группа): короткие «а когда сможешь?» не должны засорять
  *  ленту задачи — она про след работы, а не про разговор. */

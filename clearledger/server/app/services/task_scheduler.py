@@ -36,7 +36,7 @@ from app.models import (
     TaskChecklistItem, TaskEvent, TaskRecurrence, TaskTemplate, TaskType, User,
     UserCompany,
 )
-from app.services import doc_exchange, task_mail
+from app.services import doc_exchange, process_templates, task_mail
 
 log = logging.getLogger("clearledger.tasks.scheduler")
 
@@ -88,33 +88,23 @@ def next_run(rule: dict, after: datetime) -> datetime:
 
 
 async def spawn_doc_from_template(db, rec: TaskRecurrence, tpl: TaskTemplate):
-    """Породить ДОКУМЕНТ по шаблону: «акт сверки к 5 числу каждого месяца».
-
-    Второго планировщика под документы не заводим: расписание одно на
-    пространство, а чем оно кончится, решает шаблон. Номер здесь не выдаётся —
-    регистрация остаётся решением человека, и черновик обязан отличаться от
-    зарегистрированного даже когда появился сам.
-    """
-    from app.models import DocCard, DocEvent, DocKind
-
-    kind = await db.get(DocKind, tpl.doc_kind_id)
-    if kind is None:
-        log.warning("расписание %s: вид документа не найден", rec.id)
+    """Запустить документный процесс по расписанию тем же путём, что вручную."""
+    actor = await db.get(User, rec.created_by) if rec.created_by else None
+    if actor is None:
+        log.warning("расписание %s: автор запуска не найден", rec.id)
         return None
-    now = datetime.now(timezone.utc)
-    days = tpl.due_days
-    d = DocCard(
-        company_id=rec.company_id, kind_id=kind.id, kind_code=kind.code,
-        family=kind.family, direction=kind.direction, title=tpl.title,
-        summary=tpl.description, author_id=rec.created_by,
-        responsible_id=tpl.assignee_id, object_id=tpl.object_id,
-        source="api", source_ref=f"recurrence:{rec.id}",
-        due_at=now + timedelta(days=days) if days is not None else None)
-    db.add(d)
-    await db.flush()
-    db.add(DocEvent(doc_id=d.id, kind="created", user_id=rec.created_by,
-                    to_value=kind.name, note=f"по расписанию «{tpl.name}»"))
-    return d
+    try:
+        doc, _ = await process_templates.launch(
+            db, rec.company_id, tpl, actor,
+            source="api",
+            source_ref=(f"recurrence:{rec.id}:"
+                        f"{datetime.now(timezone.utc).isoformat()}"),
+            source_note=f"по расписанию «{tpl.name}»",
+        )
+        return doc
+    except process_templates.ProcessTemplateError as exc:
+        log.warning("расписание %s: %s", rec.id, exc)
+        return None
 
 
 async def spawn_from_template(db, rec: TaskRecurrence, tpl: TaskTemplate) -> Task | None:

@@ -1,3 +1,4 @@
+import inspect
 import uuid
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -124,6 +125,18 @@ def test_receipt_rbac_is_additive_and_operator_has_no_admin_scope():
     assert _receipt_list_scope(station_only, set()) == ({208, 209}, False)
     network = ReceiptAccess(uuid.uuid4(), True, frozenset())
     assert _receipt_list_scope(network, {208}) == ({208}, True)
+
+
+def test_bp_package_checks_station_before_building_sensitive_payload():
+    for endpoint in (
+        store_router.store_bp_package,
+        store_router.store_bp_package_emit,
+        store_router.store_bp_package_verify,
+    ):
+        source = inspect.getsource(endpoint)
+        assert source.index("resolve_shift_station") < source.index("_require_receipt_station")
+        if "build_shift_package" in source:
+            assert source.index("_require_receipt_station") < source.index("build_shift_package")
 
 
 def test_draft_can_keep_supplier_snapshot_but_accept_requires_both_canonical_ids():

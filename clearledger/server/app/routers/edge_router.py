@@ -24,7 +24,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response, status
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -129,7 +129,7 @@ async def health(company: Company = Depends(get_company_by_api_key)):
 #
 # В переменной окружения, а не константой: номер версии меняется каждым
 # релизом агента, и пересобирать ради него образ backend — глупо.
-DESIRED_AGENT_VERSION = os.environ.get("EDGE_DESIRED_AGENT_VERSION", "1.39.0")
+DESIRED_AGENT_VERSION = os.environ.get("EDGE_DESIRED_AGENT_VERSION", "1.99.0")
 
 
 # Обстоятельства выгрузки, а не её содержание. При каждой пересборке пакета
@@ -530,92 +530,134 @@ async def _ingest_cheques(db: AsyncSession, company_id, station_id: int,
                           payload: dict, packet_uuid: str) -> int:
     """Разложить пакет чеков смены в реестр.
 
-    Идемпотентно по (станция, смена, номер чека): агент повторяет отправку при
-    любой неопределённости, и повтор обязан обновлять чек, а не плодить второй.
+    Идемпотентно по (станция, смена, ключ чека). Номер чека нумеруется отдельно
+    на каждом посту; пакет считается полным снимком чеков смены, поэтому
+    отсутствующие в новой ревизии старые строки удаляются.
     """
     from app.models import StoreCheque
 
     смена = payload.get("Смена") or {}
     номер_смены = int(смена.get("НомерСменыВнутр") or смена.get("НомерСмены") or 0)
-    принято = 0
+    входящие = []
+    есть_реестр = False
     for doc in payload.get("Документы") or []:
         if not isinstance(doc, dict) or doc.get("Тип") != "fiscal_receipts":
             continue
-        for чек in doc.get("Чеки") or []:
-            номер = int(чек.get("Номер") or 0)
-            if номер <= 0:
-                continue
-            строки = []
-            for line in чек.get("Товары") or []:
-                incoming_scope = line.get("scope") or line.get("Контур")
-                строки.append({
-                    "item_uuid": line.get("Номенклатура") or "",
-                    "name": line.get("Наименование") or "",
-                    "ns_code": line.get("КодНС"),
-                    "qty": float(line.get("Количество") or 0),
-                    "price": float(line.get("Цена") or 0),
-                    "amount": float(line.get("Сумма") or 0),
-                    "section": line.get("Секция"),
-                    "scope": incoming_scope or "store",
-                    "scope_source": (
-                        line.get("scope_source")
-                        or ("edge_explicit" if incoming_scope
-                            else "edge_fiscal_receipts_filtered_v1")),
-                    "vat_rate": line.get("СтавкаНДС"),
-                    "vat_amount": (float(line.get("СуммаНДС"))
-                                   if line.get("СуммаНДС") is not None else None),
-                })
-            момент = чек.get("Время")
-            try:
-                когда = (datetime.fromisoformat(момент) if момент
-                         else datetime.now(timezone.utc))
-            except ValueError:
-                когда = datetime.now(timezone.utc)
-            if когда.tzinfo is None:
-                когда = когда.replace(tzinfo=timezone.utc)
+        есть_реестр = True
+        входящие.extend(чек for чек in (doc.get("Чеки") or []) if isinstance(чек, dict))
+    if not есть_реестр:
+        return 0
 
-            существующий = (await db.execute(select(StoreCheque).where(
-                StoreCheque.company_id == company_id,
-                StoreCheque.station_id == station_id,
-                StoreCheque.shift_number == номер_смены,
-                StoreCheque.number == номер).with_for_update())).scalar_one_or_none()
-            значения = {
-                "fiscal_number": чек.get("ФН"),
-                "at": когда,
-                "is_return": bool(чек.get("Возврат")),
-                "had_fuel": bool(чек.get("БылоТопливо")),
-                "pay_type": чек.get("ВидОплаты"),
-                "pay_name": (чек.get("ВидОплатыНазвание") or "")[:60] or None,
-                "total": float(sum(
-                    (Decimal(str(line.get("amount") or 0)) for line in строки),
-                    Decimal("0"),
-                )),
-                "positions": len(строки),
-                "lines": строки,
-                "packet_uuid": packet_uuid,
+    if not входящие:
+        await db.execute(delete(StoreCheque).where(
+            StoreCheque.company_id == company_id,
+            StoreCheque.station_id == station_id,
+            StoreCheque.shift_number == номер_смены,
+        ))
+        return 0
+
+    существующие = (await db.execute(select(StoreCheque).where(
+        StoreCheque.company_id == company_id,
+        StoreCheque.station_id == station_id,
+        StoreCheque.shift_number == номер_смены,
+    ).with_for_update())).scalars().all()
+    по_ключу = {
+        str(getattr(row, "cash_key", "") or
+            f"{int(getattr(row, 'cash_no', 0) or 0)}:{int(row.number)}"): row
+        for row in существующие
+    }
+    принятые_ключи: set[str] = set()
+    принято = 0
+    for чек in входящие:
+        номер = int(чек.get("Номер") or 0)
+        if номер < 0:
+            continue
+        строки = []
+        for line in чек.get("Товары") or []:
+            incoming_scope = line.get("scope") or line.get("Контур")
+            строки.append({
+                "item_uuid": line.get("Номенклатура") or "",
+                "name": line.get("Наименование") or "",
+                "ns_code": line.get("КодНС"),
+                "qty": float(line.get("Количество") or 0),
+                "price": float(line.get("Цена") or 0),
+                "amount": float(line.get("Сумма") or 0),
+                "section": line.get("Секция"),
+                "scope": incoming_scope or "store",
+                "scope_source": (
+                    line.get("scope_source")
+                    or ("edge_explicit" if incoming_scope
+                        else "edge_fiscal_receipts_filtered_v1")),
+                "vat_rate": line.get("СтавкаНДС"),
+                "vat_amount": (float(line.get("СуммаНДС"))
+                               if line.get("СуммаНДС") is not None else None),
+            })
+        if not строки:
+            continue
+        момент = чек.get("Время")
+        try:
+            когда = (datetime.fromisoformat(момент) if момент
+                     else datetime.now(timezone.utc))
+        except ValueError:
+            когда = datetime.now(timezone.utc)
+        if когда.tzinfo is None:
+            когда = когда.replace(tzinfo=timezone.utc)
+
+        пост = int(чек.get("Пост") or 0)
+        ключ = str(чек.get("КлючЧека") or "").strip() or f"{пост}:{номер}"
+        существующий = по_ключу.get(ключ)
+        значения = {
+            "number": номер,
+            "cash_no": пост,
+            "cash_key": ключ,
+            "fiscal_number": чек.get("ФН"),
+            "at": когда,
+            "is_return": bool(чек.get("Возврат")),
+            "had_fuel": bool(чек.get("БылоТопливо")),
+            "pay_type": чек.get("ВидОплаты"),
+            "pay_name": (чек.get("ВидОплатыНазвание") or "")[:60] or None,
+            "total": float(sum(
+                (Decimal(str(line.get("amount") or 0)) for line in строки),
+                Decimal("0"),
+            )),
+            "positions": len(строки),
+            "lines": строки,
+            "packet_uuid": packet_uuid,
+        }
+        if существующий is None:
+            db.add(StoreCheque(company_id=company_id, station_id=station_id,
+                               shift_number=номер_смены,
+                               version=1, **значения))
+        else:
+            текущее = {
+                "number": существующий.number,
+                "cash_no": существующий.cash_no,
+                "cash_key": существующий.cash_key,
+                "fiscal_number": существующий.fiscal_number,
+                "at": существующий.at,
+                "is_return": существующий.is_return,
+                "had_fuel": существующий.had_fuel,
+                "pay_type": существующий.pay_type,
+                "pay_name": существующий.pay_name,
+                "total": существующий.total,
+                "positions": существующий.positions,
+                "lines": существующий.lines,
+                "packet_uuid": существующий.packet_uuid,
             }
-            if существующий is None:
-                db.add(StoreCheque(company_id=company_id, station_id=station_id,
-                                   shift_number=номер_смены, number=номер,
-                                   version=1, **значения))
-            else:
-                текущее = {
-                    "fiscal_number": существующий.fiscal_number,
-                    "at": существующий.at,
-                    "is_return": существующий.is_return,
-                    "had_fuel": существующий.had_fuel,
-                    "pay_type": существующий.pay_type,
-                    "pay_name": существующий.pay_name,
-                    "total": существующий.total,
-                    "positions": существующий.positions,
-                    "lines": существующий.lines,
-                    "packet_uuid": существующий.packet_uuid,
-                }
-                if _cheque_business_state(текущее) != _cheque_business_state(значения):
-                    for k, v in значения.items():
-                        setattr(существующий, k, v)
-                    существующий.version = int(существующий.version or 0) + 1
-            принято += 1
+            if _cheque_business_state(текущее) != _cheque_business_state(значения):
+                for k, v in значения.items():
+                    setattr(существующий, k, v)
+                существующий.version = int(существующий.version or 0) + 1
+        принятые_ключи.add(ключ)
+        принято += 1
+
+    if принятые_ключи:
+        await db.execute(delete(StoreCheque).where(
+            StoreCheque.company_id == company_id,
+            StoreCheque.station_id == station_id,
+            StoreCheque.shift_number == номер_смены,
+            StoreCheque.cash_key.not_in(принятые_ключи),
+        ))
     return принято
 
 
