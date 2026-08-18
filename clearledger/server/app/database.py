@@ -3461,6 +3461,68 @@ async def create_all() -> None:
         ):
             await conn.execute(_sa.text(stmt))
 
+        # v2.44: разделение точки обслуживания и станции (СТО «Идентификация и
+        # учёт объектов зарядной инфраструктуры», docs/OBJECTS.md).
+        #
+        # Паспорт станции переезжает в единицу оборудования — она и есть станция
+        # («станция-железка складского контура» в докстринге модели). Второй
+        # таблицы для этого не заводим: она стала бы третьим определением того же
+        # железа рядом с `ezs_equipment_units` и `ezs_site_equipment`.
+        #
+        # Колонки прежнего паспорта в `service_locations` НЕ удаляются: на этом
+        # шаге читатели не трогаются, старые экраны продолжают работать. Их снятие —
+        # отдельный шаг после перевода витрин.
+        for stmt in (
+            "ALTER TABLE ezs_equipment_units ADD COLUMN IF NOT EXISTS brand VARCHAR(120)",
+            "ALTER TABLE ezs_equipment_units ADD COLUMN IF NOT EXISTS owner_name VARCHAR(200)",
+            "ALTER TABLE ezs_equipment_units ADD COLUMN IF NOT EXISTS operator_name VARCHAR(200)",
+            "ALTER TABLE ezs_equipment_units ADD COLUMN IF NOT EXISTS ocpp_protocol VARCHAR(40)",
+            "ALTER TABLE ezs_equipment_units ADD COLUMN IF NOT EXISTS firmware VARCHAR(80)",
+            "ALTER TABLE ezs_equipment_units ADD COLUMN IF NOT EXISTS speed_class VARCHAR(10)",
+            "ALTER TABLE ezs_equipment_units ADD COLUMN IF NOT EXISTS commissioned_on VARCHAR(10)",
+            "ALTER TABLE ezs_equipment_units ADD COLUMN IF NOT EXISTS decommissioned_on VARCHAR(10)",
+            "ALTER TABLE ezs_equipment_units ADD COLUMN IF NOT EXISTS hubex_asset_id VARCHAR(80)",
+        ):
+            await conn.execute(_sa.text(stmt))
+
+        # Непересечение периодов у связи — смысл таблицы `object_links`, а не
+        # украшение: станция не может одновременно стоять в двух точках
+        # обслуживания, а внешний идентификатор — принадлежать двум объектам в
+        # один период (СТО п. 8.4). Декларативно gist-исключение не выразить,
+        # `ADD CONSTRAINT IF NOT EXISTS` в PostgreSQL нет — отсюда DO-блок.
+        #
+        # Обе операции в одном блоке и обе с обработкой: `btree_gist` даёт
+        # оператор = для скалярных типов внутри gist-исключения (без него
+        # ALTER падает на uuid), а его установка требует прав, которых у роли
+        # стека может не быть. Упавший старт бэкенда хуже отсутствующей
+        # гарантии, поэтому здесь предупреждение в лог, а не исключение — но
+        # предупреждение громкое: без ограничения станция сможет числиться в
+        # двух точках сразу.
+        await conn.execute(_sa.text(
+            "DO $$ BEGIN "
+            "  BEGIN "
+            "    CREATE EXTENSION IF NOT EXISTS btree_gist; "
+            "  EXCEPTION WHEN insufficient_privilege THEN "
+            "    RAISE WARNING 'btree_gist недоступен: непересечение периодов "
+            "у object_links не гарантировано, поставьте расширение вручную'; "
+            "  END; "
+            "  BEGIN "
+            "    ALTER TABLE object_links ADD CONSTRAINT object_links_no_overlap "
+            "    EXCLUDE USING gist ("
+            "      company_id WITH =, child_type WITH =, child_id WITH =, relation WITH =,"
+            "      (daterange(valid_from, valid_to, '[)')) WITH &&"
+            "    ); "
+            "  EXCEPTION "
+            # EXCLUDE заводит одноимённый индекс, поэтому повтор приходит как
+            # duplicate_table (42P07), а не duplicate_object: без этой ветки
+            # первый старт проходил бы, а рестарт бэкенда падал.
+            "    WHEN duplicate_object OR duplicate_table THEN NULL; "
+            "    WHEN undefined_object THEN "
+            "      RAISE WARNING 'object_links_no_overlap не создан: нет btree_gist'; "
+            "  END; "
+            "END $$"
+        ))
+
     await _ensure_active_group_readiness(engine)
 
 

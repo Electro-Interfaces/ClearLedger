@@ -5827,6 +5827,25 @@ class EzsEquipmentUnit(Base):
     connectors_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     connector_types: Mapped[str | None] = mapped_column(String(200), nullable=True)
     inventory_number: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    # ── Паспорт станции как объекта инфраструктуры (СТО, уровень «станция») ──
+    # До разделения уровней эти графы жили в `ServiceLocation` — там, где теперь
+    # точка обслуживания. Уровни разъехались: замена станции не прерывает
+    # аналитику выручки точки (СТО п. 5.2), а перемещение станции не меняет её
+    # инвентарный номер (п. 5.3). Размещение — не колонка, а связь с периодом
+    # (`object_links`): оно меняется во времени, и «где было на дату» скалярной
+    # ссылкой не выражается.
+    brand: Mapped[str | None] = mapped_column(String(120), nullable=True)          # коммерческое обозначение (п. 2.18)
+    owner_name: Mapped[str | None] = mapped_column(String(200), nullable=True)     # владелец (п. 2.16)
+    operator_name: Mapped[str | None] = mapped_column(String(200), nullable=True)  # оператор (п. 2.17)
+    ocpp_protocol: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    firmware: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    speed_class: Mapped[str | None] = mapped_column(String(10), nullable=True)     # fast | slow
+    # Даты жизненного цикла ISO 'YYYY-MM-DD'. Дата ввода берётся из акта о
+    # приёме-передаче (п. 9.3), а не из дня, когда её заметили: реквизит
+    # обязателен при переводе станции в эксплуатацию.
+    commissioned_on: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    decommissioned_on: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    hubex_asset_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
     supplier: Mapped[str | None] = mapped_column(String(300), nullable=True)
     purchase_doc: Mapped[str | None] = mapped_column(String(200), nullable=True)
     purchase_date: Mapped[str | None] = mapped_column(String(10), nullable=True)      # ISO YYYY-MM-DD
@@ -5908,6 +5927,122 @@ class EzsEquipmentMovement(Base):
     __table_args__ = (
         Index("ix_ezs_move_company_date", "company_id", "occurred_on"),
         Index("ix_ezs_move_unit_created", "unit_id", "created_at"),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Связи объектов с периодом действия (общая механика, СТО разделы 3 и 8)
+# ---------------------------------------------------------------------------
+class ObjectLink(Base):
+    """Привязка одного объекта к другому на период времени.
+
+    Уровни объектов не просто вложены — их связи меняются: станцию заменяют,
+    перемещают между точками обслуживания, точку обслуживания закрывают, а
+    площадка остаётся. Скалярная ссылка отвечает только на вопрос «где сейчас»
+    и теряет ответ на вопрос «где было на дату», без которого не считается ни
+    выручка точки за прошлый период, ни наработка станции.
+
+    Одна механика на все привязки: и на внутренние связи уровней
+    (`placed_at`, `mounted_in`, `belongs_to`), и на идентификаторы внешних
+    систем (`external_id`) — реестр соответствий СТО раздела 8 устроен так же,
+    вплоть до закрытия датой вместо удаления.
+
+    Два времени различаются намеренно: `valid_from`/`valid_to` — когда связь
+    действует по документу, `recorded_at` — когда её внесли. СТО п. 13.1 сам
+    даёт подразделениям N рабочих дней на внесение сведений, поэтому запись
+    задним числом — штатный режим, а не сбой.
+
+    Непересечение периодов обеспечивается EXCLUDE-ограничением (заводится
+    DDL-патчем: декларативно gist-исключение не выразить). Оно и есть смысл
+    таблицы: станция не может одновременно стоять в двух точках обслуживания,
+    а внешний идентификатор — принадлежать двум объектам в один период
+    (СТО п. 8.4).
+    """
+    __tablename__ = "object_links"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    # site | point_of_service | station | evse | connector | external
+    parent_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    # String(64), а не UUID: id точки обслуживания — строковый nanoid, id станции —
+    # UUID, а значением внешнего идентификатора бывает строка любого формата.
+    parent_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    child_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    child_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    # placed_at (станция в точке) | mounted_in (точка отпуска на станции) |
+    # belongs_to (точка обслуживания на площадке) | external_id (реестр соответствий)
+    relation: Mapped[str] = mapped_column(String(30), nullable=False)
+    valid_from: Mapped[date_type] = mapped_column(Date, nullable=False)
+    valid_to: Mapped[date_type | None] = mapped_column(Date, nullable=True)
+    # Документ-основание: накладная на внутреннее перемещение, акт о приёме-передаче,
+    # приказ (СТО, приложение Б). Мягкая ссылка на doc_cards — как supply_id у
+    # движения: документ живёт своим жизненным циклом и переживает связь.
+    basis_doc_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    basis_note: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    recorded_by_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    recorded_by_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    closed_reason: Mapped[str | None] = mapped_column(String(300), nullable=True)
+
+    __table_args__ = (
+        Index("ix_object_links_child", "company_id", "child_type", "child_id"),
+        Index("ix_object_links_parent", "company_id", "parent_type", "parent_id"),
+        Index("ix_object_links_open", "company_id", "relation", "valid_to"),
+    )
+
+
+class EzsEvse(Base):
+    """Точка отпуска — часть станции, заряжающая не более одного ТС (СТО п. 2.5).
+
+    Единица информационного обмена: именно ей принадлежит внешний идентификатор
+    формата `RU*OOO*TNNNNN*C` (п. 11.4). Единицей бухгалтерского учёта не
+    является — инвентарный объект это станция (п. 4.6).
+    """
+    __tablename__ = "ezs_evse"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    unit_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("ezs_equipment_units.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    # Порядковый номер в пределах станции, начиная с единицы (приложение А).
+    number: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Внешний идентификатор. Пока уровень не введён повсеместно, п. 15.8 разрешает
+    # вести его на станции — тогда здесь NULL, а значение лежит в реестре соответствий.
+    external_id: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    power_kwt: Mapped[float | None] = mapped_column(Float, nullable=True)
+    status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("unit_id", "number", name="uq_ezs_evse_number"),
+        Index("uq_ezs_evse_external", "company_id", "external_id", unique=True,
+              postgresql_where=text("external_id IS NOT NULL")),
+    )
+
+
+class EzsConnector(Base):
+    """Коннектор — физический разъём точки отпуска (СТО п. 2.6).
+
+    Имя таблицы с префиксом `ezs_` намеренно: `connectors` в этой же схеме —
+    подключения к внешним системам, совсем другая сущность. Одно слово в двух
+    несовместимых смыслах уже путало при аудите, в схеме этого быть не должно.
+    """
+    __tablename__ = "ezs_connectors"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    evse_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("ezs_evse.id", ondelete="CASCADE"), nullable=False, index=True)
+    # Порядковый номер в пределах точки отпуска, начиная с единицы (приложение А).
+    number: Mapped[int] = mapped_column(Integer, nullable=False)
+    connector_type: Mapped[str | None] = mapped_column(String(40), nullable=True)  # CCS2 | CHADEMO | GBT_DC | TYPE2
+    power_kwt: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("evse_id", "number", name="uq_ezs_connector_number"),
     )
 
 
