@@ -3567,6 +3567,20 @@ async def create_all() -> None:
         ):
             await conn.execute(_sa.text(stmt))
 
+        # v2.53: внешний участник согласует по ссылке — право на одну активность.
+        for stmt in (
+            "ALTER TABLE doc_share_links ADD COLUMN IF NOT EXISTS "
+            "purpose VARCHAR(20) NOT NULL DEFAULT 'view'",
+            "ALTER TABLE doc_share_links ADD COLUMN IF NOT EXISTS approval_id UUID",
+            "ALTER TABLE doc_share_links ADD COLUMN IF NOT EXISTS used_at TIMESTAMPTZ",
+            # Одна живая ссылка на визу: вторая означала бы две подписи под одним
+            # шагом, и спор о том, какая из них настоящая.
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_doc_share_links_approval "
+            "ON doc_share_links (approval_id) "
+            "WHERE approval_id IS NOT NULL AND NOT revoked AND used_at IS NULL",
+        ):
+            await conn.execute(_sa.text(stmt))
+
     await _ensure_active_group_readiness(engine)
 
 

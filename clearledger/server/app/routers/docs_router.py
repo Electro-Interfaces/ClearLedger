@@ -51,8 +51,8 @@ from app.models import (
 )
 from app.routers import doc_share_router
 from app.services import (
-    doc_approvals, doc_exchange, doc_print, doc_text, doc_verify, file_safety,
-    file_store, mail_send, process_templates, task_mail,
+    doc_approvals, doc_exchange, doc_print, doc_text, doc_verify, external_approval,
+    file_safety, file_store, mail_send, process_templates, task_mail,
 )
 from app.services.doc_numbers import next_number, render, scope_key
 
@@ -2652,6 +2652,27 @@ class ShareIn(BaseModel):
     days: int = Field(14, ge=1, le=180)
 
 
+async def _share_snapshots(db: AsyncSession, d: DocCard) -> tuple[list[dict], dict]:
+    """Снимок редакций и карточки на момент выпуска ссылки.
+
+    Общий для показа и для внешней визы: без снимка замена файла задним числом
+    меняет содержание того, что уже подтвердили или подписали.
+    """
+    versions = (await db.execute(select(DocVersion).where(
+        DocVersion.doc_id == d.id, DocVersion.is_current.is_(True),
+        DocVersion.tombstoned_at.is_(None)).order_by(
+        DocVersion.role, DocVersion.revision))).scalars().all()
+    return [{
+        "id": str(version.id), "role": version.role,
+        "revision": version.revision, "file_name": version.file_name,
+        "size": version.size_bytes, "sha256": version.sha256,
+    } for version in versions], {
+        "title": d.title, "reg_number": d.reg_number,
+        "reg_date": d.reg_date.isoformat() if d.reg_date else None,
+        "summary": d.summary,
+    }
+
+
 @router.post("/{doc_id}/share", status_code=status.HTTP_201_CREATED)
 async def create_share(
     doc_id: str,
@@ -2691,20 +2712,7 @@ async def create_share(
         recipient_email=(payload.recipient_email or "").strip() or None,
         expires_at=datetime.now(timezone.utc) + timedelta(days=payload.days),
         created_by=current_user.id)
-    versions = (await db.execute(select(DocVersion).where(
-        DocVersion.doc_id == d.id, DocVersion.is_current.is_(True),
-        DocVersion.tombstoned_at.is_(None)).order_by(
-        DocVersion.role, DocVersion.revision))).scalars().all()
-    link.version_snapshot = [{
-        "id": str(version.id), "role": version.role,
-        "revision": version.revision, "file_name": version.file_name,
-        "size": version.size_bytes, "sha256": version.sha256,
-    } for version in versions]
-    link.card_snapshot = {
-        "title": d.title, "reg_number": d.reg_number,
-        "reg_date": d.reg_date.isoformat() if d.reg_date else None,
-        "summary": d.summary,
-    }
+    link.version_snapshot, link.card_snapshot = await _share_snapshots(db, d)
     db.add(link)
     db.add(DocEvent(doc_id=d.id, kind="dispatch", user_id=current_user.id,
                     actor_name=current_user.name or current_user.email,
@@ -2715,6 +2723,65 @@ async def create_share(
     # Единственное место, где токен виден: дальше он существует только у получателя.
     return {"id": str(link.id), "token": raw_token,
             "expires_at": link.expires_at.isoformat()}
+
+
+class ExternalApprovalIn(BaseModel):
+    company_id: str
+    # Срок короче, чем у показа: право подписать живёт ровно столько, сколько
+    # длится ожидание визы, а не столько, сколько документ вообще актуален.
+    days: int = Field(7, ge=1, le=90)
+    recipient_name: str | None = None
+
+
+@router.post("/{doc_id}/approvals/{approval_id}/external-link",
+             status_code=status.HTTP_201_CREATED)
+async def create_external_approval_link(
+    doc_id: str,
+    approval_id: str,
+    payload: ExternalApprovalIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Позвать внешнего участника поставить одну визу.
+
+    Он не получает ни учётки, ни членства в компании, ни доступа к остальным
+    документам — только право на этот шаг и только до конца срока. Регистрация
+    документа здесь не требуется, в отличие от показа: согласовывают как раз то,
+    что ещё не зарегистрировано.
+    """
+    cid = await assert_company_product(payload.company_id, current_user, db, "docs")
+    d = await _doc_or_404(db, cid, doc_id)
+    await _assert_doc_permission(db, cid, d, current_user, "send")
+
+    try:
+        approval = await db.get(DocApproval, uuid.UUID(approval_id))
+    except ValueError:
+        approval = None
+    if approval is None or approval.doc_id != d.id or approval.company_id != cid:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Виза не найдена")
+
+    raw_token = doc_share_router.new_token()
+    try:
+        link = await external_approval.issue_link(
+            db, cid, approval,
+            token_hash=doc_share_router.token_hash(raw_token),
+            token_prefix=raw_token[:8],
+            created_by=current_user, ttl_days=payload.days,
+            recipient_name=payload.recipient_name)
+    except external_approval.ExternalApprovalError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+
+    link.version_snapshot, link.card_snapshot = await _share_snapshots(db, d)
+    db.add(DocEvent(doc_id=d.id, kind="approval", user_id=current_user.id,
+                    actor_name=current_user.name or current_user.email,
+                    to_value=f"внешнее согласование: {approval.step_name}",
+                    note=f"{approval.actor_ref or "адресат не указан"}, ссылка на {payload.days} дн."))
+    await db.commit()
+    await db.refresh(link)
+    # Токен виден один раз: дальше он существует только у получателя.
+    return {"id": str(link.id), "token": raw_token,
+            "expires_at": link.expires_at.isoformat(),
+            "step_name": approval.step_name}
 
 
 @router.get("/{doc_id}/share")

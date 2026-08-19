@@ -29,7 +29,11 @@ from app.models import (
 
 # Из чего резолвится согласующий. Незнакомый способ отбрасывается санитайзером:
 # иначе в справочнике копится мусор, за которым ничего не стоит.
-ACTOR_KINDS = ("user", "role", "department", "head_of", "position")
+ACTOR_KINDS = ("user", "role", "department", "head_of", "position", "external")
+# `external` — человек вне пространства: подрядчик, арендодатель, инспектор. У
+# него нет учётки и членства, поэтому в визе он опознаётся почтой (`actor_ref`),
+# а `assignee_id` остаётся пустым. Право он получает не на документ, а на один
+# шаг — ссылкой с обязательным сроком (`DocShareLink`, purpose="approve").
 MODES = ("serial", "parallel")
 BUSINESS_TIMEZONE = ZoneInfo("Europe/Moscow")
 
@@ -95,8 +99,22 @@ async def resolve_actors(db: AsyncSession, cid: uuid.UUID,
             seen.add(uid)
             out.append((kind, ref, uid))
 
+    def add_external(ref: str) -> None:
+        """Внешний согласующий: человека в базе нет, есть адрес, на который
+        уйдёт ссылка. Дедупликация по адресу, а не по идентификатору."""
+        key = ref.strip().lower()
+        if key and not any(k == "external" and r.strip().lower() == key
+                           for k, r, _ in out):
+            out.append(("external", ref.strip(), None))
+
     for a in actors:
         by, ref = a.get("by"), a.get("ref")
+        if by == "external":
+            # Адрес проверяем грубо: пустое и не похожее на почту отсекаем, но
+            # доставку проверит почтовый сервер, а не мы.
+            if isinstance(ref, str) and "@" in ref and len(ref) <= 320:
+                add_external(ref)
+            continue
         if by == "user":
             try:
                 uid = uuid.UUID(ref)
@@ -377,7 +395,8 @@ async def decide(db: AsyncSession, cid: uuid.UUID, doc: DocCard, row: DocApprova
             company_id=cid,
             doc_id=doc.id,
             approval_id=row.id,
-            method="internal_approval",
+            method=("external_link" if row.actor_kind == "external"
+                    else "internal_approval"),
             provider="Track",
             signer_id=actor.id,
             signer_name=actor.name or actor.email,
@@ -391,7 +410,11 @@ async def decide(db: AsyncSession, cid: uuid.UUID, doc: DocCard, row: DocApprova
                 "step_code": row.step_code,
                 "step_name": row.step_name,
                 "decision": "approved",
-                "identity_source": "authenticated_session",
+                # Чем опознали подписанта. Для внешнего участника это ссылка со
+                # сроком, а не сеанс, и называть это сеансом нельзя: в споре
+                # разница между ними и есть весь вопрос.
+                "identity_source": ("external_link" if row.actor_kind == "external"
+                                    else "authenticated_session"),
             },
             signed_at=row.decided_at,
         ))

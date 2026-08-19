@@ -28,8 +28,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models import (
-    DocCard, DocEvent, DocKind, DocShareLink, DocVersion, Organization, SourceFile,
+    DocApproval, DocCard, DocEvent, DocKind, DocShareLink, DocVersion, Organization,
+    SourceFile,
 )
+from app.services import external_approval
 
 router = APIRouter(prefix="/doc-share", tags=["Документ по ссылке"])
 
@@ -169,6 +171,10 @@ async def open_link(token: str, request: Request, response: Response,
         "acknowledged_at": link.acknowledged_at.isoformat()
         if link.acknowledged_at else None,
         "ack_text": ACK_TEXT,
+        # Ссылка на визу говорит о себе прямо: человек должен понимать, что от
+        # него хотят подписи, ещё до того, как нажмёт кнопку.
+        "purpose": link.purpose,
+        "approval": await _approval_view(db, link),
         "files": [{"id": str(v.id),
                    "file_name": snapshot.get("file_name") or v.file_name,
                    "size": snapshot.get("size") or v.size_bytes}
@@ -201,6 +207,24 @@ async def download(token: str, version_id: str, db: AsyncSession = Depends(get_d
     return FileResponse(path=sf.storage_path, media_type=sf.mime_type or
                         "application/octet-stream", filename=v.file_name,
                         headers=PUBLIC_ERROR_HEADERS)
+
+
+async def _approval_view(db: AsyncSession, link: DocShareLink) -> dict[str, Any] | None:
+    """Что именно просят согласовать. Пусто, если ссылка только на показ."""
+    if link.purpose != "approve" or not link.approval_id:
+        return None
+    row = await db.get(DocApproval, link.approval_id)
+    if row is None:
+        return None
+    return {
+        "step_name": row.step_name,
+        "round": row.round,
+        "status": row.status,
+        "used_at": link.used_at.isoformat() if link.used_at else None,
+        # Тексты показываем оба: человек видит, под чем распишется в каждом случае.
+        "approve_text": external_approval.APPROVE_TEXT,
+        "reject_text": external_approval.REJECT_TEXT,
+    }
 
 
 class AckIn(BaseModel):
@@ -239,3 +263,43 @@ async def acknowledge(token: str, payload: AckIn, request: Request, response: Re
                     note=f"по ссылке, {ip or 'адрес неизвестен'}"))
     await db.commit()
     return {"acknowledged_at": now.isoformat()}
+
+
+class DecideIn(BaseModel):
+    """Решение внешнего участника.
+
+    Имя обязательно и не подставляется из ссылки: подписывает человек, а ссылку
+    ему мог переслать кто угодно, и в доказательстве должно стоять то имя,
+    которое он назвал сам.
+    """
+
+    name: str = Field(..., min_length=2, max_length=300)
+    approved: bool
+    comment: str | None = Field(None, max_length=2000)
+
+
+@router.post("/{token}/decide")
+async def decide_by_link(token: str, payload: DecideIn, request: Request,
+                         response: Response,
+                         db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+    """Поставить визу по ссылке — одну, на одном шаге, один раз.
+
+    Проверки срока и отзыва делает `_link_or_404` при каждом обращении: отозванная
+    ссылка перестаёт работать в ту же секунду, а не со следующего выпуска.
+    """
+    response.headers.update(PUBLIC_ERROR_HEADERS)
+    link = await _link_or_404(db, token, for_update=True)
+    try:
+        result = await external_approval.decide(
+            db, link, approved=payload.approved, signer_name=payload.name,
+            comment=payload.comment,
+            ip=(request.client.host if request.client else None),
+            user_agent=request.headers.get("user-agent"))
+    except external_approval.ExternalApprovalError as exc:
+        # Причину называем: человек снаружи не может посмотреть журнал и обязан
+        # понять, чинить ему что-то или просить новую ссылку.
+        await db.rollback()
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc),
+                            headers=PUBLIC_ERROR_HEADERS) from exc
+    await db.commit()
+    return result

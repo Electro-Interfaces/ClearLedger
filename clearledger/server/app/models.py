@@ -10678,6 +10678,17 @@ class DocShareLink(Base):
     # выданные ссылки продолжали работать, и очищается бэкфиллом после того, как
     # хеши проставлены.
     token: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
+    # Зачем выдана ссылка: `view` — показать документ, `approve` — дать право
+    # поставить одну визу. Право именно на активность, а не на документ: внешний
+    # человек не получает ни учётки, ни членства в компании, ни доступа к
+    # остальному — только к тому шагу, ради которого его позвали.
+    purpose: Mapped[str] = mapped_column(String(20), nullable=False, default="view")
+    approval_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("doc_approvals.id", ondelete="CASCADE"), nullable=True)
+    # Момент, когда правом воспользовались. Виза ставится один раз, и ссылка
+    # после этого мертва: одноразовость здесь не украшение, а условие того, что
+    # пересланная кому-то ссылка не превращается во вторую подпись.
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     recipient_name: Mapped[str | None] = mapped_column(String(300), nullable=True)
     recipient_email: Mapped[str | None] = mapped_column(String(320), nullable=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
