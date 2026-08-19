@@ -69,20 +69,6 @@ def parse_connector_types(raw: str | None, count: int | None = None) -> list[str
     return types
 
 
-def _selftest() -> None:
-    assert parse_connector_types("CCS2, CHAdeMO") == ["CCS2", "CHAdeMO"]
-    assert parse_connector_types("CCS2; GB/T DC") == ["CCS2", "GB/T DC"]  # слэш — часть названия
-    assert parse_connector_types("CCS2", 3) == ["CCS2", None, None]
-    assert parse_connector_types(None, 2) == [None, None]
-    assert parse_connector_types(None) == []
-    assert parse_connector_types("  ", 1) == [None]
-    print("selftest ok")
-
-
-if "--selftest" in sys.argv:
-    _selftest()
-    raise SystemExit(0)
-
 from sqlalchemy import func, select  # noqa: E402
 
 from app.database import async_session_factory  # noqa: E402
@@ -143,6 +129,29 @@ def _fill_passport(unit: EzsEquipmentUnit, loc: L) -> list[str]:
     return filled
 
 
+def _is_retired(loc: L) -> bool:
+    """Станция выведена: закрытый объект, помеченный выведенным, либо с датой вывода.
+
+    На стенде таких 65 из 620 — ставить им `in_operation` значило бы завести парк
+    оборудования, наполовину состоящий из демонтированных станций."""
+    return (loc.status == "closed"
+            or loc.operational_status == "decommissioned"
+            or bool((loc.decommissioned_on or "").strip()))
+
+
+def _retired_on(loc: L) -> date | None:
+    """Дата вывода, если она известна. Выдумывать её нельзя: объект без даты при
+    выведенном состоянии — это материал обязательного контроля (СТО п. 14.2),
+    а не повод подставить сегодняшнее число."""
+    raw = (loc.decommissioned_on or "").strip()
+    if len(raw) == 10:
+        try:
+            return date.fromisoformat(raw)
+        except ValueError:
+            return None
+    return None
+
+
 def _valid_from(loc: L) -> date:
     """Дата, с которой станция стоит в точке: ввод в эксплуатацию, иначе появление
     записи. Сегодняшнюю дату не берём — это ровно та ошибка, из-за которой дата
@@ -159,39 +168,69 @@ def _valid_from(loc: L) -> date:
 async def main() -> None:
     async with async_session_factory() as db:
         cid = await resolve_company_id(COMPANY, db)
+        # Технические и тестовые объекты в парк оборудования не заводим: их прячут
+        # и из реестра сети, а станцией они не являются.
         locs = (await db.execute(
-            select(L).where(L.company_id == cid, L.type == "ev_charging").order_by(L.code)
+            select(L).where(L.company_id == cid, L.type == "ev_charging",
+                            L.is_test.is_(False)).order_by(L.code)
         )).scalars().all()
-        print(f"company '{COMPANY}' → {cid}; объектов ev_charging: {len(locs)}")
+        skipped_test = (await db.execute(
+            select(func.count()).select_from(L).where(
+                L.company_id == cid, L.type == "ev_charging", L.is_test.is_(True))
+        )).scalar_one()
+        print(f"company '{COMPANY}' → {cid}; объектов ev_charging: {len(locs)}"
+              f" (тестовых пропущено: {skipped_test})")
 
         stats = {"units_created": 0, "units_filled": 0, "links_created": 0,
-                 "links_exist": 0, "evse_created": 0, "connectors_created": 0}
+                 "links_exist": 0, "evse_created": 0, "connectors_created": 0,
+                 "retired": 0, "links_closed": 0}
+        needs_review: list[str] = []
 
         for loc in locs:
+            retired = _is_retired(loc)
             unit = await _find_unit(db, cid, loc)
             if unit is None:
                 unit = EzsEquipmentUnit(
-                    company_id=cid, kind="station", state="in_operation", is_used=True,
-                    current_location_id=loc.id, custodian="site", origin_location_id=loc.id,
-                    notes=BASIS_NOTE,
+                    company_id=cid, kind="station",
+                    state="written_off" if retired else "in_operation", is_used=True,
+                    current_location_id=None if retired else loc.id,
+                    custodian="none" if retired else "site",
+                    origin_location_id=loc.id, notes=BASIS_NOTE,
                 )
                 db.add(unit)
                 await db.flush()
                 stats["units_created"] += 1
+            if retired:
+                stats["retired"] += 1
 
             if _fill_passport(unit, loc):
                 stats["units_filled"] += 1
 
             if await _open_link(db, cid, loc.id) is None:
+                closed_on = _retired_on(loc) if retired else None
+                start = _valid_from(loc)
+                # Дата вывода раньше даты начала бывает у перенесённых записей:
+                # такую связь оставляем открытой, иначе EXCLUDE получит пустой
+                # период и правда о размещении потеряется молча.
+                if closed_on is not None and closed_on < start:
+                    needs_review.append(f"{loc.code}: дата вывода {closed_on} раньше начала {start}")
+                    closed_on = None
                 db.add(ObjectLink(
                     company_id=cid,
                     parent_type="point_of_service", parent_id=loc.id,
                     child_type="station", child_id=str(unit.id),
                     relation="placed_at",
-                    valid_from=_valid_from(loc),
+                    valid_from=start, valid_to=closed_on,
                     basis_note=BASIS_NOTE,
+                    closed_reason="Выведена из эксплуатации" if closed_on else None,
                 ))
                 stats["links_created"] += 1
+                if closed_on:
+                    stats["links_closed"] += 1
+                elif retired:
+                    # СТО п. 14.2: выведенный объект без даты вывода — предмет
+                    # обязательного контроля, а не повод подставить дату.
+                    needs_review.append(f"{loc.code}: выведена, дата вывода не указана")
             else:
                 stats["links_exist"] += 1
 
@@ -217,7 +256,57 @@ async def main() -> None:
         else:
             await db.commit()
         print("; ".join(f"{k}={v}" for k, v in stats.items()))
+        if needs_review:
+            print(f"\nТребуется сверка ({len(needs_review)}):")
+            for line in needs_review[:40]:
+                print(f"  · {line}")
+            if len(needs_review) > 40:
+                print(f"  … ещё {len(needs_review) - 40}")
+
+
+def _selftest() -> None:
+    """Проверка правил, по которым 620 объектов разъезжаются на живые и выведенные."""
+    from datetime import datetime
+
+    class Fake:
+        status = "active"; operational_status = "working"
+        decommissioned_on = None; installed_on = None
+        created_at = datetime(2026, 6, 21)
+
+    assert parse_connector_types("CCS2, CHAdeMO") == ["CCS2", "CHAdeMO"]
+    assert parse_connector_types("CCS2; GB/T DC") == ["CCS2", "GB/T DC"]  # слэш — часть названия
+    assert parse_connector_types("CCS2", 3) == ["CCS2", None, None]
+    assert parse_connector_types(None, 2) == [None, None]
+    assert parse_connector_types(None) == []
+    assert parse_connector_types("  ", 1) == [None]
+
+    live = Fake()
+    assert not _is_retired(live)
+    assert _retired_on(live) is None
+    assert _valid_from(live) == date(2026, 6, 21)          # нет даты ввода — дата записи
+
+    dated = Fake(); dated.installed_on = "2019-08-01"
+    assert _valid_from(dated) == date(2019, 8, 1)
+
+    broken = Fake(); broken.installed_on = "не указана"     # не ISO → дата записи
+    assert _valid_from(broken) == date(2026, 6, 21)
+
+    closed = Fake(); closed.status = "closed"
+    assert _is_retired(closed) and _retired_on(closed) is None   # выведена без даты → в сверку
+
+    decom = Fake(); decom.operational_status = "decommissioned"
+    assert _is_retired(decom)
+
+    with_date = Fake(); with_date.decommissioned_on = "2024-12-11"
+    assert _is_retired(with_date) and _retired_on(with_date) == date(2024, 12, 11)
+
+    junk = Fake(); junk.status = "closed"; junk.decommissioned_on = "12.11.2024"
+    assert _retired_on(junk) is None                        # не ISO — не выдумываем дату
+    print("selftest ok")
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    if "--selftest" in sys.argv:
+        _selftest()
+    else:
+        asyncio.run(main())
