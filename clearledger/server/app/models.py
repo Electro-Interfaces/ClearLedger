@@ -6665,6 +6665,48 @@ class EzsSiteEquipment(Base):
     )
 
 
+class InboundEvent(Base):
+    """Входящие события от приложений пространства — с защитой от повтора.
+
+    Обратный канал нужен там, где раньше была синхронная пара вызовов: Координатор
+    коммитит переход, Ядро следом двигает воронку. Если между этими точками рвалась
+    связь, маршрут уходил вперёд, а проект оставался позади — и повторить шаг было
+    нельзя, второй раз ребро не срабатывает.
+
+    Теперь Координатор кладёт событие в свой outbox и доставляет с ретраями, а
+    Ядро принимает его сюда. Повторная доставка — штатный режим такой доставки,
+    поэтому ключ `(provider, external_id)` уникален: второе появление того же
+    события не обрабатывается заново, а сразу отвечает «уже принято».
+
+    Обработка отделена от приёма намеренно: приём обязан быть быстрым и почти
+    всегда успешным, иначе отправитель будет ретраить из-за нашей внутренней
+    ошибки и копить очередь.
+    """
+    __tablename__ = "inbound_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=True, index=True)
+    # Кто прислал: код приложения пространства (`support`, …).
+    provider: Mapped[str] = mapped_column(String(40), nullable=False)
+    # Идентификатор события у отправителя — он же ключ идемпотентности.
+    external_id: Mapped[str] = mapped_column(String(120), nullable=False)
+    type: Mapped[str] = mapped_column(String(80), nullable=False)
+    payload: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # ok | skipped | failed — и текст, если не вышло: молчаливая потеря события
+    # хуже видимой ошибки, потому что о ней никто не узнает.
+    result: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+    __table_args__ = (
+        Index("uq_inbound_events_key", "provider", "external_id", unique=True),
+        Index("ix_inbound_events_unprocessed", "received_at",
+              postgresql_where=text("processed_at IS NULL")),
+    )
+
+
 class ObjectExportLog(Base):
     """Журнал выгрузок сведений об объектах (СТО п. 12.3).
 

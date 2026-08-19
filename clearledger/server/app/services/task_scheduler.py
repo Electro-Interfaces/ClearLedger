@@ -332,6 +332,16 @@ async def run_break_glass_notifications(db, now: datetime) -> int:
     return sent
 
 
+async def run_inbound_events(db: AsyncSession, now: datetime) -> int:
+    """Разобрать принятые события приложений.
+
+    Приём и обработка разделены: ручка отвечает отправителю сразу, иначе наша
+    внутренняя ошибка превращалась бы в бесконечную повторную доставку.
+    """
+    from app.services import inbound_events
+    return await inbound_events.process_pending(db)
+
+
 async def run_project_reconcile(db: AsyncSession, now: datetime) -> int:
     """Досверить проекты, у которых шаг маршрута начат, но не отражён.
 
@@ -370,7 +380,8 @@ async def tick() -> dict[str, int]:
     """Один проход регламента. Ошибка одной части не отменяет остальные."""
     now = datetime.now(timezone.utc)
     out = {"recurrences": 0, "reminders": 0, "escalations": 0,
-           "acquaints": 0, "exchange": 0, "break_glass": 0, "project_reconcile": 0}
+           "acquaints": 0, "exchange": 0, "break_glass": 0, "project_reconcile": 0,
+           "inbound_events": 0}
     async with async_session_factory() as db:
         for key, fn in (("recurrences", run_recurrences),
                         ("reminders", run_due_reminders),
@@ -378,7 +389,8 @@ async def tick() -> dict[str, int]:
                         ("acquaints", run_acquaint_reminders),
                         ("exchange", run_exchange_scans),
                         ("break_glass", run_break_glass_notifications),
-                        ("project_reconcile", run_project_reconcile)):
+                        ("project_reconcile", run_project_reconcile),
+                        ("inbound_events", run_inbound_events)):
             try:
                 out[key] = await fn(db, now)
                 await db.commit()

@@ -3546,6 +3546,13 @@ async def create_all() -> None:
         ):
             await conn.execute(_sa.text(stmt))
 
+        # v2.47: обратный канал приложений — приём событий с защитой от повтора.
+        for stmt in (
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_inbound_events_key "
+            "ON inbound_events (provider, external_id)",
+        ):
+            await conn.execute(_sa.text(stmt))
+
     await _ensure_active_group_readiness(engine)
 
 
