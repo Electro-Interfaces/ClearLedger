@@ -16,7 +16,7 @@ RS256 Ядра и внутренний адрес приложения. Отде
 """
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Any
 
 import httpx
@@ -133,11 +133,12 @@ async def case_state(db: AsyncSession, company_id, site: EzsSite,
     Действия считаются ОТ ИМЕНИ человека: кнопку ОКС менеджеру отдела развития
     показывать незачем. Кейса ещё нет — это не ошибка, а «работа не начата».
 
-    Здесь же досводится ввод в эксплуатацию. Шаг применяется в двух системах по
-    очереди: Координатор коммитит переход, Ядро двигает воронку — и если между
-    этими точками оборвалась связь, маршрут ушёл вперёд, а проект остался в
-    прежней стадии навсегда: повторить шаг нельзя, второй раз ребро не сработает.
-    Проверка при чтении карточки чинит расхождение сама.
+    **Чтение ничего не пишет.** Раньше здесь же досводился ввод в эксплуатацию,
+    и это оказалось худшим из решений: дата ввода — основание перевода капвложений
+    08 → 01 — проставлялась фактом открытия карточки, датой чужого просмотра и под
+    правами любого члена компании. Теперь расхождение только НАЗЫВАЕТСЯ
+    (`needsReconcile`), а устраняет его явная операция `reconcile` — руками или
+    фоновым проходом.
     """
     state = await _call(db, company_id, "GET", f"/api/v1/eco/projects/{site.id}/case",
                         params={"actorEmail": getattr(user, "email", None) or "",
@@ -148,19 +149,62 @@ async def case_state(db: AsyncSession, company_id, site: EzsSite,
     # и обрыв связи между этими точками оставлял подрядчика и форму права только в
     # кейсе: человек их ввёл, а чек-лист проекта об этом не знал. Значения кейса —
     # канонические, поэтому сверка идемпотентна и повтор ей не вредит.
+    state["needsReconcile"] = _pending_diff(site, state)
+    return state
+
+
+def _pending_diff(site: EzsSite, state: dict[str, Any]) -> list[str]:
+    """Чем карточка проекта расходится с маршрутом — без единой записи.
+
+    Возвращает причины на языке человека: их видно в карточке, и по ним понятно,
+    что даст кнопка «Сверить». Пустой список означает, что сверять нечего.
+    """
+    reasons: list[str] = []
+    values = state.get("values") or {}
+    for source, column in STEP_FIELDS_TO_SITE.items():
+        if not hasattr(site, column):
+            continue
+        value = values.get(source)
+        if value in (None, ""):
+            continue
+        if getattr(site, column, None) in (None, "", 0):
+            reasons.append(f"поле «{column}» заполнено в маршруте, но не в карточке")
+
+    stage = (state.get("stage") or {}).get("code") or state.get("stageCode")
+    if stage in COMMISSIONED_STAGES and not site.commissioned_on:
+        reasons.append("маршрут дошёл до ввода в эксплуатацию, дата ввода не зафиксирована")
+    if stage == "ezs_rejected" and site.stage != "archive":
+        reasons.append("маршрут завершён отказом, проект не переведён в архив")
+    if stage == "ezs_hold" and site.stage != "on_hold":
+        reasons.append("маршрут на паузе, проект остался в работе")
+    return reasons
+
+
+async def reconcile(db: AsyncSession, company_id, site: EzsSite,
+                    user: User | None = None) -> dict[str, Any]:
+    """Свести карточку проекта с маршрутом — явной операцией, а не чтением.
+
+    Ровно то, что раньше делалось на GET: поля шага и исход маршрута. Отличие
+    в том, что теперь это осознанное действие с автором, и дату ввода ставит тот,
+    кто её подтвердил, а не тот, кто открыл экран.
+    """
+    state = await _call(db, company_id, "GET", f"/api/v1/eco/projects/{site.id}/case",
+                        params={"actorEmail": getattr(user, "email", None) or "",
+                                "kind": site.kind or "new_build"})
     before = {column: getattr(site, column, None) for column in STEP_FIELDS_TO_SITE.values()}
     written = _reflect_step_fields(site, state.get("values") or {})
     if written:
         state["siteFieldsWritten"] = written
         from app.services.ezs_site_work import log_event
         await log_event(
-            db, site, "edit", user=None, source="system",
+            db, site, "edit", user=user, source="reconcile",
             text="Поля проекта досверены с маршрутом",
             changes=[make_change(field, before[field], getattr(site, field)) for field in written],
         )
     funnel = await _reflect_outcome(db, site, state, payload=state.get("values") or {}, user=user)
     if funnel:
         state["funnel"] = funnel
+    state["needsReconcile"] = _pending_diff(site, state)
     return state
 
 
@@ -305,6 +349,14 @@ async def apply_step(db: AsyncSession, company_id, site: EzsSite, link_id: str,
     branch_case_id адресует шаг в параллельную ветку проекта (ОР ∥ ОКС, подрядчик):
     ветка держит родителя, и закрывать её человек должен там же, где видит.
     """
+    # Намерение отмечается ДО вызова и фиксируется отдельной транзакцией: если
+    # связь оборвётся после того, как Координатор закоммитил переход, отметка
+    # останется и фоновый проход досверит проект. Раньше это чинилось только тем,
+    # что кто-нибудь откроет карточку.
+    site.pending_link_id = str(link_id)
+    site.pending_at = datetime.now(timezone.utc)
+    await db.commit()
+
     state = await _call(db, company_id, "POST",
                         f"/api/v1/eco/projects/{site.id}/case/transition", json={
                             "linkId": str(link_id),
@@ -330,4 +382,8 @@ async def apply_step(db: AsyncSession, company_id, site: EzsSite, link_id: str,
     funnel = await _reflect_outcome(db, site, state, payload=payload, user=user)
     if funnel:
         state["funnel"] = funnel
+
+    # Отражение прошло — намерение исполнено.
+    site.pending_link_id = None
+    site.pending_at = None
     return state

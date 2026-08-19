@@ -6363,6 +6363,15 @@ class EzsSite(Base):
     # на станцию, которой у проекта ещё нет.
     contract_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("contracts.id", ondelete="SET NULL"), nullable=True)
+    # ── Отметка намерения: шаг маршрута начат, но ещё не отражён в проекте ──
+    # Шаг применяется в двух системах по очереди: Координатор коммитит переход,
+    # Ядро двигает воронку. Если между этими точками оборвалась связь, маршрут
+    # ушёл вперёд, а проект остался в прежней стадии — и повторить шаг нельзя,
+    # второй раз ребро не сработает. Отметка ставится ДО вызова и снимается после
+    # отражения: по ней фоновый проход находит, что осталось досверить, а раньше
+    # это чинилось только чужим открытием карточки.
+    pending_link_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    pending_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Полный исходный ряд (заголовок → значение) — ничего не теряем при импорте.
     raw: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     source_sheet: Mapped[str | None] = mapped_column(String(80), nullable=True)  # лист-источник

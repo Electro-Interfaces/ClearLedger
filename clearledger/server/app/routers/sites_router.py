@@ -851,6 +851,26 @@ async def project_case(
         return {"ok": False, "exists": False, "error": str(e)}
 
 
+@router.post("/{site_id}/case/reconcile")
+async def reconcile_project_case(
+    site_id: uuid.UUID, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Свести карточку проекта с маршрутом.
+
+    Раньше это делалось молча при открытии карточки: дата ввода в эксплуатацию —
+    основание перевода капвложений 08 → 01 — проставлялась датой чужого просмотра.
+    Теперь у операции есть автор и намерение, а чтение карточки только называет
+    расхождение.
+    """
+    cid = await assert_company_member(company_id, user, db)
+    site = await _owned(db, cid, site_id)
+    try:
+        return await projects_process.reconcile(db, cid, site, user)
+    except ProjectionError as e:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(e))
+
+
 @router.post("/{site_id}/case")
 async def open_project_case(
     site_id: uuid.UUID, company_id: str = Query(...),

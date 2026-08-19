@@ -3536,6 +3536,16 @@ async def create_all() -> None:
         ):
             await conn.execute(_sa.text(stmt))
 
+        # v2.46: отметка намерения на шаге маршрута проекта — чтобы незавершённый
+        # шаг находил фоновый проход, а не чужое открытие карточки.
+        for stmt in (
+            "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS pending_link_id VARCHAR(64)",
+            "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS pending_at TIMESTAMPTZ",
+            "CREATE INDEX IF NOT EXISTS ix_ezs_sites_pending "
+            "ON ezs_sites (company_id, pending_at) WHERE pending_link_id IS NOT NULL",
+        ):
+            await conn.execute(_sa.text(stmt))
+
     await _ensure_active_group_readiness(engine)
 
 

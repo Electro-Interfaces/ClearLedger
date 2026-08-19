@@ -332,18 +332,53 @@ async def run_break_glass_notifications(db, now: datetime) -> int:
     return sent
 
 
+async def run_project_reconcile(db: AsyncSession, now: datetime) -> int:
+    """Досверить проекты, у которых шаг маршрута начат, но не отражён.
+
+    Шаг применяется в двух системах по очереди, и обрыв между ними оставлял
+    маршрут впереди, а проект позади — навсегда: повторить шаг нельзя, второй раз
+    ребро не сработает. Раньше это чинило только чужое открытие карточки, то есть
+    дата ввода в эксплуатацию зависела от того, кто и когда зайдёт на экран.
+
+    Берём отметки старше пяти минут: меньший порог поймал бы шаг, который прямо
+    сейчас нормально доигрывается в соседнем запросе.
+    """
+    from app.models import EzsSite
+    from app.services import projects_process
+
+    cutoff = now - timedelta(minutes=5)
+    rows = (await db.execute(
+        select(EzsSite).where(
+            EzsSite.pending_link_id.is_not(None),
+            EzsSite.pending_at < cutoff,
+        ).limit(50)
+    )).scalars().all()
+
+    done = 0
+    for site in rows:
+        try:
+            await projects_process.reconcile(db, site.company_id, site, user=None)
+            site.pending_link_id = None
+            site.pending_at = None
+            done += 1
+        except Exception:  # noqa: BLE001 — один проект не отменяет остальные
+            log.exception("Досверка проекта %s не удалась", site.id)
+    return done
+
+
 async def tick() -> dict[str, int]:
     """Один проход регламента. Ошибка одной части не отменяет остальные."""
     now = datetime.now(timezone.utc)
     out = {"recurrences": 0, "reminders": 0, "escalations": 0,
-           "acquaints": 0, "exchange": 0, "break_glass": 0}
+           "acquaints": 0, "exchange": 0, "break_glass": 0, "project_reconcile": 0}
     async with async_session_factory() as db:
         for key, fn in (("recurrences", run_recurrences),
                         ("reminders", run_due_reminders),
                         ("escalations", run_escalations),
                         ("acquaints", run_acquaint_reminders),
                         ("exchange", run_exchange_scans),
-                        ("break_glass", run_break_glass_notifications)):
+                        ("break_glass", run_break_glass_notifications),
+                        ("project_reconcile", run_project_reconcile)):
             try:
                 out[key] = await fn(db, now)
                 await db.commit()
