@@ -800,14 +800,20 @@ async def downlink(
         raise HTTPException(400, "Не определён код АЗС")
     station_id = сверить_станцию(станция_ключа_, int(header))
 
+    # Идентификатор забираем ДО сверки: внутри неё есть commit, после которого
+    # объект company истекает, и следующее обращение к `company.id` уходит в
+    # ленивую подгрузку уже вне живой сессии — запрос падает с 500, а станция
+    # остаётся без заданий молча: в её логе только «мастер ответил 500».
+    company_id = company.id
+
     # Станция на связи — это и есть момент сверки: реестр документов освежается
     # и свежий снимок заголовков ложится в эту же очередь заданий. Иначе центр
     # и станция расходятся молча, пока человек не нажмёт кнопку.
-    await сверить_документы(db, company.id, station_id)
+    await сверить_документы(db, company_id, station_id)
 
     rows = (await db.execute(
         select(EdgeDownlink)
-        .where(EdgeDownlink.company_id == company.id,
+        .where(EdgeDownlink.company_id == company_id,
                EdgeDownlink.station_id == station_id,
                EdgeDownlink.acked_at.is_(None),
                # Отменённое центром станции не отдаём — иначе отмена
