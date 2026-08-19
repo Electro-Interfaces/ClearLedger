@@ -346,6 +346,21 @@ async def apply_movement(db: AsyncSession, company_id, user: User | None,
     if op in ("to_repair", "to_vendor") and not counterparty:
         raise HTTPException(400, "Укажите контрагента (кому передано)")
 
+    # Даты ввода и вывода обязательны при смене состояния (СТО п. 9.3, 9.5,
+    # бэклог п. 15.7). Дата берётся из даты операции, а не из «сегодня»: акт
+    # подписывают одним числом, а вносят другим, и подставлять день внесения —
+    # ровно та ошибка, из-за которой дата ввода равнялась дню просмотра карточки.
+    if op in ("commissioning", "write_off", "to_vendor"):
+        occurred = (payload.get("occurred_on") or "").strip()
+        if len(occurred) != 10:
+            raise HTTPException(
+                400, "Укажите дату операции: она становится датой "
+                     + ("ввода в эксплуатацию" if op == "commissioning" else "вывода"))
+        if op == "commissioning":
+            unit.commissioned_on = occurred
+        else:
+            unit.decommissioned_on = occurred
+
     # применяем к юниту
     unit.state = to_state
     if op in ("dismantle", "from_repair"):
