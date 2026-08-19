@@ -845,8 +845,14 @@ class BpPackageEmitter:
             DataEntry.doc_type_id == "retail_sale_sidegoods",
         ))).scalars().all()
         candidates = [row for row in rows if self._candidate_shift_key(row) == shift_key]
+        # При нескольких выгрузках одной смены (переоткрытие/перевыгрузка) берём
+        # ФИНАЛЬНУЮ ревизию — с максимальным временем закрытия, а не первую по id.
+        # Иначе промежуточная ревизия (напр. до формирования выпусков блюд) роняет
+        # пакет на fail-closed «нет точной ТТК», хотя финальная собирается чисто.
         candidates.sort(key=lambda row: (
-            row.source != "edge", str(getattr(row, "id", "")),
+            row.source != "edge",
+            -(_timestamp(((row.meta or {}).get("Смена") or {}).get("Закрытие")) or 0.0),
+            str(getattr(row, "id", "")),
         ))
         if not candidates:
             raise ValueError(f"смена не найдена: {shift_key}")
