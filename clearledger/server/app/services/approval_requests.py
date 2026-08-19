@@ -32,7 +32,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import ApprovalRequest, DocCard, DocKind
+from app.models import ApprovalRequest, DocCard, DocEvent, DocKind
 from app.services import doc_approvals
 
 log = logging.getLogger("clearledger.approvals")
@@ -164,6 +164,18 @@ async def deliver_pending(db: AsyncSession, limit: int = 20) -> int:
         except Exception as exc:  # noqa: BLE001 — одна связь не валит проход
             row.last_error = f"{type(exc).__name__}: {exc}"[:500]
             log.warning("Исход круга по документу %s не доставлен: %s", row.doc_id, exc)
+            if row.attempts >= MAX_ATTEMPTS:
+                # Попытки кончились. Молчать здесь — худшее из возможного: круг
+                # виз закрыт, его исход существует только у нас, и без записи в
+                # следе документа человек узнает о потере, когда придёт спросить,
+                # почему стройка стоит. След — то место, куда он и так смотрит.
+                db.add(DocEvent(
+                    doc_id=row.doc_id, kind="approval", user_id=None,
+                    actor_name="Процесс",
+                    to_value="исход круга не доставлен",
+                    note=(f"попыток {row.attempts}; {row.last_error}")[:2000]))
+                log.error("Исход круга по документу %s потерян после %s попыток",
+                          row.doc_id, row.attempts)
     return done
 
 
