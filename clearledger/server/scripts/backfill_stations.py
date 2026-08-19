@@ -16,17 +16,18 @@
 СТО п. 15.8 разрешает вести внешний идентификатор на станции, пока уровень не
 введён достоверно, поэтому выдумывать структуру ради заполненности не нужно.
 
-Использование:
-  docker compose exec ledger-backend python scripts/backfill_stations.py rushydro
-  docker compose exec ledger-backend python scripts/backfill_stations.py rushydro --dry-run
-  docker compose exec ledger-backend python scripts/backfill_stations.py rushydro --evse
-  python scripts/backfill_stations.py --selftest      # без БД
+Использование (без --apply ничего не пишет — это защита от случайного запуска):
+  COMPANY_SLUG=rushydro exec-py.sh rushydro backfill_stations.py     # прогон вхолостую
+  COMPANY_SLUG=rushydro APPLY=1 exec-py.sh rushydro backfill_stations.py
+  python scripts/backfill_stations.py rushydro --apply --evse
+  python scripts/backfill_stations.py --selftest                     # без БД
 
 Основание: СТО «Идентификация и учёт объектов зарядной инфраструктуры»,
 docs/OBJECTS.md в ecosystem-deploy.
 """
 import asyncio
 import os
+import uuid
 import re
 import sys
 from datetime import date
@@ -76,27 +77,63 @@ from app.models import EzsConnector, EzsEvse, EzsEquipmentUnit, ObjectLink  # no
 from app.models import ServiceLocation as L  # noqa: E402
 from app.utils import resolve_company_id  # noqa: E402
 
-COMPANY = next((a for a in sys.argv[1:] if not a.startswith("--")), "rushydro")
-DRY_RUN = "--dry-run" in sys.argv
-WITH_EVSE = "--evse" in sys.argv
+# COMPANY_SLUG пробрасывает exec-py.sh — в стеке с несколькими компаниями скрипт
+# обязан знать, чьи данные трогает.
+COMPANY = os.environ.get("COMPANY_SLUG") or next(
+    (a for a in sys.argv[1:] if not a.startswith("--")), "rushydro")
+# Прогон без записи — поведение ПО УМОЛЧАНИЮ: скрипт заводит сотни строк в боевом
+# пространстве, и запускать его случайно (например, через exec-py.sh, который не
+# передаёт аргументы) не должно ничего менять.
+APPLY = "--apply" in sys.argv or os.environ.get("APPLY") == "1"
+DRY_RUN = not APPLY
+WITH_EVSE = "--evse" in sys.argv or os.environ.get("WITH_EVSE") == "1"
 BASIS_NOTE = "Бэкфилл разделения уровней (СТО, docs/OBJECTS.md)"
 
 
-async def _open_link(db, cid, loc_id: str) -> ObjectLink | None:
-    """Действующая связь станции с этой точкой обслуживания, если она уже есть."""
+async def _existing_link(db, cid, loc_id: str) -> ObjectLink | None:
+    """Любая связь станции с этой точкой обслуживания — открытая или закрытая.
+
+    Фильтровать по открытым нельзя: у выведенной станции связь закрыта датой
+    вывода, и второй проход завёл бы её заново. На боевом стенде это поймал
+    EXCLUDE — 66 выведенных станций из 603 дали ExclusionViolation на повторе.
+    Бэкфилл заводит первичное состояние, а не отслеживает переезды, поэтому
+    признак «связь уже заведена» — наличие любой записи по этой паре.
+    """
     return (await db.execute(
         select(ObjectLink).where(
             ObjectLink.company_id == cid,
             ObjectLink.relation == "placed_at",
             ObjectLink.parent_type == "point_of_service",
             ObjectLink.parent_id == loc_id,
-            ObjectLink.valid_to.is_(None),
         ).limit(1)
     )).scalar_one_or_none()
 
 
 async def _find_unit(db, cid, loc: L) -> EzsEquipmentUnit | None:
-    """Станция этого объекта: по серийнику, затем по прежней скалярной привязке."""
+    """Станция этого объекта: по заведённой связи, затем по заводскому номеру,
+    затем по прежней скалярной привязке.
+
+    Связь спрашивается первой, и она же — единственный способ узнать станцию у
+    объекта без заводского номера: у выведенной станции `current_location_id`
+    пуст, серийника нет, и без этой ветки каждый проход заводил бы её заново.
+    На стенде такой объект ровно один, и он всплыл именно на повторном прогоне.
+    """
+    link = await _existing_link(db, cid, loc.id)
+    if link is not None:
+        try:
+            unit_id = uuid.UUID(link.child_id)
+        except ValueError:
+            unit_id = None
+        if unit_id is not None:
+            unit = (await db.execute(
+                select(EzsEquipmentUnit).where(
+                    EzsEquipmentUnit.company_id == cid,
+                    EzsEquipmentUnit.id == unit_id,
+                ).limit(1)
+            )).scalar_one_or_none()
+            if unit is not None:
+                return unit
+
     serial = (loc.serial_number or "").strip()
     if serial:
         unit = (await db.execute(
@@ -206,15 +243,17 @@ async def main() -> None:
             if _fill_passport(unit, loc):
                 stats["units_filled"] += 1
 
-            if await _open_link(db, cid, loc.id) is None:
+            if await _existing_link(db, cid, loc.id) is None:
                 closed_on = _retired_on(loc) if retired else None
                 start = _valid_from(loc)
+                noted = False
                 # Дата вывода раньше даты начала бывает у перенесённых записей:
                 # такую связь оставляем открытой, иначе EXCLUDE получит пустой
                 # период и правда о размещении потеряется молча.
                 if closed_on is not None and closed_on < start:
                     needs_review.append(f"{loc.code}: дата вывода {closed_on} раньше начала {start}")
                     closed_on = None
+                    noted = True
                 db.add(ObjectLink(
                     company_id=cid,
                     parent_type="point_of_service", parent_id=loc.id,
@@ -227,9 +266,12 @@ async def main() -> None:
                 stats["links_created"] += 1
                 if closed_on:
                     stats["links_closed"] += 1
-                elif retired:
+                elif retired and not noted:
                     # СТО п. 14.2: выведенный объект без даты вывода — предмет
-                    # обязательного контроля, а не повод подставить дату.
+                    # обязательного контроля, а не повод подставить дату. Причина
+                    # пишется один раз: у объекта с отброшенной датой она уже
+                    # названа выше, и вторая строка «дата не указана» противоречила
+                    # бы первой.
                     needs_review.append(f"{loc.code}: выведена, дата вывода не указана")
             else:
                 stats["links_exist"] += 1
