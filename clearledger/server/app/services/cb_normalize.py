@@ -47,6 +47,24 @@ def _shift_key(shift: dict) -> str:
     return str(shift.get("ОСЭНомер") or shift.get("НомерСмены") or "").strip()
 
 
+def _shift_scope(shift: dict) -> str:
+    """Ключ смены для записей, живущих В КОНТЕКСТЕ смены (ТТК).
+
+    `НомерСмены` и `ОСЭНомер` кодируют дату, а не последовательность смен: у обеих
+    смен одного дня они совпадают (18.08.2026 — `2082081808202601` и у 7080, и у
+    7081). Для ТТК одного `_shift_key` мало — вторая смена дня перезаписывала
+    рецептуры первой, и первая падала fail-closed «нет точной ТТК этой смены»,
+    хотя блюда продавались и выпуск был. Документы смены это не задевало: у них в
+    ключе есть собственный `ИсточникUUID`, а у ТТК он один на (блюдо, версия).
+
+    Кассовый номер смены различает смены внутри дня — тот же различитель, что
+    использует `_shift_identity` при поиске ТТК смены.
+    """
+    key = _shift_key(shift)
+    internal = str(shift.get("НомерСменыВнутр") or "").strip()
+    return f"{key}:{internal}" if internal else key
+
+
 def _recipe_index(docs: list[dict]) -> dict[str, list[dict]]:
     """{БлюдоUUID: [{НоменклатураUUID, Количество=Брутто}]} из kind=recipe."""
     idx: dict[str, list[dict]] = {}
@@ -227,7 +245,7 @@ def normalize_shift_package(
                 "doc_type_id": "recipe",
                 "source": source,
                 "source_label": source_label,
-                "source_id": f"{skey}:recipe:{blyudo}:{version_token}",
+                "source_id": f"{_shift_scope(shift)}:recipe:{blyudo}:{version_token}",
                 "layer": "clean",
                 "status": "verified",
                 "meta": {"Смена": shift_meta, "kind": "recipe", "Документ": rec_doc},
