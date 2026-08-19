@@ -41,6 +41,7 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.station_passport import stations_by_location, write_value
 from app.models import (
     ChargePayment, CorporateClient, EzsCustomer, EzsReference, EzsRfidCard, EzsTariff,
     ServiceLocation,
@@ -337,6 +338,10 @@ async def ingest_connectors(db: AsyncSession, company_id, rows: list[dict[str, A
     Ключ разъёма — (id станции, номер коннектора): `id_коннектора` в витрине
     сквозным НЕ является (на 1596 строк всего 8 значений — это порядковый номер)."""
     idx = await _station_index(db, company_id)
+    # Паспорт железа принадлежит станции (СТО, docs/OBJECTS.md): состав разъёмов и
+    # мощность пишем ей, а не точке обслуживания. Карта собирается один раз на весь
+    # прогон — витрина приносит тысячи строк, и запрос на станцию был бы N+1.
+    stations = await stations_by_location(db, company_id, [l.id for l in idx.values()])
     by_station: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for r in rows:
         sid = _s(r.get("id_станции"), 64)
@@ -377,11 +382,12 @@ async def ingest_connectors(db: AsyncSession, company_id, rows: list[dict[str, A
                 "priceKwh": _pos(r.get("цена_за_квтч")),
                 "priceHour": _pos(r.get("цена_за_час")),
             }.items() if v is not None})
-        loc.connectors_count = len(items)
+        unit = stations.get(loc.id)
+        write_value("connectorsCount", loc, unit, len(items))
         if types:
-            loc.connector_types = ", ".join(types)[:200]
+            write_value("connectorTypes", loc, unit, ", ".join(types)[:200])
         if powers:
-            loc.power_kwt = max(powers)
+            write_value("powerKwt", loc, unit, max(powers))
         loc.extra_metadata = {**(loc.extra_metadata or {}), "connectors": conns,
                               "connectorsSource": "asuim_vitrina"}
         updated += 1

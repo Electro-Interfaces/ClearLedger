@@ -1,14 +1,15 @@
 """Паспорт объекта: у кого спрашивать каждую графу.
 
 После разделения уровней (СТО, docs/OBJECTS.md) графы железа принадлежат станции,
-но семь из них до сих пор наполняют конвейеры загрузки прямо в колонки точки.
-Спросить не того владельца — значит показать застывшее значение вместо свежего,
-причём молча. Правило легко сломать невнимательной правкой словаря, поэтому оно
-закреплено тестом.
+и конвейеры загрузки переведены на запись владельцу графы. Спросить не того
+владельца — значит показать застывшее значение вместо свежего, причём молча:
+на экране просто старое число. Правило легко сломать невнимательной правкой
+словаря, поэтому оно закреплено тестом.
 """
 from types import SimpleNamespace
 
-from app.services.station_passport import FEED_OWNED, PASSPORT_SOURCES, passport_value
+from app.services.station_passport import (
+    FEED_OWNED, PASSPORT_SOURCES, passport_value, write_value)
 
 
 def _loc(**kw):
@@ -40,19 +41,47 @@ def test_station_owns_its_own_passport():
     assert passport_value("firmware", loc, unit) == "1.2.3"
 
 
-def test_feed_owned_graphs_stay_with_the_point():
-    """Мощность, коннекторы, владелец, инвентарный, бренд, дата ввода — их пишет
-    загрузка в точку, и станция не должна перекрывать свежую выгрузку."""
-    loc = _loc(power_kwt=120.0, connectors_count=4, owner="РусГидро",
-               inventory_number="INV-NEW", brand="B-NEW", installed_on="2024-01-01")
-    unit = _unit(power_kwt=50.0, connectors_count=1, owner_name="Старый",
-                 inventory_number="INV-OLD", brand="B-OLD", commissioned_on="2019-01-01")
-    assert passport_value("powerKwt", loc, unit) == 120.0
-    assert passport_value("connectorsCount", loc, unit) == 4
+def test_all_graphs_come_from_the_station_after_writers_moved():
+    """Конвейеры переведены на запись владельцу, поэтому станцию спрашиваем первой
+    у всех граф — включая те, что раньше вела загрузка."""
+    loc = _loc(power_kwt=120.0, connectors_count=4, owner="Старый",
+               inventory_number="INV-OLD", brand="B-OLD", installed_on="2019-01-01")
+    unit = _unit(power_kwt=50.0, connectors_count=1, owner_name="РусГидро",
+                 inventory_number="INV-NEW", brand="B-NEW", commissioned_on="2024-01-01")
+    assert passport_value("powerKwt", loc, unit) == 50.0
+    assert passport_value("connectorsCount", loc, unit) == 1
     assert passport_value("owner", loc, unit) == "РусГидро"
     assert passport_value("inventoryNumber", loc, unit) == "INV-NEW"
     assert passport_value("brand", loc, unit) == "B-NEW"
     assert passport_value("installedOn", loc, unit) == "2024-01-01"
+
+
+def test_feed_owned_flips_priority_back():
+    """Механизм на случай, если запись графы вернётся в точку: имя в FEED_OWNED
+    возвращает приоритет точке, и застывшее значение станции не всплывает."""
+    import app.services.station_passport as sp
+
+    loc, unit = _loc(power_kwt=120.0), _unit(power_kwt=50.0)
+    assert passport_value("powerKwt", loc, unit) == 50.0
+    saved = sp.FEED_OWNED
+    try:
+        sp.FEED_OWNED = frozenset({"powerKwt"})
+        assert passport_value("powerKwt", loc, unit) == 120.0
+    finally:
+        sp.FEED_OWNED = saved
+
+
+def test_write_goes_to_the_station_when_it_exists():
+    """Запись идёт в одно место: станции, если она заведена, иначе точке."""
+    loc, unit = _loc(power_kwt=120.0), _unit()
+    assert write_value("powerKwt", loc, unit, 75.0) is True
+    assert unit.power_kwt == 75.0
+    assert loc.power_kwt == 120.0, "точку конвейер больше не трогает"
+    assert write_value("powerKwt", loc, unit, 75.0) is False, "повтор не считается правкой"
+
+    orphan = _loc()
+    assert write_value("powerKwt", orphan, None, 30.0) is True
+    assert orphan.power_kwt == 30.0, "нет станции — пишем в точку, как до разделения"
 
 
 def test_fallback_works_in_both_directions():

@@ -5,10 +5,11 @@
 точке обслуживания. Прежние колонки `service_locations` при этом остались на
 месте: снимать их до перевода всех читателей нельзя.
 
-Отсюда правило слияния: **что знает станция — берём у станции, чего не знает —
-у точки**. Пока паспорт станции не заполнен, экраны показывают ровно то же, что
-показывали; по мере заполнения данные начинают приходить из нового места. Никакой
-даты переключения не требуется, и откат не ломает витрины.
+Отсюда правило: **графу спрашиваем у того, кто её пишет, с фолбэком на второго**.
+Конвейеры загрузки переведены на запись владельцу (`write_value`), поэтому
+владелец всех граф — станция; пока связь не заведена, и чтение, и запись идут в
+точку, как до разделения. Никакой даты переключения не требуется, и откат не
+ломает витрины.
 
 Станция ищется по связи с периодом действия, а не по скалярной ссылке: в точке
 за годы стоят разные станции, и «какая стоит сейчас» — это вопрос с датой.
@@ -43,22 +44,15 @@ PASSPORT_SOURCES: tuple[tuple[str, str, str], ...] = (
 )
 
 
-# Графы, которые пока наполняют конвейеры загрузки — прямо в колонки точки:
-#   power_kwt / connectors_count / connector_types — нормализация справочника
-#     станций по составу коннекторов (`services/asuim_normalize.py:380-384`);
-#   owner — нормализация станций (`services/stations_normalize.py:408`);
-#   inventory_number / brand / installed_on — реестр РусГидро
-#     (`services/reestr_rushydro.py:1109,1128,1132`).
+# Раздвоения владельцев больше нет: конвейеры загрузки пишут паспорт владельцу
+# графы (`write_value`), а не в колонки точки — переведены нормализация разъёмов
+# (`asuim_normalize`), нормализация станций (`stations_normalize`) и реестр
+# РусГидро (`reestr_rushydro`). Поэтому спрашиваем станцию первой у ВСЕХ граф.
 #
-# По ним приоритет остаётся у точки, иначе очередная выгрузка обновила бы точку,
-# а карточка показывала бы застывшее значение станции — регресс вместо перевода.
-# Порядок меняется на обратный не «когда-нибудь», а ровно тогда, когда запись
-# этих конвейеров переедет в станцию; до тех пор владелец графы — тот, кто её
-# пишет, и читатель обязан спрашивать именно его.
-FEED_OWNED = frozenset({
-    "powerKwt", "connectorsCount", "connectorTypes", "owner",
-    "inventoryNumber", "brand", "installedOn",
-})
+# Множество оставлено пустым намеренно: если запись какой-то графы вернётся в
+# точку (новый конвейер, чужая интеграция), её имя добавляется сюда — и читатель
+# сразу перестаёт показывать застывшее значение станции.
+FEED_OWNED: frozenset[str] = frozenset()
 
 
 def passport_value(key: str, loc, unit) -> object | None:
@@ -78,18 +72,46 @@ def passport_value(key: str, loc, unit) -> object | None:
     return getattr(loc, key, None)
 
 
+def write_value(key: str, loc, unit, value) -> bool:
+    """Записать графу её владельцу: станции, если она заведена, иначе точке.
+
+    Пишем в одно место, а не в оба: двойная запись рождает вопрос «чья правда»
+    ровно там, где мы его только что убрали. Пока связь не заведена (новая точка,
+    объект без станции), запись идёт в точку — как до разделения, и читатель
+    возьмёт её оттуда фолбэком.
+
+    Возвращает True, если значение изменилось: конвейеры считают по этому признаку
+    «обновлено N станций», и терять счётчик нельзя.
+    """
+    for out_key, unit_field, loc_field in PASSPORT_SOURCES:
+        if out_key != key:
+            continue
+        target, field = ((unit, unit_field) if unit is not None else (loc, loc_field))
+        if getattr(target, field, None) == value:
+            return False
+        setattr(target, field, value)
+        return True
+    if getattr(loc, key, None) == value:
+        return False
+    setattr(loc, key, value)
+    return True
+
+
 async def stations_by_location(
     db: AsyncSession,
     company_id,
-    location_ids: list[str],
+    location_ids: list[str] | None,
     on: date | None = None,
 ) -> dict[str, EzsEquipmentUnit]:
     """Карта «точка обслуживания → станция, стоящая в ней на дату».
 
     Один запрос на весь список: карточка объекта открывается из реестра сети, где
     объектов шестьсот, и запрос на каждую строку превратил бы список в N+1.
+
+    `location_ids=None` — все точки компании: конвейерам загрузки список заранее
+    неизвестен, объекты резолвятся по ходу разбора файла.
     """
-    if not location_ids:
+    if location_ids is not None and not location_ids:
         return {}
     on = on or date.today()
     # Два запроса вместо join'а: `child_id` — текст (там бывает и nanoid точки, и
@@ -101,7 +123,7 @@ async def stations_by_location(
             ObjectLink.relation == "placed_at",
             ObjectLink.parent_type == "point_of_service",
             ObjectLink.child_type == "station",
-            ObjectLink.parent_id.in_(location_ids),
+            *([ObjectLink.parent_id.in_(location_ids)] if location_ids is not None else []),
             ObjectLink.valid_from <= on,
             or_(ObjectLink.valid_to.is_(None), ObjectLink.valid_to > on),
         )

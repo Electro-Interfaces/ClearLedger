@@ -30,6 +30,8 @@ from typing import Any
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.station_passport import (
+    passport_value, stations_by_location, write_value)
 from app.models import ChannelSyncLog, ChargeSession, Region, ServiceLocation
 from app.services.mapping import canon_brand, canon_city, canon_region, geo_in_russia
 
@@ -338,6 +340,10 @@ async def _ingest_compact(
     ambiguous: list[str] = []   # номер носят несколько карточек — не угадываем
     touched: set[str] = set()   # карточки, уже занятые строкой этого файла
     total = len(rows)
+    # Паспорт железа принадлежит станции (СТО, docs/OBJECTS.md). Карта берётся по
+    # всем точкам компании: какие из них встретятся в файле, заранее неизвестно —
+    # объекты резолвятся по ходу разбора.
+    stations = await stations_by_location(db, company_id, None)
     await _bump(db, log_id, 0, total, 0, 0)
 
     for idx, row in enumerate(rows):
@@ -400,12 +406,15 @@ async def _ingest_compact(
                 loc.operational_status = oper
                 if oper == "decommissioned":
                     loc.status = "closed"
-                for fld in ("ocpp_protocol", "brand", "connector_types"):
+                unit = stations.get(loc.id)
+                for fld, key in (("ocpp_protocol", "ocppProtocol"), ("brand", "brand"),
+                                 ("connector_types", "connectorTypes")):
                     if row.get(fld):
-                        setattr(loc, fld, canon_brand(row[fld]) if fld == "brand" else row[fld])
+                        write_value(key, loc, unit,
+                                    canon_brand(row[fld]) if fld == "brand" else row[fld])
                 # поля полного паспорта не затираем — дозаполняем только пустые
-                if not loc.owner and row.get("owner"):
-                    loc.owner = row["owner"]
+                if not passport_value("owner", loc, unit) and row.get("owner"):
+                    write_value("owner", loc, unit, row["owner"])
                 if not loc.address and row.get("address"):
                     loc.address = row["address"]
                 # Подпись из справочника CPO — главнее имени из сессий: реестр

@@ -39,6 +39,8 @@ import openpyxl
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.station_passport import (
+    passport_value, stations_by_location, write_value)
 from app.models import (
     Contract,
     ContractLocation,
@@ -1079,7 +1081,7 @@ def parse_obshaya(content: bytes) -> dict[str, Any]:
         wb.close()
 
 
-def _enrich_passport(loc: ServiceLocation, row: dict) -> bool:
+def _enrich_passport(loc: ServiceLocation, row: dict, unit=None) -> bool:
     """Обогащение паспорта станции из станционной строки сводной.
     Классификаторы (city/highway, fast/slow, корп) переписываются свежим файлом;
     факты (даты, инвентарный, марка, мощность) — только дозаполняются."""
@@ -1096,22 +1098,23 @@ def _enrich_passport(loc: ServiceLocation, row: dict) -> bool:
         setattr_if("location_class", "city")
     elif lc.startswith("трасс"):
         setattr_if("location_class", "highway")
+    # Класс скорости — характеристика железа, поэтому едет владельцу графы, а не
+    # в колонку точки: `setattr_if` пишет только в `loc` и здесь не подходит.
     sp = _pv(row.get("speed")).lower()
-    if sp.startswith("быстр"):
-        setattr_if("speed_class", "fast")
-    elif sp.startswith("медлен"):
-        setattr_if("speed_class", "slow")
+    speed = "fast" if sp.startswith("быстр") else "slow" if sp.startswith("медлен") else None
+    if speed and write_value("speedClass", loc, unit, speed):
+        changed = True
     if _pv(row.get("corp")).lower().startswith("корп") and not loc.is_corp:
         loc.is_corp = True
         changed = True
     inst = _iso_date(row.get("installed"))
-    if inst and not loc.installed_on:
-        loc.installed_on = inst
+    if inst and not passport_value("installedOn", loc, unit):
+        write_value("installedOn", loc, unit, inst)
         changed = True
     dec_raw = row.get("decommissioned")
     dec = _iso_date(dec_raw)
-    if dec and not loc.decommissioned_on:
-        loc.decommissioned_on = dec
+    if dec and not passport_value("decommissionedOn", loc, unit):
+        write_value("decommissionedOn", loc, unit, dec)
         changed = True
     elif dec is None and not _blank(dec_raw):
         s = str(dec_raw).strip()
@@ -1123,17 +1126,17 @@ def _enrich_passport(loc: ServiceLocation, row: dict) -> bool:
                 loc.extra_metadata = md
                 changed = True
     inv = _pv(row.get("inv"))
-    if (inv and not loc.inventory_number
+    if (inv and not passport_value("inventoryNumber", loc, unit)
             and "нет" not in inv.lower() and "не извест" not in inv.lower()):
-        loc.inventory_number = inv[:60]
+        write_value("inventoryNumber", loc, unit, inv[:60])
         changed = True
     brand = _pv(row.get("brand"))
-    if brand and not loc.brand:
-        loc.brand = brand[:120]
+    if brand and not passport_value("brand", loc, unit):
+        write_value("brand", loc, unit, brand[:120])
         changed = True
     pw = _num(row.get("power"))
-    if pw and not loc.power_kwt:
-        loc.power_kwt = pw
+    if pw and not passport_value("powerKwt", loc, unit):
+        write_value("powerKwt", loc, unit, pw)
         changed = True
     return changed
 
@@ -1157,6 +1160,10 @@ async def ingest_obshaya(db: AsyncSession, company_id, parsed: dict) -> dict[str
     # станции, покрытые коннекторным листом кВт·ч, — станционный ряд для них не пишем
     conn_covered = {skey(r) for r in parsed["connectors"] if r.get("_months")}
 
+    # Паспорт железа принадлежит станции (СТО, docs/OBJECTS.md); карта по всем
+    # точкам компании — какие встретятся в реестре, заранее неизвестно.
+    stations = await stations_by_location(db, company_id, None)
+
     # 1) станционный лист: L1 + паспорт + кВт·ч только для непокрытых коннекторами
     for row in parsed["stations"]:
         res["rows"] += 1
@@ -1173,7 +1180,7 @@ async def ingest_obshaya(db: AsyncSession, company_id, parsed: dict) -> dict[str
         if loc is None:
             res["unmatched"] += 1
             continue
-        if _enrich_passport(loc, row):
+        if _enrich_passport(loc, row, stations.get(loc.id)):
             res["enriched"] += 1
         if skey(row) not in conn_covered:
             for period, kwh in (row["_months"] or {}).items():
