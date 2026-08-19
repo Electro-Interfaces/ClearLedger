@@ -9,12 +9,15 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import case, distinct, func, select
+from datetime import date
+
+from sqlalchemy import Text, and_, case, cast, distinct, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.station_passport import passport_value, stations_by_location
 from app.models import (
-    Channel, ChargeSession, DataEntry, Region, ServiceLocation,
-    StationContractSettlement, StationEnergyPeriod,
+    Channel, ChargeSession, DataEntry, EzsEquipmentUnit, ObjectLink, Region,
+    ServiceLocation, StationContractSettlement, StationEnergyPeriod,
 )
 
 
@@ -43,7 +46,11 @@ async def stations_linkage(db: AsyncSession, company_id) -> dict[str, Any]:
         n = o.station_number or (o.extra_metadata or {}).get("number")
         if n is not None and str(n).strip():
             obj_numbers.add(str(n).strip())
-    enriched = sum(1 for o in objs if o.serial_number is not None)
+    # «Обогащена паспортом» — у владельца графы, а не в колонке точки: после
+    # переезда записи заводской номер новых станций в точку уже не попадает.
+    _stations = await stations_by_location(db, company_id, [o.id for o in objs])
+    enriched = sum(1 for o in objs
+                   if passport_value("serialNumber", o, _stations.get(o.id)) is not None)
 
     # Сессии → материализованная связь по location_id (FK на объект); резолв по №.
     sess_codes = {str(x).strip() for x in (await db.execute(
@@ -120,47 +127,82 @@ async def stations_linkage(db: AsyncSession, company_id) -> dict[str, Any]:
 
 
 async def stations_model(db: AsyncSession, company_id) -> dict[str, Any]:
-    L = ServiceLocation
+    L, U, K = ServiceLocation, EzsEquipmentUnit, ObjectLink
     where = (L.company_id == company_id, L.type == "ev_charging")
 
-    agg = (await db.execute(select(
+    # Паспорт железа принадлежит станции (СТО, docs/OBJECTS.md), и конвейеры пишут
+    # его туда. Полнота, считанная по колонкам точки, с этого момента отражала бы
+    # не заполненность паспорта, а возраст бэкфилла: у новых объектов точка пуста.
+    # Поэтому витрина берёт графу у владельца — станции, стоящей в точке сегодня,
+    # с фолбэком на точку (то же правило, что в `station_passport`).
+    _today = date.today()
+    _placed = and_(
+        K.company_id == L.company_id, K.relation == "placed_at",
+        K.parent_type == "point_of_service", K.parent_id == L.id,
+        K.child_type == "station",
+        K.valid_from <= _today,
+        or_(K.valid_to.is_(None), K.valid_to > _today),
+    )
+
+    def joined(*cols):
+        """Выборка по точкам со станцией, стоящей в них сегодня.
+
+        Сравнение идентификаторов текстом, а не приведением `child_id` к uuid:
+        в связях лежат и nanoid точек, и значения внешних идентификаторов, и
+        приведение типа развалилось бы на первой же нечисловой строке."""
+        return (select(*cols).select_from(L)
+                .outerjoin(K, _placed)
+                .outerjoin(U, cast(U.id, Text) == K.child_id))
+
+    P_serial = func.coalesce(U.serial_number, L.serial_number)
+    P_power = func.coalesce(U.power_kwt, L.power_kwt)
+    P_conn = func.coalesce(U.connectors_count, L.connectors_count)
+    P_conn_types = func.coalesce(U.connector_types, L.connector_types)
+    P_owner = func.coalesce(U.owner_name, L.owner)
+    P_brand = func.coalesce(U.brand, L.brand)
+    P_model = func.coalesce(U.model, L.model)
+    P_ocpp = func.coalesce(U.ocpp_protocol, L.ocpp_protocol)
+    P_firmware = func.coalesce(U.firmware, L.firmware)
+    P_hubex = func.coalesce(U.hubex_asset_id, L.hubex_asset_id)
+
+    agg = (await db.execute(joined(
         func.count().label("rows"),
-        func.coalesce(func.sum(L.power_kwt), 0).label("power"),
-        func.coalesce(func.sum(L.connectors_count), 0).label("connectors"),
+        func.coalesce(func.sum(P_power), 0).label("power"),
+        func.coalesce(func.sum(P_conn), 0).label("connectors"),
         func.coalesce(func.avg(L.rating), 0).label("rating"),
         func.coalesce(func.avg(L.success_pct), 0).label("success"),
         func.coalesce(func.sum(case((L.is_test.is_(True), 1), else_=0)), 0).label("tests"),
         # заполнение полей паспорта (COUNT игнорирует NULL → доля непустых)
         func.count(L.code).label("f_code"),
         func.count(L.name).label("f_name"),
-        func.count(L.serial_number).label("f_serial"),
+        func.count(P_serial).label("f_serial"),
         func.count(L.station_number).label("f_number"),
         func.count(L.region_id).label("f_region"),
         func.count(L.city).label("f_city"),
         func.count(L.address).label("f_address"),
         func.count(L.latitude).label("f_lat"),
         func.count(L.longitude).label("f_lng"),
-        func.count(L.power_kwt).label("f_power"),
-        func.count(L.connectors_count).label("f_conn"),
-        func.count(L.connector_types).label("f_conn_types"),
-        func.count(L.owner).label("f_owner"),
-        func.count(L.brand).label("f_brand"),
-        func.count(L.model).label("f_model"),
-        func.count(L.ocpp_protocol).label("f_ocpp"),
-        func.count(L.firmware).label("f_firmware"),
+        func.count(P_power).label("f_power"),
+        func.count(P_conn).label("f_conn"),
+        func.count(P_conn_types).label("f_conn_types"),
+        func.count(P_owner).label("f_owner"),
+        func.count(P_brand).label("f_brand"),
+        func.count(P_model).label("f_model"),
+        func.count(P_ocpp).label("f_ocpp"),
+        func.count(P_firmware).label("f_firmware"),
         func.count(L.stage).label("f_stage"),
-        func.count(L.hubex_asset_id).label("f_hubex"),
+        func.count(P_hubex).label("f_hubex"),
         func.count(L.rating).label("f_rating"),
         func.count(L.success_pct).label("f_success"),
         # кардинальность измерений
         func.count(distinct(L.region_id)).label("d_region"),
-        func.count(distinct(L.owner)).label("d_owner"),
-        func.count(distinct(L.brand)).label("d_brand"),
-        func.count(distinct(L.model)).label("d_model"),
-        func.count(distinct(L.connector_types)).label("d_conn_types"),
+        func.count(distinct(P_owner)).label("d_owner"),
+        func.count(distinct(P_brand)).label("d_brand"),
+        func.count(distinct(P_model)).label("d_model"),
+        func.count(distinct(P_conn_types)).label("d_conn_types"),
         func.count(distinct(L.stage)).label("d_stage"),
         func.count(distinct(L.operational_status)).label("d_oper"),
-        func.count(distinct(L.ocpp_protocol)).label("d_ocpp"),
+        func.count(distinct(P_ocpp)).label("d_ocpp"),
         func.count(distinct(L.city)).label("d_city"),
     ).where(*where))).one()
 
@@ -186,7 +228,7 @@ async def stations_model(db: AsyncSession, company_id) -> dict[str, Any]:
 
     async def members(col, limit: int) -> list[dict[str, Any]]:
         r = (await db.execute(
-            select(col.label("m"), func.count().label("cnt"))
+            joined(col.label("m"), func.count().label("cnt"))
             .where(*where, col.is_not(None)).group_by(col).order_by(func.count().desc()).limit(limit)
         )).all()
         return [{"label": str(x.m), "count": int(x.cnt)} for x in r]
@@ -198,24 +240,24 @@ async def stations_model(db: AsyncSession, company_id) -> dict[str, Any]:
         .where(*where).group_by(Region.name).order_by(func.count().desc()).limit(8)
     )).all()
     m_region = [{"label": str(x.m), "count": int(x.cnt)} for x in reg]
-    m_owner = await members(L.owner, 8)
-    m_brand = await members(L.brand, 12)
-    m_model = await members(L.model, 8)
-    m_conn_types = await members(L.connector_types, 12)
+    m_owner = await members(P_owner, 8)
+    m_brand = await members(P_brand, 12)
+    m_model = await members(P_model, 8)
+    m_conn_types = await members(P_conn_types, 12)
     m_stage = await members(L.stage, 8)
     m_oper = await members(L.operational_status, 8)
-    m_ocpp = await members(L.ocpp_protocol, 8)
+    m_ocpp = await members(P_ocpp, 8)
 
     # мощность — бэнды (вычисляемое измерение)
     band = case(
-        (L.power_kwt >= 150, "≥150 кВт (DC-ультра)"),
-        (L.power_kwt >= 50, "50–150 кВт (DC-быстрая)"),
-        (L.power_kwt >= 22, "22–50 кВт"),
-        (L.power_kwt > 0, "<22 кВт (AC)"),
+        (P_power >= 150, "≥150 кВт (DC-ультра)"),
+        (P_power >= 50, "50–150 кВт (DC-быстрая)"),
+        (P_power >= 22, "22–50 кВт"),
+        (P_power > 0, "<22 кВт (AC)"),
         else_="— не указана",
     )
     br = (await db.execute(
-        select(band.label("m"), func.count().label("cnt")).where(*where)
+        joined(band.label("m"), func.count().label("cnt")).where(*where)
         .group_by(band).order_by(func.count().desc())
     )).all()
     m_band = [{"label": str(x.m), "count": int(x.cnt)} for x in br]
