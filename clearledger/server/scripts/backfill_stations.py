@@ -73,7 +73,7 @@ def parse_connector_types(raw: str | None, count: int | None = None) -> list[str
 from sqlalchemy import func, select  # noqa: E402
 
 from app.database import async_session_factory  # noqa: E402
-from app.models import EzsConnector, EzsEvse, EzsEquipmentUnit, ObjectLink  # noqa: E402
+from app.models import ChargeSession, EzsConnector, EzsEvse, EzsEquipmentUnit, ObjectLink  # noqa: E402
 from app.models import ServiceLocation as L  # noqa: E402
 from app.utils import resolve_company_id  # noqa: E402
 
@@ -189,6 +189,30 @@ def _retired_on(loc: L) -> date | None:
     return None
 
 
+async def _session_range(db, cid, loc_id: str) -> tuple[date | None, date | None]:
+    """Первая и последняя зарядная сессия в этой точке.
+
+    Первая нужна, потому что дата появления записи в реестре — не дата установки:
+    у 192 объектов из 603 даты ввода нет вовсе, а справочник загружен позже.
+    Связь, открытая датой загрузки, оставляла 13 787 сессий (9%) без ответа на
+    вопрос «какая станция их обслужила». Сессия — доказательство, что станция
+    здесь уже стояла, и связь не вправе начинаться позже неё.
+
+    Последняя нужна для обратной проверки: сессии ПОСЛЕ даты вывода означают, что
+    объект помечен выведенным, но продолжает работать. Домысливать тут нечего —
+    либо дата вывода неверна, либо станцию заменили, а замену не записали. И то,
+    и другое — предмет сверки, а не повод молча сдвинуть границу.
+    """
+    row = (await db.execute(
+        select(func.min(func.date(ChargeSession.started_at)),
+               func.max(func.date(ChargeSession.started_at))).where(
+            ChargeSession.company_id == cid,
+            ChargeSession.location_id == loc_id,
+        )
+    )).one()
+    return row[0], row[1]
+
+
 def _valid_from(loc: L) -> date:
     """Дата, с которой станция стоит в точке: ввод в эксплуатацию, иначе появление
     записи. Сегодняшнюю дату не берём — это ровно та ошибка, из-за которой дата
@@ -220,7 +244,8 @@ async def main() -> None:
 
         stats = {"units_created": 0, "units_filled": 0, "links_created": 0,
                  "links_exist": 0, "evse_created": 0, "connectors_created": 0,
-                 "retired": 0, "links_closed": 0}
+                 "retired": 0, "links_closed": 0, "links_backdated": 0,
+                 "worked_after_retirement": 0}
         needs_review: list[str] = []
 
         for loc in locs:
@@ -243,9 +268,32 @@ async def main() -> None:
             if _fill_passport(unit, loc):
                 stats["units_filled"] += 1
 
-            if await _existing_link(db, cid, loc.id) is None:
+            link = await _existing_link(db, cid, loc.id)
+            first_session, last_session = await _session_range(db, cid, loc.id)
+
+            if link is not None:
+                # Связь уже заведена: единственное, что здесь уточняется — начало.
+                # Сессия старше связи означает, что станция стояла в точке раньше,
+                # чем мы записали, и без сдвига она не определится на свою же дату.
+                if first_session is not None and first_session < link.valid_from:
+                    stats["links_backdated"] += 1
+                    needs_review.append(
+                        f"{loc.code}: начало сдвинуто {link.valid_from} → {first_session} "
+                        f"(сессии старше записи)")
+                    link.valid_from = first_session
+                # Работа после вывода: границу не двигаем, а показываем человеку.
+                if (link.valid_to is not None and last_session is not None
+                        and last_session >= link.valid_to):
+                    stats["worked_after_retirement"] += 1
+                    needs_review.append(
+                        f"{loc.code}: сессии до {last_session} при выводе {link.valid_to} "
+                        f"— объект помечен выведенным, но работает")
+                stats["links_exist"] += 1
+            else:
                 closed_on = _retired_on(loc) if retired else None
                 start = _valid_from(loc)
+                if first_session is not None and first_session < start:
+                    start = first_session
                 noted = False
                 # Дата вывода раньше даты начала бывает у перенесённых записей:
                 # такую связь оставляем открытой, иначе EXCLUDE получит пустой
@@ -273,8 +321,6 @@ async def main() -> None:
                     # названа выше, и вторая строка «дата не указана» противоречила
                     # бы первой.
                     needs_review.append(f"{loc.code}: выведена, дата вывода не указана")
-            else:
-                stats["links_exist"] += 1
 
             if WITH_EVSE:
                 has_evse = (await db.execute(
