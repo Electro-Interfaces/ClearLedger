@@ -6681,8 +6681,13 @@ class InboundEvent(Base):
     Обработка отделена от приёма намеренно: приём обязан быть быстрым и почти
     всегда успешным, иначе отправитель будет ретраить из-за нашей внутренней
     ошибки и копить очередь.
+
+    Префикс `eco_` обязателен: Ядро и Поддержка живут в одной базе (схемы `core`
+    и `public`, `search_path = core, public`), и имя `inbound_events` у Поддержки
+    уже занято. Без префикса `CREATE TABLE IF NOT EXISTS` нашёл бы чужую таблицу
+    через `search_path`, промолчал — и мы писали бы в чужую очередь.
     """
-    __tablename__ = "inbound_events"
+    __tablename__ = "eco_inbound_events"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     company_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -6701,8 +6706,8 @@ class InboundEvent(Base):
     error: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     __table_args__ = (
-        Index("uq_inbound_events_key", "provider", "external_id", unique=True),
-        Index("ix_inbound_events_unprocessed", "received_at",
+        Index("uq_eco_inbound_events_key", "provider", "external_id", unique=True),
+        Index("ix_eco_inbound_events_unprocessed", "received_at",
               postgresql_where=text("processed_at IS NULL")),
     )
 
