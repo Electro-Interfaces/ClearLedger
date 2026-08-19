@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import assert_company_member, get_company_by_api_key, get_current_user
 from app.database import get_db
 from app.deps import CompanyDep, get_owned
+from app.services.object_freeze import freeze_reasons, number_changed
 from app.services.station_passport import passport_value, stations_by_location
 from app.models import AuditEvent, Company, ServiceLocation, User, location_bindings
 from app.scope import in_scope, scope_location_conds
@@ -279,6 +280,17 @@ async def update_location(
 ):
     loc = await get_owned(ServiceLocation, location_id, current_user, db)
     data = payload.model_dump(exclude_unset=True)
+
+    # Номер объекта после замораживающего события не меняется (СТО п. 7.5): по нему
+    # объект уже нашли снаружи — в договоре, в проводке, в чужой системе, — и правка
+    # рвёт эти ссылки молча. Причину называем: «нельзя» без объяснения провоцирует
+    # обход системы, а по названному событию видно, что делать дальше.
+    new_number = (data.get("metadata") or {}).get("number") if "metadata" in data else None
+    if number_changed(loc, data.get("code"), new_number):
+        reasons = await freeze_reasons(db, loc.company_id, loc.id)
+        if reasons:
+            raise HTTPException(409, "Номер объекта изменить нельзя: " + ", ".join(reasons))
+
     if data.get("code") and data["code"] != loc.code:
         await _assert_code_free(db, loc.company_id, data["code"], except_id=loc.id)
     if "sourceBindings" in data:
