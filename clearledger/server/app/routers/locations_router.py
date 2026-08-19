@@ -6,6 +6,7 @@ CRUD для ServiceLocation (точки обслуживания) — АЗС/м�
 id — клиентский nanoid (String), чтобы фронт и бэк совпадали.
 """
 import json
+import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -36,7 +37,11 @@ router = APIRouter(prefix="/locations", tags=["Точки обслуживани
 
 
 class LocationIn(BaseModel):
-    id: str
+    # Технический ключ присваивает система (СТО п. 7.1): клиент вправе прислать
+    # свой при повторной отправке того же объекта (ручка работает как upsert), но
+    # придумывать ключ за систему ему больше не нужно. Формат к прочтению людьми
+    # не предназначен и в документах не применяется.
+    id: str | None = None
     company_id: str
     code: str
     name: str
@@ -259,11 +264,12 @@ async def create_location(
     current_user: User = Depends(get_current_user),
 ):
     cid = await assert_company_member(payload.company_id, current_user, db)
-    existing = await db.get(ServiceLocation, payload.id)
+    new_id = (payload.id or "").strip() or f"ezs-{uuid.uuid4().hex[:20]}"
+    existing = await db.get(ServiceLocation, new_id)
     if existing:
         # upsert по клиентскому id — но чужую точку (другой компании) перехватить
         # нельзя: get_owned бросит 404, если нет членства в её компании.
-        await get_owned(ServiceLocation, payload.id, current_user, db)
+        await get_owned(ServiceLocation, new_id, current_user, db)
         existing.company_id = cid
         existing.code = payload.code
         existing.name = payload.name
@@ -280,7 +286,7 @@ async def create_location(
     else:
         await _assert_code_free(db, cid, payload.code)
         loc = ServiceLocation(
-            id=payload.id, company_id=cid, code=payload.code, name=payload.name,
+            id=new_id, company_id=cid, code=payload.code, name=payload.name,
             type=payload.type, status=payload.status, address=payload.address,
             description=payload.description, source_bindings=payload.sourceBindings,
             extra_metadata=payload.metadata,
