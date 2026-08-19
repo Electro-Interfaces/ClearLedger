@@ -18,6 +18,8 @@ from app.auth import assert_company_member, get_company_by_api_key, get_current_
 from app.database import get_db
 from app.deps import CompanyDep, get_owned
 from app.services import object_control
+from app.services.export_policy import (
+    PUBLIC_FIELDS, filter_for_export, is_publishable)
 from app.services.object_freeze import freeze_reasons, number_changed
 from app.services.station_passport import passport_value, stations_by_location
 from app.models import (
@@ -230,18 +232,34 @@ async def list_locations(cid: CompanyDep, db: AsyncSession = Depends(get_db)):
     return [_out(l, stations.get(l.id)) for l in rows]
 
 
-@router.get("/export", response_model=list[LocationOut])
+@router.get("/export")
 async def export_locations(
+    scope: str = Query("internal", pattern="^(internal|external)$"),
     company: Company = Depends(get_company_by_api_key),
     db: AsyncSession = Depends(get_db),
 ):
+    """Выгрузка реестра объектов.
+
+    `scope=internal` (по умолчанию) — обмен между системами организации: полный
+    состав, иначе Поддержка не сможет вести заявку по объекту. Такая передача не
+    замораживает номера (СТО п. 7.6).
+
+    `scope=external` — передача вовне: только объекты с разрешением на публикацию
+    (п. 12.4) и только разрешённый состав (п. 12.1–12.2), без технического ключа,
+    заводского и инвентарного номеров и параметров подключения.
+    """
     res = await db.execute(
         select(ServiceLocation).where(ServiceLocation.company_id == company.id)
         .order_by(ServiceLocation.code)
     )
     rows = res.scalars().all()
+    external = scope == "external"
+    if external:
+        rows = [l for l in rows if is_publishable(l)]
     stations = await stations_by_location(db, company.id, [l.id for l in rows])
     out = [_out(l, stations.get(l.id)) for l in rows]
+    if external:
+        out = [filter_for_export(item.model_dump()) for item in out]
 
     # Журнал выгрузок (СТО п. 12.3): кто, когда, какой состав и объём. Ручка
     # ходит по ключу интеграции — это обмен между системами ОРГАНИЗАЦИИ, поэтому
@@ -249,10 +267,12 @@ async def export_locations(
     # первая же синхронизация с Поддержкой заморозила бы всю сеть.
     db.add(ObjectExportLog(
         company_id=company.id, actor_kind="integration", actor_ref="cloud-api-key",
-        destination="internal", is_external=False,
-        fields=sorted(LocationOut.model_fields.keys()),
+        destination=scope, is_external=external,
+        fields=(sorted(PUBLIC_FIELDS | {"passport"}) if external
+                else sorted(LocationOut.model_fields.keys())),
         objects_count=len(out),
-        note="Выгрузка реестра объектов по ключу интеграции",
+        note=("Выгрузка реестра объектов наружу" if external
+              else "Выгрузка реестра объектов по ключу интеграции"),
     ))
     return out
 
