@@ -29,6 +29,7 @@ import { NewProjectDialog } from './NewProjectDialog'
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 const PAGE = 100
 const today = () => new Date().toISOString().slice(0, 10)
+const BOARD_STAGES: SiteStage[] = [...FUNNEL_STAGES, 'on_hold', 'archive']
 
 /**
  * Доска по стадиям — «где скопилось» вместо «что с проектом».
@@ -48,7 +49,7 @@ function StageBoard({ rows, onOpen }: { rows: SiteRow[]; onOpen: (id: string) =>
     }
     return m
   }, [rows])
-  const stages = FUNNEL_STAGES.filter((s) => (byStage.get(s)?.length ?? 0) > 0)
+  const stages = BOARD_STAGES.filter((s) => (byStage.get(s)?.length ?? 0) > 0)
 
   if (stages.length === 0) {
     return (
@@ -112,11 +113,10 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
   })
   const { phase, ownerId, region, closed, overdue, search, view, page } = f
   // Блок и этап взаимно исключают друг друга: выбрали этап — блок снимается.
-  const setPhase = (v: string) => patch({ phase: v, stage: '' })
-  const setStage = (v: string) => patch({ stage: v, phase: '' })
+  const setPhase = (v: string) => patch({ phase: v, stage: '', closed: false })
+  const setStage = (v: string) => patch({ stage: v, phase: '', closed: false })
   const setOwnerId = (v: string) => patch({ ownerId: v })
   const setRegion = (v: string) => patch({ region: v })
-  const setClosed = (v: boolean) => patch({ closed: v })
   const setOverdue = (v: boolean) => patch({ overdue: v })
   const setSearch = (v: string) => patch({ search: v })
   const setView = (v: 'table' | 'board') => patch({ view: v })
@@ -246,6 +246,11 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
                 ))}
               </SelectGroup>
             ))}
+            <SelectGroup>
+              <SelectItem value="st:on_hold" className="text-sm">
+                Не трогать ({nf0.format(regions.data?.onHold ?? 0)})
+              </SelectItem>
+            </SelectGroup>
           </SelectContent>
         </Select>
 
@@ -276,7 +281,19 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
           Просрочено
         </button>
 
-        <button type="button" onClick={() => { setClosed(!closed); reset() }}
+        <button type="button" onClick={() => {
+          patch({ stage: !closed && stagePick === 'on_hold' ? '' : 'on_hold', phase: '', closed: false, page: 1 })
+          clearStage()
+        }}
+          title="Проекты, поставленные на паузу со статусом «Не трогать»"
+          className={`px-2.5 py-1 text-sm rounded-md border transition-colors ${!closed && stagePick === 'on_hold' ? 'bg-primary text-primary-foreground border-transparent' : 'border-border text-muted-foreground hover:text-foreground'}`}>
+          Не трогать
+        </button>
+
+        <button type="button" onClick={() => {
+          patch({ closed: !closed, stage: '', phase: '', page: 1 })
+          clearStage()
+        }}
           title="Проекты, закрытые с причиной: место рассмотрели и отказались"
           className={`px-2.5 py-1 text-sm rounded-md border transition-colors ${closed ? 'bg-primary text-primary-foreground border-transparent' : 'border-border text-muted-foreground hover:text-foreground'}`}>
           Отклонённые

@@ -59,3 +59,23 @@ async def test_поиск_находит_по_названию_и_номеру(d
     пусто = await ezs_sites.list_sites(db, company.id, search="такого адреса нет ни у кого")
     assert пусто["total"] == 0
     await db.rollback()
+
+
+async def test_приостановленные_проекты_доступны_отдельным_фильтром(db):
+    company = await _company(db)
+    paused = await ezs_site_work.create_site(db, company.id, {
+        "title": "Проект в статусе не трогать",
+        "address": "Проверка приостановленного проекта",
+    }, None)
+    paused.stage = "on_hold"
+    await db.flush()
+
+    search = "проверка приостановленного проекта"
+    on_hold = await ezs_sites.list_sites(db, company.id, stage="on_hold", search=search)
+    active = await ezs_sites.list_sites(db, company.id, stage="active", search=search)
+    archived = await ezs_sites.list_sites(db, company.id, stage="archive", search=search)
+
+    assert any(row["id"] == str(paused.id) for row in on_hold["items"])
+    assert all(row["id"] != str(paused.id) for row in active["items"])
+    assert all(row["id"] != str(paused.id) for row in archived["items"])
+    await db.rollback()
