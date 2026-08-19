@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import assert_company_member, get_company_by_api_key, get_current_user
 from app.database import get_db
 from app.deps import CompanyDep, get_owned
+from app.services.station_passport import passport_value, stations_by_location
 from app.models import AuditEvent, Company, ServiceLocation, User, location_bindings
 from app.scope import in_scope, scope_location_conds
 from app.services import hubex_service
@@ -73,32 +74,45 @@ class LocationOut(BaseModel):
     updatedAt: str
 
 
-def _passport(l: ServiceLocation) -> dict[str, Any] | None:
-    """Типизированный паспорт (L2) объекта → dict непустых полей, либо None."""
+def _passport(l: ServiceLocation, unit=None) -> dict[str, Any] | None:
+    """Типизированный паспорт (L2) объекта → dict непустых полей, либо None.
+
+    Графы железа берутся у станции, стоящей в этой точке (`station_passport`), с
+    фолбэком на прежние колонки объекта: после разделения уровней заводской номер,
+    модель, мощность и инвентарный номер принадлежат станции, а не точке. Контракт
+    ответа при этом не меняется — экраны читают те же ключи, что читали.
+
+    Графы самой точки — адрес, координаты, регион, класс размещения, признак
+    тестового объекта — остаются здесь: станция к ним отношения не имеет.
+    """
     fields = {
-        "serialNumber": getattr(l, "serial_number", None),
+        "serialNumber": passport_value("serialNumber", l, unit),
         "stationNumber": getattr(l, "station_number", None),
         "city": getattr(l, "city", None), "street": getattr(l, "street", None),
         "house": getattr(l, "house", None),
         "latitude": getattr(l, "latitude", None), "longitude": getattr(l, "longitude", None),
-        "powerKwt": getattr(l, "power_kwt", None),
-        "connectorsCount": getattr(l, "connectors_count", None),
-        "connectorTypes": getattr(l, "connector_types", None),
-        "owner": getattr(l, "owner", None), "ownerId": getattr(l, "owner_id", None),
-        "brand": getattr(l, "brand", None), "model": getattr(l, "model", None),
-        "ocppProtocol": getattr(l, "ocpp_protocol", None), "firmware": getattr(l, "firmware", None),
+        "powerKwt": passport_value("powerKwt", l, unit),
+        "connectorsCount": passport_value("connectorsCount", l, unit),
+        "connectorTypes": passport_value("connectorTypes", l, unit),
+        "owner": passport_value("owner", l, unit), "ownerId": getattr(l, "owner_id", None),
+        "brand": passport_value("brand", l, unit), "model": passport_value("model", l, unit),
+        "ocppProtocol": passport_value("ocppProtocol", l, unit),
+        "firmware": passport_value("firmware", l, unit),
         "stage": getattr(l, "stage", None), "isTest": getattr(l, "is_test", None),
-        "hubexAssetId": getattr(l, "hubex_asset_id", None),
+        "hubexAssetId": passport_value("hubexAssetId", l, unit),
         "hubexLinkStatus": getattr(l, "hubex_link_status", None),
         "rating": getattr(l, "rating", None), "successPct": getattr(l, "success_pct", None),
         "regionId": str(l.region_id) if getattr(l, "region_id", None) else None,
         # атрибуты из сводной выработки (слот obshaya, v2.14)
         "locationClass": getattr(l, "location_class", None),
-        "speedClass": getattr(l, "speed_class", None),
-        "installedOn": getattr(l, "installed_on", None),
-        "decommissionedOn": getattr(l, "decommissioned_on", None),
-        "inventoryNumber": getattr(l, "inventory_number", None),
+        "speedClass": passport_value("speedClass", l, unit),
+        "installedOn": passport_value("installedOn", l, unit),
+        "decommissionedOn": passport_value("decommissionedOn", l, unit),
+        "inventoryNumber": passport_value("inventoryNumber", l, unit),
         "isCorp": True if getattr(l, "is_corp", False) else None,
+        # Идентификатор станции — чтобы карточка открывала её напрямую, а не
+        # угадывала по серийнику. Пуст, пока связь не заведена.
+        "stationId": str(unit.id) if unit is not None else None,
     }
     out = {k: v for k, v in fields.items() if v is not None}
     return out or None
@@ -169,14 +183,14 @@ async def _assert_code_free(db: AsyncSession, company_id, code: str, except_id: 
         raise HTTPException(409, f"Код «{code}» уже занят другим объектом компании")
 
 
-def _out(l: ServiceLocation) -> LocationOut:
+def _out(l: ServiceLocation, unit=None) -> LocationOut:
     return LocationOut(
         id=l.id, code=l.code, name=l.name, type=l.type, status=l.status,
         operationalStatus=getattr(l, "operational_status", "unknown") or "unknown",
         address=l.address, description=l.description,
         sourceBindings=location_bindings(l),
         metadata=l.extra_metadata,
-        passport=_passport(l),
+        passport=_passport(l, unit),
         createdAt=l.created_at.isoformat() if l.created_at else "",
         updatedAt=l.updated_at.isoformat() if l.updated_at else "",
     )
@@ -192,7 +206,9 @@ async def list_locations(cid: CompanyDep, db: AsyncSession = Depends(get_db)):
         .where(ServiceLocation.company_id == cid, *scope_location_conds(ServiceLocation.id))
         .order_by(ServiceLocation.code)
     )
-    return [_out(l) for l in res.scalars().all()]
+    rows = res.scalars().all()
+    stations = await stations_by_location(db, cid, [l.id for l in rows])
+    return [_out(l, stations.get(l.id)) for l in rows]
 
 
 @router.get("/export", response_model=list[LocationOut])
@@ -204,7 +220,9 @@ async def export_locations(
         select(ServiceLocation).where(ServiceLocation.company_id == company.id)
         .order_by(ServiceLocation.code)
     )
-    return [_out(l) for l in res.scalars().all()]
+    rows = res.scalars().all()
+    stations = await stations_by_location(db, company.id, [l.id for l in rows])
+    return [_out(l, stations.get(l.id)) for l in rows]
 
 
 @router.post("", response_model=LocationOut)
@@ -245,7 +263,11 @@ async def create_location(
     # onupdate=func.now() истекает updated_at после flush на UPDATE-ветке upsert
     # → _out не должен триггерить синхронную дозагрузку (MissingGreenlet).
     await db.refresh(loc)
-    return _out(loc)
+    # Станция подтягивается и здесь: иначе карточка после сохранения показывала бы
+    # прежние колонки точки, а список рядом — паспорт станции. Одна выборка по
+    # одному объекту, N+1 тут неоткуда взяться.
+    stations = await stations_by_location(db, loc.company_id, [loc.id])
+    return _out(loc, stations.get(loc.id))
 
 
 @router.patch("/{location_id}", response_model=LocationOut)
@@ -268,7 +290,11 @@ async def update_location(
         setattr(loc, k, v)
     await db.flush()
     await db.refresh(loc)
-    return _out(loc)
+    # Станция подтягивается и здесь: иначе карточка после сохранения показывала бы
+    # прежние колонки точки, а список рядом — паспорт станции. Одна выборка по
+    # одному объекту, N+1 тут неоткуда взяться.
+    stations = await stations_by_location(db, loc.company_id, [loc.id])
+    return _out(loc, stations.get(loc.id))
 
 
 @router.delete("/{location_id}")
@@ -312,7 +338,11 @@ async def set_operational_status(
     ))
     await db.flush()
     await db.refresh(loc)
-    return _out(loc)
+    # Станция подтягивается и здесь: иначе карточка после сохранения показывала бы
+    # прежние колонки точки, а список рядом — паспорт станции. Одна выборка по
+    # одному объекту, N+1 тут неоткуда взяться.
+    stations = await stations_by_location(db, loc.company_id, [loc.id])
+    return _out(loc, stations.get(loc.id))
 
 
 @router.get("/{location_id}/operational-status/history")
