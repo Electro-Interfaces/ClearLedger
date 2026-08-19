@@ -15,6 +15,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import secrets
 from datetime import datetime, timezone
 from typing import Any
@@ -47,9 +48,17 @@ def new_token() -> str:
     return secrets.token_urlsafe(24)
 
 
+def token_hash(token: str) -> str:
+    """Хеш токена — то, что хранится в базе вместо самого токена."""
+    return hashlib.sha256((token or "").encode("utf-8")).hexdigest()
+
+
 async def _link_or_404(db: AsyncSession, token: str,
                        for_update: bool = False) -> DocShareLink:
-    statement = select(DocShareLink).where(DocShareLink.token == token)
+    # Ищем по хешу; колонка прежнего открытого токена остаётся запасным путём,
+    # пока бэкфилл не проставил хеши всем выданным ссылкам.
+    statement = select(DocShareLink).where(
+        (DocShareLink.token_hash == token_hash(token)) | (DocShareLink.token == token))
     if for_update:
         statement = statement.execution_options(
             populate_existing=True).with_for_update()

@@ -10558,7 +10558,16 @@ class DocShareLink(Base):
     doc_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("doc_cards.id", ondelete="CASCADE"),
         nullable=False, index=True)
-    token: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    # Токен в базе НЕ хранится: дамп таблицы означал бы рабочие ссылки на все
+    # непросроченные документы. Хранится его SHA-256 (по нему идёт поиск) и
+    # первые символы — чтобы человек узнал свою ссылку в списке, не имея её
+    # целиком. Полную ссылку показываем один раз, при выпуске.
+    token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
+    token_prefix: Mapped[str | None] = mapped_column(String(12), nullable=True)
+    # Колонка прежнего открытого токена: остаётся до конца перехода, чтобы уже
+    # выданные ссылки продолжали работать, и очищается бэкфиллом после того, как
+    # хеши проставлены.
+    token: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
     recipient_name: Mapped[str | None] = mapped_column(String(300), nullable=True)
     recipient_email: Mapped[str | None] = mapped_column(String(320), nullable=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

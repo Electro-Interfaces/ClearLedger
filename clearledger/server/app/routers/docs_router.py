@@ -2680,8 +2680,13 @@ async def create_share(
         raise HTTPException(status.HTTP_409_CONFLICT,
                             "Сначала зарегистрируйте документ: наружу уходит номер")
 
+    # Токен живёт только в этом ответе: в базу уходят его хеш и первые символы.
+    # Показать ссылку повторно нельзя — это и есть смысл хранения хешем.
+    raw_token = doc_share_router.new_token()
     link = DocShareLink(
-        company_id=cid, doc_id=d.id, token=doc_share_router.new_token(),
+        company_id=cid, doc_id=d.id,
+        token_hash=doc_share_router.token_hash(raw_token),
+        token_prefix=raw_token[:8],
         recipient_name=(payload.recipient_name or "").strip() or None,
         recipient_email=(payload.recipient_email or "").strip() or None,
         expires_at=datetime.now(timezone.utc) + timedelta(days=payload.days),
@@ -2707,7 +2712,8 @@ async def create_share(
                     note=f"ссылка на {payload.days} дн."))
     await db.commit()
     await db.refresh(link)
-    return {"id": str(link.id), "token": link.token,
+    # Единственное место, где токен виден: дальше он существует только у получателя.
+    return {"id": str(link.id), "token": raw_token,
             "expires_at": link.expires_at.isoformat()}
 
 
@@ -2725,7 +2731,9 @@ async def list_shares(
         DocShareLink.doc_id == d.id).order_by(
         DocShareLink.created_at.desc()))).scalars().all()
     return {"links": [{
-        "id": str(r.id), "token": r.token,
+        # Токена в списке нет: ссылка показывается один раз при выпуске.
+        # Префикс — чтобы человек узнал свою среди нескольких.
+        "id": str(r.id), "tokenPrefix": r.token_prefix or (r.token or "")[:8],
         "recipient": r.recipient_name or r.recipient_email,
         "expires_at": r.expires_at.isoformat(),
         "revoked": r.revoked, "opened_count": r.opened_count,

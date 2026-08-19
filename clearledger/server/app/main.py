@@ -302,6 +302,20 @@ app.add_middleware(
 )
 
 @app.middleware("http")
+async def rate_limit_public(request, call_next):
+    """Ограничение частоты на публичных ручках — до всякой работы с базой.
+
+    Стоит перед остальными обработчиками намеренно: смысл лимита в том, чтобы
+    перебор не доходил до проверки пароля и до выборки по токену."""
+    from app.rate_limit import check
+
+    blocked = check(request)
+    if blocked is not None:
+        return blocked
+    return await call_next(request)
+
+
+@app.middleware("http")
 async def organization_context(request, call_next):
     """Активная организация запроса — из заголовка `X-Organization-Id`.
 

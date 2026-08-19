@@ -6,7 +6,7 @@
  */
 import { useId, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Copy, Link2, Mail, Ban } from 'lucide-react'
+import { Link2, Mail, Ban } from 'lucide-react'
 import { toast } from 'sonner'
 import { ConfirmActionDialog } from '@/components/common/ConfirmActionDialog'
 import { Button } from '@/components/ui/button'
@@ -166,19 +166,6 @@ export function DocSendTab({ doc, companyId, onChanged }: {
               <div className="flex shrink-0 gap-1">
                 {!l.revoked && !expired && (
                   <>
-                    <Button size="sm" variant="ghost" title="Скопировать ссылку"
-                      aria-label={`Скопировать ссылку для ${l.recipient || 'получателя'}`}
-                      onClick={async () => {
-                        const url = `${window.location.origin}/doc-share/${l.token}`
-                        try {
-                          await navigator.clipboard.writeText(url)
-                          toast.success('Скопировано')
-                        } catch {
-                          window.prompt('Скопируйте ссылку вручную', url)
-                        }
-                      }}>
-                      <Copy className="h-3.5 w-3.5" />
-                    </Button>
                     <ConfirmActionDialog
                       trigger={(
                         <Button size="sm" variant="ghost" title="Отозвать"

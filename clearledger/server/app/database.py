@@ -3523,6 +3523,19 @@ async def create_all() -> None:
             "END $$"
         ))
 
+        # v2.45: публичная ссылка на документ ищется по хешу, а не по токену.
+        # Открытый токен в базе означал бы, что дамп таблицы — это рабочие ссылки
+        # на все непросроченные документы. Колонка `token` остаётся до конца
+        # перехода (уже выданные ссылки должны работать) и очищается бэкфиллом.
+        for stmt in (
+            "ALTER TABLE doc_share_links ADD COLUMN IF NOT EXISTS token_hash VARCHAR(64)",
+            "ALTER TABLE doc_share_links ADD COLUMN IF NOT EXISTS token_prefix VARCHAR(12)",
+            "ALTER TABLE doc_share_links ALTER COLUMN token DROP NOT NULL",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_doc_share_token_hash "
+            "ON doc_share_links (token_hash) WHERE token_hash IS NOT NULL",
+        ):
+            await conn.execute(_sa.text(stmt))
+
     await _ensure_active_group_readiness(engine)
 
 
