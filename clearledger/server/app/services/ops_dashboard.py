@@ -29,6 +29,7 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.station_passport import passport_value, stations_by_location
 from app.models import (
     ChargeSession,
     Counterparty,
@@ -579,6 +580,10 @@ async def ops_station(db: AsyncSession, company_id, location_id: str) -> dict[st
         "extra": s.extra,
     } for s in sorted(settl, key=lambda x: {"energy": 0, "rent": 1, "service": 2}.get(x.role, 9))]
 
+    # Графы железа принадлежат станции, стоящей в точке сейчас (СТО, docs/OBJECTS.md).
+    # Снимок выгрузки (`md`) остаётся последним фолбэком, как было до разделения.
+    station = (await stations_by_location(db, company_id, [loc.id])).get(loc.id)
+
     return {
         "found": True,
         "locationId": loc.id,
@@ -586,9 +591,10 @@ async def ops_station(db: AsyncSession, company_id, location_id: str) -> dict[st
         "address": loc.address or " ".join(filter(None, [md.get("cityName"), md.get("street"), str(md.get("houseNumber") or "")])).strip() or None,
         "status": loc.operational_status,
         "stage": md.get("stage"),
-        "powerKw": loc.power_kwt or md.get("maxPowerKw"),
-        "connectors": loc.connectors_count or md.get("connectorCount"),
-        "serial": loc.serial_number or md.get("serialNumber"),
+        "powerKw": passport_value("powerKwt", loc, station) or md.get("maxPowerKw"),
+        "connectors": passport_value("connectorsCount", loc, station) or md.get("connectorCount"),
+        "serial": passport_value("serialNumber", loc, station) or md.get("serialNumber"),
+        "stationId": str(station.id) if station is not None else None,
         "zoi": md.get("zoi1"),
         "ownUseEstKwh": round(own, 1) if own is not None else None,
         "avgTariff": avg_tariff,

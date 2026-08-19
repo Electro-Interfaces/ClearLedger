@@ -43,16 +43,38 @@ PASSPORT_SOURCES: tuple[tuple[str, str, str], ...] = (
 )
 
 
+# Графы, которые пока наполняют конвейеры загрузки — прямо в колонки точки:
+#   power_kwt / connectors_count / connector_types — нормализация справочника
+#     станций по составу коннекторов (`services/asuim_normalize.py:380-384`);
+#   owner — нормализация станций (`services/stations_normalize.py:408`);
+#   inventory_number / brand / installed_on — реестр РусГидро
+#     (`services/reestr_rushydro.py:1109,1128,1132`).
+#
+# По ним приоритет остаётся у точки, иначе очередная выгрузка обновила бы точку,
+# а карточка показывала бы застывшее значение станции — регресс вместо перевода.
+# Порядок меняется на обратный не «когда-нибудь», а ровно тогда, когда запись
+# этих конвейеров переедет в станцию; до тех пор владелец графы — тот, кто её
+# пишет, и читатель обязан спрашивать именно его.
+FEED_OWNED = frozenset({
+    "powerKwt", "connectorsCount", "connectorTypes", "owner",
+    "inventoryNumber", "brand", "installedOn",
+})
+
+
 def passport_value(key: str, loc, unit) -> object | None:
-    """Значение одной графы: приоритет у станции, фолбэк на точку."""
+    """Значение одной графы у того, кто ею владеет, с фолбэком на второго.
+
+    Владелец — станция, кроме граф из `FEED_OWNED`: их до сих пор пишет загрузка
+    в колонки точки, и спрашивать станцию первой значило бы показывать устаревшее.
+    """
     for out_key, unit_field, loc_field in PASSPORT_SOURCES:
         if out_key != key:
             continue
-        if unit is not None:
-            value = getattr(unit, unit_field, None)
-            if value not in (None, ""):
-                return value
-        return getattr(loc, loc_field, None)
+        loc_value = getattr(loc, loc_field, None)
+        unit_value = getattr(unit, unit_field, None) if unit is not None else None
+        first, second = ((loc_value, unit_value) if out_key in FEED_OWNED
+                         else (unit_value, loc_value))
+        return first if first not in (None, "") else second
     return getattr(loc, key, None)
 
 
