@@ -6656,6 +6656,43 @@ class EzsSiteEquipment(Base):
     )
 
 
+class ObjectExportLog(Base):
+    """Журнал выгрузок сведений об объектах (СТО п. 12.3).
+
+    Норма требует фиксировать каждую передачу: кто (работник либо учётная запись
+    интеграции), когда, какой состав и какой объём. Журнал нужен и сам по себе, и
+    как основание четвёртого замораживающего события (п. 7.6): по нему видно, что
+    объект уже уехал наружу и его номер трогать нельзя.
+
+    `is_external` разделяет две принципиально разные записи. Обмен между
+    информационными системами ОРГАНИЗАЦИИ замораживающим событием не является —
+    это оговорено нормой прямо, — поэтому проекция Ядро → Поддержка и выгрузка по
+    внутреннему ключу пишутся сюда с `false`. Без этого флага первая же внутренняя
+    синхронизация заморозила бы номера всей сети.
+    """
+    __tablename__ = "object_export_log"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # Кто передал: работник (его id) либо учётная запись интеграции (её имя).
+    actor_kind: Mapped[str] = mapped_column(String(20), nullable=False)  # user | integration
+    actor_ref: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # Куда: код внешней системы либо приложения экосистемы.
+    destination: Mapped[str] = mapped_column(String(80), nullable=False)
+    is_external: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Что и сколько: перечень переданных реквизитов и число объектов.
+    fields: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    objects_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    note: Mapped[str | None] = mapped_column(String(300), nullable=True)
+
+    __table_args__ = (
+        Index("ix_object_export_company_at", "company_id", "at"),
+    )
+
+
 class EzsSiteCost(Base):
     """Статья бюджета проекта: план и факт. Факт может ссылаться на документ."""
     __tablename__ = "ezs_site_costs"

@@ -18,7 +18,8 @@ from app.database import get_db
 from app.deps import CompanyDep, get_owned
 from app.services.object_freeze import freeze_reasons, number_changed
 from app.services.station_passport import passport_value, stations_by_location
-from app.models import AuditEvent, Company, ServiceLocation, User, location_bindings
+from app.models import (
+    AuditEvent, Company, ObjectExportLog, ServiceLocation, User, location_bindings)
 from app.scope import in_scope, scope_location_conds
 from app.services import hubex_service
 
@@ -223,7 +224,20 @@ async def export_locations(
     )
     rows = res.scalars().all()
     stations = await stations_by_location(db, company.id, [l.id for l in rows])
-    return [_out(l, stations.get(l.id)) for l in rows]
+    out = [_out(l, stations.get(l.id)) for l in rows]
+
+    # Журнал выгрузок (СТО п. 12.3): кто, когда, какой состав и объём. Ручка
+    # ходит по ключу интеграции — это обмен между системами ОРГАНИЗАЦИИ, поэтому
+    # `is_external=False`: такая передача номера не замораживает (п. 7.6), иначе
+    # первая же синхронизация с Поддержкой заморозила бы всю сеть.
+    db.add(ObjectExportLog(
+        company_id=company.id, actor_kind="integration", actor_ref="cloud-api-key",
+        destination="internal", is_external=False,
+        fields=sorted(LocationOut.model_fields.keys()),
+        objects_count=len(out),
+        note="Выгрузка реестра объектов по ключу интеграции",
+    ))
+    return out
 
 
 @router.post("", response_model=LocationOut)

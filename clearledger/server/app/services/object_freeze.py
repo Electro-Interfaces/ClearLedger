@@ -25,7 +25,8 @@ from sqlalchemy import exists, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
-    ChargeSession, ContractLocation, EzsEquipmentUnit, ObjectLink, ServiceLocation,
+    ChargeSession, ContractLocation, EzsEquipmentUnit, ObjectExportLog, ObjectLink,
+    ServiceLocation,
 )
 
 # Человекочитаемые причины: их видит тот, кому отказали в правке номера, и по ним
@@ -85,6 +86,14 @@ async def freeze_reasons(db: AsyncSession, company_id, location_id: str) -> list
         ObjectLink.relation == "external_id",
         ObjectLink.parent_id.in_([location_id, *station_ids]),
     )))
+    if not exported:
+        # Второй признак — запись журнала выгрузок, помеченная как внешняя
+        # (п. 12.3). Реестр соответствий свидетельствует о состоявшейся передаче
+        # адресно, журнал — о передаче как таковой; для заморозки годится любое.
+        exported = await db.scalar(select(exists().where(
+            ObjectExportLog.company_id == company_id,
+            ObjectExportLog.is_external.is_(True),
+        )))
     if exported:
         reasons.append(REASON_EXPORTED)
 
