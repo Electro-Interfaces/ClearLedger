@@ -3553,6 +3553,20 @@ async def create_all() -> None:
         ):
             await conn.execute(_sa.text(stmt))
 
+        # v2.52: круги виз, запущенные процессом. Частичный уникальный индекс
+        # держит правило «живой круг по документу один» на уровне базы: гонка двух
+        # запросов иначе открыла бы второй круг, и визы разъехались бы по кругам.
+        for stmt in (
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_eco_approval_requests_key "
+            "ON eco_approval_requests (company_id, request_id)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_eco_approval_requests_open "
+            "ON eco_approval_requests (company_id, doc_id) WHERE outcome IS NULL",
+            "CREATE INDEX IF NOT EXISTS ix_eco_approval_requests_undelivered "
+            "ON eco_approval_requests (decided_at) "
+            "WHERE outcome IS NOT NULL AND delivered_at IS NULL",
+        ):
+            await conn.execute(_sa.text(stmt))
+
     await _ensure_active_group_readiness(engine)
 
 

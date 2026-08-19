@@ -35,5 +35,5 @@ async def accept_event(
     """
     event = await request.json()
     provider = str(event.get("source") or request.headers.get("X-Eco-App") or "support")
-    status, note = await inbound_events.accept(db, provider, event)
+    status, note = await inbound_events.accept(db, provider, event, company.id)
     return {"status": status, "note": note}

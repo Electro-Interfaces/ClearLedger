@@ -342,6 +342,17 @@ async def run_inbound_events(db: AsyncSession, now: datetime) -> int:
     return await inbound_events.process_pending(db)
 
 
+async def run_approval_delivery(db: AsyncSession, now: datetime) -> int:
+    """Отдать процессам исходы закрытых кругов виз.
+
+    Круг закрывается независимо от того, доступен ли сейчас Координатор, поэтому
+    исход сначала фиксируется у себя, а доставляется отсюда с повторами: визы
+    собирают один раз, второй раз их никто собирать не будет.
+    """
+    from app.services import approval_requests
+    return await approval_requests.deliver_pending(db)
+
+
 async def run_project_reconcile(db: AsyncSession, now: datetime) -> int:
     """Досверить проекты, у которых шаг маршрута начат, но не отражён.
 
@@ -381,7 +392,7 @@ async def tick() -> dict[str, int]:
     now = datetime.now(timezone.utc)
     out = {"recurrences": 0, "reminders": 0, "escalations": 0,
            "acquaints": 0, "exchange": 0, "break_glass": 0, "project_reconcile": 0,
-           "inbound_events": 0}
+           "inbound_events": 0, "approval_delivery": 0}
     async with async_session_factory() as db:
         for key, fn in (("recurrences", run_recurrences),
                         ("reminders", run_due_reminders),
@@ -390,7 +401,8 @@ async def tick() -> dict[str, int]:
                         ("exchange", run_exchange_scans),
                         ("break_glass", run_break_glass_notifications),
                         ("project_reconcile", run_project_reconcile),
-                        ("inbound_events", run_inbound_events)):
+                        ("inbound_events", run_inbound_events),
+                        ("approval_delivery", run_approval_delivery)):
             try:
                 out[key] = await fn(db, now)
                 await db.commit()

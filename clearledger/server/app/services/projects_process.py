@@ -93,6 +93,12 @@ async def _call(db: AsyncSession, company_id, method: str, path: str,
     return resp.json()
 
 
+# Публичное имя того же вызова: к фасаду процессов ходит не только проектный
+# мост, но и возврат исхода круга виз. Прятать общий транспорт под подчёркиванием
+# и звать его из соседнего сервиса — хуже, чем назвать его вслух.
+call_process = _call
+
+
 async def _participants(db: AsyncSession, site: EzsSite) -> list[dict[str, Any]]:
     """Состав проекта для кейса: человек + служба регламента.
 

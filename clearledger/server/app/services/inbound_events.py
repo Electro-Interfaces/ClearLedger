@@ -21,7 +21,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import select, text
+from sqlalchemy import select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -32,10 +32,11 @@ log = logging.getLogger("clearledger.inbound")
 # События, которые Ядро умеет обрабатывать. Остальные принимаем и помечаем
 # `skipped`: неизвестное событие — не ошибка отправителя, а наш ещё не написанный
 # обработчик, и ретраить его бессмысленно.
-HANDLED = {"case.stage_changed", "case.closed"}
+HANDLED = {"case.stage_changed", "case.closed", "approval.requested"}
 
 
-async def accept(db: AsyncSession, provider: str, event: dict[str, Any]) -> tuple[str, str]:
+async def accept(db: AsyncSession, provider: str, event: dict[str, Any],
+                 company_id: Any = None) -> tuple[str, str]:
     """Принять событие. Возвращает (статус, пояснение) для ответа отправителю."""
     external_id = str(event.get("id") or "").strip()
     if not external_id:
@@ -47,11 +48,9 @@ async def accept(db: AsyncSession, provider: str, event: dict[str, Any]) -> tupl
         type=str(event.get("type") or "")[:80],
         payload=event,
     )
-    company = event.get("companyId") or (event.get("data") or {}).get("company_id")
-    if company:
-        # Компания приложения ≠ компания Ядра, поэтому в поле кладём только то,
-        # что удалось сопоставить; иначе оставляем пустым и разбираем при обработке.
-        row.company_id = None
+    # Компания — та, чьим ключом интеграции пришло событие. Полю в теле не верим:
+    # у приложения своя нумерация компаний, и его "companyId" — не наш.
+    row.company_id = company_id
     db.add(row)
     try:
         await db.flush()
@@ -76,15 +75,50 @@ async def process_pending(db: AsyncSession, limit: int = 50) -> int:
             result, error = await _handle(db, row)
         except Exception as exc:  # noqa: BLE001 — одно событие не валит проход
             log.exception("Событие %s (%s) не обработано", row.external_id, row.type)
-            result, error = "failed", f"{type(exc).__name__}: {exc}"[:500]
+            # Откат обязателен: после сорванной вставки сессия не принимает записи,
+            # и без него отметка «разобрано» не легла бы ни на это событие, ни на
+            # следующие. Отметка ставится отдельным запросом — объект после отката
+            # к сессии уже не привязан.
+            await db.rollback()
+            await db.execute(update(InboundEvent).where(InboundEvent.id == row.id).values(
+                processed_at=datetime.now(timezone.utc), result="failed",
+                error=f"{type(exc).__name__}: {exc}"[:500]))
+            await db.commit()
+            done += 1
+            continue
         row.processed_at = datetime.now(timezone.utc)
         row.result = result
         row.error = error
+        # Каждое событие — своей транзакцией: разбор одного не должен пропасть
+        # из-за соседнего, а обработчик мог уже что-то создать.
+        await db.commit()
         done += 1
     return done
 
 
+async def _start_approval(db: AsyncSession, row: InboundEvent) -> tuple[str, str | None]:
+    """Узел маршрута просит собрать визы по документу.
+
+    Отказ запуска (документ не той редакции, вид требует регистрации, маршрут
+    пуст) — это `skipped` с текстом причины, а не ошибка доставки: повторять
+    доставку бессмысленно, пока человек не поправит документ или маршрут.
+    """
+    from app.services import approval_requests
+
+    if row.company_id is None:
+        return "skipped", "Событие пришло без компании"
+    try:
+        req = await approval_requests.request(
+            db, row.company_id, row.external_id, (row.payload or {}).get("data") or {})
+    except approval_requests.RequestError as exc:
+        return "skipped", str(exc)[:500]
+    return "ok", f"круг {req.round} по документу {req.doc_id}"
+
+
 async def _handle(db: AsyncSession, row: InboundEvent) -> tuple[str, str | None]:
+    if row.type == "approval.requested":
+        return await _start_approval(db, row)
+
     if row.type not in HANDLED:
         return "skipped", None
 

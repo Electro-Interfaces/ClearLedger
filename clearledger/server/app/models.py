@@ -6712,6 +6712,60 @@ class InboundEvent(Base):
     )
 
 
+class ApprovalRequest(Base):
+    """Круг виз, запущенный узлом маршрута процесса, и возврат его исхода.
+
+    Согласование документа — работа «Трека», ход стройки — работа Координатора.
+    Раньше связать их мог только человек: посмотрел, что визы собраны, и нажал
+    кнопку в процессе. Здесь эта передача становится машинной.
+
+    Запись живёт дольше самого вызова, потому что исход надо не только узнать, но
+    и **доставить**. Доставка идёт фоновым проходом с ретраями: сеть между двумя
+    сервисами рвётся, а круг виз к тому моменту уже закрыт — терять его исход
+    нельзя, второй раз согласовывать никто не будет.
+
+    Идемпотентность — `request_id`: повторная доставка `approval.requested`
+    (штатная при at-least-once) не открывает второго круга по тому же документу.
+
+    Действие процесса задаётся глаголом, а не идентификатором ребра: граф
+    пересобирают, идентификаторы при этом меняются, а «согласовано» остаётся
+    «согласовано».
+    """
+    __tablename__ = "eco_approval_requests"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    # Идентификатор события, породившего запрос, — он же ключ от второго круга.
+    request_id: Mapped[str] = mapped_column(String(120), nullable=False)
+    # Процесс в Координаторе и, если ход идёт по ветви, сама ветвь.
+    process_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    branch_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    doc_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("doc_cards.id", ondelete="CASCADE"), nullable=False, index=True)
+    round: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Чем двигать процесс при каждом исходе. Пусто — исход только фиксируется.
+    on_approved: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    on_rejected: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    # approved | rejected | cancelled
+    outcome: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("uq_eco_approval_requests_key", "company_id", "request_id", unique=True),
+        # Живой круг по документу один: второй запрос от процесса, пока прежний не
+        # закрыт, — это ошибка настройки маршрута, а не новая работа.
+        Index("uq_eco_approval_requests_open", "company_id", "doc_id", unique=True,
+              postgresql_where=text("outcome IS NULL")),
+        Index("ix_eco_approval_requests_undelivered", "decided_at",
+              postgresql_where=text("outcome IS NOT NULL AND delivered_at IS NULL")),
+    )
+
+
 class ObjectExportLog(Base):
     """Журнал выгрузок сведений об объектах (СТО п. 12.3).
 

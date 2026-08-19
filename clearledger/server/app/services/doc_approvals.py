@@ -260,11 +260,15 @@ def _activate(rows: list[DocApproval], now: datetime) -> int:
 
 
 async def start(db: AsyncSession, cid: uuid.UUID, doc: DocCard, route: list[dict],
-                actor: User) -> dict[str, Any]:
+                actor: User | None) -> dict[str, Any]:
     """Запустить круг согласования по маршруту вида.
 
     Живой круг один: повторный запуск открывает следующий, прошлые остаются в
     истории. Иначе на вопрос «сколько кругов прошёл договор» ответить нечем.
+
+    `actor` пуст, когда круг запустил узел маршрута процесса. Заводить ради этого
+    техническую учётку не стали: в следе документа честнее видеть «Процесс», чем
+    человекообразного пользователя, которого не существует.
     """
     steps = clean_route(route)
     if not steps:
@@ -304,8 +308,9 @@ async def start(db: AsyncSession, cid: uuid.UUID, doc: DocCard, route: list[dict
 
     doc.approval_round = round_no
     doc.approval_status = "pending"
-    db.add(DocEvent(doc_id=doc.id, kind="approval", user_id=actor.id,
-                    actor_name=actor.name or actor.email,
+    db.add(DocEvent(doc_id=doc.id, kind="approval",
+                    user_id=actor.id if actor else None,
+                    actor_name=(actor.name or actor.email) if actor else "Процесс",
                     to_value=f"круг {round_no}",
                     note=f"согласующих: {created}; пакет: {snapshot_hash[:12]}"))
     await db.flush()
@@ -417,6 +422,12 @@ async def decide(db: AsyncSession, cid: uuid.UUID, doc: DocCard, row: DocApprova
         for p in pend:
             p.status = "skipped"
         doc.approval_status = "rejected"
+        # Исход круга ждёт узел маршрута, если круг запустил он. Отметка ставится
+        # здесь, внутри закрывающей транзакции: доставка пойдёт фоном, но потерять
+        # исход нельзя — второй раз визы никто собирать не станет.
+        from app.services import approval_requests  # локально: обратный импорт
+
+        await approval_requests.mark_outcome(db, doc.id, "rejected")
         await db.flush()
         return {"status": "rejected", "returned": True}
 
@@ -449,6 +460,9 @@ async def decide(db: AsyncSession, cid: uuid.UUID, doc: DocCard, row: DocApprova
         db.add(DocEvent(doc_id=doc.id, kind="approval", user_id=actor.id,
                         actor_name=actor.name or actor.email,
                         to_value="круг пройден"))
+        from app.services import approval_requests  # локально: обратный импорт
+
+        await approval_requests.mark_outcome(db, doc.id, "approved")
     await db.flush()
     return {"status": doc.approval_status, "left": len(left)}
 
@@ -467,6 +481,10 @@ async def cancel(db: AsyncSession, doc: DocCard, actor: User,
     for row in rows:
         row.status = "skipped"
     doc.approval_status = "none"
+    from app.services import approval_requests  # локально: обратный импорт
+
+    # Отменённый круг — тоже исход: процесс, ждущий виз, иначе стоял бы вечно.
+    await approval_requests.mark_outcome(db, doc.id, "cancelled")
     db.add(DocEvent(
         doc_id=doc.id, kind="approval", user_id=actor.id,
         actor_name=actor.name or actor.email, to_value="круг отменён", note=reason,
