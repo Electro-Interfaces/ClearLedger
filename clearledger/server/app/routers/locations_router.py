@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import assert_company_member, get_company_by_api_key, get_current_user
 from app.database import get_db
 from app.deps import CompanyDep, get_owned
+from app.services import object_control
 from app.services.object_freeze import freeze_reasons, number_changed
 from app.services.station_passport import passport_value, stations_by_location
 from app.models import (
@@ -196,6 +197,17 @@ def _out(l: ServiceLocation, unit=None) -> LocationOut:
         createdAt=l.created_at.isoformat() if l.created_at else "",
         updatedAt=l.updated_at.isoformat() if l.updated_at else "",
     )
+
+
+@router.get("/control")
+async def objects_control(cid: CompanyDep, db: AsyncSession = Depends(get_db)):
+    """Обязательный контроль объектов (СТО п. 14.2).
+
+    Объявлен до `/{location_id}`: иначе FastAPI разберёт «control» как
+    идентификатор объекта и ручка ответит 404 — грабля, на которую уже наступали
+    со `/summary` в «Задачах».
+    """
+    return await object_control.run(db, cid)
 
 
 @router.get("", response_model=list[LocationOut])
