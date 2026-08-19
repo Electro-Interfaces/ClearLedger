@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.support_scope import support_company_id
 from app.auth import assert_company_member, get_current_user
 from app.database import get_db
 from app.models import User
@@ -68,7 +69,13 @@ async def list_tickets(
     closed — завершённые, all — всё. object_id — объект ПРОСТРАНСТВА (core-id):
     карточка объекта и «Офис» ссылаются на свои заявки; матчим через проекцию
     (service_objects.eco_object_id), на всякий случай принимаем и public-id."""
-    await assert_company_member(company_id, current_user, db)
+    cid = await assert_company_member(company_id, current_user, db)
+    # Заявки лежат в схеме Поддержки, и company_id там СВОЙ. Без фильтра по карте
+    # соответствия компания видела бы чужие заявки (в контейнере их бывает
+    # несколько). Нет карты — нет выдачи: пусто честнее, чем чужое.
+    support_cid = await support_company_id(db, cid)
+    if not support_cid:
+        return {"tickets": [], "total": 0}
     cond = "true"
     if scope == "open":
         cond = "t.status not in ('closed','cancelled')"
@@ -96,10 +103,12 @@ async def list_tickets(
         left join public.users pu on lower(pu.email) = lower(:email)
         where coalesce(t.is_deleted, false) = false
           and coalesce(t.is_archived, false) = false
+          and t.company_id::text = :support_cid
           and {cond}
         order by t.created_at desc
         limit :lim
     """), {"email": current_user.email, "lim": _LIST_LIMIT,
+           "support_cid": support_cid,
            **({"oid": object_id} if object_id else {})})).all()
     return {"tickets": [_row(r) for r in rows], "total": len(rows)}
 
@@ -111,9 +120,13 @@ async def tickets_summary(
     current_user: User = Depends(get_current_user),
 ):
     """Срез руководителя: сколько и где стоит работа. Одним запросом на блок."""
-    await assert_company_member(company_id, current_user, db)
+    cid = await assert_company_member(company_id, current_user, db)
+    support_cid = await support_company_id(db, cid)
+    if not support_cid:
+        return {"totals": {}, "by": {}}
     base = ("from public.tickets t where coalesce(t.is_deleted,false)=false "
-            "and coalesce(t.is_archived,false)=false")
+            "and coalesce(t.is_archived,false)=false "
+            "and t.company_id::text = :support_cid")
     totals = (await db.execute(text(f"""
         select count(*) filter (where t.status not in ('closed','cancelled')) as open,
                count(*) filter (where t.status not in ('closed','cancelled')
@@ -127,7 +140,7 @@ async def tickets_summary(
                count(*) filter (where t.created_at >= now() - interval '30 days') as created_30d,
                count(*) filter (where t.closed_at >= now() - interval '30 days') as closed_30d
         {base}
-    """))).one()
+    """), {"support_cid": support_cid})).one()
     by = {}
     for key, expr in (("responsibility", "coalesce(t.responsibility,'—')"),
                       ("status", "t.status"),
@@ -136,16 +149,17 @@ async def tickets_summary(
             select {expr} as k, count(*) as n {base}
               and t.status not in ('closed','cancelled')
             group by 1 order by 2 desc limit 12
-        """))).all()
+        """), {"support_cid": support_cid})).all()
         by[key] = [{"key": r.k, "count": r.n} for r in rows]
     assignees = (await db.execute(text("""
         select coalesce(au.name, '— не назначен') as k, count(*) as n
         from public.tickets t
         left join public.users au on au.id = coalesce(t.current_assignee_id, t.assigned_to)
         where coalesce(t.is_deleted,false)=false and coalesce(t.is_archived,false)=false
+          and t.company_id::text = :support_cid
           and t.status not in ('closed','cancelled')
         group by 1 order by 2 desc limit 10
-    """))).all()
+    """), {"support_cid": support_cid})).all()
     by["assignee"] = [{"key": r.k, "count": r.n} for r in assignees]
     # Разрез по подразделениям штатной структуры: исполнитель Поддержки → человек
     # Ядра по email → его подразделение. Руководитель видит нагрузку своих отделов.
@@ -159,7 +173,7 @@ async def tickets_summary(
         where coalesce(t.is_deleted,false)=false and coalesce(t.is_archived,false)=false
           and t.status not in ('closed','cancelled')
         group by 1 order by 2 desc limit 12
-    """))).all()
+    """), {"support_cid": support_cid})).all()
     by["department"] = [{"key": r.k, "count": r.n} for r in departments]
     return {
         "open": totals.open, "sla_breached": totals.sla_breached,
@@ -177,16 +191,20 @@ async def list_schedules(
 ):
     """Регламентные (периодические) задачи: движок Поддержки сам порождает заявки
     по interval_days. Здесь — витрина «что и когда должно выполняться»."""
-    await assert_company_member(company_id, current_user, db)
+    cid = await assert_company_member(company_id, current_user, db)
+    support_cid = await support_company_id(db, cid)
+    if not support_cid:
+        return {"schedules": []}
     rows = (await db.execute(text("""
         select m.id, m.name, m.description, m.interval_days, m.lead_days,
                m.category, m.priority, m.next_due_date, m.is_active,
                so.name as object_name
         from public.maintenance_schedules m
         left join public.service_objects so on so.id = m.service_object_id
+        where m.company_id::text = :support_cid
         order by m.is_active desc, m.next_due_date nulls last
         limit 200
-    """))).all()
+    """), {"support_cid": support_cid})).all()
     return {"schedules": [{
         "id": str(r.id), "name": r.name, "description": r.description,
         "interval_days": r.interval_days, "lead_days": r.lead_days,
@@ -211,8 +229,13 @@ async def ticket_details(
     подразделения исполнителя по штатной структуре; если исполнитель сам
     руководитель — руководитель родительского подразделения.
     """
-    await assert_company_member(company_id, current_user, db)
+    cid = await assert_company_member(company_id, current_user, db)
     tid = _uuid_or_400(ticket_id, "ticket_id")
+    # Карточка по прямой ссылке — тоже только своей компании: без фильтра
+    # идентификатор чужой заявки открывал её целиком.
+    support_cid = await support_company_id(db, cid)
+    if not support_cid:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Заявка не найдена")
     r = (await db.execute(text("""
         select t.id, t.number, t.display_number, t.title, t.description, t.status,
                t.priority, t.type, t.category, t.responsibility, t.external_system,
@@ -227,7 +250,8 @@ async def ticket_details(
         left join public.users au on au.id = coalesce(t.current_assignee_id, t.assigned_to)
         left join public.users cu on cu.id = t.customer_user_id
         where t.id = :tid and coalesce(t.is_deleted, false) = false
-    """), {"tid": str(tid)})).one_or_none()
+          and t.company_id::text = :support_cid
+    """), {"tid": str(tid), "support_cid": support_cid})).one_or_none()
     if r is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Заявка не найдена")
 

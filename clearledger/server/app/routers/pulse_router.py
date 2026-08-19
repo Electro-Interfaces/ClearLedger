@@ -31,6 +31,7 @@ from app.auth import (
     assert_company_member, assert_company_product, get_current_user,
     resolve_member_modules,
 )
+from app.services.support_scope import support_company_id
 from app.database import get_db
 from app.services.tax_mode import tax_mode as space_tax_mode
 from app.models import (
@@ -1372,6 +1373,10 @@ async def pulse_day_data(db: AsyncSession, company_id: str,
     и плитка начала бы врать про то, что внутри.
     """
     cid = str(company_id)
+    # Заявки лежат в схеме Поддержки, где company_id свой: без карты
+    # соответствия компания видела бы чужие счётчики. Нет карты — считаем
+    # по несуществующей компании, то есть ноль, а не всё подряд.
+    support_cid = await support_company_id(db, cid) or "-"
     # Чем мерить продажи, решает профиль: у топливного пространства это заправки,
     # у ЭЗС — зарядные сессии. Раньше таблица была зашита, и на профиле fuel экран
     # дня тревожно писал «Данных о сессиях нет» при 376 744 живых заправках.
@@ -1443,7 +1448,8 @@ async def pulse_day_data(db: AsyncSession, company_id: str,
         where status not in ('closed', 'cancelled')
           and coalesce(is_deleted, false) = false
           and coalesce(is_archived, false) = false
-    """))).one()
+          and company_id::text = :support_cid
+    """), {"support_cid": support_cid})).one()
 
     # ── Развитие: воронка проектов (активные стадии) и вводы за 30 дней ──
     funnel = (await db.execute(text("""
@@ -2808,6 +2814,10 @@ async def pulse_team(
     email — той же связкой, что и разрез по подразделениям в «Заявках».
     """
     cid = await assert_company_product(company_id, current_user, db, "pulse")
+    # Заявки лежат в схеме Поддержки, где company_id свой: без карты
+    # соответствия компания видела бы чужие счётчики. Нет карты — считаем
+    # по несуществующей компании, то есть ноль, а не всё подряд.
+    support_cid = await support_company_id(db, cid) or "-"
     cid = str(cid)
     tickets_ok = await _tickets_available(db)
     # Без прав на заявки колонка считается нулями: остальная картина по
@@ -2829,7 +2839,8 @@ async def pulse_team(
                  and lower(au.email) = lower(u.email)
             left join public.users cu on cu.id = tk.customer_user_id
                  and lower(cu.email) = lower(u.email)
-            where coalesce(tk.is_deleted,false) = false
+            where tk.company_id::text = :support_cid
+              and coalesce(tk.is_deleted,false) = false
               and coalesce(tk.is_archived,false) = false
               and (au.id is not null or cu.id is not null)""" if tickets_ok else (
         "select 0 as open, 0 as breached, 0 as authored, 0 as closed_30d")
@@ -2886,7 +2897,7 @@ async def pulse_team(
         ) a on true
         order by coalesce(t.breached,0) desc, coalesce(t.open,0) desc,
                  u.last_seen_at desc nulls last
-    """), {"cid": cid})).all()]
+    """), {"cid": cid, "support_cid": support_cid})).all()]
 
     departments = [{
         "name": r.name, "head": r.head, "people": r.people,
@@ -2916,6 +2927,10 @@ async def pulse_person(
     счётчик, но и ответ «что именно у него в работе и куда он ходит».
     """
     cid = await assert_company_product(company_id, current_user, db, "pulse")
+    # Заявки лежат в схеме Поддержки, где company_id свой: без карты
+    # соответствия компания видела бы чужие счётчики. Нет карты — считаем
+    # по несуществующей компании, то есть ноль, а не всё подряд.
+    support_cid = await support_company_id(db, cid) or "-"
     cid, uid = str(cid), str(user_id)
 
     who = (await db.execute(text("""
@@ -2940,12 +2955,13 @@ async def pulse_person(
         from public.tickets tk
         join public.users au on au.id = coalesce(tk.current_assignee_id, tk.assigned_to)
         left join public.service_objects so on so.id = tk.service_object_id
-        where lower(au.email) = lower(:email)
+        where tk.company_id::text = :support_cid
+          and lower(au.email) = lower(:email)
           and tk.status not in ('closed','cancelled')
           and coalesce(tk.is_deleted,false)=false and coalesce(tk.is_archived,false)=false
         order by tk.sla_breached desc nulls last, tk.created_at
         limit 20
-    """), {"email": who.email})).all()]
+    """), {"support_cid": support_cid, "email": who.email})).all()]
 
     projects = [{"title": r.title, "stage": r.stage} for r in (await db.execute(text("""
         select coalesce(nullif(title,''), project_no, 'без имени') as title, stage
@@ -3010,6 +3026,10 @@ async def pulse_week(
 async def pulse_week_data(db: AsyncSession, company_id: str) -> dict[str, Any]:
     """Данные «Недели» без проверки доступа — её делает вызывающий (и выгрузка)."""
     cid = str(company_id)
+    # Заявки лежат в схеме Поддержки, где company_id свой: без карты
+    # соответствия компания видела бы чужие счётчики. Нет карты — считаем
+    # по несуществующей компании, то есть ноль, а не всё подряд.
+    support_cid = await support_company_id(db, cid) or "-"
 
     # Бухгалтерское пространство меряет неделю не сессиями и стадиями проектов, а
     # тем, что доехало из 1С, что разобрали и чего дождались от клиента.
@@ -3050,8 +3070,9 @@ async def pulse_week_data(db: AsyncSession, company_id: str) -> dict[str, Any]:
                count(*) filter (where closed_at >= now() - interval '14 days'
                                 and closed_at < now() - interval '7 days') as closed_prev
         from public.tickets
-        where coalesce(is_deleted,false)=false and coalesce(is_archived,false)=false
-    """))).one()
+        where company_id::text = :support_cid
+          and coalesce(is_deleted,false)=false and coalesce(is_archived,false)=false
+    """), {"support_cid": support_cid})).one()
     # Поток заявок вырос — это не победа: полярность у строк дайджеста разная.
     rows.append({"label": "Заявок поступило", "value": t.created, "prev": t.created_prev,
                  "unit": None, "higher_is_better": False})

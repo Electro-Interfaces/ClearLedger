@@ -56,6 +56,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.auth import assert_company_member, get_current_user
+from urllib.parse import urlparse
+
+from app.net_guard import assert_external_host
 from app.database import get_db, async_session_factory
 from app.deps import capture_company_header, scope_company_id
 from app.utils import msk_day_end, msk_day_start
@@ -597,7 +600,19 @@ async def list_export_docs(
 # ═══════════════════════════════════════════════════════════════
 
 @router.post("/sts/test")
-async def test_sts_connection(body: StsConnectionIn):
+async def test_sts_connection(
+    body: StsConnectionIn,
+    current_user: User = Depends(get_current_user),
+):
+    """Проба подключения к STS.
+
+    Ручка принимает произвольный адрес и делает по нему исходящий запрос, поэтому
+    без авторизации она была сканером внутренней сети для любого желающего: по
+    различимым ответам видно, что за порт открыт, а логин с паролем можно
+    подставить чужие. Адрес дополнительно проверяется `net_guard` — тем самым,
+    что написан против этого сценария, но здесь не вызывался.
+    """
+    assert_external_host(urlparse(body.base_url or "").hostname)
     return await sts_test_connection(
         body.base_url, body.login, body.password, body.system_code,
     )

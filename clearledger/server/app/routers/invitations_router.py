@@ -120,6 +120,19 @@ async def create_invitation(
     current_user: User = Depends(get_current_user),
 ):
     cid = await require_company_admin(payload.company_id, current_user, db)
+
+    # Приглашение в пространство заводит членство во ВСЕХ организациях контейнера
+    # (`_accept_targets`), а право проверено только на одну. Значит администратор
+    # одной организации мог выдать себе или третьему лицу доступ ко всем
+    # остальным — и с ролью admin, потому что роль и область задаются независимо.
+    # Такое решение принимает владелец контейнера, а не администратор компании.
+    is_space = (getattr(payload, "scope", None) or "company") == "space"
+    if is_space and not current_user.is_superadmin:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Приглашение в пространство выдаёт только суперадминистратор: "
+            "оно даёт членство во всех организациях контейнера")
+
     email = payload.email  # уже нормализован схемой (NormEmail: strip + lower)
     party = payload.party_type or "internal"
     org_id = await resolve_org_id(payload.organization_id, cid, db) if party != "internal" else None
@@ -181,8 +194,12 @@ async def list_invitations(
     rows = (
         await db.execute(
             select(Invitation)
+            # Приглашения на всё пространство видит только тот, кто вправе их
+            # выдавать: администратору одной организации чужой список ничего не
+            # даёт, а email и роль приглашённого показывает.
             .where(Invitation.status == "pending",
-                   (Invitation.company_id == cid) | (Invitation.scope == "space"))
+                   (Invitation.company_id == cid) if not current_user.is_superadmin
+                   else ((Invitation.company_id == cid) | (Invitation.scope == "space")))
             .order_by(Invitation.created_at.desc())
         )
     ).scalars().all()
