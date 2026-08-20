@@ -188,35 +188,16 @@ async def _deliver(db: AsyncSession, row: ApprovalRequest) -> None:
 
     from app.services import projects_process
 
-    card = await projects_process.call_process(
-        db, row.company_id, "GET", f"/api/v1/process/instances/{row.process_id}")
-    action = _match_action(card.get("availableActions") or [], verb)
-    if action is None:
-        raise RequestError(
-            f"В процессе нет доступного действия «{verb}» "
-            f"(есть: {', '.join(_labels(card.get('availableActions') or [])) or 'нет'})")
-
+    # Действие называем словом, а не идентификатором из карточки.
+    #
+    # Карточка считает кнопки для ЧЕЛОВЕКА: на ролевом переходе она отдаёт их
+    # закрытыми, потому что ответственности по договору у машины нет. Пока мы
+    # искали глагол в этом списке, доставка работала лишь потому, что не смотрела
+    # на признак доступности, — один фильтр `allowed` в фасаде, и она встала бы на
+    # всех ролевых маршрутах разом. Глагол ещё и устойчивее: графы пересобирают,
+    # идентификаторы меняются, «Согласовано» остаётся.
     await projects_process.call_process(
         db, row.company_id, "POST",
         f"/api/v1/process/instances/{row.process_id}/actions",
-        json={"actionId": action.get("id"), "branchId": row.branch_id,
+        json={"verb": verb, "branchId": row.branch_id,
               "payload": {"approval_round": row.round, "doc_id": str(row.doc_id)}})
-
-
-def _labels(actions: list[dict[str, Any]]) -> list[str]:
-    return [str(a.get("verb") or a.get("name") or a.get("code") or "") for a in actions if a]
-
-
-def _match_action(actions: list[dict[str, Any]], verb: str) -> dict[str, Any] | None:
-    """Найти действие по глаголу — без учёта регистра и лишних пробелов.
-
-    Сравниваем и с кодом: маршруты пишут разные люди, и «approve» рядом с
-    «Согласовано» встречается чаще, чем хотелось бы.
-    """
-    want = verb.strip().casefold()
-    for action in actions:
-        for field in ("verb", "code", "name"):
-            value = str(action.get(field) or "").strip().casefold()
-            if value and value == want:
-                return action
-    return None

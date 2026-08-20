@@ -3553,6 +3553,13 @@ async def create_all() -> None:
         ):
             await conn.execute(_sa.text(stmt))
 
+        # v2.56: последний известный ход процесса — один снимок на предмет.
+        for stmt in (
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_process_snapshots_subject "
+            "ON process_snapshots (company_id, subject_type, subject_id)",
+        ):
+            await conn.execute(_sa.text(stmt))
+
         # v2.52: круги виз, запущенные процессом. Частичный уникальный индекс
         # держит правило «живой круг по документу один» на уровне базы: гонка двух
         # запросов иначе открыла бы второй круг, и визы разъехались бы по кругам.

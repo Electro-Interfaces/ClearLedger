@@ -741,6 +741,35 @@ class TobaccoMrc(Base):
 
 
 # ---------------------------------------------------------------------------
+# ProcessSnapshot
+# ---------------------------------------------------------------------------
+class ProcessSnapshot(Base):
+    """Последний известный ход процесса по предмету.
+
+    Ход ведёт Координатор, и когда он недоступен, карточка проекта открывалась без
+    панели хода вовсе: ни стадии, ни пройденного пути, ни вех. Человек в этот момент
+    не может ничего нажать — но посмотреть, где стройка, должен.
+
+    Снимок пишется на КАЖДОМ действии и на фоновой сверке, но никогда на чтении:
+    открытие карточки не должно писать в базу (фаза 1). Поэтому он может отставать —
+    и отдаётся честно помеченным, с временем последнего обновления.
+    """
+
+    __tablename__ = "process_snapshots"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    subject_type: Mapped[str] = mapped_column(String(60), nullable=False)
+    subject_id: Mapped[str] = mapped_column(String(120), nullable=False)
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+# ---------------------------------------------------------------------------
 # SecurityEvent
 # ---------------------------------------------------------------------------
 class SecurityEvent(Base):

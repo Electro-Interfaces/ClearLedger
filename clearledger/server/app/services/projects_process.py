@@ -17,13 +17,16 @@ RS256 Ядра и внутренний адрес приложения. Отде
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from typing import Any
 
 import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import EzsSite, EzsSiteParticipant, User
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+from app.models import EzsSite, EzsSiteParticipant, ProcessSnapshot, User
 from app.services.ezs_changes import make_change
 from app.services.space_projection import (
     DEFAULT_TIMEOUT,
@@ -73,6 +76,69 @@ def _from_facade(card: dict[str, Any], **extra: Any) -> dict[str, Any]:
            if key in card},
         **extra,
     }
+
+
+async def _mark_reconcile(db: AsyncSession, company_id, site: EzsSite,
+                          process_id: str, reasons: list[str]) -> None:
+    """Сказать процессу, что он разошёлся с карточкой проекта.
+
+    Раньше расхождение называла только карточка: человек, работающий в маршруте,
+    о нём не знал вовсе — он видел свой ход и считал, что всё сошлось. Теперь
+    причина лежит в сводке процесса, там же, где остальной контекст шага.
+
+    Отметка ставится на действиях и на фоновой сверке, не на чтении, и снимается
+    сама, когда сверять больше нечего: висящий флаг перестают замечать за неделю.
+    """
+    await _call(db, company_id, "POST", f"{FACADE}/instances", json={
+        "definition": PROCESS_DEFINITION,
+        "subject": {"type": SUBJECT_TYPE, "id": str(site.id)},
+        "context": {"needs_reconcile": reasons or None},
+    })
+
+
+async def _remember(db: AsyncSession, company_id, site: EzsSite,
+                    state: dict[str, Any]) -> None:
+    """Запомнить последний известный ход проекта.
+
+    Пишем только на действиях и на фоновой сверке — никогда на чтении: открытие
+    карточки не должно писать в базу. Поэтому снимок и может отставать, и отдаётся
+    он честно помеченным.
+    """
+    if not state.get("exists"):
+        return
+    keep = {key: state.get(key) for key in
+            ("stage", "stages", "links", "path", "milestones", "participants",
+             "fields", "values", "branches", "caseId", "stageEnteredAt", "daysInStage")}
+    await db.execute(pg_insert(ProcessSnapshot).values(
+        company_id=company_id, subject_type=SUBJECT_TYPE, subject_id=str(site.id),
+        payload=keep, at=datetime.now(timezone.utc),
+    ).on_conflict_do_update(
+        index_elements=[ProcessSnapshot.company_id, ProcessSnapshot.subject_type,
+                        ProcessSnapshot.subject_id],
+        set_={"payload": keep, "at": datetime.now(timezone.utc)},
+    ))
+
+
+async def _recall(db: AsyncSession, company_id, site: EzsSite) -> dict[str, Any] | None:
+    """Последний известный ход — когда спросить у Координатора не получилось.
+
+    Кнопок в таком ответе нет намеренно: нажать их всё равно нельзя, а показать
+    значит соврать. Карточка при этом открывается, и видно, где стоит стройка.
+    """
+    row = (await db.execute(select(ProcessSnapshot).where(
+        ProcessSnapshot.company_id == company_id,
+        ProcessSnapshot.subject_type == SUBJECT_TYPE,
+        ProcessSnapshot.subject_id == str(site.id)))).scalars().first()
+    if row is None:
+        return None
+    state = dict(row.payload or {})
+    state.update({
+        "ok": True, "exists": True, "stale": True, "staleAt": row.at.isoformat(),
+        "actions": [], "readonly": True,
+        "readonlyReason": "Координатор недоступен — показан последний известный ход",
+        "needsReconcile": [],
+    })
+    return state
 
 
 async def _instance_id(db: AsyncSession, company_id, site: EzsSite) -> tuple[str | None, dict]:
@@ -186,7 +252,9 @@ async def sync_case(db: AsyncSession, company_id, site: EzsSite,
         "related": related,
         "participants": await _participants(db, site),
     })
-    return _from_facade(card)
+    state = _from_facade(card)
+    await _remember(db, company_id, site, state)
+    return state
 
 
 async def case_state(db: AsyncSession, company_id, site: EzsSite,
@@ -203,7 +271,15 @@ async def case_state(db: AsyncSession, company_id, site: EzsSite,
     (`needsReconcile`), а устраняет его явная операция `reconcile` — руками или
     фоновым проходом.
     """
-    process_id, preview = await _instance_id(db, company_id, site)
+    try:
+        process_id, preview = await _instance_id(db, company_id, site)
+    except ProjectionError:
+        # Координатор недоступен. Панель хода без него всё равно не работает, но
+        # карточка обязана открыться и показать, где стоит стройка.
+        remembered = await _recall(db, company_id, site)
+        if remembered is None:
+            raise
+        return remembered
     if not process_id:
         # Процесса ещё нет, но маршрут есть: отдаём сам граф, чтобы путь был виден
         # заранее. Без этого схема исчезала с экрана до первого шага и выглядела
@@ -277,6 +353,12 @@ async def reconcile(db: AsyncSession, company_id, site: EzsSite,
     if funnel:
         state["funnel"] = funnel
     state["needsReconcile"] = _pending_diff(site, state)
+    # Молча свести и молча оставить расхождение — одинаково плохо: во втором случае
+    # человек в маршруте не узнает, что карточка с ним не согласна.
+    was = ((state.get("values") or {}).get("needs_reconcile")) or []
+    if list(was) != state["needsReconcile"]:
+        await _mark_reconcile(db, company_id, site, process_id, state["needsReconcile"])
+    await _remember(db, company_id, site, state)
     return state
 
 
@@ -410,6 +492,7 @@ async def undo_step(db: AsyncSession, company_id, site: EzsSite,
     funnel = await _reflect_outcome(db, site, state, payload=state.get("values") or {}, user=user)
     if funnel:
         state["funnel"] = funnel
+    await _remember(db, company_id, site, state)
     return state
 
 
@@ -463,6 +546,8 @@ async def apply_step(db: AsyncSession, company_id, site: EzsSite, link_id: str,
     funnel = await _reflect_outcome(db, site, state, payload=payload, user=user)
     if funnel:
         state["funnel"] = funnel
+
+    await _remember(db, company_id, site, state)
 
     # Отражение прошло — намерение исполнено.
     site.pending_link_id = None
