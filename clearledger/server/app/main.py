@@ -310,10 +310,27 @@ async def rate_limit_public(request, call_next):
     перебор не доходил до проверки пароля и до выборки по токену."""
     from app.rate_limit import check
 
-    blocked = check(request)
+    blocked, event = check(request)
     if blocked is not None:
+        if event is not None:
+            await _log_security_event(event)
         return blocked
     return await call_next(request)
+
+
+async def _log_security_event(event: dict) -> None:
+    """Записать отбитый перебор. Своя сессия и подавленная ошибка: журнал не
+    должен уметь уронить ответ, ради которого он ведётся."""
+    from app.database import async_session_factory
+    from app.models import SecurityEvent
+
+    try:
+        async with async_session_factory() as db:
+            db.add(SecurityEvent(**event))
+            await db.commit()
+    except Exception:  # noqa: BLE001 — запись в журнал не отменяет отказ
+        logging.getLogger("clearledger.security").warning(
+            "Отбитая попытка не записана: %s", event, exc_info=True)
 
 
 @app.middleware("http")

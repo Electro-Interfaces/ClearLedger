@@ -45,6 +45,10 @@ ROUTES: tuple[tuple[str, str], ...] = (
 )
 
 _hits: dict[str, deque[float]] = defaultdict(deque)
+# Когда по этому ключу последний раз писали в журнал безопасности. Отбитых
+# запросов в переборе тысячи, а запись нужна одна: она называет факт «по этому
+# адресу шёл перебор», а не считает его попытки.
+_reported: dict[str, float] = {}
 # Потолок словаря: без него длинная атака с меняющихся адресов съедала бы память
 # процесса. При переполнении чистим самые старые окна — они всё равно истекли.
 _MAX_KEYS = 20_000
@@ -74,11 +78,16 @@ def _prune(now: float) -> None:
         _hits.pop(k, None)
 
 
-def check(request: Request) -> JSONResponse | None:
-    """Ответ 429, если лимит исчерпан; иначе None и запрос идёт дальше."""
+def check(request: Request) -> tuple[JSONResponse | None, dict[str, object] | None]:
+    """Ответ 429, если лимит исчерпан; иначе None и запрос идёт дальше.
+
+    Второй элемент — событие для журнала безопасности: он не пустой только на
+    первом отказе в окне. Отбить перебор мало: если его никто не увидел, разбирать
+    инцидент будет не по чему.
+    """
     group = _group(request.url.path)
     if group is None:
-        return None
+        return None, None
 
     limit, window = LIMITS[group]
     now = time.monotonic()
@@ -89,12 +98,23 @@ def check(request: Request) -> JSONResponse | None:
 
     if len(hits) >= limit:
         retry_after = max(1, int(window - (now - hits[0])))
+        event = None
+        if now - _reported.get(key, 0.0) > window:
+            _reported[key] = now
+            event = {
+                "kind": "rate_limited",
+                "scope": group,
+                "ip": _client_ip(request)[:64],
+                "path": request.url.path[:200],
+                "user_agent": (request.headers.get("user-agent") or "")[:300] or None,
+                "hits": len(hits),
+            }
         return JSONResponse(
             status_code=429,
             content={"detail": "Слишком много попыток. Повторите позже."},
             headers={"Retry-After": str(retry_after)},
-        )
+        ), event
 
     hits.append(now)
     _prune(now)
-    return None
+    return None, None

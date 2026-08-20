@@ -741,6 +741,34 @@ class TobaccoMrc(Base):
 
 
 # ---------------------------------------------------------------------------
+# SecurityEvent
+# ---------------------------------------------------------------------------
+class SecurityEvent(Base):
+    """Отбитая попытка: перебор токенов публичной ссылки или подбор пароля.
+
+    Отдельно от `audit_events` намеренно: там у каждой записи есть компания и
+    пользователь, а перебор идёт до всякой аутентификации — ни того, ни другого у
+    него нет. Пишется одна запись на окно и ключ: иначе перебор превращался бы в
+    тысячи вставок, то есть в атаку нашими же руками.
+    """
+
+    __tablename__ = "security_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    kind: Mapped[str] = mapped_column(String(40), nullable=False)
+    scope: Mapped[str] = mapped_column(String(40), nullable=False)
+    ip: Mapped[str] = mapped_column(String(64), nullable=False)
+    path: Mapped[str] = mapped_column(String(200), nullable=False)
+    user_agent: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    hits: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
+# ---------------------------------------------------------------------------
 # AuditEvent
 # ---------------------------------------------------------------------------
 class AuditEvent(Base):
