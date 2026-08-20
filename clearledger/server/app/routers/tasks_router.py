@@ -17,6 +17,7 @@ import os
 import re
 import uuid
 from datetime import date as date_type, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Any
 
@@ -961,47 +962,6 @@ async def delete_template(
     return {"deleted": template_id}
 
 
-@router.post("/templates/{template_id}/use", status_code=status.HTTP_201_CREATED)
-async def use_template(
-    template_id: str,
-    company_id: str = Query(...),
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """Поставить задачу по шаблону прямо сейчас — тем же кодом, что и расписание.
-
-    Один путь порождения на оба случая: иначе задача «руками» и задача «по
-    расписанию» разъезжаются по составу чек-листа при первой же правке.
-    """
-    cid = await _assert_work(company_id, current_user, db)
-    tpl = await db.get(TaskTemplate, _uuid_or_400(template_id, "template_id"))
-    if tpl is None or tpl.company_id != cid:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Шаблон не найден")
-    if tpl.doc_kind_id:
-        try:
-            doc, result = await process_templates.launch(
-                db, cid, tpl, current_user,
-                source_note=f"по шаблону процесса «{tpl.name}»",
-            )
-        except process_templates.ProcessTemplateError as exc:
-            code = (status.HTTP_403_FORBIDDEN if "Недостаточно прав" in str(exc)
-                    else status.HTTP_400_BAD_REQUEST)
-            raise HTTPException(code, str(exc)) from exc
-        await db.commit()
-        await db.refresh(doc)
-        return process_templates.launch_out(doc, tpl, result)
-    holder = TaskRecurrence(company_id=cid, template_id=tpl.id, rule={},
-                            created_by=current_user.id)
-    t = await task_scheduler.spawn_from_template(db, holder, tpl)
-    if t is None:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Шаблон пуст")
-    await db.commit()
-    await db.refresh(t)
-    names = await _names(db, [t])
-    extras = await _extras(db, [t])
-    return _task_out(t, names[t.id]["route"], names[t.id], extras[t.id])
-
-
 class RecurrenceIn(BaseModel):
     company_id: str
     template_id: str
@@ -1450,7 +1410,40 @@ async def task_action(
         task_mail.send_notice_async(
             [new_assignee_email], f"Вам поручена задача №{t.number}: {t.title}",
             _errand_text(t, current_user, payload.note))
+    # Наблюдатель подписался, чтобы знать судьбу работы, а узнавал о ней последним:
+    # письма уходили только упомянутым и новому исполнителю. Шлём на закрытии и на
+    # передаче — на двух событиях, ради которых за задачей и следят. Реплики сюда не
+    # входят намеренно: для «позовите меня в обсуждение» есть упоминание.
+    if payload.status in ("done", "cancelled") or new_assignee_email:
+        await _notify_watchers(db, t, current_user, payload, mentioned)
     return out
+
+
+async def _notify_watchers(db: AsyncSession, t: Task, actor: User,
+                           payload: TaskAction, mentioned: list[tuple[str, str]]) -> None:
+    """Письмо наблюдателям: работа закрыта или сменила исполнителя.
+
+    Того, кто действие совершил, и тех, кому письмо уже ушло другим поводом, из
+    списка убираем: два письма об одном событии человек читает как ошибку системы.
+    """
+    already = {email for _, email in mentioned if email}
+    already.add(actor.email)
+    rows = (await db.execute(
+        select(User.email).join(TaskWatcher, TaskWatcher.user_id == User.id)
+        .where(TaskWatcher.task_id == t.id))).scalars().all()
+    targets = sorted({email for email in rows if email and email not in already})
+    if not targets:
+        return
+    if payload.status in ("done", "cancelled"):
+        verb = "выполнена" if payload.status == "done" else "отменена"
+        subject = f"Задача №{t.number} {verb}: {t.title}"
+        body = f"{verb.capitalize()}: {actor.name or actor.email}"
+    else:
+        subject = f"Задача №{t.number} передана: {t.title}"
+        body = f"Передал: {actor.name or actor.email}"
+    if payload.note:
+        body = f"{body}\n\n{payload.note}"
+    task_mail.send_notice_async(targets, subject, body)
 
 
 def _errand_text(t: Task, author: User, note: str | None) -> str:

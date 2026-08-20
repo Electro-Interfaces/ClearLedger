@@ -388,12 +388,6 @@ export interface TemplateProcessLaunch {
   round?: number; approvals?: number; reason: string | null
 }
 
-/** Запустить задачу или документный процесс по шаблону прямо сейчас. */
-export async function useTaskTemplate(id: string, companyId: string) {
-  return post<SpaceTask | TemplateProcessLaunch>(
-    `/api/tasks/templates/${id}/use?company_id=${encodeURIComponent(companyId)}`, {})
-}
-
 export interface TaskRecurrence {
   id: string; template_id: string; template: string
   rule: { mode?: string; at?: string; weekday?: number; day?: number; tz?: string }
