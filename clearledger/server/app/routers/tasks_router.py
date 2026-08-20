@@ -2455,3 +2455,148 @@ async def inbound_email(
         list(people), f"Ответ по задаче №{t.number}: {t.title}",
         f"{ev.actor_name} ответил письмом:\n\n{text}")
     return {"ok": True, "eventId": str(ev.id)}
+
+# ---------------------------------------------------------------------------
+# Исполнительская дисциплина по поручениям
+# ---------------------------------------------------------------------------
+
+# Отчётные сутки считаем по рабочему часовому поясу компании — как в отчёте по
+# визам: иначе «сделано вчера вечером» уезжало бы в соседний день.
+_REPORT_TIMEZONE = ZoneInfo("Europe/Moscow")
+
+
+def _discipline_percentile(values: list[float], fraction: float) -> float:
+    """Перцентиль по возрастающей выборке. Пустая выборка — ноль, а не деление на ноль."""
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    position = fraction * (len(ordered) - 1)
+    low = int(position)
+    high = min(low + 1, len(ordered) - 1)
+    if low == high:
+        return ordered[low]
+    return ordered[low] + (ordered[high] - ordered[low]) * (position - low)
+
+
+def _errand_bounds(date_from: date_type | None, date_to: date_type | None):
+    """Границы периода: те же правила, что у отчёта по визам, — чтобы цифры сравнивались."""
+    today = datetime.now(_REPORT_TIMEZONE).date()
+    selected_to = date_to or today
+    selected_from = date_from or selected_to - timedelta(days=89)
+    if selected_from > selected_to:
+        raise HTTPException(400, "Дата начала периода позже даты окончания")
+    if (selected_to - selected_from).days > 366:
+        raise HTTPException(400, "Период отчёта не может превышать 367 дней")
+    start_at = datetime.combine(selected_from, datetime.min.time(),
+                                tzinfo=_REPORT_TIMEZONE).astimezone(timezone.utc)
+    end_at = datetime.combine(selected_to + timedelta(days=1), datetime.min.time(),
+                              tzinfo=_REPORT_TIMEZONE).astimezone(timezone.utc)
+    return selected_from, selected_to, start_at, end_at
+
+
+@router.get("/reports/discipline")
+async def errand_discipline(
+    company_id: str = Query(...),
+    date_from: date_type | None = Query(None),
+    date_to: date_type | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Дисциплина по поручениям: сколько сделано в срок, за сколько и кем.
+
+    Отчёт по визам отвечает на вопрос «как проходит согласование», этот — «как
+    делается работа». Считаются они по-разному и смешивать их нельзя: у визы срок
+    задаёт круг, у поручения — тот, кто его поставил.
+
+    Когорта — **закрытые за период** поручения: работа попадает в отчёт тогда,
+    когда она закончена, иначе долгая задача годами висела бы в знаменателе и
+    портила картину месяца, в котором её только поставили.
+
+    Текущий остаток считается отдельно и на «сейчас»: он не про период, а про то,
+    что горит прямо в эту минуту.
+
+    Паспорт метрик:
+
+    - «в срок» — закрыто со статусом `done` не позже `due_at`; поручения без срока
+      в долю не входят вовсе (их размер выборки показан отдельно): срок, которого
+      не ставили, нельзя ни соблюсти, ни нарушить;
+    - длительность — календарные часы от постановки до закрытия;
+    - по людям — разрез по исполнителю на момент закрытия; человека без закрытых
+      поручений в списке нет.
+    """
+    cid = await _assert_work(company_id, current_user, db)
+    # Разрез по людям — не для всех: это оценка работы конкретного человека.
+    await _assert_admin(db, cid, current_user)
+    selected_from, selected_to, start_at, end_at = _errand_bounds(date_from, date_to)
+
+    closed = list((await db.execute(select(Task).where(
+        Task.company_id == cid,
+        Task.status.in_(("done", "cancelled")),
+        Task.closed_at.is_not(None),
+        Task.closed_at >= start_at,
+        Task.closed_at < end_at,
+    ))).scalars())
+    users = {r.id: r.name for r in (await db.execute(select(User).where(
+        User.id.in_({t.assignee_id for t in closed if t.assignee_id})))).scalars()}         if any(t.assignee_id for t in closed) else {}
+
+    def hours(task: Task) -> float:
+        return max(0.0, (task.closed_at - task.created_at).total_seconds() / 3600)
+
+    done = [t for t in closed if t.status == "done"]
+    with_due = [t for t in done if t.due_at is not None]
+    in_time = [t for t in with_due if t.closed_at <= t.due_at]
+    durations = [hours(t) for t in done]
+
+    by_person: dict[uuid.UUID, dict[str, Any]] = {}
+    for task in done:
+        if task.assignee_id is None:
+            continue
+        row = by_person.setdefault(task.assignee_id, {
+            "user_id": str(task.assignee_id),
+            "name": users.get(task.assignee_id) or "—",
+            "closed": 0, "with_due": 0, "in_time": 0, "_hours": [],
+        })
+        row["closed"] += 1
+        row["_hours"].append(hours(task))
+        if task.due_at is not None:
+            row["with_due"] += 1
+            if task.closed_at <= task.due_at:
+                row["in_time"] += 1
+    people = []
+    for row in by_person.values():
+        spent = row.pop("_hours")
+        row["median_hours"] = round(_discipline_percentile(spent, 0.5), 1)
+        row["in_time_share"] = (round(row["in_time"] / row["with_due"], 3)
+                                if row["with_due"] else None)
+        people.append(row)
+    # Сначала те, у кого хуже с соблюдением срока: отчёт читают ради этого.
+    people.sort(key=lambda value: (value["in_time_share"] if value["in_time_share"] is not None
+                                   else 1.0, -value["closed"]))
+
+    now = datetime.now(timezone.utc)
+    open_tasks = list((await db.execute(select(Task).where(
+        Task.company_id == cid, Task.status == "open"))).scalars())
+    overdue = [t for t in open_tasks if t.due_at is not None and t.due_at < now]
+
+    return {
+        "date_from": selected_from.isoformat(),
+        "date_to": selected_to.isoformat(),
+        "cohort": "closed_in_period",
+        "time_zone": "Europe/Moscow",
+        "as_of": now.isoformat(),
+        "closed": len(closed),
+        "done": len(done),
+        "cancelled": len(closed) - len(done),
+        "with_due": len(with_due),
+        "in_time": len(in_time),
+        "in_time_share": round(len(in_time) / len(with_due), 3) if with_due else None,
+        "median_hours": round(_discipline_percentile(durations, 0.5), 1),
+        "p90_hours": round(_discipline_percentile(durations, 0.9), 1),
+        "people": people,
+        "backlog": {
+            "open": len(open_tasks),
+            "overdue": len(overdue),
+            "oldest_overdue_days": (
+                max((now - t.due_at).days for t in overdue) if overdue else 0),
+        },
+    }
