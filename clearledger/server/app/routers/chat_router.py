@@ -28,7 +28,7 @@ from app.deps import capture_company_header, scope_company_id
 from app.models import (
     ChatFolder, ChatMessage, ChatMessageReaction, ChatParticipant, ChatPushSubscription,
     ChatPoll, ChatPollVote, ChatRoom, ChatTicketLink, Company, Counterparty,
-    ServiceLocation, User, UserCompany,
+    DocRelation, ServiceLocation, User, UserCompany,
 )
 from app.services import chat_mail, process_templates, web_push
 from app.services import link_preview as link_preview_service
@@ -2244,6 +2244,13 @@ async def process_from_message(
                 summary_suffix=context,
                 object_id=room.scope_object_id,
             )
+            # Обратная ссылка на обсуждение. В чат мы пишем сообщение со ссылкой
+            # на документ, а в карточке оставался только `source_ref` — строка,
+            # по которой человек никуда не перейдёт. Разговор, из которого
+            # документ вырос, спрашивают чаще, чем кажется: там причина.
+            db.add(DocRelation(
+                company_id=room.company_id, doc_id=entity.id, kind="discussion",
+                target_ref=f"room:{room.id}", created_by=current_user.id))
         else:
             entity, result = await process_templates.launch_task(
                 db, room.company_id, tpl, current_user,

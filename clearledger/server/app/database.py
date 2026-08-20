@@ -3458,6 +3458,16 @@ async def create_all() -> None:
             "AND ranked.position > 1",
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_mail_messages_company_msgid "
             "ON mail_messages (company_id, message_id) WHERE message_id IS NOT NULL",
+            # Напоминания по визам. Срок визы хранился с самого начала, но никого
+            # не дёргал: планировщик не читал круг вовсе, и просрочка всплывала
+            # только в отчёте — когда согласование уже стояло.
+            "ALTER TABLE doc_approvals ADD COLUMN IF NOT EXISTS reminded_at TIMESTAMPTZ",
+            "ALTER TABLE doc_approvals ADD COLUMN IF NOT EXISTS "
+            "reminder_attempted_at TIMESTAMPTZ",
+            "ALTER TABLE doc_approvals ADD COLUMN IF NOT EXISTS "
+            "reminder_error VARCHAR(500)",
+            "CREATE INDEX IF NOT EXISTS idx_doc_approvals_due "
+            "ON doc_approvals (due_at) WHERE status = 'pending' AND due_at IS NOT NULL",
         ):
             await conn.execute(_sa.text(stmt))
 
@@ -3550,6 +3560,40 @@ async def create_all() -> None:
         for stmt in (
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_eco_inbound_events_key "
             "ON eco_inbound_events (provider, external_id)",
+        ):
+            await conn.execute(_sa.text(stmt))
+
+        # v2.58: шина исходящих событий пространства. `create_all` заводит
+        # таблицы, но не частичные индексы и не CHECK — их руками.
+        for stmt in (
+            # Подписка обязана указывать хотя бы один тип события: «пусто = на
+            # всё» подписало бы получателя на то, чего он не заказывал.
+            "ALTER TABLE eco_event_subscriptions DROP CONSTRAINT IF EXISTS "
+            "ck_eco_event_subs_types",
+            "ALTER TABLE eco_event_subscriptions ADD CONSTRAINT "
+            "ck_eco_event_subs_types CHECK (cardinality(event_types) >= 1)",
+            "ALTER TABLE eco_event_subscriptions DROP CONSTRAINT IF EXISTS "
+            "ck_eco_event_subs_target",
+            # Цель либо приложение по служебному каналу, либо внешний адрес —
+            # и внешний без секрета не заводится: подписывать нечем.
+            "ALTER TABLE eco_event_subscriptions ADD CONSTRAINT "
+            "ck_eco_event_subs_target CHECK ("
+            "(target_kind = 'app' AND app_code IS NOT NULL AND url IS NULL) OR "
+            "(target_kind = 'url' AND url IS NOT NULL AND secret_enc IS NOT NULL))",
+            "ALTER TABLE eco_event_subscriptions DROP CONSTRAINT IF EXISTS "
+            "ck_eco_event_subs_stop_days",
+            "ALTER TABLE eco_event_subscriptions ADD CONSTRAINT "
+            "ck_eco_event_subs_stop_days CHECK (stop_day_count BETWEEN 1 AND 999)",
+            "ALTER TABLE eco_outbox_events DROP CONSTRAINT IF EXISTS "
+            "ck_eco_outbox_status",
+            "ALTER TABLE eco_outbox_events ADD CONSTRAINT ck_eco_outbox_status "
+            "CHECK (status IN ('pending','done','failed','expired','cancelled'))",
+            "CREATE INDEX IF NOT EXISTS ix_eco_outbox_pending "
+            "ON eco_outbox_events (next_attempt_at) WHERE status = 'pending'",
+            "CREATE INDEX IF NOT EXISTS ix_eco_outbox_subject "
+            "ON eco_outbox_events (subject) WHERE status <> 'done'",
+            "CREATE INDEX IF NOT EXISTS ix_eco_event_subs_company "
+            "ON eco_event_subscriptions (company_id) WHERE enabled",
         ):
             await conn.execute(_sa.text(stmt))
 

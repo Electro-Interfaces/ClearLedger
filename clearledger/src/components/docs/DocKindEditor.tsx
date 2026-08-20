@@ -11,6 +11,8 @@ import * as docsService from '@/services/docsService'
 import type { DocKind, DocKindField } from '@/services/docsService'
 
 type DraftActor = { by: 'user' | 'role' | 'department' | 'head_of' | 'position'; ref: string }
+type ConditionOp = (typeof CONDITION_OPS)[number][0]
+type DraftCondition = { field: string; op: ConditionOp; value: string }
 type DraftStep = {
   code: string
   name: string
@@ -18,6 +20,7 @@ type DraftStep = {
   quorum: string
   sla_hours: string
   step_kind: 'approve' | 'sign'
+  when: DraftCondition | null
   actors: DraftActor[]
 }
 type DraftKind = Omit<DocKind, 'id' | 'route'> & { route: DraftStep[] }
@@ -27,6 +30,59 @@ const FAMILY = [
   ['internal', 'Внутренние'], ['contract', 'Договорные'], ['other', 'Прочие'],
 ] as const
 const SELECT_CLASS = 'h-9 w-full rounded-md border border-input bg-background px-2 text-sm'
+// Условие шага. Списки повторяют CONDITION_OPS и CONDITION_CARD_FIELDS из
+// server/app/services/doc_approvals.py: что не из этих списков, санитайзер выбросит.
+const CONDITION_OPS = [
+  ['eq', 'равно'], ['ne', 'не равно'], ['gt', 'больше'], ['gte', 'больше или равно'],
+  ['lt', 'меньше'], ['lte', 'меньше или равно'], ['in', 'один из'],
+  ['set', 'заполнено'], ['unset', 'не заполнено'],
+] as const
+const CONDITION_CARD_FIELDS = [
+  ['family', 'Поток'], ['kind_code', 'Код вида'], ['direction', 'Направление'],
+  ['confidentiality', 'Доступ'], ['counterparty_id', 'Корреспондент'],
+  ['object_id', 'Объект'], ['subject_ref', 'Предмет (ссылка)'],
+  ['organization_id', 'Наше юрлицо'], ['department_id', 'Подразделение'],
+] as const
+// Свойства карточки хранят коды, а не подписи: подсказываем, что вводить.
+const CONDITION_VALUE_HINT: Record<string, string> = {
+  family: FAMILY.map(([code]) => code).join(', '),
+  direction: 'none, in, out',
+  confidentiality: 'company, private, strict',
+}
+
+function hasConditionValue(op: ConditionOp): boolean {
+  return op !== 'set' && op !== 'unset'
+}
+
+function draftCondition(raw: unknown): DraftCondition | null {
+  if (!raw || typeof raw !== 'object') return null
+  const row = raw as Record<string, unknown>
+  const field = String(row.field ?? '').trim()
+  if (!field) return null
+  return {
+    field,
+    op: CONDITION_OPS.find(([code]) => code === row.op)?.[0] ?? 'eq',
+    value: Array.isArray(row.value) ? row.value.map(String).join(', ') : String(row.value ?? ''),
+  }
+}
+
+function conditionPayload(when: DraftCondition): Record<string, unknown> {
+  if (!hasConditionValue(when.op)) return { field: when.field, op: when.op }
+  if (when.op === 'in') {
+    return {
+      field: when.field, op: when.op,
+      value: when.value.split(',').map((item) => item.trim()).filter(Boolean),
+    }
+  }
+  return { field: when.field, op: when.op, value: when.value.trim() }
+}
+
+function conditionPlaceholder(when: DraftCondition, fields: DocKindField[]): string {
+  const hint = CONDITION_VALUE_HINT[when.field]
+    ?? (fields.find((field) => fieldCode(field.code) === when.field)?.options ?? []).join(', ')
+  if (when.op === 'in') return hint ? `значения через запятую: ${hint}` : 'значения через запятую'
+  return hint || 'значение'
+}
 
 function emptyKind(): DraftKind {
   return {
@@ -49,6 +105,7 @@ function draftKind(value?: DocKind): DraftKind {
       quorum: String(raw.quorum ?? 'all'),
       sla_hours: raw.sla_hours ? String(raw.sla_hours) : '',
       step_kind: raw.step_kind === 'sign' ? 'sign' : 'approve',
+      when: draftCondition(raw.when),
       actors: Array.isArray(raw.actors) ? raw.actors.map((actor) => {
         const row = actor as Record<string, unknown>
         const by = ['user', 'role', 'department', 'head_of', 'position'].includes(String(row.by))
@@ -97,6 +154,7 @@ export function DocKindEditor({ companyId, initial, onClose, onSaved }: {
         required: true, actors: step.actors.filter((actor) => actor.ref),
         ...(step.sla_hours ? { sla_hours: Number(step.sla_hours) } : {}),
         ...(step.step_kind === 'sign' ? { step_kind: 'sign' } : {}),
+        ...(step.when ? { when: conditionPayload(step.when) } : {}),
       })),
     }, initial?.id),
     onSuccess: () => {
@@ -109,7 +167,8 @@ export function DocKindEditor({ companyId, initial, onClose, onSaved }: {
   const numberWarning = draft.number_scope.includes('org')
     && !draft.number_template.includes('{org')
   const invalidRoute = draft.route.some((step) => !fieldCode(step.code) || !step.name.trim()
-    || step.actors.length === 0 || step.actors.some((actor) => !actor.ref))
+    || step.actors.length === 0 || step.actors.some((actor) => !actor.ref)
+    || (!!step.when && hasConditionValue(step.when.op) && !step.when.value.trim()))
   const invalidFields = draft.fields.some((field) => !fieldCode(field.code) || !field.label.trim()
     || (field.type === 'select' && !(field.options?.length)))
   const ready = !!draft.code.trim() && !!draft.name.trim() && draft.number_template.includes('{n')
@@ -222,7 +281,7 @@ export function DocKindEditor({ companyId, initial, onClose, onSaved }: {
       <section className="space-y-3" aria-labelledby="kind-route-heading">
         <div className="flex items-center justify-between gap-2"><h3 id="kind-route-heading" className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Маршрут согласования</h3>
           <Button type="button" size="sm" variant="outline" disabled={!subjectsQ.isSuccess} onClick={() => setDraft({ ...draft, route: [...draft.route, {
-            code: `step_${draft.route.length + 1}`, name: '', mode: 'serial', quorum: 'all', sla_hours: '', step_kind: 'approve', actors: [{ by: 'user', ref: '' }],
+            code: `step_${draft.route.length + 1}`, name: '', mode: 'serial', quorum: 'all', sla_hours: '', step_kind: 'approve', when: null, actors: [{ by: 'user', ref: '' }],
           }] })}><Plus className="mr-1 h-3.5 w-3.5" />Добавить шаг</Button></div>
         {draft.route.map((step, stepIndex) => (
           <div key={stepIndex} className="space-y-3 rounded-md border p-3">
@@ -236,6 +295,8 @@ export function DocKindEditor({ companyId, initial, onClose, onSaved }: {
               <Input aria-label={`Срок шага ${stepIndex + 1} в часах`} type="number" min={1} max={8760} value={step.sla_hours} onChange={(event) => updateStep(stepIndex, { sla_hours: event.target.value })} placeholder="SLA, часов" />
               {step.mode === 'parallel' && <select aria-label={`Кворум шага ${stepIndex + 1}`} value={step.quorum} onChange={(event) => updateStep(stepIndex, { quorum: event.target.value })} className={SELECT_CLASS}><option value="all">решение всех</option><option value="any">достаточно одного</option></select>}
             </div>
+            <ConditionRow when={step.when} index={stepIndex} fields={draft.fields}
+              onChange={(when) => updateStep(stepIndex, { when })} />
             <div className="space-y-2">
               {step.actors.map((actor, actorIndex) => (
                 <div key={actorIndex} className="grid gap-2 md:grid-cols-[180px_1fr_auto]">
@@ -274,6 +335,57 @@ export function DocKindEditor({ companyId, initial, onClose, onSaved }: {
         </Button>
       </div>
     </Card>
+  )
+}
+
+function ConditionRow({ when, index, fields, onChange }: {
+  when: DraftCondition | null
+  index: number
+  fields: DocKindField[]
+  onChange: (when: DraftCondition | null) => void
+}) {
+  const kindFields = fields.filter((field) => fieldCode(field.code) && field.label.trim())
+  return (
+    <div className="space-y-1.5">
+      <div className="grid gap-2 md:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1.5fr)]">
+        <select aria-label={`Условие шага ${index + 1}`} value={when?.field ?? ''} className={SELECT_CLASS}
+          onChange={(event) => onChange(event.target.value
+            ? { field: event.target.value, op: when?.op ?? 'eq', value: when?.value ?? '' }
+            : null)}>
+          <option value="">условие: выполняется всегда</option>
+          <optgroup label="Свойства карточки">
+            {CONDITION_CARD_FIELDS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+          </optgroup>
+          {kindFields.length > 0 && (
+            <optgroup label="Реквизиты вида">
+              {kindFields.map((field) => (
+                <option key={field.code} value={fieldCode(field.code)}>{field.label}</option>
+              ))}
+            </optgroup>
+          )}
+          {/* Реквизит из условия удалили из схемы: показываем код, а не пустой селект. */}
+          {when && !CONDITION_CARD_FIELDS.some(([code]) => code === when.field)
+            && !kindFields.some((field) => fieldCode(field.code) === when.field) && (
+            <option value={when.field}>{when.field} — реквизита нет в схеме</option>
+          )}
+        </select>
+        {when && (
+          <select aria-label={`Сравнение в условии шага ${index + 1}`} value={when.op} className={SELECT_CLASS}
+            onChange={(event) => onChange({ ...when, op: event.target.value as ConditionOp })}>
+            {CONDITION_OPS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+          </select>
+        )}
+        {when && hasConditionValue(when.op) && (
+          <Input aria-label={`Значение условия шага ${index + 1}`} value={when.value}
+            placeholder={conditionPlaceholder(when, fields)}
+            onChange={(event) => onChange({ ...when, value: event.target.value })} />
+        )}
+      </div>
+      {when && hasConditionValue(when.op) && !when.value.trim() && (
+        <p role="alert" className="text-xs text-destructive">Укажите значение — иначе условие потеряется и шаг станет безусловным.</p>
+      )}
+      {when && <p className="text-xs text-muted-foreground">Шаг попадёт в круг согласования, только если условие выполнено.</p>}
+    </div>
   )
 }
 

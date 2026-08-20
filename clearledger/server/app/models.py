@@ -6769,6 +6769,149 @@ class InboundEvent(Base):
     )
 
 
+class EventSubscription(Base):
+    """Кто и о чём просит сообщать: подписка на события пространства.
+
+    Форма взята из зоны `Subscriptions` ГОСТ Р 53898 — набор флагов на типы
+    уведомлений плюс срок, в течение которого подписчик события ждёт
+    (`StopDayCount`). Норма на нас не распространяется, берём конструкцию: она
+    решает ровно нашу задачу и решает её лучше, чем «получай всё подряд».
+
+    Два отличия от шины Поддержки, оба намеренные:
+
+    * **`company_id` обязателен.** Там подписка с пустой компанией означает «все
+      компании стека». Стек мультикомпанийный, и это ровно тот механизм, которым
+      события одной компании уедут потребителю другой. Нужны все — заводится
+      несколько строк, зато в витрине видно, кто что получает.
+    * **Пустой список типов запрещён.** Там пусто означает «на всё», то есть
+      тихую подписку на события, которых подписчик не заказывал.
+    """
+    __tablename__ = "eco_event_subscriptions"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    label: Mapped[str] = mapped_column(String(200), nullable=False)
+    # app — приложение пространства по служебному каналу; url — внешний потребитель.
+    target_kind: Mapped[str] = mapped_column(String(10), nullable=False, default="app")
+    # Для app адрес НЕ храним: его знает реестр приложений. Вторая копия адреса
+    # в Ядре разъедется с первой в тот день, когда приложение переедет.
+    app_code: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    path: Mapped[str] = mapped_column(
+        String(200), nullable=False, default="/api/v1/eco/events")
+    url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # HMAC-секрет под Fernet — как реквизиты источников. Держать его открытым
+    # было бы нарушением собственной доктрины ровно там, где она записана.
+    secret_enc: Mapped[str | None] = mapped_column(Text, nullable=True)
+    secret_hint: Mapped[str | None] = mapped_column(String(12), nullable=True)
+    event_types: Mapped[list] = mapped_column(
+        ARRAY(Text), nullable=False, server_default=text("'{}'::text[]"))
+    # Срок ожидания в днях. Событие старше срока не доставляем — подписчик его
+    # уже не ждёт; молчащую дольше срока подписку гасим.
+    stop_day_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=30, server_default=text("30"))
+    enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=text("true"))
+    last_delivery_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    last_status: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    failure_streak: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0"))
+    # С какого момента подписчик молчит. Без этой отметки срок ожидания не к чему
+    # приложить: число неудач не отвечает на вопрос «как давно».
+    failing_since: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    disabled_reason: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    disabled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("company_id", "label", name="uq_eco_event_subs_label"),
+        Index("ix_eco_event_subs_company", "company_id",
+              postgresql_where=text("enabled")),
+    )
+
+
+class OutboxEvent(Base):
+    """Событие пространства, ждущее доставки подписчику.
+
+    Транзакционный outbox: строка пишется в той же транзакции, что и само
+    изменение. Или произошло и записано к отправке, или не произошло вовсе —
+    третьего состояния, при котором документ зарегистрирован, а никто об этом не
+    узнал, не бывает.
+
+    **Одна строка — одна доставка одному подписчику**, `event_id` общий. В шине
+    Поддержки строка одна на факт, а рассылка идёт при доставке, и там ошибка
+    одного получателя возвращает событие в очередь целиком — живые получают дубль
+    столько раз, сколько мёртвый не ответил. Здесь дохлая подписка остаётся своей
+    бедой: попытки считаются на адресата, и на вопрос «почему одному дошло, а
+    другому нет» отвечает одна выборка.
+
+    Чего сознательно нет: клеймящего статуса `processing` с отметкой блокировки —
+    доставка живёт в общем планировщике, где уже есть advisory-lock на проход и
+    `SKIP LOCKED` на батч.
+    """
+    __tablename__ = "eco_outbox_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # CloudEvents `id`, он же заголовок `webhook-id`. Стабилен на все попытки:
+    # получатель отсеивает повтор по нему.
+    event_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    subscription_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("eco_event_subscriptions.id", ondelete="CASCADE"),
+        nullable=False)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False)
+    type: Mapped[str] = mapped_column(String(80), nullable=False)
+    # Предмет события — идентификатор документа. Вынесен из тела ради поиска
+    # «что уходило по этому документу».
+    subject: Mapped[str] = mapped_column(String(64), nullable=False)
+    source: Mapped[str] = mapped_column(
+        String(120), nullable=False, default="/elsyplus/core/docs")
+    # Время ФАКТА, а не записи: иначе после разбора очереди история сложится в
+    # момент доставки, а не в момент, когда документ зарегистрировали.
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now())
+    data: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    correlation_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    causation_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True)
+    # pending | done | failed | expired | cancelled
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    attempts: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0"))
+    next_attempt_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now())
+    last_error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+    delivered_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("event_id", "subscription_id",
+                         name="uq_eco_outbox_delivery"),
+        Index("ix_eco_outbox_pending", "next_attempt_at",
+              postgresql_where=text("status = 'pending'")),
+        Index("ix_eco_outbox_company_time", "company_id", "occurred_at"),
+        Index("ix_eco_outbox_subject", "subject",
+              postgresql_where=text("status <> 'done'")),
+    )
+
+
 class ApprovalRequest(Base):
     """Круг виз, запущенный узлом маршрута процесса, и возврат его исхода.
 
@@ -10654,6 +10797,14 @@ class DocApproval(Base):
     # При отказе обязателен: возврат без причины бессмыслен, автор не поймёт, что править.
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Напоминание о визе. Разделено на «отправлено» и «пробовали отправить», как у
+    # ознакомления: почта падает, и без второй отметки прогон долбил бы мёртвый
+    # ящик каждую минуту, а без первой — молчал бы, решив, что уже написал.
+    reminded_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    reminder_attempted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    reminder_error: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now())
 

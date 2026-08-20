@@ -12,6 +12,8 @@
   типом время. Смысл не в наказании: работа, которую никто не взял, обязана
   всплыть до срока, а не после.
 * **ознакомление** напоминает человеку о непрочитанном документе к сроку;
+* **виза** напоминает согласующему и его заместителю: срок визы хранился с самого
+  начала, но никого не дёргал, и согласование вставало молча;
 * **обмен с СЭД** проверяет только явно включённые и уже обкатанные папки.
 
 Устройство повторяет планировщик каналов (`channel_scheduler`): фоновый цикл из
@@ -32,11 +34,12 @@ from sqlalchemy import and_, or_, select, text
 from app.auth import resolve_member_modules
 from app.database import async_session_factory
 from app.models import (
-    DocAcquaint, DocBreakGlassAccess, DocCard, DocExchangeTarget, Task,
-    TaskChecklistItem, TaskEvent, TaskRecurrence, TaskTemplate, TaskType, User,
-    UserCompany,
+    DocAcquaint, DocApproval, DocBreakGlassAccess, DocCard, DocExchangeTarget,
+    Task, TaskChecklistItem, TaskEvent, TaskRecurrence, TaskTemplate, TaskType,
+    User, UserCompany,
 )
-from app.services import doc_exchange, process_templates, task_mail
+from app.services import (
+    doc_approvals, doc_exchange, process_templates, space_events, task_mail)
 
 log = logging.getLogger("clearledger.tasks.scheduler")
 
@@ -47,6 +50,8 @@ LOCK_NAMESPACE = 0x1A5C5ED
 ACQUAINT_LOCK_KEY = 0x0AC011
 EXCHANGE_LOCK_KEY = 0x0ED011
 BREAK_GLASS_LOCK_KEY = 0x0B6A55
+APPROVAL_LOCK_KEY = 0x0A9F00
+EVENTS_LOCK_KEY = 0x0E7E415
 
 
 def _tz(rule: dict) -> ZoneInfo:
@@ -281,6 +286,85 @@ async def run_acquaint_reminders(db, now: datetime) -> int:
     return sent
 
 
+async def run_approval_reminders(db, now: datetime) -> int:
+    """Напомнить согласующему о визе за сутки до срока и затем раз в сутки.
+
+    Срок визы хранился с самого начала и не делал ничего: планировщик круг не
+    читал, а `sla_hours` доезжал только до отчёта. Согласование останавливалось
+    молча — ровно там, где документ ждёт одного человека.
+
+    Заместителю пишем тем же письмом. Виза за другого запрещена, но отпуск не
+    должен держать документ: заместитель визирует от своего имени, и узнать об
+    ожидании он обязан не позже того, кого замещает.
+    """
+    got = await db.scalar(text("SELECT pg_try_advisory_xact_lock(:ns, :key)"),
+                          {"ns": LOCK_NAMESPACE, "key": APPROVAL_LOCK_KEY})
+    if not got:
+        return 0
+    soon = now + timedelta(days=1)
+    rows = (await db.execute(
+        select(DocApproval, DocCard, User, UserCompany)
+        .join(DocCard, and_(DocCard.id == DocApproval.doc_id,
+                            DocCard.company_id == DocApproval.company_id))
+        .join(User, User.id == DocApproval.assignee_id)
+        .join(UserCompany, and_(UserCompany.user_id == DocApproval.assignee_id,
+                                UserCompany.company_id == DocApproval.company_id))
+        .where(DocApproval.status == "pending", DocApproval.due_at.is_not(None),
+               User.mail_only.is_(False),
+               DocApproval.due_at <= soon,
+               or_(DocApproval.reminded_at.is_(None),
+                   DocApproval.reminded_at <= now - timedelta(days=1)),
+               or_(DocApproval.reminder_attempted_at.is_(None),
+                   DocApproval.reminder_attempted_at
+                   <= now - timedelta(hours=1))))).all()
+    sent = 0
+    for approval, doc, user, membership in rows:
+        if not user.is_superadmin and membership.role != "admin":
+            modules = await resolve_member_modules(membership, db)
+            if (modules is not None and "docs" not in modules and not any(
+                    key.startswith("docs:") for key in modules)):
+                continue
+        if not user.email:
+            continue
+        addresses = [user.email]
+        for deputy_id in await doc_approvals.active_deputy_for(
+                db, approval.company_id, user.id):
+            deputy_mail = await db.scalar(
+                select(User.email).where(User.id == deputy_id))
+            if deputy_mail and deputy_mail not in addresses:
+                addresses.append(deputy_mail)
+        overdue = approval.due_at < now
+        number = doc.reg_number or "без номера"
+        ok, error = await task_mail.send_notice_checked(
+            addresses,
+            f"{'Просрочена виза' if overdue else 'Ожидает визы'}: {doc.title}",
+            f"Документ {number}\nШаг: {approval.step_name or 'согласование'}\n"
+            f"Срок: {approval.due_at.strftime('%d.%m.%Y %H:%M')}\n\n"
+            "Откройте «Трек» → «На мне» → «Визы».")
+        approval.reminder_attempted_at = now
+        approval.reminder_error = error
+        if ok:
+            approval.reminded_at = now
+            sent += 1
+    return sent
+
+
+async def run_event_delivery(db, now: datetime) -> int:
+    """Разослать события пространства подписчикам и погасить молчащих.
+
+    Отдельного цикла для шины не заводим: доставка события терпит пять минут,
+    а второй фоновый проход означал бы второй лок, второй лог и второй способ
+    упасть. Понадобится мгновенная отдача — это будет отдельное решение.
+    """
+    got = await db.scalar(text("SELECT pg_try_advisory_xact_lock(:ns, :key)"),
+                          {"ns": LOCK_NAMESPACE, "key": EVENTS_LOCK_KEY})
+    if not got:
+        return 0
+    sent = await space_events.deliver_pending(db, now)
+    await space_events.disable_dead(db, now)
+    return sent
+
+
 async def run_exchange_scans(db, now: datetime) -> int:
     """Проверить включённые папки СЭД; принятие найденного остаётся ручным."""
     got = await db.scalar(text("SELECT pg_try_advisory_xact_lock(:ns, :key)"),
@@ -391,13 +475,15 @@ async def tick() -> dict[str, int]:
     """Один проход регламента. Ошибка одной части не отменяет остальные."""
     now = datetime.now(timezone.utc)
     out = {"recurrences": 0, "reminders": 0, "escalations": 0,
-           "acquaints": 0, "exchange": 0, "break_glass": 0, "project_reconcile": 0,
+           "acquaints": 0, "approvals": 0, "events": 0, "exchange": 0, "break_glass": 0, "project_reconcile": 0,
            "inbound_events": 0, "approval_delivery": 0}
     async with async_session_factory() as db:
         for key, fn in (("recurrences", run_recurrences),
                         ("reminders", run_due_reminders),
                         ("escalations", run_escalations),
                         ("acquaints", run_acquaint_reminders),
+                        ("approvals", run_approval_reminders),
+                        ("events", run_event_delivery),
                         ("exchange", run_exchange_scans),
                         ("break_glass", run_break_glass_notifications),
                         ("project_reconcile", run_project_reconcile),

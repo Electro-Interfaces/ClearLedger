@@ -16,7 +16,9 @@
 Регистрация вынесена отдельно: она выдаёт номер из счётчика, и смешивать её с
 правкой полей нельзя.
 """
+import csv
 import hashlib
+import io
 import json
 import re
 import uuid
@@ -39,20 +41,23 @@ from app.auth import (
     assert_company_product, get_current_user, resolve_member_modules,
     verify_password,
 )
+from app.config import get_settings
 from app.database import get_db
 from app.models import (
-    CompanyRole, Counterparty, Department, DocAccessGrant, DocApproval,
+    ChatRoom, CompanyRole, Contract, Counterparty, Department, DocAccessGrant,
+    DocApproval,
     DocBreakGlassAccess, DocCard,
     DocCase, DocEvent, DocKind, DocRelation, DocAcquaint, DocExchangeTarget,
     DocExport, DocInboxItem, DocLabelLink,
     DocShareLink, DocSignatureEvidence, UserSubstitution,
-    DocVersion, Organization, SourceFile, Task, TaskEvent, TaskLabel,
-    TaskTemplate, TaskType, TaskView, TaskWorkItem, User, UserCompany,
+    DocVersion, Organization, ServiceLocation, SourceFile, Task, TaskEvent,
+    TaskLabel, TaskTemplate, TaskType, TaskView, TaskWorkItem, User, UserCompany,
 )
 from app.routers import doc_share_router
 from app.services import (
     doc_approvals, doc_exchange, doc_print, doc_text, doc_verify, external_approval,
-    file_safety, file_store, mail_send, process_templates, task_mail,
+    file_safety, file_store, jitsi, mail_send, process_templates, space_events,
+    task_mail,
 )
 from app.services.doc_numbers import next_number, render, scope_key
 
@@ -106,6 +111,47 @@ def _uuid_or_400(value: str, field: str) -> uuid.UUID:
         return uuid.UUID(str(value))
     except (ValueError, TypeError):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Неверный {field}")
+
+
+# На что документ вправе ссылаться: вид → (модель, ключ строковый). Объект сети
+# держит строковый ключ (`ezs-…`), остальные — UUID.
+_REF_TARGETS: dict[str, tuple[Any, bool]] = {
+    "contract": (Contract, False),
+    "counterparty": (Counterparty, False),
+    "object": (ServiceLocation, True),
+    "task": (Task, False),
+    # Обсуждение, из которого вырос документ. Комната — такой же объект
+    # пространства, как договор; отдельная таблица связей ради одного вида цели
+    # завела бы второй механизм рядом с работающим.
+    "room": (ChatRoom, False),
+}
+
+
+async def _assert_ref(db: AsyncSession, cid: uuid.UUID, ref: str | None,
+                      field: str = "ссылка") -> None:
+    """Проверить, что ссылка `<вид>:<ключ>` ведёт в эту же компанию.
+
+    Компанию проверяем не из педантизма: без неё документ подшивается к договору
+    соседнего пространства, и дальше это уезжает в отчёты, в поиск и агентам —
+    молча, потому что запись формально валидна.
+
+    Незнакомый вид не запрещаем. Контуров в пространстве больше, чем перечислено,
+    и падение на первом неизвестном сделало бы связь бесполезной ровно там, где
+    она нужна: при стыковке с новым приложением. Знакомый вид — цель обязана быть.
+    """
+    if not ref or ":" not in ref:
+        return
+    prefix, key = ref.split(":", 1)
+    target = _REF_TARGETS.get(prefix)
+    if target is None or not key:
+        return
+    model, key_is_text = target
+    ident: Any = key if key_is_text else _uuid_or_400(key, field)
+    found = (await db.execute(select(model.id).where(
+        model.id == ident, model.company_id == cid))).scalar_one_or_none()
+    if found is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND,
+                            f"Цель ссылки не найдена в этой компании: {ref}")
 
 
 def _clean_fields(value: Any) -> list[dict[str, Any]]:
@@ -1096,6 +1142,11 @@ class ProcessStartIn(BaseModel):
     company_id: str
     responsible_id: str | None = None
     title: str | None = Field(None, min_length=3, max_length=300)
+    # Стороны и предмет задаются при запуске: без них шаблон нечем заполнять, а
+    # «допишу потом» означает документ, ушедший наружу с пустым местом.
+    counterparty_id: str | None = None
+    subject_ref: str | None = Field(None, max_length=120)
+    object_id: str | None = Field(None, max_length=40)
 
 
 @router.get("/process-templates")
@@ -1123,11 +1174,22 @@ async def start_process_template(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Шаблон процесса не найден")
     responsible = (_uuid_or_400(payload.responsible_id, "responsible_id")
                    if payload.responsible_id else None)
+    await _assert_ref(db, cid, payload.subject_ref, "subject_ref")
+    if payload.object_id:
+        await _assert_ref(db, cid, f"object:{payload.object_id}", "object_id")
+    if payload.counterparty_id:
+        await _assert_ref(db, cid, f"counterparty:{payload.counterparty_id}",
+                          "counterparty_id")
     try:
         if tpl.doc_kind_id:
             entity, result = await process_templates.launch(
                 db, cid, tpl, current_user, responsible_id=responsible,
                 source_note=f"по шаблону процесса «{tpl.name}»",
+                counterparty_id=(_uuid_or_400(payload.counterparty_id,
+                                              "counterparty_id")
+                                 if payload.counterparty_id else None),
+                subject_ref=payload.subject_ref,
+                object_id=payload.object_id,
             )
         else:
             entity, result = await process_templates.launch_task(
@@ -1701,6 +1763,7 @@ async def list_docs(
     counterparty_id: str | None = Query(None),
     responsible_id: str | None = Query(None),
     object_ids: str | None = Query(None, max_length=5000),
+    ref: str | None = Query(None, max_length=200),
     date_from: date_type | None = Query(None),
     date_to: date_type | None = Query(None),
     q: str | None = Query(None),
@@ -1739,6 +1802,17 @@ async def list_docs(
         }
         stmt = stmt.where(
             DocCard.object_id.in_(selected_objects) if selected_objects else false())
+    if ref:
+        # Документы, привязанные к сущности пространства (`contract:<uuid>`,
+        # `counterparty:<uuid>`, `object:<ключ>`). Привязка бывает двух видов:
+        # предметом карточки и явной связью, — и обе одинаково законны, поэтому
+        # ищем по обеим. Это обратный ход графа: из карточки договора в её
+        # документы, а не наоборот.
+        related = select(DocRelation.doc_id).where(
+            DocRelation.company_id == cid,
+            DocRelation.doc_id == DocCard.id,
+            DocRelation.target_ref == ref).exists()
+        stmt = stmt.where(or_(DocCard.subject_ref == ref, related))
     if date_from:
         stmt = stmt.where(func.coalesce(DocCard.reg_date,
                                         func.date(DocCard.created_at)) >= date_from)
@@ -1796,6 +1870,93 @@ async def list_docs(
             "count": total or 0}
 
 
+# Потолок выгрузки. Реестр за год в компании — тысячи строк; десять тысяч
+# покрывают любой разумный отбор, а без границы одна кнопка выгружает всё
+# пространство целиком и держит соединение, пока его не оборвут.
+_EXPORT_LIMIT = 10_000
+_EXPORT_COLUMNS = (
+    ("reg_number", "Регистрационный номер"),
+    ("reg_date", "Дата регистрации"),
+    ("kind_name", "Вид документа"),
+    ("title", "Заголовок"),
+    ("status", "Состояние"),
+    ("approval_status", "Согласование"),
+    ("counterparty_name", "Корреспондент"),
+    ("external_number", "Номер корреспондента"),
+    ("external_date", "Дата корреспондента"),
+    ("organization_name", "Юридическое лицо"),
+    ("object_id", "Объект"),
+    ("due_at", "Срок"),
+    ("storage_until", "Хранить до"),
+)
+
+
+@router.get("/export")
+async def export_docs(
+    company_id: str = Query(...),
+    family: str | None = Query(None),
+    direction: str | None = Query(None),
+    status_: str | None = Query(None, alias="status"),
+    kind_id: str | None = Query(None),
+    label_id: str | None = Query(None),
+    counterparty_id: str | None = Query(None),
+    responsible_id: str | None = Query(None),
+    object_ids: str | None = Query(None, max_length=5000),
+    ref: str | None = Query(None, max_length=200),
+    date_from: date_type | None = Query(None),
+    date_to: date_type | None = Query(None),
+    q: str | None = Query(None),
+    mine: bool = Query(False),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Выгрузить реестр по текущему отбору.
+
+    Отбор не повторяем, а листаем сам реестр: двенадцать условий, переписанные
+    во второй раз, разойдутся с первыми на первой же правке — и выгрузка начнёт
+    тихо показывать не то, что экран. Цена — несколько запросов вместо одного;
+    выгрузку жмут не в цикле.
+
+    Разделитель `;` и BOM — ради Excel: с запятой он кладёт строку в одну
+    ячейку, без BOM показывает кириллицу кракозябрами, и человек считает, что
+    выгрузка сломана.
+    """
+    rows: list[dict[str, Any]] = []
+    offset = 0
+    while len(rows) < _EXPORT_LIMIT:
+        page = await list_docs(
+            company_id=company_id, family=family, direction=direction,
+            status_=status_, kind_id=kind_id, label_id=label_id,
+            counterparty_id=counterparty_id, responsible_id=responsible_id,
+            object_ids=object_ids, ref=ref, date_from=date_from,
+            date_to=date_to, q=q, mine=mine,
+            limit=_LIST_LIMIT, offset=offset, db=db, current_user=current_user)
+        chunk = page.get("docs") or []
+        rows.extend(chunk)
+        if len(chunk) < _LIST_LIMIT:
+            break
+        offset += _LIST_LIMIT
+
+    truncated = len(rows) > _EXPORT_LIMIT
+    rows = rows[:_EXPORT_LIMIT]
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, delimiter=";", lineterminator="\r\n")
+    writer.writerow([title for _, title in _EXPORT_COLUMNS])
+    for card in rows:
+        writer.writerow([card.get(key) or "" for key, _ in _EXPORT_COLUMNS])
+    if truncated:
+        # Молча обрезанная выгрузка читается как «это всё» — а это не всё.
+        writer.writerow([f"Показаны первые {_EXPORT_LIMIT} строк отбора; "
+                         "сузьте период или отбор"])
+    body = "﻿" + buffer.getvalue()
+    stamp = datetime.now(_BUSINESS_TIMEZONE).strftime("%Y%m%d-%H%M")
+    return Response(
+        content=body.encode("utf-8"),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition":
+                 f'attachment; filename="documents-{stamp}.csv"'})
+
+
 # ── Карточка ─────────────────────────────────────────────────────────────────
 
 
@@ -1832,11 +1993,22 @@ async def create_doc(
     kind = await _kind_or_404(db, cid, payload.kind_id)
     attrs = _validate_attrs(kind, payload.attrs, required=False)
 
+    await _assert_ref(db, cid, payload.subject_ref, "subject_ref")
+    if payload.object_id:
+        await _assert_ref(db, cid, f"object:{payload.object_id}", "object_id")
+
     name = payload.counterparty_name.strip()
-    if payload.counterparty_id and not name:
-        name = (await db.execute(select(Counterparty.name).where(
-            Counterparty.id == _uuid_or_400(payload.counterparty_id, "counterparty_id")
-        ))).scalar_one_or_none() or ""
+    if payload.counterparty_id:
+        # Компанию проверяем и здесь: без неё имя подтягивалось бы от контрагента
+        # соседнего пространства, а карточка вставала бы на чужую ссылку.
+        found = (await db.execute(select(Counterparty.name).where(
+            Counterparty.id == _uuid_or_400(payload.counterparty_id, "counterparty_id"),
+            Counterparty.company_id == cid))).scalar_one_or_none()
+        if found is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND,
+                                "Контрагент не найден в этой компании")
+        if not name:
+            name = found
 
     d = DocCard(
         company_id=cid, kind_id=kind.id, kind_code=kind.code,
@@ -1974,6 +2146,12 @@ async def register_doc(
                     target=number, details={"title": d.title[:200], "kind": kind.code,
                                              "manual": bool(manual_number),
                                              "manual_reason": reason or None})
+    # Событие ставится в очередь ЗДЕСЬ, до фиксации: или документ зарегистрирован
+    # и подписчики об этом узнают, или не зарегистрирован вовсе. Состояния «номер
+    # выдан, но никто не в курсе» не бывает.
+    await space_events.publish(
+        db, cid, "doc.registered", str(d.id),
+        space_events.doc_data(d, current_user, manual=bool(manual_number)))
     try:
         await db.commit()
     except IntegrityError:
@@ -2142,6 +2320,13 @@ async def doc_action(
             d.retention_state = "archived"
             d.archive_accepted_at = datetime.now(timezone.utc)
             d.archive_accepted_by = current_user.id
+            await space_events.publish(
+                db, cid, "doc.archived", str(d.id),
+                space_events.doc_data(
+                    d, current_user,
+                    caseId=str(d.case_id) if d.case_id else None,
+                    storageUntil=(d.storage_until.isoformat()
+                                  if d.storage_until else None)))
 
     simple = {
         "title": payload.title, "summary": payload.summary,
@@ -4510,6 +4695,11 @@ async def mark_acquainted(
     db.add(DocEvent(doc_id=d.id, kind="field", user_id=current_user.id,
                     actor_name=current_user.name or current_user.email,
                     to_value="ознакомлен", note=row.note))
+    await space_events.publish(
+        db, cid, "doc.acquainted", str(d.id),
+        space_events.doc_data(d, current_user, acquaintId=str(row.id),
+                              readAt=row.read_at.isoformat(),
+                              snapshotSha256=row.snapshot_sha256))
     await db.commit()
     return {"status": "done", "read_at": row.read_at.isoformat()}
 
@@ -5098,6 +5288,8 @@ async def add_relation(
         target_doc = _uuid_or_400(payload.target_ref.split(":", 1)[1], "target_ref")
         target = await _doc_or_404(db, cid, target_doc)
         await _assert_doc_permission(db, cid, target, current_user, "read")
+    else:
+        await _assert_ref(db, cid, payload.target_ref, "target_ref")
     dup = (await db.execute(select(DocRelation.id).where(
         DocRelation.company_id == cid, DocRelation.doc_id == d.id,
         DocRelation.kind == payload.kind,
@@ -5114,6 +5306,42 @@ async def add_relation(
     await db.commit()
     await db.refresh(r)
     return {"id": str(r.id), "kind": r.kind, "target_ref": r.target_ref}
+
+
+@router.post("/{doc_id}/meeting", status_code=status.HTTP_201_CREATED)
+async def start_doc_meeting(
+    doc_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Собрать совещание по документу.
+
+    Гостевую ссылку кладём в след документа, а не рассылаем письмами: кто видит
+    документ — тот и участник обсуждения, и через месяц будет видно, что по нему
+    собирались, даже если переписка потерялась.
+
+    Право требуется на чтение, а не на правку: обсуждают документ и те, кто его
+    не редактирует, — иначе на совещание не позвать ни согласующего, ни автора
+    смежного документа.
+    """
+    if not get_settings().jitsi_enabled:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
+                            "Видеоконференции не настроены")
+    cid = await assert_company_product(company_id, current_user, db, "docs")
+    d = await _doc_or_404(db, cid, doc_id)
+    await _assert_doc_permission(db, cid, d, current_user, "read")
+
+    room = jitsi.new_room()
+    urls = jitsi.meeting_urls(room, current_user.name)
+    db.add(DocEvent(doc_id=d.id, kind="meeting", user_id=current_user.id,
+                    actor_name=current_user.name or current_user.email,
+                    to_value="совещание", note=urls.get("guest_url")))
+    db.add(DocRelation(company_id=cid, doc_id=d.id, kind="discussion",
+                       target_ref=f"meeting:{room}",
+                       created_by=current_user.id))
+    await db.commit()
+    return urls
 
 
 async def authorize_docs_file_download(db: AsyncSession, user: User,

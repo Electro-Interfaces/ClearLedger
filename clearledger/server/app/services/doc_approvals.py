@@ -29,11 +29,19 @@ from app.models import (
 
 # Из чего резолвится согласующий. Незнакомый способ отбрасывается санитайзером:
 # иначе в справочнике копится мусор, за которым ничего не стоит.
-ACTOR_KINDS = ("user", "role", "department", "head_of", "position", "external")
+ACTOR_KINDS = ("user", "role", "department", "head_of", "position", "external",
+               "partner")
 # `external` — человек вне пространства: подрядчик, арендодатель, инспектор. У
 # него нет учётки и членства, поэтому в визе он опознаётся почтой (`actor_ref`),
 # а `assignee_id` остаётся пустым. Право он получает не на документ, а на один
 # шаг — ссылкой с обязательным сроком (`DocShareLink`, purpose="approve").
+#
+# `partner` — не человек, а ЧУЖАЯ СИСТЕМА: учётная система контрагента, шлюз
+# оператора, служба заказчика. Отличие от `external` в способе опознания: там
+# одноразовая ссылка человеку на почту, здесь — именной ключ доступа
+# (`SpaceInboundKey`), по которому партнёр ходит к нам сам. `assignee_id` так же
+# пуст: партнёр — участник процесса, но не участник пространства, и заводить ему
+# учётку значило бы дать доступ ко всему остальному.
 MODES = ("serial", "parallel")
 BUSINESS_TIMEZONE = ZoneInfo("Europe/Moscow")
 
@@ -79,8 +87,92 @@ def clean_route(route: Any) -> list[dict]:
             step["sla_hours"] = sla
         if raw.get("step_kind") == "sign":
             step["step_kind"] = "sign"
+        condition = _clean_condition(raw.get("when"))
+        if condition is not None:
+            step["when"] = condition
         out.append(step)
     return out
+
+
+# Условие шага. Одно сравнение, а не выражение: маршрут читают делопроизводители,
+# и «если сумма больше 100 000» они проверят глазами, а вложенные скобки — нет.
+# Понадобится ветвление сложнее — это будет другой разговор, с деревом решений.
+CONDITION_OPS = ("eq", "ne", "gt", "gte", "lt", "lte", "in", "set", "unset")
+# Свойства карточки, доступные условию наравне с реквизитами вида. Остальное —
+# из `attrs`: там живут поля, заданные схемой вида документа.
+CONDITION_CARD_FIELDS = (
+    "family", "kind_code", "direction", "confidentiality", "counterparty_id",
+    "object_id", "subject_ref", "organization_id", "department_id",
+)
+
+
+def _clean_condition(raw: Any) -> dict | None:
+    if not isinstance(raw, dict):
+        return None
+    field = str(raw.get("field") or "").strip()[:40]
+    op = str(raw.get("op") or "eq").strip()
+    if not field or op not in CONDITION_OPS:
+        return None
+    out: dict[str, Any] = {"field": field, "op": op}
+    if op in ("set", "unset"):
+        return out
+    value = raw.get("value")
+    if op == "in":
+        if not isinstance(value, list) or not value:
+            return None
+        out["value"] = [v for v in value[:50]
+                        if isinstance(v, (str, int, float, bool))]
+        return out if out["value"] else None
+    if not isinstance(value, (str, int, float, bool)):
+        return None
+    out["value"] = value
+    return out
+
+
+def _condition_value(doc: DocCard, field: str) -> Any:
+    if field in CONDITION_CARD_FIELDS:
+        value = getattr(doc, field, None)
+        return None if value is None else str(value)
+    return (doc.attrs or {}).get(field)
+
+
+def step_applies(step: dict, doc: DocCard) -> bool:
+    """Нужен ли шаг этому документу.
+
+    Шаг без условия нужен всегда — маршруты, написанные до появления условий,
+    обязаны вести себя ровно как раньше.
+
+    Несравнимое значение (в числовом сравнении лежит текст) считаем «условие не
+    выполнено», а не ошибкой: маршрут не должен падать из-за того, что человек
+    оставил реквизит пустым. Цена ошибки разная — лишний согласующий заметен и
+    поправим, пропущенный молча не заметен никем.
+    """
+    condition = step.get("when")
+    if not condition:
+        return True
+    value = _condition_value(doc, condition["field"])
+    op = condition["op"]
+    if op == "set":
+        return value not in (None, "")
+    if op == "unset":
+        return value in (None, "")
+    expected = condition.get("value")
+    if op == "in":
+        return any(str(value) == str(item) for item in expected)
+    if op in ("eq", "ne"):
+        same = str(value) == str(expected)
+        return same if op == "eq" else not same
+    try:
+        left, right = float(value), float(expected)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return False
+    if op == "gt":
+        return left > right
+    if op == "gte":
+        return left >= right
+    if op == "lt":
+        return left < right
+    return left <= right
 
 
 async def resolve_actors(db: AsyncSession, cid: uuid.UUID,
@@ -158,6 +250,23 @@ async def resolve_actors(db: AsyncSession, cid: uuid.UUID,
                 UserCompany.position == ref))).scalars().all()
             for uid in rows:
                 add("position", ref, uid)
+        elif by == "partner":
+            # Ключ проверяем на месте: отозванный партнёр не должен появляться в
+            # круге вообще. Иначе шаг откроется на того, кто уже не может к нам
+            # прийти, и маршрут встанет молча — без единого признака, почему.
+            from app.models import SpaceInboundKey
+
+            try:
+                key_id = uuid.UUID(ref)
+            except (ValueError, TypeError):
+                continue
+            key = (await db.execute(select(SpaceInboundKey).where(
+                SpaceInboundKey.id == key_id,
+                SpaceInboundKey.company_id == cid,
+                SpaceInboundKey.revoked_at.is_(None)))).scalar_one_or_none()
+            if key is not None and not any(
+                    k == "partner" and r == ref for k, r, _ in out):
+                out.append(("partner", ref, None))
     return out
 
 
@@ -291,6 +400,12 @@ async def start(db: AsyncSession, cid: uuid.UUID, doc: DocCard, route: list[dict
     steps = clean_route(route)
     if not steps:
         return {"error": "у вида документа не задан маршрут согласования"}
+    # Условия отбираются ДО нумерации шагов: номер должен идти подряд по тому
+    # маршруту, который документ реально прошёл, иначе в листе согласования
+    # появятся дыры, а снимок круга перестанет совпадать с историей.
+    steps = [step for step in steps if step_applies(step, doc)]
+    if not steps:
+        return {"error": "по условиям маршрута не осталось ни одного шага"}
 
     prepared: list[tuple[int, dict, list[tuple[str, str, uuid.UUID]]]] = []
     for i, step in enumerate(steps, start=1):
@@ -451,6 +566,16 @@ async def decide(db: AsyncSession, cid: uuid.UUID, doc: DocCard, row: DocApprova
         from app.services import approval_requests  # локально: обратный импорт
 
         await approval_requests.mark_outcome(db, doc.id, "rejected")
+        # Подписчикам шины — тем же движением и в той же транзакции. Точка
+        # выбрана не рядом с отметкой процесса случайно: здесь уже доказано, что
+        # мы внутри закрывающей транзакции круга.
+        from app.services import space_events  # локально: обратный импорт
+
+        await space_events.publish(
+            db, doc.company_id, "doc.rejected", str(doc.id),
+            space_events.doc_data(doc, actor, round=row.round,
+                                  step=row.step_name or None,
+                                  comment=row.comment))
         await db.flush()
         return {"status": "rejected", "returned": True}
 
@@ -486,6 +611,12 @@ async def decide(db: AsyncSession, cid: uuid.UUID, doc: DocCard, row: DocApprova
         from app.services import approval_requests  # локально: обратный импорт
 
         await approval_requests.mark_outcome(db, doc.id, "approved")
+        from app.services import space_events  # локально: обратный импорт
+
+        await space_events.publish(
+            db, doc.company_id, "doc.approval.completed", str(doc.id),
+            space_events.doc_data(doc, actor, round=row.round,
+                                  outcome="approved"))
     await db.flush()
     return {"status": doc.approval_status, "left": len(left)}
 

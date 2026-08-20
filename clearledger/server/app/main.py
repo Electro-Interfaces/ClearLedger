@@ -73,6 +73,7 @@ from app.routers import (
     info_router,
     sso_router,
     app_registry_router,
+    space_events_router,
     space_registry_router,
     core_router,
     matrix_chat_router,
@@ -98,6 +99,7 @@ from app.routers import (
     perimeter_router,
     pulse_router,
     doc_share_router,
+    partner_router,
     docs_archive_router,
     docs_router,
     tasks_router,
@@ -399,9 +401,11 @@ app.include_router(audit_data_router.router, prefix=API_PREFIX)
 # Аудитор пространства: настройки агента и след его работы
 # (сам агент — сервис стека, ecosystem-deploy/services/auditor).
 app.include_router(auditor_router.router, prefix=API_PREFIX)
+app.include_router(partner_router.router, prefix=API_PREFIX)  # партнёр согласует документ по именному ключу
 app.include_router(dedup_ingest_router.router, prefix=API_PREFIX)  # приём среза дублей 208 по X-Cloud-API-Key
 app.include_router(edge_router.router, prefix=API_PREFIX)  # приём пакетов edge-агентов АЗС по X-Cloud-API-Key
 app.include_router(eco_events_router.router, prefix=API_PREFIX)  # обратный канал приложений
+app.include_router(space_events_router.router, prefix=API_PREFIX)  # подписки на исходящие события и очередь
 app.include_router(ocr_router.router, prefix=API_PREFIX)
 app.include_router(fuel_router.router, prefix=API_PREFIX)
 app.include_router(fuel_mappings_router.router, prefix=API_PREFIX)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -8,14 +9,82 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
-    DocAccessGrant, DocCard, DocEvent, DocKind, Task, TaskChecklistItem,
-    TaskEvent, TaskTemplate, TaskType, User, UserCompany,
+    Contract, Counterparty, DocAccessGrant, DocCard, DocEvent, DocKind,
+    Organization, ServiceLocation, Task, TaskChecklistItem, TaskEvent,
+    TaskTemplate, TaskType, User, UserCompany,
 )
 from app.services import doc_approvals, task_mail
 
 
 class ProcessTemplateError(ValueError):
     pass
+
+
+# Подстановка данных пространства в заголовок и содержание шаблона. Скобки
+# одинарные — те же, что в шаблоне номера (`doc_numbers.render`): человек,
+# настроивший нумерацию, не должен учить второй синтаксис ради текста.
+_SLOT = re.compile(r"\{([а-яёa-z_]{2,30})\}", re.IGNORECASE)
+
+
+def fill(text: str | None, values: dict[str, str]) -> str | None:
+    """Подставить значения в текст шаблона.
+
+    Незаполненное имя остаётся в тексте как есть — ровно как в номере. Молча
+    подставленная пустота даёт «Акт по договору  от », и замечают это уже у
+    контрагента; оставшееся `{договор}` видно своему же человеку до отправки.
+    """
+    if not text:
+        return text
+
+    def replace(match: re.Match[str]) -> str:
+        value = values.get(match.group(1).lower())
+        return value if value else match.group(0)
+
+    return _SLOT.sub(replace, text)
+
+
+async def compose_values(db: AsyncSession, cid: uuid.UUID, doc: DocCard,
+                         actor: User) -> dict[str, str]:
+    """Что доступно шаблону: реквизиты сторон, предмет, объект, дата.
+
+    Берём только то, что уже стоит в карточке. Догадываться о договоре по
+    названию или искать «похожего» контрагента нельзя: документ уходит наружу,
+    и подставленная не та сторона хуже, чем незаполненное место.
+    """
+    today = datetime.now(timezone.utc).date()
+    values: dict[str, str] = {
+        "дата": today.strftime("%d.%m.%Y"),
+        "год": str(today.year),
+        "автор": actor.name or actor.email or "",
+    }
+    if doc.counterparty_id:
+        name = await db.scalar(select(Counterparty.name).where(
+            Counterparty.id == doc.counterparty_id,
+            Counterparty.company_id == cid))
+        values["контрагент"] = name or doc.counterparty_name or ""
+    elif doc.counterparty_name:
+        values["контрагент"] = doc.counterparty_name
+    if doc.organization_id:
+        values["организация"] = await db.scalar(select(Organization.name).where(
+            Organization.id == doc.organization_id)) or ""
+    if doc.object_id:
+        values["объект"] = await db.scalar(select(ServiceLocation.name).where(
+            ServiceLocation.id == doc.object_id,
+            ServiceLocation.company_id == cid)) or ""
+    if doc.subject_ref and doc.subject_ref.startswith("contract:"):
+        try:
+            contract_id = uuid.UUID(doc.subject_ref.split(":", 1)[1])
+        except (ValueError, TypeError):
+            contract_id = None
+        if contract_id is not None:
+            row = (await db.execute(select(Contract).where(
+                Contract.id == contract_id,
+                Contract.company_id == cid))).scalar_one_or_none()
+            if row is not None:
+                values["договор"] = row.number
+                values["дата_договора"] = row.date or ""
+                values["предмет"] = row.title or ""
+    return values
 
 
 async def can_launch_kind(
@@ -237,6 +306,8 @@ async def launch(
     source_note: str | None = None,
     summary_suffix: str | None = None,
     object_id: str | None = None,
+    counterparty_id: uuid.UUID | None = None,
+    subject_ref: str | None = None,
 ) -> tuple[DocCard, dict[str, Any]]:
     if tpl.company_id != cid or not tpl.doc_kind_id:
         raise ProcessTemplateError("Шаблон процесса не найден")
@@ -265,11 +336,19 @@ async def launch(
         author_id=actor.id,
         responsible_id=responsible,
         object_id=object_id or tpl.object_id,
+        counterparty_id=counterparty_id,
+        subject_ref=subject_ref,
         source=source,
         source_ref=source_ref,
         due_at=(now + timedelta(days=tpl.due_days)
                 if tpl.due_days is not None else None),
     )
+    # Подстановку делаем после сборки карточки и до записи: значения берутся из
+    # её же полей, а в базу должен попасть готовый текст, а не шаблон. Иначе
+    # `{контрагент}` уедет в реестр, в поиск и в печатную форму.
+    values = await compose_values(db, cid, d, actor)
+    d.title = fill(d.title, values) or d.title
+    d.summary = fill(d.summary, values)
     db.add(d)
     await db.flush()
     db.add(DocEvent(
