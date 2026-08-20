@@ -3553,6 +3553,21 @@ async def create_all() -> None:
         ):
             await conn.execute(_sa.text(stmt))
 
+        # v2.57: поручение как активность процесса. Таблица кругов виз обобщена:
+        # `create_all` колонку в существующую таблицу не добавит, поэтому руками.
+        for stmt in (
+            "ALTER TABLE eco_approval_requests ADD COLUMN IF NOT EXISTS "
+            "kind VARCHAR(20) NOT NULL DEFAULT 'approval'",
+            "ALTER TABLE eco_approval_requests ADD COLUMN IF NOT EXISTS task_id UUID",
+            "ALTER TABLE eco_approval_requests ALTER COLUMN doc_id DROP NOT NULL",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_eco_errand_requests_open "
+            "ON eco_approval_requests (company_id, task_id) "
+            "WHERE outcome IS NULL AND task_id IS NOT NULL",
+            "CREATE INDEX IF NOT EXISTS ix_eco_approval_requests_task "
+            "ON eco_approval_requests (task_id) WHERE task_id IS NOT NULL",
+        ):
+            await conn.execute(_sa.text(stmt))
+
         # v2.56: последний известный ход процесса — один снимок на предмет.
         for stmt in (
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_process_snapshots_subject "

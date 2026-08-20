@@ -32,7 +32,7 @@ log = logging.getLogger("clearledger.inbound")
 # События, которые Ядро умеет обрабатывать. Остальные принимаем и помечаем
 # `skipped`: неизвестное событие — не ошибка отправителя, а наш ещё не написанный
 # обработчик, и ретраить его бессмысленно.
-HANDLED = {"case.stage_changed", "case.closed", "approval.requested"}
+HANDLED = {"case.stage_changed", "case.closed", "approval.requested", "errand.requested"}
 
 
 async def accept(db: AsyncSession, provider: str, event: dict[str, Any],
@@ -115,9 +115,28 @@ async def _start_approval(db: AsyncSession, row: InboundEvent) -> tuple[str, str
     return "ok", f"круг {req.round} по документу {req.doc_id}"
 
 
+async def _start_errand(db: AsyncSession, row: InboundEvent) -> tuple[str, str | None]:
+    """Узел маршрута просит сделать работу по заготовке «Трека».
+
+    Симметрично `_start_approval`: разворачиваем поручение и запоминаем, что процесс
+    ждёт его исхода. Невыполнимая просьба помечается `skipped` с причиной, а не
+    ретраится: заготовки не станет от повтора, а очередь на ней остановится.
+    """
+    from app.services import errands
+
+    data = (row.payload or {}).get("data") or {}
+    try:
+        await errands.request(db, row.company_id, row.external_id, data)
+    except errands.ErrandError as exc:
+        return "skipped", str(exc)[:500]
+    return "ok", None
+
+
 async def _handle(db: AsyncSession, row: InboundEvent) -> tuple[str, str | None]:
     if row.type == "approval.requested":
         return await _start_approval(db, row)
+    if row.type == "errand.requested":
+        return await _start_errand(db, row)
 
     if row.type not in HANDLED:
         return "skipped", None

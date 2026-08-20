@@ -6798,8 +6798,15 @@ class ApprovalRequest(Base):
     # Процесс в Координаторе и, если ход идёт по ветви, сама ветвь.
     process_id: Mapped[str] = mapped_column(String(64), nullable=False)
     branch_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    doc_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("doc_cards.id", ondelete="CASCADE"), nullable=False, index=True)
+    # Чего именно ждёт процесс: круг виз по документу или выполнения поручения.
+    # Вид один, потому что ожидание одно: работа делается людьми в «Треке», а
+    # обратно едет одно событие исхода. Второй механизм доставки означал бы вторые
+    # ретраи, второй счётчик попыток и вторую историю о том, где исход потерялся.
+    kind: Mapped[str] = mapped_column(String(20), nullable=False, default="approval")
+    doc_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("doc_cards.id", ondelete="CASCADE"), nullable=True, index=True)
+    task_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="CASCADE"), nullable=True, index=True)
     round: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     # Чем двигать процесс при каждом исходе. Пусто — исход только фиксируется.
     on_approved: Mapped[str | None] = mapped_column(String(120), nullable=True)
@@ -6816,6 +6823,8 @@ class ApprovalRequest(Base):
         Index("uq_eco_approval_requests_key", "company_id", "request_id", unique=True),
         # Живой круг по документу один: второй запрос от процесса, пока прежний не
         # закрыт, — это ошибка настройки маршрута, а не новая работа.
+        Index("uq_eco_errand_requests_open", "company_id", "task_id", unique=True,
+              postgresql_where=text("outcome IS NULL AND task_id IS NOT NULL")),
         Index("uq_eco_approval_requests_open", "company_id", "doc_id", unique=True,
               postgresql_where=text("outcome IS NULL")),
         Index("ix_eco_approval_requests_undelivered", "decided_at",

@@ -1345,6 +1345,17 @@ async def task_action(
         t.status = payload.status
         logged = True
         t.closed_at = None if payload.status == "open" else datetime.now(timezone.utc)
+        # Работу мог поручить маршрут — тогда он ждёт исхода. Отметка ставится в
+        # той же транзакции, что и закрытие: доставка пойдёт фоном, но потерять
+        # исход нельзя — работа уже сделана, второй раз её никто не сделает.
+        if payload.status in ("done", "cancelled"):
+            from app.services import errands
+            waiting = await errands.close(db, t, payload.status)
+            if waiting is not None:
+                db.add(TaskEvent(
+                    task_id=t.id, kind="status", user_id=current_user.id,
+                    actor_name="Процесс", to_value="исход уехал в процесс",
+                    note=f"процесс {waiting.process_id}"))
 
     # Правка поля — тоже событие. Молча сдвинутый срок или снятая срочность
     # рушат доверие к следу: работа «сама» перестала гореть, и объяснить это

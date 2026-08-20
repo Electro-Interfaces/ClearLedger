@@ -23,7 +23,10 @@ from app.services import approval_requests
 class _Row:
     """Запись исхода: круг закрыт, осталось доставить его процессу."""
 
-    def __init__(self, outcome="approved", on_approved="Согласовано", on_rejected="Отказано"):
+    def __init__(self, outcome="approved", on_approved="Согласовано", on_rejected="Отказано",
+                 kind="approval"):
+        self.kind = kind
+        self.task_id = uuid.uuid4()
         self.company_id = uuid.uuid4()
         self.process_id = str(uuid.uuid4())
         self.branch_id = None
@@ -75,3 +78,24 @@ async def test_v_dejstvie_edet_krug_i_dokument(calls):
     payload = calls[0]["json"]["payload"]
     assert payload["approval_round"] == row.round
     assert payload["doc_id"] == str(row.doc_id)
+
+
+async def test_vypolnennoe_poruchenie_dvigaet_process(calls):
+    """Поручение — такая же активность процесса, как круг виз.
+
+    Исходов у любой активности два: работа сделана или не сделана. У круга это
+    «согласовано / отказано», у поручения — «выполнено / отменено», и доезжают они
+    одним и тем же путём: второй механизм доставки означал бы вторые ретраи и
+    вторую историю о том, где потерялся исход.
+    """
+    row = _Row(outcome="done", on_approved="Работа принята", kind="errand")
+    await approval_requests._deliver(None, row)
+    assert calls[0]["json"]["verb"] == "Работа принята"
+    # В следе шага должно стоять само поручение, а не пустое место от документа.
+    assert calls[0]["json"]["payload"] == {"task_id": str(row.task_id)}
+
+
+async def test_otmenennoe_poruchenie_uhodit_svoim_glagolom(calls):
+    row = _Row(outcome="cancelled", on_rejected="Работа отменена", kind="errand")
+    await approval_requests._deliver(None, row)
+    assert calls[0]["json"]["verb"] == "Работа отменена"

@@ -126,6 +126,19 @@ async def request(db: AsyncSession, company_id: uuid.UUID, request_id: str,
     return row
 
 
+async def mark_task_outcome(db: AsyncSession, task_id: uuid.UUID, outcome: str) -> None:
+    """Исход поручения — тем же путём, что и исход круга виз (см. `errands.close`)."""
+    row = (await db.execute(select(ApprovalRequest).where(
+        ApprovalRequest.task_id == task_id,
+        ApprovalRequest.kind == "errand",
+        ApprovalRequest.outcome.is_(None)).limit(1))).scalar_one_or_none()
+    if row is None:
+        return
+    row.outcome = outcome
+    row.decided_at = datetime.now(timezone.utc)
+    await db.flush()
+
+
 async def mark_outcome(db: AsyncSession, doc_id: uuid.UUID, outcome: str) -> None:
     """Записать исход круга. Вызывается из терминальных точек согласования.
 
@@ -179,8 +192,23 @@ async def deliver_pending(db: AsyncSession, limit: int = 20) -> int:
     return done
 
 
+def _trace(row: ApprovalRequest) -> dict[str, Any]:
+    """Чем именно двинули процесс — часть следа шага.
+
+    У круга виз это документ и номер круга, у поручения — само поручение. Слать
+    «doc_id: None» для поручения значило бы оставить в истории шага пустое место
+    там, где должен стоять ответ на вопрос «а что было сделано».
+    """
+    if row.kind == "errand":
+        return {"task_id": str(row.task_id) if row.task_id else None}
+    return {"approval_round": row.round, "doc_id": str(row.doc_id) if row.doc_id else None}
+
+
 async def _deliver(db: AsyncSession, row: ApprovalRequest) -> None:
-    verb = row.on_approved if row.outcome == "approved" else row.on_rejected
+    # Исходов два на любой вид активности: работа сделана или не сделана. У круга
+    # виз это «согласовано / отказано», у поручения — «выполнено / отменено»;
+    # процессу оба доезжают своим глаголом, и доставка у них одна.
+    verb = row.on_approved if row.outcome in ("approved", "done") else row.on_rejected
     if not verb:
         # Маршрут просил только собрать визы, двигать процесс не просил. Это
         # законный случай, а не недоставка: исход виден в карточке документа.
@@ -199,5 +227,4 @@ async def _deliver(db: AsyncSession, row: ApprovalRequest) -> None:
     await projects_process.call_process(
         db, row.company_id, "POST",
         f"/api/v1/process/instances/{row.process_id}/actions",
-        json={"verb": verb, "branchId": row.branch_id,
-              "payload": {"approval_round": row.round, "doc_id": str(row.doc_id)}})
+        json={"verb": verb, "branchId": row.branch_id, "payload": _trace(row)})
