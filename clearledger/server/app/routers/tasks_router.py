@@ -534,14 +534,20 @@ def _clean_route(route: list[dict]) -> list[dict]:
     return out
 
 
-async def _assert_admin(db: AsyncSession, cid: uuid.UUID, user: User) -> None:
-    """Справочник типов правит тот, кто отвечает за правила: админ пространства.
-    Исполнитель может двигать свою задачу, но не менять маршрут для всех."""
+async def _assert_admin(db: AsyncSession, cid: uuid.UUID, user: User,
+                        message: str = "Типы задач правит администратор пространства") -> None:
+    """Правила и оценки — админу пространства.
+
+    Справочник типов правит тот, кто отвечает за порядок: исполнитель может двигать
+    свою задачу, но не менять маршрут для всех. Отказ называет причину своими
+    словами — «типы задач правит администратор» под отчётом о людях выглядит
+    ошибкой системы, а не правилом.
+    """
     if user.is_superadmin:
         return
     m = await db.get(UserCompany, (user.id, cid))
     if m is None or m.role != "admin":
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Типы задач правит администратор пространства")
+        raise HTTPException(status.HTTP_403_FORBIDDEN, message)
 
 
 @router.post("/types", status_code=status.HTTP_201_CREATED)
@@ -2526,7 +2532,8 @@ async def errand_discipline(
     """
     cid = await _assert_work(company_id, current_user, db)
     # Разрез по людям — не для всех: это оценка работы конкретного человека.
-    await _assert_admin(db, cid, current_user)
+    await _assert_admin(db, cid, current_user,
+                        "Поимённый отчёт по дисциплине доступен администратору пространства")
     selected_from, selected_to, start_at, end_at = _errand_bounds(date_from, date_to)
 
     closed = list((await db.execute(select(Task).where(
