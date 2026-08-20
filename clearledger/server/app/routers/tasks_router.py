@@ -1420,18 +1420,28 @@ async def task_action(
     # письма уходили только упомянутым и новому исполнителю. Шлём на закрытии и на
     # передаче — на двух событиях, ради которых за задачей и следят. Реплики сюда не
     # входят намеренно: для «позовите меня в обсуждение» есть упоминание.
-    if payload.status in ("done", "cancelled") or new_assignee_email:
-        await _notify_watchers(db, t, current_user, payload, mentioned)
+    await _notify_watchers(db, t, current_user, payload, mentioned,
+                           handed_over=bool(new_assignee_email))
     return out
 
 
 async def _notify_watchers(db: AsyncSession, t: Task, actor: User,
-                           payload: TaskAction, mentioned: list[tuple[str, str]]) -> None:
+                          payload: TaskAction, mentioned: list[tuple[str, str]],
+                          *, handed_over: bool = False) -> None:
     """Письмо наблюдателям: работа закрыта или сменила исполнителя.
 
-    Того, кто действие совершил, и тех, кому письмо уже ушло другим поводом, из
-    списка убираем: два письма об одном событии человек читает как ошибку системы.
+    Правило «о чём уведомляем» живёт здесь, а не у вызывающего: иначе второй
+    вызов из соседней ручки однажды разошёлся бы с первым, и наблюдатели начали
+    бы получать письма о каждой правке срока.
+
+    Реплики сюда не входят намеренно — для «позовите меня в обсуждение» есть
+    упоминание. Того, кто действие совершил, и тех, кому письмо уже ушло другим
+    поводом, из списка убираем: два письма об одном событии человек читает как
+    ошибку системы.
     """
+    closing = payload.status in ("done", "cancelled")
+    if not closing and not handed_over:
+        return
     already = {email for _, email in mentioned if email}
     already.add(actor.email)
     rows = (await db.execute(
@@ -1440,7 +1450,7 @@ async def _notify_watchers(db: AsyncSession, t: Task, actor: User,
     targets = sorted({email for email in rows if email and email not in already})
     if not targets:
         return
-    if payload.status in ("done", "cancelled"):
+    if closing:
         verb = "выполнена" if payload.status == "done" else "отменена"
         subject = f"Задача №{t.number} {verb}: {t.title}"
         body = f"{verb.capitalize()}: {actor.name or actor.email}"
