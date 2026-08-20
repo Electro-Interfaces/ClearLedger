@@ -35,6 +35,60 @@ from app.services.space_projection import (
 
 APP_CODE = "support"
 
+# Фасад процессов — общий вход в движок маршрутов. Проектные ручки `/eco/projects/*`
+# ещё живы для совместимости, но Ядро ходит сюда: пока ходило туда, фаза 2 оставалась
+# витриной, а мост нельзя было отключить в принципе.
+FACADE = "/api/v1/process"
+SUBJECT_TYPE = "ezs_site"
+PROCESS_DEFINITION = "ezs_work"
+
+
+def _from_facade(card: dict[str, Any], **extra: Any) -> dict[str, Any]:
+    """Ответ фасада в словах карточки проекта.
+
+    Фасад говорит о процессе — `processId`, `currentStep`, `steps`; карточка проекта
+    говорит о ходе работы — `stage`, `stages`, `path`. Приводим в одном месте: менять
+    словарь во фронте значило бы переучивать людей ради внутреннего переезда, а
+    отдавать наружу два разных словаря — плодить третью правду.
+    """
+    return {
+        "ok": True,
+        "exists": True,
+        "caseId": card.get("processId"),
+        "stage": card.get("currentStep"),
+        "stages": card.get("steps"),
+        "links": card.get("transitions"),
+        "path": card.get("history"),
+        "actions": card.get("availableActions"),
+        "fields": card.get("fields"),
+        "values": card.get("values"),
+        "milestones": card.get("milestones"),
+        "participants": card.get("participants"),
+        "branches": card.get("branches"),
+        "readonly": card.get("readonly"),
+        "readonlyReason": card.get("readonlyReason"),
+        "stageEnteredAt": card.get("stepEnteredAt"),
+        "daysInStage": card.get("daysInStep"),
+        **{key: card[key] for key in ("created", "participantsUnknown", "undone")
+           if key in card},
+        **extra,
+    }
+
+
+async def _instance_id(db: AsyncSession, company_id, site: EzsSite) -> tuple[str | None, dict]:
+    """Процесс предмета и — если его ещё нет — сам маршрут.
+
+    Возвращает пару: идентификатор процесса и предпросмотр графа. Пустой процесс не
+    ошибка: работа по проекту может быть ещё не начата, а путь показать уже нужно.
+    """
+    data = await _call(db, company_id, "GET", f"{FACADE}/instances", params={
+        "subjectType": SUBJECT_TYPE,
+        "subjectId": str(site.id),
+        "definition": PROCESS_DEFINITION,
+    })
+    items = data.get("instances") or []
+    return (items[0].get("processId") if items else None), (data.get("definitionPreview") or {})
+
 # Стадии кейса, при входе в которые проект считается введённым в эксплуатацию.
 # Это узел 21 блок-схемы («автоматическое обновление статуса на "Введена в
 # эксплуатацию"»): решение принимает маршрут, но запись о вводе — наша, потому что
@@ -121,15 +175,18 @@ async def sync_case(db: AsyncSession, company_id, site: EzsSite,
     Одна операция на два действия сознательно: контекст уезжает при каждом значимом
     изменении проекта, и отдельная «создать» плодила бы гонку «кейс уже есть или нет».
     """
-    return await _call(db, company_id, "POST", "/api/v1/eco/projects/case", json={
-        "projectId": str(site.id),
+    related = ([{"type": "service_object", "id": str(site.location_id)}]
+               if site.location_id else [])
+    card = await _call(db, company_id, "POST", f"{FACADE}/instances", json={
+        "definition": PROCESS_DEFINITION,
+        "subject": {"type": SUBJECT_TYPE, "id": str(site.id)},
         "title": site.title or site.project_no or f"Проект ЭЗС {site.id}",
-        "kind": site.kind or "new_build",
-        "objectEcoId": str(site.location_id) if site.location_id else None,
         "actorEmail": getattr(user, "email", None),
-        "fields": _context(site),
+        "context": _context(site),
+        "related": related,
         "participants": await _participants(db, site),
     })
+    return _from_facade(card)
 
 
 async def case_state(db: AsyncSession, company_id, site: EzsSite,
@@ -146,11 +203,16 @@ async def case_state(db: AsyncSession, company_id, site: EzsSite,
     (`needsReconcile`), а устраняет его явная операция `reconcile` — руками или
     фоновым проходом.
     """
-    state = await _call(db, company_id, "GET", f"/api/v1/eco/projects/{site.id}/case",
-                        params={"actorEmail": getattr(user, "email", None) or "",
-                                # Вид проекта нужен, когда кейса ещё нет: Координатор
-                                # вернёт маршрут, чтобы путь было видно заранее.
-                                "kind": site.kind or "new_build"})
+    process_id, preview = await _instance_id(db, company_id, site)
+    if not process_id:
+        # Процесса ещё нет, но маршрут есть: отдаём сам граф, чтобы путь был виден
+        # заранее. Без этого схема исчезала с экрана до первого шага и выглядела
+        # как пропавшая возможность, а не как «работа не начата».
+        return {"ok": True, "exists": False, "kind": site.kind or "new_build",
+                **preview, "needsReconcile": []}
+    state = _from_facade(await _call(
+        db, company_id, "GET", f"{FACADE}/instances/{process_id}",
+        params={"actorEmail": getattr(user, "email", None) or ""}))
     # Поля шага тоже досверяем. Их пишет `apply_step` уже после ответа Координатора,
     # и обрыв связи между этими точками оставлял подрядчика и форму права только в
     # кейсе: человек их ввёл, а чек-лист проекта об этом не знал. Значения кейса —
@@ -194,9 +256,13 @@ async def reconcile(db: AsyncSession, company_id, site: EzsSite,
     в том, что теперь это осознанное действие с автором, и дату ввода ставит тот,
     кто её подтвердил, а не тот, кто открыл экран.
     """
-    state = await _call(db, company_id, "GET", f"/api/v1/eco/projects/{site.id}/case",
-                        params={"actorEmail": getattr(user, "email", None) or "",
-                                "kind": site.kind or "new_build"})
+    process_id, _ = await _instance_id(db, company_id, site)
+    if not process_id:
+        # Сводить нечего: работа по маршруту не начиналась.
+        return {"ok": True, "exists": False, "needsReconcile": []}
+    state = _from_facade(await _call(
+        db, company_id, "GET", f"{FACADE}/instances/{process_id}",
+        params={"actorEmail": getattr(user, "email", None) or ""}))
     before = {column: getattr(site, column, None) for column in STEP_FIELDS_TO_SITE.values()}
     written = _reflect_step_fields(site, state.get("values") or {})
     if written:
@@ -335,8 +401,12 @@ async def undo_step(db: AsyncSession, company_id, site: EzsSite,
     Наше дело — вернуть воронку следом, тем же `_reflect_outcome`: отменённый
     отказ обязан снять проект с архива, иначе карточка снова разойдётся с ходом.
     """
-    state = await _call(db, company_id, "POST", f"/api/v1/eco/projects/{site.id}/case/undo",
-                        json={"actorEmail": getattr(user, "email", None)})
+    process_id, _ = await _instance_id(db, company_id, site)
+    if not process_id:
+        raise ProjectionError("По этому проекту маршрут ещё не начат — отменять нечего")
+    state = _from_facade(await _call(
+        db, company_id, "POST", f"{FACADE}/instances/{process_id}/undo",
+        json={"actorEmail": getattr(user, "email", None)}))
     funnel = await _reflect_outcome(db, site, state, payload=state.get("values") or {}, user=user)
     if funnel:
         state["funnel"] = funnel
@@ -363,13 +433,18 @@ async def apply_step(db: AsyncSession, company_id, site: EzsSite, link_id: str,
     site.pending_at = datetime.now(timezone.utc)
     await db.commit()
 
-    state = await _call(db, company_id, "POST",
-                        f"/api/v1/eco/projects/{site.id}/case/transition", json={
-                            "linkId": str(link_id),
-                            "actorEmail": getattr(user, "email", None),
-                            "payload": payload or {},
-                            "branchCaseId": branch_case_id,
-                        })
+    process_id, _ = await _instance_id(db, company_id, site)
+    if not process_id:
+        raise ProjectionError("По этому проекту маршрут ещё не начат")
+    state = _from_facade(await _call(
+        db, company_id, "POST", f"{FACADE}/instances/{process_id}/actions", json={
+            # Снаружи процесс двигают действием: идентификатор ребра остался тем же,
+            # но называется он теперь по делу, а не «переходом стадии».
+            "actionId": str(link_id),
+            "actorEmail": getattr(user, "email", None),
+            "payload": payload or {},
+            "branchId": branch_case_id,
+        }))
 
     # Шаг применён — переносим заполненное в карточку, иначе чек-лист не увидит
     # ни подрядчика, ни формы права, и человек будет искать, почему пункт красный.

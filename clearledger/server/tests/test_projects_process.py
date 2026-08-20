@@ -78,6 +78,19 @@ class _FakeWork:
         return self.result
 
 
+
+def _facade(step_code: str, step_name: str):
+    """Фасад в ответ на два вызова: найти процесс предмета и двинуть его.
+
+    Раньше мост звал одну ручку и получал «стадию»; теперь сначала спрашивает,
+    заведён ли процесс, и только потом действует — поэтому и подделка двойная.
+    """
+    async def fake_call(db_, company_id, method, path, *, json=None, params=None):
+        if path.endswith("/instances"):
+            return {"instances": [{"processId": "p-1"}]}
+        return {"processId": "p-1", "currentStep": {"code": step_code, "name": step_name}}
+    return fake_call
+
 @pytest.mark.parametrize("moved,ожидаем_дату", [(True, True), (False, False)])
 async def test_дата_ввода_только_когда_воронка_приняла(db, monkeypatch, moved,
                                                        ожидаем_дату):
@@ -87,10 +100,7 @@ async def test_дата_ввода_только_когда_воронка_при
     db.add(site)
     await db.flush()
 
-    async def fake_call(db_, company_id, method, path, *, json=None, params=None):
-        return {"stage": {"code": "ezs_commissioning", "name": "Ввод в эксплуатацию"}}
-
-    monkeypatch.setattr(pp, "_call", fake_call)
+    monkeypatch.setattr(pp, "_call", _facade("ezs_commissioning", "Ввод в эксплуатацию"))
     import app.services.ezs_site_work as work
     monkeypatch.setattr(work, "set_stage", _FakeWork(moved).set_stage)
 
@@ -112,10 +122,7 @@ async def test_промежуточная_стадия_воронку_не_тр�
     db.add(site)
     await db.flush()
 
-    async def fake_call(db_, company_id, method, path, *, json=None, params=None):
-        return {"stage": {"code": "ezs_pnr", "name": "Пусконаладка"}}
-
-    monkeypatch.setattr(pp, "_call", fake_call)
+    monkeypatch.setattr(pp, "_call", _facade("ezs_pnr", "Пусконаладка"))
 
     state = await pp.apply_step(db, company.id, site, "link-1", {}, None)
     assert "funnel" not in state
