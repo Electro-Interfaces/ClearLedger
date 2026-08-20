@@ -2315,7 +2315,14 @@ async def ensure_task_room(
     from app.models import Task, TaskWatcher
 
     cid = await _company_of(current_user, db)
-    await assert_company_product(str(cid), current_user, db, "plan")
+    # Поручения переехали в «Трек», а ключ `plan` остался только у ранее выданных
+    # ролей. Гейт спрашивает сначала новый продукт, потом старый — как в самих
+    # ручках поручений (`tasks_router._assert_work`). Иначе первый же человек, у
+    # которого есть только «Трек», не смог бы открыть обсуждение своей работы.
+    try:
+        await assert_company_product(str(cid), current_user, db, "docs")
+    except HTTPException:
+        await assert_company_product(str(cid), current_user, db, "plan")
     try:
         tid = uuid.UUID(task_id)
     except (ValueError, TypeError):
