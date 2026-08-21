@@ -520,9 +520,14 @@ export function ChargeMapPanel({ companyId, dateFrom, dateTo }: {
   }, [allPoints, search, region, status, link, power, manuf, stage, owner, locClass, speed, highway,
       lifecycle, stationCodes, regionIds, locationIds])
 
-  // Место = набор станций с общими координатами (площадка, а не пост).
+  // Сколько ТОЧЕК человек увидит на карте: посты одной площадки стоят рядом и
+  // сливаются в один кружок. Округление до 3 знаков — около 110 метров, размер
+  // площадки. Считаем именно кружки, а не «места»: сказать, сколько на трассе
+  // площадок, по координатам нельзя — у 27 станций М-11 адреса называют две
+  // площадки, а координаты дают 27 разных значений. Врать точным числом там, где
+  // его нет, хуже, чем не называть его вовсе.
   const placeCount = useMemo(
-    () => new Set(points.map((p) => `${p.lat.toFixed(4)},${p.lon.toFixed(4)}`)).size, [points])
+    () => new Set(points.map((p) => `${p.lat.toFixed(3)},${p.lon.toFixed(3)}`)).size, [points])
 
   // пороги раскраски по метрике (квантили над видимыми точками)
   const colorTh = useMemo(() => {
@@ -633,14 +638,14 @@ export function ChargeMapPanel({ companyId, dateFrom, dateTo }: {
 
       {/* счётчик + адаптивная легенда */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground shrink-0">
-        {/* Станций и МЕСТ. У заказчика на 63-м и 75-м километре М-11 стоит по
-            десятку постов с общими координатами: фильтр честно говорит «27
-            станций», а на карте видно два кружка — и это выглядит как поломка,
-            пока не сказано, что мест действительно два. */}
+        {/* Станций и ТОЧЕК на карте. У заказчика на 63-м и 75-м километре М-11
+            стоит по десятку постов вплотную: фильтр честно говорит «27 станций»,
+            а кружков видно меньше — и это читается как поломка, пока не сказано,
+            что часть станций стоит на одном месте. */}
         <span>
           На карте: <b className="text-foreground">{nf0.format(points.length)}</b> из {nf0.format(allPoints.length)} станций
           {placeCount > 0 && placeCount < points.length && (
-            <> · {nf0.format(placeCount)} {plural(placeCount, 'место', 'места', 'мест')} на карте</>
+            <> · {plural(placeCount, 'точка', 'точки', 'точек')} на карте: <b className="text-foreground">{nf0.format(placeCount)}</b></>
           )}
         </span>
         {catLegend.map((l) => (
