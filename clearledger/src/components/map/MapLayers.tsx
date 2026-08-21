@@ -14,7 +14,7 @@
  * которого нет уже полчаса.
  */
 import { useEffect, useState } from 'react'
-import { GeoJSON, TileLayer } from 'react-leaflet'
+import { GeoJSON, Pane, TileLayer } from 'react-leaflet'
 import type { FeatureCollection } from 'geojson'
 import { Layers, Satellite, Map as MapIcon, TrafficCone, LandPlot } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -53,6 +53,11 @@ export function useMapLayers() {
  * зелёный, вода синяя, застройка серая. Серая линия среди них теряется, а
  * фиолетового на подложке нет — граница читается сразу. На спутнике и в тёмной
  * теме тот же тёмный тон исчезает, поэтому там берётся светлый: `pale`.
+ *
+ * Слой лежит НИЖЕ станций и не ловит мышь. Иначе полигон площадью в область
+ * перекрывает кружки станций, всё время подсвечивается под курсором и забирает
+ * себе клик: карта про станции, а выбрать удаётся только регион. По той же
+ * причине заливки нет — рисуются именно границы.
  */
 function RegionsLayer({ pale }: { pale: boolean }) {
   const [data, setData] = useState<FeatureCollection | null>(null)
@@ -65,19 +70,11 @@ function RegionsLayer({ pale }: { pale: boolean }) {
     return () => { alive = false }
   }, [])
   if (!data) return null
-  const line = pale ? '#c4b5fd' : '#6d28d9'
-  const rest = { color: line, weight: 2, opacity: 0.9, fillColor: line, fillOpacity: pale ? 0.07 : 0.05 }
-  const over = { ...rest, weight: 3.5, fillOpacity: pale ? 0.2 : 0.16 }
   return (
-    <GeoJSON key={pale ? 'pale' : 'ink'} data={data} style={rest}
-      onEachFeature={(feature, layer) => {
-        // Подсветка под курсором: без неё на стыке двух областей непонятно, какая
-        // из них подписана.
-        layer.on('mouseover', () => (layer as any).setStyle?.(over))
-        layer.on('mouseout', () => (layer as any).setStyle?.(rest))
-        const name = (feature.properties as { name?: string } | null)?.name
-        if (name) layer.bindTooltip(name, { sticky: true, direction: 'top' })
-      }} />
+    <Pane name="regions" style={{ zIndex: 350 }}>
+      <GeoJSON key={pale ? 'pale' : 'ink'} data={data}
+        style={{ color: pale ? '#c4b5fd' : '#6d28d9', weight: 2, opacity: 0.9, fill: false, interactive: false }} />
+    </Pane>
   )
 }
 
