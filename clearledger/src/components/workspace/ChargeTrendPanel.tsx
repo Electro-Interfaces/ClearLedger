@@ -19,6 +19,7 @@ import { getChargeLongTrend } from '@/services/analyticsService'
 import { useNetScope } from '@/hooks/useScopeReset'
 import { seriesColor } from './analytics/palette'
 import { rechartsTooltipTheme } from '@/components/ui/chart-utils'
+import { formatMonth } from '@/lib/formatDate'
 
 const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: d }).format(n)
 
@@ -36,7 +37,7 @@ const DIM_LABEL: Record<string, string> = {
   '—': 'Не размечено',
 }
 
-export function ChargeTrendPanel({ companyId }: {
+export function ChargeTrendPanel({ companyId, dateFrom, dateTo }: {
   companyId: string; dateFrom?: string; dateTo?: string
 }) {
   const rootRef = useRef<HTMLDivElement>(null)
@@ -78,6 +79,11 @@ export function ChargeTrendPanel({ companyId }: {
   const prevYear = months.find((m) => m.period === `${Number(last.period.slice(0, 4)) - 1}${last.period.slice(4)}`)
   const yoy = prevYear && prevYear.kwh > 0 ? (last.kwh - prevYear.kwh) / prevYear.kwh * 100 : null
   const fileMonths = months.filter((m) => m.source === 'file').length
+  // Ряд шире выбранного периода — значит фильтр к этой панели не применён, и
+  // сказать об этом надо ровно тогда, когда расхождение действительно есть.
+  const widerThanPeriod = Boolean(
+    (dateFrom && months[0].period.slice(0, 7) < dateFrom.slice(0, 7))
+    || (dateTo && last.period.slice(0, 7) > dateTo.slice(0, 7)))
 
   return (
     <div ref={rootRef} className="space-y-4 p-6">
@@ -86,8 +92,18 @@ export function ChargeTrendPanel({ companyId }: {
         <Badge className="bg-emerald-500/15 text-[10px] text-emerald-600 dark:text-emerald-400">реальные данные</Badge>
         <ExportButton title="Динамика отпуска 2024+" getEl={() => rootRef.current} />
         <span className="text-xs text-muted-foreground">
-          {months[0].period.slice(0, 7)} — {last.period.slice(0, 7)} · до {cutoffLabel ?? '—'} — сводная контрагента, далее — сессии
+          {formatMonth(months[0].period.slice(0, 7))} — {formatMonth(last.period.slice(0, 7))}
+          {' · до '}{cutoffLabel ? formatMonth(cutoffLabel) : '—'} — сводная контрагента, далее — сессии
         </span>
+        {/* Панель СОЗНАТЕЛЬНО не слушает период рабочей области: она про длинный
+            горизонт. Молчать об этом нельзя — человек видит в фильтре июнь, на
+            графике сентябрь и делает вывод, что фильтр сломан. */}
+        {widerThanPeriod && (
+          <span className="rounded border border-amber-400/40 px-1.5 py-0.5 text-[10px] text-amber-600 dark:text-amber-400"
+            title="Длинный горизонт показывает всю историю сети целиком. Период рабочей области сужает другие разделы, а этот — нет.">
+            период не применяется: горизонт целиком
+          </span>
+        )}
       </div>
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
@@ -130,14 +146,17 @@ export function ChargeTrendPanel({ companyId }: {
         <ResponsiveContainer width="100%" height={340}>
           <ComposedChart data={chart} margin={{ top: 8, right: 12, left: 8, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="currentColor" opacity={0.08} />
-            <XAxis dataKey="period" tick={{ fontSize: 10 }} interval={2} />
+            {/* Полный год, а не «сен 25»: ряд идёт через границу года, и на оси
+                в 10 px две последние цифры путались (замечание заказчика 18.08). */}
+            <XAxis dataKey="period" tick={{ fontSize: 10 }} interval={2}
+              tickFormatter={formatMonth} />
             <YAxis tick={{ fontSize: 10 }} tickFormatter={(v: number) => nf(v / 1000) + 'к'} width={44} />
             <Tooltip {...rechartsTooltipTheme}
               formatter={(v, name) => [`${nf(Number(v))} кВт·ч`, DIM_LABEL[String(name)] ?? String(name)]}
               labelFormatter={(l) => {
                 const key = String(l)
                 const m = months.find((x) => x.period.slice(0, 7) === key)
-                return `${key} · ${m?.source === 'file' ? 'сводная контрагента' : 'зарядные сессии'}`
+                return `${formatMonth(key)} · ${m?.source === 'file' ? 'сводная контрагента' : 'зарядные сессии'}`
               }}
               contentStyle={{ fontSize: 12 }}
             />

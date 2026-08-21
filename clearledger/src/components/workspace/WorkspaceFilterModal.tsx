@@ -151,12 +151,28 @@ export function WorkspaceFilterModal({ open, onOpenChange }: { open: boolean; on
       .sort((a, b) => a.name.localeCompare(b.name, 'ru'))
   }, [draft.regionIds.length, locationQuery, locations, regionSet])
 
+  // Регион СУЖАЕТ список станций — ровно то, что обещает подпись раздела и чего
+  // энергетическая ветка не делала: у топливной точки фильтровались по региону, а
+  // станции — нет, и «Московская область» оставляла в списке все 600 (замечание
+  // заказчика 21.08.2026). Поиск идёт и по городу с адресом: станцию ищут по
+  // месту, а не по коду, который никто не помнит.
   const energyStations = useMemo(() => {
     const query = stationQuery.trim().toLowerCase()
     return (dimensions?.stations ?? []).filter((station) => (
-      !query || `${station.name} ${station.code}`.toLowerCase().includes(query)
+      (draft.regionIds.length === 0 || (station.region ? regionSet.has(station.region) : false))
+      && (!query || `${station.name} ${station.code} ${station.city ?? ''} ${station.address ?? ''}`
+        .toLowerCase().includes(query))
     ))
-  }, [dimensions?.stations, stationQuery])
+  }, [dimensions?.stations, draft.regionIds.length, regionSet, stationQuery])
+
+  const shownCodes = useMemo(
+    () => new Set(energyStations.map((s) => s.code)), [energyStations])
+  const allShownPicked = shownCodes.size > 0
+    && [...shownCodes].every((c) => stationCodeSet.has(c))
+
+  /** Что показывать строкой станции: место человек читает, код — сверяет. */
+  const stationPlace = (s: { city: string | null; address: string | null; region: string | null }) =>
+    [s.city || s.region, s.address].filter(Boolean).join(' · ')
 
   const count = activeFilterCount(draft)
   const dirty = !sameFilterState(draft, state)
@@ -473,18 +489,52 @@ export function WorkspaceFilterModal({ open, onOpenChange }: { open: boolean; on
                       <span className="text-[10px] text-muted-foreground">Выбрано: {draft.stationCodes.length}</span>
                     </div>
                     <Input
-                      placeholder="Найти станцию по названию или коду"
+                      placeholder="Найти станцию: название, город, улица или код"
                       value={stationQuery}
                       onChange={(event) => setStationQuery(event.target.value)}
                       className="h-9 text-xs"
                     />
+                    {/* «Выбрать все» — это все ОТФИЛЬТРОВАННЫЕ, а не все 600 в сети:
+                        кнопка стоит под фильтром и обязана слушаться его же. */}
+                    {energyStations.length > 0 && (
+                      <div className="flex items-center justify-between gap-2 px-1">
+                        <label className="flex cursor-pointer items-center gap-2 text-xs">
+                          <Checkbox
+                            checked={allShownPicked}
+                            onCheckedChange={() => setDraft((current) => ({
+                              ...current,
+                              stationCodes: allShownPicked
+                                ? current.stationCodes.filter((c) => !shownCodes.has(c))
+                                : [...new Set([...current.stationCodes, ...shownCodes])],
+                            }))}
+                          />
+                          <span>{allShownPicked ? 'Снять все показанные' : 'Выбрать все показанные'}</span>
+                        </label>
+                        <span className="text-[10px] text-muted-foreground">
+                          показано: {energyStations.length}
+                          {draft.regionIds.length > 0 ? ' (в выбранных регионах)' : ''}
+                        </span>
+                      </div>
+                    )}
                     <div className="max-h-44 overflow-y-auto rounded-md border p-1.5">
                       {energyStations.length === 0 ? (
-                        <p className="px-2 py-5 text-center text-xs text-muted-foreground">Станции не найдены</p>
+                        <p className="px-2 py-5 text-center text-xs text-muted-foreground">
+                          {draft.regionIds.length > 0
+                            ? 'В выбранных регионах станций нет'
+                            : 'Станции не найдены'}
+                        </p>
                       ) : energyStations.map((station) => (
-                        <label key={station.code} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-muted/70">
-                          <Checkbox checked={stationCodeSet.has(station.code)} onCheckedChange={() => toggleValue('stationCodes', station.code)} />
-                          <span className="min-w-0 flex-1 truncate">{station.name}</span>
+                        <label key={station.code} className="flex cursor-pointer items-start gap-2 rounded px-2 py-1.5 text-xs hover:bg-muted/70">
+                          <Checkbox className="mt-0.5" checked={stationCodeSet.has(station.code)} onCheckedChange={() => toggleValue('stationCodes', station.code)} />
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate">{station.name}</span>
+                            {/* Место под именем: по двум номерам станцию не опознать. */}
+                            {stationPlace(station) && (
+                              <span className="block truncate text-[10px] text-muted-foreground">
+                                {stationPlace(station)}
+                              </span>
+                            )}
+                          </span>
                           <span className="shrink-0 tabular-nums text-muted-foreground">{station.code}</span>
                         </label>
                       ))}

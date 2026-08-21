@@ -166,13 +166,18 @@ async def speed_stations_list(
     date_from: str,
     date_to: str,
     cls: str = Query("fast", pattern="^(fast|slow|unknown)$"),
+    stations: str | None = None,
+    regions: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Список станций одной скорости (fast|slow|unknown) — по клику с карточки «Парк по скорости»."""
     cid = await assert_company_product(company_id, current_user, db, "sales")
+    codes = [x.strip() for x in stations.split(",") if x.strip()] if stations else None
+    regs = [x.strip() for x in regions.split(",") if x.strip()] if regions else None
     return await OverviewService(db).speed_stations(
-        cid, _d(date_from, "date_from"), _d(date_to, "date_to"), cls)
+        cid, _d(date_from, "date_from"), _d(date_to, "date_to"), cls,
+        regions=regs, stations=codes)
 
 
 @router.get("/abc-xyz")
@@ -210,11 +215,16 @@ async def owner_stations_list(
     date_from: str,
     date_to: str,
     cls: str = Query("own", pattern="^(own|partner|unknown)$"),
+    stations: str | None = None,
+    regions: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Список станций одного владельца (own|partner|unknown) с их работой за
     период — раскрывается по клику с карточки «Парк по владельцу»."""
     cid = await assert_company_product(company_id, current_user, db, "sales")
+    codes = [x.strip() for x in stations.split(",") if x.strip()] if stations else None
+    regs = [x.strip() for x in regions.split(",") if x.strip()] if regions else None
     return await OverviewService(db).owner_stations(
-        cid, _d(date_from, "date_from"), _d(date_to, "date_to"), cls)
+        cid, _d(date_from, "date_from"), _d(date_to, "date_to"), cls,
+        regions=regs, stations=codes)

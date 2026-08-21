@@ -234,9 +234,11 @@ export interface OwnerStationsResponse {
 }
 export async function getOwnerStations(p: {
   companyId: string; dateFrom: string; dateTo: string; cls: string
+  stations?: string[]; regions?: string[]
 }): Promise<OwnerStationsResponse> {
   return get<OwnerStationsResponse>('/api/analytics/charge-sessions/owners/stations', {
     company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo, cls: p.cls,
+    stations: p.stations?.join(','), regions: p.regions?.join(','),
   })
 }
 
@@ -256,9 +258,11 @@ export async function getSpeedBreakdown(p: {
 }
 export async function getSpeedStations(p: {
   companyId: string; dateFrom: string; dateTo: string; cls: string
+  stations?: string[]; regions?: string[]
 }): Promise<OwnerStationsResponse> {
   return get<OwnerStationsResponse>('/api/analytics/charge-sessions/speed/stations', {
     company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo, cls: p.cls,
+    stations: p.stations?.join(','), regions: p.regions?.join(','),
   })
 }
 

@@ -1354,8 +1354,10 @@ class AnalyticsService:
         # Имя — свежайшее по последней сессии кода (не max: он алфавитный и после
         # переименования показывал бы старое имя).
         names = await self._station_names(company_id)
+        places = await self._station_places(company_id)
         st_rows = [SimpleNamespace(station_code=r.station_code,
                                    name=names.get(r.station_code) or r.station_code,
+                                   place=places.get(r.station_code),
                                    cnt=r.cnt) for r in st_counts]
         # Регион — из справочника (единый источник), чтобы список фильтра совпадал
         # с группировкой разреза (иначе фильтр по региону не сойдётся). Выражение —
@@ -1369,9 +1371,43 @@ class AnalyticsService:
         )
         rg_rows = (await self.session.execute(rg_stmt)).all()
         return {
-            "stations": [{"code": r.station_code, "name": r.name or r.station_code, "sessions": int(r.cnt)} for r in st_rows],
+            # Регион, город и адрес станции — не украшение справочника, а то, без
+            # чего фильтром нельзя пользоваться: в списке из 600 строк «680 680»
+            # станцию не опознать, а регион не может сузить список станций, если
+            # он у станции неизвестен (замечания заказчика 21.08.2026).
+            "stations": [{
+                "code": r.station_code,
+                "name": r.name or r.station_code,
+                "region": (r.place or {}).get("region"),
+                "city": (r.place or {}).get("city"),
+                "address": (r.place or {}).get("address"),
+                "sessions": int(r.cnt),
+            } for r in st_rows],
             "regions": [{"region": r.region, "sessions": int(r.cnt)} for r in rg_rows],
         }
+
+    async def _station_places(self, company_id) -> dict[str, dict[str, str | None]]:
+        """Код станции → регион, город, адрес по объекту ПОСЛЕДНЕЙ сессии.
+
+        Свежесть считаем так же, как у имени (`_station_names`): станция может
+        переехать между объектами, и старая привязка врала бы о регионе. Берём
+        поля объекта, а не разбираем адрес из имени: имя пишет CPO как хочет.
+        """
+        S = ChargeSession
+        stmt = self._apply_region_join(
+            select(
+                S.station_code,
+                func.coalesce(Region.name, None).label("region"),
+                ServiceLocation.city.label("city"),
+                ServiceLocation.address.label("address"),
+            )
+            .where(S.company_id == company_id, S.station_code.is_not(None))
+            .distinct(S.station_code)
+            .order_by(S.station_code, S.started_at.desc().nulls_last())
+        )
+        rows = (await self.session.execute(stmt)).all()
+        return {r.station_code: {"region": r.region, "city": r.city, "address": r.address}
+                for r in rows}
 
     async def charge_model(self, company_id) -> dict[str, Any]:
         """Модель данных зарядных сессий для раздела «Нормализация» (energy).

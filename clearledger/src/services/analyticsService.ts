@@ -343,7 +343,11 @@ export interface PeriodParams {
 }
 
 export interface ChargeDimensions {
-  stations: { code: string; name: string; sessions: number }[]
+  /** Регион, город и адрес — чтобы станцию можно было опознать и сузить регионом. */
+  stations: {
+    code: string; name: string; sessions: number
+    region: string | null; city: string | null; address: string | null
+  }[]
   regions: { region: string; sessions: number }[]
 }
 export async function getChargeDimensions(companyId: string): Promise<ChargeDimensions> {

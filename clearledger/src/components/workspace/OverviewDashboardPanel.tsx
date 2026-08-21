@@ -39,6 +39,7 @@ import { useFilters } from '@/contexts/FilterContext'
 import { rechartsTooltipTheme } from '@/components/ui/chart-utils'
 import { MetricTile } from '@/components/ui/metric-tile'
 import { ModalCard } from '@/components/ui/modal-card'
+import { StationCardModal, type StationCardSeed } from './StationCardModal'
 import { useChartAxis } from '@/lib/chartAxis'
 
 /** Сужение по сети из контура (регион/станции) для запросов обзора. */
@@ -117,7 +118,10 @@ type BreakdownConfig = {
   title: string; hint: string; queryKey: string; stationsHint: string
   dot: Record<string, string>; hover: Record<string, string>
   fetchRows: (a: { companyId: string; dateFrom: string; dateTo: string; stations?: string[]; regions?: string[] }) => Promise<OwnerBreakdownRow[]>
-  fetchStations: (a: { companyId: string; dateFrom: string; dateTo: string; cls: string }) => Promise<OwnerStationsResponse>
+  fetchStations: (a: {
+    companyId: string; dateFrom: string; dateTo: string; cls: string
+    stations?: string[]; regions?: string[]
+  }) => Promise<OwnerStationsResponse>
 }
 
 function BreakdownCard({ companyId, period, scope, cfg }: {
@@ -171,6 +175,7 @@ function BreakdownCard({ companyId, period, scope, cfg }: {
       </CardContent>
       {open && (
         <BreakdownStationsDialog companyId={companyId} period={period} row={open}
+          scope={scope}
           queryKey={cfg.queryKey} fetchStations={cfg.fetchStations} onClose={() => setOpen(null)} />
       )}
     </Card>
@@ -179,19 +184,35 @@ function BreakdownCard({ companyId, period, scope, cfg }: {
 
 /** Список станций одного класса разреза — по клику с карточки. Простаивающие
  *  (0 сессий за период) идут вперёд: список читают, чтобы найти, с чем разбираться. */
-function BreakdownStationsDialog({ companyId, period, row, queryKey, fetchStations, onClose }: {
+function BreakdownStationsDialog({ companyId, period, row, scope, queryKey, fetchStations, onClose }: {
+  scope: { stations?: string[]; regions?: string[]; key: string }
   companyId: string; period: { from: string; to: string }; row: OwnerBreakdownRow
   queryKey: string
-  fetchStations: (a: { companyId: string; dateFrom: string; dateTo: string; cls: string }) => Promise<OwnerStationsResponse>
+  fetchStations: (a: {
+    companyId: string; dateFrom: string; dateTo: string; cls: string
+    stations?: string[]; regions?: string[]
+  }) => Promise<OwnerStationsResponse>
   onClose: () => void
 }) {
   const q = useQuery({
-    queryKey: [`${queryKey}-stations`, companyId, period.from, period.to, row.cls],
-    queryFn: () => fetchStations({ companyId, dateFrom: period.from, dateTo: period.to, cls: row.cls }),
+    // Контур в ключе и в запросе: карточка разреза его слушает, а её раскрытие
+    // показывало станции всей сети — карточка и содержимое противоречили друг другу.
+    queryKey: [`${queryKey}-stations`, companyId, period.from, period.to, row.cls, scope.key],
+    queryFn: () => fetchStations({
+      companyId, dateFrom: period.from, dateTo: period.to, cls: row.cls,
+      stations: scope.stations, regions: scope.regions,
+    }),
   })
   const succCls = (v: number | null) => (v == null ? 'text-muted-foreground'
     : v >= 85 ? 'text-emerald-600 dark:text-emerald-400'
     : v >= 70 ? 'text-amber-600 dark:text-amber-400' : 'text-red-600 dark:text-red-400')
+  const [station, setStation] = useState<StationCardSeed | null>(null)
+  if (station) {
+    // Карточка станции ЗАМЕЩАЕТ список, а не встаёт поверх: два модальных окна
+    // друг на друге человек закрывает наугад и теряет, где был.
+    return <StationCardModal companyId={companyId} seed={station} period={period}
+      onClose={() => setStation(null)} />
+  }
   return (
     <ModalCard
       className="max-w-4xl max-h-[85dvh]"
@@ -222,7 +243,15 @@ function BreakdownStationsDialog({ companyId, period, row, queryKey, fetchStatio
               <tbody>
                 {(q.data?.stations ?? []).map((s) => (
                   <tr key={s.id} className="border-b border-border/30 hover:bg-muted/30">
-                    <td className="p-2 font-medium">{s.name} <span className="text-muted-foreground">({s.code})</span></td>
+                    {/* Провал в станцию: до этого из разреза нельзя было выйти
+                        никуда, и человек упирался в строку таблицы. */}
+                    <td className="p-2 font-medium">
+                      <button type="button"
+                        onClick={() => setStation({ code: String(s.code), name: s.name, locationId: s.id })}
+                        className="text-left hover:text-primary hover:underline">
+                        {s.name} <span className="text-muted-foreground">({s.code})</span>
+                      </button>
+                    </td>
                     <td className="p-2 text-muted-foreground">{s.city ?? '—'}</td>
                     <td className="p-2 text-muted-foreground">{s.operational_status ?? '—'}</td>
                     <td className={`p-2 text-right font-mono tabular-nums ${s.sessions === 0 ? 'text-amber-600 dark:text-amber-400' : ''}`}>
@@ -289,6 +318,7 @@ function SilentCard({ companyId, period, silent }: {
   silent: OverviewNetwork['silent']
 }) {
   const [open, setOpen] = useState(false)
+  const [station, setStation] = useState<StationCardSeed | null>(null)
   const sc = useScope()
   const q = useQuery({
     queryKey: ['silent-stations', companyId, period.from, period.to, sc.key],
@@ -297,6 +327,10 @@ function SilentCard({ companyId, period, silent }: {
   })
   if (!silent.silent) {
     return <CountCard label="Молчат ЭЗС" value="0" hint="весь парк работал" />
+  }
+  if (station) {
+    return <StationCardModal companyId={companyId} seed={station} period={period}
+      onClose={() => setStation(null)} />
   }
   return (
     <>
@@ -340,7 +374,15 @@ function SilentCard({ companyId, period, silent }: {
                   <tbody>
                     {(q.data?.stations ?? []).map((s) => (
                       <tr key={s.id} className="border-b border-border/30 hover:bg-muted/30">
-                        <td className="p-2 font-medium">{s.name} <span className="text-muted-foreground">({s.code})</span></td>
+                        {/* Молчащая станция — начало работы, а не строка отчёта:
+                            из неё надо попадать в карточку. */}
+                        <td className="p-2 font-medium">
+                          <button type="button"
+                            onClick={() => setStation({ code: String(s.code), name: s.name, locationId: s.id })}
+                            className="text-left hover:text-primary hover:underline">
+                            {s.name} <span className="text-muted-foreground">({s.code})</span>
+                          </button>
+                        </td>
                         <td className="p-2 text-muted-foreground">{s.city ?? '—'}</td>
                         <td className="p-2 text-muted-foreground">{s.operational_status ?? '—'}</td>
                         <td className="p-2 font-mono text-muted-foreground">
@@ -937,7 +979,19 @@ export function OverviewDashboardPanel({ companyId, dateFrom, dateTo, embedded }
             {/* статистика по объектам сети. «Молчат» — кликабельная: простой
                 парка это не справочная цифра, а список работ. */}
             <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
-              <CountCard label="ЭЗС (всего в сети)" value={nf0.format(linkage.data?.objects || data.meta.active_stations)} hint="боевых (без тест/выведенных)" />
+              {/* Пока контур не сужен, «всего в сети» — цифра справочника и она
+                  верна. Как только выбран регион или станции, та же плитка
+                  начинает утверждать неправду: человек смотрит одну область, а
+                  ему показывают всю сеть (замечание заказчика 21.08.2026).
+                  Поэтому при активном контуре плитка меняет и число, и подпись —
+                  вместо того чтобы молча показывать чужое. */}
+              {sc.stations || sc.regions ? (
+                <CountCard label="ЭЗС в выбранном" value={nf0.format(data.meta.active_stations)}
+                  hint="работали за период в выбранном контуре" />
+              ) : (
+                <CountCard label="ЭЗС (всего в сети)" value={nf0.format(linkage.data?.objects || data.meta.active_stations)}
+                  hint="боевых (без тест/выведенных)" />
+              )}
               <CountCard label="Активных ЭЗС" value={nf0.format(data.meta.active_stations)} hint="с сессиями за период" />
               <SilentCard companyId={companyId} period={period} silent={data.network.silent} />
               <CountCard label="Регионов" value={nf0.format(regQ.data?.lines.length ?? 0)} hint="за период" />

@@ -663,15 +663,33 @@ class OverviewService:
         return {"period": {"from": df.isoformat(), "to": dt.isoformat()}, "speed": out}
 
     async def _dimension_stations(self, company_id: Any, df: date, dt: date, cls: str,
-                                  class_expr: str, labels: dict[str, str]) -> dict[str, Any]:
+                                  class_expr: str, labels: dict[str, str],
+                                  regions: list[str] | None = None,
+                                  stations: list[str] | None = None) -> dict[str, Any]:
         """Список станций одного класса (владелец/скорость) с их работой за период —
-        раскрывается по клику с карточки разреза. Молчащие вперёд (0 сессий сверху)."""
+        раскрывается по клику с карточки разреза. Молчащие вперёд (0 сессий сверху).
+
+        Контур (`regions`, `stations`) обязателен здесь по той же причине, по какой
+        он есть у самой карточки разреза: человек выбрал область, а раскрытие
+        показывало станции всей сети — карточка и её содержимое противоречили друг
+        другу (замечание заказчика 21.08.2026)."""
         from sqlalchemy import text
 
         if cls not in labels:
             cls = "unknown"
         lo = datetime.combine(df, datetime.min.time())
         hi = datetime.combine(dt, datetime.max.time())
+        scope_bits: list[str] = []
+        scope_params: dict[str, Any] = {}
+        if stations:
+            scope_bits.append("and sl.station_number = any(:st_codes)")
+            scope_params["st_codes"] = [str(x) for x in stations]
+        if regions:
+            scope_bits.append(
+                "and exists (select 1 from regions r"
+                "             where r.id = sl.region_id and r.name = any(:rg_names))")
+            scope_params["rg_names"] = [str(x) for x in regions]
+        scope_sql = "\n              ".join(scope_bits)
         rows = (await self.db.execute(text(f"""
             with sess as (
                 select location_id,
@@ -710,8 +728,9 @@ class OverviewService:
               and coalesce(sl.is_test, false) = false
               and coalesce(sl.operational_status, '') <> 'decommissioned'
               and ({class_expr}) = :cls
+              {scope_sql}
             order by coalesce(s.sessions, 0) asc, sl.name asc
-        """), {"cid": company_id, "lo": lo, "hi": hi, "cls": cls})).mappings().all()
+        """), {"cid": company_id, "lo": lo, "hi": hi, "cls": cls, **scope_params})).mappings().all()
 
         out = []
         for r in rows:
@@ -737,14 +756,20 @@ class OverviewService:
             "stations": out,
         }
 
-    async def owner_stations(self, company_id: Any, df: date, dt: date, cls: str) -> dict[str, Any]:
+    async def owner_stations(self, company_id: Any, df: date, dt: date, cls: str,
+                             regions: list[str] | None = None,
+                             stations: list[str] | None = None) -> dict[str, Any]:
         """Список станций одного владельца (own|partner|unknown) — по клику с карточки."""
         from app.services.station_owner import CLASS_LABELS, owner_class_sql
         return await self._dimension_stations(
-            company_id, df, dt, cls, owner_class_sql("sl.owner"), CLASS_LABELS)
+            company_id, df, dt, cls, owner_class_sql("sl.owner"), CLASS_LABELS,
+            regions=regions, stations=stations)
 
-    async def speed_stations(self, company_id: Any, df: date, dt: date, cls: str) -> dict[str, Any]:
+    async def speed_stations(self, company_id: Any, df: date, dt: date, cls: str,
+                             regions: list[str] | None = None,
+                             stations: list[str] | None = None) -> dict[str, Any]:
         """Список станций одной скорости (fast|slow|unknown) — по клику с карточки."""
         from app.services.station_speed import SPEED_LABELS, speed_class_sql
         return await self._dimension_stations(
-            company_id, df, dt, cls, speed_class_sql("sl."), SPEED_LABELS)
+            company_id, df, dt, cls, speed_class_sql("sl."), SPEED_LABELS,
+            regions=regions, stations=stations)
