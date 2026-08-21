@@ -224,6 +224,24 @@ async def _call(db: AsyncSession, company_id, method: str, path: str,
 call_process = _call
 
 
+async def send_verb(db: AsyncSession, company_id, process_id: str, verb: str, *,
+                    branch_id: str | None = None,
+                    payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Двинуть процесс глаголом. Единственная дверь к действиям фасада.
+
+    Адрес ручки собирается ЗДЕСЬ и больше нигде. Пока путь знали двое, движок
+    процессов был виден Ядру шире, чем нужно: замена того, кто отвечает по ту
+    сторону, потребовала бы искать все места, где этот адрес набран строкой.
+    Держать границу узкой дешевле, чем потом её сужать.
+
+    Действие называем словом, а не идентификатором ребра: графы пересобирают,
+    идентификаторы меняются, «Согласовано» остаётся.
+    """
+    return await _call(
+        db, company_id, "POST", f"{FACADE}/instances/{process_id}/actions",
+        json={"verb": verb, "branchId": branch_id, "payload": payload or {}})
+
+
 async def _participants(db: AsyncSession, site: EzsSite) -> list[dict[str, Any]]:
     """Состав проекта для кейса: человек + служба регламента.
 

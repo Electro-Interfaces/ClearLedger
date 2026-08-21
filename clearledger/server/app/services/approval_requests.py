@@ -224,7 +224,6 @@ async def _deliver(db: AsyncSession, row: ApprovalRequest) -> None:
     # на признак доступности, — один фильтр `allowed` в фасаде, и она встала бы на
     # всех ролевых маршрутах разом. Глагол ещё и устойчивее: графы пересобирают,
     # идентификаторы меняются, «Согласовано» остаётся.
-    await projects_process.call_process(
-        db, row.company_id, "POST",
-        f"/api/v1/process/instances/{row.process_id}/actions",
-        json={"verb": verb, "branchId": row.branch_id, "payload": _trace(row)})
+    await projects_process.send_verb(
+        db, row.company_id, row.process_id, verb,
+        branch_id=row.branch_id, payload=_trace(row))
