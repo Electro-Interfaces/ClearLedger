@@ -1,4 +1,4 @@
-import { Menu, BookText, Lightbulb } from 'lucide-react'
+import { Menu, Lightbulb } from 'lucide-react'
 import { Link, useLocation } from 'react-router-dom'
 import { useGuideMode } from '@/hooks/useGuideMode'
 import { UiLevelHeaderButton } from '@/components/common/UiLevelToggle'
@@ -25,8 +25,6 @@ export function Header({ onMobileMenuToggle, isMobile }: HeaderProps) {
   // Приложение Ядра («Чаты», «Управление») называет себя само: продукта у него нет, а
   // надпись «Учёт» в чужом приложении сбивает с толку.
   const coreTitle = product ? null : coreAppTitle(pathname)
-  // Универсальный логотип «учёт»: приложение не привязано к топливу/энергии.
-  const BrandIcon = BookText
 
   return (
     <header className="mobile-safe-top box-content h-[var(--header-height)] shrink-0
@@ -48,9 +46,15 @@ export function Header({ onMobileMenuToggle, isMobile }: HeaderProps) {
               На телефоне логотипа нет: он был третьим путём на стол (рядом стояли
               кнопка «Стол» и нижняя навигация), а место занимал в первом ряду. */}
           <Link to="/" title="К рабочему столу экосистемы" className="hidden items-center gap-3 shrink-0 lg:flex">
-            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-blue-600 to-blue-700 shadow-lg">
-              <BrandIcon className="h-5 w-5 text-white" />
-            </div>
+            {/* Знак пространства, а не иконка продукта. Раньше здесь стоял общий
+                глиф книги на синем квадрате — одинаковый у всех компаний, хотя у
+                каждой уже есть свой знак: сборка кладёт его в `favicon.svg` по
+                бренду стека, и браузер показывает его во вкладке. Шапка и вкладка
+                расходились, и заказчик прямо попросил свой знак в левом верхнем
+                углу (Чурилов, 21.08.2026). Берём тот же файл — двух источников
+                правды о знаке компании быть не должно. */}
+            <img src={`${import.meta.env.BASE_URL}favicon.svg`} alt=""
+              className="h-11 w-11 shrink-0 rounded-xl shadow-lg" />
             {/* Шапка называет ТЕКУЩИЙ продукт: там, где Учёт разрезан на рабочие места
                 («Финансы», «Данные»), надпись «Учёт» врала бы о том, где человек. */}
             <div className="flex flex-col leading-none">
