@@ -14,6 +14,8 @@ run_channel(db, channel) диспетчеризует по типу источн
 """
 from __future__ import annotations
 
+import logging
+
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -27,7 +29,10 @@ from app.services.cb_intake import ingest_packages
 from app.services.cb_vitrine_ingest import ingest_cb_vitrine
 from app.services.onec.client_factory import make_onec_client
 from app.services.onec.crypto import decrypt_password
+from app.services.raw_intake import note_result, save_raw_batch
 from app.services.sts_client import sts_get_points
+
+logger = logging.getLogger("clearledger.channels")
 
 
 _STREAM_ROLE_RANK = {"anchor": 0, "control": 1, "reference": 2, "external": 3}
@@ -155,7 +160,8 @@ async def _ingest_cb_dataentry_extras(db: AsyncSession, cid, client, pf: str, pt
 
 
 async def _run_cb(db: AsyncSession, channel: Channel, src: Source,
-                  date_from: str | None = None, date_to: str | None = None) -> dict[str, Any]:
+                  date_from: str | None = None, date_to: str | None = None,
+                  log_id=None) -> dict[str, Any]:
     conn = _conn_string(src, await _decrypt_pwd(db, src.id))
     cfg = src.connection_config or {}
     station = str((channel.config or {}).get("station") or cfg.get("default_station") or "208")
@@ -166,11 +172,25 @@ async def _run_cb(db: AsyncSession, channel: Channel, src: Source,
     _LIMIT = 3000
     async with make_onec_client(conn) as client:
         packages = await client.fetch_cb_shifts(pf, pt, station=station, limit=_LIMIT)
+        # L1: то, что ЦБ отдал за этот заход, ложится ДО разбора и своей
+        # транзакцией — иначе падение нормализации откатило бы вместе с собой и
+        # то, по чему её повторяют (services/raw_intake.py). Второй раз к ЦБ за
+        # тем же периодом не сходишь: документы перепроводят.
+        batch_id = await save_raw_batch(
+            db, company_id=channel.company_id, source_id=src.id,
+            channel_id=channel.id, sync_log_id=log_id, doc_type="cb_shifts",
+            items=packages, since=pf, until=pt,
+            meta={"station": station, "limit": _LIMIT},
+        )
         result = await ingest_packages(db, channel.company_id, packages, channel_id=channel.id)
         # F2/OB-5/F3: типы вне пакета смены (production/gain/return) — штатно в канал.
         extras = await _ingest_cb_dataentry_extras(db, channel.company_id, client, pf, pt, station)
         # F3: витринные снимки (inventory/writeoff/transfer/revaluation/stock) — тоже канал.
         vitrine = await ingest_cb_vitrine(db, channel.company_id, client)
+    # Пакет без отметки об итоге = заход, чей разбор не дошёл до конца. Именно
+    # такие и переигрывают, а найти их иначе нечем.
+    await note_result(db, batch_id, {k: result.get(k) for k in
+                                     ("shifts", "created", "updated", "skipped_kinds")})
     await db.commit()
     truncated = len(packages) >= _LIMIT
     msg = result.get("message") or ""
@@ -585,8 +605,73 @@ async def run_channel(
     src = await _channel_source(db, channel.id)
     if src is None:
         return {"status": "skipped", "message": "в потоках канала нет источника"}
+    try:
+        result = await _dispatch(db, channel, src, date_from, date_to, log_id,
+                                 station_codes, all_period, mode)
+    except Exception as exc:  # noqa: BLE001 — факт неудачи нужен именно при ней
+        await _publish_sync_fact(db, channel, src,
+                                 {"status": "error", "message": str(exc)})
+        raise
+    await _publish_sync_fact(db, channel, src, result)
+    return result
+
+
+async def _publish_sync_fact(db: AsyncSession, channel: Channel, src: Source,
+                             result: dict[str, Any]) -> None:
+    """Сообщить пространству, чем кончился прогон канала.
+
+    Точка выбрана в диспетчере, а не в каждой ветке: веток восемь, а факт обмена
+    у них один. Разложить публикацию по веткам значило бы завести семь мест, где
+    её забудут добавить, и одно, где она есть.
+
+    Событие не должно ронять прогон: данные уже загружены, и отказ шины — потеря
+    уведомления, а не работы. При исключении в ветке сессия отравлена, и запись
+    в неё не пройдёт — откат здесь единственный способ вообще что-то сказать.
+    """
+    from app.services import space_events
+
+    status = str(result.get("status") or "ok")
+    failed = status in ("error", "failed")
+    payload = {
+        "channel": {
+            "id": str(channel.id),
+            "name": getattr(channel, "name", None),
+            "template": getattr(channel, "template_id", None),
+        },
+        "source": {"id": str(src.id), "type": src.source_type, "name": src.name},
+        "status": status,
+        "message": str(result.get("message") or "")[:500] or None,
+        # Счёт записей ветки называют по-разному — берём то, что есть, и не
+        # подставляем ноль: «привёз ноль» и «не сказал сколько» — разные факты.
+        "items": (result.get("saved") if result.get("saved") is not None
+                  else result.get("count")),
+    }
+    try:
+        await space_events.publish(
+            db, src.company_id,
+            "connector.sync.failed" if failed else "connector.sync.completed",
+            str(channel.id), payload)
+        await db.commit()
+    except Exception as exc:  # noqa: BLE001 — уведомление не важнее данных
+        await db.rollback()
+        logger.warning("факт обмена по каналу %s не опубликован: %s", channel.id, exc)
+
+
+async def _dispatch(
+    db: AsyncSession,
+    channel: Channel,
+    src: Source,
+    date_from: str | None,
+    date_to: str | None,
+    log_id,
+    station_codes: list[int] | None,
+    all_period: bool,
+    mode: str,
+) -> dict[str, Any]:
+    """Ветка прогона по типу источника. Вынесена из `run_channel`, чтобы факт
+    обмена публиковался один раз на все ветки, а не восемь раз по копии."""
     if src.source_type == "onec_operational":
-        return await _run_cb(db, channel, src, date_from, date_to)
+        return await _run_cb(db, channel, src, date_from, date_to, log_id=log_id)
     if src.source_type == "manual_table":
         return await _run_reestr(db, channel, src, mode=mode)
     if src.source_type == "charge_sessions_excel":
