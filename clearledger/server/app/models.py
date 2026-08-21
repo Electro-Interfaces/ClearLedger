@@ -6420,6 +6420,14 @@ class EzsSite(Base):
     # на станцию, которой у проекта ещё нет.
     contract_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("contracts.id", ondelete="SET NULL"), nullable=True)
+    # ── По какому маршруту ведётся проект ──
+    # Маршрут у стройки не один: полный регламент, короткий для переноса и
+    # модернизации, свой у компании. Выбор делается один раз — при постановке на
+    # рельсы — и хранится ЗДЕСЬ, а не только в кейсе Координатора: состав проекта
+    # уезжает в кейс раньше первого шага (`_push_participants`), и без записи
+    # выбор затирался бы умолчанием ещё до того, как человек его сделал.
+    # Пусто — маршрут по умолчанию, тот же, что брался всегда.
+    route_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # ── Отметка намерения: шаг маршрута начат, но ещё не отражён в проекте ──
     # Шаг применяется в двух системах по очереди: Координатор коммитит переход,
     # Ядро двигает воронку. Если между этими точками оборвалась связь, маршрут
@@ -6766,6 +6774,78 @@ class InboundEvent(Base):
         Index("uq_eco_inbound_events_key", "provider", "external_id", unique=True),
         Index("ix_eco_inbound_events_unprocessed", "received_at",
               postgresql_where=text("processed_at IS NULL")),
+    )
+
+
+class SpaceConnection(Base):
+    """Учётная запись подключения к внешней системе — одна на пространство.
+
+    До неё записей о подключениях было две: в Ядре `Source` с каналами, в
+    Координаторе своя таблица `connectors`. Витрина «что подключено у компании»
+    собиралась опросом приложений на лету — и потому молчала, когда приложение не
+    отвечало, а глобально настроенные интеграции не показывала вовсе.
+
+    Здесь только УЧЁТ: кто, куда, чем, в каком состоянии. Транспорт и настройки
+    остаются у владельца — приложение продолжает ходить в свою внешнюю систему
+    само, а сюда сообщает, что у него есть и как оно себя чувствует.
+
+    Почему не расширили `Source`. У него другой смысл: источник данных Ядра с
+    каналами, потоками и расписанием. Подключение Координатора каналов не имеет,
+    и общая таблица смешала бы «источник, который мы прогоняем» с «подключением,
+    о котором мы знаем». Одна лишняя таблица дешевле одного размытого понятия.
+
+    Секрет здесь не лежит и лежать не может: `secret_ref` — это ссылка (имя
+    переменной окружения или ключ в хранилище владельца), а не значение.
+    """
+    __tablename__ = "eco_space_connections"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    # Владелец записи: код приложения, которое обслуживает подключение. Для
+    # собственных подключений Ядра — `core`.
+    app_code: Mapped[str] = mapped_column(String(40), nullable=False)
+    # Идентификатор подключения У ВЛАДЕЛЬЦА. Строкой: у приложений свои типы
+    # ключей, и приводить их к общему — плодить сопоставления на ровном месте.
+    external_id: Mapped[str] = mapped_column(String(120), nullable=False)
+    # Что за система: `hubex`, `megafon`, `mango`, `email`, `sts`, `onec`, …
+    provider: Mapped[str] = mapped_column(String(40), nullable=False)
+    # Род подключения: channel | tracker | db | proxy | asr | api_consumer | …
+    kind: Mapped[str] = mapped_column(String(30), nullable=False, default="channel")
+    name: Mapped[str] = mapped_column(String(200), nullable=False, default="")
+    # Куда текут данные: in | out | both.
+    direction: Mapped[str] = mapped_column(String(10), nullable=False, default="in")
+    # Кто начинает обмен: `us` — мы ходим к ним, `them` — они стучатся к нам.
+    # Ось отдельная от направления: опрашиваемый источник и вебхук могут нести
+    # данные в одну сторону, но настраиваются и ломаются по-разному.
+    initiator: Mapped[str] = mapped_column(String(10), nullable=False, default="us")
+    # Роль компании в обмене: own | coordinate | enrich.
+    engagement_mode: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="own")
+    # active | disabled | error | draft
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft")
+    # Настроено ли подключение по мнению владельца: пустые ключи — не настроено.
+    configured: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false"))
+    # Ссылка на секрет, но НЕ секрет: имя переменной окружения или ключ хранилища.
+    secret_ref: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    endpoint: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    last_sync_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # Когда владелец в последний раз сообщал о себе. Запись, о которой давно не
+    # сообщали, — повод спросить приложение, а не тихо считать её живой.
+    reported_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("company_id", "app_code", "external_id",
+                         name="uq_eco_space_connections"),
+        Index("ix_eco_space_connections_company", "company_id", "app_code"),
     )
 
 

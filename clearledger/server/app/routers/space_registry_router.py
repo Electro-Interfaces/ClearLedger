@@ -23,8 +23,8 @@ from app.database import get_db
 from app.models import App, AppCompanyLink, Company, User, UserCompany
 from app.services import space_map as space_map_service
 from app.services import (
-    space_connectors, space_data_model, space_desk, space_links, space_projection,
-    space_registry,
+    space_connection_registry, space_connectors, space_data_model, space_desk,
+    space_links, space_projection, space_registry,
 )
 from app.services.data_quality import data_quality
 from app.services.ezs_reference_link import link_references
@@ -312,6 +312,31 @@ async def list_space_connectors(
     cid = await _member(company_id, user, db)
     data = await space_connectors.list_connectors(db, cid)
     return {"companyId": str(cid), **data, "total": len(data["connectors"])}
+
+
+@router.get("/connections")
+async def list_space_connections(
+    company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Учёт подключений компании — из реестра, а не опросом приложений.
+
+    Отличие от `/connectors` существенное. Та витрина собирается в момент показа:
+    ходит в приложения служебным каналом и склеивает ответы. Приложение молчит —
+    подключений «нет»; интеграция настроена переменными окружения и приложение о
+    ней не рассказывает — её не видно вовсе.
+
+    Здесь читается то, о чём владельцы доложили сами. Запись, о которой давно не
+    сообщали, помечена `stale`: её состояние давнее, но она не исчезает с экрана,
+    потому что молчание приложения — это не «подключения больше нет».
+
+    Обе витрины пока живут рядом: старая остаётся, пока приложения не начнут
+    докладывать; переключать её, не имея данных, значило бы оставить
+    администратора с пустым экраном.
+    """
+    cid = await _member(company_id, user, db)
+    data = await space_connection_registry.listing(db, cid)
+    return {"companyId": str(cid), **data}
 
 
 @router.get("/equipment")

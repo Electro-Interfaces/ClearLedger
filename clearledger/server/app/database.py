@@ -3589,6 +3589,32 @@ async def create_all() -> None:
         ):
             await conn.execute(_sa.text(stmt))
 
+        # v2.59: реестр подключений пространства. Таблицу заводит `create_all`,
+        # а проверки допустимых значений — руками: ими держится словарь, по
+        # которому строятся разрезы витрины.
+        for stmt in (
+            "ALTER TABLE eco_space_connections DROP CONSTRAINT IF EXISTS "
+            "ck_eco_space_connections_direction",
+            "ALTER TABLE eco_space_connections ADD CONSTRAINT "
+            "ck_eco_space_connections_direction CHECK (direction IN ('in','out','both'))",
+            "ALTER TABLE eco_space_connections DROP CONSTRAINT IF EXISTS "
+            "ck_eco_space_connections_initiator",
+            # Ось «кто начинает обмен» отдельная от направления данных: вебхук и
+            # опрашиваемый источник могут нести данные в одну сторону, но
+            # настраиваются и ломаются по-разному, и разрез «кто подключён к нам»
+            # строится именно по ней.
+            "ALTER TABLE eco_space_connections ADD CONSTRAINT "
+            "ck_eco_space_connections_initiator CHECK (initiator IN ('us','them'))",
+            "ALTER TABLE eco_space_connections DROP CONSTRAINT IF EXISTS "
+            "ck_eco_space_connections_status",
+            "ALTER TABLE eco_space_connections ADD CONSTRAINT "
+            "ck_eco_space_connections_status "
+            "CHECK (status IN ('active','disabled','error','draft'))",
+            "CREATE INDEX IF NOT EXISTS ix_eco_space_connections_inbound "
+            "ON eco_space_connections (company_id) WHERE initiator = 'them'",
+        ):
+            await conn.execute(_sa.text(stmt))
+
         # v2.58: шина исходящих событий пространства. `create_all` заводит
         # таблицы, но не частичные индексы и не CHECK — их руками.
         for stmt in (
