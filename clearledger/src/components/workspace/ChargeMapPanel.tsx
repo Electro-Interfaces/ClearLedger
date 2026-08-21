@@ -446,10 +446,14 @@ export function ChargeMapPanel({ companyId, dateFrom, dateTo }: {
   }, [points, colorBy])
   const noMetricCount = useMemo(() => (isMetric(colorBy) ? points.filter((p) => !metricMap.has(p.id)).length : 0), [points, colorBy, metricMap])
 
+  // Хук стоит ДО ранних возвратов, а не после них. Пока он был ниже, первый
+  // рендер уходил в «загрузку» и до него не доходил, а следующий доходил —
+  // React видел, что хуков стало больше, и валил ошибкой #310 весь раздел
+  // «Продажи», а не одну карту.
+  const mapLayers = useMapLayers()
+
   if (isLoading) return <div className="flex justify-center py-16"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
   if (allPoints.length === 0) return <div className="p-8 text-center text-sm text-muted-foreground">Нет станций с координатами. Загрузите справочник станций ЭЗС.</div>
-
-  const mapLayers = useMapLayers()
 
   return (
     <div className="flex h-full flex-col gap-3 p-4">
