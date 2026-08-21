@@ -87,6 +87,15 @@ export interface EquipmentUnit {
   originLocation: LocBrief | null
   reservedFor: LocBrief | null
   notes: string | null
+  /** Графы складского реестра заказчика. */
+  region: string | null
+  keeper: string | null
+  accountingNo: string | null
+  externalNo: string | null
+  speedClass: string | null
+  /** Поставщик подтвердил количество и порты. Ложь — позиция ждёт уточнения. */
+  dataConfirmed: boolean
+  unconfirmedReason: string | null
   supplyId: string | null
   supplyLineId: string | null
   supplyNumber: string | null

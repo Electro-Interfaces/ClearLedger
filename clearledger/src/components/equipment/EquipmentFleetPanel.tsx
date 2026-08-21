@@ -1131,12 +1131,20 @@ export function EquipmentFleetPanel({ companyId }: { companyId: string }) {
   const kpiVal = (n: number) => (overviewQ.isLoading ? '—' : nf0.format(n))
   const filtersActive = q !== '' || state !== 'all' || vendor !== 'all' || warehouseFilter !== 'all'
   const total = unitsQ.data?.total ?? 0
+  // Позиции реестра, по которым поставщик ещё не назвал количество или порты:
+  // показывать их остатком наравне с принятыми значит выдать ожидание за факт.
+  const unconfirmed = rows.filter((u) => !u.dataConfirmed).length
 
   return (
     <div className="p-4 space-y-4">
       {/* KPI-ряд по состояниям жизненного цикла */}
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-7">
         <Kpi label="На складах новые" value={kpiVal(cs('in_stock_new'))} />
+        {unconfirmed > 0 && (
+          <Kpi label="Ждут подтверждения" value={nf0.format(unconfirmed)}
+            sub="поставщик не назвал порты или статус"
+            cls="text-amber-600 dark:text-amber-500" />
+        )}
         <Kpi label="На складах б/у" value={kpiVal(cs('in_stock_used'))} />
         <Kpi label="Резерв" value={kpiVal(cs('reserved'))} />
         <Kpi label="В монтаже" value={kpiVal(cs('in_installation'))} />
@@ -1246,7 +1254,16 @@ export function EquipmentFleetPanel({ companyId }: { companyId: string }) {
                 {rows.map((u) => (
                   <tr key={u.id} onClick={() => setDetailsId(u.id)}
                     className="cursor-pointer border-b border-border/30 hover:bg-muted/30">
-                    <td className="p-2 font-mono font-medium whitespace-nowrap">{u.serialNumber ?? '—'}</td>
+                    <td className="p-2 font-mono font-medium whitespace-nowrap">
+                      {u.serialNumber ?? '—'}
+                      {!u.dataConfirmed && (
+                        <span className="ml-2 rounded bg-amber-500/15 px-1.5 py-0.5 font-sans
+                          text-[10px] font-medium text-amber-700 dark:text-amber-400"
+                          title={u.unconfirmedReason ?? 'поставщик не подтвердил данные'}>
+                          не подтверждена
+                        </span>
+                      )}
+                    </td>
                     <td className="p-2 whitespace-nowrap">{u.vendor ?? u.vendorRaw ?? '—'}</td>
                     <td className="p-2 max-w-[220px] truncate">{u.model ?? '—'}</td>
                     <td className="p-2 text-right font-mono">{u.powerKwt != null ? nf0.format(u.powerKwt) : '—'}</td>
