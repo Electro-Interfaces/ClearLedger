@@ -1819,7 +1819,10 @@ function ChatBubble({
           {/* На мыши действия появляются по hover. На телефоне эта панель скрыта:
               там одна выбранная реплика открывает отдельную нижнюю панель. */}
           <div className={cn(
-            'pointer-events-none absolute -top-5 z-10 flex items-center gap-0.5 rounded-lg border border-border bg-popover px-1 py-1 shadow-lg opacity-0 transition-opacity group-hover/bubble:pointer-events-auto group-hover/bubble:opacity-100 [@media(pointer:coarse)]:hidden',
+            // `select-none` не украшение: панель лежит внутри пузыря, и без него
+            // выделение нескольких реплик утаскивало в буфер шесть эмодзи и весь
+            // ряд кнопок — вставлялось это вперемешку с текстом разговора.
+            'pointer-events-none absolute -top-5 z-10 flex select-none items-center gap-0.5 rounded-lg border border-border bg-popover px-1 py-1 shadow-lg opacity-0 transition-opacity group-hover/bubble:pointer-events-auto group-hover/bubble:opacity-100 [@media(pointer:coarse)]:hidden',
             isOwn ? 'right-0' : 'left-0',
           )}>
             {actionButtons}
@@ -1840,7 +1843,7 @@ function ChatBubble({
                 onClick={onCloseActions}
                 className="fixed inset-0 z-30 hidden bg-black/10 [@media(pointer:coarse)]:block" />
               <div id={actionsId} role="toolbar" aria-label="Действия с сообщением"
-                className="fixed inset-x-2 bottom-[calc(env(safe-area-inset-bottom)+4.75rem)] z-40 hidden flex-wrap items-center justify-center gap-0.5 rounded-2xl border border-border bg-popover p-2 text-popover-foreground shadow-2xl [@media(pointer:coarse)]:flex">
+                className="fixed inset-x-2 bottom-[calc(env(safe-area-inset-bottom)+4.75rem)] z-40 hidden select-none flex-wrap items-center justify-center gap-0.5 rounded-2xl border border-border bg-popover p-2 text-popover-foreground shadow-2xl [@media(pointer:coarse)]:flex">
                 {actionButtons}
               </div>
             </>
@@ -1896,14 +1899,29 @@ function ChatBubble({
           )}
 
           {isEditing ? (
-            <div className="space-y-1">
+            // Ширину задаём полю правки, а не пузырю: пузырь мерится по своему
+            // тексту, и у короткой реплики поле схлопывалось в колонку в два слова
+            // с внутренней прокруткой — править в такой щели нельзя.
+            <div className="w-[min(38rem,72vw)] max-w-full space-y-1">
               <textarea autoFocus value={editText} onChange={(e) => onEditTextChange(e.target.value)}
+                ref={(el) => {
+                  // Высота по содержимому: строк в реплике бывает и десять, а
+                  // фиксированные две превращали правку в чтение через прорезь.
+                  if (!el) return
+                  el.style.height = 'auto'
+                  el.style.height = `${Math.min(el.scrollHeight, 320)}px`
+                }}
+                onInput={(e) => {
+                  const el = e.currentTarget
+                  el.style.height = 'auto'
+                  el.style.height = `${Math.min(el.scrollHeight, 320)}px`
+                }}
                 onKeyDown={(e) => {
                   // Правка сохраняется тем же жестом, каким отправляют новое.
                   if (editSend(e)) { e.preventDefault(); onEditSave() }
                   if (e.key === 'Escape') onEditCancel()
                 }}
-                className={cn('min-h-[28px] w-full resize-none rounded border border-border bg-transparent p-1 outline-none focus:border-primary', textSizeClass)} rows={2} />
+                className={cn('max-h-[20rem] min-h-[3.5rem] w-full resize-y overflow-y-auto rounded border border-border bg-background/60 p-1.5 leading-[1.5] text-foreground outline-none focus:border-primary', textSizeClass)} />
               <div className="flex justify-end gap-1">
                 <button onClick={onEditCancel} className="rounded p-0.5 text-muted-foreground hover:bg-accent"><X className="size-3.5" /></button>
                 <button onClick={onEditSave} className="rounded p-0.5 text-emerald-500 hover:bg-accent"><Check className="size-3.5" /></button>
@@ -1950,9 +1968,10 @@ function ChatBubble({
             )
           ) : null}
 
-          {/* Реакции */}
+          {/* Реакции. `select-none` — по той же причине, что и у панели действий:
+              при копировании разговора «👍1» прилипало к тексту реплики. */}
           {message.reactions.length > 0 && (
-            <div className="mt-1 flex flex-wrap gap-1">
+            <div className="mt-1 flex select-none flex-wrap gap-1">
               {message.reactions.map((r) => (
                 /* Подсказка перечисляет ИМЕНА: «1» без автора не отвечает на вопрос,
                    кто это поставил, — а в группе это первое, что хотят знать. */
