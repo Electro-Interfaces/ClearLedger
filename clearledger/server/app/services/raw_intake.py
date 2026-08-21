@@ -133,9 +133,10 @@ async def save_raw_batch(
     db: AsyncSession,
     *,
     company_id: uuid.UUID,
-    source_id: uuid.UUID,
     doc_type: str,
     items: list,
+    source_id: uuid.UUID | None = None,
+    connection_id: uuid.UUID | None = None,
     channel_id: uuid.UUID | None = None,
     sync_log_id: uuid.UUID | None = None,
     since: Any = None,
@@ -148,12 +149,22 @@ async def save_raw_batch(
     зовётся на границе транзакции: после fetch и до разбора, когда в сессии нет
     чужой незавершённой работы. **Не бросает никогда**: не легло сырое — канал
     обязан отработать, о неудаче узнаёт лог, а не пользователь.
+
+    Привезти пакет может либо наш канал (`source_id`), либо приложение своим
+    подключением (`connection_id`). Ровно одна ссылка, не обе: «оба сразу»
+    означало бы, что мы не знаем, кто его привёз, и повторить разбор было бы
+    некому.
     """
+    if bool(source_id) == bool(connection_id):
+        log.warning("Сырой пакет '%s' без однозначного владельца: "
+                    "укажите либо источник канала, либо подключение", doc_type)
+        return None
     items = list(items or [])
     try:
         kept, note = fit(items)
         record = RawBatchRecord(
             company_id=company_id, source_id=source_id,
+            connection_id=connection_id,
             channel_id=channel_id, sync_log_id=sync_log_id,
             doc_type=doc_type,
             since=_as_dt(since), until=_as_dt(until),

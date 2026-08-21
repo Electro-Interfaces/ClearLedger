@@ -3589,6 +3589,26 @@ async def create_all() -> None:
         ):
             await conn.execute(_sa.text(stmt))
 
+        # v2.62: сырое кладут не только наши каналы, но и приложения. У пакета
+        # приложения источника Ядра нет — есть подключение из реестра, поэтому
+        # ссылка на источник перестаёт быть обязательной, а ссылка на подключение
+        # появляется. Существующую колонку `create_all` не ослабит.
+        for stmt in (
+            "ALTER TABLE raw_batches ALTER COLUMN source_id DROP NOT NULL",
+            "ALTER TABLE raw_batches ADD COLUMN IF NOT EXISTS connection_id UUID "
+            "REFERENCES eco_space_connections(id) ON DELETE CASCADE",
+            "ALTER TABLE raw_batches DROP CONSTRAINT IF EXISTS ck_raw_batches_owner",
+            # Ровно один владелец: «оба сразу» означало бы, что неизвестно, кто
+            # привёз пакет, и повторить разбор было бы некому.
+            "ALTER TABLE raw_batches ADD CONSTRAINT ck_raw_batches_owner CHECK ("
+            "(source_id IS NOT NULL AND connection_id IS NULL) OR "
+            "(source_id IS NULL AND connection_id IS NOT NULL))",
+            "CREATE INDEX IF NOT EXISTS ix_raw_batches_connection "
+            "ON raw_batches (connection_id, fetched_at DESC) "
+            "WHERE connection_id IS NOT NULL",
+        ):
+            await conn.execute(_sa.text(stmt))
+
         # v2.59: реестр подключений пространства. Таблицу заводит `create_all`,
         # а проверки допустимых значений — руками: ими держится словарь, по
         # которому строятся разрезы витрины.

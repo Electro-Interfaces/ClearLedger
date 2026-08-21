@@ -4530,9 +4530,19 @@ class RawBatchRecord(Base):
     company_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
     )
-    source_id: Mapped[uuid.UUID] = mapped_column(
+    # Источник Ядра — у пакета, привезённого нашим каналом. Стал необязательным,
+    # когда сырое начали класть и приложения: у подключения Координатора источника
+    # в Ядре нет и быть не должно — свой обмен оно ведёт само.
+    source_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("sources.id", ondelete="CASCADE"),
-        nullable=False
+        nullable=True
+    )
+    # Подключение пространства — у пакета, положенного приложением. Заполнена
+    # ровно одна из двух ссылок: пакет либо наш, либо чужой, и «оба сразу»
+    # означало бы, что мы не знаем, кто его привёз.
+    connection_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("eco_space_connections.id", ondelete="CASCADE"), nullable=True
     )
     channel_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("channels.id", ondelete="SET NULL"),

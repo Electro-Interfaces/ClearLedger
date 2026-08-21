@@ -2,6 +2,7 @@
 
 Без БД: проверяется ровно то, что решает судьбу пакета ещё до вставки.
 """
+import uuid
 import json
 
 import pytest
@@ -82,3 +83,25 @@ def test_повтор_объявлен_только_там_где_источни
     # Ветки STS сохраняют перечень смен, а отчёт смены тянут отдельным запросом:
     # «повтор» по такому пакету всё равно пошёл бы к источнику.
     assert set(raw_intake._REPLAY) == {"cb_shifts"}
+
+
+# ── Владелец пакета: канал Ядра или подключение приложения ───────────────────
+
+
+async def test_пакет_без_владельца_не_сохраняется():
+    """Ни источника, ни подключения — неизвестно, кто привёз и кому повторять."""
+    from app.services import raw_intake
+
+    got = await raw_intake.save_raw_batch(
+        None, company_id=uuid.uuid4(), doc_type="cb_shifts", items=[{"a": 1}])
+    assert got is None
+
+
+async def test_пакет_с_двумя_владельцами_не_сохраняется():
+    # «Оба сразу» — это не избыточность, а потеря ответа на вопрос «чей пакет».
+    from app.services import raw_intake
+
+    got = await raw_intake.save_raw_batch(
+        None, company_id=uuid.uuid4(), doc_type="cb_shifts", items=[{"a": 1}],
+        source_id=uuid.uuid4(), connection_id=uuid.uuid4())
+    assert got is None

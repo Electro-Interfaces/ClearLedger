@@ -8,6 +8,7 @@
 потому что отправитель ретраит по коду ответа, и наша внутренняя ошибка не должна
 превращаться в бесконечную повторную доставку.
 """
+import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status as http_status
@@ -16,8 +17,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_company_by_api_key
 from app.database import get_db
-from app.models import App, AppCompanyLink, Company
-from app.services import inbound_events, space_connection_registry
+from app.models import App, AppCompanyLink, Company, SpaceConnection
+from app.services import inbound_events, raw_intake, space_connection_registry
 
 router = APIRouter(prefix="/eco", tags=["Экосистема: события приложений"])
 
@@ -111,3 +112,62 @@ async def report_connections(
         out["note"] = ("Для этих компаний приложения не задано соответствие "
                        "компании пространства (Центр управления → Приложения)")
     return out
+
+
+@router.post("/raw")
+async def accept_raw_batch(
+    request: Request,
+    company: Company = Depends(get_company_by_api_key),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Принять сырой пакет от приложения — то, что отдала внешняя система.
+
+    Отдельная ручка, а не событие. Событие несёт ФАКТ и мало весит: «канал привёз
+    N записей». Здесь приезжают сами записи, и мерить их тем же приёмником нельзя
+    — у него другой размер тела и другая судьба: событие разбирается фоновым
+    проходом, а пакет просто ложится и ждёт того, кто его разберёт.
+
+    Смысл слоя не в архиве, а в возможности повторить разбор, не ходя к источнику
+    заново. Для внешних систем, где повторный заход стоит дорого или невозможен
+    (сессия 1С, лимит запросов ВАТС, перепроведённые документы), это единственный
+    способ починить нормализацию задним числом.
+
+    Пакет привязывается к подключению — учётной записи из реестра. Она же
+    отвечает на вопрос, чей это пакет: компания берётся из неё, а не из тела,
+    ровно по той же причине, по какой ей не верят при приёме событий.
+    """
+    body = await request.json()
+    connection_id = str(body.get("connectionId") or body.get("connection_id") or "").strip()
+    if not connection_id:
+        raise HTTPException(http_status.HTTP_400_BAD_REQUEST,
+                            "Не указано подключение (connectionId)")
+    try:
+        ident = uuid.UUID(connection_id)
+    except (ValueError, TypeError):
+        raise HTTPException(http_status.HTTP_400_BAD_REQUEST,
+                            "Неверный connectionId")
+    connection = await db.get(SpaceConnection, ident)
+    if connection is None:
+        raise HTTPException(http_status.HTTP_404_NOT_FOUND,
+                            "Подключение не найдено в реестре")
+
+    items = body.get("items")
+    if not isinstance(items, list):
+        raise HTTPException(http_status.HTTP_400_BAD_REQUEST,
+                            "Ожидается список items")
+    doc_type = str(body.get("docType") or body.get("doc_type") or "").strip()
+    if not doc_type:
+        raise HTTPException(http_status.HTTP_400_BAD_REQUEST,
+                            "Не указан вид пакета (docType)")
+
+    batch_id = await raw_intake.save_raw_batch(
+        db, company_id=connection.company_id, connection_id=connection.id,
+        doc_type=doc_type[:100], items=items,
+        since=body.get("since"), until=body.get("until"),
+        meta={"app": connection.app_code, "provider": connection.provider})
+    if batch_id is None:
+        # Слой сырого никогда не роняет отправителя: не легло — потеря удобства,
+        # а не работы. Но и врать «принято» нельзя, иначе на той стороне решат,
+        # что разбор можно будет повторить.
+        return {"status": "skipped", "note": "пакет не сохранён, подробности в журнале"}
+    return {"status": "accepted", "batchId": str(batch_id)}
