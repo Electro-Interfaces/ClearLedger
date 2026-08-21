@@ -1029,7 +1029,7 @@ def _risk_conditions(risk: str) -> list[Any]:
     Считаются ровно так же, как в `portfolio_overview`: иначе список не сойдётся
     с цифрой, и доверия к экрану не будет.
     """
-    from sqlalchemy import case, exists, literal, select as _select
+    from sqlalchemy import case, exists, literal, literal_column, select as _select
 
     from app.models import (
         EzsSiteEquipment, EzsSiteEvent, EzsSiteParticipant, EzsTechConnection,
@@ -1101,8 +1101,11 @@ def _risk_conditions(risk: str) -> list[Any]:
         # Здесь выражение целиком строится на колонке и не зависит от алиасов.
         # NULL у `gates` даёт NULL, а он в WHERE ложен — ровно то, что нужно:
         # у проекта без отметок послаблений нет.
+        # Путь пишем `literal_column`, а не связанным параметром: параметр уезжает
+        # как VARCHAR, а `jsonb_path_exists` ждёт тип `jsonpath` — и функция просто
+        # не находится. Подстановки здесь нет, путь — наша константа.
         return [*active, func.jsonb_path_exists(
-            S.gates, literal("$.*.*.waived ? (@ == true)"))]
+            S.gates, literal_column("'$.*.*.waived ? (@ == true)'::jsonpath"))]
     if risk == "commissioning_mismatch":
         has_date = func.coalesce(S.commissioned_on, "") != ""
         return [*active, (
