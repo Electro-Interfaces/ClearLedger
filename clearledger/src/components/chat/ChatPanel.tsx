@@ -15,6 +15,7 @@ import {
   Folder, AtSign, Loader2, Paperclip, Camera, Search as SearchIcon,
   Shield, ShieldOff, UserMinus, LogOut, Bell, BellOff, Forward, MapPin, ClipboardList, Workflow,
   Mail, Palette, Smile, Images, Volume2, VolumeX, Mic, BarChart3, WifiOff,
+  CheckSquare, Square,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/contexts/AuthContext'
@@ -1656,6 +1657,7 @@ function CreateChatDialog({ open, onOpenChange, onCreated, scopeProduct }: {
 function ChatBubble({
   message, album, isOwn, grouping, canDelete, editingId, editText, searchHighlight,
   onReply, onEditStart, onEditCancel, onEditSave, onEditTextChange, onDelete,
+  selectionMode, selected, onSelectToggle,
   onAuthorClick, authorAvatar, withAvatar, selfId, onReact, onPin, onForward, onTicket, onProcess, onImageClick,
   actionsOpen, onToggleActions, onCloseActions, textSizeClass,
 }: {
@@ -1673,6 +1675,10 @@ function ChatBubble({
   onEditSave: () => void
   onEditTextChange: (t: string) => void
   onDelete: () => void
+  /** Режим выбора: клик по реплике отмечает её, а не открывает действие. */
+  selectionMode?: boolean
+  selected?: boolean
+  onSelectToggle?: () => void
   onAuthorClick?: () => void
   /** Фото автора: в групповом чате оно слева от пузыря, как в привычных мессенджерах. */
   authorAvatar?: string | null
@@ -1755,6 +1761,8 @@ function ChatBubble({
       {onReact && <span className="mx-0.5 h-5 w-px bg-border [@media(pointer:coarse)]:h-8" />}
       <button onClick={() => runAction(onReply)} title="Ответить"
         className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground [@media(pointer:coarse)]:size-10"><Reply className="size-4" /></button>
+      {onSelectToggle && <button onClick={() => runAction(onSelectToggle)} title="Выбрать"
+        className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground [@media(pointer:coarse)]:size-10"><CheckSquare className="size-4" /></button>}
       {onForward && <button onClick={() => runAction(onForward)} title="Переслать"
         className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground [@media(pointer:coarse)]:size-10"><Forward className="size-4" /></button>}
       {onTicket && <button onClick={() => runAction(onTicket)} title="Создать заявку из сообщения"
@@ -1781,7 +1789,25 @@ function ChatBubble({
   return (
     <>
       {showDate && <DateChip iso={message.createdAt} />}
-      <div className={cn('group/bubble flex items-end gap-1.5', isOwn ? 'justify-end' : 'justify-start', isLastInGroup ? 'mb-2' : 'mb-[2px]')}>
+      <div
+        onClick={selectionMode ? (e) => {
+          // В режиме выбора клик по строке отмечает реплику. Ссылки и кнопки внутри
+          // при этом молчат: иначе выбор превращался бы в случайные переходы.
+          e.preventDefault()
+          onSelectToggle?.()
+        } : undefined}
+        className={cn('group/bubble flex items-end gap-1.5', isOwn ? 'justify-end' : 'justify-start',
+          isLastInGroup ? 'mb-2' : 'mb-[2px]',
+          selectionMode && 'cursor-pointer rounded-lg px-1 -mx-1',
+          selectionMode && (selected ? 'bg-primary/15' : 'hover:bg-muted/40'))}>
+        {selectionMode && (
+          <span className={cn('mb-1 shrink-0 self-center', isOwn ? 'order-last ml-1' : 'mr-1')}
+            aria-hidden>
+            {selected
+              ? <CheckSquare className="size-4 text-primary" />
+              : <Square className="size-4 text-muted-foreground/60" />}
+          </span>
+        )}
         {/* Аватар автора — у последнего сообщения серии, как в мессенджерах:
             лицо стоит рядом с концом реплики, а не улетает к её началу. Место
             под него держим всегда, иначе пузыри серии съезжают по горизонтали. */}
@@ -1822,8 +1848,15 @@ function ChatBubble({
             // `select-none` не украшение: панель лежит внутри пузыря, и без него
             // выделение нескольких реплик утаскивало в буфер шесть эмодзи и весь
             // ряд кнопок — вставлялось это вперемешку с текстом разговора.
-            'pointer-events-none absolute -top-5 z-10 flex select-none items-center gap-0.5 rounded-lg border border-border bg-popover px-1 py-1 shadow-lg opacity-0 transition-opacity group-hover/bubble:pointer-events-auto group-hover/bubble:opacity-100 [@media(pointer:coarse)]:hidden',
-            isOwn ? 'right-0' : 'left-0',
+            'pointer-events-none absolute z-10 flex select-none items-center gap-0.5 rounded-lg border border-border bg-popover px-1 py-1 shadow-lg opacity-0 transition-opacity group-hover/bubble:pointer-events-auto group-hover/bubble:opacity-100 [@media(pointer:coarse)]:hidden',
+            // Панель встаёт СБОКУ от пузыря, в пустое поле ленты. Раньше она висела
+            // над ним и на каждом наведении закрывала предыдущую реплику — читать
+            // переписку, ведя по ней мышью, было нельзя.
+            'top-0',
+            isOwn ? 'right-full mr-1.5' : 'left-full ml-1.5',
+            // Узкое окно: сбоку места нет, возвращаемся к панели над пузырём.
+            'max-[1100px]:bottom-full max-[1100px]:top-auto max-[1100px]:mb-1 max-[1100px]:ml-0 max-[1100px]:mr-0',
+            isOwn ? 'max-[1100px]:left-auto max-[1100px]:right-0' : 'max-[1100px]:left-0 max-[1100px]:right-auto',
           )}>
             {actionButtons}
           </div>
