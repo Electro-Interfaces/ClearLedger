@@ -46,15 +46,23 @@ COST_ITEM_MAP: tuple[tuple[str, str, bool], ...] = (
     # (начало строки выгрузки, наш код статьи, капитальные ли вложения)
     ("оплата по договорам аренды земли в рамках", "rent", True),
     ("оплата по договорам аренды земли", "rent", False),
+    ("оплата по договорам аренды помещений в рамках", "rent_other", True),
+    ("оплата по договорам аренды помещений", "rent_other", False),
     ("оплата по договорам аренды прочего имущества", "rent_other", False),
     ("арендная плата по направлениям", "rent", False),
+    ("платежи по договорам аренды", "rent", False),
     ("покупка электроэнергии", "energy", False),
     ("оплата за коммунальные услуги", "utilities", False),
     ("оплата поставщикам (подрядчикам) инвестиции", "contractors", True),
     ("оплата поставщикам (подрядчикам) по инвест", "contractors", True),
     ("оплата поставщикам (подрядчикам)", "contractors", False),
     ("оплата товаров, работ, услуг", "contractors", False),
+    ("оплата по договорам по техническому обслуживанию", "maintenance", False),
+    ("платежи по договорам на информационные", "contractors", False),
+    ("приобретение объектов основных средств", "assets", True),
+    ("приобретение основных средств", "assets", True),
     ("выплаты штрафов", "penalty", False),
+    ("пени, штрафы, неустойки", "penalty", False),
     ("обеспечительные платежи", "deposit", False),
 )
 
@@ -146,15 +154,20 @@ def read_rows(sheet: Iterable[tuple], *, source_label: str | None = None) -> dic
         if not label:
             continue
         code, capital = classify(label)
-        if code == "other":
-            unknown.add(label[:120])
+        # В список незнакомых попадает только то, что принесло деньги: строка без
+        # сумм — это шапка группы (имя контрагента), а не статья, и жаловаться на
+        # неё значит топить настоящие находки в трёхстах именах.
+        brought_money = False
         for idx, (period, granularity) in periods.items():
             value = row[idx] if idx < len(row) else None
             if isinstance(value, (int, float)) and value:
+                brought_money = True
                 pending.append({
                     "period": period, "granularity": granularity, "cost_item": code,
                     "is_capital": capital, "amount": float(value),
                 })
+        if brought_money and code == "other":
+            unknown.add(label[:120])
 
     return {"payments": payments, "unknown_items": sorted(unknown)}
 
@@ -179,7 +192,7 @@ async def store(db: AsyncSession, company_id: uuid.UUID, parsed: dict[str, Any],
     batch = batch_id or uuid.uuid4()
     known = await _counterparty_index(db, company_id)
     saved, matched = 0, 0
-    for item in parsed["payments"]:
+    for item in _fold(parsed["payments"]):
         cp_id = known.get(_norm_name(item["counterparty_name"]))
         if cp_id:
             matched += 1
@@ -204,6 +217,28 @@ async def store(db: AsyncSession, company_id: uuid.UUID, parsed: dict[str, Any],
         "counterparties_matched": matched,
         "unknown_items": parsed.get("unknown_items") or [],
     }
+
+
+def _fold(payments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Свернуть строки по ключу ДО записи.
+
+    Разные формулировки заказчика ложатся на один наш код — «оплата поставщикам» и
+    «оплата товаров, работ, услуг» обе про подрядчиков. Если писать их по очереди,
+    вторая затрёт первую (запись идёт `on conflict do update`), а если складывать в
+    базе — повторная загрузка того же файла удвоит суммы. Складываем здесь: тогда
+    и слагаемые целы, и повтор даёт ту же цифру.
+    """
+    folded: dict[str, dict[str, Any]] = {}
+    for item in payments:
+        key = item["external_key"]
+        if key in folded:
+            folded[key]["amount"] += item["amount"]
+            numbers = set(folded[key].get("object_numbers") or [])
+            numbers.update(item.get("object_numbers") or [])
+            folded[key]["object_numbers"] = sorted(numbers)
+        else:
+            folded[key] = dict(item)
+    return list(folded.values())
 
 
 def _norm_name(name: str) -> str:

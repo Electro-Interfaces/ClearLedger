@@ -2578,6 +2578,8 @@ async def create_all() -> None:
                '{act,invoice}',        'contract',    '20',  15),
               ('utilities',       'Коммунальные услуги',    'services',      NULL,      'fixed',
                '{act,invoice}',        'prev_period', '20',  25),
+              ('assets',          'Приобретение основных средств', NULL,     NULL,      'fixed',
+               '{act,invoice}',        'contract',    '08',  70),
               ('penalty',         'Штрафы, пени, неустойки', NULL,           NULL,      'fixed',
                '{act}',                'average',     '91',  80),
               ('deposit',         'Обеспечительные платежи', NULL,           NULL,      'fixed',
