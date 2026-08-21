@@ -633,6 +633,8 @@ export interface OpsPaymentsSummary {
   periods: OpsPaymentsPeriod[]
   total_paid: number
   total_capital: number
+  /** Откуда цифра: файл выгрузки и когда его приняли. */
+  source: { file: string | null; loaded_at: string; rows: number } | null
 }
 
 export async function getOpsPayments(
@@ -642,6 +644,41 @@ export async function getOpsPayments(
   if (from) params.date_from = from
   if (to) params.date_to = to
   return get<OpsPaymentsSummary>('/api/ops/payments', params)
+}
+
+/** Кому платим больше всего: разрез выгрузки по контрагентам. */
+export interface OpsPaymentsParty {
+  name: string
+  known: boolean
+  paid: number
+  items: number
+  objects: number
+  first_period: string
+  last_period: string
+}
+
+export async function getOpsPaymentsParties(
+  companyId: string, limit = 50,
+): Promise<{ rows: OpsPaymentsParty[] }> {
+  return get('/api/ops/payments/counterparties', {
+    company_id: companyId, limit: String(limit),
+  })
+}
+
+/** Принять сводную выгрузку списаний. Повтор того же файла не двоит суммы. */
+export interface OpsPaymentsUploadResult {
+  batch_id: string
+  saved: number
+  counterparties_matched: number
+  unknown_items: string[]
+}
+
+export async function uploadOpsPayments(
+  companyId: string, file: File,
+): Promise<OpsPaymentsUploadResult> {
+  const form = new FormData()
+  form.append('file', file)
+  return upload(`/api/ops/payments/upload?company_id=${encodeURIComponent(companyId)}`, form)
 }
 
 /** Сколько бухгалтерских номеров выгрузки связано с объектами сети. */
