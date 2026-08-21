@@ -8,8 +8,8 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { MapContainer, TileLayer, CircleMarker, Popup, useMap, useMapEvents } from 'react-leaflet'
-import { MAP_CRS, mapTileProps } from '@/lib/mapTiles'
+import { MapContainer, TileLayer, CircleMarker, Popup, useMap, useMapEvents, AttributionControl } from 'react-leaflet'
+import { MAP_ATTRIBUTION_PREFIX, MAP_CRS, mapTileProps } from '@/lib/mapTiles'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { Loader2, Search, MapPin, Zap, Plug, Hash, Gauge, Wallet, SlidersHorizontal, type LucideIcon } from 'lucide-react'
@@ -515,8 +515,9 @@ export function ChargeMapPanel({ companyId, dateFrom, dateTo }: {
       {/* карта — isolate: свой stacking-контекст, чтобы z-index панелей Leaflet
           (popupPane 700 и др.) не всплывал поверх модальных диалогов приложения */}
       <div className="isolate min-h-0 flex-1 overflow-hidden rounded-lg border border-border">
-        <MapContainer crs={MAP_CRS} center={[62, 94]} zoom={3} style={{ height: '100%', width: '100%', background: 'hsl(var(--muted))' }} scrollWheelZoom preferCanvas>
+        <MapContainer crs={MAP_CRS} attributionControl={false} center={[62, 94]} zoom={3} style={{ height: '100%', width: '100%', background: 'hsl(var(--muted))' }} scrollWheelZoom preferCanvas>
           <TileLayer key={dark ? 'dark' : 'light'} {...mapTileProps(dark)} />
+          <AttributionControl position="bottomright" prefix={MAP_ATTRIBUTION_PREFIX} />
           <FitBounds points={allPoints} />
           <MapInvalidate />
           <StationMarkers points={points} colorFn={colorFn} sizeFn={sizeFn} metricMap={metricMap}

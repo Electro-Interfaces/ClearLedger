@@ -7,8 +7,8 @@
  */
 import { Fragment, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { MapContainer, TileLayer, CircleMarker, Circle, Popup } from 'react-leaflet'
-import { MAP_CRS, mapTileProps } from '@/lib/mapTiles'
+import { MapContainer, TileLayer, CircleMarker, Circle, Popup, AttributionControl } from 'react-leaflet'
+import { MAP_ATTRIBUTION_PREFIX, MAP_CRS, mapTileProps } from '@/lib/mapTiles'
 import 'leaflet/dist/leaflet.css'
 import { Card, CardContent } from '@/components/ui/card'
 import { Loader2 } from 'lucide-react'
@@ -98,8 +98,9 @@ export function SitesMapPanel({ companyId }: { companyId: string }) {
             <div className="flex justify-center py-24"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
           ) : (
             <div className="h-[calc(100vh-260px)] min-h-[420px] w-full overflow-hidden rounded-lg">
-              <MapContainer crs={MAP_CRS} center={CENTER} zoom={4} style={{ height: '100%', width: '100%' }} preferCanvas>
+              <MapContainer crs={MAP_CRS} attributionControl={false} center={CENTER} zoom={4} style={{ height: '100%', width: '100%' }} preferCanvas>
                 <TileLayer key={false ? 'dark' : 'light'} {...mapTileProps(false)} />
+          <AttributionControl position="bottomright" prefix={MAP_ATTRIBUTION_PREFIX} />
 
                 {/* Действующая станция: видимая точка 5 px, а ловит клик прозрачный
                     круг 12 px вокруг неё. В точку радиусом 3 px мышью было почти не

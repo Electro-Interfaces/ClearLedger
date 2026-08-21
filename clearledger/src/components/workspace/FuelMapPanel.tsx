@@ -6,8 +6,8 @@
 
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { MapContainer, TileLayer, CircleMarker, Marker, Popup, Tooltip, useMap, useMapEvents } from 'react-leaflet'
-import { MAP_CRS, mapTileProps } from '@/lib/mapTiles'
+import { MapContainer, TileLayer, CircleMarker, Marker, Popup, Tooltip, useMap, useMapEvents, AttributionControl } from 'react-leaflet'
+import { MAP_ATTRIBUTION_PREFIX, MAP_CRS, mapTileProps } from '@/lib/mapTiles'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { Loader2, MapPin, Fuel, Wallet, Gauge, RefreshCw } from 'lucide-react'
@@ -778,8 +778,9 @@ export function FuelMapPanel({ companyId, dateFrom, dateTo }: {
         </div>
       ) : (
         <div className="relative isolate min-h-[520px] flex-1">
-          <MapContainer crs={MAP_CRS} center={[60.7, 28.8]} zoom={9} scrollWheelZoom style={{ height: '100%', width: '100%', background: dark ? '#0b1220' : '#e5e7eb' }} preferCanvas>
+          <MapContainer crs={MAP_CRS} attributionControl={false} center={[60.7, 28.8]} zoom={9} scrollWheelZoom style={{ height: '100%', width: '100%', background: dark ? '#0b1220' : '#e5e7eb' }} preferCanvas>
             <TileLayer key={dark ? 'dark' : 'light'} {...mapTileProps(dark)} />
+          <AttributionControl position="bottomright" prefix={MAP_ATTRIBUTION_PREFIX} />
             <MapInvalidate />
             <FitBounds pts={pts} />
             <StationMarkers pts={pts} metric={metric} th={th} dark={dark} total={totalVal}
