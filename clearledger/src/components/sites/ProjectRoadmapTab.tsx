@@ -156,7 +156,13 @@ export function ProjectRoadmapTab({ site, companyId }: { site: SiteDetail; compa
                               ? <Check className="h-3 w-3 text-emerald-600 dark:text-emerald-400 shrink-0" />
                               : <Circle className="h-3 w-3 text-muted-foreground shrink-0" />}
                             <span className={it.done ? '' : 'text-muted-foreground'}>{it.label}</span>
-                            {it.required && !it.done && <span className="text-xs text-red-500/80">держит переход</span>}
+                            {it.required && !it.done && !it.waived && (
+                              <span className="text-xs text-red-500/80">держит переход</span>
+                            )}
+                            {it.waived && (
+                              <span className="text-xs text-amber-600 dark:text-amber-400"
+                                title="Обязательность снята под ответственность">не держит переход</span>
+                            )}
                           </div>
                         ))}
                       </div>

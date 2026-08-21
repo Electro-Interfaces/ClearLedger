@@ -873,7 +873,7 @@ export interface ProjectRoadmap {
     state: 'done' | 'current' | 'stopped' | 'waiting' | 'unknown'
     date: string | null
     gateDone: number; gateTotal: number; blocking: string[]
-    items: { label: string; done: boolean; required: boolean }[]
+    items: { label: string; done: boolean; required: boolean; waived?: boolean }[]
   }[]
   tracks: {
     key: string; kind: 'track'; phase: string; label: string

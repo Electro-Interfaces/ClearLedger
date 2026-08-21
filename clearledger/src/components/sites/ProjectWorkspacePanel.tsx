@@ -22,6 +22,7 @@ import { toast } from 'sonner'
 import { PROJECT_TABS, ProjectTabContent, type ProjectTabKey } from './ProjectTabs'
 import { ProjectPhaseStrip } from './ProjectPhaseStrip'
 import { ProjectsListPanel } from './ProjectsListPanel'
+import { plural } from '@/lib/textUtils'
 
 const today = () => new Date().toISOString().slice(0, 10)
 
@@ -96,7 +97,9 @@ function ProjectWorkspace({ companyId, id, tab, onTab, onBack }: {
   const pending = useMemo(() => {
     const set = new Set<ProjectTabKey>()
     for (const i of s?.gate?.items ?? []) {
-      if (i.done) continue
+      // Пункт с послаблением метку на вкладке не ставит: она звала бы закрывать
+      // то, чего решили не ждать.
+      if (i.done || i.waived) continue
       if (i.doc) set.add('docs')
       else if (i.equipment) set.add('equipment')
       else if (i.manual) set.add('work')
@@ -157,12 +160,23 @@ function ProjectWorkspace({ companyId, id, tab, onTab, onBack }: {
               <CalendarClock className="h-3 w-3" />
               {s.nextAction ? `${s.nextAction}${s.nextActionDue ? ` · до ${s.nextActionDue}` : ''}` : 'следующий шаг не задан'}
             </span>
-            {s.gate && (
-              <span className={s.gate.canAdvance ? 'text-emerald-600 dark:text-emerald-400' : ''}>
-                гейт {s.gate.done}/{s.gate.total}
-                {!s.gate.canAdvance && s.gate.blocking.length > 0 && ` · держит: ${s.gate.blocking[0]}`}
-              </span>
-            )}
+            {s.gate && (() => {
+              // Зелёный «гейт 2/8» читается как «всё собрано». С послаблением
+              // переход открыт не потому, что работа сделана, а потому, что за
+              // неё подписались, — и цвет обязан это различать, иначе строка
+              // утверждает факт, которого нет.
+              const waived = s.gate.waived?.length ?? 0
+              return (
+                <span className={
+                  waived > 0 ? 'text-amber-600 dark:text-amber-400'
+                    : s.gate.canAdvance ? 'text-emerald-600 dark:text-emerald-400' : ''}
+                  title={waived > 0 ? 'С части обязательных пунктов снята обязательность' : undefined}>
+                  гейт {s.gate.done}/{s.gate.total}
+                  {waived > 0 && ` · ${waived} с послаблением`}
+                  {!s.gate.canAdvance && s.gate.blocking.length > 0 && ` · держит: ${s.gate.blocking[0]}`}
+                </span>
+              )
+            })()}
           </div>
         </div>
       </div>
@@ -242,8 +256,13 @@ function NextStepBar({ site, onGoTab, onPlanStep }: {
   if (!gate) return null
   const nextStage = FUNNEL_STAGES[FUNNEL_STAGES.indexOf(site.stage as never) + 1]
   const nextLabel = nextStage ? STAGE_META[nextStage]?.label : null
-  const open = (gate.items ?? []).filter((i) => !i.done)
+  // Пункт с послаблением не держит переход и не может быть «ближайшим шагом»:
+  // отправлять человека делать то, чего он сам решил не ждать, — издевательство.
+  // `required` у такого пункта остаётся истиной (по регламенту он обязателен),
+  // поэтому фильтровать надо именно по `waived`.
+  const open = (gate.items ?? []).filter((i) => !i.done && !i.waived)
   const blocking = open.filter((i) => i.required)
+  const waived = gate.waived?.length ?? 0
   const lead = blocking[0] ?? open[0]
   const leadTab = lead ? GATE_TAB[lead.doc ? 'doc' : lead.equipment ? 'equipment' : lead.manual ? 'manual' : 'field'] : undefined
 
@@ -251,7 +270,14 @@ function NextStepBar({ site, onGoTab, onPlanStep }: {
     <div data-zone="Что делать сейчас" className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <span className="font-medium">Сейчас: {site.stageLabel}</span>
-        {gate.canAdvance ? (
+        {gate.canAdvance && waived > 0 ? (
+          // «Всё обязательное закрыто» здесь было бы неправдой: пункты не закрыты,
+          // с них снята обязательность. Формулировка называет, почему путь открыт.
+          <span className="text-amber-600 dark:text-amber-400">
+            переход открыт под ответственность: не ждём {waived} {plural(waived, 'пункт', 'пункта', 'пунктов')}
+            {nextLabel ? ` — дальше «${nextLabel}»` : ''}
+          </span>
+        ) : gate.canAdvance ? (
           <span className="text-emerald-600 dark:text-emerald-400">
             всё обязательное закрыто{nextLabel ? ` — дальше «${nextLabel}»` : ''}
           </span>

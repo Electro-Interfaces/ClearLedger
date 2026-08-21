@@ -59,3 +59,18 @@ export function diceCoefficient(a: string, b: string): number {
 
   return (2 * matches) / (na.length - 1 + nb.length - 1)
 }
+
+/**
+ * Русская форма существительного при числе: 1 пункт, 2 пункта, 5 пунктов.
+ *
+ * Без неё в интерфейсе появляется «5 пункта» — мелочь, по которой человек
+ * решает, что систему писали наспех, и начинает не доверять остальному.
+ */
+export function plural(n: number, one: string, few: string, many: string): string {
+  const abs = Math.abs(n) % 100
+  if (abs > 10 && abs < 20) return many
+  const last = abs % 10
+  if (last === 1) return one
+  if (last >= 2 && last <= 4) return few
+  return many
+}

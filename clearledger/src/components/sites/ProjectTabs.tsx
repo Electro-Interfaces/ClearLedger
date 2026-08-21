@@ -236,6 +236,13 @@ function RoutePanel({ site, companyId, onDone }: {
             {mOpen.isPending && <Loader2 className="h-4 w-4 animate-spin mr-1" />}Вести по маршруту
           </Button>
         </div>
+        {/* Список маршрутов не пришёл — молчать нельзя: выбор был, а человек его
+            не увидел и решит, что маршрут в системе один. */}
+        {qRoutes.data?.error && (
+          <p className="text-xs text-muted-foreground">
+            Список маршрутов недоступен, проект пойдёт по маршруту по умолчанию: {qRoutes.data.error}
+          </p>
+        )}
         {choice && (
           <div className="space-y-1">
             <div className="text-xs text-muted-foreground">
@@ -811,22 +818,23 @@ export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; company
                   {it.required && !it.waived && <span className="text-xs text-red-500/80 shrink-0 mt-0.5"
                     title="Пока не закрыт, проект дальше не пойдёт">держит переход</span>}
                   {it.waived && <span className="text-xs text-amber-600 dark:text-amber-400 shrink-0 mt-0.5"
-                    title="Пункт обязателен по регламенту, но не держит переход — под чьей-то ответственностью">
-                    не обязателен</span>}
+                    title="Пункт обязателен по регламенту, но переход больше не держит — под чьей-то ответственностью">
+                    не держит переход</span>}
                   {source && <span className="text-xs text-muted-foreground shrink-0 mt-0.5">— {source}</span>}
                 </Row>
 
                 {/* Кто снял обязательность и почему. Строка не прячется под тултип:
                     решение принято за всю компанию, и читать его должно быть видно. */}
                 {it.waived && (
-                  <div className="ml-11 mb-1 flex flex-wrap items-baseline gap-x-2 text-xs text-amber-700 dark:text-amber-400">
+                  <div className="ml-6 sm:ml-11 mb-1 flex flex-wrap items-baseline gap-x-2 text-xs text-amber-700 dark:text-amber-400">
                     <span>
                       Обязательность снял{it.waivedBy ? ` ${it.waivedBy}` : 'а система'}
                       {it.waivedAt ? `, ${it.waivedAt.slice(0, 10)}` : ''}
                       {it.waiveReason ? `: ${it.waiveReason}` : ''}
                     </span>
                     {site.mayWaive && (
-                      <button type="button" className="underline hover:no-underline"
+                      <button type="button"
+                        className="underline hover:no-underline max-sm:inline-flex max-sm:min-h-11 max-sm:items-center"
                         disabled={mWaive.isPending}
                         onClick={() => mWaive.mutate({ key: it.key, waived: false, reason: '' })}>
                         вернуть обязательность
@@ -836,9 +844,9 @@ export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; company
                 )}
 
                 {canOfferWaive && waiveFor !== it.key && (
-                  <div className="ml-11 mb-1">
+                  <div className="ml-6 sm:ml-11 mb-1">
                     <button type="button"
-                      className="text-xs text-muted-foreground underline hover:no-underline"
+                      className="text-xs text-muted-foreground underline hover:no-underline max-sm:inline-flex max-sm:min-h-11 max-sm:items-center"
                       onClick={() => { setWaiveFor(it.key); setWaiveWhy('') }}>
                       снять обязательность под свою ответственность
                     </button>
@@ -846,7 +854,7 @@ export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; company
                 )}
 
                 {canOfferWaive && waiveFor === it.key && (
-                  <div className="ml-11 mb-2 space-y-1 rounded border border-amber-500/40 bg-amber-500/5 p-2">
+                  <div className="ml-6 sm:ml-11 mb-2 space-y-1 rounded border border-amber-500/40 bg-amber-500/5 p-2">
                     <div className="text-xs text-muted-foreground">
                       Пункт останется в чек-листе невыполненным и будет виден в отчёте.
                       Под решением встанет ваше имя.
@@ -1225,7 +1233,8 @@ export function PassportTab({ site, companyId, onDone }: { site: SiteDetail; com
   const wanted = useMemo(() => {
     const map = new Map<string, string>()
     for (const i of site.gate?.items ?? []) {
-      if (i.done) continue
+      // Пункт с послаблением графу не подсвечивает: гейт его больше не ждёт.
+      if (i.done || i.waived) continue
       for (const f of i.fields ?? []) map.set(f, i.key)
     }
     return map
@@ -1836,7 +1845,7 @@ export function DocsTab({ site, companyId, onDone }: {
   const rows = docs.data ?? []
   // Какой документ ждёт гейт именно сейчас — по незакрытым пунктам текущей стадии.
   const docGateHint = (site.gate?.items ?? [])
-    .filter((i) => !i.done && i.doc)
+    .filter((i) => !i.done && !i.waived && i.doc)
     .map((i) => i.label)
     .join('; ')
   return (

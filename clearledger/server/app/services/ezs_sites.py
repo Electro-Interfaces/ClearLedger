@@ -1091,6 +1091,18 @@ def _risk_conditions(risk: str) -> list[Any]:
             from_pos >= 0,
             to_pos >= 0,
             to_pos < from_pos))]
+    if risk == "waived_gates":
+        # Проекты, где с обязательного пункта снята обязательность. Цифра в обзоре
+        # без раскрытия бесполезна: подпись под решением имеет смысл, только если
+        # до конкретных проектов можно дойти.
+        #
+        # jsonpath, а не подзапрос с `jsonb_each`: тому нужно имя таблицы внутри
+        # сырого SQL, а как SQLAlchemy назовёт её в этом запросе — не наше дело.
+        # Здесь выражение целиком строится на колонке и не зависит от алиасов.
+        # NULL у `gates` даёт NULL, а он в WHERE ложен — ровно то, что нужно:
+        # у проекта без отметок послаблений нет.
+        return [*active, func.jsonb_path_exists(
+            S.gates, literal("$.*.*.waived ? (@ == true)"))]
     if risk == "commissioning_mismatch":
         has_date = func.coalesce(S.commissioned_on, "") != ""
         return [*active, (

@@ -974,15 +974,8 @@ async def portfolio_overview(db: AsyncSession, company_id) -> dict[str, Any]:
                    -- обязательность под свою подпись. Отдельный флаг потому, что
                    -- подпись под решением, которого никто не смотрит, формальна:
                    -- проект прошёл дальше, а собрано не всё.
-                   exists (
-                       select 1
-                         from jsonb_each(coalesce(a.gates, '{{}}'::jsonb)) as g(stage, marks)
-                         cross join lateral jsonb_each(
-                             case when jsonb_typeof(g.marks) = 'object'
-                                  then g.marks else '{{}}'::jsonb end) as m(key, mark)
-                        where jsonb_typeof(m.mark) = 'object'
-                          and coalesce(m.mark->>'waived', 'false') = 'true'
-                   ) as has_waived,
+                   coalesce(jsonb_path_exists(a.gates,
+                       '$.*.*.waived ? (@ == true)'), false) as has_waived,
                    (a.next_action_due is not null and a.next_action_due < :today) as step_overdue,
                    exists (
                        select 1 from ezs_tech_connections t where t.site_id = a.id
@@ -1627,7 +1620,11 @@ async def project_roadmap(db: AsyncSession, company_id, site: EzsSite) -> dict[s
             "state": st,
             "date": site.stage_since if st == "current" else None,
             "gateDone": g["done"], "gateTotal": g["total"], "blocking": blocking,
-            "items": [{"label": i["label"], "done": i["done"], "required": i["required"]}
+            # `waived` — обязательный пункт, с которого сняли обязательность. Без
+            # него схема продолжала бы писать «держит переход» там, где переход
+            # уже открыт под чью-то подпись.
+            "items": [{"label": i["label"], "done": i["done"], "required": i["required"],
+                       "waived": i["waived"]}
                       for i in g["items"]],
         })
 
