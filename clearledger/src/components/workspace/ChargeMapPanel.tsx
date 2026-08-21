@@ -606,6 +606,10 @@ export function ChargeMapPanel({ companyId, dateFrom, dateTo }: {
               <SelectContent className="z-[1200]">{COLOR_BY.map((o) => <SelectItem key={o.v} value={o.v} className="text-xs">{o.label}</SelectItem>)}</SelectContent>
             </Select>
           </div>
+          <button type="button" onClick={toggleFull}
+            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-2.5 text-xs text-muted-foreground hover:text-foreground">
+            <Maximize2 className="h-3.5 w-3.5" />Во весь экран
+          </button>
           <div className="flex items-center gap-1"><span className="text-xs text-muted-foreground">Размер:</span>
             <Select value={sizeBy} onValueChange={(v) => setSizeBy(v as SizeBy)}>
               <SelectTrigger className="h-11 w-[140px] text-sm sm:h-8 sm:text-xs"><SelectValue /></SelectTrigger>
@@ -639,11 +643,16 @@ export function ChargeMapPanel({ companyId, dateFrom, dateTo }: {
       <div ref={mapBoxRef}
         className="relative isolate min-h-0 flex-1 overflow-hidden rounded-lg border border-border">
         <MapLayerSwitch {...mapLayers} />
+        {/* Значок стоит ПОД переключателем слоёв (`top-14`), а не в том же углу:
+            переключатель занимает `right-2 top-2` и перекрывает всё, что туда
+            положат. В обычном режиме это дубль кнопки из строки фильтров, но в
+            полноэкранном строка скрыта — и выйти можно только отсюда или Esc. */}
         <button type="button" onClick={toggleFull}
           title={isFull ? 'Свернуть карту (Esc)' : 'Развернуть карту на весь экран'}
           aria-label={isFull ? 'Свернуть карту' : 'Развернуть карту на весь экран'}
-          className="absolute right-2 top-2 z-[500] inline-flex h-9 w-9 items-center justify-center rounded-md border border-border bg-card/95 text-muted-foreground shadow-sm hover:text-foreground">
+          className="absolute right-2 top-14 z-[1000] inline-flex h-9 items-center gap-1.5 rounded-lg border border-border bg-background/95 px-2.5 text-xs text-muted-foreground shadow-md backdrop-blur hover:text-foreground">
           {isFull ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+          {isFull ? 'Свернуть' : 'Во весь экран'}
         </button>
         <MapContainer crs={MAP_CRS} attributionControl={false} center={[62, 94]} zoom={3} style={{ height: '100%', width: '100%', background: 'hsl(var(--muted))' }} scrollWheelZoom preferCanvas>
           <MapTiles base={mapLayers.base} traffic={mapLayers.traffic} regions={mapLayers.regions} dark={dark} />
