@@ -4723,6 +4723,23 @@ class ServiceLocation(Base):
     decommissioned_on: Mapped[str | None] = mapped_column(String(10), nullable=True)
     # инвентарный номер ОС (мост к бухучёту; «НЕТ НА 01»/«не известно» → NULL);
     inventory_number: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    # ── Графы складского реестра заказчика ──────────────────────────────────
+    # Регион и хранитель отвечают на вопрос «где физически лежит станция и кто за
+    # неё отвечает», пока она не смонтирована: склад заказчика, склад подрядчика и
+    # склад производителя — три разных ответственности, а не одна «локация».
+    region: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    keeper: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # Номер счёта 08 у заказчика: станция на складе — это капвложение, и в его
+    # учёте она живёт этим номером. Свой идентификатор объекта им не подменяется
+    # (СТО, п. 8.5) — графа отдельная и названа честно.
+    accounting_no: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    # Номер во внешнем реестре заказчика (ZOI/ЗЕВС), если он уже присвоен.
+    external_no: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    # Данные подтверждены поставщиком. Реестр приходит с позициями, по которым
+    # количество и порты ещё уточняются: показать их как обычный остаток значило бы
+    # выдать ожидание за факт, а выбросить — потерять то, что уже известно.
+    data_confirmed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    unconfirmed_reason: Mapped[str | None] = mapped_column(String(200), nullable=True)
     # станция закреплена за корп-контуром (каршеринг) — их «статус корп».
     is_corp: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=text("false"))

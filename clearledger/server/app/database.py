@@ -3669,6 +3669,21 @@ async def create_all() -> None:
         ):
             await conn.execute(_sa.text(stmt))
 
+        # v2.59: складской реестр ЭЗС — графы, которых у карточки не было.
+        for stmt in (
+            "ALTER TABLE ezs_equipment_units ADD COLUMN IF NOT EXISTS region VARCHAR(120)",
+            "ALTER TABLE ezs_equipment_units ADD COLUMN IF NOT EXISTS keeper VARCHAR(200)",
+            "ALTER TABLE ezs_equipment_units ADD COLUMN IF NOT EXISTS accounting_no VARCHAR(60)",
+            "ALTER TABLE ezs_equipment_units ADD COLUMN IF NOT EXISTS external_no VARCHAR(60)",
+            "ALTER TABLE ezs_equipment_units ADD COLUMN IF NOT EXISTS "
+            "data_confirmed BOOLEAN NOT NULL DEFAULT true",
+            "ALTER TABLE ezs_equipment_units ADD COLUMN IF NOT EXISTS "
+            "unconfirmed_reason VARCHAR(200)",
+            "CREATE INDEX IF NOT EXISTS ix_ezs_equipment_units_unconfirmed "
+            "ON ezs_equipment_units (company_id) WHERE NOT data_confirmed",
+        ):
+            await conn.execute(_sa.text(stmt))
+
         # v2.58: кассовый факт «Хозяйства» — сколько по объектам реально заплатили.
         for stmt in (
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_ops_payments_key "
