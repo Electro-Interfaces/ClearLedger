@@ -4,6 +4,7 @@
 Изолированный слой поверх L2 (station_energy_periods + charge_sessions +
 station_contract_settlements) — см. services/ops_dashboard.py.
 """
+import io
 import uuid
 from datetime import date
 
@@ -13,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import assert_company_member, get_current_user
 from app.database import get_db
 from app.models import User
-from app.services import ops_closing, ops_expectations, ops_terms
+from app.services import ops_closing, ops_expectations, ops_payments, ops_terms
 from app.services.ops_dashboard import (
     ops_balance, ops_completeness, ops_overview, ops_station,
 )
@@ -495,3 +496,78 @@ async def post_charge_correction(
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()
     return result
+
+# ---------------------------------------------------------------------------
+# Кассовый факт: сколько по объектам сети реально заплатили
+# ---------------------------------------------------------------------------
+
+@router.post("/payments/upload", status_code=201)
+async def upload_ops_payments(
+    company_id: str = Query(...),
+    sheet: str | None = Query(None, description="лист выгрузки; по умолчанию первый"),
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Принять сводную выгрузку списаний казначейства.
+
+    «Хозяйство» знало только ожидания по договорам; сколько ушло со счёта — не знало
+    вовсе, и вопрос «платим больше или меньше должного» оставался без ответа.
+
+    Повторная загрузка того же файла не задваивает суммы: ключ строки — период,
+    статья и контрагент. Незнакомые формулировки статей не теряются, а попадают в
+    «прочие расходы» и возвращаются списком — по нему уточняется карта соответствий.
+    """
+    cid = await assert_company_member(company_id, current_user, db)
+    content = await file.read()
+    if not content:
+        raise HTTPException(400, "Пустой файл")
+    try:
+        import openpyxl
+
+        wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+        ws = wb[sheet] if sheet and sheet in wb.sheetnames else wb[wb.sheetnames[0]]
+        parsed = ops_payments.read_rows(ws.iter_rows(values_only=True),
+                                        source_label=(file.filename or "")[:200])
+        result = await ops_payments.store(db, cid, parsed)
+    except ops_payments.PaymentsImportError as e:
+        await db.rollback()
+        raise HTTPException(400, str(e)) from e
+    except KeyError as e:
+        await db.rollback()
+        raise HTTPException(400, f"Лист выгрузки не найден: {e}") from e
+    await db.commit()
+    return result
+
+
+@router.get("/payments")
+async def get_ops_payments(
+    company_id: str = Query(...),
+    date_from: str | None = Query(None),
+    date_to: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Факт против ожидания по периодам и статьям.
+
+    Расхождение считается только по месяцам: годовые строки старых лет сравнивать
+    не с чем — начислений за те годы в пространстве нет, и показать «минус всё»
+    значило бы соврать.
+    """
+    cid = await assert_company_member(company_id, current_user, db)
+    return await ops_payments.summary(db, cid, date_from=date_from, date_to=date_to)
+
+
+@router.get("/payments/coverage")
+async def get_ops_payments_coverage(
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Сколько бухгалтерских номеров из выгрузки связано с объектами сети.
+
+    Нужна честная цифра: пока номер заказчика в реестре соответствий не ведётся,
+    разложить расход по площадкам нечем, и это должно быть видно, а не подразумеваться.
+    """
+    cid = await assert_company_member(company_id, current_user, db)
+    return await ops_payments.objects_coverage(db, cid)
