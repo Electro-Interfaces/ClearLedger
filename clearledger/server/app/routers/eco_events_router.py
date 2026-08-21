@@ -135,21 +135,38 @@ async def accept_raw_batch(
     Пакет привязывается к подключению — учётной записи из реестра. Она же
     отвечает на вопрос, чей это пакет: компания берётся из неё, а не из тела,
     ровно по той же причине, по какой ей не верят при приёме событий.
+
+    Подключение можно назвать двумя способами, и второй — основной. Наш
+    идентификатор (`connectionId`) знает лишь тот, кто читал реестр; приложение
+    же знает СВОЙ (`connectorId`) и код своего приложения. Требовать от него наш
+    значило бы заставить каждое приложение сперва вычитать реестр и держать у
+    себя карту соответствий — вторую копию того, что мы и так храним.
     """
     body = await request.json()
+    connection = None
     connection_id = str(body.get("connectionId") or body.get("connection_id") or "").strip()
-    if not connection_id:
-        raise HTTPException(http_status.HTTP_400_BAD_REQUEST,
-                            "Не указано подключение (connectionId)")
-    try:
-        ident = uuid.UUID(connection_id)
-    except (ValueError, TypeError):
-        raise HTTPException(http_status.HTTP_400_BAD_REQUEST,
-                            "Неверный connectionId")
-    connection = await db.get(SpaceConnection, ident)
+    if connection_id:
+        try:
+            ident = uuid.UUID(connection_id)
+        except (ValueError, TypeError):
+            raise HTTPException(http_status.HTTP_400_BAD_REQUEST,
+                                "Неверный connectionId")
+        connection = await db.get(SpaceConnection, ident)
+    else:
+        app_code = str(body.get("app") or request.headers.get("X-Eco-App") or "").strip()
+        external_id = str(body.get("connectorId") or body.get("connector_id") or "").strip()
+        if not app_code or not external_id:
+            raise HTTPException(
+                http_status.HTTP_400_BAD_REQUEST,
+                "Укажите подключение: connectionId либо пару app + connectorId")
+        connection = (await db.execute(select(SpaceConnection).where(
+            SpaceConnection.app_code == app_code[:40],
+            SpaceConnection.external_id == external_id[:120]))).scalars().first()
     if connection is None:
-        raise HTTPException(http_status.HTTP_404_NOT_FOUND,
-                            "Подключение не найдено в реестре")
+        raise HTTPException(
+            http_status.HTTP_404_NOT_FOUND,
+            "Подключение не найдено в реестре: сначала доложите о нём "
+            "(PUT /api/eco/connections)")
 
     items = body.get("items")
     if not isinstance(items, list):
