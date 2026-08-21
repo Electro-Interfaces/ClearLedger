@@ -970,6 +970,19 @@ async def portfolio_overview(db: AsyncSession, company_id) -> dict[str, Any]:
                        or (a.stage = 'live' and coalesce(a.commissioned_on, '') = '')
                        or (a.kind = 'decommission' and coalesce(a.commissioned_on, '') <> '')
                    ) as commissioning_mismatch,
+                   -- Послабления: обязательные пункты, с которых ответственный снял
+                   -- обязательность под свою подпись. Отдельный флаг потому, что
+                   -- подпись под решением, которого никто не смотрит, формальна:
+                   -- проект прошёл дальше, а собрано не всё.
+                   exists (
+                       select 1
+                         from jsonb_each(coalesce(a.gates, '{{}}'::jsonb)) as g(stage, marks)
+                         cross join lateral jsonb_each(
+                             case when jsonb_typeof(g.marks) = 'object'
+                                  then g.marks else '{{}}'::jsonb end) as m(key, mark)
+                        where jsonb_typeof(m.mark) = 'object'
+                          and coalesce(m.mark->>'waived', 'false') = 'true'
+                   ) as has_waived,
                    (a.next_action_due is not null and a.next_action_due < :today) as step_overdue,
                    exists (
                        select 1 from ezs_tech_connections t where t.site_id = a.id
@@ -997,6 +1010,7 @@ async def portfolio_overview(db: AsyncSession, company_id) -> dict[str, Any]:
              '1970-01-01') < :d30) as no_touch_30,
           count(*) filter (where no_participants) as no_participants,
           count(*) filter (where has_rework) as rework,
+          count(*) filter (where has_waived) as waived_gates,
           count(*) filter (where commissioning_mismatch) as commissioning_mismatch,
           count(*) filter (where step_overdue or tp_overdue or eq_overdue) as at_risk,
           count(*) filter (where step_overdue or tp_overdue or eq_overdue
@@ -1004,7 +1018,8 @@ async def portfolio_overview(db: AsyncSession, company_id) -> dict[str, Any]:
              or (stage_since is not null
                  and (current_date - stage_since::date) > {_NORM_CASE})
              or coalesce(to_char(last_touch_at, 'YYYY-MM-DD'), '1970-01-01') < :d30
-             or no_participants or has_rework or commissioning_mismatch) as attention_total,
+             or no_participants or has_rework or commissioning_mismatch
+             or has_waived) as attention_total,
           count(*) as active_total,
           count(*) filter (where stage_events > 0) as with_history,
           count(*) filter (where stage_events = 0) as without_history,
@@ -1044,6 +1059,12 @@ async def portfolio_overview(db: AsyncSession, company_id) -> dict[str, Any]:
         {"key": "no_participants", "label": "Не назначен состав проекта",
          "count": int(risks["no_participants"]),
          "hint": "нет ни одного участника с ролью по регламенту", "filter": "", "tone": "warning"},
+        {"key": "waived_gates", "label": "Идут с послаблениями",
+         "count": int(risks["waived_gates"]),
+         # Не упрёк: снятие обязательности — законный ход ответственного. Но оно
+         # обязано быть видно, иначе подпись под ним ничего не стоит.
+         "hint": "с обязательных пунктов снята обязательность — под чьей-то подписью",
+         "filter": "", "tone": "warning"},
     ]
 
     # ── 2. Где затык: воронка со сроком и проходимостью ────────────────────

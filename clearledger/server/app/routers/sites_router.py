@@ -105,6 +105,25 @@ async def list_gates(user: User = Depends(get_current_user)):
     }
 
 
+@router.get("/meta/routes")
+async def list_project_routes(
+    company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Маршруты, по которым можно повести проект: полный регламент, короткий, свой.
+
+    Стоит среди `/meta/*` не для красоты: ручка `/{site_id}` объявлена ниже и
+    разобрала бы «routes» как идентификатор площадки.
+    """
+    cid = await assert_company_member(company_id, user, db)
+    try:
+        return {"routes": await projects_process.list_routes(db, cid)}
+    except ProjectionError as e:
+        # Недоступный Координатор — не повод не дать завести проект: без списка он
+        # поедет по маршруту умолчания, как ездил всегда.
+        return {"routes": [], "error": str(e)}
+
+
 @router.get("/meta/project-kinds")
 async def project_kinds(user: User = Depends(get_current_user)):
     """Типы проектов и режимы закрытия — для форм заведения и остановки."""
@@ -484,6 +503,10 @@ async def get_site(
     out = await ezs_sites.site_detail(db, cid, site_id)
     if out is None:
         raise HTTPException(404, "Площадка не найдена")
+    # Право считается на человека, а не на карточку, поэтому живёт в ручке, а не в
+    # `site_detail`. Кнопку, которой всё равно ответят 403, показывать незачем.
+    site = await _owned(db, cid, site_id)
+    out["mayWaive"] = await _may_waive_gate(db, cid, site, user)
     return out
 
 
@@ -536,6 +559,30 @@ async def _is_company_admin(db: AsyncSession, cid, user: User) -> bool:
     row = (await db.execute(select(UserCompany).where(
         UserCompany.user_id == user.id, UserCompany.company_id == cid))).scalar_one_or_none()
     return bool(row is not None and getattr(row, "role", None) == "admin")
+
+
+async def _may_waive_gate(db: AsyncSession, cid, site: EzsSite, user: User) -> bool:
+    """Кто вправе снять с пункта обязательность.
+
+    Тот, кто отвечает за проект: назначенный ответственный либо участник в роли
+    отдела развития — он ведёт проект от локации до инвестрешения и отвечает за
+    сроки. Администратор компании тоже вправе, и не ради удобства: у проекта без
+    назначенного состава иначе не остаётся ни одного человека, кто может сдвинуть
+    его с застрявшего пункта.
+
+    Подпись при этом всегда чужая не бывает — в журнал пишется тот, кто нажал.
+    Именно поэтому право можно давать широко: администратор здесь не подменяет
+    собой ответственного, он попадает в историю под своим именем.
+    """
+    if site.owner_user_id and site.owner_user_id == user.id:
+        return True
+    lead = (await db.execute(select(EzsSiteParticipant).where(
+        EzsSiteParticipant.site_id == site.id,
+        EzsSiteParticipant.user_id == user.id,
+        EzsSiteParticipant.role_code.in_(("ОР", "ДР/ГД"))))).first()
+    if lead is not None:
+        return True
+    return await _is_company_admin(db, cid, user)
 
 
 # ── Документы проекта ──────────────────────────────────────────────────────
@@ -790,6 +837,32 @@ async def mark_gate(
     return res
 
 
+@router.post("/{site_id}/gate/waive")
+async def waive_gate(
+    site_id: uuid.UUID, payload: dict, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Снять с обязательного пункта обязательность (или вернуть её).
+
+    Тело: `{ key, waived, reason }`. Пункт не отменяется и не считается
+    выполненным — он перестаёт держать переход, а в чек-листе остаётся видимым, с
+    именем того, кто это решил, и обоснованием.
+    """
+    cid = await assert_company_member(company_id, user, db)
+    site = await _owned(db, cid, site_id)
+    if not await _may_waive_gate(db, cid, site, user):
+        raise HTTPException(
+            403, "Снять обязательность может ответственный за проект или отдел развития")
+    res = await ezs_site_work.set_gate_waiver(
+        db, site, str(payload.get("key") or ""), bool(payload.get("waived")),
+        str(payload.get("reason") or ""), user)
+    if not res.get("ok"):
+        await db.rollback()
+        raise HTTPException(400, res.get("message", "Пункт не изменён"))
+    await db.commit()
+    return {**res, "site": await ezs_sites.site_detail(db, cid, site_id)}
+
+
 @router.get("/{site_id}/events")
 async def get_events(
     site_id: uuid.UUID, company_id: str = Query(...),
@@ -873,12 +946,33 @@ async def reconcile_project_case(
 
 @router.post("/{site_id}/case")
 async def open_project_case(
-    site_id: uuid.UUID, company_id: str = Query(...),
+    site_id: uuid.UUID, payload: dict | None = None, company_id: str = Query(...),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    """Начать вести проект по маршруту (или обновить сводку у заведённого кейса)."""
+    """Начать вести проект по маршруту (или обновить сводку у заведённого кейса).
+
+    Тело `{ routeCode }` — по каким рельсам вести. Действует только на первом
+    вызове, том, что кейс и заводит: у идущего проекта маршрут не меняется, и
+    молча подменять его на другой было бы хуже, чем отказать. «Повести
+    по-другому» означает завести проект заново.
+    """
     cid = await assert_company_member(company_id, user, db)
     site = await _owned(db, cid, site_id)
+    route_code = str((payload or {}).get("routeCode") or "").strip()
+    if route_code and route_code != (site.route_code or ""):
+        # Записываем выбор, только если ТОЧНО знаем, что кейса ещё нет. Не знаем —
+        # не пишем: маршрут в карточке, разошедшийся с маршрутом идущего кейса,
+        # врал бы и на схеме, и в предпросмотре, а починить это было бы нечем.
+        try:
+            state = await projects_process.case_state(db, cid, site, user)
+        except ProjectionError as e:
+            raise HTTPException(502, str(e)) from e
+        if state.get("exists"):
+            raise HTTPException(
+                409, "Проект уже идёт по маршруту — сменить его нельзя. "
+                     "Чтобы вести по-другому, заведите проект заново")
+        site.route_code = route_code[:64]
+        await db.commit()
     try:
         return await projects_process.sync_case(db, cid, site, user)
     except ProjectionError as e:

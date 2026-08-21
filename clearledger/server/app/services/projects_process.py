@@ -147,11 +147,16 @@ async def _instance_id(db: AsyncSession, company_id, site: EzsSite) -> tuple[str
     Возвращает пару: идентификатор процесса и предпросмотр графа. Пустой процесс не
     ошибка: работа по проекту может быть ещё не начата, а путь показать уже нужно.
     """
-    data = await _call(db, company_id, "GET", f"{FACADE}/instances", params={
+    params = {
         "subjectType": SUBJECT_TYPE,
         "subjectId": str(site.id),
         "definition": PROCESS_DEFINITION,
-    })
+    }
+    # Предпросмотр рисуем по ВЫБРАННОМУ маршруту, а не по умолчанию: иначе человек
+    # видел бы до первого шага один путь, а поехал бы по другому.
+    if site.route_code:
+        params["route"] = site.route_code
+    data = await _call(db, company_id, "GET", f"{FACADE}/instances", params=params)
     items = data.get("instances") or []
     return (items[0].get("processId") if items else None), (data.get("definitionPreview") or {})
 
@@ -234,17 +239,34 @@ async def _participants(db: AsyncSession, site: EzsSite) -> list[dict[str, Any]]
             for p, u in rows]
 
 
+async def list_routes(db: AsyncSession, company_id) -> list[dict[str, Any]]:
+    """Маршруты, по которым можно вести проект, — из чего выбирает человек.
+
+    Список приходит из Координатора: там маршруты и живут, там же их правят и
+    публикуют. Держать здесь свою копию значило бы завести вторую правду о том,
+    какой регламент действует.
+    """
+    data = await _call(db, company_id, "GET",
+                       f"{FACADE}/definitions/{PROCESS_DEFINITION}/routes")
+    return list(data.get("routes") or [])
+
+
 async def sync_case(db: AsyncSession, company_id, site: EzsSite,
                     user: User | None = None) -> dict[str, Any]:
     """Завести кейс проекта либо обновить его сводку и состав. Повтор безопасен.
 
     Одна операция на два действия сознательно: контекст уезжает при каждом значимом
     изменении проекта, и отдельная «создать» плодила бы гонку «кейс уже есть или нет».
+
+    Маршрут (`route`) Координатор применяет только при заведении: у идущего кейса
+    менять граф нечем, проект уже стоит в одной из его стадий. Поэтому шлём его
+    всегда, а действует он один раз — на том вызове, который кейс и создаёт.
     """
     related = ([{"type": "service_object", "id": str(site.location_id)}]
                if site.location_id else [])
     card = await _call(db, company_id, "POST", f"{FACADE}/instances", json={
         "definition": PROCESS_DEFINITION,
+        "route": site.route_code or None,
         "subject": {"type": SUBJECT_TYPE, "id": str(site.id)},
         "title": site.title or site.project_no or f"Проект ЭЗС {site.id}",
         "actorEmail": getattr(user, "email", None),

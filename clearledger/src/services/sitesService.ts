@@ -101,12 +101,37 @@ export interface GateItem {
   /** Графы площадки, которыми закрывается пункт — для подсветки в паспорте. */
   fields?: string[]
   role?: string | null; phase?: string | null; phaseLabel?: string | null
+  /**
+   * С пункта снята обязательность под ответственность человека. Пункт при этом
+   * остаётся невыполненным и видимым: он не отменён, он не держит переход.
+   */
+  waived?: boolean
+  waivedBy?: string | null
+  waivedAt?: string | null
+  waiveReason?: string | null
+  /** Можно ли снимать обязательность с этого пункта вообще. */
+  waivable?: boolean
 }
 export interface GateState {
   stage: SiteStage; stageLabel: string; items: GateItem[]; done: number; total: number
   /** Обязательные незакрытые пункты — они держат переход вперёд. */
   blocking: string[]
+  /** Пункты, прошедшие с послаблением: кто снял, когда и почему. */
+  waived?: {
+    key: string; label: string; by: string | null; at: string | null; reason: string | null
+  }[]
   canAdvance: boolean
+}
+
+/** Маршрут проекта — рельсы, по которым его ведут от локации до ввода. */
+export interface ProjectRoute {
+  code: string; name: string; revision: number
+  /** Свой у компании (иначе общий эталон поставки). */
+  own: boolean
+  automation: boolean
+  stages: number; links: number
+  /** Его возьмут молча, если ничего не выбрать. */
+  isDefault: boolean
 }
 
 export interface SiteDetail extends SiteRow {
@@ -150,6 +175,10 @@ export interface SiteDetail extends SiteRow {
   ownerContact: string | null
   sourceCompany: string | null
   sourcePerson: string | null
+  /** По каким рельсам ведут проект. Пусто — маршрут по умолчанию. */
+  routeCode: string | null
+  /** Вправе ли ЭТОТ человек снимать обязательность с пунктов чек-листа. */
+  mayWaive?: boolean
 }
 
 export interface SiteEvent {
@@ -373,9 +402,24 @@ export async function getProjectCase(companyId: string, id: string): Promise<Cas
   return get(`/api/sites/${id}/case`, { company_id: companyId })
 }
 
-/** Начать вести проект по маршруту (повтор безопасен — обновляет сводку). */
-export async function openProjectCase(companyId: string, id: string): Promise<CaseState> {
-  return post(`/api/sites/${id}/case?company_id=${companyId}`, {})
+/**
+ * Начать вести проект по маршруту (повтор безопасен — обновляет сводку).
+ *
+ * `routeCode` действует только на первом вызове, том, что кейс и заводит: у
+ * идущего проекта маршрут не меняется — стадии у другого графа свои, и проект
+ * оказался бы в стадии, которой в нём нет.
+ */
+export async function openProjectCase(
+  companyId: string, id: string, routeCode?: string,
+): Promise<CaseState> {
+  return post(`/api/sites/${id}/case?company_id=${companyId}`, { routeCode })
+}
+
+/** Маршруты, из которых выбирают, ставя проект на рельсы. */
+export async function getProjectRoutes(
+  companyId: string,
+): Promise<{ routes: ProjectRoute[]; error?: string }> {
+  return get('/api/sites/meta/routes', { company_id: companyId })
 }
 
 /**
@@ -428,6 +472,19 @@ export async function markSiteGate(
   companyId: string, id: string, key: string, done: boolean,
 ): Promise<{ ok: boolean; gate?: GateState; message?: string }> {
   return post(`/api/sites/${id}/gate?company_id=${companyId}`, { key, done })
+}
+
+/**
+ * Снять с обязательного пункта обязательность — или вернуть её.
+ *
+ * Пункт не отменяется и не считается выполненным: он остаётся в чек-листе
+ * невыполненным, но перестаёт держать переход. Под решением стоит имя того, кто
+ * его принял, поэтому обоснование обязательно.
+ */
+export async function waiveSiteGate(
+  companyId: string, id: string, key: string, waived: boolean, reason: string,
+): Promise<{ ok: boolean; gate?: GateState; site?: SiteDetail }> {
+  return post(`/api/sites/${id}/gate/waive?company_id=${companyId}`, { key, waived, reason })
 }
 
 export async function getSiteEvents(companyId: string, id: string): Promise<SiteEvent[]> {

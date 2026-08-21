@@ -3708,6 +3708,28 @@ async def create_all() -> None:
         ):
             await conn.execute(_sa.text(stmt))
 
+        # v2.60: маршрут проекта выбирается человеком, а не берётся молча первым.
+        # Пусто у всех существующих проектов — это и есть прежнее поведение.
+        for stmt in (
+            "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS route_code VARCHAR(64)",
+        ):
+            await conn.execute(_sa.text(stmt))
+
+        # v2.61: слой сырых пакетов оживает для API-источников (services/raw_intake.py).
+        # Таблицу заводит `create_all`, индексы — руками, и все три по делу: чистка
+        # ходит по горизонту, повтор разбора ищет последнее сырое канала, а
+        # неиндексированный FK превращает удаление родителя (запись журнала прогонов)
+        # в seq scan по таблице с jsonb.
+        for stmt in (
+            "CREATE INDEX IF NOT EXISTS ix_raw_batches_expiry "
+            "ON raw_batches (fetched_at)",
+            "CREATE INDEX IF NOT EXISTS ix_raw_batches_channel "
+            "ON raw_batches (channel_id, fetched_at DESC) WHERE channel_id IS NOT NULL",
+            "CREATE INDEX IF NOT EXISTS ix_raw_batches_sync_log "
+            "ON raw_batches (sync_log_id) WHERE sync_log_id IS NOT NULL",
+        ):
+            await conn.execute(_sa.text(stmt))
+
     await _ensure_active_group_readiness(engine)
 
 

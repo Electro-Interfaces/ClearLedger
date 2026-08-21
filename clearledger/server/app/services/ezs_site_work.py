@@ -20,7 +20,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import EzsProject, EzsSite, EzsSiteEvent, User
-from app.services.ezs_checklist import PHASE_LABELS_DOC, gates_by_stage
+from app.services.ezs_checklist import PHASE_LABELS_DOC, WAIVE_FORBIDDEN, gates_by_stage
 from app.services.ezs_sites import (
     STAGE_LABELS, STAGE_ORDER, _site_out, format_project_no, parse_project_seq,
     project_no_prefix,
@@ -80,6 +80,10 @@ def gate_state(site: EzsSite, stage: str | None = None,
 
     `doc_kinds` — типы приложенных документов проекта; без них пункты вида
     «скан договора» считать нельзя, поэтому вызывающая сторона их передаёт.
+
+    **Послабление** (`waived`) — обязательный пункт, с которого ответственный снял
+    обязательность под свою подпись. Пункт остаётся в списке невыполненным: он не
+    отменён и его всё ещё видно. Он просто перестаёт держать переход.
     """
     st = stage or site.stage
     items = GATES.get(st, [])
@@ -87,6 +91,8 @@ def gate_state(site: EzsSite, stage: str | None = None,
     docs = doc_kinds or set()
     out = []
     for it in items:
+        mark = marks.get(it["key"]) or {}
+        waived = bool(mark.get("waived"))
         if it.get("manual"):
             done = bool(marks.get(it["key"], {}).get("done"))
         elif it.get("doc"):
@@ -102,20 +108,36 @@ def gate_state(site: EzsSite, stage: str | None = None,
             done = _field_filled(site, it["field"])
         out.append({"key": it["key"], "label": it["label"], "manual": bool(it.get("manual")),
                     "doc": it.get("doc"), "equipment": bool(it.get("equipment")),
+                    # `required` остаётся истиной и после послабления: по регламенту
+                    # пункт обязателен, снята обязательность только в этом проекте
+                    # и только под подписью. Разница видна и в карточке, и в отчёте.
                     "required": bool(it.get("required")), "done": done,
+                    "waived": waived,
+                    "waivedBy": mark.get("waived_by_name") if waived else None,
+                    "waivedAt": mark.get("waived_at") if waived else None,
+                    "waiveReason": mark.get("waive_reason") if waived else None,
+                    # Снимать обязательность имеет смысл только с того, что её имеет
+                    # и не выполнено; три пункта не снимаются вовсе (WAIVE_FORBIDDEN).
+                    "waivable": bool(it.get("required")) and it["key"] not in WAIVE_FORBIDDEN,
                     "role": it.get("role"),
                     # Какие графы закрывают пункт: карточка подсвечивает их в паспорте.
                     # Из 55 граф иначе не понять, какие нужны прямо сейчас.
                     "fields": it.get("fields") or ([it["field"]] if it.get("field") else []),
                     "phase": it.get("phase"),
                     "phaseLabel": PHASE_LABELS_DOC.get(it.get("phase", ""), "")})
-    blocking = [i["label"] for i in out if i["required"] and not i["done"]]
+    blocking = [i["label"] for i in out if i["required"] and not i["done"] and not i["waived"]]
+    waived = [{"key": i["key"], "label": i["label"], "by": i["waivedBy"],
+               "at": i["waivedAt"], "reason": i["waiveReason"]}
+              for i in out if i["waived"]]
     return {
         "stage": st, "stageLabel": STAGE_LABELS.get(st, st),
         "items": out,
         "done": sum(1 for i in out if i["done"]),
         "total": len(out),
         "blocking": blocking,          # что держит переход вперёд
+        # Пройденное с послаблением называется вслух: иначе «переход открыт»
+        # выглядит как «всё собрано», а собрано не всё.
+        "waived": waived,
         "canAdvance": not blocking,
     }
 
@@ -448,7 +470,10 @@ async def set_gate_item(db: AsyncSession, site: EzsSite, key: str, done: bool,
     gates = dict(site.gates or {})
     stage_marks = dict(gates.get(site.stage) or {})
     old_done = bool(stage_marks.get(key, {}).get("done"))
+    # Отметка и послабление живут в одной записи, поэтому пишем поверх, а не вместо:
+    # иначе галочка стирала бы чужую подпись под снятием обязательности.
     stage_marks[key] = {
+        **(stage_marks.get(key) or {}),
         "done": bool(done),
         "at": datetime.now(timezone.utc).isoformat(),
         "by": str(user.id) if user is not None else None,
@@ -467,6 +492,91 @@ async def set_gate_item(db: AsyncSession, site: EzsSite, key: str, done: bool,
     return {"ok": True, "gate": gate_state(
         site, doc_kinds=await site_doc_kinds(db, site.id),
         equipment_supplied=await site_equipment_supplied(db, site.id))}
+
+
+# Пункт чек-листа по номеру, вместе со стадией, к которой он приписан. Гейты
+# разложены по стадиям, а послабление адресуется пункту: «3.12» человек называет
+# по номеру, не помня, на какой стадии он закрывается.
+_ITEM_BY_KEY: dict[str, tuple[str, dict[str, Any]]] = {
+    it["key"]: (st, it) for st, items in GATES.items() for it in items
+}
+
+
+async def set_gate_waiver(db: AsyncSession, site: EzsSite, key: str, waived: bool,
+                          reason: str, user: User | None) -> dict[str, Any]:
+    """Снять с обязательного пункта обязательность — под ответственность человека.
+
+    Это НЕ отмена пункта и не отметка «выполнено». Пункт остаётся в чек-листе
+    невыполненным и видимым, но перестаёт держать переход: ответственный за проект
+    заявил, что здесь ждать нечего, и подписался под этим своим именем.
+
+    Зачем отдельно от обхода гейта (`set_stage(override=True)`): обход — событие
+    одного перехода, его надо повторять на каждом шаге, и в карточке от него не
+    остаётся ничего, кроме строки в истории. Послабление — состояние проекта: его
+    видно в чек-листе, у него есть автор и причина, и оно снимается так же явно,
+    как ставится.
+
+    Право проверяет вызывающая сторона (роутер): здесь только правила самого
+    чек-листа — какой пункт вообще можно ослабить.
+    """
+    found = _ITEM_BY_KEY.get(key)
+    if found is None:
+        return {"ok": False, "message": f"Пункт {key} в чек-листе не значится"}
+    stage, item = found
+    if not item.get("required"):
+        return {"ok": False, "message": "Пункт и так не обязателен — снимать нечего"}
+    if key in WAIVE_FORBIDDEN:
+        return {"ok": False,
+                "message": f"Пункт {key} «{item['label']}» обязателен без исключений"}
+    reason = (reason or "").strip()
+    if waived and not reason:
+        return {"ok": False, "message": "Нужно обоснование: под ним будет стоять ваше имя"}
+
+    gates = dict(site.gates or {})
+    stage_marks = dict(gates.get(stage) or {})
+    mark = dict(stage_marks.get(key) or {})
+    was = bool(mark.get("waived"))
+    if was == bool(waived):
+        return {"ok": True, "unchanged": True, "gate": await gate_now(db, site)}
+
+    now = datetime.now(timezone.utc).isoformat()
+    if waived:
+        mark.update({
+            "waived": True,
+            "waived_at": now,
+            "waived_by": str(user.id) if user is not None else None,
+            # Имя снимком: отчёт и карточка читают его без join, а человек может
+            # уволиться — подпись под решением от этого не должна исчезнуть.
+            "waived_by_name": (getattr(user, "name", None) or getattr(user, "email", None)
+                               if user is not None else None),
+            "waive_reason": reason[:500],
+        })
+    else:
+        # Возврат обязательности стирает послабление, но не отметку выполнения:
+        # это две разные вещи в одной записи.
+        for f in ("waived", "waived_at", "waived_by", "waived_by_name", "waive_reason"):
+            mark.pop(f, None)
+    stage_marks[key] = mark
+    gates[stage] = stage_marks
+    site.gates = gates
+    site.last_touch_at = datetime.now(timezone.utc)
+
+    text = (f"Снята обязательность пункта {key} «{item['label']}»: {reason}"
+            if waived else f"Возвращена обязательность пункта {key} «{item['label']}»")
+    await log_event(db, site, "gate", user=user, text=text,
+                    changes=[make_change(
+                        f"gate:{key}:waived", was, bool(waived),
+                        label=f"Обязательность пункта {key}", category="decision",
+                        old_display="обязателен" if not was else "не обязателен",
+                        new_display="не обязателен" if waived else "обязателен",
+                    )])
+    return {"ok": True, "gate": await gate_now(db, site)}
+
+
+async def gate_now(db: AsyncSession, site: EzsSite) -> dict[str, Any]:
+    """Чек-лист текущей стадии со всеми фактами, которые считаются из базы."""
+    return gate_state(site, doc_kinds=await site_doc_kinds(db, site.id),
+                      equipment_supplied=await site_equipment_supplied(db, site.id))
 
 
 async def add_touch(db: AsyncSession, site: EzsSite, text: str, kind: str,
@@ -526,6 +636,7 @@ def site_out_full(site: EzsSite, owner_name: str | None = None,
         "ownerContact": site.owner_contact, "sourceCompany": site.source_company,
         "sourcePerson": site.source_person,
         "locationId": str(site.location_id) if site.location_id else None,
+        "routeCode": site.route_code,
         "manualFields": site.manual_fields or [],
         "gate": gate_state(site, doc_kinds=doc_kinds, equipment_supplied=equipment_supplied),
     })

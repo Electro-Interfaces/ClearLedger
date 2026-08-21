@@ -33,8 +33,8 @@ import * as chatApi from '@/services/chatService'
 import { useSupportContext } from '@/contexts/SupportContext'
 import {
   getSiteEvents, getSiteMembers, getSiteEconomics, getProjectContext, getSiteDocs,
-  patchSite, moveSiteStage, markSiteGate, addSiteEvent, uploadSiteDoc, deleteSiteDoc,
-  downloadSiteDoc,
+  patchSite, moveSiteStage, markSiteGate, waiveSiteGate, addSiteEvent, uploadSiteDoc,
+  deleteSiteDoc, downloadSiteDoc, getProjectRoutes,
   saveTechConnection, saveCost, deleteCost, saveEquipment, deleteEquipment,
   linkContract, linkLocation, getProjectKinds, getLocationWorks, startSuccessor,
   getProjectCase, openProjectCase, applyProjectStep, undoProjectStep,
@@ -145,8 +145,18 @@ function RoutePanel({ site, companyId, onDone }: {
   })
   const state = q.data
 
+  // Маршруты спрашиваем только пока проект не на рельсах: у идущего выбор уже
+  // сделан и менять его нечем — лишний запрос в карточку каждого проекта.
+  const qRoutes = useQuery({
+    queryKey: ['project-routes', companyId],
+    queryFn: () => getProjectRoutes(companyId),
+    enabled: state != null && !state.exists,
+    staleTime: 5 * 60_000,
+  })
+  const routes = qRoutes.data?.routes ?? []
+  const [route, setRoute] = useState<string>('')
   const mOpen = useMutation({
-    mutationFn: () => openProjectCase(companyId, site.id),
+    mutationFn: () => openProjectCase(companyId, site.id, route || undefined),
     onSuccess: async () => { toast.success('Проект встал на маршрут'); await q.refetch() },
     onError: (e) => toast.error(e instanceof Error ? e.message : 'Не удалось открыть маршрут'),
   })
@@ -211,15 +221,47 @@ function RoutePanel({ site, companyId, onDone }: {
     )
   }
   if (!state?.exists) {
+    // Выбор маршрута показываем, только если выбирать есть из чего. Один маршрут —
+    // это не выбор, а лишний вопрос перед единственной кнопкой.
+    const choice = routes.length > 1
+    const routeInfo = routes.find((r) => r.code === route) ?? routes.find((r) => r.isDefault)
     return (
-      <section className="rounded-lg border border-dashed border-border px-3 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div className="text-sm text-muted-foreground">
-          Проект ещё не ведётся по маршруту регламента: нет ни ответственного за шаг, ни сроков этапов.
+      <section className="rounded-lg border border-dashed border-border px-3 py-3 space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="text-sm text-muted-foreground">
+            Проект ещё не ведётся по маршруту регламента: нет ни ответственного за шаг, ни сроков этапов.
+          </div>
+          <Button size="sm" className="h-10 sm:h-9 w-full sm:w-auto shrink-0"
+            onClick={() => mOpen.mutate()} disabled={mOpen.isPending}>
+            {mOpen.isPending && <Loader2 className="h-4 w-4 animate-spin mr-1" />}Вести по маршруту
+          </Button>
         </div>
-        <Button size="sm" className="h-10 sm:h-9 w-full sm:w-auto shrink-0"
-          onClick={() => mOpen.mutate()} disabled={mOpen.isPending}>
-          {mOpen.isPending && <Loader2 className="h-4 w-4 animate-spin mr-1" />}Вести по маршруту
-        </Button>
+        {choice && (
+          <div className="space-y-1">
+            <div className="text-xs text-muted-foreground">
+              По какому маршруту вести. Выбор делается один раз: сменить его у идущего
+              проекта нельзя — стадии у каждого маршрута свои.
+            </div>
+            <Select value={route || routeInfo?.code || ''} onValueChange={setRoute}>
+              <SelectTrigger className="h-9"><SelectValue placeholder="Маршрут" /></SelectTrigger>
+              <SelectContent>
+                {routes.map((r) => (
+                  <SelectItem key={r.code} value={r.code}>
+                    {r.name}
+                    {r.own ? ' · свой' : ''}
+                    {r.isDefault ? ' · по умолчанию' : ''}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {routeInfo && (
+              <div className="text-xs text-muted-foreground">
+                {routeInfo.stages} стадий, {routeInfo.links} переходов, редакция {routeInfo.revision}
+                {routeInfo.automation ? '' : ' · автоматика выключена'}
+              </div>
+            )}
+          </div>
+        )}
       </section>
     )
   }
@@ -687,6 +729,21 @@ export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; company
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : 'Не удалось отметить пункт'),
   })
+  // Снятие обязательности — решение под подписью, поэтому обоснование спрашиваем
+  // прямо в строке пункта, а не диалогом: диалог уводит взгляд с того, что именно
+  // человек берёт на себя.
+  const [waiveFor, setWaiveFor] = useState<string | null>(null)
+  const [waiveWhy, setWaiveWhy] = useState('')
+  const mWaive = useMutation({
+    mutationFn: (p: { key: string; waived: boolean; reason: string }) =>
+      waiveSiteGate(companyId, site.id, p.key, p.waived, p.reason),
+    onSuccess: async (_r, p) => {
+      setWaiveFor(null); setWaiveWhy('')
+      toast.success(p.waived ? 'Обязательность снята' : 'Обязательность возвращена')
+      await onDone()
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : 'Не удалось изменить пункт'),
+  })
   const mTouch = useMutation({
     mutationFn: () => addSiteEvent(companyId, site.id, touch, 'touch'),
     onSuccess: async () => { setTouch(''); toast.success('Записано'); await onDone() },
@@ -727,27 +784,92 @@ export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; company
               // Падеж целиком, а не хвост: склейка «графа» + «й» давала «графай».
               : byFields.length ? `граф${byFields.length > 1 ? 'ами' : 'ой'} «${byFields.join('», «')}» в паспорте`
               : 'заполняется в паспорте'
+            // Предложить снятие обязательности есть смысл только там, где она есть
+            // и мешает: пункт обязателен, не закрыт и не из числа неснимаемых.
+            const canOfferWaive = !!site.mayWaive && !!it.waivable && it.required
+              && !it.done && !it.waived
             return (
-              <Row key={it.key} type={it.manual ? 'button' : undefined}
-                disabled={it.manual ? mGate.isPending : undefined}
-                onClick={it.manual ? () => mGate.mutate({ key: it.key, done: !it.done }) : undefined}
-                title={it.manual ? 'Отметить вручную' : `Закроется само: ${source}`}
-                className={`flex w-full items-start gap-2 text-left text-sm px-1 py-1 rounded ${
-                  it.manual ? 'hover:bg-muted/60 cursor-pointer' : ''}`}>
-                <span className="shrink-0 mt-0.5">
-                  {it.done
-                    ? <Check className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
-                    : <Circle className={`h-3.5 w-3.5 ${it.manual ? '' : 'text-muted-foreground/50'}`} />}
-                </span>
-                {/* Номер пункта регламента: по нему сверяются с бумагой отдела развития. */}
-                <span className="shrink-0 font-mono text-xs text-muted-foreground mt-0.5 w-8"
-                  title={it.phaseLabel ? `Этап ${it.phase}. ${it.phaseLabel}` : undefined}>{it.key}</span>
-                <span className={it.done ? '' : 'text-muted-foreground'}>{it.label}</span>
-                {it.role && <span className="text-xs text-muted-foreground shrink-0 mt-0.5">· {it.role}</span>}
-                {it.required && <span className="text-xs text-red-500/80 shrink-0 mt-0.5"
-                  title="Пока не закрыт, проект дальше не пойдёт">держит переход</span>}
-                {source && <span className="text-xs text-muted-foreground shrink-0 mt-0.5">— {source}</span>}
-              </Row>
+              <div key={it.key}>
+                <Row type={it.manual ? 'button' : undefined}
+                  disabled={it.manual ? mGate.isPending : undefined}
+                  onClick={it.manual ? () => mGate.mutate({ key: it.key, done: !it.done }) : undefined}
+                  title={it.manual ? 'Отметить вручную' : `Закроется само: ${source}`}
+                  className={`flex w-full items-start gap-2 text-left text-sm px-1 py-1 rounded ${
+                    it.manual ? 'hover:bg-muted/60 cursor-pointer' : ''}`}>
+                  <span className="shrink-0 mt-0.5">
+                    {it.done
+                      ? <Check className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+                      : <Circle className={`h-3.5 w-3.5 ${it.manual ? '' : 'text-muted-foreground/50'}`} />}
+                  </span>
+                  {/* Номер пункта регламента: по нему сверяются с бумагой отдела развития. */}
+                  <span className="shrink-0 font-mono text-xs text-muted-foreground mt-0.5 w-8"
+                    title={it.phaseLabel ? `Этап ${it.phase}. ${it.phaseLabel}` : undefined}>{it.key}</span>
+                  <span className={it.done ? '' : 'text-muted-foreground'}>{it.label}</span>
+                  {it.role && <span className="text-xs text-muted-foreground shrink-0 mt-0.5">· {it.role}</span>}
+                  {/* Снятая обязательность заменяет «держит переход», а не дописывается
+                      рядом: две метки об одном и том же противоречили бы друг другу. */}
+                  {it.required && !it.waived && <span className="text-xs text-red-500/80 shrink-0 mt-0.5"
+                    title="Пока не закрыт, проект дальше не пойдёт">держит переход</span>}
+                  {it.waived && <span className="text-xs text-amber-600 dark:text-amber-400 shrink-0 mt-0.5"
+                    title="Пункт обязателен по регламенту, но не держит переход — под чьей-то ответственностью">
+                    не обязателен</span>}
+                  {source && <span className="text-xs text-muted-foreground shrink-0 mt-0.5">— {source}</span>}
+                </Row>
+
+                {/* Кто снял обязательность и почему. Строка не прячется под тултип:
+                    решение принято за всю компанию, и читать его должно быть видно. */}
+                {it.waived && (
+                  <div className="ml-11 mb-1 flex flex-wrap items-baseline gap-x-2 text-xs text-amber-700 dark:text-amber-400">
+                    <span>
+                      Обязательность снял{it.waivedBy ? ` ${it.waivedBy}` : 'а система'}
+                      {it.waivedAt ? `, ${it.waivedAt.slice(0, 10)}` : ''}
+                      {it.waiveReason ? `: ${it.waiveReason}` : ''}
+                    </span>
+                    {site.mayWaive && (
+                      <button type="button" className="underline hover:no-underline"
+                        disabled={mWaive.isPending}
+                        onClick={() => mWaive.mutate({ key: it.key, waived: false, reason: '' })}>
+                        вернуть обязательность
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {canOfferWaive && waiveFor !== it.key && (
+                  <div className="ml-11 mb-1">
+                    <button type="button"
+                      className="text-xs text-muted-foreground underline hover:no-underline"
+                      onClick={() => { setWaiveFor(it.key); setWaiveWhy('') }}>
+                      снять обязательность под свою ответственность
+                    </button>
+                  </div>
+                )}
+
+                {canOfferWaive && waiveFor === it.key && (
+                  <div className="ml-11 mb-2 space-y-1 rounded border border-amber-500/40 bg-amber-500/5 p-2">
+                    <div className="text-xs text-muted-foreground">
+                      Пункт останется в чек-листе невыполненным и будет виден в отчёте.
+                      Под решением встанет ваше имя.
+                    </div>
+                    <Textarea value={waiveWhy} onChange={(e) => setWaiveWhy(e.target.value)}
+                      rows={2} placeholder="Почему ждать этот пункт не нужно"
+                      className="text-sm" />
+                    <div className="flex gap-2">
+                      <Button size="sm" variant="outline"
+                        disabled={!waiveWhy.trim() || mWaive.isPending}
+                        onClick={() => mWaive.mutate({
+                          key: it.key, waived: true, reason: waiveWhy.trim(),
+                        })}>
+                        {mWaive.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />}
+                        Снять обязательность
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => setWaiveFor(null)}>
+                        Отмена
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
             )
           })}
         </div>
