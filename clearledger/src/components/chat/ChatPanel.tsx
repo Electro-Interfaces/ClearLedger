@@ -2399,7 +2399,17 @@ export function ChatPanel({ compact, scopeProduct }: {
   }, [selectedRoom, messages.length, tabVisible, qc])
   // Длина СТРАНИЦЫ, а не всей ленты: догрузка истории вверх не должна утаскивать
   // человека обратно вниз, к последнему сообщению.
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [pageMessages.length, typingUsers])
+  //
+  // Плавность — только для НОВОГО сообщения в уже открытом чате: там она и нужна,
+  // чтобы взгляд успел за лентой. При открытии комнаты та же плавность гнала экран
+  // от первого сообщения к последнему через всю историю — секунды бессмысленной
+  // пробежки на каждом входе в группу.
+  const jumpedRoomRef = useRef<string | null>(null)
+  useEffect(() => {
+    const firstOpen = jumpedRoomRef.current !== (selectedRoom ?? null)
+    jumpedRoomRef.current = selectedRoom ?? null
+    endRef.current?.scrollIntoView({ behavior: firstOpen ? 'auto' : 'smooth', block: 'end' })
+  }, [pageMessages.length, typingUsers, selectedRoom])
   // Тихая переподписка Web Push: разрешение уже дано — восстановить подписку после
   // чистки браузера или пересоздания SW. Один раз на открытие чата.
   useEffect(() => { ensurePushSubscription().catch(() => {}) }, [])
