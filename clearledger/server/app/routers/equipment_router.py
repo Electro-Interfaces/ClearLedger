@@ -142,6 +142,13 @@ def _unit_out(u: EzsEquipmentUnit, locs: dict[str, ServiceLocation],
         "originLocation": _loc_brief(locs.get(u.origin_location_id or "")),
         "reservedFor": _loc_brief(locs.get(u.reserved_for_location_id or "")),
         "notes": u.notes,
+        # Графы складского реестра заказчика: где лежит, кто хранит, чем числится
+        # в его учёте — и подтвердил ли поставщик то, что здесь написано.
+        "region": u.region, "keeper": u.keeper,
+        "accountingNo": u.accounting_no, "externalNo": u.external_no,
+        "speedClass": u.speed_class,
+        "dataConfirmed": u.data_confirmed,
+        "unconfirmedReason": u.unconfirmed_reason,
         "supplyId": str(u.supply_id) if u.supply_id else None,
         "supplyLineId": str(u.supply_line_id) if u.supply_line_id else None,
         "supplyNumber": (supplies or {}).get(u.supply_id) if u.supply_id else None,
