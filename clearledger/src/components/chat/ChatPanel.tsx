@@ -1757,15 +1757,19 @@ function ChatBubble({
     action()
     onCloseActions()
   }
-  const actionButtons = (
-    <>
-      {onReact && QUICK_REACTIONS.map((emoji) => (
+  const reactionRow = onReact ? (
+    <div className="flex items-center gap-0.5">
+      {QUICK_REACTIONS.map((emoji) => (
         <button key={emoji} onClick={() => runAction(() => onReact(emoji))} title={emoji}
           className="flex size-7 items-center justify-center rounded-md text-[18px] leading-none transition-transform hover:scale-110 hover:bg-accent active:scale-95 [@media(pointer:coarse)]:size-10 [@media(pointer:coarse)]:text-[20px]">
           {emoji}
         </button>
       ))}
-      {onReact && <span className="mx-0.5 h-5 w-px bg-border [@media(pointer:coarse)]:h-8" />}
+    </div>
+  ) : null
+
+  const toolRow = (
+    <div className="flex items-center gap-0.5">
       <button onClick={() => runAction(onReply)} title="Ответить"
         className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground [@media(pointer:coarse)]:size-10"><Reply className="size-4" /></button>
       {onSelectToggle && <button onClick={() => runAction(onSelectToggle)} title="Выбрать"
@@ -1790,6 +1794,16 @@ function ChatBubble({
             : 'Сообщение с вложением будет удалено. Восстановить нельзя.'}
           confirmLabel="Удалить" destructive onConfirm={() => runAction(onDelete)} />
       )}
+    </div>
+  )
+
+  // Две строки вместо одной ленты в двенадцать иконок: сверху то, чем отвечают
+  // чувством, снизу то, чем работают. Панель стала вдвое уже и перестала
+  // растягиваться на половину ленты.
+  const actionButtons = (
+    <>
+      {reactionRow}
+      {toolRow}
     </>
   )
 
@@ -1855,7 +1869,7 @@ function ChatBubble({
             // `select-none` не украшение: панель лежит внутри пузыря, и без него
             // выделение нескольких реплик утаскивало в буфер шесть эмодзи и весь
             // ряд кнопок — вставлялось это вперемешку с текстом разговора.
-            'pointer-events-none absolute z-10 flex select-none items-center gap-0.5 rounded-lg border border-border bg-popover px-1 py-1 shadow-lg opacity-0 transition-opacity group-hover/bubble:pointer-events-auto group-hover/bubble:opacity-100 [@media(pointer:coarse)]:hidden',
+            'pointer-events-none absolute z-10 flex select-none flex-col gap-0.5 rounded-lg border border-border bg-popover px-1 py-1 shadow-lg opacity-0 transition-opacity group-hover/bubble:pointer-events-auto group-hover/bubble:opacity-100 [@media(pointer:coarse)]:hidden',
             // Панель встаёт СБОКУ от пузыря, в пустое поле ленты. Раньше она висела
             // над ним и на каждом наведении закрывала предыдущую реплику — читать
             // переписку, ведя по ней мышью, было нельзя.
@@ -1883,7 +1897,7 @@ function ChatBubble({
                 onClick={onCloseActions}
                 className="fixed inset-0 z-30 hidden bg-black/10 [@media(pointer:coarse)]:block" />
               <div id={actionsId} role="toolbar" aria-label="Действия с сообщением"
-                className="fixed inset-x-2 bottom-[calc(env(safe-area-inset-bottom)+4.75rem)] z-40 hidden select-none flex-wrap items-center justify-center gap-0.5 rounded-2xl border border-border bg-popover p-2 text-popover-foreground shadow-2xl [@media(pointer:coarse)]:flex">
+                className="fixed inset-x-2 bottom-[calc(env(safe-area-inset-bottom)+4.75rem)] z-40 hidden select-none flex-col items-center justify-center gap-1 rounded-2xl border border-border bg-popover p-2 text-popover-foreground shadow-2xl [@media(pointer:coarse)]:flex">
                 {actionButtons}
               </div>
             </>
@@ -2451,9 +2465,29 @@ export function ChatPanel({ compact, scopeProduct }: {
   // пробежки на каждом входе в группу.
   const jumpedRoomRef = useRef<string | null>(null)
   useEffect(() => {
-    const firstOpen = jumpedRoomRef.current !== (selectedRoom ?? null)
-    jumpedRoomRef.current = selectedRoom ?? null
-    endRef.current?.scrollIntoView({ behavior: firstOpen ? 'auto' : 'smooth', block: 'end' })
+    const room = selectedRoom ?? null
+    const firstOpen = jumpedRoomRef.current !== room
+    // Первый эффект комнаты приходит на ПУСТОЙ ленте — сообщения ещё летят с
+    // сервера. Если отметить комнату как показанную здесь, то настоящая прокрутка
+    // (когда лента наполнилась) окажется уже «не первой» и поедет плавно — то есть
+    // ровно та пробежка по всей истории, ради устранения которой всё и затевалось.
+    if (firstOpen && pageMessages.length === 0) return
+    if (firstOpen) {
+      jumpedRoomRef.current = room
+      // Ставим прокрутку сами, а не через scrollIntoView: он умеет анимировать по
+      // настройке страницы, а нам нужен именно мгновенный переход в конец.
+      const el = feedRef.current
+      if (el) el.scrollTop = el.scrollHeight
+      else endRef.current?.scrollIntoView({ block: 'end' })
+      // Картинки и карточки ссылок меняют высоту после загрузки — дотягиваем в
+      // следующем кадре, иначе конец ленты уезжает под низ окна.
+      requestAnimationFrame(() => {
+        const again = feedRef.current
+        if (again) again.scrollTop = again.scrollHeight
+      })
+      return
+    }
+    endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
   }, [pageMessages.length, typingUsers, selectedRoom])
   // Тихая переподписка Web Push: разрешение уже дано — восстановить подписку после
   // чистки браузера или пересоздания SW. Один раз на открытие чата.
