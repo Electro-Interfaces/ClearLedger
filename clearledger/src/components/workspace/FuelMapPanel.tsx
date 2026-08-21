@@ -6,8 +6,9 @@
 
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { MapContainer, TileLayer, CircleMarker, Marker, Popup, Tooltip, useMap, useMapEvents, AttributionControl } from 'react-leaflet'
-import { MAP_ATTRIBUTION_PREFIX, MAP_CRS, mapTileProps } from '@/lib/mapTiles'
+import { MapContainer, CircleMarker, Marker, Popup, Tooltip, useMap, useMapEvents, AttributionControl } from 'react-leaflet'
+import { MAP_ATTRIBUTION_PREFIX, MAP_CRS } from '@/lib/mapTiles'
+import { MapLayerSwitch, MapTiles, useMapLayers } from '@/components/map/MapLayers'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { Loader2, MapPin, Fuel, Wallet, Gauge, RefreshCw } from 'lucide-react'
@@ -731,6 +732,8 @@ export function FuelMapPanel({ companyId, dateFrom, dateTo }: {
     } finally { setSyncing(false) }
   }
 
+  const mapLayers = useMapLayers()
+
   return (
     <div className="flex h-full flex-col">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-2.5">
@@ -778,8 +781,9 @@ export function FuelMapPanel({ companyId, dateFrom, dateTo }: {
         </div>
       ) : (
         <div className="relative isolate min-h-[520px] flex-1">
-          <MapContainer crs={MAP_CRS} attributionControl={false} center={[60.7, 28.8]} zoom={9} scrollWheelZoom style={{ height: '100%', width: '100%', background: dark ? '#0b1220' : '#e5e7eb' }} preferCanvas>
-            <TileLayer key={dark ? 'dark' : 'light'} {...mapTileProps(dark)} />
+          <MapLayerSwitch {...mapLayers} />
+        <MapContainer crs={MAP_CRS} attributionControl={false} center={[60.7, 28.8]} zoom={9} scrollWheelZoom style={{ height: '100%', width: '100%', background: dark ? '#0b1220' : '#e5e7eb' }} preferCanvas>
+            <MapTiles base={mapLayers.base} traffic={mapLayers.traffic} dark={dark} />
           <AttributionControl position="bottomright" prefix={MAP_ATTRIBUTION_PREFIX} />
             <MapInvalidate />
             <FitBounds pts={pts} />

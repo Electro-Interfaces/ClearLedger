@@ -10,8 +10,9 @@
  */
 import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { MapContainer, TileLayer, CircleMarker, Popup, AttributionControl } from 'react-leaflet'
-import { MAP_ATTRIBUTION_PREFIX, MAP_CRS, mapTileProps } from '@/lib/mapTiles'
+import { MapContainer, CircleMarker, Popup, AttributionControl } from 'react-leaflet'
+import { MAP_ATTRIBUTION_PREFIX, MAP_CRS } from '@/lib/mapTiles'
+import { MapLayerSwitch, MapTiles, useMapLayers } from '@/components/map/MapLayers'
 import 'leaflet/dist/leaflet.css'
 import { Loader2, MapPin, Plus } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
@@ -86,6 +87,8 @@ function MarketMap() {
     .map((l) => ({ id: l.id, name: l.name, lat: Number(l.latitude), lon: Number(l.longitude) })),
   [ours.data])
 
+  const mapLayers = useMapLayers()
+
   return (
     <div className="flex h-full min-h-0 flex-col gap-3 p-4">
       <div className="flex flex-wrap items-center gap-2">
@@ -113,10 +116,11 @@ function MarketMap() {
         } />
       </div>
 
-      <div className="isolate min-h-0 flex-1 overflow-hidden rounded-lg border border-border">
+      <div className="relative isolate min-h-0 flex-1 overflow-hidden rounded-lg border border-border">
+        <MapLayerSwitch {...mapLayers} />
         <MapContainer crs={MAP_CRS} attributionControl={false} center={[55.75, 37.6]} zoom={5} scrollWheelZoom preferCanvas
           style={{ height: '100%', width: '100%', background: 'hsl(var(--muted))' }}>
-          <TileLayer key={dark ? 'dark' : 'light'} {...mapTileProps(dark)} />
+          <MapTiles base={mapLayers.base} traffic={mapLayers.traffic} dark={dark} />
           <AttributionControl position="bottomright" prefix={MAP_ATTRIBUTION_PREFIX} />
           {ourPoints.map((p) => (
             <CircleMarker key={`our-${p.id}`} center={[p.lat, p.lon]} radius={5}

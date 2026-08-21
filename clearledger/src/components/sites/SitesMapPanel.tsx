@@ -7,8 +7,9 @@
  */
 import { Fragment, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { MapContainer, TileLayer, CircleMarker, Circle, Popup, AttributionControl } from 'react-leaflet'
-import { MAP_ATTRIBUTION_PREFIX, MAP_CRS, mapTileProps } from '@/lib/mapTiles'
+import { MapContainer, CircleMarker, Circle, Popup, AttributionControl } from 'react-leaflet'
+import { MAP_ATTRIBUTION_PREFIX, MAP_CRS } from '@/lib/mapTiles'
+import { MapLayerSwitch, MapTiles, useMapLayers } from '@/components/map/MapLayers'
 import 'leaflet/dist/leaflet.css'
 import { Card, CardContent } from '@/components/ui/card'
 import { Loader2 } from 'lucide-react'
@@ -62,6 +63,8 @@ export function SitesMapPanel({ companyId }: { companyId: string }) {
   }), [net.data])
   const cannibalKm = pts.data?.thresholds.cannibalKm ?? 0.5
 
+  const mapLayers = useMapLayers()
+
   return (
     <div className="p-4 space-y-3">
       <div className="flex flex-wrap items-center gap-2">
@@ -97,9 +100,10 @@ export function SitesMapPanel({ companyId }: { companyId: string }) {
           {pts.isLoading ? (
             <div className="flex justify-center py-24"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
           ) : (
-            <div className="h-[calc(100vh-260px)] min-h-[420px] w-full overflow-hidden rounded-lg">
-              <MapContainer crs={MAP_CRS} attributionControl={false} center={CENTER} zoom={4} style={{ height: '100%', width: '100%' }} preferCanvas>
-                <TileLayer key={false ? 'dark' : 'light'} {...mapTileProps(false)} />
+            <div className="relative h-[calc(100vh-260px)] min-h-[420px] w-full overflow-hidden rounded-lg">
+              <MapLayerSwitch {...mapLayers} />
+        <MapContainer crs={MAP_CRS} attributionControl={false} center={CENTER} zoom={4} style={{ height: '100%', width: '100%' }} preferCanvas>
+                <MapTiles base={mapLayers.base} traffic={mapLayers.traffic} dark={false} />
           <AttributionControl position="bottomright" prefix={MAP_ATTRIBUTION_PREFIX} />
 
                 {/* Действующая станция: видимая точка 5 px, а ловит клик прозрачный

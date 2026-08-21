@@ -107,3 +107,25 @@ export function mapTileProps(dark: boolean) {
  * `<AttributionControl prefix={MAP_ATTRIBUTION_PREFIX} />`.
  */
 export const MAP_ATTRIBUTION_PREFIX = false as const
+
+/**
+ * Слои растрового Яндекса, доступные без ключа и без смены движка.
+ *
+ * `map` — схема, `sat` — спутник, `hybrid` — спутник плюс отдельный слой подписей
+ * (`skl`), который кладётся сверху: в одном тайле их не отдают. `traffic` — пробки;
+ * у них свой кэш и обязательная метка времени, иначе браузер покажет затор
+ * получасовой давности из своего кэша.
+ */
+export const YANDEX_LAYERS = {
+  map: { url: 'https://core-renderer-tiles.maps.yandex.net/tiles?l=map&x={x}&y={y}&z={z}&scale=1&lang=ru_RU' },
+  sat: { url: 'https://core-sat.maps.yandex.net/tiles?l=sat&x={x}&y={y}&z={z}&scale=1&lang=ru_RU' },
+  hybrid: { url: 'https://core-sat.maps.yandex.net/tiles?l=sat&x={x}&y={y}&z={z}&scale=1&lang=ru_RU' },
+  labels: { url: 'https://core-renderer-tiles.maps.yandex.net/tiles?l=skl&x={x}&y={y}&z={z}&scale=1&lang=ru_RU' },
+  traffic: {
+    url: (stamp: number) =>
+      `https://core-jams-rdr-cache.maps.yandex.net/1.1/tiles?l=trf,trfe&x={x}&y={y}&z={z}&scale=1&tm=${Math.floor(stamp / 1000)}`,
+  },
+} as const
+
+/** Слои есть только у Яндекса: на OSM переключателю показывать нечего. */
+export const isYandexBase = ACTIVE === 'yandex'
