@@ -56,6 +56,7 @@ import { OpsCompletenessVitrine } from '@/components/balance/OpsCompleteness'
 import { ProcurementVitrine, RentVitrine } from '@/components/balance/EnergyManagementVitrines'
 import { OpsClosingPanel } from '@/components/balance/OpsClosingPanel'
 import { OpsChargesPanel } from '@/components/balance/OpsChargesPanel'
+import { OpsPaymentsPanel } from '@/components/balance/OpsPaymentsPanel'
 import { OpsCounterpartiesPanel } from '@/components/balance/OpsCounterpartiesPanel'
 import { OpsDocsPanel } from '@/components/balance/OpsDocsPanel'
 import { FinancialVitrine } from '@/components/balance/EnergyFinancialVitrine'
@@ -130,6 +131,7 @@ function EnergyMgmtVitrine({ tab }: { tab: string }) {
     // Денежный контур: реестр обязательств и закрытие месяца по затратам.
     case 'ops_closing': return <OpsClosingPanel />
     case 'ops_charges': return <OpsChargesPanel />
+    case 'ops_payments': return <OpsPaymentsPanel />
     case 'ops_docs': return <OpsDocsPanel />
     case 'ops_parties': return <OpsCounterpartiesPanel />
     case 'procurement': return <ProcurementVitrine />

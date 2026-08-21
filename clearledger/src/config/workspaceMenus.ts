@@ -137,6 +137,9 @@ export function fuelModeForKey(key: string): 'management' | 'sales_sessions' | '
 export const ENERGY_MGMT: CentralMenuItem[] = [
   { key: 'ops_closing',  label: 'Закрытие месяца' },
   { key: 'ops_charges',  label: 'Затраты объектов' },
+  // «Оплаты» рядом с «Затратами» намеренно: это две стороны одного вопроса —
+  // сколько должны были начислить и сколько ушло со счёта.
+  { key: 'ops_payments', label: 'Оплаты' },
   { key: 'ops_docs',     label: 'Документы' },
   { key: 'ops_parties',  label: 'Контрагенты' },
   { key: 'procurement',  label: 'Энергозакупка' },

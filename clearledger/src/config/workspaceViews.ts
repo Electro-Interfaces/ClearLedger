@@ -164,7 +164,7 @@ const SUB_LABELS: Partial<Record<CoreMode, Record<string, string>>> = {
     eq_supplies: 'Поставки и возвраты',
     eq_movements: 'Движения', eq_spares: 'ЗИП и запчасти',
   },
-  ops_economy: { procurement: 'Энергозакупка', rent: 'Аренда' },
+  ops_economy: { procurement: 'Энергозакупка', rent: 'Аренда', ops_payments: 'Оплаты' },
   marketing: {
     mk_position: 'Позиция', mk_map: 'Карта рынка', mk_sites: 'Точки рынка',
     mk_operators: 'Операторы', mk_observations: 'Наблюдения',

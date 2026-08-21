@@ -617,3 +617,36 @@ export async function getOpsCharges(
   if (to) params.to = to
   return get<OpsChargesMatrix>('/api/ops/charges', params)
 }
+
+/** Кассовый факт: сколько заплачено против того, сколько начислено. */
+export interface OpsPaymentsPeriod {
+  period: string
+  granularity: 'month' | 'year'
+  paid: number
+  capital: number
+  expected: number
+  diff: number
+  items: Record<string, { paid: number; expected: number }>
+}
+
+export interface OpsPaymentsSummary {
+  periods: OpsPaymentsPeriod[]
+  total_paid: number
+  total_capital: number
+}
+
+export async function getOpsPayments(
+  companyId: string, from?: string, to?: string,
+): Promise<OpsPaymentsSummary> {
+  const params: Record<string, string> = { company_id: companyId }
+  if (from) params.date_from = from
+  if (to) params.date_to = to
+  return get<OpsPaymentsSummary>('/api/ops/payments', params)
+}
+
+/** Сколько бухгалтерских номеров выгрузки связано с объектами сети. */
+export async function getOpsPaymentsCoverage(
+  companyId: string,
+): Promise<{ numbers_total: number; numbers_linked: number; hint: string }> {
+  return get('/api/ops/payments/coverage', { company_id: companyId })
+}
