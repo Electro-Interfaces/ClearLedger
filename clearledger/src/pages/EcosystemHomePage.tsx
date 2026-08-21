@@ -37,7 +37,6 @@ import { useCompany } from '@/contexts/CompanyContext'
 import { isApiEnabled } from '@/services/apiClient'
 import { listSsoApps, type SsoApp } from '@/services/ssoService'
 import { useOpenApp } from '@/hooks/useOpenApp'
-import { useMaxWidth } from '@/hooks/use-mobile'
 import {
   READINESS_LABEL, SPACE_PRODUCTS, productReadiness, type Readiness,
 } from '@/config/spaceProducts'
@@ -217,8 +216,6 @@ export function EcosystemHomePage({ embedded, onNavigate }: {
     const target = mode && SPACE_PRODUCTS.find((p) => (p.modes as string[]).includes(mode))
     if (target) navigate(`${target.route}${location.search}`, { replace: true })
   }, [location, navigate])
-  // Тот же порог, что у раскладок: ниже него интерфейс живёт в руке, а не под курсором.
-  const narrow = useMaxWidth(1024)
   const [menuOpen, setMenuOpen] = useState(false)
   const { user } = useAuth()
   const { company, companyId } = useCompany()
@@ -294,10 +291,14 @@ export function EcosystemHomePage({ embedded, onNavigate }: {
   }
 
   /** Открыть внешнее приложение: SSO — по handoff-токену, мост — ссылкой.
-   *  Новая вкладка только на десктопе (см. openProduct); чужой домен уходит в неё
-   *  всегда — там своя сессия и свой «назад», это решает сам хук. */
+   *
+   *  Вкладку не навязываем: приложение стека («Поддержка» на /support) живёт на
+   *  том же домене и для человека это такая же страница пространства, что и
+   *  внутренние продукты, — а принудительная вкладка открывала его отдельным
+   *  окном. Чужой домен уходит в новую вкладку всегда: там своя сессия и свой
+   *  «назад», и это решает сам хук по origin. */
   async function openExternal(app: SsoApp) {
-    await openViaHook(app.code, !narrow)
+    await openViaHook(app.code)
   }
 
   /** Плитка любого продукта пространства: подпись говорит, ЧТО за ним стоит, а не как он
