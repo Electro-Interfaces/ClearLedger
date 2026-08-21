@@ -613,9 +613,14 @@ def _warehouse_name(raw: str | None) -> tuple[str | None, str | None]:
     text = " ".join(str(raw or "").split())
     if not text:
         return None, None
+    # Складом считаем только то, что заказчик назвал складом. В этой графе у него
+    # два разных смысла: «склад ДГК», «На заводе ООО ЗЭТЗ» — место хранения, а
+    # «ЭЗС №479 г. Чита» — адрес площадки, куда станция ехала и не доехала. Заводить
+    # склад из второго значило бы получить шестьдесят складов с именами станций.
+    if not re.search(r"склад|завод|производств", text, re.I):
+        return None, text[:400]
     head = re.split(r"\s*[(.,;]\s*", text, maxsplit=1)[0].strip()
     if not head or len(head) > 80:
-        # Названия склада тут нет вовсе — только пояснение.
         return None, text[:400]
     note = text[len(head):].strip(" (.,;") or None
     return head[:100], (note[:400] if note else None)
@@ -719,7 +724,8 @@ async def import_units_xlsx(db: AsyncSession, company_id, user: User | None,
                 vendor = canon_vendor(vendor_raw)
                 model = cell(row, "model", colmap)
                 inv = cell(row, "inventory", colmap)
-                wh_name, wh_note = _warehouse_name(cell(row, "warehouse", colmap))
+                wh_raw = cell(row, "warehouse", colmap)
+                wh_name, wh_note = _warehouse_name(wh_raw)
                 state_raw = cell(row, "state", colmap)
                 state, recognized = _map_state(state_raw)
                 if state_raw and not recognized:
@@ -808,11 +814,12 @@ async def import_units_xlsx(db: AsyncSession, company_id, user: User | None,
                         wh_cache[key] = wh
                     if key not in known_wh and wh_name.strip() not in report["warehousesCreated"]:
                         report["warehousesCreated"].append(wh_name.strip())
-                elif state in STOCK_STATES or state == "reserved":
-                    # Склада нет, но позиция известна: неподтверждённую принимаем без
-                    # места хранения — она и есть «ещё не приехала».
+                elif (state in STOCK_STATES or state == "reserved") and not wh_raw:
+                    # Графа пуста — место хранения неизвестно вовсе. Если же в ней
+                    # стоит адрес площадки, а не склад, позицию принимаем: станция
+                    # существует, просто лежит не на складе, и текст сохранён.
                     if confirmed:
-                        report["errors"].append({"row": ri, "message": "не указан склад"})
+                        report["errors"].append({"row": ri, "message": "не указано место хранения"})
                         continue
 
                 if dry_run:
