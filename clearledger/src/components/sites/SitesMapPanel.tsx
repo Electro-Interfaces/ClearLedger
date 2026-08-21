@@ -8,6 +8,7 @@
 import { Fragment, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { MapContainer, TileLayer, CircleMarker, Circle, Popup } from 'react-leaflet'
+import { MAP_CRS, mapTileProps } from '@/lib/mapTiles'
 import 'leaflet/dist/leaflet.css'
 import { Card, CardContent } from '@/components/ui/card'
 import { Loader2 } from 'lucide-react'
@@ -25,7 +26,6 @@ const CENTER: [number, number] = [58, 60]
 type ColorBy = 'stage' | 'quadrant'
 
 // Тайлы CARTO — те же, что на карте сети, чтобы разделы не выглядели чужими.
-const TILE = 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png'
 const STAGE_COLOR: Record<string, string> = {
   lead: '#94a3b8', screening: '#0ea5e9', negotiation: '#3b82f6', dd: '#f59e0b',
   decision: '#f97316', contracting: '#8b5cf6', construction: '#14b8a6', live: '#10b981',
@@ -98,8 +98,8 @@ export function SitesMapPanel({ companyId }: { companyId: string }) {
             <div className="flex justify-center py-24"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
           ) : (
             <div className="h-[calc(100vh-260px)] min-h-[420px] w-full overflow-hidden rounded-lg">
-              <MapContainer center={CENTER} zoom={4} style={{ height: '100%', width: '100%' }} preferCanvas>
-                <TileLayer url={TILE} attribution="&copy; OpenStreetMap, &copy; CARTO" />
+              <MapContainer crs={MAP_CRS} center={CENTER} zoom={4} style={{ height: '100%', width: '100%' }} preferCanvas>
+                <TileLayer key={false ? 'dark' : 'light'} {...mapTileProps(false)} />
 
                 {/* Действующая станция: видимая точка 5 px, а ловит клик прозрачный
                     круг 12 px вокруг неё. В точку радиусом 3 px мышью было почти не

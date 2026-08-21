@@ -7,6 +7,7 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { MapContainer, TileLayer, CircleMarker, Marker, Popup, Tooltip, useMap, useMapEvents } from 'react-leaflet'
+import { MAP_CRS, mapTileProps } from '@/lib/mapTiles'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { Loader2, MapPin, Fuel, Wallet, Gauge, RefreshCw } from 'lucide-react'
@@ -730,10 +731,6 @@ export function FuelMapPanel({ companyId, dateFrom, dateTo }: {
     } finally { setSyncing(false) }
   }
 
-  const tiles = dark
-    ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
-    : 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png'
-
   return (
     <div className="flex h-full flex-col">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-2.5">
@@ -781,8 +778,8 @@ export function FuelMapPanel({ companyId, dateFrom, dateTo }: {
         </div>
       ) : (
         <div className="relative isolate min-h-[520px] flex-1">
-          <MapContainer center={[60.7, 28.8]} zoom={9} scrollWheelZoom style={{ height: '100%', width: '100%', background: dark ? '#0b1220' : '#e5e7eb' }} preferCanvas>
-            <TileLayer url={tiles} attribution='&copy; OpenStreetMap, &copy; CARTO' subdomains="abcd" maxZoom={20} />
+          <MapContainer crs={MAP_CRS} center={[60.7, 28.8]} zoom={9} scrollWheelZoom style={{ height: '100%', width: '100%', background: dark ? '#0b1220' : '#e5e7eb' }} preferCanvas>
+            <TileLayer key={dark ? 'dark' : 'light'} {...mapTileProps(dark)} />
             <MapInvalidate />
             <FitBounds pts={pts} />
             <StationMarkers pts={pts} metric={metric} th={th} dark={dark} total={totalVal}

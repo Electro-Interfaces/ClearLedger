@@ -11,6 +11,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { MapContainer, TileLayer, CircleMarker, Popup } from 'react-leaflet'
+import { MAP_CRS, mapTileProps } from '@/lib/mapTiles'
 import 'leaflet/dist/leaflet.css'
 import { Loader2, MapPin, Plus } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
@@ -79,10 +80,6 @@ function MarketMap() {
   const [kind, setKind] = useState('all')
   const { sites, ours } = useMarketData(kind)
 
-  const tileUrl = dark
-    ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
-    : 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png'
-
   const market = (sites.data?.sites ?? []).filter((s) => s.lat != null && s.lon != null)
   const ourPoints = useMemo(() => (ours.data ?? [])
     .filter((l) => l.latitude != null && l.longitude != null)
@@ -117,10 +114,9 @@ function MarketMap() {
       </div>
 
       <div className="isolate min-h-0 flex-1 overflow-hidden rounded-lg border border-border">
-        <MapContainer center={[55.75, 37.6]} zoom={5} scrollWheelZoom preferCanvas
+        <MapContainer crs={MAP_CRS} center={[55.75, 37.6]} zoom={5} scrollWheelZoom preferCanvas
           style={{ height: '100%', width: '100%', background: 'hsl(var(--muted))' }}>
-          <TileLayer key={dark ? 'dark' : 'light'} url={tileUrl} subdomains="abcd" maxZoom={19}
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>' />
+          <TileLayer key={dark ? 'dark' : 'light'} {...mapTileProps(dark)} />
           {ourPoints.map((p) => (
             <CircleMarker key={`our-${p.id}`} center={[p.lat, p.lon]} radius={5}
               pathOptions={{ color: '#3b82f6', fillColor: '#3b82f6', fillOpacity: 0.85, weight: 1 }}>
