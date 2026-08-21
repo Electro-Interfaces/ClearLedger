@@ -619,10 +619,14 @@ def _warehouse_name(raw: str | None) -> tuple[str | None, str | None]:
     # склад из второго значило бы получить шестьдесят складов с именами станций.
     if not re.search(r"склад|завод|производств", text, re.I):
         return None, text[:400]
-    head = re.split(r"\s*[(.,;]\s*", text, maxsplit=1)[0].strip()
+    # Название склада — тот фрагмент, где стоит само слово: «ЭЗС №262 г. Южно-
+    # сахалинск склад ДЭК» — это склад ДЭК, а не «ЭЗС №262 г».
+    parts = [p.strip() for p in re.split(r"\s*[(,;]\s*|\.\s+", text) if p.strip()]
+    head = next((p for p in parts if re.search(r"склад|завод|производств", p, re.I)),
+                parts[0] if parts else "")
     if not head or len(head) > 80:
         return None, text[:400]
-    note = text[len(head):].strip(" (.,;") or None
+    note = text.replace(head, "", 1).strip(" (.,;") or None
     return head[:100], (note[:400] if note else None)
 
 
