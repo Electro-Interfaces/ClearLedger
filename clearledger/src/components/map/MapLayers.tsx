@@ -14,8 +14,9 @@
  * которого нет уже полчаса.
  */
 import { useEffect, useState } from 'react'
-import { TileLayer } from 'react-leaflet'
-import { Layers, Satellite, Map as MapIcon, TrafficCone } from 'lucide-react'
+import { GeoJSON, TileLayer } from 'react-leaflet'
+import type { FeatureCollection } from 'geojson'
+import { Layers, Satellite, Map as MapIcon, TrafficCone, LandPlot } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { MAP_ATTRIBUTION, MAP_MAX_ZOOM, YANDEX_LAYERS, isYandexBase } from '@/lib/mapTiles'
 
@@ -23,20 +24,59 @@ export type MapBase = 'map' | 'sat' | 'hybrid'
 
 const STORE_KEY = 'map-layer'
 const STORE_TRAFFIC = 'map-traffic'
+const STORE_REGIONS = 'map-regions'
 
 /** Выбор слоя и пробок с памятью на рабочем месте. */
 export function useMapLayers() {
   const [base, setBase] = useState<MapBase>(() =>
     (localStorage.getItem(STORE_KEY) as MapBase) || 'map')
   const [traffic, setTraffic] = useState(() => localStorage.getItem(STORE_TRAFFIC) === '1')
+  const [regions, setRegions] = useState(() => localStorage.getItem(STORE_REGIONS) === '1')
   useEffect(() => { localStorage.setItem(STORE_KEY, base) }, [base])
   useEffect(() => { localStorage.setItem(STORE_TRAFFIC, traffic ? '1' : '0') }, [traffic])
-  return { base, setBase, traffic, setTraffic }
+  useEffect(() => { localStorage.setItem(STORE_REGIONS, regions ? '1' : '0') }, [regions])
+  return { base, setBase, traffic, setTraffic, regions, setRegions }
 }
 
-/** Слои подложки: основа плюс пробки поверх, если включены. */
-export function MapTiles({ base, traffic, dark }: {
-  base: MapBase; traffic: boolean; dark: boolean
+/**
+ * Границы субъектов РФ.
+ *
+ * Файл лежит в поставке и грузится ТОЛЬКО когда слой включили: полмегабайта
+ * геометрии в каждом открытии карты — это полсекунды на пустом месте у тех, кому
+ * границы не нужны.
+ *
+ * Источник — Natural Earth (общественное достояние), упрощённый до точности
+ * обзорной карты. Это навигационный слой, а не кадастровый: по нему видно, в каком
+ * субъекте стоит станция, но межевать по нему нельзя.
+ */
+function RegionsLayer() {
+  const [data, setData] = useState<FeatureCollection | null>(null)
+  useEffect(() => {
+    let alive = true
+    fetch(`${import.meta.env.BASE_URL}ru-regions.geojson`)
+      .then((r) => r.json())
+      .then((d) => { if (alive) setData(d) })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [])
+  if (!data) return null
+  return (
+    <GeoJSON data={data}
+      style={{ color: '#64748b', weight: 1, fillColor: '#64748b', fillOpacity: 0.06 }}
+      onEachFeature={(feature, layer) => {
+        // Подсветка под курсором: без неё на стыке двух областей непонятно, какая
+        // из них подписана.
+        layer.on('mouseover', () => (layer as any).setStyle?.({ weight: 2, fillOpacity: 0.14 }))
+        layer.on('mouseout', () => (layer as any).setStyle?.({ weight: 1, fillOpacity: 0.06 }))
+        const name = (feature.properties as { name?: string } | null)?.name
+        if (name) layer.bindTooltip(name, { sticky: true, direction: 'top' })
+      }} />
+  )
+}
+
+/** Слои подложки: основа плюс пробки и границы поверх, если включены. */
+export function MapTiles({ base, traffic, regions, dark }: {
+  base: MapBase; traffic: boolean; regions?: boolean; dark: boolean
 }) {
   // Метка времени пробок: перерисовываем слой раз в три минуты.
   const [stamp, setStamp] = useState(() => Date.now())
@@ -60,16 +100,19 @@ export function MapTiles({ base, traffic, dark }: {
         <TileLayer key={`traffic-${stamp}`} url={YANDEX_LAYERS.traffic.url(stamp)}
           maxZoom={MAP_MAX_ZOOM} opacity={0.85} />
       )}
+      {regions && <RegionsLayer />}
     </>
   )
 }
 
 /** Переключатель в углу карты. */
-export function MapLayerSwitch({ base, setBase, traffic, setTraffic, className }: {
+export function MapLayerSwitch({ base, setBase, traffic, setTraffic, regions, setRegions, className }: {
   base: MapBase
   setBase: (v: MapBase) => void
   traffic: boolean
   setTraffic: (v: boolean) => void
+  regions?: boolean
+  setRegions?: (v: boolean) => void
   className?: string
 }) {
   if (!isYandexBase) return null
@@ -95,6 +138,14 @@ export function MapLayerSwitch({ base, setBase, traffic, setTraffic, className }
           traffic ? 'bg-amber-500 text-white' : 'text-foreground hover:bg-accent')}>
         <TrafficCone className="size-3.5" />Пробки
       </button>
+      {setRegions && (
+        <button type="button" onClick={() => setRegions(!regions)}
+          title="Границы субъектов России" aria-pressed={!!regions}
+          className={cn('inline-flex items-center gap-1 rounded px-2 py-1 text-[11px] font-medium transition-colors',
+            regions ? 'bg-primary text-primary-foreground' : 'text-foreground hover:bg-accent')}>
+          <LandPlot className="size-3.5" />Регионы
+        </button>
+      )}
     </div>
   )
 }

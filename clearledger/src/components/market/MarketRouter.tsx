@@ -120,7 +120,7 @@ function MarketMap() {
         <MapLayerSwitch {...mapLayers} />
         <MapContainer crs={MAP_CRS} attributionControl={false} center={[55.75, 37.6]} zoom={5} scrollWheelZoom preferCanvas
           style={{ height: '100%', width: '100%', background: 'hsl(var(--muted))' }}>
-          <MapTiles base={mapLayers.base} traffic={mapLayers.traffic} dark={dark} />
+          <MapTiles base={mapLayers.base} traffic={mapLayers.traffic} regions={mapLayers.regions} dark={dark} />
           <AttributionControl position="bottomright" prefix={MAP_ATTRIBUTION_PREFIX} />
           {ourPoints.map((p) => (
             <CircleMarker key={`our-${p.id}`} center={[p.lat, p.lon]} radius={5}

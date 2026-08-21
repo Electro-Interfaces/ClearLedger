@@ -783,7 +783,7 @@ export function FuelMapPanel({ companyId, dateFrom, dateTo }: {
         <div className="relative isolate min-h-[520px] flex-1">
           <MapLayerSwitch {...mapLayers} />
         <MapContainer crs={MAP_CRS} attributionControl={false} center={[60.7, 28.8]} zoom={9} scrollWheelZoom style={{ height: '100%', width: '100%', background: dark ? '#0b1220' : '#e5e7eb' }} preferCanvas>
-            <MapTiles base={mapLayers.base} traffic={mapLayers.traffic} dark={dark} />
+            <MapTiles base={mapLayers.base} traffic={mapLayers.traffic} regions={mapLayers.regions} dark={dark} />
           <AttributionControl position="bottomright" prefix={MAP_ATTRIBUTION_PREFIX} />
             <MapInvalidate />
             <FitBounds pts={pts} />

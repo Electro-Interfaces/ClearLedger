@@ -520,7 +520,7 @@ export function ChargeMapPanel({ companyId, dateFrom, dateTo }: {
       <div className="relative isolate min-h-0 flex-1 overflow-hidden rounded-lg border border-border">
         <MapLayerSwitch {...mapLayers} />
         <MapContainer crs={MAP_CRS} attributionControl={false} center={[62, 94]} zoom={3} style={{ height: '100%', width: '100%', background: 'hsl(var(--muted))' }} scrollWheelZoom preferCanvas>
-          <MapTiles base={mapLayers.base} traffic={mapLayers.traffic} dark={dark} />
+          <MapTiles base={mapLayers.base} traffic={mapLayers.traffic} regions={mapLayers.regions} dark={dark} />
           <AttributionControl position="bottomright" prefix={MAP_ATTRIBUTION_PREFIX} />
           <FitBounds points={allPoints} />
           <MapInvalidate />

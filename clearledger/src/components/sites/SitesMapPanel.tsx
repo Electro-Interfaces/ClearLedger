@@ -103,7 +103,7 @@ export function SitesMapPanel({ companyId }: { companyId: string }) {
             <div className="relative h-[calc(100vh-260px)] min-h-[420px] w-full overflow-hidden rounded-lg">
               <MapLayerSwitch {...mapLayers} />
         <MapContainer crs={MAP_CRS} attributionControl={false} center={CENTER} zoom={4} style={{ height: '100%', width: '100%' }} preferCanvas>
-                <MapTiles base={mapLayers.base} traffic={mapLayers.traffic} dark={false} />
+                <MapTiles base={mapLayers.base} traffic={mapLayers.traffic} regions={mapLayers.regions} dark={false} />
           <AttributionControl position="bottomright" prefix={MAP_ATTRIBUTION_PREFIX} />
 
                 {/* Действующая станция: видимая точка 5 px, а ловит клик прозрачный
