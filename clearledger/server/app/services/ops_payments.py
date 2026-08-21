@@ -316,11 +316,15 @@ async def last_load(db: AsyncSession, company_id: uuid.UUID) -> dict[str, Any] |
     в полтора миллиона, первым делом спросит «а это из чего посчитано»; ответ должен
     стоять рядом с цифрой, а не искаться в журнале загрузок.
     """
+    # Группировать по времени загрузки нельзя: у каждой строки оно своё с точностью
+    # до микросекунды, и «строк в файле» превращалось в единицу.
     row = (await db.execute(select(
-        OpsPayment.source_label, OpsPayment.loaded_at, func.count().label("rows"),
+        OpsPayment.source_label,
+        func.max(OpsPayment.loaded_at).label("loaded_at"),
+        func.count().label("rows"),
     ).where(OpsPayment.company_id == company_id).group_by(
-        OpsPayment.source_label, OpsPayment.loaded_at,
-    ).order_by(OpsPayment.loaded_at.desc()).limit(1))).first()
+        OpsPayment.source_label,
+    ).order_by(func.max(OpsPayment.loaded_at).desc()).limit(1))).first()
     if row is None:
         return None
     return {"file": row.source_label, "loaded_at": row.loaded_at.isoformat(),
