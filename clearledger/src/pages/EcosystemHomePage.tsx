@@ -35,15 +35,13 @@ import { Sheet, SheetContent, SheetDescription, SheetTitle, SheetTrigger } from 
 import { useAuth } from '@/contexts/AuthContext'
 import { useCompany } from '@/contexts/CompanyContext'
 import { isApiEnabled } from '@/services/apiClient'
-import { listSsoApps, hasSideButton, isCoreApp, type SsoApp } from '@/services/ssoService'
+import { listSsoApps, type SsoApp } from '@/services/ssoService'
 import { useOpenApp } from '@/hooks/useOpenApp'
 import { useMaxWidth } from '@/hooks/use-mobile'
 import {
   READINESS_LABEL, SPACE_PRODUCTS, productReadiness, type Readiness,
 } from '@/config/spaceProducts'
 
-/** База сборки SPA (корень домена) — новая вкладка открывается по полному адресу. */
-const BASE = import.meta.env.BASE_URL.replace(/\/$/, '')
 
 /** Иконка по имени из реестра Ядра (`eco_apps.icon`, манифест `apps/<code>.yml`).
  *  Неизвестное имя — LayoutGrid: плитка появляется, просто без своего значка. */
@@ -273,28 +271,23 @@ export function EcosystemHomePage({ embedded, onNavigate }: {
     })
 
   /**
-   * Открыть продукт. На десктопе рабочее место уходит в НОВУЮ вкладку (решение МАГа
-   * 27.07.2026): стол остаётся открытым, продукты копятся вкладками рядом. Сервисы с
-   * кнопкой в шапке (Чат) открываются здесь же — они часть текущего экрана.
+   * Открыть продукт. Продукт пространства — это СТРАНИЦА, и открывается он обычным
+   * переходом в текущей вкладке (решение МАГа 21.08.2026, отменяет прежний порядок
+   * от 27.07.2026, когда каждый продукт уходил в новую вкладку).
    *
-   * На телефоне — в ТЕКУЩЕЙ вкладке. Держать рабочие места параллельно там не выходит:
-   * переключение между вкладками стоит двух жестов через меню браузера, вкладки копятся
-   * и теряются, а «назад» перестаёт работать. Плюс новая вкладка открывается со своими
-   * настройками — в режиме эмуляции устройства она приходит уже в десктопном виде.
+   * Почему отменено: вкладки копились десятками, «назад» вело не туда, откуда
+   * пришли, а на пустой стол в другой вкладке, и одно пространство размазывалось по
+   * всему окну браузера. Адрес продукта и так свой — им и делятся, когда нужно
+   * второе окно; браузер для этого умеет «открыть в новой вкладке» сам, и это
+   * решение человека, а не приложения.
+   *
+   * Внешние приложения (свой домен, свой вход) по-прежнему уходят в новую вкладку:
+   * там чужая сессия и чужой «назад», и возвращать человека оттуда нам нечем.
    */
   async function openProduct(app: SsoApp) {
     if (app.mode === 'internal' && app.route) {
-      // В текущей вкладке: телефон, продукты с кнопкой рядом (Чат · Заявки ·
-      // Конференция) и функции Ядра — «Инфо», «Данные», «Управление», «Пульс».
-      // Последние не рабочие места продуктов, а экраны самого пространства.
-      if (narrow || hasSideButton(app.code) || isCoreApp(app.code)) {
-        navigate(app.route)
-        onNavigate?.()
-      }
-      else {
-        window.open(`${window.location.origin}${BASE}${app.route}`, '_blank', 'noopener,noreferrer')
-        onNavigate?.()
-      }
+      navigate(app.route)
+      onNavigate?.()
       return
     }
     await openExternal(app)

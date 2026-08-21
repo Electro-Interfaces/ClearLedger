@@ -11,17 +11,9 @@
 import { useCallback, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
-import { authorizeApp, hasSideButton, type SsoApp } from '@/services/ssoService'
+import { authorizeApp, type SsoApp } from '@/services/ssoService'
 import { startMeeting } from '@/services/conferenceService'
 import { useCompany } from '@/contexts/CompanyContext'
-import { useMaxWidth } from '@/hooks/use-mobile'
-
-/** Маршрут SPA → абсолютный адрес с учётом базы сборки (по умолчанию корень).
- *  Без неё новая вкладка открыла бы `/finance` мимо приложения — на 404 кромки. */
-function routeUrl(route: string): string {
-  const base = import.meta.env.BASE_URL.replace(/\/$/, '')
-  return `${window.location.origin}${base}${route}`
-}
 
 function isSameOrigin(url: string) {
   try {
@@ -34,8 +26,6 @@ function isSameOrigin(url: string) {
 export function useOpenApp() {
   const { companyId } = useCompany()
   const navigate = useNavigate()
-  // Тот же порог, что у раскладок: ниже него продукт открывается в текущей вкладке.
-  const narrow = useMaxWidth(1024)
   const [busy, setBusy] = useState<string | null>(null)
 
   const open = useCallback(async (code: string, newTab = false) => {
@@ -78,14 +68,18 @@ export function useOpenApp() {
    * сразу в десктопном виде.
    */
   const openApp = useCallback(async (app: SsoApp) => {
-    const sameTab = narrow || hasSideButton(app.code)
+    // Продукт пространства — страница, и открывается переходом в текущей вкладке
+    // (решение МАГа 21.08.2026). Прежний порядок — каждое рабочее место в свою
+    // вкладку — копил их десятками, ломал «назад» и размазывал одно пространство
+    // по всему окну браузера. Понадобилось второе окно — браузер умеет открыть
+    // ссылку в новой вкладке сам, и это выбор человека, а не приложения.
     if (app.mode === 'internal' && app.route) {
-      if (sameTab) navigate(app.route)
-      else window.open(routeUrl(app.route), '_blank', 'noopener,noreferrer')
+      navigate(app.route)
       return
     }
-    await open(app.code, !sameTab)
-  }, [narrow, navigate, open])
+    // Чужой домен — по-прежнему отдельной вкладкой: там своя сессия и свой «назад».
+    await open(app.code, true)
+  }, [navigate, open])
 
   return { open, openApp, busy }
 }
