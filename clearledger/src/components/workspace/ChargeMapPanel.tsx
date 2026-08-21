@@ -28,6 +28,7 @@ import { useResetOnScopeChange } from '@/hooks/useScopeReset'
 import { useFilters } from '@/contexts/FilterContext'
 import { ApplyToScope } from './ApplyToScope'
 import { LocationCockpitModal } from '@/components/locations/LocationCockpitModal'
+import { plural } from '@/lib/textUtils'
 
 const ALL = '__all__'
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
@@ -481,7 +482,13 @@ export function ChargeMapPanel({ companyId, dateFrom, dateTo }: {
   const owners = useMemo(() => sortedUnique(allPoints, (p) => p.owner), [allPoints])
   // Трассы — только те, что реально встретились: список из ста кодов, где 90
   // пустых, выбирать невозможно.
-  const highways = useMemo(() => sortedUnique(allPoints, (p) => p.highway || '—'), [allPoints])
+  // Сортировка по букве и ЧИСЛУ, а не по строке: иначе «А370» встаёт перед «А6»,
+  // а «М10» перед «М4» — список выглядит перемешанным, и нужную трассу в нём ищут
+  // глазами по всей длине.
+  const highways = useMemo(() => sortedUnique(allPoints, (p) => p.highway || '—')
+    .sort((a, b) => (a[0] === b[0]
+      ? Number(a.slice(1)) - Number(b.slice(1))
+      : a.localeCompare(b, 'ru'))), [allPoints])
 
   const points = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -512,6 +519,10 @@ export function ChargeMapPanel({ companyId, dateFrom, dateTo }: {
     })
   }, [allPoints, search, region, status, link, power, manuf, stage, owner, locClass, speed, highway,
       lifecycle, stationCodes, regionIds, locationIds])
+
+  // Место = набор станций с общими координатами (площадка, а не пост).
+  const placeCount = useMemo(
+    () => new Set(points.map((p) => `${p.lat.toFixed(4)},${p.lon.toFixed(4)}`)).size, [points])
 
   // пороги раскраски по метрике (квантили над видимыми точками)
   const colorTh = useMemo(() => {
@@ -622,7 +633,16 @@ export function ChargeMapPanel({ companyId, dateFrom, dateTo }: {
 
       {/* счётчик + адаптивная легенда */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground shrink-0">
-        <span>На карте: <b className="text-foreground">{nf0.format(points.length)}</b> из {nf0.format(allPoints.length)} станций</span>
+        {/* Станций и МЕСТ. У заказчика на 63-м и 75-м километре М-11 стоит по
+            десятку постов с общими координатами: фильтр честно говорит «27
+            станций», а на карте видно два кружка — и это выглядит как поломка,
+            пока не сказано, что мест действительно два. */}
+        <span>
+          На карте: <b className="text-foreground">{nf0.format(points.length)}</b> из {nf0.format(allPoints.length)} станций
+          {placeCount > 0 && placeCount < points.length && (
+            <> · {nf0.format(placeCount)} {plural(placeCount, 'место', 'места', 'мест')} на карте</>
+          )}
+        </span>
         {catLegend.map((l) => (
           <span key={l.label} className="inline-flex items-center gap-1.5">
             <span className="h-2.5 w-2.5 rounded-full" style={{ background: l.color }} />{l.label} · <b className="text-foreground">{nf0.format(l.count)}</b>

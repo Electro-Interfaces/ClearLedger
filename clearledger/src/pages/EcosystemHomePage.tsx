@@ -407,9 +407,12 @@ export function EcosystemHomePage({ embedded, onNavigate }: {
               </SidebarProvider>
             </SheetContent>
           </Sheet>
-          <span className="hidden rounded-xl bg-primary/10 p-2 text-primary sm:inline-flex">
-            <LayoutGrid className="size-5" />
-          </span>
+          {/* Знак пространства — тот же файл, что в шапке приложений и во вкладке
+              браузера (сборка кладёт его в `favicon.svg` по бренду стека). Здесь
+              стоял общий значок-сетка, и рабочий стол — первый экран, куда человек
+              попадает, — оставался единственным местом без знака компании. */}
+          <img src={`${import.meta.env.BASE_URL}favicon.svg`} alt=""
+            className="hidden size-9 shrink-0 rounded-xl sm:inline-block" />
           {/* Слева — имя ПРОСТРАНСТВА, а не организации. Здесь стояло имя организации,
               и стол называл себя «ПРОМИЗОЛ СПБ», хотя это пространство «Аудит», внутри
               которого организаций может быть много. Организацию называет переключатель;
