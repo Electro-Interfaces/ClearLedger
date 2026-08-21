@@ -374,7 +374,11 @@ export function WorkspaceFilterBar() {
 
   return (
     <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-      <div className="flex w-full min-w-0 items-center gap-1.5">
+      {/* Перенос обязателен. «Сбросить» появляется только когда фильтр задан —
+          и ровно тогда строке становится тесно: она была `flex` без переноса, а
+          блок справа `shrink-0`, поэтому сжимались сами элементы фильтра и
+          кнопка на них наезжала (замечание заказчика 21.08.2026). */}
+      <div className="flex w-full min-w-0 flex-wrap items-center gap-1.5">
       <Button
         variant="outline"
         size="sm"

@@ -6,14 +6,17 @@
  * Слои раскраски, размер, фильтры, адаптивная легенда, размер точек растёт с зумом.
  */
 
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { MapContainer, CircleMarker, Popup, useMap, useMapEvents, AttributionControl } from 'react-leaflet'
 import { MAP_ATTRIBUTION_PREFIX, MAP_CRS } from '@/lib/mapTiles'
 import { MapLayerSwitch, MapTiles, useMapLayers } from '@/components/map/MapLayers'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
-import { Loader2, Search, MapPin, Zap, Plug, Hash, Gauge, Wallet, SlidersHorizontal, type LucideIcon } from 'lucide-react'
+import {
+  Loader2, Search, MapPin, Zap, Plug, Hash, Gauge, Wallet, SlidersHorizontal,
+  Maximize2, Minimize2, type LucideIcon,
+} from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { loadLocations } from '@/services/locationService'
@@ -132,12 +135,43 @@ interface Pt {
   manufacturer: string; stage: string; owner: string
   /** Паспортные классы из сводной контрагента (слот obshaya). */
   locClass: string; speedClass: string; isCorp: boolean; decommissioned: boolean
+  /** Код трассы, разобранный из названия и адреса. Пусто — не на трассе. */
+  highway: string
 }
 
 function sortedUnique(points: Pt[], selectValue: (point: Pt) => string): string[] {
   return [...new Set(points.map(selectValue))]
     .filter((value) => value !== '—')
     .sort((a, b) => a.localeCompare(b, 'ru'))
+}
+
+/**
+ * Код трассы из названия и адреса станции: «М11», «А370», «Р254».
+ *
+ * Поля «трасса» у станции НЕТ — в паспорте есть только класс размещения
+ * (город / трасса). Название трассы заказчик пишет в имени или адресе, и
+ * достать его можно только разбором текста: «выбор по трассе М11» просили
+ * прямо (Чурилов, 21.08.2026), а ждать нового поля от АСУ можно долго.
+ *
+ * Разбор намеренно строгий: буква категории и до трёх цифр. Свободный текст
+ * вроде «автодорога Уссури» не ловим — лучше не показать трассу, чем показать
+ * выдуманную.
+ *
+ * Проверено на боевых названиях (21.08.2026), в том числе на ловушках:
+ *   «М-9 Балтия, 83 км»              → М9
+ *   «тер Федеральная трасса А370»    → А370
+ *   «автодорога Р-254 Иртыш, 1150 км»→ Р254
+ *   «АЗС 208, Витебский пр., 41»     → пусто (номер станции, не трасса)
+ *   «МЦ Липецк»                      → пусто (буква не та, цифр нет)
+ * На боевых данных даёт: М11 — 27 станций, А370 — 6, Р254 и Р297 — по 5.
+ */
+const HIGHWAY_RE = /(?:^|[\s,.(«"'-])([МРАMPA])[-\s]?(\d{1,3})(?![\d])/u
+function highwayOf(name: string, address: string): string {
+  const m = HIGHWAY_RE.exec(`${name} ${address}`)
+  if (!m) return ''
+  const letter = m[1].toUpperCase()
+      .replace('M', 'М').replace('P', 'Р').replace('A', 'А')   // латиница → кириллица
+  return `${letter}${m[2]}`
 }
 
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null)
@@ -159,6 +193,7 @@ function toPoint(l: ServiceLocation): Pt | null {
     opStatus: l.operationalStatus || 'unknown', linkStatus: str(m.linkStatus) || 'unknown',
     manufacturer: str(m.manufacturer) || '—', stage: str(m.stage) || '—', owner: str(m.ownerTitle) || '—',
     locClass: str(pp.locationClass), speedClass: str(pp.speedClass),
+    highway: highwayOf(l.name || '', addr),
     isCorp: pp.isCorp === true,
     decommissioned: pp.decommissionedOn != null || l.operationalStatus === 'decommissioned',
   }
@@ -176,14 +211,63 @@ function useIsDark() {
   return dark
 }
 
+/** Ключ набора точек: по нему видно, что фильтр действительно изменился. */
+function pointsKey(points: Pt[]): string {
+  return `${points.length}:${points[0]?.id ?? ''}:${points[points.length - 1]?.id ?? ''}`
+}
+
+/**
+ * Подгонка карты под точки.
+ *
+ * Раньше подгонялась ОДИН раз и по ВСЕЙ сети. Сеть у заказчика тянется от
+ * Калининграда до Владивостока (медиана долготы 113°), поэтому общий план всегда
+ * оказывался над пустой Сибирью — «карта постоянно открывается где-то в Азии».
+ * И выбор региона на неё не влиял: человек фильтровал Московскую область, а
+ * смотрел по-прежнему на Забайкалье.
+ *
+ * Теперь подгоняется под ТО, ЧТО ПОКАЗАНО, и заново при смене набора точек.
+ * Ручное перемещение при этом не сбрасывается: ключ меняется только от фильтра.
+ */
 function FitBounds({ points }: { points: Pt[] }) {
   const map = useMap()
+  const key = pointsKey(points)
   useEffect(() => {
     const sane = points.filter((p) => p.lat >= 40 && p.lat <= 78 && p.lon >= 19 && p.lon <= 180)
     if (sane.length) map.fitBounds(L.latLngBounds(sane.map((p) => [p.lat, p.lon] as [number, number])), { padding: [30, 30] })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [map])
+  }, [map, key])
   return null
+}
+
+/** Быстрый переход к части страны: общий план сети бесполезен, а эти — рабочие. */
+const VIEWS: { key: string; label: string; center: [number, number]; zoom: number }[] = [
+  { key: 'center', label: 'Центр', center: [55.7, 37.6], zoom: 6 },
+  { key: 'nw', label: 'Северо-Запад', center: [59.9, 30.3], zoom: 6 },
+  { key: 'siberia', label: 'Сибирь', center: [55.0, 82.9], zoom: 5 },
+  { key: 'dv', label: 'Дальний Восток', center: [43.6, 132.0], zoom: 6 },
+]
+
+function ViewJumps({ points }: { points: Pt[] }) {
+  const map = useMap()
+  return (
+    <div className="pointer-events-auto absolute bottom-2 left-2 z-[500] flex flex-wrap gap-1">
+      <button type="button"
+        onClick={() => {
+          const sane = points.filter((p) => p.lat >= 40 && p.lat <= 78 && p.lon >= 19 && p.lon <= 180)
+          if (sane.length) map.fitBounds(L.latLngBounds(sane.map((p) => [p.lat, p.lon] as [number, number])), { padding: [30, 30] })
+        }}
+        className="rounded-md border border-border bg-card/95 px-2 py-1 text-[11px] text-muted-foreground shadow-sm hover:text-foreground">
+        Всё показанное
+      </button>
+      {VIEWS.map((v) => (
+        <button key={v.key} type="button"
+          onClick={() => map.setView(v.center, v.zoom)}
+          className="rounded-md border border-border bg-card/95 px-2 py-1 text-[11px] text-muted-foreground shadow-sm hover:text-foreground">
+          {v.label}
+        </button>
+      ))}
+    </div>
+  )
 }
 
 function MapInvalidate() {
@@ -356,6 +440,7 @@ export function ChargeMapPanel({ companyId, dateFrom, dateTo }: {
   const [owner, setOwner] = useState(ALL)
   const [locClass, setLocClass] = useState(ALL)
   const [speed, setSpeed] = useState(ALL)
+  const [highway, setHighway] = useState(ALL)
   const [lifecycle, setLifecycle] = useState(ALL)   // active | decommissioned | corp
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [colorBy, setColorBy] = useState<ColorBy>('single')
@@ -367,6 +452,24 @@ export function ChargeMapPanel({ companyId, dateFrom, dateTo }: {
   // подсовывали в фильтры мусорные бренды и регионы.
   // Карточка станции, открытая с карты (клик «Открыть станцию» в подсказке).
   const [cockpitId, setCockpitId] = useState<string | null>(null)
+  // Полный экран. «С картой работать невозможно» — карте достаётся остаток
+  // колонки под фильтрами и легендой, и на ноутбуке это полоса (Чурилов,
+  // 21.08.2026). Берём системный полноэкранный режим, а не свою «развёртку»:
+  // выход по Esc человек знает и так, а рисовать свой — плодить непонятную
+  // кнопку, из которой неясно, как выбраться.
+  const mapBoxRef = useRef<HTMLDivElement>(null)
+  const [isFull, setIsFull] = useState(false)
+  useEffect(() => {
+    const onChange = () => setIsFull(document.fullscreenElement === mapBoxRef.current)
+    document.addEventListener('fullscreenchange', onChange)
+    return () => document.removeEventListener('fullscreenchange', onChange)
+  }, [])
+  const toggleFull = () => {
+    const el = mapBoxRef.current
+    if (!el) return
+    if (document.fullscreenElement) void document.exitFullscreen()
+    else void el.requestFullscreen?.()
+  }
   const cockpit = useMemo(() => (data ?? []).find((l) => l.id === cockpitId) ?? null, [data, cockpitId])
   const allPoints = useMemo(() => (data ?? []).filter((l) => !isTestStation(l))
     .map(toPoint).filter((p): p is Pt => p !== null), [data])
@@ -376,6 +479,9 @@ export function ChargeMapPanel({ companyId, dateFrom, dateTo }: {
   const manufs = useMemo(() => sortedUnique(allPoints, (p) => p.manufacturer), [allPoints])
   const stages = useMemo(() => sortedUnique(allPoints, (p) => p.stage), [allPoints])
   const owners = useMemo(() => sortedUnique(allPoints, (p) => p.owner), [allPoints])
+  // Трассы — только те, что реально встретились: список из ста кодов, где 90
+  // пустых, выбирать невозможно.
+  const highways = useMemo(() => sortedUnique(allPoints, (p) => p.highway || '—'), [allPoints])
 
   const points = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -397,13 +503,15 @@ export function ChargeMapPanel({ companyId, dateFrom, dateTo }: {
       if (owner !== ALL && p.owner !== owner) return false
       if (locClass !== ALL && p.locClass !== locClass) return false
       if (speed !== ALL && p.speedClass !== speed) return false
+      if (highway !== ALL && p.highway !== highway) return false
       if (lifecycle === 'active' && p.decommissioned) return false
       if (lifecycle === 'decommissioned' && !p.decommissioned) return false
       if (lifecycle === 'corp' && !p.isCorp) return false
       if (q && !`${p.name} ${p.city} ${p.address} ${p.number}`.toLowerCase().includes(q)) return false
       return true
     })
-  }, [allPoints, search, region, status, link, power, manuf, stage, owner, locClass, speed, lifecycle, stationCodes, regionIds, locationIds])
+  }, [allPoints, search, region, status, link, power, manuf, stage, owner, locClass, speed, highway,
+      lifecycle, stationCodes, regionIds, locationIds])
 
   // пороги раскраски по метрике (квантили над видимыми точками)
   const colorTh = useMemo(() => {
@@ -482,6 +590,13 @@ export function ChargeMapPanel({ companyId, dateFrom, dateTo }: {
           options={[{ v: 'city', label: 'Город' }, { v: 'highway', label: 'Трасса' }]} w="w-[150px]" />
         <FSelect value={speed} onChange={setSpeed} all="Класс: все"
           options={[{ v: 'fast', label: 'Быстрые' }, { v: 'slow', label: 'Медленные' }]} w="w-[140px]" />
+        {/* Трасса — рядом с «Размещение», потому что уточняет именно его: сначала
+            «на трассе», потом «на какой». Список пустой — селектора нет вовсе:
+            у топливного профиля трасс в названиях не бывает. */}
+        {highways.length > 0 && (
+          <FSelect value={highway} onChange={setHighway} all="Трасса: любая"
+            options={highways.map((h) => ({ v: h, label: h }))} w="w-[130px]" />
+        )}
         <FSelect value={lifecycle} onChange={setLifecycle} all="Контур: все"
           options={[{ v: 'active', label: 'Действующие' }, { v: 'decommissioned', label: 'Выведенные' }, { v: 'corp', label: 'Корп (каршеринг)' }]} w="w-[170px]" />
         <div className="col-span-2 flex flex-wrap items-center gap-2 sm:ml-auto">
@@ -521,12 +636,20 @@ export function ChargeMapPanel({ companyId, dateFrom, dateTo }: {
 
       {/* карта — isolate: свой stacking-контекст, чтобы z-index панелей Leaflet
           (popupPane 700 и др.) не всплывал поверх модальных диалогов приложения */}
-      <div className="relative isolate min-h-0 flex-1 overflow-hidden rounded-lg border border-border">
+      <div ref={mapBoxRef}
+        className="relative isolate min-h-0 flex-1 overflow-hidden rounded-lg border border-border">
         <MapLayerSwitch {...mapLayers} />
+        <button type="button" onClick={toggleFull}
+          title={isFull ? 'Свернуть карту (Esc)' : 'Развернуть карту на весь экран'}
+          aria-label={isFull ? 'Свернуть карту' : 'Развернуть карту на весь экран'}
+          className="absolute right-2 top-2 z-[500] inline-flex h-9 w-9 items-center justify-center rounded-md border border-border bg-card/95 text-muted-foreground shadow-sm hover:text-foreground">
+          {isFull ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+        </button>
         <MapContainer crs={MAP_CRS} attributionControl={false} center={[62, 94]} zoom={3} style={{ height: '100%', width: '100%', background: 'hsl(var(--muted))' }} scrollWheelZoom preferCanvas>
           <MapTiles base={mapLayers.base} traffic={mapLayers.traffic} regions={mapLayers.regions} dark={dark} />
           <AttributionControl position="bottomright" prefix={MAP_ATTRIBUTION_PREFIX} />
-          <FitBounds points={allPoints} />
+          <FitBounds points={points} />
+          <ViewJumps points={points} />
           <MapInvalidate />
           <StationMarkers points={points} colorFn={colorFn} sizeFn={sizeFn} metricMap={metricMap}
             dark={dark} onOpen={setCockpitId} />
