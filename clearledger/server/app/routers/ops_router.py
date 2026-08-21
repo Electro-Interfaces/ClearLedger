@@ -558,6 +558,21 @@ async def get_ops_payments(
     return await ops_payments.summary(db, cid, date_from=date_from, date_to=date_to)
 
 
+@router.get("/payments/counterparties")
+async def get_ops_payments_counterparties(
+    company_id: str = Query(...),
+    date_from: str | None = Query(None),
+    date_to: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=500),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Кому платим больше всего. Пока объекты не связаны — это главный разрез."""
+    cid = await assert_company_member(company_id, current_user, db)
+    return await ops_payments.by_counterparty(
+        db, cid, date_from=date_from, date_to=date_to, limit=limit)
+
+
 @router.get("/payments/coverage")
 async def get_ops_payments_coverage(
     company_id: str = Query(...),

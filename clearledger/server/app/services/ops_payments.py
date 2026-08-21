@@ -305,7 +305,70 @@ async def summary(db: AsyncSession, company_id: uuid.UUID, *,
         "periods": sorted(periods.values(), key=lambda b: b["period"]),
         "total_paid": round(sum(b["paid"] for b in periods.values()), 2),
         "total_capital": round(sum(b["capital"] for b in periods.values()), 2),
+        "source": await last_load(db, company_id),
     }
+
+
+async def last_load(db: AsyncSession, company_id: uuid.UUID) -> dict[str, Any] | None:
+    """Откуда взялась цифра: файл и когда его приняли.
+
+    Без этого таблица — просто числа на экране. Человек, который увидит расхождение
+    в полтора миллиона, первым делом спросит «а это из чего посчитано»; ответ должен
+    стоять рядом с цифрой, а не искаться в журнале загрузок.
+    """
+    row = (await db.execute(select(
+        OpsPayment.source_label, OpsPayment.loaded_at, func.count().label("rows"),
+    ).where(OpsPayment.company_id == company_id).group_by(
+        OpsPayment.source_label, OpsPayment.loaded_at,
+    ).order_by(OpsPayment.loaded_at.desc()).limit(1))).first()
+    if row is None:
+        return None
+    return {"file": row.source_label, "loaded_at": row.loaded_at.isoformat(),
+            "rows": int(row.rows or 0)}
+
+
+async def by_counterparty(db: AsyncSession, company_id: uuid.UUID, *,
+                          date_from: str | None = None, date_to: str | None = None,
+                          limit: int = 50) -> dict[str, Any]:
+    """Кому и за что платим — от большего к меньшему.
+
+    Разрез по объектам недоступен, пока бухгалтерский номер не связан с площадкой,
+    и это не повод оставлять человека без ответа: контрагент в этой выгрузке —
+    такой же законный разрез работы, а для аренды земли — единственный осмысленный.
+    """
+    q = select(
+        OpsPayment.counterparty_name, OpsPayment.counterparty_id,
+        func.sum(OpsPayment.amount).label("paid"),
+        func.count(func.distinct(OpsPayment.cost_item)).label("items"),
+        func.min(OpsPayment.period).label("first_period"),
+        func.max(OpsPayment.period).label("last_period"),
+    ).where(OpsPayment.company_id == company_id)
+    if date_from:
+        q = q.where(OpsPayment.period >= date_from)
+    if date_to:
+        q = q.where(OpsPayment.period <= date_to)
+    rows = (await db.execute(q.group_by(
+        OpsPayment.counterparty_name, OpsPayment.counterparty_id,
+    ).order_by(func.sum(OpsPayment.amount).desc()).limit(limit))).all()
+
+    # Объекты контрагента — отдельным проходом: их перечни лежат построчно, и
+    # собирать их агрегатом значило бы получить массив массивов.
+    objects: dict[str, set[str]] = {}
+    for name, numbers in (await db.execute(select(
+            OpsPayment.counterparty_name, OpsPayment.object_numbers).where(
+            OpsPayment.company_id == company_id))).all():
+        if numbers:
+            objects.setdefault(name, set()).update(numbers)
+
+    return {"rows": [{
+        "name": r.counterparty_name,
+        "known": r.counterparty_id is not None,
+        "paid": round(float(r.paid or 0), 2),
+        "items": int(r.items or 0),
+        "objects": len(objects.get(r.counterparty_name, ())),
+        "first_period": r.first_period,
+        "last_period": r.last_period,
+    } for r in rows]}
 
 
 async def objects_coverage(db: AsyncSession, company_id: uuid.UUID) -> dict[str, Any]:
