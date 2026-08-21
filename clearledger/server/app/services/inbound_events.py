@@ -32,7 +32,8 @@ log = logging.getLogger("clearledger.inbound")
 # События, которые Ядро умеет обрабатывать. Остальные принимаем и помечаем
 # `skipped`: неизвестное событие — не ошибка отправителя, а наш ещё не написанный
 # обработчик, и ретраить его бессмысленно.
-HANDLED = {"case.stage_changed", "case.closed", "approval.requested", "errand.requested"}
+HANDLED = {"case.stage_changed", "case.closed", "approval.requested",
+           "errand.requested", "document.requested"}
 
 
 async def accept(db: AsyncSession, provider: str, event: dict[str, Any],
@@ -115,6 +116,30 @@ async def _start_approval(db: AsyncSession, row: InboundEvent) -> tuple[str, str
     return "ok", f"круг {req.round} по документу {req.doc_id}"
 
 
+async def _start_document(db: AsyncSession, row: InboundEvent) -> tuple[str, str | None]:
+    """Узел маршрута просит завести документ по заготовке «Трека».
+
+    Третья просьба того же рода. Отличие от круга виз в том, что документа ещё
+    нет: раньше маршрут мог попросить согласовать бумагу, но взять её было
+    неоткуда — кто-то должен был создать её руками и вовремя.
+
+    Невыполнимая просьба (нет такой заготовки, она не документная, не указан
+    процесс) — `skipped` с причиной, а не ошибка доставки: от повтора заготовка
+    не появится, а очередь на ней встанет.
+    """
+    from app.services import document_requests
+
+    if row.company_id is None:
+        return "skipped", "Событие пришло без компании"
+    try:
+        req = await document_requests.request(
+            db, row.company_id, row.external_id, (row.payload or {}).get("data") or {})
+    except document_requests.DocumentRequestError as exc:
+        return "skipped", str(exc)[:500]
+    waiting = "ждём исход" if req.on_approved else "без ожидания"
+    return "ok", f"документ {req.doc_id} заведён ({waiting})"
+
+
 async def _start_errand(db: AsyncSession, row: InboundEvent) -> tuple[str, str | None]:
     """Узел маршрута просит сделать работу по заготовке «Трека».
 
@@ -137,6 +162,8 @@ async def _handle(db: AsyncSession, row: InboundEvent) -> tuple[str, str | None]
         return await _start_approval(db, row)
     if row.type == "errand.requested":
         return await _start_errand(db, row)
+    if row.type == "document.requested":
+        return await _start_document(db, row)
 
     if row.type not in HANDLED:
         return "skipped", None

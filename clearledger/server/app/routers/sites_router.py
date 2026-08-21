@@ -17,7 +17,8 @@ from app.database import get_db
 from app.models import EzsSite, EzsSiteParticipant, User
 from app.services import (
     ezs_changes, ezs_checklist, ezs_lifecycle, ezs_park_plan, ezs_project,
-    ezs_site_analysis, ezs_site_work, ezs_sites, projects_process,
+    ezs_site_analysis, ezs_site_work, ezs_sites, process_documents,
+    projects_process,
 )
 from app.services.space_projection import ProjectionError
 
@@ -142,6 +143,28 @@ async def list_projects(
     cid = await assert_company_member(company_id, user, db)
     return await ezs_lifecycle.list_projects(
         db, cid, site_id=site_id, location_id=location_id, kind=kind)
+
+
+@router.get("/projects/{process_id}/documents")
+async def project_documents(
+    process_id: str,
+    company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Документооборот проекта: что запущено маршрутом и чем кончилось.
+
+    Ключевые точки проекта требуют бумаг — акт выбора площадки, согласование
+    технических условий, приёмка работ. Маршрут их запускает, «Трек» ведёт, а из
+    карточки проекта до сих пор не было видно ни того, что запущено, ни того, на
+    чём стоим: человек открывал два приложения и складывал картину в голове.
+
+    Отдельно считается, сколько бумаг ДЕРЖИТ работу прямо сейчас. Просьба с
+    глаголом возврата не пускает процесс дальше, пока документ не согласован;
+    просьба без глагола заведена к сведению и хода не держит. Смешивать их в
+    одном счётчике — значит потерять ответ на вопрос «почему стоим».
+    """
+    cid = await assert_company_member(company_id, user, db)
+    return await process_documents.listing(db, cid, process_id)
 
 
 @router.post("/{site_id}/projects", status_code=201)
