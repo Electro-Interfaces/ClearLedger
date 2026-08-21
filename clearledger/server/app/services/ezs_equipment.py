@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import re
 import json
 import uuid
 from datetime import date
@@ -602,6 +603,24 @@ def _detect_header(rows: list[tuple], scan: int = 10):
     return best
 
 
+def _warehouse_name(raw: str | None) -> tuple[str | None, str | None]:
+    """Графа «Адрес / место хранения» → (название склада, примечание).
+
+    Заказчик пишет туда и склад, и историю станции целым предложением: «ЭЗС №268
+    (была поставлена изначально в г. Байкальск)…». Заводить склад с таким именем
+    нельзя — это не место, а рассказ; но и терять рассказ незачем.
+    """
+    text = " ".join(str(raw or "").split())
+    if not text:
+        return None, None
+    head = re.split(r"\s*[(.,;]\s*", text, maxsplit=1)[0].strip()
+    if not head or len(head) > 80:
+        # Названия склада тут нет вовсе — только пояснение.
+        return None, text[:400]
+    note = text[len(head):].strip(" (.,;") or None
+    return head[:100], (note[:400] if note else None)
+
+
 def _connectors(row: tuple, conns: dict[int, str]) -> tuple[int | None, str | None]:
     """Порты станции из колонок-разъёмов → (сколько всего, чем именно).
 
@@ -700,7 +719,7 @@ async def import_units_xlsx(db: AsyncSession, company_id, user: User | None,
                 vendor = canon_vendor(vendor_raw)
                 model = cell(row, "model", colmap)
                 inv = cell(row, "inventory", colmap)
-                wh_name = cell(row, "warehouse", colmap)
+                wh_name, wh_note = _warehouse_name(cell(row, "warehouse", colmap))
                 state_raw = cell(row, "state", colmap)
                 state, recognized = _map_state(state_raw)
                 if state_raw and not recognized:
@@ -821,7 +840,8 @@ async def import_units_xlsx(db: AsyncSession, company_id, user: User | None,
                     speed_class=speed,
                     inventory_number=inv, supplier=cell(row, "supplier", colmap),
                     purchase_date=cell(row, "purchase_date", colmap),
-                    notes=cell(row, "notes", colmap),
+                    notes=" · ".join(x for x in (cell(row, "notes", colmap), wh_note) if x)[:500]
+                    or None,
                     state=state, is_used=(state == "in_stock_used"),
                     current_location_id=loc_id, custodian=custodian,
                     data_confirmed=confirmed, unconfirmed_reason=reason,
