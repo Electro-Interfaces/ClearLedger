@@ -1922,9 +1922,23 @@ function ChatBubble({
                   if (e.key === 'Escape') onEditCancel()
                 }}
                 className={cn('max-h-[20rem] min-h-[3.5rem] w-full resize-y overflow-y-auto rounded border border-border bg-background/60 p-1.5 leading-[1.5] text-foreground outline-none focus:border-primary', textSizeClass)} />
-              <div className="flex justify-end gap-1">
-                <button onClick={onEditCancel} className="rounded p-0.5 text-muted-foreground hover:bg-accent"><X className="size-3.5" /></button>
-                <button onClick={onEditSave} className="rounded p-0.5 text-emerald-500 hover:bg-accent"><Check className="size-3.5" /></button>
+              {/* Выход из правки был двумя иконками в 14 пикселей на цветном фоне
+                  своего сообщения: человек не находил, чем закончить, и правка
+                  выглядела ловушкой. Кнопки названы словами, рядом — жесты. */}
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] text-muted-foreground">
+                  Enter — сохранить · Esc — отмена
+                </span>
+                <div className="flex items-center gap-1.5">
+                  <button onClick={onEditCancel}
+                    className="inline-flex items-center gap-1 rounded-md border border-border/70 bg-background/70 px-2 py-1 text-[12px] font-medium text-foreground hover:bg-accent">
+                    <X className="size-3.5" />Отмена
+                  </button>
+                  <button onClick={onEditSave}
+                    className="inline-flex items-center gap-1 rounded-md bg-emerald-600 px-2.5 py-1 text-[12px] font-medium text-white hover:bg-emerald-700">
+                    <Check className="size-3.5" />Сохранить
+                  </button>
+                </div>
               </div>
             </div>
           ) : (
