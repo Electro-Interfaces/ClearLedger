@@ -525,7 +525,23 @@ COLUMN_SYNONYMS: dict[str, tuple[str, ...]] = {
     "connectors": ("разъёмы", "разъемы", "коннекторы", "порты", "connectors"),
     "purchase_date": ("дата закупки", "дата поступления", "дата прихода", "дата покупки"),
     "supplier": ("поставщик", "supplier"),
-    "notes": ("примечание", "комментарий", "заметки", "notes"),
+    "notes": ("примечание", "комментарий", "комментарии", "заметки", "notes"),
+    # Графы складского реестра заказчика: где лежит, кто хранит, чем числится.
+    "region": ("регион", "субъект", "region"),
+    "keeper": ("подрядчик", "подрядчик (монтаж/хранение)", "хранитель", "ответственный"),
+    "accounting_no": ("бух. № объекта", "бух.№ объекта", "бух № объекта", "бух. № объекта (сч.08)",
+                      "инв. номер сч.08", "№ сч.08"),
+    "external_no": ("№ zoi-1", "№ zoi", "zoi", "зевс", "№ зевс"),
+    "purchase_doc": ("№ и дата договора поставки", "договор поставки", "№ договора"),
+    "warranty": ("гарантийный срок", "гарантия", "гарантийный срок, окончание"),
+}
+
+# Колонки-разъёмы: у заказчика каждый тип отдельной графой с количеством портов.
+# Одной колонкой «разъёмы» это не выражается, а порты — главный вопрос к станции
+# на складе: без них непонятно, на какую площадку её вообще можно ставить.
+CONNECTOR_COLUMNS: dict[str, str] = {
+    "ccs2": "CCS2", "ccs": "CCS2", "chademo": "CHAdeMO", "gb/t": "GB/T", "gbt": "GB/T",
+    "type2": "Type 2", "type 2": "Type 2", "type1": "Type 1", "type 1": "Type 1",
 }
 
 _STATE_SYNONYMS = (
@@ -550,15 +566,25 @@ def _map_state(raw: str | None) -> tuple[str, bool]:
     return "in_stock_new", False
 
 
-def _detect_header(rows: list[tuple], scan: int = 10) -> tuple[int, dict[int, str], list[str]]:
-    """Найти строку заголовка (≥3 совпадений по синонимам) → (row_idx, {col→key}, unknown)."""
-    best: tuple[int, dict[int, str], list[str]] | None = None
+def _detect_header(rows: list[tuple], scan: int = 10):
+    """Найти строку заголовка → (row_idx, {col→key}, {col→тип разъёма}, unknown).
+
+    Колонки-разъёмы выделяются отдельно от паспортных: их несколько, они несут
+    количество портов каждого типа, и складывать их в общий `colmap` значило бы
+    оставить в карточке только последний найденный тип.
+    """
+    best = None
     for ri, row in enumerate(rows[:scan]):
         colmap: dict[int, str] = {}
+        conns: dict[int, str] = {}
         unknown: list[str] = []
         for ci, cell in enumerate(row):
             label = " ".join(str(cell or "").strip().lower().split())
             if not label:
+                continue
+            conn = CONNECTOR_COLUMNS.get(label)
+            if conn:
+                conns[ci] = conn
                 continue
             hit = next((key for key, syns in COLUMN_SYNONYMS.items()
                         if any(label == s or label.startswith(s) for s in syns)), None)
@@ -567,11 +593,37 @@ def _detect_header(rows: list[tuple], scan: int = 10) -> tuple[int, dict[int, st
             else:
                 unknown.append(str(cell).strip())
         if len(colmap) >= 3 and (best is None or len(colmap) > len(best[1])):
-            best = (ri, colmap, unknown)
+            best = (ri, colmap, conns, unknown)
     if best is None:
         raise HTTPException(400, "Не найдена строка заголовка (нужны минимум 3 знакомые колонки: "
                                  "серийный №, производитель, модель, склад, состояние…)")
     return best
+
+
+def _connectors(row: tuple, conns: dict[int, str]) -> tuple[int | None, str | None]:
+    """Порты станции из колонок-разъёмов → (сколько всего, чем именно).
+
+    Пустая строка портов — не ноль, а «неизвестно»: у станции, которую ещё не
+    подтвердил поставщик, портов не бывает ноль, их бывает «пока не сказали».
+    """
+    found: list[tuple[str, int]] = []
+    for ci, name in conns.items():
+        if ci >= len(row):
+            continue
+        raw = row[ci]
+        if raw in (None, ""):
+            continue
+        try:
+            count = int(float(str(raw).replace(",", ".")))
+        except (TypeError, ValueError):
+            continue
+        if count > 0:
+            found.append((name, count))
+    if not found:
+        return None, None
+    total = sum(c for _, c in found)
+    label = ", ".join(f"{name}×{c}" if c > 1 else name for name, c in found)
+    return total, label[:200]
 
 
 async def import_units_xlsx(db: AsyncSession, company_id, user: User | None,
@@ -580,13 +632,14 @@ async def import_units_xlsx(db: AsyncSession, company_id, user: User | None,
     import openpyxl
 
     wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
-    ws = wb.active
-    rows = [tuple(c for c in r) for r in ws.iter_rows(values_only=True)]
+    # Реестр приходит вкладками по классу станции — «Быстрые ЭЗС» и «Медленные ЭЗС».
+    # Брать только активный лист значило бы молча потерять половину склада, и
+    # заметили бы это по недостаче на инвентаризации, а не при загрузке.
+    sheets = [(ws.title, [tuple(c for c in r) for r in ws.iter_rows(values_only=True)])
+              for ws in wb.worksheets]
     wb.close()
-    if not rows:
+    if not any(rows for _, rows in sheets):
         raise HTTPException(400, "Пустой файл")
-
-    header_idx, colmap, unknown_cols = _detect_header(rows)
 
     # существующие единицы компании — индексы дедупа
     existing = (await db.execute(
@@ -599,7 +652,7 @@ async def import_units_xlsx(db: AsyncSession, company_id, user: User | None,
 
     report: dict[str, Any] = {
         "created": 0, "updated": 0, "skipped": 0,
-        "errors": [], "unknownColumns": unknown_cols,
+        "errors": [], "unknownColumns": [],
         "warehousesCreated": [], "stateUnknown": [], "dryRun": dry_run,
     }
     wh_cache: dict[str, ServiceLocation] = {}
@@ -608,109 +661,178 @@ async def import_units_xlsx(db: AsyncSession, company_id, user: User | None,
                                       ServiceLocation.type == "warehouse")
     )).scalars().all()}
 
-    def cell(row: tuple, key: str) -> str | None:
+    def cell(row: tuple, key: str, colmap: dict[int, str]) -> str | None:
         for ci, k in colmap.items():
             if k == key and ci < len(row) and row[ci] is not None:
                 v = str(row[ci]).strip()
                 return v or None
         return None
 
-    for ri, row in enumerate(rows[header_idx + 1:], start=header_idx + 2):
-        if all(c is None or str(c).strip() == "" for c in row):
+    report["sheets"] = []
+    for sheet_name, rows in sheets:
+        if not rows:
             continue
         try:
-            serial = (cell(row, "serial") or "").strip() or None
-            vendor_raw = cell(row, "vendor")
-            vendor = canon_vendor(vendor_raw)
-            model = cell(row, "model")
-            inv = cell(row, "inventory")
-            wh_name = cell(row, "warehouse")
-            state_raw = cell(row, "state")
-            state, recognized = _map_state(state_raw)
-            if not recognized:
-                report["stateUnknown"].append({"row": ri, "value": state_raw})
-
-            # дедуп
-            unit = by_serial.get(serial.lower()) if serial else None
-            if unit is None and not serial and inv:
-                unit = by_alt.get((vendor or "", model or "", inv))
-
-            if unit is not None:
-                # обновление: дозаполняем пустые паспортные поля
-                changed = False
-                for field, val in (("vendor", vendor), ("vendor_raw", vendor_raw),
-                                   ("model", model), ("inventory_number", inv),
-                                   ("supplier", cell(row, "supplier")),
-                                   ("purchase_date", cell(row, "purchase_date")),
-                                   ("connector_types", cell(row, "connectors")),
-                                   ("notes", cell(row, "notes"))):
-                    if val and not getattr(unit, field):
-                        if not dry_run:
-                            setattr(unit, field, val)
-                        changed = True
-                pw = cell(row, "power")
-                if pw and unit.power_kwt is None:
-                    try:
-                        if not dry_run:
-                            unit.power_kwt = float(str(pw).replace(",", "."))
-                        changed = True
-                    except ValueError:
-                        pass
-                report["updated" if changed else "skipped"] += 1
-                continue
-
-            # создание
-            wh: ServiceLocation | None = None
-            if wh_name:
-                key = wh_name.strip().lower()
-                if not dry_run:
-                    wh = wh_cache.get(key) or await get_or_create_warehouse(db, company_id, wh_name)
-                    wh_cache[key] = wh
-                if key not in known_wh and wh_name.strip() not in report["warehousesCreated"]:
-                    report["warehousesCreated"].append(wh_name.strip())
-            elif state in STOCK_STATES or state == "reserved":
-                report["errors"].append({"row": ri, "message": "не указан склад"})
-                continue
-
-            if dry_run:
-                report["created"] += 1
-                continue
-
-            power = None
-            pw = cell(row, "power")
-            if pw:
-                try:
-                    power = float(str(pw).replace(",", "."))
-                except ValueError:
-                    power = None
-            # Терминальное состояние (списана/возврат) держателя на складе не
-            # имеет: current_location=None, custodian vendor|none (не «warehouse»).
-            terminal = state in TERMINAL_STATES
-            loc_id = None if terminal else (wh.id if wh else None)
-            custodian = ("vendor" if state == "returned_to_vendor" else "none") \
-                if terminal else "warehouse"
-            unit = EzsEquipmentUnit(
-                company_id=company_id,
-                serial_number=serial, vendor=vendor, vendor_raw=vendor_raw,
-                model=model, power_kwt=power,
-                connector_types=cell(row, "connectors"),
-                inventory_number=inv, supplier=cell(row, "supplier"),
-                purchase_date=cell(row, "purchase_date"), notes=cell(row, "notes"),
-                state=state, is_used=(state == "in_stock_used"),
-                current_location_id=loc_id, custodian=custodian,
-            )
-            db.add(unit)
-            await db.flush()
-            db.add(_movement(company_id, unit, "receipt", user=user,
-                             to_location_id=loc_id,
-                             to_state=state, basis=f"импорт: {filename}"))
-            if serial:
-                by_serial[serial.lower()] = unit
-            report["created"] += 1
+            header_idx, colmap, conns, unknown_cols = _detect_header(rows)
         except HTTPException:
-            raise
-        except Exception as e:  # noqa: BLE001 — строка не валит импорт
-            report["errors"].append({"row": ri, "message": str(e)[:200]})
+            # Лист без узнаваемой шапки — не повод валить загрузку остальных: в книге
+            # заказчика рядом с реестром живут пояснения и черновики.
+            report["sheets"].append({"sheet": sheet_name, "skipped": "нет строки заголовка"})
+            continue
+        for u in unknown_cols:
+            if u not in report["unknownColumns"]:
+                report["unknownColumns"].append(u)
+        # Класс станции берётся из названия вкладки: в самих строках его нет, а
+        # «быстрая» и «медленная» — разные и по мощности, и по применению.
+        speed = ("fast" if "быстр" in sheet_name.lower()
+                 else "slow" if "медлен" in sheet_name.lower() else None)
+        sheet_stat = {"sheet": sheet_name, "rows": 0, "unconfirmed": 0}
+        report["sheets"].append(sheet_stat)
+        for ri, row in enumerate(rows[header_idx + 1:], start=header_idx + 2):
+            if all(c is None or str(c).strip() == "" for c in row):
+                continue
+            sheet_stat["rows"] += 1
+            try:
+                serial = (cell(row, "serial", colmap) or "").strip() or None
+                vendor_raw = cell(row, "vendor", colmap)
+                vendor = canon_vendor(vendor_raw)
+                model = cell(row, "model", colmap)
+                inv = cell(row, "inventory", colmap)
+                wh_name = cell(row, "warehouse", colmap)
+                state_raw = cell(row, "state", colmap)
+                state, recognized = _map_state(state_raw)
+                if state_raw and not recognized:
+                    report["stateUnknown"].append({"row": ri, "value": state_raw})
+
+                ports, port_types = _connectors(row, conns)
+                if port_types is None:
+                    port_types = cell(row, "connectors", colmap)
+                # Позиция считается неподтверждённой, когда поставщик ещё не сказал
+                # главного: где она и с какими портами. Такие строки принимаются —
+                # выбросить их значило бы потерять то, что уже известно, — но
+                # помечаются, чтобы не попасть в остаток наравне с проверенными.
+                gaps = []
+                if not state_raw:
+                    gaps.append("статус")
+                if ports is None:
+                    gaps.append("порты")
+                confirmed = not gaps
+                reason = ("поставщик не подтвердил: " + ", ".join(gaps))[:200] if gaps else None
+                if not confirmed:
+                    sheet_stat["unconfirmed"] += 1
+
+                extra = {
+                    "region": cell(row, "region", colmap),
+                    "keeper": cell(row, "keeper", colmap),
+                    "accounting_no": cell(row, "accounting_no", colmap),
+                    "external_no": cell(row, "external_no", colmap),
+                    "purchase_doc": cell(row, "purchase_doc", colmap),
+                    "warranty_until": cell(row, "warranty", colmap),
+                }
+
+                # дедуп
+                unit = by_serial.get(serial.lower()) if serial else None
+                if unit is None and not serial and inv:
+                    unit = by_alt.get((vendor or "", model or "", inv))
+
+                if unit is not None:
+                    # обновление: дозаполняем пустые паспортные поля
+                    changed = False
+                    fields = [("vendor", vendor), ("vendor_raw", vendor_raw),
+                              ("model", model), ("inventory_number", inv),
+                              ("supplier", cell(row, "supplier", colmap)),
+                              ("purchase_date", cell(row, "purchase_date", colmap)),
+                              ("connector_types", port_types),
+                              ("speed_class", speed),
+                              ("notes", cell(row, "notes", colmap))]
+                    fields += list(extra.items())
+                    for field, val in fields:
+                        if val and not getattr(unit, field, None):
+                            if not dry_run:
+                                setattr(unit, field, val)
+                            changed = True
+                    if ports and not unit.connectors_count:
+                        if not dry_run:
+                            unit.connectors_count = ports
+                        changed = True
+                    # Подтверждение — это новость, а не «пустое поле»: если реестр
+                    # наконец назвал порты и статус, отметку снимаем.
+                    if confirmed and not unit.data_confirmed:
+                        if not dry_run:
+                            unit.data_confirmed = True
+                            unit.unconfirmed_reason = None
+                        changed = True
+                    pw = cell(row, "power", colmap)
+                    if pw and unit.power_kwt is None:
+                        try:
+                            if not dry_run:
+                                unit.power_kwt = float(str(pw).replace(",", "."))
+                            changed = True
+                        except ValueError:
+                            pass
+                    report["updated" if changed else "skipped"] += 1
+                    continue
+
+                # создание
+                wh: ServiceLocation | None = None
+                if wh_name:
+                    key = wh_name.strip().lower()
+                    if not dry_run:
+                        wh = wh_cache.get(key) or await get_or_create_warehouse(
+                            db, company_id, wh_name)
+                        wh_cache[key] = wh
+                    if key not in known_wh and wh_name.strip() not in report["warehousesCreated"]:
+                        report["warehousesCreated"].append(wh_name.strip())
+                elif state in STOCK_STATES or state == "reserved":
+                    # Склада нет, но позиция известна: неподтверждённую принимаем без
+                    # места хранения — она и есть «ещё не приехала».
+                    if confirmed:
+                        report["errors"].append({"row": ri, "message": "не указан склад"})
+                        continue
+
+                if dry_run:
+                    report["created"] += 1
+                    continue
+
+                power = None
+                pw = cell(row, "power", colmap)
+                if pw:
+                    try:
+                        power = float(str(pw).replace(",", "."))
+                    except ValueError:
+                        power = None
+                # Терминальное состояние (списана/возврат) держателя на складе не
+                # имеет: current_location=None, custodian vendor|none (не «warehouse»).
+                terminal = state in TERMINAL_STATES
+                loc_id = None if terminal else (wh.id if wh else None)
+                custodian = ("vendor" if state == "returned_to_vendor" else "none") \
+                    if terminal else "warehouse"
+                unit = EzsEquipmentUnit(
+                    company_id=company_id,
+                    serial_number=serial, vendor=vendor, vendor_raw=vendor_raw,
+                    model=model, power_kwt=power,
+                    connectors_count=ports, connector_types=port_types,
+                    speed_class=speed,
+                    inventory_number=inv, supplier=cell(row, "supplier", colmap),
+                    purchase_date=cell(row, "purchase_date", colmap),
+                    notes=cell(row, "notes", colmap),
+                    state=state, is_used=(state == "in_stock_used"),
+                    current_location_id=loc_id, custodian=custodian,
+                    data_confirmed=confirmed, unconfirmed_reason=reason,
+                    **{k: v for k, v in extra.items() if v},
+                )
+                db.add(unit)
+                await db.flush()
+                db.add(_movement(company_id, unit, "receipt", user=user,
+                                 to_location_id=loc_id,
+                                 to_state=state, basis=f"импорт: {filename} · {sheet_name}"))
+                if serial:
+                    by_serial[serial.lower()] = unit
+                report["created"] += 1
+            except HTTPException:
+                raise
+            except Exception as e:  # noqa: BLE001 — строка не валит импорт
+                report["errors"].append({"row": ri, "sheet": sheet_name, "message": str(e)[:200]})
 
     return report
 
