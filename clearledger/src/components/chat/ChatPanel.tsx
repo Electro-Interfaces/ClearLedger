@@ -15,7 +15,7 @@ import {
   Folder, AtSign, Loader2, Paperclip, Camera, Search as SearchIcon,
   Shield, ShieldOff, UserMinus, LogOut, Bell, BellOff, Forward, MapPin, ClipboardList, Workflow,
   Mail, Palette, Smile, Images, Volume2, VolumeX, Mic, BarChart3, WifiOff,
-  CheckSquare, Square,
+  CheckSquare, Copy, Square,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/contexts/AuthContext'
@@ -1357,12 +1357,14 @@ function TicketFromMessageDialog({ message, defaultObjectId, defaultObjectName, 
 }
 
 // ── пересылка: выбор чатов-получателей ───────────────────────────────────────
-function ForwardDialog({ message, rooms, onClose, onDone }: {
-  message: ChatMessage
+function ForwardDialog({ messages, rooms, onClose, onDone }: {
+  /** Одна реплика — частный случай пакета: диалог у них один и тот же. */
+  messages: ChatMessage[]
   rooms: ChatRoom[]
   onClose: () => void
   onDone: (roomIds: string[]) => void
 }) {
+  const message = messages[0]
   const [picked, setPicked] = useState<Record<string, boolean>>({})
   const [q, setQ] = useState('')
   const [busy, setBusy] = useState(false)
@@ -1373,7 +1375,9 @@ function ForwardDialog({ message, rooms, onClose, onDone }: {
     if (!ids.length) return
     setBusy(true)
     try {
-      await chat.forwardMessage(message.id, ids)
+      // Порядок сохраняем: пересланная переписка должна читаться так же, как
+      // читалась здесь, поэтому шлём последовательно, а не пачкой промисов.
+      for (const m of messages) await chat.forwardMessage(m.id, ids)
       onDone(ids)
     } catch (e) {
       toast.error((e as Error).message || 'Не удалось переслать')
@@ -1383,11 +1387,14 @@ function ForwardDialog({ message, rooms, onClose, onDone }: {
     <Dialog open onOpenChange={(o) => { if (!o) onClose() }}>
       <DialogContent className="max-w-sm gap-0 p-0 sm:max-w-sm">
         <DialogHeader className="border-b border-border/50 px-4 py-3">
-          <DialogTitle className="text-sm">Переслать сообщение</DialogTitle>
+          <DialogTitle className="text-sm">
+            {messages.length > 1 ? `Переслать ${messages.length} сообщения` : 'Переслать сообщение'}
+          </DialogTitle>
         </DialogHeader>
         <div className="p-4">
           <p className="mb-2 truncate rounded-md bg-muted/40 px-2.5 py-1.5 text-xs text-muted-foreground">
             {message.content || message.fileName || 'вложение'}
+            {messages.length > 1 && ` и ещё ${messages.length - 1}`}
           </p>
           <div className="relative mb-2">
             <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -2117,6 +2124,11 @@ export function ChatPanel({ compact, scopeProduct }: {
   const [profileFor, setProfileFor] = useState<string | null>(null)
   // Пересылка: сообщение, для которого открыт выбор чатов-получателей.
   const [forwardMsg, setForwardMsg] = useState<ChatMessage | null>(null)
+  // Выбранные реплики: работа с перепиской бывает пакетной — переслать три
+  // сообщения в другую комнату, скопировать кусок разговора в задачу, убрать
+  // ошибочную серию. По одному это делается втрое дольше и с ошибками.
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const [forwardBatch, setForwardBatch] = useState<ChatMessage[] | null>(null)
   // «В заявку»: сообщение, из которого создаётся заявка.
   const [ticketMsg, setTicketMsg] = useState<ChatMessage | null>(null)
   const [processMsg, setProcessMsg] = useState<ChatMessage | null>(null)
@@ -3149,6 +3161,62 @@ export function ChatPanel({ compact, scopeProduct }: {
             </div>
           )}
 
+          {/* Выбранные реплики: пакетная работа с перепиской. Полоса стоит НАД
+              лентой, а не всплывает над сообщением — она про весь набор, и её
+              место не должно зависеть от того, куда уехала прокрутка. */}
+          {selectedIds.length > 0 && (
+            <div className="flex items-center gap-2 border-b border-border bg-muted/60 px-3 py-2">
+              <span className="text-sm font-medium">
+                Выбрано: {selectedIds.length}
+              </span>
+              <div className="ml-auto flex items-center gap-1.5">
+                <button
+                  onClick={() => {
+                    // Копируем так, как разговор читается: автор, время, текст.
+                    // Голый текст без автора в задаче или письме бесполезен —
+                    // непонятно, кто это сказал.
+                    const chosen = messages.filter((m) => selectedIds.includes(m.id))
+                    const text = chosen.map((m) => {
+                      const who = m.userName || 'Участник'
+                      const when = formatTime(m.createdAt)
+                      const body = m.content || m.fileName || '[вложение]'
+                      return `${who} (${when}): ${body}`
+                    }).join('\n')
+                    navigator.clipboard.writeText(text)
+                      .then(() => { toast.success(`Скопировано реплик: ${chosen.length}`); setSelectedIds([]) })
+                      .catch(() => toast.error('Буфер обмена недоступен'))
+                  }}
+                  className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-2 py-1 text-xs font-medium hover:bg-accent">
+                  <Copy className="size-3.5" />Копировать
+                </button>
+                <button
+                  onClick={() => setForwardBatch(messages.filter((m) => selectedIds.includes(m.id)))}
+                  className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-2 py-1 text-xs font-medium hover:bg-accent">
+                  <Forward className="size-3.5" />Переслать
+                </button>
+                {(isAdmin || activeRoom?.createdBy === user?.id
+                  || messages.filter((m) => selectedIds.includes(m.id)).every((m) => m.userId === user?.id)) && (
+                  <button
+                    onClick={() => {
+                      // Удаление пакетом — необратимо, поэтому спрашиваем один раз
+                      // и называем число: «удалить выбранное» без счёта читается
+                      // как «удалить что-то».
+                      if (!window.confirm(`Удалить сообщений: ${selectedIds.length}? Восстановить нельзя.`)) return
+                      selectedIds.forEach((id) => deleteMutation.mutate(id))
+                      setSelectedIds([])
+                    }}
+                    className="inline-flex items-center gap-1 rounded-md border border-destructive/40 bg-background px-2 py-1 text-xs font-medium text-destructive hover:bg-destructive/10">
+                    <Trash2 className="size-3.5" />Удалить
+                  </button>
+                )}
+                <button onClick={() => setSelectedIds([])}
+                  className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-accent">
+                  <X className="size-3.5" />Снять выбор
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Лента. Фон — личная настройка: он ничего не значит для других
               участников, поэтому живёт в браузере, а не в базе пространства.
               Файл можно просто бросить в переписку — это привычнее, чем искать
@@ -3213,6 +3281,10 @@ export function ChatPanel({ compact, scopeProduct }: {
                       onEditSave={() => editMutation.mutate({ id: msg.id, content: editText })}
                       onEditTextChange={setEditText}
                       onDelete={() => deleteMutation.mutate(msg.id)}
+                      selectionMode={selectedIds.length > 0}
+                      selected={selectedIds.includes(msg.id)}
+                      onSelectToggle={() => setSelectedIds((ids) => ids.includes(msg.id)
+                        ? ids.filter((x) => x !== msg.id) : [...ids, msg.id])}
                       onAuthorClick={!isOwn && msg.userId && activeRoom?.type !== 'direct' ? () => setProfileFor(msg.userId!) : undefined}
                       withAvatar={activeRoom?.type !== 'direct'}
                       selfId={user?.id}
@@ -3369,8 +3441,17 @@ export function ChatPanel({ compact, scopeProduct }: {
           onClose={() => setProfileFor(null)}
           onMessage={(uid) => { setProfileFor(null); openDirectMutation.mutate(uid) }} />
       )}
+      {forwardBatch && (
+        <ForwardDialog messages={forwardBatch} rooms={rooms.filter((r) => !r.isArchived)}
+          onClose={() => setForwardBatch(null)}
+          onDone={(ids) => {
+            setForwardBatch(null)
+            setSelectedIds([])
+            toast.success(ids.length === 1 ? 'Переслано' : `Переслано в ${ids.length} чата`)
+          }} />
+      )}
       {forwardMsg && (
-        <ForwardDialog message={forwardMsg} rooms={rooms.filter((r) => !r.isArchived)}
+        <ForwardDialog messages={[forwardMsg]} rooms={rooms.filter((r) => !r.isArchived)}
           onClose={() => setForwardMsg(null)}
           onDone={(ids) => {
             setForwardMsg(null)
