@@ -619,14 +619,23 @@ def _warehouse_name(raw: str | None) -> tuple[str | None, str | None]:
     # склад из второго значило бы получить шестьдесят складов с именами станций.
     if not re.search(r"склад|завод|производств", text, re.I):
         return None, text[:400]
-    # Название склада — тот фрагмент, где стоит само слово: «ЭЗС №262 г. Южно-
-    # сахалинск склад ДЭК» — это склад ДЭК, а не «ЭЗС №262 г».
-    parts = [p.strip() for p in re.split(r"\s*[(,;]\s*|\.\s+", text) if p.strip()]
-    head = next((p for p in parts if re.search(r"склад|завод|производств", p, re.I)),
-                parts[0] if parts else "")
+    # Название склада — то место, где стоит само слово. Заказчик пишет графу тремя
+    # способами, и каждый требует своего:
+    #   «ЭЗС №262 г.Южно-сахалинск склад ДЭК» → склад ДЭК (не «ЭЗС №262 г»);
+    #   «На заводе ООО ЗЭТЗ в Казани»          → весь фрагмент, это и есть место;
+    #   «Череповец (в производстве на заводе)» → Череповец, а «в производстве» —
+    #                                            состояние станции, а не склад.
+    parts = [p.strip() for p in re.split(r"\s*[(,;]\s*", text) if p.strip()]
+    m = re.search(r"склад[а-яё]*(?:\s+[^,;()]+)?", text, re.I)
+    if m:
+        head = m.group(0).strip(" .)")
+    elif re.match(r"\s*(?:на\s+)?завод", text, re.I):
+        head = parts[0]
+    else:
+        head = parts[0]
     if not head or len(head) > 80:
         return None, text[:400]
-    note = text.replace(head, "", 1).strip(" (.,;") or None
+    note = text.replace(head, "", 1).strip(" (.,;)") or None
     return head[:100], (note[:400] if note else None)
 
 
