@@ -2929,6 +2929,17 @@ async def create_all() -> None:
             "ALTER TABLE store_document_projections ALTER COLUMN document_role SET NOT NULL",
             "CREATE INDEX IF NOT EXISTS ix_store_document_projection_accounting_group "
             "ON store_document_projections (company_id, accounting_group_id)",
+            # v2.59: смена как сквозной разрез реестра. accounting_group_id для
+            # этого не годится — он про бухгалтерскую очередь (что уехало в БП),
+            # а смена нужна раньше и шире: по ней группируется весь товарный
+            # контур станции. Ключ естественный — внутренний номер смены кассы,
+            # он приходит в каждом пакете и равен нулю у документов, смене не
+            # принадлежащих (приёмка, инвентаризация, перемещение).
+            "ALTER TABLE store_document_projections ADD COLUMN IF NOT EXISTS "
+            "shift_no INTEGER",
+            "CREATE INDEX IF NOT EXISTS ix_store_document_projection_shift "
+            "ON store_document_projections (company_id, station_id, shift_no) "
+            "WHERE shift_no IS NOT NULL",
             "CREATE INDEX IF NOT EXISTS ix_store_document_projection_source_document "
             "ON store_document_projections (company_id, projection_source, source_document_id)",
             "UPDATE store_document_projections SET projection_source = CASE "
@@ -3594,6 +3605,15 @@ async def create_all() -> None:
             "ON eco_outbox_events (subject) WHERE status <> 'done'",
             "CREATE INDEX IF NOT EXISTS ix_eco_event_subs_company "
             "ON eco_event_subscriptions (company_id) WHERE enabled",
+        ):
+            await conn.execute(_sa.text(stmt))
+
+        # v2.58: кассовый факт «Хозяйства» — сколько по объектам реально заплатили.
+        for stmt in (
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_ops_payments_key "
+            "ON ops_payments (company_id, external_key)",
+            "CREATE INDEX IF NOT EXISTS ix_ops_payments_period_item "
+            "ON ops_payments (company_id, period, cost_item)",
         ):
             await conn.execute(_sa.text(stmt))
 

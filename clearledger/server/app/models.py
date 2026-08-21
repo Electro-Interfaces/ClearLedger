@@ -8138,6 +8138,62 @@ class OpsPeriodCharge(Base):
     )
 
 
+class OpsPayment(Base):
+    """Кассовый факт: сколько контрагенту заплатили за период по статье.
+
+    В «Хозяйстве» до сих пор жила только одна сторона дела — ОЖИДАНИЕ:
+    `OpsPeriodCharge` разворачивает условия договоров в «сколько должно быть
+    начислено». Сравнить это было не с чем: первичка приходит поштучно, а денег,
+    ушедших со счёта, в пространстве не было вовсе. Отсюда вопрос, на который
+    «Хозяйство» не отвечало: «мы платим больше, чем должны, — или меньше?»
+
+    Строка — это выгрузка казначейства/бухгалтерии заказчика, а не наш расчёт.
+    Поэтому она не участвует в закрытии месяца и не правит начислений: закрытый
+    месяц не переписывается (см. `ops_closing`), а факт лишь показывает рядом,
+    сколько ушло. Расхождение считается на чтении — как и везде в этом контуре.
+
+    Объекты названы бухгалтерскими номерами заказчика, и их в одной строке
+    обычно несколько: энергосбыт выставляет счёт сразу на десятки площадок. Мы
+    храним перечень как есть — раскладывать сумму по объектам без основания
+    значило бы выдумать распределение, которого в документе нет.
+    """
+
+    __tablename__ = "ops_payments"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    # Первое число месяца ISO — как в OpsPeriodCharge. Годовые итоги выгрузки
+    # ложатся на январь своего года с пометкой `granularity = 'year'`: смешивать
+    # их с месяцами нельзя, но и терять историю 2022–2024 незачем.
+    period: Mapped[str] = mapped_column(String(10), nullable=False, index=True)
+    granularity: Mapped[str] = mapped_column(String(10), nullable=False, default="month")
+    cost_item: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    # Инвестиции идут теми же статьями, но это капитальные вложения, а не расход
+    # периода: в отчёте о результате им не место, в стоимости объекта — место.
+    is_capital: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    counterparty_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("counterparties.id", ondelete="SET NULL"), nullable=True)
+    # Имя из выгрузки хранится всегда, даже когда контрагент опознан: сопоставление
+    # может оказаться ошибочным, и тогда нужно видеть, что было написано в источнике.
+    counterparty_name: Mapped[str] = mapped_column(String(300), nullable=False)
+    amount: Mapped[float] = mapped_column(Float, nullable=False, default=0)
+    # Бухгалтерские номера объектов заказчика, к которым относится платёж.
+    object_numbers: Mapped[list[str] | None] = mapped_column(ARRAY(String(40)), nullable=True)
+    source_label: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    batch_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+    # Ключ идемпотентности: повторная загрузка того же файла не задваивает суммы.
+    external_key: Mapped[str] = mapped_column(String(200), nullable=False)
+    loaded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index("uq_ops_payments_key", "company_id", "external_key", unique=True),
+        Index("ix_ops_payments_period_item", "company_id", "period", "cost_item"),
+    )
+
+
 class OpsPeriodClose(Base):
     """Закрытие месяца по затратам эксплуатации.
 
@@ -8765,6 +8821,10 @@ class StoreDocumentProjection(Base):
     document_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     accounting_group_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), nullable=True)
+    # shift_no: внутренний номер кассовой смены. Пусто у документов, которые
+    # смене не принадлежат, — приёмка от поставщика приходит в смену, но ей не
+    # принадлежит: она условие смены, а не её часть.
+    shift_no: Mapped[int | None] = mapped_column(Integer, nullable=True)
     projection_source: Mapped[str] = mapped_column(String(20), nullable=False)
     source_kind: Mapped[str] = mapped_column(String(30), nullable=False)
     source_record_id: Mapped[str] = mapped_column(String(200), nullable=False)
