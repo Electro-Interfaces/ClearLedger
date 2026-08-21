@@ -2569,6 +2569,19 @@ async def create_all() -> None:
                '{act,invoice}',        'prev_period', '26',  50),
               ('cleaning',        'Уборка и содержание',   'services',      NULL,      'fixed',
                '{act,invoice}',        'contract',    '20',  60),
+              -- Пришли с кассовым фактом заказчика (выгрузка списаний 2022–2026):
+              -- расход по ним идёт, а статьи под него не было, и деньги падали
+              -- в «прочие», где их не разобрать.
+              ('contractors',     'Поставщики и подрядчики', 'services',    NULL,      'fixed',
+               '{act,invoice}',        'average',     '20',  35),
+              ('rent_other',      'Аренда прочего имущества', 'rent',       'rent',    'fixed',
+               '{act,invoice}',        'contract',    '20',  15),
+              ('utilities',       'Коммунальные услуги',    'services',      NULL,      'fixed',
+               '{act,invoice}',        'prev_period', '20',  25),
+              ('penalty',         'Штрафы, пени, неустойки', NULL,           NULL,      'fixed',
+               '{act}',                'average',     '91',  80),
+              ('deposit',         'Обеспечительные платежи', NULL,           NULL,      'fixed',
+               '{invoice}',            'contract',    '76',  85),
               ('other',           'Прочие расходы',         NULL,           NULL,      'fixed',
                '{act}',                'average',     '26',  90)
             ON CONFLICT (code) DO UPDATE
