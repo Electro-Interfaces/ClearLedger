@@ -129,16 +129,64 @@ async def create_object(
         db, cid, payload.model_dump(exclude_none=True), actor=user)
 
 
+@router.get("/objects/{object_id}/impact")
+async def object_impact(
+    object_id: str,
+    company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Что потянет за собой вывод объекта из эксплуатации.
+
+    Состав объектов приложений задаёт этот реестр: чего здесь нет, того нет и у
+    них. Значит снятие станции с эксплуатации закрывает и работу по ней — и
+    человек обязан увидеть, сколько именно работы, до того как нажмёт.
+    """
+    cid = await _member(company_id, user, db)
+    return await _impact(db, cid, object_id)
+
+
+async def _impact(db: AsyncSession, cid: uuid.UUID, object_id: str) -> dict:
+    # Приложение может быть не подключено или лежать — это не повод запретить
+    # правку реестра, но повод честно сказать, что последствия неизвестны.
+    try:
+        res = await space_projection.object_tickets(db, cid, object_id, "support")
+        return {"support": {"known": True, "total": res.get("total", 0),
+                            "open": res.get("open", 0), "tickets": res.get("tickets", [])}}
+    except space_projection.ProjectionError as e:
+        return {"support": {"known": False, "reason": str(e)}}
+
+
 @router.patch("/objects/{object_id}")
 async def patch_object(
     object_id: str,
     payload: ObjectPatch,
     company_id: str = Query(...),
+    confirm: bool = Query(False, description="согласие на вывод объекта из эксплуатации"),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ) -> dict:
     cid = await _admin(company_id, user, db)
     _validate(payload.type, payload.status)
     data = payload.model_dump(exclude_none=True)
+
+    # Вывод из эксплуатации — не рядовая правка поля. Объект уходит из состава
+    # приложений, и открытая по нему работа уходит вместе с ним. Без явного
+    # подтверждения такой переход не проводим и возвращаем, что именно закроется.
+    if data.get("status") and data["status"] != "active":
+        current = await space_registry.get_object(db, cid, object_id)
+        if current is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Объект не найден в этой компании")
+        if current.get("status") == "active" and not confirm:
+            impact = await _impact(db, cid, object_id)
+            support = impact.get("support", {})
+            raise HTTPException(status.HTTP_409_CONFLICT, detail={
+                "code": "object_leaves_operation",
+                "message": (
+                    f"Объект уходит из эксплуатации в состояние «{data['status']}». "
+                    "Он пропадёт из состава объектов приложений."
+                ),
+                "willArchive": support,
+                "hint": "Повторите запрос с confirm=true, если это и требуется.",
+            })
     if "code" in data and await space_registry.code_taken(
             db, cid, data["code"].strip(), except_id=object_id):
         raise HTTPException(status.HTTP_409_CONFLICT,

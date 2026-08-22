@@ -2857,6 +2857,22 @@ async def create_all() -> None:
             )
         """))
 
+        # Дата запрета изменения — граница закрытого бухгалтерией периода.
+        #
+        # Одно значение на компанию: та же дата, что стоит в БП ГИГ, и она же
+        # раздаётся станциям заданием. Всё, что относится к ней и раньше, не
+        # правится и не пересобирается — уточнение оформляется документом
+        # открытой даты, как это делает бухгалтерия.
+        await conn.execute(_sa.text("""
+            CREATE TABLE IF NOT EXISTS accounting_closing_date (
+                company_id  UUID PRIMARY KEY,
+                closing_date DATE,
+                author      VARCHAR(120) NOT NULL DEFAULT '',
+                note        TEXT NOT NULL DEFAULT '',
+                updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
+
         # Политика Магазина v1: цены всех карточек находятся в ведении АЗС.
         # Колонка остаётся — позже она снова станет различаться по категории
         # или карточке, когда будет включён сетевой контроль ценообразования.
@@ -3740,6 +3756,19 @@ async def create_all() -> None:
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_doc_share_links_approval "
             "ON doc_share_links (approval_id) "
             "WHERE approval_id IS NOT NULL AND NOT revoked AND used_at IS NULL",
+        ):
+            await conn.execute(_sa.text(stmt))
+
+        # v2.63: тип задачи может принадлежать проекту (models.TaskType.project_id).
+        # Таблицу `task_projects` завёл `create_all`, а столбец в уже
+        # существующей `task_types` он не добавляет — для этого и есть список
+        # ниже. Без строки бэкенд не поднимался: первый же запрос типа падал на
+        # UndefinedColumnError. NULL = тип общий для компании, как и было.
+        for stmt in (
+            "ALTER TABLE task_types ADD COLUMN IF NOT EXISTS project_id UUID "
+            "REFERENCES task_projects(id) ON DELETE CASCADE",
+            "CREATE INDEX IF NOT EXISTS ix_task_types_project "
+            "ON task_types (project_id) WHERE project_id IS NOT NULL",
         ):
             await conn.execute(_sa.text(stmt))
 

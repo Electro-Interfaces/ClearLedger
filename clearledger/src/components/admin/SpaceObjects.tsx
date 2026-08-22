@@ -5,7 +5,7 @@
  * здесь, в единственной админке пространства. Рабочая часть (операционный статус, карта,
  * связь со сменами и заявками) остаётся в приложениях — сюда не тянем.
  */
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Loader2, MapPin, Plus, Search, Pencil, Share2 } from 'lucide-react'
@@ -23,7 +23,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import {
   listSpaceObjects, createSpaceObject, updateSpaceObject, projectSpaceObjects,
   OBJECT_TYPE_LABELS, OBJECT_STATUS_LABELS,
-  type SpaceObject, type SpaceObjectInput,
+  type SpaceObject, type SpaceObjectInput, type ObjectImpact,
 } from '@/services/spaceObjectsService'
 
 const EMPTY: SpaceObjectInput = { code: '', name: '', type: 'fuel_station', status: 'active' }
@@ -48,18 +48,37 @@ export function SpaceObjects({ companyId, canManage }: { companyId: string; canM
     onError: (e) => toast.error('Проекция не выполнена', { description: (e as Error).message }),
   })
 
+  // Вывод объекта из эксплуатации: сервер такой переход без подтверждения не
+  // проводит и возвращает, сколько работы закроется вместе с объектом. Держим
+  // это состояние здесь — диалог показывает цифру и спрашивает согласие.
+  const [leaving, setLeaving] = useState<{ data: SpaceObjectInput; impact: ObjectImpact } | null>(null)
+
   const save = useMutation({
-    mutationFn: (data: SpaceObjectInput) =>
-      editing ? updateSpaceObject(companyId, editing.id, data) : createSpaceObject(companyId, data),
+    mutationFn: async ({ data, confirm }: { data: SpaceObjectInput; confirm?: boolean }) => {
+      if (!editing) return createSpaceObject(companyId, data)
+      return updateSpaceObject(companyId, editing.id, data, confirm)
+    },
     onSuccess: () => {
       toast.success(editing ? 'Объект обновлён' : 'Объект добавлен')
       qc.invalidateQueries({ queryKey: key })
       // Прикладной разрез читает те же данные — обновляем и его кеш.
       qc.invalidateQueries({ queryKey: ['locations'] })
-      setForm(null); setEditing(null)
+      setForm(null); setEditing(null); setLeaving(null)
     },
-    onError: (e) => toast.error((e as Error).message || 'Не удалось сохранить'),
+    onError: async (e) => {
+      const detail = (e as { detail?: unknown }).detail as
+        { code?: string; willArchive?: ObjectImpact['support'] } | undefined
+      if (detail?.code === 'object_leaves_operation' && pendingRef.current) {
+        setLeaving({ data: pendingRef.current, impact: { support: detail.willArchive ?? { known: false } } })
+        return
+      }
+      toast.error((e as Error).message || 'Не удалось сохранить')
+    },
   })
+
+  // Что именно сохраняли, когда сервер попросил подтверждение.
+  const pendingRef = useRef<SpaceObjectInput | null>(null)
+  const submit = (data: SpaceObjectInput) => { pendingRef.current = data; save.mutate({ data }) }
 
   if (q.isLoading) {
     return (
@@ -239,10 +258,60 @@ export function SpaceObjects({ companyId, canManage }: { companyId: string; canM
             <Button variant="outline" onClick={() => { setForm(null); setEditing(null) }}>Отмена</Button>
             <Button
               disabled={!form?.code.trim() || !form?.name.trim() || save.isPending}
-              onClick={() => form && save.mutate(form)}
+              onClick={() => form && submit(form)}
             >
               {save.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               {editing ? 'Сохранить' : 'Добавить'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Вывод из эксплуатации. Не «вы уверены?»: диалог называет последствие
+          числом, потому что решение зависит именно от него — одно дело закрыть
+          станцию без работы, другое вместе с десятком открытых заявок. */}
+      <Dialog open={!!leaving} onOpenChange={(o) => !o && setLeaving(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Объект уходит из эксплуатации</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 text-sm">
+            <p className="text-muted-foreground">
+              Состав объектов приложений задаёт этот реестр. После перевода в состояние
+              «{OBJECT_STATUS_LABELS[leaving?.data.status ?? ''] ?? leaving?.data.status}» объект
+              пропадёт из «Поддержки», а открытая по нему работа закроется.
+            </p>
+            {leaving?.impact.support.known ? (
+              <div className="rounded-md border border-border bg-muted/30 px-3 py-2.5">
+                <div className="text-foreground">
+                  Заявок по объекту: <b>{leaving.impact.support.total ?? 0}</b>
+                  {(leaving.impact.support.open ?? 0) > 0 && (
+                    <>, из них открытых <b className="text-amber-500">{leaving.impact.support.open}</b></>
+                  )}
+                </div>
+                {(leaving.impact.support.open ?? 0) > 0 && (
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    Они будут отменены с причиной «объект выведен из эксплуатации».
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-xs">
+                Поддержка не ответила, сколько работы связано с объектом
+                {leaving?.impact.support.reason ? `: ${leaving.impact.support.reason}` : ''}.
+                Последствия неизвестны — лучше повторить позже.
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setLeaving(null)}>Отмена</Button>
+            <Button
+              variant="destructive"
+              disabled={save.isPending}
+              onClick={() => leaving && save.mutate({ data: leaving.data, confirm: true })}
+            >
+              {save.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Вывести из эксплуатации
             </Button>
           </DialogFooter>
         </DialogContent>

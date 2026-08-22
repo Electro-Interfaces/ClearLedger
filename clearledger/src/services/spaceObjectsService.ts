@@ -72,11 +72,35 @@ export async function createSpaceObject(companyId: string, data: SpaceObjectInpu
 
 export async function updateSpaceObject(
   companyId: string, objectId: string, data: Partial<SpaceObjectInput>,
+  /** Согласие на вывод объекта из эксплуатации — см. `ObjectLeavesOperation`. */
+  confirm = false,
 ): Promise<SpaceObject> {
   return patch<SpaceObject>(
-    `/api/registry/objects/${encodeURIComponent(objectId)}?company_id=${encodeURIComponent(companyId)}`,
+    `/api/registry/objects/${encodeURIComponent(objectId)}?company_id=${encodeURIComponent(companyId)}`
+      + (confirm ? '&confirm=true' : ''),
     data,
   )
+}
+
+/**
+ * Что закроется вместе с объектом, если снять его с эксплуатации.
+ *
+ * Состав объектов приложений задаёт этот реестр: чего здесь нет, того нет и у
+ * них. Значит вывод станции закрывает и работу по ней — и человек обязан
+ * увидеть, сколько именно работы, до того как нажмёт.
+ */
+export interface ObjectImpact {
+  support: {
+    known: boolean
+    total?: number
+    open?: number
+    reason?: string
+  }
+}
+
+export async function getObjectImpact(companyId: string, objectId: string): Promise<ObjectImpact> {
+  return get<ObjectImpact>(
+    `/api/registry/objects/${encodeURIComponent(objectId)}/impact`, { company_id: companyId })
 }
 
 export interface ProjectionResult {
