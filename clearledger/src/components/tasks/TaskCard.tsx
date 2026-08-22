@@ -594,6 +594,12 @@ function Attributes({ task, companyId, live, people, labels, pending, onAct, onC
     enabled: !!task.project_id, staleTime: 5 * 60 * 1000,
   })
   const versions = versionsQ.data?.versions ?? []
+  const sprintsQ = useQuery({
+    queryKey: ['task-sprints', companyId, task.project_id],
+    queryFn: () => tasksService.listTaskSprints(companyId, task.project_id ?? undefined),
+    enabled: !!task.project_id, staleTime: 5 * 60 * 1000,
+  })
+  const sprints = sprintsQ.data?.sprints ?? []
   const watch = useMutation({
     mutationFn: (v: { userId: string; on: boolean }) => v.on
       ? tasksService.addWatcher(task.id, companyId, v.userId)
@@ -661,6 +667,20 @@ function Attributes({ task, companyId, live, people, labels, pending, onAct, onC
               <VersionPick value={task.found_version_id ?? ''} versions={versions}
                 disabled={!live || pending}
                 onChange={(v) => onAct({ companyId, foundVersionId: v })} />
+            </Field>
+            <Field label="Спринт" hint={task.sprint ? undefined : "бэклог"}>
+              {/* Закрытый спринт не предлагается: его итог уже подведён. */}
+              <Select value={task.sprint_id ?? 'none'} disabled={!live || pending}
+                onValueChange={(v) => onAct({ companyId, sprintId: v === 'none' ? null : v })}>
+                <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Бэклог</SelectItem>
+                  {sprints.filter((sp) => sp.state !== 'closed' || sp.id === task.sprint_id)
+                    .map((sp) => (
+                      <SelectItem key={sp.id} value={sp.id}>{sp.name}</SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
             </Field>
           </>
         )}

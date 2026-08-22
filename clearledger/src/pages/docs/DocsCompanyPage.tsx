@@ -22,6 +22,8 @@ const TasksCompanyPage = lazy(() => import('@/pages/tasks/TasksWorkPage')
   .then((m) => ({ default: m.TasksCompanyPage })))
 const TasksBoardPage = lazy(() => import('@/pages/tasks/TasksBoardPage')
   .then((m) => ({ default: m.TasksBoardPage })))
+const SprintPlanPage = lazy(() => import('./SprintPlanPage')
+  .then((m) => ({ default: m.SprintPlanPage })))
 
 function Loading() {
   return <div className="p-6 text-sm text-muted-foreground">Загрузка…</div>
@@ -86,6 +88,9 @@ export function DocsCompanyPage() {
   }
   if (view === 'board') {
     return <Suspense fallback={<Loading />}><TasksBoardPage /></Suspense>
+  }
+  if (view === 'plan') {
+    return <Suspense fallback={<Loading />}><SprintPlanPage /></Suspense>
   }
   if (view === 'inbox') {
     return <div className="px-4 py-4"><DocsInboxPanel /></div>

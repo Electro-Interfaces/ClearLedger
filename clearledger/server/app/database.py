@@ -3828,6 +3828,18 @@ async def create_all() -> None:
         ):
             await conn.execute(_sa.text(stmt))
 
+        # v2.65: спринты проекта (этап 11). Таблицу заводит `create_all`, столбец
+        # в существующей `tasks` — нет. SET NULL по той же причине, что у версий:
+        # удалённый спринт не должен утащить за собой работу — она вернётся в
+        # бэклог, где ей и место.
+        for stmt in (
+            "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS sprint_id UUID "
+            "REFERENCES task_sprints(id) ON DELETE SET NULL",
+            "CREATE INDEX IF NOT EXISTS ix_tasks_sprint "
+            "ON tasks (sprint_id) WHERE sprint_id IS NOT NULL",
+        ):
+            await conn.execute(_sa.text(stmt))
+
         # v2.60: маршрут проекта выбирается человеком, а не берётся молча первым.
         # Пусто у всех существующих проектов — это и есть прежнее поведение.
         for stmt in (

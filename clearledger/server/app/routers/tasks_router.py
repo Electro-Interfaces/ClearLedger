@@ -32,8 +32,8 @@ from app.database import get_db
 from app.models import (
     Company, ServiceLocation, SourceFile, Task, TaskAttachment, TaskChecklistItem,
     TaskEvent, TaskExternalRef, TaskLabel, TaskLabelLink, TaskLink, TaskParticipant,
-    TaskProject, TaskRecurrence, TaskTemplate, TaskType, TaskVersion, TaskView,
-    TaskWatcher, TaskWorkItem,
+    TaskProject, TaskRecurrence, TaskSprint, TaskTemplate, TaskType, TaskVersion,
+    TaskView, TaskWatcher, TaskWorkItem,
     User, UserCompany,
 )
 from app.services import process_templates, space_connectors, task_mail, task_scheduler
@@ -55,6 +55,8 @@ async def _assert_work(company_ref: str, user: User, db: AsyncSession) -> uuid.U
 
 
 
+# Чем человек называет возврат задачи из спринта в очередь — в командной строке.
+_BACKLOG_WORDS = ("бэклог", "backlog", "-")
 _LIST_LIMIT = 500
 _PRIORITY = "^(low|medium|high|critical)$"
 # Виды связи. `subtask`: task_id — родитель, related_task_id — подзадача.
@@ -156,6 +158,9 @@ def _task_out(t: Task, route: list[dict], names: dict[str, str | None],
         "fix_version_id": str(t.fix_version_id) if t.fix_version_id else None,
         "found_version": names.get("found_version"),
         "found_version_id": str(t.found_version_id) if t.found_version_id else None,
+        # Пусто — задача в бэклоге: решили делать, не решили когда.
+        "sprint": names.get("sprint"),
+        "sprint_id": str(t.sprint_id) if t.sprint_id else None,
         "title": t.title,
         "status": t.status,
         "priority": t.priority,
@@ -188,10 +193,13 @@ async def _names(db: AsyncSession, tasks: list[Task]) -> dict[uuid.UUID, dict[st
     obj_ids = {t.object_id for t in tasks if t.object_id}
     prj_ids = {t.project_id for t in tasks if t.project_id}
     ver_ids = {i for t in tasks for i in (t.fix_version_id, t.found_version_id) if i}
+    spr_ids = {t.sprint_id for t in tasks if t.sprint_id}
     prjs = {r.id: r for r in (await db.execute(
         select(TaskProject).where(TaskProject.id.in_(prj_ids)))).scalars()} if prj_ids else {}
     vers = {r.id: r.name for r in (await db.execute(
         select(TaskVersion).where(TaskVersion.id.in_(ver_ids)))).scalars()} if ver_ids else {}
+    sprs = {r.id: r.name for r in (await db.execute(
+        select(TaskSprint).where(TaskSprint.id.in_(spr_ids)))).scalars()} if spr_ids else {}
     types = {r.id: r for r in (await db.execute(
         select(TaskType).where(TaskType.id.in_(type_ids)))).scalars()} if type_ids else {}
     users = {r.id: r.name for r in (await db.execute(
@@ -208,6 +216,7 @@ async def _names(db: AsyncSession, tasks: list[Task]) -> dict[uuid.UUID, dict[st
         "project_code": prjs[t.project_id].code if t.project_id in prjs else None,
         "fix_version": vers.get(t.fix_version_id),
         "found_version": vers.get(t.found_version_id),
+        "sprint": sprs.get(t.sprint_id),
     } for t in tasks}
 
 
@@ -386,6 +395,10 @@ async def list_tasks(
     project_id: str | None = Query(None),
     fix_version_id: str | None = Query(None),
     found_version_id: str | None = Query(None),
+    sprint_id: str | None = Query(None),
+    # Бэклог — это отсутствие спринта, а не отдельный список. Отдельный
+    # параметр нужен потому, что «пусто» через `sprint_id` не передать.
+    backlog: bool = Query(False),
     type_id: str | None = Query(None),
     assignee_id: str | None = Query(None),
     author_id: str | None = Query(None),
@@ -449,6 +462,10 @@ async def list_tasks(
         sel = sel.where(Task.author_id == _uuid_or_400(author_id, "author_id"))
     if project_id:
         sel = sel.where(Task.project_id == _uuid_or_400(project_id, "project_id"))
+    if sprint_id:
+        sel = sel.where(Task.sprint_id == _uuid_or_400(sprint_id, "sprint_id"))
+    if backlog:
+        sel = sel.where(Task.sprint_id.is_(None))
     if fix_version_id:
         sel = sel.where(Task.fix_version_id == _uuid_or_400(fix_version_id, "fix_version_id"))
     if found_version_id:
@@ -818,6 +835,186 @@ async def version_summary(
                  for t in fixed if t.status == "open"],
         "found": [_task_out(t, names[t.id]["route"], names[t.id])
                   for t in rows if t.found_version_id == v.id],
+    }
+
+
+# ── Спринты проекта ─────────────────────────────────────────────────────────
+# Доска по стадиям отвечает «где работа стоит», спринт — «что берём следующим».
+# Задача без спринта и есть бэклог: отдельной сущности под него нет, иначе
+# задачу пришлось бы класть куда-то дважды.
+
+
+def _sprint_out(sp: TaskSprint, done: int = 0, left: int = 0) -> dict[str, Any]:
+    return {
+        "id": str(sp.id), "project_id": str(sp.project_id),
+        "name": sp.name, "state": sp.state,
+        "starts_on": sp.starts_on.isoformat() if sp.starts_on else None,
+        "ends_on": sp.ends_on.isoformat() if sp.ends_on else None,
+        "carried_over": sp.carried_over,
+        # Итог тремя числами: взято, сделано, перенесено. Диаграмму сгорания не
+        # рисуем, пока её никто не попросил.
+        "taken": done + left + sp.carried_over, "done": done, "left": left,
+    }
+
+
+@router.get("/sprints")
+async def list_sprints(
+    company_id: str = Query(...),
+    project_id: str | None = Query(None),
+    state: str | None = Query(None, pattern="^(planned|active|closed)$"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Спринты компании со счётчиками: сделано и осталось видно списком."""
+    cid = await _assert_work(company_id, current_user, db)
+    q = select(TaskSprint).where(TaskSprint.company_id == cid)
+    if project_id:
+        q = q.where(TaskSprint.project_id == _uuid_or_400(project_id, "project_id"))
+    if state:
+        q = q.where(TaskSprint.state == state)
+    rows = (await db.execute(q.order_by(TaskSprint.starts_on.desc().nullslast(),
+                                        TaskSprint.name))).scalars().all()
+    counts = dict((sid, (d, o)) for sid, d, o in (await db.execute(
+        select(Task.sprint_id,
+               func.count(Task.id).filter(Task.status != "open"),
+               func.count(Task.id).filter(Task.status == "open"))
+        .where(Task.company_id == cid, Task.sprint_id.is_not(None))
+        .group_by(Task.sprint_id))).all())
+    return {"sprints": [_sprint_out(sp, *counts.get(sp.id, (0, 0))) for sp in rows]}
+
+
+class SprintIn(BaseModel):
+    company_id: str
+    project_id: str
+    name: str = Field(min_length=1, max_length=60)
+    starts_on: date_type | None = None
+    ends_on: date_type | None = None
+
+
+@router.post("/sprints", status_code=status.HTTP_201_CREATED)
+async def create_sprint(
+    payload: SprintIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cid = await _assert_work(payload.company_id, current_user, db)
+    prj = await db.get(TaskProject, _uuid_or_400(payload.project_id, "project_id"))
+    if prj is None or prj.company_id != cid:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Неизвестный проект")
+    if payload.starts_on and payload.ends_on and payload.ends_on < payload.starts_on:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Спринт кончается раньше, чем начинается")
+    name = payload.name.strip()
+    if (await db.execute(select(TaskSprint.id).where(
+            TaskSprint.project_id == prj.id,
+            TaskSprint.name == name))).scalar_one_or_none() is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Такой спринт в проекте уже есть")
+    sp = TaskSprint(company_id=cid, project_id=prj.id, name=name,
+                    starts_on=payload.starts_on, ends_on=payload.ends_on)
+    db.add(sp)
+    await db.flush()
+    await db.commit()
+    return _sprint_out(sp)
+
+
+class SprintPatch(BaseModel):
+    company_id: str
+    name: str | None = Field(None, min_length=1, max_length=60)
+    state: str | None = Field(None, pattern="^(planned|active|closed)$")
+    starts_on: date_type | None = None
+    ends_on: date_type | None = None
+
+
+@router.patch("/sprints/{sprint_id}")
+async def update_sprint(
+    sprint_id: str,
+    payload: SprintPatch,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Правка спринта, включая начало и закрытие отрезка.
+
+    Закрытие — не просто смена слова: незакрытые задачи возвращаются в бэклог, а
+    их число остаётся в спринте. Иначе итог показал бы «взято столько же, сколько
+    сделано» — по такому отчёту не видно, что отрезок переоценили.
+    """
+    cid = await _assert_work(payload.company_id, current_user, db)
+    sp = await db.get(TaskSprint, _uuid_or_400(sprint_id, "спринт"))
+    if sp is None or sp.company_id != cid:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Спринт не найден")
+    if payload.name is not None and payload.name.strip() != sp.name:
+        name = payload.name.strip()
+        if (await db.execute(select(TaskSprint.id).where(
+                TaskSprint.project_id == sp.project_id, TaskSprint.name == name,
+                TaskSprint.id != sp.id))).scalar_one_or_none() is not None:
+            raise HTTPException(status.HTTP_409_CONFLICT, "Такой спринт в проекте уже есть")
+        sp.name = name
+    if payload.starts_on is not None:
+        sp.starts_on = payload.starts_on
+    if payload.ends_on is not None:
+        sp.ends_on = payload.ends_on
+    if sp.starts_on and sp.ends_on and sp.ends_on < sp.starts_on:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Спринт кончается раньше, чем начинается")
+
+    if payload.state is not None and payload.state != sp.state:
+        if payload.state == "active":
+            # Активный спринт в проекте один: два «текущих» отрезка означают, что
+            # плана нет, а есть два списка желаний.
+            busy = (await db.execute(select(TaskSprint.name).where(
+                TaskSprint.project_id == sp.project_id, TaskSprint.state == "active",
+                TaskSprint.id != sp.id))).scalars().first()
+            if busy:
+                raise HTTPException(status.HTTP_409_CONFLICT,
+                                    f"В проекте уже идёт спринт «{busy}» — закройте его")
+            if sp.starts_on is None:
+                sp.starts_on = datetime.now(timezone.utc).date()
+        if payload.state == "closed":
+            left = (await db.execute(select(Task).where(
+                Task.sprint_id == sp.id, Task.status == "open"))).scalars().all()
+            sp.carried_over = len(left)
+            for t in left:
+                t.sprint_id = None
+                db.add(TaskEvent(task_id=t.id, kind="field", user_id=current_user.id,
+                                 from_value=f"спринт: {sp.name}"[:200],
+                                 to_value="бэклог"))
+            if sp.ends_on is None:
+                sp.ends_on = datetime.now(timezone.utc).date()
+        sp.state = payload.state
+    await db.commit()
+    counts = (await db.execute(
+        select(func.count(Task.id).filter(Task.status != "open"),
+               func.count(Task.id).filter(Task.status == "open"))
+        .where(Task.sprint_id == sp.id))).one()
+    return _sprint_out(sp, *counts)
+
+
+@router.get("/sprints/{sprint_id}/summary")
+async def sprint_summary(
+    sprint_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Итог спринта: что сделано и что в нём осталось.
+
+    Перенесённое числом, а не списком: задачи к этому моменту уже в бэклоге и
+    показываются там — второй список означал бы, что они в двух местах сразу.
+    """
+    cid = await _assert_work(company_id, current_user, db)
+    sp = await db.get(TaskSprint, _uuid_or_400(sprint_id, "спринт"))
+    if sp is None or sp.company_id != cid:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Спринт не найден")
+    admin = await _is_admin(db, cid, current_user)
+    rows = (await db.execute(
+        select(Task).where(Task.company_id == cid, _visible_to(current_user, admin),
+                           Task.sprint_id == sp.id)
+        .order_by(Task.project_number, Task.number))).scalars().all()
+    names = await _names(db, rows)
+    done = [t for t in rows if t.status != "open"]
+    left = [t for t in rows if t.status == "open"]
+    return {
+        "sprint": _sprint_out(sp, len(done), len(left)),
+        "done": [_task_out(t, names[t.id]["route"], names[t.id]) for t in done],
+        "left": [_task_out(t, names[t.id]["route"], names[t.id]) for t in left],
     }
 
 
@@ -1586,6 +1783,7 @@ class TaskAction(BaseModel):
     # "" — снять версию: «оказалось, чинить не здесь» бывает чаще, чем хотелось бы.
     fix_version_id: str | None = None
     found_version_id: str | None = None
+    sprint_id: str | None = None           # "" — вернуть задачу в бэклог
     add_label_id: str | None = None
     remove_label_id: str | None = None
     estimate: str | None = Field(None, max_length=40)   # «4ч», «30м»; "" — снять
@@ -1734,6 +1932,27 @@ async def task_action(
         now_v = await db.get(TaskVersion, new_v) if new_v else None
         field_changed(label, was.name if was else None, now_v.name if now_v else None)
         setattr(t, field, new_v)
+    # Спринт — то же правило, что у версии: он живёт на проекте, и чужой отрезок
+    # задаче не подходит. Пустая строка возвращает задачу в бэклог.
+    if payload.sprint_id is not None:
+        new_sp = None
+        if payload.sprint_id:
+            sp = await db.get(TaskSprint, _uuid_or_400(payload.sprint_id, "sprint_id"))
+            if sp is None or sp.company_id != t.company_id:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, "Неизвестный спринт")
+            if t.project_id is None or sp.project_id != t.project_id:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                    "Спринт принадлежит другому проекту")
+            if sp.state == "closed":
+                raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                    "Спринт закрыт: его итог уже подведён")
+            new_sp = sp.id
+        if new_sp != t.sprint_id:
+            was_sp = await db.get(TaskSprint, t.sprint_id) if t.sprint_id else None
+            now_sp = await db.get(TaskSprint, new_sp) if new_sp else None
+            field_changed("спринт", was_sp.name if was_sp else "бэклог",
+                          now_sp.name if now_sp else "бэклог")
+            t.sprint_id = new_sp
     if payload.visibility is not None and payload.visibility != t.visibility:
         # Смена круга видимости — событие: «кто закрыл задачу от компании» должно
         # быть видно, иначе это тихое действие с большими последствиями.
@@ -2276,9 +2495,10 @@ async def apply_command(
     note_parts: list[str] = []
     labels: list[str] = []
     work: str | None = None
-    # Версия разрешается не здесь, а на каждой задаче: одно и то же «1.4» может
-    # существовать в двух проектах, и пачка задач бывает из разных.
+    # Версия и спринт разрешаются не здесь, а на каждой задаче: одно и то же
+    # «1.4» может существовать в двух проектах, и пачка задач бывает из разных.
     version_name: str | None = None
+    sprint_name: str | None = None
 
     people = {(n or "").lower(): u for u, n in (await db.execute(
         select(User.id, User.name).join(UserCompany, UserCompany.user_id == User.id)
@@ -2293,6 +2513,10 @@ async def apply_command(
         select(TaskVersion.id, TaskVersion.project_id, TaskVersion.name)
         .where(TaskVersion.company_id == cid,
                TaskVersion.state != "cancelled"))).all()}
+    sprints = {(pid, (n or "").lower()): i for i, pid, n in (await db.execute(
+        select(TaskSprint.id, TaskSprint.project_id, TaskSprint.name)
+        .where(TaskSprint.company_id == cid, TaskSprint.state != "closed"))).all()}
+    sprint_titles = {name for _pid, name in sprints}
     types = (await db.execute(select(TaskType).where(TaskType.company_id == cid))).scalars().all()
     stages = {s.get("name", "").lower(): s.get("code")
               for ty in types for s in (ty.route or []) if s.get("name")}
@@ -2327,6 +2551,21 @@ async def apply_command(
         if w in ("версия", "version") and nxt:
             version_name = nxt
             i += 2
+            continue
+        if w in ("спринт", "sprint") and nxt:
+            # Имя спринта бывает из нескольких слов («Спринт 34»), поэтому берём
+            # самую длинную фразу, которую знает хоть один проект, — как со сроком
+            # «через 3 дня». «спринт бэклог» возвращает работу обратно: планирование
+            # пачкой ходит в обе стороны.
+            for take in (3, 2, 1):
+                phrase = " ".join(words[i + 1:i + 1 + take])
+                if phrase.lower() in sprint_titles or phrase.lower() in _BACKLOG_WORDS:
+                    sprint_name = phrase
+                    i += 1 + take
+                    break
+            else:
+                unknown.append(f"спринт {nxt}")
+                i += 2
             continue
         if w in ("стадия", "state", "stage") and nxt:
             code = stages.get(nxt.lower())
@@ -2370,7 +2609,7 @@ async def apply_command(
     # и другое, как в YouTrack.
     if note_parts:
         action["note"] = " ".join(note_parts)
-    if not action and not labels and not work and not version_name:
+    if not action and not labels and not work and not version_name and not sprint_name:
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             "Не понял команду. Например: «на меня срочная срок завтра»")
 
@@ -2387,6 +2626,15 @@ async def apply_command(
                 skipped.append(f"№{t.number}: версия {version_name} не найдена в проекте")
                 continue
             step["fix_version_id"] = str(vid)
+        if sprint_name:
+            if sprint_name.lower() in _BACKLOG_WORDS:
+                step["sprint_id"] = ""
+            else:
+                sid = sprints.get((t.project_id, sprint_name.lower()))
+                if sid is None:
+                    skipped.append(f"№{t.number}: спринт {sprint_name} не найден в проекте")
+                    continue
+                step["sprint_id"] = str(sid)
         try:
             await task_action(str(t.id), TaskAction(
                 company_id=str(cid), **step), db, current_user)
@@ -2406,7 +2654,8 @@ async def apply_command(
 
     return {"changed": done, "skipped": skipped, "unknown": unknown,
             "applied": {**{k: v for k, v in action.items() if k != "company_id"},
-                        **({"версия": version_name} if version_name else {})}}
+                        **({"версия": version_name} if version_name else {}),
+                        **({"спринт": sprint_name} if sprint_name else {})}}
 
 
 # ── Учёт времени: план и факт ────────────────────────────────────────────

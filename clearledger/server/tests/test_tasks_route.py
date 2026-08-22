@@ -799,3 +799,117 @@ async def test_версия_проекта_собирает_состав(auth_cl
     card = (await auth_client.get(f"/api/tasks/{second['id']}",
                                   params={"company_id": cid})).json()
     assert card["fix_version"] == "1.4.2"
+
+
+async def test_спринт_планирует_и_подводит_итог(auth_client: AsyncClient):
+    """Этап 11: бэклог, отрезок работы и его итог.
+
+    Ловим то, что молча ломается: в проекте заводится второй «текущий» спринт
+    (плана больше нет, есть два списка желаний); закрытие спринта оставляет
+    незакрытые задачи внутри и итог показывает «взято = сделано»; в закрытый
+    спринт докладывают работу задним числом.
+    """
+    me = await _me(auth_client)
+    cid = me["companies"][0]["id"]
+
+    r = await auth_client.post("/api/tasks/projects", json={
+        "company_id": cid, "code": "SPR", "name": "Проверка спринтов"})
+    assert r.status_code == 201, r.text
+    prj = r.json()
+    r = await auth_client.post("/api/tasks/projects", json={
+        "company_id": cid, "code": "SPROTH", "name": "Соседний продукт"})
+    other = r.json()
+
+    r = await auth_client.post("/api/tasks/sprints", json={
+        "company_id": cid, "project_id": prj["id"], "name": "Спринт 1",
+        "starts_on": "2026-08-24", "ends_on": "2026-09-06"})
+    assert r.status_code == 201, r.text
+    sprint = r.json()
+    assert sprint["state"] == "planned" and sprint["taken"] == 0
+
+    # Отрезок, который кончается раньше, чем начинается, — опечатка, а не план.
+    r = await auth_client.post("/api/tasks/sprints", json={
+        "company_id": cid, "project_id": prj["id"], "name": "Кривой",
+        "starts_on": "2026-09-06", "ends_on": "2026-08-24"})
+    assert r.status_code == 400, r.text
+
+    # Две задачи проекта: обе рождаются в бэклоге — спринт им никто не назначал.
+    ids = []
+    for title in ("Первая работа отрезка", "Вторая работа отрезка"):
+        r = await auth_client.post("/api/tasks", json={
+            "company_id": cid, "title": title, "project_id": prj["id"]})
+        assert r.status_code == 201, r.text
+        ids.append(r.json()["id"])
+
+    backlog = (await auth_client.get("/api/tasks", params={
+        "company_id": cid, "scope": "open", "project_id": prj["id"],
+        "backlog": "true"})).json()
+    assert set(ids) <= {t["id"] for t in backlog["tasks"]}
+
+    # Спринт соседнего проекта не подходит: отрезок планирует свою работу.
+    r = await auth_client.post("/api/tasks/sprints", json={
+        "company_id": cid, "project_id": other["id"], "name": "Чужой отрезок"})
+    alien = r.json()
+    r = await auth_client.post(f"/api/tasks/{ids[0]}/action", json={
+        "company_id": cid, "sprint_id": alien["id"]})
+    assert r.status_code == 400, r.text
+
+    for task_id in ids:
+        r = await auth_client.post(f"/api/tasks/{task_id}/action", json={
+            "company_id": cid, "sprint_id": sprint["id"]})
+        assert r.status_code == 200, r.text
+
+    # Взяли в работу: активный спринт в проекте ровно один.
+    r = await auth_client.patch(f"/api/tasks/sprints/{sprint['id']}", json={
+        "company_id": cid, "state": "active"})
+    assert r.status_code == 200, r.text
+    assert r.json()["taken"] == 2
+    r = await auth_client.post("/api/tasks/sprints", json={
+        "company_id": cid, "project_id": prj["id"], "name": "Спринт 2"})
+    second = r.json()
+    r = await auth_client.patch(f"/api/tasks/sprints/{second['id']}", json={
+        "company_id": cid, "state": "active"})
+    assert r.status_code == 409, "в проекте пошли два спринта разом"
+
+    r = await auth_client.post(f"/api/tasks/{ids[0]}/action", json={
+        "company_id": cid, "status": "done"})
+    assert r.status_code == 200, r.text
+
+    # Закрытие: сделанное остаётся в отрезке, незакрытое уходит в бэклог, а его
+    # число остаётся в спринте — иначе не видно, что отрезок переоценили.
+    r = await auth_client.patch(f"/api/tasks/sprints/{sprint['id']}", json={
+        "company_id": cid, "state": "closed"})
+    assert r.status_code == 200, r.text
+    closed = r.json()
+    assert (closed["done"], closed["left"], closed["carried_over"]) == (1, 0, 1), closed
+    assert closed["taken"] == 2, "итог потерял то, что взяли, но не сделали"
+
+    card = (await auth_client.get(f"/api/tasks/{ids[1]}",
+                                  params={"company_id": cid})).json()
+    assert card["sprint_id"] is None, "незакрытая задача осталась в закрытом спринте"
+    assert any(e["kind"] == "field" and e["to"] == "бэклог" for e in card["events"]), card["events"]
+
+    # Задним числом в закрытый отрезок не докладывают: его итог уже подведён.
+    r = await auth_client.post(f"/api/tasks/{ids[1]}/action", json={
+        "company_id": cid, "sprint_id": sprint["id"]})
+    assert r.status_code == 400, r.text
+
+    # Планирование пачкой — командой, в обе стороны.
+    # Несуществующий отрезок не проглатывается молча: человек уверен, что
+    # спланировал работу, а она осталась в бэклоге.
+    r = await auth_client.post("/api/tasks/command", json={
+        "company_id": cid, "task_ids": [ids[1]], "command": "спринт Небывалый"})
+    assert r.status_code == 400, r.text
+    r = await auth_client.post("/api/tasks/command", json={
+        "company_id": cid, "task_ids": [ids[1]], "command": "спринт Спринт 2"})
+    assert r.status_code == 200, r.text
+    card = (await auth_client.get(f"/api/tasks/{ids[1]}",
+                                  params={"company_id": cid})).json()
+    assert card["sprint"] == "Спринт 2", card["sprint"]
+
+    r = await auth_client.post("/api/tasks/command", json={
+        "company_id": cid, "task_ids": [ids[1]], "command": "спринт бэклог"})
+    assert r.status_code == 200, r.text
+    card = (await auth_client.get(f"/api/tasks/{ids[1]}",
+                                  params={"company_id": cid})).json()
+    assert card["sprint_id"] is None

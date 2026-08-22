@@ -9377,6 +9377,10 @@ class Task(Base):
         UUID(as_uuid=True), ForeignKey("task_versions.id", ondelete="SET NULL"), nullable=True)
     fix_version_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("task_versions.id", ondelete="SET NULL"), nullable=True)
+    # Отрезок работы. Пусто — бэклог: задача есть, а когда её делать, ещё не
+    # решили. Это состояние нормальное, а не незаполненное поле.
+    sprint_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("task_sprints.id", ondelete="SET NULL"), nullable=True)
     type_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("task_types.id", ondelete="SET NULL"), nullable=True)
     title: Mapped[str] = mapped_column(String(300), nullable=False)
@@ -9626,6 +9630,46 @@ class TaskVersion(Base):
 
     __table_args__ = (
         UniqueConstraint("project_id", "name", name="uq_task_versions_name"),
+    )
+
+
+class TaskSprint(Base):
+    """Спринт проекта: что берём в работу следующим отрезком времени.
+
+    Заведён 22.08.2026, этап 11 трекерного контура. Доска по стадиям отвечает
+    «где работа стоит», но не отвечает «что берём следующим»: без спринта живая
+    работа и бэклог лежат вперемешку, и планёрка сводится к чтению всего списка.
+
+    Задача без спринта — это и есть бэклог. Отдельной сущности «бэклог» нет:
+    она означала бы, что задачу надо куда-то положить дважды.
+    """
+    __tablename__ = "task_sprints"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("task_projects.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(60), nullable=False)
+    starts_on: Mapped[date_type | None] = mapped_column(Date, nullable=True)
+    ends_on: Mapped[date_type | None] = mapped_column(Date, nullable=True)
+    # planned | active | closed. Активный спринт в проекте один — это правило
+    # держится в роутере: два «текущих» отрезка означают, что плана нет.
+    state: Mapped[str] = mapped_column(String(20), nullable=False, default="planned")
+    # Сколько задач ушло обратно в бэклог при закрытии. Считать это потом
+    # неоткуда: задачи к тому моменту уже без спринта, и «взято» превратилось бы
+    # в «сделано» — итог, по которому не видно, что отрезок переоценили.
+    carried_over: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("project_id", "name", name="uq_task_sprints_name"),
     )
 
 

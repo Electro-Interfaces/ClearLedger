@@ -64,6 +64,22 @@ export interface TaskVersion {
   open: number
 }
 
+export interface TaskSprint {
+  id: string
+  project_id: string
+  name: string
+  /** planned — план, active — идёт, closed — итог подведён. */
+  state: 'planned' | 'active' | 'closed'
+  starts_on: string | null
+  ends_on: string | null
+  /** Сколько задач ушло обратно в бэклог при закрытии. */
+  carried_over: number
+  /** Итог тремя числами: взято, сделано, осталось. */
+  taken: number
+  done: number
+  left: number
+}
+
 export interface SpaceTask {
   id: string
   number: number
@@ -78,6 +94,9 @@ export interface SpaceTask {
   fix_version_id?: string | null
   found_version?: string | null
   found_version_id?: string | null
+  /** Пусто — задача в бэклоге: решили делать, не решили когда. */
+  sprint?: string | null
+  sprint_id?: string | null
   title: string
   status: string           // open | done | cancelled
   priority: string
@@ -197,6 +216,8 @@ export type TaskScope = 'open' | 'mine' | 'assigned' | 'watching' | 'overdue'
 export interface TaskFilters {
   objectId?: string; projectId?: string; typeId?: string; assigneeId?: string; authorId?: string
   fixVersionId?: string; foundVersionId?: string
+  /** `backlog` — задачи без спринта; вместе с `sprintId` не используется. */
+  sprintId?: string; backlog?: boolean
   stage?: string; priority?: string; labelId?: string; q?: string
   dueFrom?: string; dueTo?: string
   sort?: string; limit?: number; offset?: number
@@ -222,6 +243,8 @@ export async function listTasks(companyId: string, scope: TaskScope, opts?: Task
       object_id: opts?.objectId || undefined, project_id: opts?.projectId || undefined,
       fix_version_id: opts?.fixVersionId || undefined,
       found_version_id: opts?.foundVersionId || undefined,
+      sprint_id: opts?.sprintId || undefined,
+      backlog: opts?.backlog ? 'true' : undefined,
       type_id: opts?.typeId || undefined,
       assignee_id: opts?.assigneeId || undefined, author_id: opts?.authorId || undefined,
       stage: opts?.stage || undefined, priority: opts?.priority || undefined,
@@ -356,6 +379,43 @@ export async function taskVersionSummary(id: string, companyId: string) {
     }))
 }
 
+/** Спринты проекта. Без `projectId` — все спринты компании. */
+export async function listTaskSprints(companyId: string, projectId?: string) {
+  return get<{ sprints: TaskSprint[] }>(
+    '/api/tasks/sprints',
+    { company_id: companyId, project_id: projectId || undefined })
+}
+
+export async function createTaskSprint(data: {
+  companyId: string; projectId: string; name: string
+  startsOn?: string; endsOn?: string
+}) {
+  return post<TaskSprint>('/api/tasks/sprints', {
+    company_id: data.companyId, project_id: data.projectId, name: data.name,
+    starts_on: data.startsOn || undefined, ends_on: data.endsOn || undefined,
+  })
+}
+
+/** Правка спринта. `state: 'closed'` подводит итог: незакрытые задачи уходят в
+ *  бэклог, их число остаётся в спринте как «перенесено». */
+export async function updateTaskSprint(id: string, data: {
+  companyId: string; name?: string; state?: TaskSprint['state']
+  startsOn?: string; endsOn?: string
+}) {
+  return patch<TaskSprint>(`/api/tasks/sprints/${id}`, {
+    company_id: data.companyId, name: data.name, state: data.state,
+    starts_on: data.startsOn, ends_on: data.endsOn,
+  })
+}
+
+export async function taskSprintSummary(id: string, companyId: string) {
+  return get<{ sprint: TaskSprint; done: SpaceTask[]; left: SpaceTask[] }>(
+    `/api/tasks/sprints/${id}/summary`, { company_id: companyId })
+    .then((r) => ({
+      ...r, done: (r.done ?? []).map(fillTask), left: (r.left ?? []).map(fillTask),
+    }))
+}
+
 export async function listTaskTypes(companyId: string) {
   return get<{ types: TaskType[]; default_route: RouteStage[] }>(
     '/api/tasks/types', { company_id: companyId })
@@ -385,6 +445,8 @@ export async function taskAction(id: string, data: {
   projectId?: string
   /** null = снять версию; undefined = не трогать. */
   fixVersionId?: string | null; foundVersionId?: string | null
+  /** null = вернуть в бэклог; undefined = не трогать. */
+  sprintId?: string | null
   addLabelId?: string; removeLabelId?: string; estimate?: string
   visibility?: 'company' | 'private'
 }) {
@@ -400,6 +462,7 @@ export async function taskAction(id: string, data: {
     project_id: data.projectId,
     fix_version_id: data.fixVersionId === null ? '' : data.fixVersionId,
     found_version_id: data.foundVersionId === null ? '' : data.foundVersionId,
+    sprint_id: data.sprintId === null ? '' : data.sprintId,
     add_label_id: data.addLabelId, remove_label_id: data.removeLabelId,
     estimate: data.estimate, visibility: data.visibility,
   })
