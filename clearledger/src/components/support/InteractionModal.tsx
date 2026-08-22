@@ -64,6 +64,11 @@ export function InteractionModal() {
               // окне они переносятся по слогам.
               : section === 'auditor'
                 ? 'sm:w-[94vw] sm:max-w-5xl sm:h-[84dvh] sm:max-h-[84dvh]'
+              // «Трек» — не сводка, а рабочее окно: строка задачи несёт номер,
+              // проект, стадию, срок и действия, и в узком окне всё это
+              // переносится в три этажа.
+              : section === 'tasks'
+                ? 'sm:w-[94vw] sm:max-w-5xl sm:h-[86dvh] sm:max-h-[86dvh]'
               : 'sm:w-[92vw] sm:max-w-2xl sm:h-[70vh] sm:max-h-[70vh]')
           }
         >
