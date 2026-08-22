@@ -3764,11 +3764,21 @@ async def create_all() -> None:
         # существующей `task_types` он не добавляет — для этого и есть список
         # ниже. Без строки бэкенд не поднимался: первый же запрос типа падал на
         # UndefinedColumnError. NULL = тип общий для компании, как и было.
+        # Столбцов два, и правила удаления у них разные: тип без проекта не
+        # нужен (CASCADE), а задача без проекта — нужна: NULL допустим на время
+        # переноса старых поручений (SET NULL). `project_number` — номер внутри
+        # проекта («TF-42»); сквозной `number` остаётся, на него ссылаются
+        # написанные интеграции.
         for stmt in (
             "ALTER TABLE task_types ADD COLUMN IF NOT EXISTS project_id UUID "
             "REFERENCES task_projects(id) ON DELETE CASCADE",
             "CREATE INDEX IF NOT EXISTS ix_task_types_project "
             "ON task_types (project_id) WHERE project_id IS NOT NULL",
+            "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS project_id UUID "
+            "REFERENCES task_projects(id) ON DELETE SET NULL",
+            "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS project_number INTEGER",
+            "CREATE INDEX IF NOT EXISTS ix_tasks_project "
+            "ON tasks (project_id) WHERE project_id IS NOT NULL",
         ):
             await conn.execute(_sa.text(stmt))
 
