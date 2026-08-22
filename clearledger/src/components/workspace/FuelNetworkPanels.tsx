@@ -16,7 +16,7 @@ import { PumpUnitModal, type PumpUnitRef } from './PumpUnitModal'
 import { BarList } from '@/components/ui/bar-list'
 import { SparkLineChart } from '@/components/ui/spark-chart'
 import { Tracker } from '@/components/ui/tracker'
-import { formatBucket } from '@/lib/formatDate'
+import { formatBucket, formatDate } from '@/lib/formatDate'
 import { Card, CardContent } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useCompany } from '@/contexts/CompanyContext'
@@ -408,7 +408,7 @@ export function FuelPumpsPanel({ companyId, dateFrom, dateTo }: {
                       <tr key={i} className="border-b border-border/50 hover:bg-muted/25">
                         <Td className="text-muted-foreground">{r.kind}</Td>
                         <Td>{r.station}</Td><Td>{r.pos ?? '—'}</Td><Td>{r.nozzle ?? '—'}</Td>
-                        <Td right>{r.last_at ? r.last_at.slice(0, 10) : 'никогда'}</Td>
+                        <Td right>{r.last_at ? formatDate(r.last_at) : 'никогда'}</Td>
                         <Td right className="text-amber-400">{r.days_idle ?? '—'}</Td>
                       </tr>
                     ))}
@@ -876,7 +876,7 @@ export function FuelClientsPanel({ companyId, dateFrom, dateTo }: {
                     <Td right>{fmtMoney(k.amount)}</Td>
                     <Td right>{fmtMoney(k.avg_check)}</Td>
                     <Td right>{k.stations}</Td>
-                    <Td right className="text-muted-foreground">{k.last_at ? k.last_at.slice(0, 10) : '—'}</Td>
+                    <Td right className="text-muted-foreground">{k.last_at ? formatDate(k.last_at) : '—'}</Td>
                   </tr>
                 ))}
               </tbody>

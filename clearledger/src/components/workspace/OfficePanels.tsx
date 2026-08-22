@@ -38,6 +38,7 @@ import {
 import { OffBalanceAccounts, OffBalanceHiddenScreen } from './OfficeOffBalance'
 import { getMailByCounterparty } from '@/services/mailService'
 import { useWorkspaceSections } from './workspaceSections'
+import { formatDate } from '@/lib/formatDate'
 
 const money = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 const num = new Intl.NumberFormat('ru-RU')
@@ -724,7 +725,7 @@ function CounterpartyMail({ companyId, id }: { companyId: string; id: string }) 
             {t.messages}
           </td>
           <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
-            {t.lastAt?.slice(0, 10)}
+            {t.lastAt ? formatDate(t.lastAt) : '—'}
           </td>
         </tr>
       ))}

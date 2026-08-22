@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import * as docsService from '@/services/docsService'
 import { DocsErrorState, DocsLoadingState } from './DocsQueryState'
+import { formatDate } from '@/lib/formatDate'
 
 type QueueFilter = 'all' | 'due' | 'hold' | 'legacy' | 'active'
 
@@ -28,8 +29,7 @@ const STATE_LABEL: Record<string, string> = {
 }
 
 function displayDate(value: string | null): string {
-  if (!value) return 'не установлен'
-  return new Intl.DateTimeFormat('ru-RU').format(new Date(`${value}T00:00:00`))
+  return value ? formatDate(value) : 'не установлен'
 }
 
 export function DocsArchiveQueue({ companyId }: { companyId: string }) {

@@ -38,6 +38,7 @@ import {
 } from '@/services/mailService'
 import { useCounterparties } from '@/hooks/useReferences'
 import { get } from '@/services/apiClient'
+import { formatDate } from '@/lib/formatDate'
 
 const EMPTY: MailAccountInput = {
   address: '', title: '', purpose: '', mode: 'both',
@@ -721,7 +722,7 @@ export function MailConnector({ mode = 'all' }: { mode?: 'setup' | 'work' | 'all
                   <div className="text-[11px] text-muted-foreground flex items-center gap-2">
                     <span>{t.counterpartyName ?? t.participants[0] ?? '—'}</span>
                     <span className="ml-auto tabular-nums">
-                      {t.messages} · {t.lastAt?.slice(0, 10)}
+                      {t.messages} · {t.lastAt ? formatDate(t.lastAt) : '—'}
                     </span>
                   </div>
                 </button>

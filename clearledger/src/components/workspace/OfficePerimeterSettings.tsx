@@ -21,6 +21,7 @@ import {
   getPerimeterSettings, savePerimeterSettings, type PerimeterSettings,
 } from '@/services/perimeterService'
 import { Loading } from './OfficePanels'
+import { formatDate } from '@/lib/formatDate'
 
 const inputCls = 'w-full rounded-md border bg-background px-2.5 py-1.5 text-sm'
 
@@ -180,7 +181,7 @@ export function PerimeterSettingsScreen({ companyId }: { companyId: string }) {
 
       <div className="flex items-center justify-between">
         <span className="text-[11px] text-muted-foreground">
-          {form.updatedAt ? `Изменено ${form.updatedAt.slice(0, 10)}` : ''}
+          {form.updatedAt ? `Изменено ${formatDate(form.updatedAt)}` : ''}
         </span>
         <Button size="sm" disabled={save.isPending} onClick={() => save.mutate(form)}>
           {save.isPending ? 'Сохраняем…' : 'Сохранить'}

@@ -1,11 +1,7 @@
 import { CalendarRange, MapPin, RotateCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useDocsScope } from '@/hooks/useDocsScope'
-
-function displayDate(value: string): string {
-  const date = new Date(`${value}T00:00:00`)
-  return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat('ru-RU').format(date)
-}
+import { formatPeriod } from '@/lib/formatDate'
 
 export function DocsScopeBar() {
   const scope = useDocsScope()
@@ -16,7 +12,7 @@ export function DocsScopeBar() {
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
         <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
           <CalendarRange className="h-3.5 w-3.5" aria-hidden="true" />
-          Рабочий контур: {displayDate(scope.period.from)}–{displayDate(scope.period.to)}
+          Рабочий контур: {formatPeriod(scope.period.from, scope.period.to)}
         </span>
         <span className="inline-flex items-center gap-1.5 text-muted-foreground">
           <MapPin className="h-3.5 w-3.5" aria-hidden="true" />

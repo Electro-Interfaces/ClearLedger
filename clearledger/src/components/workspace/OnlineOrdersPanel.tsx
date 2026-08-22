@@ -15,6 +15,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { FuelBadge } from '@/components/common/FuelBadge'
 import { cn } from '@/lib/utils'
 import { useResetOnScopeChange } from '@/hooks/useScopeReset'
+import { formatDateTime } from '@/lib/formatDate'
 import {
   getLoadedOnlineOrders,
   refreshOnlineOrders,
@@ -64,10 +65,7 @@ const number2 = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 2, maxim
 const volume = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 3 })
 
 function displayDate(value: string | null) {
-  if (!value) return '—'
-  return new Date(value).toLocaleString('ru-RU', {
-    day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit',
-  })
+  return value ? formatDateTime(value) : '—'
 }
 
 function effectiveVolume(order: LoadedOnlineOrder) {

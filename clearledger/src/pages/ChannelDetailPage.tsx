@@ -51,7 +51,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { format } from 'date-fns'
-import { MONTHS_SHORT_NOM } from '@/lib/formatDate'
+import { MONTHS_SHORT_NOM, formatDate } from '@/lib/formatDate'
 
 type TabId = 'overview' | 'data' | 'mapping' | 'settings'
 
@@ -495,7 +495,7 @@ function ManualTableCard({ channel }: { channel: Channel }) {
                         {slot?.fileId
                           ? <>
                               {slot.fileName || `${String(slot.fileId).slice(0, 8)}…`}
-                              {slot.processedAt && <span className="ml-1 text-[10px] text-muted-foreground/70">· {slot.processedAt.slice(0, 10)}</span>}
+                              {slot.processedAt && <span className="ml-1 text-[10px] text-muted-foreground/70">· {formatDate(slot.processedAt)}</span>}
                             </>
                           : <span className="text-muted-foreground/60">не загружен</span>}
                       </td>

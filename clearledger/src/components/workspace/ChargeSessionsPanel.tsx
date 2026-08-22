@@ -41,6 +41,7 @@ import {
   type ChargeNewClientsInterval, type StationReliabilityRow,
 } from '@/services/analyticsService'
 import { TrendSpark } from '@/components/ui/trend-spark'
+import { formatDate } from '@/lib/formatDate'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 const nf1 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 })
@@ -1885,7 +1886,7 @@ function UnpaidAnalysis({ companyId, dateFrom, dateTo }: { companyId: string; da
                     <td className="p-2 text-right font-mono text-muted-foreground">{nf1.format(r.kwh)}</td>
                     <td className="p-2 text-right font-mono">{fmtMoney(r.amount)} ₽</td>
                     <td className="p-2 text-right font-mono text-muted-foreground">{r.stations}</td>
-                    <td className="p-2 font-mono text-muted-foreground whitespace-nowrap">{r.last_at.slice(0, 10)}</td>
+                    <td className="p-2 font-mono text-muted-foreground whitespace-nowrap">{formatDate(r.last_at)}</td>
                   </tr>
                 ))}
               </tbody>

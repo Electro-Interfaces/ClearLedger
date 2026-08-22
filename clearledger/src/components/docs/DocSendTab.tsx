@@ -16,6 +16,7 @@ import { Label } from '@/components/ui/label'
 import { get, post } from '@/services/apiClient'
 import type { DocDetails } from '@/services/docsService'
 import { DocExchangeBlock } from './DocExchangeBlock'
+import { formatDate } from '@/lib/formatDate'
 
 interface ShareRow {
   id: string
@@ -155,7 +156,7 @@ export function DocSendTab({ doc, companyId, onChanged }: {
               <div className="min-w-0 text-sm">
                 <div>{l.recipient || 'без имени'}</div>
                 <div className="text-[11px] text-muted-foreground">
-                  до {l.expires_at.slice(0, 10)} · открытий {l.opened_count}
+                  до {formatDate(l.expires_at)} · открытий {l.opened_count}
                   {l.acknowledged_at
                     ? ` · получение подтвердил ${l.acknowledged_by}`
                     : ''}

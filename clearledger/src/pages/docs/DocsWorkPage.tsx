@@ -18,6 +18,7 @@ import { DOC_STATUS } from '@/services/docsService'
 import { DocCardPanel } from '@/components/docs/DocCardPanel'
 import { useDocsView } from './DocsLayout'
 import { DocsErrorState } from '@/components/docs/DocsQueryState'
+import { formatDate } from '@/lib/formatDate'
 
 const TasksWorkPage = lazy(() => import('@/pages/tasks/TasksWorkPage')
   .then((module) => ({ default: module.TasksWorkPage })))
@@ -251,7 +252,7 @@ function DueBadge({ value, now }: { value: string; now: number }) {
       'shrink-0 rounded-md px-1.5 py-0.5 text-xs',
       overdue ? 'bg-destructive/10 text-destructive' : 'bg-muted text-muted-foreground',
     )} title={Number.isNaN(date.getTime()) ? value : date.toLocaleString('ru-RU')}>
-      {overdue ? 'просрочено' : 'до'} {value.slice(0, 10)}
+      {overdue ? 'просрочено' : 'до'} {formatDate(value)}
     </span>
   )
 }

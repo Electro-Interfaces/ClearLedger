@@ -21,6 +21,7 @@ import {
   listMovements, UNIT_OP_META, type EquipmentMovement, type UnitOp,
 } from '@/services/equipmentService'
 import { loadLocations } from '@/services/locationService'
+import { formatDate } from '@/lib/formatDate'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 const PAGE_SIZE = 200
@@ -174,7 +175,7 @@ export function EquipmentMovementsPanel({ companyId }: { companyId: string }) {
                   ].filter(Boolean).join(' · ')
                   return (
                     <tr key={m.id} className="border-b border-border/30 hover:bg-muted/30">
-                      <td className="p-2 font-mono whitespace-nowrap">{m.occurredOn?.slice(0, 10)}</td>
+                      <td className="p-2 font-mono whitespace-nowrap">{m.occurredOn ? formatDate(m.occurredOn) : '—'}</td>
                       <td className="p-2 whitespace-nowrap">
                         <Badge variant="outline" className={`text-[10px] font-normal ${opCls(m.op)}`}>
                           {m.opLabel}

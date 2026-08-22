@@ -13,6 +13,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { useAuth } from '@/contexts/AuthContext'
 import * as docsService from '@/services/docsService'
+import { formatDate, formatDateTime } from '@/lib/formatDate'
 import type {
   DocArchiveDecision, DocArchiveHold, DocDestructionAct, DocDetails,
 } from '@/services/docsService'
@@ -75,20 +76,14 @@ const ARCHIVE_EVENT: Record<string, string> = {
 }
 
 function displayDate(value: string | null): string {
-  if (!value) return 'не зафиксирован'
-  const date = new Date(`${value.slice(0, 10)}T00:00:00`)
-  if (Number.isNaN(date.getTime())) return value
-  return new Intl.DateTimeFormat('ru-RU', { dateStyle: 'medium' }).format(date)
+  // Формат — общий для пространства; здесь только подпись для пустого значения.
+  return value ? formatDate(value) : 'не зафиксирован'
 }
 
 function displayDateTime(value: string | null): string {
-  if (!value) return 'не зафиксировано'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return new Intl.DateTimeFormat('ru-RU', {
-    dateStyle: 'medium', timeStyle: 'short', timeZone: 'Europe/Moscow',
-  }).format(date)
+  return value ? formatDateTime(value) : 'не зафиксировано'
 }
+
 
 function mutationMessage(error: unknown): string {
   return (error as Error).message || 'Действие не выполнено'

@@ -20,6 +20,7 @@ import { Label } from '@/components/ui/label'
 import * as docsService from '@/services/docsService'
 import type { DocDetails } from '@/services/docsService'
 import { useAuth } from '@/contexts/AuthContext'
+import { formatDate } from '@/lib/formatDate'
 
 const ROW_STATUS: Record<string, { label: string; icon: typeof CheckCircle2 }> = {
   waiting: { label: 'этап ещё не начат', icon: Clock3 },
@@ -184,7 +185,7 @@ export function DocApprovalTab({ doc, companyId, onChanged }: {
                     <span className="text-muted-foreground"> · {meta.label}</span>
                     {r.due_at && r.status === 'pending' && (
                       <span className="text-muted-foreground">
-                        {' '}· до {r.due_at.slice(0, 10)}
+                        {' '}· до {formatDate(r.due_at)}
                       </span>
                     )}
                     {r.comment && <div className="text-muted-foreground">{r.comment}</div>}

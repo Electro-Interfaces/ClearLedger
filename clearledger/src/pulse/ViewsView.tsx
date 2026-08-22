@@ -31,6 +31,7 @@ import {
 } from './pulseService'
 import { PulseError, PulseLoading } from './parts'
 import { ShowcaseBody } from './ShowcaseView'
+import { formatDate } from '@/lib/formatDate'
 
 export function ViewsView() {
   const { companyId } = useCompany()
@@ -462,7 +463,7 @@ function LinksBlock({ viewId, published }: { viewId: string; published: boolean 
                 <span className="font-medium">{l.label || 'без пометки'}</span>
                 <span className="text-muted-foreground">
                   {l.revoked ? 'отозвана' : l.expired ? 'истекла'
-                    : `до ${(l.expiresAt ?? '').slice(0, 10)}`}
+                    : `до ${formatDate(l.expiresAt ?? '')}`}
                   {' · открывали '}{l.opened}
                 </span>
                 {!dead && (

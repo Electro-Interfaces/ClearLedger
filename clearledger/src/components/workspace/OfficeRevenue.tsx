@@ -47,6 +47,7 @@ import {
 } from './officeShared'
 import { ProductHelpPanel } from './ProductHelpPanel'
 import { REVENUE_HELP_SLICES } from './helpSlices'
+import { formatDate } from '@/lib/formatDate'
 import {
   REV_SALES_MENU, REV_CLIENTS_MENU, REV_ITEMS_MENU, REV_DOCS_MENU,
   REV_MONEY_MENU, REV_STOCK_MENU,
@@ -3461,7 +3462,7 @@ function RevBank({ companyId, period }: { companyId: string; period: Period }) {
     <div className="p-4 space-y-4">
       <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
         <MetricTile label="Денег на счетах" value={money.format(d.rest) + ' ₽'}
-          hint={d.asOf ? `сальдо на ${d.asOf.slice(0, 10)}` : 'сальдо не загружено'} />
+          hint={d.asOf ? `сальдо на ${formatDate(d.asOf)}` : 'сальдо не загружено'} />
         <MetricTile label="Поступило за период" value={money.format(d.inflow) + ' ₽'} />
         <MetricTile label="Ушло за период" value={money.format(d.outflow) + ' ₽'} />
         <MetricTile label="Счетов" value={num.format(d.rows.length)}

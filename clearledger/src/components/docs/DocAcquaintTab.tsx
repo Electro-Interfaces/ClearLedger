@@ -16,6 +16,7 @@ import { Label } from '@/components/ui/label'
 import { useAuth } from '@/contexts/AuthContext'
 import * as docsService from '@/services/docsService'
 import type { DocDetails } from '@/services/docsService'
+import { formatDate } from '@/lib/formatDate'
 
 function moscowToday(date: Date): string {
   const parts = new Intl.DateTimeFormat('en-US', {
@@ -91,7 +92,7 @@ export function DocAcquaintTab({ doc, companyId, canEdit, onChanged }: {
         <Card className="flex flex-wrap items-center justify-between gap-3 p-4">
           <div className="text-sm">
             Документ направлен вам на ознакомление
-            {mine.due_at ? ` · до ${mine.due_at.slice(0, 10)}` : ''}
+            {mine.due_at ? ` · до ${formatDate(mine.due_at)}` : ''}
           </div>
           <Button size="sm" onClick={() => read.mutate()} disabled={read.isPending}>
             Я ознакомлен
@@ -121,15 +122,15 @@ export function DocAcquaintTab({ doc, companyId, canEdit, onChanged }: {
                 <span>{nameOf(a.user_id)}</span>
                 <span className="text-muted-foreground">
                   {a.status === 'done'
-                    ? ` · ознакомлен ${(a.read_at ?? '').slice(0, 10)}`
+                    ? ` · ознакомлен ${formatDate(a.read_at ?? '')}`
                     : a.status === 'superseded' ? ' · заменено новой редакцией'
                     : overdue ? ' · просрочено' : ' · ждём'}
                 </span>
                 <div className={overdue ? 'text-destructive' : 'text-muted-foreground'}>
                   {a.revision ? `редакция ${a.revision}` : 'редакция без номера'}
                   {a.reason_name ? ` · ${a.reason_name}` : ''}
-                  {a.due_at ? ` · срок ${a.due_at.slice(0, 10)}` : ''}
-                  {a.reminded_at ? ` · напомнили ${a.reminded_at.slice(0, 10)}` : ''}
+                  {a.due_at ? ` · срок ${formatDate(a.due_at)}` : ''}
+                  {a.reminded_at ? ` · напомнили ${formatDate(a.reminded_at)}` : ''}
                 </div>
                 {a.reminder_error && (
                   <div className="text-destructive">

@@ -50,6 +50,7 @@ import { getObjectTickets, createObjectTicket } from '@/services/spaceObjectsSer
 
 import { ProjectRoadmapTab } from './ProjectRoadmapTab'
 import { useOpenProject } from './useOpenProject'
+import { formatDate } from '@/lib/formatDate'
 
 export const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 const CONTROL_FORMS = ['аренда', 'сервитут', 'разрешение на размещение', 'собственность', 'соглашение с ТЦ']
@@ -829,7 +830,7 @@ export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; company
                   <div className="ml-6 sm:ml-11 mb-1 flex flex-wrap items-baseline gap-x-2 text-xs text-amber-700 dark:text-amber-400">
                     <span>
                       Обязательность снял{it.waivedBy ? ` ${it.waivedBy}` : 'а система'}
-                      {it.waivedAt ? `, ${it.waivedAt.slice(0, 10)}` : ''}
+                      {it.waivedAt ? `, ${formatDate(it.waivedAt)}` : ''}
                       {it.waiveReason ? `: ${it.waiveReason}` : ''}
                     </span>
                     {site.mayWaive && (
@@ -2154,7 +2155,7 @@ function ObjectTicketsSection({ site, companyId }: { site: SiteDetail; companyId
             <span className="text-xs rounded border px-1.5 py-0.5">
               {TICKET_STATUS[t.status] ?? t.status}
             </span>
-            <span className="text-xs text-muted-foreground">{t.created_at?.slice(0, 10)}</span>
+            <span className="text-xs text-muted-foreground">{t.created_at ? formatDate(t.created_at) : '—'}</span>
           </div>
         ))}
 

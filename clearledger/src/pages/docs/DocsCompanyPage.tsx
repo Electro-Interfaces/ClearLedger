@@ -16,6 +16,7 @@ import { DocsInboxPanel } from '@/components/docs/DocsInboxPanel'
 import { DocsArchiveQueue } from '@/components/docs/DocsArchiveQueue'
 import { useDocsView } from './DocsLayout'
 import { DocsErrorState, DocsLoadingState } from '@/components/docs/DocsQueryState'
+import { formatDate } from '@/lib/formatDate'
 
 const TasksCompanyPage = lazy(() => import('@/pages/tasks/TasksWorkPage')
   .then((m) => ({ default: m.TasksCompanyPage })))
@@ -164,7 +165,7 @@ export function DocsCompanyPage() {
                         {d.waiting_people.map((person) => person.name).join(', ')}
                         {d.approval_due_at && (
                           <span className={d.approval_overdue ? ' font-medium text-destructive' : ''}>
-                            {` · виза до ${d.approval_due_at.slice(0, 10)}`}
+                            {` · виза до ${formatDate(d.approval_due_at)}`}
                           </span>
                         )}
                       </div>

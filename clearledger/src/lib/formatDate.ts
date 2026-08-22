@@ -1,13 +1,20 @@
+/** Голая дата («2026-08-22») по стандарту разбирается как полночь UTC, и в поясе
+ *  западнее Гринвича срок съезжает на день назад. Дата без времени — календарная,
+ *  а не момент, поэтому читаем её как местную полночь. */
+function parseIso(iso: string): Date {
+  return new Date(/^\d{4}-\d{2}-\d{2}$/.test(iso) ? `${iso}T00:00:00` : iso)
+}
+
 /** Формат даты (DD.MM.YYYY) */
 export function formatDate(iso: string): string {
-  const d = new Date(iso)
+  const d = parseIso(iso)
   if (isNaN(d.getTime())) return iso
   return d.toLocaleDateString('ru-RU')
 }
 
 /** Формат даты + времени */
 export function formatDateTime(iso: string): string {
-  const d = new Date(iso)
+  const d = parseIso(iso)
   if (isNaN(d.getTime())) return iso
   return d.toLocaleString('ru-RU', {
     day: '2-digit',

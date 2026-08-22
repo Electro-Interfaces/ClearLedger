@@ -27,6 +27,7 @@ import { useDocsScope } from '@/hooks/useDocsScope'
 import { useDocsView } from './DocsLayout'
 import { DocsBulkBar } from '@/components/docs/DocsBulkBar'
 import { DocsErrorState, DocsLoadingState } from '@/components/docs/DocsQueryState'
+import { formatDate } from '@/lib/formatDate'
 
 const VIEW_FILTER: Record<string, docsService.DocFilters> = {
   incoming: { family: 'incoming' },
@@ -211,7 +212,7 @@ export function DocsRegistryPage() {
             </div>
             <div className="flex flex-wrap gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
               <span>{doc.reg_number ?? 'без номера'}</span>
-              <span>{doc.reg_date ?? (doc.created_at ?? '').slice(0, 10)}</span>
+              <span>{formatDate(doc.reg_date ?? doc.created_at ?? '')}</span>
               <span>{doc.kind_name}</span>
               {doc.organization_name && <span>{doc.organization_name}</span>}
             </div>
@@ -267,7 +268,7 @@ export function DocsRegistryPage() {
                     {doc.reg_number ?? <span className="text-muted-foreground">без номера</span>}
                   </td>
                   <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">
-                    {doc.reg_date ?? (doc.created_at ?? '').slice(0, 10)}
+                    {formatDate(doc.reg_date ?? doc.created_at ?? '')}
                   </td>
                   <td className="px-3 py-2 text-muted-foreground">{doc.organization_name || '—'}</td>
                   <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">{doc.kind_name}</td>

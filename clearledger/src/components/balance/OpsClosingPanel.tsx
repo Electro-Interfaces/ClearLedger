@@ -23,6 +23,7 @@ import { fmtN } from './balanceCalc'
 import { OpsPeriodsScale } from './OpsPeriodsScale'
 import { OpsCalendarBlock } from './OpsCalendarBlock'
 import { OpsDocDialog } from './OpsDocDialog'
+import { formatDate } from '@/lib/formatDate'
 import {
   closeOpsPeriod, correctOpsCharge, getOpsClosing,
   type OpsCharge, type OpsChargeBasis, type OpsClosing, type OpsPeriodStatus,
@@ -190,7 +191,7 @@ function PeriodBar({ period, onPeriod, status, closedAt, isClosed, blockReason,
       <span className="text-sm font-medium">{monthLabel(period)}</span>
       <Badge variant="outline" title={meta.hint} className="text-xs">{meta.label}</Badge>
       {closedAt && (
-        <span className="text-xs text-muted-foreground">закрыт {closedAt.slice(0, 10)}</span>
+        <span className="text-xs text-muted-foreground">закрыт {formatDate(closedAt)}</span>
       )}
       <div className="ml-auto flex items-center gap-2">
         <Button variant="ghost" size="sm" onClick={onRefresh} title="Пересобрать ожидания">
