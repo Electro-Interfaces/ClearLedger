@@ -27,6 +27,7 @@ os.environ["ECOSYSTEM_COMPANIES"] = ""
 
 from collections.abc import AsyncGenerator
 
+import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import (
@@ -85,6 +86,21 @@ async def client(setup_database) -> AsyncGenerator[AsyncClient, None]:
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limit():
+    """Счётчик попыток входа — общий на процесс, а логинится каждый тест.
+
+    Лимит — десять попыток в минуту (`app.rate_limit`), и одиннадцатый тест
+    файла падает на 429 — не потому, что сломан, а потому, что защита от
+    перебора не отличает прогон набора от подбора пароля. Сам лимит
+    проверяется своим тестом (`test_rate_limit.py`), у которого своя такая же чистка.
+    """
+    import app.rate_limit as rl
+    rl._hits.clear()
+    rl._reported.clear()
+    yield
 
 
 @pytest_asyncio.fixture(loop_scope="session")

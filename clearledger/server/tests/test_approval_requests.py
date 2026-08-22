@@ -37,9 +37,35 @@ class _Row:
         self.on_rejected = on_rejected
 
 
+class _Db:
+    """Сессия-заглушка: доставка исхода поручения спрашивает у неё версию.
+
+    Возвращает то, что положили: имя версии или None. Настоящая сессия здесь не
+    нужна — проверяется, что уехало в след шага, а не как это прочитано.
+    """
+
+    def __init__(self, version: str | None = None):
+        self._version = version
+
+    async def execute(self, *_args, **_kwargs):
+        version = self._version
+
+        class _Result:
+            def scalar_one_or_none(self):
+                return version
+
+        return _Result()
+
+
 @pytest.fixture
 def calls(monkeypatch):
-    """Перехват вызовов фасада: важно и что послали, и чего НЕ читали."""
+    """Перехват вызовов фасада: важно и что послали, и чего НЕ читали.
+
+    Патчим `_call`, а не алиас `call_process`: `send_verb` зовёт первый, и патч
+    алиаса до него не доходил — тест был зелёным ровно до того дня, когда фасад
+    перестал ходить через алиас, и с тех пор падал незамеченным (тесты с БД
+    локально не гоняются). Поймано первым прогоном на стенде 23.08.2026.
+    """
     seen = []
 
     async def fake_call(db, company_id, method, path, *, json=None, params=None):
@@ -47,6 +73,7 @@ def calls(monkeypatch):
         return {}
 
     from app.services import projects_process
+    monkeypatch.setattr(projects_process, "_call", fake_call)
     monkeypatch.setattr(projects_process, "call_process", fake_call)
     return seen
 
@@ -89,13 +116,27 @@ async def test_vypolnennoe_poruchenie_dvigaet_process(calls):
     вторую историю о том, где потерялся исход.
     """
     row = _Row(outcome="done", on_approved="Работа принята", kind="errand")
-    await approval_requests._deliver(None, row)
+    await approval_requests._deliver(_Db(), row)
     assert calls[0]["json"]["verb"] == "Работа принята"
     # В следе шага должно стоять само поручение, а не пустое место от документа.
     assert calls[0]["json"]["payload"] == {"task_id": str(row.task_id)}
 
 
+async def test_versiya_ispravleniya_edet_zayavitelyu(calls):
+    """Этап 10: закрыли поручение с версией — её ждёт заявитель в Поддержке.
+
+    Имя версии, а не идентификатор: в ответе человеку стоит «1.4.2», и второй
+    запрос за расшифровкой на той стороне был бы лишним.
+    """
+    row = _Row(outcome="done", on_approved="Работа принята", kind="errand")
+    await approval_requests._deliver(_Db("1.4.2"), row)
+    assert calls[0]["json"]["payload"] == {
+        "task_id": str(row.task_id), "fixed_version": "1.4.2"}
+
+
 async def test_otmenennoe_poruchenie_uhodit_svoim_glagolom(calls):
     row = _Row(outcome="cancelled", on_rejected="Работа отменена", kind="errand")
-    await approval_requests._deliver(None, row)
+    # Отменённое поручение версию не везёт: чинить было нечего.
+    await approval_requests._deliver(_Db("1.4.2"), row)
     assert calls[0]["json"]["verb"] == "Работа отменена"
+    assert "fixed_version" not in calls[0]["json"]["payload"]

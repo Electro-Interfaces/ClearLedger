@@ -553,13 +553,19 @@ async def test_регламент_шаблоны_расписания_эскал
     tpl = r.json()
     assert tpl["checklist"] == ["Сверить остатки", "Подписать акт"]
 
-    # Постановка по шаблону — тем же кодом, что и расписание.
-    r = await auth_client.post(f"/api/tasks/templates/{tpl['id']}/use",
-                               params={"company_id": cid})
+    # Постановка по шаблону — тем же кодом, что и расписание. Адрес у неё
+    # теперь в «Треке»: старая `/tasks/templates/{id}/use` ушла вместе с разделом
+    # «Задачи» 16.08.2026, а тест продолжал стучаться в неё и падал на 404 —
+    # поймано первым же прогоном на стенде 23.08.2026.
+    r = await auth_client.post(f"/api/docs/process-templates/{tpl['id']}/start",
+                               json={"company_id": cid})
     assert r.status_code == 201, r.text
     made = r.json()
-    assert made["checklist"] == {"total": 2, "done": 0}, "чек-лист шаблона не доехал"
-    assert made["due_at"], "срок по due_days шаблона не проставился"
+    assert made["kind"] == "task" and made["taskId"], made
+    card = (await auth_client.get(f"/api/tasks/{made['taskId']}",
+                                  params={"company_id": cid})).json()
+    assert card["checklist"] == {"total": 2, "done": 0}, "чек-лист шаблона не доехал"
+    assert card["due_at"], "срок по due_days шаблона не проставился"
 
     r = await auth_client.post("/api/tasks/recurrences", json={
         "company_id": cid, "template_id": tpl["id"],
