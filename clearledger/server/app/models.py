@@ -9306,6 +9306,12 @@ class TaskType(Base):
     code: Mapped[str] = mapped_column(String(40), nullable=False)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Тип принадлежит проекту или всей компании (NULL). У разработки свои маршруты
+    # (ошибка → воспроизведение → правка → проверка), у делопроизводства свои, а
+    # общие типы вроде «Поручения» нужны обоим — поэтому связь необязательная.
+    project_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("task_projects.id", ondelete="CASCADE"),
+        nullable=True, index=True)
     # [{"code": "new", "name": "Постановка"}, …] — порядок = порядок движения.
     route: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     default_priority: Mapped[str] = mapped_column(String(20), nullable=False, default="medium")
@@ -9355,6 +9361,14 @@ class Task(Base):
     number: Mapped[int] = mapped_column(
         Integer, _tasks_number_seq, server_default=_tasks_number_seq.next_value(),
         nullable=False, unique=True)
+    # Проект работы. NULL допустим только на время переноса старых поручений:
+    # задача без проекта — это свалка, в которой не собрать ни релиз, ни бэклог.
+    project_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("task_projects.id", ondelete="SET NULL"),
+        nullable=True, index=True)
+    # Номер внутри проекта: показывается как `TF-42`. Сквозной `number` остаётся
+    # внутренним — на него уже ссылаются написанные интеграции.
+    project_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
     type_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("task_types.id", ondelete="SET NULL"), nullable=True)
     title: Mapped[str] = mapped_column(String(300), nullable=False)
@@ -9522,6 +9536,47 @@ class TaskWatcher(Base):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now())
+
+
+class TaskProject(Base):
+    """Проект: контейнер работы со своим номером, участниками и составом.
+
+    Заведён 22.08.2026 (решение МАГа) под трекерный контур «Трека»: без проекта не
+    собирается ни бэклог, ни релиз, ни «мои задачи по продукту» — всё лежит одной
+    кучей на пространство.
+
+    Почему отдельная сущность, а не ось объектов: объекты пространства — нормативная
+    модель зарядной инфраструктуры (СТО, пять уровней), и программный продукт туда не
+    кладётся без искажения предметной области. Почему не метка: метка не несёт ни
+    префикса номера, ни своих типов задач, ни прав.
+    """
+    __tablename__ = "task_projects"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    # Код идёт в номер задачи и в разговор: «посмотри TF-42». Короткий и в верхнем
+    # регистре — из тех же соображений, по которым он такой в YouTrack.
+    code: Mapped[str] = mapped_column(String(10), nullable=False)
+    name: Mapped[str] = mapped_column(String(150), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    lead_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    # Счётчик своей нумерации. Растёт только вперёд: номер закрытой задачи не
+    # переиспользуется, иначе ссылка из переписки однажды укажет на чужую работу.
+    counter: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    is_archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("company_id", "code", name="uq_task_projects_code"),
+    )
 
 
 class TaskLabel(Base):

@@ -8,7 +8,7 @@
  * Весь отбор живёт в адресе: на «просрочки у Петрова» можно дать ссылку, а
  * обзор проваливается сюда сменой параметров.
  */
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -78,6 +78,7 @@ export function TasksWorkPage({ embeddedView }: {
   }, { replace: true })
 
   const objectId = params.get('object') ?? ''
+  const projectId = params.get('project') ?? ''
   const typeId = params.get('type') ?? ''
   const assigneeId = params.get('assignee') ?? ''
   const authorId = params.get('author') ?? ''
@@ -98,6 +99,11 @@ export function TasksWorkPage({ embeddedView }: {
     queryFn: () => listSpaceObjects(company.id),
     enabled: full, staleTime: 5 * 60 * 1000,
   })
+  const projectsQ = useQuery({
+    queryKey: ['task-projects', company.id],
+    queryFn: () => tasksService.listTaskProjects(company.id),
+    staleTime: 5 * 60 * 1000,
+  })
   const typesQ = useQuery({
     queryKey: ['task-types', company.id],
     queryFn: () => tasksService.listTaskTypes(company.id),
@@ -115,7 +121,8 @@ export function TasksWorkPage({ embeddedView }: {
   })
 
   const filters = {
-    objectId: objectId || undefined, typeId: typeId || undefined,
+    objectId: objectId || undefined, projectId: projectId || undefined,
+    typeId: typeId || undefined,
     assigneeId: assigneeId || undefined, authorId: authorId || undefined,
     priority: priority || undefined, labelId: labelId || undefined,
     q: q || undefined, sort, limit: PAGE, offset: page * PAGE,
@@ -133,9 +140,50 @@ export function TasksWorkPage({ embeddedView }: {
   })
   const tasks = listQ.data?.tasks ?? []
   const total = listQ.data?.total ?? 0
-  const hasFilter = !!(objectId || typeId || assigneeId || authorId || priority || labelId || q)
+  const hasFilter = !!(objectId || projectId || typeId || assigneeId || authorId
+                       || priority || labelId || q)
 
   const refresh = () => { void listQ.refetch(); setPicked(new Set()) }
+
+  /* Работа с клавиатуры — то, чем берёт YouTrack: `/` в поиск, стрелки по списку,
+     Enter открывает, Esc снимает отметки. Клавиши молчат, пока курсор в поле
+     ввода: иначе буква «н» в заголовке задачи открывала бы новую задачу. */
+  const searchRef = useRef<HTMLInputElement>(null)
+  const [cursor, setCursor] = useState(-1)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null
+      const typing = !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA'
+        || el.isContentEditable)
+      if (typing) {
+        if (e.key === 'Escape') el?.blur()
+        return
+      }
+      if (e.ctrlKey || e.altKey || e.metaKey) return
+      if (e.key === '/') { e.preventDefault(); searchRef.current?.focus(); return }
+      if (e.key === 'Escape' && picked.size) { setPicked(new Set()); return }
+      if (!tasks.length) return
+      if (e.key === 'ArrowDown' || e.key === 'j') {
+        e.preventDefault()
+        setCursor((i) => Math.min(tasks.length - 1, i + 1))
+      } else if (e.key === 'ArrowUp' || e.key === 'k') {
+        e.preventDefault()
+        setCursor((i) => Math.max(0, i - 1))
+      } else if (e.key === 'Enter' && cursor >= 0 && cursor < tasks.length) {
+        e.preventDefault()
+        set({ task: tasks[cursor].id })
+      } else if (e.key === ' ' && cursor >= 0 && cursor < tasks.length) {
+        // Пробел отмечает строку под курсором — так набирают пачку под команду.
+        e.preventDefault()
+        const next = new Set(picked)
+        const id = tasks[cursor].id
+        next.has(id) ? next.delete(id) : next.add(id)
+        setPicked(next)
+      }
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  })
 
   // Открытая задача занимает экран целиком: это рабочее место, а не всплывающая
   // справка. Возврат — кнопкой «к списку», отбор при этом сохраняется в адресе.
@@ -165,6 +213,7 @@ export function TasksWorkPage({ embeddedView }: {
                 view: 'registry',
                 ...(assigneeId && { assignee: assigneeId }),
                 ...(authorId && { author: authorId }),
+                ...(projectId && { project: projectId }),
                 ...(typeId && { type: typeId }),
                 ...(objectId && { object: objectId }),
                 ...(priority && { priority }),
@@ -215,7 +264,8 @@ export function TasksWorkPage({ embeddedView }: {
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative">
             <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-            <Input defaultValue={q} placeholder="Поиск: №, заголовок, реплики"
+            <Input defaultValue={q} ref={searchRef}
+              placeholder="Поиск: №, заголовок, реплики — «/» ставит курсор сюда"
               className="h-8 w-[240px] pl-7 text-xs"
               onKeyDown={(e) => {
                 if (e.key === 'Enter') set({ q: (e.target as HTMLInputElement).value || null })
@@ -231,9 +281,18 @@ export function TasksWorkPage({ embeddedView }: {
             items={(peopleQ.data?.people ?? []).map((p) => ({ id: p.id, name: p.name }))}
             placeholder="Любой автор" emptyLabel="Любой автор"
             searchPlaceholder="Фамилия…" />
+          {(projectsQ.data?.projects ?? []).length > 0 && (
+            <Pick value={projectId} onChange={(v) => set({ project: v })} width={170}
+              placeholder="Проект" allLabel="Все проекты"
+              items={(projectsQ.data?.projects ?? []).map((p) => ({
+                id: p.id, name: `${p.code} · ${p.name}` }))} />
+          )}
           <Pick value={typeId} onChange={(v) => set({ type: v })} width={150}
             placeholder="Тип" allLabel="Все типы"
-            items={(typesQ.data?.types ?? []).map((t) => ({ id: t.id, name: t.name }))} />
+            items={(typesQ.data?.types ?? [])
+              /* Типы чужого проекта в отборе только мешают: их задач в списке нет */
+              .filter((x) => !x.project_id || x.project_id === projectId)
+              .map((x) => ({ id: x.id, name: x.name }))} />
           <SearchPicker className="w-[200px]" value={objectId}
             onChange={(v) => set({ object: v || null })}
             items={(objectsQ.data ?? []).map((o) => ({
@@ -286,7 +345,7 @@ export function TasksWorkPage({ embeddedView }: {
             onOpen={(id) => set({ task: id })} onChanged={refresh} />
         ) : (
           <TasksTable tasks={tasks} sort={sort} onSort={(s) => set({ sort: s })}
-            picked={picked} onPick={setPicked} groupByObject={view === 'objects'}
+            picked={picked} onPick={setPicked} cursor={cursor} groupByObject={view === 'objects'}
             onOpen={(id) => set({ task: id })} />
         )
       )}
@@ -319,7 +378,7 @@ function QuickCreate({ companyId, onCreated }: { companyId: string; onCreated: (
   const create = useMutation({
     mutationFn: () => tasksService.createTask({ companyId, title: title.trim() }),
     onSuccess: (t) => {
-      toast.success(`Задача №${t.number} поставлена`)
+      toast.success(`Задача ${tasksService.taskKey(t)} поставлена`)
       setTitle('')
       qc.invalidateQueries({ queryKey: ['tasks'] })
       onCreated()
@@ -348,7 +407,7 @@ function QuickCreate({ companyId, onCreated }: { companyId: string; onCreated: (
 /* ── Таблица ─────────────────────────────────────────────────────────── */
 
 const COLUMNS: { key: string; label: string; sort?: string }[] = [
-  { key: 'number', label: '№', sort: 'number' },
+  { key: 'number', label: 'Задача', sort: 'number' },
   { key: 'title', label: 'Задача' },
   { key: 'type', label: 'Тип' },
   { key: 'stage', label: 'Стадия' },
@@ -358,9 +417,9 @@ const COLUMNS: { key: string; label: string; sort?: string }[] = [
   { key: 'updated', label: 'Обновлена', sort: 'updated' },
 ]
 
-function TasksTable({ tasks, sort, onSort, picked, onPick, groupByObject, onOpen }: {
+function TasksTable({ tasks, sort, onSort, picked, onPick, cursor, groupByObject, onOpen }: {
   tasks: ListedTask[]; sort: string; onSort: (s: string) => void
-  picked: Set<string>; onPick: (s: Set<string>) => void
+  picked: Set<string>; onPick: (s: Set<string>) => void; cursor?: number
   groupByObject: boolean; onOpen: (id: string) => void
 }) {
   // Место — разрез, а не свойство карточки: в «По объектам» одна и та же задача
@@ -423,16 +482,26 @@ function TasksTable({ tasks, sort, onSort, picked, onPick, groupByObject, onOpen
               )}
               {g.tasks.map((t) => (
                 <tr key={t.id} tabIndex={0} aria-haspopup="dialog"
+                  ref={(el) => {
+                    /* Строку под курсором держим в поле зрения: иначе стрелка
+                       уводит выделение за нижний край и человек жмёт вслепую. */
+                    if (el && cursor != null && tasks[cursor]?.id === t.id) {
+                      el.scrollIntoView({ block: 'nearest' })
+                    }
+                  }}
                   onClick={() => onOpen(t.id)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(t.id) }
                   }}
-                  className="cursor-pointer border-t transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
+                  className={cn('cursor-pointer border-t transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
+                    cursor != null && tasks[cursor]?.id === t.id && 'bg-primary/10')}>
                   <td className="p-2.5 align-top" onClick={(e) => e.stopPropagation()}>
-                    <Checkbox aria-label={`Отметить №${t.number}`}
+                    <Checkbox aria-label={`Отметить ${tasksService.taskKey(t)}`}
                       checked={picked.has(t.id)} onCheckedChange={() => toggle(t.id)} />
                   </td>
-                  <td className="whitespace-nowrap p-2.5 align-top font-medium">№{t.number}</td>
+                  <td className="whitespace-nowrap p-2.5 align-top font-medium">
+                    {tasksService.taskKey(t)}
+                  </td>
                   {/* Строка несла восемь подписей одним кеглем — статус, срочность,
                       автор, чек-лист, подзадачи, время, метки, «ждём внешних», — и
                       читать её было нечем. Убраны дубли колонок (статус, автор), а
@@ -622,7 +691,7 @@ function CommandLine({ companyId, ids, onDone }: {
       <Terminal className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
       <Input value={text} onChange={(e) => setText(e.target.value)}
         placeholder="Команда: на меня срочная срок завтра"
-        title="Примеры: «на меня», «срочная», «стадия Диагностика», «срок через 3 дня», «метка стройка», «время 2ч», «выполнена»"
+        title="Примеры: «на меня», «срочная», «проект TF», «стадия Диагностика», «срок через 3 дня», «метка стройка», «время 2ч», «выполнена»"
         className="h-8 flex-1 text-xs"
         onKeyDown={(e) => { if (e.key === 'Enter' && text.trim()) run.mutate() }} />
       <Button size="sm" variant="outline" className="h-8"
@@ -783,7 +852,7 @@ async function exportTasks(tasks: ListedTask[], sheetName: string) {
   const { loadXlsx } = await import('@/utils/xlsxLoader')
   const XLSX = await loadXlsx()
   const rows = tasks.map((t) => ({
-    '№': t.number,
+    '№': tasksService.taskKey(t),
     'Задача': t.title,
     'Тип': t.type ?? 'поручение',
     'Стадия': t.stage ?? '',

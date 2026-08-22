@@ -132,7 +132,7 @@ function ExternalSection({ companyId }: { companyId: string }) {
 
 /* ── Типы и маршруты ─────────────────────────────────────────────────── */
 
-function TypesSection({ companyId }: { companyId: string }) {
+export function TypesSection({ companyId }: { companyId: string }) {
   const qc = useQueryClient()
   const q = useQuery({
     queryKey: ['task-types', companyId],

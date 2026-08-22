@@ -27,6 +27,8 @@ export interface TaskType {
   route: RouteStage[]
   default_priority: string
   due_days: number | null
+  /** NULL — тип общий для компании; иначе он свой у проекта. */
+  project_id?: string | null
   is_active: boolean
   sort_order: number
   /** Часов на первый отклик исполнителя; null — за реакцией не следим. */
@@ -35,9 +37,28 @@ export interface TaskType {
   escalate_to_id: string | null
 }
 
+export interface TaskProject {
+  id: string
+  code: string
+  name: string
+  description: string | null
+  lead_id: string | null
+  counter: number
+  is_archived: boolean
+  sort_order: number
+  tasks: number
+  open: number
+}
+
 export interface SpaceTask {
   id: string
   number: number
+  /** Как задачу называют вслух и пишут в коммите: `TF-42`. У задач без проекта —
+   *  просто номер, чтобы строка списка не пустовала. */
+  key?: string
+  project?: string | null
+  project_id?: string | null
+  project_number?: number | null
   title: string
   status: string           // open | done | cancelled
   priority: string
@@ -63,6 +84,13 @@ export interface SpaceTask {
   subtasks?: TaskSubtasks
   time?: TaskTime
   visibility?: 'company' | 'private'
+}
+
+/** Как задача называется в интерфейсе: `TF-42` у задачи в проекте, `№17` — без него.
+ *  Одна точка на все экраны: раньше номер печатали строкой в семи местах, и с
+ *  появлением проектов это разошлось бы на первой же правке. */
+export function taskKey(t: { key?: string; number: number }): string {
+  return t.key && t.key !== String(t.number) ? t.key : `№${t.number}`
 }
 
 /** Значения по умолчанию для полей, которых может не быть у старого бэкенда. */
@@ -148,7 +176,7 @@ export type TaskScope = 'open' | 'mine' | 'assigned' | 'watching' | 'overdue'
   | 'today' | 'waiting' | 'closed' | 'all'
 
 export interface TaskFilters {
-  objectId?: string; typeId?: string; assigneeId?: string; authorId?: string
+  objectId?: string; projectId?: string; typeId?: string; assigneeId?: string; authorId?: string
   stage?: string; priority?: string; labelId?: string; q?: string
   dueFrom?: string; dueTo?: string
   sort?: string; limit?: number; offset?: number
@@ -171,7 +199,8 @@ export async function listTasks(companyId: string, scope: TaskScope, opts?: Task
   return get<{ tasks: SpaceTask[]; total: number; limit: number; offset: number }>(
     '/api/tasks', {
       company_id: companyId, scope,
-      object_id: opts?.objectId || undefined, type_id: opts?.typeId || undefined,
+      object_id: opts?.objectId || undefined, project_id: opts?.projectId || undefined,
+      type_id: opts?.typeId || undefined,
       assignee_id: opts?.assigneeId || undefined, author_id: opts?.authorId || undefined,
       stage: opts?.stage || undefined, priority: opts?.priority || undefined,
       label_id: opts?.labelId || undefined, q: opts?.q || undefined,
@@ -234,6 +263,33 @@ export async function listTaskPeople(companyId: string) {
   return get<{ people: TaskPerson[] }>('/api/tasks/people', { company_id: companyId })
 }
 
+/** Проекты компании со счётчиками работы. */
+export async function listTaskProjects(companyId: string, archived = false) {
+  return get<{ projects: TaskProject[] }>(
+    '/api/tasks/projects', { company_id: companyId, archived: archived ? 'true' : 'false' })
+}
+
+export async function createTaskProject(data: {
+  companyId: string; code: string; name: string
+  description?: string; leadId?: string; sortOrder?: number
+}) {
+  return post<TaskProject>('/api/tasks/projects', {
+    company_id: data.companyId, code: data.code.toUpperCase(), name: data.name,
+    description: data.description || undefined, lead_id: data.leadId || undefined,
+    sort_order: data.sortOrder ?? 100,
+  })
+}
+
+export async function updateTaskProject(id: string, data: {
+  companyId: string; name?: string; description?: string
+  leadId?: string; sortOrder?: number; isArchived?: boolean
+}) {
+  return patch<TaskProject>(`/api/tasks/projects/${id}`, {
+    company_id: data.companyId, name: data.name, description: data.description,
+    lead_id: data.leadId, sort_order: data.sortOrder, is_archived: data.isArchived,
+  })
+}
+
 export async function listTaskTypes(companyId: string) {
   return get<{ types: TaskType[]; default_route: RouteStage[] }>(
     '/api/tasks/types', { company_id: companyId })
@@ -241,12 +297,13 @@ export async function listTaskTypes(companyId: string) {
 
 export async function createTask(data: {
   companyId: string; title: string; description?: string
-  typeId?: string; assigneeId?: string; objectId?: string
+  projectId?: string; typeId?: string; assigneeId?: string; objectId?: string
   priority?: string; dueAt?: string
 }) {
   return post<SpaceTask>('/api/tasks', {
     company_id: data.companyId, title: data.title,
     description: data.description || undefined,
+    project_id: data.projectId || undefined,
     type_id: data.typeId || undefined, assignee_id: data.assigneeId || undefined,
     object_id: data.objectId || undefined, priority: data.priority || undefined,
     due_at: data.dueAt || undefined,
@@ -258,6 +315,7 @@ export async function taskAction(id: string, data: {
   companyId: string; stageCode?: string; assigneeId?: string | null
   status?: string; priority?: string; dueAt?: string; note?: string
   title?: string; description?: string; objectId?: string | null
+  projectId?: string
   addLabelId?: string; removeLabelId?: string; estimate?: string
   visibility?: 'company' | 'private'
 }) {
@@ -270,6 +328,7 @@ export async function taskAction(id: string, data: {
     due_at: data.dueAt, note: data.note || undefined,
     title: data.title, description: data.description,
     object_id: data.objectId === null ? '' : data.objectId,
+    project_id: data.projectId,
     add_label_id: data.addLabelId, remove_label_id: data.removeLabelId,
     estimate: data.estimate, visibility: data.visibility,
   })

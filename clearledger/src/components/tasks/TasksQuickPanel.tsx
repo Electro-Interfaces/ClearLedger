@@ -80,7 +80,7 @@ export function TasksQuickPanel() {
               onClick={() => open(t.id)}
               className="flex w-full items-start gap-3 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-accent"
             >
-              <span className="mt-0.5 shrink-0 font-mono text-xs text-muted-foreground">№{t.number}</span>
+              <span className="mt-0.5 shrink-0 font-mono text-xs text-muted-foreground">{tasksService.taskKey(t)}</span>
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-sm font-medium text-foreground">{t.title}</span>
                 <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">

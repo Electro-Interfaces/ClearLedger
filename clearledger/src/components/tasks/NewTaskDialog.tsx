@@ -42,6 +42,7 @@ export function NewTaskDialog({ companyId, onCreated, defaultObjectId }: {
   const [open, setOpen] = useState(false)
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
+  const [projectId, setProjectId] = useState('')
   const [typeId, setTypeId] = useState('')
   const [assigneeId, setAssigneeId] = useState('')
   const [objectId, setObjectId] = useState(defaultObjectId ?? '')
@@ -52,6 +53,11 @@ export function NewTaskDialog({ companyId, onCreated, defaultObjectId }: {
   const [dragOver, setDragOver] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
+  const projectsQ = useQuery({
+    queryKey: ['task-projects', companyId],
+    queryFn: () => tasksService.listTaskProjects(companyId),
+    enabled: open, staleTime: 5 * 60 * 1000,
+  })
   const typesQ = useQuery({
     queryKey: ['task-types', companyId],
     queryFn: () => tasksService.listTaskTypes(companyId),
@@ -75,7 +81,7 @@ export function NewTaskDialog({ companyId, onCreated, defaultObjectId }: {
   const type = (typesQ.data?.types ?? []).find((t) => t.id === typeId)
 
   const reset = () => {
-    setTitle(''); setDescription(''); setTypeId(''); setAssigneeId('')
+    setTitle(''); setDescription(''); setProjectId(''); setTypeId(''); setAssigneeId('')
     setObjectId(defaultObjectId ?? ''); setPriority(''); setDueAt('')
     setLabels([]); setFiles([])
   }
@@ -90,6 +96,7 @@ export function NewTaskDialog({ companyId, onCreated, defaultObjectId }: {
       const task = await tasksService.createTask({
         companyId, title: title.trim(),
         description: description.trim() || undefined,
+        projectId: projectId || undefined,
         typeId: typeId || undefined, assigneeId: assigneeId || undefined,
         objectId: objectId || undefined, priority: priority || undefined,
         // Срок вводят датой — на сервер уходит начало суток в поясе браузера.
@@ -109,7 +116,7 @@ export function NewTaskDialog({ companyId, onCreated, defaultObjectId }: {
       return task
     },
     onSuccess: (task) => {
-      toast.success(`Задача №${task.number} поставлена`)
+      toast.success(`Задача ${tasksService.taskKey(task)} поставлена`)
       qc.invalidateQueries({ queryKey: ['tasks'] })
       setOpen(false); reset()
       onCreated(task.id)
@@ -154,6 +161,21 @@ export function NewTaskDialog({ companyId, onCreated, defaultObjectId }: {
           </div>
 
           <div className="grid gap-3 sm:grid-cols-3">
+            {(projectsQ.data?.projects ?? []).length > 0 && (
+              <div className="space-y-1.5">
+                <Label>Проект</Label>
+                <Select value={projectId || 'none'}
+                  onValueChange={(v) => { setProjectId(v === 'none' ? '' : v); setTypeId('') }}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Без проекта</SelectItem>
+                    {(projectsQ.data?.projects ?? []).map((p) => (
+                      <SelectItem key={p.id} value={p.id}>{p.code} · {p.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             <div className="space-y-1.5">
               <Label>Тип</Label>
               <Select value={typeId || 'none'}
@@ -161,7 +183,12 @@ export function NewTaskDialog({ companyId, onCreated, defaultObjectId }: {
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">Поручение (без типа)</SelectItem>
-                  {(typesQ.data?.types ?? []).filter((t) => t.is_active).map((t) => (
+                  {(typesQ.data?.types ?? [])
+                    .filter((t) => t.is_active)
+                    /* Тип показывается, если он общий (без проекта) или принадлежит
+                       выбранному: чужие маршруты в списке только сбивают. */
+                    .filter((t) => !t.project_id || t.project_id === projectId)
+                    .map((t) => (
                     <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
                   ))}
                 </SelectContent>

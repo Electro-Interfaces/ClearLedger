@@ -401,7 +401,10 @@ function Header({ task, onRename, onBack }: {
         </button>
       )}
       <div className="flex items-center gap-2">
-        <span className="text-base font-semibold">№{task.number}</span>
+        <span className="text-base font-semibold">{tasksService.taskKey(task)}</span>
+        {task.project && (
+          <Badge variant="secondary" className="h-5 px-1.5 text-[11px]">{task.project}</Badge>
+        )}
         {task.type && <Badge variant="outline" className="h-5 px-1.5 text-[11px]">{task.type}</Badge>}
         <span className="text-[11px] text-muted-foreground">
           {STATUS_LABEL[task.status] ?? task.status}

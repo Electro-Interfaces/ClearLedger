@@ -3782,6 +3782,36 @@ async def create_all() -> None:
         ):
             await conn.execute(_sa.text(stmt))
 
+        # v2.63a: номер внутри проекта («TF-42») выдаёт база, а не приложение.
+        # Задачи создаются в семи местах кода — маршрут процесса, письмо,
+        # расписание, «Пульс», карточка документа, ручная постановка, шаблон, —
+        # и `max(...)+1` в каждом разошёлся бы на первой одновременной
+        # постановке. UPDATE ... RETURNING берёт строку проекта под блокировку и
+        # тем снимает гонку, как последовательность снимает её для сквозного
+        # `number`. Счётчик только растёт: номер закрытой задачи не
+        # переиспользуется, иначе ссылка из переписки однажды укажет на чужую
+        # работу.
+        for stmt in (
+            """
+            CREATE OR REPLACE FUNCTION task_project_number() RETURNS trigger AS $$
+            BEGIN
+                IF NEW.project_id IS NOT NULL AND NEW.project_number IS NULL THEN
+                    UPDATE task_projects SET counter = counter + 1, updated_at = now()
+                     WHERE id = NEW.project_id
+                    RETURNING counter INTO NEW.project_number;
+                END IF;
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql
+            """,
+            "DROP TRIGGER IF EXISTS trg_task_project_number ON tasks",
+            """
+            CREATE TRIGGER trg_task_project_number BEFORE INSERT ON tasks
+            FOR EACH ROW EXECUTE FUNCTION task_project_number()
+            """,
+        ):
+            await conn.execute(_sa.text(stmt))
+
         # v2.60: маршрут проекта выбирается человеком, а не берётся молча первым.
         # Пусто у всех существующих проектов — это и есть прежнее поведение.
         for stmt in (

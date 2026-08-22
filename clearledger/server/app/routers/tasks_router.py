@@ -32,7 +32,8 @@ from app.database import get_db
 from app.models import (
     Company, ServiceLocation, SourceFile, Task, TaskAttachment, TaskChecklistItem,
     TaskEvent, TaskExternalRef, TaskLabel, TaskLabelLink, TaskLink, TaskParticipant,
-    TaskRecurrence, TaskTemplate, TaskType, TaskView, TaskWatcher, TaskWorkItem,
+    TaskProject, TaskRecurrence, TaskTemplate, TaskType, TaskView, TaskWatcher,
+    TaskWorkItem,
     User, UserCompany,
 )
 from app.services import process_templates, space_connectors, task_mail, task_scheduler
@@ -130,6 +131,8 @@ def _type_out(t: TaskType) -> dict[str, Any]:
         "due_days": t.due_days, "is_active": t.is_active, "sort_order": t.sort_order,
         "reaction_hours": t.reaction_hours,
         "escalate_to_id": str(t.escalate_to_id) if t.escalate_to_id else None,
+        # NULL — тип общий для компании; иначе он свой у проекта.
+        "project_id": str(t.project_id) if t.project_id else None,
     }
 
 
@@ -140,6 +143,13 @@ def _task_out(t: Task, route: list[dict], names: dict[str, str | None],
         **(extra or {}),
         "id": str(t.id),
         "number": t.number,
+        # Как задачу называют вслух и пишут в коммите: `TF-42`. Сквозной номер
+        # остаётся рядом — на него ссылаются уже написанные интеграции.
+        "key": (f"{names.get('project_code')}-{t.project_number}"
+                if names.get("project_code") and t.project_number else str(t.number)),
+        "project": names.get("project"),
+        "project_id": str(t.project_id) if t.project_id else None,
+        "project_number": t.project_number,
         "title": t.title,
         "status": t.status,
         "priority": t.priority,
@@ -170,6 +180,9 @@ async def _names(db: AsyncSession, tasks: list[Task]) -> dict[uuid.UUID, dict[st
     type_ids = {t.type_id for t in tasks if t.type_id}
     user_ids = {i for t in tasks for i in (t.assignee_id, t.author_id) if i}
     obj_ids = {t.object_id for t in tasks if t.object_id}
+    prj_ids = {t.project_id for t in tasks if t.project_id}
+    prjs = {r.id: r for r in (await db.execute(
+        select(TaskProject).where(TaskProject.id.in_(prj_ids)))).scalars()} if prj_ids else {}
     types = {r.id: r for r in (await db.execute(
         select(TaskType).where(TaskType.id.in_(type_ids)))).scalars()} if type_ids else {}
     users = {r.id: r.name for r in (await db.execute(
@@ -182,6 +195,8 @@ async def _names(db: AsyncSession, tasks: list[Task]) -> dict[uuid.UUID, dict[st
         "assignee": users.get(t.assignee_id),
         "author": users.get(t.author_id),
         "object": objs.get(t.object_id),
+        "project": prjs[t.project_id].name if t.project_id in prjs else None,
+        "project_code": prjs[t.project_id].code if t.project_id in prjs else None,
     } for t in tasks}
 
 
@@ -357,6 +372,7 @@ async def list_tasks(
     company_id: str = Query(...),
     scope: str = Query("open", pattern="^(open|mine|assigned|watching|overdue|today|waiting|closed|all)$"),
     object_id: str | None = Query(None),
+    project_id: str | None = Query(None),
     type_id: str | None = Query(None),
     assignee_id: str | None = Query(None),
     author_id: str | None = Query(None),
@@ -418,6 +434,8 @@ async def list_tasks(
         sel = sel.where(Task.assignee_id == _uuid_or_400(assignee_id, "assignee_id"))
     if author_id:
         sel = sel.where(Task.author_id == _uuid_or_400(author_id, "author_id"))
+    if project_id:
+        sel = sel.where(Task.project_id == _uuid_or_400(project_id, "project_id"))
     if type_id:
         sel = sel.where(Task.type_id == _uuid_or_400(type_id, "type_id"))
     if stage:
@@ -495,6 +513,113 @@ async def list_people(
 
 
 # ── Типы задач и маршруты ────────────────────────────────────────────────
+
+
+# ── Проекты ─────────────────────────────────────────────────────────────────
+# Контейнер работы: свой номер (`TF-42`), свои типы задач, свой состав. Заведён
+# 22.08.2026 под трекерный контур: без проекта не собирается ни бэклог, ни релиз.
+
+
+def _project_out(p: TaskProject, tasks: int = 0, open_tasks: int = 0) -> dict[str, Any]:
+    return {
+        "id": str(p.id), "code": p.code, "name": p.name,
+        "description": p.description,
+        "lead_id": str(p.lead_id) if p.lead_id else None,
+        "counter": p.counter, "is_archived": p.is_archived,
+        "sort_order": p.sort_order,
+        "tasks": tasks, "open": open_tasks,
+    }
+
+
+@router.get("/projects")
+async def list_projects(
+    company_id: str = Query(...),
+    archived: bool = Query(False),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Проекты компании со счётчиками работы: пустой проект видно сразу."""
+    cid = await _assert_work(company_id, current_user, db)
+    q = select(TaskProject).where(TaskProject.company_id == cid)
+    if not archived:
+        q = q.where(TaskProject.is_archived.is_(False))
+    rows = (await db.execute(q.order_by(TaskProject.sort_order, TaskProject.code))).scalars().all()
+    counts = dict((pid, (n, o)) for pid, n, o in (await db.execute(
+        select(Task.project_id, func.count(Task.id),
+               func.count(Task.id).filter(Task.status == "open"))
+        .where(Task.company_id == cid, Task.project_id.is_not(None))
+        .group_by(Task.project_id))).all())
+    return {"projects": [_project_out(p, *counts.get(p.id, (0, 0))) for p in rows]}
+
+
+class ProjectIn(BaseModel):
+    company_id: str
+    # Код идёт в номер задачи и в разговор, поэтому только латиница в верхнем
+    # регистре и цифры: `TF-42` читается, `тф-42` в коммите — нет.
+    code: str = Field(min_length=2, max_length=10, pattern="^[A-Z][A-Z0-9]*$")
+    name: str = Field(min_length=1, max_length=150)
+    description: str | None = None
+    lead_id: str | None = None
+    sort_order: int = 100
+
+
+@router.post("/projects", status_code=status.HTTP_201_CREATED)
+async def create_project(
+    payload: ProjectIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cid = await _assert_work(payload.company_id, current_user, db)
+    await _assert_admin(db, cid, current_user)
+    exists = (await db.execute(select(TaskProject).where(
+        TaskProject.company_id == cid,
+        TaskProject.code == payload.code))).scalar_one_or_none()
+    if exists is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Проект с таким кодом уже есть")
+    p = TaskProject(
+        company_id=cid, code=payload.code, name=payload.name.strip(),
+        description=payload.description, sort_order=payload.sort_order,
+        lead_id=_uuid_or_400(payload.lead_id, "руководитель") if payload.lead_id else None)
+    db.add(p)
+    await db.flush()
+    await db.commit()
+    return _project_out(p)
+
+
+class ProjectPatch(BaseModel):
+    company_id: str
+    name: str | None = Field(None, min_length=1, max_length=150)
+    description: str | None = None
+    lead_id: str | None = None
+    sort_order: int | None = None
+    is_archived: bool | None = None
+
+
+@router.patch("/projects/{project_id}")
+async def update_project(
+    project_id: str,
+    payload: ProjectPatch,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Правка проекта. Код не меняется: он уже в номерах задач и в переписке."""
+    cid = await _assert_work(payload.company_id, current_user, db)
+    await _assert_admin(db, cid, current_user)
+    p = await db.get(TaskProject, _uuid_or_400(project_id, "проект"))
+    if p is None or p.company_id != cid:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Проект не найден")
+    if payload.name is not None:
+        p.name = payload.name.strip()
+    if payload.description is not None:
+        p.description = payload.description
+    if payload.lead_id is not None:
+        p.lead_id = _uuid_or_400(payload.lead_id, "руководитель") if payload.lead_id else None
+    if payload.sort_order is not None:
+        p.sort_order = payload.sort_order
+    if payload.is_archived is not None:
+        p.is_archived = payload.is_archived
+    await db.commit()
+    return _project_out(p)
 
 
 @router.get("/types")
@@ -629,6 +754,7 @@ class TaskIn(BaseModel):
     company_id: str
     title: str = Field(min_length=3, max_length=300)
     description: str | None = Field(None, max_length=8000)
+    project_id: str | None = None
     type_id: str | None = None
     assignee_id: str | None = None
     object_id: str | None = None
@@ -650,6 +776,19 @@ async def create_task(
         ttype = await db.get(TaskType, _uuid_or_400(payload.type_id, "type_id"))
         if ttype is None or ttype.company_id != cid:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Неизвестный тип задачи")
+    # Проект: свой номер задачи (`TF-42`) выдаёт триггер базы, здесь только
+    # проверяем, что проект наш и не в архиве — в закрытый проект работу не ставят.
+    project = None
+    if payload.project_id:
+        project = await db.get(TaskProject, _uuid_or_400(payload.project_id, "project_id"))
+        if project is None or project.company_id != cid:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Неизвестный проект")
+        if project.is_archived:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Проект в архиве")
+    if ttype is not None and ttype.project_id and (
+            project is None or ttype.project_id != project.id):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Этот тип задач принадлежит другому проекту")
     route = _route_of(ttype)
     due = payload.due_at
     if due is None and ttype is not None and ttype.due_days is not None:
@@ -659,7 +798,8 @@ async def create_task(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Исполнитель не состоит в пространстве")
 
     t = Task(
-        company_id=cid, type_id=ttype.id if ttype else None,
+        company_id=cid, project_id=project.id if project else None,
+        type_id=ttype.id if ttype else None,
         title=payload.title.strip(), description=payload.description,
         priority=payload.priority or (ttype.default_priority if ttype else "medium"),
         status="open", stage_code=route[0]["code"],
@@ -1233,6 +1373,7 @@ class TaskAction(BaseModel):
     title: str | None = Field(None, min_length=3, max_length=300)
     description: str | None = Field(None, max_length=8000)
     object_id: str | None = None
+    project_id: str | None = None          # подобрать «ничью» задачу в проект
     add_label_id: str | None = None
     remove_label_id: str | None = None
     estimate: str | None = Field(None, max_length=40)   # «4ч», «30м»; "" — снять
@@ -1353,6 +1494,20 @@ async def task_action(
     if payload.object_id is not None and (payload.object_id or None) != t.object_id:
         field_changed("объект", t.object_id, payload.object_id or None)
         t.object_id = payload.object_id or None
+    # Проект назначается только задаче, у которой его не было. Перенос между
+    # проектами означал бы перевыпуск номера — `TF-42` в проекте `LG` не значит
+    # ничего, — а старый номер к этому времени уже разошёлся по переписке.
+    # Перенос сделаем отдельно, когда понадобится, и вместе с историей номера.
+    if payload.project_id and t.project_id is None:
+        prj = await db.get(TaskProject, _uuid_or_400(payload.project_id, "project_id"))
+        if prj is None or prj.company_id != t.company_id:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Неизвестный проект")
+        prj.counter += 1
+        t.project_id, t.project_number = prj.id, prj.counter
+        field_changed("проект", None, f"{prj.code} · {prj.name}")
+    elif payload.project_id and t.project_id is not None             and str(t.project_id) != payload.project_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Задача уже в проекте: перенос между проектами пока не делаем")
     if payload.visibility is not None and payload.visibility != t.visibility:
         # Смена круга видимости — событие: «кто закрыл задачу от компании» должно
         # быть видно, иначе это тихое действие с большими последствиями.
@@ -1901,6 +2056,10 @@ async def apply_command(
         .where(UserCompany.company_id == cid))).all()}
     label_rows = {(n or "").lower(): i for i, n in (await db.execute(
         select(TaskLabel.id, TaskLabel.name).where(TaskLabel.company_id == cid))).all()}
+    projects = {(c or "").lower(): i for i, c in (await db.execute(
+        select(TaskProject.id, TaskProject.code)
+        .where(TaskProject.company_id == cid,
+               TaskProject.is_archived.is_(False)))).all()}
     types = (await db.execute(select(TaskType).where(TaskType.company_id == cid))).scalars().all()
     stages = {s.get("name", "").lower(): s.get("code")
               for ty in types for s in (ty.route or []) if s.get("name")}
@@ -1926,6 +2085,12 @@ async def apply_command(
             action["status"] = _CMD_STATUS[w]
             i += 1
             continue
+        if w in ("проект", "project") and nxt:
+            pid = projects.get(nxt.lower())
+            if pid:
+                action["project_id"] = str(pid)
+                i += 2
+                continue
         if w in ("стадия", "state", "stage") and nxt:
             code = stages.get(nxt.lower())
             if code:

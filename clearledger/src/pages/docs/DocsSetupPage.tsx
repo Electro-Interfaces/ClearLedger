@@ -25,6 +25,8 @@ import { DOC_FAMILY } from '@/services/docsService'
 import { useDocsView } from './DocsLayout'
 import { DocKindEditor } from '@/components/docs/DocKindEditor'
 import { DocsErrorState, DocsLoadingState } from '@/components/docs/DocsQueryState'
+import { ProjectsSection } from './ProjectsSection'
+import { TypesSection } from '@/pages/tasks/TasksSetupPage' 
 
 const SCOPE_LABEL: Record<string, string> = {
   kind: 'сквозная по виду',
@@ -71,6 +73,15 @@ export function DocsSetupPage() {
     )
   }
 
+  // Проекты и типы задач настраиваются здесь же, а не в снятом с лаунчера
+  // разделе «Задачи»: когда механизмы перенесли в «Трек», настройку забыли,
+  // и попасть в неё можно было только прямым адресом /tasks-legacy/setup.
+  if (view === 'projects') {
+    return <ProjectsSection companyId={company.id} />
+  }
+  if (view === 'types') {
+    return <TypesSection companyId={company.id} />
+  }
   if (view === 'substitutions') {
     return <Substitutions companyId={companyId} />
   }
