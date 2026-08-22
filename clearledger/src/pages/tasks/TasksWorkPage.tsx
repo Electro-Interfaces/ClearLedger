@@ -37,6 +37,7 @@ import {
 import { TASKS_VIEWS, tasksRouteOf, useTasksView } from './TasksLayout'
 import { TasksBoardPage } from './TasksBoardPage'
 import { ViewsSection } from './TasksRegulation'
+import { QueryBar, type QuerySuggestions } from '@/components/tasks/QueryBar'
 import { TasksDueBoard } from './TasksDueBoard'
 
 const nf = new Intl.NumberFormat('ru-RU')
@@ -80,6 +81,7 @@ export function TasksWorkPage({ embeddedView }: {
   const objectId = params.get('object') ?? ''
   const projectId = params.get('project') ?? ''
   const versionId = params.get('version') ?? ''
+  const queryText = params.get('query') ?? ''
   const typeId = params.get('type') ?? ''
   const assigneeId = params.get('assignee') ?? ''
   const authorId = params.get('author') ?? ''
@@ -112,6 +114,16 @@ export function TasksWorkPage({ embeddedView }: {
     queryFn: () => tasksService.listTaskVersions(company.id, projectId),
     enabled: !!projectId, staleTime: 5 * 60 * 1000,
   })
+  const allVersionsQ = useQuery({
+    queryKey: ['task-versions', company.id, ''],
+    queryFn: () => tasksService.listTaskVersions(company.id),
+    enabled: full, staleTime: 5 * 60 * 1000,
+  })
+  const allSprintsQ = useQuery({
+    queryKey: ['task-sprints', company.id, ''],
+    queryFn: () => tasksService.listTaskSprints(company.id),
+    enabled: full, staleTime: 5 * 60 * 1000,
+  })
   const typesQ = useQuery({
     queryKey: ['task-types', company.id],
     queryFn: () => tasksService.listTaskTypes(company.id),
@@ -135,6 +147,7 @@ export function TasksWorkPage({ embeddedView }: {
     assigneeId: assigneeId || undefined, authorId: authorId || undefined,
     priority: priority || undefined, labelId: labelId || undefined,
     q: q || undefined, sort, limit: PAGE, offset: page * PAGE,
+    query: queryText || undefined,
   }
   const listQ = useQuery({
     queryKey: ['tasks', company.id, scope, filters],
@@ -150,7 +163,21 @@ export function TasksWorkPage({ embeddedView }: {
   const tasks = listQ.data?.tasks ?? []
   const total = listQ.data?.total ?? 0
   const hasFilter = !!(objectId || projectId || versionId || typeId || assigneeId
-                       || authorId || priority || labelId || q)
+                       || authorId || priority || labelId || q || queryText)
+
+  /* Подсказки строки запроса берём из справочников, которые экран и так
+     загрузил: второй источник имён разошёлся бы с первым. */
+  const suggestions: QuerySuggestions = {
+    проект: (projectsQ.data?.projects ?? []).map((p) => p.code),
+    исполнитель: (peopleQ.data?.people ?? []).map((p) => p.name.split(' ')[0]),
+    автор: (peopleQ.data?.people ?? []).map((p) => p.name.split(' ')[0]),
+    метка: (labelsQ.data?.labels ?? []).map((l) => l.name),
+    тип: (typesQ.data?.types ?? []).map((t) => t.name),
+    стадия: [...new Set((typesQ.data?.types ?? [])
+      .flatMap((t) => (t.route ?? []).map((st) => st.name)))],
+    версия: (allVersionsQ.data?.versions ?? []).map((v) => v.name),
+    спринт: (allSprintsQ.data?.sprints ?? []).map((sp) => sp.name),
+  }
 
   const refresh = () => { void listQ.refetch(); setPicked(new Set()) }
 
@@ -228,6 +255,7 @@ export function TasksWorkPage({ embeddedView }: {
                 ...(priority && { priority }),
                 ...(labelId && { label: labelId }),
                 ...(q && { q }),
+                ...(queryText && { query: queryText }),
                 ...(sort !== 'created' && { sort }),
               }} />
               <Button variant="outline" size="sm" className="h-8"
@@ -267,6 +295,12 @@ export function TasksWorkPage({ embeddedView }: {
           <NewTaskDialog companyId={company.id} defaultObjectId={objectId || undefined}
             onCreated={(id) => { refresh(); set({ task: id }) }} />
         </div>
+      )}
+
+      {full && (
+        <QueryBar className="max-w-3xl" value={queryText} suggestions={suggestions}
+          result={listQ.data?.query}
+          onChange={(v) => set({ query: v || null })} />
       )}
 
       {full && (
@@ -325,6 +359,7 @@ export function TasksWorkPage({ embeddedView }: {
               onClick={() => set({
                 q: null, assignee: null, author: null, type: null,
                 object: null, priority: null, label: null, version: null,
+                query: null,
               })}>
               <X className="mr-1 h-3.5 w-3.5" />Сбросить
             </Button>

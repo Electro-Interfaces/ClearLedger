@@ -174,12 +174,19 @@ export function ViewsSection({ companyId, scope = 'task' }: {
               className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm">
               <button type="button"
                 onClick={() => {
-                  const target = new URLSearchParams(location.search)
-                  for (const key of ['doc', 'task', 'tab', 'page', 'view', 'q', 'status',
-                    'kind', 'date_from', 'date_to']) target.delete(key)
+                  /* Список ключей отставал от того, что кладёт кнопка «Сохранить
+                     отбор»: исполнитель, проект, метка и остальное записывались в
+                     представление и молча терялись при открытии — человек видел
+                     не свой отбор и решал, что представления «не работают». */
                   const allowed = new Set([
                     'view', 'q', 'status', 'kind', 'date_from', 'date_to', 'f',
+                    'assignee', 'author', 'project', 'version', 'sprint', 'type',
+                    'object', 'priority', 'label', 'sort', 'query', 'backlog',
                   ])
+                  const target = new URLSearchParams(location.search)
+                  for (const key of ['doc', 'task', 'tab', 'page', ...allowed]) {
+                    target.delete(key)
+                  }
                   for (const [key, value] of Object.entries(v.query)) {
                     if (allowed.has(key) && value) target.set(key, value)
                   }

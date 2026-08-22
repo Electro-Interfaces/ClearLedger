@@ -913,3 +913,80 @@ async def test_спринт_планирует_и_подводит_итог(auth
     card = (await auth_client.get(f"/api/tasks/{ids[1]}",
                                   params={"company_id": cid})).json()
     assert card["sprint_id"] is None
+
+
+async def test_запрос_строкой_даёт_то_же_что_форма(auth_client: AsyncClient):
+    """Этап 12: «проект: QRY #нерешённые исполнитель: я» вместо восьми полей формы.
+
+    Ловим то, что молча ломается: строка отбирает не то же, что форма (тогда
+    сохранённый отбор однажды покажет чужую работу); опечатка в имени глотается
+    и список молча сужается; значение с пробелом рвётся по пробелу.
+    """
+    me = await _me(auth_client)
+    cid = me["companies"][0]["id"]
+    my_id = me["id"]
+
+    r = await auth_client.post("/api/tasks/projects", json={
+        "company_id": cid, "code": "QRY", "name": "Проверка запросов"})
+    assert r.status_code == 201, r.text
+    prj = r.json()
+    r = await auth_client.post("/api/tasks/sprints", json={
+        "company_id": cid, "project_id": prj["id"], "name": "Отрезок с пробелом"})
+    assert r.status_code == 201, r.text
+    sprint = r.json()
+
+    r = await auth_client.post("/api/tasks", json={
+        "company_id": cid, "title": "Разбор запроса строкой", "project_id": prj["id"],
+        "assignee_id": my_id, "priority": "high"})
+    assert r.status_code == 201, r.text
+    mine = r.json()
+    r = await auth_client.post("/api/tasks", json={
+        "company_id": cid, "title": "Чужая работа того же проекта",
+        "project_id": prj["id"], "priority": "low"})
+    other = r.json()
+
+    # Строка и форма отбирают одно и то же — иначе сохранённый отбор однажды
+    # покажет не ту работу, и доверия к представлениям больше не будет.
+    by_form = (await auth_client.get("/api/tasks", params={
+        "company_id": cid, "scope": "open", "project_id": prj["id"],
+        "assignee_id": my_id, "priority": "high"})).json()
+    by_text = (await auth_client.get("/api/tasks", params={
+        "company_id": cid, "scope": "all",
+        "query": "проект: QRY #нерешённые исполнитель: я приоритет: срочная"})).json()
+    assert [t["id"] for t in by_text["tasks"]] == [t["id"] for t in by_form["tasks"]]
+    assert mine["id"] in [t["id"] for t in by_text["tasks"]]
+    assert other["id"] not in [t["id"] for t in by_text["tasks"]]
+    assert by_text["query"]["unknown"] == [], by_text["query"]
+
+    # Опечатка не глотается: человек должен видеть, что отбор не сработал.
+    body = (await auth_client.get("/api/tasks", params={
+        "company_id": cid, "scope": "all",
+        "query": "проект: НЕТТАКОГО #выдумка кому: Несуществующий"})).json()
+    assert len(body["query"]["unknown"]) == 3, body["query"]
+
+    # Значение с пробелом — в кавычках, иначе рвётся по пробелу.
+    r = await auth_client.post(f"/api/tasks/{mine['id']}/action", json={
+        "company_id": cid, "sprint_id": sprint["id"]})
+    assert r.status_code == 200, r.text
+    body = (await auth_client.get("/api/tasks", params={
+        "company_id": cid, "scope": "all",
+        "query": 'спринт: "Отрезок с пробелом"'})).json()
+    assert [t["id"] for t in body["tasks"]] == [mine["id"]], body["query"]
+
+    # Свободный хвост — обычный поиск по тексту, как в поле «Поиск».
+    body = (await auth_client.get("/api/tasks", params={
+        "company_id": cid, "scope": "all",
+        "query": "проект: QRY разбор запроса"})).json()
+    assert body["query"]["text"] == "разбор запроса"
+    assert [t["id"] for t in body["tasks"]] == [mine["id"]]
+
+    # Отбор сохраняется представлением и возвращается целиком: до этапа 12
+    # половина ключей терялась по дороге.
+    r = await auth_client.post("/api/tasks/views", json={
+        "company_id": cid, "name": "Мои срочные в QRY",
+        "query": {"view": "registry", "query": "проект: QRY #мои приоритет: срочная"}})
+    assert r.status_code == 201, r.text
+    views = (await auth_client.get("/api/tasks/views",
+                                   params={"company_id": cid})).json()["views"]
+    saved = next(v for v in views if v["name"] == "Мои срочные в QRY")
+    assert saved["query"]["query"] == "проект: QRY #мои приоритет: срочная"

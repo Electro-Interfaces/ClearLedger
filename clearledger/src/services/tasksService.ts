@@ -218,6 +218,9 @@ export interface TaskFilters {
   fixVersionId?: string; foundVersionId?: string
   /** `backlog` — задачи без спринта; вместе с `sprintId` не используется. */
   sprintId?: string; backlog?: boolean
+  /** Строка запроса: «проект: TF #нерешённые исполнитель: я». Разбирает сервер —
+   *  одна реализация на форму и на строку, иначе они разойдутся. */
+  query?: string
   stage?: string; priority?: string; labelId?: string; q?: string
   dueFrom?: string; dueTo?: string
   sort?: string; limit?: number; offset?: number
@@ -236,8 +239,19 @@ export function fillTask<T extends SpaceTask>(t: T): T & Required<
   }
 }
 
+/** Что сервер понял из строки запроса. `unknown` показываем человеку: молча
+ *  проглоченная опечатка сужает список, а он думает, что работы просто нет. */
+export interface ParsedQuery {
+  parsed: Record<string, string>
+  unknown: string[]
+  text: string | null
+}
+
 export async function listTasks(companyId: string, scope: TaskScope, opts?: TaskFilters) {
-  return get<{ tasks: SpaceTask[]; total: number; limit: number; offset: number }>(
+  return get<{
+    tasks: SpaceTask[]; total: number; limit: number; offset: number
+    query?: ParsedQuery
+  }>(
     '/api/tasks', {
       company_id: companyId, scope,
       object_id: opts?.objectId || undefined, project_id: opts?.projectId || undefined,
@@ -245,6 +259,7 @@ export async function listTasks(companyId: string, scope: TaskScope, opts?: Task
       found_version_id: opts?.foundVersionId || undefined,
       sprint_id: opts?.sprintId || undefined,
       backlog: opts?.backlog ? 'true' : undefined,
+      query: opts?.query || undefined,
       type_id: opts?.typeId || undefined,
       assignee_id: opts?.assigneeId || undefined, author_id: opts?.authorId || undefined,
       stage: opts?.stage || undefined, priority: opts?.priority || undefined,
