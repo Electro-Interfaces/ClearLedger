@@ -439,6 +439,31 @@ function Header({ task, onRename, onBack }: {
   )
 }
 
+/** Выбор версии проекта. Отменённые не предлагаются, но уже проставленная
+ *  показывается — иначе поле выглядит пустым там, где значение есть. */
+function VersionPick({ value, versions, disabled, onChange }: {
+  value: string
+  versions: tasksService.TaskVersion[]
+  disabled: boolean
+  onChange: (v: string | null) => void
+}) {
+  const items = versions.filter((v) => v.state !== 'cancelled' || v.id === value)
+  return (
+    <Select value={value || 'none'} disabled={disabled}
+      onValueChange={(v) => onChange(v === 'none' ? null : v)}>
+      <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Не указана" /></SelectTrigger>
+      <SelectContent>
+        <SelectItem value="none">Не указана</SelectItem>
+        {items.map((v) => (
+          <SelectItem key={v.id} value={v.id}>
+            {v.name}{v.state === 'released' ? ' · выпущена' : ''}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  )
+}
+
 /* ── Описание ────────────────────────────────────────────────────────── */
 
 function Description({ task, disabled, onSave }: {
@@ -561,6 +586,14 @@ function Attributes({ task, companyId, live, people, labels, pending, onAct, onC
     queryFn: () => listSpaceObjects(companyId),
     staleTime: 5 * 60 * 1000,
   })
+  // Версии живут на проекте: у задачи без проекта выбирать не из чего, и поля
+  // не показываются вовсе — пустой список хуже отсутствия поля.
+  const versionsQ = useQuery({
+    queryKey: ['task-versions', companyId, task.project_id],
+    queryFn: () => tasksService.listTaskVersions(companyId, task.project_id ?? undefined),
+    enabled: !!task.project_id, staleTime: 5 * 60 * 1000,
+  })
+  const versions = versionsQ.data?.versions ?? []
   const watch = useMutation({
     mutationFn: (v: { userId: string; on: boolean }) => v.on
       ? tasksService.addWatcher(task.id, companyId, v.userId)
@@ -617,6 +650,20 @@ function Attributes({ task, companyId, live, people, labels, pending, onAct, onC
             searchPlaceholder="Номер, название или адрес…"
             loading={objectsQ.isLoading} width="w-[320px]" />
         </Field>
+        {task.project_id && (
+          <>
+            <Field label="Исправлено в версии">
+              <VersionPick value={task.fix_version_id ?? ''} versions={versions}
+                disabled={!live || pending}
+                onChange={(v) => onAct({ companyId, fixVersionId: v })} />
+            </Field>
+            <Field label="Обнаружено в версии">
+              <VersionPick value={task.found_version_id ?? ''} versions={versions}
+                disabled={!live || pending}
+                onChange={(v) => onAct({ companyId, foundVersionId: v })} />
+            </Field>
+          </>
+        )}
       </div>
 
       {labels.length > 0 && (

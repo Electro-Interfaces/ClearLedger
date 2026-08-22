@@ -50,6 +50,20 @@ export interface TaskProject {
   open: number
 }
 
+export interface TaskVersion {
+  id: string
+  project_id: string
+  name: string
+  description: string | null
+  /** open — набирается, released — выпущена, cancelled — отменена. */
+  state: 'open' | 'released' | 'cancelled'
+  released_on: string | null
+  sort_order: number
+  /** Состав: сколько задач закрыто в этой версии и сколько ещё висит. */
+  fixed: number
+  open: number
+}
+
 export interface SpaceTask {
   id: string
   number: number
@@ -59,6 +73,11 @@ export interface SpaceTask {
   project?: string | null
   project_id?: string | null
   project_number?: number | null
+  /** «Исправлено в 1.4.2» — ответ заявителю; «обнаружено в» — с чего разбираться. */
+  fix_version?: string | null
+  fix_version_id?: string | null
+  found_version?: string | null
+  found_version_id?: string | null
   title: string
   status: string           // open | done | cancelled
   priority: string
@@ -177,6 +196,7 @@ export type TaskScope = 'open' | 'mine' | 'assigned' | 'watching' | 'overdue'
 
 export interface TaskFilters {
   objectId?: string; projectId?: string; typeId?: string; assigneeId?: string; authorId?: string
+  fixVersionId?: string; foundVersionId?: string
   stage?: string; priority?: string; labelId?: string; q?: string
   dueFrom?: string; dueTo?: string
   sort?: string; limit?: number; offset?: number
@@ -200,6 +220,8 @@ export async function listTasks(companyId: string, scope: TaskScope, opts?: Task
     '/api/tasks', {
       company_id: companyId, scope,
       object_id: opts?.objectId || undefined, project_id: opts?.projectId || undefined,
+      fix_version_id: opts?.fixVersionId || undefined,
+      found_version_id: opts?.foundVersionId || undefined,
       type_id: opts?.typeId || undefined,
       assignee_id: opts?.assigneeId || undefined, author_id: opts?.authorId || undefined,
       stage: opts?.stage || undefined, priority: opts?.priority || undefined,
@@ -290,6 +312,50 @@ export async function updateTaskProject(id: string, data: {
   })
 }
 
+/** Версии проекта. Без `projectId` — все версии компании: карточка задачи
+ *  получает одним запросом всё, из чего может выбрать. */
+export async function listTaskVersions(companyId: string, projectId?: string) {
+  return get<{ versions: TaskVersion[] }>(
+    '/api/tasks/versions',
+    { company_id: companyId, project_id: projectId || undefined })
+}
+
+export async function createTaskVersion(data: {
+  companyId: string; projectId: string; name: string
+  description?: string; releasedOn?: string; sortOrder?: number
+}) {
+  return post<TaskVersion>('/api/tasks/versions', {
+    company_id: data.companyId, project_id: data.projectId, name: data.name,
+    description: data.description || undefined,
+    released_on: data.releasedOn || undefined, sort_order: data.sortOrder ?? 100,
+  })
+}
+
+export async function updateTaskVersion(id: string, data: {
+  companyId: string; name?: string; description?: string
+  state?: TaskVersion['state']; releasedOn?: string; sortOrder?: number
+}) {
+  return patch<TaskVersion>(`/api/tasks/versions/${id}`, {
+    company_id: data.companyId, name: data.name, description: data.description,
+    state: data.state, released_on: data.releasedOn, sort_order: data.sortOrder,
+  })
+}
+
+/** Состав версии: что вошло, что осталось, что в ней обнаружено. Он же
+ *  черновик списка изменений для ответа заявителю. */
+export async function taskVersionSummary(id: string, companyId: string) {
+  return get<{
+    version: TaskVersion
+    done: SpaceTask[]; left: SpaceTask[]; found: SpaceTask[]
+  }>(`/api/tasks/versions/${id}/summary`, { company_id: companyId })
+    .then((r) => ({
+      ...r,
+      done: (r.done ?? []).map(fillTask),
+      left: (r.left ?? []).map(fillTask),
+      found: (r.found ?? []).map(fillTask),
+    }))
+}
+
 export async function listTaskTypes(companyId: string) {
   return get<{ types: TaskType[]; default_route: RouteStage[] }>(
     '/api/tasks/types', { company_id: companyId })
@@ -298,6 +364,7 @@ export async function listTaskTypes(companyId: string) {
 export async function createTask(data: {
   companyId: string; title: string; description?: string
   projectId?: string; typeId?: string; assigneeId?: string; objectId?: string
+  foundVersionId?: string; fixVersionId?: string
   priority?: string; dueAt?: string
 }) {
   return post<SpaceTask>('/api/tasks', {
@@ -316,6 +383,8 @@ export async function taskAction(id: string, data: {
   status?: string; priority?: string; dueAt?: string; note?: string
   title?: string; description?: string; objectId?: string | null
   projectId?: string
+  /** null = снять версию; undefined = не трогать. */
+  fixVersionId?: string | null; foundVersionId?: string | null
   addLabelId?: string; removeLabelId?: string; estimate?: string
   visibility?: 'company' | 'private'
 }) {
@@ -329,6 +398,8 @@ export async function taskAction(id: string, data: {
     title: data.title, description: data.description,
     object_id: data.objectId === null ? '' : data.objectId,
     project_id: data.projectId,
+    fix_version_id: data.fixVersionId === null ? '' : data.fixVersionId,
+    found_version_id: data.foundVersionId === null ? '' : data.foundVersionId,
     add_label_id: data.addLabelId, remove_label_id: data.removeLabelId,
     estimate: data.estimate, visibility: data.visibility,
   })

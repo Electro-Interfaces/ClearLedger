@@ -32,7 +32,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import ApprovalRequest, DocCard, DocEvent, DocKind
+from app.models import ApprovalRequest, DocCard, DocEvent, DocKind, Task, TaskVersion
 from app.services import doc_approvals
 
 log = logging.getLogger("clearledger.approvals")
@@ -192,16 +192,28 @@ async def deliver_pending(db: AsyncSession, limit: int = 20) -> int:
     return done
 
 
-def _trace(row: ApprovalRequest) -> dict[str, Any]:
+async def _trace(db: AsyncSession, row: ApprovalRequest) -> dict[str, Any]:
     """Чем именно двинули процесс — часть следа шага.
 
     У круга виз это документ и номер круга, у поручения — само поручение. Слать
     «doc_id: None» для поручения значило бы оставить в истории шага пустое место
     там, где должен стоять ответ на вопрос «а что было сделано».
+
+    У выполненного поручения едет ещё версия, в которой исправлено (этап 10): этого
+    ждёт заявитель в Поддержке, а спросить её обратным ходом она не может: поручение
+    живёт в «Треке». Имя версии, а не её идентификатор: в ответе человеку стоит
+    «1.4.2», и второй запрос за расшифровкой тут лишний.
     """
-    if row.kind == "errand":
-        return {"task_id": str(row.task_id) if row.task_id else None}
-    return {"approval_round": row.round, "doc_id": str(row.doc_id) if row.doc_id else None}
+    if row.kind != "errand":
+        return {"approval_round": row.round, "doc_id": str(row.doc_id) if row.doc_id else None}
+    trace: dict[str, Any] = {"task_id": str(row.task_id) if row.task_id else None}
+    if row.task_id and row.outcome == "done":
+        version = (await db.execute(
+            select(TaskVersion.name).join(Task, Task.fix_version_id == TaskVersion.id)
+            .where(Task.id == row.task_id))).scalar_one_or_none()
+        if version:
+            trace["fixed_version"] = version
+    return trace
 
 
 async def _deliver(db: AsyncSession, row: ApprovalRequest) -> None:
@@ -226,4 +238,4 @@ async def _deliver(db: AsyncSession, row: ApprovalRequest) -> None:
     # идентификаторы меняются, «Согласовано» остаётся.
     await projects_process.send_verb(
         db, row.company_id, row.process_id, verb,
-        branch_id=row.branch_id, payload=_trace(row))
+        branch_id=row.branch_id, payload=await _trace(db, row))

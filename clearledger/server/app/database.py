@@ -3812,6 +3812,22 @@ async def create_all() -> None:
         ):
             await conn.execute(_sa.text(stmt))
 
+        # v2.64: версии проекта (этап 10 трекерного контура). Таблицу
+        # `task_versions` заводит `create_all`, а столбцы в уже существующей
+        # `tasks` — нет. Оба SET NULL: отменённая версия не должна утащить за
+        # собой задачу, работа переживает свой релиз. Индекс один — по
+        # «исправлено в версии»: по нему собирается состав релиза, а «обнаружено
+        # в» спрашивают поштучно из карточки.
+        for stmt in (
+            "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS found_version_id UUID "
+            "REFERENCES task_versions(id) ON DELETE SET NULL",
+            "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS fix_version_id UUID "
+            "REFERENCES task_versions(id) ON DELETE SET NULL",
+            "CREATE INDEX IF NOT EXISTS ix_tasks_fix_version "
+            "ON tasks (fix_version_id) WHERE fix_version_id IS NOT NULL",
+        ):
+            await conn.execute(_sa.text(stmt))
+
         # v2.60: маршрут проекта выбирается человеком, а не берётся молча первым.
         # Пусто у всех существующих проектов — это и есть прежнее поведение.
         for stmt in (

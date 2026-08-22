@@ -26,6 +26,7 @@ import { useDocsView } from './DocsLayout'
 import { DocKindEditor } from '@/components/docs/DocKindEditor'
 import { DocsErrorState, DocsLoadingState } from '@/components/docs/DocsQueryState'
 import { ProjectsSection } from './ProjectsSection'
+import { VersionsSection } from './VersionsSection'
 import { TypesSection } from '@/pages/tasks/TasksSetupPage' 
 
 const SCOPE_LABEL: Record<string, string> = {
@@ -78,6 +79,9 @@ export function DocsSetupPage() {
   // и попасть в неё можно было только прямым адресом /tasks-legacy/setup.
   if (view === 'projects') {
     return <ProjectsSection companyId={company.id} />
+  }
+  if (view === 'versions') {
+    return <VersionsSection companyId={company.id} />
   }
   if (view === 'types') {
     return <TypesSection companyId={company.id} />

@@ -702,3 +702,100 @@ async def test_зеркало_внешней_системы(auth_client: AsyncCl
     card = (await auth_client.get(f"/api/tasks/{task['id']}",
                                   params={"company_id": cid})).json()
     assert card["waiting_for"] is None, "ждать некого, а мяч всё ещё снаружи"
+
+
+async def test_версия_проекта_собирает_состав(auth_client: AsyncClient):
+    """Этап 10: «исправлено в версии» — ответ заявителю, и он не должен врать.
+
+    Ловим то, что молча ломается: версия чужого проекта проставляется задаче
+    (заявителю уедет номер релиза, в котором его правки нет); выпуск версии
+    остаётся без даты (номер есть, а когда вышла — неизвестно); состав версии
+    не отделяет сделанное от висящего, и релиз выпускают недоделанным.
+    """
+    me = await _me(auth_client)
+    cid = me["companies"][0]["id"]
+
+    r = await auth_client.post("/api/tasks/projects", json={
+        "company_id": cid, "code": "VER", "name": "Проверка версий"})
+    assert r.status_code == 201, r.text
+    prj = r.json()
+    r = await auth_client.post("/api/tasks/projects", json={
+        "company_id": cid, "code": "VEROTH", "name": "Соседний продукт"})
+    assert r.status_code == 201, r.text
+    other = r.json()
+
+    r = await auth_client.post("/api/tasks/versions", json={
+        "company_id": cid, "project_id": prj["id"], "name": "1.4.2"})
+    assert r.status_code == 201, r.text
+    version = r.json()
+    assert version["state"] == "open" and version["released_on"] is None
+
+    # Одноимённая версия у соседа — законна: «1.4» у двух продуктов разные вещи.
+    r = await auth_client.post("/api/tasks/versions", json={
+        "company_id": cid, "project_id": other["id"], "name": "1.4.2"})
+    assert r.status_code == 201, r.text
+    alien = r.json()
+    # А в том же проекте — нет: два разных релиза с одним номером не бывает.
+    r = await auth_client.post("/api/tasks/versions", json={
+        "company_id": cid, "project_id": prj["id"], "name": "1.4.2"})
+    assert r.status_code == 409, r.text
+
+    r = await auth_client.post("/api/tasks", json={
+        "company_id": cid, "title": "Правка, которая войдёт в релиз",
+        "project_id": prj["id"]})
+    assert r.status_code == 201, r.text
+    task = r.json()
+
+    # Версия соседнего проекта не проставляется: иначе заявителю уедет номер
+    # релиза, в котором его исправления нет.
+    r = await auth_client.post(f"/api/tasks/{task['id']}/action", json={
+        "company_id": cid, "fix_version_id": alien["id"]})
+    assert r.status_code == 400, r.text
+
+    r = await auth_client.post(f"/api/tasks/{task['id']}/action", json={
+        "company_id": cid, "fix_version_id": version["id"]})
+    assert r.status_code == 200, r.text
+    card = (await auth_client.get(f"/api/tasks/{task['id']}",
+                                  params={"company_id": cid})).json()
+    assert card["fix_version"] == "1.4.2"
+    # Смена версии — след, а не тихая правка: она уезжает заявителю.
+    assert any(e["kind"] == "field" and (e["from"] or "").startswith("исправлено в версии")
+               and e["to"] == "1.4.2" for e in card["events"]), card["events"]
+
+    # Пока задача жива, она в остатке: состав отвечает «можно ли выпускать».
+    body = (await auth_client.get(f"/api/tasks/versions/{version['id']}/summary",
+                                  params={"company_id": cid})).json()
+    assert [t["id"] for t in body["left"]] == [task["id"]]
+    assert body["done"] == []
+
+    r = await auth_client.post(f"/api/tasks/{task['id']}/action", json={
+        "company_id": cid, "status": "done"})
+    assert r.status_code == 200, r.text
+    body = (await auth_client.get(f"/api/tasks/versions/{version['id']}/summary",
+                                  params={"company_id": cid})).json()
+    assert [t["id"] for t in body["done"]] == [task["id"]]
+    assert body["left"] == []
+
+    # Выпуск без даты — дырка в ответе заявителю. Дата ставится сама.
+    r = await auth_client.patch(f"/api/tasks/versions/{version['id']}", json={
+        "company_id": cid, "state": "released"})
+    assert r.status_code == 200, r.text
+    assert r.json()["released_on"], "версия выпущена, а когда — неизвестно"
+
+    # Отбор по версии — то, из чего собирается список изменений.
+    listed = (await auth_client.get("/api/tasks", params={
+        "company_id": cid, "scope": "all", "fix_version_id": version["id"]})).json()
+    assert [t["id"] for t in listed["tasks"]] == [task["id"]]
+
+    # Команда одной строкой: «версия 1.4.2» подбирает задачу в релиз проекта.
+    r = await auth_client.post("/api/tasks", json={
+        "company_id": cid, "title": "Вторая правка того же релиза",
+        "project_id": prj["id"]})
+    second = r.json()
+    r = await auth_client.post("/api/tasks/command", json={
+        "company_id": cid, "task_ids": [second["id"]], "command": "версия 1.4.2"})
+    assert r.status_code == 200, r.text
+    assert r.json()["changed"] == 1, r.text
+    card = (await auth_client.get(f"/api/tasks/{second['id']}",
+                                  params={"company_id": cid})).json()
+    assert card["fix_version"] == "1.4.2"

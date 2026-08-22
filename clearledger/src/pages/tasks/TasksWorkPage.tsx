@@ -79,6 +79,7 @@ export function TasksWorkPage({ embeddedView }: {
 
   const objectId = params.get('object') ?? ''
   const projectId = params.get('project') ?? ''
+  const versionId = params.get('version') ?? ''
   const typeId = params.get('type') ?? ''
   const assigneeId = params.get('assignee') ?? ''
   const authorId = params.get('author') ?? ''
@@ -104,6 +105,13 @@ export function TasksWorkPage({ embeddedView }: {
     queryFn: () => tasksService.listTaskProjects(company.id),
     staleTime: 5 * 60 * 1000,
   })
+  // Версии живут на проекте: отбор по версии показывается, только когда проект
+  // выбран, иначе в списке смешались бы одноимённые версии разных продуктов.
+  const versionsQ = useQuery({
+    queryKey: ['task-versions', company.id, projectId],
+    queryFn: () => tasksService.listTaskVersions(company.id, projectId),
+    enabled: !!projectId, staleTime: 5 * 60 * 1000,
+  })
   const typesQ = useQuery({
     queryKey: ['task-types', company.id],
     queryFn: () => tasksService.listTaskTypes(company.id),
@@ -122,6 +130,7 @@ export function TasksWorkPage({ embeddedView }: {
 
   const filters = {
     objectId: objectId || undefined, projectId: projectId || undefined,
+    fixVersionId: versionId || undefined,
     typeId: typeId || undefined,
     assigneeId: assigneeId || undefined, authorId: authorId || undefined,
     priority: priority || undefined, labelId: labelId || undefined,
@@ -140,8 +149,8 @@ export function TasksWorkPage({ embeddedView }: {
   })
   const tasks = listQ.data?.tasks ?? []
   const total = listQ.data?.total ?? 0
-  const hasFilter = !!(objectId || projectId || typeId || assigneeId || authorId
-                       || priority || labelId || q)
+  const hasFilter = !!(objectId || projectId || versionId || typeId || assigneeId
+                       || authorId || priority || labelId || q)
 
   const refresh = () => { void listQ.refetch(); setPicked(new Set()) }
 
@@ -282,10 +291,15 @@ export function TasksWorkPage({ embeddedView }: {
             placeholder="Любой автор" emptyLabel="Любой автор"
             searchPlaceholder="Фамилия…" />
           {(projectsQ.data?.projects ?? []).length > 0 && (
-            <Pick value={projectId} onChange={(v) => set({ project: v })} width={170}
+            <Pick value={projectId} onChange={(v) => set({ project: v, version: null })} width={170}
               placeholder="Проект" allLabel="Все проекты"
               items={(projectsQ.data?.projects ?? []).map((p) => ({
                 id: p.id, name: `${p.code} · ${p.name}` }))} />
+          )}
+          {(versionsQ.data?.versions ?? []).length > 0 && (
+            <Pick value={versionId} onChange={(v) => set({ version: v })} width={160}
+              placeholder="Версия" allLabel="Любая версия"
+              items={(versionsQ.data?.versions ?? []).map((v) => ({ id: v.id, name: v.name }))} />
           )}
           <Pick value={typeId} onChange={(v) => set({ type: v })} width={150}
             placeholder="Тип" allLabel="Все типы"
@@ -310,7 +324,7 @@ export function TasksWorkPage({ embeddedView }: {
             <Button variant="ghost" size="sm" className="h-8 text-muted-foreground"
               onClick={() => set({
                 q: null, assignee: null, author: null, type: null,
-                object: null, priority: null, label: null,
+                object: null, priority: null, label: null, version: null,
               })}>
               <X className="mr-1 h-3.5 w-3.5" />Сбросить
             </Button>

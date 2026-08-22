@@ -9369,6 +9369,14 @@ class Task(Base):
     # Номер внутри проекта: показывается как `TF-42`. Сквозной `number` остаётся
     # внутренним — на него уже ссылаются написанные интеграции.
     project_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Версии проекта: в какой обнаружено и в какой исправлено. Второе — ответ
+    # заявителю («исправлено в 1.4.2»), первое — с чего разбираться, когда через
+    # три релиза окажется, что сломали давно. Обе принадлежат проекту задачи:
+    # версия чужого проекта в карточке не значит ничего.
+    found_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("task_versions.id", ondelete="SET NULL"), nullable=True)
+    fix_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("task_versions.id", ondelete="SET NULL"), nullable=True)
     type_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("task_types.id", ondelete="SET NULL"), nullable=True)
     title: Mapped[str] = mapped_column(String(300), nullable=False)
@@ -9576,6 +9584,48 @@ class TaskProject(Base):
 
     __table_args__ = (
         UniqueConstraint("company_id", "code", name="uq_task_projects_code"),
+    )
+
+
+class TaskVersion(Base):
+    """Версия проекта: «исправлено в 1.4.2» — то, чего ждёт заявитель.
+
+    Заведена 22.08.2026, этап 10 трекерного контура. Версия принадлежит проекту,
+    а не компании: «1.4» у фронта и «1.4» у бэкенда — разные вещи, и общий на
+    пространство справочник заставил бы придумывать им разные имена.
+
+    Состояние тремя словами: `open` — версия набирается, `released` — выпущена
+    (дата выпуска проставлена), `cancelled` — отменена, задачи из неё надо
+    перецелить. Версия не удаляется: её номер уже назван заявителю в ответе.
+    """
+    __tablename__ = "task_versions"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("task_projects.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    # Имя версии — как её называют в разговоре и пишут заявителю: «1.4.2»,
+    # «2026.08». Свободная строка: схемы нумерации у продуктов разные, и
+    # навязывать semver значило бы спорить с командой о том, что не наше дело.
+    name: Mapped[str] = mapped_column(String(40), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # open | released | cancelled
+    state: Mapped[str] = mapped_column(String(20), nullable=False, default="open")
+    # Дата выпуска: план, пока версия набирается, и факт после выпуска. Дата, а
+    # не отметка времени: релиз называют днём, а не минутой.
+    released_on: Mapped[date_type | None] = mapped_column(Date, nullable=True)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("project_id", "name", name="uq_task_versions_name"),
     )
 
 

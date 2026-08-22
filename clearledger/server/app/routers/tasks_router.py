@@ -32,8 +32,8 @@ from app.database import get_db
 from app.models import (
     Company, ServiceLocation, SourceFile, Task, TaskAttachment, TaskChecklistItem,
     TaskEvent, TaskExternalRef, TaskLabel, TaskLabelLink, TaskLink, TaskParticipant,
-    TaskProject, TaskRecurrence, TaskTemplate, TaskType, TaskView, TaskWatcher,
-    TaskWorkItem,
+    TaskProject, TaskRecurrence, TaskTemplate, TaskType, TaskVersion, TaskView,
+    TaskWatcher, TaskWorkItem,
     User, UserCompany,
 )
 from app.services import process_templates, space_connectors, task_mail, task_scheduler
@@ -150,6 +150,12 @@ def _task_out(t: Task, route: list[dict], names: dict[str, str | None],
         "project": names.get("project"),
         "project_id": str(t.project_id) if t.project_id else None,
         "project_number": t.project_number,
+        # «Исправлено в 1.4.2» — ответ заявителю, «обнаружено в» — с чего
+        # разбираться, если сломали давно.
+        "fix_version": names.get("fix_version"),
+        "fix_version_id": str(t.fix_version_id) if t.fix_version_id else None,
+        "found_version": names.get("found_version"),
+        "found_version_id": str(t.found_version_id) if t.found_version_id else None,
         "title": t.title,
         "status": t.status,
         "priority": t.priority,
@@ -181,8 +187,11 @@ async def _names(db: AsyncSession, tasks: list[Task]) -> dict[uuid.UUID, dict[st
     user_ids = {i for t in tasks for i in (t.assignee_id, t.author_id) if i}
     obj_ids = {t.object_id for t in tasks if t.object_id}
     prj_ids = {t.project_id for t in tasks if t.project_id}
+    ver_ids = {i for t in tasks for i in (t.fix_version_id, t.found_version_id) if i}
     prjs = {r.id: r for r in (await db.execute(
         select(TaskProject).where(TaskProject.id.in_(prj_ids)))).scalars()} if prj_ids else {}
+    vers = {r.id: r.name for r in (await db.execute(
+        select(TaskVersion).where(TaskVersion.id.in_(ver_ids)))).scalars()} if ver_ids else {}
     types = {r.id: r for r in (await db.execute(
         select(TaskType).where(TaskType.id.in_(type_ids)))).scalars()} if type_ids else {}
     users = {r.id: r.name for r in (await db.execute(
@@ -197,6 +206,8 @@ async def _names(db: AsyncSession, tasks: list[Task]) -> dict[uuid.UUID, dict[st
         "object": objs.get(t.object_id),
         "project": prjs[t.project_id].name if t.project_id in prjs else None,
         "project_code": prjs[t.project_id].code if t.project_id in prjs else None,
+        "fix_version": vers.get(t.fix_version_id),
+        "found_version": vers.get(t.found_version_id),
     } for t in tasks}
 
 
@@ -373,6 +384,8 @@ async def list_tasks(
     scope: str = Query("open", pattern="^(open|mine|assigned|watching|overdue|today|waiting|closed|all)$"),
     object_id: str | None = Query(None),
     project_id: str | None = Query(None),
+    fix_version_id: str | None = Query(None),
+    found_version_id: str | None = Query(None),
     type_id: str | None = Query(None),
     assignee_id: str | None = Query(None),
     author_id: str | None = Query(None),
@@ -436,6 +449,11 @@ async def list_tasks(
         sel = sel.where(Task.author_id == _uuid_or_400(author_id, "author_id"))
     if project_id:
         sel = sel.where(Task.project_id == _uuid_or_400(project_id, "project_id"))
+    if fix_version_id:
+        sel = sel.where(Task.fix_version_id == _uuid_or_400(fix_version_id, "fix_version_id"))
+    if found_version_id:
+        sel = sel.where(
+            Task.found_version_id == _uuid_or_400(found_version_id, "found_version_id"))
     if type_id:
         sel = sel.where(Task.type_id == _uuid_or_400(type_id, "type_id"))
     if stage:
@@ -622,6 +640,187 @@ async def update_project(
     return _project_out(p)
 
 
+# ── Версии проекта ────────────────────────────────────────────
+# «Исправлено в 1.4.2» — то, чего ждёт заявитель. Версия принадлежит проекту:
+# «1.4» у фронта и «1.4» у бэкенда — разные вещи, и общий справочник заставил
+# бы придумывать им разные имена.
+
+
+def _version_out(v: TaskVersion, fixed: int = 0, open_tasks: int = 0) -> dict[str, Any]:
+    return {
+        "id": str(v.id), "project_id": str(v.project_id),
+        "name": v.name, "description": v.description, "state": v.state,
+        "released_on": v.released_on.isoformat() if v.released_on else None,
+        "sort_order": v.sort_order,
+        # Состав виден прямо в списке: «десять сделано, три висят» — это и есть
+        # ответ на вопрос «можно ли выпускать».
+        "fixed": fixed, "open": open_tasks,
+    }
+
+
+async def _version_or_400(db: AsyncSession, value: str, project_id: uuid.UUID | None,
+                          field: str) -> uuid.UUID:
+    """Версия существует и принадлежит проекту задачи.
+
+    Версия чужого проекта в карточке не значит ничего: `1.4` фронта, проставленная
+    задаче бэкенда, соврёт заявителю, в каком релизе искать исправление.
+    """
+    v = await db.get(TaskVersion, _uuid_or_400(value, field))
+    if v is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Неизвестная версия")
+    if project_id is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "У задачи нет проекта: версии живут на проекте")
+    if v.project_id != project_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Версия принадлежит другому проекту")
+    return v.id
+
+
+@router.get("/versions")
+async def list_versions(
+    company_id: str = Query(...),
+    project_id: str | None = Query(None),
+    state: str | None = Query(None, pattern="^(open|released|cancelled)$"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Версии компании со счётчиками состава. Без `project_id` — все проекты
+    разом: так карточка задачи одним запросом получает всё, что может выбрать."""
+    cid = await _assert_work(company_id, current_user, db)
+    q = select(TaskVersion).where(TaskVersion.company_id == cid)
+    if project_id:
+        q = q.where(TaskVersion.project_id == _uuid_or_400(project_id, "project_id"))
+    if state:
+        q = q.where(TaskVersion.state == state)
+    rows = (await db.execute(q.order_by(TaskVersion.sort_order,
+                                        TaskVersion.name))).scalars().all()
+    counts = dict((vid, (n, o)) for vid, n, o in (await db.execute(
+        select(Task.fix_version_id, func.count(Task.id),
+               func.count(Task.id).filter(Task.status == "open"))
+        .where(Task.company_id == cid, Task.fix_version_id.is_not(None))
+        .group_by(Task.fix_version_id))).all())
+    return {"versions": [_version_out(v, *counts.get(v.id, (0, 0))) for v in rows]}
+
+
+class VersionIn(BaseModel):
+    company_id: str
+    project_id: str
+    # Свободная строка: схемы нумерации у продуктов разные, и навязывать semver
+    # значило бы спорить с командой о том, что не наше дело.
+    name: str = Field(min_length=1, max_length=40)
+    description: str | None = None
+    released_on: date_type | None = None
+    sort_order: int = 100
+
+
+@router.post("/versions", status_code=status.HTTP_201_CREATED)
+async def create_version(
+    payload: VersionIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cid = await _assert_work(payload.company_id, current_user, db)
+    await _assert_admin(db, cid, current_user)
+    prj = await db.get(TaskProject, _uuid_or_400(payload.project_id, "project_id"))
+    if prj is None or prj.company_id != cid:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Неизвестный проект")
+    name = payload.name.strip()
+    if (await db.execute(select(TaskVersion.id).where(
+            TaskVersion.project_id == prj.id,
+            TaskVersion.name == name))).scalar_one_or_none() is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Такая версия в проекте уже есть")
+    v = TaskVersion(company_id=cid, project_id=prj.id, name=name,
+                    description=payload.description, released_on=payload.released_on,
+                    sort_order=payload.sort_order)
+    db.add(v)
+    await db.flush()
+    await db.commit()
+    return _version_out(v)
+
+
+class VersionPatch(BaseModel):
+    company_id: str
+    name: str | None = Field(None, min_length=1, max_length=40)
+    description: str | None = None
+    state: str | None = Field(None, pattern="^(open|released|cancelled)$")
+    released_on: date_type | None = None
+    sort_order: int | None = None
+
+
+@router.patch("/versions/{version_id}")
+async def update_version(
+    version_id: str,
+    payload: VersionPatch,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Правка версии. Проект не меняется: версия уже названа заявителю в ответе,
+    и переезд в другой проект сделал бы этот ответ ложью."""
+    cid = await _assert_work(payload.company_id, current_user, db)
+    await _assert_admin(db, cid, current_user)
+    v = await db.get(TaskVersion, _uuid_or_400(version_id, "версия"))
+    if v is None or v.company_id != cid:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Версия не найдена")
+    if payload.name is not None and payload.name.strip() != v.name:
+        name = payload.name.strip()
+        if (await db.execute(select(TaskVersion.id).where(
+                TaskVersion.project_id == v.project_id, TaskVersion.name == name,
+                TaskVersion.id != v.id))).scalar_one_or_none() is not None:
+            raise HTTPException(status.HTTP_409_CONFLICT, "Такая версия в проекте уже есть")
+        v.name = name
+    if payload.description is not None:
+        v.description = payload.description
+    if payload.sort_order is not None:
+        v.sort_order = payload.sort_order
+    if payload.released_on is not None:
+        v.released_on = payload.released_on
+    if payload.state is not None:
+        v.state = payload.state
+        # Выпуск без даты — дырка в ответе заявителю: «исправлено в 1.4.2», а
+        # когда она вышла, неизвестно. Ставим день выпуска, если его не назвали.
+        if payload.state == "released" and v.released_on is None:
+            v.released_on = datetime.now(timezone.utc).date()
+    await db.commit()
+    return _version_out(v)
+
+
+@router.get("/versions/{version_id}/summary")
+async def version_summary(
+    version_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Состав версии: что вошло, что осталось, что в ней обнаружено.
+
+    Она же черновик списка изменений: закрытые задачи с номерами и заголовками —
+    ровно то, что уходит в ответ заявителю и в описание релиза.
+    """
+    cid = await _assert_work(company_id, current_user, db)
+    v = await db.get(TaskVersion, _uuid_or_400(version_id, "версия"))
+    if v is None or v.company_id != cid:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Версия не найдена")
+    admin = await _is_admin(db, cid, current_user)
+    rows = (await db.execute(
+        select(Task).where(Task.company_id == cid, _visible_to(current_user, admin),
+                           or_(Task.fix_version_id == v.id, Task.found_version_id == v.id))
+        .order_by(Task.project_number, Task.number))).scalars().all()
+    names = await _names(db, rows)
+    fixed = [t for t in rows if t.fix_version_id == v.id]
+    return {
+        "version": _version_out(
+            v, len([t for t in fixed if t.status != "open"]),
+            len([t for t in fixed if t.status == "open"])),
+        "done": [_task_out(t, names[t.id]["route"], names[t.id])
+                 for t in fixed if t.status != "open"],
+        "left": [_task_out(t, names[t.id]["route"], names[t.id])
+                 for t in fixed if t.status == "open"],
+        "found": [_task_out(t, names[t.id]["route"], names[t.id])
+                  for t in rows if t.found_version_id == v.id],
+    }
+
+
 @router.get("/types")
 async def list_types(
     company_id: str = Query(...),
@@ -755,6 +954,8 @@ class TaskIn(BaseModel):
     title: str = Field(min_length=3, max_length=300)
     description: str | None = Field(None, max_length=8000)
     project_id: str | None = None
+    found_version_id: str | None = None
+    fix_version_id: str | None = None
     type_id: str | None = None
     assignee_id: str | None = None
     object_id: str | None = None
@@ -789,6 +990,13 @@ async def create_task(
             project is None or ttype.project_id != project.id):
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             "Этот тип задач принадлежит другому проекту")
+    # Версии живут на проекте, поэтому и проверяются против него: задача без
+    # проекта версии не получает — их некуда отнести.
+    pid = project.id if project else None
+    found_v = await _version_or_400(db, payload.found_version_id, pid,
+                                    "found_version_id") if payload.found_version_id else None
+    fix_v = await _version_or_400(db, payload.fix_version_id, pid,
+                                  "fix_version_id") if payload.fix_version_id else None
     route = _route_of(ttype)
     due = payload.due_at
     if due is None and ttype is not None and ttype.due_days is not None:
@@ -799,6 +1007,7 @@ async def create_task(
 
     t = Task(
         company_id=cid, project_id=project.id if project else None,
+        found_version_id=found_v, fix_version_id=fix_v,
         type_id=ttype.id if ttype else None,
         title=payload.title.strip(), description=payload.description,
         priority=payload.priority or (ttype.default_priority if ttype else "medium"),
@@ -1374,6 +1583,9 @@ class TaskAction(BaseModel):
     description: str | None = Field(None, max_length=8000)
     object_id: str | None = None
     project_id: str | None = None          # подобрать «ничью» задачу в проект
+    # "" — снять версию: «оказалось, чинить не здесь» бывает чаще, чем хотелось бы.
+    fix_version_id: str | None = None
+    found_version_id: str | None = None
     add_label_id: str | None = None
     remove_label_id: str | None = None
     estimate: str | None = Field(None, max_length=40)   # «4ч», «30м»; "" — снять
@@ -1508,6 +1720,20 @@ async def task_action(
     elif payload.project_id and t.project_id is not None             and str(t.project_id) != payload.project_id:
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             "Задача уже в проекте: перенос между проектами пока не делаем")
+    # Версии — след для заявителя, поэтому их смена попадает в историю задачи, а
+    # не меняется молча. Пустая строка снимает версию.
+    for field, label in (("fix_version_id", "исправлено в версии"),
+                         ("found_version_id", "обнаружено в версии")):
+        value = getattr(payload, field)
+        if value is None:
+            continue
+        new_v = await _version_or_400(db, value, t.project_id, field) if value else None
+        if new_v == getattr(t, field):
+            continue
+        was = await db.get(TaskVersion, getattr(t, field)) if getattr(t, field) else None
+        now_v = await db.get(TaskVersion, new_v) if new_v else None
+        field_changed(label, was.name if was else None, now_v.name if now_v else None)
+        setattr(t, field, new_v)
     if payload.visibility is not None and payload.visibility != t.visibility:
         # Смена круга видимости — событие: «кто закрыл задачу от компании» должно
         # быть видно, иначе это тихое действие с большими последствиями.
@@ -2050,6 +2276,9 @@ async def apply_command(
     note_parts: list[str] = []
     labels: list[str] = []
     work: str | None = None
+    # Версия разрешается не здесь, а на каждой задаче: одно и то же «1.4» может
+    # существовать в двух проектах, и пачка задач бывает из разных.
+    version_name: str | None = None
 
     people = {(n or "").lower(): u for u, n in (await db.execute(
         select(User.id, User.name).join(UserCompany, UserCompany.user_id == User.id)
@@ -2060,6 +2289,10 @@ async def apply_command(
         select(TaskProject.id, TaskProject.code)
         .where(TaskProject.company_id == cid,
                TaskProject.is_archived.is_(False)))).all()}
+    versions = {(pid, (n or "").lower()): i for i, pid, n in (await db.execute(
+        select(TaskVersion.id, TaskVersion.project_id, TaskVersion.name)
+        .where(TaskVersion.company_id == cid,
+               TaskVersion.state != "cancelled"))).all()}
     types = (await db.execute(select(TaskType).where(TaskType.company_id == cid))).scalars().all()
     stages = {s.get("name", "").lower(): s.get("code")
               for ty in types for s in (ty.route or []) if s.get("name")}
@@ -2091,6 +2324,10 @@ async def apply_command(
                 action["project_id"] = str(pid)
                 i += 2
                 continue
+        if w in ("версия", "version") and nxt:
+            version_name = nxt
+            i += 2
+            continue
         if w in ("стадия", "state", "stage") and nxt:
             code = stages.get(nxt.lower())
             if code:
@@ -2133,7 +2370,7 @@ async def apply_command(
     # и другое, как в YouTrack.
     if note_parts:
         action["note"] = " ".join(note_parts)
-    if not action and not labels and not work:
+    if not action and not labels and not work and not version_name:
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             "Не понял команду. Например: «на меня срочная срок завтра»")
 
@@ -2143,9 +2380,16 @@ async def apply_command(
         if t is None or t.company_id != cid:
             skipped.append(raw)
             continue
+        step = dict(action)
+        if version_name:
+            vid = versions.get((t.project_id, version_name.lower()))
+            if vid is None:
+                skipped.append(f"№{t.number}: версия {version_name} не найдена в проекте")
+                continue
+            step["fix_version_id"] = str(vid)
         try:
             await task_action(str(t.id), TaskAction(
-                company_id=str(cid), **{k: v for k, v in action.items()}), db, current_user)
+                company_id=str(cid), **step), db, current_user)
         except HTTPException as e:
             skipped.append(f"№{t.number}: {e.detail}")
             continue
@@ -2161,7 +2405,8 @@ async def apply_command(
         done += 1
 
     return {"changed": done, "skipped": skipped, "unknown": unknown,
-            "applied": {k: v for k, v in action.items() if k != "company_id"}}
+            "applied": {**{k: v for k, v in action.items() if k != "company_id"},
+                        **({"версия": version_name} if version_name else {})}}
 
 
 # ── Учёт времени: план и факт ────────────────────────────────────────────
