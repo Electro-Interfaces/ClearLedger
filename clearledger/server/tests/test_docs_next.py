@@ -615,19 +615,22 @@ async def test_последовательный_шаг_получает_свой
         "company_id": cid, "route": route,
     })
     assert started.status_code == 201, started.text
-    db.expire_all()
+    db.expunge_all()
     rows = (await db.execute(select(DocApproval).where(
         DocApproval.doc_id == uuid.UUID(doc["id"])).order_by(DocApproval.step_no)
     )).scalars().all()
     assert rows[0].status == "pending" and rows[0].activated_at is not None
     assert rows[1].status == "waiting" and rows[1].activated_at is None
+    # Идентификаторы забираем до `expire_all`: после него доступ к атрибуту
+    # тянет подгрузку, а синхронное обращение к async-сессии падает.
+    first_id, second_id = rows[0].id, rows[1].id
 
-    decided = await auth_client.post(f"/api/docs/approvals/{rows[0].id}", json={
+    decided = await auth_client.post(f"/api/docs/approvals/{first_id}", json={
         "company_id": cid, "approved": True,
     })
     assert decided.status_code == 200, decided.text
-    db.expire_all()
-    second = await db.get(DocApproval, rows[1].id)
+    db.expunge_all()
+    second = await db.get(DocApproval, second_id)
     assert second.status == "pending" and second.activated_at is not None
     assert second.activated_at >= rows[0].activated_at
 
@@ -1049,15 +1052,18 @@ async def test_конкурентные_запуск_и_решение_согл�
         DocApproval.doc_id == uuid.UUID(doc["id"]),
     ))).scalars().all()
     assert len(rows) == 1 and rows[0].status == "pending"
+    # Идентификатор забираем до `expire_all`: после него обращение к атрибуту
+    # тянет подгрузку, а синхронный доступ к async-сессии падает MissingGreenlet.
+    approval_id = rows[0].id
 
     decisions = await asyncio.gather(*[
-        auth_client.post(f"/api/docs/approvals/{rows[0].id}", json={
+        auth_client.post(f"/api/docs/approvals/{approval_id}", json={
             "company_id": cid, "approved": True,
         }) for _ in range(2)
     ])
     assert sorted(item.status_code for item in decisions) == [200, 409]
-    db.expire_all()
-    approval = await db.get(DocApproval, rows[0].id)
+    db.expunge_all()
+    approval = await db.get(DocApproval, approval_id)
     assert approval.status == "approved"
     events = (await db.execute(select(DocEvent).where(
         DocEvent.doc_id == uuid.UUID(doc["id"]),
