@@ -85,6 +85,7 @@ async def прочитать_компанию(db, company_id: uuid.UUID) -> dict
     """Снять срез за окно и сразу сопоставить его с нашими сменами."""
     from app.services.onec_accounting_read import снять_срез, сохранить_срез
     from app.services.onec_doc_matching import сопоставить_реестр
+    from app.services.tobacco_mrc_sync import синхронизировать_мрц
 
     строка = await _строка_соединения(db, company_id)
     if not строка:
@@ -101,6 +102,10 @@ async def прочитать_компанию(db, company_id: uuid.UUID) -> dict
     сохранено = await сохранить_срез(
         db, company_id, срез, период=f"{с.isoformat()}…{по.isoformat()}")
     итог = await сопоставить_реестр(db, company_id)
+    # Тем же тактом обновляем МРЦ табака: она приезжает от станций в НСИ, а
+    # регуляторный справочник до этого ждал ручного CSV и стоял пустым —
+    # контроль «дороже МРЦ» молчал, будто нарушений нет.
+    мрц = await синхронизировать_мрц(db, company_id)
     await db.execute(text("""
         INSERT INTO audit_events (id, company_id, user_id, user_name,
                                   action, details, timestamp)
@@ -110,11 +115,13 @@ async def прочитать_компанию(db, company_id: uuid.UUID) -> dict
         "cid": str(company_id), "действие": ДЕЙСТВИЕ,
         "детали": (
             f"документов {len(срез.документы)}, заведено {сохранено.get('Заведено')}, "
-            f"обновлено {сохранено.get('Обновлено')}, связано {итог.связано}"
+            f"обновлено {сохранено.get('Обновлено')}, связано {итог.связано}, "
+            f"МРЦ {мрц['ВсегоВСправочнике']}"
         ),
     })
     await db.commit()
-    return {"Прочитано": len(срез.документы), **сохранено, **итог.как_словарь()}
+    return {"Прочитано": len(срез.документы), **сохранено, **итог.как_словарь(),
+            "МРЦ": мрц}
 
 
 async def run_once() -> int:
