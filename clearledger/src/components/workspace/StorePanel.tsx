@@ -31,6 +31,16 @@ import { StoreWriteoffPanel } from './StoreWriteoffPanel'
 import { StoreGainPanel } from './StoreGainPanel'
 import { StoreTransferPanel } from './StoreTransferPanel'
 import { StoreReceiptsPanel, StoreSuppliersPanel, StoreCategoriesPanel, StoreBarcodesPanel } from './StoreReportPanels'
+import { NetworkReportPanel } from './NetworkReportPanel'
+
+/**
+ * Пункты меню, за которыми стоит готовый отчёт сети (`/api/store/reports/<вид>`).
+ * Ключ пункта равен виду отчёта — иначе пришлось бы держать вторую таблицу
+ * соответствий и следить, чтобы она не разъехалась с каталогом.
+ */
+const СЕТЕВЫЕ_ОТЧЁТЫ = new Set([
+  'turnover', 'no-cost', 'pay-mix', 'vat-book', 'purchase-diff', 'abc',
+])
 import { StoreRecipeVersionsPanel } from './StoreRecipeVersionsPanel'
 import { StoreCateringPanel } from './StoreCateringPanel'
 import { StorePricingPanel } from './StorePricingPanel'
@@ -395,6 +405,16 @@ export function StoreView({ sub, companyId, dateFrom, dateTo, stations }: StoreV
     return (
       <div className="h-full overflow-y-auto">
         <StoreStationsPanel dateFrom={dateFrom} dateTo={dateTo} />
+      </div>
+    )
+  }
+  // Отчёты сети, которые считает сервер: одна панель на все виды — ответ API
+  // сам несёт заголовок, колонки и поля. Ключ пункта совпадает с видом отчёта.
+  if (СЕТЕВЫЕ_ОТЧЁТЫ.has(sub)) {
+    return (
+      <div className="h-full overflow-y-auto">
+        <NetworkReportPanel kind={sub} dateFrom={dateFrom} dateTo={dateTo}
+          stations={stations?.map(Number).filter(Number.isFinite)} />
       </div>
     )
   }
