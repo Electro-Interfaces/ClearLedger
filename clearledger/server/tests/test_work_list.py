@@ -125,3 +125,45 @@ async def test_закрытая_работа_в_общую_ленту_не_по�
     total_list = (await auth_client.get("/api/work", params={
         "company_id": cid, "scope": "all", "limit": 1})).json()["total"]
     assert total_summary == total_list, "сводка и лента считают по-разному"
+
+
+async def test_язык_запросов_работает_над_общей_лентой(auth_client: AsyncClient):
+    """Этап 13в: тем же языком спрашивают оба контура.
+
+    Ловим: слово, которого у документов нет (спринт, стадия), молча сужает
+    ленту — человек уверен, что отобрал, а отбора не было.
+    """
+    me = await _me(auth_client)
+    cid = me["companies"][0]["id"]
+
+    r = await auth_client.post("/api/tasks", json={
+        "company_id": cid, "title": "Работа для языка запросов",
+        "assignee_id": me["id"]})
+    assert r.status_code == 201, r.text
+    task = r.json()
+
+    body = (await auth_client.get("/api/work", params={
+        "company_id": cid, "scope": "all", "limit": 200,
+        "query": "род: поручение исполнитель: я"})).json()
+    assert body["query"]["unknown"] == [], body["query"]
+    assert task["id"] in {r["id"] for r in body["work"]}
+    assert all(r["kind"] == "task" for r in body["work"])
+
+    # Флаг рода — короче и читается так же.
+    docs = (await auth_client.get("/api/work", params={
+        "company_id": cid, "scope": "all", "limit": 200,
+        "query": "#документы"})).json()
+    assert all(r["kind"] == "doc" for r in docs["work"])
+
+    # Состояние словами человека.
+    body = (await auth_client.get("/api/work", params={
+        "company_id": cid, "scope": "all", "limit": 200,
+        "query": "состояние: на согласовании"})).json()
+    assert body["query"]["parsed"].get("state") == "approval", body["query"]
+    assert all(r["state"] == "approval" for r in body["work"])
+
+    # То, чего у документов нет, не проглатывается молча.
+    body = (await auth_client.get("/api/work", params={
+        "company_id": cid, "scope": "all", "limit": 200,
+        "query": "приоритет: срочная"})).json()
+    assert body["query"]["unknown"], "молча сузили ленту тем, чего у документов нет"

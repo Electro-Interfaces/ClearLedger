@@ -40,7 +40,7 @@ from app.models import (
     DocCard, DocKind, DocLabelLink, ServiceLocation, Task, TaskLabel,
     TaskLabelLink, TaskProject, TaskType, User,
 )
-from app.services import work_state
+from app.services import work_query, work_state
 
 router = APIRouter(prefix="/work", tags=["Трек"])
 
@@ -89,7 +89,12 @@ async def list_work(
     assignee_id: str | None = Query(None),
     object_id: str | None = Query(None),
     label_id: str | None = Query(None),
+    author_id: str | None = Query(None),
     q: str | None = Query(None, max_length=200),
+    # Тот же язык, что в реестре поручений (этап 12): «тип: входящее #мои
+    # состояние: на согласовании». Разбирает `work_query` — один разбор на оба
+    # списка, иначе «исполнитель: я» значило бы в них разное.
+    query: str | None = Query(None, max_length=500),
     due_to: datetime | None = Query(None),
     sort: str = Query("updated", pattern="^-?(updated|created|due)$"),
     limit: int = Query(50, ge=1, le=_LIST_LIMIT),
@@ -104,6 +109,42 @@ async def list_work(
     """
     cid = await _assert_work(company_id, current_user, db)
     now = datetime.now(timezone.utc)
+
+    query_out: dict[str, Any] | None = None
+    if query and query.strip():
+        parsed, unknown, free_text = await work_query.parse(db, cid, current_user, query)
+        # Разрезы реестра поручений переводятся в разрезы общей ленты: часть из
+        # них у документов не существует (наблюдатель, спринт), и молчать об
+        # этом нельзя — человек решит, что отобрал, а отбора не было.
+        scope_map = {"open": "open", "closed": "done", "mine": "mine",
+                     "assigned": "assigned", "all": "all"}
+        parsed_scope = parsed.get("scope")
+        if parsed_scope in scope_map:
+            scope = scope_map[parsed_scope]
+        elif parsed_scope == "overdue":
+            scope, due_to = "open", due_to or now
+        elif parsed_scope == "today":
+            scope, due_to = "open", due_to or now + timedelta(days=1)
+        elif parsed_scope == "waiting":
+            scope, state = "open", "external"
+        elif parsed_scope is not None:
+            unknown.append("#" + parsed_scope)
+        for name in ("backlog", "sprint_id", "fix_version_id", "found_version_id",
+                     "stage", "priority"):
+            if parsed.get(name) is not None:
+                unknown.append(f"{name}: только у поручений")
+        kind = parsed.get("kind", kind)
+        state = parsed.get("state", state)
+        project_id = parsed.get("project_id", project_id)
+        assignee_id = parsed.get("assignee_id", assignee_id)
+        author_id = parsed.get("author_id", author_id)
+        label_id = parsed.get("label_id", label_id)
+        type_id = parsed.get("type_id", type_id)
+        object_id = parsed.get("object_id", object_id)
+        due_to = parsed.get("due_to", due_to)
+        q = free_text or q
+        query_out = {"parsed": {k: str(v) for k, v in parsed.items()},
+                     "unknown": unknown, "text": free_text or None}
 
     # Правила видимости берём у их хозяев — второй версии этих правил быть не
     # должно, они разойдутся на первой же правке прав.
@@ -198,6 +239,8 @@ async def list_work(
         sel = sel.where(union.c.project_id == _uuid_or_400(project_id, "project_id"))
     if assignee_id:
         sel = sel.where(union.c.responsible_id == _uuid_or_400(assignee_id, "assignee_id"))
+    if author_id:
+        sel = sel.where(union.c.author_id == _uuid_or_400(author_id, "author_id"))
     if object_id:
         sel = sel.where(union.c.object_id == object_id)
     if due_to:
@@ -235,6 +278,7 @@ async def list_work(
         "total": total, "limit": limit, "offset": offset,
         "columns": [{"code": c, "name": work_state.COLUMN_NAMES[c]}
                     for c in work_state.COLUMNS],
+        **({"query": query_out} if query_out is not None else {}),
     }
 
 
