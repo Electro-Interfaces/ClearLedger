@@ -5479,6 +5479,69 @@ async def receipt_duplicate_audit(
             "total": len(plan)}
 
 
+@router.get("/receipts/orphan-audit")
+async def receipt_orphan_audit(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Приёмки, принятые в центре, о которых станция не знает.
+
+    Схема «поставщик → станция» означает, что товар физически принимает
+    приёмщик на АЗС, и остаток ведёт станция. Документ такой схемы, отмеченный
+    принятым в центре, — разрыв: движения записаны здесь, а на станции прихода
+    нет, и её остаток уходит в минус при первой же продаже.
+
+    Случай не выдуманный: 208, август 2026 — тринадцать накладных на 270 570 ₽
+    были приняты в центре в обход правила, заготовки на станцию сняты, и товар
+    оказался нигде. Экран разбора смены при этом честно показывал «у нас ноль,
+    на полке есть», но причину назвать не мог.
+
+    Только чтение: что делать с каждым документом — решение человека. Слепая
+    переотправка задвоит остаток там, где товар успел прийти другим путём.
+    """
+    access = await _receipt_access(user, db)
+    if not access.network:
+        raise HTTPException(403, "Аудит приёмок доступен товароведу сети")
+    строки = (await db.execute(text("""
+        SELECT r.id, r.number, r.station_id, left(r.doc_date::text, 10) AS doc_date,
+               r.total_amount, r.author,
+               (SELECT count(*) FROM store_receipt_stock_movements m
+                 WHERE m.receipt_id = r.id) AS movements,
+               (SELECT count(*) FROM edge_downlink d
+                 WHERE d.company_id = r.company_id
+                   AND d.kind = 'goods_receipt_expected'
+                   AND d.payload->>'id' = r.id::text
+                   AND d.cancelled_at IS NULL) AS live_tasks
+          FROM store_receipts r
+         WHERE r.company_id = :c
+           AND r.delivery_scheme = 'supplier_to_station'
+           AND r.status = 'accepted'
+           AND r.origin = 'station'
+           AND NOT EXISTS (
+               SELECT 1 FROM edge_downlink d
+                WHERE d.company_id = r.company_id
+                  AND d.kind = 'goods_receipt_expected'
+                  AND d.payload->>'id' = r.id::text
+                  AND d.acked_at IS NOT NULL AND d.cancelled_at IS NULL)
+           AND r.author IS DISTINCT FROM 'АдминистраторАЗК'
+         ORDER BY r.doc_date
+    """), {"c": str(access.company_id)})).mappings().all()
+    итог = [dict(р) | {"id": str(р["id"]),
+                       "total_amount": float(р["total_amount"] or 0)}
+            for р in строки]
+    return {
+        "mode": "dry-run",
+        "total": len(итог),
+        "amount": round(sum(р["total_amount"] for р in итог), 2),
+        "rows": итог,
+        "about": (
+            "Документы приняты в центре, но станция о них не знает. Прежде чем "
+            "передавать их вниз, сверьте построчно: товар, успевший прийти "
+            "другим путём, задвоится."
+        ),
+    }
+
+
 @router.get("/receipts/{receipt_id}")
 async def get_receipt(
     receipt_id: uuid.UUID,
