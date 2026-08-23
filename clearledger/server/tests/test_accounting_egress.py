@@ -16,6 +16,7 @@ from app.models import (
     CutoverManifest,
     ExportPacket,
 )
+from app.services.accounting_contract_v3 import business_projection_hash
 from tests.accounting_v3_fixtures import accounting_v3_fixture
 from app.routers import store_router
 from app.routers import export_packets_router
@@ -921,3 +922,33 @@ async def test_public_file_emitter_is_fail_closed(tmp_path):
     with pytest.raises(AccountingEgressDenied, match="Прямая запись"):
         await emitter.emit_to_dir("any-shift", str(tmp_path))
     assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def test_guard_holds_shift_that_needs_review_until_human_decides():
+    """Невыверенная смена не уходит в бухгалтерию сама, но человек может её пустить."""
+    company_id = uuid.uuid4()
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    policy = _policy(company_id, 9220, now - timedelta(days=2))
+    manifest = _effective_manifest(policy)
+    fixture = _packet(
+        9220, now - timedelta(hours=1), policy=policy, manifest=manifest,
+        with_identity=True,
+    )
+    fixture.packet["ПолнотаГруппы"]["Статус"] = "needs_review"
+    # Статус входит в бизнес-проекцию, поэтому хеш пересчитываем: иначе пакет
+    # отвергнется раньше — на несовпадении хеша, а не на выверке.
+    fixture.packet["ХешПакета"] = business_projection_hash(fixture.packet)
+    session = _Session(
+        [policy], [manifest], shifts=[fixture.shift], groups=[fixture.group],
+    )
+    guard = AccountingEgressGuard(session, company_id)
+
+    with pytest.raises(AccountingEgressDenied, match="не выверена"):
+        await guard.authorize_packet(fixture.packet, manifest.manifest_hash)
+
+    decision = await guard.authorize_packet(
+        fixture.packet, manifest.manifest_hash,
+        "Жукова: приход по кухне заведён, себестоимость подтверждена",
+    )
+    assert decision.station_id == 9220

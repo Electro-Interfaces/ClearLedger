@@ -11,6 +11,7 @@
  */
 
 import { useEffect, useMemo } from 'react'
+import { STORE_VIEWS } from '@/config/storeCatalog'
 import { ProductHelpPanel } from './ProductHelpPanel'
 import { STORE_HELP_SLICES } from './helpSlices'
 import { useWorkspace, useWorkspaceSubView } from '@/contexts/WorkspaceContext'
@@ -202,6 +203,13 @@ export type StoreViewProps = {
   stations: string[]
 }
 
+// Заголовок пункта берём из каталога: там он уже написан и живёт вместе с
+// самим пунктом меню, а не второй копией в компоненте.
+function пунктМеню(key: string) {
+  const вид = STORE_VIEWS.find((элемент) => элемент.key === key)
+  return вид ? { title: вид.title, subtitle: вид.subtitle } : undefined
+}
+
 export function StoreView({ sub, companyId, dateFrom, dateTo, stations }: StoreViewProps) {
   // «Обзор» — executive-дашборд; SKU-экраны — реестр товаров; прочие — scaffold.
   if (sub === 'overview') {
@@ -211,8 +219,28 @@ export function StoreView({ sub, companyId, dateFrom, dateTo, stations }: StoreV
       </div>
     )
   }
-  if (sub === 'store_documents') {
-    return <StoreDocumentsPanel key={`${dateFrom}:${dateTo}:${stations.join(',')}`} dateFrom={dateFrom} dateTo={dateTo} stations={stations} />
+  // Пункты документооборота — один экран с разным входом: разбор, смены и
+  // срезы по смыслу работы. Разводить их по отдельным компонентам нечем —
+  // отличается только начальный вид и набор видов документов.
+  const документныеПункты: Record<string, { view: 'triage' | 'shifts' | 'list'; kinds?: string[] }> = {
+    store_documents: { view: 'triage' },
+    docs_shifts: { view: 'shifts' },
+    docs_supply: { view: 'list', kinds: ['purchase', 'return_purchase'] },
+    docs_movement: { view: 'list', kinds: ['transfer'] },
+    docs_stock: { view: 'list', kinds: ['inventory', 'gain', 'writeoff'] },
+    docs_price: { view: 'list', kinds: ['revaluation'] },
+    docs_catering: { view: 'list', kinds: ['recipe', 'production_release', 'ingredients_writeoff'] },
+  }
+  const документный = документныеПункты[sub]
+  if (документный) {
+    return (
+      <StoreDocumentsPanel
+        key={`${sub}:${dateFrom}:${dateTo}:${stations.join(',')}`}
+        dateFrom={dateFrom} dateTo={dateTo} stations={stations}
+        startView={документный.view} kinds={документный.kinds}
+        heading={пунктМеню(sub)}
+      />
+    )
   }
   if (sub === 'sales') {
     return (

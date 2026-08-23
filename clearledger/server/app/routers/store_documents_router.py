@@ -24,6 +24,7 @@ from app.deps import capture_company_header, scope_company_id
 from app.models import (
     Company,
     CompanyRole,
+    EdgePacket,
     SourceFile,
     StoreDocFile,
     StoreDocMeta,
@@ -59,10 +60,14 @@ COUNTER_CONDITIONS = {
         StoreDocumentProjection.document_kind.in_(("purchase", "return_purchase")),
         StoreDocumentProjection.has_files.is_(False),
     ),
+    # «pending» — не проблема, а нормальная жизнь документа до выгрузки: пока
+    # бухгалтерский канал не запущен, в этом состоянии находится вообще всё.
+    # Считая его непорядком, счётчик показывал 664 документа и требовал
+    # разобрать то, что разбору не подлежит.
     "not_accounting_ready": lambda: (
         StoreDocumentProjection.document_kind.not_in(("fiscal_receipt", "store_shift")),
-        StoreDocumentProjection.accounting_status.not_in(
-            ("ready", "accepted", "not_applicable")),
+        StoreDocumentProjection.accounting_status.in_(
+            ("needs_review", "rejected", "blocked")),
     ),
     "onec_mismatch": lambda: (
         StoreDocumentProjection.discrepancy_status.in_(
@@ -178,6 +183,7 @@ def _brief(row: StoreDocumentProjection) -> dict:
         "projection_source": row.projection_source,
         "document_role": row.document_role,
         "accounting_group_id": str(row.accounting_group_id) if row.accounting_group_id else None,
+        "shift_no": row.shift_no,
         "station_id": row.station_id, "number": row.number,
         "document_at": row.document_at, "counterparty": row.counterparty_name,
         "counterparty_inn": row.counterparty_inn,
@@ -255,6 +261,327 @@ async def rebuild_documents(
     return result
 
 
+@router.get("/triage")
+async def documents_triage(
+    stations: str | None = Query(None, description="Коды АЗС через запятую"),
+    date_from: date | None = Query(None),
+    date_to: date | None = Query(None),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Очереди работы: что разобрать и почему, а не сколько всего документов.
+
+    Счётчик «54 требуют внимания» говорит, что работа есть, но не говорит,
+    какая. Здесь каждая очередь названа своей причиной и своей суммой: поставка
+    без накладной — это риск для вычета НДС, а смена с оценочной себестоимостью
+    просто не уйдёт в бухгалтерию.
+    """
+    access = await resolve_document_access(user, db)
+    базовые = [
+        StoreDocumentProjection.company_id == access.company_id,
+        StoreDocumentProjection.is_primary.is_(True),
+        StoreDocumentProjection.document_kind.in_(PROJECTION_DOCUMENT_KINDS),
+    ]
+    if stations:
+        коды = [value.strip() for value in stations.split(",") if value.strip()]
+        if any(not value.isdigit() for value in коды):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Коды АЗС должны быть целыми числами")
+        базовые.append(StoreDocumentProjection.station_id.in_([int(v) for v in коды]))
+    if not access.network and access.station_ids:
+        базовые.append(StoreDocumentProjection.station_id.in_(sorted(access.station_ids)))
+    if date_from is not None:
+        базовые.append(StoreDocumentProjection.document_at >= datetime.combine(
+            date_from, time.min, tzinfo=timezone.utc))
+    if date_to is not None:
+        базовые.append(StoreDocumentProjection.document_at < datetime.combine(
+            date_to + timedelta(days=1), time.min, tzinfo=timezone.utc))
+
+    ОЧЕРЕДИ = (
+        ("waiting_receipt", "Поставки ждут приёмки",
+         "Товар привезли, но приёмка не проведена — остаток и себестоимость станции неверны",
+         "Открыть и принять", (
+             StoreDocumentProjection.document_kind == "purchase",
+             # «in_baseline» сюда не берём: этот приход уже внутри стартового
+             # остатка, и звать человека принять его — звать задвоить товар.
+             StoreDocumentProjection.operational_status.in_(("expected", "draft")),
+         )),
+        ("missing_evidence", "Поставки без накладной",
+         "К документу не приложен файл-подтверждение: без него бухгалтерия не примет вычет НДС",
+         "Приложить накладную или УПД", COUNTER_CONDITIONS["missing_evidence"]()),
+        ("attention", "Документы с ошибкой разбора",
+         "Станция прислала документ, который не разобрался до конца",
+         "Открыть и разобрать причину", COUNTER_CONDITIONS["attention"]()),
+        ("onec_mismatch", "Расхождения с 1С",
+         "Наш документ и документ 1С не сошлись",
+         "Сверить построчно", COUNTER_CONDITIONS["onec_mismatch"]()),
+        ("not_accounting_ready", "Учёт вернул документ",
+         "Бухгалтерия не приняла документ или он ждёт решения по реквизитам",
+         "Проверить реквизиты и статус", COUNTER_CONDITIONS["not_accounting_ready"]()),
+    )
+
+    очереди: list[dict] = []
+    for код, заголовок, причина, действие, условия in ОЧЕРЕДИ:
+        строка = (await db.execute(select(
+            func.count().label("шт"),
+            func.coalesce(func.sum(StoreDocumentProjection.amount), 0).label("сумма"),
+            func.min(StoreDocumentProjection.document_at).label("самый_старый"),
+        ).where(*базовые, *условия))).one()
+        if not строка.шт:
+            continue
+        очереди.append({
+            "code": код, "title": заголовок, "reason": причина, "action": действие,
+            "count": int(строка.шт), "amount": float(строка.сумма or 0),
+            "oldest_at": строка.самый_старый.isoformat() if строка.самый_старый else None,
+        })
+
+    # Смены — отдельная очередь, и берём её по светофору, который поставила
+    # станция, а не по признаку «требует внимания» у ОРП. Последний стоит почти
+    # у каждой смены: две одинаковых позиции в чеке дают строки без своего
+    # ключа, и для розницы это норма. Такая очередь показывала бы 142 смены из
+    # 145 и не значила бы ничего.
+    смены_условия = [
+        EdgePacket.company_id == access.company_id,
+        EdgePacket.kind == "shift",
+        EdgePacket.shift_internal_no.isnot(None),
+        EdgePacket.payload["ShiftCompleteness"]["status"].astext == "needs_review",
+    ]
+    if stations:
+        смены_условия.append(EdgePacket.station_id.in_(
+            [int(v.strip()) for v in stations.split(",") if v.strip()]))
+    if not access.network and access.station_ids:
+        смены_условия.append(EdgePacket.station_id.in_(sorted(access.station_ids)))
+    смены = (await db.execute(select(
+        func.count(func.distinct(func.concat(
+            EdgePacket.station_id, ":", EdgePacket.shift_internal_no))).label("шт"),
+    ).where(*смены_условия))).one()
+    if смены.шт:
+        очереди.append({
+            "code": "shifts_review", "title": "Смены ждут выверки",
+            "reason": ("Себестоимость посчитана по оценке центра, а не по своим приходам — "
+                       "в бухгалтерию такая смена не уйдёт без решения"),
+            "action": "Открыть паспорт смены",
+            "count": int(смены.шт), "amount": 0.0, "oldest_at": None,
+        })
+
+    очереди.sort(key=lambda q: -q["count"])
+    return {"queues": очереди, "total": sum(q["count"] for q in очереди)}
+
+
+@router.get("/shifts")
+async def list_document_shifts(
+    stations: str | None = Query(None, description="Коды АЗС через запятую"),
+    date_from: date | None = Query(None),
+    date_to: date | None = Query(None),
+    limit: int = Query(200, ge=1, le=1000),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Реестр смен: то же самое, что реестр документов, но одной строкой на смену.
+
+    Смена — главный разрез товарного контура станции: продажи, выпуск блюд и
+    чеки порождены ею, и разбирать их поодиночке бессмысленно. Документы,
+    которые смене не принадлежат (приёмка, инвентаризация, перемещение), сюда
+    не попадают: у них shift_no пуст, и они влияют на смену через остаток, а не
+    входят в её состав.
+    """
+    access = await resolve_document_access(user, db)
+    conditions = [
+        StoreDocumentProjection.company_id == access.company_id,
+        StoreDocumentProjection.is_primary.is_(True),
+        StoreDocumentProjection.shift_no.isnot(None),
+    ]
+    if stations:
+        коды = [value.strip() for value in stations.split(",") if value.strip()]
+        if any(not value.isdigit() for value in коды):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Коды АЗС должны быть целыми числами")
+        conditions.append(StoreDocumentProjection.station_id.in_([int(v) for v in коды]))
+    if not access.network and access.station_ids:
+        conditions.append(StoreDocumentProjection.station_id.in_(sorted(access.station_ids)))
+    if date_from is not None:
+        conditions.append(StoreDocumentProjection.document_at >= datetime.combine(
+            date_from, time.min, tzinfo=timezone.utc))
+    if date_to is not None:
+        conditions.append(StoreDocumentProjection.document_at < datetime.combine(
+            date_to + timedelta(days=1), time.min, tzinfo=timezone.utc))
+
+    строки = (await db.execute(
+        select(
+            StoreDocumentProjection.station_id,
+            StoreDocumentProjection.shift_no,
+            StoreDocumentProjection.document_kind,
+            func.count().label("шт"),
+            func.sum(StoreDocumentProjection.amount).label("сумма"),
+            func.min(StoreDocumentProjection.document_at).label("начало"),
+            func.max(StoreDocumentProjection.document_at).label("конец"),
+            func.bool_or(StoreDocumentProjection.requires_attention).label("внимание"),
+        ).where(*conditions).group_by(
+            StoreDocumentProjection.station_id,
+            StoreDocumentProjection.shift_no,
+            StoreDocumentProjection.document_kind,
+        )
+    )).all()
+
+    смены: dict[tuple[int | None, int], dict] = {}
+    for row in строки:
+        ключ = (row.station_id, row.shift_no)
+        смена = смены.setdefault(ключ, {
+            "station_id": row.station_id, "shift_no": row.shift_no,
+            "documents": 0, "revenue": 0.0, "started_at": None, "finished_at": None,
+            "requires_attention": False, "kinds": {},
+        })
+        смена["documents"] += int(row.шт)
+        смена["kinds"][row.document_kind] = int(row.шт)
+        # Выручка смены — это её отчёт о розничных продажах, а не сумма всех
+        # документов: чеки и выпуск блюд повторяют те же деньги в других
+        # разрезах, и сложение дало бы тройной оборот.
+        if row.document_kind == "retail_sale_sidegoods":
+            смена["revenue"] += float(row.сумма or 0)
+        if row.внимание:
+            смена["requires_attention"] = True
+        for поле, значение in (("started_at", row.начало), ("finished_at", row.конец)):
+            текущее = смена[поле]
+            if значение is None:
+                continue
+            if текущее is None or (значение < текущее if поле == "started_at" else значение > текущее):
+                смена[поле] = значение
+
+    итог = sorted(смены.values(),
+                  key=lambda s: (s["finished_at"] or datetime.min.replace(tzinfo=timezone.utc),
+                                 s["shift_no"]), reverse=True)
+    for смена in итог:
+        for поле in ("started_at", "finished_at"):
+            смена[поле] = смена[поле].isoformat() if смена[поле] else None
+    return {"shifts": итог[:limit], "total": len(итог)}
+
+
+@router.get("/shifts/{station_id}/{shift_no}")
+async def shift_passport(
+    station_id: int,
+    shift_no: int,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Паспорт смены: одно место, где видно состояние всех разрезов учёта.
+
+    Не журнал ошибок, а карточка состояния: из чего смена состоит, что на неё
+    повлияло, что мешает уйти в бухгалтерию и что для этого сделать.
+    """
+    access = await resolve_document_access(user, db)
+    if not access.network and station_id not in access.station_ids:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Станция вне вашего доступа")
+
+    документы = (await db.execute(select(StoreDocumentProjection).where(
+        StoreDocumentProjection.company_id == access.company_id,
+        StoreDocumentProjection.is_primary.is_(True),
+        StoreDocumentProjection.station_id == station_id,
+        StoreDocumentProjection.shift_no == shift_no,
+    ).order_by(StoreDocumentProjection.document_at))).scalars().all()
+    if not документы:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Смена {shift_no} на АЗС {station_id} не найдена")
+
+    состав: dict[str, dict] = {}
+    for row in документы:
+        узел = состав.setdefault(row.document_kind, {"count": 0, "amount": 0.0, "attention": 0})
+        узел["count"] += 1
+        узел["amount"] += float(row.amount or 0)
+        узел["attention"] += 1 if row.requires_attention else 0
+
+    орп = next((row for row in документы
+                if row.document_kind == "retail_sale_sidegoods"), None)
+    смена_док = next((row for row in документы if row.document_kind == "store_shift"), None)
+    начало = min((row.document_at for row in документы if row.document_at), default=None)
+    конец = max((row.document_at for row in документы if row.document_at), default=None)
+
+    # Последний пакет смены несёт светофор и доказательство себестоимости:
+    # по нему видно, какие ингредиенты посчитаны по оценке центра, а не по
+    # собственной закупке.
+    пакет = (await db.execute(select(EdgePacket).where(
+        EdgePacket.company_id == access.company_id,
+        EdgePacket.station_id == station_id,
+        EdgePacket.shift_internal_no == shift_no,
+        EdgePacket.kind == "shift",
+    ).order_by(EdgePacket.received_at.desc()).limit(1))).scalars().first()
+    payload = (пакет.payload if пакет else None) or {}
+    completeness = payload.get("ShiftCompleteness") or {}
+    светофор = str(completeness.get("status") or "").strip() or "unknown"
+    evidence = payload.get("CostEvidence") or {}
+    ингредиенты = evidence.get("ingredients") or []
+    оценочные = [row for row in ингредиенты if str(row.get("status")) != "known"]
+
+    # Влияние: документы того же дня и станции, которые смене не принадлежат,
+    # но меняют её остаток. Приёмка не часть смены — она её условие.
+    влияние: list[dict] = []
+    if начало and конец:
+        соседи = (await db.execute(select(StoreDocumentProjection).where(
+            StoreDocumentProjection.company_id == access.company_id,
+            StoreDocumentProjection.is_primary.is_(True),
+            StoreDocumentProjection.station_id == station_id,
+            StoreDocumentProjection.shift_no.is_(None),
+            StoreDocumentProjection.document_at >= начало - timedelta(days=1),
+            StoreDocumentProjection.document_at <= конец + timedelta(days=1),
+        ).order_by(StoreDocumentProjection.document_at).limit(50))).scalars().all()
+        влияние = [{
+            "record_id": str(row.id), "kind": row.document_kind, "number": row.number,
+            "document_at": row.document_at.isoformat() if row.document_at else None,
+            "amount": float(row.amount or 0), "counterparty": row.counterparty_name,
+            "operational_status": row.operational_status,
+        } for row in соседи]
+
+    действия: list[dict] = []
+    if светофор == "needs_review":
+        действия.append({
+            "code": "cost_hint",
+            "text": (f"Себестоимость {len(оценочные)} ингредиентов взята по оценке центра, "
+                     "а не по собственным приходам — смена не уйдёт в бухгалтерию"),
+            "hint": "Завести приходы по кухне или загрузить смену осознанно, указав причину",
+        })
+    ожидают = [row for row in влияние if row["operational_status"] in ("expected", "draft")]
+    if ожидают:
+        действия.append({
+            "code": "receipts_pending",
+            "text": f"Рядом со сменой {len(ожидают)} непринятых документов поставки",
+            "hint": "Принять их — тогда остаток и себестоимость смены станут своими",
+        })
+    внимание = [row for row in документы if row.requires_attention]
+    if внимание:
+        действия.append({
+            "code": "attention",
+            "text": f"{len(внимание)} документов смены помечены «требует внимания»",
+            "hint": "Открыть их из состава смены и разобрать причину",
+        })
+
+    # Границы смены — из её шапки, а не по документам: рецептуры и выпуск
+    # создаются в момент сборки, и по ним «смена» тянулась бы до сегодняшнего
+    # дня.
+    шапка_смены = payload.get("Смена") or {}
+    открытие = str(шапка_смены.get("Открытие") or "").strip()
+    закрытие = str(шапка_смены.get("Закрытие") or "").strip()
+
+    return {
+        "station_id": station_id,
+        "shift_no": shift_no,
+        "started_at": открытие or (начало.isoformat() if начало else None),
+        "finished_at": закрытие or (конец.isoformat() if конец else None),
+        "status": светофор,
+        "revenue": float(орп.amount or 0) if орп is not None else 0.0,
+        "vat": float(орп.vat_amount or 0) if орп is not None and орп.vat_amount is not None else None,
+        "cheques": int((смена_док.header or {}).get("cheques") or 0) if смена_док is not None else 0,
+        "documents": len(документы),
+        "composition": [
+            {"kind": вид, **значения} for вид, значения in sorted(состав.items())
+        ],
+        "cost_estimated": [
+            {"item_uuid": row.get("item_uuid"), "status": row.get("status"),
+             "quantity_millis": row.get("required_quantity_millis"),
+             "amount_micros": row.get("required_amount_micros")}
+            for row in оценочные
+        ],
+        "influenced_by": влияние,
+        "actions": действия,
+        "packet_uuid": (пакет.packet_uuid if пакет else None),
+    }
+
+
 @router.get("")
 async def list_documents(
     station_id: int | None = Query(None),
@@ -272,6 +599,8 @@ async def list_documents(
     warehouse: str | None = Query(None, description="UUID склада или его название"),
     attention: bool | None = Query(None),
     has_files: bool | None = Query(None),
+    shift_no: int | None = Query(
+        None, description="Документы одной кассовой смены станции"),
     counter: str | None = Query(
         None, description="Отобрать ровно то, что посчитал счётчик реестра"),
     limit: int = Query(500, ge=1, le=5000),
@@ -285,6 +614,13 @@ async def list_documents(
         StoreDocumentProjection.is_primary.is_(True),
         StoreDocumentProjection.document_kind.in_(PROJECTION_DOCUMENT_KINDS),
     ]
+    # Чек и кассовая смена — доказательство продажи, а не учётный документ, и у
+    # них есть свой раздел «Касса». В реестре документов они только топят
+    # накладные: полторы тысячи чеков против сотни документов учёта. Достать их
+    # по-прежнему можно, запросив вид явно.
+    if not kind:
+        base_conditions.append(
+            StoreDocumentProjection.document_kind.not_in(("fiscal_receipt", "store_shift")))
     requested_stations: set[int] = set()
     if stations:
         raw_stations = [value.strip() for value in stations.split(",") if value.strip()]
@@ -313,9 +649,15 @@ async def list_documents(
 
     filter_conditions = []
     if kind:
-        if kind not in PROJECTION_DOCUMENT_KINDS:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Неизвестный вид документа")
-        filter_conditions.append(StoreDocumentProjection.document_kind == kind)
+        # Раздел документооборота — это несколько видов сразу: «изменения
+        # остатка» складываются из пересчёта, оприходования и списания, и
+        # человек работает с ними как с одним разделом.
+        виды = [значение.strip() for значение in kind.split(",") if значение.strip()]
+        неизвестные = [значение for значение in виды if значение not in PROJECTION_DOCUMENT_KINDS]
+        if неизвестные:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                f"Неизвестный вид документа: {', '.join(неизвестные)}")
+        filter_conditions.append(StoreDocumentProjection.document_kind.in_(виды))
     if operational_status:
         filter_conditions.append(
             StoreDocumentProjection.operational_status == operational_status)
@@ -361,6 +703,8 @@ async def list_documents(
         counter_conditions.append(StoreDocumentProjection.requires_attention.is_(attention))
     if has_files is not None:
         counter_conditions.append(StoreDocumentProjection.has_files.is_(has_files))
+    if shift_no is not None:
+        counter_conditions.append(StoreDocumentProjection.shift_no == shift_no)
     if accounting_status:
         counter_conditions.append(
             StoreDocumentProjection.accounting_status == accounting_status)
@@ -434,6 +778,8 @@ async def document_detail(
     result = _brief(row)
     result.update({
         "header": row.header,
+        "issues": _document_issues(row),
+        "timeline": _document_timeline(row),
         "file_write_allowed": _file_write_allowed(
             access, row.station_id, row.document_kind),
         "line_refs": [{"section": item.source_section,
@@ -442,6 +788,90 @@ async def document_detail(
         "document": safe_payload,
     })
     return result
+
+
+def _document_issues(row: StoreDocumentProjection) -> list[dict]:
+    """Что с документом не так — словами, а не набором бейджей.
+
+    До сих пор человек читал карточку как ребус: «нужна проверка», «строки без
+    ключа», «на карантине» — и сам догадывался, чинить это ему, нам, или не
+    чинить вовсе. Здесь у каждой проблемы есть причина и адресат.
+    """
+    проблемы: list[dict] = []
+    if row.document_kind in ("purchase", "return_purchase") and not row.has_files:
+        проблемы.append({
+            "code": "no_evidence", "owner": "человек",
+            "text": "Нет файла-подтверждения",
+            "hint": "Приложите накладную или УПД: без документа бухгалтерия не примет вычет НДС",
+        })
+    if row.operational_status in ("expected", "draft"):
+        проблемы.append({
+            "code": "not_accepted", "owner": "человек",
+            "text": "Поставка не принята",
+            "hint": "Пока приёмка не проведена, остаток и себестоимость станции считаются без неё",
+        })
+    if row.accounting_status == "needs_review":
+        проблемы.append({
+            "code": "accounting_review", "owner": "человек",
+            "text": "Учёт ждёт решения",
+            "hint": "Проверьте реквизиты: поставщика, договор, склад, ставки НДС",
+        })
+    if row.accounting_status == "rejected":
+        проблемы.append({
+            "code": "accounting_rejected", "owner": "человек",
+            "text": "Бухгалтерия вернула документ",
+            "hint": "Причина — в ответе приёмника; исправьте и отправьте заново",
+        })
+    if row.discrepancy_status == "quarantined":
+        причина = (row.header or {}).get("classification_error")
+        проблемы.append({
+            "code": "quarantined", "owner": "разработка",
+            "text": "Документ не разобрался до конца",
+            "hint": причина or "Строки не удалось отнести к товарному контуру станции",
+        })
+    if row.discrepancy_status == "line_identity_ambiguous":
+        проблемы.append({
+            "code": "line_identity", "owner": "никто",
+            "text": "Строки без собственного ключа",
+            "hint": ("Свойство данных, а не ошибка: документ собран версией агента, "
+                     "которая не присваивала строкам идентификаторы. Действий не требует"),
+        })
+    if row.discrepancy_status in ("minor", "material", "critical", "unmatched"):
+        проблемы.append({
+            "code": "onec_diff", "owner": "человек",
+            "text": "Расходится с документом 1С",
+            "hint": "Сверьте построчно: количество, цены и ставки",
+        })
+    return проблемы
+
+
+def _document_timeline(row: StoreDocumentProjection) -> list[dict]:
+    """Что с документом происходило: путь, а не только текущее состояние.
+
+    Состояние отвечает «где документ сейчас», но не отвечает «почему он тут
+    застрял». Путь собираем из того, что реестр знает точно, и не выдумываем
+    шагов, которых не было.
+    """
+    шаги: list[dict] = []
+    источник = {
+        "edge": "Создан на станции", "store": "Заведён в приёмке",
+        "cash": "Пробит кассой", "onec": "Пришёл из 1С",
+        "accounting": "Создан бухгалтерским каналом",
+    }.get(row.projection_source, "Создан")
+    шаги.append({"code": "created", "text": источник,
+                 "at": row.document_at.isoformat() if row.document_at else None,
+                 "done": True})
+    шаги.append({"code": "delivered", "text": "Доставлен в центр",
+                 "at": row.rebuilt_at.isoformat() if row.rebuilt_at else None,
+                 "done": row.sync_status in ("received", "accepted", "queued")})
+    if row.document_kind in ("purchase", "return_purchase"):
+        шаги.append({"code": "accepted", "text": "Принят на станции", "at": None,
+                     "done": row.operational_status == "accepted"})
+        шаги.append({"code": "evidence", "text": "Приложен подтверждающий файл",
+                     "at": None, "done": bool(row.has_files)})
+    шаги.append({"code": "accounting", "text": "Передан в бухгалтерию", "at": None,
+                 "done": row.accounting_status in ("accepted", "ready")})
+    return шаги
 
 
 @router.get("/{record_id}/print", response_class=HTMLResponse)

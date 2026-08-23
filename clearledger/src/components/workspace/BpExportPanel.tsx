@@ -63,7 +63,13 @@ export function BpExportPanel({ companyId, dateFrom, dateTo }: { companyId: stri
     queryFn: () => getBpPackageVerify(key!),
     enabled: !!key,
   })
-  const emitMut = useMutation({ mutationFn: () => emitBpPackage(key!) })
+  // Решение по невыверенной смене: гейт центра не пускает её в бухгалтерию без
+  // имени и причины, и человек должен эту причину написать, а не обойти.
+  const [решение, setРешение] = useState('')
+  const emitMut = useMutation({
+    mutationFn: () => emitBpPackage(key!, решение),
+  })
+  const смена_не_выверена = /не выверена/i.test((emitMut.error as Error)?.message ?? '')
   const shift = shiftsQ.data?.shifts.find((s) => s.shift_key === key) ?? null
   const pkg = pkgQ.data ?? null
 
@@ -169,8 +175,36 @@ export function BpExportPanel({ companyId, dateFrom, dateTo }: { companyId: stri
                     <FileJson className="h-3.5 w-3.5" /> {emitMut.data.file}
                   </span>
                 )}
-                {emitMut.isError && <span className="text-xs text-red-400/90">Ошибка выгрузки: {(emitMut.error as Error)?.message || 'неизвестно'}</span>}
+                {emitMut.isError && !смена_не_выверена && (
+                  <span className="text-xs text-red-400/90">
+                    Ошибка выгрузки: {(emitMut.error as Error)?.message || 'неизвестно'}
+                  </span>
+                )}
               </div>
+
+              {смена_не_выверена && (
+                <div className="rounded-lg border border-amber-400/40 bg-amber-400/5 p-3">
+                  <p className="text-xs">
+                    Смена не выверена: часть себестоимости взята по оценке центра, а не по
+                    собственным приходам станции. Загрузить её всё равно можно — решение
+                    сохранится вместе с пакетом, чтобы позже было видно, почему документ
+                    выглядит именно так.
+                  </p>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <input
+                      value={решение}
+                      onChange={(event) => setРешение(event.target.value)}
+                      placeholder="Кто и почему загружает: «Жукова — приход по кухне заведён»"
+                      aria-label="Причина загрузки невыверенной смены"
+                      className="h-8 min-w-72 flex-1 rounded-md border bg-background px-2 text-xs"
+                    />
+                    <Button size="sm" variant="outline" disabled={!решение.trim() || emitMut.isPending}
+                      onClick={() => emitMut.mutate()}>
+                      Загрузить с решением
+                    </Button>
+                  </div>
+                </div>
+              )}
 
               {verifyQ.isLoading && <p className="text-xs text-muted-foreground">Проверяем пакет перед выгрузкой…</p>}
               {verifyQ.isError && (

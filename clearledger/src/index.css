@@ -217,7 +217,7 @@
     --muted-foreground: 215 15% 65%;
     --accent: 218 28% 18%;
     --accent-foreground: 224 56% 91%;
-    --destructive: 0 84% 60%;
+    --destructive: 0 72% 62%;
     --destructive-foreground: 0 0% 98%;
     --border: 218 25% 20%;
     --input: 218 30% 15%;
@@ -262,13 +262,17 @@
     /* Platform accent colors */
     --accent-blue: 217 91% 60%;
     --accent-purple: 280 100% 70%;
-    --accent-green: 120 100% 40%;
-    --accent-orange: 25 100% 55%;
+    --accent-green: 152 58% 45%;
+    --accent-orange: 25 92% 60%;
 
-    /* Status colors */
-    --success: 120 100% 40%;
-    --warning: 45 100% 55%;
-    --error: 0 84% 60%;
+    /* Status colors.
+       Приглушены сознательно: 120 100% 40% — чистый неон, и в таблице из сорока
+       строк он выжигает глаза. Взят тот же зелёный, что в светлой теме, только
+       светлее — 6,5:1 к фону; красный и янтарь дают 4,9:1 и 10:1. Те же
+       значения стоят в агенте станции: палитра одна на два места. */
+    --success: 152 58% 45%;
+    --warning: 42 92% 58%;
+    --error: 0 72% 62%;
 
     /* Shadows */
     --shadow-soft: 0 2px 8px rgba(0, 0, 0, 0.25);

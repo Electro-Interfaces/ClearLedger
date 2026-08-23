@@ -1,6 +1,7 @@
 import { del, downloadBlob, get, post, upload } from './apiClient'
 
 export interface StoreDocumentBrief {
+  shift_no?: number | null
   record_id: string
   document_id: string
   kind: string
@@ -89,6 +90,8 @@ export interface StoreDocumentFilters {
   kind?: string
   search?: string
   supplier?: string
+  /** Показать только документы одной кассовой смены. */
+  shiftNo?: number
   operationalStatus?: string
   syncStatus?: string
   accountingStatus?: string
@@ -104,7 +107,24 @@ export interface StoreDocumentFilters {
 
 export type StoreDocumentCounter = keyof StoreDocumentStats
 
+export interface StoreDocumentIssue {
+  code: string
+  /** Кто чинит: человек в интерфейсе, разработка кодом, либо никто. */
+  owner: 'человек' | 'разработка' | 'никто'
+  text: string
+  hint: string
+}
+
+export interface StoreDocumentStep {
+  code: string
+  text: string
+  at: string | null
+  done: boolean
+}
+
 export interface StoreDocumentDetail extends StoreDocumentBrief {
+  issues?: StoreDocumentIssue[]
+  timeline?: StoreDocumentStep[]
   header: Record<string, unknown>
   file_write_allowed: boolean
   line_refs: Array<{ section: string; line_id: string; ordinal: number }>
@@ -144,6 +164,74 @@ export interface StoreDocumentPayloadResponse {
   payload?: unknown
 }
 
+/** Очередь работы: что разобрать и почему. */
+export interface StoreTriageQueue {
+  code: string
+  title: string
+  reason: string
+  action: string
+  count: number
+  amount: number
+  oldest_at: string | null
+}
+
+export function getStoreTriage(params: {
+  stations?: string[]; dateFrom?: string; dateTo?: string
+}): Promise<{ queues: StoreTriageQueue[]; total: number }> {
+  return get('/api/store/documents/triage', {
+    stations: params.stations?.length ? params.stations.join(',') : undefined,
+    date_from: params.dateFrom,
+    date_to: params.dateTo,
+  })
+}
+
+/** Смена в реестре: одна строка на смену вместо десятков документов. */
+export interface StoreShiftBrief {
+  station_id: number | null
+  shift_no: number
+  documents: number
+  revenue: number
+  started_at: string | null
+  finished_at: string | null
+  requires_attention: boolean
+  kinds: Record<string, number>
+}
+
+/** Паспорт смены: состояние разрезов и что осталось сделать. */
+export interface StoreShiftPassport {
+  station_id: number
+  shift_no: number
+  started_at: string | null
+  finished_at: string | null
+  status: string
+  revenue: number
+  vat: number | null
+  cheques: number
+  documents: number
+  composition: { kind: string; count: number; amount: number; attention: number }[]
+  cost_estimated: { item_uuid: string | null; status: string; quantity_millis: number | null }[]
+  influenced_by: {
+    record_id: string; kind: string; number: string | null; document_at: string | null
+    amount: number; counterparty: string | null; operational_status: string | null
+  }[]
+  actions: { code: string; text: string; hint?: string }[]
+  packet_uuid: string | null
+}
+
+export function listStoreShifts(params: {
+  stations?: string[]; dateFrom?: string; dateTo?: string
+}): Promise<{ shifts: StoreShiftBrief[]; total: number }> {
+  return get('/api/store/documents/shifts', {
+    stations: params.stations?.length ? params.stations.join(',') : undefined,
+    date_from: params.dateFrom,
+    date_to: params.dateTo,
+  })
+}
+
+export function getStoreShiftPassport(stationId: number, shiftNo: number): Promise<StoreShiftPassport> {
+  return get(`/api/store/documents/shifts/${stationId}/${shiftNo}`)
+}
+
 export function listStoreDocuments(filters: StoreDocumentFilters): Promise<StoreDocumentsResponse> {
   return get('/api/store/documents', {
     date_from: filters.dateFrom,
@@ -152,6 +240,7 @@ export function listStoreDocuments(filters: StoreDocumentFilters): Promise<Store
     kind: filters.kind,
     q: filters.search,
     supplier: filters.supplier,
+    shift_no: filters.shiftNo,
     operational_status: filters.operationalStatus,
     sync_status: filters.syncStatus,
     accounting_status: filters.accountingStatus,

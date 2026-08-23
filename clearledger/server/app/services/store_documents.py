@@ -70,6 +70,7 @@ class ProjectionCandidate:
     priority: int
     document_role: str = "operational"
     accounting_group_id: uuid.UUID | None = None
+    shift_no: int | None = None
     source_document_id: uuid.UUID | None = None
     station_id: int | None = None
     organization_id: uuid.UUID | None = None
@@ -175,6 +176,20 @@ def _hash(value: object) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+def _shift_no(value: object) -> int | None:
+    """Внутренний номер кассовой смены из шапки пакета.
+
+    Ноль — не смена: так агент помечает документы, которые смене не
+    принадлежат (приёмка, инвентаризация, перемещение). Возвращаем None,
+    чтобы они не склеились в одну ложную «нулевую смену».
+    """
+    try:
+        номер = int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+    return номер if номер > 0 else None
+
+
 def _station(value: object) -> int | None:
     if isinstance(value, int):
         return value
@@ -230,12 +245,22 @@ def _candidate_lines(
 
 
 def _mark_ambiguous_lines(candidate: ProjectionCandidate, ambiguous: bool) -> None:
+    """Строки без собственного ключа: факт записываем, тревогу не поднимаем.
+
+    Раньше это включало «требует внимания» и уводило документ в «нужна
+    проверка». На 208 так были помечены 333 документа из 350 — все, где в
+    чеке встретились две одинаковых позиции, а это норма розницы. Разобрать
+    такой документ человек не может: у него нет ни ошибки, ни действия, и
+    счётчик проблем переставал что-либо значить.
+
+    Ключи строк присваивает станция (ключиСтрок в пакете агента); документы,
+    собранные до этого, так и останутся без ключей — их прошлое не переписать.
+    Признак остаётся в разрезе расхождений: там он читается как свойство
+    данных, а не как невыполненная работа.
+    """
     if not ambiguous:
         return
-    candidate.requires_attention = True
     candidate.discrepancy_status = "line_identity_ambiguous"
-    if candidate.accounting_status not in {"accepted", "rejected", "not_applicable"}:
-        candidate.accounting_status = "needs_review"
 
 
 def _line_scope(row: dict) -> str | None:
@@ -643,6 +668,17 @@ def sanitize_edge_document(document: dict, *, trusted_station_packet: bool) -> d
     }
 
 
+# PROJECTION_RULES_VERSION — версия наших правил разбора, а не данных.
+#
+# Защита «тот же revision, другой hash» ловит подмену: источник переписал
+# документ, не подняв версию. Но тот же хеш меняется и когда правила меняем мы
+# сами — сняли ложную пометку, добавили поле. Без этой версии любая такая
+# правка навсегда роняла пересборку реестра, и чинить приходилось руками, в
+# базе. Меняется логика — поднимаем версию, и расхождение хеша на строках
+# старой версии считается ожидаемым.
+PROJECTION_RULES_VERSION = 2
+
+
 def _candidate_hash(candidate: ProjectionCandidate) -> str:
     return _hash({
         "projection_source": candidate.projection_source,
@@ -813,6 +849,8 @@ async def _edge_adapter(db: AsyncSession, company_id: uuid.UUID) -> list[Project
                 document_kind=kind,
                 priority=300,
                 document_role="operational",
+                shift_no=_shift_no(
+                    ((packet.payload or {}).get("Смена") or {}).get("НомерСменыВнутр")),
                 station_id=packet.station_id,
                 number=document.get("Номер"),
                 document_at=_datetime(document.get("Дата")) or packet.received_at,
@@ -892,6 +930,7 @@ async def _cheque_adapter(db: AsyncSession, company_id: uuid.UUID) -> list[Proje
             document_kind="fiscal_receipt",
             priority=450,
             document_role="fiscal",
+            shift_no=_shift_no(row.shift_number),
             station_id=row.station_id,
             number=str(row.number),
             document_at=row.at,
@@ -944,6 +983,7 @@ async def _cheque_adapter(db: AsyncSession, company_id: uuid.UUID) -> list[Proje
             document_kind="store_shift",
             priority=440,
             document_role="fiscal",
+            shift_no=_shift_no(shift_number),
             station_id=station_id,
             number=str(shift_number),
             document_at=max(row.at for row, _ in items),
@@ -1291,7 +1331,7 @@ ADAPTER_REGISTRY = (
 
 
 ROW_FIELDS = (
-    "document_id", "accounting_group_id", "projection_source", "source_kind",
+    "document_id", "accounting_group_id", "shift_no", "projection_source", "source_kind",
     "source_record_id", "source_document_id", "document_kind", "document_role", "station_id",
     "organization_id", "warehouse_id", "number", "document_at", "counterparty_name",
     "counterparty_inn", "amount", "vat_amount", "author", "operational_status",
@@ -1302,9 +1342,12 @@ ROW_FIELDS = (
 
 
 def _row_values(candidate: ProjectionCandidate, *, primary: bool, has_files: bool) -> dict:
+    header = dict(candidate.header or {})
+    header["rules_version"] = PROJECTION_RULES_VERSION
     return {
         "document_id": candidate.document_id,
         "accounting_group_id": candidate.accounting_group_id,
+        "shift_no": candidate.shift_no,
         "projection_source": candidate.projection_source,
         "source_kind": candidate.source_kind,
         "source_record_id": candidate.source_record_id,
@@ -1332,7 +1375,7 @@ def _row_values(candidate: ProjectionCandidate, *, primary: bool, has_files: boo
         "is_primary": primary,
         "revision": candidate.revision,
         "content_hash": candidate.content_hash,
-        "header": candidate.header,
+        "header": header,
     }
 
 
@@ -1427,7 +1470,9 @@ async def rebuild_store_document_projection(
                 f"Source-record {candidate.source_record_id}: revision {candidate.revision} "
                 f"меньше сохранённой {current.revision}"
             )
-        if (candidate.revision == current.revision
+        по_тем_же_правилам = (
+            (current.header or {}).get("rules_version") == PROJECTION_RULES_VERSION)
+        if (по_тем_же_правилам and candidate.revision == current.revision
                 and current.content_hash and candidate.content_hash
                 and current.content_hash != candidate.content_hash):
             raise ProjectionRevisionConflict(

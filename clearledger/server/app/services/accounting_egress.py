@@ -24,6 +24,7 @@ from app.services.accounting_contract_v3 import (
     validate_top_level_v3,
 )
 from app.services.store_document_contract import ACCOUNTING_DOCUMENT_KINDS
+from app.services.closing_date import ClosedPeriodError, assert_period_open
 from app.services.cutover_policy import (
     CutoverPolicyError,
     canonical_manifest_hash,
@@ -154,10 +155,35 @@ class AccountingEgressGuard:
             _SCOPE_LOCK_STATEMENT, {"scope_key": scope_key},
         )
 
+    @staticmethod
+    def _assert_shift_reviewed(packet: dict, review_override: str | None) -> None:
+        """Смена, про которую мы сами знаем, что она не выверена, в бухгалтерию не идёт.
+
+        Признак ставит станция: агент помечает смену «needs_review», если часть
+        себестоимости посчитана по оценке центра, а не по собственным приходам.
+        Исправлять такой документ в БП дороже, чем не отправлять его сейчас.
+
+        Последнее слово остаётся за человеком: он может загрузить смену
+        осознанно, передав review_override — своё имя и причину. Решение уходит
+        в журнал вместе с пакетом.
+        """
+        completeness = packet.get("ПолнотаГруппы")
+        if not isinstance(completeness, dict):
+            return
+        if str(completeness.get("Статус") or "").strip() != "needs_review":
+            return
+        if not (review_override or "").strip():
+            raise AccountingEgressDenied(
+                "Смена не выверена: часть себестоимости взята по оценке центра. "
+                "Загрузка в бухгалтерию возможна только с явным решением "
+                "(review_override: кто и почему)"
+            )
+
     async def authorize_packet(
         self,
         packet: dict,
         requested_manifest_hash: str | None,
+        review_override: str | None = None,
     ) -> AccountingEgressDecision:
         if str(packet.get("ВерсияФормата") or "") != "3":
             raise AccountingEgressDenied(
@@ -173,10 +199,19 @@ class AccountingEgressGuard:
         actual_hash = business_projection_hash(packet)
         if not declared_hash or declared_hash != actual_hash:
             raise AccountingEgressDenied("ХешПакета не совпадает с каноническим содержимым")
+        self._assert_shift_reviewed(packet, review_override)
 
         station_id = accounting_packet_station(packet)
         await self._lock_scope(station_id)
         fact_times = _packet_fact_times(packet)
+        # Барьер закрытого периода: пакет за закрытый бухгалтерией день в
+        # очередь не ставится. Проверка здесь, перед постановкой, а не после —
+        # и здесь же, потому что это единственная дверь в бухгалтерию.
+        try:
+            await assert_period_open(
+                self.session, self.company_id, fact_times, "бухгалтерская группа")
+        except ClosedPeriodError as exc:
+            raise AccountingEgressDenied(str(exc)) from exc
         policies = (await self.session.execute(
             select(AccountingSourcePolicy).where(
                 AccountingSourcePolicy.company_id == self.company_id,
@@ -358,6 +393,7 @@ class AccountingEgressGuard:
         self,
         packet: dict,
         requested_manifest_hash: str | None,
+        review_override: str | None = None,
     ) -> AccountingQueueResult:
         from app.services.store_receipt_accounting import (
             ReceiptAccountingError,
@@ -370,7 +406,9 @@ class AccountingEgressGuard:
                 raise AccountingRevisionConflict(
                     "ИдентификаторПакета должен быть корректным UUID"
                 ) from exc
-            decision = await self.authorize_packet(packet, requested_manifest_hash)
+            decision = await self.authorize_packet(
+                packet, requested_manifest_hash, review_override,
+            )
             await assert_purchase_documents_ready(self.session, self.company_id, packet)
             outbox = AccountingOutboxService(self.session, self.company_id)
             revision = await outbox.append_validated_revision(

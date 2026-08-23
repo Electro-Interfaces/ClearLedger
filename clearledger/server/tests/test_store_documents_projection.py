@@ -993,7 +993,11 @@ async def test_document_registry_filters_stats_and_station_scope(monkeypatch):
     assert "store_document_projections.document_at <" in stats_sql
     assert "store_document_projections.accounting_status =" not in stats_sql
     assert "store_document_projections.discrepancy_status =" not in stats_sql
-    assert "not_applicable" in repr(session.statements[0].compile().params)
+    # Счётчик считает документы, по которым учёт ждёт решения, а не всё, что
+    # ещё не выгружено: «pending» — нормальная жизнь документа до выгрузки.
+    параметры = repr(session.statements[0].compile().params)
+    assert "needs_review" in параметры and "rejected" in параметры
+    assert "pending" not in параметры
     assert "fiscal_receipt" in repr(session.statements[0].compile().params)
     assert "store_shift" in repr(session.statements[0].compile().params)
     assert "store_document_projections.accounting_status =" in result_sql
@@ -1784,3 +1788,73 @@ def test_exchange_with_station_triggers_document_sync():
     """Сверка живёт в обмене, а не в отдельном планировщике."""
     source = inspect.getsource(edge_router.downlink)
     assert "сверить_документы" in source
+
+
+def test_ноль_в_номере_смены_не_создаёт_ложную_группу():
+    """Смена — разрез только для того, что ею порождено.
+
+    Агент ставит «0» документам, которые смене не принадлежат: приёмка,
+    инвентаризация, перемещение. Если принять ноль за номер, весь товарный
+    контур станции склеится в одну несуществующую «смену №0».
+    """
+    from app.services.store_documents import _shift_no
+
+    assert _shift_no("7085") == 7085
+    assert _shift_no(7085) == 7085
+    assert _shift_no("0") is None
+    assert _shift_no(0) is None
+    assert _shift_no(None) is None
+    assert _shift_no("") is None
+    assert _shift_no("не число") is None
+    assert _shift_no("-3") is None
+
+
+def test_смена_правил_разбора_не_ломает_пересборку():
+    """Наша правка логики — не подмена данных источником.
+
+    Защита «тот же revision, другой hash» ловит источник, переписавший документ
+    молча. Но хеш меняется и когда правила меняем мы: сняли ложную пометку,
+    добавили поле. До версии правил такая правка навсегда роняла пересборку
+    реестра, и разблокировать её приходилось руками в базе.
+    """
+    from app.services.store_documents import PROJECTION_RULES_VERSION, _row_values
+
+    candidate = ProjectionCandidate(
+        company_id=uuid.uuid4(), projection_source="edge", source_kind="edge_document",
+        source_record_id="пакет:1", document_id=uuid.uuid4(), document_kind="purchase",
+        priority=300, header={"packet_uuid": "п-1"},
+    )
+    значения = _row_values(candidate, primary=True, has_files=False)
+    assert значения["header"]["rules_version"] == PROJECTION_RULES_VERSION
+    # Кандидату версию не приписываем: она про строку реестра, не про документ.
+    assert "rules_version" not in candidate.header
+
+
+@pytest.mark.asyncio
+async def test_реестр_документов_не_топит_накладные_чеками(monkeypatch):
+    """Чек — доказательство продажи, а не учётный документ, и живёт в «Кассе».
+
+    В реестре документов чеков полторы тысячи против сотни накладных: оставив
+    их, раздел показывает кассовую ленту вместо документооборота станции.
+    """
+    from app.routers import store_documents_router
+
+    access = store_documents_router.DocumentAccess(
+        company_id=uuid.uuid4(), is_superadmin=True, is_merchandiser=True,
+        is_accountant=False, station_ids=frozenset({208}),
+    )
+
+    async def resolved(_user, _db, _company_id=None):
+        return access
+
+    monkeypatch.setattr(store_documents_router, "resolve_document_access", resolved)
+    session = ListSession()
+    await store_documents_router.list_documents(
+        station_id=None, stations=None, date_from=None, date_to=None, kind=None,
+        q=None, supplier=None, operational_status=None, sync_status=None,
+        accounting_status=None, discrepancy_status=None, source=None, warehouse=None,
+        attention=None, has_files=None, shift_no=None, counter=None, limit=50, offset=0,
+        user=SimpleNamespace(), db=session,
+    )
+    запрос = str(session.statements[-1])
+    assert "document_kind NOT IN" in запрос or "not_in" in запрос.lower()

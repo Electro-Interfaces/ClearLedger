@@ -52,6 +52,7 @@ from app.services.export_audit import log_export
 from app.services.edo_upd import parse_upd
 from app.services.goods_dashboard import GoodsDashboardService
 from app.services.onec.crypto import encrypt_password
+from app.services.closing_date import get_closing_date, set_closing_date
 from app.services.store_document_contract import PROJECTION_DOCUMENT_KINDS
 from app.services.store_documents import (
     cheque_lines_from_catalog,
@@ -3996,6 +3997,47 @@ async def nsi_item_update(
     return {"ok": True, "changed": [k for k in fields if k != "id"], "станций": sent}
 
 
+class ClosingDateIn(BaseModel):
+    """Дата запрета изменения: та же, что стоит в БП ГИГ."""
+
+    closing_date: date | None = None
+    note: str = ""
+
+
+@router.get("/accounting/closing-date")
+async def accounting_closing_date_get(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Действующая граница закрытого периода."""
+    cid = await scope_company_id(user, db)
+    closing = await get_closing_date(db, cid)
+    return {"closing_date": closing.isoformat() if closing else None}
+
+
+@router.put("/accounting/closing-date")
+async def accounting_closing_date_set(
+    body: ClosingDateIn,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Поставить или снять дату запрета и разослать её станциям.
+
+    Пустая дата снимает запрет: так бухгалтерия открывает период обратно.
+    Отдельного сигнала об этом станциям не нужно — задание несёт саму дату.
+    """
+    cid = await _require_central_commercial_control(user, db)
+    станций = await set_closing_date(
+        db, cid, body.closing_date,
+        author=getattr(user, "email", None) or "центр", note=body.note)
+    await db.commit()
+    return {
+        "ok": True,
+        "closing_date": body.closing_date.isoformat() if body.closing_date else None,
+        "станций": станций,
+    }
+
+
 @router.post("/nsi/items/{item_id}/price")
 async def nsi_set_price(
     item_id: str,
@@ -6361,6 +6403,13 @@ async def store_bp_package_emit(
     manifest_hash: str | None = Query(
         None, description="SHA-256 exact effective CutoverManifest",
     ),
+    review_override: str | None = Query(
+        None,
+        description=(
+            "Осознанная загрузка невыверенной смены: кто и почему. "
+            "Без него смена со статусом needs_review в бухгалтерию не уходит"
+        ),
+    ),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -6409,7 +6458,12 @@ async def store_bp_package_emit(
         raise HTTPException(400, f"Постановка пакета в очередь: {e}")
 
     try:
-        queued = await guard.queue_packet(packet, manifest_hash)
+        # Роутер зовут и напрямую (тесты, внутренние вызовы) — тогда сюда
+        # приезжает сам объект Query, а не строка.
+        решение = review_override.strip() if isinstance(review_override, str) else ""
+        if решение:
+            решение = f"{решение} (загрузил {user.email or user.id})"
+        queued = await guard.queue_packet(packet, manifest_hash, решение or None)
     except ValueError as e:
         raise HTTPException(409, str(e))
     except Exception as e:

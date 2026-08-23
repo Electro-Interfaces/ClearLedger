@@ -717,9 +717,18 @@ def build_accounting_business_payload(
         ]
         completeness_sources.sort(key=lambda row: row["Тип"])
 
+    # Статус группы наследуется от станции: смену, где часть себестоимости
+    # посчитана по оценке центра, агент помечает «needs_review». Терять этот
+    # признак при пересборке пакета нельзя — по нему гейт решает, пускать ли
+    # документ в бухгалтерию.
+    станционный = (raw_packet.get("ShiftCompleteness") or {})
+    статус_группы = "complete"
+    if str(станционный.get("status") or "").strip() == "needs_review":
+        статус_группы = "needs_review"
+
     return {
         "ПолнотаГруппы": {
-            "Версия": "1", "Статус": "complete",
+            "Версия": "1", "Статус": статус_группы,
             "Источники": completeness_sources,
             "ОжидаемыеКомпоненты": components,
         },

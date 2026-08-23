@@ -710,9 +710,14 @@ export interface BpEmitResult {
 }
 export const getBpPackage = (shiftKey: string) =>
   get<BpPackage>('/api/store/bp-package', { shift_key: shiftKey })
-export const emitBpPackage = (shiftKey: string) =>
+export const emitBpPackage = (shiftKey: string, reviewOverride?: string) => {
   // каталог задаёт сервер (BP_EXPORT_DIR), клиент путь не передаёт (directory-injection закрыта)
-  post<BpEmitResult>(`/api/store/bp-package/emit?shift_key=${encodeURIComponent(shiftKey)}`)
+  const решение = reviewOverride?.trim()
+    ? `&review_override=${encodeURIComponent(reviewOverride.trim())}`
+    : ''
+  return post<BpEmitResult>(
+    `/api/store/bp-package/emit?shift_key=${encodeURIComponent(shiftKey)}${решение}`)
+}
 
 export interface BpVerifyCheck { Проверка: string; ok: boolean; Детали: string }
 export interface BpVerifyResult {

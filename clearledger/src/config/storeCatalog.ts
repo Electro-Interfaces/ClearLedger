@@ -30,7 +30,7 @@ import {
   PackagePlus, PackageCheck, Warehouse, ArrowLeftRight, ClipboardList, Trash2, Undo2, RefreshCw,
   QrCode, ScanLine, PackageMinus, ShieldAlert, ShieldCheck, Plug, CalendarClock, CopyCheck, ShoppingCart, Database, Receipt, FileSpreadsheet,
   Link2, GitCompareArrows, Layers,
-  RadioTower, HeartPulse, Files,
+  RadioTower, HeartPulse, Files, AlertCircle,
 } from 'lucide-react'
 
 export type StoreStatus = 'ready' | 'wip' | 'planned'
@@ -115,10 +115,56 @@ export interface StoreView {
 }
 
 export const STORE_VIEWS: StoreView[] = [
+  // Документооборот станции идёт по смыслу работы, а не по техническому типу:
+  // человек приходит принять поставку или понять, почему изменился остаток, а
+  // не «посмотреть kind=purchase». Чеков здесь нет намеренно — они
+  // доказательство продажи и живут в разделе «Касса».
   {
-    key: 'store_documents', label: 'Документы', section: 'store_documents', icon: Files,
+    key: 'store_documents', label: 'Разбор', section: 'store_documents', icon: AlertCircle,
     title: 'Документы магазина',
-    subtitle: 'Сквозной реестр товарных документов, первичных подтверждений и готовности к бухгалтерскому учёту.',
+    subtitle: 'Что мешает закрыть период: непринятые поставки, документы без подтверждений, смены, не готовые к бухгалтерии.',
+    status: 'ready',
+    blocks: [],
+  },
+  {
+    key: 'docs_shifts', label: 'Смены', section: 'store_documents', icon: CalendarClock,
+    title: 'Смены',
+    subtitle: 'Смена — главный разрез товарного контура: продажи, выпуск блюд и чеки порождены ею. Паспорт смены показывает состояние всех разрезов и что осталось сделать.',
+    status: 'ready',
+    blocks: [],
+  },
+  {
+    key: 'docs_supply', label: 'Поступления', section: 'store_documents', icon: PackagePlus,
+    title: 'Поступления',
+    subtitle: 'Приход от поставщиков и возвраты им: что привезли, чем подтверждено, принято ли на станции.',
+    status: 'ready',
+    blocks: [],
+  },
+  {
+    key: 'docs_movement', label: 'Движение товара', section: 'store_documents', icon: ArrowLeftRight,
+    title: 'Движение товара',
+    subtitle: 'Перемещения между складами и станциями сети.',
+    status: 'ready',
+    blocks: [],
+  },
+  {
+    key: 'docs_stock', label: 'Изменения остатка', section: 'store_documents', icon: ClipboardList,
+    title: 'Изменения остатка',
+    subtitle: 'Почему остаток стал другим: пересчёты, оприходование найденного товара, списания.',
+    status: 'ready',
+    blocks: [],
+  },
+  {
+    key: 'docs_price', label: 'Цены', section: 'store_documents', icon: Tag,
+    title: 'Цены',
+    subtitle: 'Переоценки: когда и на сколько менялась цена полки.',
+    status: 'ready',
+    blocks: [],
+  },
+  {
+    key: 'docs_catering', label: 'Общепит', section: 'store_documents', icon: UtensilsCrossed,
+    title: 'Документы общепита',
+    subtitle: 'Техкарты, выпуск блюд и расход сырья по ним.',
     status: 'ready',
     blocks: [],
   },

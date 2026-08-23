@@ -284,7 +284,11 @@ async def station_console(
     цель = f"{HUB_URL}/api/v1/integration/stations/{station_id}/console/{path}"
 
     try:
-        async with httpx.AsyncClient(timeout=40.0, follow_redirects=False) as client:
+        # 130 с — больше, чем таймаут прокси на хабе (120 с): на рваном канале
+        # станции страница рабочего места идёт со станции десятки секунд, и при
+        # меньшем значении центр обрывал бы запрос раньше хаба, подменяя внятный
+        # ответ станции своим таймаутом.
+        async with httpx.AsyncClient(timeout=130.0, follow_redirects=False) as client:
             ответ = await client.request(
                 request.method, цель, params=dict(request.query_params),
                 headers=заголовки, content=тело or None,
