@@ -20,6 +20,7 @@ const MarketRouter = lazy(() => import('@/components/market/MarketRouter').then(
 const EquipmentRouter = lazy(() => import('@/components/equipment/EquipmentRouter').then((m) => ({ default: m.EquipmentRouter })))
 const SitesRouter = lazy(() => import('@/components/sites/SitesRouter').then((m) => ({ default: m.SitesRouter })))
 const ChargeSalesRouter = lazy(() => import('./ChargeSalesRouter').then((m) => ({ default: m.ChargeSalesRouter })))
+const AdjustmentPanel = lazy(() => import('./AdjustmentPanel').then((m) => ({ default: m.AdjustmentPanel })))
 const FuelSalesRouter = lazy(() => import('./FuelSalesRouter').then((m) => ({ default: m.FuelSalesRouter })))
 
 /** Обёртка ожидания для ленивого роутера: чанк приезжает за доли секунды. */
@@ -547,6 +548,9 @@ export function AccountingPanel() {
           </>
         )}
         {tab === 'export' && <BpExportPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
+        {/* Правка документов перед отправкой: факт станции остаётся нетронутым,
+            в бухгалтерию уходит результат наложения правок. */}
+        {tab === 'cb_fix' && <AdjustmentPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
 
         {/* Поток 3 · общепит: своя работа, но ТОТ ЖЕ пакет — здесь его разрез */}
         {tab === 'food_menu' && (

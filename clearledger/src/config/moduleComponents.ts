@@ -163,6 +163,14 @@ export const MODULE_COMPONENTS: ModuleComponent[] = [
     builderKinds: ['recipe', 'purchase', 'retail_sale_sidegoods', 'production_release', 'inventory', 'gain', 'writeoff', 'transfer'],
   },
   {
+    id: 'acc_std_cb_fix', moduleId: 'accounting', kind: 'standard',
+    section: 'acc_store',
+    label: 'Корректировки',
+    description: 'Правка документов смены перед выгрузкой: факт станции остаётся нетронутым, правка ложится поверх и помнит автора, причину и версию факта. В бухгалтерию уходит результат наложения.',
+    profiles: ['fuel'], status: 'active',
+    menuItems: [{ key: 'cb_fix', label: 'Корректировки', group: 'Закрытие' }],
+  },
+  {
     id: 'acc_std_cb_recon', moduleId: 'accounting', kind: 'standard',
     section: 'acc_store',
     label: 'Готовность пакета',

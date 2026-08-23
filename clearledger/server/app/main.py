@@ -26,6 +26,7 @@ from app.database import (
     get_db,
 )
 from app.routers import (
+    accounting_adjustments_router,
     accounting_docs_router,
     audit_data_router,
     audit_router,
@@ -397,6 +398,7 @@ app.include_router(settings_router.router, prefix=API_PREFIX)
 app.include_router(intake_router.router, prefix=API_PREFIX)
 app.include_router(references_router.router, prefix=API_PREFIX)
 app.include_router(accounting_docs_router.router, prefix=API_PREFIX)
+app.include_router(accounting_adjustments_router.router, prefix=API_PREFIX)
 app.include_router(reconciliation_router.router, prefix=API_PREFIX)
 app.include_router(reconciliation_proxy_router.router, prefix=API_PREFIX)  # прокси «Сверки»: /api/tradecorp/*, /api/msto/*
 app.include_router(audit_data_router.router, prefix=API_PREFIX)

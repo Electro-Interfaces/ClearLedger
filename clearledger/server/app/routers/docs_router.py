@@ -2109,6 +2109,21 @@ async def register_doc(
             raise HTTPException(status.HTTP_409_CONFLICT,
                                 "Укажите причину переноса номера из прежнего журнала")
         number = manual_number
+        # Занятость номера спрашиваем ДО записи. Уникальный индекс ловит гонку,
+        # но срабатывает он на ближайшем autoflush — то есть посреди чужого
+        # запроса, за пределами try вокруг commit, и наружу вылетает 500 вместо
+        # внятного «номер занят». Человек при этом переносит журнал руками и
+        # ошибается в номере регулярно: это штатный путь, а не сбой.
+        busy = (await db.execute(select(DocCard.id).where(
+            DocCard.company_id == cid,
+            DocCard.organization_id.is_(d.organization_id)
+            if d.organization_id is None
+            else DocCard.organization_id == d.organization_id,
+            DocCard.reg_number == number,
+            DocCard.id != d.id))).scalar_one_or_none()
+        if busy is not None:
+            raise HTTPException(status.HTTP_409_CONFLICT,
+                                f"Номер {number} уже занят другим документом")
         d.number_manual = True
     else:
         reason = ""
