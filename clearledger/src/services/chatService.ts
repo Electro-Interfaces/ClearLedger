@@ -292,6 +292,13 @@ export type ChatProcessLaunchResult = {
 })
 
 /** Процесс из сообщения: документный маршрут или внутренняя задача. */
+/** Поручение по сообщению — без шаблона: половина работы рождается в разговоре,
+ *  и переписывать сообщение руками в форму постановки незачем. */
+export const taskFromMessage = (messageId: string,
+  body: { title?: string; assigneeId?: string; dueAt?: string }) =>
+  post<{ taskId: string; number: number; title: string; url: string }>(
+    `/api/chat/messages/${messageId}/task`, body)
+
 export const processFromMessage = (messageId: string,
   body: { templateId: string; responsibleId?: string; title?: string }) =>
   post<ChatProcessLaunchResult>(`/api/chat/messages/${messageId}/process`, body)

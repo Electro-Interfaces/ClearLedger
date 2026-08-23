@@ -2177,6 +2177,130 @@ async def ticket_from_message(
     return {"ok": True, "ticketId": str(t_id) if t_id else None, "ticketNumber": t_num or None}
 
 
+class TaskFromMessageBody(BaseModel):
+    title: str | None = Field(None, min_length=3, max_length=300)
+    assigneeId: str | None = None
+    dueAt: datetime | None = None
+
+
+@router.post("/messages/{message_id}/task", status_code=status.HTTP_201_CREATED)
+async def task_from_message(
+    message_id: str, body: TaskFromMessageBody,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Поставить поручение по сообщению.
+
+    Процесс из сообщения уже был, но он требует шаблона — а половина работы
+    рождается в разговоре без всякого шаблона: «сделай, пожалуйста». Раньше это
+    значило переписать сообщение руками в форму постановки, и связь с
+    обсуждением терялась вместе с причиной.
+
+    Ссылка двусторонняя: в чат уходит сообщение с номером задачи, в задаче
+    остаётся след с адресом обсуждения. Разговор, из которого выросла работа,
+    спрашивают чаще, чем кажется — там причина.
+    """
+    from app.models import (
+        SourceFile, Task, TaskAttachment, TaskEvent, TaskType,
+    )
+    from app.services import work_state
+
+    try:
+        mid = uuid.UUID(message_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID")
+
+    msg = await db.get(ChatMessage, mid)
+    if msg is None or msg.deleted_at is not None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Сообщение не найдено")
+    room = await _assert_participant(msg.room_id, current_user, db)
+    await assert_company_product(str(room.company_id), current_user, db, "docs")
+
+    source_ref = f"chat:{mid}:task"
+    duplicate = await db.scalar(select(TaskEvent.id).join(
+        Task, Task.id == TaskEvent.task_id).where(
+            Task.company_id == room.company_id,
+            TaskEvent.kind == "created",
+            TaskEvent.note == source_ref).limit(1))
+    if duplicate is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Поручение по этому сообщению уже поставлено")
+
+    src = (msg.content or msg.file_name or "").strip()
+    title = (body.title or src)[:300].strip()
+    if len(title) < 3:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "В сообщении нечего поручить: задайте заголовок")
+
+    assignee_id = None
+    if body.assigneeId:
+        try:
+            assignee_id = uuid.UUID(body.assigneeId)
+        except (ValueError, TypeError):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "Неверный исполнитель") from None
+        if await db.get(UserCompany, (assignee_id, room.company_id)) is None:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "Исполнитель не состоит в пространстве")
+
+    # Тип не спрашиваем: у поручения из разговора его обычно нет, а маршрут по
+    # умолчанию тот же, что у поставленного руками.
+    route = [{"code": "new", "name": "Постановка"},
+             {"code": "in_progress", "name": "В работе"},
+             {"code": "review", "name": "Проверка"}]
+    default_type = (await db.execute(select(TaskType).where(
+        TaskType.company_id == room.company_id, TaskType.code == "errand",
+        TaskType.is_active.is_(True)))).scalars().first()
+    if default_type is not None and default_type.route:
+        route = default_type.route
+
+    task = Task(
+        company_id=room.company_id,
+        type_id=default_type.id if default_type is not None else None,
+        title=title,
+        description=(f"{msg.user_name or 'Участник'}: {src}\n\n"
+                     f"Из обсуждения «{room.name or 'чат'}»."),
+        priority=(default_type.default_priority if default_type is not None else "medium"),
+        status="open", stage_code=route[0]["code"],
+        stage_column=work_state.stage_column_of(route, route[0]["code"]),
+        assignee_id=assignee_id, author_id=current_user.id,
+        object_id=room.scope_object_id, due_at=body.dueAt)
+    db.add(task)
+    await db.flush()
+    # Ключ источника хранится в следе создания: по нему ловится повтор, и по нему
+    # же видно, откуда работа взялась.
+    db.add(TaskEvent(task_id=task.id, kind="created", user_id=current_user.id,
+                     to_value=route[0]["name"], note=source_ref))
+
+    if msg.file_url:
+        try:
+            file_id = uuid.UUID(msg.file_url.rstrip("/").rsplit("/", 1)[-1])
+        except (ValueError, TypeError):
+            file_id = None
+        source_file = await db.get(SourceFile, file_id) if file_id else None
+        if source_file is not None and source_file.company_id == room.company_id:
+            db.add(TaskAttachment(task_id=task.id, file_id=source_file.id,
+                                  uploaded_by=current_user.id))
+
+    target_url = (f"{get_settings().app_public_url.rstrip('/')}"
+                  f"/docs/company?view=errands&task={task.id}")
+    note = ChatMessage(
+        room_id=room.id, user_id=current_user.id, user_name=current_user.name,
+        type="text",
+        content=f"→ Поставлено поручение №{task.number}: {title}\n{target_url}",
+        reply_to=mid)
+    db.add(note)
+    room.updated_at = _now()
+    await db.flush()
+    parties = await _party_types(db, room.company_id, {current_user.id})
+    payload = _msg_out(note, 0, msg, None, parties.get(current_user.id))
+    await db.commit()
+    await manager.broadcast(f"chat:{room.id}",
+                            _событие("chat:message", payload.model_dump()))
+    return {"taskId": str(task.id), "number": task.number, "title": task.title,
+            "url": target_url, "message": payload}
+
+
 class ProcessFromMessageBody(BaseModel):
     templateId: str
     responsibleId: str | None = None

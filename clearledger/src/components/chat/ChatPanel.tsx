@@ -15,7 +15,7 @@ import {
   Folder, AtSign, Loader2, Paperclip, Camera, Search as SearchIcon,
   Shield, ShieldOff, UserMinus, LogOut, Bell, BellOff, Forward, MapPin, ClipboardList, Workflow,
   Mail, Palette, Smile, Images, Volume2, VolumeX, Mic, BarChart3, WifiOff,
-  CheckSquare, Copy, Square,
+  CheckSquare, Copy, Square, ListChecks,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/contexts/AuthContext'
@@ -1113,6 +1113,88 @@ function GlobalSearchResults({ q, onOpen }: {
 }
 
 // ── «В заявку»: обсудили — отправили на выполнение ───────────────────────────
+
+/** Поручение по сообщению.
+ *
+ * Шаблон здесь не нужен: «сделай, пожалуйста» — половина всей работы, и
+ * заставлять выбирать шаблон ради неё значит не получить ни того, ни другого.
+ * Заголовок берётся из сообщения и правится на месте: сообщение бывает длинным,
+ * а поручение должно читаться строкой в списке.
+ */
+function TaskFromMessageDialog({ message, companyId, onClose, onDone }: {
+  message: ChatMessage
+  companyId: string
+  onClose: () => void
+  onDone: (result: Awaited<ReturnType<typeof chat.taskFromMessage>>) => void
+}) {
+  const src = (message.content || message.fileName || '').trim()
+  const [title, setTitle] = useState(() => src.slice(0, 300))
+  const [assigneeId, setAssigneeId] = useState('')
+  const [dueAt, setDueAt] = useState('')
+
+  const peopleQ = useQuery({
+    queryKey: ['task-people', companyId],
+    queryFn: () => listTaskPeople(companyId),
+    enabled: !!companyId, staleTime: 5 * 60 * 1000,
+  })
+  const send = useMutation({
+    mutationFn: () => chat.taskFromMessage(message.id, {
+      title: title.trim(),
+      assigneeId: assigneeId || undefined,
+      dueAt: dueAt ? new Date(`${dueAt}T00:00`).toISOString() : undefined,
+    }),
+    onSuccess: onDone,
+    onError: (e) => toast.error((e as Error).message || 'Не удалось поставить поручение'),
+  })
+
+  return (
+    <Dialog open onOpenChange={(o) => { if (!o) onClose() }}>
+      <DialogContent className="max-w-sm gap-0 p-0 sm:max-w-sm">
+        <DialogHeader className="border-b border-border/50 px-4 py-3">
+          <DialogTitle className="text-sm">Поручение по сообщению</DialogTitle>
+          <DialogDescription className="text-xs">
+            Сообщение станет основанием: в чате останется ссылка на поручение.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3 px-4 py-3">
+          <div className="space-y-1">
+            <Label className="text-xs">Что сделать</Label>
+            <Input value={title} maxLength={300} className="h-8 text-xs"
+              onChange={(e) => setTitle(e.target.value)} />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Кому</Label>
+            <Select value={assigneeId || 'none'}
+              onValueChange={(v) => setAssigneeId(v === 'none' ? '' : v)}>
+              <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">Пока никому</SelectItem>
+                {(peopleQ.data?.people ?? []).map((person) => (
+                  <SelectItem key={person.id} value={person.id}>{person.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">К какому сроку</Label>
+            <Input type="date" value={dueAt} className="h-8 text-xs"
+              onChange={(e) => setDueAt(e.target.value)} />
+          </div>
+        </div>
+        <div className="flex justify-end gap-2 border-t border-border/50 px-4 py-3">
+          <Button size="sm" variant="ghost" className="h-8" onClick={onClose}>Отмена</Button>
+          <Button size="sm" className="h-8"
+            disabled={title.trim().length < 3 || send.isPending}
+            onClick={() => send.mutate()}>
+            {send.isPending && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+            Поручить
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 function ProcessFromMessageDialog({ message, companyId, onClose, onDone }: {
   message: ChatMessage
   companyId: string
@@ -1665,7 +1747,7 @@ function ChatBubble({
   message, album, isOwn, grouping, canDelete, editingId, editText, searchHighlight,
   onReply, onEditStart, onEditCancel, onEditSave, onEditTextChange, onDelete,
   selectionMode, selected, onSelectToggle,
-  onAuthorClick, authorAvatar, withAvatar, selfId, onReact, onPin, onForward, onTicket, onProcess, onImageClick,
+  onAuthorClick, authorAvatar, withAvatar, selfId, onReact, onPin, onForward, onTicket, onProcess, onTask, onImageClick,
   actionsOpen, onToggleActions, onCloseActions, textSizeClass,
 }: {
   message: ChatMessage
@@ -1698,6 +1780,7 @@ function ChatBubble({
   onForward?: () => void
   onTicket?: () => void
   onProcess?: () => void
+  onTask?: () => void
   onImageClick?: (path: string) => void
   actionsOpen: boolean
   onToggleActions: () => void
@@ -1780,6 +1863,10 @@ function ChatBubble({
         className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground [@media(pointer:coarse)]:size-10"><ClipboardList className="size-4" /></button>}
       {onProcess && <button onClick={() => runAction(onProcess)} title="Запустить процесс из сообщения"
         className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground [@media(pointer:coarse)]:size-10"><Workflow className="size-4" /></button>}
+      {/* Поручение без шаблона: «сделай, пожалуйста» — половина работы рождается
+          именно так, и переписывать сообщение руками в форму постановки незачем. */}
+      {onTask && <button onClick={() => runAction(onTask)} title="Поставить поручение по сообщению"
+        className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground [@media(pointer:coarse)]:size-10"><ListChecks className="size-4" /></button>}
       {onPin && <button onClick={() => runAction(onPin)} title="Закрепить"
         className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground [@media(pointer:coarse)]:size-10"><Pin className="size-4" /></button>}
       {isOwn && <button onClick={() => runAction(onEditStart)} title="Редактировать"
@@ -2146,6 +2233,7 @@ export function ChatPanel({ compact, scopeProduct }: {
   // «В заявку»: сообщение, из которого создаётся заявка.
   const [ticketMsg, setTicketMsg] = useState<ChatMessage | null>(null)
   const [processMsg, setProcessMsg] = useState<ChatMessage | null>(null)
+  const [taskMsg, setTaskMsg] = useState<ChatMessage | null>(null)
   // Кнопку показываем только там, где продукт подключён: иначе человек жмёт и
   // получает отказ гарда — обещание, которого система не держит.
   const docsEnabled = useDocsApp()
@@ -3328,6 +3416,7 @@ export function ChatPanel({ compact, scopeProduct }: {
                       onForward={() => setForwardMsg(msg)}
                       onTicket={activeRoom?.type !== 'direct' ? () => setTicketMsg(msg) : undefined}
                       onProcess={docsEnabled ? () => setProcessMsg(msg) : undefined}
+                      onTask={docsEnabled ? () => setTaskMsg(msg) : undefined}
                       onImageClick={openImage}
                       actionsOpen={mobileActionsFor === msg.id}
                       onToggleActions={() => setMobileActionsFor((id) => id === msg.id ? null : msg.id)}
@@ -3504,6 +3593,17 @@ export function ChatPanel({ compact, scopeProduct }: {
             toast.success(num ? `Заявка №${num} создана` : 'Заявка создана')
             qc.invalidateQueries({ queryKey: ['chat-messages', selectedRoom] })
             qc.invalidateQueries({ queryKey: ['chat-rooms'] })
+          }} />
+      )}
+      {taskMsg && (
+        <TaskFromMessageDialog message={taskMsg} companyId={companyId ?? ''}
+          onClose={() => setTaskMsg(null)}
+          onDone={(result) => {
+            setTaskMsg(null)
+            toast.success(`Поручение №${result.number} поставлено`)
+            qc.invalidateQueries({ queryKey: ['chat-messages', selectedRoom] })
+            qc.invalidateQueries({ queryKey: ['tasks'] })
+            qc.invalidateQueries({ queryKey: ['work'] })
           }} />
       )}
       {processMsg && (

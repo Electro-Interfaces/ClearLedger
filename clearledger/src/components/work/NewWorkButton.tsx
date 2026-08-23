@@ -13,9 +13,10 @@
  * притвориться, что это одно и то же, нельзя.
  */
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
-import { FileText, ListChecks, Play, Plus } from 'lucide-react'
+import { FileText, ListChecks, Loader2, Play, Plus } from 'lucide-react'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
@@ -33,6 +34,8 @@ export function NewWorkButton() {
   const [taskSignal, setTaskSignal] = useState(0)
   const [docOpen, setDocOpen] = useState(false)
 
+  const qc = useQueryClient()
+
   // Виды документов нужны только для формы документа: спрашиваем их, когда
   // человек этот пункт выбрал, а не при каждой отрисовке шапки.
   const kindsQ = useQuery({
@@ -40,6 +43,35 @@ export function NewWorkButton() {
     queryFn: () => docsService.listKinds(companyId),
     enabled: docOpen && !!companyId,
   })
+  // Шаблоны — то, чем работу заводят чаще всего: «Закрытие месяца», «Заявка на
+  // доступ». Держать их за двумя переходами (меню → регламент → кнопка) значит
+  // не пользоваться ими вовсе.
+  const templatesQ = useQuery({
+    queryKey: ['process-templates', companyId],
+    queryFn: () => docsService.listProcessTemplates(companyId),
+    enabled: !!companyId, staleTime: 5 * 60 * 1000,
+  })
+  const start = useMutation({
+    mutationFn: (template: docsService.ProcessTemplate) =>
+      docsService.startProcessTemplate(template.id, companyId),
+    onSuccess: (result) => {
+      void qc.invalidateQueries({ queryKey: ['work'] })
+      void qc.invalidateQueries({ queryKey: ['work-mine'] })
+      // Заведённое открываем сразу: человек нажал «завести», а не «положить в
+      // список» — ему нужно дописать предмет и отправить.
+      navigate(result.kind === 'document'
+        ? `/docs?view=all&doc=${result.docId}`
+        : `/docs/company?view=errands&task=${result.taskId}`)
+    },
+    onError: (e) => toast.error((e as Error).message),
+  })
+
+  // В меню — то, что запускается одним нажатием. Шаблон, которому нужны стороны
+  // и предмет, ведёт в «Регламент»: спрашивать их из выпадающего меню — значит
+  // строить в нём вторую форму.
+  const ready = (templatesQ.data?.templates ?? [])
+    .filter((t) => !t.requiresPreparation)
+    .slice(0, 5)
 
   if (!companyId) return null
   return (
@@ -63,10 +95,30 @@ export function NewWorkButton() {
             <FileText className="mr-2 h-3.5 w-3.5" />
             Документ
           </DropdownMenuItem>
+          {ready.length > 0 && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel className="text-[11px] font-normal text-muted-foreground">
+                По шаблону
+              </DropdownMenuLabel>
+              {ready.map((template) => (
+                <DropdownMenuItem key={template.id} disabled={start.isPending}
+                  onSelect={() => start.mutate(template)}>
+                  {start.isPending
+                    ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+                    : <Play className="mr-2 h-3.5 w-3.5" />}
+                  <span className="flex-1 truncate">{template.name}</span>
+                  <span className="ml-2 shrink-0 text-[10px] text-muted-foreground">
+                    {template.kind === 'document' ? 'документ' : 'поручение'}
+                  </span>
+                </DropdownMenuItem>
+              ))}
+            </>
+          )}
           <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={() => navigate('/docs/regulation?view=templates')}>
             <Play className="mr-2 h-3.5 w-3.5" />
-            <span className="flex-1">По шаблону</span>
+            <span className="flex-1">Все шаблоны</span>
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
