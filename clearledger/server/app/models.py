@@ -9678,6 +9678,45 @@ class TaskSprint(Base):
     )
 
 
+class TaskCodeRef(Base):
+    """Что в коде сделано по этой задаче: ветка, коммит, запрос на слияние.
+
+    «Исправлено в версии» отвечает заявителю, а этот след отвечает разработчику:
+    каким изменением. Без него вопрос «что именно поменяли» решается поиском по
+    сообщениям коммитов, и ответ зависит от того, вспомнил ли автор написать
+    номер задачи.
+
+    Ссылка, а не копия: заголовок и автор сохраняются как подпись на момент
+    добавления, содержимое остаётся в системе, где живёт код. Хранить у себя
+    диффы — заводить вторую историю изменений, которая разойдётся с первой.
+    """
+    __tablename__ = "task_code_refs"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    task_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    # branch | commit | pr | other. Вид определяется по адресу и меняется руками,
+    # если распознали неверно: чужих хостингов больше, чем шаблонов у нас.
+    kind: Mapped[str] = mapped_column(String(20), nullable=False, default="other")
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    # Как это называть в карточке: «fix/export-bp», «a1b2c3d», «#128».
+    title: Mapped[str] = mapped_column(String(200), nullable=False, default="")
+    # Хранилище и репозиторий строкой: «github · Electro-Interfaces/ClearLedger».
+    repo: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    added_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        # Одна ссылка на задачу один раз: повторное добавление того же коммита
+        # это опечатка, а не второе изменение.
+        UniqueConstraint("task_id", "url", name="uq_task_code_refs_url"),
+    )
+
+
 class TaskLabel(Base):
     """Метка компании: свободный ярлык поверх типа и стадии."""
     __tablename__ = "task_labels"

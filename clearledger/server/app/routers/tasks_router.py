@@ -28,6 +28,7 @@ from sqlalchemy import (
     case, delete as sa_delete, func, or_, select, true as sa_true,
     update as sa_update,
 )
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import assert_company_product, get_company_by_api_key, get_current_user
@@ -35,8 +36,8 @@ from app.database import get_db
 from app.models import (
     Company, ServiceLocation, SourceFile, Task, TaskAttachment, TaskChecklistItem,
     TaskEvent, TaskExternalRef, TaskLabel, TaskLabelLink, TaskLink, TaskParticipant,
-    TaskProject, TaskRecurrence, TaskSprint, TaskTemplate, TaskType, TaskVersion,
-    TaskView, TaskWatcher, TaskWorkItem,
+    TaskCodeRef, TaskProject, TaskRecurrence, TaskSprint, TaskTemplate, TaskType,
+    TaskVersion, TaskView, TaskWatcher, TaskWorkItem,
     User, UserCompany,
 )
 from app.services import (
@@ -2714,6 +2715,129 @@ async def apply_command(
             "applied": {**{k: v for k, v in action.items() if k != "company_id"},
                         **({"версия": version_name} if version_name else {}),
                         **({"спринт": sprint_name} if sprint_name else {})}}
+
+
+# ── Что сделано в коде ──────────────────────────────────────────────────────
+# «Исправлено в версии» отвечает заявителю, ссылка на код — разработчику: каким
+# изменением. Без неё вопрос «что именно поменяли» решается поиском по
+# сообщениям коммитов и зависит от того, вспомнил ли автор написать номер.
+
+# Адреса известных хостингов. Список короткий намеренно: неузнанный адрес не
+# отвергается, а сохраняется видом «ссылка» — чужих хостингов больше, чем
+# шаблонов, которые мы готовы поддерживать.
+_CODE_URL = re.compile(
+    r"^https?://(?P<host>[^/]+)/(?P<repo>[^/]+/[^/]+)/"
+    r"(?P<what>commit|commits|tree|pull|pulls|merge_requests|-/commit|-/tree|-/merge_requests)/"
+    r"(?P<ref>[^/?#]+)")
+
+_CODE_KINDS = {
+    "commit": "commit", "commits": "commit", "-/commit": "commit",
+    "tree": "branch", "-/tree": "branch",
+    "pull": "pr", "pulls": "pr", "merge_requests": "pr", "-/merge_requests": "pr",
+}
+
+
+def _read_code_url(url: str) -> tuple[str, str, str | None]:
+    """Адрес → (вид, подпись, репозиторий). Неузнанный остаётся ссылкой."""
+    match = _CODE_URL.match(url.strip())
+    if not match:
+        return "other", url.strip()[:200], None
+    kind = _CODE_KINDS.get(match.group("what"), "other")
+    ref = match.group("ref")
+    if kind == "commit":
+        # Коммит зовут коротким хешем: полный в строке карточки только мешает.
+        ref = ref[:7]
+    elif kind == "pr":
+        ref = f"#{ref}"
+    host = match.group("host").split(".")[0]
+    return kind, ref[:200], f"{host} · {match.group('repo')}"[:200]
+
+
+@router.get("/{task_id}/code")
+async def list_code_refs(
+    task_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Что сделано в коде по задаче."""
+    cid = await _assert_work(company_id, current_user, db)
+    task = await _task_or_404(db, cid, task_id)
+    rows = (await db.execute(select(TaskCodeRef).where(
+        TaskCodeRef.task_id == task.id).order_by(TaskCodeRef.created_at))).scalars().all()
+    names = {u.id: u.name for u in (await db.execute(select(User).where(
+        User.id.in_({r.added_by for r in rows if r.added_by})))).scalars()} if rows else {}
+    return {"code": [{
+        "id": str(r.id), "kind": r.kind, "url": r.url, "title": r.title,
+        "repo": r.repo, "added_by": names.get(r.added_by),
+        "created_at": r.created_at.isoformat() if r.created_at else None,
+    } for r in rows]}
+
+
+class CodeRefIn(BaseModel):
+    company_id: str
+    url: str = Field(min_length=8, max_length=2000)
+    # Вид и подпись распознаются по адресу; передают их, только когда наш разбор
+    # ошибся — на своём хостинге это бывает.
+    kind: str | None = Field(None, pattern="^(branch|commit|pr|other)$")
+    title: str | None = Field(None, max_length=200)
+
+
+@router.post("/{task_id}/code", status_code=status.HTTP_201_CREATED)
+async def add_code_ref(
+    task_id: str,
+    payload: CodeRefIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Привязать к задаче ветку, коммит или запрос на слияние."""
+    cid = await _assert_work(payload.company_id, current_user, db)
+    task = await _task_or_404(db, cid, task_id)
+    url = payload.url.strip()
+    if not url.lower().startswith(("http://", "https://")):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Нужен полный адрес: с http:// или https://")
+    kind, title, repo = _read_code_url(url)
+    row = TaskCodeRef(
+        task_id=task.id, url=url, repo=repo,
+        kind=payload.kind or kind,
+        title=(payload.title or title).strip()[:200],
+        added_by=current_user.id)
+    db.add(row)
+    try:
+        await db.flush()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Эта ссылка уже привязана к задаче") from None
+    # Ссылка на код — часть следа: по ней видно, чем задачу двигали, даже когда
+    # автор изменения давно ушёл из переписки.
+    db.add(TaskEvent(task_id=task.id, kind="field", user_id=current_user.id,
+                     from_value="код", to_value=row.title[:200]))
+    await db.commit()
+    await db.refresh(row)
+    return {"id": str(row.id), "kind": row.kind, "url": row.url,
+            "title": row.title, "repo": row.repo}
+
+
+@router.delete("/{task_id}/code/{ref_id}")
+async def delete_code_ref(
+    task_id: str,
+    ref_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Отвязать ссылку: ошиблись адресом или изменение уехало в другую задачу."""
+    cid = await _assert_work(company_id, current_user, db)
+    task = await _task_or_404(db, cid, task_id)
+    row = await db.get(TaskCodeRef, _uuid_or_400(ref_id, "ref_id"))
+    if row is None or row.task_id != task.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Ссылка не найдена")
+    await db.delete(row)
+    await db.commit()
+    return {"ok": True}
+
 
 
 # ── Учёт времени: план и факт ────────────────────────────────────────────

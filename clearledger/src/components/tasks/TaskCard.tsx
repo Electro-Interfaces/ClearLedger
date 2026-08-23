@@ -14,6 +14,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowLeft, ArrowRight, CheckCircle2, ChevronRight, Clock, Eye, EyeOff, Link2,
   Loader2, Lock, Mail, MessagesSquare, Paperclip, Pin, Plus, RefreshCw, Send, Trash2,
+  X,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -241,6 +242,7 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
           <TabsContent value="links" className="space-y-5 pt-4">
         <Links task={t} companyId={companyId} live={live}
           onChanged={reload} onOpenOther={onOpenOther} />
+        <CodeRefs taskId={t.id} companyId={companyId} live={live} />
         <External task={t} companyId={companyId} live={live} onChanged={reload} />
           </TabsContent>
           <TabsContent value="time" className="space-y-5 pt-4">
@@ -799,6 +801,84 @@ function FieldLabel({ children }: { children: React.ReactNode }) {
 }
 
 /* ── Связи и подзадачи ───────────────────────────────────────────────── */
+
+/** Что сделано в коде: ветка, коммит, запрос на слияние.
+ *
+ *  «Исправлено в версии» отвечает заявителю, этот блок — разработчику: каким
+ *  изменением. Вид ссылки узнаётся по адресу; неузнанный хостинг не отвергается,
+ *  а показывается ссылкой — чужих хостингов больше, чем шаблонов, которые мы
+ *  готовы поддерживать. */
+function CodeRefs({ taskId, companyId, live }: {
+  taskId: string; companyId: string; live: boolean
+}) {
+  const qc = useQueryClient()
+  const [url, setUrl] = useState('')
+
+  const q = useQuery({
+    queryKey: ['task-code', taskId],
+    queryFn: () => tasksService.listTaskCode(taskId, companyId),
+  })
+  const refresh = () => qc.invalidateQueries({ queryKey: ['task-code', taskId] })
+  const add = useMutation({
+    mutationFn: () => tasksService.addTaskCode(taskId, { companyId, url: url.trim() }),
+    onSuccess: () => { setUrl(''); refresh() },
+    onError: (e) => toast.error((e as Error).message),
+  })
+  const drop = useMutation({
+    mutationFn: (id: string) => tasksService.deleteTaskCode(taskId, id, companyId),
+    onSuccess: refresh,
+    onError: (e) => toast.error((e as Error).message),
+  })
+
+  const rows = q.data?.code ?? []
+  return (
+    <Section title="Код">
+      <div className="space-y-1">
+        {rows.map((row) => (
+          <div key={row.id} className="flex items-center gap-2 text-xs">
+            <span className="w-[92px] shrink-0 text-[11px] text-muted-foreground">
+              {CODE_KIND_LABEL[row.kind] ?? 'ссылка'}
+            </span>
+            <a href={row.url} target="_blank" rel="noreferrer"
+              className="truncate font-mono text-primary hover:underline">
+              {row.title}
+            </a>
+            {row.repo && (
+              <span className="truncate text-[11px] text-muted-foreground">{row.repo}</span>
+            )}
+            {live && (
+              <button type="button" aria-label={`Отвязать ${row.title}`}
+                className="ml-auto shrink-0 text-muted-foreground hover:text-foreground"
+                onClick={() => drop.mutate(row.id)}>
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+        ))}
+        {rows.length === 0 && (
+          <p className="text-xs text-muted-foreground">
+            Ссылок на код нет. Вставьте адрес ветки, коммита или запроса на слияние.
+          </p>
+        )}
+      </div>
+      {live && (
+        <div className="mt-2 flex gap-2">
+          <Input value={url} onChange={(e) => setUrl(e.target.value)}
+            placeholder="https://github.com/…/commit/a1b2c3d"
+            className="h-8 flex-1 text-xs"
+            onKeyDown={(e) => { if (e.key === 'Enter' && url.trim()) add.mutate() }} />
+          <Button size="sm" className="h-8" disabled={!url.trim() || add.isPending}
+            onClick={() => add.mutate()}>Привязать</Button>
+        </div>
+      )}
+    </Section>
+  )
+}
+
+const CODE_KIND_LABEL: Record<string, string> = {
+  branch: 'ветка', commit: 'коммит', pr: 'слияние', other: 'ссылка',
+}
+
 
 function Links({ task, companyId, live, onChanged, onOpenOther }: {
   task: LoadedTask; companyId: string; live: boolean

@@ -406,6 +406,37 @@ export async function taskVersionSummary(id: string, companyId: string) {
 }
 
 /** Спринты проекта. Без `projectId` — все спринты компании. */
+/** Что сделано в коде по задаче: ветка, коммит, запрос на слияние.
+ *  «Исправлено в версии» отвечает заявителю, это — разработчику: каким
+ *  изменением. Ссылка, а не копия: содержимое живёт там, где живёт код. */
+export interface TaskCodeRef {
+  id: string
+  kind: 'branch' | 'commit' | 'pr' | 'other'
+  url: string
+  title: string
+  repo: string | null
+  added_by?: string | null
+  created_at?: string | null
+}
+
+export async function listTaskCode(taskId: string, companyId: string) {
+  return get<{ code: TaskCodeRef[] }>(
+    `/api/tasks/${taskId}/code`, { company_id: companyId })
+}
+
+export async function addTaskCode(taskId: string, data: {
+  companyId: string; url: string; kind?: TaskCodeRef['kind']; title?: string
+}) {
+  return post<TaskCodeRef>(`/api/tasks/${taskId}/code`, {
+    company_id: data.companyId, url: data.url,
+    kind: data.kind, title: data.title,
+  })
+}
+
+export async function deleteTaskCode(taskId: string, refId: string, companyId: string) {
+  return del(`/api/tasks/${taskId}/code/${refId}?company_id=${encodeURIComponent(companyId)}`)
+}
+
 export async function listTaskSprints(companyId: string, projectId?: string) {
   return get<{ sprints: TaskSprint[] }>(
     '/api/tasks/sprints',

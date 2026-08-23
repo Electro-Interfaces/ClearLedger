@@ -997,3 +997,66 @@ async def test_запрос_строкой_даёт_то_же_что_форма(
                                    params={"company_id": cid})).json()["views"]
     saved = next(v for v in views if v["name"] == "Мои срочные в QRY")
     assert saved["query"]["query"] == "проект: QRY #мои приоритет: срочная"
+
+
+async def test_ссылки_на_код_привязываются_к_задаче(auth_client: AsyncClient):
+    """Что сделано в коде по задаче: ветка, коммит, запрос на слияние.
+
+    Ловим: адрес не разбирается и в карточке висит простыня вместо подписи;
+    один и тот же коммит привязывается дважды; чужая ссылка удаляется из чужой
+    задачи.
+    """
+    me = await _me(auth_client)
+    cid = seed_company_id(me)
+
+    r = await auth_client.post("/api/tasks", json={
+        "company_id": cid, "title": "Работа со ссылкой на код"})
+    assert r.status_code == 201, r.text
+    task = r.json()
+
+    commit = "https://github.com/Electro-Interfaces/ClearLedger/commit/a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+    r = await auth_client.post(f"/api/tasks/{task['id']}/code", json={
+        "company_id": cid, "url": commit})
+    assert r.status_code == 201, r.text
+    added = r.json()
+    # Коммит зовут коротким хешем: полный в строке карточки только мешает.
+    assert added["kind"] == "commit" and added["title"] == "a1b2c3d"
+    assert added["repo"] == "github · Electro-Interfaces/ClearLedger"
+
+    # Запрос на слияние и ветка узнаются по тому же адресу.
+    r = await auth_client.post(f"/api/tasks/{task['id']}/code", json={
+        "company_id": cid,
+        "url": "https://github.com/Electro-Interfaces/ClearLedger/pull/128"})
+    assert r.status_code == 201 and r.json()["kind"] == "pr", r.text
+    assert r.json()["title"] == "#128"
+    r = await auth_client.post(f"/api/tasks/{task['id']}/code", json={
+        "company_id": cid,
+        "url": "https://github.com/Electro-Interfaces/ClearLedger/tree/fix/export-bp"})
+    assert r.status_code == 201 and r.json()["kind"] == "branch", r.text
+
+    # Неузнанный хостинг не отвергается: он остаётся ссылкой.
+    r = await auth_client.post(f"/api/tasks/{task['id']}/code", json={
+        "company_id": cid, "url": "https://git.example.ru/some/thing"})
+    assert r.status_code == 201 and r.json()["kind"] == "other", r.text
+
+    # Адрес без схемы — опечатка, а не ссылка.
+    r = await auth_client.post(f"/api/tasks/{task['id']}/code", json={
+        "company_id": cid, "url": "github.com/x/y/commit/abc"})
+    assert r.status_code == 400, r.text
+
+    # Тот же коммит второй раз — опечатка, а не второе изменение.
+    r = await auth_client.post(f"/api/tasks/{task['id']}/code", json={
+        "company_id": cid, "url": commit})
+    assert r.status_code == 409, r.text
+
+    listed = (await auth_client.get(f"/api/tasks/{task['id']}/code",
+                                    params={"company_id": cid})).json()["code"]
+    assert len(listed) == 4
+    assert {row["kind"] for row in listed} == {"commit", "pr", "branch", "other"}
+
+    r = await auth_client.delete(
+        f"/api/tasks/{task['id']}/code/{added['id']}", params={"company_id": cid})
+    assert r.status_code == 200, r.text
+    listed = (await auth_client.get(f"/api/tasks/{task['id']}/code",
+                                    params={"company_id": cid})).json()["code"]
+    assert len(listed) == 3
