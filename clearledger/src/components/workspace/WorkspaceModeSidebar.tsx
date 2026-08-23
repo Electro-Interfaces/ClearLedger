@@ -277,10 +277,20 @@ export function WorkspaceModeSidebar() {
                             className={`w-full px-3 py-1.5 rounded-md text-[13px] text-left whitespace-nowrap transition-colors ${
                               subActive
                                 ? 'bg-primary/10 text-primary font-medium'
-                                : 'text-muted-foreground hover:text-foreground hover:bg-accent/40'
+                                : item.disabled
+                                  ? 'text-muted-foreground/45 hover:text-muted-foreground hover:bg-accent/30'
+                                  : 'text-muted-foreground hover:text-foreground hover:bg-accent/40'
                             }`}
                           >
                             {item.label}
+                            {/* Неготовый пункт обязан выглядеть неготовым: иначе
+                                человек идёт за отчётом и упирается в заглушку,
+                                хотя меню обещало рабочий инструмент. */}
+                            {item.disabled && (
+                              <span className="ml-1.5 text-[9px] uppercase tracking-wide opacity-70">
+                                скоро
+                              </span>
+                            )}
                           </button>
                         )
                       })}

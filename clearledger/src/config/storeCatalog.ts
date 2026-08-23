@@ -255,7 +255,7 @@ export const STORE_VIEWS: StoreView[] = [
     blocks: [],
   },
   {
-    key: 'receipt-edo', label: 'Из ЭДО', section: 'store_receipt', icon: Plug,
+    key: 'receipt-edo', label: 'По накладной ЭДО', section: 'store_receipt', icon: Plug,
     title: 'Поступления из ЭДО',
     subtitle: 'Накладные поставщиков из электронного документооборота: заготовка уходит на станцию, там её принимают по факту.',
     status: 'planned',
@@ -569,7 +569,7 @@ export const STORE_VIEWS: StoreView[] = [
     ],
   },
   {
-    key: 'marking', label: 'Приёмка марок', section: 'store_marking', icon: QrCode,
+    key: 'mark_intake', label: 'Приёмка марок', section: 'store_marking', icon: QrCode,
     title: 'Приёмка маркированного',
     subtitle: 'Приёмка маркированного товара: УПД от поставщика через ЭДО плюс сканы DataMatrix на станции. Подтверждение приёмки переводит коды на нас в ГИС МТ — это обязанность, а не удобство: до неё товар юридически чужой.',
     status: 'wip',
@@ -664,7 +664,7 @@ export const STORE_VIEWS: StoreView[] = [
   // не «посмотреть kind=purchase». Чеков здесь нет намеренно — они
   // доказательство продажи и живут в разделе «Касса».
   {
-    key: 'store_documents', label: 'Разбор', section: 'store_documents', group: 'Поиск и разбор', icon: AlertCircle,
+    key: 'store_documents', label: 'Все документы', section: 'store_documents', group: 'Поиск и разбор', icon: AlertCircle,
     title: 'Документы магазина',
     subtitle: 'Что мешает закрыть период: непринятые поставки, документы без подтверждений, смены, не готовые к бухгалтерии.',
     status: 'ready',
@@ -824,7 +824,14 @@ export const STORE_VIEWS: StoreView[] = [
 /** Пункты раздела: порядок = порядок записей в STORE_VIEWS. */
 export const storeMenu = (mode: StoreMode) =>
   STORE_VIEWS.filter((v) => v.section === mode)
-    .map((v) => ({ key: v.key, label: v.label, ...(v.group ? { group: v.group } : {}) }))
+    .map((v) => ({
+      key: v.key, label: v.label,
+      ...(v.group ? { group: v.group } : {}),
+      // Неготовый пункт в меню обязан выглядеть неготовым. Иначе человек идёт
+      // за отчётом, открывает экран и упирается в «панель ещё не собрана» —
+      // а меню обещало рабочий инструмент.
+      ...(v.status === 'ready' ? {} : { disabled: true }),
+    }))
 
 /** Все пункты разом — для карты прав и подписей; от раздела состав не зависит. */
 export const STORE_MENU = STORE_VIEWS.map((v) => ({ key: v.key, label: v.label }))

@@ -97,7 +97,7 @@ export const MODULE_COMPONENTS: ModuleComponent[] = [
     label: 'Смены (нефтепродукты)',
     description: 'Сменные отчёты STS: журнал + корректировка значений перед выгрузкой в 1С (правки хранятся в L2).',
     profiles: ['fuel'], status: 'active', defaultOn: true,
-    menuItems: [{ key: 'shifts', label: 'Смены', group: 'Работа' }],
+    menuItems: [{ key: 'shifts', label: 'Смены топлива', group: 'Работа' }],
     builderKinds: ['shift_orp', 'cash_pko'],
   },
   {
@@ -154,15 +154,6 @@ export const MODULE_COMPONENTS: ModuleComponent[] = [
     menuItems: [{ key: 'cb_shifts', label: 'Смены сопутки', group: 'Работа' }],
   },
   {
-    id: 'acc_std_export', moduleId: 'accounting', kind: 'standard',
-    section: 'acc_store',
-    label: 'Пакет в БП (магазин и общепит)',
-    description: 'Ledger — продюсер JSON-пакетов «смена→БП ГИГ» (замена TL_ЭкспортБП): превью состава документов и НСИ, хеш, скачать JSON или выгрузить в каталог обмена, откуда их забирает TL_СопуткаСервис. Приёмник TradeLedger.cfe не меняется.',
-    profiles: ['fuel'], status: 'active',
-    menuItems: [{ key: 'export', label: 'Пакет в БП', group: 'Закрытие' }],
-    builderKinds: ['recipe', 'purchase', 'retail_sale_sidegoods', 'production_release', 'inventory', 'gain', 'writeoff', 'transfer'],
-  },
-  {
     id: 'acc_std_cb_fix', moduleId: 'accounting', kind: 'standard',
     section: 'acc_store',
     label: 'Корректировки',
@@ -177,6 +168,15 @@ export const MODULE_COMPONENTS: ModuleComponent[] = [
     description: 'Проверки перед загрузкой: балансы документов, полнота НСИ, ставки НДС, хеш. Пока это самосогласованность собственного пакета; сверка с проведёнными документами БП живёт в разделе «Сверка».',
     profiles: ['fuel'], status: 'active',
     menuItems: [{ key: 'cb_recon', label: 'Готовность пакета', group: 'Закрытие' }],
+  },
+  {
+    id: 'acc_std_export', moduleId: 'accounting', kind: 'standard',
+    section: 'acc_store',
+    label: 'Пакет в БП (магазин и общепит)',
+    description: 'Ledger — продюсер JSON-пакетов «смена→БП ГИГ» (замена TL_ЭкспортБП): превью состава документов и НСИ, хеш, скачать JSON или выгрузить в каталог обмена, откуда их забирает TL_СопуткаСервис. Приёмник TradeLedger.cfe не меняется.',
+    profiles: ['fuel'], status: 'active',
+    menuItems: [{ key: 'export', label: 'Пакет в БП', group: 'Закрытие' }],
+    builderKinds: ['recipe', 'purchase', 'retail_sale_sidegoods', 'production_release', 'inventory', 'gain', 'writeoff', 'transfer'],
   },
 
   // ── ПОТОК 3 · ОБЩЕПИТ ───────────────────────────────────────────────────────
