@@ -76,6 +76,7 @@ import {
   FuelLoadControlPanel, CateringPackagePanel, AccountingDocsBridge, AccountingStageBar,
 } from './AccountingWorkPanels'
 import { AccountingPeriodPanel } from './AccountingPeriodPanel'
+import { NetworkReportPanel } from './NetworkReportPanel'
 import { AccountingTrendPanel, StreamMarginSummary } from './AccountingResultsPanels'
 import {
   ACCOUNTING_MODES, ACCOUNTING_KEYS, accountingModeForKey, type AccountingSection,
@@ -576,6 +577,9 @@ export function AccountingPanel() {
               <MgmtMargin companyId={companyId} dateFrom={period.from} dateTo={period.to} />
             </div>
           </div>
+        )}
+        {tab === 'res_vat_book' && (
+          <NetworkReportPanel kind="vat-book" dateFrom={period.from} dateTo={period.to} />
         )}
         {tab === 'res_tax' && <TaxPanel />}
     </ScrollArea>

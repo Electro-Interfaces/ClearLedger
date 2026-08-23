@@ -426,13 +426,7 @@ export const STORE_VIEWS: StoreView[] = [
     status: 'planned',
     blocks: [],
   },
-  {
-    key: 'vat-book', label: 'Книга покупок', section: 'store_reports', group: 'Бухгалтерия', icon: Database,
-    title: 'Книга покупок',
-    subtitle: 'НДС к вычету по поступлениям сети: поставщик, счёт-фактура, ставка, сумма.',
-    status: 'ready',
-    blocks: [],
-  },
+ 
   {
     key: 'purchase-diff', label: 'Расхождения приёмки', section: 'store_reports', group: 'Бухгалтерия', icon: GitCompareArrows,
     title: 'Расхождения приёмки',

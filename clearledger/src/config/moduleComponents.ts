@@ -259,6 +259,18 @@ export const MODULE_COMPONENTS: ModuleComponent[] = [
     menuItems: [{ key: 'res_margin', label: 'Маржа' }],
   },
   {
+    // Книга покупок стоит здесь, а не в «Магазине»: это налоговый регистр, а не
+    // товарная витрина. Граница между приложениями проходит по вопросу — в
+    // «Магазине» смотрят, чем торгуем и что на полке, здесь — что уйдёт в
+    // декларацию и в финансовый результат.
+    id: 'acc_res_vat_book', moduleId: 'accounting', kind: 'standard',
+    section: 'acc_results',
+    label: 'Книга покупок',
+    description: 'НДС к вычету по поступлениям сети: поставщик, счёт-фактура, ставка, сумма. Приёмка без входящего документа показана отдельно — это сумма, которую не зачтут.',
+    profiles: ['fuel'], status: 'active',
+    menuItems: [{ key: 'res_vat_book', label: 'Книга покупок' }],
+  },
+  {
     id: 'acc_res_tax', moduleId: 'accounting', kind: 'standard',
     section: 'acc_results',
     label: 'НДС и прибыль',
