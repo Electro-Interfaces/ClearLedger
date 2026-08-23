@@ -834,7 +834,11 @@ async def test_strict_deny_и_break_glass_закрывают_прямой_фай
             "attachments": [str(source.id)],
         },
     )
-    assert mail_bypass.status_code == 404
+    # 403, а не 404: право на файл проверяется ДО всего остального, и обход
+    # закрывается именно им. Ожидание 404 приходило от несуществующего ящика —
+    # то есть проверка ловила не свой предмет и зависела от порядка проверок в
+    # ручке. Наружу при этом ничего не ушло, а это и есть предмет.
+    assert mail_bypass.status_code == 403
 
     closed = await auth_client.get(
         f"/api/docs/{doc.id}", params={"company_id": str(company_id)},

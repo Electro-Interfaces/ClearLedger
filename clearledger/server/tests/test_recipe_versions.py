@@ -97,7 +97,16 @@ def test_recipe_hash_ignores_json_key_order_but_not_content():
 
 
 @pytest.mark.asyncio(loop_scope="session")
-async def test_station_bundle_bootstraps_registry_and_next_change_is_draft(db):
+async def test_station_bundle_bootstraps_registry_and_next_change_activates(db):
+    """Второй набор со станции сразу действует, а прежний уходит в архив.
+
+    Раньше проверка ждала черновика — по прежней модели, где карту со станции
+    активировал человек в центре. Модель изменили осознанно: на станции карта
+    УЖЕ применена, по ней продают и списывают сырьё, и черновик размыкал
+    контур — путь в «active» был только через ручку активации, закрытую той же
+    политикой, версии копились, а центр показывал канон, которого на станции
+    нет. Проверка догоняет код: имя говорило обратное тому, что происходит.
+    """
     company = Company(name="Тест ТТК станции", slug=f"recipe-{uuid.uuid4().hex[:10]}",
                       profile_id="gig")
     db.add(company)
@@ -124,13 +133,21 @@ async def test_station_bundle_bootstraps_registry_and_next_change_is_draft(db):
         })
         assert second["created"] == 1
         assert second["unchanged"] == 2
-        draft = (await db.execute(select(StoreRecipeVersion).where(
+        current = (await db.execute(select(StoreRecipeVersion).where(
             StoreRecipeVersion.company_id == company.id,
             StoreRecipeVersion.dish_uuid == "dish-1",
-            StoreRecipeVersion.status == "draft",
+            StoreRecipeVersion.status == "active",
         ))).scalar_one()
-        assert draft.version == 2
-        assert draft.change_note == "Булочка крупнее"
+        assert current.version == 2
+        assert current.change_note == "Булочка крупнее"
+        # Две действующие карты одного блюда — спор о том, что списывать:
+        # прежняя обязана закрыться тем же ходом.
+        archived = (await db.execute(select(StoreRecipeVersion).where(
+            StoreRecipeVersion.company_id == company.id,
+            StoreRecipeVersion.dish_uuid == "dish-1",
+            StoreRecipeVersion.status == "archived",
+        ))).scalar_one()
+        assert archived.version == 1 and archived.valid_to is not None
     finally:
         await db.delete(company)
         await db.commit()

@@ -72,7 +72,11 @@ class _FakeWork:
         self.result = {"moved": moved, "blocking": [] if moved else ["Акт ввода"],
                        "message": None if moved else "Не закрыты обязательные пункты"}
 
-    async def set_stage(self, db, site, stage, reason=None, user=None):
+    # Сигнатура повторяет настоящую `ezs_site_work.set_stage`, включая
+    # именованные-только параметры: подделка, отставшая от контракта, падает
+    # на TypeError и выглядит поломкой продукта.
+    async def set_stage(self, db, site, stage, *, reason=None, user=None,
+                        may_override=False, override=False, source="user"):
         if self.result["moved"]:
             site.stage = stage
         return self.result
@@ -95,8 +99,12 @@ def _facade(step_code: str, step_name: str):
 async def test_дата_ввода_только_когда_воронка_приняла(db, monkeypatch, moved,
                                                        ожидаем_дату):
     company = (await db.execute(select(Company).limit(1))).scalars().first()
+    # `build` — это ЭТАП воронки («Реализация»), а не стадия: стадии внутри него
+    # называются `construction` и `commissioning`. Проект на несуществующей
+    # стадии считается снятым с воронки, и маршрут честно отвечал «верните его
+    # в работу» — проверка ловила не гейты, а собственную опечатку.
     site = EzsSite(company_id=company.id, title=f"Мост: ввод {moved}",
-                   kind="new_build", stage="build")
+                   kind="new_build", stage="construction")
     db.add(site)
     await db.flush()
 
@@ -111,7 +119,7 @@ async def test_дата_ввода_только_когда_воронка_при
     if not moved:
         # Гейт держит — маршрут об этом сообщает, а не обходит молча.
         assert state["funnel"]["blocking"] == ["Акт ввода"]
-        assert site.stage == "build"
+        assert site.stage == "construction"
     await db.rollback()
 
 
