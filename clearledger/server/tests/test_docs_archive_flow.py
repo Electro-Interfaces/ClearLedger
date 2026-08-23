@@ -777,11 +777,14 @@ async def test_strict_deny_и_break_glass_закрывают_прямой_фай
         db, company_id, b"strict content", file_name="strict.txt", mime="text/plain",
     )
     await db.flush()
-    db.add(DocVersion(
+    # Версия нужна дальше по имени: проверка прямого доступа к файлу ходит
+    # именно по её идентификатору.
+    version = DocVersion(
         company_id=company_id, doc_id=doc.id, revision=1, role="body",
         file_id=source.id, file_name=source.file_name, mime=source.mime_type,
         size_bytes=source.size, sha256=source.fingerprint, author_id=employee.id,
-    ))
+    )
+    db.add(version)
     grant = DocAccessGrant(
         company_id=company_id, scope_type="doc", scope_id=doc.id,
         subject_type="user", subject_id=employee.id,

@@ -38,16 +38,26 @@ def classify_external_export_status(status: str) -> str | None:
 
 
 async def document_snapshot(db: AsyncSession, doc: DocCard) -> dict[str, Any]:
-    case_row = await db.get(DocCase, doc.case_id) if doc.case_id else None
+    # Читаем из базы, а не из карты объектов сессии. Снимок — основание акта
+    # уничтожения: если строка выгрузки уже прочитана этой сессией и с тех пор
+    # изменилась, снимок покажет прежнее состояние, и документ уничтожат при
+    # неучтённой копии наружу. Ошибка тихая и необратимая, поэтому здесь
+    # `populate_existing` стоит явно, а не подразумевается свежей сессией.
+    fresh = {"populate_existing": True}
+    case_row = await db.get(DocCase, doc.case_id,
+                            populate_existing=True) if doc.case_id else None
     versions = (await db.execute(select(DocVersion).where(
         DocVersion.doc_id == doc.id,
-    ).order_by(DocVersion.role, DocVersion.revision, DocVersion.id))).scalars().all()
+    ).order_by(DocVersion.role, DocVersion.revision, DocVersion.id)
+        .execution_options(**fresh))).scalars().all()
     exports = (await db.execute(select(DocExport).where(
         DocExport.doc_id == doc.id,
-    ).order_by(DocExport.created_at, DocExport.id))).scalars().all()
+    ).order_by(DocExport.created_at, DocExport.id)
+        .execution_options(**fresh))).scalars().all()
     shares = (await db.execute(select(DocShareLink).where(
         DocShareLink.doc_id == doc.id,
-    ).order_by(DocShareLink.created_at, DocShareLink.id))).scalars().all()
+    ).order_by(DocShareLink.created_at, DocShareLink.id)
+        .execution_options(**fresh))).scalars().all()
     placed_exports = [
         row for row in exports
         if classify_external_export_status(row.status) == "known_copy"
