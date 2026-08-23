@@ -56,6 +56,9 @@ class Корректировка:
     author: str
     created_at: datetime
     status: str = "applied"
+    # Влияние на сумму документа — снимок в момент правки. Нужен сверке слоёв:
+    # разница «факт → пакет» обязана сойтись с суммой правок до копейки.
+    amount_delta: float = 0.0
 
 
 @dataclass
@@ -121,7 +124,7 @@ async def список_корректировок(
     """Действующие правки смены, старые первыми: порядок наложения — порядок правок."""
     rows = (await session.execute(text("""
         SELECT id, doc_kind, document_id, base_content_hash, patch, reason,
-               author, created_at, status
+               author, created_at, status, amount_delta
           FROM accounting_adjustments
          WHERE company_id = :c AND shift_key = :s AND status = 'applied'
          ORDER BY created_at, id
@@ -130,7 +133,7 @@ async def список_корректировок(
         id=r["id"], doc_kind=r["doc_kind"], document_id=r["document_id"],
         base_content_hash=r["base_content_hash"], patch=r["patch"] or {},
         reason=r["reason"], author=r["author"], created_at=r["created_at"],
-        status=r["status"],
+        status=r["status"], amount_delta=float(r["amount_delta"] or 0),
     ) for r in rows]
 
 

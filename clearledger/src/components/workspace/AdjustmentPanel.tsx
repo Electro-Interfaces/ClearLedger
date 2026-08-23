@@ -14,6 +14,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { getStoreShifts } from '@/services/storeService'
 import { PanelViewTabs } from './PanelViewTabs'
 import { AdjustmentJournalPanel } from './AdjustmentJournalPanel'
+import { AdjustmentReconPanel } from './AdjustmentReconPanel'
 import { History, PencilLine, RotateCcw, TriangleAlert } from 'lucide-react'
 import {
   getПредпросмотрПравок, getПравки, завестиПравку, отменитьПравку,
@@ -33,8 +34,11 @@ const ПОЛЯ: { ключ: keyof ДокСтрока; подпись: string; д
 
 const ВИДЫ = [
   { k: 'shift', label: 'По смене' },
+  { k: 'recon', label: 'Сверка слоёв' },
   { k: 'journal', label: 'Журнал за период' },
 ] as const
+
+type Вид = (typeof ВИДЫ)[number]['k']
 
 const число = (v: unknown) => (typeof v === 'number' ? v : Number(v ?? 0))
 const деньги = (v: unknown) => (число(v) === 0 ? '—' : fmtMoney(число(v)))
@@ -43,7 +47,7 @@ const кол = (v: unknown) => new Intl.NumberFormat('ru-RU', { maximumFractionD
 export function AdjustmentPanel({ companyId, dateFrom, dateTo }: {
   companyId: string; dateFrom: string; dateTo: string
 }) {
-  const [вид, setВид] = useState<'shift' | 'journal'>('shift')
+  const [вид, setВид] = useState<Вид>('shift')
   const [выбор, setВыбор] = useState<{ companyId: string; key: string } | null>(null)
   const ключ = выбор?.companyId === companyId ? выбор.key : null
   // companyId в ключе кеша обязателен: без него после смены компании панель
@@ -53,16 +57,19 @@ export function AdjustmentPanel({ companyId, dateFrom, dateTo }: {
     queryFn: () => getStoreShifts(dateFrom, dateTo),
   })
 
-  // Два вида одного дела: правка конкретной смены и то же самое за месяц.
-  // Журнал не отдельный пункт меню — приходят сюда с одним вопросом, отличается
-  // только масштаб.
+  // Три вида одного дела: правка смены, сверка её слоёв и то же за месяц.
+  // Отдельными пунктами меню они не стали намеренно — приходят сюда с одним
+  // вопросом, отличается масштаб и глубина.
+  //
+  // Журнал не привязан к выбранной смене, поэтому пикер смен ему не нужен и
+  // рисуется он во всю ширину.
   if (вид === 'journal') {
     return (
       <div>
         <div className="px-6 pt-4">
           <PanelViewTabs
             tabs={ВИДЫ} value={вид}
-            onChange={(k) => setВид(k as 'shift' | 'journal')} />
+            onChange={(k) => setВид(k as Вид)} />
         </div>
         <AdjustmentJournalPanel companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />
       </div>
@@ -73,12 +80,15 @@ export function AdjustmentPanel({ companyId, dateFrom, dateTo }: {
     <div className="p-6 space-y-4">
       <PanelViewTabs
         tabs={ВИДЫ} value={вид}
-        onChange={(k) => setВид(k as 'shift' | 'journal')} />
+        onChange={(k) => setВид(k as Вид)} />
       <div>
-        <h3 className="text-base font-semibold">Корректировки перед выгрузкой</h3>
+        <h3 className="text-base font-semibold">
+          {вид === 'recon' ? 'Сверка слоёв' : 'Корректировки перед выгрузкой'}
+        </h3>
         <p className="mt-0.5 max-w-3xl text-xs text-muted-foreground">
-          Правка документа перед отправкой в 1С. Факт станции при этом не меняется: его видит
-          администратор АЗС и раздел «Магазин», и он остаётся доказательством того, как продали.
+          {вид === 'recon'
+            ? 'Что продали на станции, что отправили в бухгалтерию и что легло в 1С — три состояния одной смены и объяснение разниц между ними.'
+            : 'Правка документа перед отправкой в 1С. Факт станции при этом не меняется: его видит администратор АЗС и раздел «Магазин», и он остаётся доказательством того, как продали.'}
         </p>
       </div>
 
@@ -112,7 +122,9 @@ export function AdjustmentPanel({ companyId, dateFrom, dateTo }: {
         </div>
 
         <div className="min-w-0">
-          <ДокументыСмены shiftKey={ключ ?? ''} />
+          {вид === 'recon'
+            ? <AdjustmentReconPanel shiftKey={ключ ?? ''} companyId={companyId} />
+            : <ДокументыСмены shiftKey={ключ ?? ''} />}
         </div>
       </div>
     </div>

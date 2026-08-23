@@ -126,3 +126,25 @@ export const getЖурналПравок = (
   date_from: dateFrom, date_to: dateTo,
   station_id: stationId ? String(stationId) : undefined,
 })
+
+/** Один слой сверки: сколько документов и на какую сумму. */
+export interface СлойСверки {
+  есть: boolean
+  документов: number
+  сумма: number
+  подробности: Record<string, number>
+  примечание: string
+}
+
+export interface СверкаСлоёв {
+  shift_key: string
+  Сошлось: boolean
+  Слои: Record<'Факт станции' | 'Отправлено' | 'В бухгалтерии', СлойСверки>
+  Правок: number
+  СуммаПравок: number
+  /** Разница между слоями и то, чем она объясняется. */
+  Выводы: { Слои: string; ok: boolean; Что: string; Почему: string }[]
+}
+
+export const getСверкаСлоёв = (shiftKey: string) =>
+  get<СверкаСлоёв>('/api/accounting/adjustments/reconciliation', { shift_key: shiftKey })
