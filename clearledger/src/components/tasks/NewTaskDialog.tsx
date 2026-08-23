@@ -58,6 +58,48 @@ export function NewTaskDialog({ companyId, onCreated, defaultObjectId, openSigna
   const [dragOver, setDragOver] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
+  /* Черновик постановки.
+   *
+   * Человек начинает писать задачу, его отвлекают, вкладка закрывается — и текст
+   * пропадает. Храним его в браузере: на сервере черновик пришлось бы чистить,
+   * показывать в списках и решать, чей он, — а задача решается тем, что текст
+   * остаётся там же, где его набирали.
+   *
+   * Файлы в черновик не кладём: их в хранилище браузера не положить, а
+   * притворяться, что они сохранены, хуже, чем честно потерять выбор файлов. */
+  const draftKey = `cl-task-draft-${companyId}`
+  useEffect(() => {
+    if (!open) return
+    try {
+      const saved = JSON.parse(localStorage.getItem(draftKey) || 'null')
+      if (!saved) return
+      setTitle((v) => v || saved.title || '')
+      setDescription((v) => v || saved.description || '')
+      setProjectId((v) => v || saved.projectId || '')
+      setTypeId((v) => v || saved.typeId || '')
+      setAssigneeId((v) => v || saved.assigneeId || '')
+      setPriority((v) => v || saved.priority || '')
+      setDueAt((v) => v || saved.dueAt || '')
+      setLabels((v) => (v.length ? v : saved.labels || []))
+    } catch {
+      // Испорченный черновик — не повод ронять диалог постановки.
+    }
+  }, [open, draftKey])
+  useEffect(() => {
+    if (!open) return
+    const draft = { title, description, projectId, typeId, assigneeId, priority, dueAt, labels }
+    const empty = !title.trim() && !description.trim() && !assigneeId && !dueAt
+      && !projectId && !typeId && !priority && labels.length === 0
+    try {
+      if (empty) localStorage.removeItem(draftKey)
+      else localStorage.setItem(draftKey, JSON.stringify(draft))
+    } catch {
+      // Приватный режим или переполненное хранилище: черновик не сохранится,
+      // но постановку это ломать не должно.
+    }
+  }, [open, draftKey, title, description, projectId, typeId, assigneeId,
+      priority, dueAt, labels])
+
   const projectsQ = useQuery({
     queryKey: ['task-projects', companyId],
     queryFn: () => tasksService.listTaskProjects(companyId),
@@ -89,6 +131,8 @@ export function NewTaskDialog({ companyId, onCreated, defaultObjectId, openSigna
     setTitle(''); setDescription(''); setProjectId(''); setTypeId(''); setAssigneeId('')
     setObjectId(defaultObjectId ?? ''); setPriority(''); setDueAt('')
     setLabels([]); setFiles([])
+    // Задача поставлена — черновик своё отработал.
+    try { localStorage.removeItem(draftKey) } catch { /* хранилище недоступно */ }
   }
 
   const addFiles = (list: FileList | File[] | null) => {
