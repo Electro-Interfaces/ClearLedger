@@ -10677,8 +10677,15 @@ class DocKind(Base):
     number_template: Mapped[str] = mapped_column(
         String(80), nullable=False, default="{prefix}-{yyyy}-{n:04d}")
     # Область непрерывной нумерации: kind | kind_year | kind_org | kind_org_year.
+    #
+    # По умолчанию — год без юрлица, в пару к шаблону выше. Раньше здесь стоял
+    # `kind_org_year`, и дефолты спорили друг с другом: счётчик отдельный по
+    # юрлицу, а признака юрлица в номере нет. Правило вида такое сочетание
+    # запрещает, и вид, заведённый посевом, нельзя было сохранить через форму —
+    # 400 на каждой правке. Кому нужен журнал по юрлицу, включает область и
+    # добавляет `{org}` в шаблон; отказ прямо об этом говорит.
     number_scope: Mapped[str] = mapped_column(
-        String(20), nullable=False, default="kind_org_year")
+        String(20), nullable=False, default="kind_year")
     number_prefix: Mapped[str] = mapped_column(String(20), nullable=False, default="")
     # Схема предметных реквизитов вида: [{code,label,type,options,required}].
     # У приказа это гриф и основание, у входящего — способ доставки. Заводить под

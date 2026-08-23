@@ -98,3 +98,31 @@ export function измененияСтроки(
     .filter((поле) => поле !== 'НомерСтроки' && было[поле] !== стало[поле])
     .map((поле) => ({ поле, было: было[поле], стало: стало[поле] }))
 }
+
+/** Строка журнала за период: правка вместе с тем, что было до неё. */
+export interface ЗаписьЖурнала extends ЗаписьИстории {
+  shift_key: string
+  station_id: number | null
+  business_date: string | null
+  amount_delta: number
+  prev_values: {
+    Строки?: Record<string, Record<string, unknown>>
+    Шапка?: Record<string, unknown>
+  }
+}
+
+export interface ЖурналПравок {
+  Записи: ЗаписьЖурнала[]
+  Всего: number
+  Действующих: number
+  /** На сколько действующие правки изменили суммы документов. */
+  ВлияниеНаСумму: number
+  Авторы: string[]
+}
+
+export const getЖурналПравок = (
+  dateFrom: string, dateTo: string, stationId?: number,
+) => get<ЖурналПравок>('/api/accounting/adjustments/journal', {
+  date_from: dateFrom, date_to: dateTo,
+  station_id: stationId ? String(stationId) : undefined,
+})

@@ -20,7 +20,7 @@ import unicodedata
 import uuid
 from dataclasses import dataclass, field
 from decimal import Decimal
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import text
@@ -160,8 +160,16 @@ async def завести_корректировку(
     reason: str,
     author: str,
     business_shift_id: uuid.UUID | None = None,
+    оригинал: dict | None = None,
+    station_id: int | None = None,
+    business_date: str | None = None,
 ) -> uuid.UUID:
-    """Записать правку. Без причины и без содержимого не принимаем."""
+    """Записать правку. Без причины и без содержимого не принимаем.
+
+    Прежние значения снимаем здесь же, из документа: журнал за месяц не должен
+    пересобирать полсотни пакетов ради ответа «что было», а после пересчёта
+    смены прежние цифры уже не восстановить.
+    """
     reason = (reason or "").strip()
     if not reason:
         raise AdjustmentError(
@@ -174,19 +182,50 @@ async def завести_корректировку(
     if len(base_content_hash or "") != 64:
         raise AdjustmentError("Правка должна ссылаться на версию факта (хеш документа)")
 
+    прежние, дельта = снять_прежние(оригинал, patch) if оригинал else ({}, 0.0)
+
     ident = uuid.uuid4()
     await session.execute(text("""
         INSERT INTO accounting_adjustments
             (id, company_id, business_shift_id, shift_key, doc_kind, document_id,
-             base_content_hash, patch, reason, author, status)
-        VALUES (:id, :c, :bs, :s, :k, :d, :h, CAST(:p AS jsonb), :r, :a, 'applied')
+             base_content_hash, patch, reason, author, status,
+             prev_values, amount_delta, station_id, business_date)
+        VALUES (:id, :c, :bs, :s, :k, :d, :h, CAST(:p AS jsonb), :r, :a, 'applied',
+                CAST(:prev AS jsonb), :delta, :st, :bd)
     """), {
         "id": str(ident), "c": str(company_id),
         "bs": str(business_shift_id) if business_shift_id else None,
         "s": shift_key, "k": doc_kind, "d": document_id,
         "h": base_content_hash, "p": _json(patch), "r": reason, "a": author or "",
+        "prev": _json(прежние), "delta": Decimal(str(дельта)),
+        "st": station_id, "bd": _дата(business_date),
     })
     return ident
+
+
+def снять_прежние(документ: dict, patch: dict) -> tuple[dict, float]:
+    """Что было до правки и на сколько изменится сумма документа.
+
+    Дельта считается по полю «Сумма»: именно её сверяет бухгалтерия, когда
+    спрашивает «на сколько мы разошлись с фактом станции».
+    """
+    прежние: dict = {}
+    дельта = 0.0
+    товары = {int(т.get("НомерСтроки") or 0): т for т in (документ.get("Товары") or [])}
+    for правка in (patch.get("Строки") or []):
+        номер = int(правка.get("НомерСтроки") or 0)
+        строка = товары.get(номер)
+        if строка is None:
+            continue
+        было = {поле: строка.get(поле) for поле in правка if поле != "НомерСтроки"}
+        было["Наименование"] = строка.get("Наименование")
+        прежние.setdefault("Строки", {})[str(номер)] = было
+        if "Сумма" in правка:
+            дельта += float(правка.get("Сумма") or 0) - float(строка.get("Сумма") or 0)
+    шапка = patch.get("Шапка") or {}
+    if шапка:
+        прежние["Шапка"] = {поле: документ.get(поле) for поле in шапка}
+    return прежние, round(дельта, 2)
 
 
 async def отменить_корректировку(
@@ -311,6 +350,58 @@ def _iso(значение: Any) -> str:
     return str(значение or "")
 
 
+def _дата(значение: str | None):
+    """Строку в дату: драйвер PostgreSQL принимает date, а не «2026-08-20»."""
+    if not значение:
+        return None
+    try:
+        return datetime.strptime(str(значение)[:10], "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
 def _json(значение: Any) -> str:
     import json
     return json.dumps(значение, ensure_ascii=False)
+
+
+async def журнал_за_период(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    *,
+    date_from: str,
+    date_to: str,
+    station_id: int | None = None,
+    только_действующие: bool = False,
+) -> list[dict]:
+    """Все правки за период — то, что спросят при разборе с бухгалтерией.
+
+    Отменённые входят намеренно: журнал отвечает на вопрос «что делали», а не
+    «что осталось». Отменённая правка — тоже действие, и она объясняет, почему
+    цифра сначала изменилась, а потом вернулась.
+    """
+    # Правую границу сдвигаем на день здесь, а не в SQL: параметр без явного
+    # типа Postgres к дате не приводит, и «дата + interval» падает на типах.
+    # Заодно период включает последний день целиком — иначе теряются документы,
+    # заведённые вечером.
+    начало = _дата(date_from)
+    конец = _дата(date_to)
+    условия = ["company_id = :c", "created_at >= :f", "created_at < :t"]
+    параметры: dict[str, Any] = {
+        "c": str(company_id), "f": начало,
+        "t": (конец + timedelta(days=1)) if конец else None,
+    }
+    if station_id:
+        условия.append("station_id = :st")
+        параметры["st"] = station_id
+    if только_действующие:
+        условия.append("status = 'applied'")
+    rows = (await session.execute(text("""
+        SELECT id, shift_key, doc_kind, document_id, patch, prev_values,
+               amount_delta, reason, author, status, station_id, business_date,
+               created_at, cancelled_at, cancelled_by
+          FROM accounting_adjustments
+         WHERE %s
+         ORDER BY created_at DESC, id
+    """ % " AND ".join(условия)), параметры)).mappings().all()
+    return [dict(r) for r in rows]

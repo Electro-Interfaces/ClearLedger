@@ -2903,6 +2903,22 @@ async def create_all() -> None:
         await conn.execute(_sa.text(
             "CREATE INDEX IF NOT EXISTS accounting_adjustments_shift "
             "ON accounting_adjustments (company_id, shift_key, status)"))
+        # Прежние значения и влияние на сумму — снимок в момент правки. Журнал
+        # за месяц не должен пересобирать полсотни пакетов, чтобы ответить
+        # «что было и на сколько изменилось»; а после пересчёта смены прежние
+        # цифры вообще не восстановить.
+        for колонка, тип in (
+            ("prev_values", "JSONB NOT NULL DEFAULT '{}'::jsonb"),
+            ("amount_delta", "NUMERIC(18,2) NOT NULL DEFAULT 0"),
+            ("station_id", "INTEGER"),
+            ("business_date", "DATE"),
+        ):
+            await conn.execute(_sa.text(
+                "ALTER TABLE accounting_adjustments ADD COLUMN IF NOT EXISTS %s %s"
+                % (колонка, тип)))
+        await conn.execute(_sa.text(
+            "CREATE INDEX IF NOT EXISTS accounting_adjustments_period "
+            "ON accounting_adjustments (company_id, business_date)"))
 
         # Политика Магазина v1: цены всех карточек находятся в ведении АЗС.
         # Колонка остаётся — позже она снова станет различаться по категории
@@ -3877,6 +3893,19 @@ async def create_all() -> None:
         # при первом же движении по маршруту и при правке типа.
         for stmt in (
             "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS stage_column VARCHAR(20)",
+        ):
+            await conn.execute(_sa.text(stmt))
+
+        # v2.67: у видов документов область нумерации и шаблон согласуются.
+        #
+        # Дефолт области был «по юрлицу и году», а дефолт шаблона — без `{org}`.
+        # Пока вид не трогали, он работал: юрлицо в компании одно, счётчик всё
+        # равно один. Но правка такого вида через форму падала с 400, потому что
+        # правило требует признак юрлица в номере. Приводим область к тому, что
+        # шаблон умеет: нумерация продолжается, номера не меняются.
+        for stmt in (
+            "UPDATE doc_kinds SET number_scope = replace(number_scope, '_org', '')"
+            " WHERE number_scope LIKE '%_org%' AND number_template NOT LIKE '%{org%'",
         ):
             await conn.execute(_sa.text(stmt))
 

@@ -994,7 +994,7 @@ class KindIn(BaseModel):
     family: str = Field("internal", pattern="^(ord|incoming|outgoing|internal|contract|other)$")
     direction: str = Field("none", pattern="^(in|out|none)$")
     number_template: str = Field("{prefix}-{org}-{yyyy}-{n:04d}", max_length=80)
-    number_scope: str = Field("kind_org_year", pattern="^(kind|kind_year|kind_org|kind_org_year)$")
+    number_scope: str = Field("kind_year", pattern="^(kind|kind_year|kind_org|kind_org_year)$")
     number_prefix: str = Field("", max_length=20)
     fields: list[dict] = Field(default_factory=list)
     # Маршрут согласования вида. Санитайзер оставляет только известные ключи:
@@ -3685,6 +3685,11 @@ async def docs_board(
     decision_by: str | None = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=100),
+    # Отбор по метке доска умела в теле, но параметр в сигнатуре потерялся: любое
+    # обращение падало с NameError, то есть 500 на весь экран. Место — в конце:
+    # доску зовут и напрямую, позиционными аргументами, и вставка в середину
+    # сдвинула бы чужие вызовы.
+    label_id: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):

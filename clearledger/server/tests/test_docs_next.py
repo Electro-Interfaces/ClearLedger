@@ -682,7 +682,7 @@ async def test_отчёт_и_детализация_одинаково_скры�
         company_id=cid_raw, family=None, kind_id=str(kind.id), assignee_id=None,
         pending_only=False, overdue_only=False, cohort_from=cohort_day,
         cohort_to=cohort_day, report_metric="completed", decision_by=None,
-        page=1, page_size=50, db=db, current_user=admin,
+        page=1, page_size=50, label_id=None, db=db, current_user=admin,
     )
     assert detail["total"] == 0
 

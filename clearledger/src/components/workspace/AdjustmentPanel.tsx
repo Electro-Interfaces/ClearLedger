@@ -12,6 +12,8 @@
 import { useMemo, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { getStoreShifts } from '@/services/storeService'
+import { PanelViewTabs } from './PanelViewTabs'
+import { AdjustmentJournalPanel } from './AdjustmentJournalPanel'
 import { History, PencilLine, RotateCcw, TriangleAlert } from 'lucide-react'
 import {
   getПредпросмотрПравок, getПравки, завестиПравку, отменитьПравку,
@@ -29,6 +31,11 @@ const ПОЛЯ: { ключ: keyof ДокСтрока; подпись: string; д
   { ключ: 'СуммаНДС', подпись: 'НДС', деньги: true },
 ]
 
+const ВИДЫ = [
+  { k: 'shift', label: 'По смене' },
+  { k: 'journal', label: 'Журнал за период' },
+] as const
+
 const число = (v: unknown) => (typeof v === 'number' ? v : Number(v ?? 0))
 const деньги = (v: unknown) => (число(v) === 0 ? '—' : fmtMoney(число(v)))
 const кол = (v: unknown) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 3 }).format(число(v))
@@ -36,6 +43,7 @@ const кол = (v: unknown) => new Intl.NumberFormat('ru-RU', { maximumFractionD
 export function AdjustmentPanel({ companyId, dateFrom, dateTo }: {
   companyId: string; dateFrom: string; dateTo: string
 }) {
+  const [вид, setВид] = useState<'shift' | 'journal'>('shift')
   const [выбор, setВыбор] = useState<{ companyId: string; key: string } | null>(null)
   const ключ = выбор?.companyId === companyId ? выбор.key : null
   // companyId в ключе кеша обязателен: без него после смены компании панель
@@ -45,8 +53,27 @@ export function AdjustmentPanel({ companyId, dateFrom, dateTo }: {
     queryFn: () => getStoreShifts(dateFrom, dateTo),
   })
 
+  // Два вида одного дела: правка конкретной смены и то же самое за месяц.
+  // Журнал не отдельный пункт меню — приходят сюда с одним вопросом, отличается
+  // только масштаб.
+  if (вид === 'journal') {
+    return (
+      <div>
+        <div className="px-6 pt-4">
+          <PanelViewTabs
+            tabs={ВИДЫ} value={вид}
+            onChange={(k) => setВид(k as 'shift' | 'journal')} />
+        </div>
+        <AdjustmentJournalPanel companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />
+      </div>
+    )
+  }
+
   return (
     <div className="p-6 space-y-4">
+      <PanelViewTabs
+        tabs={ВИДЫ} value={вид}
+        onChange={(k) => setВид(k as 'shift' | 'journal')} />
       <div>
         <h3 className="text-base font-semibold">Корректировки перед выгрузкой</h3>
         <p className="mt-0.5 max-w-3xl text-xs text-muted-foreground">
