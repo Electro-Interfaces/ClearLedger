@@ -96,6 +96,8 @@ export function TasksWorkPage({ embeddedView }: {
   const asBoard = params.get('as') === 'board'
   const canBoard = ['mine', 'assigned', 'today', 'waiting'].includes(view)
   const [picked, setPicked] = useState<Set<string>>(new Set())
+  // Счётчик, а не флаг: второе нажатие `N` после закрытия должно снова открыть.
+  const [newTaskSignal, setNewTaskSignal] = useState(0)
 
   const objectsQ = useQuery({
     queryKey: ['space-objects', company.id],
@@ -132,7 +134,9 @@ export function TasksWorkPage({ embeddedView }: {
   const peopleQ = useQuery({
     queryKey: ['task-people', company.id],
     queryFn: () => tasksService.listTaskPeople(company.id),
-    enabled: full, staleTime: 5 * 60 * 1000,
+    // Люди нужны и в личных разрезах: исполнителя меняют прямо в строке, а
+    // список сотрудников пространства невелик и живёт в кэше пять минут.
+    staleTime: 5 * 60 * 1000,
   })
   const labelsQ = useQuery({
     queryKey: ['task-labels', company.id],
@@ -197,6 +201,13 @@ export function TasksWorkPage({ embeddedView }: {
       }
       if (e.ctrlKey || e.altKey || e.metaKey) return
       if (e.key === '/') { e.preventDefault(); searchRef.current?.focus(); return }
+      // `N` ставит задачу — как в YouTrack. Клавиша молчит, пока курсор в поле
+      // ввода: иначе буква в заголовке открывала бы диалог.
+      if (e.key === 'n' || e.key === 'т' || e.key === 'N' || e.key === 'Т') {
+        e.preventDefault()
+        setNewTaskSignal((n) => n + 1)
+        return
+      }
       if (e.key === 'Escape' && picked.size) { setPicked(new Set()); return }
       if (!tasks.length) return
       if (e.key === 'ArrowDown' || e.key === 'j') {
@@ -293,6 +304,7 @@ export function TasksWorkPage({ embeddedView }: {
         <div className="flex items-center gap-2">
           <QuickCreate companyId={company.id} onCreated={refresh} />
           <NewTaskDialog companyId={company.id} defaultObjectId={objectId || undefined}
+            openSignal={newTaskSignal}
             onCreated={(id) => { refresh(); set({ task: id }) }} />
         </div>
       )}
@@ -395,7 +407,8 @@ export function TasksWorkPage({ embeddedView }: {
         ) : (
           <TasksTable tasks={tasks} sort={sort} onSort={(s) => set({ sort: s })}
             picked={picked} onPick={setPicked} cursor={cursor} groupByObject={view === 'objects'}
-            onOpen={(id) => set({ task: id })} />
+            onOpen={(id) => set({ task: id })} companyId={company.id}
+            people={peopleQ.data?.people ?? []} onChanged={refresh} />
         )
       )}
 
@@ -466,10 +479,14 @@ const COLUMNS: { key: string; label: string; sort?: string }[] = [
   { key: 'updated', label: 'Обновлена', sort: 'updated' },
 ]
 
-function TasksTable({ tasks, sort, onSort, picked, onPick, cursor, groupByObject, onOpen }: {
+function TasksTable({ tasks, sort, onSort, picked, onPick, cursor, groupByObject,
+                     onOpen, companyId, people, onChanged }: {
   tasks: ListedTask[]; sort: string; onSort: (s: string) => void
   picked: Set<string>; onPick: (s: Set<string>) => void; cursor?: number
   groupByObject: boolean; onOpen: (id: string) => void
+  // Правка в строке делает то же действие, что карточка: ей нужны компания,
+  // список людей и способ перечитать список.
+  companyId: string; people: { id: string; name: string }[]; onChanged: () => void
 }) {
   // Место — разрез, а не свойство карточки: в «По объектам» одна и та же задача
   // не размножается, но заголовок группы отвечает на вопрос «что на этой точке».
@@ -635,8 +652,12 @@ function TasksTable({ tasks, sort, onSort, picked, onPick, cursor, groupByObject
                       </span>
                     )}
                   </td>
-                  <td className="p-2.5 align-top">
-                    {t.assignee ?? <span className="text-muted-foreground">не назначен</span>}
+                  <td className="p-2.5 align-top" onClick={(e) => e.stopPropagation()}>
+                    {/* Правка в строке: сменить исполнителя — самое частое, ради
+                        чего открывали карточку. Клик по ячейке не открывает
+                        задачу, иначе выбор превращался бы в переход. */}
+                    <InlineAssignee task={t} companyId={companyId}
+                      people={people} onChanged={onChanged} />
                   </td>
                   <td className="p-2.5 align-top">{t.object ?? '—'}</td>
                   <td className={cn('whitespace-nowrap p-2.5 align-top',
@@ -921,6 +942,44 @@ async function exportTasks(tasks: ListedTask[], sheetName: string) {
   XLSX.utils.book_append_sheet(book, sheet, sheetName.slice(0, 31))
   XLSX.writeFile(book, `Задачи — ${sheetName}.xlsx`)
 }
+
+
+/** Исполнитель прямо в строке списка.
+ *
+ *  Открывать карточку ради смены исполнителя — то, на что уходит половина
+ *  времени работы со списком. Действие то же самое, что в карточке: одна ручка,
+ *  один след. */
+function InlineAssignee({ task, companyId, people, onChanged }: {
+  task: ListedTask
+  companyId: string
+  people: { id: string; name: string }[]
+  onChanged: () => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const act = useMutation({
+    mutationFn: (assigneeId: string | null) =>
+      tasksService.taskAction(task.id, { companyId, assigneeId }),
+    onSuccess: () => { setEditing(false); onChanged() },
+    onError: (e) => toast.error((e as Error).message),
+  })
+
+  if (!editing) {
+    return (
+      <button type="button" onClick={() => setEditing(true)}
+        className="text-left hover:underline">
+        {task.assignee ?? <span className="text-muted-foreground">не назначен</span>}
+      </button>
+    )
+  }
+  return (
+    <SearchPicker className="w-[170px]" value={task.assignee_id ?? ''}
+      items={people.map((p) => ({ id: p.id, name: p.name }))}
+      onChange={(v) => act.mutate(v || null)}
+      placeholder="Не назначен" emptyLabel="Не назначен"
+      searchPlaceholder="Фамилия или имя…" />
+  )
+}
+
 
 /* ── Мелочи ──────────────────────────────────────────────────────────── */
 

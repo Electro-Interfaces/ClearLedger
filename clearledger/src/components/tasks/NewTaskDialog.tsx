@@ -10,7 +10,7 @@
  * Файлы: выбор, перетаскивание и вставка из буфера (Ctrl+V) — скриншот
  * попадает в задачу без промежуточного «сохранить на диск».
  */
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ImagePlus, Loader2, Paperclip, Plus, Trash2, Upload } from 'lucide-react'
 import { toast } from 'sonner'
@@ -31,15 +31,20 @@ import { PRIORITY_LABEL, fileSize } from './taskWords'
 import { SearchPicker } from './SearchPicker'
 import { useAuth } from '@/contexts/AuthContext'
 
-export function NewTaskDialog({ companyId, onCreated, defaultObjectId }: {
+export function NewTaskDialog({ companyId, onCreated, defaultObjectId, openSignal }: {
   companyId: string
   onCreated: (taskId: string) => void
   defaultObjectId?: string
+  /** Счётчик внешних запросов на открытие: клавиша `N` в списке. Открывать
+   *  диалог из родителя приходится счётчиком, а не флагом, — иначе повторное
+   *  нажатие после закрытия ничего не сделает. */
+  openSignal?: number
 }) {
   const qc = useQueryClient()
   const { user } = useAuth()
   const me = user?.id ?? ''
   const [open, setOpen] = useState(false)
+  useEffect(() => { if (openSignal) setOpen(true) }, [openSignal])
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [projectId, setProjectId] = useState('')
