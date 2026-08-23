@@ -101,3 +101,35 @@ export function workHref(item: WorkItem): string {
     ? `/docs?view=all&doc=${item.id}`
     : `/docs/company?view=errands&task=${item.id}`
 }
+
+/** Строка очереди «На мне»: предмет плюс род действия, которого он от меня ждёт. */
+export interface MyWorkItem {
+  kind: 'doc' | 'task'
+  id: string
+  /** `approve` — виза, `acquaint` — ознакомление, `do` — работа, `own` — мой документ. */
+  reason: 'approve' | 'acquaint' | 'do' | 'own'
+  reason_name: string
+  key: string
+  title: string
+  note: string | null
+  due_at: string | null
+  overdue: boolean
+  bucket: 'overdue' | 'today' | 'week' | 'later'
+  state?: string
+  acting_for?: string | null
+  acquaint_id?: string
+}
+
+export async function myWork(companyId: string) {
+  return get<{
+    mine: MyWorkItem[]
+    buckets: { code: MyWorkItem['bucket']; name: string }[]
+  }>('/api/work/mine', { company_id: companyId })
+}
+
+/** Куда ведёт строка очереди: виза открывается в карточке документа. */
+export function myWorkHref(item: MyWorkItem): string {
+  return item.kind === 'doc'
+    ? `/docs?view=all&doc=${item.id}`
+    : `/docs/company?view=errands&task=${item.id}`
+}

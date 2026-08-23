@@ -22,6 +22,8 @@ import { formatDate } from '@/lib/formatDate'
 
 const TasksWorkPage = lazy(() => import('@/pages/tasks/TasksWorkPage')
   .then((module) => ({ default: module.TasksWorkPage })))
+const MyWorkPage = lazy(() => import('./MyWorkPage')
+  .then((module) => ({ default: module.MyWorkPage })))
 const MINE_PAGE_SIZE = 200
 
 export function DocsWorkPage() {
@@ -93,6 +95,14 @@ export function DocsWorkPage() {
   }
 
   if (!companyId) return null
+
+  if (view === 'mine-all') {
+    return (
+      <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">Загрузка…</div>}>
+        <MyWorkPage />
+      </Suspense>
+    )
+  }
 
   if (view === 'errands') {
     return (

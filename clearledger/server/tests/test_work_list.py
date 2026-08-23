@@ -167,3 +167,39 @@ async def test_язык_запросов_работает_над_общей_ле
         "company_id": cid, "scope": "all", "limit": 200,
         "query": "приоритет: срочная"})).json()
     assert body["query"]["unknown"], "молча сузили ленту тем, чего у документов нет"
+
+
+async def test_очередь_на_мне_собирает_все_роды_действия(auth_client: AsyncClient):
+    """Этап 13г: визы, ознакомления, работа и свои документы одной очередью.
+
+    Ловим: предмет двоится, когда он и на визе, и мой; очередь не отвечает «что
+    горит», потому что не сгруппирована по сроку.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    me = await _me(auth_client)
+    cid = me["companies"][0]["id"]
+
+    past = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
+    r = await auth_client.post("/api/tasks", json={
+        "company_id": cid, "title": "Просроченная работа на мне",
+        "assignee_id": me["id"], "due_at": past})
+    assert r.status_code == 201, r.text
+    task = r.json()
+
+    body = (await auth_client.get("/api/work/mine",
+                                  params={"company_id": cid})).json()
+    rows = {(r["kind"], r["id"]): r for r in body["mine"]}
+    mine = rows.get(("task", task["id"]))
+    assert mine, "поручение на мне не попало в очередь"
+    assert mine["reason"] == "do" and mine["bucket"] == "overdue"
+    assert mine["overdue"] is True
+    assert [b["code"] for b in body["buckets"]] == ["overdue", "today", "week", "later"]
+
+    # Один предмет — одна строка: очередь не двоит работу.
+    keys = [(r["kind"], r["id"]) for r in body["mine"]]
+    assert len(keys) == len(set(keys)), "предмет попал в очередь дважды"
+
+    # Горящее стоит выше того, что без срока.
+    order = [r["bucket"] for r in body["mine"]]
+    assert order == sorted(order, key=lambda b: ["overdue", "today", "week", "later"].index(b))

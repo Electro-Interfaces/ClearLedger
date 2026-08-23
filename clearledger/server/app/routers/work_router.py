@@ -347,6 +347,145 @@ async def _decorate(db: AsyncSession, cid: uuid.UUID, rows: list[Any],
     return out
 
 
+# ── Очередь «На мне» ────────────────────────────────────────────────────────
+# Личное разложено по четырём спискам: визы, поручения, ознакомления, свои
+# документы. Человек утром хочет знать не «сколько у меня виз», а «что горит», —
+# и здесь это один список, сгруппированный по сроку.
+#
+# Род действия остаётся в строке (`reason`), потому что от него зависит, что с
+# предметом делать: расписаться, отметить прочтение или закрыть работу.
+
+# Что человек должен сделать с предметом. Порядок — приоритет показа, когда один
+# предмет попадает в очередь дважды: расписаться важнее, чем «мой документ».
+_REASONS: tuple[tuple[str, str], ...] = (
+    ("approve", "виза"),
+    ("acquaint", "ознакомиться"),
+    ("do", "работа"),
+    ("own", "мой документ"),
+)
+
+
+@router.get("/mine")
+async def work_mine(
+    company_id: str = Query(...),
+    limit: int = Query(200, ge=1, le=_LIST_LIMIT),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Всё, что ждёт лично меня, одной очередью.
+
+    Четыре источника сводятся здесь, а не на экране: иначе клиент собирал бы
+    очередь четырьмя запросами и сам решал, что важнее, — а «что горит» это
+    вопрос к данным, а не к вёрстке.
+    """
+    cid = await _assert_work(company_id, current_user, db)
+    now = datetime.now(timezone.utc)
+
+    from app.routers.docs_router import approvals_mine, my_acquaints
+    from app.routers.tasks_router import _is_admin, _visible_to
+
+    admin = await _is_admin(db, cid, current_user)
+    items: dict[tuple[str, str], dict[str, Any]] = {}
+
+    def put(kind: str, item_id: str, reason: str, data: dict[str, Any]) -> None:
+        """Один предмет — одна строка. Приоритет рода действия задан `_REASONS`:
+        документ, который я и подписываю, и веду, ждёт от меня подписи."""
+        key = (kind, item_id)
+        order = [r for r, _ in _REASONS]
+        if key in items and order.index(items[key]["reason"]) <= order.index(reason):
+            return
+        items[key] = {"kind": kind, "id": item_id, "reason": reason,
+                      "reason_name": dict(_REASONS)[reason], **data}
+
+    # Визы и ознакомления берём у их хозяина: правила замещения, кругов и
+    # break-glass живут там, и повторять их здесь значит завести вторую версию.
+    approvals = (await approvals_mine(company_id, db, current_user))["approvals"]
+    for row in approvals:
+        put("doc", row["doc_id"], "approve", {
+            "title": row["doc_title"], "key": row["doc_number"] or "черновик",
+            "due_at": row["due_at"], "note": row["step_name"],
+            "acting_for": row.get("acting_for"),
+        })
+    acquaints = (await my_acquaints(company_id, db, current_user))["acquaints"]
+    for row in acquaints:
+        put("doc", row["doc_id"], "acquaint", {
+            "title": row["doc_title"], "key": row["doc_number"] or "черновик",
+            "due_at": row["due_at"], "note": None, "acquaint_id": row["id"],
+        })
+
+    # Поручения на мне и мои документы — из общей проекции: состояние и ключ
+    # считаются тем же правилом, что в ленте.
+    task_rows = (await db.execute(
+        select(Task).where(
+            Task.company_id == cid, _visible_to(current_user, admin),
+            Task.status == "open", Task.assignee_id == current_user.id)
+        .order_by(Task.due_at.asc().nullslast()).limit(limit))).scalars().all()
+    projects = {p.id: p.code for p in (await db.execute(select(TaskProject).where(
+        TaskProject.id.in_({t.project_id for t in task_rows if t.project_id}))
+    )).scalars()} if task_rows else {}
+    types = {t.id: t for t in (await db.execute(select(TaskType).where(
+        TaskType.id.in_({t.type_id for t in task_rows if t.type_id}))
+    )).scalars()} if task_rows else {}
+    for t in task_rows:
+        code = projects.get(t.project_id)
+        route = (types[t.type_id].route if t.type_id in types else None) or []
+        put("task", str(t.id), "do", {
+            "title": t.title,
+            "key": (f"{code}-{t.project_number}" if code and t.project_number
+                    else f"№{t.number}"),
+            "due_at": t.due_at.isoformat() if t.due_at else None,
+            "note": next((s.get("name") for s in route
+                          if s.get("code") == t.stage_code), None),
+            "state": work_state.task_state(t, route),
+        })
+
+    doc_rows = (await db.execute(
+        select(DocCard).where(
+            DocCard.company_id == cid,
+            DocCard.status.in_(("draft", "registered", "in_force")),
+            or_(DocCard.responsible_id == current_user.id,
+                DocCard.author_id == current_user.id))
+        .order_by(DocCard.due_at.asc().nullslast()).limit(limit))).scalars().all()
+    for d in doc_rows:
+        put("doc", str(d.id), "own", {
+            "title": d.title, "key": d.reg_number or "черновик",
+            "due_at": d.due_at.isoformat() if d.due_at else None,
+            "note": None, "state": work_state.doc_state(d),
+        })
+
+    # Группа по сроку — то, ради чего очередь и собрана: человек спрашивает
+    # «что горит», а не «сколько у меня виз».
+    def bucket(due: str | None) -> str:
+        if not due:
+            return "later"
+        at = datetime.fromisoformat(due)
+        if at.tzinfo is None:
+            at = at.replace(tzinfo=timezone.utc)
+        if at < now:
+            return "overdue"
+        if at < now + timedelta(days=1):
+            return "today"
+        if at < now + timedelta(days=7):
+            return "week"
+        return "later"
+
+    rows = []
+    for item in items.values():
+        rows.append({**item, "bucket": bucket(item.get("due_at")),
+                     "overdue": bucket(item.get("due_at")) == "overdue"})
+    order = {"overdue": 0, "today": 1, "week": 2, "later": 3}
+    rows.sort(key=lambda r: (order[r["bucket"]], r.get("due_at") or "9999"))
+    return {
+        "mine": rows,
+        "buckets": [
+            {"code": "overdue", "name": "Горит"},
+            {"code": "today", "name": "Сегодня"},
+            {"code": "week", "name": "На неделе"},
+            {"code": "later", "name": "Без срока"},
+        ],
+    }
+
+
 @router.get("/summary")
 async def work_summary(
     company_id: str = Query(...),
