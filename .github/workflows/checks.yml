@@ -1,0 +1,92 @@
+# Проверки на каждый push: типы фронта и тесты бэкенда.
+#
+# До этого проверок не было вовсе — единственный workflow собирал витрину на
+# GitHub Pages. Тесты гоняли руками в контейнере на стенде, то есть почти
+# никогда: 23.08.2026 в наборе нашлись три теста, сломанных неделями и никем не
+# замеченных, — рейт-лимит на входе, ручка, переехавшая в другой раздел, и мок,
+# мимо которого код давно ходит другой дорогой.
+#
+# Тесты с БД поднимают настоящий Postgres: половина проверок здесь про
+# транзакционные счётчики, уникальные индексы и блокировки — на заглушке они
+# не значат ничего.
+name: Проверки
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  types:
+    name: Типы фронта
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: clearledger
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: clearledger/package-lock.json
+      - run: npm ci
+      # Прод-сборка Vite типы не проверяет: без этого шага ошибка уезжает в образ.
+      - run: npx tsc --noEmit -p tsconfig.app.json
+
+  tests:
+    name: Тесты бэкенда
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: clearledger/server
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: clearledger
+          POSTGRES_PASSWORD: clearledger
+          POSTGRES_DB: clearledger_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U clearledger"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgresql+asyncpg://clearledger:clearledger@localhost:5432/clearledger_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-test.txt
+      # Карантин — файлы, красные не из-за проверяемого изменения. Он на виду и
+      # с причинами: список, который никто не читает, превращается в способ
+      # прятать поломки.
+      - name: Что вынесено из прогона
+        run: cat tests/quarantine.txt
+      - name: Прогон
+        run: |
+          # Каждый файл — свой процесс и своя чистая база. Набор пока зависит от
+          # порядка: тест видит компанию и документы, заведённые соседним файлом,
+          # и падает не по своей вине. Пока это не вычищено, честнее гонять файлы
+          # порознь, чем читать случайные падения общего прогона.
+          failed=""
+          for file in tests/test_*.py; do
+            if grep -qxF "$file" tests/quarantine.txt; then
+              echo "::notice::карантин, пропущен: $file"
+              continue
+            fi
+            echo "::group::$file"
+            python -m pytest "$file" -q -p no:cacheprovider || failed="$failed $file"
+            echo "::endgroup::"
+          done
+          if [ -n "$failed" ]; then
+            echo "::error::красные файлы:$failed"
+            exit 1
+          fi
