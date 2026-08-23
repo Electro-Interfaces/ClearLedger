@@ -286,3 +286,85 @@ async def сверка(
         "СуммаПравок": с.сумма_правок,
         "Выводы": с.выводы,
     }
+
+
+@router.get("/onec-snapshot")
+async def срез_боевой_бп(
+    date_from: str = Query(..., description="с даты, YYYY-MM-DD"),
+    date_to: str = Query(..., description="по дату включительно"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Что видно в боевой БП ГИГ за период: документы, проводка, дата запрета.
+
+    Взгляд в реальную бухгалтерию — не выгрузка и не сверка пакета. Отвечает на
+    вопрос «как там идёт учёт»: что уже проведено, что лежит непроведённым и до
+    какой даты период закрыт.
+
+    Читаем и только читаем: документы в БП кладёт бухгалтер расширением.
+    """
+    from datetime import date as _date
+
+    from sqlalchemy import select as _select
+
+    from app.models import Source, SourceCredentials
+    from app.services.onec.crypto import decrypt_password
+    from app.services.onec_accounting_read import снять_срез
+
+    company_id = await _доступ(user, db)
+    источник = (await db.execute(_select(Source).where(
+        Source.company_id == company_id, Source.source_type == "onec_accounting",
+    ))).scalar_one_or_none()
+    if источник is None:
+        raise HTTPException(409, "Источник «1С:Бухгалтерия» у компании не заведён")
+
+    cfg = источник.connection_config or {}
+    строка = str(cfg.get("connection_string") or "")
+    if not строка:
+        raise HTTPException(
+            409,
+            "У источника не задана строка соединения: настройте подключение к БП",
+        )
+    if cfg.get("login"):
+        строка += f'Usr="{cfg["login"]}";'
+    креды = (await db.execute(_select(SourceCredentials).where(
+        SourceCredentials.source_id == источник.id))).scalar_one_or_none()
+    зашифрованный = ((креды.encrypted_values or {}) if креды else {}).get("password")
+    if зашифрованный:
+        строка += f'Pwd="{decrypt_password(зашифрованный)}";'
+
+    try:
+        с = _date.fromisoformat(date_from)
+        по = _date.fromisoformat(date_to)
+    except ValueError:
+        raise HTTPException(400, "Даты в виде YYYY-MM-DD")
+
+    срез = await снять_срез(строка, date_from=с, date_to=по)
+    по_видам: dict[str, dict] = {}
+    for д in срез.документы:
+        строка_вида = по_видам.setdefault(
+            д.вид, {"Вид": д.вид, "Всего": 0, "Проведено": 0, "Сумма": 0.0})
+        строка_вида["Всего"] += 1
+        строка_вида["Проведено"] += 1 if д.проведён else 0
+        строка_вида["Сумма"] = round(строка_вида["Сумма"] + д.сумма, 2)
+
+    return {
+        "Прочитано": срез.прочитано.isoformat(),
+        "Организация": срез.организация,
+        "ДатаЗапрета": срез.дата_запрета.isoformat() if срез.дата_запрета else None,
+        "Ошибка": срез.ошибка,
+        "Итого": {
+            "Документов": len(срез.документы),
+            "Проведено": срез.проведено,
+            "НеПроведено": срез.не_проведено,
+            "Сумма": срез.сумма,
+        },
+        "ПоВидам": sorted(по_видам.values(), key=lambda x: -x["Всего"]),
+        "Документы": [
+            {
+                "Вид": д.вид, "Номер": д.номер, "Дата": д.дата,
+                "Сумма": д.сумма, "Проведён": д.проведён,
+                "Комментарий": д.комментарий,
+            } for д in срез.документы[:300]
+        ],
+    }
