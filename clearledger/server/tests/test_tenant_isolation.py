@@ -26,9 +26,12 @@ async def _admin_token(client: AsyncClient) -> str:
 async def _create_user(client: AsyncClient, admin: str, email: str, company: str) -> str:
     """Суперадмин создаёт пользователя в company; возвращает токен этого юзера.
     Идемпотентно (повторный прогон в сессии — вернёт существующего + членство)."""
+    # Роль администратора СВОЕЙ компании: источники и каналы — настройка, её
+    # ведёт админ. Изоляция от этого не слабеет — она про соседнюю компанию, а
+    # не про уровень прав внутри своей.
     r = await client.post("/api/users", headers=_h(admin), json={
         "company_id": company, "email": email, "name": email.split("@")[0],
-        "password": "secret123", "role": "user",
+        "password": "secret123", "role": "admin",
     })
     assert r.status_code in (200, 201), r.text
     lr = await client.post("/api/auth/login", json={"email": email, "password": "secret123"})

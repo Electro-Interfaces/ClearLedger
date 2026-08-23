@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime
 from typing import Annotated, Literal
 
-from pydantic import AfterValidator, BaseModel, EmailStr, Field
+from pydantic import AfterValidator, BaseModel, BeforeValidator, EmailStr, Field
 
 
 def _normalize_email(value: str) -> str:
@@ -821,8 +821,11 @@ class ContractResponse(BaseModel):
     companyId: str
     number: str
     date: str
-    counterpartyId: str
-    organizationId: str
+    # Ссылки на справочники хранятся идентификаторами; наружу отдаём строкой.
+    # Раньше здесь и в базе были строки, потом база перешла на UUID — и ответ
+    # падал валидацией, то есть 500 на любом договоре с заполненным юрлицом.
+    counterpartyId: Annotated[str, BeforeValidator(lambda v: str(v) if v else v)]
+    organizationId: Annotated[str, BeforeValidator(lambda v: str(v) if v else v)]
     type: str
     amountLimit: float | None = None
     kind: str | None = None

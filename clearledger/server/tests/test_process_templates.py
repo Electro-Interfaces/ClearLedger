@@ -68,9 +68,11 @@ async def test_шаблон_документа_запускает_маршрут
     assert row["steps"] == 1
     assert row["requiresPreparation"] is False
 
+    # Запуск по шаблону живёт в «Треке»: `/tasks/templates/{id}/use` ушла вместе
+    # с разделом «Задачи» 16.08.2026.
     started = await auth_client.post(
-        f"/api/tasks/templates/{template['id']}/use",
-        params={"company_id": cid},
+        f"/api/docs/process-templates/{template['id']}/start",
+        json={"company_id": cid},
     )
     assert started.status_code == 201, started.text
     result = started.json()

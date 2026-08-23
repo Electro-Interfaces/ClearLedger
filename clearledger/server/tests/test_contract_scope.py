@@ -17,8 +17,26 @@ async def _post(client: AsyncClient, url: str, body: dict) -> dict:
     return r.json()
 
 
+async def _organization(client: AsyncClient) -> str:
+    """Юрлицо компании: договор ссылается на него по идентификатору.
+
+    Раньше в тесте стояла строка «org-x» — поле было свободным. Теперь это
+    ссылка на справочник юрлиц, и произвольная строка до базы не доезжает.
+    """
+    import uuid as _uuid
+
+    tail = _uuid.uuid4().hex[:6]
+    response = await client.post("/api/references/organizations", json={
+        "company_id": "gig", "name": f"Юрлицо {tail}",
+        "inn": f"78{_uuid.uuid4().int % 10 ** 8:08d}", "prefix": "Ю",
+    })
+    assert response.status_code == 201, response.text
+    return response.json()["id"]
+
+
 @pytest.mark.asyncio(loop_scope="session")
 async def test_contract_scope_and_navigation(auth_client: AsyncClient):
+    org_id = await _organization(auth_client)
     # Две точки
     for lid, code in [(LOC1, "201"), (LOC2, "202")]:
         await _post(auth_client, "/api/locations", {
@@ -34,12 +52,12 @@ async def test_contract_scope_and_navigation(auth_client: AsyncClient):
     # Договор аренды (потом охват = LOC1) + договор поставки на всю компанию
     rent = await _post(auth_client, "/api/references/contracts", {
         "company_id": "gig", "number": "АР-1", "date": "2026-02-01",
-        "counterpartyId": cp_id, "organizationId": "org-x", "type": "СПоставщиком",
+        "counterpartyId": cp_id, "organizationId": org_id, "type": "СПоставщиком",
     })
     assert rent["scopeType"] == "unassigned"   # дефолт
     supply = await _post(auth_client, "/api/references/contracts", {
         "company_id": "gig", "number": "ПОСТ-1", "date": "2026-02-02",
-        "counterpartyId": cp_id, "organizationId": "org-x", "type": "СПоставщиком",
+        "counterpartyId": cp_id, "organizationId": org_id, "type": "СПоставщиком",
         "scopeType": "company",
     })
     assert supply["scopeType"] == "company"
@@ -76,6 +94,7 @@ async def test_contract_scope_and_navigation(auth_client: AsyncClient):
 @pytest.mark.asyncio(loop_scope="session")
 async def test_scope_company_clears_locations(auth_client: AsyncClient):
     """Смена охвата на company очищает набор точек."""
+    org_id = await _organization(auth_client)
     await _post(auth_client, "/api/locations", {
         "company_id": "gig", "id": "loc-scope-301", "code": "301",
         "name": "АЗС 301", "type": "fuel_station",
@@ -85,7 +104,7 @@ async def test_scope_company_clears_locations(auth_client: AsyncClient):
     })
     ct = await _post(auth_client, "/api/references/contracts", {
         "company_id": "gig", "number": "СМ-1", "date": "2026-03-01",
-        "counterpartyId": cp["id"], "organizationId": "org-x", "type": "СПоставщиком",
+        "counterpartyId": cp["id"], "organizationId": org_id, "type": "СПоставщиком",
     })
     # сначала locations
     await auth_client.put(f"/api/references/contracts/{ct['id']}/scope", json={
@@ -109,7 +128,7 @@ async def test_contract_dimensions(auth_client: AsyncClient):
     })
     ct = await _post(auth_client, "/api/references/contracts", {
         "company_id": "gig", "number": "ДИМ-1", "date": "2026-04-01",
-        "counterpartyId": cp["id"], "organizationId": "org-x", "type": "Поставка",
+        "counterpartyId": cp["id"], "organizationId": org_id, "type": "Поставка",
     })
     # изначально граней нет
     d0 = (await auth_client.get(f"/api/references/contracts/{ct['id']}/dimensions")).json()
