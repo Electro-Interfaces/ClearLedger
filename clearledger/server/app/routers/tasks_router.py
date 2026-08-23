@@ -24,7 +24,10 @@ from typing import Any
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import case, delete as sa_delete, func, or_, select, true as sa_true
+from sqlalchemy import (
+    case, delete as sa_delete, func, or_, select, true as sa_true,
+    update as sa_update,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import assert_company_product, get_company_by_api_key, get_current_user
@@ -1325,6 +1328,14 @@ async def update_type(
     t.reaction_hours = payload.reaction_hours
     t.escalate_to_id = (_uuid_or_400(payload.escalate_to_id, "escalate_to_id")
                         if payload.escalate_to_id else None)
+    # Маршрут переписали — задачи этого типа переезжают по колонкам сразу.
+    # Без этого доска держала бы прежнюю раскладку до следующего движения каждой
+    # задачи, то есть месяцами: человек поправил колонку и не увидел результата.
+    # Один UPDATE на стадию: их единицы, а задач могут быть тысячи.
+    for index, stage in enumerate(t.route):
+        await db.execute(sa_update(Task).where(
+            Task.type_id == t.id, Task.stage_code == stage["code"]).values(
+            stage_column=work_state.stage_column(stage, index, len(t.route))))
     await db.commit()
     await db.refresh(t)
     return _type_out(t)
@@ -1418,6 +1429,7 @@ async def create_task(
         title=payload.title.strip(), description=payload.description,
         priority=payload.priority or (ttype.default_priority if ttype else "medium"),
         status="open", stage_code=route[0]["code"],
+        stage_column=work_state.stage_column_of(route, route[0]["code"]),
         assignee_id=assignee, author_id=current_user.id,
         object_id=payload.object_id or None, due_at=due)
     db.add(t)
@@ -2045,7 +2057,9 @@ async def task_action(
                              from_value=_stage_name(route, t.stage_code),
                              to_value=_stage_name(route, payload.stage_code),
                              note=payload.note))
-            t.stage_code = payload.stage_code
+            # Колонка ставится вместе со стадией: код без колонки — задача,
+            # которой нет на общей доске.
+            work_state.apply_stage(t, route, payload.stage_code)
             logged = True
 
     new_assignee_email: str | None = None
@@ -2327,7 +2341,7 @@ async def bulk_action(
                              from_value=_stage_name(route, t.stage_code),
                              to_value=_stage_name(route, payload.stage_code),
                              note=payload.note))
-            t.stage_code = payload.stage_code
+            work_state.apply_stage(t, route, payload.stage_code)
         if payload.assignee_id is not None:
             new_id = _uuid_or_400(payload.assignee_id, "assignee_id") if payload.assignee_id else None
             if new_id is not None and await db.get(UserCompany, (new_id, cid)) is None:

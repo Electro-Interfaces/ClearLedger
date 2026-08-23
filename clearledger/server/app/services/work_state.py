@@ -23,6 +23,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from sqlalchemy import case, literal
+
 # Порядок колонок = порядок движения работы. Он же порядок слева направо на доске.
 COLUMNS: tuple[str, ...] = ("new", "in_work", "approval", "external", "done")
 
@@ -56,6 +58,26 @@ def stage_column(stage: dict[str, Any] | None, index: int, total: int) -> str:
     if index >= total - 1:
         return "done"
     return "in_work"
+
+
+def stage_column_of(route: list[dict[str, Any]] | None, code: str | None) -> str | None:
+    """Колонка стадии по её коду. None — стадии в маршруте нет."""
+    stages = [s for s in (route or []) if isinstance(s, dict)]
+    index = next((i for i, s in enumerate(stages) if s.get("code") == code), -1)
+    if index < 0:
+        return None
+    return stage_column(stages[index], index, len(stages))
+
+
+def apply_stage(task: Any, route: list[dict[str, Any]] | None, code: str | None) -> None:
+    """Поставить задаче стадию вместе с её колонкой.
+
+    Одна дверь на все пять мест, где задача встаёт на стадию: постановка, шаблон,
+    расписание и два движения по маршруту. Ставить код без колонки — значит
+    получить задачу, которой нет на доске.
+    """
+    task.stage_code = code
+    task.stage_column = stage_column_of(route, code)
 
 
 def task_state(task: Any, route: list[dict[str, Any]]) -> str:
@@ -97,6 +119,31 @@ def doc_state(doc: Any) -> str:
     if status == "draft":
         return "new"
     return "in_work"
+
+
+def task_state_sql(model: Any) -> Any:
+    """То же правило для отбора в SQL. Порядок ветвей совпадает с `task_state`.
+
+    Два выражения одного правила — цена постраничного отбора: фильтровать
+    состояние в приложении значит вытаскивать всю таблицу ради второй страницы.
+    Расхождение ловится тестом, который прогоняет обе ветки по одним данным.
+    """
+    return case(
+        (model.status != "open", literal("done")),
+        (model.waiting_for == "external", literal("external")),
+        (model.stage_column.is_not(None), model.stage_column),
+        else_=literal("in_work"),
+    )
+
+
+def doc_state_sql(model: Any) -> Any:
+    """То же правило для документа в SQL."""
+    return case(
+        (model.status.in_(_DOC_DONE), literal("done")),
+        (model.approval_status == "pending", literal("approval")),
+        (model.status == "draft", literal("new")),
+        else_=literal("in_work"),
+    )
 
 
 def state_out(code: str) -> dict[str, str]:

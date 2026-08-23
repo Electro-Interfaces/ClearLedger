@@ -39,7 +39,8 @@ from app.models import (
     User, UserCompany,
 )
 from app.services import (
-    doc_approvals, doc_exchange, process_templates, space_events, task_mail)
+    doc_approvals, doc_exchange, process_templates, space_events, task_mail,
+    work_state)
 
 log = logging.getLogger("clearledger.tasks.scheduler")
 
@@ -132,6 +133,7 @@ async def spawn_from_template(db, rec: TaskRecurrence, tpl: TaskTemplate) -> Tas
         description=tpl.description,
         priority=tpl.priority or (ttype.default_priority if ttype else "medium"),
         status="open", stage_code=route[0].get("code"),
+        stage_column=work_state.stage_column_of(route, route[0].get("code")),
         assignee_id=tpl.assignee_id, author_id=rec.created_by,
         object_id=tpl.object_id,
         due_at=now + timedelta(days=days) if days is not None else None)

@@ -1,0 +1,338 @@
+"""Единый список работы: документы и поручения одной лентой.
+
+Этап 13б трекерного контура. До сих пор «вся работа компании» была двумя
+экранами с разными отборами, и вопрос «что у нас в работе по площадке 208»
+требовал посмотреть в обоих. Человек приходит с одним вопросом — «что в работе»
+— и не должен знать, какой движок за предметом стоит.
+
+Объединяется выдача, а не модель: `doc_cards` и `tasks` остаются раздельными
+(`docs/TRACK.md`, раздел 2). Здесь UNION по общей проекции — ключ, род, тип,
+заголовок, ответственный, срок, состояние, объект, проект.
+
+Три вещи, из-за которых это не сводится к двум запросам подряд:
+
+1. **Права спрашиваются обе.** У документов свой ACL (`_readable_doc_clause` —
+   закрытые карточки, гранты, визы), у поручений своя видимость (`_visible_to`).
+   Единый список обязан применить оба правила, иначе объединение станет дырой в
+   правах, а не удобством. Правила зовутся из своих роутеров: скопировать их
+   сюда значило бы завести вторую версию, которая разойдётся с первой.
+
+2. **Постраничность в базе.** Слить две выборки в приложении можно ровно до
+   второй страницы: чтобы отдать строки 100–200 общего порядка, пришлось бы
+   тянуть по 200 из каждой таблицы, а дальше только хуже.
+
+3. **Состояние общее.** Колонка считается `work_state` — тем же правилом, что в
+   карточке и на доске (этап 13а).
+"""
+from __future__ import annotations
+
+import uuid
+from datetime import datetime, timedelta, timezone
+from typing import Any
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import Integer, String, Uuid, func, literal, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.auth import assert_company_product, get_current_user
+from app.database import get_db
+from app.models import (
+    DocCard, DocKind, DocLabelLink, ServiceLocation, Task, TaskLabel,
+    TaskLabelLink, TaskProject, TaskType, User,
+)
+from app.services import work_state
+
+router = APIRouter(prefix="/work", tags=["Трек"])
+
+_LIST_LIMIT = 200
+
+
+async def _assert_work(company_ref: str, user: User, db: AsyncSession) -> uuid.UUID:
+    """Право на работу компании — то же, что у обоих контуров по отдельности."""
+    try:
+        return await assert_company_product(company_ref, user, db, "docs")
+    except HTTPException:
+        return await assert_company_product(company_ref, user, db, "plan")
+
+
+def _uuid_or_400(value: str, field: str) -> uuid.UUID:
+    try:
+        return uuid.UUID(str(value))
+    except (ValueError, TypeError, AttributeError) as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Неверный {field}") from exc
+
+
+def _key(row: Any, project_code: str | None) -> str:
+    """Как предмет называют вслух: «TF-42», «№17», «Вх-88», «черновик».
+
+    Ключ собирается здесь, а не в SQL: у поручения он зависит от проекта, у
+    документа — от того, зарегистрирован ли он. Незарегистрированный документ
+    честно называется черновиком: выдуманный номер увёл бы человека искать его
+    в журнале.
+    """
+    if row.kind == "task":
+        if project_code and row.project_number:
+            return f"{project_code}-{row.project_number}"
+        return f"№{row.number}"
+    return row.reg_number or "черновик"
+
+
+@router.get("")
+async def list_work(
+    company_id: str = Query(...),
+    kind: str | None = Query(None, pattern="^(doc|task)$"),
+    scope: str = Query("open", pattern="^(open|mine|assigned|done|all)$"),
+    state: str | None = Query(None),
+    type_id: str | None = Query(None),
+    project_id: str | None = Query(None),
+    assignee_id: str | None = Query(None),
+    object_id: str | None = Query(None),
+    label_id: str | None = Query(None),
+    q: str | None = Query(None, max_length=200),
+    due_to: datetime | None = Query(None),
+    sort: str = Query("updated", pattern="^-?(updated|created|due)$"),
+    limit: int = Query(50, ge=1, le=_LIST_LIMIT),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Работа компании одной лентой: документы и поручения вперемешку.
+
+    `kind` — фильтр, а не раздел: «входящие» это отбор по виду документа, а не
+    отдельный экран со своей веткой кода.
+    """
+    cid = await _assert_work(company_id, current_user, db)
+    now = datetime.now(timezone.utc)
+
+    # Правила видимости берём у их хозяев — второй версии этих правил быть не
+    # должно, они разойдутся на первой же правке прав.
+    from app.routers.docs_router import _readable_doc_clause
+    from app.routers.tasks_router import _is_admin, _visible_to
+
+    admin = await _is_admin(db, cid, current_user)
+    doc_clause = await _readable_doc_clause(db, cid, current_user)
+
+    task_sel = select(
+        Task.id.label("id"),
+        literal("task", String).label("kind"),
+        Task.title.label("title"),
+        work_state.task_state_sql(Task).label("state"),
+        Task.status.label("status"),
+        Task.stage_code.label("stage_code"),
+        Task.type_id.label("type_id"),
+        Task.assignee_id.label("responsible_id"),
+        Task.author_id.label("author_id"),
+        Task.due_at.label("due_at"),
+        Task.object_id.label("object_id"),
+        Task.project_id.label("project_id"),
+        Task.number.label("number"),
+        Task.project_number.label("project_number"),
+        literal(None, String).label("reg_number"),
+        literal(None, String).label("kind_code"),
+        Task.priority.label("priority"),
+        Task.created_at.label("created_at"),
+        Task.updated_at.label("updated_at"),
+    ).where(Task.company_id == cid, _visible_to(current_user, admin))
+
+    # Имена колонок задаются явно у обеих половин: UNION берёт их у первой, и
+    # при отборе только по документам подзапрос назывался бы `kind_id` вместо
+    # `type_id` — фильтры молча промахивались бы мимо колонки.
+    doc_sel = select(
+        DocCard.id.label("id"),
+        literal("doc", String).label("kind"),
+        DocCard.title.label("title"),
+        work_state.doc_state_sql(DocCard).label("state"),
+        DocCard.status.label("status"),
+        literal(None, String).label("stage_code"),
+        DocCard.kind_id.label("type_id"),
+        DocCard.responsible_id.label("responsible_id"),
+        DocCard.author_id.label("author_id"),
+        DocCard.due_at.label("due_at"),
+        DocCard.object_id.label("object_id"),
+        literal(None, Uuid).label("project_id"),
+        literal(None, Integer).label("number"),
+        literal(None, Integer).label("project_number"),
+        DocCard.reg_number.label("reg_number"),
+        DocCard.kind_code.label("kind_code"),
+        literal(None, String).label("priority"),
+        DocCard.created_at.label("created_at"),
+        DocCard.updated_at.label("updated_at"),
+    ).where(DocCard.company_id == cid, doc_clause)
+
+    if kind == "task":
+        parts = [task_sel]
+    elif kind == "doc":
+        parts = [doc_sel]
+    else:
+        parts = [task_sel, doc_sel]
+    union = parts[0].union_all(*parts[1:]).subquery("work") if len(parts) > 1 \
+        else parts[0].subquery("work")
+
+    sel = select(union)
+
+    # Разрез — тот же вопрос, что в реестре поручений: что живо, что моё, что
+    # закрыто. «Моё» одинаково читается в обоих контурах: я исполнитель работы
+    # или ответственный за документ.
+    if scope == "open":
+        sel = sel.where(union.c.state != "done")
+    elif scope == "done":
+        sel = sel.where(union.c.state == "done")
+    elif scope == "mine":
+        sel = sel.where(union.c.state != "done",
+                        union.c.responsible_id == current_user.id)
+    elif scope == "assigned":
+        sel = sel.where(union.c.state != "done",
+                        union.c.author_id == current_user.id,
+                        or_(union.c.responsible_id.is_(None),
+                            union.c.responsible_id != current_user.id))
+
+    if state:
+        codes = [c for c in state.split(",") if c in work_state.COLUMNS]
+        if not codes:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Неизвестное состояние")
+        sel = sel.where(union.c.state.in_(codes))
+    if type_id:
+        sel = sel.where(union.c.type_id == _uuid_or_400(type_id, "type_id"))
+    if project_id:
+        sel = sel.where(union.c.project_id == _uuid_or_400(project_id, "project_id"))
+    if assignee_id:
+        sel = sel.where(union.c.responsible_id == _uuid_or_400(assignee_id, "assignee_id"))
+    if object_id:
+        sel = sel.where(union.c.object_id == object_id)
+    if due_to:
+        sel = sel.where(union.c.due_at <= due_to)
+    if label_id:
+        # Справочник меток общий на оба контура, а связи свои у каждого.
+        lid = _uuid_or_400(label_id, "label_id")
+        sel = sel.where(or_(
+            union.c.id.in_(select(TaskLabelLink.task_id).where(TaskLabelLink.label_id == lid)),
+            union.c.id.in_(select(DocLabelLink.doc_id).where(DocLabelLink.label_id == lid)),
+        ))
+    if q and (text := q.strip()):
+        like = f"%{text}%"
+        digits = text.lstrip("№#").strip()
+        conds = [union.c.title.ilike(like), union.c.reg_number.ilike(like)]
+        if digits.isdigit():
+            conds.append(union.c.number == int(digits))
+        sel = sel.where(or_(*conds))
+
+    total = (await db.execute(
+        select(func.count()).select_from(sel.subquery()))).scalar_one()
+
+    desc = sort.startswith("-")
+    key = sort.lstrip("-")
+    col = {"updated": union.c.updated_at, "created": union.c.created_at,
+           "due": union.c.due_at}[key]
+    # Срок по возрастанию — сначала ближайшие; без срока уезжает в конец в обоих
+    # порядках, иначе голову списка занимает то, что никого не ждёт.
+    sel = sel.order_by(col.desc().nullslast() if desc or key != "due"
+                       else col.asc().nullslast())
+
+    rows = (await db.execute(sel.limit(limit).offset(offset))).all()
+    return {
+        "work": await _decorate(db, cid, rows, now),
+        "total": total, "limit": limit, "offset": offset,
+        "columns": [{"code": c, "name": work_state.COLUMN_NAMES[c]}
+                    for c in work_state.COLUMNS],
+    }
+
+
+async def _decorate(db: AsyncSession, cid: uuid.UUID, rows: list[Any],
+                    now: datetime) -> list[dict[str, Any]]:
+    """Доклеить имена пачкой: страница списка не ходит в базу построчно."""
+    if not rows:
+        return []
+    people = {i for r in rows for i in (r.responsible_id, r.author_id) if i}
+    types = {r.type_id for r in rows if r.type_id}
+    projects = {r.project_id for r in rows if r.project_id}
+    objects = {r.object_id for r in rows if r.object_id}
+
+    names = {u.id: u.name for u in (await db.execute(
+        select(User).where(User.id.in_(people)))).scalars()} if people else {}
+    task_types = {t.id: (t.name, t.route) for t in (await db.execute(
+        select(TaskType).where(TaskType.id.in_(types)))).scalars()} if types else {}
+    doc_kinds = {k.id: k.name for k in (await db.execute(
+        select(DocKind).where(DocKind.id.in_(types)))).scalars()} if types else {}
+    prjs = {p.id: p.code for p in (await db.execute(
+        select(TaskProject).where(TaskProject.id.in_(projects)))).scalars()} if projects else {}
+    objs = {o.id: o.name for o in (await db.execute(
+        select(ServiceLocation).where(
+            ServiceLocation.id.in_(objects)))).scalars()} if objects else {}
+
+    ids = [r.id for r in rows]
+    labels: dict[uuid.UUID, list[dict[str, str]]] = {i: [] for i in ids}
+    for link_model, link_col in ((TaskLabelLink, TaskLabelLink.task_id),
+                                 (DocLabelLink, DocLabelLink.doc_id)):
+        for owner, lid, name, color in (await db.execute(
+            select(link_col, TaskLabel.id, TaskLabel.name, TaskLabel.color)
+            .join(TaskLabel, TaskLabel.id == link_model.label_id)
+            .where(link_col.in_(ids))
+        )).all():
+            labels[owner].append({"id": str(lid), "name": name, "color": color})
+
+    out = []
+    for r in rows:
+        route = task_types.get(r.type_id, (None, None))[1] if r.kind == "task" else None
+        stage = next((s.get("name") for s in (route or [])
+                      if s.get("code") == r.stage_code), None)
+        out.append({
+            "id": str(r.id),
+            "kind": r.kind,
+            "key": _key(r, prjs.get(r.project_id)),
+            "title": r.title,
+            "type": (task_types.get(r.type_id, (None, None))[0] if r.kind == "task"
+                     else doc_kinds.get(r.type_id)),
+            "stage": stage,
+            **work_state.state_out(r.state),
+            "status": r.status,
+            "responsible": names.get(r.responsible_id),
+            "responsible_id": str(r.responsible_id) if r.responsible_id else None,
+            "author": names.get(r.author_id),
+            "due_at": r.due_at.isoformat() if r.due_at else None,
+            # Просрочка — свойство живой работы: у завершённой срок уже не сигнал.
+            "overdue": bool(r.due_at and r.state != "done" and r.due_at < now),
+            "object_id": r.object_id,
+            "object": objs.get(r.object_id),
+            "project": prjs.get(r.project_id),
+            "project_id": str(r.project_id) if r.project_id else None,
+            "priority": r.priority,
+            "labels": labels.get(r.id, []),
+            "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+        })
+    return out
+
+
+@router.get("/summary")
+async def work_summary(
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Сколько работы в каждой колонке — заголовки доски и счётчики разделов."""
+    cid = await _assert_work(company_id, current_user, db)
+    from app.routers.docs_router import _readable_doc_clause
+    from app.routers.tasks_router import _is_admin, _visible_to
+
+    admin = await _is_admin(db, cid, current_user)
+    doc_clause = await _readable_doc_clause(db, cid, current_user)
+    counts: dict[str, dict[str, int]] = {
+        c: {"doc": 0, "task": 0} for c in work_state.COLUMNS}
+
+    for model, clause, state_expr, key in (
+        (Task, _visible_to(current_user, admin), work_state.task_state_sql(Task), "task"),
+        (DocCard, doc_clause, work_state.doc_state_sql(DocCard), "doc"),
+    ):
+        for value, count in (await db.execute(
+            select(state_expr.label("state"), func.count())
+            .where(model.company_id == cid, clause)
+            .group_by(state_expr)
+        )).all():
+            if value in counts:
+                counts[value][key] = count
+
+    return {"columns": [{
+        "code": c, "name": work_state.COLUMN_NAMES[c],
+        "docs": counts[c]["doc"], "tasks": counts[c]["task"],
+        "total": counts[c]["doc"] + counts[c]["task"],
+    } for c in work_state.COLUMNS]}

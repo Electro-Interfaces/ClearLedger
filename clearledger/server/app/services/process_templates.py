@@ -13,7 +13,7 @@ from app.models import (
     Organization, ServiceLocation, Task, TaskChecklistItem, TaskEvent,
     TaskTemplate, TaskType, User, UserCompany,
 )
-from app.services import doc_approvals, task_mail
+from app.services import doc_approvals, task_mail, work_state
 
 
 class ProcessTemplateError(ValueError):
@@ -250,6 +250,7 @@ async def launch_task(
         priority=tpl.priority or (task_type.default_priority if task_type else "medium"),
         status="open",
         stage_code=route[0]["code"],
+        stage_column=work_state.stage_column_of(route, route[0]["code"]),
         assignee_id=responsible,
         author_id=actor.id,
         object_id=object_id or tpl.object_id,

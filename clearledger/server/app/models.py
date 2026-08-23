@@ -9389,6 +9389,11 @@ class Task(Base):
     # open | done | cancelled. Стадия — где внутри маршрута, статус — жива ли.
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="open")
     stage_code: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    # Колонка текущей стадии на общей оси пространства (`work_state`). Хранится
+    # рядом с кодом стадии, потому что вычисляется из маршрута ТИПА (JSONB), а
+    # отбор по состоянию должен идти в SQL: разбирать маршрут запросом — дорого
+    # и нечитаемо, а фильтровать в приложении значит сломать постраничность.
+    stage_column: Mapped[str | None] = mapped_column(String(20), nullable=True)
     assignee_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     author_id: Mapped[uuid.UUID | None] = mapped_column(
