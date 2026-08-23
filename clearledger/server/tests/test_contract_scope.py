@@ -123,6 +123,7 @@ async def test_scope_company_clears_locations(auth_client: AsyncClient):
 @pytest.mark.asyncio(loop_scope="session")
 async def test_contract_dimensions(auth_client: AsyncClient):
     """Обобщённые грани договора по разрезам (Фаза 3): номенклатура, каналы."""
+    org_id = await _organization(auth_client)
     cp = await _post(auth_client, "/api/references/counterparties", {
         "company_id": "gig", "inn": "7800000200", "name": "Поставщик-дим ООО",
     })

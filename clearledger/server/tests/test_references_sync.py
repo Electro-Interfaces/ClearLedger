@@ -9,10 +9,12 @@
 """
 from types import SimpleNamespace
 
+import uuid
+
 import pytest
 from sqlalchemy import select
 
-from app.models import Company, Contract, Counterparty
+from app.models import Organization, Company, Contract, Counterparty
 from app.services.onec.odata_client import ENTITY_CONTRACTS, ENTITY_COUNTERPARTIES
 from app.services.onec.sync_service import (
     OneCSyncService,
@@ -91,6 +93,14 @@ async def test_sync_counterparties_and_contracts(db):
     svc = OneCSyncService(db)
     client = _FakeClient({ENTITY_COUNTERPARTIES: CP_ROWS, ENTITY_CONTRACTS: CONTRACT_ROWS})
 
+    # Юрлицо заводим заранее: договор ссылается на справочник организаций, и без
+    # него загрузка честно откладывает договор до следующего прогона.
+    organization = Organization(
+        company_id=company.id, external_ref=ORG, name="Наше юрлицо",
+        inn=f"78{uuid.uuid4().int % 10 ** 8:08d}")
+    db.add(organization)
+    await db.flush()
+
     await svc._sync_counterparties(client, conn, _log())
     await svc._sync_contracts(client, conn, _log())
     await db.flush()
@@ -112,8 +122,10 @@ async def test_sync_counterparties_and_contracts(db):
         Contract.external_ref == CONTRACT_REF,
     ))).scalars().first()
     assert ct is not None
-    assert ct.counterparty_id == OWNER            # резолв владельца → GUID контрагента
-    assert ct.organization_id == ORG
+    # Владелец и организация разрешаются в НАШИ идентификаторы: обе оси ведутся
+    # внешними ключами, и GUID из 1С в них не лежит.
+    assert ct.counterparty_id == cp.id
+    assert ct.organization_id == organization.id
     assert ct.kind == "СПоставщиком"
     assert ct.valid_until == "2027-01-01"
     assert ct.is_closed is False
@@ -127,8 +139,19 @@ async def test_resync_preserves_scope_type(db):
     company = (await db.execute(select(Company).limit(1))).scalars().first()
     conn = SimpleNamespace(company_id=company.id)
     svc = OneCSyncService(db)
-    client = _FakeClient({ENTITY_CONTRACTS: CONTRACT_ROWS})
+    client = _FakeClient({
+        ENTITY_COUNTERPARTIES: CP_ROWS, ENTITY_CONTRACTS: CONTRACT_ROWS})
 
+    # Договор ссылается на справочники, поэтому обе стороны должны существовать:
+    # контрагент приезжает из 1С, юрлицо заводим сами.
+    if not (await db.execute(select(Organization).where(
+            Organization.company_id == company.id,
+            Organization.external_ref == ORG))).scalars().first():
+        db.add(Organization(
+            company_id=company.id, external_ref=ORG, name="Наше юрлицо",
+            inn=f"78{uuid.uuid4().int % 10 ** 8:08d}"))
+        await db.flush()
+    await svc._sync_counterparties(client, conn, _log())
     await svc._sync_contracts(client, conn, _log())
     await db.flush()
     ct = (await db.execute(select(Contract).where(

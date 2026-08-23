@@ -1143,6 +1143,16 @@ class OneCSyncService:
         scope_type (охват по точкам) — НАШ слой: задаётся в UI, при ресинхронизации
         НЕ перезаписывается. См. TRADELEDGER_COUNTERPARTY_AXIS §5."""
         stats = {"processed": 0, "created": 0, "updated": 0, "skipped": 0, "errors": 0}
+        # Карты «GUID 1С → наш идентификатор»: договор ссылается на справочники
+        # ссылками, и разрешать их построчным запросом значит сделать по два
+        # запроса на каждый договор. Перед построением сбрасываем сессию:
+        # контрагентов мог завести этот же прогон, и без flush они в индекс не
+        # попадут — все их договоры «пропустятся» до следующего раза.
+        await self.session.flush()
+        local_cp = await self._build_local_index(
+            Counterparty, connection.company_id, by="id")
+        local_org = await self._build_local_index(
+            Organization, connection.company_id, by="id")
         # Полная выборка: промо-поля + ВСЕ реквизиты (describe) → raw полный снимок.
         select_list = await self._full_select(client, ENTITY_CONTRACTS, CONTRACT_FETCH)
         async for item in client.iter_entity(ENTITY_CONTRACTS, select=select_list, orderby="Ref_Key", page_size=500):
@@ -1161,8 +1171,20 @@ class OneCSyncService:
                         Contract.external_ref == ref_key,
                     )
                 )).scalar_one_or_none()
-                owner = _clean_ref(item.get("Owner_Key") or item.get("Владелец_Key")) or ""
-                org = _clean_ref(item.get("Организация_Key")) or ""
+                owner_ref = _clean_ref(item.get("Owner_Key") or item.get("Владелец_Key")) or ""
+                org_ref = _clean_ref(item.get("Организация_Key")) or ""
+                # Ссылки на контрагента и юрлицо — наши идентификаторы, а не GUID
+                # из 1С: обе оси давно ведутся внешними ключами. Раньше сюда
+                # писался GUID, и загрузка падала на первом же договоре —
+                # нарушением внешнего ключа, то есть весь справочник не доезжал.
+                owner = local_cp.get(owner_ref)
+                org = local_org.get(org_ref)
+                if owner is None or org is None:
+                    # Контрагент или юрлицо ещё не синхронизированы: договор
+                    # подождёт следующего прогона. Молча пропускать нельзя —
+                    # иначе «загрузилось 0 из 300» выглядит успехом.
+                    stats["skipped"] += 1
+                    continue
                 number = (item.get("Номер") or item.get("Description") or "").strip()
                 date = _clean_1c_date(item.get("Дата"))
                 kind = _norm_contract_kind(item.get("ВидДоговора"))

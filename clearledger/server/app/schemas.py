@@ -1095,7 +1095,8 @@ class LocationContractBrief(BaseModel):
     kind: str | None = None
     scopeType: str
     companyWide: bool               # True = общекомпанейский (scope=company)
-    counterpartyId: str
+    # Та же история, что в `ContractResponse`: в базе идентификатор, наружу строка.
+    counterpartyId: Annotated[str, BeforeValidator(lambda v: str(v) if v else v)]
     counterpartyName: str | None = None
     counterpartyInn: str | None = None
 

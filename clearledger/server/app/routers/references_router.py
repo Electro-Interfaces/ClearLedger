@@ -7,7 +7,9 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import and_, delete, func, or_, select
+from typing import Any
+
+from sqlalchemy import and_, delete, false as sa_false, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import assert_company_member, get_current_user
@@ -169,6 +171,36 @@ def _counterparty_resp(cp: Counterparty) -> CounterpartyResponse:
         updatedAt=_ts(cp.updated_at),
         **{camel: getattr(cp, snake) for camel, snake in _CP_EXTRA_FIELDS.items()},
     )
+
+
+
+def _counterparty_match(keys) -> Any:
+    """Условие поиска контрагентов по смешанному набору ссылок.
+
+    В `counterparty_id` лежит либо наш идентификатор, либо GUID из 1С: у ручного
+    контрагента внешней ссылки нет вовсе. Раньше набор целиком отдавался в
+    `external_ref IN (...)`, и как только в нём оказывался настоящий UUID —
+    запрос падал на типе колонки, то есть 500 на карточке точки и на списке
+    договоров. Разделяем: UUID ищем по идентификатору, остальное по внешней
+    ссылке.
+    """
+    ids, refs = [], []
+    for key in keys:
+        if isinstance(key, uuid.UUID):
+            ids.append(key)
+            continue
+        try:
+            ids.append(uuid.UUID(str(key)))
+        except (ValueError, AttributeError, TypeError):
+            refs.append(str(key))
+    conditions = []
+    if refs:
+        conditions.append(Counterparty.external_ref.in_(refs))
+    if ids:
+        conditions.append(Counterparty.id.in_(ids))
+    if not conditions:
+        return sa_false()
+    return or_(*conditions) if len(conditions) > 1 else conditions[0]
 
 
 @router.get("/counterparties", response_model=list[CounterpartyResponse])
@@ -936,15 +968,7 @@ async def get_location_contracts(
     keys = {c.counterparty_id for c in contracts if c.counterparty_id}
     cp_map: dict[str, Counterparty] = {}
     if keys:
-        uuid_keys = []
-        for k in keys:
-            try:
-                uuid_keys.append(uuid.UUID(k))
-            except (ValueError, AttributeError, TypeError):
-                pass
-        cp_cond = Counterparty.external_ref.in_(keys)
-        if uuid_keys:
-            cp_cond = or_(cp_cond, Counterparty.id.in_(uuid_keys))
+        cp_cond = _counterparty_match(keys)
         cps = (await db.execute(
             select(Counterparty).where(
                 Counterparty.company_id == loc.company_id, cp_cond,
@@ -958,7 +982,7 @@ async def get_location_contracts(
     briefs: list[LocationContractBrief] = []
     seen: dict[str, CounterpartyBrief] = {}
     for c in contracts:
-        cp = cp_map.get(c.counterparty_id)
+        cp = cp_map.get(str(c.counterparty_id)) if c.counterparty_id else None
         briefs.append(LocationContractBrief(
             id=str(c.id), number=c.number, date=c.date, kind=c.kind,
             scopeType=c.scope_type, companyWide=(c.scope_type == "company"),
@@ -968,7 +992,10 @@ async def get_location_contracts(
         ))
         if c.counterparty_id and c.counterparty_id not in seen:
             seen[c.counterparty_id] = CounterpartyBrief(
-                externalRef=cp.external_ref if cp else c.counterparty_id,
+                # У ручного контрагента внешней ссылки нет — тогда ключом идёт
+                # наш идентификатор, и он обязан доехать строкой: схема ответа
+                # объявляет строку, а в поле договора теперь UUID.
+                externalRef=cp.external_ref if cp else str(c.counterparty_id),
                 name=cp.name if cp else "(неизвестный контрагент)",
                 inn=cp.inn if cp else None,
             )
@@ -1107,15 +1134,7 @@ async def settlements_detail(
     cp_ids = {r.counterparty_id for r in rows if r.counterparty_id}
     cp_map: dict[str, str] = {}
     if cp_ids:
-        uuid_keys = []
-        for k in cp_ids:
-            try:
-                uuid_keys.append(uuid.UUID(k))
-            except (ValueError, TypeError):
-                pass
-        cond = Counterparty.external_ref.in_(cp_ids)
-        if uuid_keys:
-            cond = or_(cond, Counterparty.id.in_(uuid_keys))
+        cond = _counterparty_match(cp_ids)
         for cp in (await db.execute(
             select(Counterparty).where(Counterparty.company_id == cid, cond)
         )).scalars().all():
@@ -1142,7 +1161,8 @@ async def settlements_detail(
             buNumber=md.get("buNumber"),
             role=r.role,
             counterpartyId=r.counterparty_id,
-            counterpartyName=cp_map.get(r.counterparty_id) if r.counterparty_id else None,
+            counterpartyName=(cp_map.get(str(r.counterparty_id))
+                              if r.counterparty_id else None),
             contractNumber=contr_map.get(r.contract_id) if r.contract_id else None,
             basis=r.basis,
             paidThrough=r.paid_through,
