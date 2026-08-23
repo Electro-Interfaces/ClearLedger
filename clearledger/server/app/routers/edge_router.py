@@ -504,9 +504,15 @@ async def _ingest_receipts(db: AsyncSession, company_id, station_id: int,
                 continue
             if existing.source_uuid is None:
                 existing.source_uuid = str(source_uuid)[:64]
+            # Происхождение читается ДО перезаписи полей: цикл ниже ставит
+            # «station» всем подряд, и проверка после него смотрела бы на уже
+            # затёртое значение — то есть всегда видела бы «station». Документ,
+            # заведённый центром или пришедший по ЭДО, при первой же выгрузке со
+            # станции переставал быть таковым, и разрез «кто завёл приёмку» врал.
+            was_from = existing.origin
             for key, value in values.items():
                 setattr(existing, key, value)
-            existing.origin = existing.origin if existing.origin in ("center", "edo") else "station"
+            existing.origin = was_from if was_from in ("center", "edo") else "station"
             existing.version = int(existing.version or 0) + 1
             row = existing
         await db.flush()
