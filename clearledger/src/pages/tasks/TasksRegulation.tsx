@@ -283,6 +283,18 @@ export function TemplatesSection({ companyId }: { companyId: string }) {
     onSuccess: done,
     onError: (e) => toast.error((e as Error).message),
   })
+  // Пустой список заготовок означает пустое меню «Создать» по всему «Треку»:
+  // человек, пришедший заводить работу, не находит ни одной готовой дорожки.
+  const starter = useMutation({
+    mutationFn: () => tasksService.createStarterTemplates(companyId),
+    onSuccess: (r) => {
+      toast.success(r.added ? `Заведено заготовок: ${r.added}` : 'Все заготовки уже есть')
+      qc.invalidateQueries({ queryKey: ['task-templates'] })
+      qc.invalidateQueries({ queryKey: ['task-types'] })
+      qc.invalidateQueries({ queryKey: ['process-templates'] })
+    },
+    onError: (e) => toast.error((e as Error).message),
+  })
   const templates = q.data?.templates ?? []
 
   return (
@@ -295,9 +307,15 @@ export function TemplatesSection({ companyId }: { companyId: string }) {
             процесс можно передавать между сотрудниками до полного выполнения.
           </p>
         </div>
-        <Button size="sm" className="h-8" onClick={() => setOpen((v) => !v)}>
-          <Plus className="mr-1.5 h-3.5 w-3.5" />{open ? 'Свернуть' : 'Новый шаблон'}
-        </Button>
+        <span className="flex items-center gap-2">
+          {isCompanyAdmin && (
+            <Button variant="outline" size="sm" className="h-8" disabled={starter.isPending}
+              onClick={() => starter.mutate()}>Завести заготовки</Button>
+          )}
+          <Button size="sm" className="h-8" onClick={() => setOpen((v) => !v)}>
+            <Plus className="mr-1.5 h-3.5 w-3.5" />{open ? 'Свернуть' : 'Новый шаблон'}
+          </Button>
+        </span>
       </div>
 
       {open && (

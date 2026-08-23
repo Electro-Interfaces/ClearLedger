@@ -803,3 +803,13 @@ export async function createStarterTypes(companyId: string) {
   return post<{ added: number }>(
     `/api/tasks/types/starter?company_id=${encodeURIComponent(companyId)}`, {})
 }
+
+/**
+ * Завести обычный набор заготовок работы: разбор ошибки, задача разработки,
+ * выпуск версии, разбор обращения. Идемпотентно по имени — нажатие второй раз
+ * ничего не задвоит и не тронет переписанное под себя.
+ */
+export async function createStarterTemplates(companyId: string) {
+  return post<{ added: number }>(
+    `/api/tasks/templates/starter?company_id=${encodeURIComponent(companyId)}`, {})
+}

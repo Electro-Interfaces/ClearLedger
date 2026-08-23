@@ -112,6 +112,85 @@ STARTER_TYPES: list[dict] = [
 ]
 
 
+# Заготовки работы: то, у чего есть СОДЕРЖАНИЕ, а не только маршрут.
+#
+# Заготовка без чек-листа — лишний клик: разовое поручение ставится кнопкой и
+# без неё. Оправдывает заготовку список шагов, который иначе держат в голове и
+# половину забывают. Поэтому здесь ровно то, где забывают: ошибка без версии, в
+# которой исправлено; задача без признака готовности; выпуск без проверки на
+# живом стенде; обращение без ответа заявителю.
+#
+# Набор намеренно короткий. Пятнадцать заготовок означают, что человек выбирает
+# заготовку дольше, чем пишет задачу, — и перестаёт ими пользоваться вовсе.
+STARTER_TEMPLATES: list[dict] = [
+    {
+        "name": "Разбор ошибки",
+        "title": "Ошибка: ",
+        "type_code": "incident",
+        "priority": "high",
+        "due_days": 3,
+        "description": "Пришёл сигнал, что сломано. Ведём от воспроизведения "
+                       "до версии, в которой исправлено.",
+        "checklist": [
+            "Воспроизвести и записать шаги",
+            "Указать версию, в которой обнаружено",
+            "Найти причину, а не место, где заметили",
+            "Исправить и закрыть проверкой, которая падала бы до исправления",
+            "Указать версию, в которой исправлено",
+            "Ответить тому, кто сообщил",
+        ],
+    },
+    {
+        "name": "Задача разработки",
+        # Заголовок непустой намеренно: запуск подставляет его как есть, и пустая
+        # строка дала бы задачу без названия — строку-призрак в реестре.
+        "title": "Разработка: ",
+        "type_code": "flow",
+        "due_days": 10,
+        "description": "Работа из бэклога: берём в план, делаем, показываем "
+                       "результат тому, кто просил.",
+        "checklist": [
+            "Описать одним абзацем: что меняется и зачем",
+            "Договориться, по какому признаку работа считается сделанной",
+            "Проверить, чего ещё это касается",
+            "Сделать и покрыть проверкой",
+            "Обновить документацию, если поведение изменилось",
+            "Показать результат тому, кто просил",
+        ],
+    },
+    {
+        "name": "Выпуск версии",
+        "title": "Выпуск версии ",
+        "type_code": "errand",
+        "due_days": 1,
+        "description": "Собрать, проверить, выкатить и сказать людям. "
+                       "Последнее забывают чаще всего.",
+        "checklist": [
+            "Собрать перечень: что вошло в версию",
+            "Прогнать проверки целиком, а не только изменённое",
+            "Выкатить и посмотреть вживую, а не только на «здоров»",
+            "Проставить версию исправленным задачам",
+            "Сообщить тем, кто ждал",
+        ],
+    },
+    {
+        "name": "Разбор обращения",
+        "title": "Обращение: ",
+        "type_code": "incident",
+        "priority": "high",
+        "due_days": 1,
+        "description": "Пришло из «Поддержки». Сначала отвечаем человеку, "
+                       "потом решаем, дефект это или нет.",
+        "checklist": [
+            "Воспроизвести у себя",
+            "Решить, что это: вопрос, настройка или дефект",
+            "Ответить заявителю тем же днём",
+            "Если дефект — завести «Разбор ошибки» и связать с обращением",
+        ],
+    },
+]
+
+
 def _uuid_or_400(v: str, what: str) -> uuid.UUID:
     try:
         return uuid.UUID(v)
@@ -1573,6 +1652,54 @@ async def create_template(
     return _template_out(tpl)
 
 
+@router.post("/templates/starter", status_code=status.HTTP_201_CREATED)
+async def create_starter_templates(
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Завести обычный набор заготовок работы.
+
+    Идемпотентно по имени: повторное нажатие ничего не задвоит и не тронет то,
+    что пространство успело переписать под себя. Посев одноразовый — дальше
+    заготовки живут своей жизнью, поэтому «выключателя» у них нет: ненужную
+    удаляют, а не прячут.
+
+    Недостающие типы заводятся заодно. Заготовка без своего типа пошла бы
+    маршрутом по умолчанию — то есть «Разбор ошибки» шёл бы «Постановка → В
+    работе → Проверка» вместо диагностики и устранения, и разница вскрылась бы
+    на первой же доске.
+    """
+    cid = await _assert_work(company_id, current_user, db)
+    await _assert_admin(db, cid, current_user)
+
+    needed = {spec["type_code"] for spec in STARTER_TEMPLATES}
+    types = {t.code: t for t in (await db.execute(select(TaskType).where(
+        TaskType.company_id == cid, TaskType.code.in_(needed)))).scalars().all()}
+    for spec in STARTER_TYPES:
+        if spec["code"] in needed and spec["code"] not in types:
+            created = TaskType(company_id=cid, **spec)
+            db.add(created)
+            types[spec["code"]] = created
+    await db.flush()
+
+    have = {name for (name,) in (await db.execute(select(TaskTemplate.name).where(
+        TaskTemplate.company_id == cid))).all()}
+    added = 0
+    for spec in STARTER_TEMPLATES:
+        if spec["name"] in have:
+            continue
+        task_type = types.get(spec["type_code"])
+        db.add(TaskTemplate(
+            company_id=cid, name=spec["name"], title=spec["title"],
+            description=spec.get("description"),
+            type_id=task_type.id if task_type is not None else None,
+            priority=spec.get("priority"), due_days=spec.get("due_days"),
+            checklist=list(spec["checklist"])))
+        added += 1
+    await db.commit()
+    return {"added": added}
+
 @router.delete("/templates/{template_id}")
 async def delete_template(
     template_id: str,
@@ -1587,6 +1714,15 @@ async def delete_template(
     if tpl.doc_kind_id or (tpl.assignee_id is not None
                            and tpl.assignee_id != current_user.id):
         await _assert_admin(db, cid, current_user)
+    # Расписание ссылается на заготовку каскадом: удаление унесло бы его молча, и
+    # «акт сверки к 5 числу» просто перестал бы заводиться. Узнать об этом можно
+    # было бы только пятого числа следующего месяца, когда акта не окажется.
+    scheduled = await db.scalar(select(TaskRecurrence.id).where(
+        TaskRecurrence.template_id == tpl.id).limit(1))
+    if scheduled is not None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "По этой заготовке работает расписание. Сначала отключите его")
     await db.delete(tpl)
     await db.commit()
     return {"deleted": template_id}
