@@ -58,10 +58,6 @@ jobs:
           --health-interval 5s --health-timeout 5s --health-retries 10
     env:
       TEST_DATABASE_URL: postgresql+asyncpg://clearledger:clearledger@localhost:5432/clearledger_test
-      # Хранилище вложений: в контейнере стенда это `/app/uploads`, а на раннере
-      # прав на `/app` нет — половина проверок документооборота падала не на
-      # своём предмете, а на отказе создать каталог.
-      UPLOAD_DIR: ${{ runner.temp }}/uploads
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -75,4 +71,11 @@ jobs:
       - name: Что вынесено из прогона
         run: cat tests/quarantine.txt
       - name: Прогон
+        env:
+          # Хранилище вложений: в контейнере стенда это `/app/uploads`, а на
+          # раннере прав на `/app` нет — половина проверок документооборота
+          # падала не на своём предмете, а на отказе создать каталог. Переменная
+          # задаётся у шага: контекст `runner` в `jobs.<id>.env` недоступен, и
+          # workflow с ней там не запускается вовсе.
+          UPLOAD_DIR: ${{ runner.temp }}/uploads
         run: bash tests/run_ci.sh
