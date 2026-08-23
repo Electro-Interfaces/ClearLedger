@@ -31,6 +31,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel
 from sqlalchemy import Integer, String, Uuid, func, literal, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -484,6 +485,94 @@ async def work_mine(
             {"code": "later", "name": "Без срока"},
         ],
     }
+
+
+# ── Перенос по доске ────────────────────────────────────────────────────────
+# Карточку тянут мышью, а делает это движок предмета: поручение идёт по маршруту
+# своего типа, документ — через круг виз. Единая доска не заводит третьего
+# способа менять состояние, иначе след работы разошёлся бы с самой работой.
+
+
+class MoveIn(BaseModel):
+    company_id: str
+    state: str
+
+
+@router.post("/{kind}/{item_id}/move")
+async def move_work(
+    kind: str,
+    item_id: str,
+    payload: MoveIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Перенести предмет в колонку общей доски.
+
+    Отказ всегда называет причину: карточка, молча прыгнувшая обратно, — загадка,
+    а «этот документ не зарегистрирован, а вид этого требует» — ответ.
+    """
+    cid = await _assert_work(payload.company_id, current_user, db)
+    if payload.state not in work_state.COLUMNS:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Неизвестная колонка")
+    if payload.state == "external":
+        # Внешняя сторона появляется не переносом карточки: работа уезжает
+        # наружу вместе с адресатом и возвращается его ответом.
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "В «Ждём внешних» работа попадает, когда её отдают наружу — "
+            "письмом или заявкой у подрядчика, а не переносом карточки")
+
+    if kind == "task":
+        from app.routers.tasks_router import TaskAction, task_action
+
+        task = await db.get(Task, _uuid_or_400(item_id, "item_id"))
+        if task is None or task.company_id != cid:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Поручение не найдено")
+        if payload.state == "done":
+            return await task_action(item_id, TaskAction(
+                company_id=str(cid), status="done"), db, current_user)
+        ttype = await db.get(TaskType, task.type_id) if task.type_id else None
+        route = (ttype.route if ttype else None) or []
+        target = next((s.get("code") for i, s in enumerate(route)
+                       if work_state.stage_column(s, i, len(route)) == payload.state), None)
+        if target is None:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"У типа «{ttype.name if ttype else 'поручение'}» нет стадии в колонке "
+                f"«{work_state.COLUMN_NAMES[payload.state]}» — добавьте её в маршрут")
+        if task.status != "open":
+            return await task_action(item_id, TaskAction(
+                company_id=str(cid), status="open", stage_code=target), db, current_user)
+        return await task_action(item_id, TaskAction(
+            company_id=str(cid), stage_code=target), db, current_user)
+
+    if kind == "doc":
+        from app.routers.docs_router import (
+            ActionIn, ApprovalStartIn, approval_start, doc_action,
+        )
+
+        doc = await db.get(DocCard, _uuid_or_400(item_id, "item_id"))
+        if doc is None or doc.company_id != cid:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Документ не найден")
+        if payload.state == "approval":
+            # Круг виз стартует своей ручкой: там проверки вида, регистрации и
+            # обязательных реквизитов, и обойти их доской нельзя.
+            return await approval_start(item_id, ApprovalStartIn(
+                company_id=str(cid)), db, current_user)
+        if payload.state == "done":
+            return await doc_action(item_id, ActionIn(
+                company_id=str(cid), status="executed"), db, current_user)
+        if payload.state == "in_work" and doc.approval_status == "pending":
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "Документ на согласовании: круг отменяют в карточке, "
+                "чтобы отказ был с причиной и остался в листе")
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Документ переводит в это состояние регистрация или подпись — "
+            "их делают в карточке")
+
+    raise HTTPException(status.HTTP_400_BAD_REQUEST, "Неизвестный род предмета")
 
 
 @router.get("/summary")

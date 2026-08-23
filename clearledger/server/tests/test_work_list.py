@@ -203,3 +203,57 @@ async def test_очередь_на_мне_собирает_все_роды_де�
     # Горящее стоит выше того, что без срока.
     order = [r["bucket"] for r in body["mine"]]
     assert order == sorted(order, key=lambda b: ["overdue", "today", "week", "later"].index(b))
+
+
+async def test_перенос_по_доске_делает_движок_предмета(auth_client: AsyncClient):
+    """Этап 13д: доска не заводит третьего способа менять состояние.
+
+    Ловим: перенос молча возвращает карточку (отказ без причины); поручение
+    переезжает в колонку, которой нет в его маршруте; «Ждём внешних» выглядит
+    местом, куда можно перетащить работу.
+    """
+    me = await _me(auth_client)
+    cid = me["companies"][0]["id"]
+
+    r = await auth_client.post("/api/tasks/types/starter", params={"company_id": cid})
+    assert r.status_code in (200, 201), r.text
+    types = (await auth_client.get("/api/tasks/types",
+                                   params={"company_id": cid})).json()["types"]
+    incident = next(t for t in types if t["code"] == "incident")
+
+    r = await auth_client.post("/api/tasks", json={
+        "company_id": cid, "title": "Работа для доски", "type_id": incident["id"]})
+    assert r.status_code == 201, r.text
+    task = r.json()
+
+    # Перенос в «В работе» ставит стадию, а не выдумывает состояние.
+    r = await auth_client.post(f"/api/work/task/{task['id']}/move", json={
+        "company_id": cid, "state": "in_work"})
+    assert r.status_code == 200, r.text
+    card = (await auth_client.get(f"/api/tasks/{task['id']}",
+                                  params={"company_id": cid})).json()
+    assert card["state"] == "in_work", card["state"]
+    assert card["stage_code"], "стадия не проставилась"
+
+    # В «Готово» — закрытие работы тем же действием, что кнопкой в карточке.
+    r = await auth_client.post(f"/api/work/task/{task['id']}/move", json={
+        "company_id": cid, "state": "done"})
+    assert r.status_code == 200, r.text
+    card = (await auth_client.get(f"/api/tasks/{task['id']}",
+                                  params={"company_id": cid})).json()
+    assert card["status"] == "done" and card["state"] == "done"
+
+    # «Ждём внешних» — не место назначения: туда попадают, отдав работу наружу.
+    r = await auth_client.post(f"/api/work/task/{task['id']}/move", json={
+        "company_id": cid, "state": "external"})
+    assert r.status_code == 400 and "наружу" in r.json()["detail"], r.text
+
+    # Отказ по документу называет причину, а не молчит.
+    kinds = (await auth_client.get("/api/docs/kinds",
+                                   params={"company_id": cid})).json()["kinds"]
+    kind = next(k for k in kinds if k["code"] == "doc_in")
+    doc = (await auth_client.post("/api/docs", json={
+        "company_id": cid, "kind_id": kind["id"], "title": "Документ для доски"})).json()
+    r = await auth_client.post(f"/api/work/doc/{doc['id']}/move", json={
+        "company_id": cid, "state": "new"})
+    assert r.status_code == 400 and r.json()["detail"], r.text

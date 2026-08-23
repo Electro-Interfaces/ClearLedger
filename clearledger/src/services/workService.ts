@@ -5,7 +5,7 @@
  * ручка и своя проекция, и приписать её к одному из контуров значило бы сказать,
  * что она принадлежит ему, — а она общая.
  */
-import { get } from './apiClient'
+import { get, post } from './apiClient'
 
 /** Колонка общей оси состояния. Порядок — порядок движения работы. */
 export type WorkState = 'new' | 'in_work' | 'approval' | 'external' | 'done'
@@ -132,4 +132,12 @@ export function myWorkHref(item: MyWorkItem): string {
   return item.kind === 'doc'
     ? `/docs?view=all&doc=${item.id}`
     : `/docs/company?view=errands&task=${item.id}`
+}
+
+/** Перенести предмет в колонку общей доски. Делает движок предмета: маршрут у
+ *  поручения, круг виз у документа. Отказ приходит с причиной — её и показываем. */
+export async function moveWork(
+  kind: 'doc' | 'task', id: string, companyId: string, state: WorkState,
+) {
+  return post(`/api/work/${kind}/${id}/move`, { company_id: companyId, state })
 }
