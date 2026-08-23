@@ -33,7 +33,7 @@ log = logging.getLogger("clearledger.inbound")
 # `skipped`: неизвестное событие — не ошибка отправителя, а наш ещё не написанный
 # обработчик, и ретраить его бессмысленно.
 HANDLED = {"case.stage_changed", "case.closed", "approval.requested",
-           "errand.requested", "document.requested"}
+           "errand.requested", "document.requested", "acquaint.requested"}
 
 
 async def accept(db: AsyncSession, provider: str, event: dict[str, Any],
@@ -97,6 +97,27 @@ async def process_pending(db: AsyncSession, limit: int = 50) -> int:
     return done
 
 
+async def process_soon() -> int:
+    """Разобрать принятое, не дожидаясь тика регламента.
+
+    Регламент ходит раз в пять минут — этого довольно для событий, которые никто
+    не ждёт глядя в экран. Но просьбу, заведённую человеком из карточки заявки,
+    ждут именно так: нажал «Завести» и смотрит, появилось ли. Пять минут пустого
+    списка научат нажимать второй раз.
+
+    Своя сессия и свой отказ: ответ отправителю уже отдан, и наша неудача здесь
+    не должна ни превратиться в его ретрай, ни потеряться — регламент подберёт.
+    """
+    from app.database import async_session_factory
+
+    try:
+        async with async_session_factory() as db:
+            return await process_pending(db)
+    except Exception:  # noqa: BLE001 — фоновая попытка, страхует регламент
+        log.exception("Ранний разбор принятых событий не удался")
+        return 0
+
+
 async def _start_approval(db: AsyncSession, row: InboundEvent) -> tuple[str, str | None]:
     """Узел маршрута просит собрать визы по документу.
 
@@ -140,6 +161,29 @@ async def _start_document(db: AsyncSession, row: InboundEvent) -> tuple[str, str
     return "ok", f"документ {req.doc_id} заведён ({waiting})"
 
 
+async def _start_acquaint(db: AsyncSession, row: InboundEvent) -> tuple[str, str | None]:
+    """Узел маршрута просит довести документ до людей.
+
+    Четвёртая просьба того же рода. Согласование и утверждение отвечают на
+    вопрос «можно ли», ознакомление — на вопрос «а он знал»; приказ, никем не
+    прочитанный, не работает, и лист об этом честнее памяти.
+
+    Невыполнимая просьба (некого знакомить, нет документа, подразделение не
+    заведено) — `skipped` с причиной: от повтора людей не прибавится.
+    """
+    from app.services import acquaint_requests
+
+    if row.company_id is None:
+        return "skipped", "Событие пришло без компании"
+    try:
+        req = await acquaint_requests.request(
+            db, row.company_id, row.external_id, (row.payload or {}).get("data") or {})
+    except acquaint_requests.AcquaintRequestError as exc:
+        return "skipped", str(exc)[:500]
+    waiting = "ждём исход" if req.on_approved else "без ожидания"
+    return "ok", f"ознакомление {req.round} чел. по документу {req.doc_id} ({waiting})"
+
+
 async def _start_errand(db: AsyncSession, row: InboundEvent) -> tuple[str, str | None]:
     """Узел маршрута просит сделать работу по заготовке «Трека».
 
@@ -164,6 +208,8 @@ async def _handle(db: AsyncSession, row: InboundEvent) -> tuple[str, str | None]
         return await _start_errand(db, row)
     if row.type == "document.requested":
         return await _start_document(db, row)
+    if row.type == "acquaint.requested":
+        return await _start_acquaint(db, row)
 
     if row.type not in HANDLED:
         return "skipped", None

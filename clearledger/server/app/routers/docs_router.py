@@ -4743,6 +4743,12 @@ async def mark_acquainted(
         space_events.doc_data(d, current_user, acquaintId=str(row.id),
                               readAt=row.read_at.isoformat(),
                               snapshotSha256=row.snapshot_sha256))
+    # Ознакомился последний — процесс, который этого ждал, может идти дальше.
+    # Отметка ставится здесь, в закрывающей транзакции: доставка пойдёт фоном, но
+    # потерять исход нельзя — человек уже прочитал, второй раз не прочтёт.
+    from app.services import acquaint_requests
+
+    await acquaint_requests.close_if_done(db, d.id)
     await db.commit()
     return {"status": "done", "read_at": row.read_at.isoformat()}
 
