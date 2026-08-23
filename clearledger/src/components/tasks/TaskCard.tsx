@@ -28,6 +28,7 @@ import { QueryError } from '@/components/common/QueryError'
 import { cn } from '@/lib/utils'
 import * as tasksService from '@/services/tasksService'
 import { WorkIdentity } from '@/components/work/WorkIdentity'
+import { WorkTrace } from '@/components/work/WorkTrace'
 import type { LinkKind, LoadedTask } from '@/services/tasksService'
 import { listSpaceObjects } from '@/services/spaceObjectsService'
 import { listSpaceConnectors } from '@/services/spaceConnectorsService'
@@ -304,47 +305,47 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
           </span>
         }>
           <div className="space-y-2">
-            {events.map((e) => (
-              <div key={e.id}
-                className={cn('rounded-md border px-3 py-1.5 text-xs',
-                  // Реплика из письма помечена: автор должен понимать, что человек
-                  // писал не отсюда и мог не видеть остального контекста.
-                  e.kind === 'mail'
-                    ? 'border-sky-500/40 bg-sky-500/5'
-                    : 'border-border/70 bg-card/60')}>
-                <div className="flex flex-wrap items-baseline gap-1.5">
-                  <span className="font-medium">{e.user ?? 'система'}</span>
-                  <span className="text-muted-foreground">{eventText(e)}</span>
-                  {e.kind === 'mail' && (
-                    <span className="inline-flex items-center gap-0.5 rounded border border-sky-500/40 px-1 text-[10px] text-sky-700 dark:text-sky-300">
-                      <Mail className="h-2.5 w-2.5" />письмом
-                    </span>
-                  )}
-                  <span className="ml-auto text-[11px] text-muted-foreground">{dtT(e.created_at)}</span>
-                  {live && (
-                    <button type="button" title={e.pinned ? 'Открепить' : 'Закрепить'}
-                      onClick={() => pin.mutate(e.id)}
-                      className={cn('shrink-0',
-                        e.pinned ? 'text-primary' : 'text-muted-foreground/50 hover:text-foreground')}>
-                      <Pin className="h-3 w-3" />
-                    </button>
-                  )}
-                </div>
-                {e.note && <RichText text={e.note} className="mt-0.5 text-foreground/90" />}
-                {e.kind === 'mail' && e.to && (
-                  // Первоисточник остаётся в архиве Поддержки: из ленты должна быть
-                  // возможность дойти до оригинала, а не только до вычищенного текста.
+            {/* След рисуется общим компонентом (этап 13е): у документа и у
+                поручения один и тот же вопрос — «что делали и кто». Особенное
+                приходит слотами: закрепление, пометка письма, ссылка на оригинал. */}
+            <WorkTrace
+              events={events.map((e) => ({
+                id: e.id, at: e.created_at, actor: e.user, action: eventText(e),
+                tone: e.kind === 'mail' ? 'mail' : 'default',
+                note: e.note
+                  ? <RichText text={e.note} className="mt-0.5 text-foreground/90" />
+                  : null,
+              }))}
+              empty={feedKind === 'all' ? 'Ходов пока нет.' : 'В этом разрезе ходов нет.'}
+              renderBadge={(event) => (event.tone === 'mail' ? (
+                <span className="inline-flex items-center gap-0.5 rounded border border-sky-500/40 px-1 text-[10px] text-sky-700 dark:text-sky-300">
+                  <Mail className="h-2.5 w-2.5" />письмом
+                </span>
+              ) : null)}
+              renderActions={(event) => {
+                const source = events.find((e) => e.id === event.id)
+                if (!live || !source) return null
+                return (
+                  <button type="button" title={source.pinned ? 'Открепить' : 'Закрепить'}
+                    onClick={() => pin.mutate(source.id)}
+                    className={cn('shrink-0',
+                      source.pinned ? 'text-primary'
+                        : 'text-muted-foreground/50 hover:text-foreground')}>
+                    <Pin className="h-3 w-3" />
+                  </button>
+                )
+              }}
+              renderExtra={(event) => {
+                const source = events.find((e) => e.id === event.id)
+                // Первоисточник остаётся в архиве Поддержки: из ленты должна быть
+                // возможность дойти до оригинала, а не только до вычищенного текста.
+                if (!source || source.kind !== 'mail' || !source.to) return null
+                return (
                   <div className="mt-0.5 text-[10px] text-muted-foreground">
-                    оригинал письма в архиве Поддержки: {e.to}
+                    оригинал письма в архиве Поддержки: {source.to}
                   </div>
-                )}
-              </div>
-            ))}
-            {events.length === 0 && (
-              <p className="text-xs text-muted-foreground">
-                {feedKind === 'all' ? 'Ходов пока нет.' : 'В этом разрезе ходов нет.'}
-              </p>
-            )}
+                )
+              }} />
           </div>
         </Section>
           </TabsContent>

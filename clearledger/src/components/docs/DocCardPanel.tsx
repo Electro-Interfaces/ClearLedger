@@ -23,6 +23,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import * as docsService from '@/services/docsService'
 import { WorkIdentity } from '@/components/work/WorkIdentity'
+import { WorkTrace } from '@/components/work/WorkTrace'
 import { DOC_STATUS } from '@/services/docsService'
 import type { DocKindField } from '@/services/docsService'
 import { DocAcquaintTab } from './DocAcquaintTab'
@@ -828,34 +829,29 @@ export function DocCardPanel({ id, companyId, onBack, onChanged, initialTab,
         </TabsContent>
 
         <TabsContent value="feed" className="pt-3">
-          <Card className="divide-y divide-border/60">
-            {d.events.map((event) => (
-              <div key={event.id} className="px-3 py-2 text-sm">
-                <div className="flex flex-wrap items-baseline gap-2">
-                  <span className="text-xs text-muted-foreground">
-                    {formatEventTime(event.created_at)}
-                  </span>
-                  <span className="font-medium">{event.actor ?? 'Система'}</span>
-                  <span className="text-muted-foreground">
-                    {event.kind === 'field' && event.note
-                      ? `изменил: ${FIELD_LABEL[event.note] ?? event.note}`
-                      : EVENT_LABEL[event.kind] ?? event.kind}
-                  </span>
-                </div>
-                {(event.from !== null || event.to !== null) && (
-                  <div className="pt-1 text-[13px]">
-                    {event.from !== null && <span>{formatEventValue(event.from)}</span>}
-                    {event.from !== null && event.to !== null && (
-                      <span className="px-1.5 text-muted-foreground" aria-label="стало">→</span>
-                    )}
-                    {event.to !== null && <span>{formatEventValue(event.to)}</span>}
-                  </div>
-                )}
-                {event.note && event.kind !== 'field' && (
-                  <div className="pt-0.5 text-[13px] text-muted-foreground">{event.note}</div>
-                )}
-              </div>
-            ))}
+          {/* Тот же компонент следа, что в карточке поручения (этап 13е):
+              «что делали и кто» — один вопрос, и отвечать на него двумя
+              разметками значит рассказывать одно и то же по-разному. */}
+          <Card className="p-2">
+            <WorkTrace
+              empty="По документу пока ничего не делали."
+              events={d.events.map((event) => ({
+                id: event.id,
+                at: event.created_at,
+                actor: event.actor ?? 'Система',
+                action: event.kind === 'field' && event.note
+                  ? `изменил: ${FIELD_LABEL[event.note] ?? event.note}`
+                  : EVENT_LABEL[event.kind] ?? event.kind,
+                from: event.from !== null ? formatEventValue(event.from) : null,
+                to: event.to !== null ? formatEventValue(event.to) : null,
+                note: event.note && event.kind !== 'field'
+                  ? (
+                    <div className="pt-0.5 text-[13px] text-muted-foreground">
+                      {event.note}
+                    </div>
+                  )
+                  : null,
+              }))} />
           </Card>
         </TabsContent>
 

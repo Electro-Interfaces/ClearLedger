@@ -9,12 +9,14 @@
  * должен заметить смены правил.
  */
 import { useEffect, useRef, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { Outlet, useLocation, useSearchParams } from 'react-router-dom'
 import { ChevronRight, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { useMaxWidth } from '@/hooks/use-mobile'
 import { useCompany } from '@/contexts/CompanyContext'
 import { cn } from '@/lib/utils'
 import { DocsScopeBar } from '@/components/docs/DocsScopeBar'
+import * as tasksService from '@/services/tasksService'
 
 export interface DocsView { key: string; label: string; hint: string }
 
@@ -93,7 +95,7 @@ export function useDocsView(route: string): string {
 export function DocsLayout() {
   const { pathname } = useLocation()
   const [params, setParams] = useSearchParams()
-  const { isCompanyAdmin } = useCompany()
+  const { company, isCompanyAdmin } = useCompany()
   const narrow = useMaxWidth(1024)
   const [collapsed, setCollapsed] = useState(
     () => localStorage.getItem(COLLAPSE_KEY) === '1')
@@ -103,6 +105,32 @@ export function DocsLayout() {
   const views = (DOCS_VIEWS[route] ?? []).filter(
     (view) => view.key !== 'discipline' || isCompanyAdmin)
   const active = useDocsView(route)
+
+  // Сохранённые отборы общей ленты — продолжение пунктов, а не отдельный экран:
+  // «Входящие за квартал» и «Разработка TF» это такие же вопросы к работе, как
+  // «Доска» или «Планирование», просто заданные человеком, а не нами.
+  const savedQ = useQuery({
+    queryKey: ['task-views', company?.id ?? '', 'work'],
+    queryFn: () => tasksService.listTaskViews(company!.id, 'work'),
+    enabled: route === '/docs/company' && !!company?.id,
+    staleTime: 5 * 60 * 1000,
+  })
+  const saved = route === '/docs/company' ? (savedQ.data?.views ?? []) : []
+  const savedView = params.get('view') === 'work' ? params.get('saved') : null
+
+  // Отбор открывается на общей ленте: он её и описывает.
+  const openSaved = (id: string, query: Record<string, string>) => setParams((p) => {
+    const n = new URLSearchParams(p)
+    for (const key of ['scope', 'kind', 'state', 'query', 'page', 'doc', 'task']) {
+      n.delete(key)
+    }
+    n.set('view', 'work')
+    n.set('saved', id)
+    for (const [key, value] of Object.entries(query)) {
+      if (value && ['scope', 'kind', 'state', 'query'].includes(key)) n.set(key, value)
+    }
+    return n
+  }, { replace: true })
 
   useEffect(() => {
     const requested = params.get('view')
@@ -156,10 +184,21 @@ export function DocsLayout() {
               <button key={v.key} type="button" onClick={() => open(v.key)} title={v.hint}
                 aria-current={v.key === active ? 'page' : undefined}
                 className={cn('min-h-11 shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                  v.key === active
+                  v.key === active && !savedView
                     ? 'bg-primary/10 font-medium text-primary'
                     : 'text-muted-foreground')}>
                 {v.label}
+              </button>
+            ))}
+            {saved.map((v) => (
+              <button key={v.id} type="button"
+                onClick={() => openSaved(v.id, v.query as Record<string, string>)}
+                aria-current={savedView === v.id ? 'page' : undefined}
+                className={cn('min-h-11 shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-xs transition-colors',
+                  savedView === v.id
+                    ? 'bg-primary/10 font-medium text-primary'
+                    : 'text-muted-foreground/80')}>
+                {v.name}
               </button>
             ))}
           </nav>
@@ -204,12 +243,30 @@ export function DocsLayout() {
             <button key={v.key} type="button" onClick={() => open(v.key)} title={v.hint}
               aria-current={v.key === active ? 'page' : undefined}
               className={cn('rounded-md px-3 py-1.5 text-left text-[13px] transition-colors',
-                v.key === active
+                v.key === active && !savedView
                   ? 'bg-primary/10 font-medium text-primary'
                   : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground')}>
               {v.label}
             </button>
           ))}
+          {saved.length > 0 && (
+            <>
+              <div className="mt-3 px-3 pb-1 text-[11px] uppercase tracking-wide text-muted-foreground/70">
+                Мои отборы
+              </div>
+              {saved.map((v) => (
+                <button key={v.id} type="button"
+                  onClick={() => openSaved(v.id, v.query as Record<string, string>)}
+                  aria-current={savedView === v.id ? 'page' : undefined}
+                  className={cn('truncate rounded-md px-3 py-1.5 text-left text-[13px] transition-colors',
+                    savedView === v.id
+                      ? 'bg-primary/10 font-medium text-primary'
+                      : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground')}>
+                  {v.name}
+                </button>
+              ))}
+            </>
+          )}
         </nav>
       )}
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
