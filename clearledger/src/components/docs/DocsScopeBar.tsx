@@ -2,6 +2,7 @@ import { CalendarRange, MapPin, RotateCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useDocsScope } from '@/hooks/useDocsScope'
 import { formatPeriod } from '@/lib/formatDate'
+import { NewWorkButton } from '@/components/work/NewWorkButton'
 
 export function DocsScopeBar() {
   const scope = useDocsScope()
@@ -10,6 +11,10 @@ export function DocsScopeBar() {
     <div className="shrink-0 border-b border-border/60 bg-muted/35 px-3 py-2 text-xs"
       aria-live="polite">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+        {/* Кнопка создания стоит в шапке продукта, а не на отдельных экранах:
+            человек заводит работу оттуда, где он сейчас, — из ленты, с доски,
+            из очереди «На мне». */}
+        <NewWorkButton />
         <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
           <CalendarRange className="h-3.5 w-3.5" aria-hidden="true" />
           Рабочий контур: {formatPeriod(scope.period.from, scope.period.to)}
