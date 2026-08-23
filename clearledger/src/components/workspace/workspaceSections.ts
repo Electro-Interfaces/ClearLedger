@@ -83,6 +83,8 @@ export interface WorkspaceSection {
   connected: boolean
   /** Роль закрыла ВСЕ пункты раздела — показывать его нечем (см. `productAccess.ts`). */
   restricted?: boolean
+  /** Черта над разделом: делит ежедневную работу и то, к чему обращаются по поводу. */
+  separatorBefore?: boolean
 }
 
 /**
@@ -176,6 +178,7 @@ export function useWorkspaceSections(): WorkspaceSection[] {
   const storeSections: WorkspaceSection[] = STORE_SECTIONS.map((sec) => ({
     mode: sec.mode, label: sec.label, icon: sec.icon,
     items: storeOn ? storeMenu(sec.mode) : [], connected: storeOn,
+    ...(sec.separatorBefore ? { separatorBefore: true } : {}),
   }))
   // Помощь по «Магазину» — тот же приём, что в «Топливе»: свод знания по продукту
   // стоит в самом продукте, а не в соседнем приложении.

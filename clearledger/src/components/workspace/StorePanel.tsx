@@ -59,6 +59,7 @@ import { StoreBarcodeCollisionsPanel } from './StoreBarcodeCollisionsPanel'
 import { StoreCatalogHealthPanel } from './StoreCatalogHealthPanel'
 import { StoreReceiptDocsPanel } from './StoreReceiptDocsPanel'
 import { StoreDocumentsPanel } from './StoreDocumentsPanel'
+import { Info } from 'lucide-react'
 import {
   STORE_KEYS, STORE_MODES, STORE_MENU, STORE_HELP_KEYS, getStoreView, storeDefaultKey, storeModeForKey,
   type StoreMode, type StoreStatus, type StoreView,
@@ -121,11 +122,12 @@ function ViewScaffold({ view }: { view: StoreView }) {
       </div>
 
       {view.status === 'planned' && (
-        <div className="mt-4 rounded-lg border border-dashed border-amber-400/30 bg-amber-400/5 p-3 text-xs text-amber-200/70 leading-relaxed">
-          ⚠ Экран ещё не подключён к данным. Документы движения (перемещения, инвентаризации,
-          списания, переоценка) в ЦБ ЭЛСИ.АЗК <b>есть</b> (probe подтвердил — тысячи записей по 208),
-          коннектор их пока не читает: нужен выделённый fetch + нормализация. См.
-          <code className="mx-1">STORE_MOVEMENT_BLUEPRINT.md</code>.
+        <div className="mt-4 flex items-start gap-2 rounded-lg border border-dashed border-border bg-muted/30 p-3 text-xs text-muted-foreground leading-relaxed">
+          <Info className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+          <span>
+            {view.note ??
+              'Пункт заведён, панель ещё не собрана. На рабочем месте станции этот экран уже работает — в центре он показывает то же самое по всей сети и появится по мере переноса.'}
+          </span>
         </div>
       )}
     </div>

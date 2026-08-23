@@ -87,7 +87,7 @@ export const SPACE_PRODUCTS: SpaceProduct[] = [
     // Закрытия периода здесь нет: приём из 1С и выгрузка в БП ГИГ — работа бухгалтера,
     // они живут в «Бухгалтерском» (`finance`), поток «Магазин и общепит» (04.08.2026).
     code: 'shop', route: '/shop', label: 'Магазин',
-    modes: ['store', 'store_documents', 'store_catering', 'store_stock', 'store_cash', 'store_catalog', 'store_marking', 'store_network', 'store_1c', 'store_reports', 'store_help'], paths: [],
+    modes: ['store', 'store_receipt', 'store_stock', 'store_catering', 'store_reports', 'store_catalog', 'store_cash', 'store_marking', 'store_documents', 'store_network', 'store_1c', 'store_help'], paths: [],
   },
   {
     // Маркетинг — поведение клиентов: кампании, акции, сегменты под рассылку. Продукт

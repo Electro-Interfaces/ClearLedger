@@ -185,7 +185,7 @@ export function WorkspaceModeSidebar() {
           const Icon = section.icon
           return (
             <div key={section.mode} className="flex flex-col items-center">
-              {section.mode === 'export' && <div className="my-1 w-6 h-px bg-border/40" />}
+              {(section.mode === 'export' || section.separatorBefore) && <div className="my-1 w-6 h-px bg-border/40" />}
               <button
                 onClick={() => setCoreMode(section.mode)}
                 title={section.label}
@@ -225,7 +225,7 @@ export function WorkspaceModeSidebar() {
 
         return (
           <div key={section.mode}>
-            {section.mode === 'export' && <div className="my-1.5 mx-2 h-px bg-border/40" />}
+            {(section.mode === 'export' || section.separatorBefore) && <div className="my-1.5 mx-2 h-px bg-border/40" />}
 
             {/* Раздел */}
             <button
