@@ -5,6 +5,7 @@ import asyncio
 import io
 import tempfile
 import zipfile
+import os
 from pathlib import Path
 from xml.etree import ElementTree
 
@@ -82,16 +83,27 @@ async def _pdf(path: Path, folder: Path, timeout: int) -> str:
     if text:
         return text
 
+    # Распознавание — дорогая ветка: она включается только когда во вложении нет
+    # встроенного текста (скан). Предел страниц есть, потому что OCR идёт секунды
+    # на страницу, а загрузка не должна висеть; но двадцать страниц — это меньше
+    # обычного договора, и его вторая половина в поиск не попадала. Предел
+    # поднят и вынесен в окружение: у сканов приложений к тендеру он свой.
+    limit = max(1, int(os.environ.get("DOC_OCR_PAGE_LIMIT", "60")))
     prefix = folder / "page"
     await _command(
-        "pdftoppm", "-f", "1", "-l", "20", "-r", "160", "-png", str(path), str(prefix),
-        timeout=timeout)
+        "pdftoppm", "-f", "1", "-l", str(limit), "-r", "160", "-png",
+        str(path), str(prefix), timeout=timeout)
     parts: list[str] = []
     for image in sorted(folder.glob("page-*.png")):
         value = await _image(image, timeout)
         if value:
             parts.append(value)
-    return _clean(" ".join(parts))
+    text = _clean(" ".join(parts))
+    if len(sorted(folder.glob("page-*.png"))) >= limit:
+        # Честная отметка: иначе «нашлось не всё» выглядит как «в документе
+        # этого нет», и человек делает вывод по половине бумаги.
+        text = f"{text} [распознаны первые {limit} страниц]".strip()
+    return text
 
 
 async def extract(content: bytes, mime: str, file_name: str) -> str | None:

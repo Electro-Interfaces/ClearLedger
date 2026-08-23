@@ -3919,6 +3919,14 @@ async def create_all() -> None:
         ):
             await conn.execute(_sa.text(stmt))
 
+        # v2.69: переходящие дела (долг «Трека»). У существующих дел признак
+        # снят: их поведение не меняется, пока делопроизводитель не решит иначе.
+        for stmt in (
+            "ALTER TABLE doc_cases ADD COLUMN IF NOT EXISTS carry_over "
+            "BOOLEAN NOT NULL DEFAULT FALSE",
+        ):
+            await conn.execute(_sa.text(stmt))
+
         # v2.60: маршрут проекта выбирается человеком, а не берётся молча первым.
         # Пусто у всех существующих проектов — это и есть прежнее поведение.
         for stmt in (

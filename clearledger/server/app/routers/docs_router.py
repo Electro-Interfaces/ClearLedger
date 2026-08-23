@@ -332,9 +332,25 @@ def _assert_case_accepts_doc(case_row: DocCase, doc: DocCard,
         raise HTTPException(status.HTTP_409_CONFLICT,
                             "Юрлицо документа не совпадает с юрлицом дела")
     effective_date = registration_date or doc.reg_date
-    if effective_date is not None and case_row.year != effective_date.year:
-        raise HTTPException(status.HTTP_409_CONFLICT,
-                            "Год дела должен совпадать с годом регистрации документа")
+    if effective_date is None:
+        return
+    if case_row.carry_over:
+        # Переходящее дело принимает документы следующих лет, но не прошлых:
+        # подшить в него бумагу, которая старше самого дела, значит переписать
+        # историю. Срок хранения при этом считается от года регистрации
+        # документа — то есть позже, а не раньше: ошибиться в сторону «храним
+        # дольше» дешевле, чем уничтожить нужное.
+        if effective_date.year < case_row.year:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "Документ старше дела: переходящее дело принимает документы "
+                "своего года и следующих")
+        return
+    if case_row.year != effective_date.year:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Год дела должен совпадать с годом регистрации документа. "
+            "Если дело переходящее, отметьте это в номенклатуре")
 
 
 def _set_storage_until(doc: DocCard, case_row: DocCase,
@@ -2679,6 +2695,9 @@ class CaseIn(BaseModel):
     retention_basis: str | None = Field(None, max_length=300)
     retention_class: str = Field(
         "temporary", pattern="^(temporary|epk|permanent|unclassified)$")
+    # Переходящее дело принимает документы следующих лет: длящийся договор,
+    # переписка по одному вопросу через новый год.
+    carry_over: bool = False
 
 
 @router.get("/cases")
@@ -2696,7 +2715,7 @@ async def list_cases(
     return {"cases": [{
         "id": str(c.id), "year": c.year, "index": c.index, "title": c.title,
         "storage_term": c.storage_term, "storage_years": c.storage_years,
-        "epk": c.epk, "status": c.status,
+        "epk": c.epk, "status": c.status, "carry_over": c.carry_over,
         "retention_basis": c.retention_basis,
         "retention_class": c.retention_class,
         "organization_id": str(c.organization_id) if c.organization_id else None,
@@ -2735,7 +2754,7 @@ async def create_case(
         title=payload.title.strip(), storage_term=payload.storage_term,
         storage_years=payload.storage_years, epk=payload.epk,
         retention_basis=(payload.retention_basis or "").strip() or None,
-        retention_class=payload.retention_class,
+        retention_class=payload.retention_class, carry_over=payload.carry_over,
         organization_id=organization_id, department_id=department_id)
     db.add(c)
     try:
@@ -2745,7 +2764,8 @@ async def create_case(
         raise HTTPException(status.HTTP_409_CONFLICT,
                             f"Дело с индексом {case_index} за {payload.year} год уже есть")
     await db.refresh(c)
-    return {"id": str(c.id), "index": c.index, "title": c.title}
+    return {"id": str(c.id), "index": c.index, "title": c.title,
+            "year": c.year, "carry_over": c.carry_over}
 
 
 class CaseCloseIn(BaseModel):

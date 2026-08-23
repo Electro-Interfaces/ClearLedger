@@ -11101,6 +11101,11 @@ class DocCase(Base):
         UUID(as_uuid=True), ForeignKey("org_departments.id", ondelete="SET NULL"), nullable=True)
     # open | closed — закрытое дело новых документов не принимает.
     status: Mapped[str] = mapped_column(String(10), nullable=False, default="open")
+    # Переходящее дело: начато в одном году, продолжается в следующем. По
+    # Перечню Росархива такие дела существуют (длящиеся договоры, переписка по
+    # одному вопросу), и запрет «год дела равен году регистрации» их просто
+    # запрещал: в январе делопроизводитель упирался в отказ и заводил дубль.
+    carry_over: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     note: Mapped[str | None] = mapped_column(String(300), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -11305,6 +11310,9 @@ class DocShareLink(Base):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now())
+
+
+# ── ниже: связь метки с документом ──────────────────────────────────────────
 
 
 class DocLabelLink(Base):

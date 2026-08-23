@@ -43,12 +43,7 @@ const AdminSectionPage = lazy(() => import('@/pages/AdminSectionPage').then((m) 
 const AdminHomeRedirect = lazy(() => import('@/pages/AdminSectionPage').then((m) => ({ default: m.AdminHomeRedirect })))
 const MessagesPage = lazy(() => import('@/pages/MessagesPage').then((m) => ({ default: m.MessagesPage })))
 const TicketsAppPage = lazy(() => import('@/pages/TicketsAppPage').then((m) => ({ default: m.TicketsAppPage })))
-const TasksLayout = lazy(() => import('@/pages/tasks/TasksLayout').then((m) => ({ default: m.TasksLayout })))
-const TasksWorkPage = lazy(() => import('@/pages/tasks/TasksWorkPage').then((m) => ({ default: m.TasksWorkPage })))
-const TasksCompanyPage = lazy(() => import('@/pages/tasks/TasksWorkPage').then((m) => ({ default: m.TasksCompanyPage })))
-const TasksOverviewPage = lazy(() => import('@/pages/tasks/TasksOverviewPage').then((m) => ({ default: m.TasksOverviewPage })))
 const TasksRegulation = lazy(() => import('@/pages/tasks/TasksRegulation').then((m) => ({ default: m.TasksRegulation })))
-const TasksSetupPage = lazy(() => import('@/pages/tasks/TasksSetupPage').then((m) => ({ default: m.TasksSetupPage })))
 const DocsLayout = lazy(() => import('@/pages/docs/DocsLayout').then((m) => ({ default: m.DocsLayout })))
 const DocsRegistryPage = lazy(() => import('@/pages/docs/DocsRegistryPage').then((m) => ({ default: m.DocsRegistryPage })))
 const DocsSetupPage = lazy(() => import('@/pages/docs/DocsSetupPage').then((m) => ({ default: m.DocsSetupPage })))
@@ -299,16 +294,12 @@ const router = createBrowserRouter([
           // должны приводить в пустоту.
           { path: '/tasks', element: <LegacyTasksRedirect /> },
           { path: '/tasks/*', element: <LegacyTasksRedirect /> },
-          {
-            path: '/tasks-legacy',
-            element: <RequireApp code="plan"><LazyPage><TasksLayout /></LazyPage></RequireApp>,
-            children: [
-              { index: true, element: <LazyPage><TasksWorkPage /></LazyPage> },
-              { path: 'company', element: <LazyPage><TasksCompanyPage /></LazyPage> },
-              { path: 'overview', element: <LazyPage><TasksOverviewPage /></LazyPage> },
-              { path: 'setup', element: <LazyPage><TasksSetupPage /></LazyPage> },
-            ],
-          },
+          // Запасного входа в снятый раздел больше нет: все его экраны живут в
+          // «Треке» — реестр поручений и доска в «Компании», разрезы в «Обзоре»,
+          // типы и маршруты в «Настройке». Пока он оставался, у продукта было
+          // два лица, и настройку правили то там, то там.
+          { path: '/tasks-legacy', element: <LegacyTasksRedirect /> },
+          { path: '/tasks-legacy/*', element: <LegacyTasksRedirect /> },
           // «Дело» — документооборот пространства: реестры корреспонденции и
           // приказов, регистрация с номером, редакции файлов. Поручение по
           // документу ставится «Задачами», поэтому продукты разные, а движок общий.

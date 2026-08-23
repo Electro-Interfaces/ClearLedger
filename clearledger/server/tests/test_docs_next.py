@@ -1138,3 +1138,44 @@ async def test_агент_проходит_шаг_следом_отличимы�
                                   params={"company_id": cid_raw})).json()
     # Человеческие события помечены человеком — иначе различие бессмысленно.
     assert all(e["actor_kind"] == "user" for e in card["events"]), card["events"]
+
+
+async def test_переходящее_дело_принимает_документы_следующего_года(
+        auth_client: AsyncClient):
+    """Договор, заведённый в декабре, живёт до марта — и подшивается в своё дело.
+
+    Ловим: запрет «год дела равен году регистрации» отправляет делопроизводителя
+    в январе заводить дубль дела; и обратное — в переходящее дело подшивают
+    бумагу старше самого дела, переписывая историю.
+    """
+    me, cid_raw, kind = await _context(auth_client)
+    year = datetime.now(ZoneInfo("Europe/Moscow")).year
+
+    plain = await auth_client.post("/api/docs/cases", json={
+        "company_id": cid_raw, "year": year - 1, "index": f"П-{uuid.uuid4().hex[:5]}",
+        "title": "Обычное дело прошлого года"})
+    assert plain.status_code == 201, plain.text
+    carry = await auth_client.post("/api/docs/cases", json={
+        "company_id": cid_raw, "year": year - 1, "index": f"Х-{uuid.uuid4().hex[:5]}",
+        "title": "Переходящее дело", "carry_over": True})
+    assert carry.status_code == 201, carry.text
+    assert carry.json()["carry_over"] is True
+
+    doc = (await auth_client.post("/api/docs", json={
+        "company_id": cid_raw, "kind_id": kind["id"],
+        "title": f"Документ этого года {uuid.uuid4().hex[:6]}"})).json()
+    # Правило года работает по дате регистрации: у черновика её ещё нет.
+    r = await auth_client.post(f"/api/docs/{doc['id']}/register",
+                               json={"company_id": cid_raw})
+    assert r.status_code == 200, r.text
+
+    # Обычное дело прошлого года документ этого года не принимает — и говорит,
+    # что делать.
+    r = await auth_client.put(f"/api/docs/{doc['id']}/case", json={
+        "company_id": cid_raw, "case_id": plain.json()["id"]})
+    assert r.status_code == 409 and "переходящее" in r.json()["detail"], r.text
+
+    # Переходящее — принимает.
+    r = await auth_client.put(f"/api/docs/{doc['id']}/case", json={
+        "company_id": cid_raw, "case_id": carry.json()["id"]})
+    assert r.status_code == 200, r.text
