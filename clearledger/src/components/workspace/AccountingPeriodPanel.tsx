@@ -28,6 +28,7 @@ import { get } from '@/services/apiClient'
 import { getLoadedShifts, getFuelReadiness } from '@/services/fuel/fuelMappingService'
 import { getReconciliationSummary } from '@/services/accountingDocService'
 import { getStoreShifts } from '@/services/storeService'
+import { PeriodOneCCard } from './PeriodOneCCard'
 import { fmtMoney } from '@/services/analyticsService'
 
 const H3 = 'text-xs font-semibold uppercase tracking-wide text-muted-foreground'
@@ -165,6 +166,14 @@ type Cell = 'closed' | 'open' | 'none'
 
 export function AccountingPeriodPanel() {
   const { companyId } = useCompany()
+  // Наша граница закрытого периода: её ставит бухгалтерия и раздаёт станциям.
+  // Рядом с бухгалтерской из 1С видно, совпадают ли они и в какую сторону.
+  const нашаГраница = useQuery({
+    queryKey: ['closing-date', companyId],
+    queryFn: () => get<{ closing_date: string | null }>('/api/store/accounting/closing-date'),
+    staleTime: 5 * 60 * 1000,
+  })
+  const ourClosingDate = нашаГраница.data?.closing_date ?? null
   const { setCoreMode } = useWorkspace()
   const [selected, setSelected] = useState<{ year: number; month: number } | null>(null)
   const [stream, setStream] = useState<'fuel' | 'store'>('fuel')
@@ -463,6 +472,16 @@ export function AccountingPeriodPanel() {
           стоят итоговой строкой матрицы покрытия, а два блока про одно заставляли
           сверять их между собой. */}
       {active && <CoverageCard data={coverage.data} loading={coverage.isLoading} />}
+
+      {/* Что реально лежит в боевой 1С за этот же период. Раньше экран отвечал
+          только за нашу сторону: собрано ли у нас. Но период закрывает
+          бухгалтерия, и её сторону тоже надо видеть — сколько документов
+          проведено, сколько висит и до какой даты она закрылась у себя. */}
+      {active && range && (
+        <PeriodOneCCard
+          dateFrom={range.from} dateTo={range.to} companyId={companyId}
+          ourClosingDate={ourClosingDate} />
+      )}
 
       {active && <PeriodReadinessCard data={readinessDocs.data} loading={readinessDocs.isLoading}
         month={scope === 'month' ? `${MONTHS[active.month - 1]} ${active.year}`
