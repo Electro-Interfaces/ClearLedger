@@ -254,6 +254,27 @@ async def журнал(
     }
 
 
+@router.post("/match-registry")
+async def сопоставить_реестр_1с(
+    all_docs: bool = Query(
+        False, description="Пройти и по документам без метки канала"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Проставить связь «документ 1С ↔ наша смена» по метке канала.
+
+    Реестр наполняется срезом боевой БП, но без этого прохода он немой: у
+    документов остаётся статус «pending», и человек не видит, чей это документ
+    и к какой смене он относится.
+    """
+    from app.services.onec_doc_matching import сопоставить_реестр
+
+    company_id = await _доступ(user, db)
+    итог = await сопоставить_реестр(db, company_id, только_свежие=not all_docs)
+    await db.commit()
+    return итог.как_словарь()
+
+
 @router.get("/reconciliation")
 async def сверка(
     shift_key: str = Query(..., description="Смена"),

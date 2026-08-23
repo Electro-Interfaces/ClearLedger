@@ -12,11 +12,12 @@
  *                   разрез этого пакета — блюда, техкарты, комплектации.
  */
 import { useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import {
-  AlertTriangle, ArrowRight, CheckCircle2, ChefHat, FileText, Loader2, Users,
+  AlertTriangle, ArrowRight, CheckCircle2, ChefHat, FileText, Loader2, RefreshCw, Users,
 } from 'lucide-react'
+import { toast } from 'sonner'
 
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -26,6 +27,7 @@ import { useFilters } from '@/contexts/FilterContext'
 import { useWorkspace } from '@/contexts/WorkspaceContext'
 import { getFuelReadiness } from '@/services/fuel/fuelMappingService'
 import { getReconciliationSummary } from '@/services/accountingDocService'
+import { сопоставитьРеестр } from '@/services/adjustmentService'
 import { getStoreShifts, getBpPackage, getStoreCateringMenu } from '@/services/storeService'
 import { fmtMoney } from '@/services/analyticsService'
 
@@ -377,6 +379,22 @@ export function AccountingDocsBridge({ kind }: { kind: 'docs' | 'parties' }) {
     queryFn: () => getReconciliationSummary(companyId),
   })
   const total = recon.data?.totalAccDocs ?? 0
+  const queryClient = useQueryClient()
+  // Сопоставление реестра — действие, а не фон: оно переписывает статусы у
+  // тысяч записей, и запускать его само при открытии экрана нельзя.
+  const сопоставление = useMutation({
+    mutationFn: () => сопоставитьРеестр(),
+    onSuccess: (и) => {
+      queryClient.invalidateQueries({ queryKey: ['reconciliation-summary'] })
+      toast.success(
+        `Связано ${и.Связано} из ${и.Рассмотрено}`,
+        { description: и.БезСвязи
+            ? `Без связи ${и.БезСвязи} — причины в реестре у каждого документа`
+            : 'Все документы с меткой канала нашли свою смену' },
+      )
+    },
+    onError: (e: Error) => toast.error('Сопоставление не прошло', { description: e.message }),
+  })
 
   if (kind === 'parties') {
     return (
@@ -435,10 +453,36 @@ export function AccountingDocsBridge({ kind }: { kind: 'docs' | 'parties' }) {
             <p className="text-xs text-muted-foreground">
               документов в базе; фильтры по типу, периоду и статусу сверки — в самом реестре.
             </p>
-            <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs"
-              onClick={() => nav('/1c/documents')}>
-              Открыть реестр документов <ArrowRight className="h-3.5 w-3.5" />
-            </Button>
+
+            <div className="grid gap-2 sm:grid-cols-3">
+              <Metric label="Связаны со сменой" value={fmtN(recon.data?.matched ?? 0)}
+                hint="нашли свою смену по метке канала" tone="good" />
+              <Metric label="Расхождения" value={fmtN(recon.data?.discrepancy ?? 0)}
+                hint="сумма не сошлась с нашей"
+                tone={(recon.data?.discrepancy ?? 0) > 0 ? 'warn' : undefined} />
+              <Metric label="Без связи" value={fmtN(recon.data?.unmatchedAcc ?? 0)}
+                hint="чужой контур или нет метки" />
+            </div>
+            <p className="text-[11px] leading-relaxed text-muted-foreground">
+              Документ находит свою смену по метке, которую канал ставит в комментарий:
+              наш UUID, номер смены или станция с датой. Что не связалось — не молчит:
+              у каждого документа записана причина, чаще всего честная — станции нет
+              в нашем контуре.
+            </p>
+
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs"
+                onClick={() => nav('/1c/documents')}>
+                Открыть реестр документов <ArrowRight className="h-3.5 w-3.5" />
+              </Button>
+              <Button variant="ghost" size="sm" className="h-8 gap-1.5 text-xs"
+                disabled={сопоставление.isPending}
+                onClick={() => сопоставление.mutate()}>
+                <RefreshCw className={cn('h-3.5 w-3.5',
+                  сопоставление.isPending && 'animate-spin')} />
+                {сопоставление.isPending ? 'Сопоставляем…' : 'Сопоставить со сменами'}
+              </Button>
+            </div>
           </CardContent>
         </Card>
       )}

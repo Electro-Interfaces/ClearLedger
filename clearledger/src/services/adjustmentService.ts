@@ -150,3 +150,23 @@ export interface СверкаСлоёв {
 
 export const getСверкаСлоёв = (shiftKey: string) =>
   get<СверкаСлоёв>('/api/accounting/adjustments/reconciliation', { shift_key: shiftKey })
+
+/** Итог прохода сопоставления реестра 1С с нашими сменами. */
+export interface ИтогСопоставления {
+  Рассмотрено: number
+  Связано: number
+  Расхождений: number
+  БезСвязи: number
+  ПоМетодам: Record<string, number>
+  Причины: Record<string, number>
+}
+
+/**
+ * Проставить связь «документ 1С ↔ наша смена» по метке канала.
+ *
+ * Реестр наполняется срезом боевой БП, но без этого прохода он немой: документы
+ * висят в «pending», и не видно, чей это документ и к какой смене он относится.
+ */
+export const сопоставитьРеестр = (всеДокументы = false) =>
+  post<ИтогСопоставления>(
+    `/api/accounting/adjustments/match-registry?all_docs=${всеДокументы}`, {})
