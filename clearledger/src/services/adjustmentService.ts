@@ -134,6 +134,8 @@ export interface СлойСверки {
   сумма: number
   подробности: Record<string, number>
   примечание: string
+  /** Насколько точно связан слой: наши · канал ЦБ · метка · реестр. */
+  источник?: string
 }
 
 export interface СверкаСлоёв {

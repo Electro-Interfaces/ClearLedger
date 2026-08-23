@@ -98,7 +98,10 @@ function Слой({ метка, что, данные }: { метка: string; ч
     <div className={`h-full rounded-lg border p-3 ${
       данные.есть ? 'border-border/60 bg-card/40' : 'border-dashed border-border bg-muted/20'
     }`}>
-      <div className="text-[11px] font-medium text-muted-foreground">{метка}</div>
+      <div className="flex items-center gap-1.5">
+        <span className="text-[11px] font-medium text-muted-foreground">{метка}</span>
+        {данные.источник && <ЗнакТочности источник={данные.источник} />}
+      </div>
       <div className="mt-1 text-lg font-semibold tabular-nums">
         {данные.документов ? fmtMoney(данные.сумма) : '—'}
       </div>
@@ -111,6 +114,40 @@ function Слой({ метка, что, данные }: { метка: string; ч
         </p>
       )}
     </div>
+  )
+}
+
+/**
+ * Насколько точно этот слой связан с 1С. Разница принципиальна: «наши» —
+ * подокументно по UUID, «реестр» — вся станция за день, и сравнивать суммы в
+ * лоб уже нельзя. Без этой пометки человек читает приблизительное как точное.
+ */
+function ЗнакТочности({ источник }: { источник: string }) {
+  const вид: Record<string, { текст: string; стиль: string; подсказка: string }> = {
+    'наши': {
+      текст: 'по UUID', стиль: 'border-emerald-400/50 text-emerald-300/80',
+      подсказка: 'наши документы найдены в 1С поимённо — по метке канала',
+    },
+    'канал ЦБ': {
+      текст: 'канал ЦБ', стиль: 'border-blue-400/50 text-blue-300/80',
+      подсказка: 'сопутка доставлена прежним каналом: документы собраны на день, не на смену',
+    },
+    'метка': {
+      текст: 'по смене', стиль: 'border-amber-400/50 text-amber-300/80',
+      подсказка: 'найдено по номеру смены в метке — это документы топливного канала',
+    },
+    'реестр': {
+      текст: 'за день', стиль: 'border-zinc-600 text-zinc-400',
+      подсказка: 'приблизительно: вся станция за день, включая соседние смены',
+    },
+  }
+  const з = вид[источник]
+  if (!з) return null
+  return (
+    <span title={з.подсказка}
+      className={`rounded border px-1 py-px text-[9px] leading-none ${з.стиль}`}>
+      {з.текст}
+    </span>
   )
 }
 
