@@ -47,16 +47,20 @@ export type AccountingSection =
   | 'acc_period' | 'accounting' | 'acc_store' | 'acc_food'
   | 'acc_recon' | 'acc_docs' | 'acc_results'
 
+// Рельса читается блоками, а не списком: рамка периода — потоки учёта —
+// проверка — результат. Черта ставится перед первым разделом блока.
 export const ACCOUNTING_SECTIONS: {
-  mode: AccountingSection; label: string; icon: ComponentType<{ className?: string }>
+  mode: AccountingSection; label: string
+  icon: ComponentType<{ className?: string }>
+  separatorBefore?: boolean
 }[] = [
   { mode: 'acc_period',  label: 'Период',        icon: CalendarCheck },
-  { mode: 'accounting',  label: 'Нефтепродукты', icon: Fuel },
+  { mode: 'accounting',  label: 'Нефтепродукты', icon: Fuel, separatorBefore: true },
   { mode: 'acc_store',   label: 'Магазин',       icon: ShoppingCart },
   { mode: 'acc_food',    label: 'Общепит',       icon: UtensilsCrossed },
-  { mode: 'acc_recon',   label: 'Сверка',        icon: GitCompare },
+  { mode: 'acc_recon',   label: 'Сверка',        icon: GitCompare, separatorBefore: true },
   { mode: 'acc_docs',    label: 'Документы',     icon: FileText },
-  { mode: 'acc_results', label: 'Итоги',         icon: BarChart3 },
+  { mode: 'acc_results', label: 'Итоги',         icon: BarChart3, separatorBefore: true },
 ]
 
 export const ACCOUNTING_MODES: string[] = ACCOUNTING_SECTIONS.map((s) => s.mode)

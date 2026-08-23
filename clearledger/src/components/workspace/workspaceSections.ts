@@ -199,7 +199,11 @@ export function useWorkspaceSections(): WorkspaceSection[] {
     ? [{ mode: 'accounting', label: 'Бухгалтерский', icon: BookOpen, items: [], connected: accOn }]
     : ACCOUNTING_SECTIONS.map((sec) => {
         const items = accItemsOf(sec.mode)
-        return { mode: sec.mode, label: sec.label, icon: sec.icon, items, connected: accOn && items.length > 0 }
+        return {
+          mode: sec.mode, label: sec.label, icon: sec.icon, items,
+          connected: accOn && items.length > 0,
+          ...(sec.separatorBefore ? { separatorBefore: true } : {}),
+        }
       }).filter((s) => s.items.length > 0 || s.mode === 'accounting')
   const exp: WorkspaceSection   = { mode: 'export',     label: 'Выгрузка',       icon: FileOutput,   items: [], connected: true }
   // Компания без объектов (профиль `office`): «Реализация» и «Бухгалтерия». Разделы

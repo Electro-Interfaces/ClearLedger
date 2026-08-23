@@ -180,12 +180,13 @@ export function WorkspaceModeSidebar() {
           <PanelLeftOpen className="h-4 w-4" />
         </button>
         <div className="my-1 w-6 h-px bg-border/40" />
-        {sections.map((section) => {
+        {sections.map((section, i) => {
           const active = coreMode === section.mode
           const Icon = section.icon
           return (
             <div key={section.mode} className="flex flex-col items-center">
-              {(section.mode === 'export' || section.separatorBefore) && <div className="my-1 w-6 h-px bg-border/40" />}
+              {i > 0 && (section.mode === 'export' || section.separatorBefore)
+                && <div className="my-1 w-6 h-px bg-border/40" />}
               <button
                 onClick={() => setCoreMode(section.mode)}
                 title={section.label}
@@ -213,7 +214,7 @@ export function WorkspaceModeSidebar() {
           <PanelLeftClose className="h-4 w-4" />
         </button>
       </div>
-      {sections.map((section) => {
+      {sections.map((section, i) => {
         const active = coreMode === section.mode
         const expanded = expandedMode === section.mode
         const Icon = section.icon
@@ -225,7 +226,8 @@ export function WorkspaceModeSidebar() {
 
         return (
           <div key={section.mode}>
-            {(section.mode === 'export' || section.separatorBefore) && <div className="my-1.5 mx-2 h-px bg-border/40" />}
+            {i > 0 && (section.mode === 'export' || section.separatorBefore)
+              && <div className="my-1.5 mx-2 h-px bg-border/40" />}
 
             {/* Раздел */}
             <button

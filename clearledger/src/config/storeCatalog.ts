@@ -84,7 +84,7 @@ export const STORE_SECTIONS: {
   { mode: 'store_documents', label: 'Документы', icon: Files },
   // Станции — единственное, чего нет на самой станции: парк АЗС, задания,
   // версии агентов, вход в рабочее место конкретной точки.
-  { mode: 'store_network', label: 'Станции', icon: RadioTower },
+  { mode: 'store_network', label: 'Станции', icon: RadioTower, separatorBefore: true },
   { mode: 'store_1c', label: '1С до перехода', icon: CopyCheck },
 ]
 

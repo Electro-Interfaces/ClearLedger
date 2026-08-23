@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import {
   Sidebar,
   SidebarContent,
@@ -469,16 +469,22 @@ function SidebarNavBody({ collapsed = false, onNavigate }: {
       <>
         <SidebarGroup className="py-0">
           <SidebarMenu>
-            {modes.map((s) => (
-              <NavItem
-                key={s.mode}
-                to={`${product.route}?mode=${s.mode}`}
-                icon={s.icon}
-                label={s.label}
-                collapsed={collapsed}
-                onNavigate={onNavigate}
-                active={onProductRoute && s.mode === activeMode}
-              />
+            {modes.map((s, i) => (
+              <Fragment key={s.mode}>
+                {/* Смысловая граница рельсы: ежедневная работа выше, справочное
+                    и отчётное ниже. Черта объявлена в карте разделов продукта
+                    (`separatorBefore`) — здесь её только рисуем, чтобы рельса
+                    приложения читалась так же, как рабочее место станции. */}
+                {s.separatorBefore && i > 0 && <SidebarSeparator className="my-1.5" />}
+                <NavItem
+                  to={`${product.route}?mode=${s.mode}`}
+                  icon={s.icon}
+                  label={s.label}
+                  collapsed={collapsed}
+                  onNavigate={onNavigate}
+                  active={onProductRoute && s.mode === activeMode}
+                />
+              </Fragment>
             ))}
             {items.map((item) => (
               <NavItem key={item.to} {...item} collapsed={collapsed} onNavigate={onNavigate} />
