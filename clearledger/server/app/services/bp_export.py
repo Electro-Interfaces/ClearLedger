@@ -143,6 +143,10 @@ class BpPackageEmitter:
         self._shift_targets: dict[str, DataEntry] = {}
         self._shift_candidates_cache: dict[str, list[DataEntry]] = {}
         self._accounting_context: dict[str, dict] = {}
+        # Сводка правок последнего собранного пакета: экран показывает её рядом
+        # с документом, в сам пакет она не попадает — верхний уровень контракта
+        # закрыт для новых полей.
+        self.последние_корректировки: dict | None = None
 
     async def _nom_map(self) -> dict[str, CbNomenclature]:
         rows = (await self.session.execute(select(CbNomenclature).where(
@@ -1749,6 +1753,9 @@ class BpPackageEmitter:
         raw = raw_packet or await self.build_shift_package(shift_key)
         if raw.get("НеРазложено"):
             raise ValueError("Accounting packet содержит НеРазложено")
+        # Правки бухгалтера ложатся между фактом станции и пакетом: сам факт
+        # остаётся нетронутым, в бухгалтерию уходит результат наложения.
+        raw, корректировки = await self._наложить_корректировки(shift_key, raw)
         company_key = context["company_key"]
         station_id = context["station_id"]
         business_date = context["business_date"]
@@ -1807,6 +1814,7 @@ class BpPackageEmitter:
             "UnicodeNormalization": "NFC",
             **business,
         }
+        self.последние_корректировки = корректировки
         packet = normalize_nfc_json(packet)
         packet["ХешПакета"] = business_projection_hash(packet)
         current_revision = resolution.group.current_revision
@@ -1818,6 +1826,37 @@ class BpPackageEmitter:
         else:
             packet["РевизияПакета"] = current_revision + 1
         return packet
+
+    async def _наложить_корректировки(
+        self, shift_key: str, raw: dict,
+    ) -> tuple[dict, dict | None]:
+        """Применить правки бухгалтера к пакету смены.
+
+        Устаревшая правка (факт с тех пор пересчитали) пакет не собирает: молча
+        наложить её на другие цифры значит отправить в бухгалтерию число,
+        которого никто не считал. Решение принимает человек — пересмотреть
+        правку или отменить её.
+        """
+        from app.services.accounting_adjustment import наложить, список_корректировок
+
+        правки = await список_корректировок(self.session, self.company_id, shift_key)
+        if not правки:
+            return raw, None
+        итог = наложить(raw, правки)
+        if итог.устарели:
+            перечень = "; ".join(
+                "%s (%s)" % (п.reason, п.author or "без автора") for п in итог.устарели
+            )
+            raise ValueError(
+                "Правки сделаны на другой версии факта — смену пересчитали после них: "
+                + перечень + ". Пересмотрите или отмените их в «Пакет в БП»"
+            )
+        return итог.packet, {
+            "Была": True,
+            "Правок": len(итог.применено),
+            "Авторы": sorted({п.author for п in итог.применено if п.author}),
+            "Причины": [п.reason for п in итог.применено],
+        }
 
     async def emit_to_dir(self, shift_key: str, directory: str) -> dict:
         """Legacy API оставлен только как fail-closed совместимый вызов."""

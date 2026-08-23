@@ -2873,6 +2873,37 @@ async def create_all() -> None:
             )
         """))
 
+        # Корректировки документов перед выгрузкой в бухгалтерию.
+        #
+        # Факт станции неприкосновенен: бухгалтер правит не его, а то, что уйдёт
+        # в 1С. Правка ложится отдельной записью поверх оригинала — с автором,
+        # причиной и хешем той версии факта, на которой она сделана. Пересчёт
+        # смены меняет хеш, и правка перестаёт применяться молча: наложить её на
+        # другие цифры значит отправить в бухгалтерию число, которого никто не
+        # считал.
+        await conn.execute(_sa.text("""
+            CREATE TABLE IF NOT EXISTS accounting_adjustments (
+                id                UUID PRIMARY KEY,
+                company_id        UUID NOT NULL,
+                business_shift_id UUID,
+                shift_key         VARCHAR(80) NOT NULL DEFAULT '',
+                doc_kind          VARCHAR(60) NOT NULL,
+                document_id       VARCHAR(80) NOT NULL DEFAULT '',
+                base_content_hash CHAR(64) NOT NULL DEFAULT '',
+                patch             JSONB NOT NULL,
+                reason            TEXT NOT NULL,
+                author            VARCHAR(160) NOT NULL DEFAULT '',
+                status            VARCHAR(20) NOT NULL DEFAULT 'applied',
+                superseded_by     UUID,
+                created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+                cancelled_at      TIMESTAMPTZ,
+                cancelled_by      VARCHAR(160) NOT NULL DEFAULT ''
+            )
+        """))
+        await conn.execute(_sa.text(
+            "CREATE INDEX IF NOT EXISTS accounting_adjustments_shift "
+            "ON accounting_adjustments (company_id, shift_key, status)"))
+
         # Политика Магазина v1: цены всех карточек находятся в ведении АЗС.
         # Колонка остаётся — позже она снова станет различаться по категории
         # или карточке, когда будет включён сетевой контроль ценообразования.
