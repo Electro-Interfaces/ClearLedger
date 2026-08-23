@@ -57,7 +57,7 @@ from app.routers import doc_share_router
 from app.services import (
     doc_approvals, doc_exchange, doc_print, doc_text, doc_verify, external_approval,
     file_safety, file_store, jitsi, mail_send, process_templates, space_events,
-    task_mail,
+    task_mail, work_state,
 )
 from app.services.doc_numbers import next_number, render, scope_key
 
@@ -849,6 +849,9 @@ def _card_out(d: DocCard, names: dict[str, str] | None = None,
         "kind_name": names.get(str(d.kind_id), ""),
         "family": d.family, "direction": d.direction,
         "title": d.title, "summary": d.summary, "status": d.status,
+        # Та же ось, что у поручений (этап 13а): круг виз сильнее статуса —
+        # смотрящий на доску спрашивает «кого ждём», а не «зарегистрирован ли».
+        **work_state.state_out(work_state.doc_state(d)),
         "reg_number": d.reg_number,
         "reg_date": d.reg_date.isoformat() if d.reg_date else None,
         "number_manual": d.number_manual,

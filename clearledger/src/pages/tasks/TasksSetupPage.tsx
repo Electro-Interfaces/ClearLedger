@@ -21,9 +21,10 @@ import { QueryError } from '@/components/common/QueryError'
 import { cn } from '@/lib/utils'
 import { useCompany } from '@/contexts/CompanyContext'
 import * as tasksService from '@/services/tasksService'
+import type { WorkColumn } from '@/services/tasksService'
 import type { RouteStage, TaskType } from '@/services/tasksService'
 import { listSpaceConnectors } from '@/services/spaceConnectorsService'
-import { PRIORITY_LABEL } from '@/components/tasks/taskWords'
+import { PRIORITY_LABEL, WORK_COLUMNS } from '@/components/tasks/taskWords'
 import { tasksRouteOf, useTasksView } from './TasksLayout'
 import { RecurrencesSection, TemplatesSection } from './TasksRegulation'
 
@@ -347,7 +348,8 @@ function TypeEditor({ companyId, type, onSaved }: {
           <Label>Маршрут</Label>
           <p className="text-[11px] text-muted-foreground">
             Стадии по порядку — так задача и пойдёт. Выключенных стадий не бывает:
-            лишнюю проще удалить.
+            лишнюю проще удалить. Колонка справа — место стадии на общей доске
+            пространства, где поручения стоят рядом с документами.
           </p>
           <div className="space-y-2">
             {route.map((s, i) => (
@@ -355,10 +357,27 @@ function TypeEditor({ companyId, type, onSaved }: {
                 <span className="w-4 text-center text-xs text-muted-foreground">{i + 1}</span>
                 <Input className="h-8 flex-1 text-xs" value={s.name} placeholder="Название стадии"
                   onChange={(e) => setStage(i, { name: e.target.value })} />
-                <Input className="h-8 w-32 text-xs" value={s.code} placeholder="код"
+                <Input className="h-8 w-28 text-xs" value={s.code} placeholder="код"
                   onChange={(e) => setStage(i, {
                     code: e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ''),
                   })} />
+                {/* Колонка общей доски. «По месту» — эвристика: первая стадия
+                    «Заведено», последняя «Готово», остальные «В работе». Она
+                    угадывает простой маршрут и врёт на маршруте с юристом. */}
+                <Select value={s.column ?? 'auto'}
+                  onValueChange={(v) => setStage(i, {
+                    column: v === 'auto' ? undefined : v as WorkColumn,
+                  })}>
+                  <SelectTrigger className="h-8 w-[150px] text-xs">
+                    <SelectValue placeholder="по месту" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="auto">по месту</SelectItem>
+                    {WORK_COLUMNS.map((c) => (
+                      <SelectItem key={c.code} value={c.code}>{c.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 <Button variant="ghost" size="sm" className="h-8 px-2"
                   onClick={() => setRoute((r) => r.filter((_, j) => j !== i))}
                   aria-label="Удалить стадию">

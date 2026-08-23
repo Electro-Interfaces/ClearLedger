@@ -36,7 +36,9 @@ from app.models import (
     TaskView, TaskWatcher, TaskWorkItem,
     User, UserCompany,
 )
-from app.services import process_templates, space_connectors, task_mail, task_scheduler
+from app.services import (
+    process_templates, space_connectors, task_mail, task_scheduler, work_state,
+)
 
 router = APIRouter(prefix="/tasks", tags=["Задачи"])
 
@@ -176,6 +178,9 @@ def _task_out(t: Task, route: list[dict], names: dict[str, str | None],
         "object_id": t.object_id,
         "due_at": t.due_at.isoformat() if t.due_at else None,
         "waiting_for": t.waiting_for,
+        # Общая ось пространства (этап 13а): одна колонка на документ и на
+        # поручение. Считается в `work_state` и больше нигде.
+        **work_state.state_out(work_state.task_state(t, route)),
         "visibility": t.visibility,
         # Просрочка — свойство живой задачи: у закрытой срок уже не сигнал.
         "overdue": bool(t.due_at and t.status == "open" and t.due_at < now),
@@ -1219,7 +1224,9 @@ async def list_types(
     cid = await _assert_work(company_id, current_user, db)
     rows = (await db.execute(select(TaskType).where(TaskType.company_id == cid)
                              .order_by(TaskType.sort_order, TaskType.name))).scalars().all()
-    return {"types": [_type_out(t) for t in rows], "default_route": DEFAULT_ROUTE}
+    return {"types": [_type_out(t) for t in rows], "default_route": DEFAULT_ROUTE,
+            "columns": [{"code": c, "name": work_state.COLUMN_NAMES[c]}
+                        for c in work_state.COLUMNS]}
 
 
 class TypeIn(BaseModel):
@@ -1238,12 +1245,22 @@ class TypeIn(BaseModel):
 
 
 def _clean_route(route: list[dict]) -> list[dict]:
+    """Маршрут из формы: коды уникальны, имена обязательны, колонка — по желанию.
+
+    Колонка (`work_state.COLUMNS`) — место стадии на общей доске пространства.
+    Её называет тот, кто рисует маршрут: только он знает, что «Согласование с
+    юристом» — это согласование, а не работа. Пусто — колонку угадывает
+    эвристика по месту стадии.
+    """
     out: list[dict] = []
     for s in route:
         code = str(s.get("code") or "").strip()[:40]
         name = str(s.get("name") or "").strip()[:120]
         if code and name and code not in [x["code"] for x in out]:
-            out.append({"code": code, "name": name})
+            stage = {"code": code, "name": name}
+            if s.get("column") in work_state.COLUMNS:
+                stage["column"] = str(s["column"])
+            out.append(stage)
     return out
 
 

@@ -108,6 +108,9 @@ export interface DocCard {
   title: string
   summary: string | null
   status: string          // draft | registered | in_force | executed | archived | cancelled
+  /** Колонка общей оси состояния (этап 13а) — та же, что у поручений. */
+  state?: 'new' | 'in_work' | 'approval' | 'external' | 'done'
+  state_name?: string
   reg_number: string | null
   reg_date: string | null
   number_manual: boolean

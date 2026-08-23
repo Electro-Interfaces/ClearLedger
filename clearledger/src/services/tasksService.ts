@@ -4,7 +4,15 @@
  */
 import { del, get, patch, post, put, upload } from './apiClient'
 
-export interface RouteStage { code: string; name: string }
+/** Стадия маршрута. `column` — место стадии на общей доске пространства
+ *  (этап 13а): его называет тот, кто рисует маршрут, потому что только он знает,
+ *  что «Согласование с юристом» — это согласование, а не работа. Пусто — колонку
+ *  угадывает эвристика по месту стадии в маршруте. */
+export interface RouteStage { code: string; name: string; column?: WorkColumn }
+
+/** Общая ось состояния работы: одна колонка на документ и на поручение. */
+export type WorkColumn = 'new' | 'in_work' | 'approval' | 'external' | 'done'
+export interface WorkColumnDef { code: WorkColumn; name: string }
 
 export interface TaskLabel { id: string; name: string; color: string }
 export interface TaskProgress { total: number; done: number }
@@ -94,6 +102,9 @@ export interface SpaceTask {
   fix_version_id?: string | null
   found_version?: string | null
   found_version_id?: string | null
+  /** Колонка общей оси: где работа стоит, одинаково с документами. */
+  state?: WorkColumn
+  state_name?: string
   /** Пусто — задача в бэклоге: решили делать, не решили когда. */
   sprint?: string | null
   sprint_id?: string | null
@@ -432,7 +443,7 @@ export async function taskSprintSummary(id: string, companyId: string) {
 }
 
 export async function listTaskTypes(companyId: string) {
-  return get<{ types: TaskType[]; default_route: RouteStage[] }>(
+  return get<{ types: TaskType[]; default_route: RouteStage[]; columns?: WorkColumnDef[] }>(
     '/api/tasks/types', { company_id: companyId })
 }
 

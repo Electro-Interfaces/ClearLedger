@@ -19,6 +19,22 @@ export const STATUS_LABEL: Record<string, string> = {
   open: 'в работе', done: 'выполнена', cancelled: 'отменена',
 }
 
+/** Общая ось состояния работы (этап 13а): одни и те же колонки для
+ *  документа и для поручения. Порядок = порядок движения работы и порядок
+ *  колонок на доске. Список тот же, что на сервере (`work_state.COLUMNS`):
+ *  сервер отдаёт его в `/api/tasks/types`, а здесь он живёт для тех экранов,
+ *  которые рисуют колонки до первого ответа. */
+export const WORK_COLUMNS: { code: string; name: string }[] = [
+  { code: 'new', name: 'Заведено' },
+  { code: 'in_work', name: 'В работе' },
+  { code: 'approval', name: 'На согласовании' },
+  { code: 'external', name: 'Ждём внешних' },
+  { code: 'done', name: 'Готово' },
+]
+
+export const WORK_COLUMN_LABEL: Record<string, string> = Object.fromEntries(
+  WORK_COLUMNS.map((c) => [c.code, c.name]))
+
 /** Как связь называется со стороны открытой карточки. */
 export const LINK_LABEL: Record<string, string> = {
   subtask: 'подзадача', parent: 'родительская',
