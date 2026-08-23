@@ -27,7 +27,7 @@ import { useFilters } from '@/contexts/FilterContext'
 import { useWorkspace } from '@/contexts/WorkspaceContext'
 import { getFuelReadiness } from '@/services/fuel/fuelMappingService'
 import { getReconciliationSummary } from '@/services/accountingDocService'
-import { сопоставитьРеестр } from '@/services/adjustmentService'
+import { getСостояниеРеестра, сопоставитьРеестр } from '@/services/adjustmentService'
 import { getStoreShifts, getBpPackage, getStoreCateringMenu } from '@/services/storeService'
 import { fmtMoney } from '@/services/analyticsService'
 
@@ -380,6 +380,10 @@ export function AccountingDocsBridge({ kind }: { kind: 'docs' | 'parties' }) {
   })
   const total = recon.data?.totalAccDocs ?? 0
   const queryClient = useQueryClient()
+  const состояние = useQuery({
+    queryKey: ['registry-state', companyId],
+    queryFn: getСостояниеРеестра,
+  })
   // Сопоставление реестра — действие, а не фон: оно переписывает статусы у
   // тысяч записей, и запускать его само при открытии экрана нельзя.
   const сопоставление = useMutation({
@@ -454,6 +458,9 @@ export function AccountingDocsBridge({ kind }: { kind: 'docs' | 'parties' }) {
               документов в базе; фильтры по типу, периоду и статусу сверки — в самом реестре.
             </p>
 
+            <ЧитаноКогда когда={состояние.data?.ПоследнееЧтение ?? null}
+              подробности={состояние.data?.Подробности ?? ''} />
+
             <div className="grid gap-2 sm:grid-cols-3">
               <Metric label="Связаны со сменой" value={fmtN(recon.data?.matched ?? 0)}
                 hint="нашли свою смену по метке канала" tone="good" />
@@ -487,6 +494,35 @@ export function AccountingDocsBridge({ kind }: { kind: 'docs' | 'parties' }) {
         </Card>
       )}
     </div>
+  )
+}
+
+/**
+ * Возраст среза боевой БП. Цифры сверки выглядят одинаково уверенно и на
+ * свежих данных, и на трёхнедельных, поэтому дату чтения показываем рядом с
+ * ними, а не прячем в подсказку. Сутки — норма (такт ночной), двое — повод
+ * посмотреть, живо ли соединение.
+ */
+function ЧитаноКогда({ когда, подробности }: { когда: string | null; подробности: string }) {
+  if (!когда) {
+    return (
+      <p className="text-[11px] text-muted-foreground">
+        Боевую БП автоматически ещё не читали — реестр наполнен ручным срезом.
+        Ночной такт снимает его сам, раз в сутки.
+      </p>
+    )
+  }
+  const д = new Date(когда)
+  const часов = Math.floor((Date.now() - д.getTime()) / 3_600_000)
+  const устарело = часов >= 48
+  return (
+    <p className={cn('text-[11px]', устарело ? 'text-amber-500' : 'text-muted-foreground')}>
+      Читано из боевой БП {д.toLocaleString('ru-RU', {
+        day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+      {часов >= 24 && ` · ${часов} ч назад`}
+      {устарело && ' — такт не отработал, стоит проверить соединение'}
+      {подробности && <span className="text-muted-foreground"> · {подробности}</span>}
+    </p>
   )
 }
 

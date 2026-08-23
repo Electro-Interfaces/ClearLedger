@@ -254,6 +254,37 @@ async def журнал(
     }
 
 
+@router.get("/registry-state")
+async def состояние_реестра(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Свежесть реестра документов 1С и разрез по сопоставлению.
+
+    Цифры сверки выглядят одинаково уверенно и на свежих данных, и на
+    трёхнедельных. Возраст среза — часть ответа, а не сноска.
+    """
+    from sqlalchemy import text as _text
+
+    company_id = await _доступ(user, db)
+    последнее = (await db.execute(_text("""
+        SELECT timestamp, details FROM audit_events
+         WHERE company_id = :c AND action = 'onec.read.snapshot'
+         ORDER BY timestamp DESC LIMIT 1
+    """), {"c": str(company_id)})).mappings().first()
+    разрез = {р["match_status"]: int(р["n"]) for р in (await db.execute(_text("""
+        SELECT match_status, count(*) AS n FROM accounting_docs
+         WHERE company_id = :c AND details->'Метка' IS NOT NULL
+         GROUP BY match_status
+    """), {"c": str(company_id)})).mappings().all()}
+    return {
+        "ПоследнееЧтение": последнее["timestamp"].isoformat() if последнее else None,
+        "Подробности": (последнее["details"] if последнее else "") or "",
+        "Разрез": разрез,
+        "СМеткой": sum(разрез.values()),
+    }
+
+
 @router.post("/match-registry")
 async def сопоставить_реестр_1с(
     all_docs: bool = Query(

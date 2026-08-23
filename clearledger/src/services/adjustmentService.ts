@@ -170,3 +170,14 @@ export interface ИтогСопоставления {
 export const сопоставитьРеестр = (всеДокументы = false) =>
   post<ИтогСопоставления>(
     `/api/accounting/adjustments/match-registry?all_docs=${всеДокументы}`, {})
+
+/** Свежесть реестра документов 1С: когда читали и что с сопоставлением. */
+export interface СостояниеРеестра {
+  ПоследнееЧтение: string | null
+  Подробности: string
+  Разрез: Record<string, number>
+  СМеткой: number
+}
+
+export const getСостояниеРеестра = () =>
+  get<СостояниеРеестра>('/api/accounting/adjustments/registry-state')

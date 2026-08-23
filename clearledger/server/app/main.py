@@ -269,8 +269,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception as e:  # noqa: BLE001 — почта не критична для API
         logger.warning(f"Опрос почты не запущен: {e}")
 
+    # Чтение боевой БП: реестр документов 1С не должен устаревать молча. Раз в
+    # сутки в тихий час — соединение там одно на всех, днём оно занято людьми.
+    onec_read_task: asyncio.Task | None = None
+    try:
+        from app.services.onec_read_scheduler import run_forever as _onec_read
+        onec_read_task = asyncio.create_task(_onec_read())
+    except Exception as e:  # noqa: BLE001 — чтение БП не критично для API
+        logger.warning(f"Такт чтения БП не запущен: {e}")
+
     logger.info("TradeLedger Server запущен")
     yield
+    if onec_read_task is not None:
+        onec_read_task.cancel()
     if mail_task is not None:
         mail_task.cancel()
     if tasks_task is not None:
