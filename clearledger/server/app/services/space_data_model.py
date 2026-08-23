@@ -171,9 +171,6 @@ _ENTITIES: list[tuple[str, str, list[tuple]]] = [
         ("dispense_periods", "Отпуск по сводной", StationDispensePeriod,
          "Сводная выработка контрагента", "Сверка с сессиями",
          "объект + период", None, None),
-        ("accounting_docs", "Первичка", AccountingDoc,
-         "Загрузка документов · 1С", "Финансы",
-         "контрагент + договор", None, None),
     ]),
     ("service", "Сервис", [
         ("hubex_tasks", "Заявки обслуживания", HubexTask,

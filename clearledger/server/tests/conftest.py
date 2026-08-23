@@ -36,6 +36,8 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from sqlalchemy import text as sa_text
+
 from app.database import Base, get_db
 from app.main import app
 from app.seed import seed_data
@@ -65,18 +67,39 @@ _db.async_session_factory = _test_session_factory
 
 @pytest_asyncio.fixture(scope="session", loop_scope="session")
 async def setup_database():
-    """Создаёт таблицы и seed-данные один раз за сессию."""
+    """Создаёт схему тем же кодом, что и приложение, плюс seed — раз за сессию.
+
+    Схема поднимается через `app.database.create_all`, а не голым `create_all`
+    метаданных: половина правил живёт не в моделях, а в инкрементальных
+    миграциях — частичные уникальные индексы, выражения, триггеры
+    неизменяемости архива. Тестовая база без них отличается от боевой, и
+    проверка готовности (`/ready`) честно отвечала 503: обязательных объектов
+    схемы нет. Тест при этом ловил не поломку кода, а разницу окружений.
+    """
     async with _test_engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
-        await conn.run_sync(Base.metadata.create_all)
+        # Схему сносим целиком, а не `drop_all` по метаданным: миграции заводят
+        # таблицы, которых в моделях нет (журнал решений по ревизиям станции), и
+        # `drop_all` спотыкается о внешний ключ из такой таблицы. База здесь
+        # отдельная (`clearledger_test`), сносить её содержимое безопасно.
+        await conn.execute(sa_text("DROP SCHEMA IF EXISTS edge CASCADE"))
+        await conn.execute(sa_text("DROP SCHEMA public CASCADE"))
+        await conn.execute(sa_text("CREATE SCHEMA public"))
+        # Схему `edge` в бою заводит инициализатор базы пространства: у роли
+        # приложения нет права CREATE, и само оно её не создаёт.
+        await conn.execute(sa_text("CREATE SCHEMA edge"))
+    await _db.create_all()
 
     async with _test_session_factory() as session:
         await seed_data(session)
 
     yield
 
+    # Чистим тем же способом, что и создавали: `drop_all` по метаданным не знает
+    # о таблицах, заведённых миграциями, и падает на их внешних ключах.
     async with _test_engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
+        await conn.execute(sa_text("DROP SCHEMA IF EXISTS edge CASCADE"))
+        await conn.execute(sa_text("DROP SCHEMA public CASCADE"))
+        await conn.execute(sa_text("CREATE SCHEMA public"))
     await _test_engine.dispose()
 
 

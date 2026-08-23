@@ -48,9 +48,14 @@ def test_ledger_replaced_by_products_when_carved():
 
 
 def test_space_management_and_services_always_on():
-    for code in ("admin", "chat", "plan", "conf", "info", "pulse"):
+    # `plan` из списка ушёл вместе с продуктом: «Задачи» сняты с лаунчера
+    # 16.08.2026, работа компании ведётся «Треком» (`docs`).
+    for code in ("admin", "chat", "conf", "info", "pulse"):
         for profile in (*CARVED_PROFILES, "general", None):
             assert _default_app_on(code, profile) is True, f"{profile}: {code}"
+    # «Трек» включён во всех разрезанных профилях — именно он теперь несёт работу.
+    for profile in CARVED_PROFILES:
+        assert _default_app_on("docs", profile) is True, profile
 
 
 def test_coordinator_needs_explicit_enable():
