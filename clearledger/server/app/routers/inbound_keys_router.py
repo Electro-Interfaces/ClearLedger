@@ -30,6 +30,10 @@ class InboundKeyCreate(BaseModel):
     company_id: str
     consumer: str = Field(min_length=2, max_length=200)
     station_id: int | None = Field(default=None, gt=0)
+    # Чем ключ представляется в следе: чужая система или наш агент. За партнёром
+    # стоит организация с договором, за агентом — мы сами, и в истории документа
+    # это должно различаться (этап 8 «Трека»).
+    actor_kind: str = Field("partner", pattern="^(partner|agent)$")
 
 
 @router.get("")
@@ -45,6 +49,7 @@ async def list_keys(
     )).scalars().all()
     return {"keys": [{
         "id": str(k.id), "consumer": k.consumer, "prefix": k.key_prefix,
+        "actor_kind": k.actor_kind,
         "station_id": k.station_id,
         "created_at": k.created_at.isoformat() if k.created_at else None,
         "last_used_at": k.last_used_at.isoformat() if k.last_used_at else None,
@@ -77,6 +82,7 @@ async def create_key(
     raw = secrets.token_urlsafe(32)
     key = SpaceInboundKey(
         id=uuid.uuid4(), company_id=cid, consumer=payload.consumer.strip(),
+        actor_kind=payload.actor_kind,
         key_hash=hashlib.sha256(raw.encode()).hexdigest(), key_prefix=raw[:8],
         station_id=payload.station_id,
     )
@@ -85,7 +91,8 @@ async def create_key(
                     action="inbound_key.create", target=key.consumer)
     await db.flush()
     return {"id": str(key.id), "consumer": key.consumer, "key": raw,
-            "prefix": key.key_prefix, "station_id": key.station_id}
+            "prefix": key.key_prefix, "station_id": key.station_id,
+            "actor_kind": key.actor_kind}
 
 
 @router.delete("/{key_id}", status_code=status.HTTP_204_NO_CONTENT)

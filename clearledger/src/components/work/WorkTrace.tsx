@@ -26,6 +26,14 @@ export interface TraceEvent {
   note?: ReactNode
   /** `mail` — реплика пришла письмом: автор мог не видеть остального контекста. */
   tone?: 'default' | 'mail'
+  /** Кто действовал: человек, чужая система, наш агент, планировщик. Машинное
+   *  действие должно быть видно как машинное — подпись «Аудитор Поддержки»
+   *  иначе читается как имя сотрудника. */
+  actorKind?: 'user' | 'partner' | 'agent' | 'system'
+}
+
+export const ACTOR_KIND_LABEL: Record<string, string> = {
+  partner: 'чужая система', agent: 'агент', system: 'по расписанию',
 }
 
 function stamp(value: string | null): string {

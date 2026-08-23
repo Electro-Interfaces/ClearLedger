@@ -218,7 +218,12 @@ async def partner_decide(
     # моменту.
     db.add(DocEvent(
         doc_id=doc.id, kind="approval", user_id=None, actor_name=actor.name,
-        to_value="решение партнёра",
+        # Род действующего берём у ключа: по одной подписи «Аудитор Поддержки»
+        # не отличить чужую систему от нашего агента, а спрашивать с них
+        # по-разному.
+        actor_kind=key.actor_kind,
+        to_value=("решение агента" if key.actor_kind == "agent"
+                  else "решение партнёра"),
         note=f"ключ {key.key_prefix}…, адрес "
              f"{request.client.host if request.client else 'неизвестен'}"))
     result = await doc_approvals.decide(

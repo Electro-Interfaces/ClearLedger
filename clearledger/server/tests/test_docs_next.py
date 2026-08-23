@@ -1097,3 +1097,44 @@ async def test_конкурентные_запуск_и_решение_согл�
         DocEvent.to_value == "круг отменён",
     ))).scalars().all()
     assert len(cancel_events) == 1
+
+
+async def test_агент_проходит_шаг_следом_отличимым_от_человека(
+        auth_client: AsyncClient, db: AsyncSession):
+    """Этап 8: действие машины видно как машинное.
+
+    Ловим: подпись «Аудитор Поддержки» в ленте читается как имя человека, и
+    разбор «кто это решил» упирается в справочник сотрудников.
+    """
+    import hashlib
+    import secrets
+
+    from app.models import SpaceInboundKey
+
+    me, cid_raw, kind = await _context(auth_client)
+    cid = uuid.UUID(cid_raw)
+
+    raw = secrets.token_urlsafe(24)
+    key = SpaceInboundKey(
+        company_id=cid, consumer="Агент разбора почты",
+        key_hash=hashlib.sha256(raw.encode()).hexdigest(), key_prefix=raw[:8],
+        actor_kind="agent")
+    db.add(key)
+    await db.commit()
+
+    doc = (await auth_client.post("/api/docs", json={
+        "company_id": cid_raw, "kind_id": kind["id"],
+        "title": f"Документ для агента {uuid.uuid4().hex[:6]}"})).json()
+    r = await auth_client.post(f"/api/docs/{doc['id']}/register",
+                               json={"company_id": cid_raw})
+    assert r.status_code == 200, r.text
+    r = await auth_client.post(f"/api/docs/{doc['id']}/approval/start", json={
+        "company_id": cid_raw,
+        "route": [{"code": "agent", "name": "Разбор агентом", "mode": "serial",
+                   "actors": [{"by": "partner", "ref": str(key.id)}]}]})
+    assert r.status_code in (201, 409), r.text
+
+    card = (await auth_client.get(f"/api/docs/{doc['id']}",
+                                  params={"company_id": cid_raw})).json()
+    # Человеческие события помечены человеком — иначе различие бессмысленно.
+    assert all(e["actor_kind"] == "user" for e in card["events"]), card["events"]

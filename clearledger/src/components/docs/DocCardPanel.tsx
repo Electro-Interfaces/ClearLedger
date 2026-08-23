@@ -23,7 +23,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import * as docsService from '@/services/docsService'
 import { WorkIdentity } from '@/components/work/WorkIdentity'
-import { WorkTrace } from '@/components/work/WorkTrace'
+import { ACTOR_KIND_LABEL, WorkTrace } from '@/components/work/WorkTrace'
 import { DOC_STATUS } from '@/services/docsService'
 import type { DocKindField } from '@/services/docsService'
 import { DocAcquaintTab } from './DocAcquaintTab'
@@ -835,8 +835,16 @@ export function DocCardPanel({ id, companyId, onBack, onChanged, initialTab,
           <Card className="p-2">
             <WorkTrace
               empty="По документу пока ничего не делали."
+              // Машинное действие помечено словом: агент и чужая система в
+              // ленте не должны выглядеть сотрудниками (этап 8).
+              renderBadge={(event) => (ACTOR_KIND_LABEL[event.actorKind ?? 'user'] ? (
+                <span className="rounded border border-border/60 px-1 text-[10px] text-muted-foreground">
+                  {ACTOR_KIND_LABEL[event.actorKind ?? 'user']}
+                </span>
+              ) : null)}
               events={d.events.map((event) => ({
                 id: event.id,
+                actorKind: event.actor_kind,
                 at: event.created_at,
                 actor: event.actor ?? 'Система',
                 action: event.kind === 'field' && event.note

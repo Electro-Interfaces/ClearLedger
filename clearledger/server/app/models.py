@@ -236,6 +236,12 @@ class SpaceInboundKey(Base):
     )
     # Кто ходит по ключу: «Дедуп-нода АЗС 208», «Аудитор Поддержки», …
     consumer: Mapped[str] = mapped_column(String(200), nullable=False)
+    # Чем этот ключ представляется в следе: `partner` — чужая система (учётная
+    # система контрагента, шлюз оператора), `agent` — наш автоматический
+    # участник. Разница не косметическая: за партнёром стоит организация с
+    # договором, за агентом — мы сами, и спрашивать с них по-разному.
+    actor_kind: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="partner")
     key_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     key_prefix: Mapped[str] = mapped_column(String(12), nullable=False)
     station_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -10993,6 +10999,11 @@ class DocEvent(Base):
     user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     actor_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # user | partner | agent | system. Действие машины должно быть видно как
+    # машинное: подпись «Аудитор Поддержки» без этого читается как имя человека,
+    # и разбор «кто это решил» упирается в справочник сотрудников.
+    actor_kind: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="user")
     from_value: Mapped[str | None] = mapped_column(String(200), nullable=True)
     to_value: Mapped[str | None] = mapped_column(String(200), nullable=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)

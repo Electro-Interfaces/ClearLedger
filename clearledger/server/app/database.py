@@ -3909,6 +3909,16 @@ async def create_all() -> None:
         ):
             await conn.execute(_sa.text(stmt))
 
+        # v2.68: род действующего (этап 8 «Трека»). У существующих событий
+        # остаётся `user`: они и были человеческими — агентов до этого не было.
+        for stmt in (
+            "ALTER TABLE doc_events ADD COLUMN IF NOT EXISTS actor_kind "
+            "VARCHAR(20) NOT NULL DEFAULT 'user'",
+            "ALTER TABLE space_inbound_keys ADD COLUMN IF NOT EXISTS actor_kind "
+            "VARCHAR(20) NOT NULL DEFAULT 'partner'",
+        ):
+            await conn.execute(_sa.text(stmt))
+
         # v2.60: маршрут проекта выбирается человеком, а не берётся молча первым.
         # Пусто у всех существующих проектов — это и есть прежнее поведение.
         for stmt in (

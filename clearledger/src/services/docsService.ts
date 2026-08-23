@@ -163,6 +163,9 @@ export interface DocEvent {
   id: string
   kind: string
   actor: string | null
+  /** Кто действовал: человек, чужая система, наш агент или планировщик.
+   *  Подпись «Аудитор Поддержки» без этого читается как имя сотрудника. */
+  actor_kind?: 'user' | 'partner' | 'agent' | 'system'
   from: string | null
   to: string | null
   note: string | null

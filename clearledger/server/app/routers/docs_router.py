@@ -4872,6 +4872,9 @@ async def get_doc_history(
         "count": total or 0,
         "events": [{
             "id": str(e.id), "kind": e.kind, "actor": e.actor_name,
+            # Машинное действие видно как машинное: подпись «Аудитор Поддержки»
+            # без этого читается как имя человека (этап 8).
+            "actor_kind": e.actor_kind,
             "user_id": str(e.user_id) if e.user_id else None,
             "from": e.from_value, "to": e.to_value, "note": e.note,
             "created_at": e.created_at.isoformat() if e.created_at else None,
@@ -4987,6 +4990,7 @@ async def get_doc(
         } for v in versions],
         "events": [{
             "id": str(e.id), "kind": e.kind, "actor": e.actor_name,
+            "actor_kind": e.actor_kind,
             "from": e.from_value, "to": e.to_value, "note": e.note,
             "created_at": e.created_at.isoformat() if e.created_at else None,
         } for e in events],
