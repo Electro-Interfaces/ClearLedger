@@ -7,6 +7,8 @@
 import re
 from pathlib import Path
 
+import pytest
+
 from app.services.app_registry import _APPS
 from app.services.info_center import KIND_LABELS
 from app.services.info_seed_station import ARTICLES, CATEGORIES, IMG
@@ -16,6 +18,14 @@ FRONT = Path(__file__).resolve().parents[2]
 STORE_CATALOG = FRONT / "src" / "config" / "storeCatalog.ts"
 HELP_SLICES = FRONT / "src" / "components" / "workspace" / "helpSlices.ts"
 SHOTS = FRONT / "public" / "help" / "station"
+
+# Проверка сверяет справку с деревом ФРОНТА. В прогоне против одного `server/`
+# (так тесты гоняют в контейнере стенда) этого дерева нет — и падение означало
+# бы «не туда посмотрели», а не поломку. В CI и на машине разработчика дерево
+# полное, там проверка работает.
+pytestmark = pytest.mark.skipif(
+    not STORE_CATALOG.exists(),
+    reason="дерево фронта недоступно: прогон идёт против одного server/")
 
 
 def _store_view_keys() -> set[str]:

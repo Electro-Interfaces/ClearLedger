@@ -65,28 +65,10 @@ jobs:
           python-version: '3.13'
           cache: pip
       - run: pip install -r requirements.txt -r requirements-test.txt
-      # Карантин — файлы, красные не из-за проверяемого изменения. Он на виду и
-      # с причинами: список, который никто не читает, превращается в способ
-      # прятать поломки.
+      # Карантин — файлы и тесты, красные не из-за проверяемого изменения. Он на
+      # виду и с причинами: список, который никто не читает, превращается в
+      # способ прятать поломки.
       - name: Что вынесено из прогона
         run: cat tests/quarantine.txt
       - name: Прогон
-        run: |
-          # Каждый файл — свой процесс и своя чистая база. Набор пока зависит от
-          # порядка: тест видит компанию и документы, заведённые соседним файлом,
-          # и падает не по своей вине. Пока это не вычищено, честнее гонять файлы
-          # порознь, чем читать случайные падения общего прогона.
-          failed=""
-          for file in tests/test_*.py; do
-            if grep -qxF "$file" tests/quarantine.txt; then
-              echo "::notice::карантин, пропущен: $file"
-              continue
-            fi
-            echo "::group::$file"
-            python -m pytest "$file" -q -p no:cacheprovider || failed="$failed $file"
-            echo "::endgroup::"
-          done
-          if [ -n "$failed" ]; then
-            echo "::error::красные файлы:$failed"
-            exit 1
-          fi
+        run: bash tests/run_ci.sh
