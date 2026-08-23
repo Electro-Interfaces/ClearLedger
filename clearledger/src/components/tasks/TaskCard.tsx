@@ -900,6 +900,26 @@ function Links({ task, companyId, live, onChanged, onOpenOther }: {
     onSuccess: () => { setAdding(false); setQuery(''); onChanged() },
     onError: (e) => toast.error((e as Error).message),
   })
+  // Разбить работу на шаги — то, ради чего подзадачи и нужны. Раньше карточка
+  // умела только связать с уже заведённой задачей: сначала иди в реестр, поставь,
+  // вернись и найди её поиском. Здесь она заводится строкой и сразу цепляется.
+  const createChild = useMutation({
+    mutationFn: async () => {
+      const child = await tasksService.createTask({
+        companyId, title: query.trim(),
+        // Подзадача остаётся в том же проекте: иначе она выпадет из релиза и
+        // спринта, к которым относится работа целиком.
+        projectId: task.project_id ?? undefined,
+        objectId: task.object_id ?? undefined,
+      })
+      await tasksService.addTaskLink(task.id, {
+        companyId, relatedTaskId: child.id, kind: 'subtask',
+      })
+      return child
+    },
+    onSuccess: () => { setAdding(false); setQuery(''); onChanged() },
+    onError: (e) => toast.error((e as Error).message),
+  })
   const remove = useMutation({
     mutationFn: (linkId: string) => tasksService.deleteTaskLink(task.id, linkId, companyId),
     onSuccess: onChanged,
@@ -928,7 +948,10 @@ function Links({ task, companyId, live, onChanged, onOpenOther }: {
               </SelectContent>
             </Select>
             <Input value={query} onChange={(e) => setQuery(e.target.value)}
-              placeholder="Номер или слова из заголовка" className="h-7 flex-1 text-xs" />
+              placeholder={kind === 'subtask'
+                ? 'Номер, слова из заголовка или название новой подзадачи'
+                : 'Номер или слова из заголовка'}
+              className="h-7 flex-1 text-xs" />
           </div>
           <div className="space-y-1">
             {(found.data?.tasks ?? []).filter((x) => x.id !== task.id).map((x) => (
@@ -940,7 +963,18 @@ function Links({ task, companyId, live, onChanged, onOpenOther }: {
                 <span className="truncate">{x.title}</span>
               </button>
             ))}
-            {query.trim().length >= 2 && found.data?.tasks.length === 0 && (
+            {kind === 'subtask' && query.trim().length >= 3 && (
+              <button type="button" disabled={createChild.isPending}
+                onClick={() => createChild.mutate()}
+                className="flex w-full items-center gap-2 rounded border border-dashed px-1.5 py-1 text-left text-xs hover:bg-muted/60">
+                <Plus className="h-3 w-3 shrink-0 text-muted-foreground" />
+                <span className="truncate">
+                  Завести подзадачу «{query.trim()}»
+                </span>
+              </button>
+            )}
+            {query.trim().length >= 2 && found.data?.tasks.length === 0
+              && kind !== 'subtask' && (
               <p className="text-[11px] text-muted-foreground">Ничего не нашлось.</p>
             )}
           </div>
