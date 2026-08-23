@@ -786,6 +786,10 @@ async def test_подразделение_получает_ознакомлен�
     await db.commit()
     sent = await task_scheduler.run_acquaint_reminders(db, now)
     assert sent == 0
+    # Планировщик оставляет изменения в сессии, а коммитит их цикл регламента.
+    # Перечитать строку, не сохранив, значит стереть ровно то, что проверяем:
+    # причина сбоя ещё не в базе, и refresh вернул бы прежний NULL.
+    await db.commit()
     await db.refresh(row)
     assert row.reminded_at is None
     assert row.reminder_error == "SMTP временно недоступен"
@@ -856,11 +860,16 @@ async def test_новая_редакция_требует_нового_озна�
         "company_id": cid_raw, "title": f"Изменено-{uuid.uuid4().hex}",
     })
     assert changed.status_code == 200, changed.text
+    # Ручка работала в своей сессии, а эти строки уже прочитаны нашей. Без
+    # `populate_existing` SQLAlchemy вернёт их из карты объектов с прежним
+    # статусом, и проверка увидела бы не состояние базы, а свой же кеш.
+    # Именно `populate_existing`, а не `expire_all`: просроченный атрибут в
+    # async-сессии подгружается синхронно и падает на MissingGreenlet.
     rows = (await db.execute(select(DocAcquaint).where(
         DocAcquaint.doc_id == uuid.UUID(doc["id"]),
         DocAcquaint.user_id == person.id,
-    ))).scalars().all()
-    assert all(row.status == "superseded" for row in rows)
+    ).execution_options(populate_existing=True))).scalars().all()
+    assert all(row.status == "superseded" for row in rows), [r.status for r in rows]
 
 
 async def test_расписание_сэд_включается_только_после_ручной_проверки(
