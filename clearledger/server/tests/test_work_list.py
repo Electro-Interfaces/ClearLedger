@@ -257,3 +257,28 @@ async def test_перенос_по_доске_делает_движок_пред
     r = await auth_client.post(f"/api/work/doc/{doc['id']}/move", json={
         "company_id": cid, "state": "new"})
     assert r.status_code == 400 and r.json()["detail"], r.text
+
+
+async def test_отбор_общей_ленты_сохраняется_представлением(auth_client: AsyncClient):
+    """Этап 13ж: справочник отборов один на три списка, но списки не смешиваются.
+
+    Ловим: отбор общей ленты вылезает в реестре поручений — там его ключи ничего
+    не значат, и человек видит пустой список без объяснения.
+    """
+    me = await _me(auth_client)
+    cid = me["companies"][0]["id"]
+
+    r = await auth_client.post("/api/tasks/views", json={
+        "company_id": cid, "name": "Горящее по компании", "list_scope": "work",
+        "query": {"scope": "open", "state": "approval"}})
+    assert r.status_code == 201, r.text
+    assert r.json()["list_scope"] == "work"
+
+    work_views = (await auth_client.get("/api/tasks/views", params={
+        "company_id": cid, "list_scope": "work"})).json()["views"]
+    assert "Горящее по компании" in [v["name"] for v in work_views]
+
+    task_views = (await auth_client.get("/api/tasks/views", params={
+        "company_id": cid, "list_scope": "task"})).json()["views"]
+    assert "Горящее по компании" not in [v["name"] for v in task_views], (
+        "отбор общей ленты попал в реестр поручений")

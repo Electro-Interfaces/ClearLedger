@@ -553,16 +553,20 @@ export interface TaskView {
   position?: number; can_delete?: boolean
 }
 
-export async function listTaskViews(companyId: string) {
-  return get<{ views: TaskView[] }>('/api/tasks/views', { company_id: companyId })
+export async function listTaskViews(companyId: string, listScope: 'task' | 'doc' | 'work' = 'task') {
+  return get<{ views: TaskView[] }>(
+    '/api/tasks/views', { company_id: companyId, list_scope: listScope })
 }
 
+/** Сохранённый отбор. `listScope`: `task` — реестр поручений, `doc` —
+ *  документов, `work` — общая лента работы. Справочник один на все три. */
 export async function createTaskView(data: {
   companyId: string; name: string; query: Record<string, string>; shared?: boolean
+  listScope?: 'task' | 'doc' | 'work'
 }) {
   return post<TaskView>('/api/tasks/views', {
     company_id: data.companyId, name: data.name, query: data.query,
-    shared: data.shared ?? false,
+    shared: data.shared ?? false, list_scope: data.listScope ?? 'task',
   })
 }
 

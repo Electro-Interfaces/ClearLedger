@@ -9,11 +9,17 @@
  * показывается человеку. Отбор формой и отбор строкой дают один результат,
  * потому что за ними одна ручка.
  */
-import { useMemo } from 'react'
-import { useQuery, keepPreviousData } from '@tanstack/react-query'
+import { useMemo, useState } from 'react'
+import {
+  keepPreviousData, useMutation, useQuery, useQueryClient,
+} from '@tanstack/react-query'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { FileText, ListChecks, Loader2, RefreshCw, X } from 'lucide-react'
+import {
+  BookmarkPlus, FileText, ListChecks, Loader2, RefreshCw, X,
+} from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -124,6 +130,14 @@ export function WorkListPage() {
 
       <QueryBar className="max-w-3xl" value={queryText} suggestions={suggestions}
         result={listQ.data?.query} onChange={(v) => set({ query: v || null })} />
+
+      {/* Сохранённые отборы — здесь, а не в рельсе слева: рельса это карта
+          продукта, и она не должна расти от чужих отборов (этап 13ж). */}
+      <SavedViews companyId={company.id} current={{ scope, kind, state, query: queryText }}
+        onApply={(q) => set({
+          scope: q.scope ?? null, kind: q.kind ?? null,
+          state: q.state ?? null, query: q.query ?? null,
+        })} />
 
       <div className="flex flex-wrap items-center gap-2">
         {SCOPES.map((s) => (
@@ -236,6 +250,76 @@ export function WorkListPage() {
               onClick={() => set({ page: String(page + 2) })}>Вперёд</Button>
           </div>
         </div>
+      )}
+    </div>
+  )
+}
+
+/** Сохранённые отборы общей ленты: применить одним нажатием и завести новый. */
+function SavedViews({ companyId, current, onApply }: {
+  companyId: string
+  current: Record<string, string>
+  onApply: (query: Record<string, string>) => void
+}) {
+  const qc = useQueryClient()
+  const [name, setName] = useState('')
+  const [adding, setAdding] = useState(false)
+
+  const q = useQuery({
+    queryKey: ['task-views', companyId, 'work'],
+    queryFn: () => tasksService.listTaskViews(companyId, 'work'),
+    staleTime: 60 * 1000,
+  })
+  const save = useMutation({
+    mutationFn: () => tasksService.createTaskView({
+      companyId, name: name.trim(), listScope: 'work',
+      query: Object.fromEntries(Object.entries(current).filter(([, v]) => v)),
+    }),
+    onSuccess: () => {
+      toast.success('Отбор сохранён')
+      setAdding(false); setName('')
+      void qc.invalidateQueries({ queryKey: ['task-views'] })
+    },
+    onError: (e) => toast.error((e as Error).message),
+  })
+  const drop = useMutation({
+    mutationFn: (id: string) => tasksService.deleteTaskView(id, companyId),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['task-views'] }) },
+    onError: (e) => toast.error((e as Error).message),
+  })
+
+  const views = q.data?.views ?? []
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {views.map((v) => (
+        <span key={v.id}
+          className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px]">
+          <button type="button" onClick={() => onApply(v.query as Record<string, string>)}>
+            {v.name}
+          </button>
+          {v.can_delete !== false && (
+            <button type="button" aria-label={`Удалить отбор ${v.name}`}
+              className="text-muted-foreground hover:text-foreground"
+              onClick={() => drop.mutate(v.id)}>×</button>
+          )}
+        </span>
+      ))}
+      {adding ? (
+        <span className="inline-flex items-center gap-1">
+          <Input value={name} autoFocus maxLength={120} placeholder="Название отбора"
+            className="h-7 w-[180px] text-xs"
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && name.trim()) save.mutate() }} />
+          <Button size="sm" className="h-7 text-xs" disabled={!name.trim() || save.isPending}
+            onClick={() => save.mutate()}>Сохранить</Button>
+          <Button size="sm" variant="ghost" className="h-7 px-2"
+            onClick={() => setAdding(false)}><X className="h-3.5 w-3.5" /></Button>
+        </span>
+      ) : (
+        <Button size="sm" variant="ghost" className="h-7 text-[11px] text-muted-foreground"
+          onClick={() => setAdding(true)}>
+          <BookmarkPlus className="mr-1 h-3.5 w-3.5" />Сохранить отбор
+        </Button>
       )}
     </div>
   )

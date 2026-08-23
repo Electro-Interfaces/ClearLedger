@@ -1404,11 +1404,16 @@ class ViewIn(BaseModel):
     query: dict = Field(default_factory=dict)
     shared: bool = False
     position: int = 100
+    # К какому списку относится отбор: реестр поручений, реестр документов или
+    # общая лента работы (этап 13ж). Справочник один на все три — человек видит
+    # свои отборы в одном месте, а не в трёх.
+    list_scope: str = Field("task", pattern="^(task|doc|work)$")
 
 
 @router.get("/views")
 async def list_views(
     company_id: str = Query(...),
+    list_scope: str = Query("task", pattern="^(task|doc|work)$"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -1416,13 +1421,14 @@ async def list_views(
     cid = await _assert_work(company_id, current_user, db)
     rows = (await db.execute(select(TaskView).where(
         TaskView.company_id == cid,
-        TaskView.list_scope == "task",
+        TaskView.list_scope == list_scope,
         or_(TaskView.user_id.is_(None), TaskView.user_id == current_user.id))
         .order_by(TaskView.position, TaskView.name))).scalars().all()
     can_manage_shared = await _is_admin(db, cid, current_user)
     return {"views": [{
         "id": str(v.id), "name": v.name, "query": v.query or {},
         "shared": v.user_id is None, "position": v.position,
+        "list_scope": v.list_scope,
         "can_delete": v.user_id == current_user.id or can_manage_shared,
     } for v in rows]}
 
@@ -1439,14 +1445,14 @@ async def create_view(
     if payload.shared:
         await _assert_admin(db, cid, current_user)
     v = TaskView(company_id=cid, user_id=None if payload.shared else current_user.id,
-                 list_scope="task",
+                 list_scope=payload.list_scope,
                  name=payload.name.strip(), query=payload.query or {},
                  position=payload.position)
     db.add(v)
     await db.commit()
     await db.refresh(v)
     return {"id": str(v.id), "name": v.name, "query": v.query,
-            "shared": v.user_id is None}
+            "shared": v.user_id is None, "list_scope": v.list_scope}
 
 
 @router.delete("/views/{view_id}")
