@@ -18,13 +18,14 @@ from app.models import (
 )
 from app.routers import docs_router
 from app.services import mail_routing, task_scheduler
+from tests.helpers import seed_company_id
 
 pytestmark = pytest.mark.asyncio(loop_scope="session")
 
 
 async def _context(client: AsyncClient) -> tuple[dict, str, dict]:
     me = (await client.get("/api/auth/me")).json()
-    cid = me["companies"][0]["id"]
+    cid = seed_company_id(me)
     starter = await client.post(f"/api/docs/kinds/starter?company_id={cid}")
     assert starter.status_code in (200, 201), starter.text
     kinds = (await client.get("/api/docs/kinds", params={"company_id": cid})).json()["kinds"]

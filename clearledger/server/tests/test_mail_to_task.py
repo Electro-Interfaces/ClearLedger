@@ -17,6 +17,7 @@ from app.models import (
     TaskParticipant, User,
 )
 from app.services import mail_routing
+from tests.helpers import seed_company_id
 
 pytestmark = pytest.mark.asyncio(loop_scope="session")
 
@@ -25,7 +26,7 @@ async def _task_with_mail_participant(auth_client: AsyncClient, db: AsyncSession
                                       email: str) -> tuple[str, Task, User]:
     """Задача с почтовым участником — так выглядит делегирование наружу."""
     me = (await auth_client.get("/api/auth/me")).json()
-    cid = me["companies"][0]["id"]
+    cid = seed_company_id(me)
 
     r = await auth_client.post("/api/tasks", json={
         "company_id": cid, "title": "Приёмка документов от подрядчика"})

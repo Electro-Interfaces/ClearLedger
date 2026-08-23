@@ -6,6 +6,7 @@
 """
 import pytest
 from httpx import AsyncClient
+from tests.helpers import seed_company_id
 
 pytestmark = pytest.mark.asyncio(loop_scope="session")
 
@@ -22,7 +23,7 @@ async def _me(client: AsyncClient) -> dict:
 
 async def test_задача_идёт_по_маршруту_типа(auth_client: AsyncClient):
     me = await _me(auth_client)
-    cid = me["companies"][0]["id"]
+    cid = seed_company_id(me)
 
     # Заготовки типов — идемпотентно: повторный вызов не плодит дублей.
     r = await auth_client.post(f"/api/tasks/types/starter?company_id={cid}")
@@ -94,7 +95,7 @@ async def test_задача_идёт_по_маршруту_типа(auth_client:
 async def test_реплика_на_текущей_стадии_не_теряется(auth_client: AsyncClient):
     """Клик по стадии, на которой задача уже стоит, событием не становится —
     но написанное человеком должно остаться в следе, а не исчезнуть."""
-    cid = (await _me(auth_client))["companies"][0]["id"]
+    cid = seed_company_id(await _me(auth_client))
     tid = (await auth_client.post("/api/tasks", json={
         "company_id": cid, "title": "Задача без типа идёт маршрутом поручения",
     })).json()["id"]
@@ -117,7 +118,7 @@ async def test_обзор_видит_просрочку_и_разрезы(auth_c
     сроком; разрез по людям отдаёт одно имя без id — и провалиться из обзора в список
     некуда, хотя кнопка нажимается."""
     me = await _me(auth_client)
-    cid = me["companies"][0]["id"]
+    cid = seed_company_id(me)
     past = "2020-01-01T00:00:00Z"
 
     async def new(title: str, **extra) -> str:
@@ -167,7 +168,7 @@ async def test_карточка_собирает_работу_целиком(aut
     метка не фильтрует.
     """
     me = await _me(auth_client)
-    cid = me["companies"][0]["id"]
+    cid = seed_company_id(me)
 
     async def new(title: str, **extra) -> dict:
         r = await auth_client.post("/api/tasks", json={
@@ -230,7 +231,7 @@ async def test_рабочее_место_отделяет_моё_от_поруч
     """«На мне» — что я делаю, «Я поставил» — где мяч у других. Плюс поиск по
     номеру и упоминание, которое подписывает человека на задачу."""
     me = await _me(auth_client)
-    cid = me["companies"][0]["id"]
+    cid = seed_company_id(me)
 
     mine = (await auth_client.post("/api/tasks", json={
         "company_id": cid, "title": "Эту делаю я", "assignee_id": me["id"]})).json()
@@ -274,7 +275,7 @@ async def test_команда_одной_строкой(auth_client: AsyncClient
     а его нет); свободный хвост теряется вместо реплики.
     """
     me = await _me(auth_client)
-    cid = me["companies"][0]["id"]
+    cid = seed_company_id(me)
     a = (await auth_client.post("/api/tasks", json={
         "company_id": cid, "title": "Команда — первая"})).json()
     b = (await auth_client.post("/api/tasks", json={
@@ -325,7 +326,7 @@ async def test_приватная_задача_не_видна_посторон�
     from sqlalchemy import select
 
     me = await _me(auth_client)
-    cid = me["companies"][0]["id"]
+    cid = seed_company_id(me)
     t = (await auth_client.post("/api/tasks", json={
         "company_id": cid, "title": "Пересмотр оклада"})).json()
     r = await auth_client.post(f"/api/tasks/{t['id']}/action", json={
@@ -374,7 +375,7 @@ async def test_учёт_времени_план_и_факт(auth_client: AsyncCl
     assert human_duration(150) == "2 ч 30 мин"
 
     me = await _me(auth_client)
-    cid = me["companies"][0]["id"]
+    cid = seed_company_id(me)
     t = (await auth_client.post("/api/tasks", json={
         "company_id": cid, "title": "Работа с учётом времени",
         "assignee_id": me["id"]})).json()
@@ -417,7 +418,7 @@ async def test_закрытая_задача_по_маршруту_не_ходи
     и после этого маршрут снова доступен.
     """
     me = await _me(auth_client)
-    cid = me["companies"][0]["id"]
+    cid = seed_company_id(me)
     types = (await auth_client.get("/api/tasks/types",
                                    params={"company_id": cid})).json()["types"]
     incident = next(t for t in types if t["code"] == "incident")
@@ -469,7 +470,7 @@ async def test_поручение_внешнему_письмом(auth_client: A
     monkeypatch.setattr(settings, "smtp_host", "localhost", raising=False)
 
     me = await _me(auth_client)
-    cid = me["companies"][0]["id"]
+    cid = seed_company_id(me)
     task = (await auth_client.post("/api/tasks", json={
         "company_id": cid, "title": "Заменить шлагбаум на въезде",
         "assignee_id": me["id"]})).json()
@@ -542,7 +543,7 @@ async def test_регламент_шаблоны_расписания_эскал
     from app.services import task_scheduler
 
     me = await _me(auth_client)
-    cid = me["companies"][0]["id"]
+    cid = seed_company_id(me)
 
     r = await auth_client.post("/api/tasks/templates", json={
         "company_id": cid, "name": "Закрытие месяца",
@@ -659,7 +660,7 @@ async def test_зеркало_внешней_системы(auth_client: AsyncCl
     вечно «у внешней стороны».
     """
     me = await _me(auth_client)
-    cid = me["companies"][0]["id"]
+    cid = seed_company_id(me)
     task = (await auth_client.post("/api/tasks", json={
         "company_id": cid, "title": "Ремонт по гарантии подрядчика",
         "assignee_id": me["id"]})).json()
@@ -719,7 +720,7 @@ async def test_версия_проекта_собирает_состав(auth_cl
     не отделяет сделанное от висящего, и релиз выпускают недоделанным.
     """
     me = await _me(auth_client)
-    cid = me["companies"][0]["id"]
+    cid = seed_company_id(me)
 
     r = await auth_client.post("/api/tasks/projects", json={
         "company_id": cid, "code": "VER", "name": "Проверка версий"})
@@ -816,7 +817,7 @@ async def test_спринт_планирует_и_подводит_итог(auth
     спринт докладывают работу задним числом.
     """
     me = await _me(auth_client)
-    cid = me["companies"][0]["id"]
+    cid = seed_company_id(me)
 
     r = await auth_client.post("/api/tasks/projects", json={
         "company_id": cid, "code": "SPR", "name": "Проверка спринтов"})
@@ -929,7 +930,7 @@ async def test_запрос_строкой_даёт_то_же_что_форма(
     и список молча сужается; значение с пробелом рвётся по пробелу.
     """
     me = await _me(auth_client)
-    cid = me["companies"][0]["id"]
+    cid = seed_company_id(me)
     my_id = me["id"]
 
     r = await auth_client.post("/api/tasks/projects", json={

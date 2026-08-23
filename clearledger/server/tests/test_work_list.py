@@ -8,6 +8,7 @@
 """
 import pytest
 from httpx import AsyncClient
+from tests.helpers import seed_company_id
 
 pytestmark = pytest.mark.asyncio(loop_scope="session")
 
@@ -20,7 +21,7 @@ async def _me(client: AsyncClient) -> dict:
 
 async def test_работа_показывается_одной_лентой(auth_client: AsyncClient):
     me = await _me(auth_client)
-    cid = me["companies"][0]["id"]
+    cid = seed_company_id(me)
 
     # Виды документов заводятся посевом; берём любой живой.
     r = await auth_client.post(f"/api/docs/kinds/starter?company_id={cid}")
@@ -69,7 +70,7 @@ async def test_состояние_в_отборе_совпадает_с_карт
     доверия к доске не осталось бы. Здесь они сверяются на живых данных.
     """
     me = await _me(auth_client)
-    cid = me["companies"][0]["id"]
+    cid = seed_company_id(me)
 
     listed = (await auth_client.get("/api/work", params={
         "company_id": cid, "scope": "all", "limit": 200})).json()["work"]
@@ -102,7 +103,7 @@ async def test_закрытая_работа_в_общую_ленту_не_по�
     тому же правилу, что в реестре поручений.
     """
     me = await _me(auth_client)
-    cid = me["companies"][0]["id"]
+    cid = seed_company_id(me)
 
     r = await auth_client.post("/api/tasks", json={
         "company_id": cid, "title": "Кадровое поручение", "assignee_id": me["id"]})
@@ -134,7 +135,7 @@ async def test_язык_запросов_работает_над_общей_ле
     ленту — человек уверен, что отобрал, а отбора не было.
     """
     me = await _me(auth_client)
-    cid = me["companies"][0]["id"]
+    cid = seed_company_id(me)
 
     r = await auth_client.post("/api/tasks", json={
         "company_id": cid, "title": "Работа для языка запросов",
@@ -178,7 +179,7 @@ async def test_очередь_на_мне_собирает_все_роды_де�
     from datetime import datetime, timedelta, timezone
 
     me = await _me(auth_client)
-    cid = me["companies"][0]["id"]
+    cid = seed_company_id(me)
 
     past = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
     r = await auth_client.post("/api/tasks", json={
@@ -213,7 +214,7 @@ async def test_перенос_по_доске_делает_движок_пред
     местом, куда можно перетащить работу.
     """
     me = await _me(auth_client)
-    cid = me["companies"][0]["id"]
+    cid = seed_company_id(me)
 
     r = await auth_client.post("/api/tasks/types/starter", params={"company_id": cid})
     assert r.status_code in (200, 201), r.text
@@ -266,7 +267,7 @@ async def test_отбор_общей_ленты_сохраняется_пред�
     не значат, и человек видит пустой список без объяснения.
     """
     me = await _me(auth_client)
-    cid = me["companies"][0]["id"]
+    cid = seed_company_id(me)
 
     r = await auth_client.post("/api/tasks/views", json={
         "company_id": cid, "name": "Горящее по компании", "list_scope": "work",

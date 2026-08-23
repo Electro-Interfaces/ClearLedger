@@ -17,6 +17,7 @@ from app.models import (
 )
 from app.routers import docs_router
 from app.services import doc_archive, file_store
+from tests.helpers import seed_company_id
 
 pytestmark = pytest.mark.asyncio(loop_scope="session")
 
@@ -741,7 +742,7 @@ async def test_strict_deny_и_break_glass_закрывают_прямой_фай
 ):
     monkeypatch.setenv("UPLOAD_DIR", str(tmp_path))
     me = (await auth_client.get("/api/auth/me")).json()
-    company_id = uuid.UUID(me["companies"][0]["id"])
+    company_id = uuid.UUID(seed_company_id(me))
     superadmin = await db.get(User, uuid.UUID(me["id"]))
     kind = DocKind(
         company_id=company_id, code=f"strict_{uuid.uuid4().hex[:8]}",

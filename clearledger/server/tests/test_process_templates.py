@@ -2,6 +2,7 @@ import uuid
 
 import pytest
 from httpx import AsyncClient
+from tests.helpers import seed_company_id
 
 
 pytestmark = pytest.mark.asyncio(loop_scope="session")
@@ -24,7 +25,7 @@ async def _login(client: AsyncClient, email: str, password: str) -> dict[str, st
 
 async def _process_template(client: AsyncClient) -> tuple[str, dict]:
     me = await _me(client)
-    cid = me["companies"][0]["id"]
+    cid = seed_company_id(me)
     kind_response = await client.post("/api/docs/kinds", json={
         "company_id": cid,
         "code": f"chat_{uuid.uuid4().hex[:10]}",
@@ -132,7 +133,7 @@ async def test_стандартный_процесс_из_чата_создаё�
     auth_client: AsyncClient,
 ):
     me = await _me(auth_client)
-    cid = me["companies"][0]["id"]
+    cid = seed_company_id(me)
     templates = (await auth_client.get(
         "/api/docs/process-templates", params={"company_id": cid})).json()["templates"]
     template = next(item for item in templates
@@ -178,7 +179,7 @@ async def test_сотрудники_запускают_передают_комм
     from app.models import User, UserCompany
 
     me = await _me(auth_client)
-    cid = uuid.UUID(me["companies"][0]["id"])
+    cid = uuid.UUID(seed_company_id(me))
     password = "process-test-123"
     people = [User(
         company_id=cid,

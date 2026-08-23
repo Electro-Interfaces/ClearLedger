@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import DocCard, DocShareLink, User, UserCompany
 from app.routers import docs_router
+from tests.helpers import seed_company_id
 
 pytestmark = pytest.mark.asyncio(loop_scope="session")
 
@@ -24,7 +25,7 @@ pytestmark = pytest.mark.asyncio(loop_scope="session")
 async def _company(client: AsyncClient) -> str:
     me = (await client.get("/api/auth/me")).json()
     assert me["companies"], "сид-суперадмин не состоит ни в одной компании"
-    return me["companies"][0]["id"]
+    return seed_company_id(me)
 
 
 async def _kinds(client: AsyncClient, cid: str) -> list[dict]:
@@ -344,12 +345,27 @@ async def test_ссылка_наружу_только_после_регистр�
         await anon.aclose()
 
 
+async def _fresh_company(client: AsyncClient, suffix: str) -> str:
+    """Своя компания под тест.
+
+    Юрлица заводятся навсегда, а виды документов по умолчанию нумеруются по
+    юрлицу: после такого теста регистрация в общей компании начинает требовать
+    выбора журнала, и соседние тесты падают с 409 там, где ждали 400. Дешевле
+    завести компанию, чем чинить порядок всего файла.
+    """
+    response = await client.post("/api/companies", json={
+        "slug": f"orgtest{suffix}", "name": f"Журналы {suffix}",
+        "profile_id": "office",
+    })
+    assert response.status_code == 201, response.text
+    return response.json()["id"]
+
+
 async def test_юрлица_имеют_свои_журналы_и_чужое_юрлицо_не_принимается(
         auth_client: AsyncClient):
-    me = (await auth_client.get("/api/auth/me")).json()
-    cid = me["companies"][0]["id"]
-    other_cid = me["companies"][1]["id"]
     suffix = uuid.uuid4().hex[:8]
+    cid = await _fresh_company(auth_client, suffix)
+    other_cid = await _fresh_company(auth_client, f"{suffix}b")
     inn_tail = str(uuid.uuid4().int)[:7]
 
     async def make_org(company_id: str, index: int) -> dict:
@@ -366,7 +382,9 @@ async def test_юрлица_имеют_свои_журналы_и_чужое_ю�
     kind_response = await auth_client.post("/api/docs/kinds", json={
         "company_id": cid, "code": f"org_{suffix}", "name": "Журнал по юрлицам",
         "family": "internal", "direction": "none", "number_prefix": "ОРГ",
-        "number_template": "{prefix}-{yyyy}-{n:04d}",
+        # Счётчик отдельный по юрлицу — значит и номер обязан нести признак
+        # юрлица, иначе два журнала выдают одинаковые «ОРГ-2026-0001».
+        "number_template": "{prefix}-{org}-{yyyy}-{n:04d}",
         "number_scope": "kind_org_year", "fields": [], "route": [],
     })
     assert kind_response.status_code == 201, kind_response.text
@@ -383,7 +401,12 @@ async def test_юрлица_имеют_свои_журналы_и_чужое_ю�
             f"/api/docs/{created.json()['id']}/register", json={"company_id": cid})
         assert registered.status_code == 200, registered.text
         numbers.append(registered.json()["reg_number"])
-    assert numbers[0] == numbers[1], "независимые журналы юрлиц не начали с одного номера"
+    # Счётчики независимы: оба журнала начинают с первого номера. Сами номера при
+    # этом различаются признаком юрлица — иначе в общем реестре два документа
+    # выглядели бы одним.
+    assert [n.rsplit("-", 1)[1] for n in numbers] == ["0001", "0001"], (
+        f"независимые журналы юрлиц не начали с одного номера: {numbers}")
+    assert numbers[0] != numbers[1], "номера разных юрлиц совпали"
 
     without_org = await auth_client.post("/api/docs", json={
         "company_id": cid, "kind_id": kind["id"], "title": "Не выбран журнал",
@@ -418,7 +441,7 @@ async def test_регистрация_проверяет_дату_состоян
     response = await auth_client.post(f"/api/docs/{blank['id']}/register", json={
         "company_id": cid, "reg_number": "   ", "manual_reason": "Перенос",
     })
-    assert response.status_code == 400
+    assert response.status_code == 400, response.text
 
     cancelled = (await auth_client.post("/api/docs", json={
         "company_id": cid, "kind_id": kind["id"], "title": "Отменён до регистрации",
