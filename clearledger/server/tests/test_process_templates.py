@@ -105,9 +105,10 @@ async def test_сообщение_запускает_процесс_и_оста�
     assert message_response.status_code == 201, message_response.text
     message = message_response.json()
 
-    old_action = await auth_client.post(
-        f"/api/chat/messages/{message['id']}/task", json={})
-    assert old_action.status_code == 404
+    # Из сообщения растут два разных пути, и путать их нельзя: процесс по
+    # шаблону («Согласование договора») и поручение без шаблона («сделай,
+    # пожалуйста»). Проверка ниже — про первый; второй живёт своим набором.
+    # Раньше здесь стояло ожидание 404: ручки поручения не существовало вовсе.
 
     launched = await auth_client.post(
         f"/api/chat/messages/{message['id']}/process",
