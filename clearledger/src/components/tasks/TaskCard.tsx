@@ -16,7 +16,6 @@ import {
   Loader2, Lock, Mail, MessagesSquare, Paperclip, Pin, Plus, RefreshCw, Send, Trash2,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
@@ -28,6 +27,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { QueryError } from '@/components/common/QueryError'
 import { cn } from '@/lib/utils'
 import * as tasksService from '@/services/tasksService'
+import { WorkIdentity } from '@/components/work/WorkIdentity'
 import type { LinkKind, LoadedTask } from '@/services/tasksService'
 import { listSpaceObjects } from '@/services/spaceObjectsService'
 import { listSpaceConnectors } from '@/services/spaceConnectorsService'
@@ -401,11 +401,11 @@ function Header({ task, onRename, onBack }: {
         </button>
       )}
       <div className="flex items-center gap-2">
-        <span className="text-base font-semibold">{tasksService.taskKey(task)}</span>
-        {task.project && (
-          <Badge variant="secondary" className="h-5 px-1.5 text-[11px]">{task.project}</Badge>
-        )}
-        {task.type && <Badge variant="outline" className="h-5 px-1.5 text-[11px]">{task.type}</Badge>}
+        {/* Та же строка представления, что у документа (этап 13е): человек,
+            перешедший из ленты работы, читает одни и те же слова. */}
+        <WorkIdentity itemKey={tasksService.taskKey(task)} type={task.type}
+          state={task.state} stateName={task.state_name}
+          extra={task.project} />
         <span className="text-[11px] text-muted-foreground">
           {STATUS_LABEL[task.status] ?? task.status}
         </span>

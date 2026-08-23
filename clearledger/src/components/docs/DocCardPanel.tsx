@@ -22,6 +22,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import * as docsService from '@/services/docsService'
+import { WorkIdentity } from '@/components/work/WorkIdentity'
 import { DOC_STATUS } from '@/services/docsService'
 import type { DocKindField } from '@/services/docsService'
 import { DocAcquaintTab } from './DocAcquaintTab'
@@ -359,12 +360,14 @@ export function DocCardPanel({ id, companyId, onBack, onChanged, initialTab,
                   </span>
                 )}
               </div>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                {d.kind_name || d.kind_code}
-                {registered ? ` · ${d.reg_number} от ${d.reg_date}` : ' · номер не присвоен'}
-                {d.organization_name ? ` · ${d.organization_name}` : ''}
-                {d.counterparty_name ? ` · ${d.counterparty_name}` : ''}
-              </p>
+              {/* Одна строка представления на оба контура (этап 13е): ключ,
+                  вид работы, состояние на общей оси пространства. */}
+              <WorkIdentity className="mt-0.5"
+                itemKey={registered ? `${d.reg_number} от ${d.reg_date}` : 'черновик'}
+                type={d.kind_name || d.kind_code}
+                state={d.state} stateName={d.state_name}
+                extra={[d.organization_name, d.counterparty_name]
+                  .filter(Boolean).join(' · ') || null} />
             </div>
           </div>
           <div className="hidden flex-wrap items-center justify-end gap-2 md:flex">{headerActions}</div>
