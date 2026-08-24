@@ -158,6 +158,131 @@ async def process_work(
         items.append(item)
     return {"process_id": process_id, "items": items}
 
+
+@router.get("/work")
+async def company_work(
+    scope: str = "waiting",
+    kind: str | None = None,
+    limit: int = 200,
+    company: Company = Depends(get_company_by_api_key),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Вся работа «Трека», заведённая заявками, — одним списком.
+
+    Витрина процесса отвечает на вопрос «что по ЭТОЙ заявке». Управляющему нужен
+    другой: где сейчас стоит весь контур. Пока такого списка не было, поручение,
+    зависшее на чужой визе, обнаруживалось только через заявку, в которую надо
+    было догадаться зайти, — то есть не обнаруживалось.
+
+    scope: `waiting` — процесс ждёт «Трек» (стоит работа заявки), `overdue` —
+    срок вышел, `open` — всё незакрытое, `all` — с историей.
+
+    Читает и ничего не решает: решения принимаются в «Треке», где журнал и права.
+    """
+    from datetime import datetime, timezone
+
+    from sqlalchemy import func
+
+    from app.config import get_settings
+    from app.models import DocApproval, User
+
+    q = select(ApprovalRequest).where(ApprovalRequest.company_id == company.id)
+    if scope in ("waiting", "overdue", "open"):
+        q = q.where(ApprovalRequest.outcome.is_(None))
+    if kind:
+        q = q.where(ApprovalRequest.kind == kind)
+    rows = (await db.execute(
+        q.order_by(ApprovalRequest.created_at.desc()).limit(max(1, min(limit, 1000))),
+    )).scalars().all()
+    if not rows:
+        return {"scope": scope, "items": [], "total": 0}
+
+    base = get_settings().app_public_url.rstrip("/")
+    doc_ids = {r.doc_id for r in rows if r.doc_id}
+    task_ids = {r.task_id for r in rows if r.task_id}
+    docs = {d.id: d for d in (await db.execute(select(DocCard).where(
+        DocCard.id.in_(doc_ids)))).scalars().all()} if doc_ids else {}
+    tasks = {t.id: t for t in (await db.execute(select(Task).where(
+        Task.id.in_(task_ids)))).scalars().all()} if task_ids else {}
+
+    # Кто держит документ — незакрытая виза: её срок и есть срок документа.
+    # Берём самую раннюю: контур стоит по первому невыполненному шагу, а не по
+    # последнему, и именно на него надо смотреть.
+    holders: dict[uuid.UUID, tuple[Any, Any, str | None]] = {}
+    if doc_ids:
+        steps = (await db.execute(
+            select(DocApproval)
+            .where(DocApproval.doc_id.in_(doc_ids), DocApproval.status == "pending")
+            .order_by(DocApproval.doc_id, DocApproval.step_no))).scalars().all()
+        for step in steps:
+            holders.setdefault(step.doc_id, (step.due_at, step.assignee_id, step.step_name))
+
+    # Ознакомление меряется листом, а не состоянием документа: «Действует» ничего
+    # не говорит о том, дошло ли оно до людей.
+    sheets: dict[uuid.UUID, dict[str, int]] = {}
+    if any(r.kind == "acquaint" for r in rows) and doc_ids:
+        counted = (await db.execute(
+            select(DocAcquaint.doc_id, DocAcquaint.status, func.count(DocAcquaint.id))
+            .where(DocAcquaint.doc_id.in_(doc_ids))
+            .group_by(DocAcquaint.doc_id, DocAcquaint.status))).all()
+        for doc_id, state, count in counted:
+            entry = sheets.setdefault(doc_id, {"done": 0, "total": 0})
+            entry["total"] += int(count)
+            if state == "done":
+                entry["done"] += int(count)
+
+    people_ids = {t.assignee_id for t in tasks.values() if t.assignee_id}
+    people_ids |= {h[1] for h in holders.values() if h[1]}
+    people = {u.id: u.name for u in (await db.execute(select(User).where(
+        User.id.in_(people_ids)))).scalars().all()} if people_ids else {}
+
+    now = datetime.now(timezone.utc)
+    items: list[dict[str, Any]] = []
+    for row in rows:
+        doc = docs.get(row.doc_id) if row.doc_id else None
+        task = tasks.get(row.task_id) if row.task_id else None
+        due = holder = state = number = title = url = subject = None
+        if doc is not None:
+            subject = "document"
+            number, title = doc.reg_number or None, doc.title
+            state = _DOC_STATE.get(doc.status, doc.status)
+            url = f"{base}/docs?view=all&doc={doc.id}"
+            step_due, step_who, step_name = holders.get(doc.id, (None, None, None))
+            due = step_due
+            holder = people.get(step_who) if step_who else step_name
+            if row.kind == "acquaint":
+                sheet = sheets.get(doc.id, {"done": 0, "total": row.round})
+                state = f"Ознакомились {sheet['done']} из {sheet['total']}"
+        elif task is not None:
+            subject = "task"
+            number, title = f"№{task.number}", task.title
+            state = _TASK_STATE.get(task.status, task.status)
+            url = f"{base}/docs/company?view=errands&task={task.id}"
+            due, holder = task.due_at, people.get(task.assignee_id) if task.assignee_id else None
+        else:
+            # Предмет исчез — строку показываем: сама просьба это история процесса.
+            title = "Предмет недоступен"
+
+        overdue = bool(due and row.outcome is None and due < now)
+        if scope == "overdue" and not overdue:
+            continue
+        items.append({
+            "id": str(row.id), "process_id": row.process_id,
+            "kind": row.kind, "kind_name": _KIND_NAME.get(row.kind, row.kind),
+            "subject": subject, "number": number, "title": title,
+            "state": state, "url": url,
+            "requested_at": row.created_at.isoformat() if row.created_at else None,
+            "due": due.isoformat() if due else None, "overdue": overdue,
+            "holder": holder,
+            "outcome": row.outcome,
+            "decided_at": row.decided_at.isoformat() if row.decided_at else None,
+            # Ход заявки стоит и ждёт именно эту работу — это и есть повод вмешаться.
+            "waits": bool(row.on_approved) and row.outcome is None,
+        })
+    if scope == "waiting":
+        items = [i for i in items if i["waits"]]
+    return {"scope": scope, "items": items, "total": len(items)}
+
 @router.get("/track/templates")
 async def track_templates(
     company: Company = Depends(get_company_by_api_key),
