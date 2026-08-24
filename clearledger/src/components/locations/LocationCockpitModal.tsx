@@ -22,6 +22,7 @@ import { PassportTab } from './cockpit/PassportTab'
 import { EnergyTab } from './cockpit/EnergyTab'
 import { StatusDiagnosticsTab } from './cockpit/StatusDiagnosticsTab'
 import { ServiceTab } from './cockpit/ServiceTab'
+import { TrackTab } from './cockpit/TrackTab'
 import { ChatsTab } from './cockpit/ChatsTab'
 import { ContractsTab } from './cockpit/ContractsTab'
 import { SalesTab } from './cockpit/SalesTab'
@@ -145,6 +146,9 @@ export function LocationCockpitModal({
               </TabsContent>
               <TabsContent value="service" className="m-0 h-full">
                 <ServiceTab location={location} />
+              </TabsContent>
+              <TabsContent value="track" className="m-0 h-full">
+                <TrackTab location={location} />
               </TabsContent>
               <TabsContent value="contracts" className="m-0 h-full">
                 <ContractsTab location={location} />

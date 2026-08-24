@@ -7,7 +7,7 @@
 import type { ComponentType } from 'react'
 import {
   ClipboardList, Activity, Wrench,
-  FileSignature, Wallet, Truck, MessageCircle, Zap,
+  FileSignature, FolderOpen, Wallet, Truck, MessageCircle, Zap,
 } from 'lucide-react'
 
 export type CockpitGroup = 'object' | 'connection' | 'service' | 'commerce'
@@ -36,6 +36,9 @@ export const COCKPIT_TABS: CockpitTab[] = [
   // Заявки по объекту. Вкладка отрисовывалась модалкой, но кнопки в шапке не было —
   // открыть её было нельзя, и обслуживание объекта из его карточки не смотрелось.
   { value: 'service', label: 'Обслуживание', icon: Wrench, group: 'service' },
+  // Документооборот и поручения по объекту. Рядом с «Обслуживанием»: там заявки,
+  // здесь бумаги и работа — приказ о выводе в ремонт, акт обследования.
+  { value: 'track', label: 'Трек', icon: FolderOpen, group: 'service' },
   { value: 'contracts', label: 'Договоры', icon: FileSignature, group: 'commerce' },
   { value: 'sales', label: 'Реализация', icon: Wallet, group: 'commerce' },
   { value: 'supply', label: 'Снабжение', icon: Truck, group: 'commerce' },
