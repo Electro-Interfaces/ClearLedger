@@ -58,7 +58,8 @@ export function ProjectTrackTab({ site, companyId }: {
     mutationFn: (template: docsService.ProcessTemplate) =>
       docsService.startProcessTemplate(template.id, companyId, {
         // Предмет — сам проект: объект сети появляется только со вводом в
-        // эксплуатацию, а бумаги нужны с первого дня. Есть объект — цепляем и
+        // эксплуатацию, а работа нужна с первого дня. Предмет получают и
+        // документ, и поручение — одним механизмом. Есть объект — цепляем и
         // к нему, чтобы работа нашлась с обеих сторон.
         subjectRef: `site:${site.id}`,
         objectId: track.data?.object_id || undefined,

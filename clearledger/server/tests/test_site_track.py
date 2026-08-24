@@ -43,12 +43,19 @@ async def test_лента_проекта_находит_работу_обоим�
     db.add(early)
     await db.commit()
 
+    # Поручение по тому же предмету — объекта сети всё ещё нет, а выезд нужен.
+    early_errand = Task(company_id=cid, title="Осмотр участка", status="open",
+                        subject_ref=f"site:{site.id}",
+                        author_id=uuid.UUID(me["id"]))
+    db.add(early_errand)
+    await db.commit()
+
     listing = await auth_client.get(f"/api/sites/{site.id}/track",
                                     params={"company_id": str(cid)})
     assert listing.status_code == 200, listing.text
     body = listing.json()
     assert body["subject_ref"] == f"site:{site.id}"
-    assert [i["title"] for i in body["items"]] == ["Акт выбора площадки"]
+    assert {i["title"] for i in body["items"]} == {"Акт выбора площадки", "Осмотр участка"}
     assert body["object_id"] is None
 
     # Площадка стала объектом сети — работа по объекту попадает в ту же ленту.
@@ -70,7 +77,8 @@ async def test_лента_проекта_находит_работу_обоим�
     body = (await auth_client.get(f"/api/sites/{site.id}/track",
                                   params={"company_id": str(cid)})).json()
     titles = {i["title"] for i in body["items"]}
-    assert titles == {"Акт выбора площадки", "Акт ввода", "Выезд на пусконаладку"}
+    assert titles == {"Акт выбора площадки", "Осмотр участка",
+                      "Акт ввода", "Выезд на пусконаладку"}
     assert body["object_id"] == location.id
     # Документы и поручения идут вместе: два списка человек складывал бы в уме.
     assert {i["kind"] for i in body["items"]} == {"doc", "task"}
@@ -97,3 +105,14 @@ async def test_ленты_нет_у_чужого_проекта(auth_client: Asy
     missing = await auth_client.get(f"/api/sites/{uuid.uuid4()}/track",
                                     params={"company_id": cid})
     assert missing.status_code == 404, missing.text
+
+
+async def test_предмет_поручения_проверяется(auth_client: AsyncClient):
+    """Ссылка проверяется как у документа: поручение с несуществующим проектом
+    потерялось бы молча — запись формально верна, а найти её по проекту нельзя."""
+    me = (await auth_client.get("/api/auth/me")).json()
+    cid = seed_company_id(me)
+    made = await auth_client.post("/api/tasks", json={
+        "company_id": cid, "title": "Поручение в никуда",
+        "subject_ref": f"site:{uuid.uuid4()}"})
+    assert made.status_code == 404, made.text

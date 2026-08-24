@@ -3935,6 +3935,15 @@ async def create_all() -> None:
         ):
             await conn.execute(_sa.text(stmt))
 
+        # v2.70: предмет поручения. Пусто у существующих — они и были без
+        # предмета; заполняется тем, кто заводит работу из карточки проекта.
+        for stmt in (
+            "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS subject_ref VARCHAR(120)",
+            "CREATE INDEX IF NOT EXISTS ix_tasks_subject "
+            "ON tasks (company_id, subject_ref) WHERE subject_ref IS NOT NULL",
+        ):
+            await conn.execute(_sa.text(stmt))
+
         # v2.60: маршрут проекта выбирается человеком, а не берётся молча первым.
         # Пусто у всех существующих проектов — это и есть прежнее поведение.
         for stmt in (

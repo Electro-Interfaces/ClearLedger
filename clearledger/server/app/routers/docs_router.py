@@ -1219,6 +1219,11 @@ async def start_process_template(
             entity, result = await process_templates.launch_task(
                 db, cid, tpl, current_user, responsible_id=responsible,
                 title=payload.title,
+                # Предмет и объект передаются и поручению: заведённое из
+                # карточки проекта обязано находиться по этому проекту, иначе
+                # оно исчезает из его ленты сразу после создания.
+                subject_ref=payload.subject_ref,
+                object_id=payload.object_id,
                 source_note=f"по шаблону процесса «{tpl.name}»",
             )
     except process_templates.ProcessTemplateError as exc:

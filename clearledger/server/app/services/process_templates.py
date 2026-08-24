@@ -220,6 +220,9 @@ async def launch_task(
     source_note: str | None = None,
     summary_suffix: str | None = None,
     object_id: str | None = None,
+    # Предмет работы — тот же механизм, что у документа. Из карточки проекта
+    # это сам проект: объекта сети у площадки может ещё не быть.
+    subject_ref: str | None = None,
 ) -> tuple[Task, dict[str, Any]]:
     if tpl.company_id != cid or tpl.doc_kind_id:
         raise ProcessTemplateError("Шаблон процесса не найден")
@@ -254,6 +257,7 @@ async def launch_task(
         assignee_id=responsible,
         author_id=actor.id,
         object_id=object_id or tpl.object_id,
+        subject_ref=subject_ref,
         due_at=now + timedelta(days=days) if days is not None else None,
         visibility="company",
     )

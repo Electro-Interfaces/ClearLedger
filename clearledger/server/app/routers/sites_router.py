@@ -215,11 +215,15 @@ async def site_track(
             DocCard.object_id == site.location_id if site.location_id else false()),
     ).order_by(DocCard.created_at.desc()).limit(100))).scalars().all()
 
-    tasks = []
+    # Поручение ищется так же, как документ: по предмету и по объекту. Предмет
+    # важнее — он есть у площадки с первого дня, а объект появляется только со
+    # вводом в эксплуатацию.
+    task_where = [Task.subject_ref.in_(refs)]
     if site.location_id:
-        tasks = (await db.execute(select(Task).where(
-            Task.company_id == cid, Task.object_id == site.location_id,
-        ).order_by(Task.created_at.desc()).limit(100))).scalars().all()
+        task_where.append(Task.object_id == site.location_id)
+    tasks = (await db.execute(select(Task).where(
+        Task.company_id == cid, or_(*task_where),
+    ).order_by(Task.created_at.desc()).limit(100))).scalars().all()
 
     items = [{
         "id": str(d.id), "kind": "doc",

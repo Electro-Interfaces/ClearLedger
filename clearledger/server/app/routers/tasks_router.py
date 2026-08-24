@@ -1399,6 +1399,10 @@ class TaskIn(BaseModel):
     type_id: str | None = None
     assignee_id: str | None = None
     object_id: str | None = None
+    # Предмет работы: `site:<uuid>`, `contract:<uuid>`, `object:<ключ>`. Тот же
+    # механизм, что у документа, — иначе поручение по проекту без объекта сети
+    # не найти ни из карточки проекта, ни из реестра.
+    subject_ref: str | None = Field(None, max_length=120)
     priority: str | None = Field(None, pattern=_PRIORITY)
     due_at: datetime | None = None
 
@@ -1445,6 +1449,13 @@ async def create_task(
     if assignee is not None and await db.get(UserCompany, (assignee, cid)) is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Исполнитель не состоит в пространстве")
 
+    # Ссылка на предмет проверяется, как у документа: с несуществующим проектом
+    # поручение потерялось бы молча — формально запись верна, а найти её по
+    # проекту нельзя.
+    if payload.subject_ref:
+        from app.routers.docs_router import _assert_ref
+
+        await _assert_ref(db, cid, payload.subject_ref, "subject_ref")
     t = Task(
         company_id=cid, project_id=project.id if project else None,
         found_version_id=found_v, fix_version_id=fix_v,
@@ -1454,7 +1465,8 @@ async def create_task(
         status="open", stage_code=route[0]["code"],
         stage_column=work_state.stage_column_of(route, route[0]["code"]),
         assignee_id=assignee, author_id=current_user.id,
-        object_id=payload.object_id or None, due_at=due)
+        object_id=payload.object_id or None,
+        subject_ref=payload.subject_ref or None, due_at=due)
     db.add(t)
     await db.flush()
     db.add(TaskEvent(task_id=t.id, kind="created", user_id=current_user.id,
