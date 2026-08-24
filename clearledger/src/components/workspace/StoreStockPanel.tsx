@@ -15,6 +15,7 @@ import { PivotView } from './PivotView'
 import {
   getStoreStock, getStorePivot, getStorePivotCatalog, type StoreStockItem,
 } from '@/services/storeService'
+import { getDemoStoreStock } from '@/services/storeDemoService'
 import { fmtMoney } from '@/services/analyticsService'
 import { ChzBadge } from '@/components/common/ChzBadge'
 import { SnapshotBadge } from '@/components/common/SnapshotBadge'
@@ -23,8 +24,8 @@ const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { maximumFractio
 
 type MarkedFilter = 'all' | 'marked' | 'plain'
 
-export function StoreStockPanel({ companyId, dateFrom, dateTo, stations }: {
-  companyId: string; dateFrom?: string; dateTo?: string; stations?: string[]
+export function StoreStockPanel({ companyId, dateFrom, dateTo, stations, demo = false }: {
+  companyId: string; dateFrom?: string; dateTo?: string; stations?: string[]; demo?: boolean
 }) {
   // Строка = товар: раскрывается его карточка (та же, что в «Ассортименте»).
   const [openSku, setOpenSku] = useState<string | null>(null)
@@ -39,8 +40,10 @@ export function StoreStockPanel({ companyId, dateFrom, dateTo, stations }: {
   const stationKey = stations?.join(',') ?? ''
 
   const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ['store-stock', companyId, warehouse ?? '', stationKey],
-    queryFn: () => getStoreStock({ warehouse, stations }),
+    queryKey: ['store-stock', demo ? 'demo' : 'live', companyId, warehouse ?? '', stationKey],
+    queryFn: () => demo
+      ? getDemoStoreStock({ warehouse, stations })
+      : getStoreStock({ warehouse, stations }),
   })
 
   useEffect(() => { setWarehouse(undefined) }, [stationKey])
@@ -138,17 +141,18 @@ export function StoreStockPanel({ companyId, dateFrom, dateTo, stations }: {
           {/* Книга для сверки: сводка, лист проблемных и позиции с пустой
               колонкой ФАКТ. Выгружается ТЕКУЩИЙ отбор — то, что человек видит,
               иначе файл спорит с экраном. */}
-          <button type="button" disabled={выгружается || !items.length}
+          <button type="button" disabled={demo || выгружается || !items.length}
             onClick={выгрузить}
-            title="Книга Excel: сводка, лист «Требуют решения» и остатки с колонкой ФАКТ — для сверки и подготовки пересчёта"
+            title={demo ? 'Демонстрационные данные — выгрузка отключена' : 'Книга Excel: сводка, лист «Требуют решения» и остатки с колонкой ФАКТ — для сверки и подготовки пересчёта'}
             className="rounded-md border border-border/50 px-2.5 py-1.5 text-xs font-medium hover:bg-accent/40 disabled:opacity-50">
             {выгружается ? 'Собираю…' : 'Выгрузить в Excel'}
           </button>
           <div className="inline-flex rounded-md bg-muted p-[3px]">
             {(['list', 'pivot'] as const).map((v) => (
-              <button key={v} type="button" onClick={() => задатьПодачу(v)}
+              <button key={v} type="button" disabled={demo && v === 'pivot'} onClick={() => задатьПодачу(v)}
+                title={demo && v === 'pivot' ? 'Сводная доступна в рабочем контуре' : undefined}
                 className={`rounded-[5px] px-2.5 py-1 text-xs font-medium transition-colors ${
-                  подача === v ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
+                  подача === v ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'} disabled:cursor-not-allowed disabled:opacity-40`}>
                 {v === 'list' ? 'Список' : 'Сводная'}
               </button>
             ))}
@@ -305,7 +309,7 @@ export function StoreStockPanel({ companyId, dateFrom, dateTo, stations }: {
       </div>
       )}
       {openSku && (
-        <SkuDetailModal guid={openSku} dateFrom={dateFrom ?? ''} dateTo={dateTo ?? ''} stations={stations}
+        <SkuDetailModal guid={openSku} dateFrom={dateFrom ?? ''} dateTo={dateTo ?? ''} stations={stations} demo={demo}
           onClose={() => setOpenSku(null)} />
       )}
     </div>

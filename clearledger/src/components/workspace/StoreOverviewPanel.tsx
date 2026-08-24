@@ -13,6 +13,7 @@ import { ExportButton } from './analytics/ExportButton'
 import { Kpi } from './analytics/Kpi'
 import { CHART_SERIES, seriesColor } from './analytics/palette'
 import { getStoreOverview, monthOf } from '@/services/storeService'
+import { getDemoStoreOverview } from '@/services/storeDemoService'
 import { fmtMoney, fmtMoneyShort } from '@/services/analyticsService'
 import { StorePlanMonitor } from './StorePlanMonitor'
 import { StoreExceptionsWidget } from './StoreExceptionsWidget'
@@ -43,13 +44,15 @@ function ShareBars({ rows }: { rows: { name: string; value: number; percent?: nu
   )
 }
 
-export function StoreOverviewPanel({ companyId, dateFrom, dateTo, stations }: {
-  companyId: string; dateFrom: string; dateTo: string; stations?: string[]
+export function StoreOverviewPanel({ companyId, dateFrom, dateTo, stations, demo = false }: {
+  companyId: string; dateFrom: string; dateTo: string; stations?: string[]; demo?: boolean
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const { data, isLoading, error } = useQuery({
-    queryKey: ['store-overview', companyId, dateFrom, dateTo, stations],
-    queryFn: () => getStoreOverview(dateFrom, dateTo, { compare: true, stations }),
+    queryKey: ['store-overview', demo ? 'demo' : 'live', companyId, dateFrom, dateTo, stations],
+    queryFn: () => demo
+      ? getDemoStoreOverview(dateFrom, dateTo, stations)
+      : getStoreOverview(dateFrom, dateTo, { compare: true, stations }),
   })
 
   if (isLoading) return <div className="p-6 text-sm text-muted-foreground">Загрузка обзора…</div>
@@ -68,7 +71,7 @@ export function StoreOverviewPanel({ companyId, dateFrom, dateTo, stations }: {
             Сопутка + общепит · {data.period.from} – {data.period.to} · {op.shifts_count} смен · {op.stations_count} АЗС
           </p>
         </div>
-        <ExportButton title="Обзор" subtitle={`${data.period.from} — ${data.period.to}`} getEl={() => ref.current} />
+        {!demo && <ExportButton title="Обзор" subtitle={`${data.period.from} — ${data.period.to}`} getEl={() => ref.current} />}
       </div>
 
       {empty ? (
@@ -79,13 +82,13 @@ export function StoreOverviewPanel({ companyId, dateFrom, dateTo, stations }: {
       ) : (
         <>
           {/* План-факт-светофор (директорский монитор, О-1) */}
-          <StorePlanMonitor companyId={companyId} period={monthOf(data.period.to)} />
+          {!demo && <StorePlanMonitor companyId={companyId} period={monthOf(data.period.to)} />}
 
           {/* Виджет-исключения «работа по исключениям» (О-6) */}
-          <StoreExceptionsWidget companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} period={monthOf(data.period.to)} />
+          {!demo && <StoreExceptionsWidget companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} period={monthOf(data.period.to)} />}
 
           {/* Движение и потери (учёт документов движения в разделе) */}
-          <StoreMovementSummary companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />
+          {!demo && <StoreMovementSummary companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />}
 
           {/* Поток людей. Стоит выше денег намеренно: выручка отвечает «сколько
               заработали», а посещения — «из чего было зарабатывать». Заправился и

@@ -80,6 +80,8 @@ const DocSharePage = lazy(() => import('@/pages/DocSharePage').then((m) => ({ de
 const DocVerifyPage = lazy(() => import('@/pages/DocVerifyPage').then((m) => ({ default: m.DocVerifyPage })))
 const ShowcaseLinkPage = lazy(() => import('@/pages/ShowcaseLinkPage')
   .then((m) => ({ default: m.ShowcaseLinkPage })))
+const StoreDemoPage = lazy(() => import('@/pages/StoreDemoPage')
+  .then((m) => ({ default: m.StoreDemoPage })))
 
 function LegacyTasksRedirect({ docsErrands = false }: { docsErrands?: boolean }) {
   const { pathname, search } = useLocation()
@@ -179,20 +181,22 @@ function Providers() {
 
 function CompanyScopedProviders() {
   const { companyId } = useCompany()
+  const { pathname } = useLocation()
+  const isStoreDemo = pathname.endsWith('/demo/shop')
   return (
     <TabsProvider key={companyId}>
-      <FilterProvider>
+      <FilterProvider syncUrl={!isStoreDemo}>
         <SupportProvider>
           <TooltipProvider>
-            <TabFilterSync />
+            {!isStoreDemo && <TabFilterSync />}
             <DocumentTitle />
-            <OneCAutoSync />
+            {!isStoreDemo && <OneCAutoSync />}
             <Outlet />
             {/* Установка приложением и уведомление о выкатке — здесь, а не в
                 оболочке приложений: рабочий стол и «Управление» рисуются своими
                 маршрутами, и на первом же экране обвязка терялась. */}
-            <InstallApp />
-            <UpdateBanner />
+            {!isStoreDemo && <InstallApp />}
+            {!isStoreDemo && <UpdateBanner />}
             <Toaster position="bottom-right" richColors closeButton />
           </TooltipProvider>
         </SupportProvider>
@@ -228,6 +232,7 @@ const router = createBrowserRouter([
       // Витрина по ссылке: стоит рядом с приглашением и сбросом пароля — это
       // третий вход без учётки, и открывать его должен кто угодно с токеном.
       { path: '/showcase/:token', element: <LazyPage><ShowcaseLinkPage /></LazyPage> },
+      { path: '/demo/shop', element: <LazyPage><StoreDemoPage /></LazyPage> },
       // Документ по ссылке: четвёртый вход без учётки. Контрагент смотрит
       // реквизиты, скачивает файлы и подтверждает получение.
       { path: '/doc-share/:token', element: <LazyPage><DocSharePage /></LazyPage> },

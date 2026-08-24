@@ -19,6 +19,7 @@ import {
 import {
   getStoreExchange, getStoreExchangeStation, type StoreExchangeStation,
 } from '@/services/storeService'
+import { getDemoStoreExchange, getDemoStoreExchangeStation } from '@/services/storeDemoService'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useStoreWindow } from './StoreWindow'
 import { rowDrill } from './rowDrill'
@@ -131,13 +132,15 @@ function Факт({ label, value, title }: {
  * Сеансы перечислены поимённо, с паузой перед каждым: длина молчания и есть
  * качество канала, а средняя по парку её прячет.
  */
-function StationExchangeDialog({ stationId, dateFrom, dateTo, onClose }: {
-  stationId: number; dateFrom: string; dateTo: string; onClose: () => void
+function StationExchangeDialog({ stationId, dateFrom, dateTo, onClose, demo = false }: {
+  stationId: number; dateFrom: string; dateTo: string; onClose: () => void; demo?: boolean
 }) {
   const { company } = useCompany()
   const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ['store-exchange-station', company.id, stationId, dateFrom, dateTo],
-    queryFn: () => getStoreExchangeStation(stationId, dateFrom, dateTo),
+    queryKey: ['store-exchange-station', demo ? 'demo' : 'live', company.id, stationId, dateFrom, dateTo],
+    queryFn: () => demo
+      ? getDemoStoreExchangeStation(stationId, dateFrom, dateTo)
+      : getStoreExchangeStation(stationId, dateFrom, dateTo),
   })
 
   return (
@@ -406,7 +409,7 @@ function StationExchangeDialog({ stationId, dateFrom, dateTo, onClose }: {
   )
 }
 
-export function StoreStationsPanel({ dateFrom, dateTo }: { dateFrom: string; dateTo: string }) {
+export function StoreStationsPanel({ dateFrom, dateTo, stations: stationScope, demo = false }: { dateFrom: string; dateTo: string; stations?: string[]; demo?: boolean }) {
   const { company } = useCompany()
   const открытьОкном = useStoreWindow()
   // Два уровня чтения: сверху сеть целиком, по клику — конкретная АЗС. Смешивать
@@ -414,8 +417,10 @@ export function StoreStationsPanel({ dateFrom, dateTo }: { dateFrom: string; dat
   // произошло», и ответы на них живут в разных разрезах.
   const [выбрана, выбрать] = useState<number | null>(null)
   const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ['store-exchange', company.id, dateFrom, dateTo],
-    queryFn: () => getStoreExchange(dateFrom, dateTo),
+    queryKey: ['store-exchange', demo ? 'demo' : 'live', company.id, dateFrom, dateTo, stationScope],
+    queryFn: () => demo
+      ? getDemoStoreExchange(dateFrom, dateTo, stationScope)
+      : getStoreExchange(dateFrom, dateTo),
     // Экран смотрят, когда что-то пошло не так — данные должны быть свежими.
     refetchInterval: 60_000,
   })
@@ -576,9 +581,10 @@ export function StoreStationsPanel({ dateFrom, dateTo }: { dateFrom: string; dat
           ))}
           {/* Очередь разбирают, не отходя от состояния станций: уйти отсюда
               совсем — значит потерять из виду, кто именно молчит. */}
-          <button type="button"
+          <button type="button" disabled={demo}
             onClick={() => открытьОкном('station-drafts')}
-            className="ml-auto text-xs text-primary hover:underline">
+            title={demo ? 'Демонстрационные данные — разбор отключён' : undefined}
+            className="ml-auto text-xs text-primary hover:underline disabled:cursor-not-allowed disabled:opacity-50">
             разобрать в «Каталоге» →
           </button>
         </div>
@@ -665,7 +671,7 @@ export function StoreStationsPanel({ dateFrom, dateTo }: { dateFrom: string; dat
       </p>
 
       {выбрана !== null && (
-        <StationExchangeDialog stationId={выбрана} dateFrom={dateFrom} dateTo={dateTo}
+        <StationExchangeDialog stationId={выбрана} dateFrom={dateFrom} dateTo={dateTo} demo={demo}
                                onClose={() => выбрать(null)} />
       )}
     </div>

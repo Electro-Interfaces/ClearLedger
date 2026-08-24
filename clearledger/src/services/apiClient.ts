@@ -96,7 +96,7 @@ let isRedirecting = false
 
 /** Страницы, доступные без сессии: увести отсюда на вход — значит сломать вход. */
 const PUBLIC_PAGES = [
-  '/login', '/invite/', '/reset-password/', '/showcase/', '/doc-share/', '/doc-verify/',
+  '/login', '/invite/', '/reset-password/', '/showcase/', '/demo/shop', '/doc-share/', '/doc-verify/',
 ]
 export function isPublicPage(pathname: string): boolean {
   const p = pathname.replace(/\/$/, '')

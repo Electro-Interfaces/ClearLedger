@@ -194,12 +194,12 @@ function savePresets(companyId: string, list: NamedPreset[]): void {
   try { localStorage.setItem(presetsKey(companyId), JSON.stringify(list)) } catch { /* ignore */ }
 }
 
-export function FilterProvider({ children }: { children: ReactNode }) {
+export function FilterProvider({ children, syncUrl = true }: { children: ReactNode; syncUrl?: boolean }) {
   const { companyId } = useCompany()
   const [searchParams, setSearchParams] = useSearchParams()
   const companyChanged = lastFilterCompanyId !== null && lastFilterCompanyId !== companyId
   const ignoreInitialUrlRef = useRef(companyChanged)
-  const initialUrlState = companyChanged ? null
+  const initialUrlState = companyChanged || !syncUrl ? null
     : decodeFilterParam(searchParams.get(URL_FILTER_PARAM))
   const [state, setState] = useState<FilterState>(() => initialUrlState ?? loadFilters(companyId))
   const [history, setHistory] = useState<FilterState[]>(() => loadHistory(companyId))
@@ -228,6 +228,7 @@ export function FilterProvider({ children }: { children: ReactNode }) {
   // Ссылка и Back/Forward восстанавливают контур. При смене компании первое `f`
   // принадлежит предыдущей компании — его один раз игнорируем и заменяем локальным.
   useEffect(() => {
+    if (!syncUrl) return
     if (ignoreInitialUrlRef.current) {
       ignoreInitialUrlRef.current = false
       return
@@ -248,10 +249,11 @@ export function FilterProvider({ children }: { children: ReactNode }) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setState(fromUrl)
     }
-  }, [rawUrlFilter, setSearchParams])
+  }, [rawUrlFilter, setSearchParams, syncUrl])
 
   // URL-персист текущей выборки: merge-safe, replace — без спама history.
   useEffect(() => {
+    if (!syncUrl) return
     const pending = pendingUrlStateRef.current
     if (pending && !sameFilterState(state, pending)) return
     if (pending) pendingUrlStateRef.current = null
@@ -262,7 +264,7 @@ export function FilterProvider({ children }: { children: ReactNode }) {
       next.set(URL_FILTER_PARAM, encoded)
       return next
     }, { replace: true })
-  }, [rawUrlFilter, setSearchParams, state])
+  }, [rawUrlFilter, setSearchParams, state, syncUrl])
 
   const setPeriod = useCallback((p: Period) => {
     setState((prev) => ({ ...prev, period: p }))

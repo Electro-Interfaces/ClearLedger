@@ -13,6 +13,7 @@ import { coreAppTitle, isCarvedProfile, productForPath, productLabel } from '@/c
 
 function screenName(pathname: string, profileId: string | null | undefined): string {
   if (pathname === '/') return 'Рабочее пространство'
+  if (pathname.endsWith('/demo/shop')) return 'Магазин — демо'
   const product = isCarvedProfile(profileId) ? productForPath(pathname) : null
   if (product) return productLabel(product, profileId)
   // Приложения Ядра («Заявки», «Инфо», «Данные», «Пульс», «Чаты», «Управление»)

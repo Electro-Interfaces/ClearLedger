@@ -21,6 +21,7 @@ import { ShiftDetailModal } from './ShiftDetailModal'
 import {
   getStoreSales, getStoreVisits, type SalesGroupBy, type SalesCategory, type SalesMarked,
 } from '@/services/storeService'
+import { getDemoStoreSales, getDemoStoreVisits } from '@/services/storeDemoService'
 import { fmtMoney, fmtMoneyShort } from '@/services/analyticsService'
 import { rechartsTooltipTheme } from '@/components/ui/chart-utils'
 
@@ -58,7 +59,7 @@ function Seg<T extends string>({ tabs, value, onChange, disabled = false }: {
   )
 }
 
-export function StoreSalesPanel({ companyId, dateFrom, dateTo, stations }: { companyId: string; dateFrom: string; dateTo: string; stations?: string[] }) {
+export function StoreSalesPanel({ companyId, dateFrom, dateTo, stations, demo = false }: { companyId: string; dateFrom: string; dateTo: string; stations?: string[]; demo?: boolean }) {
   const [groupBy, setGroupBy] = useState<SalesGroupBy>('sku')
   const [category, setCategory] = useState<SalesCategory>('all')
   const [marked, setMarked] = useState<SalesMarked>('all')
@@ -71,12 +72,16 @@ export function StoreSalesPanel({ companyId, dateFrom, dateTo, stations }: { com
   const scopeSub = useScopeSubtitle()
 
   const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ['store-sales', companyId, dateFrom, dateTo, groupBy, category, marked, q, stations],
-    queryFn: () => getStoreSales(dateFrom, dateTo, { groupBy, category, marked, q, stations }),
+    queryKey: ['store-sales', demo ? 'demo' : 'live', companyId, dateFrom, dateTo, groupBy, category, marked, q, stations],
+    queryFn: () => demo
+      ? getDemoStoreSales(dateFrom, dateTo, { groupBy, category, marked, q, stations })
+      : getStoreSales(dateFrom, dateTo, { groupBy, category, marked, q, stations }),
   })
   const { data: поток } = useQuery({
-    queryKey: ['store-visits', companyId, dateFrom, dateTo, stations],
-    queryFn: () => getStoreVisits(dateFrom, dateTo, stations),
+    queryKey: ['store-visits', demo ? 'demo' : 'live', companyId, dateFrom, dateTo, stations],
+    queryFn: () => demo
+      ? getDemoStoreVisits(dateFrom, dateTo, stations)
+      : getStoreVisits(dateFrom, dateTo, stations),
   })
 
   const isPayment = groupBy === 'payment'
@@ -92,7 +97,7 @@ export function StoreSalesPanel({ companyId, dateFrom, dateTo, stations }: { com
             Крутите продажи сопутки/общепита по любой группировке. НДС-разрез — для сверки с учётной политикой.
           </p>
         </div>
-        <ExportButton title="Продажи магазина" subtitle={scopeSub} getEl={() => ref.current} />
+        {!demo && <ExportButton title="Продажи магазина" subtitle={scopeSub} getEl={() => ref.current} />}
       </div>
 
       {/* группировки */}
@@ -189,7 +194,7 @@ export function StoreSalesPanel({ companyId, dateFrom, dateTo, stations }: { com
                   <tr key={g.key}
                       {...rowDrill(
                         groupBy === 'sku' ? () => setOpenSku(g.key)
-                        : groupBy === 'shift' ? () => setOpenShift(g.key)
+                        : groupBy === 'shift' && !demo ? () => setOpenShift(g.key)
                         : null,
                         `${g.label} — раскрыть`,
                         'border-t border-border/30',
@@ -222,7 +227,7 @@ export function StoreSalesPanel({ companyId, dateFrom, dateTo, stations }: { com
       {/* Расшифровка строки: товар и смена — единственные группировки, за которыми стоит
           сущность; у остальных строка агрегатная и по клику не раскрывается. */}
       {openSku && (
-        <SkuDetailModal guid={openSku} dateFrom={dateFrom} dateTo={dateTo} stations={stations}
+        <SkuDetailModal guid={openSku} dateFrom={dateFrom} dateTo={dateTo} stations={stations} demo={demo}
           onClose={() => setOpenSku(null)} />
       )}
       {openShift && (

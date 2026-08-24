@@ -6,6 +6,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { ResponsiveContainer, BarChart, Bar, XAxis, Tooltip, CartesianGrid } from 'recharts'
 import { getStoreSkuDetail, type SkuDetailData } from '@/services/storeService'
+import { getDemoStoreSkuDetail } from '@/services/storeDemoService'
 import { fmtMoney } from '@/services/analyticsService'
 import { ChzBadge } from '@/components/common/ChzBadge'
 import { ModalCard } from '@/components/ui/modal-card'
@@ -15,13 +16,15 @@ const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { maximumFractio
 const pctStr = (v: number | null | undefined, d = 1) => (v == null ? '—' : `${nf(v, d)}%`)
 const marginCls = (v: number | null | undefined) => (v == null ? '' : v < 0 ? 'text-red-400/80' : v < 10 ? 'text-amber-300/90' : 'text-emerald-300/80')
 
-export function SkuDetailModal({ guid, dateFrom, dateTo, stations, onClose }: {
-  guid: string; dateFrom: string; dateTo: string; stations?: string[]; onClose: () => void
+export function SkuDetailModal({ guid, dateFrom, dateTo, stations, onClose, demo = false }: {
+  guid: string; dateFrom: string; dateTo: string; stations?: string[]; onClose: () => void; demo?: boolean
 }) {
   const { companyId } = useCompany()
   const { data: d, isLoading } = useQuery({
-    queryKey: ['store-sku', companyId, guid, dateFrom, dateTo, stations?.join(',') ?? ''],
-    queryFn: () => getStoreSkuDetail(guid, dateFrom, dateTo, stations),
+    queryKey: ['store-sku', demo ? 'demo' : 'live', companyId, guid, dateFrom, dateTo, stations?.join(',') ?? ''],
+    queryFn: () => demo
+      ? getDemoStoreSkuDetail(guid, dateFrom, dateTo, stations)
+      : getStoreSkuDetail(guid, dateFrom, dateTo, stations),
   })
 
   return (

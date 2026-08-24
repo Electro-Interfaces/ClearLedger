@@ -213,6 +213,7 @@ export type StoreViewProps = {
   dateFrom: string
   dateTo: string
   stations: string[]
+  demo?: boolean
 }
 
 // Заголовок пункта берём из каталога: там он уже написан и живёт вместе с
@@ -222,12 +223,12 @@ function пунктМеню(key: string) {
   return вид ? { title: вид.title, subtitle: вид.subtitle } : undefined
 }
 
-export function StoreView({ sub, companyId, dateFrom, dateTo, stations }: StoreViewProps) {
+export function StoreView({ sub, companyId, dateFrom, dateTo, stations, demo = false }: StoreViewProps) {
   // «Обзор» — executive-дашборд; SKU-экраны — реестр товаров; прочие — scaffold.
   if (sub === 'overview') {
     return (
       <div className="h-full overflow-y-auto">
-        <StoreOverviewPanel companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} stations={stations} />
+        <StoreOverviewPanel companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} stations={stations} demo={demo} />
       </div>
     )
   }
@@ -257,7 +258,7 @@ export function StoreView({ sub, companyId, dateFrom, dateTo, stations }: StoreV
   if (sub === 'sales') {
     return (
       <div className="h-full overflow-y-auto">
-        <StoreSalesPanel companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} stations={stations} />
+        <StoreSalesPanel companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} stations={stations} demo={demo} />
       </div>
     )
   }
@@ -278,7 +279,7 @@ export function StoreView({ sub, companyId, dateFrom, dateTo, stations }: StoreV
   if (sub === 'stock') {
     return (
       <div className="h-full overflow-y-auto">
-        <StoreStockPanel companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} stations={stations} />
+        <StoreStockPanel companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} stations={stations} demo={demo} />
       </div>
     )
   }
@@ -404,7 +405,7 @@ export function StoreView({ sub, companyId, dateFrom, dateTo, stations }: StoreV
   if (sub === 'stations') {
     return (
       <div className="h-full overflow-y-auto">
-        <StoreStationsPanel dateFrom={dateFrom} dateTo={dateTo} />
+        <StoreStationsPanel dateFrom={dateFrom} dateTo={dateTo} stations={stations} demo={demo} />
       </div>
     )
   }
