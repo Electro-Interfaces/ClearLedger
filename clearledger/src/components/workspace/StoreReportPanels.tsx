@@ -89,8 +89,8 @@ export function StoreReceiptsPanel(p: PanelProps) {
       <Shell title="Приёмка (поступления)"
         sub={`${d.period.from} – ${d.period.to} · ${d.summary.count} документов · закупки нетто ${fmtMoney(d.summary.amount_net)} · НДС ${fmtMoney(d.summary.vat)} · клик по строке — состав накладной`}>
         <Table
-          head={[{ label: 'Дата' }, { label: 'Смена' }, { label: 'Номер' }, { label: 'Поставщик' }, { label: 'Позиций', num: true }, { label: 'Сумма (нетто)', num: true }, { label: 'НДС', num: true }]}
-          rows={d.docs.map((r) => [r.date, r.shift_number ?? '—', r.number, r.supplier, nf(r.positions), fmtMoney(r.amount_net), fmtMoney(r.vat)])}
+          head={[{ label: 'Дата' }, { label: 'Смена' }, { label: 'Номер' }, { label: 'Поставщик' }, { label: 'Завёл' }, { label: 'Позиций', num: true }, { label: 'Сумма (нетто)', num: true }, { label: 'НДС', num: true }]}
+          rows={d.docs.map((r) => [r.date, r.shift_number ?? '—', r.number, r.supplier, r.author ?? '—', nf(r.positions), fmtMoney(r.amount_net), fmtMoney(r.vat)])}
           onRowClick={(i) => setOpen(i)}
           rowLabel={(i) => `накладная ${d.docs[i].number} от ${d.docs[i].supplier}`}
         />

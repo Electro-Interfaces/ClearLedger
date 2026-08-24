@@ -39,7 +39,7 @@ import { NetworkReportPanel } from './NetworkReportPanel'
  * соответствий и следить, чтобы она не разъехалась с каталогом.
  */
 const СЕТЕВЫЕ_ОТЧЁТЫ = new Set([
-  'turnover', 'no-cost', 'pay-mix', 'vat-book', 'purchase-diff', 'abc',
+  'turnover', 'no-cost', 'pay-mix', 'vat-book', 'purchase-diff', 'abc', 'purchases',
 ])
 import { StoreRecipeVersionsPanel } from './StoreRecipeVersionsPanel'
 import { StoreCateringPanel } from './StoreCateringPanel'

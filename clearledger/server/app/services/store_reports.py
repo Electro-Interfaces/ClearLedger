@@ -968,6 +968,84 @@ async def suppliers(db: AsyncSession, cid, date_from, date_to,
             "amount": round(sum(s["amount"] for s in строки), 2)}
 
 
+async def purchases(db: AsyncSession, cid, date_from, date_to,
+                    stations: list[int] | None = None) -> dict:
+    """Приходы от поставщиков в товарном разрезе: что и почём приехало.
+
+    Журнал приёмок отвечает на вопрос «какие были поставки», этот отчёт — на
+    другой: «что мы вообще закупаем и по какой цене». Разные вопросы, и по
+    документам второй не собрать — позиция размазана по десяткам накладных.
+
+    Источник — документы прихода станции (`purchase`), а не реестр приёмок
+    центра: реестр начал наполняться в августе, а история закупок нужна с
+    первого дня работы станции. Цену считаем как сумму, делённую на количество:
+    в одной поставке позиция бывает несколькими строками с разной ценой.
+    """
+    d1, d2 = _период(date_from, date_to)
+    p = {"cid": cid, "d1": d1, "d2": d2}
+    ф = ""
+    if stations:
+        p["st"] = [str(s) for s in stations]
+        ф = " AND d.metadata->'Смена'->>'КодАЗС' = ANY(:st)"
+    rows = (await db.execute(text(f"""
+        SELECT coalesce(
+                   nullif(л->>'Наименование', ''),
+                   -- Часть документов приходит из 1С без имени в строке: там
+                   -- ссылка, а название живёт в справочнике. Без этой подстановки
+                   -- отчёт показывал столбец из шестнадцатибайтных ключей.
+                   (SELECT ii.name FROM edge.item ii
+                     WHERE ii.external_uuid::text = л->>'Номенклатура' LIMIT 1),
+                   л->>'Номенклатура') AS name,
+               л->>'Номенклатура'           AS item_uuid,
+               -- Группа берётся из справочника, а не из строки документа: в
+               -- документе её нет, а вопрос «сколько взяли сигарет против
+               -- напитков» задают чаще, чем вопрос про отдельную позицию.
+               -- Именно товарная группа, а не класс SKU: класс делит склад
+               -- надвое («Сопутка» и «Общепит») и на такой вопрос не отвечает.
+               coalesce((SELECT g.name FROM edge.item ii
+                           LEFT JOIN edge.item_group g ON g.id = ii.group_id
+                          WHERE ii.external_uuid::text = л->>'Номенклатура'
+                          LIMIT 1), '— без группы') AS sku_class,
+               (SELECT bc.code FROM edge.barcode bc
+                  JOIN edge.item ii ON ii.id = bc.item_id
+                 WHERE ii.external_uuid::text = л->>'Номенклатура'
+                 ORDER BY bc.code LIMIT 1)   AS barcode,
+               count(DISTINCT d.id)                          AS docs,
+               sum((л->>'Количество')::numeric)              AS qty,
+               sum((л->>'Сумма')::numeric)                   AS amount,
+               sum(coalesce((л->>'СуммаНДС')::numeric, 0))   AS vat,
+               max(left(coalesce(d.metadata->'Документ'->>'Дата',
+                                 d.created_at::text), 10))  AS last_date,
+               count(DISTINCT coalesce(nullif(
+                   d.metadata->'Документ'->>'Контрагент', ''), '—')) AS suppliers
+          FROM data_entries d,
+               LATERAL jsonb_array_elements(
+                   coalesce(d.metadata->'Документ'->'Товары', '[]'::jsonb)) л
+         WHERE d.company_id = :cid AND d.doc_type_id = 'purchase'{ф}
+           AND coalesce((d.metadata->'Документ'->>'Дата')::timestamptz,
+                        d.created_at) BETWEEN :d1 AND :d2
+         GROUP BY 1, 2, 3, 4
+         ORDER BY 8 DESC NULLS LAST
+    """), p)).mappings().all()
+    строки = []
+    for r in rows:
+        кол = float(r["qty"] or 0)
+        сумма = round(float(r["amount"] or 0), 2)
+        строки.append({
+            "name": r["name"], "sku_class": r["sku_class"], "barcode": r["barcode"],
+            "docs": int(r["docs"]), "qty": round(кол, 3),
+            "amount": сумма,
+            "vat": round(float(r["vat"] or 0), 2),
+            # Средняя цена закупки: по ней видно подорожание, которого в
+            # документах поштучно не разглядеть.
+            "price": round(сумма / кол, 2) if кол else None,
+            "suppliers": int(r["suppliers"] or 0),
+            "last_date": r["last_date"],
+        })
+    return {"rows": строки, "total": len(строки),
+            "amount": round(sum(с["amount"] for с in строки), 2)}
+
+
 async def returns(db: AsyncSession, cid, date_from, date_to,
                   stations: list[int] | None = None) -> dict:
     """Возвраты сети: покупателю и поставщику.
@@ -1325,6 +1403,17 @@ REPORTS = {
                    "receipts", "positions", "stock_amount", "snapshot_at"],
         "group": "skvoz",
     },
+    "purchases": {
+        "title": "Приходы по товарам",
+        "about": "Что закупаем и по какой цене: количество, сумма, число поставок "
+                 "и средняя цена по каждой позиции. Журнал приёмок отвечает «какие "
+                 "были поставки», этот отчёт — «что мы вообще берём и почём».",
+        "columns": ["Товар", "Группа", "Штрихкод", "Поставок", "Количество", "Сумма",
+                    "НДС", "Средняя цена", "Поставщиков", "Последний приход"],
+        "fields": ["name", "sku_class", "barcode", "docs", "qty", "amount", "vat",
+                   "price", "suppliers", "last_date"],
+        "group": "priem",
+    },
     "suppliers": {
         "title": "Поставщики",
         "about": "Оборот, число поставок и последняя дата по каждому поставщику сети. "
@@ -1373,6 +1462,7 @@ BUILDERS = {
     "visits": visits,
     "mrc": mrc,
     "suppliers": suppliers,
+    "purchases": purchases,
     "returns": returns,
     "no-cost": no_cost,
     "pay-mix": pay_mix,

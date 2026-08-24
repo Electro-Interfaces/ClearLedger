@@ -141,6 +141,8 @@ export interface StoreReceiptsData {
   period: { from: string; to: string }
   docs: {
     date: string; number: string; supplier: string; positions: number
+    /** Кто завёл документ: администратор станции или центр, разбирающий 1С. */
+    author?: string
     /** Номер смены: поступления приезжают из ЦБ вместе со сменным отчётом. */
     shift_number?: string | null
     amount: number; vat: number; amount_net: number
