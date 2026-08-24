@@ -27,8 +27,20 @@ class _Result:
 
 
 class _FakeDb:
-    def __init__(self): self.added = []
+    """Сессия, которой хватает разбору гейта.
+
+    `get` появился вместе с тем, что пункт стал закрываться и документом
+    «Трека»: проверка грузит проект, чтобы узнать его предмет и объект.
+    Подделка, отставшая от контракта, падает на AttributeError и выглядит
+    поломкой продукта.
+    """
+
+    def __init__(self, site=None):
+        self.added = []
+        self._site = site
+
     async def execute(self, *a, **k): return _Result()
+    async def get(self, model, ident): return self._site
     def add(self, obj): self.added.append(obj)
 
 
@@ -50,7 +62,7 @@ def test_снятая_обязательность_открывает_перех
     assert blocker["label"] in gate["blocking"]
     assert gate["canAdvance"] is False
 
-    res = _run(set_gate_waiver(_FakeDb(), site, blocker["key"], True,
+    res = _run(set_gate_waiver(_FakeDb(site), site, blocker["key"], True,
                                "Собственник — муниципалитет, форма права одна", _USER))
     assert res["ok"] is True
 
@@ -69,8 +81,8 @@ def test_снятая_обязательность_открывает_перех
 def test_возврат_обязательности_снимает_послабление():
     site = _site("contracting")
     key = next(i["key"] for i in gate_state(site)["items"] if i["required"] and not i["done"])
-    _run(set_gate_waiver(_FakeDb(), site, key, True, "причина", _USER))
-    _run(set_gate_waiver(_FakeDb(), site, key, False, "", _USER))
+    _run(set_gate_waiver(_FakeDb(site), site, key, True, "причина", _USER))
+    _run(set_gate_waiver(_FakeDb(site), site, key, False, "", _USER))
     it = next(i for i in gate_state(site)["items"] if i["key"] == key)
     assert it["waived"] is False
     assert it["label"] in gate_state(site)["blocking"]
@@ -80,8 +92,8 @@ def test_отметка_пункта_не_стирает_чужую_подпис
     """Галочка и послабление живут в одной записи — раньше вторая затирала первую."""
     site = _site("negotiation")   # 3.1 «Переговоры с собственником» — глазами и обязателен
     manual = next(i for i in gate_state(site)["items"] if i["manual"] and i["required"])
-    _run(set_gate_waiver(_FakeDb(), site, manual["key"], True, "проверено выездом", _USER))
-    _run(set_gate_item(_FakeDb(), site, manual["key"], True, _USER))
+    _run(set_gate_waiver(_FakeDb(site), site, manual["key"], True, "проверено выездом", _USER))
+    _run(set_gate_item(_FakeDb(site), site, manual["key"], True, _USER))
     it = next(i for i in gate_state(site)["items"] if i["key"] == manual["key"])
     assert it["done"] is True
     assert it["waived"] is True, "отметка выполнения стёрла послабление"
@@ -90,7 +102,7 @@ def test_отметка_пункта_не_стирает_чужую_подпис
 def test_обоснование_обязательно():
     site = _site("contracting")
     key = next(i["key"] for i in gate_state(site)["items"] if i["required"] and not i["done"])
-    res = _run(set_gate_waiver(_FakeDb(), site, key, True, "   ", _USER))
+    res = _run(set_gate_waiver(_FakeDb(site), site, key, True, "   ", _USER))
     assert res["ok"] is False
     assert "обоснование" in res["message"].lower()
     assert gate_state(site)["blocking"], "пункт перестал держать переход без обоснования"
@@ -99,7 +111,7 @@ def test_обоснование_обязательно():
 def test_необязательный_пункт_снимать_нечего():
     site = _site("screening")
     key = next(i["key"] for i in gate_state(site)["items"] if not i["required"])
-    res = _run(set_gate_waiver(_FakeDb(), site, key, True, "причина", _USER))
+    res = _run(set_gate_waiver(_FakeDb(site), site, key, True, "причина", _USER))
     assert res["ok"] is False
 
 
@@ -116,7 +128,7 @@ def test_три_пункта_не_снимаются_ничьей_подпись
         task = next(t for t in TASKS if t["key"] == key)
         assert task.get("required"), f"{key} не обязателен — запрещать нечего"
         site = _site(task["stage"])
-        res = _run(set_gate_waiver(_FakeDb(), site, key, True, "очень нужно", _USER))
+        res = _run(set_gate_waiver(_FakeDb(site), site, key, True, "очень нужно", _USER))
         assert res["ok"] is False, f"с пункта {key} удалось снять обязательность"
         it = next(i for i in gate_state(site)["items"] if i["key"] == key)
         assert it["waivable"] is False

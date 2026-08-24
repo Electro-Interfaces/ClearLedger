@@ -916,6 +916,7 @@ def _kind_out(k: DocKind) -> dict[str, Any]:
         "errand_type_id": str(k.errand_type_id) if k.errand_type_id else None,
         "requires_registration": k.requires_registration,
         "is_active": k.is_active, "sort_order": k.sort_order,
+        "gate_key": k.gate_key,
     }
 
 
@@ -1026,6 +1027,8 @@ class KindIn(BaseModel):
     requires_registration: bool = True
     is_active: bool = True
     sort_order: int = 100
+    # Какой пункт чек-листа проекта закрывает согласованный документ этого вида.
+    gate_key: str | None = Field(None, max_length=40)
 
 
 @router.get("/refs/resolve")
@@ -1088,6 +1091,24 @@ async def resolve_refs(
             url = None
         out[ref] = {"kind": prefix, "name": name, "url": url}
     return {"refs": out}
+
+
+@router.get("/kinds/gate-keys")
+async def kind_gate_keys(
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Пункты проекта, которые может закрывать документ этого вида.
+
+    Список собирается из самого чек-листа проекта: второй перечень, разойдясь с
+    ним, дал бы вид, объявленный закрывающим несуществующий пункт, — и человек
+    искал бы, почему согласованный документ гейт не двигает.
+    """
+    await assert_company_product(company_id, current_user, db, "docs")
+    from app.services import ezs_checklist
+
+    return {"keys": ezs_checklist.doc_gate_keys()}
 
 
 @router.get("/kinds/subjects")
@@ -1162,7 +1183,8 @@ async def create_kind(
         default_case_id=await _default_case_id(db, cid, payload.default_case_id),
         errand_type_id=await _kind_errand_type_id(db, cid, payload.errand_type_id),
         requires_registration=payload.requires_registration,
-        is_active=payload.is_active, sort_order=payload.sort_order)
+        is_active=payload.is_active, sort_order=payload.sort_order,
+        gate_key=payload.gate_key or None)
     db.add(k)
     await db.commit()
     await db.refresh(k)
@@ -1184,6 +1206,7 @@ async def update_kind(
                   "number_scope", "number_prefix", "requires_registration",
                   "is_active", "sort_order"):
         setattr(k, field, getattr(payload, field))
+    k.gate_key = payload.gate_key or None
     k.fields = _clean_fields(payload.fields) or None
     k.route = await _kind_route(db, cid, payload.route) or None
     k.default_case_id = await _default_case_id(db, cid, payload.default_case_id)
@@ -1232,6 +1255,10 @@ class ProcessStartIn(BaseModel):
     # «допишу потом» означает документ, ушедший наружу с пустым местом.
     counterparty_id: str | None = None
     subject_ref: str | None = Field(None, max_length=120)
+    # Связать заведённое с предметом «много к одному»: по проекту документов
+    # десяток, а предмет карточки уникален и годится лишь для отношения один
+    # к одному.
+    relate_to: str | None = Field(None, max_length=120)
     object_id: str | None = Field(None, max_length=40)
 
 
@@ -1275,6 +1302,7 @@ async def start_process_template(
                                               "counterparty_id")
                                  if payload.counterparty_id else None),
                 subject_ref=payload.subject_ref,
+                relate_to=payload.relate_to,
                 object_id=payload.object_id,
             )
         else:
@@ -1284,7 +1312,8 @@ async def start_process_template(
                 # Предмет и объект передаются и поручению: заведённое из
                 # карточки проекта обязано находиться по этому проекту, иначе
                 # оно исчезает из его ленты сразу после создания.
-                subject_ref=payload.subject_ref,
+                # У поручения предмет не уникален — связь ему не нужна.
+                subject_ref=payload.subject_ref or payload.relate_to,
                 object_id=payload.object_id,
                 source_note=f"по шаблону процесса «{tpl.name}»",
             )

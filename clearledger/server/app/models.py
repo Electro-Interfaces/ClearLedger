@@ -10760,6 +10760,14 @@ class DocKind(Base):
         Boolean, nullable=False, default=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
+    # Какой пункт чек-листа проекта закрывает согласованный документ этого вида
+    # (`contract`, `tp_contract`, `project`, `act` — ключи `ezs_checklist`).
+    #
+    # Связь данными, а не кодом: какой именно вид считается «договором аренды
+    # ЗУ», решает делопроизводство компании, и зашивать это в наш перечень
+    # значило бы требовать релиз ради переименования вида. Пусто — вид гейтов
+    # не касается, это обычное состояние для большинства.
+    gate_key: Mapped[str | None] = mapped_column(String(40), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime | None] = mapped_column(

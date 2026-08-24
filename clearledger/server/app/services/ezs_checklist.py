@@ -301,3 +301,18 @@ def checklist_meta() -> dict[str, Any]:
         ],
         "total": len(TASKS),
     }
+
+
+def doc_gate_keys() -> list[dict[str, str]]:
+    """Пункты чек-листа, которые закрываются документом.
+
+    Собирается из самого чек-листа, а не пишется вторым списком: разойдясь, они
+    дали бы вид, объявленный закрывающим несуществующий пункт, — и человек искал
+    бы причину, почему согласованный документ гейт не двигает.
+    """
+    seen: dict[str, str] = {}
+    for item in TASKS:
+        key = item.get("doc")
+        if key and key not in seen:
+            seen[key] = item.get("label") or item.get("title") or key
+    return [{"key": k, "label": v} for k, v in seen.items()]

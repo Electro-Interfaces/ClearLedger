@@ -313,6 +313,10 @@ async def launch(
     object_id: str | None = None,
     counterparty_id: uuid.UUID | None = None,
     subject_ref: str | None = None,
+    # Связь «много к одному». По проекту документов десяток — договор аренды,
+    # договор ТП, акт ввода; предметом их не привязать, он уникален на компанию
+    # и описывает отношение один к одному («карточка ЭТОГО договора»).
+    relate_to: str | None = None,
 ) -> tuple[DocCard, dict[str, Any]]:
     if tpl.company_id != cid or not tpl.doc_kind_id:
         raise ProcessTemplateError("Шаблон процесса не найден")
@@ -356,6 +360,11 @@ async def launch(
     d.summary = fill(d.summary, values)
     db.add(d)
     await db.flush()
+    if relate_to:
+        from app.models import DocRelation
+
+        db.add(DocRelation(company_id=cid, doc_id=d.id, kind="basis",
+                           target_ref=relate_to[:200]))
     db.add(DocEvent(
         doc_id=d.id,
         kind="created",

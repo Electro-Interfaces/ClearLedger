@@ -3944,6 +3944,13 @@ async def create_all() -> None:
         ):
             await conn.execute(_sa.text(stmt))
 
+        # v2.71: вид документа может закрывать пункт чек-листа проекта. Пусто у
+        # существующих: связь задаёт делопроизводитель, а не наш перечень.
+        for stmt in (
+            "ALTER TABLE doc_kinds ADD COLUMN IF NOT EXISTS gate_key VARCHAR(40)",
+        ):
+            await conn.execute(_sa.text(stmt))
+
         # v2.60: маршрут проекта выбирается человеком, а не берётся молча первым.
         # Пусто у всех существующих проектов — это и есть прежнее поведение.
         for stmt in (

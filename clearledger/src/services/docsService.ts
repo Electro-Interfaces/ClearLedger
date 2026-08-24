@@ -24,6 +24,8 @@ export interface DocKind {
   requires_registration: boolean
   is_active: boolean
   sort_order: number
+  /** Какой пункт чек-листа проекта закрывает согласованный документ этого вида. */
+  gate_key?: string | null
 }
 
 export interface DocKindField {
@@ -438,7 +440,11 @@ export async function listProcessTemplates(companyId: string) {
 export async function startProcessTemplate(
   id: string, companyId: string,
   options?: {
-    responsibleId?: string; title?: string; objectId?: string; subjectRef?: string
+    responsibleId?: string; title?: string; objectId?: string
+    subjectRef?: string
+    /** Связь «много к одному»: по проекту документов десяток, а предмет
+     *  карточки уникален и годится лишь для отношения один к одному. */
+    relateTo?: string
   },
 ) {
   return post<ProcessLaunchResult>(`/api/docs/process-templates/${id}/start`, {
@@ -448,6 +454,7 @@ export async function startProcessTemplate(
     // Предмет: из карточки проекта это сам проект (`site:<id>`). Без него
     // заведённое не найти по проекту, пока у площадки нет объекта сети.
     subject_ref: options?.subjectRef || undefined,
+    relate_to: options?.relateTo || undefined,
     // Объект передаётся, когда работу заводят из карточки проекта: без него
     // заведённое не найти по объекту, и лента «что идёт по этой площадке»
     // осталась бы пустой при живых документах и поручениях.
@@ -1236,4 +1243,11 @@ export async function stopSubstitution(
   companyId: string, id: string,
 ): Promise<{ stopped: string }> {
   return del(`/api/docs/substitutions/${id}?company_id=${companyId}`)
+}
+
+/** Пункты проекта, которые может закрывать документ: собираются из чек-листа. */
+export async function listGateKeys(companyId: string): Promise<{ key: string; label: string }[]> {
+  const res = await get<{ keys: { key: string; label: string }[] }>(
+    '/api/docs/kinds/gate-keys', { company_id: companyId })
+  return res.keys || []
 }

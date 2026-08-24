@@ -16,7 +16,7 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import false, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import EzsProject, EzsSite, EzsSiteEvent, User
@@ -156,10 +156,47 @@ async def next_project_no(db: AsyncSession, company_id) -> str:
 
 
 async def site_doc_kinds(db: AsyncSession, site_id) -> set[str]:
-    from app.models import EzsSiteDoc
+    """Чем подтверждены пункты гейта: файлами площадки и документами «Трека».
+
+    Файл, приложенный в карточку, — прежний способ, и он остаётся: не всякую
+    бумагу ведут документооборотом. Но акт ввода, прошедший круг виз и
+    подписание, до сих пор гейт НЕ закрывал: для гейта требовалось, чтобы
+    кто-то отдельно приложил тот же файл в карточку. Два источника правды об
+    одном факте — и человек выбирал, какому верить.
+
+    Документ «Трека» засчитывается, когда выполнены три условия: он привязан к
+    этому проекту (предметом или связью), его вид объявлен закрывающим пункт
+    (`DocKind.gate_key`) и он **согласован**. Черновик не подтверждает ничего:
+    иначе гейт закрывался бы намерением, а не результатом.
+    """
+    from app.models import DocCard, DocKind, DocRelation, EzsSite, EzsSiteDoc
+
     rows = (await db.execute(
         select(EzsSiteDoc.kind).where(EzsSiteDoc.site_id == site_id))).scalars().all()
-    return set(rows)
+    kinds = set(rows)
+
+    site = await db.get(EzsSite, site_id)
+    if site is None:
+        return kinds
+    refs = [f"site:{site.id}"]
+    if site.location_id:
+        refs.append(f"object:{site.location_id}")
+    related = select(DocRelation.doc_id).where(
+        DocRelation.company_id == site.company_id,
+        DocRelation.doc_id == DocCard.id,
+        DocRelation.target_ref.in_(refs)).exists()
+    settled = (await db.execute(
+        select(DocKind.gate_key)
+        .join(DocCard, DocCard.kind_id == DocKind.id)
+        .where(
+            DocCard.company_id == site.company_id,
+            DocKind.gate_key.is_not(None),
+            or_(DocCard.subject_ref.in_(refs), related,
+                DocCard.object_id == site.location_id if site.location_id else false()),
+            or_(DocCard.approval_status == "approved",
+                DocCard.status.in_(("in_force", "executed")))))).scalars().all()
+    kinds.update(k for k in settled if k)
+    return kinds
 
 
 async def site_equipment_supplied(db: AsyncSession, site_id) -> bool:

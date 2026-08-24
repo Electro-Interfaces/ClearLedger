@@ -6,6 +6,9 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import * as docsService from '@/services/docsService'
 import type { DocKind, DocKindField } from '@/services/docsService'
@@ -90,6 +93,7 @@ function emptyKind(): DraftKind {
     number_template: '{prefix}-{org}-{yyyy}-{n:04d}', number_scope: 'kind_org_year',
     number_prefix: '', fields: [], route: [], default_case_id: null,
     errand_type_id: null, requires_registration: true, is_active: true, sort_order: 100,
+    gate_key: null,
   }
 }
 
@@ -135,6 +139,13 @@ export function DocKindEditor({ companyId, initial, onClose, onSaved }: {
   const casesQ = useQuery({
     queryKey: ['doc-cases', companyId],
     queryFn: () => docsService.listCases(companyId),
+  })
+  // Пункты чек-листа проекта — из самого чек-листа, а не вторым списком: они
+  // разошлись бы, и вид закрывал бы несуществующий пункт.
+  const gateKeys = useQuery({
+    queryKey: ['doc-gate-keys', companyId],
+    queryFn: () => docsService.listGateKeys(companyId),
+    staleTime: 10 * 60 * 1000,
   })
   const save = useMutation({
     mutationFn: () => docsService.saveKind(companyId, {
@@ -223,6 +234,21 @@ export function DocKindEditor({ companyId, initial, onClose, onSaved }: {
             onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></Field>
           <Field label="Порядок" id="kind-sort"><Input id="kind-sort" type="number" value={draft.sort_order}
             onChange={(event) => setDraft({ ...draft, sort_order: Number(event.target.value) || 0 })} /></Field>
+          {/* Связь с проектом задаётся данными: какой именно вид считается
+              «договором аренды ЗУ», решает делопроизводство компании, и зашивать
+              это в наш перечень значило бы требовать релиз ради переименования. */}
+          <Field label="Закрывает пункт проекта" id="kind-gate">
+            <Select value={draft.gate_key || 'none'}
+              onValueChange={(v: string) => setDraft({ ...draft, gate_key: v === 'none' ? null : v })}>
+              <SelectTrigger id="kind-gate"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">Не закрывает</SelectItem>
+                {(gateKeys.data ?? []).map((k) => (
+                  <SelectItem key={k.key} value={k.key}>{k.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
           <Field label="Поток" id="kind-family"><select id="kind-family" value={draft.family}
             onChange={(event) => setDraft({ ...draft, family: event.target.value })} className={SELECT_CLASS}>
             {FAMILY.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Field>

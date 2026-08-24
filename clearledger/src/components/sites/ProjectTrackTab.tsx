@@ -57,11 +57,11 @@ export function ProjectTrackTab({ site, companyId }: {
   const start = useMutation({
     mutationFn: (template: docsService.ProcessTemplate) =>
       docsService.startProcessTemplate(template.id, companyId, {
-        // Предмет — сам проект: объект сети появляется только со вводом в
-        // эксплуатацию, а работа нужна с первого дня. Предмет получают и
-        // документ, и поручение — одним механизмом. Есть объект — цепляем и
-        // к нему, чтобы работа нашлась с обеих сторон.
-        subjectRef: `site:${site.id}`,
+        // Проект как предмет: объект сети появляется только со вводом в
+        // эксплуатацию, а работа нужна с первого дня. Документ цепляется
+        // СВЯЗЬЮ — предмет карточки уникален на компанию, а по проекту бумаг
+        // десяток; поручению уникальность не мешает, и оно берёт предмет.
+        relateTo: `site:${site.id}`,
         objectId: track.data?.object_id || undefined,
       }),
     onMutate: (template) => setStarting(template.id),
