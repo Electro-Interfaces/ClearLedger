@@ -341,6 +341,10 @@ def _task_out(t: Task, route: list[dict], names: dict[str, str | None],
         "sprint": names.get("sprint"),
         "sprint_id": str(t.sprint_id) if t.sprint_id else None,
         "title": t.title,
+        # Предмет работы: по нему человек, открывший поручение из ленты проекта,
+        # понимает, откуда оно, и возвращается назад. Без этого связь была
+        # односторонней — из проекта в работу пройти можно, обратно нет.
+        "subject_ref": t.subject_ref,
         "status": t.status,
         "priority": t.priority,
         "stage": _stage_name(route, t.stage_code),

@@ -38,7 +38,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import assert_company_product, get_current_user
 from app.database import get_db
 from app.models import (
-    DocCard, DocKind, DocLabelLink, ServiceLocation, Task, TaskLabel,
+    DocCard, DocKind, DocLabelLink, DocRelation, ServiceLocation, Task, TaskLabel,
     TaskLabelLink, TaskProject, TaskType, User,
 )
 from app.services import work_query, work_state
@@ -89,6 +89,10 @@ async def list_work(
     project_id: str | None = Query(None),
     assignee_id: str | None = Query(None),
     object_id: str | None = Query(None),
+    # Предмет работы: `site:<uuid>`, `contract:<uuid>`, `object:<ключ>`. Реестр
+    # документов такой отбор умел с самого начала, лента — нет, и переход
+    # «показать всю работу по проекту» приводил на список без единого поручения.
+    ref: str | None = Query(None, max_length=120),
     label_id: str | None = Query(None),
     author_id: str | None = Query(None),
     q: str | None = Query(None, max_length=200),
@@ -142,6 +146,9 @@ async def list_work(
         label_id = parsed.get("label_id", label_id)
         type_id = parsed.get("type_id", type_id)
         object_id = parsed.get("object_id", object_id)
+        # Предмета в языке запросов нет намеренно: его значение само содержит
+        # двоеточие (`site:<uuid>`), а разбор строит пары «поле: значение» —
+        # первое же двоеточие развалило бы ссылку. Предмет приходит параметром.
         due_to = parsed.get("due_to", due_to)
         q = free_text or q
         query_out = {"parsed": {k: str(v) for k, v in parsed.items()},
@@ -167,6 +174,7 @@ async def list_work(
         Task.author_id.label("author_id"),
         Task.due_at.label("due_at"),
         Task.object_id.label("object_id"),
+        Task.subject_ref.label("subject_ref"),
         Task.project_id.label("project_id"),
         Task.number.label("number"),
         Task.project_number.label("project_number"),
@@ -192,6 +200,7 @@ async def list_work(
         DocCard.author_id.label("author_id"),
         DocCard.due_at.label("due_at"),
         DocCard.object_id.label("object_id"),
+        DocCard.subject_ref.label("subject_ref"),
         literal(None, Uuid).label("project_id"),
         literal(None, Integer).label("number"),
         literal(None, Integer).label("project_number"),
@@ -244,6 +253,20 @@ async def list_work(
         sel = sel.where(union.c.author_id == _uuid_or_400(author_id, "author_id"))
     if object_id:
         sel = sel.where(union.c.object_id == object_id)
+    if ref:
+        # Документ помнит предмет двумя способами — своим полем и явной связью;
+        # оба одинаково законны, как и в реестре документов. У поручения связь
+        # одна. Ссылка вида `object:<ключ>` понимается и как объект: человек,
+        # пришедший «показать работу по объекту», не обязан знать, что внутри
+        # это разные колонки.
+        related = select(DocRelation.doc_id).where(
+            DocRelation.company_id == cid,
+            DocRelation.doc_id == union.c.id,
+            DocRelation.target_ref == ref).exists()
+        clauses = [union.c.subject_ref == ref, related]
+        if ref.startswith("object:"):
+            clauses.append(union.c.object_id == ref.split(":", 1)[1])
+        sel = sel.where(or_(*clauses))
     if due_to:
         sel = sel.where(union.c.due_at <= due_to)
     if label_id:

@@ -29,6 +29,7 @@ import { QueryError } from '@/components/common/QueryError'
 import { cn } from '@/lib/utils'
 import * as tasksService from '@/services/tasksService'
 import { WorkIdentity } from '@/components/work/WorkIdentity'
+import * as docsService from '@/services/docsService'
 import { WorkTrace } from '@/components/work/WorkTrace'
 import type { LinkKind, LoadedTask } from '@/services/tasksService'
 import { listSpaceObjects } from '@/services/spaceObjectsService'
@@ -389,7 +390,7 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
 
 /* ── Шапка: номер, тип, заголовок правится на месте ──────────────────── */
 
-function Header({ task, onRename, onBack }: {
+function Header({ task, companyId, onRename, onBack }: {
   task: LoadedTask; companyId: string; onRename: (title: string) => void
   onBack?: () => void
 }) {
@@ -412,6 +413,11 @@ function Header({ task, onRename, onBack }: {
         <span className="text-[11px] text-muted-foreground">
           {STATUS_LABEL[task.status] ?? task.status}
         </span>
+        {/* Откуда работа: человек, пришедший из карточки проекта, должен видеть
+            это и уметь вернуться. Без ссылки связь односторонняя. */}
+        {task.subject_ref && (
+          <SubjectLink companyId={companyId} refKey={task.subject_ref} />
+        )}
         {task.labels.map((l) => (
           <span key={l.id}
             className="rounded border border-border/60 bg-muted/40 px-1 py-px text-[11px]">
@@ -1418,3 +1424,30 @@ function Section({ title, action, children }: {
 
 
 export default TaskCard
+
+
+/**
+ * Предмет работы одной строкой: «проект Крыгина 95» со ссылкой.
+ *
+ * Сырую ссылку (`site:<uuid>`) показывать нельзя — человек не отличит проект от
+ * договора и не поймёт, о какой площадке речь. Пока имя не пришло, не рисуем
+ * ничего: мигающий машинный ключ хуже пустоты.
+ */
+function SubjectLink({ companyId, refKey }: { companyId: string; refKey: string }) {
+  const q = useQuery({
+    queryKey: ['ref', companyId, refKey],
+    queryFn: () => docsService.resolveRefs(companyId, [refKey]),
+    enabled: !!companyId, staleTime: 5 * 60 * 1000,
+  })
+  const found = q.data?.[refKey]
+  if (!found?.name) return null
+  const label = `${found.kind === 'site' ? 'проект' : ''} ${found.name}`.trim()
+  return found.url ? (
+    <a href={found.url} className="text-[11px] text-blue-400 hover:underline"
+      title="Открыть предмет работы">
+      {label}
+    </a>
+  ) : (
+    <span className="text-[11px] text-muted-foreground">{label}</span>
+  )
+}

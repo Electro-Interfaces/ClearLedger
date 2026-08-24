@@ -455,6 +455,30 @@ export async function startProcessTemplate(
   })
 }
 
+/** Как называется предмет работы и куда по нему пройти. */
+export interface ResolvedRef {
+  kind: string
+  /** `null` — цель исчезла: связь есть, но она сломана. */
+  name: string | null
+  url: string | null
+}
+
+/**
+ * Расшифровать ссылки на предметы пачкой.
+ *
+ * Ссылка хранится машинным видом (`site:<uuid>`): показать её человеку так же
+ * значит не показать ничего — он не отличит проект от договора. Пачкой, потому
+ * что в списке работ ссылок столько же, сколько строк.
+ */
+export async function resolveRefs(companyId: string, refs: string[]): Promise<Record<string, ResolvedRef>> {
+  const list = refs.filter(Boolean)
+  if (!list.length) return {}
+  const res = await get<{ refs: Record<string, ResolvedRef> }>('/api/docs/refs/resolve', {
+    company_id: companyId, refs: list.join(','),
+  })
+  return res.refs || {}
+}
+
 export async function listKindSubjects(companyId: string): Promise<DocKindSubjects> {
   return get<DocKindSubjects>('/api/docs/kinds/subjects', { company_id: companyId })
 }

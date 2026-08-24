@@ -116,3 +116,58 @@ async def test_предмет_поручения_проверяется(auth_cli
         "company_id": cid, "title": "Поручение в никуда",
         "subject_ref": f"site:{uuid.uuid4()}"})
     assert made.status_code == 404, made.text
+
+
+async def test_лента_работы_отбирается_по_предмету(auth_client: AsyncClient,
+                                                   db: AsyncSession):
+    """Реестр документов умел отбор по предмету с самого начала, лента — нет, и
+    переход «показать всю работу по проекту» приводил на список без единого
+    поручения."""
+    me = (await auth_client.get("/api/auth/me")).json()
+    cid = uuid.UUID(seed_company_id(me))
+    site = EzsSite(company_id=cid, title=f"Отбор {uuid.uuid4().hex[:6]}",
+                   kind="new_build", stage="construction")
+    db.add(site)
+    await db.flush()
+    kind = await _kind(db, cid)
+    ref = f"site:{site.id}"
+
+    db.add_all([
+        DocCard(company_id=cid, kind_id=kind.id, kind_code=kind.code,
+                family="internal", direction="none", title="Договор аренды",
+                status="draft", subject_ref=ref),
+        Task(company_id=cid, title="Согласовать площадку", status="open",
+             subject_ref=ref, author_id=uuid.UUID(me["id"])),
+        # Чужая работа: без предмета — в отбор попасть не должна.
+        Task(company_id=cid, title="Посторонняя работа", status="open",
+             author_id=uuid.UUID(me["id"])),
+    ])
+    await db.commit()
+
+    body = (await auth_client.get("/api/work", params={
+        "company_id": str(cid), "scope": "all", "ref": ref})).json()
+    titles = {i["title"] for i in body["work"]}
+    assert titles == {"Договор аренды", "Согласовать площадку"}
+    assert {i["kind"] for i in body["work"]} == {"doc", "task"}
+
+
+async def test_предмет_расшифровывается_именем_и_ссылкой(
+        auth_client: AsyncClient, db: AsyncSession):
+    """Сырая ссылка человеку ничего не говорит: он не отличит проект от договора
+    и не поймёт, о какой площадке речь."""
+    me = (await auth_client.get("/api/auth/me")).json()
+    cid = uuid.UUID(seed_company_id(me))
+    site = EzsSite(company_id=cid, title="Крыгина ул. 95", kind="new_build",
+                   stage="construction")
+    db.add(site)
+    await db.commit()
+
+    ghost = f"site:{uuid.uuid4()}"
+    body = (await auth_client.get("/api/docs/refs/resolve", params={
+        "company_id": str(cid), "refs": f"site:{site.id},{ghost}"})).json()["refs"]
+
+    assert body[f"site:{site.id}"]["name"] == "Крыгина ул. 95"
+    assert body[f"site:{site.id}"]["url"].endswith(str(site.id))
+    # Исчезнувшая цель называется прямо: молчание человек прочтёт как «связи
+    # нет», хотя связь есть и она сломана.
+    assert ghost in body and body[ghost]["name"] is None

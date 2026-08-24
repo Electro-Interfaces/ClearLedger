@@ -1028,6 +1028,68 @@ class KindIn(BaseModel):
     sort_order: int = 100
 
 
+@router.get("/refs/resolve")
+async def resolve_refs(
+    refs: str = Query(..., max_length=2000),
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Как называется предмет и куда по нему пройти.
+
+    Ссылка хранится машинным видом — `site:<uuid>`, `contract:<uuid>`. Показать
+    её человеку в этом виде значит не показать ничего: он не отличит проект от
+    договора и не поймёт, о какой площадке речь. Здесь ссылка превращается в имя
+    и адрес перехода, чтобы связь читалась в обе стороны: из проекта в работу и
+    из работы обратно.
+
+    Ссылки принимаются пачкой: в списке работ их столько же, сколько строк, и
+    спрашивать по одной значило бы столько же запросов.
+    """
+    cid = await assert_company_product(company_id, current_user, db, "docs")
+    wanted = [r.strip() for r in refs.split(",") if r.strip()][:100]
+    out: dict[str, dict[str, str | None]] = {}
+    for ref in wanted:
+        if ":" not in ref:
+            continue
+        prefix, key = ref.split(":", 1)
+        target = _REF_TARGETS.get(prefix)
+        if target is None or not key:
+            continue
+        model, key_is_text = target
+        try:
+            ident: Any = key if key_is_text else uuid.UUID(key)
+        except (ValueError, TypeError):
+            continue
+        row = (await db.execute(select(model).where(
+            model.id == ident, model.company_id == cid))).scalars().first()
+        if row is None:
+            # Цель исчезла — говорим об этом прямо: молчание человек прочтёт
+            # как «связи нет», хотя связь есть и она сломана.
+            out[ref] = {"kind": prefix, "name": None, "url": None}
+            continue
+        if prefix == "site":
+            name = row.title or row.address or row.city or "проект без названия"
+            url = f"/projects?site={row.id}"
+        elif prefix == "object":
+            name = row.name or row.code or str(row.id)
+            url = f"/ops?object={row.id}"
+        elif prefix == "contract":
+            name = f"договор {row.number}" if getattr(row, "number", None) else "договор"
+            url = f"/finance?contract={row.id}"
+        elif prefix == "counterparty":
+            name = getattr(row, "name", None) or "контрагент"
+            url = f"/finance?counterparty={row.id}"
+        elif prefix == "task":
+            name = f"поручение №{getattr(row, 'number', '')}".strip()
+            url = f"/docs/company?view=errands&task={row.id}"
+        else:
+            name = str(getattr(row, "name", None) or getattr(row, "title", None) or ref)
+            url = None
+        out[ref] = {"kind": prefix, "name": name, "url": url}
+    return {"refs": out}
+
+
 @router.get("/kinds/subjects")
 async def list_kind_subjects(
     company_id: str = Query(...),

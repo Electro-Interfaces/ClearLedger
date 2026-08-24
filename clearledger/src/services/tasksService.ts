@@ -121,6 +121,9 @@ export interface SpaceTask {
   author: string | null
   object: string | null
   object_id: string | null
+  /** Предмет работы: `site:<uuid>`, `contract:<uuid>`. Расшифровывается
+   *  `docsService.resolveRefs` — сырая ссылка человеку ничего не говорит. */
+  subject_ref?: string | null
   due_at: string | null
   overdue: boolean
   /** У кого мяч: `external` — ждём внешнюю сторону, `us`/null — у нас. */

@@ -55,6 +55,8 @@ export interface WorkFilters {
   assigneeId?: string
   authorId?: string
   objectId?: string
+  /** Предмет работы: `site:<uuid>`, `contract:<uuid>`, `object:<ключ>`. */
+  ref?: string
   labelId?: string
   q?: string
   query?: string
@@ -78,6 +80,7 @@ export async function listWork(companyId: string, opts?: WorkFilters) {
     assignee_id: opts?.assigneeId || undefined,
     author_id: opts?.authorId || undefined,
     object_id: opts?.objectId || undefined,
+    ref: opts?.ref || undefined,
     label_id: opts?.labelId || undefined,
     q: opts?.q || undefined,
     query: opts?.query || undefined,

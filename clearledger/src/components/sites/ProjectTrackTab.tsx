@@ -123,8 +123,11 @@ export function ProjectTrackTab({ site, companyId }: {
               </DropdownMenuItem>
             )}
             <DropdownMenuSeparator />
+            {/* В ленту работы, а не в реестр документов: реестр покажет
+                документы и промолчит о поручениях, хотя предмет у них общий. */}
             <DropdownMenuItem
-              onSelect={() => navigate(`/docs?view=all&ref=site:${site.id}`)}>
+              onSelect={() => navigate(
+                `/docs/company?view=work&scope=all&ref=site:${site.id}`)}>
               <ExternalLink className="mr-2 h-3.5 w-3.5" />
               Открыть в «Треке»
             </DropdownMenuItem>

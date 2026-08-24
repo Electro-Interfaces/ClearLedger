@@ -59,6 +59,10 @@ export function WorkListPage() {
   const kind = params.get('kind') ?? ''
   const state = params.get('state') ?? ''
   const queryText = params.get('query') ?? ''
+  // Предмет приходит из карточки проекта или объекта: «покажи всю работу по
+  // этой площадке». В язык запросов его не завести — значение само содержит
+  // двоеточие, и разбор пар «поле: значение» развалил бы ссылку.
+  const ref = params.get('ref') ?? ''
   const page = Math.max(0, Number(params.get('page')) || 0)
 
   const filters = {
@@ -66,6 +70,7 @@ export function WorkListPage() {
     kind: (kind || undefined) as 'doc' | 'task' | undefined,
     state: state || undefined,
     query: queryText || undefined,
+    ref: ref || undefined,
     limit: PAGE, offset: page * PAGE,
   }
   const listQ = useQuery({
@@ -138,6 +143,20 @@ export function WorkListPage() {
           scope: q.scope ?? null, kind: q.kind ?? null,
           state: q.state ?? null, query: q.query ?? null,
         })} />
+
+      {/* Отбор по предмету пришёл ссылкой, и его не видно среди кнопок разреза.
+          Без явной пометки человек читает короткий список как «работы нет», а
+          снять сужение ему нечем. */}
+      {ref && (
+        <div className="flex items-center gap-2 rounded-md bg-muted/30 px-2.5 py-1.5 text-xs">
+          <span className="text-muted-foreground">Только по предмету</span>
+          <code className="rounded bg-background px-1.5 py-0.5 text-[11px]">{ref}</code>
+          <Button size="sm" variant="ghost" className="ml-auto h-7 text-xs"
+            onClick={() => set({ ref: null })}>
+            Показать всю работу
+          </Button>
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center gap-2">
         {SCOPES.map((s) => (
