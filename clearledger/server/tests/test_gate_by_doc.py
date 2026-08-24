@@ -76,3 +76,44 @@ async def test_перечень_пунктов_собирается_из_чек�
     from_tasks = {i["doc"] for i in ezs_checklist.TASKS if i.get("doc")}
     assert {k["key"] for k in keys} == from_tasks
     assert all(k["label"] for k in keys)
+
+
+async def test_виды_под_гейты_сеются_профилю_сети(auth_client, db: AsyncSession):
+    """Сеть строит объекты, и четыре пункта её регламента закрываются бумагой.
+    Пока таких видов нет, согласованный акт ввода гейт не двигает."""
+    from sqlalchemy import select
+
+    from app.models import Company
+    from app.routers.docs_router import (
+        STARTER_KINDS, STARTER_KINDS_ENERGY, starter_kinds,
+    )
+    from app.services import ezs_checklist
+    from tests.helpers import seed_company_id
+
+    # Офису и рознице виды под проекты ЭЗС не нужны: пустой вид в реестре
+    # читается как незаполненный, а не как лишний.
+    assert starter_kinds("office") == STARTER_KINDS
+    assert starter_kinds(None) == STARTER_KINDS
+    energy = starter_kinds("energy")
+    assert len(energy) == len(STARTER_KINDS) + len(STARTER_KINDS_ENERGY)
+
+    # Каждый профильный вид закрывает существующий пункт: связь с несуществующим
+    # означала бы вид, который никогда ничего не двигает.
+    known = {k["key"] for k in ezs_checklist.doc_gate_keys()}
+    keys = [spec["gate_key"] for spec in STARTER_KINDS_ENERGY]
+    assert set(keys) <= known
+    assert len(keys) == len(set(keys)), "два вида на один пункт — спор о том, чем закрыт"
+
+    me = (await auth_client.get("/api/auth/me")).json()
+    cid = seed_company_id(me)
+    company = await db.get(Company, uuid.UUID(cid))
+    made = await auth_client.post("/api/docs/kinds/starter", params={"company_id": cid})
+    assert made.status_code in (200, 201), made.text
+
+    rows = (await db.execute(select(DocKind).where(
+        DocKind.company_id == uuid.UUID(cid),
+        DocKind.gate_key.is_not(None)))).scalars().all()
+    if company.profile_id == "energy":
+        assert {r.gate_key for r in rows} == set(keys)
+    else:
+        assert not rows

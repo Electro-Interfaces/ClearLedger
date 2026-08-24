@@ -44,7 +44,7 @@ from app.auth import (
 from app.config import get_settings
 from app.database import get_db
 from app.models import (
-    ChatRoom, CompanyRole, Contract, Counterparty, Department, DocAccessGrant,
+    ChatRoom, Company, CompanyRole, Contract, Counterparty, Department, DocAccessGrant,
     DocApproval,
     DocBreakGlassAccess, DocCard,
     DocCase, DocEvent, DocKind, DocRelation, DocAcquaint, DocExchangeTarget,
@@ -101,6 +101,41 @@ STARTER_KINDS: list[dict[str, Any]] = [
      "direction": "none", "number_prefix": "СЗ",
      "desc": "Внутренняя переписка подразделений"},
 ]
+
+# Виды под пункты чек-листа проекта ЭЗС: сеть строит объекты, и четыре пункта её
+# регламента закрываются именно бумагой. Пока таких видов не было, согласованный
+# в «Треке» акт ввода гейт не двигал — для гейта требовался тот же файл,
+# приложенный в карточку проекта отдельно.
+#
+# `gate_key` связывает вид с пунктом. Название и номер — дело компании, поэтому
+# это стартовые значения, а не жёсткий перечень: переименовать вид можно, связь
+# останется.
+STARTER_KINDS_ENERGY: list[dict[str, Any]] = [
+    {"code": "land_contract", "name": "Договор на землю", "family": "internal",
+     "direction": "none", "number_prefix": "ЗУ", "gate_key": "contract",
+     "desc": "Аренда, сервитут или разрешение на размещение — право на участок "
+             "(пункт 4.7: получение разрешения / подписанного договора)"},
+    {"code": "tp_act", "name": "Акт о техприсоединении", "family": "internal",
+     "direction": "none", "number_prefix": "ТП", "gate_key": "tp_contract",
+     "desc": "Акт о ТП и акт разграничения балансовой принадлежности "
+             "(пункт 5.3)"},
+    {"code": "work_docs", "name": "Рабочая документация", "family": "internal",
+     "direction": "none", "number_prefix": "РД", "gate_key": "project",
+     "desc": "Разработка рабочей документации проектной организацией "
+             "(пункт 6.2)"},
+    {"code": "commissioning_act", "name": "Акты ввода и ПНР", "family": "internal",
+     "direction": "none", "number_prefix": "АКТ", "gate_key": "act",
+     "desc": "КС-2, КС-3, ПНР, протоколы тестирования и ввода (пункт 7.7)"},
+]
+
+
+def starter_kinds(profile_id: str | None) -> list[dict[str, Any]]:
+    """Что сеять этому пространству: общее делопроизводство плюс профильное.
+
+    Офису и рознице виды под проекты ЭЗС не нужны — они бы просто засоряли
+    список, а пустой вид в реестре читается как незаполненный, а не как лишний.
+    """
+    return STARTER_KINDS + (STARTER_KINDS_ENERGY if profile_id == "energy" else [])
 
 
 # ── Помощники ────────────────────────────────────────────────────────────────
@@ -1232,7 +1267,8 @@ async def create_starter_kinds(
     errand = (await db.execute(select(TaskType.id).where(
         TaskType.company_id == cid, TaskType.code == "errand"))).scalar_one_or_none()
     added = 0
-    for spec in STARTER_KINDS:
+    company = await db.get(Company, cid)
+    for spec in starter_kinds(company.profile_id if company else None):
         if spec["code"] in have:
             continue
         db.add(DocKind(
@@ -1240,7 +1276,10 @@ async def create_starter_kinds(
             description=spec.get("desc"), family=spec["family"],
             direction=spec["direction"], number_prefix=spec["number_prefix"],
             number_template="{prefix}-{org}-{yyyy}-{n:04d}",
-            errand_type_id=errand, sort_order=100 + added))
+            errand_type_id=errand, sort_order=100 + added,
+            # Связь с пунктом чек-листа проекта: без неё вид заведётся, а гейт
+            # по-прежнему будет ждать файла, приложенного в карточку отдельно.
+            gate_key=spec.get("gate_key")))
         added += 1
     if added:
         await db.commit()
