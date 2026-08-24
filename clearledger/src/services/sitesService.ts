@@ -892,6 +892,34 @@ export async function getProjectContext(companyId: string, id: string): Promise<
   return get(`/api/sites/${id}/project`, { company_id: companyId })
 }
 
+/** Строка ленты «Трека» в карточке проекта: документ или поручение. */
+export interface SiteTrackItem {
+  id: string
+  kind: 'doc' | 'task'
+  /** Как называют вслух: «Вх-88», «№17», «черновик». */
+  key: string
+  title: string
+  type: string | null
+  state: string
+  state_name: string
+  at: string | null
+}
+
+/**
+ * Что «Трек» ведёт по проекту: документы и поручения одной лентой.
+ *
+ * Предметов у работы два, и оба законны: пока объекта сети нет — а он
+ * появляется со вводом в эксплуатацию, — работа цепляется к проекту; когда
+ * объект появился, к нему. Ручка ищет по обоим, чтобы человеку не приходилось
+ * знать внутреннее устройство.
+ */
+export async function getSiteTrack(companyId: string, id: string): Promise<{
+  site_id: string; object_id: string | null; subject_ref: string
+  items: SiteTrackItem[]; waiting: number
+}> {
+  return get(`/api/sites/${id}/track`, { company_id: companyId })
+}
+
 export async function getSiteDocs(companyId: string, id: string): Promise<SiteDoc[]> {
   return get(`/api/sites/${id}/docs`, { company_id: companyId })
 }

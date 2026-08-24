@@ -50,7 +50,7 @@ from app.models import (
     DocCase, DocEvent, DocKind, DocRelation, DocAcquaint, DocExchangeTarget,
     DocExport, DocInboxItem, DocLabelLink,
     DocShareLink, DocSignatureEvidence, UserSubstitution,
-    DocVersion, Organization, ServiceLocation, SourceFile, Task, TaskEvent,
+    DocVersion, EzsSite, Organization, ServiceLocation, SourceFile, Task, TaskEvent,
     TaskLabel, TaskTemplate, TaskType, TaskView, TaskWorkItem, User, UserCompany,
 )
 from app.routers import doc_share_router
@@ -119,6 +119,11 @@ _REF_TARGETS: dict[str, tuple[Any, bool]] = {
     "contract": (Contract, False),
     "counterparty": (Counterparty, False),
     "object": (ServiceLocation, True),
+    # Проект ЭЗС. Объект сети появляется у площадки только со вводом в
+    # эксплуатацию, а бумаги нужны с первого дня: акт выбора площадки, ТУ,
+    # договор аренды. Пока проект не был законным предметом, документ по нему
+    # цеплялся к объекту, которого ещё нет, — то есть никуда.
+    "site": (EzsSite, False),
     "task": (Task, False),
     # Обсуждение, из которого вырос документ. Комната — такой же объект
     # пространства, как договор; отдельная таблица связей ради одного вида цели

@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
-from sqlalchemy import select
+from fastapi import (
+    APIRouter, Depends, File, HTTPException, Query, UploadFile, status,
+)
+from sqlalchemy import false, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import assert_company_member, get_current_user
@@ -166,6 +168,88 @@ async def project_documents(
     cid = await assert_company_member(company_id, user, db)
     return await process_documents.listing(db, cid, process_id)
 
+
+@router.get("/{site_id}/track")
+async def site_track(
+    site_id: uuid.UUID,
+    company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Что «Трек» ведёт по этому проекту: документы и поручения одной лентой.
+
+    Связь между проектом и «Треком» была односторонней. Маршрут умел попросить
+    завести документ или поручить работу, исход возвращался и двигал проект —
+    но человек, открывший карточку, ничего этого не видел. Вкладка «Документы»
+    показывает файлы, приложенные к площадке, а не то, что по ней идёт.
+
+    Предметов у работы два, и оба законны. Пока объекта сети нет — а он
+    появляется только со вводом в эксплуатацию, — работа цепляется к самому
+    проекту (`site:<id>`); когда объект появился, к нему (`object:<ключ>`).
+    Спрашивать у человека, каким из двух искать, значило бы заставить его знать
+    внутреннее устройство: ищем по обоим.
+
+    Документы и поручения идут вместе намеренно. Разделить их значило бы
+    заставить читать два списка и складывать в уме — ровно то, ради чего
+    заводился общий ход работы.
+    """
+    cid = await assert_company_member(company_id, user, db)
+    site = (await db.execute(select(EzsSite).where(
+        EzsSite.id == site_id, EzsSite.company_id == cid))).scalar_one_or_none()
+    if site is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Проект не найден")
+
+    refs = [f"site:{site.id}"]
+    if site.location_id:
+        refs.append(f"object:{site.location_id}")
+
+    from app.models import DocCard, DocRelation, Task
+    from app.services import work_state
+
+    related = select(DocRelation.doc_id).where(
+        DocRelation.company_id == cid,
+        DocRelation.doc_id == DocCard.id,
+        DocRelation.target_ref.in_(refs)).exists()
+    docs = (await db.execute(select(DocCard).where(
+        DocCard.company_id == cid,
+        or_(DocCard.subject_ref.in_(refs), related,
+            DocCard.object_id == site.location_id if site.location_id else false()),
+    ).order_by(DocCard.created_at.desc()).limit(100))).scalars().all()
+
+    tasks = []
+    if site.location_id:
+        tasks = (await db.execute(select(Task).where(
+            Task.company_id == cid, Task.object_id == site.location_id,
+        ).order_by(Task.created_at.desc()).limit(100))).scalars().all()
+
+    items = [{
+        "id": str(d.id), "kind": "doc",
+        "key": d.reg_number or "черновик",
+        "title": d.title,
+        "type": d.kind_code or None,
+        "state": work_state.doc_state(d),
+        "state_name": work_state.COLUMN_NAMES.get(work_state.doc_state(d), ""),
+        "at": d.created_at.isoformat() if d.created_at else None,
+    } for d in docs] + [{
+        "id": str(t.id), "kind": "task",
+        "key": f"№{t.number}",
+        "title": t.title,
+        "type": None,
+        "state": t.stage_column or "new",
+        "state_name": work_state.COLUMN_NAMES.get(t.stage_column or "new", ""),
+        "at": t.created_at.isoformat() if t.created_at else None,
+    } for t in tasks]
+    items.sort(key=lambda i: i["at"] or "", reverse=True)
+
+    # «Чего ждём» — отдельным счётчиком: он отвечает на вопрос «почему стоим»,
+    # а общее число работ на него не отвечает.
+    waiting = sum(1 for i in items if i["state"] in ("approval", "external"))
+    return {
+        "site_id": str(site.id),
+        "object_id": site.location_id,
+        "subject_ref": f"site:{site.id}",
+        "items": items,
+        "waiting": waiting,
+    }
 
 @router.post("/{site_id}/projects", status_code=201)
 async def start_project(

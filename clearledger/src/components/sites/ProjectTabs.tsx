@@ -48,6 +48,7 @@ import { getContracts, getCounterparties } from '@/services/referenceService'
 import { loadLocations } from '@/services/locationService'
 import { getObjectTickets, createObjectTicket } from '@/services/spaceObjectsService'
 
+import { ProjectTrackTab } from './ProjectTrackTab'
 import { ProjectRoadmapTab } from './ProjectRoadmapTab'
 import { useOpenProject } from './useOpenProject'
 import { formatDate } from '@/lib/formatDate'
@@ -63,6 +64,9 @@ export const PROJECT_TABS = [
   { k: 'tp', label: 'Присоединение' },
   { k: 'equipment', label: 'Оборудование' },
   { k: 'docs', label: 'Документы' },
+  // «Трек» отдельной вкладкой, а не внутри «Документов»: там файлы, приложенные
+  // к площадке (ЕГРН, ТУ, договор), здесь — работа, которая по ней идёт.
+  { k: 'track', label: 'Трек' },
   { k: 'economics', label: 'Экономика' },
   { k: 'accounting', label: 'Учёт' },
   { k: 'history', label: 'История' },
@@ -79,6 +83,7 @@ export function ProjectTabContent({ tab, site, companyId, onDone }: {
   if (tab === 'tp') return <TechConnectionTab site={site} companyId={companyId} onDone={onDone} />
   if (tab === 'equipment') return <EquipmentTab site={site} companyId={companyId} onDone={onDone} />
   if (tab === 'docs') return <DocsTab site={site} companyId={companyId} onDone={onDone} />
+  if (tab === 'track') return <ProjectTrackTab site={site} companyId={companyId} />
   if (tab === 'economics') return <EconomicsTab site={site} companyId={companyId} />
   if (tab === 'accounting') return <AccountingTab site={site} companyId={companyId} onDone={onDone} />
   return <HistoryTab site={site} companyId={companyId} />

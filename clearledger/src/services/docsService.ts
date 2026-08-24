@@ -437,12 +437,21 @@ export async function listProcessTemplates(companyId: string) {
 
 export async function startProcessTemplate(
   id: string, companyId: string,
-  options?: { responsibleId?: string; title?: string },
+  options?: {
+    responsibleId?: string; title?: string; objectId?: string; subjectRef?: string
+  },
 ) {
   return post<ProcessLaunchResult>(`/api/docs/process-templates/${id}/start`, {
     company_id: companyId,
     responsible_id: options?.responsibleId || undefined,
     title: options?.title?.trim() || undefined,
+    // Предмет: из карточки проекта это сам проект (`site:<id>`). Без него
+    // заведённое не найти по проекту, пока у площадки нет объекта сети.
+    subject_ref: options?.subjectRef || undefined,
+    // Объект передаётся, когда работу заводят из карточки проекта: без него
+    // заведённое не найти по объекту, и лента «что идёт по этой площадке»
+    // осталась бы пустой при живых документах и поручениях.
+    object_id: options?.objectId || undefined,
   })
 }
 
