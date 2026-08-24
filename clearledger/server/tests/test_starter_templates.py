@@ -12,7 +12,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import TaskRecurrence, TaskTemplate, TaskType
-from app.routers.tasks_router import STARTER_TEMPLATES
+from app.routers.tasks_router import (
+    STARTER_TEMPLATES_COMMON, STARTER_TEMPLATES_ENERGY, STARTER_TEMPLATES_OFFICE,
+    starter_templates,
+)
 from tests.helpers import seed_company_id
 
 pytestmark = pytest.mark.asyncio(loop_scope="session")
@@ -26,10 +29,15 @@ async def test_посев_заводит_заготовки_вместе_с_их
                                    params={"company_id": cid})
     assert first.status_code == 201, first.text
 
+    company = (await auth_client.get("/api/companies",
+                                     params={"limit": 200})).json()
+    profile = next((c.get("profile_id") for c in (
+        company.get("companies") if isinstance(company, dict) else company)
+        if str(c.get("id")) == cid), None)
     listing = (await auth_client.get("/api/tasks/templates",
                                      params={"company_id": cid})).json()["templates"]
     by_name = {item["name"]: item for item in listing}
-    for spec in STARTER_TEMPLATES:
+    for spec in starter_templates(profile):
         assert spec["name"] in by_name, spec["name"]
         made = by_name[spec["name"]]
         # Чек-лист и есть причина существования заготовки: без него она лишний
@@ -42,7 +50,7 @@ async def test_посев_заводит_заготовки_вместе_с_их
     types = (await auth_client.get("/api/tasks/types",
                                    params={"company_id": cid})).json()["types"]
     codes = {item["code"] for item in types}
-    assert {spec["type_code"] for spec in STARTER_TEMPLATES} <= codes
+    assert {spec["type_code"] for spec in starter_templates(profile)} <= codes
 
 
 async def test_повтор_ничего_не_задваивает_и_не_трогает_правки(
@@ -54,7 +62,7 @@ async def test_повтор_ничего_не_задваивает_и_не_тр�
     # Пространство переписало заготовку под себя — посев не должен это вернуть.
     mine = (await db.execute(select(TaskTemplate).where(
         TaskTemplate.company_id == uuid.UUID(cid),
-        TaskTemplate.name == "Разбор ошибки"))).scalars().first()
+        TaskTemplate.name == "Разбор обращения"))).scalars().first()
     assert mine is not None
     mine.checklist = ["Свой единственный пункт"]
     await db.commit()
@@ -69,7 +77,7 @@ async def test_повтор_ничего_не_задваивает_и_не_тр�
 
     same = (await db.execute(select(TaskTemplate.id).where(
         TaskTemplate.company_id == uuid.UUID(cid),
-        TaskTemplate.name == "Разбор ошибки"))).scalars().all()
+        TaskTemplate.name == "Разбор обращения"))).scalars().all()
     assert len(same) == 1
 
 
@@ -96,13 +104,22 @@ async def test_заготовку_с_расписанием_не_удалить_
 
 async def test_у_каждой_заготовки_есть_чеклист_и_известный_тип():
     """Заготовка без чек-листа — лишний клик, а с неизвестным типом — маршрут,
-    которого нет. Проверяется без базы: это про сам набор, а не про пространство."""
+    которого нет. Проверяется без базы: это про сами наборы, а не про пространство.
+
+    Профили проверяются вместе: разъехаться они могут по-разному, а требование к
+    заготовке одно. Заодно ловим совпадение имён между общим и профильным
+    набором — посев идёт по имени, и двойник молча потерялся бы.
+    """
     from app.routers.tasks_router import STARTER_TYPES
 
     known = {spec["code"] for spec in STARTER_TYPES}
-    names = [spec["name"] for spec in STARTER_TEMPLATES]
-    assert len(names) == len(set(names))
-    for spec in STARTER_TEMPLATES:
+    for profile in ("energy", "office", "fuel", None):
+        names = [spec["name"] for spec in starter_templates(profile)]
+        assert len(names) == len(set(names)), profile
+    assert starter_templates("energy") != starter_templates("office")
+    assert starter_templates(None) == STARTER_TEMPLATES_COMMON
+    for spec in (STARTER_TEMPLATES_COMMON + STARTER_TEMPLATES_ENERGY
+                 + STARTER_TEMPLATES_OFFICE):
         assert spec["checklist"], spec["name"]
         assert spec["type_code"] in known, spec["name"]
         # Заголовок подставляется в задачу как есть: пустой дал бы строку-призрак
