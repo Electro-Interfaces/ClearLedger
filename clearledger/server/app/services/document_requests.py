@@ -104,7 +104,10 @@ async def request(db: AsyncSession, company_id: uuid.UUID, request_id: str,
         subject_ref=subject_ref[:120] or None,
         source="api",
         source_ref=str(process_id),
-        source_note=f"запрошен маршрутом (процесс {process_id})",
+        # Тем же правилом, что и у поручения: заведённое с рабочего места не
+        # должно числиться запрошенным маршрутом.
+        source_note=(str(data.get("source_note") or data.get("sourceNote") or "").strip()[:200]
+                     or f"запрошен маршрутом (процесс {process_id})"),
     )
 
     # Связь с предметом процесса. Без неё документ существует, но из проекта его

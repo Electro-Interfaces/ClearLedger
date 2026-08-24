@@ -78,14 +78,18 @@ async def request(db: AsyncSession, company_id: uuid.UUID, request_id: str,
 
     template = await _template(db, company_id, data)
     actor = await service_actor(db, company_id)
-    source = f"процесс {process_id}"
+    # Откуда работа взялась — пишем словами просителя, если он их сказал. Работу
+    # заводит не только маршрут: управляющий делает это с рабочего места, и
+    # «поручено маршрутом» в её истории было бы неправдой.
+    source = str(data.get("source_note") or data.get("sourceNote") or "").strip()[:200]
+    note = source or f"поручено маршрутом (процесс {process_id})"
     task, _ = await process_templates.launch_task(
         db, company_id, template, actor,
         title=(data.get("title") or None),
         responsible_id=_uuid_or_none(data.get("assignee_id") or data.get("assigneeId")),
         object_id=(data.get("object_id") or data.get("objectId") or None),
         source_ref=str(process_id),
-        source_note=f"поручено маршрутом ({source})",
+        source_note=note,
     )
 
     row = ApprovalRequest(
