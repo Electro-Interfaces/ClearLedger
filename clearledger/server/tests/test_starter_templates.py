@@ -4,6 +4,7 @@
 своего типа (маршрут поедет не тот), повторное нажатие с задвоением, потеря
 правок пространства, и молчаливое удаление расписания вместе с заготовкой.
 """
+import json
 import uuid
 
 import pytest
@@ -125,3 +126,49 @@ async def test_у_каждой_заготовки_есть_чеклист_и_и�
         # Заголовок подставляется в задачу как есть: пустой дал бы строку-призрак
         # в реестре, а короче трёх знаков не пройдёт и собственную форму.
         assert len(spec["title"].strip()) >= 3, spec["name"]
+
+
+async def test_заготовку_названную_маршрутом_не_удалить(
+        auth_client: AsyncClient, db: AsyncSession):
+    """Просьба зовёт заготовку ПО ИМЕНИ: удаление названной останавливает маршрут
+    молча — просьба становится `skipped` в журнале, а работа не появляется."""
+    from sqlalchemy import text
+
+    me = (await auth_client.get("/api/auth/me")).json()
+    cid = seed_company_id(me)
+    name = f"Выезд по обращению {uuid.uuid4().hex[:6]}"
+    made = (await auth_client.post("/api/tasks/templates", json={
+        "company_id": cid, "name": name, "title": "Выезд на площадку",
+        "checklist": ["Согласовать доступ"]})).json()
+
+    # Витрина «Поддержки» живёт в схеме `public` той же базы. В прогоне её нет —
+    # заводим ровно то, что читает проверка, и убираем за собой.
+    await db.execute(text(
+        "create table if not exists public.ticket_stage_links "
+        "(id uuid primary key, action jsonb)"))
+    link_id = uuid.uuid4()
+    await db.execute(text(
+        "insert into public.ticket_stage_links (id, action) "
+        "values (:id, cast(:act as jsonb))"),
+        {"id": str(link_id), "act": json.dumps(
+            {"kind": "connector_call", "provider": "core",
+             "payload": {"type": "errand.requested", "template": name}},
+            ensure_ascii=False)})
+    await db.commit()
+    try:
+        refused = await auth_client.delete(f"/api/tasks/templates/{made['id']}",
+                                           params={"company_id": cid})
+        assert refused.status_code == 409, refused.text
+        assert "маршрут" in refused.json()["detail"].lower()
+
+        # Маршрут поправили — заготовка снова удаляется.
+        await db.execute(text("delete from public.ticket_stage_links where id = :id"),
+                         {"id": str(link_id)})
+        await db.commit()
+        freed = await auth_client.delete(f"/api/tasks/templates/{made['id']}",
+                                         params={"company_id": cid})
+        assert freed.status_code == 200, freed.text
+    finally:
+        await db.execute(text("delete from public.ticket_stage_links where id = :id"),
+                         {"id": str(link_id)})
+        await db.commit()

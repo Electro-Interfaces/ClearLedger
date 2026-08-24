@@ -25,7 +25,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, 
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import (
-    case, delete as sa_delete, func, or_, select, true as sa_true,
+    case, delete as sa_delete, func, or_, select, text, true as sa_true,
     update as sa_update,
 )
 from sqlalchemy.exc import IntegrityError
@@ -1821,6 +1821,27 @@ async def delete_template(
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             "По этой заготовке работает расписание. Сначала отключите его")
+    # Маршрут «Поддержки» зовёт заготовку ПО ИМЕНИ: узел графа несёт просьбу
+    # «сделай работу по заготовке такой-то». Удалить названную значит тихо
+    # сломать ход процесса — просьба станет `skipped` в журнале событий, и
+    # человек узнает об этом, когда работа не появится.
+    #
+    # Читаем витрину «Поддержки» прямым SQL: базы сведены (схема `public` у неё,
+    # `core` у нас), и это тот же приём, которым событие находит проект. Если
+    # «Поддержки» в стеке нет, таблицы тоже нет — тогда и связи быть не может.
+    used_in_route = None
+    try:
+        used_in_route = await db.scalar(text(
+            "select count(*) from public.ticket_stage_links "
+            " where action::text ilike :needle"), {"needle": f"%{tpl.name}%"})
+    except Exception:  # noqa: BLE001 — нет «Поддержки» в стеке: связи неоткуда взяться
+        await db.rollback()
+    if used_in_route:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"Заготовку «{tpl.name}» зовёт маршрут в «Поддержке» "
+            f"({used_in_route} шаг(ов)). Сначала поправьте маршрут — ссылка "
+            "идёт по имени, и удаление остановит процесс молча")
     await db.delete(tpl)
     await db.commit()
     return {"deleted": template_id}
