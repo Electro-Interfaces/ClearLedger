@@ -31,7 +31,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import Integer, String, Uuid, and_, func, literal, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -39,7 +39,7 @@ from app.auth import assert_company_product, get_current_user
 from app.database import get_db
 from app.models import (
     DocCard, DocKind, DocLabelLink, DocRelation, ServiceLocation, Task, TaskLabel,
-    TaskLabelLink, TaskProject, TaskType, User,
+    TaskLabelLink, TaskProject, TaskType, User, UserCompany,
 )
 from app.services import work_query, work_state
 
@@ -635,3 +635,349 @@ async def work_summary(
         "docs": counts[c]["doc"], "tasks": counts[c]["task"],
         "total": counts[c]["doc"] + counts[c]["task"],
     } for c in work_state.COLUMNS]}
+
+
+# ---------------------------------------------------------------------------
+# Личные напоминания
+# ---------------------------------------------------------------------------
+class ReminderIn(BaseModel):
+    """Своё напоминание о предмете пространства."""
+    company_id: str
+    target_ref: str
+    remind_at: datetime
+    note: str | None = None
+
+
+class ReminderAction(BaseModel):
+    """Отложить на N минут, перенести на время или погасить."""
+    company_id: str
+    snooze_minutes: int | None = None
+    remind_at: datetime | None = None
+    done: bool | None = None
+
+
+def _reminder_out(row) -> dict[str, Any]:
+    return {
+        "id": str(row.id), "target_ref": row.target_ref, "note": row.note,
+        "remind_at": row.remind_at, "fired_at": row.fired_at,
+        "snooze_count": row.snooze_count,
+    }
+
+
+@router.get("/reminders")
+async def reminders_list(
+    company_id: str = Query(...),
+    pending: bool = Query(False, description="только сработавшие и не погашенные"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Свои напоминания. Чужих не бывает: отбор по `user_id` жёсткий, без
+    исключения для администратора — иначе слово «личное» неправда."""
+    from app.models import PersonalReminder
+
+    cid = await _assert_work(company_id, current_user, db)
+    sel = select(PersonalReminder).where(
+        PersonalReminder.company_id == cid,
+        PersonalReminder.user_id == current_user.id,
+        PersonalReminder.done_at.is_(None))
+    if pending:
+        sel = sel.where(PersonalReminder.fired_at.is_not(None))
+    rows = list((await db.execute(
+        sel.order_by(PersonalReminder.remind_at).limit(_LIST_LIMIT))).scalars())
+    return {"items": [_reminder_out(r) for r in rows], "total": len(rows)}
+
+
+@router.post("/reminders", status_code=status.HTTP_201_CREATED)
+async def reminder_create(
+    payload: ReminderIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Поставить напоминание себе.
+
+    Право на предмет здесь не проверяется намеренно: напоминание не открывает
+    ничего — оно хранит ссылку и текст, которые человек написал сам. Проверка
+    случится там, где он по ссылке пойдёт.
+    """
+    from app.services import reminders
+
+    cid = await _assert_work(payload.company_id, current_user, db)
+    try:
+        row = await reminders.put(db, cid, current_user.id, payload.target_ref,
+                                  payload.remind_at, payload.note)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    if row is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Время напоминания уже прошло")
+    await db.commit()
+    return _reminder_out(row)
+
+
+@router.post("/reminders/{reminder_id}")
+async def reminder_action(
+    reminder_id: str,
+    payload: ReminderAction,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Отложить, перенести или погасить своё напоминание."""
+    from app.models import PersonalReminder
+    from app.services import reminders
+
+    cid = await _assert_work(payload.company_id, current_user, db)
+    row = await db.get(PersonalReminder, _uuid_or_400(reminder_id, "reminder_id"))
+    if row is None or row.company_id != cid or row.user_id != current_user.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Напоминание не найдено")
+    if payload.done:
+        row.done_at = datetime.now(timezone.utc)
+    elif payload.remind_at is not None:
+        await reminders.reschedule(db, row, payload.remind_at)
+    elif payload.snooze_minutes is not None:
+        await reminders.snooze(db, row, payload.snooze_minutes)
+    else:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Нечего делать: ни отложить, ни перенести, ни погасить")
+    await db.commit()
+    return _reminder_out(row)
+
+
+# ---------------------------------------------------------------------------
+# Календарь
+# ---------------------------------------------------------------------------
+class EventIn(BaseModel):
+    """Встреча: время, место, кого зовём."""
+    company_id: str
+    title: str = Field(min_length=1, max_length=300)
+    starts_at: datetime
+    ends_at: datetime
+    description: str | None = None
+    all_day: bool = False
+    tz: str = "Europe/Moscow"
+    location: str | None = None
+    conference_url: str | None = None
+    visibility: str = Field("company", pattern="^(company|private|personal)$")
+    subject_ref: str | None = None
+    attendee_ids: list[str] = Field(default_factory=list)
+
+
+class EventAction(BaseModel):
+    """Одно действие над встречей: правка, отмена или свой ответ.
+
+    Ответ участника и правка организатора живут в одной ручке намеренно: и то,
+    и другое — «что случилось со встречей», а два места обязаны были бы
+    одинаково пересчитывать согласия и разошлись бы на первой правке.
+    """
+    company_id: str
+    title: str | None = None
+    starts_at: datetime | None = None
+    ends_at: datetime | None = None
+    description: str | None = None
+    location: str | None = None
+    conference_url: str | None = None
+    attendee_ids: list[str] | None = None
+    cancel: bool | None = None
+    cancel_reason: str | None = None
+    response: str | None = Field(None, pattern="^(accepted|declined|tentative)$")
+    comment: str | None = None
+
+
+def _event_out(ev, attendees: list, me: uuid.UUID) -> dict[str, Any]:
+    mine = next((a for a in attendees if a.user_id == me), None)
+    return {
+        "id": str(ev.id), "title": ev.title, "description": ev.description,
+        "starts_at": ev.starts_at, "ends_at": ev.ends_at, "all_day": ev.all_day,
+        "tz": ev.tz, "location": ev.location, "conference_url": ev.conference_url,
+        "visibility": ev.visibility, "status": ev.status,
+        "cancel_reason": ev.cancel_reason, "subject_ref": ev.subject_ref,
+        "organizer_id": str(ev.organizer_id),
+        "is_organizer": ev.organizer_id == me,
+        "my_response": mine.response if mine else None,
+        "attendees": [{
+            "user_id": str(a.user_id), "name": getattr(a, "name", None), "role": a.role,
+            "response": a.response, "comment": a.comment,
+        } for a in attendees],
+    }
+
+
+async def _attendees(db: AsyncSession, event_ids: list[uuid.UUID]) -> dict[uuid.UUID, list]:
+    """Участники пачкой: иначе на месяце выходит запрос на каждую встречу."""
+    from app.models import CalendarAttendee
+
+    if not event_ids:
+        return {}
+    rows = (await db.execute(
+        select(CalendarAttendee, User.name)
+        .join(User, User.id == CalendarAttendee.user_id)
+        .where(CalendarAttendee.event_id.in_(event_ids)))).all()
+    out: dict[uuid.UUID, list] = {}
+    for att, name in rows:
+        att.name = name  # имя нужно выдаче; в базе оно живёт у пользователя
+        out.setdefault(att.event_id, []).append(att)
+    return out
+
+
+def _my_events_clause(user_id: uuid.UUID):
+    """Мои встречи: те, что я собрал, и те, куда меня позвали.
+
+    Общий календарь компании сюда не входит намеренно: «все встречи всех» —
+    другой экран с другим вопросом, и подмешивать его значит утопить свои три
+    встречи в сотне чужих.
+    """
+    from app.models import CalendarAttendee, CalendarEvent
+
+    return or_(
+        CalendarEvent.organizer_id == user_id,
+        CalendarEvent.id.in_(select(CalendarAttendee.event_id).where(
+            CalendarAttendee.user_id == user_id)),
+    )
+
+
+@router.get("/calendar")
+async def calendar_list(
+    company_id: str = Query(...),
+    date_from: datetime = Query(..., alias="from"),
+    date_to: datetime = Query(..., alias="to"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Встречи периода — пересекающиеся с окном, а не начинающиеся в нём:
+    иначе командировка с прошлой недели пропадёт из этой."""
+    from app.models import CalendarEvent
+
+    cid = await _assert_work(company_id, current_user, db)
+    rows = list((await db.execute(
+        select(CalendarEvent).where(
+            CalendarEvent.company_id == cid,
+            _my_events_clause(current_user.id),
+            CalendarEvent.starts_at < date_to,
+            CalendarEvent.ends_at > date_from)
+        .order_by(CalendarEvent.starts_at).limit(_LIST_LIMIT))).scalars())
+    parts = await _attendees(db, [r.id for r in rows])
+    return {"events": [_event_out(r, parts.get(r.id, []), current_user.id) for r in rows],
+            "total": len(rows)}
+
+
+@router.post("/calendar", status_code=status.HTTP_201_CREATED)
+async def calendar_create(
+    payload: EventIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Собрать встречу. Организатор — участник по определению: иначе в
+    собственном календаре он свою же встречу не увидит."""
+    from app.models import CalendarAttendee, CalendarEvent
+
+    cid = await _assert_work(payload.company_id, current_user, db)
+    if payload.ends_at <= payload.starts_at:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Встреча не может кончаться раньше, чем начинается")
+    ev = CalendarEvent(
+        company_id=cid, organizer_id=current_user.id, title=payload.title.strip(),
+        description=payload.description or None,
+        starts_at=payload.starts_at, ends_at=payload.ends_at,
+        all_day=payload.all_day, tz=payload.tz, location=payload.location or None,
+        conference_url=payload.conference_url or None,
+        visibility=payload.visibility, subject_ref=payload.subject_ref or None)
+    db.add(ev)
+    await db.flush()
+
+    ids = {current_user.id} | {_uuid_or_400(i, "attendee_ids") for i in payload.attendee_ids}
+    # Зовём только людей этой компании: приглашение постороннему открыло бы ему
+    # карточку встречи вместе с предметом и составом участников.
+    свои = set((await db.execute(select(UserCompany.user_id).where(
+        UserCompany.company_id == cid, UserCompany.user_id.in_(ids)))).scalars())
+    for uid in ids & свои:
+        db.add(CalendarAttendee(
+            event_id=ev.id, user_id=uid,
+            response="accepted" if uid == current_user.id else "pending"))
+    await db.flush()
+    parts = await _attendees(db, [ev.id])
+    await db.commit()
+    return _event_out(ev, parts.get(ev.id, []), current_user.id)
+
+
+@router.post("/calendar/{event_id}")
+async def calendar_action(
+    event_id: str,
+    payload: EventAction,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Изменить встречу, отменить её или ответить на приглашение."""
+    from app.models import CalendarAttendee, CalendarEvent
+    from app.services import reminders
+
+    cid = await _assert_work(payload.company_id, current_user, db)
+    ev = await db.get(CalendarEvent, _uuid_or_400(event_id, "event_id"))
+    if ev is None or ev.company_id != cid:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Встреча не найдена")
+    parts = (await _attendees(db, [ev.id])).get(ev.id, [])
+    приглашён = any(a.user_id == current_user.id for a in parts)
+    if ev.organizer_id != current_user.id and not приглашён:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Это не ваша встреча")
+
+    # Свой ответ — единственное, что участник может сделать со встречей.
+    if payload.response is not None:
+        mine = next((a for a in parts if a.user_id == current_user.id), None)
+        if mine is None:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "Отвечать может только приглашённый")
+        mine.response = payload.response
+        mine.responded_at = datetime.now(timezone.utc)
+        mine.comment = payload.comment or None
+        await db.commit()
+        return _event_out(ev, parts, current_user.id)
+
+    if ev.organizer_id != current_user.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Менять встречу может только тот, кто её собрал")
+
+    if payload.cancel:
+        # Не удаляем: встреча уже стоит в чужих календарях, и молча исчезнувшая
+        # означает, что кто-то придёт в пустую переговорную.
+        ev.status = "cancelled"
+        ev.cancel_reason = (payload.cancel_reason or "").strip() or None
+        await reminders.drop_for(db, f"event:{ev.id}")
+        await db.commit()
+        return _event_out(ev, parts, current_user.id)
+
+    время_сдвинулось = False
+    if payload.starts_at is not None or payload.ends_at is not None:
+        starts = payload.starts_at or ev.starts_at
+        ends = payload.ends_at or ev.ends_at
+        if ends <= starts:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "Встреча не может кончаться раньше, чем начинается")
+        время_сдвинулось = starts != ev.starts_at or ends != ev.ends_at
+        ev.starts_at, ev.ends_at = starts, ends
+    if payload.title is not None and payload.title.strip():
+        ev.title = payload.title.strip()
+    for поле in ("description", "location", "conference_url"):
+        значение = getattr(payload, поле)
+        if значение is not None:
+            setattr(ev, поле, значение.strip() or None)
+
+    if payload.attendee_ids is not None:
+        хотим = {current_user.id} | {_uuid_or_400(i, "attendee_ids") for i in payload.attendee_ids}
+        свои = set((await db.execute(select(UserCompany.user_id).where(
+            UserCompany.company_id == cid, UserCompany.user_id.in_(хотим)))).scalars())
+        хотим &= свои
+        есть = {a.user_id: a for a in parts}
+        for uid in хотим - set(есть):
+            db.add(CalendarAttendee(event_id=ev.id, user_id=uid, response="pending"))
+        for uid, att in есть.items():
+            if uid not in хотим:
+                await db.delete(att)
+
+    if время_сдвинулось:
+        # «Буду в 10» не равно «буду в 18»: перенос обнуляет согласия, иначе
+        # организатор считает, что кворум есть, а половина не придёт.
+        for att in parts:
+            if att.user_id != current_user.id:
+                att.response = "pending"
+                att.responded_at = None
+    await db.flush()
+    parts = (await _attendees(db, [ev.id])).get(ev.id, [])
+    await db.commit()
+    return _event_out(ev, parts, current_user.id)

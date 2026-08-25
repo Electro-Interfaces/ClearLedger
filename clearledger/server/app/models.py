@@ -9885,6 +9885,148 @@ class TaskRecurrence(Base):
         DateTime(timezone=True), server_default=func.now())
 
 
+class PersonalReminder(Base):
+    """Личное напоминание: «вернуться к этому в 15:00».
+
+    Отдельно от `Task.due_at` и `Task.reminded_at` намеренно, и причин четыре.
+    Напоминание персональное, а задача общая — поле в задаче обслуживало бы
+    одного человека, и «напомни мне о чужой работе, где я наблюдатель» стало бы
+    невыразимым. Напоминать надо и о встрече, и о документе — поле пришлось бы
+    заводить в каждой из трёх таблиц. Откладывание — частая операция, а правка
+    задачи двигает `updated_at`, по которому сортируется лента работы: три
+    нажатия «отложить» вытолкнули бы задачу наверх у всей компании. И наконец,
+    существующее регламентное напоминание о сроке остаётся нетронутым.
+
+    Состояние не хранится колонкой, а выводится из отметок времени:
+    `fired_at IS NOT NULL AND done_at IS NULL` — это и есть «горит сейчас».
+    """
+    __tablename__ = "personal_reminders"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    # Владелец — единственный, кто эту строку видит и правит.
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    # Предмет: `task:<uuid>`, `event:<uuid>`, `doc:<uuid>` — тот же словарь
+    # `<вид>:<ключ>`, что у `Task.subject_ref` и `DocRelation.target_ref`.
+    # Без предмета напоминание — это личное дело со сроком, оно уже есть.
+    target_ref: Mapped[str] = mapped_column(String(120), nullable=False)
+    # Что именно напомнить: «взять паспорт». Человек чаще напоминает себе
+    # действие, а не название задачи, поэтому поле своё, а не пересказ заголовка.
+    note: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    remind_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False)
+    # Доставлено. Планировщик не берёт строку повторно.
+    fired_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    done_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    # Сколько раз отложено. Единственный сигнал, который личный помощник может
+    # вернуть человеку: отложенное шестой раз — это дело, которого не будет.
+    snooze_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+
+class CalendarEvent(Base):
+    """Встреча: время, место, люди и их ответ.
+
+    Отдельная сущность, а не поручение со сроком, по трём причинам, каждая из
+    которых видна на первом же экране календаря. У встречи есть КОНЕЦ — без
+    него нельзя ни нарисовать неделю, ни ответить «занят ли человек в 15:00».
+    У участников есть СОГЛАСИЕ («буду / не буду»), а `TaskParticipant.role`
+    описывает канал доставки, а не согласие. И участники встречи РАВНЫ, тогда
+    как у поручения есть исполнитель, с которого спрашивают.
+
+    Конец хранится временем, а не длительностью: при переносе встречи и при
+    переводе часов «90 минут» каждый клиент считает по-своему, а два момента
+    времени однозначны везде.
+
+    `tz` — пояс, в котором встречу задали. Пространство растянуто от
+    Владивостока до Москвы: «планёрка в 10:00» без пояса — это разное время
+    для организатора и участника, и показывать её надо в поясе, где её назвали.
+    """
+    __tablename__ = "calendar_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    organizer_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(300), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # Событие на весь день (отпуск, командировка): время в карточке не
+    # показывается, а в сетке такое занимает всю ячейку.
+    all_day: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    tz: Mapped[str] = mapped_column(String(64), nullable=False, default="Europe/Moscow")
+    location: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    # Ссылка на видеовстречу. Гостевая, а не модераторская: модераторская
+    # подписана именем организатора и живёт часы — рассылать её в приглашении
+    # значит отдать права ведущего всем, кого позвали.
+    conference_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # company | private | personal — тот же словарь, что у поручения: человеку
+    # незачем помнить два набора слов для одного и того же вопроса.
+    visibility: Mapped[str] = mapped_column(String(20), nullable=False, default="company")
+    # planned | cancelled. Встречу с участниками нельзя удалить — только
+    # отменить: она уже стоит в чужих календарях, и молча исчезнувшая встреча
+    # означает, что кто-то придёт в пустую переговорную.
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="planned")
+    cancel_reason: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    # Предмет, вокруг которого встреча: `task:<uuid>`, `doc:<uuid>`.
+    subject_ref: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        CheckConstraint("ends_at > starts_at", name="ck_calendar_event_span"),
+        Index("ix_calendar_events_span", "company_id", "starts_at", "ends_at"),
+    )
+
+
+class CalendarAttendee(Base):
+    """Участник встречи и его ответ.
+
+    Ответов четыре, а не три: «может быть» — настоящий ответ, и без него
+    человек ставит «буду» и не приходит, а организатор считает, что кворум есть.
+
+    Смена времени встречи сбрасывает ответы в `pending`: «буду в 10» не равно
+    «буду в 18», и молча переносить чужое согласие — значит собрать встречу,
+    на которую половина не придёт.
+    """
+    __tablename__ = "calendar_attendees"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    event_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("calendar_events.id", ondelete="CASCADE"),
+        nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    # required — без него встречу переносят; optional — зовут для сведения.
+    role: Mapped[str] = mapped_column(String(20), nullable=False, default="required")
+    # pending | accepted | declined | tentative
+    response: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    responded_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    comment: Mapped[str | None] = mapped_column(String(300), nullable=True)
+
+    __table_args__ = (
+        Index("uq_calendar_attendees", "event_id", "user_id", unique=True),
+        Index("ix_calendar_attendees_user", "user_id"),
+    )
+
+
 class TaskView(Base):
     """Сохранённый отбор реестра: «Мои просрочки», «Работа по объекту 208».
 

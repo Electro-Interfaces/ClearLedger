@@ -53,6 +53,7 @@ EXCHANGE_LOCK_KEY = 0x0ED011
 BREAK_GLASS_LOCK_KEY = 0x0B6A55
 APPROVAL_LOCK_KEY = 0x0A9F00
 EVENTS_LOCK_KEY = 0x0E7E415
+PERSONAL_LOCK_KEY = 0x0FE250
 
 
 def _tz(rule: dict) -> ZoneInfo:
@@ -193,7 +194,12 @@ async def run_due_reminders(db, now: datetime) -> int:
                # письма за жизнь задачи, а не поток.
                or_(Task.reminded_at.is_(None), Task.reminded_at <= now - timedelta(days=1)),
                # Отданное наружу не напоминаем исполнителю: мяч не у него.
-               or_(Task.waiting_for.is_(None), Task.waiting_for != "external")))).all()
+               or_(Task.waiting_for.is_(None), Task.waiting_for != "external"),
+               # Личная запись почтой не напоминает: человек завёл её себе, а
+               # письмо о ней уходит на рабочий ящик и делает личное видимым
+               # там, где человек его не заводил. Свой срок — своим
+               # напоминанием (`PersonalReminder`).
+               Task.visibility != "personal"))).all()
     sent = 0
     for t, email, name in rows:
         overdue = t.due_at < now
@@ -214,7 +220,12 @@ async def run_escalations(db, now: datetime) -> int:
         .join(TaskType, TaskType.id == Task.type_id)
         .where(Task.status == "open", Task.reacted_at.is_(None),
                TaskType.reaction_hours.is_not(None),
-               Task.assignee_id.is_not(None)))).all()
+               Task.assignee_id.is_not(None),
+               # Эскалация личной записи сообщила бы старшему о её
+               # существовании — ровно то, чего слово «личное» обещает не
+               # делать. Тип с реакцией у личной задачи взяться может: человек
+               # поднял в личное готовый шаблон.
+               Task.visibility != "personal"))).all()
     sent = 0
     for t, ttype in rows:
         deadline = t.created_at + timedelta(hours=ttype.reaction_hours)
@@ -473,12 +484,68 @@ async def run_project_reconcile(db: AsyncSession, now: datetime) -> int:
     return done
 
 
+async def run_personal_reminders(db, now: datetime) -> int:
+    """Доставить сработавшие личные напоминания — в чат, не письмом.
+
+    Отдельно от `run_due_reminders`: там срок задачи и почта всей компании,
+    здесь — то, что человек назначил себе сам. Совмещать их значило бы либо
+    слать личное почтой, либо лишить общие задачи писем.
+    """
+    from app.models import PersonalReminder
+    from app.services import notify
+
+    got = await db.scalar(text("SELECT pg_try_advisory_xact_lock(:ns, :key)"),
+                          {"ns": LOCK_NAMESPACE, "key": PERSONAL_LOCK_KEY})
+    if not got:
+        return 0
+    rows = (await db.execute(
+        select(PersonalReminder, User)
+        .join(User, User.id == PersonalReminder.user_id)
+        .where(PersonalReminder.remind_at <= now,
+               PersonalReminder.fired_at.is_(None),
+               PersonalReminder.done_at.is_(None))
+        .limit(200))).all()
+    sent = 0
+    for row, user in rows:
+        # Отметку ставим до доставки: сорванная доставка не должна оборачиваться
+        # повторами каждые пять минут. Напоминание останется в колокольчике —
+        # человек его увидит, даже если сообщение не дошло.
+        row.fired_at = now
+        try:
+            await notify.notify_person(db, row.company_id, user,
+                                       await _reminder_text(db, row))
+            sent += 1
+        except Exception:  # noqa: BLE001 — одно напоминание не валит остальные
+            log.exception("Личное напоминание %s не доставлено", row.id)
+    return sent
+
+
+async def _reminder_text(db, row) -> str:
+    """Текст напоминания: своя заметка, иначе предмет своим названием.
+
+    Ссылка на предмет собирается по тому же словарю `<вид>:<ключ>`, что
+    `subject_ref`. Название вытягиваем, чтобы напоминание читалось само по
+    себе: «task:8f3c…» человеку ничего не говорит.
+    """
+    if row.note:
+        return row.note
+    kind, _, key = (row.target_ref or "").partition(":")
+    if kind == "task":
+        try:
+            t = await db.get(Task, uuid.UUID(key))
+        except (ValueError, AttributeError):
+            t = None
+        if t is not None:
+            return f"Напоминание: {t.title}"
+    return "Напоминание"
+
+
 async def tick() -> dict[str, int]:
     """Один проход регламента. Ошибка одной части не отменяет остальные."""
     now = datetime.now(timezone.utc)
     out = {"recurrences": 0, "reminders": 0, "escalations": 0,
            "acquaints": 0, "approvals": 0, "events": 0, "exchange": 0, "break_glass": 0, "project_reconcile": 0,
-           "inbound_events": 0, "approval_delivery": 0}
+           "inbound_events": 0, "approval_delivery": 0, "personal": 0}
     async with async_session_factory() as db:
         for key, fn in (("recurrences", run_recurrences),
                         ("reminders", run_due_reminders),
@@ -490,7 +557,8 @@ async def tick() -> dict[str, int]:
                         ("break_glass", run_break_glass_notifications),
                         ("project_reconcile", run_project_reconcile),
                         ("inbound_events", run_inbound_events),
-                        ("approval_delivery", run_approval_delivery)):
+                        ("approval_delivery", run_approval_delivery),
+                        ("personal", run_personal_reminders)):
             try:
                 out[key] = await fn(db, now)
                 await db.commit()

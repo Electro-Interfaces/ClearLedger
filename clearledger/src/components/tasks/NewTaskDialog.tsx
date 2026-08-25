@@ -53,6 +53,8 @@ export function NewTaskDialog({ companyId, onCreated, defaultObjectId, openSigna
   const [objectId, setObjectId] = useState(defaultObjectId ?? '')
   const [priority, setPriority] = useState('')
   const [dueAt, setDueAt] = useState('')
+  const [visibility, setVisibility] = useState<tasksService.TaskVisibility>('company')
+  const [remindAt, setRemindAt] = useState('')
   const [labels, setLabels] = useState<string[]>([])
   const [files, setFiles] = useState<File[]>([])
   const [dragOver, setDragOver] = useState(false)
@@ -79,7 +81,9 @@ export function NewTaskDialog({ companyId, onCreated, defaultObjectId, openSigna
       setTypeId((v) => v || saved.typeId || '')
       setAssigneeId((v) => v || saved.assigneeId || '')
       setPriority((v) => v || saved.priority || '')
-      setDueAt((v) => v || saved.dueAt || '')
+      // Черновики, записанные до появления времени, хранят одну дату:
+      // datetime-local такое значение молча отбрасывает — дописываем начало дня.
+      setDueAt((v) => v || (saved.dueAt?.length === 10 ? `${saved.dueAt}T00:00` : saved.dueAt) || '')
       setLabels((v) => (v.length ? v : saved.labels || []))
     } catch {
       // Испорченный черновик — не повод ронять диалог постановки.
@@ -130,6 +134,7 @@ export function NewTaskDialog({ companyId, onCreated, defaultObjectId, openSigna
   const reset = () => {
     setTitle(''); setDescription(''); setProjectId(''); setTypeId(''); setAssigneeId('')
     setObjectId(defaultObjectId ?? ''); setPriority(''); setDueAt('')
+    setVisibility('company'); setRemindAt('')
     setLabels([]); setFiles([])
     // Задача поставлена — черновик своё отработал.
     try { localStorage.removeItem(draftKey) } catch { /* хранилище недоступно */ }
@@ -148,8 +153,13 @@ export function NewTaskDialog({ companyId, onCreated, defaultObjectId, openSigna
         projectId: projectId || undefined,
         typeId: typeId || undefined, assigneeId: assigneeId || undefined,
         objectId: objectId || undefined, priority: priority || undefined,
-        // Срок вводят датой — на сервер уходит начало суток в поясе браузера.
-        dueAt: dueAt ? new Date(`${dueAt}T00:00`).toISOString() : undefined,
+        // Срок вводится вместе со временем: «сдать к 18:00» и «сдать в этот
+        // день» — разные обещания, а форма умела только второе.
+        dueAt: dueAt ? new Date(dueAt).toISOString() : undefined,
+        // Круг уходит вместе с записью, а не вторым вызовом: иначе личная
+        // заметка успевает побывать задачей всей компании.
+        visibility: visibility === 'company' ? undefined : visibility,
+        remindAt: remindAt ? new Date(remindAt).toISOString() : undefined,
       })
       // Файлы и метки цепляются после создания: задача должна существовать,
       // чтобы к ней было что прикреплять. Неудача здесь не отменяет задачу —
@@ -265,7 +275,37 @@ export function NewTaskDialog({ companyId, onCreated, defaultObjectId, openSigna
             </div>
             <div className="space-y-1.5">
               <Label>Срок</Label>
-              <Input type="date" value={dueAt} onChange={(e) => setDueAt(e.target.value)} />
+              <Input type="datetime-local" value={dueAt}
+                onChange={(e) => setDueAt(e.target.value)} />
+            </div>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label>Кто видит</Label>
+              <Select value={visibility}
+                onValueChange={(v) => setVisibility(v as tasksService.TaskVisibility)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="company">Вся компания</SelectItem>
+                  <SelectItem value="private">Только причастные</SelectItem>
+                  <SelectItem value="personal">Только я</SelectItem>
+                </SelectContent>
+              </Select>
+              {visibility === 'personal' && (
+                <p className="text-[11px] text-muted-foreground">
+                  Личная запись: не видна ни коллегам, ни администратору, и не
+                  попадает в реестр компании.
+                </p>
+              )}
+            </div>
+            <div className="space-y-1.5">
+              <Label>Напомнить</Label>
+              <Input type="datetime-local" value={remindAt}
+                onChange={(e) => setRemindAt(e.target.value)} />
+              <p className="text-[11px] text-muted-foreground">
+                Придёт лично вам в чат — почтой такое не рассылается.
+              </p>
             </div>
           </div>
 

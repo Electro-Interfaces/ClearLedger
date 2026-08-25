@@ -109,6 +109,8 @@ export interface SpaceTask {
   sprint?: string | null
   sprint_id?: string | null
   title: string
+  /** Начало описания (200 знаков): о чём запись, не открывая её. */
+  preview?: string | null
   status: string           // open | done | cancelled
   priority: string
   stage: string | null     // имя текущей стадии
@@ -135,8 +137,12 @@ export interface SpaceTask {
   checklist?: TaskProgress
   subtasks?: TaskSubtasks
   time?: TaskTime
-  visibility?: 'company' | 'private'
+  visibility?: TaskVisibility
 }
+
+/** Кто видит запись: вся компания, причастные или только автор.
+ *  Третье значение — личная записная книжка: её не видит и администратор. */
+export type TaskVisibility = 'company' | 'private' | 'personal'
 
 /** Как задача называется в интерфейсе: `TF-42` у задачи в проекте, `№17` — без него.
  *  Одна точка на все экраны: раньше номер печатали строкой в семи местах, и с
@@ -215,7 +221,7 @@ export type LoadedTask = Omit<TaskDetails,
   events: TaskEvent[]; checklist_items: ChecklistItem[]; watchers: TaskWatcher[]
   attachments: TaskAttachment[]; links: TaskLink[]; participants: TaskParticipant[]
   external: TaskExternalRef[]; work_items: TaskWorkItem[]
-  visibility: 'company' | 'private'; waiting_for: 'us' | 'external' | null
+  visibility: TaskVisibility; waiting_for: 'us' | 'external' | null
 }
 
 /** Ответ действия: сервер может предупредить, не отказав (открытые подзадачи). */
@@ -236,6 +242,8 @@ export interface TaskFilters {
    *  одна реализация на форму и на строку, иначе они разойдутся. */
   query?: string
   stage?: string; priority?: string; labelId?: string; q?: string
+  /** Круг записи: `personal` — своя записная книжка, её не видит никто. */
+  visibility?: TaskVisibility
   dueFrom?: string; dueTo?: string
   sort?: string; limit?: number; offset?: number
 }
@@ -278,6 +286,7 @@ export async function listTasks(companyId: string, scope: TaskScope, opts?: Task
       assignee_id: opts?.assigneeId || undefined, author_id: opts?.authorId || undefined,
       stage: opts?.stage || undefined, priority: opts?.priority || undefined,
       label_id: opts?.labelId || undefined, q: opts?.q || undefined,
+      visibility: opts?.visibility || undefined,
       due_from: opts?.dueFrom || undefined, due_to: opts?.dueTo || undefined,
       sort: opts?.sort || undefined,
       limit: opts?.limit ?? undefined, offset: opts?.offset || undefined,
@@ -486,6 +495,11 @@ export async function createTask(data: {
   projectId?: string; typeId?: string; assigneeId?: string; objectId?: string
   foundVersionId?: string; fixVersionId?: string
   priority?: string; dueAt?: string
+  /** Круг с самого начала: выставлять его вторым вызовом значит на миг
+   *  показать личную запись всей компании. */
+  visibility?: TaskVisibility
+  /** Своё напоминание о записи — ставится вместе с ней. */
+  remindAt?: string
 }) {
   return post<SpaceTask>('/api/tasks', {
     company_id: data.companyId, title: data.title,
@@ -494,6 +508,8 @@ export async function createTask(data: {
     type_id: data.typeId || undefined, assignee_id: data.assigneeId || undefined,
     object_id: data.objectId || undefined, priority: data.priority || undefined,
     due_at: data.dueAt || undefined,
+    visibility: data.visibility || undefined,
+    remind_at: data.remindAt || undefined,
   })
 }
 
@@ -508,7 +524,7 @@ export async function taskAction(id: string, data: {
   /** null = вернуть в бэклог; undefined = не трогать. */
   sprintId?: string | null
   addLabelId?: string; removeLabelId?: string; estimate?: string
-  visibility?: 'company' | 'private'
+  visibility?: TaskVisibility
 }) {
   return post<TaskActionResult>(`/api/tasks/${id}/action`, {
     company_id: data.companyId,

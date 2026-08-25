@@ -144,3 +144,127 @@ export async function moveWork(
 ) {
   return post(`/api/work/${kind}/${id}/move`, { company_id: companyId, state })
 }
+
+
+/* ---------------------------------------------------------------------------
+ * Личные напоминания
+ * ------------------------------------------------------------------------ */
+
+/** Своё напоминание о предмете пространства. Чужих не бывает: сервер отбирает
+ *  строго по владельцу, и администратор здесь не исключение. */
+export interface PersonalReminder {
+  id: string
+  /** Предмет тем же словарём, что `subject_ref`: `task:<uuid>`, `event:…`, `doc:…`. */
+  target_ref: string
+  note: string | null
+  remind_at: string
+  /** Заполнено — напоминание уже пришло и ждёт, чтобы его погасили. */
+  fired_at: string | null
+  snooze_count: number
+}
+
+export async function listReminders(companyId: string, opts?: { pending?: boolean }) {
+  return get<{ items: PersonalReminder[]; total: number }>('/api/work/reminders', {
+    company_id: companyId, pending: opts?.pending ? 'true' : undefined,
+  })
+}
+
+export async function createReminder(companyId: string, data: {
+  targetRef: string; remindAt: string; note?: string
+}) {
+  return post<PersonalReminder>('/api/work/reminders', {
+    company_id: companyId, target_ref: data.targetRef,
+    remind_at: data.remindAt, note: data.note || undefined,
+  })
+}
+
+/** Отложить на N минут, перенести на время или погасить. */
+export async function reminderAction(companyId: string, id: string, data: {
+  snoozeMinutes?: number; remindAt?: string; done?: boolean
+}) {
+  return post<PersonalReminder>(`/api/work/reminders/${id}`, {
+    company_id: companyId, snooze_minutes: data.snoozeMinutes,
+    remind_at: data.remindAt, done: data.done,
+  })
+}
+
+
+/* ---------------------------------------------------------------------------
+ * Календарь
+ * ------------------------------------------------------------------------ */
+
+export type EventResponse = 'pending' | 'accepted' | 'declined' | 'tentative'
+
+export interface EventAttendee {
+  user_id: string
+  name: string | null
+  role: 'required' | 'optional'
+  response: EventResponse
+  comment: string | null
+}
+
+export interface CalendarEvent {
+  id: string
+  title: string
+  description: string | null
+  starts_at: string
+  ends_at: string
+  all_day: boolean
+  tz: string
+  location: string | null
+  conference_url: string | null
+  visibility: 'company' | 'private' | 'personal'
+  /** `cancelled` — встречу отменили; из календаря она не исчезает. */
+  status: 'planned' | 'cancelled'
+  cancel_reason: string | null
+  subject_ref: string | null
+  organizer_id: string
+  is_organizer: boolean
+  /** Мой ответ; `null` — я организатор и не приглашён отдельной строкой. */
+  my_response: EventResponse | null
+  attendees: EventAttendee[]
+}
+
+/** Встречи периода: пересекающиеся с окном, а не начинающиеся в нём. */
+export async function listEvents(companyId: string, from: string, to: string) {
+  return get<{ events: CalendarEvent[]; total: number }>('/api/work/calendar', {
+    company_id: companyId, from, to,
+  })
+}
+
+export async function createEvent(companyId: string, data: {
+  title: string; startsAt: string; endsAt: string
+  description?: string; location?: string; conferenceUrl?: string
+  allDay?: boolean; tz?: string; attendeeIds?: string[]; subjectRef?: string
+}) {
+  return post<CalendarEvent>('/api/work/calendar', {
+    company_id: companyId, title: data.title,
+    starts_at: data.startsAt, ends_at: data.endsAt,
+    description: data.description || undefined,
+    location: data.location || undefined,
+    conference_url: data.conferenceUrl || undefined,
+    all_day: data.allDay ?? false,
+    tz: data.tz || Intl.DateTimeFormat().resolvedOptions().timeZone || undefined,
+    attendee_ids: data.attendeeIds ?? [],
+    subject_ref: data.subjectRef || undefined,
+  })
+}
+
+/** Правка, отмена или свой ответ — одной ручкой, как действие над задачей. */
+export async function eventAction(companyId: string, id: string, data: {
+  title?: string; startsAt?: string; endsAt?: string
+  description?: string; location?: string; conferenceUrl?: string
+  attendeeIds?: string[]
+  cancel?: boolean; cancelReason?: string
+  response?: Exclude<EventResponse, 'pending'>; comment?: string
+}) {
+  return post<CalendarEvent>(`/api/work/calendar/${id}`, {
+    company_id: companyId, title: data.title,
+    starts_at: data.startsAt, ends_at: data.endsAt,
+    description: data.description, location: data.location,
+    conference_url: data.conferenceUrl,
+    attendee_ids: data.attendeeIds,
+    cancel: data.cancel, cancel_reason: data.cancelReason,
+    response: data.response, comment: data.comment,
+  })
+}

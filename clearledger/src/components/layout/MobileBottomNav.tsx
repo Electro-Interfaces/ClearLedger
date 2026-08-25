@@ -75,7 +75,7 @@ export function MobileBottomNav() {
   } else if (pathname === '/docs' || pathname.startsWith('/docs/')) {
     items = [
       { label: 'Реестры', path: '/docs?view=incoming', icon: FileText },
-      { label: 'На мне', path: '/docs/work?view=approvals', icon: ListChecks },
+      { label: 'Моё', path: '/docs/work?view=today', icon: ListChecks },
       { label: 'Компания', path: '/docs/company?view=docs', icon: Building2 },
       { label: 'Обзор', path: '/docs/overview?view=docs', icon: Activity },
       { label: 'Регламент', path: '/docs/regulation?view=templates', icon: CalendarDays },

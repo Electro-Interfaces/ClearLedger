@@ -30,7 +30,13 @@ const REASON_ICON = {
   approve: Stamp, acquaint: Eye, do: ListChecks, own: FileText,
 } as const
 
-export function MyWorkPage() {
+export function MyWorkPage({ buckets: only, heading = true }: {
+  /** Какие корзины показывать. Пусто — все. «Сегодня» берёт две первые: там
+   *  вопрос не «что на мне вообще», а «что на мне сегодня». */
+  buckets?: MyWorkItem['bucket'][]
+  /** Заголовок печатает вызывающий экран, когда очередь у него не единственное. */
+  heading?: boolean
+} = {}) {
   const { company } = useCompany()
   const qc = useQueryClient()
   const navigate = useNavigate()
@@ -61,18 +67,21 @@ export function MyWorkPage() {
     onError: (e) => toast.error((e as Error).message),
   })
 
-  const rows = q.data?.mine ?? []
-  const buckets = q.data?.buckets ?? []
+  const all = q.data?.mine ?? []
+  const rows = only?.length ? all.filter((r) => only.includes(r.bucket)) : all
+  const buckets = (q.data?.buckets ?? []).filter((b) => !only?.length || only.includes(b.code))
 
   return (
-    <div className="space-y-4 p-4">
-      <div>
-        <h1 className="text-lg font-semibold">На мне</h1>
-        <p className="mt-0.5 max-w-2xl text-xs text-muted-foreground">
-          Всё, что ждёт лично меня: визы, поручения, ознакомления и свои документы.
-          Сгруппировано по сроку, а не по тому, какой движок за предметом стоит.
-        </p>
-      </div>
+    <div className={cn('space-y-4', heading && 'p-4')}>
+      {heading && (
+        <div>
+          <h1 className="text-lg font-semibold">На мне</h1>
+          <p className="mt-0.5 max-w-2xl text-xs text-muted-foreground">
+            Всё, что ждёт лично меня: визы, поручения, ознакомления и свои документы.
+            Сгруппировано по сроку, а не по тому, какой движок за предметом стоит.
+          </p>
+        </div>
+      )}
 
       {q.isLoading ? (
         <div className="flex items-center gap-2 p-8 text-sm text-muted-foreground">
@@ -82,7 +91,9 @@ export function MyWorkPage() {
         <QueryError message="Очередь не загрузилась" onRetry={() => void q.refetch()} />
       ) : rows.length === 0 ? (
         <div className="rounded-lg border p-8 text-center text-sm text-muted-foreground">
-          На вас ничего не ждёт. Это нормальное состояние, а не пустой экран.
+          {only?.length
+            ? 'На сегодня ничего не назначено.'
+            : 'На вас ничего не ждёт. Это нормальное состояние, а не пустой экран.'}
         </div>
       ) : buckets.map((b) => {
         const group = rows.filter((r) => r.bucket === b.code)

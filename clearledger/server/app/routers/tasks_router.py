@@ -341,6 +341,10 @@ def _task_out(t: Task, route: list[dict], names: dict[str, str | None],
         "sprint": names.get("sprint"),
         "sprint_id": str(t.sprint_id) if t.sprint_id else None,
         "title": t.title,
+        # Первые строки описания: список должен давать понять, о чём запись, не
+        # открывая её. Целиком описание в строку не кладём — на двухстах строках
+        # это сотни килобайт ради текста, который читают у одной.
+        "preview": (t.description or "")[:200] or None,
         # Предмет работы: по нему человек, открывший поручение из ленты проекта,
         # понимает, откуда оно, и возвращается назад. Без этого связь была
         # односторонней — из проекта в работу пройти можно, обратно нет.
@@ -458,6 +462,15 @@ async def _extras(db: AsyncSession, tasks: list[Task]) -> dict[uuid.UUID, dict[s
             "spent_text": human_duration(spent.get(t.id, 0)),
         },
     } for t in tasks}
+
+
+# Круг видимости человеческими словами: он попадает в ленту события, и «стало
+# personal» там читалось бы как след машины, а не как решение человека.
+_VISIBILITY_WORD = {
+    "company": "вся компания",
+    "private": "ограниченный круг",
+    "personal": "только я",
+}
 
 
 def _visible_to(user: User, is_admin: bool):
@@ -1453,6 +1466,14 @@ class TaskIn(BaseModel):
     subject_ref: str | None = Field(None, max_length=120)
     priority: str | None = Field(None, pattern=_PRIORITY)
     due_at: datetime | None = None
+    # Круг видимости задаётся сразу. Прежде он выставлялся вторым вызовом, и
+    # личная запись успевала побывать задачей всей компании длиной в один
+    # обмен: за это время она попадала в чужие выборки и в оповещения.
+    visibility: str | None = Field(None, pattern="^(company|private|personal)$")
+    # Личное напоминание о собственной записи — тем же действием, что и сама
+    # запись: разделять их значило бы просить два шага там, где человек думает
+    # об одном.
+    remind_at: datetime | None = None
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
@@ -1514,11 +1535,19 @@ async def create_task(
         stage_column=work_state.stage_column_of(route, route[0]["code"]),
         assignee_id=assignee, author_id=current_user.id,
         object_id=payload.object_id or None,
-        subject_ref=payload.subject_ref or None, due_at=due)
+        subject_ref=payload.subject_ref or None, due_at=due,
+        visibility=payload.visibility or "company")
     db.add(t)
     await db.flush()
     db.add(TaskEvent(task_id=t.id, kind="created", user_id=current_user.id,
                      to_value=_stage_name(route, t.stage_code)))
+    # Напоминание о собственной записи ставится тем же действием: человек думает
+    # «записать и напомнить», а не «записать, потом открыть и напомнить».
+    if payload.remind_at is not None:
+        from app.services import reminders
+
+        await reminders.put(db, cid, current_user.id, f"task:{t.id}",
+                            payload.remind_at)
     person = await db.get(User, assignee) if assignee is not None else None
     if person is not None:
         db.add(TaskEvent(task_id=t.id, kind="assign", user_id=current_user.id,
@@ -2183,7 +2212,9 @@ class TaskAction(BaseModel):
     add_label_id: str | None = None
     remove_label_id: str | None = None
     estimate: str | None = Field(None, max_length=40)   # «4ч», «30м»; "" — снять
-    visibility: str | None = Field(None, pattern="^(company|private)$")
+    # Три уровня, а не два: «поднять личное в рабочее» и вернуть обратно — то
+    # самое действие, ради которого личное пространство и живёт внутри «Трека».
+    visibility: str | None = Field(None, pattern="^(company|private|personal)$")
 
 
 @router.post("/{task_id}/action")
@@ -2354,9 +2385,8 @@ async def task_action(
     if payload.visibility is not None and payload.visibility != t.visibility:
         # Смена круга видимости — событие: «кто закрыл задачу от компании» должно
         # быть видно, иначе это тихое действие с большими последствиями.
-        field_changed("видимость",
-                      "вся компания" if t.visibility == "company" else "ограниченный круг",
-                      "вся компания" if payload.visibility == "company" else "ограниченный круг")
+        field_changed("видимость", _VISIBILITY_WORD.get(t.visibility, t.visibility),
+                      _VISIBILITY_WORD.get(payload.visibility, payload.visibility))
         t.visibility = payload.visibility
     if payload.estimate is not None:
         est = parse_duration(payload.estimate) if payload.estimate.strip() else None

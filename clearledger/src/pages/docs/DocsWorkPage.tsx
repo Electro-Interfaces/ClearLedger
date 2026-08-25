@@ -24,6 +24,12 @@ const TasksWorkPage = lazy(() => import('@/pages/tasks/TasksWorkPage')
   .then((module) => ({ default: module.TasksWorkPage })))
 const MyWorkPage = lazy(() => import('./MyWorkPage')
   .then((module) => ({ default: module.MyWorkPage })))
+const NotesPage = lazy(() => import('./NotesPage')
+  .then((module) => ({ default: module.NotesPage })))
+const TodayPage = lazy(() => import('./TodayPage')
+  .then((module) => ({ default: module.TodayPage })))
+const CalendarPage = lazy(() => import('./CalendarPage')
+  .then((module) => ({ default: module.CalendarPage })))
 const MINE_PAGE_SIZE = 200
 
 export function DocsWorkPage() {
@@ -95,6 +101,30 @@ export function DocsWorkPage() {
   }
 
   if (!companyId) return null
+
+  if (view === 'today') {
+    return (
+      <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">Загрузка…</div>}>
+        <TodayPage />
+      </Suspense>
+    )
+  }
+
+  if (view === 'calendar') {
+    return (
+      <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">Загрузка…</div>}>
+        <CalendarPage />
+      </Suspense>
+    )
+  }
+
+  if (view === 'notes') {
+    return (
+      <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">Загрузка…</div>}>
+        <NotesPage />
+      </Suspense>
+    )
+  }
 
   if (view === 'mine-all') {
     return (

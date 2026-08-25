@@ -31,7 +31,7 @@ import * as tasksService from '@/services/tasksService'
 import { WorkIdentity } from '@/components/work/WorkIdentity'
 import * as docsService from '@/services/docsService'
 import { WorkTrace } from '@/components/work/WorkTrace'
-import type { LinkKind, LoadedTask } from '@/services/tasksService'
+import type { LinkKind, LoadedTask, TaskVisibility } from '@/services/tasksService'
 import { listSpaceObjects } from '@/services/spaceObjectsService'
 import { listSpaceConnectors } from '@/services/spaceConnectorsService'
 import { RichText } from './RichText'
@@ -717,13 +717,20 @@ function Attributes({ task, companyId, live, people, labels, pending, onAct, onC
         <FieldLabel>Кто видит задачу</FieldLabel>
         <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
           <Select value={task.visibility} disabled={!live || pending}
-            onValueChange={(v) => onAct({ companyId, visibility: v as 'company' | 'private' })}>
+            onValueChange={(v) => onAct({ companyId, visibility: v as TaskVisibility })}>
             <SelectTrigger className="h-7 w-[200px] text-xs"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="company">Вся компания</SelectItem>
               <SelectItem value="private">Только причастные</SelectItem>
+              <SelectItem value="personal">Только я</SelectItem>
             </SelectContent>
           </Select>
+          {task.visibility === 'personal' && (
+            <span className="inline-flex items-center gap-1 rounded border border-primary/40 bg-primary/5 px-1.5 py-0.5 text-[11px] text-primary">
+              <Lock className="h-3 w-3" />
+              личная запись: не видит никто, включая администратора
+            </span>
+          )}
           {task.visibility === 'private' && (
             <span className="inline-flex items-center gap-1 rounded border border-amber-500/40 bg-amber-500/5 px-1.5 py-0.5 text-[11px] text-amber-700 dark:text-amber-400">
               <Lock className="h-3 w-3" />

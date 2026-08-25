@@ -38,6 +38,88 @@ ALERTS_CHANNEL_TITLE = "Оповещения"
 
 
 # ---------------------------------------------------------------------------
+# Личное сообщение человеку
+# ---------------------------------------------------------------------------
+SECRETARY_EMAIL = "secretary@space.local"
+SECRETARY_NAME = "Секретарь"
+
+
+async def _secretary(db: AsyncSession, company_id: uuid.UUID) -> User:
+    """Служебный участник, от чьего имени приходит личное напоминание.
+
+    Заводится лениво и один раз, тем же приёмом, что «Процесс» в
+    `services/errands.py`: пароль заведомо невалидный, войти этой учёткой
+    нельзя. Отправитель нужен затем, что личное сообщение приходит в обычную
+    комнату чата — а у сообщения должен быть автор, иначе в ленте оно выглядит
+    сбоем, а не напоминанием.
+    """
+    import secrets
+
+    user = (await db.execute(select(User).where(
+        User.email == SECRETARY_EMAIL))).scalar_one_or_none()
+    if user is None:
+        user = User(email=SECRETARY_EMAIL, name=SECRETARY_NAME, role="user",
+                    password_hash=f"!secretary-{secrets.token_hex(16)}")
+        db.add(user)
+        await db.flush()
+    member = await db.get(UserCompany, (user.id, company_id))
+    if member is None:
+        db.add(UserCompany(user_id=user.id, company_id=company_id, role="user"))
+        await db.flush()
+    return user
+
+
+async def notify_person(db: AsyncSession, company_id: uuid.UUID, user: User,
+                        text: str) -> bool:
+    """Сообщение лично человеку — мимо подписок компании.
+
+    `dispatch` рассылает по `NotificationRule` в общую комнату «Оповещения», и
+    получателями там по умолчанию стоят администраторы. Личное напоминание
+    администратору не адресуется никогда, поэтому маршрут свой, а транспорт —
+    тот же чат пространства: счётчик непрочитанного, «без звука» и web-push у
+    него уже есть, и второй такой механизм начал бы расходиться с первым.
+    """
+    from app.models import ChatMessage, ChatParticipant, ChatRoom
+
+    secretary = await _secretary(db, company_id)
+    # Одна комната на пару «человек — Секретарь»: искать её по участникам, а не
+    # по имени, иначе переименование комнаты заводит вторую.
+    mine = select(ChatParticipant.room_id).where(ChatParticipant.user_id == user.id)
+    room = (await db.execute(
+        select(ChatRoom).where(
+            ChatRoom.company_id == company_id, ChatRoom.type == "direct",
+            ChatRoom.id.in_(mine),
+            ChatRoom.id.in_(select(ChatParticipant.room_id).where(
+                ChatParticipant.user_id == secretary.id))).limit(1))).scalar_one_or_none()
+    if room is None:
+        room = ChatRoom(company_id=company_id, type="direct", name=None,
+                        created_by=secretary.id)
+        db.add(room)
+        await db.flush()
+        db.add_all([
+            ChatParticipant(room_id=room.id, user_id=user.id),
+            ChatParticipant(room_id=room.id, user_id=secretary.id),
+        ])
+        await db.flush()
+
+    db.add(ChatMessage(room_id=room.id, user_id=secretary.id,
+                       user_name=SECRETARY_NAME, type="text", content=text))
+    await db.flush()
+
+    # Открытую вкладку не дёргаем событием сокета: список чатов у неё и так
+    # обновляется раз в минуту, а напоминанию минута роли не играет. Push нужен
+    # именно закрытой вкладке — иначе напоминание догонит человека только при
+    # следующем заходе.
+    try:
+        from app.services import web_push
+
+        web_push.push_room_async(room.id, SECRETARY_NAME, text, secretary.id)
+    except Exception as e:  # noqa: BLE001
+        logger.debug("Напоминание не ушло в push: %s", e)
+    return True
+
+
+# ---------------------------------------------------------------------------
 # Подписки
 # ---------------------------------------------------------------------------
 async def rules_for(db: AsyncSession, company_id: uuid.UUID) -> list[NotificationRule]:

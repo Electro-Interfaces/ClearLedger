@@ -3951,6 +3951,50 @@ async def create_all() -> None:
         ):
             await conn.execute(_sa.text(stmt))
 
+        # v2.72: личная лента. Колонка `visibility` уже строковая и без CHECK,
+        # поэтому третье значение — правка кода, а не схемы. Индекс частичный:
+        # личных записей у активного человека много, а без него выборка своей
+        # записной книжки просматривает все поручения пространства.
+        for stmt in (
+            "CREATE INDEX IF NOT EXISTS ix_tasks_personal "
+            "ON tasks (company_id, author_id, created_at DESC) "
+            "WHERE visibility = 'personal'",
+        ):
+            await conn.execute(_sa.text(stmt))
+
+        # v2.74: личные напоминания. Таблицу заводит `create_all`; здесь индексы.
+        # Первый — по нему ходит планировщик каждые пять минут, и полный индекс
+        # по времени рос бы вместе с историей погашенных, которая ему не нужна.
+        # Второй — колокольчик и список напоминаний человека.
+        for stmt in (
+            "CREATE INDEX IF NOT EXISTS ix_personal_reminders_due "
+            "ON personal_reminders (remind_at) "
+            "WHERE fired_at IS NULL AND done_at IS NULL",
+            "CREATE INDEX IF NOT EXISTS ix_personal_reminders_bell "
+            "ON personal_reminders (user_id, remind_at DESC)",
+        ):
+            await conn.execute(_sa.text(stmt))
+
+        # v2.75: календарь. Таблицы заводит `create_all`; здесь индексы и
+        # ограничение целостности, которое `create_all` не доставит в уже
+        # существующую базу. Проверка «конец позже начала» стоит в базе, а не
+        # только в роутере: встречу заводят и импортом, и починкой данных, а
+        # встреча с отрицательной длительностью ломает любую сетку.
+        for stmt in (
+            "CREATE INDEX IF NOT EXISTS ix_calendar_events_span "
+            "ON calendar_events (company_id, starts_at, ends_at)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_calendar_attendees "
+            "ON calendar_attendees (event_id, user_id)",
+            "CREATE INDEX IF NOT EXISTS ix_calendar_attendees_user "
+            "ON calendar_attendees (user_id)",
+        ):
+            await conn.execute(_sa.text(stmt))
+        await conn.execute(_sa.text(
+            "ALTER TABLE calendar_events DROP CONSTRAINT IF EXISTS ck_calendar_event_span"))
+        await conn.execute(_sa.text(
+            "ALTER TABLE calendar_events ADD CONSTRAINT ck_calendar_event_span "
+            "CHECK (ends_at > starts_at)"))
+
         # v2.60: маршрут проекта выбирается человеком, а не берётся молча первым.
         # Пусто у всех существующих проектов — это и есть прежнее поведение.
         for stmt in (
