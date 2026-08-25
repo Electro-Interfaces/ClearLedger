@@ -346,10 +346,19 @@ async def test_приватная_задача_не_видна_посторон�
                    UserCompany.role != "admin", User.is_superadmin.is_(False),
                    User.mail_only.is_(False)).limit(1))).scalar_one_or_none()
         if row is None:
-            return  # в пилоте все админы — проверять не на ком
+            # Раньше проверка на этом и заканчивалась: в тестовой базе не было
+            # ни одного неадмина, и тело теста не исполнялось никогда. Ветка
+            # осталась — но теперь личный тест заводит второго человека, и она
+            # срабатывает только при запуске файла в одиночку.
+            return
         from app.routers.tasks_router import list_tasks
+        # Роутер зовётся напрямую, мимо FastAPI: значения `Query(...)` остаются
+        # объектами, поэтому каждый параметр приходится называть явно. Новый
+        # параметр в ручке — новая строка здесь.
         args = dict(object_id=None, type_id=None, assignee_id=None, author_id=None,
                     stage=None, priority=None, label_id=None, due_from=None, due_to=None,
+                    visibility=None, query=None, project_id=None, sprint_id=None,
+                    fix_version_id=None, found_version_id=None, backlog=False,
                     sort="created", limit=100, offset=0, db=db, current_user=row)
         seen = await list_tasks(company_id=cid, scope="all", q=None, **args)
         assert t["id"] not in [x["id"] for x in seen["tasks"]], "приватная утекла списком"

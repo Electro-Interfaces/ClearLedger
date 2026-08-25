@@ -32,7 +32,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
-from sqlalchemy import Integer, String, Uuid, func, literal, or_, select
+from sqlalchemy import Integer, String, Uuid, and_, func, literal, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import assert_company_product, get_current_user
@@ -157,7 +157,7 @@ async def list_work(
     # Правила видимости берём у их хозяев — второй версии этих правил быть не
     # должно, они разойдутся на первой же правке прав.
     from app.routers.docs_router import _readable_doc_clause
-    from app.routers.tasks_router import _is_admin, _visible_to
+    from app.routers.tasks_router import _is_admin, _not_personal, _visible_to
 
     admin = await _is_admin(db, cid, current_user)
     doc_clause = await _readable_doc_clause(db, cid, current_user)
@@ -183,7 +183,10 @@ async def list_work(
         Task.priority.label("priority"),
         Task.created_at.label("created_at"),
         Task.updated_at.label("updated_at"),
-    ).where(Task.company_id == cid, _visible_to(current_user, admin))
+    # Личные записи в ленту компании не входят: здесь работа, а не чья-то
+    # записная книжка. Право видеть своё у автора остаётся (`_visible_to`) —
+    # это отбор, а не запрет.
+    ).where(Task.company_id == cid, _visible_to(current_user, admin), _not_personal())
 
     # Имена колонок задаются явно у обеих половин: UNION берёт их у первой, и
     # при отборе только по документам подзапрос назывался бы `kind_id` вместо
@@ -406,7 +409,7 @@ async def work_mine(
     now = datetime.now(timezone.utc)
 
     from app.routers.docs_router import approvals_mine, my_acquaints
-    from app.routers.tasks_router import _is_admin, _visible_to
+    from app.routers.tasks_router import _is_admin, _not_personal, _visible_to
 
     admin = await _is_admin(db, cid, current_user)
     items: dict[tuple[str, str], dict[str, Any]] = {}
@@ -607,7 +610,7 @@ async def work_summary(
     """Сколько работы в каждой колонке — заголовки доски и счётчики разделов."""
     cid = await _assert_work(company_id, current_user, db)
     from app.routers.docs_router import _readable_doc_clause
-    from app.routers.tasks_router import _is_admin, _visible_to
+    from app.routers.tasks_router import _is_admin, _not_personal, _visible_to
 
     admin = await _is_admin(db, cid, current_user)
     doc_clause = await _readable_doc_clause(db, cid, current_user)
@@ -615,7 +618,8 @@ async def work_summary(
         c: {"doc": 0, "task": 0} for c in work_state.COLUMNS}
 
     for model, clause, state_expr, key in (
-        (Task, _visible_to(current_user, admin), work_state.task_state_sql(Task), "task"),
+        (Task, and_(_visible_to(current_user, admin), _not_personal()),
+         work_state.task_state_sql(Task), "task"),
         (DocCard, doc_clause, work_state.doc_state_sql(DocCard), "doc"),
     ):
         for value, count in (await db.execute(

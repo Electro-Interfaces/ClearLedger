@@ -25,7 +25,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, 
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import (
-    case, delete as sa_delete, func, or_, select, text, true as sa_true,
+    and_, case, delete as sa_delete, func, or_, select, text,
     update as sa_update,
 )
 from sqlalchemy.exc import IntegrityError
@@ -461,22 +461,51 @@ async def _extras(db: AsyncSession, tasks: list[Task]) -> dict[uuid.UUID, dict[s
 
 
 def _visible_to(user: User, is_admin: bool):
-    """Условие видимости для выборок: приватную задачу видят только причастные.
+    """Условие видимости для выборок: три уровня закрытости, не два.
 
     Собрано одним местом намеренно: стоит забыть его в поиске или в обзоре — и
     закрытая задача утечёт хотя бы заголовком, а это ровно то, ради чего её
     закрывали.
+
+    `company`  — видят все в пространстве;
+    `private`  — причастные и администратор: кадровое и денежное поручение
+                 администратор обязан видеть, за него он и отвечает;
+    `personal` — ТОЛЬКО автор, включая администратора. Это личная запись
+                 человека, и «личное» в названии раздела должно быть правдой.
+
+    Условие перечисляет уровни, а не отрицает один из них. Прежнее
+    `visibility != "private"` было истинно для любого нового значения — то есть
+    добавление третьего уровня молча раскрыло бы все личные записи компании.
     """
     if is_admin:
-        return sa_true()
+        # Администратор видит всё, кроме чужого личного.
+        return or_(Task.visibility != "personal", Task.author_id == user.id)
     return or_(
-        Task.visibility != "private",
-        Task.author_id == user.id,
-        Task.assignee_id == user.id,
-        Task.id.in_(select(TaskWatcher.task_id).where(TaskWatcher.user_id == user.id)),
-        Task.id.in_(select(TaskParticipant.task_id).where(
-            TaskParticipant.user_id == user.id)),
+        Task.visibility == "company",
+        and_(
+            Task.visibility == "private",
+            or_(
+                Task.author_id == user.id,
+                Task.assignee_id == user.id,
+                Task.id.in_(select(TaskWatcher.task_id).where(
+                    TaskWatcher.user_id == user.id)),
+                Task.id.in_(select(TaskParticipant.task_id).where(
+                    TaskParticipant.user_id == user.id)),
+            ),
+        ),
+        and_(Task.visibility == "personal", Task.author_id == user.id),
     )
+
+
+def _not_personal():
+    """Отбор для общих списков: личные записи в работу компании не входят.
+
+    Права и отбор — разные вещи. Автор своё личное видеть вправе (`_visible_to`),
+    но в ленте компании, на доске и в счётчиках ему это не нужно: там он смотрит
+    на работу, а не на свою записную книжку. Без этого условия личные заметки
+    тихо затопили бы общие списки — это главный способ провалить личный раздел.
+    """
+    return Task.visibility != "personal"
 
 
 async def _is_admin(db: AsyncSession, cid: uuid.UUID, user: User) -> bool:
@@ -507,7 +536,14 @@ async def _assert_actor(db: AsyncSession, cid: uuid.UUID, user: User, t: Task) -
 
 
 async def _can_view_task(db: AsyncSession, cid: uuid.UUID, user: User, t: Task) -> bool:
-    if t.visibility != "private" or await _is_admin(db, cid, user):
+    """Зеркало `_visible_to` для одиночной карточки. Расходиться им нельзя:
+    список и карточка обязаны отвечать одинаково, иначе закрытая запись
+    открывается по прямой ссылке."""
+    if t.visibility == "personal":
+        return t.author_id == user.id
+    if t.visibility != "private":
+        return True
+    if await _is_admin(db, cid, user):
         return True
     return user.id in (t.author_id, t.assignee_id) or bool(
         await db.get(TaskWatcher, (t.id, user.id))
@@ -589,6 +625,10 @@ async def _parse_query(db: AsyncSession, cid: uuid.UUID, user: User,
 async def list_tasks(
     company_id: str = Query(...),
     scope: str = Query("open", pattern="^(open|mine|assigned|watching|overdue|today|waiting|closed|all)$"),
+    # Личная лента запрашивается явно. Без параметра список отвечает про работу
+    # компании, и личные записи в него не входят — иначе записная книжка одного
+    # человека попадёт в реестр, доску и счётчики всех остальных.
+    visibility: str | None = Query(None, pattern="^(company|private|personal)$"),
     object_id: str | None = Query(None),
     project_id: str | None = Query(None),
     fix_version_id: str | None = Query(None),
@@ -651,6 +691,10 @@ async def list_tasks(
 
     sel = select(Task).where(Task.company_id == cid,
                              _visible_to(current_user, await _is_admin(db, cid, current_user)))
+    if visibility:
+        sel = sel.where(Task.visibility == visibility)
+    else:
+        sel = sel.where(_not_personal())
 
     if scope == "open":
         sel = sel.where(Task.status == "open")
@@ -1518,6 +1562,9 @@ async def tasks_summary(
     tasks = list((await db.execute(select(Task).where(
         Task.company_id == cid,
         _visible_to(current_user, await _is_admin(db, cid, current_user)),
+        # Обзор — про работу компании: личные записи раздули бы показатели
+        # исполнителей тем, что к обязательствам отношения не имеет.
+        _not_personal(),
         or_(Task.status == "open", Task.closed_at >= since),
     ))).scalars())
     names = await _names(db, tasks)
