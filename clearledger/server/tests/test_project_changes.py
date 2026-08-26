@@ -2,11 +2,12 @@ import uuid
 from datetime import datetime, timezone
 
 import pytest
+from sqlalchemy.dialects import postgresql
 
 from app.models import EzsSite, EzsSiteEvent
 from app.services import ezs_lifecycle
-from app.services.ezs_changes import make_change
-from app.services.ezs_site_work import update_site
+from app.services.ezs_changes import _changes_len, make_change
+from app.services.ezs_site_work import log_event, update_site
 from app.services.ezs_sites import _apply_update
 
 
@@ -82,3 +83,39 @@ async def test_ручная_правка_пишет_структурирован
     assert event.changes[0]["field"] == "city"
     assert event.changes[0]["old"] == "Псков"
     assert event.changes[0]["new"] == "Великий Новгород"
+
+
+def test_длина_изменений_не_падает_на_нестандартном_значении():
+    """Заметка и касание пишутся без «было → стало», и в колонке лежит JSON null.
+
+    `jsonb_array_length` на скаляре роняет ВЕСЬ запрос, а не строку: одна такая
+    запись гасила экран «Изменения» целиком (HTTP 500).
+    """
+    sql = str(_changes_len().compile(dialect=postgresql.dialect()))
+
+    assert "jsonb_typeof" in sql
+    assert "jsonb_array_length" in sql
+
+
+@pytest.mark.asyncio
+async def test_заметка_пишется_пустым_списком_а_не_json_null(monkeypatch):
+    class FakeResult:
+        def scalar_one_or_none(self):
+            return None
+
+    class FakeDb:
+        def __init__(self):
+            self.added = []
+
+        def add(self, value):
+            self.added.append(value)
+
+        async def execute(self, _query):
+            return FakeResult()
+
+    db = FakeDb()
+    site = EzsSite(id=uuid.uuid4(), company_id=uuid.uuid4())
+
+    await log_event(db, site, "note", text="созвонились с собственником")
+
+    assert db.added[0].changes == []

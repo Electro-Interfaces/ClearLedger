@@ -6,10 +6,25 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import EzsProject, EzsSite, EzsSiteEvent, User
+
+
+def _changes_len():
+    """Длина «было → стало» события, устойчивая к нестандартному значению.
+
+    У заметки и касания менять нечего, и в колонке лежит не массив, а JSON null.
+    `jsonb_array_length` на таком значении роняет весь запрос («cannot get array
+    length of a scalar»), а не пропускает строку — экран «Изменения» падал целиком
+    из-за одной такой записи.
+    """
+    return case(
+        (func.jsonb_typeof(EzsSiteEvent.changes) == "array",
+         func.jsonb_array_length(EzsSiteEvent.changes)),
+        else_=0,
+    )
 
 
 CATEGORY_LABELS = {
@@ -216,6 +231,8 @@ async def changes_overview(
     company_id: uuid.UUID,
     *,
     days: int = 30,
+    date_from: date | None = None,
+    date_to: date | None = None,
     category: str | None = None,
     source: str | None = None,
     cursor: uuid.UUID | None = None,
@@ -225,14 +242,26 @@ async def changes_overview(
     category = category if category in CATEGORY_LABELS else None
     source = source if source in {"user", "import", "system"} else None
     limit = max(20, min(limit, 100))
-    since = datetime.now(timezone.utc) - timedelta(days=days)
+    # Период рабочей области главнее: человек задал его в шапке и ждёт, что экран
+    # его слушает. `days` остаётся для вызовов без явных дат.
+    if date_from:
+        since = datetime.combine(date_from, datetime.min.time(), tzinfo=timezone.utc)
+    else:
+        since = datetime.now(timezone.utc) - timedelta(days=days)
+    until = (
+        datetime.combine(date_to, datetime.min.time(), tzinfo=timezone.utc)
+        + timedelta(days=1)
+        if date_to else None
+    )
 
     base = [
         EzsSiteEvent.company_id == company_id,
         EzsSiteEvent.created_at >= since,
         EzsSiteEvent.changes.is_not(None),
-        func.jsonb_array_length(EzsSiteEvent.changes) > 0,
+        _changes_len() > 0,
     ]
+    if until is not None:
+        base.append(EzsSiteEvent.created_at < until)
     if source:
         base.append(EzsSiteEvent.source == source)
     if category:
@@ -330,19 +359,22 @@ async def changes_overview(
             "changes": event_changes,
         })
 
+    legacy_filters = [
+        EzsSiteEvent.company_id == company_id,
+        EzsSiteEvent.created_at >= since,
+        EzsSiteEvent.kind.in_(("edit", "stage")),
+        EzsSiteEvent.changes.is_(None),
+    ]
+    if until is not None:
+        legacy_filters.append(EzsSiteEvent.created_at < until)
     legacy_events = int((await db.execute(
-        select(func.count()).select_from(EzsSiteEvent).where(
-            EzsSiteEvent.company_id == company_id,
-            EzsSiteEvent.created_at >= since,
-            EzsSiteEvent.kind.in_(("edit", "stage")),
-            EzsSiteEvent.changes.is_(None),
-        )
+        select(func.count()).select_from(EzsSiteEvent).where(*legacy_filters)
     )).scalar_one() or 0)
     tracking_started = (await db.execute(
         select(func.min(EzsSiteEvent.created_at)).where(
             EzsSiteEvent.company_id == company_id,
             EzsSiteEvent.changes.is_not(None),
-            func.jsonb_array_length(EzsSiteEvent.changes) > 0,
+            _changes_len() > 0,
         )
     )).scalar_one_or_none()
 
@@ -363,7 +395,11 @@ async def changes_overview(
     next_cursor = str(item_rows[-1][0].id) if has_more and item_rows else None
 
     return {
-        "period": {"days": days, "from": since.isoformat()},
+        "period": {
+            "days": days,
+            "from": since.isoformat(),
+            "to": (until - timedelta(days=1)).isoformat() if until else None,
+        },
         "summary": {
             "events": len(summary_rows),
             "projects": len(projects),

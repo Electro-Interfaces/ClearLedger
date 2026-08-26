@@ -869,7 +869,7 @@ async def import_sites_xlsx(db: AsyncSession, company_id, content: bytes, dry_ru
                 company_id=company_id, site_id=site.id,
                 project_id=project_by_site.get(site.id), kind=kind,
                 text=text_, from_stage=frm, to_stage=to,
-                changes=changes, source=source,
+                changes=changes or [], source=source,
             ))
         await db.commit()
     else:

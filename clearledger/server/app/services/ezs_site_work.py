@@ -228,7 +228,10 @@ async def log_event(db: AsyncSession, site: EzsSite, kind: str, *, text: str | N
         company_id=site.company_id, site_id=site.id, project_id=project_id,
         kind=kind, text=text,
         from_stage=from_stage, to_stage=to_stage,
-        changes=changes, source=source,
+        # Пустой список, а не None: заметке и касанию менять нечего, а JSONB
+        # пишет питоновский None значением JSON null — и `jsonb_array_length`
+        # потом роняет любой запрос, который такую строку зацепит.
+        changes=changes or [], source=source,
         author_user_id=user.id if user is not None else None,
     )
     db.add(ev)

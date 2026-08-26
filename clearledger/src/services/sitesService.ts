@@ -759,7 +759,7 @@ export interface ProjectChange {
 }
 
 export interface ProjectChangesOverview {
-  period: { days: number; from: string }
+  period: { days: number; from: string; to: string | null }
   summary: { events: number; projects: number; fields: number; decisions: number }
   tracking: { startedAt: string | null; legacyEvents: number }
   byCategory: { category: string; label: string; count: number }[]
@@ -782,7 +782,8 @@ export interface ProjectChangesOverview {
 
 export async function getProjectChanges(params: {
   companyId: string
-  days: number
+  from: string
+  to: string
   category?: string
   source?: string
   cursor?: string
@@ -790,7 +791,8 @@ export async function getProjectChanges(params: {
 }): Promise<ProjectChangesOverview> {
   return get('/api/sites/changes/overview', {
     company_id: params.companyId,
-    days: params.days,
+    from: params.from,
+    to: params.to,
     category: params.category,
     source: params.source,
     cursor: params.cursor,

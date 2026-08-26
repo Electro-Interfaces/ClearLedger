@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import date
 
 from fastapi import (
     APIRouter, Depends, File, HTTPException, Query, UploadFile, status,
@@ -411,17 +412,23 @@ async def portfolio_overview(
 async def changes_overview(
     company_id: str = Query(...),
     days: int = Query(30),
+    date_from: date | None = Query(None, alias="from"),
+    date_to: date | None = Query(None, alias="to"),
     category: str | None = Query(None),
     source: str | None = Query(None),
     cursor: uuid.UUID | None = Query(None),
     limit: int = Query(60),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    """Проверяемая история изменений проекта: прежнее и новое значение рядом."""
+    """Проверяемая история изменений проекта: прежнее и новое значение рядом.
+
+    Границы берутся из периода рабочей области (`from`/`to`); `days` — запасной
+    путь для вызовов без дат.
+    """
     cid = await assert_company_member(company_id, user, db)
     return await ezs_changes.changes_overview(
-        db, cid, days=days, category=category, source=source,
-        cursor=cursor, limit=limit,
+        db, cid, days=days, date_from=date_from, date_to=date_to,
+        category=category, source=source, cursor=cursor, limit=limit,
     )
 
 

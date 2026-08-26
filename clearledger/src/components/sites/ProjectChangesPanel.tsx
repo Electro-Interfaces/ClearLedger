@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useInfiniteQuery } from '@tanstack/react-query'
 import {
-  ArrowRight, CalendarDays, Database, GitCompareArrows, History,
+  ArrowRight, Database, GitCompareArrows, History,
   Loader2, RefreshCw, UserRound,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -9,6 +9,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
+import { useFilters } from '@/contexts/FilterContext'
 import {
   getProjectChanges, type ProjectChange, type ProjectChangesOverview,
 } from '@/services/sitesService'
@@ -55,15 +56,18 @@ const SOURCE_OPTIONS = [
 
 export function ProjectChangesPanel({ companyId }: { companyId: string }) {
   const openProject = useOpenProject()
-  const [days, setDays] = useState(30)
+  // Период — общий, из шапки рабочей области. Свой селектор здесь стоял рядом с
+  // ним и молча выигрывал: человек менял период сверху, а лента не двигалась.
+  const { period } = useFilters()
   const [category, setCategory] = useState('all')
   const [source, setSource] = useState('all')
   const query = useInfiniteQuery({
-    queryKey: ['project-changes', companyId, days, category, source],
+    queryKey: ['project-changes', companyId, period.from, period.to, category, source],
     initialPageParam: '',
     queryFn: ({ pageParam }) => getProjectChanges({
       companyId,
-      days,
+      from: period.from,
+      to: period.to,
       category: category === 'all' ? undefined : category,
       source: source === 'all' ? undefined : source,
       cursor: pageParam || undefined,
@@ -115,18 +119,6 @@ export function ProjectChangesPanel({ companyId }: { companyId: string }) {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Select value={String(days)} onValueChange={(value) => setDays(Number(value))}>
-            <SelectTrigger className="h-8 w-[135px] text-xs" aria-label="Период">
-              <CalendarDays className="h-3.5 w-3.5 mr-1.5 text-muted-foreground" />
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="7">7 дней</SelectItem>
-              <SelectItem value="30">30 дней</SelectItem>
-              <SelectItem value="90">90 дней</SelectItem>
-              <SelectItem value="365">12 месяцев</SelectItem>
-            </SelectContent>
-          </Select>
           <Select value={category} onValueChange={setCategory}>
             <SelectTrigger className="h-8 w-[185px] text-xs" aria-label="Тип изменения">
               <SelectValue />
@@ -157,6 +149,7 @@ export function ProjectChangesPanel({ companyId }: { companyId: string }) {
             <span className="text-sm font-semibold">За выбранный период</span>
             <span className="ml-auto text-xs text-muted-foreground">
               с {fullDate.format(new Date(data.period.from))}
+              {data.period.to ? ` по ${fullDate.format(new Date(data.period.to))}` : ''}
             </span>
           </div>
           <div className="grid grid-cols-2 lg:grid-cols-4 divide-x divide-y lg:divide-y-0">
