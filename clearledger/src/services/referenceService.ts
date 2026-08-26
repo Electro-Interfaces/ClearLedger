@@ -516,7 +516,7 @@ export async function createCounterpartyContact(
 export async function updateCounterpartyContact(
   counterpartyId: string, contactId: string, body: CounterpartyContactIn,
 ): Promise<CounterpartyContact> {
-  return patch<CounterpartyContact>(
+  return put<CounterpartyContact>(
     `/api/references/counterparties/${counterpartyId}/contacts/${contactId}`, body)
 }
 

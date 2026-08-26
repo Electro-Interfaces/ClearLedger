@@ -385,7 +385,10 @@ async def create_counterparty_contact(
     return _contact_resp(c)
 
 
-@router.patch("/counterparties/{item_id}/contacts/{contact_id}")
+# PUT, а не PATCH: карточка отдаёт форму целиком, и ручка заменяет все поля.
+# Назвать это PATCH — оставить ту же ловушку, из-за которой правка договора
+# затирала охват: неполное тело молча стёрло бы телефон и почту.
+@router.put("/counterparties/{item_id}/contacts/{contact_id}")
 async def update_counterparty_contact(
     item_id: str,
     contact_id: str,
