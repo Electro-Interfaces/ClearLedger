@@ -5,7 +5,7 @@
  * остальное добывается по ходу и заполняется в карточке. Проект создаётся
  * стадией «Лид» и сразу получает номер.
  */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -13,7 +13,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
-import { createSite, getProjectKinds } from '@/services/sitesService'
+import { createSite, getProjectKinds, getSites } from '@/services/sitesService'
+import { useOpenProject } from './useOpenProject'
 
 export function NewProjectDialog({ companyId, onClose, onCreated }: {
   companyId: string; onClose: () => void; onCreated: (id: string) => void
@@ -32,6 +33,26 @@ export function NewProjectDialog({ companyId, onClose, onCreated }: {
   // Место должно быть опознаваемо: без адреса или названия объекта проект
   // невозможно ни найти, ни отличить от соседнего.
   const canSave = Boolean(form.address.trim() || form.install_place.trim())
+
+  // Подсказка о дубле. Место занимается один раз, а проектов по нему заводят
+  // несколько: отказ уезжает в архив, через полгода адрес приходит снова и
+  // проект заводится заново — вместе со второй историей согласований. Ищем по
+  // ВСЕМ стадиям, включая архив: именно там лежит то, что человек не увидит в
+  // реестре. Запрета нет намеренно — адрес часто известен до города, и запрет
+  // по совпадению остановил бы обычную работу.
+  const openProject = useOpenProject()
+  const probe = (form.address.trim() || form.install_place.trim()).trim()
+  const [debounced, setDebounced] = useState('')
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(probe.length >= 4 ? probe : ''), 400)
+    return () => clearTimeout(t)
+  }, [probe])
+  const similar = useQuery({
+    queryKey: ['pr-duplicates', companyId, debounced],
+    queryFn: () => getSites({ companyId, search: debounced, pageSize: 5 }),
+    enabled: debounced.length >= 4,
+  })
+  const duplicates = similar.data?.items ?? []
 
   const save = async () => {
     setBusy(true)
@@ -99,6 +120,27 @@ export function NewProjectDialog({ companyId, onClose, onCreated }: {
             <p className="text-xs text-muted-foreground">
               Нужен адрес или место установки — иначе проект не отличить от соседнего.
             </p>
+          )}
+          {duplicates.length > 0 && (
+            <div className="border border-amber-500/40 bg-amber-500/[0.06] rounded-md px-2.5 py-2 space-y-1.5">
+              <div className="text-xs font-medium">
+                Похожее место уже заводили — {duplicates.length === 5 ? 'нашлось не меньше пяти' : `нашлось ${duplicates.length}`}
+              </div>
+              {duplicates.map((d) => (
+                <button key={d.id} type="button"
+                  onClick={() => { onClose(); openProject(d.id) }}
+                  className="w-full text-left text-xs rounded px-1.5 py-1 hover:bg-accent/60">
+                  <span className="font-medium">{d.projectNo ?? 'без номера'}</span>
+                  {' · '}{d.address ?? d.installPlace ?? d.title ?? d.city ?? 'без адреса'}
+                  {' · '}<span className="text-muted-foreground">{d.stageLabel}</span>
+                  {d.archiveReason ? <span className="text-muted-foreground"> ({d.archiveReason})</span> : null}
+                </button>
+              ))}
+              <p className="text-[11px] text-muted-foreground">
+                Закрытый проект лучше вернуть в работу из его карточки, чем заводить
+                заново: с новым потеряется прежняя переписка и согласования.
+              </p>
+            </div>
           )}
           <div className="flex justify-end gap-2 pt-1">
             <Button variant="outline" size="sm" className="h-8 text-sm" onClick={onClose}>Отмена</Button>

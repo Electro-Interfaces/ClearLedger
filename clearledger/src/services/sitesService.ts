@@ -593,9 +593,29 @@ export async function getSitesGaps(companyId: string): Promise<SitesGaps> {
   return get('/api/sites/analysis/gaps', { company_id: companyId })
 }
 
+/** Закрытая площадка на карте: скоринга нет — решать нечего, есть причина закрытия. */
+export interface ClosedSitePoint {
+  id: string
+  projectNo: string | null
+  title: string | null
+  stage: string
+  stageLabel: string
+  region: string | null
+  city: string | null
+  address: string | null
+  archiveReason: string | null
+  holdUntil: string | null
+  lat: number
+  lon: number
+}
+
 export async function getSitesMapPoints(
   companyId: string,
-): Promise<{ points: (MatrixItem & { lat: number; lon: number })[]; thresholds: SitesMatrix['thresholds'] }> {
+): Promise<{
+  points: (MatrixItem & { lat: number; lon: number })[]
+  closed: ClosedSitePoint[]
+  thresholds: SitesMatrix['thresholds']
+}> {
   return get('/api/sites/analysis/map', { company_id: companyId })
 }
 

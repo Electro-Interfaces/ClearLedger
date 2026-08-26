@@ -576,7 +576,13 @@ async def analysis_map(
     company_id: str = Query(...),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    """Точки для карты: площадки со стадией и скорингом (станции сети — из /api/locations)."""
+    """Точки для карты: площадки со стадией и скорингом (станции сети — из /api/locations).
+
+    Закрытые площадки — отдельным списком, а не среди живых: скоринг для них
+    бессмыслен (решать нечего), а числом они живые перевешивают втрое. Место
+    остаётся занятым и после отказа — не увидев его на карте, рядом заводят
+    второй проект по тому же адресу.
+    """
     cid = await assert_company_member(company_id, user, db)
     m = await ezs_site_analysis.priority_matrix(db, cid)
     sites = (await db.execute(
@@ -588,7 +594,24 @@ async def analysis_map(
         c = coords.get(it["id"])
         if c:
             pts.append({**it, "lat": c[0], "lon": c[1]})
-    return {"points": pts, "thresholds": m["thresholds"]}
+
+    closed_rows = (await db.execute(
+        select(EzsSite).where(
+            EzsSite.company_id == cid,
+            EzsSite.lat.is_not(None),
+            EzsSite.stage.notin_(ezs_sites.STAGE_ORDER),
+        )
+    )).scalars().all()
+    closed = [{
+        "id": str(s.id), "projectNo": s.project_no,
+        "title": s.title or s.full_address or s.address or s.install_place,
+        "stage": s.stage, "stageLabel": ezs_sites.STAGE_LABELS.get(s.stage, s.stage),
+        "region": s.region_norm or s.region, "city": s.city,
+        "address": s.address or s.full_address or s.install_place,
+        "archiveReason": s.archive_reason, "holdUntil": s.hold_until,
+        "lat": s.lat, "lon": s.lon,
+    } for s in closed_rows]
+    return {"points": pts, "closed": closed, "thresholds": m["thresholds"]}
 
 
 @router.get("/{site_id}/economics")

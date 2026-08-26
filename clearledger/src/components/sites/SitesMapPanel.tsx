@@ -39,6 +39,10 @@ const QUADRANT_COLOR: Record<Quadrant, string> = {
 export function SitesMapPanel({ companyId }: { companyId: string }) {
   const [colorBy, setColorBy] = useState<ColorBy>('stage')
   const [showNetwork, setShowNetwork] = useState(true)
+  // Закрытые по умолчанию скрыты: их втрое больше живых (531 против 148 у пилота),
+  // и включённые сразу они превращают карту пайплайна в карту кладбища. Но место
+  // остаётся занятым и после отказа — увидеть его надо по требованию.
+  const [showClosed, setShowClosed] = useState(false)
   const [stage, setStage] = useState<'' | SiteStage>('')
   const [detailId, setDetailId] = useState<string | null>(null)
 
@@ -52,6 +56,12 @@ export function SitesMapPanel({ companyId }: { companyId: string }) {
   const points = useMemo(
     () => (pts.data?.points ?? []).filter((p) => !stage || p.stage === stage),
     [pts.data, stage],
+  )
+  // Отбор по стадии воронки к закрытым не применяется: «Архив» и «Заморожен» в
+  // ней не значатся, и любая выбранная стадия прятала бы их целиком.
+  const closed = useMemo(
+    () => (showClosed && !stage ? (pts.data?.closed ?? []) : []),
+    [pts.data, showClosed, stage],
   )
   // Координаты станции — в паспорте, иначе в сыром снимке (как на карте сети).
   const stations = useMemo(() => (net.data ?? []).flatMap((l) => {
@@ -80,6 +90,11 @@ export function SitesMapPanel({ companyId }: { companyId: string }) {
           className={`px-2.5 py-1 text-sm rounded-md border transition-colors ${showNetwork ? 'bg-primary text-primary-foreground border-transparent' : 'border-border text-muted-foreground hover:text-foreground'}`}>
           Станции сети{stations.length ? ` (${stations.length})` : ''}
         </button>
+        <button type="button" onClick={() => setShowClosed((v) => !v)} disabled={stage !== ''}
+          title={stage ? 'Снимите отбор по стадии — закрытых в воронке нет' : 'Архив и замороженные проекты'}
+          className={`px-2.5 py-1 text-sm rounded-md border transition-colors disabled:opacity-40 ${showClosed && !stage ? 'bg-primary text-primary-foreground border-transparent' : 'border-border text-muted-foreground hover:text-foreground'}`}>
+          Закрытые{pts.data?.closed?.length ? ` (${pts.data.closed.length})` : ''}
+        </button>
         <div className="inline-flex rounded-md border border-border p-0.5 gap-0.5 flex-wrap">
           <button type="button" onClick={() => setStage('')}
             className={`px-2 py-1 text-sm rounded-[5px] ${stage === '' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>Все</button>
@@ -92,6 +107,7 @@ export function SitesMapPanel({ companyId }: { companyId: string }) {
         </div>
         <span className="text-xs text-muted-foreground ml-auto">
           {pts.isLoading ? '…' : `${points.length} проектов с координатами`}
+          {closed.length > 0 ? ` + ${closed.length} закрытых` : ''}
         </span>
       </div>
 
@@ -125,6 +141,31 @@ export function SitesMapPanel({ companyId }: { companyId: string }) {
                       </Popup>
                     </CircleMarker>
                   </Fragment>
+                ))}
+
+                {/* Закрытые — полым контуром и ниже живых: место видно, но карту
+                    пайплайна оно не забивает. Причина отказа тут же: без неё
+                    точка сообщает «занято» и не говорит, чем кончилось. */}
+                {closed.map((p) => (
+                  <CircleMarker key={`c-${p.id}`} center={[p.lat, p.lon]} radius={5}
+                    pathOptions={{
+                      color: STAGE_COLOR[p.stage] ?? '#71717a',
+                      fillColor: STAGE_COLOR[p.stage] ?? '#71717a',
+                      fillOpacity: 0.12, weight: 1, dashArray: '2 2',
+                    }}
+                    eventHandlers={{ dblclick: () => setDetailId(p.id) }}>
+                    <Popup>
+                      <div className="text-sm space-y-1 min-w-[210px]">
+                        <div className="font-medium">{p.address ?? p.title ?? p.city ?? 'Проект'}</div>
+                        <div className="text-muted-foreground">{p.region ?? ''}{p.city ? ` · ${p.city}` : ''}</div>
+                        <div>Состояние: <b>{p.stageLabel}</b></div>
+                        {p.archiveReason && <div>Причина: {p.archiveReason}</div>}
+                        {p.holdUntil && <div>Вернуться к вопросу: {p.holdUntil}</div>}
+                        <button type="button" className="text-primary hover:underline"
+                          onClick={() => setDetailId(p.id)}>Открыть карточку</button>
+                      </div>
+                    </Popup>
+                  </CircleMarker>
                 ))}
 
                 {points.map((p) => {
@@ -185,6 +226,12 @@ export function SitesMapPanel({ companyId }: { companyId: string }) {
         <span className="inline-flex items-center gap-1">
           <span className="h-2 w-2 rounded-full bg-slate-500/60" />станция сети
         </span>
+        {closed.length > 0 && (
+          <span className="inline-flex items-center gap-1">
+            <span className="h-2 w-2 rounded-full border border-dashed border-zinc-500" />
+            закрытые: архив и замороженные
+          </span>
+        )}
         <span>Круг — радиус {cannibalKm * 1000} м вокруг проекты, которая стоит вплотную к нашей станции.</span>
       </div>
 
