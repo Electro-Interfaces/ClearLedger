@@ -243,6 +243,26 @@ export interface SpareMovementRow {
 
 // ─── единицы ────────────────────────────────────────────────────────────────
 
+/**
+ * Контур рабочей области. Панель фильтров стоит над разделом целиком, поэтому
+ * её обещание («Приморский край · ЭЗС 648») несут все экраны группы, а не один
+ * парк — замечание заказчика 24.08.2026 было про раздел.
+ */
+export interface EquipmentScope {
+  regionIds?: string[]
+  stationCodes?: string[]
+  locationIds?: string[]
+}
+
+export function scopeParams(s: EquipmentScope | undefined): Record<string, string> {
+  if (!s) return {}
+  return {
+    ...(s.regionIds?.length ? { region_ids: s.regionIds.join(',') } : {}),
+    ...(s.stationCodes?.length ? { station_codes: s.stationCodes.join(',') } : {}),
+    ...(s.locationIds?.length ? { location_ids: s.locationIds.join(',') } : {}),
+  }
+}
+
 export async function listUnits(p: {
   companyId: string
   state?: string
@@ -250,10 +270,7 @@ export async function listUnits(p: {
   vendor?: string
   custodian?: string
   q?: string
-  /** Контур рабочей области: регионы, коды станций, точки. */
-  regionIds?: string[]
-  stationCodes?: string[]
-  locationIds?: string[]
+  scope?: EquipmentScope
   page?: number
   pageSize?: number
 }): Promise<{ items: EquipmentUnit[]; total: number }> {
@@ -264,9 +281,7 @@ export async function listUnits(p: {
     ...(p.vendor ? { vendor: p.vendor } : {}),
     ...(p.custodian ? { custodian: p.custodian } : {}),
     ...(p.q ? { q: p.q } : {}),
-    ...(p.regionIds?.length ? { region_ids: p.regionIds.join(',') } : {}),
-    ...(p.stationCodes?.length ? { station_codes: p.stationCodes.join(',') } : {}),
-    ...(p.locationIds?.length ? { location_ids: p.locationIds.join(',') } : {}),
+    ...scopeParams(p.scope),
     page: p.page ?? 1, page_size: p.pageSize ?? 500,
   })
 }
@@ -336,8 +351,10 @@ export async function getWarehousesSummary(companyId: string): Promise<{
   return get('/api/equipment/warehouses/summary', { company_id: companyId })
 }
 
-export async function getEquipmentOverview(companyId: string): Promise<EquipmentOverview> {
-  return get('/api/equipment/overview', { company_id: companyId })
+export async function getEquipmentOverview(
+  companyId: string, scope?: EquipmentScope,
+): Promise<EquipmentOverview> {
+  return get('/api/equipment/overview', { company_id: companyId, ...scopeParams(scope) })
 }
 
 export async function importUnitsXlsx(companyId: string, file: File, dryRun: boolean): Promise<ImportReport> {

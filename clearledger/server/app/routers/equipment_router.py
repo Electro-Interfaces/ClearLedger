@@ -249,14 +249,49 @@ def _csv(v: str | None) -> list[str]:
     return [x.strip() for x in v.split(",") if x.strip()] if v else []
 
 
+class ScopeQ:
+    """Контур рабочей области, общий для всего раздела «Оборудование».
+
+    Панель фильтров стоит над разделом целиком, поэтому её обещание («Приморский
+    край · ЭЗС 648») обязаны выполнять все его экраны, а не только парк —
+    жалоба заказчика 24.08.2026 была про раздел.
+    """
+
+    def __init__(
+        self,
+        region_ids: str | None = Query(None, description="регионы через запятую"),
+        station_codes: str | None = Query(None, description="коды ЭЗС через запятую"),
+        location_ids: str | None = Query(None, description="точки через запятую"),
+    ) -> None:
+        self.regions = _csv(region_ids)
+        self.codes = _csv(station_codes)
+        self.locs = _csv(location_ids)
+
+    @property
+    def empty(self) -> bool:
+        return not (self.regions or self.codes or self.locs)
+
+    def locations(self, cid):
+        """Подзапрос точек контура или None, если контур не задан."""
+        return _scope_location_ids(cid, self.regions, self.codes, self.locs)
+
+    def unit_cond(self, cid):
+        """Единица в контуре: стоит на его точке ИЛИ сама числится в его регионе
+        (склад принадлежит региону, а точкой сети не является)."""
+        sub = self.locations(cid)
+        if sub is None:
+            return None
+        cond = EzsEquipmentUnit.current_location_id.in_(sub)
+        return cond | EzsEquipmentUnit.region.in_(self.regions) if self.regions else cond
+
+
 @router.get("/units")
 async def list_units(
     company_id: str = Query(...),
     state: str | None = Query(None), location_id: str | None = Query(None),
     vendor: str | None = Query(None), custodian: str | None = Query(None),
     q: str | None = Query(None),
-    region_ids: str | None = Query(None), station_codes: str | None = Query(None),
-    location_ids: str | None = Query(None),
+    scope: ScopeQ = Depends(),
     page: int = Query(1, ge=1), page_size: int = Query(500, le=1000),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
@@ -271,13 +306,9 @@ async def list_units(
         conds.append(_vendor_col() == vendor)
     if custodian:
         conds.append(U.custodian == custodian)
-    # Контур рабочей области. Единица попадает, если её станция в контуре ИЛИ её
-    # собственный регион выбран (склад стоит в регионе, но не на станции).
-    scope = _scope_location_ids(cid, _csv(region_ids), _csv(station_codes), _csv(location_ids))
-    if scope is not None:
-        in_scope = U.current_location_id.in_(scope)
-        regions = _csv(region_ids)
-        conds.append(in_scope | U.region.in_(regions) if regions else in_scope)
+    in_scope = scope.unit_cond(cid)
+    if in_scope is not None:
+        conds.append(in_scope)
     if q:
         like = f"%{q.strip()}%"
         # Поиск идёт и по станции, где единица стоит: люди ищут «Гоголя», а не серийник.
@@ -443,6 +474,10 @@ async def list_movements(
     cid = await assert_company_member(company_id, user, db)
     M = EzsEquipmentMovement
     conds = [M.company_id == cid]
+    # Контур рабочей области здесь НЕ применяется намеренно: 72 движения из 88 не
+    # имеют ни точки отправления, ни точки прибытия, и любое сужение обнуляет
+    # журнал. Вернуть, когда точки в движениях будут заполняться (проверять
+    # запросом, а не на глаз).
     if op:
         conds.append(M.op.in_(op.split(",")))
     if location_id:
@@ -472,7 +507,12 @@ async def warehouses_summary(
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
     """Остатки по складам: единицы по состояниям + позиции/количество ЗИП;
-    плюс синтетические строки «у подрядчика» / «у производителя»."""
+    плюс синтетические строки «у подрядчика» / «у производителя».
+
+    Контур рабочей области здесь НЕ применяется намеренно: региона нет ни у
+    одного из шести складов, и сужение по нему оставляет пустой экран. Вернуть,
+    когда у складов появится регион.
+    """
     cid = await assert_company_member(company_id, user, db)
     U = EzsEquipmentUnit
     locs = await _locations_map(db, cid)
@@ -526,19 +566,30 @@ async def warehouses_summary(
 @router.get("/overview")
 async def equipment_overview(
     company_id: str = Query(...),
+    scope: ScopeQ = Depends(),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
     cid = await assert_company_member(company_id, user, db)
     U = EzsEquipmentUnit
+    # Плитки обязаны считаться по тому же контуру, что и список под ними: иначе
+    # «всего 691» над списком из 84 читается как потеря записей.
+    base = [U.company_id == cid]
+    in_scope = scope.unit_cond(cid)
+    if in_scope is not None:
+        base.append(in_scope)
     by_state = {r[0]: int(r[1]) for r in (await db.execute(
-        select(U.state, func.count()).where(U.company_id == cid).group_by(U.state)
+        select(U.state, func.count()).where(*base).group_by(U.state)
     )).all()}
     by_custodian = {r[0]: int(r[1]) for r in (await db.execute(
-        select(U.custodian, func.count()).where(U.company_id == cid).group_by(U.custodian)
+        select(U.custodian, func.count()).where(*base).group_by(U.custodian)
     )).all()}
+    # Выражение производителя берём ОДНИМ объектом: каждый вызов `_vendor_col()`
+    # заводит свой bind-параметр для `nullif(vendor, '')`, и Postgres считает
+    # SELECT и GROUP BY разными выражениями — вся ручка падала с GroupingError.
+    vendor_col = _vendor_col()
     by_vendor = [{"vendor": r[0] or "—", "count": int(r[1])} for r in (await db.execute(
-        select(_vendor_col(), func.count()).where(U.company_id == cid)
-        .group_by(_vendor_col()).order_by(func.count().desc())
+        select(vendor_col, func.count()).where(*base)
+        .group_by(vendor_col).order_by(func.count().desc())
     )).all()]
 
     # ремонты дольше 30 дней: последнее движение to_repair старше месяца

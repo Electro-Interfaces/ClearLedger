@@ -13,7 +13,7 @@ from uuid import uuid4
 from sqlalchemy.dialects import postgresql
 
 from app.routers.charge_sessions_router import _payment_scope_cond
-from app.routers.equipment_router import _scope_location_ids
+from app.routers.equipment_router import ScopeQ, _scope_location_ids, _vendor_col
 
 
 def _sql(clause) -> str:
@@ -64,3 +64,53 @@ def test_equipment_scope_keeps_company_boundary():
 
     assert f"service_locations.company_id = '{cid}'" in sql
     assert f"regions.company_id = '{cid}'" in sql
+
+
+def test_equipment_scope_is_shared_by_the_whole_section():
+    """Один приёмник контура на раздел: парк, склады и движения читают его одинаково."""
+    q = ScopeQ(region_ids="Приморский край", station_codes="648", location_ids=None)
+
+    assert not q.empty
+    assert q.regions == ["Приморский край"] and q.codes == ["648"]
+    assert ScopeQ(None, None, None).empty
+    assert ScopeQ(None, None, None).unit_cond(uuid4()) is None
+
+
+def test_equipment_unit_in_scope_by_its_own_region_too():
+    """Склад стоит в регионе, но точкой сети не является — его нельзя терять."""
+    sql = _sql(ScopeQ(region_ids="Приморский край", station_codes=None,
+                      location_ids=None).unit_cond(uuid4()))
+
+    assert "current_location_id IN" in sql
+    assert "ezs_equipment_units.region IN ('Приморский край')" in sql
+    assert " OR " in sql
+
+
+def test_equipment_scope_by_codes_only_does_not_widen_by_region():
+    """Без регионов расширять выдачу собственным регионом единицы нечем."""
+    sql = _sql(ScopeQ(region_ids=None, station_codes="648", location_ids=None).unit_cond(uuid4()))
+
+    assert "ezs_equipment_units.region" not in sql
+
+
+def test_vendor_grouping_uses_one_expression():
+    """Разрез по производителю: SELECT и GROUP BY обязаны совпасть буквально.
+
+    Каждый вызов `_vendor_col()` заводит СВОЙ bind-параметр для `nullif(vendor, '')`,
+    и Postgres перестаёт узнавать выражение в GROUP BY — обзор оборудования падал
+    целиком (GroupingError), пока колонка бралась двумя вызовами.
+    """
+    from sqlalchemy import func, select
+
+    def raw(stmt) -> str:
+        return str(stmt.compile(dialect=postgresql.dialect()))
+
+    two = raw(select(_vendor_col(), func.count()).group_by(_vendor_col()))
+    col = _vendor_col()
+    one = raw(select(col, func.count()).group_by(col))
+
+    sel_two, grp_two = two.split("GROUP BY")
+    sel_one, grp_one = one.split("GROUP BY")
+
+    assert grp_one.strip() in sel_one          # один вызов — выражения совпали
+    assert grp_two.strip() not in sel_two      # два вызова — разошлись

@@ -33,7 +33,7 @@ import {
   Trash2, Unplug, Upload,
 } from 'lucide-react'
 import { Kpi } from '@/components/workspace/analytics/Kpi'
-import { useFilters } from '@/contexts/FilterContext'
+import { useEquipmentScope, scopeKeyOf } from './useEquipmentScope'
 import { ApiError } from '@/services/apiClient'
 import { getLocations, loadLocations } from '@/services/locationService'
 import type { ServiceLocation } from '@/types/location'
@@ -1081,17 +1081,17 @@ export function EquipmentFleetPanel({ companyId }: { companyId: string }) {
     [locations],
   )
 
-  const overviewQ = useQuery({
-    queryKey: ['eq-overview', companyId],
-    queryFn: () => getEquipmentOverview(companyId),
-  })
-  const overview = overviewQ.data
-
   // Контур рабочей области: панель фильтров стоит над разделом и обещает регион
   // и станции — до парка она не доезжала, и при «Приморском крае» в списке
   // оставались склады Хабаровска и Череповца.
-  const { regionIds, stationCodes, locationIds } = useFilters()
-  const scopeKey = `${regionIds.join(',')}|${stationCodes.join(',')}|${locationIds.join(',')}`
+  const scope = useEquipmentScope()
+  const scopeKey = scopeKeyOf(scope)
+
+  const overviewQ = useQuery({
+    queryKey: ['eq-overview', companyId, scopeKey],
+    queryFn: () => getEquipmentOverview(companyId, scope),
+  })
+  const overview = overviewQ.data
 
   const unitsQ = useQuery({
     queryKey: ['eq-units', companyId, { state, vendor, warehouseFilter, q, scopeKey }],
@@ -1101,7 +1101,7 @@ export function EquipmentFleetPanel({ companyId }: { companyId: string }) {
       vendor: vendor === 'all' ? undefined : vendor,
       locationId: warehouseFilter === 'all' ? undefined : warehouseFilter,
       q: q || undefined,
-      regionIds, stationCodes: stationCodes.map(String), locationIds,
+      scope,
     }),
   })
 
