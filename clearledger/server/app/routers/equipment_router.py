@@ -234,7 +234,12 @@ def _scope_location_ids(cid, regions: list[str], codes: list[str], loc_ids: list
         ors.append(L.region_id.in_(
             select(Region.id).where(Region.company_id == cid, Region.name.in_(regions))))
     if codes:
-        ors.append(L.code.in_(codes))
+        # Код станции в фильтре — это `charge_sessions.station_code`, и с `code`
+        # объекта он совпадает лишь у 88 станций из 461: у остальных номер живёт
+        # в паспорте (`number`, совпадений 441). Сверяем по обоим, иначе сужение
+        # по конкретной ЭЗС молча даёт пустой список.
+        ors.append(L.code.in_(codes)
+                   | (L.extra_metadata["number"].astext.in_(codes)))
     if loc_ids:
         ors.append(L.id.in_(loc_ids))
     if not ors:

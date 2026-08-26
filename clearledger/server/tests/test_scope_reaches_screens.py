@@ -54,7 +54,20 @@ def test_equipment_scope_is_union_of_dimensions():
     assert "regions.name IN ('Приморский край')" in sql
     assert "service_locations.code IN ('648')" in sql
     assert "service_locations.id IN ('loc-1')" in sql
-    assert sql.count(" OR ") == 2
+
+
+def test_station_code_is_matched_by_passport_number_too():
+    """Код станции из фильтра — это `charge_sessions.station_code`.
+
+    С `service_locations.code` он совпадает лишь у 88 станций из 461, у остальных
+    номер лежит в паспорте (441 совпадение). Сверка только по `code` давала бы
+    пустой список на большинстве станций — и выглядела бы как «оборудования нет».
+    """
+    sql = _sql(_scope_location_ids(uuid4(), [], ["648"], []))
+
+    assert "service_locations.code IN ('648')" in sql
+    assert "extra_metadata" in sql and "number" in sql
+    assert " OR " in sql
 
 
 def test_equipment_scope_keeps_company_boundary():
