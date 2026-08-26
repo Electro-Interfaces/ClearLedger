@@ -25,15 +25,12 @@ import type { LocationTypeDef } from '@/types/locationType'
 import { m } from './fleet/locationFleetService'
 import { OP_META } from './cockpit/shared'
 import { useAllSettlements } from '@/hooks/useReferences'
-import { useTabParams } from '@/hooks/useTabParams'
 import {
   stationFlag, paidThroughLabel, ROLE_LABEL,
   type StationFlag, type StationSettlement,
 } from '@/types/settlement'
 
 const PAGE_SIZE = 50
-
-const TABLE_DEFAULTS = { sort: 'name' as SortKey, asc: true, page: 0 }
 
 // Статус связки HubEx → подпись + цвет бейджа.
 const LINK_META: Record<string, { label: string; cls: string }> = {
@@ -103,13 +100,9 @@ export function LocationsTable({
   /** Клик по строке → открыть окно станции (cockpit). */
   onSelectLocation?: (location: ServiceLocation) => void
 }) {
-  // Сортировка и страница живут в параметрах пункта, а не в useState: вход в
-  // карточку станции размонтирует список, и возврат ронял отбор на первую страницу.
-  const [tp, patchTp] = useTabParams('loc_table', TABLE_DEFAULTS)
-  const { sort, asc, page } = tp
-  const setSort = (v: SortKey) => patchTp({ sort: v })
-  const setAsc = (v: boolean) => patchTp({ asc: v })
-  const setPage = (v: number) => patchTp({ page: v })
+  const [sort, setSort] = useState<SortKey>('name')
+  const [asc, setAsc] = useState(true)
+  const [page, setPage] = useState(0)
   const [pageInput, setPageInput] = useState<string | null>(null)
 
   // Колонка «Реализация, пред. мес.» показывается, только если хотя бы у одной
@@ -175,11 +168,12 @@ export function LocationsTable({
   }, [locations, sort, asc])
 
   // Новая ВЫБОРКА → на первую страницу. Сравниваем состав, а не ссылку на массив:
-  // родитель отдаёт новый массив на каждый свой рендер, и по ссылке страница
-  // слетала при обычном возврате из карточки станции — ровно то, на что
-  // пожаловались («хлебные крошки сбрасываются», 24.08.2026).
+  // родитель пересобирает список при каждом обновлении данных, и по ссылке
+  // страница слетала при обычном возврате из карточки станции — ровно то, на что
+  // пожаловались («хлебные крошки сбрасываются», 24.08.2026). В localStorage
+  // страницу класть нельзя: пагинация не переживает сессию (docs/WORKSPACE_UX_PATTERN_PROMPT).
   const selectionKey = `${locations.length}|${locations[0]?.id ?? ''}|${locations[locations.length - 1]?.id ?? ''}`
-  useEffect(() => { patchTp({ page: 0 }) }, [selectionKey, patchTp])
+  useEffect(() => { setPage(0) }, [selectionKey])
 
   const pageCount = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE))
   const cur = Math.min(page, pageCount - 1)
@@ -191,7 +185,7 @@ export function LocationsTable({
   }
 
   function toggleSort(k: SortKey) {
-    if (sort === k) setAsc(!asc)
+    if (sort === k) setAsc((v) => !v)
     else { setSort(k); setAsc(true) }
   }
 
