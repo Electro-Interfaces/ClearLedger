@@ -132,6 +132,9 @@ interface Pt {
   lat: number; lon: number
   region: string; city: string; address: string
   power: number | null; connectors: number | null
+  /** Типы разъёмов станции. Заполнены у 618 ЭЗС из 620 — фильтр по ним просили
+   *  как основной (Чурилов, 25.08.2026). */
+  connectorTypes: string[]
   opStatus: string; linkStatus: string
   manufacturer: string; stage: string; owner: string
   /** Паспортные классы из сводной контрагента (слот obshaya). */
@@ -175,6 +178,13 @@ function highwayOf(name: string, address: string): string {
   return `${letter}${m[2]}`
 }
 
+/** «CCS2×60, CHAdeMO×60, Type 2×22» → ['CCS2', 'CHAdeMO', 'Type 2'].
+ *  В данных РусГидро значения уже канонические (8 штук на всю сеть), лишнее
+ *  здесь — только приписка мощности через «×». */
+function connectorsOf(raw: string): string[] {
+  return raw.split(',').map((x) => x.replace(/[×xX]\s*[\d.,]+\s*$/u, '').trim()).filter(Boolean)
+}
+
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null)
 const str = (v: unknown): string => (typeof v === 'string' ? v : v == null ? '' : String(v))
 
@@ -191,6 +201,7 @@ function toPoint(l: ServiceLocation): Pt | null {
     id: l.id, name: l.name || str(m.number) || l.code, number: str(m.number) || l.code,
     lat, lon, region: str(m.federalSubject) || '—', city, address: addr,
     power: num(m.maxPowerKw), connectors: num(m.connectorCount),
+    connectorTypes: connectorsOf(str(m.connectorTypes)),
     opStatus: l.operationalStatus || 'unknown', linkStatus: str(m.linkStatus) || 'unknown',
     manufacturer: str(m.manufacturer) || '—', stage: str(m.stage) || '—', owner: str(m.ownerTitle) || '—',
     locClass: str(pp.locationClass), speedClass: str(pp.speedClass),
@@ -441,6 +452,7 @@ export function ChargeMapPanel({ companyId, dateFrom, dateTo }: {
   const [owner, setOwner] = useState(ALL)
   const [locClass, setLocClass] = useState(ALL)
   const [speed, setSpeed] = useState(ALL)
+  const [connector, setConnector] = useState(ALL)
   const [highway, setHighway] = useState(ALL)
   const [lifecycle, setLifecycle] = useState(ALL)   // active | decommissioned | corp
   const [filtersOpen, setFiltersOpen] = useState(false)
@@ -475,6 +487,9 @@ export function ChargeMapPanel({ companyId, dateFrom, dateTo }: {
   const allPoints = useMemo(() => (data ?? []).filter((l) => !isTestStation(l))
     .map(toPoint).filter((p): p is Pt => p !== null), [data])
   const regions = useMemo(() => sortedUnique(allPoints, (p) => p.region), [allPoints])
+  const connectors = useMemo(
+    () => [...new Set(allPoints.flatMap((p) => p.connectorTypes))].sort((a, b) => a.localeCompare(b, 'ru')),
+    [allPoints])
   const statuses = useMemo(() => [...new Set(allPoints.map((p) => p.opStatus))], [allPoints])
   const links = useMemo(() => [...new Set(allPoints.map((p) => p.linkStatus))], [allPoints])
   const manufs = useMemo(() => sortedUnique(allPoints, (p) => p.manufacturer), [allPoints])
@@ -510,6 +525,7 @@ export function ChargeMapPanel({ companyId, dateFrom, dateTo }: {
       if (owner !== ALL && p.owner !== owner) return false
       if (locClass !== ALL && p.locClass !== locClass) return false
       if (speed !== ALL && p.speedClass !== speed) return false
+      if (connector !== ALL && !p.connectorTypes.includes(connector)) return false
       if (highway !== ALL && p.highway !== highway) return false
       if (lifecycle === 'active' && p.decommissioned) return false
       if (lifecycle === 'decommissioned' && !p.decommissioned) return false
@@ -517,8 +533,8 @@ export function ChargeMapPanel({ companyId, dateFrom, dateTo }: {
       if (q && !`${p.name} ${p.city} ${p.address} ${p.number}`.toLowerCase().includes(q)) return false
       return true
     })
-  }, [allPoints, search, region, status, link, power, manuf, stage, owner, locClass, speed, highway,
-      lifecycle, stationCodes, regionIds, locationIds])
+  }, [allPoints, search, region, status, link, power, manuf, stage, owner, locClass, speed, connector,
+      highway, lifecycle, stationCodes, regionIds, locationIds])
 
   // Сколько ТОЧЕК человек увидит на карте: посты одной площадки стоят рядом и
   // сливаются в один кружок. Округление до 3 знаков — около 110 метров, размер
@@ -606,6 +622,10 @@ export function ChargeMapPanel({ companyId, dateFrom, dateTo }: {
           options={[{ v: 'city', label: 'Город' }, { v: 'highway', label: 'Трасса' }]} w="w-[150px]" />
         <FSelect value={speed} onChange={setSpeed} all="Класс: все"
           options={[{ v: 'fast', label: 'Быстрые' }, { v: 'slow', label: 'Медленные' }]} w="w-[140px]" />
+        {connectors.length > 0 && (
+          <FSelect value={connector} onChange={setConnector} all="Коннектор: все"
+            options={connectors.map((x) => ({ v: x, label: x }))} w="w-[170px]" />
+        )}
         {/* Трасса — рядом с «Размещение», потому что уточняет именно его: сначала
             «на трассе», потом «на какой». Список пустой — селектора нет вовсе:
             у топливного профиля трасс в названиях не бывает. */}

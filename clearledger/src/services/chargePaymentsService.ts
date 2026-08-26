@@ -18,6 +18,7 @@ export interface PaymentTotals {
   orphans: number       // сессии в Учёте нет (её ещё не загрузили)
   stuckCount: number    // холд без списания и без возврата
   stuckAmount: number
+  scoped: boolean       // ответ сужен контуром — платежи без сессии сюда не вошли
 }
 export interface PaymentMonth {
   bucket: string; count: number; amount: number; refund: number; receipts: number
@@ -42,8 +43,17 @@ export interface PaymentLine {
   phone: string | null
 }
 
-interface P { companyId: string; dateFrom: string; dateTo: string }
-const qp = (p: P) => ({ company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo })
+interface P {
+  companyId: string; dateFrom: string; dateTo: string
+  /** Контур рабочей области: коды станций и регионы. Платёж относится к станции
+   *  только через свою сессию — платежи без сессии в сужённый ответ не попадают. */
+  stations?: string[]; regions?: string[]
+}
+const qp = (p: P) => ({
+  company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo,
+  ...(p.stations?.length ? { stations: p.stations.join(',') } : {}),
+  ...(p.regions?.length ? { regions: p.regions.join(',') } : {}),
+})
 
 export async function getPaymentsSummary(p: P): Promise<PaymentsSummary> {
   return get<PaymentsSummary>('/api/charge-sessions/payments/summary', qp(p))

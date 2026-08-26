@@ -250,6 +250,10 @@ export async function listUnits(p: {
   vendor?: string
   custodian?: string
   q?: string
+  /** Контур рабочей области: регионы, коды станций, точки. */
+  regionIds?: string[]
+  stationCodes?: string[]
+  locationIds?: string[]
   page?: number
   pageSize?: number
 }): Promise<{ items: EquipmentUnit[]; total: number }> {
@@ -260,6 +264,9 @@ export async function listUnits(p: {
     ...(p.vendor ? { vendor: p.vendor } : {}),
     ...(p.custodian ? { custodian: p.custodian } : {}),
     ...(p.q ? { q: p.q } : {}),
+    ...(p.regionIds?.length ? { region_ids: p.regionIds.join(',') } : {}),
+    ...(p.stationCodes?.length ? { station_codes: p.stationCodes.join(',') } : {}),
+    ...(p.locationIds?.length ? { location_ids: p.locationIds.join(',') } : {}),
     page: p.page ?? 1, page_size: p.pageSize ?? 500,
   })
 }

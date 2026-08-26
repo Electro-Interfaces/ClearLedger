@@ -1088,6 +1088,17 @@ class CounterpartyActivityResponse(BaseModel):
     recent: list[CounterpartyDocBrief] = Field(default_factory=list)
 
 
+class CounterpartyContactIn(BaseModel):
+    """Контактное лицо контрагента. Роль — по какому поводу к нему обращаться."""
+
+    name: str
+    position: str | None = None
+    role: str = "other"          # contract | tech | comm | other
+    phone: str | None = None
+    email: str | None = None
+    notes: str | None = None
+
+
 class LocationContractBrief(BaseModel):
     id: str
     number: str
@@ -1099,6 +1110,8 @@ class LocationContractBrief(BaseModel):
     counterpartyId: Annotated[str, BeforeValidator(lambda v: str(v) if v else v)]
     counterpartyName: str | None = None
     counterpartyInn: str | None = None
+    # Пусто = бессрочный (канон системы), не «не заполнено».
+    validUntil: str | None = None
 
 
 class LocationContractsResponse(BaseModel):

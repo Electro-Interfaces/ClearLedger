@@ -11,6 +11,7 @@ import { useLocationContracts, useLocationSettlements } from '@/hooks/useReferen
 import { useCompany } from '@/contexts/CompanyContext'
 import type { ServiceLocation } from '@/types/location'
 import { PAYMENT_META, ROLE_LABEL, paidThroughLabel, type SettlementRole } from '@/types/settlement'
+import { OpsTermsBlock } from '@/components/balance/OpsTermDialog'
 import { Placeholder, ScrollTab } from './shared'
 
 export function ContractsTab({ location }: { location: ServiceLocation }) {
@@ -88,16 +89,24 @@ export function ContractsTab({ location }: { location: ServiceLocation }) {
             </div>
           )}
           {contracts.map((c) => (
-            <div key={c.id} className="flex items-start justify-between gap-3 rounded-md border border-border/50 p-3 text-sm">
-              <div className="min-w-0">
-                <div className="font-medium">{c.number}</div>
-                <div className="text-xs text-muted-foreground">
-                  {c.counterpartyName || c.counterpartyId}{c.kind && <span> · {c.kind}</span>}
+            <div key={c.id} className="space-y-2 rounded-md border border-border/50 p-3 text-sm">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="font-medium">{c.number}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {c.counterpartyName || c.counterpartyId}{c.kind && <span> · {c.kind}</span>}
+                    <span> · срок: {c.validUntil || 'бессрочный'}</span>
+                  </div>
                 </div>
+                {c.companyWide
+                  ? <Badge variant="secondary" className="shrink-0 gap-1 text-[10px]"><Building className="h-2.5 w-2.5" /> вся компания</Badge>
+                  : <Badge variant="outline" className="shrink-0 text-[10px]">адресный</Badge>}
               </div>
-              {c.companyWide
-                ? <Badge variant="secondary" className="shrink-0 gap-1 text-[10px]"><Building className="h-2.5 w-2.5" /> вся компания</Badge>
-                : <Badge variant="outline" className="shrink-0 text-[10px]">адресный</Badge>}
+              {/* Условия начисления — тот же блок, что в карточке контрагента.
+                  Их спрашивали именно здесь: «в „Объектах“ нет условий договоров»
+                  (Мартынова, 25.08.2026) — ходить за ними в другое приложение
+                  человеку неоткуда знать. */}
+              {isEnergy && <OpsTermsBlock contractId={c.id} />}
             </div>
           ))}
         </div>

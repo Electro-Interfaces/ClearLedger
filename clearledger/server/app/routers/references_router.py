@@ -24,6 +24,7 @@ from app.models import (
     ContractDimension,
     ContractLocation,
     Counterparty,
+    CounterpartyContact,
     DataEntry,
     EdgeAgent,
     NomenclatureItem,
@@ -48,6 +49,7 @@ from app.schemas import (
     ContractUpdate,
     CounterpartyActivityResponse,
     CounterpartyBrief,
+    CounterpartyContactIn,
     CounterpartyDocBrief,
     CounterpartyDocGroup,
     CounterpartyLocationsResponse,
@@ -332,6 +334,94 @@ async def delete_counterparty(
     uid = _parse_uuid(item_id)
     cp = await get_owned(Counterparty, uid, current_user, db)  # 404 для чужой/несуществующей
     await db.delete(cp)
+
+
+# ---------------------------------------------------------------------------
+# CounterpartyContact (контактные лица контрагента)
+# ---------------------------------------------------------------------------
+
+CONTACT_ROLES = {"contract": "Договор", "tech": "Техника",
+                 "comm": "Взаимодействие", "other": "Прочее"}
+
+
+def _contact_resp(c: CounterpartyContact) -> dict:
+    return {"id": str(c.id), "counterpartyId": str(c.counterparty_id), "name": c.name,
+            "position": c.position, "role": c.role, "phone": c.phone,
+            "email": c.email, "notes": c.notes}
+
+
+@router.get("/counterparties/{item_id}/contacts")
+async def list_counterparty_contacts(
+    item_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[dict]:
+    cp = await get_owned(Counterparty, _parse_uuid(item_id), current_user, db)
+    rows = (await db.execute(
+        select(CounterpartyContact)
+        .where(CounterpartyContact.counterparty_id == cp.id)
+        .order_by(CounterpartyContact.name)
+    )).scalars().all()
+    return [_contact_resp(c) for c in rows]
+
+
+@router.post("/counterparties/{item_id}/contacts", status_code=status.HTTP_201_CREATED)
+async def create_counterparty_contact(
+    item_id: str,
+    body: CounterpartyContactIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    cp = await get_owned(Counterparty, _parse_uuid(item_id), current_user, db)
+    if body.role not in CONTACT_ROLES:
+        raise HTTPException(400, f"Неизвестная роль контакта: {body.role}")
+    c = CounterpartyContact(
+        company_id=cp.company_id, counterparty_id=cp.id, name=body.name.strip(),
+        position=body.position, role=body.role, phone=body.phone,
+        email=body.email, notes=body.notes,
+    )
+    db.add(c)
+    await db.flush()
+    return _contact_resp(c)
+
+
+@router.patch("/counterparties/{item_id}/contacts/{contact_id}")
+async def update_counterparty_contact(
+    item_id: str,
+    contact_id: str,
+    body: CounterpartyContactIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    cp = await get_owned(Counterparty, _parse_uuid(item_id), current_user, db)
+    c = (await db.execute(select(CounterpartyContact).where(
+        CounterpartyContact.id == _parse_uuid(contact_id),
+        CounterpartyContact.counterparty_id == cp.id))).scalar_one_or_none()
+    if c is None:
+        raise HTTPException(404, "Контакт не найден")
+    if body.role not in CONTACT_ROLES:
+        raise HTTPException(400, f"Неизвестная роль контакта: {body.role}")
+    c.name, c.position, c.role = body.name.strip(), body.position, body.role
+    c.phone, c.email, c.notes = body.phone, body.email, body.notes
+    await db.flush()
+    return _contact_resp(c)
+
+
+@router.delete("/counterparties/{item_id}/contacts/{contact_id}",
+               status_code=status.HTTP_204_NO_CONTENT)
+async def delete_counterparty_contact(
+    item_id: str,
+    contact_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cp = await get_owned(Counterparty, _parse_uuid(item_id), current_user, db)
+    c = (await db.execute(select(CounterpartyContact).where(
+        CounterpartyContact.id == _parse_uuid(contact_id),
+        CounterpartyContact.counterparty_id == cp.id))).scalar_one_or_none()
+    if c is None:
+        raise HTTPException(404, "Контакт не найден")
+    await db.delete(c)
 
 
 # ---------------------------------------------------------------------------
@@ -989,6 +1079,7 @@ async def get_location_contracts(
             counterpartyId=c.counterparty_id,
             counterpartyName=cp.name if cp else None,
             counterpartyInn=cp.inn if cp else None,
+            validUntil=c.valid_until,
         ))
         if c.counterparty_id and c.counterparty_id not in seen:
             seen[c.counterparty_id] = CounterpartyBrief(

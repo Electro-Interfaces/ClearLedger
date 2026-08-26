@@ -484,6 +484,48 @@ export async function getLocationContracts(locationId: string): Promise<Location
   return get<LocationContracts>(`/api/references/locations/${locationId}/contracts`)
 }
 
+// ---- Контактные лица контрагента ----
+
+export const CONTACT_ROLE_LABEL: Record<string, string> = {
+  contract: 'Договор', tech: 'Техника', comm: 'Взаимодействие', other: 'Прочее',
+}
+
+export interface CounterpartyContact {
+  id: string
+  counterpartyId: string
+  name: string
+  position?: string | null
+  role: string
+  phone?: string | null
+  email?: string | null
+  notes?: string | null
+}
+export type CounterpartyContactIn = Omit<CounterpartyContact, 'id' | 'counterpartyId'>
+
+export async function getCounterpartyContacts(counterpartyId: string): Promise<CounterpartyContact[]> {
+  if (!isApiEnabled()) return []
+  return get<CounterpartyContact[]>(`/api/references/counterparties/${counterpartyId}/contacts`)
+}
+
+export async function createCounterpartyContact(
+  counterpartyId: string, body: CounterpartyContactIn,
+): Promise<CounterpartyContact> {
+  return post<CounterpartyContact>(`/api/references/counterparties/${counterpartyId}/contacts`, body)
+}
+
+export async function updateCounterpartyContact(
+  counterpartyId: string, contactId: string, body: CounterpartyContactIn,
+): Promise<CounterpartyContact> {
+  return patch<CounterpartyContact>(
+    `/api/references/counterparties/${counterpartyId}/contacts/${contactId}`, body)
+}
+
+export async function deleteCounterpartyContact(
+  counterpartyId: string, contactId: string,
+): Promise<void> {
+  await del(`/api/references/counterparties/${counterpartyId}/contacts/${contactId}`)
+}
+
 // ---- Активность контрагента в учёте (его документы: по связи, ИНН — запасной ключ) ----
 
 /** `label` — имя вида с сервера: словарь один на реестр документов, выгрузки и карточку. */

@@ -238,7 +238,10 @@ function ContractDetailDialog({ contract: c, children }: { contract: Contract; c
             <Req label="Вид договора" value={<ContractKindBadge contract={c} />} />
             {!isEnergy && <Req label="Тип / предмет" value={c.type} />}
             <Req label="Валюта" value={c.currency} />
-            <Req label="Срок действия" value={c.validUntil} />
+            {/* Пустой срок в системе означает «бессрочно» (так же читает справочник
+                пространства). Молчащее поле люди принимали за незаполненное:
+                бессрочных договоров в пилоте 827 из 901. */}
+            <Req label="Срок действия" value={c.validUntil || 'бессрочный (до расторжения)'} />
             <Req label="Сумма" value={c.amountLimit ? c.amountLimit.toLocaleString('ru-RU') : undefined} />
             <Req label="Ставка НДС" value={c.vatRate} />
             <Req label="Сумма включает НДС" value={c.amountInclVat == null ? ('СуммаВключаетНДС' in raw ? fmtRaw(raw.СуммаВключаетНДС) : undefined) : (c.amountInclVat ? 'Да' : 'Нет')} />
@@ -260,6 +263,157 @@ function ContractDetailDialog({ contract: c, children }: { contract: Contract; c
             <RawRequisites raw={c.raw} hide={['Номер', 'Дата', 'ВидДоговора', 'СрокДействия', 'Сумма', 'ДоговорЗакрыт', 'СуммаВключаетНДС', 'Комментарий']} />
           </div>
         </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ─── Блок «Контакты» (люди на стороне контрагента) ──────────────────────────
+// Телефон и почта организации лежат в реквизитах — это её данные. Здесь люди:
+// кому звонить и по какому поводу. Спросили прямо: «на вкладке контрагенты не
+// нашёл функции по добавлению контактов» (Пашнев, 25.08.2026).
+function ContactsBlock({ cp }: { cp: Counterparty }) {
+  const qc = useQueryClient()
+  const q = useQuery({
+    queryKey: ['cp-contacts', cp.id],
+    queryFn: () => refs.getCounterpartyContacts(cp.id),
+  })
+  const contacts = q.data ?? []
+  const invalidate = () => qc.invalidateQueries({ queryKey: ['cp-contacts', cp.id] })
+  const remove = useMutation({
+    mutationFn: (id: string) => refs.deleteCounterpartyContact(cp.id, id),
+    onSuccess: () => { toast.success('Контакт удалён'); invalidate() },
+    onError: (e: unknown) => toast.error(`Ошибка: ${(e as Error).message}`),
+  })
+
+  return (
+    <div>
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/70">
+          Контакты ({contacts.length})
+        </p>
+        <ContactFormDialog counterpartyId={cp.id} onSaved={invalidate}>
+          <Button size="sm" variant="outline" className="shrink-0">
+            <Plus className="size-4 mr-1.5" /> Добавить
+          </Button>
+        </ContactFormDialog>
+      </div>
+      {contacts.length === 0 ? (
+        <p className="text-xs text-muted-foreground">
+          Контактных лиц нет. Реквизиты связи самой организации — в блоке «Реквизиты».
+        </p>
+      ) : (
+        <div className="rounded-md border">
+          <Table>
+            <TableHeader><TableRow>
+              <TableHead>ФИО</TableHead>
+              <TableHead className="w-[150px]">Роль</TableHead>
+              <TableHead className="w-[150px]">Телефон</TableHead>
+              <TableHead className="w-[190px]">Почта</TableHead>
+              <TableHead className="w-[70px]" />
+            </TableRow></TableHeader>
+            <TableBody>
+              {contacts.map((k) => (
+                <TableRow key={k.id}>
+                  <TableCell className="text-sm">
+                    <div className="font-medium">{k.name}</div>
+                    {k.position && <div className="text-xs text-muted-foreground">{k.position}</div>}
+                    {k.notes && <div className="text-xs text-muted-foreground/80">{k.notes}</div>}
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="outline" className="text-[11px]">
+                      {refs.CONTACT_ROLE_LABEL[k.role] ?? k.role}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-sm tabular-nums">{k.phone || '—'}</TableCell>
+                  <TableCell className="text-sm break-all">{k.email || '—'}</TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex justify-end gap-1">
+                      <ContactFormDialog counterpartyId={cp.id} edit={k} onSaved={invalidate}>
+                        <Button variant="ghost" size="icon" className="h-8 w-8">
+                          <Pencil className="size-3.5" />
+                        </Button>
+                      </ContactFormDialog>
+                      <Button variant="ghost" size="icon" className="h-8 w-8"
+                        onClick={() => remove.mutate(k.id)}>
+                        <Trash2 className="size-3.5 text-destructive" />
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ContactFormDialog({ counterpartyId, edit, onSaved, children }: {
+  counterpartyId: string
+  edit?: refs.CounterpartyContact
+  onSaved: () => void
+  children: React.ReactNode
+}) {
+  const [open, setOpen] = useState(false)
+  const [f, setF] = useState({
+    name: edit?.name ?? '', position: edit?.position ?? '', role: edit?.role ?? 'other',
+    phone: edit?.phone ?? '', email: edit?.email ?? '', notes: edit?.notes ?? '',
+  })
+  const save = useMutation({
+    mutationFn: () => {
+      const body = {
+        name: f.name.trim(), position: f.position.trim() || null, role: f.role,
+        phone: f.phone.trim() || null, email: f.email.trim() || null,
+        notes: f.notes.trim() || null,
+      }
+      return edit
+        ? refs.updateCounterpartyContact(counterpartyId, edit.id, body)
+        : refs.createCounterpartyContact(counterpartyId, body)
+    },
+    onSuccess: () => {
+      toast.success(edit ? 'Контакт обновлён' : 'Контакт добавлен'); setOpen(false); onSaved()
+    },
+    onError: (e: unknown) => toast.error(`Ошибка: ${(e as Error).message}`),
+  })
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>{children}</DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{edit ? 'Изменить контакт' : 'Новый контакт'}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div className="space-y-1.5"><Label>ФИО <span className="text-destructive">*</span></Label>
+            <Input value={f.name} onChange={(e) => setF((s) => ({ ...s, name: e.target.value }))} /></div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5"><Label>Должность</Label>
+              <Input value={f.position} onChange={(e) => setF((s) => ({ ...s, position: e.target.value }))} /></div>
+            <div className="space-y-1.5"><Label>Роль</Label>
+              <Select value={f.role} onValueChange={(v) => setF((s) => ({ ...s, role: v }))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {Object.entries(refs.CONTACT_ROLE_LABEL).map(([k, label]) => (
+                    <SelectItem key={k} value={k}>{label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select></div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5"><Label>Телефон</Label>
+              <Input value={f.phone} onChange={(e) => setF((s) => ({ ...s, phone: e.target.value }))} placeholder="+7 …" /></div>
+            <div className="space-y-1.5"><Label>Почта</Label>
+              <Input value={f.email} onChange={(e) => setF((s) => ({ ...s, email: e.target.value }))} /></div>
+          </div>
+          <div className="space-y-1.5"><Label>Примечание</Label>
+            <Textarea value={f.notes} onChange={(e) => setF((s) => ({ ...s, notes: e.target.value }))} rows={2} /></div>
+        </div>
+        <DialogFooter>
+          <Button disabled={!f.name.trim() || save.isPending} onClick={() => save.mutate()}>
+            {save.isPending && <Loader2 className="size-4 animate-spin mr-2" />} Сохранить
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   )
@@ -547,6 +701,8 @@ function ContractorDetail({ cp, all }: { cp: Counterparty; all: Counterparty[] }
         </div>
       </details>
 
+      <ContactsBlock cp={cp} />
+
       {/* Договоры */}
       <div>
         <div className="flex items-center justify-between gap-2 mb-2">
@@ -791,6 +947,9 @@ function ContractFormDialog({ counterpartyId, edit, children }: {
     vatRate: edit?.vatRate ?? '', settlementKind: edit?.settlementKind ?? '', comment: edit?.comment ?? '',
     amountInclVat: edit?.amountInclVat == null ? '' : (edit.amountInclVat ? 'true' : 'false'),
     isClosed: edit?.isClosed ?? false,
+    // Бессрочность хранится отсутствием даты — своей колонки нет и не нужно:
+    // пустой `valid_until` уже везде читается как «действует до расторжения».
+    perpetual: !edit?.validUntil,
   })
   const orgId = f.organizationId || (orgs[0]?.externalRef || orgs[0]?.id || '')
   const canSave = f.number.trim() !== '' && f.date.trim() !== '' && orgId !== ''
@@ -806,7 +965,9 @@ function ContractFormDialog({ counterpartyId, edit, children }: {
       settlementKind: f.settlementKind.trim() || undefined,
       comment: f.comment.trim() || undefined,
       isClosed: f.isClosed,
-      scopeType: 'unassigned' as const,
+      // Охват правится своим диалогом («Охват договора»). Слать его отсюда нельзя:
+      // при правке любого поля привязка к точкам сбрасывалась в «Не распределён».
+      ...(edit ? {} : { scopeType: 'unassigned' as const }),
     }
     const opts = {
       onSuccess: () => { toast.success(edit ? 'Договор обновлён' : 'Договор добавлен'); setOpen(false) },
@@ -852,7 +1013,13 @@ function ContractFormDialog({ counterpartyId, edit, children }: {
                 <Input value={f.currency} onChange={(e) => setF((s) => ({ ...s, currency: e.target.value }))} /></div>
             </AdvancedOnly>
             <div className="space-y-1.5"><Label>Срок действия</Label>
-              <Input type="date" value={f.validUntil} onChange={(e) => setF((s) => ({ ...s, validUntil: e.target.value }))} /></div>
+              <Input type="date" value={f.validUntil} disabled={f.perpetual}
+                onChange={(e) => setF((s) => ({ ...s, validUntil: e.target.value }))} />
+              <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">
+                <input type="checkbox" checked={f.perpetual} className="size-3.5 accent-primary"
+                  onChange={(e) => setF((s) => ({ ...s, perpetual: e.target.checked, validUntil: e.target.checked ? '' : s.validUntil }))} />
+                бессрочный
+              </label></div>
             <div className="space-y-1.5"><Label>Сумма</Label>
               <Input value={f.amountLimit} onChange={(e) => setF((s) => ({ ...s, amountLimit: e.target.value.replace(/[^\d.]/g, '') }))} /></div>
           </div>

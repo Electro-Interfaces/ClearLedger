@@ -33,6 +33,7 @@ import {
   Trash2, Unplug, Upload,
 } from 'lucide-react'
 import { Kpi } from '@/components/workspace/analytics/Kpi'
+import { useFilters } from '@/contexts/FilterContext'
 import { ApiError } from '@/services/apiClient'
 import { getLocations, loadLocations } from '@/services/locationService'
 import type { ServiceLocation } from '@/types/location'
@@ -499,7 +500,7 @@ function UnitDetailsDialog({ companyId, unitId, warehouses, sites, onClose }: {
                   <EF label="Серийный №">
                     <Input value={edit.serialNumber} onChange={(e) => setEdit({ ...edit, serialNumber: e.target.value })} />
                   </EF>
-                  <EF label="Вендор">
+                  <EF label="Производитель">
                     <Input value={edit.vendor} onChange={(e) => setEdit({ ...edit, vendor: e.target.value })} />
                   </EF>
                   <EF label="Модель">
@@ -554,7 +555,7 @@ function UnitDetailsDialog({ companyId, unitId, warehouses, sites, onClose }: {
                 <div className="grid grid-cols-2 gap-x-4 gap-y-3">
                   <KV label="Серийный №" value={unit.serialNumber ?? undefined} />
                   <KV label="Инв. №" value={unit.inventoryNumber ?? undefined} />
-                  <KV label="Вендор" value={unit.vendor ?? unit.vendorRaw ?? undefined} />
+                  <KV label="Производитель" value={unit.vendor ?? unit.vendorRaw ?? undefined} />
                   <KV label="Модель" value={unit.model ?? undefined} />
                   <KV label="Тип станции" value={unit.stationType ?? undefined} />
                   <KV label="Мощность" value={unit.powerKwt != null ? `${nf0.format(unit.powerKwt)} кВт` : undefined} />
@@ -721,7 +722,7 @@ function UnitFormDialog({ companyId, warehouses, onClose }: {
             <EF label="Серийный №">
               <Input value={serial} onChange={(e) => setSerial(e.target.value)} placeholder="SN-…" />
             </EF>
-            <EF label="Вендор">
+            <EF label="Производитель">
               <Input value={vendor} onChange={(e) => setVendor(e.target.value)} placeholder="Sitronics" />
             </EF>
             <EF label="Модель">
@@ -1086,14 +1087,21 @@ export function EquipmentFleetPanel({ companyId }: { companyId: string }) {
   })
   const overview = overviewQ.data
 
+  // Контур рабочей области: панель фильтров стоит над разделом и обещает регион
+  // и станции — до парка она не доезжала, и при «Приморском крае» в списке
+  // оставались склады Хабаровска и Череповца.
+  const { regionIds, stationCodes, locationIds } = useFilters()
+  const scopeKey = `${regionIds.join(',')}|${stationCodes.join(',')}|${locationIds.join(',')}`
+
   const unitsQ = useQuery({
-    queryKey: ['eq-units', companyId, { state, vendor, warehouseFilter, q }],
+    queryKey: ['eq-units', companyId, { state, vendor, warehouseFilter, q, scopeKey }],
     queryFn: () => listUnits({
       companyId,
       state: state === 'all' ? undefined : state,
       vendor: vendor === 'all' ? undefined : vendor,
       locationId: warehouseFilter === 'all' ? undefined : warehouseFilter,
       q: q || undefined,
+      regionIds, stationCodes: stationCodes.map(String), locationIds,
     }),
   })
 
@@ -1180,7 +1188,7 @@ export function EquipmentFleetPanel({ companyId }: { companyId: string }) {
         <Select value={vendor} onValueChange={setVendor}>
           <SelectTrigger className="h-8 w-[170px] text-xs"><SelectValue /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="all" className="text-xs">Все вендоры</SelectItem>
+            <SelectItem value="all" className="text-xs">Все производители</SelectItem>
             {(overview?.countsByVendor ?? []).map((v) => (
               <SelectItem key={v.vendor} value={v.vendor} className="text-xs">
                 {v.vendor} · {nf0.format(v.count)}
@@ -1241,7 +1249,7 @@ export function EquipmentFleetPanel({ companyId }: { companyId: string }) {
               <thead>
                 <tr className="border-b bg-muted/40 text-muted-foreground">
                   <H k="serialNumber">Серийный №</H>
-                  <H k="vendor">Вендор</H>
+                  <H k="vendor">Производитель</H>
                   <H k="model">Модель</H>
                   <H k="powerKwt" right>кВт</H>
                   <H k="state">Состояние</H>

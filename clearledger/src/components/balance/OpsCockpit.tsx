@@ -45,6 +45,11 @@ import { MetricTile as Kpi } from '@/components/ui/metric-tile'
 const dLabel = (iso?: string | null) => (iso ? iso.split('-').reverse().join('.') : null)
 
 /* ── фильтр по региону (селект из данных ответа) ── */
+/** Маркер легенды — тем же цветом, что полоса в таблице. */
+function Mark({ cls }: { cls: string }) {
+  return <span className={`inline-block h-1.5 w-4 shrink-0 rounded-sm align-middle ${cls}`} />
+}
+
 function RegionSelect({ regions, value, onChange }: {
   regions: string[]; value: string | undefined; onChange: (v: string | undefined) => void
 }) {
@@ -149,7 +154,9 @@ export function StationDrillModal({ locationId, onClose }: { locationId: string 
             <div>
               <div className="mb-2 flex items-center gap-2">
                 <div className="text-sm font-medium">Энергобаланс по месяцам</div>
-                <span className="text-xs text-muted-foreground/70">▬ вход по счетам · ▬ отпуск по сессиям</span>
+                <span className="flex items-center gap-1.5 text-xs text-muted-foreground/70">
+                  <Mark cls="bg-primary/70" /> вход по счетам · <Mark cls="bg-emerald-500/60" /> отпуск по сессиям
+                </span>
               </div>
               <div className="overflow-x-auto rounded-md border border-border/40">
                 <Table><TableHeader><TableRow>
@@ -408,7 +415,7 @@ export function OpsOverviewVitrine({ embedded }: {
           })}
         </TableBody></Table>
         <p className="text-xs text-muted-foreground/70">
-          ▬ синий — вход по счетам контрагентов · ▬ зелёный — отпуск по сессиям. «Нет счетов» —
+          <Mark cls="bg-primary/70" /> синий — вход по счетам контрагентов · <Mark cls="bg-emerald-500/60" /> зелёный — отпуск по сессиям. «Нет счетов» —
           вход за месяц ещё не выставлен/не загружен: затраты и небаланс не считаются. Пообъектная
           детализация — пункт «Баланс (факт)».
         </p>

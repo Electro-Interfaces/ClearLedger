@@ -127,11 +127,31 @@ async def count_sessions(
     return {"count": int(n)}
 
 
+def _csv(v: str | None) -> list[str]:
+    return [x.strip() for x in v.split(",") if x.strip()] if v else []
+
+
+def _payment_scope_cond(cid, stations: list[str], regions: list[str]):
+    """Сужение платежей контуром рабочей области.
+
+    У `charge_payments` нет своей станции — единственная связь с сетью идёт через
+    `session_ext_id`. Поэтому контур применяется отбором сессий, а платёж без
+    сессии в сужённый ответ попасть не может: отнести его к станции нечем.
+    Возвращает None, если контур не задан."""
+    conds = session_scope_conds(cid, stations or None, regions or None)
+    if not conds:
+        return None
+    return ChargePayment.session_ext_id.in_(
+        select(ChargeSession.session_ext_id).where(ChargeSession.company_id == cid, *conds))
+
+
 @router.get("/payments/summary")
 async def payments_summary(
     company_id: str,
     date_from: str,
     date_to: str,
+    stations: str | None = Query(None, description="коды ЭЗС через запятую — контур"),
+    regions: str | None = Query(None, description="регионы через запятую — контур"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
@@ -147,6 +167,9 @@ async def payments_summary(
     df, dt = _day_bounds(date_from, date_to)
     scope = [ChargePayment.company_id == cid,
              ChargePayment.paid_at >= df, ChargePayment.paid_at < dt]
+    scoped = _payment_scope_cond(cid, _csv(stations), _csv(regions))
+    if scoped is not None:
+        scope.append(scoped)
 
     t = (await db.execute(select(
         func.count().label("count"),
@@ -195,6 +218,9 @@ async def payments_summary(
             "orphans": cnt - int(linked or 0),
             "stuckCount": int(stuck.count or 0),
             "stuckAmount": float(stuck.amount or 0),
+            # Экран обязан сказать, что при контуре платежи без сессии не видны:
+            # иначе итог молча расходится с реестром.
+            "scoped": scoped is not None,
         },
         "byMonth": [{"bucket": r.bucket, "count": int(r.count), "amount": float(r.amount),
                      "refund": float(r.refund), "receipts": int(r.receipts)} for r in by_month],
@@ -208,6 +234,8 @@ async def payments_list(
     company_id: str,
     date_from: str,
     date_to: str,
+    stations: str | None = Query(None, description="коды ЭЗС через запятую — контур"),
+    regions: str | None = Query(None, description="регионы через запятую — контур"),
     only: str | None = Query(None, description="orphans | stuck | refunds — фильтр разбора"),
     limit: int = Query(200, le=2000),
     db: AsyncSession = Depends(get_db),
@@ -218,6 +246,9 @@ async def payments_list(
     df, dt = _day_bounds(date_from, date_to)
     conds = [ChargePayment.company_id == cid,
              ChargePayment.paid_at >= df, ChargePayment.paid_at < dt]
+    scoped = _payment_scope_cond(cid, _csv(stations), _csv(regions))
+    if scoped is not None:
+        conds.append(scoped)
     if only == "orphans":
         conds.append(~select(ChargeSession.id).where(
             ChargeSession.company_id == cid,

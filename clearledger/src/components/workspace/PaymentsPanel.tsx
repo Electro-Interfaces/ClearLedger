@@ -13,6 +13,7 @@ import { Loader2, ExternalLink } from 'lucide-react'
 import { Kpi } from './analytics/Kpi'
 import { PanelViewTabs } from './PanelViewTabs'
 import { useTabParams } from '@/hooks/useTabParams'
+import { useFilters } from '@/contexts/FilterContext'
 import {
   getPaymentsList, getPaymentsSummary, getReconciliation, getReconciliationBy,
   getReconciliationRows,
@@ -56,16 +57,22 @@ export function PaymentsPanel({ companyId, dateFrom, dateTo }: Props) {
   const setView = (k: string) => patch({ view: k })
   const [slice, setSlice] = useState<string>('')
 
+  // Контур рабочей области. До этого экран брал платежи всей сети, а панель
+  // сверху обещала выбранные станции: 27 887 платежей на 11 станциях МЗК.
+  const { stationCodes, regionIds } = useFilters()
+  const stations = stationCodes.map(String)
+  const scopeKey = `${stations.join(',')}|${regionIds.join(',')}`
+
   const { data, isLoading } = useQuery<PaymentsSummary>({
-    queryKey: ['charge-payments', companyId, dateFrom, dateTo],
-    queryFn: () => getPaymentsSummary({ companyId, dateFrom, dateTo }),
+    queryKey: ['charge-payments', companyId, dateFrom, dateTo, scopeKey],
+    queryFn: () => getPaymentsSummary({ companyId, dateFrom, dateTo, stations, regions: regionIds }),
     enabled: !!companyId,
   })
 
   const list = useQuery<PaymentLine[]>({
-    queryKey: ['charge-payments-list', companyId, dateFrom, dateTo, slice],
+    queryKey: ['charge-payments-list', companyId, dateFrom, dateTo, slice, scopeKey],
     queryFn: () => getPaymentsList({
-      companyId, dateFrom, dateTo,
+      companyId, dateFrom, dateTo, stations, regions: regionIds,
       only: (slice || undefined) as 'orphans' | 'stuck' | 'refunds' | undefined,
     }),
     enabled: !!companyId && view === 'list',
@@ -93,9 +100,11 @@ export function PaymentsPanel({ companyId, dateFrom, dateTo }: Props) {
             <Kpi label="Зависшие холды" value={money(t.stuckAmount)}
                  sub={`${nf0.format(t.stuckCount)} платежей: деньги удержаны, списания и возврата нет`}
                  cls={t.stuckCount ? 'text-amber-600 dark:text-amber-400' : undefined} />
-            <Kpi label="Платежей без сессии" value={nf0.format(t.orphans)}
-                 sub={t.orphans ? 'сессия в Учёт ещё не загружена' : 'все платежи нашли свою сессию'}
-                 cls={t.orphans ? 'text-amber-600 dark:text-amber-400' : undefined} />
+            <Kpi label="Платежей без сессии" value={t.scoped ? '—' : nf0.format(t.orphans)}
+                 sub={t.scoped
+                   ? 'при выбранных станциях не считаются: платёж относится к станции через сессию'
+                   : (t.orphans ? 'сессия в Учёт ещё не загружена' : 'все платежи нашли свою сессию')}
+                 cls={!t.scoped && t.orphans ? 'text-amber-600 dark:text-amber-400' : undefined} />
           </div>
           <Card><CardContent className="p-0 overflow-x-auto">
             <table className="w-full text-xs">

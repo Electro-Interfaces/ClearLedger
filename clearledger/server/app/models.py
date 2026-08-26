@@ -1085,6 +1085,49 @@ class NomenclatureItem(Base):
 
 
 # ---------------------------------------------------------------------------
+# НСИ: CounterpartyContact (контактные лица контрагента)
+# ---------------------------------------------------------------------------
+class CounterpartyContact(Base):
+    """Живой человек на стороне контрагента: кому звонить и по какому поводу.
+
+    Отдельной таблицей, а не полем в `Counterparty.raw`: raw — снимок выгрузки
+    источника и перезаписывается при каждом импорте, ручной ввод там бы пропал.
+    Телефон и почта самой организации остаются в карточке (`phone`/`email`) —
+    это её реквизиты, а здесь люди.
+
+    Роль отвечает на вопрос «по какому поводу»: заказчик просил различать
+    договорную, техническую и общую связь — эскалация упирается именно в это.
+    """
+
+    __tablename__ = "counterparty_contacts"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    counterparty_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("counterparties.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    position: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    # contract | tech | comm | other
+    role: Mapped[str] = mapped_column(String(20), nullable=False, default="other")
+    phone: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+# ---------------------------------------------------------------------------
 # НСИ: Contract (Договоры)
 # ---------------------------------------------------------------------------
 class Contract(Base):
@@ -8921,6 +8964,59 @@ class StoreCheque(Base):
                          name="uq_store_cheque"),
         Index("ix_store_cheques_at", "company_id", "station_id", "at"),
         CheckConstraint("version > 0", name="ck_store_cheque_version"),
+    )
+
+
+class StorePricePlan(Base):
+    """Намерение сменить цену: корзина изменений и отложенное применение.
+
+    Отделено от истории цен (`edge.price`) намеренно: там факт — «цена стала
+    такой тогда-то», здесь план — «хотим такую с такого-то времени». Пока план
+    не применён, на полке и в кассе прежняя цена.
+
+    Зачем корзина вообще нужна. Массовое правило — самая опасная операция сети:
+    одна опечатка в поле «процент» переписывает весь прайс. Черновик даёт
+    остановиться и посмотреть, отложенное применение — сменить цены к открытию
+    смены, а не посреди неё. Ровно так это устроено на станции
+    (`agent/internal/store/prices.go`, таблица `price_plan`), и центр обязан
+    работать так же: одинаковое действие не может называться по-разному.
+
+    Одна активная строка на (АЗС, карточка): корзина — это «что хотим сделать
+    сейчас», а не журнал намерений. Повторное правило по той же позиции заменяет
+    прежнюю строку, а не копит вторую с другой ценой.
+    """
+    __tablename__ = "store_price_plans"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    station_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    item_uuid: Mapped[str] = mapped_column(String(64), nullable=False)
+    name: Mapped[str] = mapped_column(String(300), nullable=False, default="")
+    old_price: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+    new_price: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False)
+    author: Mapped[str] = mapped_column(String(120), nullable=False, default="")
+    reason: Mapped[str] = mapped_column(String(300), nullable=False, default="")
+    # draft — копится в корзине; scheduled — ждёт своего времени;
+    # applied — применён; cancelled — снят до применения.
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft")
+    # Когда применить. Пусто у черновика: ещё не решили когда.
+    effective_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False)
+    applied_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    # Почему не поехало: карточки нет в справочнике, цену перехватила станция.
+    # Пустое у успешных — иначе разбирать нечего.
+    error: Mapped[str | None] = mapped_column(String(300), nullable=True)
+
+    __table_args__ = (
+        Index("uq_store_price_plan_active", "company_id", "station_id", "item_uuid",
+              unique=True, postgresql_where=text("status IN ('draft','scheduled')")),
+        Index("ix_store_price_plans_due", "status", "effective_at"),
+        CheckConstraint("new_price >= 0", name="ck_store_price_plan_price"),
     )
 
 

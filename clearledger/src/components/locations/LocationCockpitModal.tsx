@@ -130,9 +130,17 @@ export function LocationCockpitModal({
           </div>
 
           <Tabs defaultValue="passport" className="flex flex-1 flex-col gap-0 overflow-hidden">
-            <TabsPrimitive.List className="flex shrink-0 items-end gap-1 overflow-x-auto border-b border-border/50 bg-muted/20 px-2 pt-1.5">
-              {triggers}
-            </TabsPrimitive.List>
+            {/* Затухание у правого края: вкладок девять, в узком окне ряд
+                обрывается молча, и «Договоры» кажутся отсутствующими — так и
+                спросили («в „Объектах“ нет условий договоров»). Полосу прокрутки
+                macOS прячет, поэтому подсказка своя. */}
+            <div className="relative shrink-0">
+              <TabsPrimitive.List className="flex items-end gap-1 overflow-x-auto border-b border-border/50 bg-muted/20 px-2 pt-1.5">
+                {triggers}
+              </TabsPrimitive.List>
+              <span aria-hidden
+                className="pointer-events-none absolute inset-y-0 right-0 w-8 bg-gradient-to-l from-background to-transparent" />
+            </div>
 
             <div className="flex-1 overflow-hidden">
               <TabsContent value="passport" className="m-0 h-full">

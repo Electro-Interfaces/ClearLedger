@@ -9,13 +9,14 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader,
   AlertDialogTitle, AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
-import { Trash2, ChevronLeft, ChevronRight, ArrowUpDown, Pencil } from 'lucide-react'
+import { Trash2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ArrowUpDown, Pencil } from 'lucide-react'
 import { toast } from 'sonner'
 import { deleteLocation } from '@/services/locationService'
 import { resolveLocationIcon } from '@/components/locationTypes/locationIcons'
@@ -24,12 +25,15 @@ import type { LocationTypeDef } from '@/types/locationType'
 import { m } from './fleet/locationFleetService'
 import { OP_META } from './cockpit/shared'
 import { useAllSettlements } from '@/hooks/useReferences'
+import { useTabParams } from '@/hooks/useTabParams'
 import {
   stationFlag, paidThroughLabel, ROLE_LABEL,
   type StationFlag, type StationSettlement,
 } from '@/types/settlement'
 
 const PAGE_SIZE = 50
+
+const TABLE_DEFAULTS = { sort: 'name' as SortKey, asc: true, page: 0 }
 
 // Статус связки HubEx → подпись + цвет бейджа.
 const LINK_META: Record<string, { label: string; cls: string }> = {
@@ -99,9 +103,14 @@ export function LocationsTable({
   /** Клик по строке → открыть окно станции (cockpit). */
   onSelectLocation?: (location: ServiceLocation) => void
 }) {
-  const [sort, setSort] = useState<SortKey>('name')
-  const [asc, setAsc] = useState(true)
-  const [page, setPage] = useState(0)
+  // Сортировка и страница живут в параметрах пункта, а не в useState: вход в
+  // карточку станции размонтирует список, и возврат ронял отбор на первую страницу.
+  const [tp, patchTp] = useTabParams('loc_table', TABLE_DEFAULTS)
+  const { sort, asc, page } = tp
+  const setSort = (v: SortKey) => patchTp({ sort: v })
+  const setAsc = (v: boolean) => patchTp({ asc: v })
+  const setPage = (v: number) => patchTp({ page: v })
+  const [pageInput, setPageInput] = useState<string | null>(null)
 
   // Колонка «Реализация, пред. мес.» показывается, только если хотя бы у одной
   // точки выборки есть это значение (для ЭЗС/энергетики данных нет → скрыта).
@@ -165,15 +174,24 @@ export function LocationsTable({
     })
   }, [locations, sort, asc])
 
-  // Новая выборка (фильтры изменились) → вернуться на первую страницу.
-  useEffect(() => { setPage(0) }, [locations])
+  // Новая ВЫБОРКА → на первую страницу. Сравниваем состав, а не ссылку на массив:
+  // родитель отдаёт новый массив на каждый свой рендер, и по ссылке страница
+  // слетала при обычном возврате из карточки станции — ровно то, на что
+  // пожаловались («хлебные крошки сбрасываются», 24.08.2026).
+  const selectionKey = `${locations.length}|${locations[0]?.id ?? ''}|${locations[locations.length - 1]?.id ?? ''}`
+  useEffect(() => { patchTp({ page: 0 }) }, [selectionKey, patchTp])
 
   const pageCount = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE))
   const cur = Math.min(page, pageCount - 1)
   const slice = sorted.slice(cur * PAGE_SIZE, cur * PAGE_SIZE + PAGE_SIZE)
+  function applyPageInput() {
+    const n = Number(pageInput)
+    if (pageInput && Number.isFinite(n) && n >= 1) setPage(Math.min(n, pageCount) - 1)
+    setPageInput(null)
+  }
 
   function toggleSort(k: SortKey) {
-    if (sort === k) setAsc((v) => !v)
+    if (sort === k) setAsc(!asc)
     else { setSort(k); setAsc(true) }
   }
 
@@ -338,12 +356,27 @@ export function LocationsTable({
       {/* Пагинация */}
       {pageCount > 1 && (
         <div className="flex items-center justify-between">
-          <span className="text-xs text-muted-foreground">Страница {cur + 1} из {pageCount}</span>
-          <div className="flex gap-1">
+          <span className="text-xs text-muted-foreground">
+            {sorted.length.toLocaleString('ru-RU')} записей · страница {cur + 1} из {pageCount}
+          </span>
+          {/* Ввод номера и края: на 13 страницах ходить по одной — долго. */}
+          <div className="flex items-center gap-1">
             <Button variant="outline" size="icon" className="h-8 w-8" disabled={cur === 0}
-              onClick={() => setPage(cur - 1)}><ChevronLeft className="h-4 w-4" /></Button>
+              onClick={() => setPage(0)} aria-label="Первая страница"><ChevronsLeft className="h-4 w-4" /></Button>
+            <Button variant="outline" size="icon" className="h-8 w-8" disabled={cur === 0}
+              onClick={() => setPage(cur - 1)} aria-label="Предыдущая страница"><ChevronLeft className="h-4 w-4" /></Button>
+            <Input
+              className="h-8 w-14 text-center text-xs tabular-nums"
+              value={pageInput ?? String(cur + 1)}
+              onChange={(e) => setPageInput(e.target.value.replace(/\D/g, ''))}
+              onBlur={() => { applyPageInput(); }}
+              onKeyDown={(e) => { if (e.key === 'Enter') { applyPageInput(); (e.target as HTMLInputElement).blur() } }}
+              aria-label="Номер страницы"
+            />
             <Button variant="outline" size="icon" className="h-8 w-8" disabled={cur >= pageCount - 1}
-              onClick={() => setPage(cur + 1)}><ChevronRight className="h-4 w-4" /></Button>
+              onClick={() => setPage(cur + 1)} aria-label="Следующая страница"><ChevronRight className="h-4 w-4" /></Button>
+            <Button variant="outline" size="icon" className="h-8 w-8" disabled={cur >= pageCount - 1}
+              onClick={() => setPage(pageCount - 1)} aria-label="Последняя страница"><ChevronsRight className="h-4 w-4" /></Button>
           </div>
         </div>
       )}

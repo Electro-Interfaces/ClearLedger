@@ -19,6 +19,8 @@ import { getStsStationsFromLocations } from '@/services/locationService'
 import { WorkspaceFilterModal } from './WorkspaceFilterModal'
 import { WorkspaceScopeControl } from './WorkspaceScopePopover'
 import { FuelKindControl } from './FuelKindControl'
+import { useWorkspace } from '@/contexts/WorkspaceContext'
+import { STORE_MODES } from '@/config/storeCatalog'
 import { ViewHistoryMenu } from './ViewHistoryMenu'
 import { ActiveFilterChips } from '@/components/common/ActiveFilterChips'
 import { AdvancedOnly } from '@/components/common/AdvancedOnly'
@@ -353,6 +355,13 @@ export function WorkspaceFilterBar() {
   // объектов получала в фильтре вопросы про топливо и станции, которых у неё нет.
   const isFuel = company.profileId === 'fuel'
   const isOffice = company.profileId === 'office'
+  // «Магазин» живёт у того же топливного профиля, но торгует не топливом:
+  // вид нефтепродукта, источник смен STS и обновление ленты STS к сопутке и
+  // общепиту отношения не имеют, а занятый ими чип читается как фильтр,
+  // который на цифры экрана не влияет (замечание МАГа 25.08.2026). Период и
+  // область учёта, наоборот, работают в «Магазине» так же, как в «Топливе».
+  const { coreMode } = useWorkspace()
+  const топливныйКонтур = isFuel && !STORE_MODES.includes(coreMode)
   const stations = getStsStationsFromLocations()
   const queryClient = useQueryClient()
   const [open, setOpen] = useState(false)
@@ -391,19 +400,23 @@ export function WorkspaceFilterBar() {
         {count > 0 ? <Badge className="min-w-5 px-1.5">{count}</Badge> : null}
       </Button>
 
-      <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto scrollbar-hide">
+      {/* Переносим, а не прокручиваем. С `flex-1 … overflow-x-auto` блок сжимался
+          до нуля вместо переноса (flex-wrap снаружи при этом не срабатывает), и
+          последний элемент уезжал под «Сбросить» — со скрытой полосой прокрутки
+          это читается как наложение («Сбросить так и налезает», 24.08.2026). */}
+      <div className="flex min-w-0 flex-wrap items-center gap-1.5">
         <PeriodControl />
         {isOffice ? null : <WorkspaceScopeControl />}
         {/* Вид нефтепродукта — третье измерение общего контура рядом с периодом и
             областью: у топливного профиля он меняет ответ на любом экране. */}
-        {isFuel ? <FuelKindControl /> : null}
+        {топливныйКонтур ? <FuelKindControl /> : null}
         {/* Технический источник загрузки смен: в простом режиме убран — как и
             одноимённая секция внутри модалки фильтра. Период и область учёта
             рядом остаются всегда: это ежедневный контур.
             Исключение: если источник СУЖЕН (выбрана конкретная станция), чип
             виден в любом режиме — иначе цифры на экране молча считались бы по
             одной станции, а признака этого не было бы. */}
-        {isFuel ? (
+        {топливныйКонтур ? (
           stationCode !== 'all' ? (
             <SummaryControl
               icon={Database}
@@ -426,7 +439,7 @@ export function WorkspaceFilterBar() {
         ) : null}
       </div>
 
-      <div className="ml-auto flex shrink-0 items-center gap-1">
+      <div className="ml-auto flex shrink-0 items-center gap-1 border-l border-border/50 pl-1.5">
         {count > 0 ? (
           <Button
             variant="ghost"
@@ -440,7 +453,7 @@ export function WorkspaceFilterBar() {
           </Button>
         ) : null}
         <ViewHistoryMenu />
-        {isFuel ? (
+        {топливныйКонтур ? (
           <Button
             variant="ghost"
             size="icon-sm"

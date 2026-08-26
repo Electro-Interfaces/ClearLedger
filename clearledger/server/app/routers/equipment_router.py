@@ -19,7 +19,7 @@ from app.auth import assert_company_member, get_current_user
 from app.database import get_db
 from app.models import (
     EzsEquipmentMovement, EzsEquipmentUnit, EzsSparePart, EzsSparePartMovement,
-    EzsSparePartStock, EzsSupplyDocument, ServiceLocation, User,
+    EzsSparePartStock, EzsSupplyDocument, Region, ServiceLocation, User,
 )
 from app.services.ezs_equipment import (
     OP_LABELS, STATE_LABELS, TERMINAL_STATES, allowed_ops, apply_movement,
@@ -117,6 +117,14 @@ class SpareMovementIn(BaseModel):
 
 # ─── сериализация ───────────────────────────────────────────────────────────
 
+# Производитель единицы. Колонку `vendor` заполняет загрузка поставок, а парк,
+# приехавший из реестра сети, знает только марку станции (`brand`) — у 537 станций
+# в эксплуатации пилота графа «Производитель» из-за этого выходила пустой.
+def _vendor_col():
+    U = EzsEquipmentUnit
+    return func.coalesce(func.nullif(U.vendor, ""), U.brand)
+
+
 def _loc_brief(loc: ServiceLocation | None) -> dict[str, Any] | None:
     if loc is None:
         return None
@@ -127,7 +135,7 @@ def _unit_out(u: EzsEquipmentUnit, locs: dict[str, ServiceLocation],
               supplies: dict[Any, str] | None = None) -> dict[str, Any]:
     return {
         "id": str(u.id), "kind": u.kind,
-        "serialNumber": u.serial_number, "vendor": u.vendor, "vendorRaw": u.vendor_raw,
+        "serialNumber": u.serial_number, "vendor": u.vendor or u.brand, "vendorRaw": u.vendor_raw,
         "model": u.model, "stationType": u.station_type, "powerKwt": u.power_kwt,
         "connectorsCount": u.connectors_count, "connectorTypes": u.connector_types,
         "inventoryNumber": u.inventory_number, "supplier": u.supplier,
@@ -214,12 +222,41 @@ def _payload_movement(body: MovementIn) -> dict[str, Any]:
 
 # ─── единицы ────────────────────────────────────────────────────────────────
 
+def _scope_location_ids(cid, regions: list[str], codes: list[str], loc_ids: list[str]):
+    """Подзапрос: точки компании, попавшие в контур рабочей области.
+
+    Контур — union по измерениям, как на карте: точка входит, если её регион,
+    её код или она сама выбраны. Регион берём каноном (`regions.name` через
+    `region_id`), а не денорм-полем — так же, как считает аналитика сессий."""
+    L = ServiceLocation
+    ors = []
+    if regions:
+        ors.append(L.region_id.in_(
+            select(Region.id).where(Region.company_id == cid, Region.name.in_(regions))))
+    if codes:
+        ors.append(L.code.in_(codes))
+    if loc_ids:
+        ors.append(L.id.in_(loc_ids))
+    if not ors:
+        return None
+    cond = ors[0]
+    for o in ors[1:]:
+        cond = cond | o
+    return select(L.id).where(L.company_id == cid, cond)
+
+
+def _csv(v: str | None) -> list[str]:
+    return [x.strip() for x in v.split(",") if x.strip()] if v else []
+
+
 @router.get("/units")
 async def list_units(
     company_id: str = Query(...),
     state: str | None = Query(None), location_id: str | None = Query(None),
     vendor: str | None = Query(None), custodian: str | None = Query(None),
     q: str | None = Query(None),
+    region_ids: str | None = Query(None), station_codes: str | None = Query(None),
+    location_ids: str | None = Query(None),
     page: int = Query(1, ge=1), page_size: int = Query(500, le=1000),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
@@ -231,13 +268,27 @@ async def list_units(
     if location_id:
         conds.append(U.current_location_id == location_id)
     if vendor:
-        conds.append(U.vendor == vendor)
+        conds.append(_vendor_col() == vendor)
     if custodian:
         conds.append(U.custodian == custodian)
+    # Контур рабочей области. Единица попадает, если её станция в контуре ИЛИ её
+    # собственный регион выбран (склад стоит в регионе, но не на станции).
+    scope = _scope_location_ids(cid, _csv(region_ids), _csv(station_codes), _csv(location_ids))
+    if scope is not None:
+        in_scope = U.current_location_id.in_(scope)
+        regions = _csv(region_ids)
+        conds.append(in_scope | U.region.in_(regions) if regions else in_scope)
     if q:
         like = f"%{q.strip()}%"
+        # Поиск идёт и по станции, где единица стоит: люди ищут «Гоголя», а не серийник.
+        at_location = U.current_location_id.in_(
+            select(ServiceLocation.id).where(
+                ServiceLocation.company_id == cid,
+                ServiceLocation.name.ilike(like) | ServiceLocation.address.ilike(like)
+                | ServiceLocation.code.ilike(like)))
         conds.append(U.serial_number.ilike(like) | U.model.ilike(like) |
-                     U.inventory_number.ilike(like) | U.vendor.ilike(like))
+                     U.inventory_number.ilike(like) | _vendor_col().ilike(like) |
+                     U.keeper.ilike(like) | at_location)
     total = int((await db.execute(select(func.count()).select_from(U).where(*conds))).scalar_one())
     rows = (await db.execute(
         select(U).where(*conds).order_by(U.updated_at.desc())
@@ -486,8 +537,8 @@ async def equipment_overview(
         select(U.custodian, func.count()).where(U.company_id == cid).group_by(U.custodian)
     )).all()}
     by_vendor = [{"vendor": r[0] or "—", "count": int(r[1])} for r in (await db.execute(
-        select(U.vendor, func.count()).where(U.company_id == cid)
-        .group_by(U.vendor).order_by(func.count().desc())
+        select(_vendor_col(), func.count()).where(U.company_id == cid)
+        .group_by(_vendor_col()).order_by(func.count().desc())
     )).all()]
 
     # ремонты дольше 30 дней: последнее движение to_repair старше месяца

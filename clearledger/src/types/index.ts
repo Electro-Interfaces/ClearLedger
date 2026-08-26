@@ -477,6 +477,8 @@ export interface LocationContractBrief {
   counterpartyId: string
   counterpartyName?: string
   counterpartyInn?: string
+  /** Пусто = бессрочный (канон системы), а не «не заполнено». */
+  validUntil?: string
 }
 
 export interface LocationContracts {
