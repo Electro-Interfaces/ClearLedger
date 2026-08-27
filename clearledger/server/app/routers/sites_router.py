@@ -77,15 +77,17 @@ async def list_sites(
     stage: str | None = Query(None), region: str | None = Query(None),
     search: str | None = Query(None), owner_id: uuid.UUID | None = Query(None),
     overdue: bool = Query(False), risk: str | None = Query(None),
+    node: str | None = Query(None, description="узел маршрута: ezs_contract_approval и т. п."),
     page: int = Query(1, ge=1), page_size: int = Query(100, ge=1, le=2000),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
     """Список площадок с фильтрами. `risk` раскрывает цифры обзора портфеля
-    (без ответственного, без шага, просрочки ТП и поставок, застрявшие)."""
+    (без ответственного, без шага, просрочки ТП и поставок, застрявшие);
+    `node` отбирает по узлу маршрута — «у кого сейчас работа»."""
     cid = await assert_company_member(company_id, user, db)
     return await ezs_sites.list_sites(db, cid, stage=stage, region=region, search=search,
                                       owner_id=owner_id, overdue=overdue, risk=risk,
-                                      page=page, page_size=page_size)
+                                      node=node, page=page, page_size=page_size)
 
 
 @router.get("/meta/members")
@@ -126,6 +128,25 @@ async def list_project_routes(
         # Недоступный Координатор — не повод не дать завести проект: без списка он
         # поедет по маршруту умолчания, как ездил всегда.
         return {"routes": [], "error": str(e)}
+
+
+@router.get("/meta/nodes")
+async def list_route_nodes(
+    company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Узлы маршрута с количеством стоящих на них проектов — для отбора в реестре.
+
+    Стадия воронки отвечает «далеко ли до станции», узел — «у кого сейчас работа»:
+    в «Оформлении земли» стоят и те, кто ждёт согласования локации, и те, у кого
+    договор на подписи. Считаем по снимку хода, а не спрашиваем «Поддержку»: её
+    фасад отвечает про один предмет, списком узнать нельзя.
+
+    Вместе со списком отдаём, у скольких живых проектов ход вообще известен: отбор
+    по узлу честен ровно настолько, и умалчивать об этом нельзя.
+    """
+    cid = await assert_company_member(company_id, user, db)
+    return await ezs_sites.route_nodes(db, cid)
 
 
 @router.get("/meta/project-kinds")

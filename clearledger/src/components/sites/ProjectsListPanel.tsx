@@ -19,7 +19,7 @@ import {
 import { Loader2, Search, X, ChevronLeft, ChevronRight, Plus } from 'lucide-react'
 import { ExportButton } from './ExportButton'
 import {
-  getSites, getPortfolio, getSiteMembers, getSitesOverview, bulkAssignOwner,
+  getSites, getRouteNodes, getPortfolio, getSiteMembers, getSitesOverview, bulkAssignOwner,
   PHASE_META, STAGE_META, FUNNEL_STAGES, type SiteStage, type SiteRow,
 } from '@/services/sitesService'
 import { SiteCardDialog } from './SiteCardDialog'
@@ -108,13 +108,17 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
   // реестр, и по «вернуться к списку» человек получал полный список со сброшенным
   // отбором — искать свой населённый пункт заново (замечание И. Ступина 10.08.2026).
   const [f, patch, setF] = useTabParams('pr_list', {
-    phase: '', stage: '', ownerId: '', region: '', closed: false,
+    phase: '', stage: '', node: '', ownerId: '', region: '', closed: false,
     overdue: false, search: '', view: 'table' as 'table' | 'board', page: 1,
   })
-  const { phase, ownerId, region, closed, overdue, search, view, page } = f
+  const { phase, node, ownerId, region, closed, overdue, search, view, page } = f
   // Блок и этап взаимно исключают друг друга: выбрали этап — блок снимается.
-  const setPhase = (v: string) => patch({ phase: v, stage: '', closed: false })
-  const setStage = (v: string) => patch({ stage: v, phase: '', closed: false })
+  // Этап воронки и узел маршрута отвечают на разные вопросы («далеко ли до
+  // станции» и «у кого сейчас работа»), но в одном списке выбирается одно: два
+  // отбора разом дали бы пустую выдачу там, где человек ждёт пересечения.
+  const setPhase = (v: string) => patch({ phase: v, stage: '', node: '', closed: false })
+  const setStage = (v: string) => patch({ stage: v, phase: '', node: '', closed: false })
+  const setNode = (v: string) => patch({ node: v, phase: '', stage: '', closed: false })
   const setOwnerId = (v: string) => patch({ ownerId: v })
   const setRegion = (v: string) => patch({ region: v })
   const setOverdue = (v: boolean) => patch({ overdue: v })
@@ -156,7 +160,7 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
   const stagePick = stageFromUrl || f.stage
 
   const q = useQuery({
-    queryKey: ['pr-projects', companyId, phase, stagePick, ownerId, region, closed, overdue, search, risk, page],
+    queryKey: ['pr-projects', companyId, phase, stagePick, node, ownerId, region, closed, overdue, search, risk, page],
     queryFn: () => getSites({
       companyId,
       // «Отклонённые» — тоже проекты, просто закрытые с причиной: держим их за
@@ -166,8 +170,12 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
         || (phase && stagesOfPhase.length === 1 ? stagesOfPhase[0] : (phase ? undefined : 'active')),
       region: region || undefined,
       ownerId: ownerId || undefined, overdue, search: search || undefined,
-      risk: risk || undefined, page, pageSize: PAGE,
+      risk: risk || undefined, node: node || undefined, page, pageSize: PAGE,
     }),
+  })
+  const nodes = useQuery({
+    queryKey: ['pr-nodes', companyId],
+    queryFn: () => getRouteNodes(companyId),
   })
   const regions = useQuery({
     queryKey: ['sites-overview', companyId],
@@ -200,7 +208,7 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
   // Сколько фильтров сейчас сужают выдачу — чтобы свёрнутая панель не скрывала
   // того, что список показан не целиком.
   const activeFilters = [phase, region, ownerId, overdue ? '1' : '', closed ? '1' : '',
-    risk, stagePick, search].filter(Boolean).length
+    risk, stagePick, node, search].filter(Boolean).length
 
   return (
     <div className="p-4 space-y-3">
@@ -224,10 +232,13 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
         {/* Блок и его этапы в одном списке. Раньше выбирать можно было только блок
             («Подбор 272»), и по нему не видно, у кого проект в работе: на переговорах,
             в проработке или уже на пусконаладке (замечание И. Ступина 10.08.2026). */}
-        <Select value={stagePick ? `st:${stagePick}` : phase ? `ph:${phase}` : '__all__'}
+        <Select value={node ? `nd:${node}` : stagePick ? `st:${stagePick}` : phase ? `ph:${phase}` : '__all__'}
           onValueChange={(v) => {
-            if (v === '__all__') { patch({ phase: '', stage: '', page: 1 }); clearStage(); return }
-            if (v.startsWith('st:')) { setStage(v.slice(3)); clearStage() } else { setPhase(v.slice(3)); clearStage() }
+            if (v === '__all__') { patch({ phase: '', stage: '', node: '', page: 1 }); clearStage(); return }
+            if (v.startsWith('nd:')) setNode(v.slice(3))
+            else if (v.startsWith('st:')) setStage(v.slice(3))
+            else setPhase(v.slice(3))
+            clearStage()
             reset()
           }}>
           <SelectTrigger className="h-8 w-[260px] text-sm"><SelectValue placeholder="Все этапы" /></SelectTrigger>
@@ -251,6 +262,25 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
                 Не трогать ({nf0.format(regions.data?.onHold ?? 0)})
               </SelectItem>
             </SelectGroup>
+            {/* Узел маршрута — второй способ спросить о том же списке: «у кого
+                сейчас работа». Ход ведёт Координатор, и он известен не у всех
+                проектов, поэтому под группой стоит, у скольких он известен. */}
+            {(nodes.data?.nodes ?? []).length > 0 && (
+              <SelectGroup>
+                <div className="mt-1 border-t px-2 pb-0.5 pt-1 text-xs uppercase tracking-wide text-muted-foreground">
+                  узел маршрута
+                </div>
+                {(nodes.data?.nodes ?? []).map((n) => (
+                  <SelectItem key={n.code} value={`nd:${n.code}`} className="text-sm">
+                    {n.label} ({nf0.format(n.count)})
+                  </SelectItem>
+                ))}
+                <div className="px-2 pb-1 pt-0.5 text-[11px] text-muted-foreground">
+                  ход известен у {nf0.format(nodes.data?.known ?? 0)} из{' '}
+                  {nf0.format(nodes.data?.active ?? 0)} проектов в работе
+                </div>
+              </SelectGroup>
+            )}
           </SelectContent>
         </Select>
 

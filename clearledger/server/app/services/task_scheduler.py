@@ -29,7 +29,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import and_, or_, select, text
+from sqlalchemy import String, and_, cast, or_, select, text
 
 from app.auth import resolve_member_modules
 from app.database import async_session_factory
@@ -481,6 +481,45 @@ async def run_project_reconcile(db: AsyncSession, now: datetime) -> int:
             done += 1
         except Exception:  # noqa: BLE001 — один проект не отменяет остальные
             log.exception("Досверка проекта %s не удалась", site.id)
+    return done + await _refresh_route_snapshots(db, now)
+
+
+async def _refresh_route_snapshots(db: AsyncSession, now: datetime) -> int:
+    """Освежить снимок хода у живых проектов — ради отбора по узлу маршрута.
+
+    Ход ведёт «Поддержка», и её фасад отвечает только про один предмет: списком
+    узнать, кто на каком узле стоит, нельзя. Поэтому реестр отбирает по снимку, а
+    снимок до сих пор появлялся лишь там, где кто-то делал шаг, — у 117 проектов
+    из тысячи. Отбор по узлу на таких данных врал бы молча.
+
+    Пачками по 40 за проход и не чаще, чем раз в шесть часов на проект: маршрут
+    двигают руками, и чаще спрашивать нечего.
+    """
+    from app.models import EzsSite, ProcessSnapshot
+    from app.services import ezs_sites, projects_process
+
+    stale = now - timedelta(hours=6)
+    свежие = select(ProcessSnapshot.subject_id).where(
+        ProcessSnapshot.subject_type == "ezs_site", ProcessSnapshot.at >= stale)
+    rows = (await db.execute(
+        select(EzsSite).where(
+            EzsSite.stage.in_(ezs_sites.STAGE_ORDER),
+            cast(EzsSite.id, String).not_in(свежие),
+        ).limit(40)
+    )).scalars().all()
+
+    done = 0
+    for site in rows:
+        try:
+            # Читаем ход и запоминаем его — и только. `reconcile` здесь звать
+            # нельзя: он отражает исход маршрута в воронке, то есть массово двигал
+            # бы стадии живых проектов фоном, без человека и без причины.
+            state = await projects_process.case_state(db, site.company_id, site)
+            if state.get("exists"):
+                await projects_process._remember(db, site.company_id, site, state)
+                done += 1
+        except Exception:  # noqa: BLE001 — недоступный Координатор не роняет регламент
+            log.debug("Снимок хода проекта %s не обновлён", site.id)
     return done
 
 

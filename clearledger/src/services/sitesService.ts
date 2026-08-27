@@ -21,6 +21,11 @@ export const FUNNEL_STAGES: SiteStage[] = [
   'contracting', 'construction', 'commissioning', 'live',
 ]
 
+/** Выход из работы: отказ и пауза. Обе требуют причины — у закрытого места
+ *  вопрос всегда один, «почему стоим», и отвечать на него через полгода нечем,
+ *  если причину не записали при закрытии. */
+export const CLOSING_STAGES: SiteStage[] = ['archive', 'on_hold']
+
 // Цвет по семантике: холодный на входе → тёплый в работе → зелёный на выходе,
 // нейтральный для паузы и архива (см. палитру badges в CLAUDE.md).
 export const STAGE_META: Record<SiteStage, { label: string; hint: string; cls: string; dot: string }> = {
@@ -250,14 +255,27 @@ export async function getSitesOverview(companyId: string): Promise<SitesOverview
 
 export async function getSites(p: {
   companyId: string; stage?: string; region?: string; search?: string
-  ownerId?: string; overdue?: boolean; risk?: string; page?: number; pageSize?: number
+  ownerId?: string; overdue?: boolean; risk?: string; node?: string
+  page?: number; pageSize?: number
 }): Promise<SitesList> {
   return get('/api/sites', {
     company_id: p.companyId, stage: p.stage || undefined, region: p.region || undefined,
     search: p.search || undefined, owner_id: p.ownerId || undefined,
     overdue: p.overdue ? 1 : undefined, risk: p.risk || undefined,
+    node: p.node || undefined,
     page: p.page ?? 1, page_size: p.pageSize ?? 300,
   })
+}
+
+/** Узлы маршрута с числом стоящих на них проектов.
+ *  `known` против `active` — честная оценка полноты: ход ведёт Координатор, и у
+ *  проекта, по которому шагов ещё не делали, узла нет вовсе. */
+export async function getRouteNodes(companyId: string): Promise<{
+  nodes: { code: string; label: string; count: number }[]
+  known: number
+  active: number
+}> {
+  return get('/api/sites/meta/nodes', { company_id: companyId })
 }
 
 export async function getSite(companyId: string, id: string): Promise<SiteDetail> {

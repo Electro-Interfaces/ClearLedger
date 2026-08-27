@@ -39,7 +39,7 @@ import {
   linkContract, linkLocation, getProjectKinds, getLocationWorks, startSuccessor,
   getProjectCase, openProjectCase, applyProjectStep, undoProjectStep,
   getSiteParticipants, addSiteParticipant, removeSiteParticipant, registerEquipmentUnit,
-  STAGE_META, FUNNEL_STAGES, QUADRANT_META,
+  STAGE_META, FUNNEL_STAGES, CLOSING_STAGES, QUADRANT_META,
   type SiteDetail, type SiteStage, type ProjectContext, type CaseAction,
   type SiteEquipment,
 } from '@/services/sitesService'
@@ -937,13 +937,17 @@ export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; company
             <Input value={reason} onChange={(e) => setReason(e.target.value)}
               placeholder={override ? 'Обоснование обхода — обязательно'
                 : stage === 'archive' ? 'Причина отклонения — обязательна'
-                : stage === 'on_hold' ? 'Что должно случиться, чтобы вернуть проект в работу'
+                : stage === 'on_hold' ? 'Причина приостановки — обязательна'
                 : 'Комментарий к переходу'}
               className="h-8 text-sm flex-1 min-w-[220px]" />
             <Button size="sm" variant={stage === 'archive' ? 'destructive' : 'default'}
               className="h-8 text-sm"
               disabled={stage === site.stage || mMove.isPending
-                || (stage === 'archive' && !reason.trim()) || (override && !reason.trim())}
+                // Выход из работы без причины запрещён с обеих сторон: у
+                // замороженного места «почему стоим» — тот же вопрос, что у
+                // отклонённого, и через полгода на него отвечать нечем.
+                || (CLOSING_STAGES.includes(stage) && !reason.trim())
+                || (override && !reason.trim())}
               onClick={() => mMove.mutate(undefined)}>
               {mMove.isPending ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : null}Перевести
             </Button>

@@ -39,10 +39,12 @@ const QUADRANT_COLOR: Record<Quadrant, string> = {
 export function SitesMapPanel({ companyId }: { companyId: string }) {
   const [colorBy, setColorBy] = useState<ColorBy>('stage')
   const [showNetwork, setShowNetwork] = useState(true)
-  // Закрытые по умолчанию скрыты: их втрое больше живых (531 против 148 у пилота),
-  // и включённые сразу они превращают карту пайплайна в карту кладбища. Но место
-  // остаётся занятым и после отказа — увидеть его надо по требованию.
-  const [showClosed, setShowClosed] = useState(false)
+  // Отказ и пауза — два разных вопроса к месту («сюда мы не пойдём» и «сюда
+  // вернёмся позже»), и в реестре это две отдельные кнопки. На карте они тоже
+  // включаются порознь: закрытых втрое больше живых, и одной кнопкой карта
+  // пайплайна превращается в карту кладбища.
+  const [showRejected, setShowRejected] = useState(false)
+  const [showHold, setShowHold] = useState(false)
   const [stage, setStage] = useState<'' | SiteStage>('')
   const [detailId, setDetailId] = useState<string | null>(null)
 
@@ -59,10 +61,14 @@ export function SitesMapPanel({ companyId }: { companyId: string }) {
   )
   // Отбор по стадии воронки к закрытым не применяется: «Архив» и «Заморожен» в
   // ней не значатся, и любая выбранная стадия прятала бы их целиком.
-  const closed = useMemo(
-    () => (showClosed && !stage ? (pts.data?.closed ?? []) : []),
-    [pts.data, showClosed, stage],
-  )
+  const closedAll = useMemo(() => pts.data?.closed ?? [], [pts.data])
+  const closed = useMemo(() => (stage ? [] : closedAll.filter(
+    (p) => (p.stage === 'archive' && showRejected) || (p.stage === 'on_hold' && showHold),
+  )), [closedAll, showRejected, showHold, stage])
+  const счётЗакрытых = useMemo(() => ({
+    archive: closedAll.filter((p) => p.stage === 'archive').length,
+    hold: closedAll.filter((p) => p.stage === 'on_hold').length,
+  }), [closedAll])
   // Координаты станции — в паспорте, иначе в сыром снимке (как на карте сети).
   const stations = useMemo(() => (net.data ?? []).flatMap((l) => {
     if (l.type !== 'ev_charging' || isTestStation(l)) return []
@@ -90,10 +96,17 @@ export function SitesMapPanel({ companyId }: { companyId: string }) {
           className={`px-2.5 py-1 text-sm rounded-md border transition-colors ${showNetwork ? 'bg-primary text-primary-foreground border-transparent' : 'border-border text-muted-foreground hover:text-foreground'}`}>
           Станции сети{stations.length ? ` (${stations.length})` : ''}
         </button>
-        <button type="button" onClick={() => setShowClosed((v) => !v)} disabled={stage !== ''}
-          title={stage ? 'Снимите отбор по стадии — закрытых в воронке нет' : 'Архив и замороженные проекты'}
-          className={`px-2.5 py-1 text-sm rounded-md border transition-colors disabled:opacity-40 ${showClosed && !stage ? 'bg-primary text-primary-foreground border-transparent' : 'border-border text-muted-foreground hover:text-foreground'}`}>
-          Закрытые{pts.data?.closed?.length ? ` (${pts.data.closed.length})` : ''}
+        <button type="button" onClick={() => setShowHold((v) => !v)} disabled={stage !== ''}
+          title={stage ? 'Снимите отбор по стадии — замороженных в воронке нет'
+            : 'Проекты, поставленные на паузу со статусом «Не трогать»'}
+          className={`px-2.5 py-1 text-sm rounded-md border transition-colors disabled:opacity-40 ${showHold && !stage ? 'bg-primary text-primary-foreground border-transparent' : 'border-border text-muted-foreground hover:text-foreground'}`}>
+          Не трогать{счётЗакрытых.hold ? ` (${счётЗакрытых.hold})` : ''}
+        </button>
+        <button type="button" onClick={() => setShowRejected((v) => !v)} disabled={stage !== ''}
+          title={stage ? 'Снимите отбор по стадии — отклонённых в воронке нет'
+            : 'Места, которые рассмотрели и отклонили: чтобы не заводить их заново'}
+          className={`px-2.5 py-1 text-sm rounded-md border transition-colors disabled:opacity-40 ${showRejected && !stage ? 'bg-primary text-primary-foreground border-transparent' : 'border-border text-muted-foreground hover:text-foreground'}`}>
+          Отклонённые{счётЗакрытых.archive ? ` (${счётЗакрытых.archive})` : ''}
         </button>
         <div className="inline-flex rounded-md border border-border p-0.5 gap-0.5 flex-wrap">
           <button type="button" onClick={() => setStage('')}
@@ -229,10 +242,11 @@ export function SitesMapPanel({ companyId }: { companyId: string }) {
         {closed.length > 0 && (
           <span className="inline-flex items-center gap-1">
             <span className="h-2 w-2 rounded-full border border-dashed border-zinc-500" />
-            закрытые: архив и замороженные
+            {showRejected && showHold ? 'отклонённые и замороженные'
+              : showRejected ? 'отклонённые' : 'замороженные'}
           </span>
         )}
-        <span>Круг — радиус {cannibalKm * 1000} м вокруг проекты, которая стоит вплотную к нашей станции.</span>
+        <span>Круг — радиус {cannibalKm * 1000} м вокруг проекта, который стоит вплотную к нашей станции.</span>
       </div>
 
       {detailId && <SiteCardDialog companyId={companyId} id={detailId} onClose={() => setDetailId(null)} />}

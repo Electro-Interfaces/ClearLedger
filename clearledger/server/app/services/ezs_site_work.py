@@ -38,6 +38,11 @@ from app.services.ezs_changes import make_change
 # `manual` — галочкой. `required` держит переход вперёд (обход — с обоснованием).
 GATES: dict[str, list[dict[str, Any]]] = gates_by_stage()
 
+# Стадии, которыми работа по месту прекращается: отказ и пауза. Обе требуют
+# причины и обе хранят её в одной графе — вопрос к закрытому проекту всегда один
+# и тот же: «почему стоим», а не «в каком он состоянии».
+CLOSING_STAGES = ("archive", "on_hold")
+
 # Поля, которые можно править из карточки.
 EDITABLE_FIELDS = {
     "region", "city", "address", "full_address", "place_kind", "install_place", "route",
@@ -430,6 +435,17 @@ async def set_stage(db: AsyncSession, site: EzsSite, stage: str, *, reason: str 
     eq_ok = await site_equipment_supplied(db, site.id)
     if stage == site.stage:
         return {"moved": False, "gate": gate_state(site, doc_kinds=doc_kinds, equipment_supplied=eq_ok)}
+    # Закрыть место молча нельзя: через полгода адрес приходит снова, и без
+    # причины никто не помнит, отказались мы сами или отказали нам. Требование
+    # заказчика от 27.08.2026 — «без комментария уводить объекты в отказ или
+    # замороженные нельзя».
+    if stage in CLOSING_STAGES and not (reason or "").strip():
+        return {
+            "moved": False, "blocked": True,
+            "gate": gate_state(site, doc_kinds=doc_kinds, equipment_supplied=eq_ok),
+            "message": ("Нужна причина отказа" if stage == "archive"
+                        else "Нужна причина приостановки"),
+        }
     prev = site.stage
     gate = gate_state(site, prev, doc_kinds=doc_kinds, equipment_supplied=eq_ok)
     missing = [i["label"] for i in gate["items"] if not i["done"]]
@@ -463,7 +479,10 @@ async def set_stage(db: AsyncSession, site: EzsSite, stage: str, *, reason: str 
     site.stage_since = date.today().isoformat()
     site.last_touch_at = datetime.now(timezone.utc)
     site.updated_at = datetime.now(timezone.utc)
-    if stage == "archive" and reason:
+    if stage in CLOSING_STAGES and reason:
+        # Пауза раньше хранила причину только в тексте события: в карточке и на
+        # карте у замороженного места стоял прочерк, и «почему стоим» узнавалось
+        # чтением ленты.
         old_archive_reason = site.archive_reason
         site.archive_reason = reason[:200]
         manual = set(site.manual_fields or []); manual.add("archive_reason")

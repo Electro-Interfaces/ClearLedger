@@ -26,7 +26,8 @@ import re
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import cast, func, select
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import EzsSite, Region
@@ -1116,10 +1117,64 @@ def _risk_conditions(risk: str) -> list[Any]:
     return []
 
 
+def _node_subject_ids(company_id, node: str):
+    """Проекты, стоящие на узле маршрута, — по снимку хода.
+
+    Ход ведёт «Поддержка», и спросить её списком нельзя: фасад отвечает только про
+    один предмет. Снимок пишется на каждом действии и на фоновой сверке, поэтому
+    отбор по узлу честен ровно настолько, насколько свежи снимки, — сверка держит
+    их свежими, а экран показывает, у скольких проектов ход вообще известен.
+    """
+    from app.models import ProcessSnapshot
+
+    return (
+        select(cast(ProcessSnapshot.subject_id, PGUUID(as_uuid=True)))
+        .where(
+            ProcessSnapshot.company_id == company_id,
+            ProcessSnapshot.subject_type == "ezs_site",
+            ProcessSnapshot.payload["stage"]["code"].astext == node,
+        )
+    )
+
+
+async def route_nodes(db: AsyncSession, company_id) -> dict[str, Any]:
+    """Узлы маршрута с количеством проектов и честной оценкой полноты."""
+    from app.models import ProcessSnapshot
+
+    code = ProcessSnapshot.payload["stage"]["code"].astext
+    name = ProcessSnapshot.payload["stage"]["name"].astext
+    rows = (await db.execute(
+        select(code, func.max(name), func.count())
+        .select_from(ProcessSnapshot)
+        .join(EzsSite, EzsSite.id == cast(ProcessSnapshot.subject_id, PGUUID(as_uuid=True)))
+        .where(
+            ProcessSnapshot.company_id == company_id,
+            ProcessSnapshot.subject_type == "ezs_site",
+            code.is_not(None),
+            EzsSite.stage.in_(STAGE_ORDER),
+        )
+        .group_by(code)
+        .order_by(func.count().desc())
+    )).all()
+    живых = int((await db.execute(
+        select(func.count()).select_from(EzsSite).where(
+            EzsSite.company_id == company_id,
+            EzsSite.stage.in_(STAGE_ORDER)))).scalar_one() or 0)
+    известно = sum(int(c) for _, _, c in rows)
+    return {
+        "nodes": [{"code": c, "label": n or c, "count": int(cnt)} for c, n, cnt in rows],
+        # Ход известен не у всех: снимок появляется, когда по проекту сделали шаг
+        # или прошла сверка. Экран показывает это числом, а не молчит.
+        "known": известно,
+        "active": живых,
+    }
+
+
 async def list_sites(
     db: AsyncSession, company_id, *, stage: str | None = None, region: str | None = None,
     search: str | None = None, owner_id=None, overdue: bool = False,
-    risk: str | None = None, page: int = 1, page_size: int = 100,
+    risk: str | None = None, node: str | None = None,
+    page: int = 1, page_size: int = 100,
 ) -> dict[str, Any]:
     from app.models import User
 
@@ -1131,6 +1186,11 @@ async def list_sites(
         conds.append(S.stage.in_(STAGE_ORDER))
     elif stage:
         conds.append(S.stage == stage)
+    if node:
+        # Стадия воронки отвечает «далеко ли до станции», узел маршрута — «у кого
+        # сейчас работа». Это разные вопросы: в «Оформлении земли» стоят и те, кто
+        # ждёт согласования локации, и те, у кого договор на подписи.
+        conds.append(S.id.in_(_node_subject_ids(company_id, node)))
     if region:
         conds.append(func.coalesce(S.region_norm, S.region) == region)
     if owner_id:
