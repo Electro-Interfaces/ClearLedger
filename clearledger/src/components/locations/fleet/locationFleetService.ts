@@ -118,6 +118,27 @@ export const ATTENTION_PATCH: Record<AttentionKey, Partial<LocationFilters>> = {
   noBinding: { sourceBinding: 'unbound' },
 }
 
+/**
+ * Какая пилюля «требуют внимания» сейчас включена, если включена вообще.
+ *
+ * Пилюля ставит срез РЕЖИМОМ ЗАМЕНЫ, поэтому включённой считается ровно та,
+ * чей патч совпал с текущим отбором целиком. Нужна двум вещам: подсветить
+ * включённую (иначе по виду не понять, нажата она или нет) и снять срез
+ * повторным нажатием — просил Якушевич 27.08.2026.
+ */
+export function activeAttentionKey(f: LocationFilters): AttentionKey | null {
+  // Отпечаток по фиксированному списку полей: перечисление короче и проверяемее
+  // поэлементного сравнения шести массивов, а состав `LocationFilters` тут виден
+  // целиком — новое поле в нём сразу заметно и здесь.
+  const sig = (x: LocationFilters) => JSON.stringify([
+    x.q, x.sourceBinding, x.serviceKind,
+    x.types, x.lifeStatuses, x.opStatuses, x.regions, x.owners, x.linkStatuses,
+  ])
+  const mine = sig(f)
+  const keys = Object.keys(ATTENTION_PATCH) as AttentionKey[]
+  return keys.find((k) => sig({ ...EMPTY_LOCATION_FILTERS, ...ATTENTION_PATCH[k] }) === mine) ?? null
+}
+
 export const ATTENTION_META: Record<AttentionKey, { label: string }> = {
   noLink: { label: 'Нет связи' },
   disabled: { label: 'Отключены' },

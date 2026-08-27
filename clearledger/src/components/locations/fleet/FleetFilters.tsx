@@ -14,7 +14,7 @@ import {
 } from 'lucide-react'
 import { MultiSelectFilter } from './MultiSelectFilter'
 import {
-  EMPTY_LOCATION_FILTERS, activeFilterCount,
+  EMPTY_LOCATION_FILTERS, activeFilterCount, activeAttentionKey,
   ATTENTION_META, type AttentionKey,
   type LocationFilters, type FilterOptions, type FleetStats,
 } from './locationFleetService'
@@ -42,6 +42,7 @@ export function FleetFilters({
 }) {
   const set = (patch: Partial<LocationFilters>) => onChange({ ...filters, ...patch })
   const activeCount = activeFilterCount(filters)
+  const activeKey = activeAttentionKey(filters)
 
   // Карта value→label для подписи чипов.
   const labelOf = (opts: { value: string; label: string }[], v: string) =>
@@ -70,23 +71,33 @@ export function FleetFilters({
 
   return (
     <div className="space-y-3">
-      {/* Пилюли «требуют внимания» */}
+      {/* Пилюли «требуют внимания» — переключатели: повторное нажатие снимает срез
+          (просил Якушевич 27.08.2026). Включённая залита плотнее и обведена, иначе
+          по виду не отличить нажатую от ненажатой. */}
       <div className="flex flex-wrap gap-2">
         {ATTENTION_KEYS.map((k) => {
           const Icon = ATTENTION_ICON[k]
           const count = stats.attention[k]
           if (count === 0) return null
+          const on = activeKey === k
           return (
             <button
               key={k}
-              onClick={() => onAttention(k)}
-              className="inline-flex items-center gap-1.5 rounded-full border border-amber-400/40 bg-amber-500/10 px-3 py-1 text-xs font-medium text-amber-700 transition-colors hover:bg-amber-500/20 dark:text-amber-400"
+              onClick={() => (on ? onChange(EMPTY_LOCATION_FILTERS) : onAttention(k))}
+              aria-pressed={on}
+              title={on ? 'Нажмите ещё раз, чтобы снять отбор' : undefined}
+              className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                on
+                  ? 'border-amber-500 bg-amber-500/30 text-amber-900 ring-1 ring-amber-500/40 hover:bg-amber-500/40 dark:text-amber-200'
+                  : 'border-amber-400/40 bg-amber-500/10 text-amber-700 hover:bg-amber-500/20 dark:text-amber-400'
+              }`}
             >
               <Icon className="h-3.5 w-3.5" />
               {ATTENTION_META[k].label}
               <Badge variant="secondary" className="h-4 min-w-4 justify-center bg-amber-500/20 px-1 text-[10px] tabular-nums text-amber-700 dark:text-amber-300">
                 {count}
               </Badge>
+              {on && <X className="h-3 w-3 opacity-70" />}
             </button>
           )
         })}
@@ -145,11 +156,6 @@ export function FleetFilters({
             <SelectItem value="service">Служебные</SelectItem>
           </SelectContent>
         </Select>
-        {activeCount > 0 && (
-          <Button variant="ghost" size="sm" className="h-9" onClick={() => onChange(EMPTY_LOCATION_FILTERS)}>
-            <X className="mr-1 h-4 w-4" /> Очистить
-          </Button>
-        )}
       </div>
 
       {/* Чипы активных */}
@@ -166,8 +172,19 @@ export function FleetFilters({
         </div>
       )}
 
-      <div className="text-xs text-muted-foreground">
-        Найдено: {filteredCount}{filteredCount !== totalCount && ` из ${totalCount}`}
+      {/* «Очистить» стоит здесь, а не в ряду селекторов. В ряду она была последней,
+          а сами селекторы условные — на узком срезе их пропадает до четырёх из шести,
+          и кнопка уезжала через пол-экрана («перескакивает», Якушевич 27.08.2026).
+          Строка «Найдено» одна и не переносится, поэтому место постоянное — и кнопка
+          оказалась рядом с числом, которое возвращает к полному. */}
+      <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+        <span>Найдено: {filteredCount}{filteredCount !== totalCount && ` из ${totalCount}`}</span>
+        {activeCount > 0 && (
+          <Button variant="ghost" size="sm" className="h-7 shrink-0 px-2 text-xs"
+            onClick={() => onChange(EMPTY_LOCATION_FILTERS)}>
+            <X className="mr-1 h-3.5 w-3.5" /> Очистить
+          </Button>
+        )}
       </div>
     </div>
   )
