@@ -12,6 +12,7 @@
 import { CorporatePanel } from './CorporatePanel'
 import { RetailPanel } from './RetailPanel'
 import { TariffsPanel } from './TariffsPanel'
+import { RejectedPanel } from './RejectedPanel'
 import { ChargeReconciliationPanel } from './ChargeReconciliationPanel'
 import { PaymentsPanel } from './PaymentsPanel'
 import { OverviewDashboardPanel } from './OverviewDashboardPanel'
@@ -45,6 +46,7 @@ export function ChargeSalesRouter({ tab, companyId, dateFrom, dateTo }: {
     case 'cs_segments':    content = <RetailPanel {...p} group="segments" />; break
     case 'cs_payments':    content = <PaymentsPanel {...p} />; break
     case 'cs_recon':       content = <ChargeReconciliationPanel {...p} />; break
+    case 'cs_rejected':    content = <RejectedPanel {...p} />; break
     default:               break
   }
   return <div data-sales-surface className="h-full min-w-0">{content}</div>

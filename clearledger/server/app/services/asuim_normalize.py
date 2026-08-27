@@ -43,8 +43,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.station_passport import stations_by_location, write_value
 from app.models import (
-    ChargePayment, CorporateClient, EzsCustomer, EzsReference, EzsRfidCard, EzsTariff,
-    ServiceLocation,
+    ChargePayment, ChargeRejected, CorporateClient, EzsCustomer, EzsReference, EzsRfidCard,
+    EzsTariff, ServiceLocation,
 )
 from app.services.mapping import normalize_default
 
@@ -432,6 +432,8 @@ def map_payments(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             # сплошной строкой, в users_ru — форматированным. Разные написания
             # одного номера ломают связку «платёж → клиент» по телефону.
             "user_phone": _phone(r.get("телефон_пользователя")) or _s(r.get("телефон_пользователя"), 40),
+            "raw": {k: (v.isoformat() if hasattr(v, "isoformat") else v)
+                    for k, v in r.items() if v is not None and v != ""},
         })
     return out
 
@@ -444,12 +446,25 @@ async def ingest_payments(
 
     Повторные и пересекающиеся окна выгрузки безопасны: строка с известным id
     платежа обновляется, а не задваивается — заказчик выгружает окнами по датам,
-    и стык недель всегда перекрывается."""
+    и стык недель всегда перекрывается.
+
+    Платёж отбракованной зарядки в учёт не идёт: деньги следуют за своей сессией,
+    и если её в витринах нет, то платёж без неё повис бы «сиротой» и завысил
+    выручку. Такие строки уходят в тот же журнал разбора."""
     existing: dict[str, ChargePayment] = {
         p.payment_ext_id: p for p in (await db.execute(select(ChargePayment).where(
             ChargePayment.company_id == company_id))).scalars().all()
     }
-    created = updated = errors = 0
+    # Сессии, отбракованные источником, и то, что по ним уже занесено в журнал.
+    rejected_sessions: set[str] = set((await db.execute(
+        select(ChargeRejected.session_ext_id).where(
+            ChargeRejected.company_id == company_id, ChargeRejected.kind == "session")
+    )).scalars().all())
+    known_rejected: set[str] = set((await db.execute(
+        select(ChargeRejected.ext_id).where(
+            ChargeRejected.company_id == company_id, ChargeRejected.kind == "payment")
+    )).scalars().all())
+    created = updated = errors = rejected = 0
     seen: set[str] = set()
     fields = ("bank_txn_id", "session_ext_id", "paid_at", "amount", "hold_amount",
               "refund_amount", "by_card", "op_type_id", "op_type", "status_code",
@@ -460,6 +475,20 @@ async def ingest_payments(
             if not ext or ext in seen:
                 continue
             seen.add(ext)
+            sid = row.get("session_ext_id")
+            if sid and sid in rejected_sessions:
+                if ext not in known_rejected:
+                    known_rejected.add(ext)
+                    db.add(ChargeRejected(
+                        company_id=company_id, kind="payment", ext_id=ext,
+                        session_ext_id=sid, occurred_at=row.get("paid_at"),
+                        user_id=row.get("user_phone") or row.get("user_ext_id"),
+                        amount=row.get("amount") or 0,
+                        status=row.get("op_type"), reason="suspicious",
+                        payload=row.get("raw"),
+                    ))
+                rejected += 1
+                continue
             cur = existing.get(ext)
             if cur is None:
                 # Денежные поля NOT NULL: пустое в выгрузке = 0 при создании строки.
@@ -487,9 +516,12 @@ async def ingest_payments(
             logger.warning("asuim payments: строка %s (id %s) не загружена: %s: %s",
                            idx + 1, row.get("payment_ext_id"), type(exc).__name__, exc)
     await db.flush()
+    message = f"платежи: добавлено {created}, обновлено {updated}"
+    if rejected:
+        message += f"; при отбракованных зарядках: {rejected} (в журнале разбора)"
     return {"status": "success", "kind": "asuim_payments", "created": created,
-            "updated": updated, "skipped": len(rows) - created - updated, "errors": errors,
-            "message": f"платежи: добавлено {created}, обновлено {updated}"}
+            "updated": updated, "skipped": len(rows) - created - updated - rejected,
+            "errors": errors, "rejected": rejected, "message": message}
 
 
 # ---------------------------------------------------------------------------
@@ -932,7 +964,12 @@ def map_sessions(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "finished_at": finished,
             "duration_min": round((finished - started).total_seconds() / 60, 2)
                             if started and finished else 0,
-            "result": _s(r.get("результат"), 40),
+            # Состояние сессии — из графы «статус» (Complete / CompleteError).
+            # «результат» и «описание_результата» несут одну и ту же фразу
+            # «Зарядная сессия завершена» у всех 153 246 строк и об исходе не
+            # говорят ничего; раньше в поле уезжала именно она, и у 19 729 сессий
+            # исход в базе неизвестен.
+            "result": _s(r.get("статус") or r.get("результат"), 40),
             "charge_type": _s(r.get("тип_зарядки"), 40),
             "user_type": _s(r.get("тип_пользователя"), 20),
             "user_id": _s(r.get("телефон_пользователя") or r.get("id_пользователя"), 160),
@@ -946,5 +983,12 @@ def map_sessions(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "tariff": _num(r.get("цена_тарифа") or r.get("тариф_руб_квтч")) or 0,
             "paid_at": _dt(r.get("дата_оплаты")),
             "payment_id": _s(r.get("id_платежа"), 64),
+            # Признак источника «подозрительная»: такую зарядку в учёт не берём
+            # вовсе (решение МАГа 27.08.2026) — она уходит в журнал отбракованных.
+            "suspicious": _bool(r.get("подозрительная")) or False,
+            # Строку витрины сохраняем целиком: разбор отбракованного — работа
+            # редкая, а ходить за подробностями обратно в выгрузку неоткуда.
+            "raw": {k: (v.isoformat() if hasattr(v, "isoformat") else v)
+                    for k, v in r.items() if v is not None and v != ""},
         })
     return out

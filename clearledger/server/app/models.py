@@ -6125,6 +6125,61 @@ class ObjectLink(Base):
     )
 
 
+# ---------------------------------------------------------------------------
+# Журнал отбракованных транзакций ЭЗС
+# ---------------------------------------------------------------------------
+class ChargeRejected(Base):
+    """Сессия или платёж, помеченные источником как недостоверные.
+
+    Витрина АСУиМ отдаёт у сессии колонку `подозрительная`; помеченные ею
+    зарядки в учёт не идут — решение МАГа 27.08.2026: «мы их просто не
+    показываем, вообще». Такие строки не лежат в `charge_sessions` и
+    `charge_payments` вовсе — ровно так же, как прогоны тестовых станций,
+    которые загрузчик отбрасывает на входе.
+
+    Почему отдельная таблица, а не флаг в рабочих: сессии читают 39 мест, платежи
+    ещё 8, и фильтр, расставленный по одному, рано или поздно где-нибудь забудут —
+    отбракованная зарядка вылезет в одном отчёте из двадцати, и цифры разойдутся
+    молча. Здесь же чистота витрин обеспечена тем, что данных в них просто нет.
+
+    Один журнал на оба рода записей: у отбракованной сессии и её платежа общая
+    судьба и общий экран разбора, а разводить две почти одинаковые таблицы ради
+    различия в четырёх полях смысла нет — разное лежит в `payload`.
+    """
+
+    __tablename__ = "charge_rejected"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    # session | payment
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    # Идентификатор в источнике: `id_сессии` либо `id_платежа`.
+    ext_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    # Сессия платежа — по ней собирается пара «зарядка + деньги» на экране разбора.
+    session_ext_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    occurred_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False), nullable=True)
+    station_code: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    location_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    user_id: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    energy_kwh: Mapped[float | None] = mapped_column(Numeric(12, 3), nullable=True)
+    amount: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+    status: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    # Почему отбракована. Пока единственная причина — `suspicious` (признак
+    # источника), но причина названа полем: тестовые прогоны и будущие правила
+    # лягут сюда же, а не заведут второй журнал.
+    reason: Mapped[str] = mapped_column(String(40), nullable=False, default="suspicious")
+    # Строка источника целиком: разбор отбракованного — работа редкая и глубокая,
+    # и ходить за подробностями обратно в выгрузку неоткуда.
+    payload: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    rejected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("company_id", "kind", "ext_id", name="uq_charge_rejected"),
+        Index("ix_charge_rejected_company_time", "company_id", "occurred_at"),
+    )
+
+
 class EzsEvse(Base):
     """Точка отпуска — часть станции, заряжающая не более одного ТС (СТО п. 2.5).
 

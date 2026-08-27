@@ -10,12 +10,12 @@ from datetime import date, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile
-from sqlalchemy import and_ as sa_and, func, select
+from sqlalchemy import String, and_ as sa_and, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import assert_company_product, get_current_user
 from app.database import get_db
-from app.models import ChargePayment, ChargeSession, User
+from app.models import ChargePayment, ChargeRejected, ChargeSession, Region, ServiceLocation, User
 from app.services.export_audit import log_export
 from app.services.export_files import xlsx_response
 from app.services.session_scope import session_scope_conds
@@ -267,6 +267,93 @@ async def payments_list(
         "refund": float(p.refund_amount or 0), "opType": p.op_type,
         "status": p.status_code, "receiptUrl": p.receipt_url, "phone": p.user_phone,
     } for p in rows]
+
+
+@router.get("/rejected")
+async def rejected_summary(
+    company_id: str,
+    date_from: str,
+    date_to: str,
+    stations: str | None = Query(None, description="коды ЭЗС через запятую — контур"),
+    regions: str | None = Query(None, description="регионы через запятую — контур"),
+    limit: int = Query(500, le=2000),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Отбракованное источником: сколько, на сколько и что именно.
+
+    Эти зарядки в витринах не участвуют — их нет ни в `charge_sessions`, ни в
+    `charge_payments` (решение МАГа 27.08.2026: «не показываем вообще»). Но сами
+    по себе они материал разбора: где и у кого система сочла транзакцию
+    недостоверной. Экран отвечает на это и ни на что больше — денежных итогов
+    сети здесь нет и быть не должно.
+    """
+    cid = await assert_company_product(company_id, current_user, db, "sales")
+    df, dt = _day_bounds(date_from, date_to)
+    R = ChargeRejected
+    conds = [R.company_id == cid, R.occurred_at >= df, R.occurred_at < dt]
+    codes, regs = _csv(stations), _csv(regions)
+    if codes:
+        conds.append(R.station_code.in_(codes))
+    if regs:
+        # Регион у журнала не хранится: он свойство объекта, а не транзакции.
+        # Резолвим через объект той же связкой, что и остальные разрезы.
+        conds.append(R.location_id.in_(
+            select(cast(ServiceLocation.id, String))
+            .join(Region, Region.id == ServiceLocation.region_id)
+            .where(ServiceLocation.company_id == cid, Region.name.in_(regs))))
+
+    totals = (await db.execute(select(
+        func.count().filter(R.kind == "session").label("sessions"),
+        func.count().filter(R.kind == "payment").label("payments"),
+        func.coalesce(func.sum(R.energy_kwh).filter(R.kind == "session"), 0).label("kwh"),
+        func.coalesce(func.sum(R.amount).filter(R.kind == "session"), 0).label("amount"),
+        func.coalesce(func.sum(R.amount).filter(R.kind == "payment"), 0).label("paid"),
+        func.count(func.distinct(R.station_code)).label("stations"),
+        func.count(func.distinct(R.user_id)).label("users"),
+    ).where(*conds))).one()
+
+    month = func.to_char(R.occurred_at, "YYYY-MM")
+    by_month = (await db.execute(select(
+        month.label("bucket"), func.count().label("count"),
+        func.coalesce(func.sum(R.amount), 0).label("amount"),
+    ).where(*conds, R.kind == "session").group_by(month).order_by(month))).all()
+
+    by_station = (await db.execute(select(
+        R.station_code.label("code"), func.count().label("count"),
+        func.coalesce(func.sum(R.amount), 0).label("amount"),
+    ).where(*conds, R.kind == "session")
+     .group_by(R.station_code).order_by(func.count().desc()).limit(20))).all()
+
+    rows = (await db.execute(select(R).where(*conds, R.kind == "session")
+                             .order_by(R.occurred_at.desc()).limit(limit))).scalars().all()
+    # Платёж отбракованной зарядки лежит в журнале отдельной строкой — сводим их
+    # по сессии, чтобы в реестре зарядка и её деньги стояли рядом.
+    pays = {p.session_ext_id: p for p in (await db.execute(
+        select(R).where(R.company_id == cid, R.kind == "payment",
+                        R.session_ext_id.in_([r.ext_id for r in rows] or ["—"]))
+    )).scalars().all()}
+
+    return {
+        "totals": {
+            "sessions": int(totals.sessions or 0), "payments": int(totals.payments or 0),
+            "kwh": float(totals.kwh or 0), "amount": float(totals.amount or 0),
+            "paid": float(totals.paid or 0),
+            "stations": int(totals.stations or 0), "users": int(totals.users or 0),
+        },
+        "byMonth": [{"bucket": r.bucket, "count": int(r.count), "amount": float(r.amount)}
+                    for r in by_month],
+        "byStation": [{"code": r.code or "—", "count": int(r.count), "amount": float(r.amount)}
+                      for r in by_station],
+        "items": [{
+            "id": str(r.id), "sessionId": r.ext_id,
+            "occurredAt": r.occurred_at.isoformat() if r.occurred_at else None,
+            "stationCode": r.station_code, "userId": r.user_id,
+            "energyKwh": float(r.energy_kwh or 0), "amount": float(r.amount or 0),
+            "status": r.status, "reason": r.reason,
+            "paidAmount": float(pays[r.ext_id].amount or 0) if r.ext_id in pays else None,
+        } for r in rows],
+    }
 
 
 @router.get("/reconciliation")

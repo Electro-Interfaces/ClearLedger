@@ -67,6 +67,47 @@ export async function getPaymentsList(
   })
 }
 
+/* ── Отбракованное источником ──────────────────────────────────────────────── */
+
+/**
+ * Зарядки, помеченные витриной как недостоверные. В учёте их нет вовсе — ни в
+ * сессиях, ни в платежах, — поэтому и в выручке они не участвуют. Экран отвечает
+ * на другой вопрос: где и у кого источник счёл транзакцию битой.
+ */
+export interface RejectedTotals {
+  sessions: number
+  payments: number
+  kwh: number
+  amount: number        // деньги отбракованных зарядок
+  paid: number          // сколько по ним прошло платежами
+  stations: number
+  users: number
+}
+export interface RejectedRow {
+  id: string
+  sessionId: string
+  occurredAt: string | null
+  stationCode: string | null
+  userId: string | null
+  energyKwh: number
+  amount: number
+  status: string | null
+  reason: string
+  paidAmount: number | null
+}
+export interface RejectedSummary {
+  totals: RejectedTotals
+  byMonth: { bucket: string; count: number; amount: number }[]
+  byStation: { code: string; count: number; amount: number }[]
+  items: RejectedRow[]
+}
+
+export async function getRejected(p: P & { limit?: number }): Promise<RejectedSummary> {
+  return get<RejectedSummary>('/api/charge-sessions/rejected', {
+    ...qp(p), ...(p.limit ? { limit: String(p.limit) } : {}),
+  })
+}
+
 /* ── Реализация одной точки (вкладка «Реализация» карточки объекта) ────────── */
 
 export interface StationSalesTotals {

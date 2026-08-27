@@ -21,7 +21,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import async_session_factory
 from app.models import (
-    ChannelSyncLog, ChargeSession, Contract, CorporateClient, Counterparty, Organization,
+    ChannelSyncLog, ChargeRejected, ChargeSession, Contract, CorporateClient, Counterparty,
+    Organization,
 )
 from app.services.analytics_cache import bump_version
 from app.services.charge_mart import rebuild_mart
@@ -172,6 +173,12 @@ async def ingest_charge_sessions(
 
     created = skipped = errors = 0
     tests = 0                  # сессии тестовых станций — в учёт не берём
+    rejected = 0               # отбракованные источником — тоже, но с журналом
+    # Что уже лежит в журнале: повторная выгрузка не должна плодить дубли.
+    known_rejected: set[str] = set((await db.execute(
+        select(ChargeRejected.ext_id).where(ChargeRejected.company_id == company_id,
+                                            ChargeRejected.kind == "session")
+    )).scalars().all())
     seen: set[str] = set()
     batch: list[ChargeSession] = []
 
@@ -207,6 +214,25 @@ async def ingest_charge_sessions(
             # симуляторов, они искажают выручку и надёжность сети.
             if _num_class(row.get("station_code")) == "test":
                 tests += 1
+                continue
+            # Отбракованная источником зарядка в учёт не идёт: в витринах её быть
+            # не должно вовсе (решение МАГа 27.08.2026). Но и терять её нельзя —
+            # это материал разбора, поэтому строка ложится в журнал.
+            if row.get("suspicious"):
+                if sid not in known_rejected:
+                    known_rejected.add(sid)
+                    db.add(ChargeRejected(
+                        company_id=company_id, kind="session", ext_id=sid,
+                        session_ext_id=sid, occurred_at=row.get("started_at"),
+                        station_code=row.get("station_code"),
+                        location_id=station_idx.get((row.get("station_code") or "").strip()) or None,
+                        user_id=row.get("user_id"),
+                        energy_kwh=row.get("energy_kwh") or 0.0,
+                        amount=row.get("amount") or 0.0,
+                        status=row.get("result"), reason="suspicious",
+                        payload=row.get("raw"),
+                    ))
+                rejected += 1
                 continue
             if sid in existing or sid in seen:
                 skipped += 1
@@ -298,6 +324,8 @@ async def ingest_charge_sessions(
         message = f"загружено {created}, пропущено {skipped}"
     if tests:
         message += f"; сессий тестовых станций исключено: {tests}"
+    if rejected:
+        message += f"; отбраковано источником: {rejected} (в журнале разбора)"
     if heal.get("stations_created"):
         message += f"; станций заведено из сессий: {heal['stations_created']}"
     if renamed:
