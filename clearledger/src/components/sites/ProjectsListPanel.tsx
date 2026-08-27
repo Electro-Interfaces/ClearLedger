@@ -263,8 +263,9 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
               </SelectItem>
             </SelectGroup>
             {/* Узел маршрута — второй способ спросить о том же списке: «у кого
-                сейчас работа». Ход ведёт Координатор, и он известен не у всех
-                проектов, поэтому под группой стоит, у скольких он известен. */}
+                сейчас работа». По маршруту ведётся не всякий проект: пока по нему
+                не сделали ни шага, узла у него нет вовсе — поэтому под группой
+                стоит, сколько проектов маршрут вообще ведёт. */}
             {(nodes.data?.nodes ?? []).length > 0 && (
               <SelectGroup>
                 <div className="mt-1 border-t px-2 pb-0.5 pt-1 text-xs uppercase tracking-wide text-muted-foreground">
@@ -276,7 +277,7 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
                   </SelectItem>
                 ))}
                 <div className="px-2 pb-1 pt-0.5 text-[11px] text-muted-foreground">
-                  ход известен у {nf0.format(nodes.data?.known ?? 0)} из{' '}
+                  по маршруту ведутся {nf0.format(nodes.data?.known ?? 0)} из{' '}
                   {nf0.format(nodes.data?.active ?? 0)} проектов в работе
                 </div>
               </SelectGroup>
