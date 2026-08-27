@@ -456,10 +456,15 @@ async def ingest_payments(
             ChargePayment.company_id == company_id))).scalars().all()
     }
     # Сессии, отбракованные источником, и то, что по ним уже занесено в журнал.
-    rejected_sessions: set[str] = set((await db.execute(
-        select(ChargeRejected.session_ext_id).where(
-            ChargeRejected.company_id == company_id, ChargeRejected.kind == "session")
-    )).scalars().all())
+    # Вместе со станцией и объектом: у платежа своей станции нет, он наследует её
+    # от зарядки — иначе отбор по региону покажет зарядки без их же платежей.
+    rejected_sessions: dict[str, tuple[str | None, str | None]] = {
+        row[0]: (row[1], row[2]) for row in (await db.execute(
+            select(ChargeRejected.session_ext_id, ChargeRejected.station_code,
+                   ChargeRejected.location_id)
+            .where(ChargeRejected.company_id == company_id, ChargeRejected.kind == "session")
+        )).all() if row[0]
+    }
     known_rejected: set[str] = set((await db.execute(
         select(ChargeRejected.ext_id).where(
             ChargeRejected.company_id == company_id, ChargeRejected.kind == "payment")
@@ -479,9 +484,11 @@ async def ingest_payments(
             if sid and sid in rejected_sessions:
                 if ext not in known_rejected:
                     known_rejected.add(ext)
+                    station_code, location_id = rejected_sessions[sid]
                     db.add(ChargeRejected(
                         company_id=company_id, kind="payment", ext_id=ext,
                         session_ext_id=sid, occurred_at=row.get("paid_at"),
+                        station_code=station_code, location_id=location_id,
                         user_id=row.get("user_phone") or row.get("user_ext_id"),
                         amount=row.get("amount") or 0,
                         status=row.get("op_type"), reason="suspicious",
