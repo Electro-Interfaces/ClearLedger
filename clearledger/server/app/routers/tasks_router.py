@@ -451,10 +451,24 @@ async def _extras(db: AsyncSession, tasks: list[Task]) -> dict[uuid.UUID, dict[s
         .group_by(TaskLink.task_id))).all():
         kids[tid] = {"total": total, "open": open_cnt}
 
+    # Вложения в строке: у записной книжки скриншот и есть содержание записи —
+    # «вот это письмо», «вот эта ошибка», — и открывать карточку ради того, чтобы
+    # узнать, приложено ли что-нибудь, значит не иметь записной книжки.
+    files: dict[uuid.UUID, list[dict]] = {i: [] for i in ids}
+    for tid, aid, name, mime, size in (await db.execute(
+        select(TaskAttachment.task_id, TaskAttachment.id,
+               SourceFile.file_name, SourceFile.mime_type, SourceFile.size)
+        .join(SourceFile, SourceFile.id == TaskAttachment.file_id)
+        .where(TaskAttachment.task_id.in_(ids))
+        .order_by(TaskAttachment.created_at))).all():
+        files[tid].append({"id": str(aid), "file_name": name,
+                           "mime_type": mime, "size": size})
+
     return {t.id: {
         "labels": labels.get(t.id, []),
         "checklist": check.get(t.id, {"total": 0, "done": 0}),
         "subtasks": kids.get(t.id, {"total": 0, "open": 0}),
+        "attachments": files.get(t.id, []),
         "time": {
             "estimate": t.estimate_minutes,
             "spent": spent.get(t.id, 0),

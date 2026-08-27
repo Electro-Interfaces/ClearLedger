@@ -26,6 +26,7 @@ import {
 } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { QueryError } from '@/components/common/QueryError'
+import { openAuthAttachment } from '@/lib/authFiles'
 import { cn } from '@/lib/utils'
 import * as tasksService from '@/services/tasksService'
 import { WorkIdentity } from '@/components/work/WorkIdentity'
@@ -262,9 +263,15 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
             {t.attachments.map((a) => (
               <div key={a.id} className="flex items-center gap-2 text-xs">
                 <Paperclip className="h-3 w-3 shrink-0 text-muted-foreground" />
-                <a href={tasksService.taskFileUrl(a.id, companyId)}
-                  target="_blank" rel="noreferrer"
-                  className="truncate text-primary hover:underline">{a.file_name}</a>
+                {/* Не ссылка: файл закрыт JWT, и прямой адрес в новой вкладке
+                    отвечает 401 — заголовка авторизации у неё нет. Тянем blob
+                    тем же клиентом, что и вложения чата. */}
+                <button type="button"
+                  onClick={() => {
+                    void openAuthAttachment(tasksService.taskFileUrl(a.id, companyId))
+                      .catch(() => toast.error('Файл не открылся'))
+                  }}
+                  className="truncate text-primary hover:underline">{a.file_name}</button>
                 <span className="shrink-0 text-muted-foreground">{fileSize(a.size)}</span>
                 {live && a.can_delete && (
                   <Button variant="ghost" size="sm" className="ml-auto h-6 px-1.5"

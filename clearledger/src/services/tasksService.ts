@@ -138,6 +138,17 @@ export interface SpaceTask {
   subtasks?: TaskSubtasks
   time?: TaskTime
   visibility?: TaskVisibility
+  /** Приложенные файлы — коротко, для строки списка. В записной книжке скриншот
+   *  и есть содержание записи: узнавать о нём, открыв карточку, поздно. */
+  attachments?: TaskFile[]
+}
+
+/** Вложение в строке списка: без прав и события — их спрашивают у карточки. */
+export interface TaskFile {
+  id: string
+  file_name: string
+  mime_type: string
+  size: number
 }
 
 /** Кто видит запись: вся компания, причастные или только автор.
