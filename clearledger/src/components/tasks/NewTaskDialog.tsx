@@ -272,6 +272,13 @@ export function NewTaskDialog({ companyId, onCreated, defaultObjectId, openSigna
               }))} value={assigneeId} onChange={setAssigneeId}
                 placeholder="Не назначен" emptyLabel="Не назначен"
                 searchPlaceholder="Фамилия или имя…" loading={peopleQ.isLoading} />
+              {!assigneeId && (
+                // Последствие называется до сохранения: «не назначен» звучит
+                // безобидно, а означает работу, с которой некого спросить.
+                <p className="text-xs text-muted-foreground">
+                  Никому не поручено — будет в вашей очереди как ничья работа
+                </p>
+              )}
             </div>
             <div className="space-y-1.5">
               <Label>Срок</Label>

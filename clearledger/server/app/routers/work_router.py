@@ -388,6 +388,7 @@ _REASONS: tuple[tuple[str, str], ...] = (
     ("approve", "виза"),
     ("acquaint", "ознакомиться"),
     ("do", "работа"),
+    ("unassigned", "никому не поручено"),
     ("own", "мой документ"),
 )
 
@@ -442,10 +443,16 @@ async def work_mine(
 
     # Поручения на мне и мои документы — из общей проекции: состояние и ключ
     # считаются тем же правилом, что в ленте.
+    # Второе условие — своя работа без исполнителя. Человек, заведший поручение и
+    # никому не отдавший его, увидит строку у себя: иначе работа существует, но
+    # не показывается никому, и «что на мне» отвечает неправду.
     task_rows = (await db.execute(
         select(Task).where(
             Task.company_id == cid, _visible_to(current_user, admin),
-            Task.status == "open", Task.assignee_id == current_user.id)
+            Task.status == "open",
+            or_(Task.assignee_id == current_user.id,
+                and_(Task.assignee_id.is_(None),
+                     Task.author_id == current_user.id)))
         .order_by(Task.due_at.asc().nullslast()).limit(limit))).scalars().all()
     projects = {p.id: p.code for p in (await db.execute(select(TaskProject).where(
         TaskProject.id.in_({t.project_id for t in task_rows if t.project_id}))
@@ -456,7 +463,7 @@ async def work_mine(
     for t in task_rows:
         code = projects.get(t.project_id)
         route = (types[t.type_id].route if t.type_id in types else None) or []
-        put("task", str(t.id), "do", {
+        put("task", str(t.id), "do" if t.assignee_id else "unassigned", {
             "title": t.title,
             "key": (f"{code}-{t.project_number}" if code and t.project_number
                     else f"№{t.number}"),

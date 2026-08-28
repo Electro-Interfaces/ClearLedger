@@ -13,7 +13,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import {
-  Check, Eye, FileText, ListChecks, Loader2, Stamp,
+  Check, Eye, FileText, ListChecks, Loader2, Stamp, UserPlus,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -29,15 +29,23 @@ import { cn } from '@/lib/utils'
 
 const REASON_ICON = {
   approve: Stamp, acquaint: Eye, do: ListChecks, own: FileText,
+  // Своё поручение, которое никому не отдали: работа есть, спрашивать не с кого.
+  unassigned: UserPlus,
 } as const
 
-export function MyWorkPage({ buckets: only, heading = true, hideDeferred = false,
-  hideTaken = false }: {
+export function MyWorkPage({ buckets: only, reasons, empty, heading = true,
+  hideDeferred = false, hideTaken = false }: {
   /** Какие корзины показывать. Пусто — все. «Сегодня» берёт две первые: там
    *  вопрос не «что на мне вообще», а «что на мне сегодня». */
   buckets?: MyWorkItem['bucket'][]
   /** Заголовок печатает вызывающий экран, когда очередь у него не единственное. */
   heading?: boolean
+  /** Оставить только эти причины: виза, ознакомление, работа, мой документ.
+   *  Нужно там, где очередь режут по вопросу («что ждёт моей визы»), а не по
+   *  сроку. Своя копия строки очереди разошлась бы с этой на первой же правке. */
+  reasons?: MyWorkItem['reason'][]
+  /** Чем объяснить пустоту, когда разрез узкий: «виз на вас нет» вместо общего. */
+  empty?: string
   /** Спрятанное человеком до будущего дня не показывать. Включается там, где
    *  спрашивают «что сегодня»; в полной очереди отложенное остаётся видимым —
    *  иначе его нельзя ни найти, ни вернуть. */
@@ -63,7 +71,7 @@ export function MyWorkPage({ buckets: only, heading = true, hideDeferred = false
   // Действие в строке — то же самое, что в карточке: одна ручка, один след.
   const act = useMutation({
     mutationFn: async (item: MyWorkItem) => {
-      if (item.reason === 'do') {
+      if (item.reason === 'do' || item.reason === 'unassigned') {
         return tasksService.taskAction(item.id, {
           companyId: company.id, status: 'done',
         })
@@ -79,7 +87,9 @@ export function MyWorkPage({ buckets: only, heading = true, hideDeferred = false
 
   const all = (q.data?.mine ?? []).filter(
     (r) => (!hideDeferred || !r.hidden) && (!hideTaken || !r.in_day))
-  const rows = only?.length ? all.filter((r) => only.includes(r.bucket)) : all
+  const byBucket = only?.length ? all.filter((r) => only.includes(r.bucket)) : all
+  const rows = reasons?.length
+    ? byBucket.filter((r) => reasons.includes(r.reason)) : byBucket
   const buckets = (q.data?.buckets ?? []).filter((b) => !only?.length || only.includes(b.code))
 
   return (
@@ -102,11 +112,22 @@ export function MyWorkPage({ buckets: only, heading = true, hideDeferred = false
         <QueryError message="Очередь не загрузилась" onRetry={() => void q.refetch()} />
       ) : rows.length === 0 ? (
         <div className="rounded-lg border p-8 text-center text-sm text-muted-foreground">
-          {only?.length
+          {empty ?? (only?.length
             ? 'На сегодня ничего не назначено.'
-            : 'На вас ничего не ждёт. Это нормальное состояние, а не пустой экран.'}
+            : 'На вас ничего не ждёт. Это нормальное состояние, а не пустой экран.')}
         </div>
-      ) : buckets.map((b) => {
+      ) : null}
+
+      {/* Экран «Сегодня» берёт две корзины. Всё остальное не исчезает молча:
+          иначе человек, поставивший поручение без срока, ищет его и не находит. */}
+      {!q.isLoading && !q.isError && only?.length && all.length > rows.length ? (
+        <button type="button" onClick={() => navigate('/docs/work?view=mine-all')}
+          className="text-xs text-muted-foreground hover:text-foreground">
+          Ещё {all.length - rows.length} в очереди — без срока или позже
+        </button>
+      ) : null}
+
+      {!q.isLoading && !q.isError && rows.length > 0 && buckets.map((b) => {
         const group = rows.filter((r) => r.bucket === b.code)
         if (group.length === 0) return null
         return (
@@ -138,13 +159,14 @@ function Line({ item, busy, companyId, onChanged, onOpen, onDone }: {
   const Icon = REASON_ICON[item.reason]
   // Кнопка показана только там, где действие правда доступно строкой: визу
   // ставят в карточке, где видно лист согласования и предыдущие круги.
-  const canFinish = item.reason === 'do' || (item.reason === 'acquaint' && item.acquaint_id)
+  const canFinish = item.reason === 'do' || item.reason === 'unassigned'
+    || (item.reason === 'acquaint' && item.acquaint_id)
   return (
     <div className="flex items-center gap-2 border-b px-3 py-2 last:border-b-0 hover:bg-muted/40">
       <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
       <button type="button" onClick={onOpen} className="flex-1 text-left">
         <div className="text-sm leading-snug">{item.title}</div>
-        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px] text-muted-foreground">
+        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
           <span className="font-mono">{item.key}</span>
           <span>{item.reason_name}</span>
           {item.note && <span>{item.note}</span>}
@@ -157,7 +179,7 @@ function Line({ item, busy, companyId, onChanged, onOpen, onDone }: {
           )}
         </div>
       </button>
-      <span className={cn('shrink-0 text-[11px] tabular-nums',
+      <span className={cn('shrink-0 text-xs tabular-nums',
         item.overdue ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground')}>
         {item.due_at ? dt(item.due_at) : 'без срока'}
       </span>
@@ -170,7 +192,7 @@ function Line({ item, busy, companyId, onChanged, onOpen, onDone }: {
           <Check className="h-3.5 w-3.5" />
         </Button>
       ) : (
-        <Button size="sm" variant="ghost" className="h-7 px-2 text-[11px]"
+        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs"
           onClick={onOpen}>Открыть</Button>
       )}
     </div>

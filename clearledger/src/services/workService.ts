@@ -109,8 +109,9 @@ export function workHref(item: WorkItem): string {
 export interface MyWorkItem {
   kind: 'doc' | 'task'
   id: string
-  /** `approve` — виза, `acquaint` — ознакомление, `do` — работа, `own` — мой документ. */
-  reason: 'approve' | 'acquaint' | 'do' | 'own'
+  /** `approve` — виза, `acquaint` — ознакомление, `do` — работа,
+   *  `unassigned` — своё поручение без исполнителя, `own` — мой документ. */
+  reason: 'approve' | 'acquaint' | 'do' | 'unassigned' | 'own'
   reason_name: string
   key: string
   title: string
