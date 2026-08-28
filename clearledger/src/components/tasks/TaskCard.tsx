@@ -53,6 +53,10 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
   const { openInteraction } = useSupportContext()
   const [note, setNote] = useState('')
   const [feedKind, setFeedKind] = useState<'all' | 'talk' | 'move' | 'meta'>('all')
+  // Порядок ленты — выбор человека и его привычка, а не свойство задачи:
+  // помним на пользователя, как это делает GitLab.
+  const [feedNewFirst, setFeedNewFirst] = useState(
+    () => localStorage.getItem('cl-task-feed-order') === 'new')
   const [tab, setTab] = useState('work')
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -127,7 +131,13 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
         : t.events.filter((e) => ['work', 'field'].includes(e.kind))
   // Закреплённое — наверх: договорённость, к которой возвращаются, не должна
   // тонуть в ленте из тридцати событий.
-  const events = [...shown].sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned))
+  const events = [...shown]
+    .sort((a, b) => (feedNewFirst
+      ? (b.created_at ?? '').localeCompare(a.created_at ?? '')
+      : (a.created_at ?? '').localeCompare(b.created_at ?? '')))
+    // Закреплённое всегда сверху, каким бы ни был порядок: его закрепили именно
+    // затем, чтобы не искать.
+    .sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned))
 
   return (
     <div className="flex h-full flex-col">
@@ -169,8 +179,17 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
               onClick={() => act.mutate({
                 companyId, stageCode: next.code, note: note || undefined,
               })}>
-              <ArrowRight className="mr-1.5 h-3.5 w-3.5" />{next.name}
+              <ArrowRight className="mr-1.5 h-3.5 w-3.5" />
+              {next.name}{t.assignee ? ` → ${t.assignee}` : ''}
             </Button>
+          )}
+          {/* Кнопка называет шаг, но работа уходит человеку. Пока исполнителя
+              нет, переход возможен — а спрашивать будет не с кого, и сказать об
+              этом надо до нажатия, а не в отчёте через неделю. */}
+          {live && next && !t.assignee_id && (
+            <span className="text-xs text-amber-600 dark:text-amber-400">
+              исполнитель не назначен
+            </span>
           )}
           {live && (
             <Button size="sm" variant="outline" className="h-8" disabled={act.isPending}
@@ -317,8 +336,20 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
           <TabsContent value="feed" className="space-y-5 pt-4">
         {/* Единая лента: события и реплики одним потоком — иначе «почему стоит»
             приходится собирать из двух списков. */}
-        <Section title="История" action={
-          <span className="flex gap-1">
+        <Section title="Ход работы" action={
+          <span className="flex items-center gap-1">
+            {/* Порядок ленты выбирает человек: одни читают её как разговор
+                сверху вниз, другие приходят за последним ходом. Выбор помним на
+                пользователя, а не на задачу. */}
+            <button type="button"
+              onClick={() => setFeedNewFirst((v) => {
+                try { localStorage.setItem('cl-task-feed-order', v ? 'old' : 'new') }
+                catch { /* хранилище недоступно — порядок живёт до перезагрузки */ }
+                return !v
+              })}
+              className="mr-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground transition-colors hover:text-foreground">
+              {feedNewFirst ? 'новые сверху' : 'старые сверху'}
+            </button>
             {([['all', 'всё'], ['talk', 'разговор'], ['move', 'движение'],
                ['meta', 'правки и время']] as const).map(([k, label]) => (
               <button key={k} type="button" onClick={() => setFeedKind(k)}
@@ -447,6 +478,15 @@ function Header({ task, companyId, onRename, onBack }: {
         {task.subject_ref && (
           <SubjectLink companyId={companyId} refKey={task.subject_ref} />
         )}
+        {/* Блокировка решает, браться ли сейчас, и во вкладке «Связи» её никто
+            не увидит вовремя. */}
+        {task.links?.filter((l) => l.kind === 'blocked_by').map((l) => (
+          <span key={l.id}
+            className="inline-flex items-center gap-1 rounded border border-red-500/40 bg-red-500/5 px-1.5 py-px text-xs text-red-600 dark:text-red-400">
+            <Lock className="h-3 w-3" />
+            ждёт №{l.number}
+          </span>
+        ))}
         {task.labels.map((l) => (
           <span key={l.id}
             className="rounded border border-border/60 bg-muted/40 px-1 py-px text-xs">
