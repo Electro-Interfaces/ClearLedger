@@ -24,6 +24,7 @@ import {
 } from '@/components/ui/select'
 import { QueryError } from '@/components/common/QueryError'
 import { cn } from '@/lib/utils'
+import { useAuth } from '@/contexts/AuthContext'
 import { useCompany } from '@/contexts/CompanyContext'
 import * as tasksService from '@/services/tasksService'
 import type { ListedTask, TaskScope } from '@/services/tasksService'
@@ -50,7 +51,7 @@ const VIEW_SCOPE: Record<string, TaskScope> = {
 }
 
 export function TasksWorkPage({ embeddedView }: {
-  embeddedView?: 'mine' | 'registry'
+  embeddedView?: 'mine' | 'registry' | 'assigned' | 'watching'
 } = {}) {
   const { company } = useCompany()
   const navigate = useNavigate()
@@ -60,7 +61,11 @@ export function TasksWorkPage({ embeddedView }: {
   const view = embeddedView ?? routedView
   const meta = embeddedView === 'mine'
     ? { label: 'Поручения', hint: 'Работа, которую выполняю я' }
-    : embeddedView === 'registry'
+    : embeddedView === 'assigned'
+      ? { label: 'Я поставил', hint: 'Работа, которую поручил другим, — с меня спросят результат' }
+      : embeddedView === 'watching'
+        ? { label: 'Наблюдаю', hint: 'Чужая работа, за которой слежу со стороны' }
+        : embeddedView === 'registry'
       ? { label: 'Поручения компании', hint: 'Вся работа с отбором, поиском и выгрузкой' }
       : (TASKS_VIEWS[route] ?? []).find((item) => item.key === view)
   const scope = VIEW_SCOPE[view] ?? 'open'
@@ -436,11 +441,30 @@ export function TasksWorkPage({ embeddedView }: {
 
 function QuickCreate({ companyId, onCreated }: { companyId: string; onCreated: () => void }) {
   const qc = useQueryClient()
+  const { user } = useAuth()
+  const me = user?.id ?? ''
   const [title, setTitle] = useState('')
+  // Кому: пусто — себе. Короткое поручение соседу («посмотри счёт») не стоит
+  // целой карточки, а без выбора строка умела ставить работу только на себя.
+  const [assigneeId, setAssigneeId] = useState('')
+  const peopleQ = useQuery({
+    queryKey: ['task-people', companyId],
+    queryFn: () => tasksService.listTaskPeople(companyId),
+    enabled: !!companyId,
+    staleTime: 5 * 60 * 1000,
+  })
+  const people = peopleQ.data?.people ?? []
+  // «Себе» ставит исполнителем себя, а не оставляет задачу ничьей: иначе запись
+  // не видна в «На мне», где отбор идёт по исполнителю.
   const create = useMutation({
-    mutationFn: () => tasksService.createTask({ companyId, title: title.trim() }),
+    mutationFn: () => tasksService.createTask({
+      companyId, title: title.trim(), assigneeId: assigneeId || me || undefined,
+    }),
     onSuccess: (t) => {
-      toast.success(`Задача ${tasksService.taskKey(t)} поставлена`)
+      const to = people.find((p) => p.id === assigneeId)
+      toast.success(to
+        ? `${tasksService.taskKey(t)} — поручено: ${to.name}`
+        : `Задача ${tasksService.taskKey(t)} поставлена`)
       setTitle('')
       qc.invalidateQueries({ queryKey: ['tasks'] })
       onCreated()
@@ -450,17 +474,25 @@ function QuickCreate({ companyId, onCreated }: { companyId: string; onCreated: (
   return (
     <div className="flex flex-1 items-center gap-2">
       <Input value={title} onChange={(e) => setTitle(e.target.value)}
-        placeholder="Что сделать? Enter — поставить, подробности допишете в карточке"
+        placeholder={assigneeId
+          ? 'Что поручить? Enter — поставить, подробности допишете в карточке'
+          : 'Что сделать? Enter — поставить, подробности допишете в карточке'}
         maxLength={300} className="h-9"
         onKeyDown={(e) => {
           if (e.key === 'Enter' && title.trim().length >= 3 && !create.isPending) create.mutate()
         }} />
+      <select value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)}
+        disabled={!peopleQ.isSuccess} title="Кому поручить"
+        className="h-9 max-w-[12rem] shrink-0 rounded-md border border-input bg-background px-2 text-sm">
+        <option value="">себе</option>
+        {people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+      </select>
       <Button size="sm" className="h-9" disabled={title.trim().length < 3 || create.isPending}
         onClick={() => create.mutate()}>
         {create.isPending
           ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
           : <Plus className="mr-1.5 h-3.5 w-3.5" />}
-        Поставить
+        {assigneeId ? 'Поручить' : 'Поставить'}
       </Button>
     </div>
   )
@@ -541,7 +573,7 @@ function TasksTable({ tasks, sort, onSort, picked, onPick, cursor, groupByObject
               {g.name && (
                 <tr key={`g-${g.name}`} className="border-t bg-muted/20">
                   <td colSpan={COLUMNS.length + 1}
-                    className="px-2.5 py-1.5 text-[11px] font-medium text-muted-foreground">
+                    className="px-2.5 py-1.5 text-xs font-medium text-muted-foreground">
                     {g.name} · {g.tasks.length}
                   </td>
                 </tr>
@@ -584,7 +616,7 @@ function TasksTable({ tasks, sort, onSort, picked, onPick, cursor, groupByObject
                       )}
                       <span className="font-medium text-foreground">{t.title}</span>
                       {t.waiting_for === 'external' && (
-                        <span className="mt-px shrink-0 rounded border border-amber-500/40 bg-amber-500/5 px-1 py-px text-[10px] text-amber-700 dark:text-amber-400">
+                        <span className="mt-px shrink-0 rounded border border-amber-500/40 bg-amber-500/5 px-1 py-px text-xs text-amber-700 dark:text-amber-400">
                           ждём внешних
                         </span>
                       )}
@@ -592,7 +624,7 @@ function TasksTable({ tasks, sort, onSort, picked, onPick, cursor, groupByObject
                     {(t.checklist.total > 0 || t.subtasks.total > 0 || t.time.spent > 0
                       || t.labels.length > 0
                       || t.priority === 'high' || t.priority === 'critical') && (
-                      <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px] text-muted-foreground">
+                      <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-muted-foreground">
                         {(t.priority === 'high' || t.priority === 'critical') && (
                           <span className={PRIORITY_TONE[t.priority]}>
                             {PRIORITY_LABEL[t.priority]}
@@ -639,12 +671,12 @@ function TasksTable({ tasks, sort, onSort, picked, onPick, cursor, groupByObject
                   </td>
                   <td className="p-2.5 align-top">
                     {t.status === 'open' && t.stage ? (
-                      <span className="whitespace-nowrap rounded-md border px-1.5 py-0.5 text-[11px]">
+                      <span className="whitespace-nowrap rounded-md border px-1.5 py-0.5 text-xs">
                         {t.stage}
                       </span>
                     ) : (
                       // Закрытая задача: состояние важнее несуществующей стадии.
-                      <span className={cn('whitespace-nowrap text-[11px]',
+                      <span className={cn('whitespace-nowrap text-xs',
                         t.status === 'done'
                           ? 'text-emerald-600 dark:text-emerald-400'
                           : 'text-muted-foreground')}>

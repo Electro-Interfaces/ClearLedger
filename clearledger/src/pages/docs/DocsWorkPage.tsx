@@ -146,10 +146,10 @@ export function DocsWorkPage() {
     )
   }
 
-  if (view === 'errands') {
+  if (view === 'errands' || view === 'assigned' || view === 'watching') {
     return (
       <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">Загрузка…</div>}>
-        <TasksWorkPage embeddedView="mine" />
+        <TasksWorkPage embeddedView={view === 'errands' ? 'mine' : view} />
       </Suspense>
     )
   }
