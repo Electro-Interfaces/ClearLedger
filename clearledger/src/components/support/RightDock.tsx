@@ -142,10 +142,25 @@ export function RightDock() {
 
   const dockOpen = !!section && mode === 'dock'
 
+  // Esc — первое, что нажимают, чтобы убрать панель с глаз. Слушатель живёт,
+  // только пока док открыт: иначе он ловил бы Esc у диалогов и меню.
+  useEffect(() => {
+    if (!dockOpen) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closeInteraction() }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [dockOpen, closeInteraction])
+
   /** Открыть область из рельсы её собственным способом. Один обработчик на
    *  рельсу и на шапку дока: два разных поведения у одной кнопки — то, из-за
    *  чего человек перестаёт предсказывать интерфейс. */
   const openFromRail = useCallback((key: InteractionSection) => {
+    // Нажали на уже открытую область — свернули. Кнопка, которая только
+    // открывает, заставляет искать крестик глазами каждый раз.
+    if (section === key && mode === 'dock') {
+      closeInteraction()
+      return
+    }
     openInteraction(key)
     if (MODAL_ONLY.includes(key)) {
       setInteractionMode('modal')
@@ -153,7 +168,7 @@ export function RightDock() {
     }
     const нужно = MIN_WIDTH_FOR[key]
     if (нужно) setWidth((w) => (w < нужно ? нужно : w))
-  }, [openInteraction, setInteractionMode])
+  }, [section, mode, openInteraction, setInteractionMode, closeInteraction])
 
   // ── Мобайл: рейла нет; при открытии дока — полноэкранный оверлей ──
   if (isMobile) {
@@ -232,30 +247,35 @@ function DockHead({ tabs, section, badgeOf, isMobile, onTab, onPop, onClose }: {
 }) {
   return (
     <div className="flex shrink-0 items-center gap-1 border-b border-border/50 bg-card px-2 py-1.5">
-      {tabs.map((t) => {
-        const active = section === t.key
-        const badge = badgeOf(t.key)
-        return (
-          <button key={t.key} onClick={() => onTab(t.key)}
-            className={cn('relative inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium transition-colors',
-              active ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-accent hover:text-foreground')}>
-            <t.icon className="size-4" />
-            <span>{t.label}</span>
-            {badge > 0 && (
-              <span className="ml-0.5 inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold text-white">{badge}</span>
-            )}
-          </button>
-        )
-      })}
-      <div className="flex-1" />
+      {/* Подпись несёт только открытая вкладка: семь подписей в колонке 400 px
+          выталкивали крестик за край, и панель было нечем закрыть. */}
+      <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto scrollbar-hide">
+        {tabs.map((t) => {
+          const active = section === t.key
+          const badge = badgeOf(t.key)
+          return (
+            <button key={t.key} onClick={() => onTab(t.key)} title={t.label}
+              aria-current={active ? 'page' : undefined}
+              className={cn('relative inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm font-medium transition-colors',
+                active ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-accent hover:text-foreground')}>
+              <t.icon className="size-4 shrink-0" />
+              {active && <span className="truncate">{t.label}</span>}
+              {badge > 0 && (
+                <span className="ml-0.5 inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold text-white">{badge}</span>
+              )}
+            </button>
+          )
+        })}
+      </div>
       {!isMobile && (
         <button onClick={onPop} title="Открыть окном"
-          className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground">
+          className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground">
           <Maximize2 className="size-4" />
         </button>
       )}
-      <button onClick={onClose} title="Закрыть"
-        className="inline-flex size-7 max-md:size-9 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground">
+      <button onClick={onClose} title="Закрыть — или клавишей Esc"
+        aria-label="Закрыть панель"
+        className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground">
         <X className="size-4" />
       </button>
     </div>
