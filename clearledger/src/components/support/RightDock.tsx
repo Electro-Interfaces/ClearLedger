@@ -215,8 +215,8 @@ export function RightDock() {
                 title="Видеоконференция — создать и скопировать ссылку"
                 onDragOver={(e) => { e.dataTransfer.dropEffect = 'none' }}
                 className={cn(RAIL_PRIMARY, confBusy && 'opacity-60')}>
-                <Video className="size-5" />
-                <span>Встреча</span>
+                <Video className="pointer-events-none size-5" />
+                <span className="pointer-events-none">Встреча</span>
               </button>
             )}
             {tabs.filter((t) => t.primary).map((t) => (
@@ -314,10 +314,14 @@ function RailButton({ tab, active, badge, primary, onClick, onDropItem }: {
 }) {
   const [ждём, setЖдём] = useState(false)
   const таймер = useRef<number | null>(null)
+  // Глубина: `dragenter` и `dragleave` приходят на каждый вложенный элемент, и
+  // без счёта переход курсора с кнопки на её иконку читается как уход.
+  const глубина = useRef(0)
 
   const отмена = useCallback(() => {
     if (таймер.current) window.clearTimeout(таймер.current)
     таймер.current = null
+    глубина.current = 0
     setЖдём(false)
   }, [])
 
@@ -328,7 +332,9 @@ function RailButton({ tab, active, badge, primary, onClick, onDropItem }: {
   return (
     <button onClick={onClick} title={`${tab.label} — открыть справа`}
       aria-current={active ? 'true' : undefined}
-      onDragEnter={() => {
+      onDragEnter={(e) => {
+        e.preventDefault()
+        глубина.current += 1
         if (active || таймер.current) return
         setЖдём(true)
         таймер.current = window.setTimeout(() => { отмена(); onClick() }, ПОДЕРЖАТЬ)
@@ -336,7 +342,10 @@ function RailButton({ tab, active, badge, primary, onClick, onDropItem }: {
       // Разрешаем бросок над кнопкой, чтобы курсор не показывал «нельзя», пока
       // панель открывается: сам бросок примет уже открытая панель.
       onDragOver={(e) => e.preventDefault()}
-      onDragLeave={отмена}
+      onDragLeave={() => {
+        глубина.current -= 1
+        if (глубина.current <= 0) отмена()
+      }}
       onDrop={(e) => {
         отмена()
         if (!onDropItem) return
@@ -351,10 +360,12 @@ function RailButton({ tab, active, badge, primary, onClick, onDropItem }: {
           ? 'bg-primary/10 text-primary'
           : 'text-muted-foreground hover:bg-accent hover:text-foreground'),
         primary && active && 'bg-primary text-white')}>
-      <tab.icon className="size-5" />
-      <span>{tab.label}</span>
+      {/* Содержимое не ловит указатель: иначе переход курсора с кнопки на её
+          иконку читается как уход с кнопки и рвёт отсчёт открытия. */}
+      <tab.icon className="pointer-events-none size-5" />
+      <span className="pointer-events-none">{tab.label}</span>
       {badge > 0 && (
-        <span className="absolute right-0.5 top-0.5 inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold leading-none text-white">{badge}</span>
+        <span className="pointer-events-none absolute right-0.5 top-0.5 inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold leading-none text-white">{badge}</span>
       )}
     </button>
   )
