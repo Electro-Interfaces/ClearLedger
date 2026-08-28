@@ -6,16 +6,26 @@
  * Кнопка «закрепить справа» переносит раздел в правый док (setInteractionMode).
  * Чат в окне — полная 3-колоночная раскладка (в отличие от компактного дока).
  */
+import { lazy, Suspense } from 'react'
 import { createPortal } from 'react-dom'
-import { PanelRight } from 'lucide-react'
+import { Loader2, PanelRight } from 'lucide-react'
 import { useSupportContext } from '@/contexts/SupportContext'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
-import { ChatPanel } from '@/components/chat/ChatPanel'
-import { TicketsPanel } from './InteractionPanels'
-import { TasksQuickPanel } from '@/components/tasks/TasksQuickPanel'
-import { InfoCenter } from '@/components/info/InfoCenter'
-import { AuditorPanel } from '@/components/auditor/AuditorPanel'
 import { useCompany } from '@/contexts/CompanyContext'
+
+const ChatPanel = lazy(() => import('@/components/chat/ChatPanel').then((m) => ({ default: m.ChatPanel })))
+const TicketsPanel = lazy(() => import('./InteractionPanels').then((m) => ({ default: m.TicketsPanel })))
+const TasksQuickPanel = lazy(() => import('@/components/tasks/TasksQuickPanel').then((m) => ({ default: m.TasksQuickPanel })))
+const CalendarPage = lazy(() => import('@/pages/docs/CalendarPage').then((m) => ({ default: m.CalendarPage })))
+const NotesPage = lazy(() => import('@/pages/docs/NotesPage').then((m) => ({ default: m.NotesPage })))
+const InfoCenter = lazy(() => import('@/components/info/InfoCenter').then((m) => ({ default: m.InfoCenter })))
+const AuditorPanel = lazy(() => import('@/components/auditor/AuditorPanel').then((m) => ({ default: m.AuditorPanel })))
+
+const panelFallback = (
+  <div className="flex h-full items-center justify-center">
+    <Loader2 className="size-5 animate-spin text-muted-foreground" />
+  </div>
+)
 
 // Ключ секции остался `tickets` (он в localStorage у людей), а подпись — «Поддержка»:
 // это разговор с поставщиком программы, а не заявки компании и не «Трек».
@@ -25,6 +35,9 @@ const TITLES: Record<string, string> = {
 
 export function InteractionModal() {
   const { interactionSection: section, interactionMode: mode, setInteractionMode, closeInteraction } = useSupportContext()
+  // Заголовок окна берёт имя продукта у компании — там, где агентов зовут «Агенты»,
+  // окно не должно называться «Аудитор».
+  const { appName } = useCompany()
   const isOpen = !!section && mode === 'modal'
   // Список окон ЗАКРЫТЫЙ: раздел, которого здесь нет, из шапки просто не открывается —
   // кнопка нажимается, состояние меняется, а окна нет и ошибки тоже. Так и было с
@@ -58,30 +71,34 @@ export function InteractionModal() {
           className={
             'p-0 gap-0 bg-card border-border text-foreground shadow-2xl ring-1 ring-black/5 dark:ring-white/10 '
             + 'w-screen h-[100dvh] max-w-none max-h-none rounded-none sm:rounded-xl overflow-hidden flex flex-col '
-            + (section === 'chat'
+            // «Трек» идёт по мерке чата: это тоже рабочее окно, а не сводка —
+            // строка задачи несёт номер, проект, стадию, срок и кнопки, и на
+            // прежних 5xl всё это ломалось в три этажа.
+            + (section === 'chat' || section === 'tasks'
               ? 'sm:w-[96vw] sm:max-w-[1600px] sm:h-[92dvh] sm:max-h-[92dvh]'
               // Аудитору нужна ширина чата: в ответах таблицы и карточки находок, в узком
               // окне они переносятся по слогам.
               : section === 'auditor'
                 ? 'sm:w-[94vw] sm:max-w-5xl sm:h-[84dvh] sm:max-h-[84dvh]'
-              // «Трек» — не сводка, а рабочее окно: строка задачи несёт номер,
-              // проект, стадию, срок и действия, и в узком окне всё это
-              // переносится в три этажа.
-              : section === 'tasks'
-                ? 'sm:w-[94vw] sm:max-w-5xl sm:h-[86dvh] sm:max-h-[86dvh]'
               : 'sm:w-[92vw] sm:max-w-2xl sm:h-[70vh] sm:max-h-[70vh]')
           }
         >
           {DockButton}
           <DialogHeader className="px-4 py-3 border-b border-border/50 shrink-0 text-left">
-            <DialogTitle className="text-foreground text-base">{section ? TITLES[section] : ''}</DialogTitle>
+            <DialogTitle className="text-foreground text-base">
+              {section === 'auditor' ? appName('auditor', TITLES.auditor) : (section ? TITLES[section] : '')}
+            </DialogTitle>
             <DialogDescription className="sr-only">Модуль взаимодействия с поддержкой</DialogDescription>
           </DialogHeader>
           <div className="flex-1 min-h-0 overflow-hidden">
-            {section === 'chat' && <ChatPanel />}
-            {section === 'tasks' && <TasksQuickPanel />}
-            {section === 'tickets' && <TicketsPanel />}
-            {section === 'auditor' && <AuditorPanel />}
+            <Suspense fallback={panelFallback}>
+              {section === 'chat' && <ChatPanel />}
+              {section === 'tasks' && <TasksQuickPanel />}
+              {section === 'calendar' && <CalendarPage />}
+              {section === 'notes' && <NotesPage />}
+              {section === 'tickets' && <TicketsPanel />}
+              {section === 'auditor' && <AuditorPanel />}
+            </Suspense>
           </div>
         </DialogContent>
       </Dialog>
@@ -97,7 +114,9 @@ export function InteractionModal() {
             <DialogDescription className="sr-only">Знание пространства: инструкции, нормы и документы компании</DialogDescription>
           </DialogHeader>
           <div className="flex-1 min-h-0 overflow-hidden">
-            {section === 'help' && <InfoModalBody />}
+            <Suspense fallback={panelFallback}>
+              {section === 'help' && <InfoModalBody />}
+            </Suspense>
           </div>
         </DialogContent>
       </Dialog>

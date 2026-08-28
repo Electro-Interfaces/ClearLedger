@@ -13,7 +13,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useLocation } from 'react-router-dom'
-import { MessageCircle, LifeBuoy, ListChecks, HelpCircle, Bot, X, Maximize2 } from 'lucide-react'
+import {
+  Bot, CalendarDays, HelpCircle, LifeBuoy, ListChecks, Maximize2, MessageCircle, NotebookPen, X,
+} from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useMaxWidth } from '@/hooks/use-mobile'
 import { useSupportContext, type InteractionSection } from '@/contexts/SupportContext'
@@ -23,6 +25,8 @@ import { productForMode } from '@/config/productAccess'
 import { productForPath } from '@/config/spaceProducts'
 import { TicketsPanel } from './InteractionPanels'
 import { TasksQuickPanel } from '@/components/tasks/TasksQuickPanel'
+import { CalendarPage } from '@/pages/docs/CalendarPage'
+import { NotesPage } from '@/pages/docs/NotesPage'
 import { InfoContextPanel } from '@/components/info/InfoContextPanel'
 import { AuditorPanel } from '@/components/auditor/AuditorPanel'
 import { useCompany } from '@/contexts/CompanyContext'
@@ -32,6 +36,10 @@ type Tab = { key: InteractionSection; label: string; icon: typeof MessageCircle 
 const TABS: Tab[] = [
   { key: 'chat', label: 'Чат', icon: MessageCircle },
   { key: 'tasks', label: 'Трек', icon: ListChecks },
+  // Календарь и записная книжка — то, во что заглядывают поверх работы, а не то,
+  // ради чего уходят с экрана: «свободен ли четверг» и «записать, пока помню».
+  { key: 'calendar', label: 'Календарь', icon: CalendarDays },
+  { key: 'notes', label: 'Записи', icon: NotebookPen },
   // «Аудитор» стоит рядом с «Инфо» осознанно: и то, и другое отвечает на вопрос
   // «что здесь происходит», только справка знает продукт, а аудитор — данные.
   { key: 'auditor', label: 'Аудитор', icon: Bot },
@@ -87,8 +95,13 @@ export function RightDock() {
   // «Аудитор» — по включённости продукта: пространство без него не должно показывать
   // вкладку, которая ответит «сервис не настроен».
   const tasksOn = useDocsApp()
-  const { canApp } = useCompany()
-  const tabs = TABS.filter((t) => (t.key !== 'tasks' || tasksOn) && (t.key !== 'auditor' || canApp('auditor')))
+  const { canApp, appName } = useCompany()
+  const tabs = TABS
+    .filter((t) => (!['tasks', 'calendar', 'notes'].includes(t.key) || tasksOn)
+      && (t.key !== 'auditor' || canApp('auditor')))
+    // Имя агента — как его назвала компания: рейл, окно и шапка обязаны говорить
+    // одинаково, иначе человек ищет в доке «Аудитора», которого в шапке зовут иначе.
+    .map((t) => (t.key === 'auditor' ? { ...t, label: appName('auditor', t.label) } : t))
 
   const dockOpen = !!section && mode === 'dock'
 
@@ -132,7 +145,7 @@ export function RightDock() {
               <t.icon className="size-4" />
               <span>{t.label}</span>
               {badge > 0 && (
-                <span className="absolute right-1 top-1 inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-red-600 px-1 text-[9px] font-bold leading-none text-white">{badge}</span>
+                <span className="absolute right-1 top-1 inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold leading-none text-white">{badge}</span>
               )}
             </button>
           )
@@ -209,7 +222,11 @@ function DockBody({ section }: { section: InteractionSection }) {
   return (
     <div className="min-h-0 flex-1 overflow-hidden">
       {section === 'chat' && <ChatPanel compact scopeProduct={product} />}
-      {section === 'tasks' && <TasksQuickPanel />}
+      {/* Док узкий: рельса разрезов и полоса дня туда не помещаются — панель
+          показывает разрезы строкой поверх списка. */}
+      {section === 'tasks' && <TasksQuickPanel compact />}
+      {section === 'calendar' && <div className="h-full overflow-y-auto"><CalendarPage /></div>}
+      {section === 'notes' && <div className="h-full overflow-y-auto"><NotesPage /></div>}
       {/* Аудитор берёт контекст сам (маршрут и параметры адреса) — доку не нужно
           ничего ему передавать, и та же панель работает из шапки. */}
       {section === 'auditor' && <AuditorPanel />}

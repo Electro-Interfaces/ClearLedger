@@ -58,8 +58,10 @@ export const DOCS_VIEWS: Record<string, DocsView[]> = {
   // есть место, где чужой предмет становится разложенным по-своему.
   '/docs/work': [
     { key: 'today', label: 'Сегодня', hint: 'день целиком: что взял, что принесли, напоминания', group: 'Веду сам', badge: 'hot' },
-    { key: 'calendar', label: 'Календарь', hint: 'месяц и неделя: встречи и сроки вместе', group: 'Веду сам' },
-    { key: 'notes', label: 'Записная книжка', hint: 'что записал себе — без сроков и чужих глаз', group: 'Веду сам', badge: 'notes' },
+    // Календарь и записи переехали в правую рельсу: в них заглядывают поверх
+    // работы. Пункты остаются скрытыми, чтобы прежние ссылки открывали экран.
+    { key: 'calendar', label: 'Календарь', hint: 'месяц и неделя: встречи и сроки вместе', hidden: true },
+    { key: 'notes', label: 'Записная книжка', hint: 'что записал себе — без сроков и чужих глаз', hidden: true },
     { key: 'starred', label: 'Важное', hint: 'помеченное лично: важность своя, приоритет предмета ставит постановщик', group: 'Веду сам', badge: 'starred' },
     { key: 'deferred', label: 'Отложено', hint: 'спрятанное у себя до даты — срок компании при этом не менялся', group: 'Веду сам', badge: 'deferred' },
     { key: 'assigned', label: 'Я поставил', hint: 'что поручил другим — с меня спросят результат', group: 'Веду сам', badge: 'assigned' },
@@ -406,9 +408,12 @@ export function DocsLayout() {
                   {v.group}
                 </div>
               )}
+              {/* Пункт сдвинут вправо от заголовка группы: заголовок называет
+                  раздел, пункты принадлежат ему, и одинаковый левый край читался
+                  бы как плоский список без групп. */}
               <button type="button" onClick={() => open(v.key)} title={v.hint}
                 aria-current={v.key === active ? 'page' : undefined}
-                className={cn('flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left text-sm transition-colors',
+                className={cn('flex w-full items-center gap-2 rounded-md py-1.5 pl-7 pr-3 text-left text-sm transition-colors',
                   v.key === active && !savedView && !openList
                     ? 'bg-primary/10 font-medium text-primary'
                     : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground')}>
@@ -469,12 +474,14 @@ export function DocsLayout() {
                   title={l.stale_days !== null && l.stale_days > 13
                     ? `Не открывали ${l.stale_days} дн. · Alt+↑↓ или перетаскиванием — порядок`
                     : 'Своя подборка: видите только вы. Alt+↑↓ или перетаскиванием — порядок'}
-                  className={cn('group flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left text-sm transition-colors',
+                  className={cn('group relative flex w-full items-center gap-2 rounded-md py-1.5 pl-7 pr-3 text-left text-sm transition-colors',
                     drag === l.id && 'opacity-50',
                     openList === l.id
                       ? 'bg-primary/10 font-medium text-primary'
                       : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground')}>
-                  <GripVertical className="h-3.5 w-3.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-40" aria-hidden />
+                  <GripVertical
+                    className="absolute left-1.5 h-3.5 w-3.5 opacity-0 transition-opacity group-hover:opacity-40"
+                    aria-hidden />
                   <span className="flex-1 truncate">{l.name}</span>
                   {l.stale_days !== null && l.stale_days > 13 && (
                     <span className="shrink-0 text-amber-600 dark:text-amber-400" aria-hidden>·</span>
@@ -486,7 +493,7 @@ export function DocsLayout() {
               ))}
               {myLists.length === 0 && (
                 <button type="button" onClick={() => openMyList(null, true)}
-                  className="rounded-md px-3 py-1.5 text-left text-sm text-muted-foreground/80 transition-colors hover:bg-accent/40 hover:text-foreground">
+                  className="rounded-md py-1.5 pl-7 pr-3 text-left text-sm text-muted-foreground/80 transition-colors hover:bg-accent/40 hover:text-foreground">
                   Завести подборку
                 </button>
               )}
@@ -501,7 +508,7 @@ export function DocsLayout() {
                 <button key={v.id} type="button"
                   onClick={() => openSaved(v.id, v.query as Record<string, string>)}
                   aria-current={savedView === v.id ? 'page' : undefined}
-                  className={cn('truncate rounded-md px-3 py-1.5 text-left text-sm transition-colors',
+                  className={cn('truncate rounded-md py-1.5 pl-7 pr-3 text-left text-sm transition-colors',
                     savedView === v.id
                       ? 'bg-primary/10 font-medium text-primary'
                       : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground')}>
