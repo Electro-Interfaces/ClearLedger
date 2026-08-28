@@ -67,9 +67,7 @@ export function ListsPage({ mode = 'lists' }: { mode?: ListsMode }) {
   const [params, setParams] = useSearchParams()
   const companyId = company?.id ?? ''
   const [новая, setНовая] = useState('')
-  // Пришли по «Завести подборку» — поле открыто сразу: иначе человек попадает на
-  // экран и ищет глазами ещё одну кнопку с тем же названием.
-  const [заводим, setЗаводим] = useState(() => params.get('new') === '1')
+  const [заводим, setЗаводим] = useState(false)
   const [переименование, setПереименование] = useState('')
   const [правим, setПравим] = useState<string | null>(null)
   const [имя, setИмя] = useState('')
@@ -92,9 +90,6 @@ export function ListsPage({ mode = 'lists' }: { mode?: ListsMode }) {
     n.set('view', 'lists')
     if (id) n.set('list', id)
     else n.delete('list')
-    // Признак «пришли заводить» одноразовый: иначе поле ввода открывается
-    // снова при каждом возврате на экран.
-    n.delete('new')
     return n
   }, { replace: true })
 
@@ -143,13 +138,13 @@ export function ListsPage({ mode = 'lists' }: { mode?: ListsMode }) {
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs">
           {переименование ? (
             <span className="inline-flex items-center gap-1">
-              <Input value={переименование} autoFocus className="h-7 w-[170px] text-xs"
+              <Input value={переименование} autoFocus className="h-8 w-[170px] text-xs"
                 onChange={(e) => setПереименование(e.target.value)} />
-              <Button size="sm" className="h-7 px-2 text-xs"
+              <Button size="sm" className="h-8 px-2 text-xs"
                 onClick={() => act.mutate({
                   id: текущая.id, data: { name: переименование.trim() },
                 })}>Готово</Button>
-              <Button size="sm" variant="ghost" className="h-7 px-2"
+              <Button size="sm" variant="ghost" className="h-8 px-2"
                 onClick={() => setПереименование('')}><X className="h-3 w-3" /></Button>
             </span>
           ) : (
@@ -266,7 +261,7 @@ function Обзор({
               <FolderOpen className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
               {правим === l.id ? (
                 <span className="flex flex-1 items-center gap-1.5">
-                  <Input value={имя} autoFocus className="h-7 max-w-[240px] text-sm"
+                  <Input value={имя} autoFocus className="h-8 max-w-[240px] text-sm"
                     onChange={(e) => setИмя(e.target.value)}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' && имя.trim()) {
@@ -275,11 +270,11 @@ function Обзор({
                       }
                       if (e.key === 'Escape') setПравим(null)
                     }} />
-                  <Button size="sm" className="h-7 px-2 text-xs" disabled={!имя.trim()}
+                  <Button size="sm" className="h-8 px-2 text-xs" disabled={!имя.trim()}
                     onClick={() => { act(l.id, { name: имя.trim() }); setПравим(null) }}>
                     Готово
                   </Button>
-                  <Button size="sm" variant="ghost" className="h-7 px-2"
+                  <Button size="sm" variant="ghost" className="h-8 px-2"
                     onClick={() => setПравим(null)}><X className="h-3 w-3" /></Button>
                 </span>
               ) : (
@@ -289,18 +284,18 @@ function Обзор({
                 </button>
               )}
               {l.stale_days !== null && l.stale_days > 13 && правим !== l.id && (
-                <span className="shrink-0 text-[11px] text-amber-600 dark:text-amber-400">
+                <span className="shrink-0 text-xs text-amber-600 dark:text-amber-400">
                   не открывали {l.stale_days} дн.
                 </span>
               )}
-              <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
+              <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
                 {l.count}
               </span>
               {/* Правка там, где подборка лежит: заходить внутрь ради
                   переименования — лишний шаг, которого нет ни у кого. */}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button size="sm" variant="ghost" className="h-7 shrink-0 px-2"
+                  <Button size="sm" variant="ghost" className="h-8 shrink-0 px-2"
                     title={`Что сделать с подборкой «${l.name}»`}>
                     <MoreHorizontal className="h-3.5 w-3.5" />
                   </Button>
@@ -322,22 +317,30 @@ function Обзор({
             </div>
           ))}
         </div>
-      ) : (
-        <p className="rounded-lg border border-dashed px-4 py-6 text-center text-sm text-muted-foreground">
-          Подборок пока нет. Заведите первую — и складывайте в неё что угодно:
-          свою запись, чужое поручение, документ на визе.
-        </p>
+      ) : !заводим && (
+        // Пустота ведёт за руку: рассказ о том, что кнопка где-то есть, — не
+        // пустое состояние, а отговорка.
+        <div className="rounded-lg border border-border px-4 py-8 text-center">
+          <p className="text-sm text-muted-foreground">
+            Подборок пока нет. В подборку кладут что угодно: свою запись, чужое
+            поручение, документ на визе.
+          </p>
+          <Button size="sm" className="mt-3 h-8 px-3 text-xs"
+            onClick={() => setЗаводим(true)}>
+            <Plus className="mr-1 h-3.5 w-3.5" />Завести первую
+          </Button>
+        </div>
       )}
 
       {lists.length > 0 && (
-        <p className="text-[11px] text-muted-foreground">
+        <p className="text-xs text-muted-foreground">
           Удаление подборки не трогает работу: предметы вернутся в «Не разложено».
         </p>
       )}
 
       <section>
         <h2 className="mb-1.5 text-sm font-medium text-foreground">Не разложено</h2>
-        <p className="mb-1.5 text-[11px] text-muted-foreground">
+        <p className="mb-1.5 text-xs text-muted-foreground">
           То, что вы уже трогали — брали в день или помечали, — но никуда не положили.
         </p>
         <PlacedList companyId={companyId} scope="loose" onChanged={onChanged}

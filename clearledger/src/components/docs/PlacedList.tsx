@@ -56,7 +56,7 @@ export function PlacedList({ companyId, scope, listId, empty, onChanged }: {
   }
   if (rows.length === 0) {
     return (
-      <p className="rounded-lg border border-dashed px-4 py-6 text-center text-sm text-muted-foreground">
+      <p className="rounded-lg border border-border px-4 py-6 text-center text-sm text-muted-foreground">
         {empty}
       </p>
     )
@@ -75,7 +75,7 @@ export function PlacedList({ companyId, scope, listId, empty, onChanged }: {
             <button type="button" onClick={() => navigate(href(item))}
               className="min-w-0 flex-1 text-left">
               <div className="truncate text-sm leading-snug">{item.title}</div>
-              <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px] text-muted-foreground">
+              <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
                 <span className="font-mono">{item.key}</span>
                 {item.personal && <span>своя запись</span>}
                 {item.mark?.starred && (
@@ -89,7 +89,7 @@ export function PlacedList({ companyId, scope, listId, empty, onChanged }: {
                 )}
               </div>
             </button>
-            <span className={cn('shrink-0 text-[11px] tabular-nums',
+            <span className={cn('shrink-0 text-xs tabular-nums',
               overdue ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground')}>
               {item.due_at ? dt(item.due_at) : 'без срока'}
             </span>

@@ -161,13 +161,11 @@ export function DocsLayout() {
     ? counts[view.badge] : 0)
 
   /** Открыть подборку: тот же экран подборок, но с выбранной. */
-  const openMyList = (id: string | null, заводим = false) => setParams((p) => {
+  const openMyList = (id: string | null) => setParams((p) => {
     const n = new URLSearchParams(p)
     n.set('view', 'lists')
     if (id) n.set('list', id)
     else n.delete('list')
-    if (заводим) n.set('new', '1')
-    else n.delete('new')
     n.delete('doc')
     n.delete('task')
     return n
@@ -272,10 +270,10 @@ export function DocsLayout() {
               </button>
             ))}
             {route === '/docs/work' && (
-              <button type="button" onClick={() => openMyList(null, true)}
+              <button type="button" onClick={() => openMyList(null)}
                 aria-current={active === 'lists' && !openList ? 'page' : undefined}
                 className="min-h-11 shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-xs text-muted-foreground/80">
-                + Подборка
+                Подборки
               </button>
             )}
           </nav>
@@ -319,27 +317,27 @@ export function DocsLayout() {
           {views.map((v, i) => (
             <div key={v.key}>
               {v.group && v.group !== views[i - 1]?.group && (
-                <div className={cn('px-3 pb-1 text-[11px] uppercase tracking-wide text-muted-foreground/70',
+                <div className={cn('px-3 pb-1 text-xs uppercase tracking-wide text-muted-foreground/70',
                   i > 0 && 'mt-3')}>
                   {v.group}
                 </div>
               )}
               <button type="button" onClick={() => open(v.key)} title={v.hint}
                 aria-current={v.key === active ? 'page' : undefined}
-                className={cn('flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left text-[13px] transition-colors',
+                className={cn('flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left text-sm transition-colors',
                   v.key === active && !savedView && !openList
                     ? 'bg-primary/10 font-medium text-primary'
                     : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground')}>
                 <span className="flex-1 truncate">{v.label}</span>
                 {числоУ(v) > 0 && (
-                  <span className="shrink-0 text-[11px] tabular-nums opacity-70">{числоУ(v)}</span>
+                  <span className="shrink-0 text-xs tabular-nums opacity-70">{числоУ(v)}</span>
                 )}
               </button>
             </div>
           ))}
           {route === '/docs/work' && (
             <>
-              <div className="mt-3 px-3 pb-1 text-[11px] uppercase tracking-wide text-muted-foreground/70">
+              <div className="mt-3 px-3 pb-1 text-xs uppercase tracking-wide text-muted-foreground/70">
                 Подборки
               </div>
               {myLists.map((l) => (
@@ -348,7 +346,7 @@ export function DocsLayout() {
                   title={l.stale_days !== null && l.stale_days > 13
                     ? `Не открывали ${l.stale_days} дн.`
                     : 'Своя подборка: видите только вы'}
-                  className={cn('flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left text-[13px] transition-colors',
+                  className={cn('flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left text-sm transition-colors',
                     openList === l.id
                       ? 'bg-primary/10 font-medium text-primary'
                       : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground')}>
@@ -357,34 +355,32 @@ export function DocsLayout() {
                     <span className="shrink-0 text-amber-600 dark:text-amber-400" aria-hidden>·</span>
                   )}
                   {l.count > 0 && (
-                    <span className="shrink-0 text-[11px] tabular-nums opacity-70">{l.count}</span>
+                    <span className="shrink-0 text-xs tabular-nums opacity-70">{l.count}</span>
                   )}
                 </button>
               ))}
-              <button type="button" onClick={() => openMyList(null, true)}
+              {/* Один вход, а не три: экран подборок и есть место, где их
+                  заводят, переименовывают и удаляют. */}
+              <button type="button" onClick={() => openMyList(null)}
                 aria-current={active === 'lists' && !openList ? 'page' : undefined}
-                className={cn('rounded-md px-3 py-1.5 text-left text-[13px] transition-colors',
+                className={cn('rounded-md px-3 py-1.5 text-left text-sm transition-colors',
                   active === 'lists' && !openList
                     ? 'bg-primary/10 font-medium text-primary'
                     : 'text-muted-foreground/80 hover:bg-accent/40 hover:text-foreground')}>
-                {myLists.length ? '+ Ещё подборка' : '+ Завести подборку'}
-              </button>
-              <button type="button" onClick={() => openMyList(null)}
-                className="rounded-md px-3 py-1 text-left text-[11px] text-muted-foreground/60 hover:text-foreground">
-                Управление подборками
+                {myLists.length ? 'Все подборки' : 'Завести подборку'}
               </button>
             </>
           )}
           {saved.length > 0 && (
             <>
-              <div className="mt-3 px-3 pb-1 text-[11px] uppercase tracking-wide text-muted-foreground/70">
+              <div className="mt-3 px-3 pb-1 text-xs uppercase tracking-wide text-muted-foreground/70">
                 Мои отборы
               </div>
               {saved.map((v) => (
                 <button key={v.id} type="button"
                   onClick={() => openSaved(v.id, v.query as Record<string, string>)}
                   aria-current={savedView === v.id ? 'page' : undefined}
-                  className={cn('truncate rounded-md px-3 py-1.5 text-left text-[13px] transition-colors',
+                  className={cn('truncate rounded-md px-3 py-1.5 text-left text-sm transition-colors',
                     savedView === v.id
                       ? 'bg-primary/10 font-medium text-primary'
                       : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground')}>

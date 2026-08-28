@@ -78,7 +78,7 @@ export function PlaceActions({ companyId, targetRef, mark, onChanged, compact }:
 
   const кнопкаДня = (
     <Button size="sm" variant="ghost" disabled={act.isPending}
-      className={cn('h-7 px-2', inDay && 'text-amber-600 dark:text-amber-400')}
+      className={cn('h-8 px-2', inDay && 'text-amber-600 dark:text-amber-400')}
       title={inDay ? 'Убрать из моего дня' : 'Взять в мой день'}
       onClick={() => act.mutate(inDay
         ? { dropDay: true }
@@ -89,7 +89,7 @@ export function PlaceActions({ companyId, targetRef, mark, onChanged, compact }:
 
   const кнопкаЗвезды = (
     <Button size="sm" variant="ghost" disabled={act.isPending}
-      className={cn('h-7 px-2', mark?.starred && 'text-amber-600 dark:text-amber-400')}
+      className={cn('h-8 px-2', mark?.starred && 'text-amber-600 dark:text-amber-400')}
       title={mark?.starred ? 'Снять важность' : 'Важно для меня'}
       onClick={() => act.mutate({ starred: !mark?.starred })}>
       <Star className={cn('h-3.5 w-3.5', mark?.starred && 'fill-current')} />
@@ -99,11 +99,11 @@ export function PlaceActions({ companyId, targetRef, mark, onChanged, compact }:
   if (pickingDate) {
     return (
       <span className="inline-flex items-center gap-1">
-        <Input type="date" value={date} autoFocus className="h-7 w-[150px] text-xs"
+        <Input type="date" value={date} autoFocus className="h-8 w-[150px] text-xs"
           onChange={(e) => setDate(e.target.value)} />
-        <Button size="sm" className="h-7 px-2 text-xs" disabled={!date || act.isPending}
+        <Button size="sm" className="h-8 px-2 text-xs" disabled={!date || act.isPending}
           onClick={() => act.mutate({ deferUntil: date })}>Скрыть</Button>
-        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs"
+        <Button size="sm" variant="ghost" className="h-8 px-2 text-xs"
           onClick={() => setPickingDate(false)}>Отмена</Button>
       </span>
     )
@@ -115,13 +115,13 @@ export function PlaceActions({ companyId, targetRef, mark, onChanged, compact }:
       {!compact && кнопкаЗвезды}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button size="sm" variant="ghost" className="h-7 px-2"
+          <Button size="sm" variant="ghost" className="h-8 px-2"
             title="Как разложить у себя">
             <MoreHorizontal className="h-3.5 w-3.5" />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-60">
-          <DropdownMenuLabel className="text-[11px] font-normal text-muted-foreground">
+          <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
             Только для вас: срок и состояние не меняются
           </DropdownMenuLabel>
           {compact && (
@@ -167,7 +167,7 @@ export function PlaceActions({ companyId, targetRef, mark, onChanged, compact }:
                   {/* Счётчик меняет предложение, а не текст: повторять ту же
                       кнопку бессмысленно — отложенное трижды откладывают и
                       дальше. Наверх этот счётчик не уходит. */}
-                  <DropdownMenuLabel className="text-[11px] font-normal text-muted-foreground">
+                  <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
                     Откладывали {mark?.defer_count} раз. Может, перенести срок
                     или передать?
                   </DropdownMenuLabel>
@@ -188,7 +188,7 @@ export function PlaceActions({ companyId, targetRef, mark, onChanged, compact }:
                 </DropdownMenuItem>
               ))}
               {(lists.data?.lists.length ?? 0) === 0 && (
-                <DropdownMenuLabel className="text-[11px] font-normal text-muted-foreground">
+                <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
                   Подборок пока нет — заводятся в разделе «Моё»
                 </DropdownMenuLabel>
               )}

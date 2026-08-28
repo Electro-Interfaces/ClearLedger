@@ -238,16 +238,16 @@ export function NotesPage() {
           <div className="flex items-center gap-2">
             <input ref={fileRef} type="file" multiple className="hidden"
               onChange={(e) => { addFiles(e.target.files); e.target.value = '' }} />
-            <Button variant="ghost" size="sm" className="h-7 px-2 text-xs"
+            <Button variant="ghost" size="sm" className="h-8 px-2 text-xs"
               onClick={() => fileRef.current?.click()}>
               <Paperclip className="mr-1 h-3.5 w-3.5" />Файл
             </Button>
-            <span className="text-[11px] text-muted-foreground">
+            <span className="text-xs text-muted-foreground">
               Скриншот — Ctrl+V, файл — перетащите сюда
             </span>
           </div>
           <div className="flex items-center gap-2">
-            <span className="hidden text-[11px] text-muted-foreground sm:inline">
+            <span className="hidden text-xs text-muted-foreground sm:inline">
               Ctrl+Enter — записать
             </span>
             <Button size="sm" disabled={(!text.trim() && !files.length) || add.isPending}
@@ -294,19 +294,19 @@ export function NotesPage() {
             ))}
           </div>
         ) : пусто ? (
-          <p className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
+          <p className="rounded-lg border border-border px-4 py-8 text-center text-sm text-muted-foreground">
             Пока пусто. Запишите первое — решить, дело это или мысль, можно потом:
             запись со сроком становится делом, без срока остаётся заметкой.
           </p>
         ) : ничегоНеНайдено ? (
-          <p className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
+          <p className="rounded-lg border border-border px-4 py-8 text-center text-sm text-muted-foreground">
             {поиск.trim() ? `По запросу «${поиск.trim()}» ничего нет` : 'В этом отборе пусто'}
           </p>
         ) : (
           <div className="space-y-4">
             {дни.map((день) => (
               <section key={день.key}>
-                <h2 className="sticky top-0 z-10 -mx-1 bg-background/95 px-1 pb-1 pt-0.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground backdrop-blur">
+                <h2 className="sticky top-0 z-10 -mx-1 bg-background/95 px-1 pb-1 pt-0.5 text-xs font-medium uppercase tracking-wide text-muted-foreground backdrop-blur">
                   {день.label}
                 </h2>
                 <div className="divide-y divide-border/70">
@@ -418,7 +418,7 @@ function NoteRow({ task, companyId, onChanged, onOpen }: {
           )}
         </button>
         {task.created_at && (
-          <time className="shrink-0 text-[11px] tabular-nums text-muted-foreground"
+          <time className="shrink-0 text-xs tabular-nums text-muted-foreground"
             dateTime={task.created_at}>
             {время.format(new Date(task.created_at))}
           </time>
@@ -461,14 +461,14 @@ function NoteRow({ task, companyId, onChanged, onOpen }: {
           <span className="inline-flex flex-wrap items-center gap-1.5">
             <Input type="datetime-local" value={value} autoFocus
               onChange={(e) => setValue(e.target.value)}
-              className="h-7 w-[190px] text-xs" />
-            <Button size="sm" className="h-7 px-2 text-xs" disabled={!value}
+              className="h-8 w-[190px] text-xs" />
+            <Button size="sm" className="h-8 px-2 text-xs" disabled={!value}
               onClick={() => (editing === 'due'
                 ? act.mutate({ companyId, dueAt: new Date(value).toISOString() })
                 : remind.mutate(value))}>
               Готово
             </Button>
-            <Button size="sm" variant="ghost" className="h-7 px-2 text-xs"
+            <Button size="sm" variant="ghost" className="h-8 px-2 text-xs"
               onClick={() => setEditing(null)}>Отмена</Button>
           </span>
         ) : (

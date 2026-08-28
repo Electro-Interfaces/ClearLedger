@@ -60,7 +60,7 @@ export function TodayPage() {
 
       <section>
         <h2 className="mb-1.5 text-sm font-medium text-foreground">Ждут от вас</h2>
-        <p className="mb-1.5 text-[11px] text-muted-foreground">
+        <p className="mb-1.5 text-xs text-muted-foreground">
           Принесла компания. Взять в день, отложить у себя или отдать — ваше
           решение; срок и состояние предмета при этом не меняются.
         </p>
@@ -107,12 +107,12 @@ function CarryOver({ companyId }: { companyId: string }) {
         <span className="flex-1 text-sm text-foreground">
           Вчера осталось {rows.length} {дел(rows.length)}
         </span>
-        <Button size="sm" className="h-7 px-2 text-xs" disabled={move.isPending}
+        <Button size="sm" className="h-8 px-2 text-xs" disabled={move.isPending}
           onClick={() => move.mutate()}>
           {move.isPending && <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />}
           Перенести в сегодня
         </Button>
-        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs"
+        <Button size="sm" variant="ghost" className="h-8 px-2 text-xs"
           onClick={() => setOpen((v) => !v)}>
           {open ? 'Свернуть' : 'Посмотреть'}
         </Button>
@@ -148,7 +148,7 @@ function Deferred({ companyId }: { companyId: string }) {
       </button>
       {open && (
         <div className="mt-1.5">
-          <p className="mb-1.5 text-[11px] text-muted-foreground">
+          <p className="mb-1.5 text-xs text-muted-foreground">
             Спрятано только у вас. Срок компании шёл всё это время и не менялся.
           </p>
           <PlacedList companyId={companyId} scope="deferred" empty="Ничего не отложено" />
@@ -220,23 +220,23 @@ function Row({ row, busy, onSnooze, onDone }: {
       <span className="min-w-[12rem] flex-1 text-sm text-foreground">
         {row.note || 'Напоминание'}
       </span>
-      <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+      <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
         <Clock3 className="h-3 w-3" />{dtT(row.remind_at)}
       </span>
       {/* Сколько раз откладывали — единственный сигнал, который личный помощник
           может вернуть человеку: отложенное шестой раз это дело, которого не
           будет, и полезнее решить его судьбу, чем двигать дальше. */}
       {row.snooze_count > 2 && (
-        <span className="text-[11px] text-amber-600 dark:text-amber-400">
+        <span className="text-xs text-amber-600 dark:text-amber-400">
           откладывали {row.snooze_count} {раз(row.snooze_count)}
         </span>
       )}
       <span className="flex items-center gap-1">
-        <Button size="sm" variant="ghost" className="h-7 px-2 text-[11px]" disabled={busy}
+        <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" disabled={busy}
           onClick={() => onSnooze(60)}>Через час</Button>
-        <Button size="sm" variant="ghost" className="h-7 px-2 text-[11px]" disabled={busy}
+        <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" disabled={busy}
           onClick={() => onSnooze(60 * 24)}>Завтра</Button>
-        <Button size="sm" variant="ghost" className="h-7 px-2" disabled={busy}
+        <Button size="sm" variant="ghost" className="h-8 px-2" disabled={busy}
           title="Больше не напоминать" onClick={onDone}>
           <Check className="h-3.5 w-3.5" />
         </Button>
