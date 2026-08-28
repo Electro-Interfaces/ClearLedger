@@ -3,7 +3,7 @@
  * Подписка на каналы chat:{roomId}, typing, обработка live-событий, авто-реконнект.
  */
 import { useEffect, useRef, useCallback, useState } from 'react'
-import { getToken } from '@/services/apiClient'
+import { getToken, isDemoMode } from '@/services/apiClient'
 
 export interface WsEvent {
   type: string
@@ -12,6 +12,7 @@ export interface WsEvent {
 }
 
 function wsUrl(): string | null {
+  if (isDemoMode()) return null
   const base = import.meta.env.VITE_API_URL ?? ''
   const token = getToken()
   if (!base || !token) return null

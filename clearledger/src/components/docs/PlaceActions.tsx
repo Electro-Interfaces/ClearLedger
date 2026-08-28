@@ -61,8 +61,32 @@ export function PlaceActions({ companyId, targetRef, mark, onChanged, compact }:
   const act = useMutation({
     mutationFn: (data: Parameters<typeof workService.place>[2]) =>
       workService.place(companyId, targetRef, data),
-    onSuccess: () => {
+    onSuccess: (res) => {
       setPickingDate(false)
+      // Ответ сервера — уже посчитанная отметка: кладём её в очередь и в списки
+      // раскладки, не дожидаясь повторной загрузки. Иначе открытое меню
+      // продолжает называть подборку, из которой предмет только что убрали.
+      const today = workService.todayKey()
+      qc.setQueriesData<{ mine: workService.MyWorkItem[] } | undefined>(
+        { queryKey: ['work-mine'] },
+        (old) => (old ? {
+          ...old,
+          mine: old.mine.map((r) => (workService.targetRef(r) === res.target_ref
+            ? {
+              ...r,
+              mark: res.mark,
+              in_day: res.mark?.taken_for === today,
+              hidden: !!res.mark?.deferred_until && res.mark.deferred_until > today,
+            }
+            : r)),
+        } : old))
+      qc.setQueriesData<{ items: workService.PlacedItem[] } | undefined>(
+        { queryKey: ['placed'] },
+        (old) => (old ? {
+          ...old,
+          items: old.items.map((r) => (workService.targetRef(r) === res.target_ref
+            ? { ...r, mark: res.mark } : r)),
+        } : old))
       onChanged()
       void qc.invalidateQueries({ queryKey: ['personal-lists', companyId] })
       void qc.invalidateQueries({ queryKey: ['placed'] })

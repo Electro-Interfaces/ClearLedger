@@ -14,8 +14,9 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useLocation } from 'react-router-dom'
 import {
-  Bot, CalendarDays, HelpCircle, LifeBuoy, ListChecks, Maximize2, MessageCircle, NotebookPen, X,
+  Bot, CalendarDays, HelpCircle, LifeBuoy, ListChecks, Maximize2, MessageCircle, NotebookPen, Video, X,
 } from 'lucide-react'
+import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { useMaxWidth } from '@/hooks/use-mobile'
 import { useSupportContext, type InteractionSection } from '@/contexts/SupportContext'
@@ -25,27 +26,42 @@ import { productForMode } from '@/config/productAccess'
 import { productForPath } from '@/config/spaceProducts'
 import { TicketsPanel } from './InteractionPanels'
 import { TasksQuickPanel } from '@/components/tasks/TasksQuickPanel'
-import { CalendarPage } from '@/pages/docs/CalendarPage'
+import { CalendarDock } from '@/components/docs/CalendarDock'
 import { NotesPage } from '@/pages/docs/NotesPage'
 import { InfoContextPanel } from '@/components/info/InfoContextPanel'
 import { AuditorPanel } from '@/components/auditor/AuditorPanel'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useDocsApp } from '@/hooks/useDocsApp'
+import { startMeeting } from '@/services/conferenceService'
 
-type Tab = { key: InteractionSection; label: string; icon: typeof MessageCircle }
+type Tab = {
+  key: InteractionSection; label: string; icon: typeof MessageCircle
+  /** Наверху и акцентом: отсюда работу заводят, а не только смотрят. */
+  primary?: boolean
+}
 const TABS: Tab[] = [
-  { key: 'chat', label: 'Чат', icon: MessageCircle },
-  { key: 'tasks', label: 'Трек', icon: ListChecks },
   // Календарь и записная книжка — то, во что заглядывают поверх работы, а не то,
   // ради чего уходят с экрана: «свободен ли четверг» и «записать, пока помню».
-  { key: 'calendar', label: 'Календарь', icon: CalendarDays },
-  { key: 'notes', label: 'Записи', icon: NotebookPen },
+  { key: 'calendar', label: 'Календарь', icon: CalendarDays, primary: true },
+  { key: 'notes', label: 'Записи', icon: NotebookPen, primary: true },
+  { key: 'chat', label: 'Чат', icon: MessageCircle },
+  { key: 'tasks', label: 'Трек', icon: ListChecks },
   // «Аудитор» стоит рядом с «Инфо» осознанно: и то, и другое отвечает на вопрос
   // «что здесь происходит», только справка знает продукт, а аудитор — данные.
   { key: 'auditor', label: 'Аудитор', icon: Bot },
   { key: 'tickets', label: 'Поддержка', icon: LifeBuoy },
   { key: 'help', label: 'Инфо', icon: HelpCircle },
 ]
+
+/** Области, которым в колонке не хватает места: открываются окном сразу, а не
+ *  после того, как человек убедится, что в доке они не читаются. */
+const MODAL_ONLY: InteractionSection[] = ['tasks']
+
+/** Сколько места области нужно в доке, если она открывается там. Агенту нужна
+ *  рабочая ширина: в ответах таблицы и разбор, а не одна строка. */
+const MIN_WIDTH_FOR: Partial<Record<InteractionSection, number>> = {
+  auditor: 520, notes: 420, chat: 420, calendar: 400,
+}
 
 const DOCK_WIDTH_KEY = 'ledger-dock-width'
 const MIN_W = 340
@@ -95,6 +111,27 @@ export function RightDock() {
   // «Аудитор» — по включённости продукта: пространство без него не должно показывать
   // вкладку, которая ответит «сервис не настроен».
   const tasksOn = useDocsApp()
+  const [confBusy, setConfBusy] = useState(false)
+
+  /** Создать встречу и отдать гостевую ссылку. Тот же вызов, что у кнопки шапки:
+   *  второй способ завести конференцию разошёлся бы с первым. */
+  async function startConference() {
+    if (confBusy) return
+    setConfBusy(true)
+    try {
+      const m = await startMeeting()
+      try { await navigator.clipboard.writeText(m.guest_url) } catch { /* буфер недоступен */ }
+      toast.success('Конференция создана — гостевая ссылка скопирована',
+                    { description: m.guest_url })
+    } catch (e) {
+      const msg = (e as Error).message || ''
+      toast.error(/503|не настроен/i.test(msg)
+        ? 'Видеоконференции не настроены'
+        : 'Не удалось создать конференцию')
+    } finally {
+      setConfBusy(false)
+    }
+  }
   const { canApp, appName } = useCompany()
   const tabs = TABS
     .filter((t) => (!['tasks', 'calendar', 'notes'].includes(t.key) || tasksOn)
@@ -105,13 +142,26 @@ export function RightDock() {
 
   const dockOpen = !!section && mode === 'dock'
 
+  /** Открыть область из рельсы её собственным способом. Один обработчик на
+   *  рельсу и на шапку дока: два разных поведения у одной кнопки — то, из-за
+   *  чего человек перестаёт предсказывать интерфейс. */
+  const openFromRail = useCallback((key: InteractionSection) => {
+    openInteraction(key)
+    if (MODAL_ONLY.includes(key)) {
+      setInteractionMode('modal')
+      return
+    }
+    const нужно = MIN_WIDTH_FOR[key]
+    if (нужно) setWidth((w) => (w < нужно ? нужно : w))
+  }, [openInteraction, setInteractionMode])
+
   // ── Мобайл: рейла нет; при открытии дока — полноэкранный оверлей ──
   if (isMobile) {
     if (!dockOpen) return null
     return createPortal(
       <div className="fixed inset-0 z-50 flex flex-col bg-card mobile-safe-top mobile-safe-bottom">
         <DockHead tabs={tabs} section={section} badgeOf={badgeOf} isMobile
-          onTab={openInteraction} onPop={() => setInteractionMode('modal')} onClose={closeInteraction} />
+          onTab={openFromRail} onPop={() => setInteractionMode('modal')} onClose={closeInteraction} />
         <DockBody section={section} />
       </div>,
       document.body,
@@ -129,27 +179,43 @@ export function RightDock() {
           <div onMouseDown={onDragStart}
             className="absolute left-0 top-0 z-10 h-full w-1 -translate-x-1/2 cursor-col-resize bg-transparent transition-colors hover:bg-primary/40" />
           <DockHead tabs={tabs} section={section} badgeOf={badgeOf}
-            onTab={openInteraction} onPop={() => setInteractionMode('modal')} onClose={closeInteraction} />
+            onTab={openFromRail} onPop={() => setInteractionMode('modal')} onClose={closeInteraction} />
           <DockBody section={section} />
         </div>
       )}
 
-      <div data-zone="Взаимодействие: чат, заявки, инфо" data-zone-side className="flex h-full w-12 shrink-0 flex-col items-center gap-1 border-l border-border/50 bg-card py-2">
-        {!dockOpen && tabs.map((t) => {
-          const active = section === t.key   // подсвечиваем, если открыт модалкой
-          const badge = badgeOf(t.key)
-          return (
-            <button key={t.key} onClick={() => openInteraction(t.key)} title={`${t.label} — открыть справа`}
-              className={cn('relative flex w-11 flex-col items-center gap-0.5 rounded-lg px-1 py-2 text-[10px] transition-colors',
-                active ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-accent hover:text-foreground')}>
-              <t.icon className="size-4" />
-              <span>{t.label}</span>
-              {badge > 0 && (
-                <span className="absolute right-1 top-1 inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold leading-none text-white">{badge}</span>
-              )}
-            </button>
-          )
-        })}
+      {/* Колонка видна всегда, но занимает место только когда в ней есть кнопки:
+          при открытом доке они уезжают в его шапку, и во всю ширину висела бы
+          пустая полоса. */}
+      <div data-zone="Взаимодействие: встреча, календарь, записи, чат, заявки, инфо"
+        data-zone-side
+        className={cn('flex h-full shrink-0 flex-col items-center border-l border-border/50 bg-card transition-[width] duration-200',
+          dockOpen ? 'w-3' : 'w-[72px] gap-1 py-3')}>
+        {!dockOpen && (
+          <>
+            {/* Конференция — не область, а действие: она создаёт встречу и отдаёт
+                гостевую ссылку. Место наверху, потому что её именно начинают. */}
+            {canApp('conf') && (
+              <button onClick={startConference} disabled={confBusy}
+                title="Видеоконференция — создать и скопировать ссылку"
+                className={cn(RAIL_PRIMARY, confBusy && 'opacity-60')}>
+                <Video className="size-5" />
+                <span>Встреча</span>
+              </button>
+            )}
+            {tabs.filter((t) => t.primary).map((t) => (
+              <RailButton key={t.key} tab={t} active={section === t.key} badge={badgeOf(t.key)}
+                primary onClick={() => openFromRail(t.key)} />
+            ))}
+            {/* Черта: выше — то, что отсюда заводят, ниже — области, у которых есть
+                и кнопка в шапке. */}
+            <div className="my-2 h-px w-8 bg-border" role="separator" />
+            {tabs.filter((t) => !t.primary).map((t) => (
+              <RailButton key={t.key} tab={t} active={section === t.key} badge={badgeOf(t.key)}
+                onClick={() => openFromRail(t.key)} />
+            ))}
+          </>
+        )}
       </div>
     </>
   )
@@ -206,6 +272,31 @@ function InfoDockPanel() {
   return <InfoContextPanel companyId={companyId} embedded onClose={closeInteraction} />
 }
 
+/** Спокойная кнопка рельсы и её акцентный вариант — тот же синий, что у пилюль
+ *  шапки: одно значение цвета на всё пространство. */
+const RAIL_BASE = 'relative flex min-h-[52px] w-16 flex-col items-center justify-center gap-1 rounded-lg px-1 py-1.5 text-center text-xs leading-tight transition-colors'
+const RAIL_PRIMARY = `${RAIL_BASE} border border-primary/30 bg-primary/10 text-primary hover:bg-primary hover:text-white dark:bg-primary/20 dark:border-primary/50`
+
+function RailButton({ tab, active, badge, primary, onClick }: {
+  tab: Tab; active: boolean; badge: number; primary?: boolean; onClick: () => void
+}) {
+  return (
+    <button onClick={onClick} title={`${tab.label} — открыть справа`}
+      aria-current={active ? 'true' : undefined}
+      className={cn(primary ? RAIL_PRIMARY : RAIL_BASE,
+        !primary && (active
+          ? 'bg-primary/10 text-primary'
+          : 'text-muted-foreground hover:bg-accent hover:text-foreground'),
+        primary && active && 'bg-primary text-white')}>
+      <tab.icon className="size-5" />
+      <span>{tab.label}</span>
+      {badge > 0 && (
+        <span className="absolute right-0.5 top-0.5 inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold leading-none text-white">{badge}</span>
+      )}
+    </button>
+  )
+}
+
 function DockBody({ section }: { section: InteractionSection }) {
   // Док открыт ИЗ приложения — значит и чаты показываем его: код продукта выводится
   // из активного раздела рабочей области. Верхняя кнопка (модалка) продукт не
@@ -225,7 +316,9 @@ function DockBody({ section }: { section: InteractionSection }) {
       {/* Док узкий: рельса разрезов и полоса дня туда не помещаются — панель
           показывает разрезы строкой поверх списка. */}
       {section === 'tasks' && <TasksQuickPanel compact />}
-      {section === 'calendar' && <div className="h-full overflow-y-auto"><CalendarPage /></div>}
+      {/* В доке — не второй календарь, а приёмник: сюда бросают дело, и оно
+          встаёт на день. Полный месяц с участниками живёт окном из шапки. */}
+      {section === 'calendar' && <CalendarDock />}
       {section === 'notes' && <div className="h-full overflow-y-auto"><NotesPage /></div>}
       {/* Аудитор берёт контекст сам (маршрут и параметры адреса) — доку не нужно
           ничего ему передавать, и та же панель работает из шапки. */}

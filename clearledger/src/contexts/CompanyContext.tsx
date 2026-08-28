@@ -23,7 +23,7 @@ import { resetServiceCaches, setServicesCompany } from '@/services/cacheReset'
 import { getApiOrganization, setApiCompany, setApiOrganization } from '@/services/apiClient'
 import * as referenceService from '@/services/referenceService'
 import { useQuery } from '@tanstack/react-query'
-import { useDisabledApps, useRegistryModules, intersectAccess } from '@/hooks/useCompanyRegistry'
+import { useAppNames, useDisabledApps, useRegistryModules, intersectAccess } from '@/hooks/useCompanyRegistry'
 
 interface CompanyContextType {
   company: Company
@@ -53,6 +53,8 @@ interface CompanyContextType {
   canApp: (appCode: string) => boolean
   /** Доступ к разделу продукта: `canModule('admin', 'members')`. */
   canModule: (appCode: string, moduleCode: string) => boolean
+  /** Как продукт называется В ЭТОЙ компании: `appName('auditor', 'Аудитор')`. */
+  appName: (appCode: string, fallback: string) => string
   profile: CompanyProfile
   categories: Category[]
   customization: CompanyCustomization
@@ -181,6 +183,7 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
   // нельзя никому — ни по роли, ни суперадмину (решение МАГа 16.08.2026 про
   // «Аудитора» в сетевых пространствах).
   const disabledApps = useDisabledApps(companyId)
+  const appNames = useAppNames(companyId)
 
   // Нет доступных компаний (обычный юзер без членства) — заглушка.
   if (!authLoading && user && companies.length === 0) {
@@ -226,6 +229,7 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
     if (rbacModules === null) return true
     return rbacModules.includes(appCode) || rbacModules.some((k) => k.startsWith(`${appCode}:`))
   }
+  const appName = (appCode: string, fallback: string) => appNames[appCode] || fallback
   const canModule = (appCode: string, moduleCode: string) => {
     if (rbacModules === null) return true
     return rbacModules.includes(appCode) || rbacModules.includes(`${appCode}:${moduleCode}`)
@@ -246,6 +250,7 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
         companyModules,
         canApp,
         canModule,
+        appName,
         profile: activeProfile,
         categories,
         customization: emptyCustomization(),

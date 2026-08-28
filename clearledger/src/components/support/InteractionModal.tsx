@@ -6,7 +6,7 @@
  * Кнопка «закрепить справа» переносит раздел в правый док (setInteractionMode).
  * Чат в окне — полная 3-колоночная раскладка (в отличие от компактного дока).
  */
-import { lazy, Suspense } from 'react'
+import { lazy, Suspense, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Loader2, PanelRight } from 'lucide-react'
 import { useSupportContext } from '@/contexts/SupportContext'
@@ -19,7 +19,7 @@ const TasksQuickPanel = lazy(() => import('@/components/tasks/TasksQuickPanel').
 const CalendarPage = lazy(() => import('@/pages/docs/CalendarPage').then((m) => ({ default: m.CalendarPage })))
 const NotesPage = lazy(() => import('@/pages/docs/NotesPage').then((m) => ({ default: m.NotesPage })))
 const InfoCenter = lazy(() => import('@/components/info/InfoCenter').then((m) => ({ default: m.InfoCenter })))
-const AuditorPanel = lazy(() => import('@/components/auditor/AuditorPanel').then((m) => ({ default: m.AuditorPanel })))
+const AuditorWorkspace = lazy(() => import('@/pages/AuditorPage').then((m) => ({ default: m.AuditorWorkspace })))
 
 const panelFallback = (
   <div className="flex h-full items-center justify-center">
@@ -31,6 +31,19 @@ const panelFallback = (
 // это разговор с поставщиком программы, а не заявки компании и не «Трек».
 const TITLES: Record<string, string> = {
   chat: 'Чат', tasks: 'Трек', tickets: 'Поддержка', help: 'Инфо', auditor: 'Аудитор',
+  calendar: 'Календарь',
+  notes: 'Записная книжка',
+}
+
+/**
+ * Агент в окне из шапки — то же рабочее место, что на странице приложения: рельса
+ * разделов слева, содержимое справа. Раздел живёт ЗДЕСЬ, а не в адресе: окно висит
+ * поверх рабочего экрана, и менять его адрес значило бы уводить человека с того
+ * места, ради которого он агента и позвал.
+ */
+function AuditorAtHand() {
+  const [view, setView] = useState('chat')
+  return <AuditorWorkspace view={view} onView={setView} />
 }
 
 export function InteractionModal() {
@@ -42,7 +55,8 @@ export function InteractionModal() {
   // Список окон ЗАКРЫТЫЙ: раздел, которого здесь нет, из шапки просто не открывается —
   // кнопка нажимается, состояние меняется, а окна нет и ошибки тоже. Так и было с
   // «Аудитором» на первом выкате.
-  const isPanel = section === 'chat' || section === 'tasks' || section === 'tickets' || section === 'auditor'
+  const isPanel = section === 'chat' || section === 'tasks' || section === 'tickets'
+    || section === 'auditor' || section === 'calendar' || section === 'notes'
 
   const DockButton = (
     <button
@@ -74,12 +88,15 @@ export function InteractionModal() {
             // «Трек» идёт по мерке чата: это тоже рабочее окно, а не сводка —
             // строка задачи несёт номер, проект, стадию, срок и кнопки, и на
             // прежних 5xl всё это ломалось в три этажа.
-            + (section === 'chat' || section === 'tasks'
+            // Агент идёт по той же мерке: в ответах таблицы, находки и разбор данных,
+            // а рядом — каталог того, о чём вообще можно спросить. На прежних 5xl всё
+            // это переносилось по слогам, и окно выглядело уже, чем соседние.
+            // Календарь идёт по той же мерке: месяц с встречами и сроками —
+            // это сетка, а не список, и на узком окне она перестаёт отвечать на
+            // свой вопрос «свободен ли четверг».
+            + (section === 'chat' || section === 'tasks' || section === 'auditor'
+              || section === 'calendar'
               ? 'sm:w-[96vw] sm:max-w-[1600px] sm:h-[92dvh] sm:max-h-[92dvh]'
-              // Аудитору нужна ширина чата: в ответах таблицы и карточки находок, в узком
-              // окне они переносятся по слогам.
-              : section === 'auditor'
-                ? 'sm:w-[94vw] sm:max-w-5xl sm:h-[84dvh] sm:max-h-[84dvh]'
               : 'sm:w-[92vw] sm:max-w-2xl sm:h-[70vh] sm:max-h-[70vh]')
           }
         >
@@ -97,7 +114,7 @@ export function InteractionModal() {
               {section === 'calendar' && <CalendarPage />}
               {section === 'notes' && <NotesPage />}
               {section === 'tickets' && <TicketsPanel />}
-              {section === 'auditor' && <AuditorPanel />}
+              {section === 'auditor' && <AuditorAtHand />}
             </Suspense>
           </div>
         </DialogContent>

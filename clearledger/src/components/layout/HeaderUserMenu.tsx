@@ -17,6 +17,7 @@ import { useState } from 'react'
 import { Bell, Bot, LogOut, Moon, RefreshCw, Sun, User, Video } from 'lucide-react'
 import { toast } from 'sonner'
 import { startMeeting } from '@/services/conferenceService'
+import { isDemoMode } from '@/services/apiClient'
 import { useSupportContext } from '@/contexts/SupportContext'
 import { APP_BUILD, APP_VERSION, applyUpdate } from '@/lib/appUpdate'
 import { useNavigate } from 'react-router-dom'
@@ -168,7 +169,7 @@ export function HeaderUserMenu({ settingsPath }: { settingsPath?: string }) {
             <MenuRow icon={Video} title="Конференция" note="Создать встречу и скопировать ссылку"
               disabled={confBusy} onSelect={() => void startConference()} />
           )}
-          {canApp('auditor') && (
+          {!isDemoMode() && canApp('auditor') && (
             <MenuRow icon={Bot} title="Аудитор" note="Спросить про этот экран"
               onSelect={() => toggleInteraction('auditor')} />
           )}

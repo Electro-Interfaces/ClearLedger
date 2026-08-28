@@ -1,6 +1,6 @@
 // Видеоконференции TradeLedger (Jitsi meet.dataworker.ru). Бэк подписывает токен
 // организатора своим ключом (RS256/ASAP), фронт открывает ссылку.
-import { get, post } from './apiClient'
+import { get, isDemoMode, post } from './apiClient'
 
 export interface MeetingUrls {
   room: string
@@ -24,6 +24,7 @@ export async function createMeeting(): Promise<MeetingUrls> {
  * Возвращает ссылки: гостевую зовущий рассылает сам (буфер, сообщение в чат).
  */
 export async function startMeeting(): Promise<MeetingUrls> {
+  if (isDemoMode()) return createMeeting()
   const вкладка = window.open('about:blank', '_blank')
   if (вкладка) вкладка.opener = null      // как noopener: чужая страница не дотянется до нашей
   try {

@@ -4,16 +4,12 @@ import App from './App'
 import './index.css'
 
 import { initUiLevel } from './hooks/useUiLevel'
-import { initDefaults } from './services/initService'
-import { startScheduler } from './services/channelScheduler'
-import { isApiEnabled } from './services/apiClient'
-import { setServicesCompany } from './services/cacheReset'
-import { defaultCompanyId } from './config/companies'
+import { isApiEnabled, isDemoMode } from './services/apiClient'
 import { initPwaInstall } from './lib/pwaInstall'
 
 // Chrome может выдать событие установки до того, как авторизация и React-обвязка
 // закончат загрузку. Сохраняем его сразу: событие одноразовое и повторно не приходит.
-initPwaInstall()
+if (!isDemoMode()) initPwaInstall()
 
 // После деплоя закэшированный index.html тянет чанки со старыми хэшами → Vite
 // кидает vite:preloadError («Failed to fetch dynamically imported module»).
@@ -48,9 +44,16 @@ if (localStorage.getItem('gig-schema') !== SCHEMA_VERSION) {
 // активной компании. В API-режиме это ведёт бэкенд (seed) + ручной/канальный
 // запуск под авторизацией — на старте без сессии планировщик не запускаем.
 if (!isApiEnabled()) {
-  setServicesCompany(defaultCompanyId)
-  initDefaults()
-  startScheduler()
+  void Promise.all([
+    import('./services/cacheReset'),
+    import('./config/companies'),
+    import('./services/initService'),
+    import('./services/channelScheduler'),
+  ]).then(([cache, companies, init, scheduler]) => {
+    cache.setServicesCompany(companies.defaultCompanyId)
+    init.initDefaults()
+    scheduler.startScheduler()
+  })
 }
 
 // Service worker регистрируем ЗДЕСЬ, а не при включении уведомлений: Chrome
@@ -59,7 +62,7 @@ if (!isApiEnabled()) {
 // (`lib/chatPush`) переиспользует эту же регистрацию. Не ждём window.load:
 // чем раньше SW активируется и возьмёт страницу под контроль, тем раньше браузер
 // выдаст настоящее beforeinstallprompt вместо сценария обычного ярлыка сайта.
-if ('serviceWorker' in navigator) {
+if (!isDemoMode() && 'serviceWorker' in navigator) {
   navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`, {
     scope: import.meta.env.BASE_URL,
     updateViaCache: 'none',

@@ -29,17 +29,19 @@ function href(item: PlacedItem): string {
   return item.personal ? `/tasks/${item.id}` : `/docs/company?view=errands&task=${item.id}`
 }
 
-export function PlacedList({ companyId, scope, listId, empty, onChanged }: {
+export function PlacedList({ companyId, scope, listId, on, empty, onChanged }: {
   companyId: string
   scope: Scope
   listId?: string
+  /** День для `scope: 'day'`. Пусто — сегодня. */
+  on?: string
   empty: string
   onChanged?: () => void
 }) {
   const navigate = useNavigate()
   const q = useQuery({
-    queryKey: ['placed', companyId, scope, listId ?? ''],
-    queryFn: () => workService.placed(companyId, { scope, listId }),
+    queryKey: ['placed', companyId, scope, listId ?? '', on ?? ''],
+    queryFn: () => workService.placed(companyId, { scope, listId, on }),
   })
   const refresh = () => { void q.refetch(); onChanged?.() }
   const rows = q.data?.items ?? []
@@ -70,6 +72,12 @@ export function PlacedList({ companyId, scope, listId, empty, onChanged }: {
         const overdue = Boolean(item.due_at && new Date(item.due_at) < new Date())
         return (
           <div key={`${item.kind}-${item.id}`}
+            // Строку можно унести в календарь рельсы: там она встанет на день.
+            draggable
+            onDragStart={(e) => {
+              e.dataTransfer.setData('text/plain', workService.targetRef(item))
+              e.dataTransfer.effectAllowed = 'move'
+            }}
             className="flex items-center gap-2 border-b px-3 py-2 last:border-b-0 hover:bg-muted/40">
             <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
             <button type="button" onClick={() => navigate(href(item))}

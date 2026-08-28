@@ -210,6 +210,9 @@ def test_expected_receipt_payload_keeps_accounting_evidence_roundtrip():
         "line_id": "",
         "item_uuid": row.lines[0]["nomenclature_ref"], "name": "Вода",
         "barcode": "4600000000007", "qty_expected": 2.0, "price": 50.0,
+        # Стоимость строки и налог едут числом из бумаги: цена там округлена
+        # до копеек, а стоимость посчитана от неокруглённой.
+        "sum": 0.0, "vat_set": 0.0,
         "vat_rate": "НДС22", "unit": "шт", "pack_factor": 6.0,
         "purpose": "Магазин", "series": "A", "expiry": "2027-01-01",
         "retail_price": 80.0, "markup": 60.0, "mark_codes": ["mark-1"],
@@ -309,3 +312,31 @@ def test_duplicate_audit_only_proposes_manual_review():
     assert len(plan) == 1
     assert plan[0]["action"] == "manual_review"
     assert plan[0]["suggested_keep_id"] in plan[0]["receipt_ids"]
+
+
+def test_суммы_и_налог_берутся_из_бумаги():
+    """Стоимость строки и налог печатает поставщик — центр их не пересчитывает.
+
+    В накладной цена округлена до копеек, а стоимость посчитана от
+    неокруглённой: 20 × 63,36 = 1 267,20 против 1 267,21 в графе 5. И налог в
+    УПД начислен СВЕРХУ цены без НДС, а не выделен из суммы — выделение
+    занижало его на пятую часть (3 659,27 вместо 4 464,35 по документу).
+    """
+    строки = store_receipts.normalize_lines([
+        {"name": "Мохито", "qty_fact": 20, "price": 63.3605,
+         "amount": 1267.21, "vat_amount": 278.79, "vat_rate": "НДС22"},
+        {"name": "Coca-Cola Vanilla", "qty_fact": 24, "price": 99.7129,
+         "amount": 2393.11, "vat_amount": 526.49, "vat_rate": "НДС22"},
+    ])
+    assert [line["amount"] for line in строки] == [1267.21, 2393.11]
+    assert [line["vat_amount"] for line in строки] == [278.79, 526.49]
+
+    итог, налог = store_receipts.totals(строки)
+    assert (итог, налог) == (3660.32, 805.28)
+
+    # Налога нет — считаем сами, как раньше: выделяем из суммы.
+    без_налога = store_receipts.normalize_lines([
+        {"name": "Вода", "qty_fact": 10, "price": 12.20, "vat_rate": "НДС22"},
+    ])
+    assert без_налога[0]["amount"] == 122.0
+    assert без_налога[0]["vat_amount"] == 22.0

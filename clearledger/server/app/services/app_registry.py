@@ -442,6 +442,15 @@ async def company_apps(db: AsyncSession, company_id) -> list[dict[str, Any]]:
         rec = ca.get(app.id)
         enabled = rec.enabled if rec is not None else _default_app_on(app.code, profile_id)
         name, desc = _BY_PROFILE.get((app.code, profile_id or ""), (app.name, app.description))
+        # Имя на КОМПАНИЮ, а не на профиль: у одного профиля живут разные пространства.
+        # «Аудитор» у аудиторской практики и «Агенты» в нашем внутреннем пространстве —
+        # это один продукт с одним кодом (переименование кода стоило бы миграции прав и
+        # подключений), но с разной ролью в работе, и надпись должна называть роль.
+        # Хранится в `config` подключения, потому что это настройка компании, а не факт
+        # о продукте: реестр приложений остаётся общим на контейнер.
+        cfg = (rec.config or {}) if rec is not None else {}
+        name = cfg.get("name") or name
+        desc = cfg.get("description") or desc
         out.append({
             "id": str(app.id), "code": app.code, "name": name,
             "description": desc, "baseUrl": app.base_url, "icon": app.icon,

@@ -256,10 +256,14 @@ export async function place(companyId: string, ref: string, data: {
 /** Что лежит в подборке, в дне, в отложенном или под звездой. Закрытая работа
  *  отсюда уходит сама — убирать руками нечего. */
 export async function placed(companyId: string, opts: {
-  scope?: 'list' | 'day' | 'carry' | 'deferred' | 'starred' | 'loose'; listId?: string
+  scope?: 'list' | 'day' | 'carry' | 'deferred' | 'starred' | 'loose'
+  listId?: string
+  /** День для `scope: 'day'` в виде `YYYY-MM-DD`. Пусто — сегодняшний. */
+  on?: string
 } = {}) {
   return get<{ items: PlacedItem[] }>('/api/work/placed', {
     company_id: companyId, scope: opts.scope ?? 'list', list: opts.listId,
+    on: opts.on,
   })
 }
 

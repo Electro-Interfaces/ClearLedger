@@ -5,7 +5,7 @@ import { UiLevelHeaderButton } from '@/components/common/UiLevelToggle'
 import { Button } from '@/components/ui/button'
 import { HeaderUserMenu } from '@/components/layout/HeaderUserMenu'
 import { HeaderInteractionButtons } from '@/components/layout/HeaderInteractionButtons'
-import { APP_VERSION } from '@/config/version'
+import { APP_VERSION } from '@/lib/appUpdate'
 import { ECOSYSTEM_BRAND } from '@/config/brand'
 import { OrganizationSelector } from '@/components/layout/OrganizationSelector'
 import { CompanySelector } from '@/components/company/CompanySelector'
@@ -65,8 +65,13 @@ export function Header({ onMobileMenuToggle, isMobile }: HeaderProps) {
                 {product ? productLabel(product, company.profileId)
                   : coreTitle ?? `${ECOSYSTEM_BRAND} Учёт`}
               </div>
+              {/* Компания и версия сборки — одной строкой под именем приложения.
+                  Версия стоит здесь всегда: человек, который пишет «у меня не
+                  появилось», должен уметь назвать свою версию не заходя в меню.
+                  Число берётся из `package.json` на сборке (`__APP_VERSION__`) —
+                  прежняя константа `config/version.ts` застряла на 1.2.1 и врала. */}
               <p className="text-xs text-muted-foreground">
-                {product || coreTitle ? ECOSYSTEM_BRAND : `v${APP_VERSION}`}
+                {ECOSYSTEM_BRAND} · {APP_VERSION}
               </p>
             </div>
           </Link>
@@ -99,7 +104,9 @@ export function Header({ onMobileMenuToggle, isMobile }: HeaderProps) {
           <span className="hidden sm:inline-flex"><OrganizationSelector /></span>
           {/* Чат · Задачи · Конференция (+ Инфо и поддержка на десктопе) — общий блок продуктов
               контейнера. Стоит справа и на телефоне: это то, ради чего берут трубку. */}
-          <HeaderInteractionButtons conference />
+          {/* Конференция переехала в правую рельсу: там она стоит рядом с календарём и
+              записями — тем, что человек заводит сам, а не открывает повторно. */}
+          <HeaderInteractionButtons />
           {/* Режим работы: простой ⇄ расширенный. Стоит рядом с лампочкой —
               та объясняет, ГДЕ что находится, этот убирает лишнее с глаз.
               На телефоне иконки нет: угадать в безымянном спидометре «показать

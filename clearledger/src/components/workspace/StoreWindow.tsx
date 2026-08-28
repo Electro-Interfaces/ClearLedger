@@ -19,7 +19,7 @@ import { useCompany } from '@/contexts/CompanyContext'
 import { useWorkspace } from '@/contexts/WorkspaceContext'
 import { useLocations } from '@/hooks/useLocations'
 import { scopeStationCodes } from '@/services/locationService'
-import { getStoreView, storeModeForKey, STORE_KEYS } from '@/config/storeCatalog'
+import { getStoreView, storeCanonKey, storeModeForKey, STORE_KEYS } from '@/config/storeCatalog'
 import { StoreView } from './StorePanel'
 
 /**
@@ -43,7 +43,8 @@ export function useStoreWindow() {
 
 /** Можно ли показать пункт окном (иначе вызывающий делает обычный переход). */
 export function окномМожно(key: string): boolean {
-  return STORE_KEYS.includes(key) && !ТОЛЬКО_ЭКРАНОМ.has(key)
+  const канон = storeCanonKey(key)
+  return STORE_KEYS.includes(канон) && !ТОЛЬКО_ЭКРАНОМ.has(канон)
 }
 
 export function StoreWindow() {

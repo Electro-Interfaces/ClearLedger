@@ -377,8 +377,12 @@ async def _ingest_receipts(db: AsyncSession, company_id, station_id: int,
 
         supplier_row = await exact_reference(
             Counterparty, doc.get("supplier_id"), "supplier_id")
-        if supplier_row is not None and supplier_row.kind != "external":
-            canonical_errors.append("supplier_id не является внешним поставщиком")
+        # Поставщик — внешний контрагент. В базе такие помечены и «external»,
+        # и «supplier»: второе пришло импортом поставщиков ЭДО. Требовать
+        # только «external» значило отвергать как раз тех, кто помечен
+        # поставщиком явно, — на этом застряла первая же накладная СИНТЕЗа.
+        if supplier_row is not None and supplier_row.kind not in ("external", "supplier"):
+            canonical_errors.append("supplier_id не является внешним контрагентом")
             supplier_row = None
         contract_row = await exact_reference(Contract, doc.get("contract_id"), "contract_id")
         organization_row = await exact_reference(
@@ -497,6 +501,12 @@ async def _ingest_receipts(db: AsyncSession, company_id, station_id: int,
             db.add(row)
         else:
             if existing.status == "accepted":
+                # Проведённый документ неизменяем — и это защита уровня базы
+                # («accepted store receipt evidence is immutable»), а не
+                # соглашение приёмника. Исправление со станции сюда не
+                # применяется: сначала документ распроводят, и только потом он
+                # принимает новую редакцию. Здесь остаётся отметить, что
+                # редакция разошлась с принятой.
                 if canonical_errors and existing.accounting_status != "ready":
                     store_receipt_accounting.mark_needs_review(existing, canonical_errors)
                 if not _manual_receipt_candidate_pending(existing):

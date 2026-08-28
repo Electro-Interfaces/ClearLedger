@@ -16,7 +16,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { BookOpen, Bot, CheckCircle2, ClipboardList, FlaskConical, Download, GitCommitHorizontal, ListChecks, Loader2, MessageSquare, Plus, Save, SlidersHorizontal, TerminalSquare, Upload, Wrench } from 'lucide-react'
+import { BookOpen, Bot, CheckCircle2, ClipboardList, FlaskConical, Download, GitCommitHorizontal, ListChecks, Loader2, MessageSquare, Plus, Save, SlidersHorizontal, TerminalSquare, Upload, UserRound, Wrench } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
@@ -34,6 +34,10 @@ const VIEWS = [
   // с образом. Их и надо видеть отдельно: по ним понятно, растёт он или стоит.
   { key: 'methods', label: 'Методы', icon: Wrench, hint: 'чему научили: как отвечать на класс вопросов' },
   { key: 'knowledge', label: 'Знание', icon: BookOpen, hint: 'что он знает об этой компании' },
+  // Личная карточка — рядом со знанием, а не только в профиле учётной записи: человек
+  // правит её тем же движением, каким смотрит, что агент вообще знает. Приходят сюда
+  // ровно тогда, когда агент ответил не так, как хотелось.
+  { key: 'me', label: 'Моя карточка', icon: UserRound, hint: 'что агент знает лично обо мне' },
   { key: 'setup', label: 'Настройка', icon: SlidersHorizontal, hint: 'режим, указания компании, модели' },
   { key: 'runs', label: 'Журнал', icon: ClipboardList, hint: 'что спрашивали и что он нашёл' },
   // Мастерская — НАСТОЯЩИЙ Claude Code в терминале, без нашей прослойки. Отдельный
@@ -54,9 +58,35 @@ const MODES = [
   { key: 'thorough', label: 'Дотошный', hint: 'смотрит шире: называет смежные проблемы и предлагает, что ещё проверить' },
 ] as const
 
+/**
+ * Страница агента: адрес держит открытый раздел, чтобы ссылкой можно было прислать
+ * коллеге не «зайди в Аудитора», а конкретный экран.
+ */
 export function AuditorPage() {
-  const { companyId } = useCompany()
   const [params, setParams] = useSearchParams()
+  const view = params.get('view') || 'chat'
+  const open = (key: string) => setParams((p) => {
+    const n = new URLSearchParams(p)
+    n.set('view', key)
+    return n
+  }, { replace: true })
+  return <AuditorWorkspace view={view} onView={open} />
+}
+
+/**
+ * Рабочее место агента: рельса разделов слева, содержимое справа.
+ *
+ * Одно и то же и на странице, и в окне из шапки. Окно раньше показывало только
+ * разговор, и человек, которому нужно было поправить знание или заглянуть в журнал,
+ * закрывал его и шёл в приложение — то есть окно годилось лишь на один вопрос.
+ * Поэтому состояние раздела приходит СНАРУЖИ: страница держит его в адресе, окно —
+ * у себя, и адрес рабочего экрана под окном не меняется.
+ */
+export function AuditorWorkspace({ view: viewIn, onView }: {
+  view: string
+  onView: (key: string) => void
+}) {
+  const { companyId } = useCompany()
   const { data: health } = useQuery({
     queryKey: ['auditor-health'], queryFn: auditor.getHealth, staleTime: 5 * 60 * 1000, retry: false,
   })
@@ -65,16 +95,12 @@ export function AuditorPage() {
     queryFn: () => auditor.getSettings(companyId), enabled: !!companyId, retry: false,
   })
   const views = VIEWS.filter((v) => !('admin' in v && v.admin) || (health?.workshop && settings?.can_manage))
-  const view = views.some((v) => v.key === params.get('view')) ? params.get('view')! : 'chat'
+  const view = views.some((v) => v.key === viewIn) ? viewIn : 'chat'
   const activeMobileTab = useRef<HTMLButtonElement>(null)
   useEffect(() => {
     activeMobileTab.current?.scrollIntoView({ block: 'nearest', inline: 'center' })
   }, [view])
-  const open = (key: string) => setParams((p) => {
-    const n = new URLSearchParams(p)
-    n.set('view', key)
-    return n
-  }, { replace: true })
+  const open = onView
 
   return (
     <div className="flex h-full min-h-0">
@@ -110,6 +136,7 @@ export function AuditorPage() {
           {view === 'skills' && <SkillsView />}
           {view === 'methods' && <MethodsView />}
           {view === 'knowledge' && <KnowledgeView />}
+          {view === 'me' && <MyCardView />}
           {view === 'setup' && <SetupView />}
           {view === 'runs' && <RunsView />}
           {view === 'workshop' && <AuditorTerminal />}
@@ -372,6 +399,56 @@ function MethodsView() {
   )
 }
 
+/**
+ * Моя карточка — личный слой знания.
+ *
+ * Файл заводится сам при первом вопросе и едет в промпт КАЖДОГО ответа этому человеку.
+ * Правит его двое: человек здесь, руками, и сам агент — короткой строкой после
+ * разговора, когда выяснилось что-то устойчивое («мне всегда без НДС»). Записи агента
+ * помечены датой и словом «агент»: с ними можно не согласиться и просто стереть.
+ *
+ * Прав администратора не требует: это договорённости человека с агентом, а не знание
+ * компании. Чужую карточку не показываем никому — в ней наблюдения о работе человека.
+ */
+function MyCardView() {
+  const { companyId } = useCompany()
+  const qc = useQueryClient()
+  const { data, isLoading, error, refetch } = useQuery({
+    queryKey: ['auditor-knowledge', companyId],
+    queryFn: () => auditor.getKnowledge(companyId), enabled: !!companyId, retry: false,
+  })
+  const card = (data ?? []).find((k) => k.scope === 'person')
+  const reload = () => qc.invalidateQueries({ queryKey: ['auditor-knowledge', companyId] })
+
+  if (error) return <div className="p-4"><QueryError message={(error as Error).message} onRetry={() => refetch()} /></div>
+
+  return (
+    <div className="h-full overflow-y-auto p-4">
+      <h1 className="text-lg font-semibold">Моя карточка</h1>
+      <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
+        То, что агент знает лично о вас и читает перед каждым вашим вопросом. Стоит
+        записать, чем вы заняты, как вам удобнее получать ответ и чего в вашем участке
+        не бывает. Ниже, под датой и пометкой «агент», он дописывает наблюдения сам —
+        с любой строкой можно не согласиться и стереть её.
+      </p>
+
+      {isLoading && <div className="mt-4 text-sm text-muted-foreground">Загружаю…</div>}
+
+      {!isLoading && !card && (
+        <p className="mt-4 max-w-3xl rounded-lg border border-dashed border-border/60 px-3 py-4 text-sm text-muted-foreground">
+          Карточка появится после первого вопроса агенту — тогда он заведёт её из заготовки.
+        </p>
+      )}
+
+      {card && (
+        <div className="mt-4 max-w-3xl rounded-lg border border-border/60 bg-card p-3">
+          <FileEditor path={`knowledge/${card.file}`} body={card.body} canEdit onSaved={reload} />
+        </div>
+      )}
+    </div>
+  )
+}
+
 /** Знание: что агент знает об этой компании, и как оно росло. */
 function KnowledgeView() {
   const { companyId } = useCompany()
@@ -394,6 +471,10 @@ function KnowledgeView() {
   if (error) return <div className="p-4"><QueryError message={(error as Error).message} onRetry={() => refetch()} /></div>
 
   const all = data ?? []
+  // Направления = папки внутри слоя: «корпоративный процессинг», «онлайн-заказы».
+  // Проектов у пространства много, и плоский список файлов перестаёт читаться на
+  // втором десятке.
+  const topics = [...new Set(all.filter((k) => k.topic).map((k) => k.topic as string))].sort()
   // Два слоя не смешиваем в один список: правило «у этого клиента УСН» и общая методика
   // живут по-разному, и человек должен видеть, что именно он правит — знание про одну
   // организацию или знание, которое поедет ко всем клиентам фирмы.
@@ -431,7 +512,9 @@ function KnowledgeView() {
                 <h2 className="text-sm font-semibold">{layer.title}</h2>
                 <p className="mt-0.5 text-xs text-muted-foreground">{layer.hint}</p>
               </div>
-              {layer.scope === 'company' && canEdit && <KnowledgeAdd companyId={companyId} onDone={reload} />}
+              {layer.scope === 'company' && canEdit && (
+                <KnowledgeAdd companyId={companyId} topics={topics} onDone={reload} />
+              )}
             </div>
 
             {!isLoading && !items.length && (
@@ -445,11 +528,19 @@ function KnowledgeView() {
 
             <div className="mt-2 space-y-2">
               {items.map((k) => (
+                // Направление показываем на самой строке, а не отдельными секциями:
+                // файлов в слое немного, а лишний уровень заголовков увёл бы взгляд
+                // от того, что в знании вообще есть.
                 <div key={k.file} className="rounded-lg border border-border/60 bg-card px-3 py-2">
                   <button type="button" onClick={() => setOpen(open === k.file ? null : k.file)}
                     className="flex w-full items-center gap-2 text-left">
                     <BookOpen className="size-4 shrink-0 text-muted-foreground" />
                     <span className="font-medium">{k.title}</span>
+                    {k.topic && (
+                      <span className="rounded bg-primary/10 px-1.5 py-0.5 text-xs text-primary">
+                        {k.topic}
+                      </span>
+                    )}
                     {k.generated && (
                       <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
                         пересчитывается
@@ -520,10 +611,16 @@ function KnowledgeView() {
  * Имя файла на диске не спрашиваем — оно техническое и человеку неинтересно. Человек
  * даёт заголовок, он же становится первой строкой файла и именем в списке.
  */
-function KnowledgeAdd({ companyId, onDone }: { companyId: string; onDone: () => void }) {
+function KnowledgeAdd({ companyId, topics, onDone }: {
+  companyId: string
+  /** Уже заведённые направления: подсказка, чтобы второй файл лёг рядом с первым. */
+  topics: string[]
+  onDone: () => void
+}) {
   const fileRef = useRef<HTMLInputElement>(null)
   const [busy, setBusy] = useState(false)
   const [title, setTitle] = useState<string | null>(null)
+  const [topic, setTopic] = useState('')
 
   const upload = (f?: File | null) => {
     if (!f) return
@@ -539,7 +636,16 @@ function KnowledgeAdd({ companyId, onDone }: { companyId: string; onDone: () => 
     if (!t) return
     // Имя файла — техническое и латиницей: по нему ходит белый список правки на сервисе.
     // Заголовок кириллицей живёт внутри файла, и в списке видно именно его.
-    auditor.saveAgentFile(companyId, `knowledge/${companyId}/zapis-${Date.now()}.md`, `# ${t}\n\n`)
+    // Направление = папка внутри слоя: «processing», «online-orders». Латиницей и без
+    // пробелов — по пути ходит белый список правки на сервисе, кириллица его не пройдёт.
+    // Название по-русски живёт заголовком внутри файла, как и у самой записи.
+    const dir = topic.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-|-$/g, '')
+    const path = dir
+      ? `knowledge/${companyId}/${dir}/zapis-${Date.now()}.md`
+      : `knowledge/${companyId}/zapis-${Date.now()}.md`
+    auditor.saveAgentFile(companyId, path, `# ${t}
+
+`)
       .then(() => { setTitle(null); onDone(); toast.success('Создано — откройте и напишите текст') })
       .catch((e: Error) => toast.error(e.message))
   }
@@ -559,11 +665,19 @@ function KnowledgeAdd({ companyId, onDone }: { companyId: string; onDone: () => 
         </Button>
       </div>
       {title !== null && (
-        <div className="mt-2 flex items-center gap-2">
+        <div className="mt-2 flex flex-wrap items-center justify-end gap-2">
           <input autoFocus value={title} onChange={(e) => setTitle(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') create(); if (e.key === 'Escape') setTitle(null) }}
             placeholder="О чём это знание — например «Учётная политика 2026»"
             className="w-72 rounded-md border border-border/60 bg-background px-2 py-1 text-sm" />
+          <input value={topic} onChange={(e) => setTopic(e.target.value)} list="auditor-topics"
+            onKeyDown={(e) => { if (e.key === 'Enter') create(); if (e.key === 'Escape') setTitle(null) }}
+            placeholder="направление (необязательно)"
+            title="Папка направления: processing, online-orders. Пусто — запись ляжет в корень слоя"
+            className="w-56 rounded-md border border-border/60 bg-background px-2 py-1 text-sm" />
+          <datalist id="auditor-topics">
+            {topics.map((t) => <option key={t} value={t} />)}
+          </datalist>
           <Button size="sm" onClick={create} disabled={!title.trim()}>Создать</Button>
         </div>
       )}

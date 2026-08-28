@@ -144,7 +144,7 @@ export function AdminLayout() {
             {/* Вход в состав пространства — пункт «Приложения» в левом меню:
                 кнопки в шапке дублировали его (решение МАГа 06.08.2026). */}
             {/* Чат · Заявки · Инфо — тот же вход в поддержку, что в Учёте. */}
-            <HeaderInteractionButtons conference />
+            <HeaderInteractionButtons />
           </div>
 
           <div className="flex shrink-0 items-center gap-1.5 md:gap-2">

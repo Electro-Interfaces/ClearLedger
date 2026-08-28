@@ -61,6 +61,11 @@ class SettingsOut(SettingsIn):
     # Имя правщика — уходит в автора коммита рабочей папки агента: по истории должно быть
     # видно, кто менял знание, а не «кто-то через интерфейс».
     author_name: str | None = None
+    # Кто спрашивает. Нужен агенту, чтобы взять ЛИЧНЫЙ слой знания
+    # (`knowledge/people/<user_id>.md`): у разных сотрудников свои предметы, свои
+    # привычные формулировки и свои договорённости с агентом. Идентификатор, а не имя:
+    # имена меняются и повторяются, а файл знания привязан к учётной записи.
+    user_id: str | None = None
 
 
 class RunIn(BaseModel):
@@ -91,7 +96,8 @@ async def get_settings(
     if row is None:
         # Записи нет — это НЕ ошибка: пространство просто ничего не меняло.
         return SettingsOut(disabled_skills=[], instructions=None, mode="normal",
-                           can_manage=can_manage, author_name=current_user.name)
+                           can_manage=can_manage, author_name=current_user.name,
+                           user_id=str(current_user.id))
     return SettingsOut(
         disabled_skills=row.disabled_skills or [],
         instructions=row.instructions,
@@ -101,6 +107,7 @@ async def get_settings(
         updated_at=row.updated_at,
         can_manage=can_manage,
         author_name=current_user.name,
+        user_id=str(current_user.id),
     )
 
 

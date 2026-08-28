@@ -14,6 +14,9 @@ class _Rows:
     def scalars(self):
         return self
 
+    def mappings(self):
+        return self
+
     def all(self):
         return self.rows
 
@@ -22,7 +25,12 @@ class _Session:
     def __init__(self, results):
         self.results = list(results)
 
-    async def execute(self, _statement):
+    async def execute(self, statement, params=None):
+        # Поток людей за смену (чеки и заправки) читается своими запросами и в
+        # этом тесте не проверяется: он про разнос документов по станциям и дням.
+        sql = str(statement)
+        if "store_cheques" in sql or "fuel_transactions" in sql:
+            return _Rows([])
         return _Rows(self.results.pop(0))
 
 
@@ -84,6 +92,10 @@ async def test_shift_documents_are_grouped_by_station_and_day():
     assert by_station["208"]["operator"] == "Оператор 208"
     assert by_station["208"]["register"] == "Пост 208"
     assert by_station["208"]["internal_no"] == "В-7070"
+    # Внутренний номер смены здесь не число («В-7070») — поток людей посчитать
+    # нечем, и вместо нуля стоит прочерк: ноль читался бы как «никто не купил».
+    assert by_station["208"]["cheques"] is None
+    assert by_station["208"]["conversion"] is None
 
 
 def test_station_warehouse_scope_accepts_warehouse_but_not_neighbour_station():

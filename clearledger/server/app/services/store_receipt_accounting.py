@@ -70,8 +70,12 @@ def _snapshot_contract(row: Contract) -> dict:
     return {
         "id": str(row.id), "external_ref": row.external_ref,
         "number": row.number, "date": row.date,
-        "counterparty_id": row.counterparty_id,
-        "organization_id": row.organization_id,
+        # UUID приводим к строке, как в соседних снимках: снимок уезжает в
+        # канонический JSON, а json.dumps на объекте UUID падает. Не всплывало,
+        # пока ни один документ не доходил до сборки — первая же готовая
+        # приёмка ложилась на TypeError.
+        "counterparty_id": str(row.counterparty_id) if row.counterparty_id else None,
+        "organization_id": str(row.organization_id) if row.organization_id else None,
         "type": row.type, "kind": row.kind, "currency": row.currency,
         "valid_until": row.valid_until, "is_closed": bool(row.is_closed),
         "scope_type": row.scope_type,
@@ -207,6 +211,13 @@ def _strict_document_values(
         Decimal("0.00"),
     )
     document_total = goods_total + services_total
+    # Сумма к оплате: столько платят поставщику и столько стоит в подвале
+    # накладной под «Всего к оплате». Когда цены в документе без налога, к
+    # итогу строк добавляется НДС; когда налог уже внутри цены — сумма строк
+    # и есть сумма к оплате.
+    payable_total = (
+        document_total if vat_included is True else document_total + vat_total
+    )
     stored_total = _money(receipt.total_amount, "Итог документа", errors)
     stored_vat = _money(receipt.vat_amount, "Итог НДС", errors)
     if stored_total != document_total:
@@ -215,17 +226,41 @@ def _strict_document_values(
         errors.append("Итог НДС не совпадает с НДС строк")
 
     evidence = receipt.evidence or {}
+    # Контрольные итоги приезжают со станции ИЗ БУМАЖНОЙ НАКЛАДНОЙ — их вводит
+    # оператор, глядя на подвал первички, и они по определению могут разойтись
+    # с нашим расчётом на копейки: НДС считается и округляется построчно, и на
+    # десяти строках набегает несколько копеек. Первичный документ — накладная,
+    # поэтому расхождение в пределах округления не ошибка ввода.
+    #
+    # Допуск ровно такой, каким его считает станция: копейка на строку, но не
+    # меньше рубля на документ. Ошибку ввода (перепутанную цифру, потерянную
+    # строку) он не пропустит — она всегда больше.
+    #
+    # Отдельно про declared_total: до 27.08.2026 он сверялся с суммой строк БЕЗ
+    # налога, а станция шлёт сумму К ОПЛАТЕ. Расхождение выходило на всю
+    # величину НДС, и ни один документ с заполненным подвалом в БП не уезжал.
+    tolerance = max(
+        Decimal("1.00"),
+        (Decimal(len(lines) + len(services)) * Decimal("0.01")),
+    )
+    declared_payable = (
+        _money(evidence["declared_total"], "declared_total", errors)
+        if evidence.get("declared_total") is not None else None
+    )
     declared = {
         "declared_goods_total": goods_total,
         "declared_services_total": services_total,
         "declared_vat_total": vat_total,
-        "declared_total": document_total,
+        "declared_total": payable_total,
     }
     for field, expected in declared.items():
         if evidence.get(field) is not None:
             actual = _money(evidence[field], field, errors)
-            if actual != expected:
-                errors.append(f"Контрольный итог {field} не совпадает")
+            if abs(actual - expected) > tolerance:
+                errors.append(
+                    f"Контрольный итог {field} не совпадает: "
+                    f"в документе {actual}, по строкам {expected}"
+                )
 
     currency = str(evidence.get("currency") or "").strip().upper()
     if not currency:
@@ -264,6 +299,16 @@ def _strict_document_values(
             "services": float(services_total),
             "vat": float(vat_total),
             "document": float(document_total),
+            # Сумма к оплате отдаётся отдельным числом: в БП «СуммаДокумента»
+            # поступления — сумма с налогом, и брать её из товарного итога
+            # значит занизить документ на весь НДС.
+            "payable": float(payable_total),
+            # То, что оператор ввёл с подвала накладной. Первичный документ —
+            # бумага, и в бухгалтерию уезжает её цифра: наш построчный расчёт
+            # отличается на копейки округления НДС и служит контролем, а не
+            # заменой первички (решение МАГа 27.08.2026). Сверку с допуском
+            # эта пара уже прошла выше.
+            "declared": float(declared_payable) if declared_payable is not None else None,
         },
     }
 
@@ -427,7 +472,14 @@ async def assess_receipt(
         "ДатаВходящегоДокумента": receipt.incoming_date.isoformat(),
         "Товары": lines,
         "Услуги": services,
-        "СуммаДокумента": float(receipt.total_amount or 0),
+        # СуммаДокумента поступления в БП — сумма К ОПЛАТЕ, с налогом. Пока
+        # сюда уходил товарный итог, документ приезжал в 1С заниженным ровно на
+        # НДС, и расхождение всплывало только в сверке — после проведения.
+        "СуммаДокумента": (
+            strict_values["control_totals"]["declared"]
+            if strict_values["control_totals"]["declared"] is not None
+            else strict_values["control_totals"]["payable"]
+        ),
         "СуммаНДС": float(receipt.vat_amount or 0),
         "ВалютаДокумента": strict_values["currency"],
         "СуммаВключаетНДС": strict_values["vat_included"],

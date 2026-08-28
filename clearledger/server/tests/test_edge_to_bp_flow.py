@@ -343,10 +343,14 @@ async def test_edge_documents_build_manual_unposted_bp_package_with_ttk_and_line
         id=supplier_id, name="ООО Канон", full_name="Общество Канон",
         inn="1234567890", kpp="123456789", type="ЮЛ", raw={},
     )
+    # Номер, повторяющий наименование, — обычный след импорта из 1С: там у
+    # большинства договоров номера нет вовсе, а имя «Основной договор».
     contract = SimpleNamespace(
-        id=contract_id, counterparty_id=str(supplier_id), organization_id="gig",
-        number="42", date="2026-08-01", kind="СПоставщиком", type="Поставка",
-        currency="RUB", raw={}, is_closed=False,
+        id=contract_id, external_ref="16ff72e6-65b8-11f1-be01-0050568cc25a",
+        counterparty_id=str(supplier_id), organization_id="gig",
+        number="Основной договор", date="2026-08-01", kind="СПоставщиком",
+        type="Поставка", currency="RUB", raw={"name": "Основной договор"},
+        is_closed=False,
     )
 
     first = await BpPackageEmitter(
@@ -377,11 +381,18 @@ async def test_edge_documents_build_manual_unposted_bp_package_with_ttk_and_line
     incoming = next(doc for doc in first["Документы"] if doc["Тип"] == "purchase")
     assert incoming["Товары"][0]["СтавкаНДС"] == "НДС10"
     assert incoming["Контрагент"] == str(supplier_id)
-    assert incoming["ДоговорКонтрагента"] == str(contract_id)
+    # Наверх уходит UUID договора из 1С, а не наш идентификатор: по чужому ключу
+    # приёмник договор не узнает и заведёт второй, разведя расчёты по двум.
+    assert incoming["ДоговорКонтрагента"] == contract.external_ref
     supplier_card = next(card for card in first["НСИ"] if card["Тип"] == "Контрагент")
     contract_card = next(card for card in first["НСИ"] if card["Тип"] == "Договор")
     assert supplier_card["ИНН"] == "1234567890"
     assert contract_card["ВладелецКонтрагент"] == str(supplier_id)
+    assert contract_card["ИсточникUUID"] == contract.external_ref
+    # Номер пуст: иначе приёмник заперт на поиске по номеру, которого в БП нет,
+    # и до поиска по наименованию — единственного рабочего — не доходит.
+    assert contract_card["Номер"] == ""
+    assert contract_card["Наименование"] == "Основной договор"
     release = next(doc for doc in first["Документы"] if doc["Тип"] == "production_release")
     assert release["Ингредиенты"][0]["Количество"] == 0.3
     assert release["Ингредиенты"][0]["ИдентификаторПродукция"] == "dish-1"

@@ -8,10 +8,13 @@
  * из шапки — окном, из рейла — доком. Оба состояния живут в `SupportContext`.
  */
 import { useState } from 'react'
-import { Bot, HelpCircle, LifeBuoy, ListChecks, MessageCircle, Video } from 'lucide-react'
+import {
+  Bot, CalendarDays, HelpCircle, LifeBuoy, ListChecks, MessageCircle, Video,
+} from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { startMeeting } from '@/services/conferenceService'
+import { isDemoMode } from '@/services/apiClient'
 import { useSupportContext } from '@/contexts/SupportContext'
 import { useDocsApp } from '@/hooks/useDocsApp'
 import { useCompany } from '@/contexts/CompanyContext'
@@ -38,7 +41,11 @@ export function HeaderInteractionButtons({ conference = false }: { conference?: 
   // пространство (без них человек нем и слеп). Конференция и поддержка поставщика -
   // обычные продукты реестра и показываются только при праве на них: раньше кнопки
   // стояли у всех, и человек с одним выданным приложением видел в шапке четыре чужих.
-  const { canApp } = useCompany()
+  const { canApp, appName } = useCompany()
+  // Как продукт назван в ЭТОМ пространстве: «Аудитор» у аудиторской практики,
+  // «Агенты» там, где их несколько и их учат. Надпись живёт в реестре компании,
+  // а не в коде кнопки.
+  const agentName = appName('auditor', 'Аудитор')
   const { interactionSection, toggleInteraction, unreadCounts } = useSupportContext()
   const [confBusy, setConfBusy] = useState(false)
   const tasksOn = useDocsApp()
@@ -71,6 +78,16 @@ export function HeaderInteractionButtons({ conference = false }: { conference?: 
           <span className="hidden lg:inline">Конференция</span>
         </Button>
       )}
+      {/* Полный календарь: месяц, участники, согласия — работа В календаре, и ей
+          нужно окно. Контекстный приёмник «положить дело на день» живёт в правой
+          рельсе и открывается доком. */}
+      {tasksOn && (
+        <Button variant="outline" size="sm" onClick={() => toggleInteraction('calendar')}
+          className={btnCls(interactionSection === 'calendar')} title="Календарь пространства">
+          <CalendarDays className="h-4 w-4" />
+          <span className="hidden lg:inline">Календарь</span>
+        </Button>
+      )}
       <Button variant="outline" size="sm" onClick={() => toggleInteraction('chat')} className={btnCls(interactionSection === 'chat')} title="Чаты пространства">
         <MessageCircle className="h-4 w-4" />
         <span className="hidden lg:inline">Чат</span>
@@ -90,12 +107,12 @@ export function HeaderInteractionButtons({ conference = false }: { conference?: 
       {/* «Аудитор» — тот же жест, что чат: кнопка открывает окно, где спрашивают про
           текущий экран. Показывается только там, где продукт включён компании: иначе
           человек звал бы агента, которого в стеке нет. */}
-      {canApp('auditor') && (
+      {!isDemoMode() && canApp('auditor') && (
         <Button variant="outline" size="sm" onClick={() => toggleInteraction('auditor')}
           className={`hidden lg:inline-flex ${btnCls(interactionSection === 'auditor')}`}
-          title="Аудитор: спросить про этот экран">
+          title={`${agentName}: спросить про этот экран`}>
           <Bot className="h-4 w-4" />
-          <span className="hidden lg:inline">Аудитор</span>
+          <span className="hidden lg:inline">{agentName}</span>
         </Button>
       )}
       {/* «Инфо» — четвёртая кнопка, на телефоне уже теснит имя экрана. Справка

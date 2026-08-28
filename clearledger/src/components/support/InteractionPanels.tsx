@@ -6,7 +6,7 @@ import {
   LifeBuoy, MessageCircle, Sparkles, Phone, Keyboard, FileText, Database, GitBranch,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { APP_VERSION } from '@/config/version'
+import { APP_VERSION } from '@/lib/appUpdate'
 import { ECOSYSTEM_TITLE } from '@/config/brand'
 import { useSupportContext } from '@/contexts/SupportContext'
 
@@ -93,7 +93,7 @@ export function InfoPanel() {
             документов в бухгалтерскую систему компании.
           </p>
           <span className="inline-flex items-center rounded-md bg-secondary px-2 py-0.5 text-xs font-medium text-muted-foreground">
-            версия v{APP_VERSION}
+            версия {APP_VERSION}
           </span>
         </div>
       </div>

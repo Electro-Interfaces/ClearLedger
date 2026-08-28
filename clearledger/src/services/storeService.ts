@@ -195,6 +195,9 @@ export interface StoreSalesGroup {
   key: string; label: string
   revenue: number; revenue_net: number; vat: number
   qty: number; sku_count: number; share: number
+  /** Только в разрезе по товарам: остаток и на сколько дней его хватит. */
+  stock_qty?: number
+  days_of_supply?: number | null
 }
 export interface StoreSalesData {
   period: { from: string; to: string }
@@ -471,7 +474,17 @@ export const getStoreCateringMenu = (dateFrom: string, dateTo: string, stations?
   })
 
 // ── Маржа и наценка: сегмент + группы + реестр SKU + детализация товара ──
-export interface PricingSku extends StoreSku { kind: string }
+export interface PricingSku extends StoreSku {
+  kind: string
+  /** Цена на полке: по сети она у каждой АЗС своя, поэтому диапазон, а не среднее. */
+  price_min: number | null
+  price_max: number | null
+  stock_qty: number
+  /** Кто вправе назначать цену: master — центр, station — АЗС, пусто — правило не задано. */
+  price_owner: string
+  /** Доля себестоимости в цене — язык кухни. Только у общепита. */
+  food_cost_pct: number | null
+}
 export interface PricingGroup {
   group: string; revenue: number; revenue_net: number; qty: number
   sku_count: number; share: number; margin: number | null; margin_pct: number | null
@@ -655,6 +668,11 @@ export interface ShiftComposite {
   operator?: string | null
   register?: string | null
   internal_no?: string | null
+  /** Поток людей за смену: чеки с товаром, заправки и конверсия магазина.
+   *  Пусто там, где смена без внутреннего номера или контуры ещё не сошлись. */
+  cheques?: number | null
+  fuel_ops?: number | null
+  conversion?: number | null
   revenue: number
   soputka: number
   obshepit: number
@@ -2546,6 +2564,147 @@ export const getStoreDynamics = (dateFrom: string, dateTo: string, stations?: st
     stations: stations?.length ? stations.join(',') : undefined,
   })
 
+/** Цены, продиктованные маркой: где наша цена отстала от того, что на пачке. */
+export interface MrcPriceRow {
+  station_id: number
+  item_uuid: string
+  name: string
+  barcode: string
+  price: number
+  cash_price: number
+  mrc: number | null
+  qty: number
+  amount: number
+  last_at: string | null
+  by_mark: boolean
+  price_owner: string | null
+  loss: number
+}
+
+export interface MrcPricesData {
+  period: { from: string; to: string }
+  rows: MrcPriceRow[]
+  by_mark: number
+  other: number
+  loss_mark: number
+  loss_other: number
+  by_station: { station_id: number; rows: number; by_mark: number; loss: number }[]
+  note?: string
+}
+
+export const getStorePriceMrc = (dateFrom: string, dateTo: string, stations?: string[]) =>
+  get<MrcPricesData>('/api/store/price-mrc', {
+    date_from: dateFrom,
+    date_to: dateTo,
+    stations: stations?.length ? stations.join(',') : undefined,
+  })
+
+/** Принять цену марки. items — ключи «станция:карточка»; пусто — все по марке. */
+export const acceptStorePriceMrc = (
+  dateFrom: string, dateTo: string, stations?: string[], items?: string[],
+) =>
+  post<{ accepted: number; stations: number; recovered?: number; note: string }>(
+    '/api/store/price-mrc/accept', {
+      date_from: dateFrom,
+      date_to: dateTo,
+      stations: stations?.length ? stations.map(Number).filter(Number.isFinite) : undefined,
+      items: items?.length ? items : undefined,
+    })
+
+/** Корзина сети: как покупают. Разрез по АЗС — то, чего у станции нет. */
+export interface BasketsData {
+  period: { from: string; to: string }
+  totals: {
+    cheques: number; positions: number; revenue: number
+    avg_check: number; median_check: number; depth: number
+    single: number; single_pct: number
+    /** Топливо как измерение покупателя: заправился и купил — или уехал ни с чем. */
+    mixed: number; fuel_ops: number; fuel_only: number; attach_pct: number
+    avg_fill: number; goods_per_fill: number
+    returns: number; returns_amount: number
+  }
+  fuel: {
+    ops: number
+    matched: number
+    matched_pct: number
+    by_fuel: {
+      fuel: string; ops: number; with_goods: number; attach_pct: number
+      liters: number; avg_fill: number; fuel_amount: number
+      goods_revenue: number; goods_per_fill: number; avg_goods_check: number
+    }[]
+    by_volume: {
+      label: string; ops: number; with_goods: number; attach_pct: number
+      liters: number; goods_revenue: number; goods_per_fill: number
+    }[]
+  }
+  sizes: { positions: number; label: string; cheques: number; amount: number; share: number }[]
+  hours: { hour: number; cheques: number; positions: number; revenue: number; avg_check: number; bar: number; mixed: number }[]
+  payments: { name: string; cheques: number; revenue: number; positions: number; avg_check: number; share: number }[]
+  stations: { station_id: number; cheques: number; revenue: number; avg_check: number; depth: number; single_pct: number; mixed: number; fuel_ops: number; attach_pct: number }[]
+  pairs: { a: string; b: string; together: number; support: number; confidence: number; lift: number }[]
+  pairs_total: number
+  top: { name: string; cheques: number; qty: number; revenue: number; share: number }[]
+  verdict: string
+}
+
+/** «Взяли кофе — что ещё положат в корзину»: разбор вокруг одной позиции. */
+export interface BasketItemData {
+  item: string
+  cheques: number
+  share: number
+  qty: number
+  revenue: number
+  avg_price: number
+  with_fuel: number
+  with_fuel_pct: number
+  neighbours: { name: string; together: number; confidence: number; lift: number; revenue: number }[]
+  hours: { hour: number; cheques: number; bar: number }[]
+}
+
+export const getStoreBasketItem = (name: string, dateFrom: string, dateTo: string, stations?: string[]) =>
+  get<BasketItemData>('/api/store/baskets/item', {
+    name,
+    date_from: dateFrom,
+    date_to: dateTo,
+    stations: stations?.length ? stations.join(',') : undefined,
+  })
+
+export const getStoreBaskets = (dateFrom: string, dateTo: string, stations?: string[]) =>
+  get<BasketsData>('/api/store/baskets', {
+    date_from: dateFrom,
+    date_to: dateTo,
+    stations: stations?.length ? stations.join(',') : undefined,
+  })
+
+/** Как спрос ответил на цену: наблюдение вокруг каждого изменения. */
+export interface PriceResponseRow {
+  station_id: number
+  item_uuid: string
+  name: string
+  at: string | null
+  author: string
+  price_prev: number
+  price: number
+  price_pct: number
+  qty_day_prev: number
+  qty_day: number
+  qty_pct: number
+  margin_day_prev: number
+  margin_day: number
+  margin_pct: number
+  elasticity: number | null
+  days_prev: number
+  days: number
+  verdict: string
+}
+
+export const getStorePriceResponse = (window = 14, stations?: string[], limit = 30) =>
+  get<{ window: number; rows: PriceResponseRow[]; total: number }>('/api/store/price-response', {
+    window,
+    limit,
+    stations: stations?.length ? stations.join(',') : undefined,
+  })
+
 export interface PriceLogRow {
   station_id: number
   name: string
@@ -2620,3 +2779,60 @@ export const previewRepricing = (rule: RepricingRule) =>
 export const applyRepricing = (rule: RepricingRule) =>
   post<{ applied: number; stations: number; effect?: number; note: string }>(
     '/api/store/repricing/apply', rule)
+
+/**
+ * Корзина цен: намерение сменить цену, а не факт. Пока строка лежит здесь, на
+ * полке и в кассе прежняя цена.
+ */
+export interface PricePlanRow {
+  id: string
+  station_id: number
+  item_uuid: string
+  name: string
+  price: number | null
+  new_price: number
+  delta: number | null
+  delta_pct: number | null
+  author: string
+  reason: string
+  status: 'draft' | 'scheduled' | 'applied' | 'cancelled'
+  effective_at: string | null
+  created_at: string
+  applied_at: string | null
+  error: string | null
+}
+
+export interface PricePlanData {
+  rows: PricePlanRow[]
+  history: PricePlanRow[]
+  drafts: number
+  scheduled: number
+  stations: number
+  delta_sum: number
+  next_at: string | null
+}
+
+export const getStorePricePlan = (stations?: string[]) =>
+  get<PricePlanData>('/api/store/price-plan', {
+    stations: stations?.length ? stations.join(',') : undefined,
+  })
+
+/** Посчитать правило и положить результат в корзину. Рабочую цену не меняет. */
+export const putStorePricePlan = (rule: RepricingRule & { reason?: string }) =>
+  post<{ added: number; updated: number; note: string }>('/api/store/price-plan', rule)
+
+export const editStorePricePlan = (id: string, price: number) =>
+  put<{ ok: boolean; note: string }>(`/api/store/price-plan/${id}`, { price })
+
+export const cancelStorePricePlan = (id: string) =>
+  del<{ ok: boolean; note: string }>(`/api/store/price-plan/${id}`)
+
+/** Применить корзину: сейчас · через N минут · к дате и времени. */
+export const applyStorePricePlan = (body: {
+  mode: 'now' | 'delay' | 'scheduled'
+  delay?: number
+  effective?: string
+  items?: string[]
+}) =>
+  post<{ applied: number; scheduled: number; stations: number; failed?: number
+         effective_at?: string; note: string }>('/api/store/price-plan/apply', body)

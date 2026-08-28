@@ -44,8 +44,10 @@ from app.routers.store_documents_router import (
     _station_allowed,
     resolve_document_access,
 )
-from app.services import (edge_nsi, edge_projection, edge_service, store_costs,
-                          store_cure, store_dynamics, store_repricing, store_reports)
+from app.services import (edge_nsi, edge_projection, edge_service, store_baskets,
+                          store_costs, store_cure, store_dynamics,
+                          store_mrc_prices, store_price_plans, store_repricing,
+                          store_reports)
 from app.services import recipe_versions, store_receipts as receipt_rules
 from app.services import store_receipt_accounting
 from app.services.export_audit import log_export
@@ -1747,6 +1749,113 @@ async def store_dynamics_compare(
     return await store_dynamics.compare(db, cid, date_from, date_to, коды or None)
 
 
+@router.get("/baskets")
+async def store_baskets_analysis(
+    date_from: str | None = Query(None),
+    date_to: str | None = Query(None),
+    stations: str | None = Query(None, description="коды АЗС через запятую; пусто — вся сеть"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Как покупают: средний чек, глубина, часы, оплаты, связки — по сети.
+
+    Тот же разбор, что станция делает у себя, но с разрезом по АЗС: сравнить
+    корзину двух точек можно только отсюда. Топливной части у центра нет —
+    приёмник хранит только товарные строки чека, — поэтому «прицеп к топливу»
+    здесь заменён долей товарных чеков, купленных вместе с заправкой.
+    """
+    cid: uuid.UUID = await scope_company_id(user, db)
+    коды = [int(s) for s in (stations or "").replace(" ", "").split(",") if s.isdigit()]
+    return await store_baskets.analyze(db, cid, date_from, date_to, коды or None)
+
+
+class _MrcAccept(BaseModel):
+    """Приём цен, продиктованных маркой. Пустой items — все объяснённые маркой."""
+    date_from: str | None = None
+    date_to: str | None = None
+    stations: list[int] | None = None
+    items: list[str] | None = None      # ключи «станция:карточка» из таблицы
+
+
+@router.get("/price-mrc")
+async def store_price_mrc(
+    date_from: str | None = Query(None),
+    date_to: str | None = Query(None),
+    stations: str | None = Query(None, description="коды АЗС через запятую; пусто — вся сеть"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Где по сети наша цена отстала от марки и сколько выручки на этом теряется.
+
+    Цену маркированного табака задаёт пачка, а не справочник: касса читает МРЦ
+    из кода и пробивает по ней. Подорожание приходит ко всем станциям одной
+    волной — поэтому смотреть его надо отсюда, а не по одной АЗС.
+    """
+    cid: uuid.UUID = await scope_company_id(user, db)
+    коды = [int(s) for s in (stations or "").replace(" ", "").split(",") if s.isdigit()]
+    return await store_mrc_prices.rows(db, cid, date_from, date_to, коды or None)
+
+
+@router.post("/price-mrc/accept")
+async def store_price_mrc_accept(
+    body: _MrcAccept,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Принять цену марки: наша цена догоняет ту, по которой пробила касса.
+
+    Тот же гейт, что у массовой переоценки: коммерческое решение из центра
+    пишется только в совместном режиме политики «Магазина» и только товароведом
+    сети. Автор берётся из сессии — цена это деньги, подписать её чужим именем
+    нельзя.
+    """
+    cid: uuid.UUID = await _require_central_commercial_control(user, db)
+    автор = getattr(user, "full_name", None) or getattr(user, "email", "") or "центр"
+    return await store_mrc_prices.accept(db, cid, автор, body.date_from, body.date_to,
+                                         body.stations, body.items)
+
+
+@router.get("/price-response")
+async def store_price_response(
+    window: int = Query(14, ge=3, le=60, description="дней наблюдения до и после"),
+    limit: int = Query(30, ge=1, le=100),
+    stations: str | None = Query(None),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Как спрос ответил на цену: подняли — и что стало.
+
+    Наблюдение, а не «настоящая» эластичность: контрольной группы и очищенного
+    от сезонности ряда у розницы АЗС нет. Поэтому ответ всегда идёт вместе с
+    числом дней, на которых он построен.
+    """
+    cid: uuid.UUID = await scope_company_id(user, db)
+    коды = [int(s) for s in (stations or "").replace(" ", "").split(",") if s.isdigit()]
+    return await store_dynamics.отклики(db, cid, окно=window, лимит=limit,
+                                        stations=коды or None)
+
+
+@router.get("/baskets/item")
+async def store_baskets_item(
+    name: str = Query(..., description="название позиции как в чеке"),
+    date_from: str | None = Query(None),
+    date_to: str | None = Query(None),
+    stations: str | None = Query(None),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """«Взяли кофе — что ещё положат в корзину»: разбор вокруг одной позиции.
+
+    Общая таблица связок отвечает, какие пары есть в сети; этот разбор — с чем
+    берут ИМЕННО эту позицию и в какие часы. Из первого делают выкладку по сети,
+    из второго — перестановку у кассы.
+    """
+    cid: uuid.UUID = await scope_company_id(user, db)
+    коды = [int(s) for s in (stations or "").replace(" ", "").split(",") if s.isdigit()]
+    return await store_baskets.по_товару(db, cid, date_from, date_to, name,
+                                         коды or None)
+
+
 @router.get("/price-log")
 async def store_price_log(
     date_from: str | None = Query(None),
@@ -1799,6 +1908,116 @@ async def store_repricing_preview(
     cid: uuid.UUID = await scope_company_id(user, db)
     правило, отбор = _правило_и_отбор(body)
     return await store_repricing.preview(db, cid, правило, отбор, body.stations)
+
+
+class _PlanPut(_RepricingRule):
+    """Положить результат правила в корзину. Те же поля, что у предпросмотра."""
+    reason: str = ""
+
+
+class _PlanEdit(BaseModel):
+    price: float
+
+
+class _PlanApply(BaseModel):
+    """Когда применять корзину: сейчас · через N минут · к дате и времени."""
+    mode: str = "now"                 # now | delay | scheduled
+    delay: int | None = None          # минут, для mode=delay
+    effective: str | None = None      # ISO-время в поясе сети, для mode=scheduled
+    items: list[str] | None = None    # id строк корзины; пусто — вся корзина
+
+
+@router.get("/price-plan")
+async def store_price_plan(
+    stations: str | None = Query(None, description="коды АЗС через запятую"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Корзина цен: что накоплено, что запланировано и что уже применено.
+
+    Пока изменение лежит здесь, на полке и в кассе прежняя цена — это намерение,
+    а не факт.
+    """
+    cid: uuid.UUID = await scope_company_id(user, db)
+    коды = [int(s) for s in (stations or "").replace(" ", "").split(",") if s.isdigit()]
+    return await store_price_plans.список(db, cid, коды or None)
+
+
+@router.post("/price-plan")
+async def store_price_plan_put(
+    body: _PlanPut,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Посчитать правило и положить результат в корзину. Цены не меняет.
+
+    Пересчёт делается здесь заново, а не берётся из присланной таблицы: цена
+    могла уехать, пока человек смотрел предпросмотр.
+    """
+    cid: uuid.UUID = await _require_central_commercial_control(user, db)
+    правило, отбор = _правило_и_отбор(body)
+    расчёт = await store_repricing.preview(db, cid, правило, отбор, body.stations)
+    отмечены = set(body.items or [])
+    поедут = [r for r in расчёт["rows"]
+              if not r["reject"] and (not отмечены or r["item_uuid"] in отмечены)]
+    автор = getattr(user, "full_name", None) or getattr(user, "email", "") or "центр"
+    причина = body.reason or store_repricing.описание_правила(правило)
+    return await store_price_plans.положить(db, cid, поедут, автор, причина)
+
+
+@router.put("/price-plan/{plan_id}")
+async def store_price_plan_edit(
+    plan_id: str,
+    body: _PlanEdit,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Исправить цену строки прямо в корзине."""
+    cid: uuid.UUID = await _require_central_commercial_control(user, db)
+    автор = getattr(user, "full_name", None) or getattr(user, "email", "") or "центр"
+    try:
+        return await store_price_plans.править(db, cid, plan_id, body.price, автор)
+    except LookupError as e:
+        raise HTTPException(404, str(e)) from e
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@router.delete("/price-plan/{plan_id}")
+async def store_price_plan_cancel(
+    plan_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Снять позицию из корзины или отменить запланированное до применения."""
+    cid: uuid.UUID = await _require_central_commercial_control(user, db)
+    try:
+        return await store_price_plans.снять(db, cid, plan_id)
+    except LookupError as e:
+        raise HTTPException(404, str(e)) from e
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@router.post("/price-plan/apply")
+async def store_price_plan_apply(
+    body: _PlanApply,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Применить корзину сейчас или отложить до указанного времени.
+
+    Отложенное исполняет фоновый воркер: обещание «сменить к открытию смены» не
+    должно зависеть от того, открыт ли у кого-то браузер.
+    """
+    cid: uuid.UUID = await _require_central_commercial_control(user, db)
+    автор = getattr(user, "full_name", None) or getattr(user, "email", "") or "центр"
+    try:
+        return await store_price_plans.применить(
+            db, cid, автор, mode=body.mode, delay=body.delay,
+            effective=body.effective, только=body.items)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
 
 
 @router.post("/repricing/apply")
@@ -4639,6 +4858,14 @@ def _receipt_downlink_payload(row: StoreReceipt) -> dict:
             "vat_rate": service.get("vat_rate") or "",
             "into_cost": bool(service.get("into_cost")),
         } for service in row.services or []],
+        # Транспортная накладная, принявший и три итога из подвала бумаги.
+        # Станция сверяет свой расчёт с этими числами: разошлись на копейку —
+        # видно сразу, а не после выгрузки в бухгалтерию.
+        "waybill": evidence.get("waybill") or "",
+        "responsible": evidence.get("responsible") or "",
+        "paper_net": float(evidence.get("paper_net") or 0),
+        "paper_vat": float(evidence.get("paper_vat") or 0),
+        "paper_gross": float(evidence.get("paper_gross") or 0),
         "source_kind": evidence.get("source_kind") or "paper_invoice",
         "purchased_by": evidence.get("purchased_by") or "",
         "payment_kind": evidence.get("payment_kind") or "",
@@ -4656,6 +4883,11 @@ def _receipt_downlink_payload(row: StoreReceipt) -> dict:
             "name": line.get("name") or "", "barcode": line.get("barcode") or "",
             "qty_expected": float(line.get("qty_expected") or 0),
             "price": float(line.get("price") or 0), "vat_rate": line.get("vat_rate") or "",
+            # Стоимость строки и налог как в бумаге: цена там округлена до
+            # копеек, а стоимость посчитана от неокруглённой — перемножение
+            # цены на количество расходится с накладной.
+            "sum": float(line.get("sum") or line.get("amount") or 0),
+            "vat_set": float(line.get("vat_set") or line.get("vat_amount") or 0),
             "unit": line.get("unit") or "", "pack_factor": float(line.get("pack_factor") or 0),
             "purpose": line.get("purpose") or "", "series": line.get("series") or "",
             "expiry": line.get("expiry") or "",
@@ -7690,6 +7922,248 @@ async def store_resolve_collision(
         await db.commit()
         res["pushed_to_stations"] = len(stations)
     return res
+
+
+@router.post("/partners")
+async def store_partner_create(
+    payload: dict,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Завести контрагента-поставщика в центре.
+
+    Реквизиты — те, без которых его не создать в бухгалтерии: наименование
+    обязательно, ИНН и КПП желательны. Без ИНН тоже можно: техконтрагенты
+    (наличная закупка в соседнем магазине — «Агроторг» и подобные) в учёте
+    ведутся без реквизитов принципиально, и приёмник БП такого контрагента
+    создаёт по одному наименованию.
+
+    Юрлицо или ИП определяется длиной ИНН (12 знаков — физлицо/ИП): так же
+    решает приёмник, и расхождения между центром и бухгалтерией не будет.
+    """
+    access = await _receipt_access(user, db)
+    if not access.network:
+        raise HTTPException(403, "Контрагентов сети ведёт товаровед сети")
+    name = str(payload.get("name") or "").strip()
+    if not name:
+        raise HTTPException(400, "наименование обязательно")
+    inn = "".join(c for c in str(payload.get("inn") or "") if c.isdigit())
+    kpp = str(payload.get("kpp") or "").strip()
+    if inn and len(inn) not in (10, 12):
+        raise HTTPException(400, "ИНН бывает 10 знаков у юрлица и 12 у ИП")
+    cid = access.company_id
+
+    # Тот же контрагент уже может быть заведён — тогда возвращаем его, а не
+    # плодим двойника: справочник сети один на все станции, и дубли по ИНН
+    # разбираются потом руками.
+    if inn:
+        было = (await db.execute(text(r"""
+            SELECT id, name FROM edge.partner
+             WHERE company_id = :cid
+               AND regexp_replace(coalesce(inn,''), '\D', '', 'g') = :inn
+             LIMIT 1
+        """), {"cid": cid, "inn": inn})).mappings().first()
+        if было:
+            return {"id": было["id"], "name": было["name"], "created": False}
+
+    канон = Counterparty(
+        id=uuid.uuid4(), company_id=cid, inn=inn or None, kpp=kpp or None,
+        name=name, full_name=str(payload.get("name_full") or "").strip() or name,
+        type="ИП" if len(inn) == 12 else "ЮЛ", aliases=[], kind="external",
+        raw={"source": "center_manual"},
+    )
+    db.add(канон)
+    await db.flush()
+    partner_id = (await db.execute(text("""
+        INSERT INTO edge.partner
+            (company_id, external_uuid, name, name_full, inn, kpp, role, source, comment)
+        VALUES (:cid, :uuid, :name, :full, :inn, :kpp, :role, 'master', :comment)
+        RETURNING id
+    """), {"cid": cid, "uuid": канон.id, "name": name,
+           "full": канон.full_name, "inn": inn, "kpp": kpp,
+           "role": str(payload.get("role") or "supplier"),
+           "comment": str(payload.get("comment") or "").strip()})).scalar_one()
+
+    # Станции, с которыми он работает: без этой связи справочник ему не уедет
+    # (обычная отправка шлёт только «своих»).
+    for st in payload.get("stations") or []:
+        await db.execute(text("""
+            INSERT INTO edge.partner_station (partner_id, station_id)
+            VALUES (:p, :s) ON CONFLICT DO NOTHING
+        """), {"p": partner_id, "s": int(st)})
+
+    # Договор заводится тем же движением: поставщик без договора бесполезен —
+    # приход по нему станция всё равно не проведёт. Пишем в канонический слой
+    # (`contracts`), из которого договор берёт выгрузка в бухгалтерию: вторая
+    # таблица договоров означала бы, что документ уедет с UUID, которого в БП
+    # никто не найдёт.
+    договор = payload.get("contract") or {}
+    contract_id = None
+    if договор:
+        organization_id = договор.get("organization_id")
+        if not organization_id:
+            raise HTTPException(400, "у договора должна быть организация")
+        имя = str(договор.get("name") or договор.get("title") or "Основной договор").strip()
+        номер = str(договор.get("number") or "").strip()
+        contract_id = str(uuid.uuid4())
+        await db.execute(text("""
+            INSERT INTO contracts
+                (id, company_id, number, date, title, counterparty_id, organization_id,
+                 type, kind, currency, raw)
+            VALUES (:id, :cid, :number, :date, :title, :cp, :org,
+                    'поставка', 'СПоставщиком', 'RUB',
+                    jsonb_build_object('source', 'center_manual', 'name', :title))
+        """), {"id": contract_id, "cid": cid, "number": номер or имя,
+               "date": str(договор.get("signed_on") or договор.get("date") or "")[:10],
+               "title": имя, "cp": канон.id, "org": organization_id})
+    await db.commit()
+    return {"id": partner_id, "supplier_id": str(канон.id), "name": name,
+            "created": True, "contract_id": contract_id}
+
+
+@router.get("/contracts")
+async def store_contracts(
+    partner_id: int | None = Query(None, description="только договоры этого контрагента edge.partner"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Справочник договоров с поставщиками.
+
+    Договор живёт в каноническом слое Ledger (`contracts`) — том самом, из
+    которого его берёт выгрузка в бухгалтерию: у документа стоит UUID договора,
+    и если канонической записи нет, документ в БП не уходит вовсе. Поэтому
+    второй, «станционной», таблицы договоров нет и быть не должно.
+    """
+    access = await _receipt_access(user, db)
+    где = ["c.company_id = :cid"]
+    args: dict = {"cid": access.company_id}
+    if partner_id is not None:
+        где.append("""c.counterparty_id = (
+            SELECT p.external_uuid FROM edge.partner p WHERE p.id = :pid)""")
+        args["pid"] = partner_id
+    rows = (await db.execute(text(f"""
+        SELECT c.id, c.number, c.date, c.title, c.kind, c.currency,
+               c.counterparty_id, cp.name AS counterparty_name, cp.inn,
+               c.organization_id, o.name AS organization_name, c.is_closed
+          FROM contracts c
+          JOIN counterparties cp ON cp.id = c.counterparty_id
+          LEFT JOIN organizations o ON o.id = c.organization_id
+         WHERE {" AND ".join(где)}
+         ORDER BY cp.name, c.number
+    """), args)).mappings().all()
+    return {"contracts": [dict(r) for r in rows]}
+
+
+@router.post("/contracts")
+async def store_contract_save(
+    payload: dict,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Завести договор с поставщиком.
+
+    Реквизиты — те, без которых договор не создать в бухгалтерии (см.
+    `TL_МаппингЦБ.ПолучитьДоговорПоUUID`): контрагент обязателен, дальше нужно
+    хотя бы одно из «наименование» или «номер», плюс дата и вид договора.
+    Валюту приёмник ставит сам рублёвую, если её не передали.
+    """
+    access = await _receipt_access(user, db)
+    if not access.network:
+        raise HTTPException(403, "Договоры ведёт товаровед сети")
+    counterparty_id = payload.get("counterparty_id")
+    organization_id = payload.get("organization_id")
+    title = str(payload.get("title") or payload.get("name") or "").strip()
+    number = str(payload.get("number") or "").strip()
+    if not counterparty_id or not organization_id:
+        raise HTTPException(400, "нужны контрагент и организация")
+    if not title and not number:
+        raise HTTPException(400, "нужно наименование договора или его номер")
+    args = {
+        "cid": access.company_id, "cp": counterparty_id, "org": organization_id,
+        "number": number or title, "date": str(payload.get("date") or "")[:10],
+        "title": title or f"Договор {number}",
+        "kind": str(payload.get("kind") or "СПоставщиком"),
+        "currency": str(payload.get("currency") or "RUB"),
+        "type": str(payload.get("type") or "поставка"),
+        "comment": str(payload.get("comment") or "").strip() or None,
+    }
+    if payload.get("id"):
+        args["id"] = payload["id"]
+        await db.execute(text("""
+            UPDATE contracts
+               SET number = :number, date = :date, title = :title, kind = :kind,
+                   currency = :currency, comment = :comment
+             WHERE id = :id AND company_id = :cid
+        """), args)
+        новый = payload["id"]
+    else:
+        новый = str(uuid.uuid4())
+        args["id"] = новый
+        await db.execute(text("""
+            INSERT INTO contracts
+                (id, company_id, number, date, title, counterparty_id, organization_id,
+                 type, kind, currency, comment, raw)
+            VALUES (:id, :cid, :number, :date, :title, :cp, :org,
+                    :type, :kind, :currency, :comment,
+                    jsonb_build_object('source', 'center_manual', 'name', :title))
+        """), args)
+    await db.commit()
+    return {"id": str(новый), "title": args["title"], "number": args["number"]}
+
+
+@router.post("/contracts/push/{station_id}")
+async def store_push_contracts(
+    station_id: int,
+    all_network: bool = Query(False, description="слать все договоры сети, а не только своих поставщиков"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Отправить станции справочник договоров.
+
+    По умолчанию — только по поставщикам этой станции. Станция без договора
+    приёмку не проводит, поэтому пустую посылку не отправляем: пусть лучше
+    останется прежний справочник, чем станция встанет.
+    """
+    access = await _receipt_access(user, db)
+    _require_receipt_station(access, station_id)
+    cid = access.company_id
+    фильтр = "" if all_network else """
+        AND EXISTS (SELECT 1 FROM edge.partner p
+                     JOIN edge.partner_station ps ON ps.partner_id = p.id
+                    WHERE p.external_uuid = c.counterparty_id AND ps.station_id = :s)
+    """
+    rows = (await db.execute(text(f"""
+        SELECT c.id, c.number, c.date, c.title, c.kind,
+               c.counterparty_id, cp.name AS counterparty_name,
+               c.organization_id, o.name AS organization_name
+          FROM contracts c
+          JOIN counterparties cp ON cp.id = c.counterparty_id
+          LEFT JOIN organizations o ON o.id = c.organization_id
+         WHERE c.company_id = :cid AND NOT coalesce(c.is_closed, false) {фильтр}
+         ORDER BY cp.name, c.number
+    """), {"cid": cid, "s": station_id})).mappings().all()
+    if not rows:
+        raise HTTPException(404, "Для станции нет ни одного договора")
+    db.add(EdgeDownlink(
+        company_id=cid, station_id=station_id, kind="contracts",
+        payload={"contracts": [
+            {"id": str(r["id"]), "partner_id": str(r["counterparty_id"]),
+             "partner_name": r["counterparty_name"],
+             "name": r["title"] or r["number"],
+             # Номер, дословно повторяющий наименование, — след импорта из 1С,
+             # где номера у большинства договоров нет вовсе. Отдать его станции
+             # значит показать администратору «Основной договор №Основной
+             # договор»: выбор превращается в шараду вместо подсказки.
+             "number": "" if (r["number"] or "").strip().casefold()
+                             == (r["title"] or "").strip().casefold()
+                       else (r["number"] or ""),
+             "signed_on": str(r["date"] or "")[:10],
+             "org_name": r["organization_name"] or "",
+             "org_uuid": str(r["organization_id"]) if r["organization_id"] else "",
+             "kind": "supplier", "archived": False} for r in rows]},
+    ))
+    await db.commit()
+    return {"station_id": station_id, "contracts": len(rows)}
 
 
 @router.post("/partners/push/{station_id}")

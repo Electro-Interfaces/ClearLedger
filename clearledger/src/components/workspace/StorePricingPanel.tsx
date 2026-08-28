@@ -19,6 +19,25 @@ const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { maximumFractio
 const pctStr = (v: number | null | undefined, d = 1) => (v == null ? '—' : `${nf(v, d)}%`)
 const marginCls = (v: number | null | undefined) => (v == null ? '' : v < 0 ? 'text-red-400/80' : v < 10 ? 'text-amber-300/90' : 'text-emerald-300/80')
 
+/**
+ * Цена на полке. По сети она у каждой АЗС своя, поэтому там, где станции
+ * разошлись, показываем диапазон: «средняя цена сети» — число, которого нет ни
+ * на одной полке, и разговор по нему уходит в никуда.
+ */
+function ценаНаПолке(d: PricingSku): string {
+  if (d.price_min == null) return '—'
+  if (d.price_max == null || Math.abs(d.price_max - d.price_min) < 0.005) {
+    return fmtMoney(d.price_min)
+  }
+  return `${fmtMoney(d.price_min)} – ${fmtMoney(d.price_max)}`
+}
+
+/** Владелец цены словами. Пусто в справочнике — «правило не задано», а не запрет. */
+const ВЛАДЕЛЕЦ: Record<string, string> = {
+  master: 'центр',
+  station: 'станция',
+}
+
 const SEGMENTS: { key: PriceCategory; label: string }[] = [
   { key: 'all', label: 'Всё вместе' },
   { key: 'soputka', label: 'Сопутка' },
@@ -155,12 +174,25 @@ export function StorePricingPanel({ companyId, dateFrom, dateTo, stations }: { c
               <th className="px-3 py-2 font-medium text-left">Товар</th>
               <th className="px-3 py-2 font-medium text-center">ЧЗ</th>
               <th className="px-3 py-2 font-medium text-left">Категория</th>
+              {/* Цена на полке и остаток стоят рядом с маржой не для полноты:
+                  маржа 11 % на позиции за 90 ₽ и за 900 ₽ — разговор о разном,
+                  а остаток отвечает, есть ли чем зарабатывать дальше. */}
+              <th className="px-3 py-2 font-medium text-right">Цена</th>
+              <th className="px-3 py-2 font-medium text-right">Остаток</th>
               {th('qty', 'Продано')}
               {th('revenue', 'Выручка')}
               {th('cost_net', 'Себест.ед')}
               {th('margin', 'Маржа ₽')}
               {th('margin_pct', 'Маржа%')}
               {th('markup_pct', 'Наценка%')}
+              {/* Фудкост — та же маржа со стороны кухни; показываем там, где на
+                  нём и говорят. Владелец цены отвечает на вопрос «могу ли я её
+                  тронуть отсюда», и без него сетевой товаровед узнаёт ответ
+                  только после отказа при переоценке. */}
+              {category !== 'soputka' && (
+                <th className="px-3 py-2 font-medium text-right">Фудкост%</th>
+              )}
+              <th className="px-3 py-2 font-medium text-left">Цену ставит</th>
               <th className="px-3 py-2 font-medium text-center">ABC</th>
             </tr>
           </thead>
@@ -173,6 +205,10 @@ export function StorePricingPanel({ companyId, dateFrom, dateTo, stations }: { c
                 <td className="px-3 py-1.5">{d.name}</td>
                 <td className="px-3 py-1.5 text-center">{d.marked && <ChzBadge />}</td>
                 <td className="px-3 py-1.5 text-muted-foreground">{d.category ?? '—'}</td>
+                <td className="px-3 py-1.5 text-right tabular-nums">{ценаНаПолке(d)}</td>
+                <td className={`px-3 py-1.5 text-right tabular-nums ${d.stock_qty <= 0 ? 'text-muted-foreground/50' : ''}`}>
+                  {nf(d.stock_qty)}
+                </td>
                 <td className="px-3 py-1.5 text-right tabular-nums">{nf(d.qty)}</td>
                 <td className="px-3 py-1.5 text-right tabular-nums">{fmtMoney(d.revenue)}</td>
                 <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
@@ -182,6 +218,13 @@ export function StorePricingPanel({ companyId, dateFrom, dateTo, stations }: { c
                 <td className="px-3 py-1.5 text-right tabular-nums">{d.margin != null ? fmtMoney(d.margin) : '—'}</td>
                 <td className={`px-3 py-1.5 text-right tabular-nums ${d.cost_reliable ? marginCls(d.margin_pct) : 'text-muted-foreground/50'}`}>{pctStr(d.margin_pct)}</td>
                 <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{pctStr(d.markup_pct)}</td>
+                {category !== 'soputka' && (
+                  <td className={`px-3 py-1.5 text-right tabular-nums ${
+                    d.food_cost_pct != null && d.food_cost_pct > 40 ? 'text-amber-300/90' : 'text-muted-foreground'}`}>
+                    {pctStr(d.food_cost_pct)}
+                  </td>
+                )}
+                <td className="px-3 py-1.5 text-muted-foreground">{ВЛАДЕЛЕЦ[d.price_owner] ?? 'не задано'}</td>
                 <td className="px-3 py-1.5 text-center">{d.abc}</td>
               </tr>
             ))}

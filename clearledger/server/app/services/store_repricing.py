@@ -63,6 +63,23 @@ def округлить(цена: float, как: str) -> float:
     return round(цена, 2)
 
 
+def описание_правила(правило: dict) -> str:
+    """Правило словами — оно же причина изменения в журнале цен.
+
+    Строка уезжает в историю и на станцию: через месяц «почему у нас Джокер по
+    90» обязано иметь ответ, а «переоценка» ответом не является.
+    """
+    способ = правило.get("mode") or "процент"
+    значение = float(правило.get("value") or 0)
+    return {
+        "процент": f"{значение:+.1f} % к цене",
+        "рубли": f"{значение:+.2f} ₽ к цене",
+        "наценка": f"наценка {значение:.1f} % от себестоимости",
+        "маржа": f"маржа {значение:.1f} % в цене",
+        "цена": f"цена {значение:.2f} ₽",
+    }.get(способ, "правило центра")
+
+
 def _новая_цена(старая: float, себес: float, правило: dict) -> tuple[float, str]:
     """Цена по правилу и причина отказа (пустая строка — позиция едет)."""
     способ = правило.get("mode") or "процент"
@@ -236,6 +253,65 @@ async def preview(db: AsyncSession, cid, правило: dict, отбор: dict,
     }
 
 
+async def записать_цену(db: AsyncSession, cid, station_id: int, item_uuid: str,
+                        цена: float, автор: str, note: str) -> bool:
+    """Записать цену станции: история центра + задание вниз. Один путь на все поводы.
+
+    Поводов менять цену больше одного — массовое правило, приём цены по марке
+    товара, ручная правка карточки, — а запись обязана быть одна и та же. Иначе
+    один путь пишет историю и не шлёт задание (цена есть в центре, но не на
+    кассе), другой шлёт задание без истории (на кассе есть, объяснить нечем), и
+    расхождение находят через месяц по жалобе станции.
+
+    Возвращает False, если карточки в справочнике сети нет: писать цену
+    неизвестному товару нечему.
+    """
+    карточка = (await db.execute(text("""
+        SELECT i.id, i.external_uuid, i.name, i.unit, i.vat_rate, i.price_owner,
+               i.sku_class, i.marked, i.mark_group, i.adult_only, i.mrc,
+               i.brand, i.photo_url, i.deleted, g.path AS group_path,
+               -- Колонка кода называется code, а не barcode: запрос падал
+               -- на UndefinedColumn уже после того, как часть цен была
+               -- записана, — история обновлялась, а задания вниз не
+               -- уезжали. Берём только активные коды: снятые и отклонённые
+               -- на станцию слать нельзя, они там перевесят привязку кассы.
+               coalesce(array_agg(b.code) FILTER (WHERE b.code IS NOT NULL), '{}') AS codes
+        FROM edge.item i
+        LEFT JOIN edge.item_group g ON g.id = i.group_id
+        LEFT JOIN edge.barcode b ON b.item_id = i.id AND b.status = 'active'
+        WHERE i.external_uuid = :u
+        GROUP BY i.id, g.path
+    """), {"u": item_uuid})).mappings().first()
+    if карточка is None:
+        return False
+
+    # История: прежняя запись закрывается, новая открывается. Перезаписью
+    # цены на месте станция лишилась бы ответа на «почему было столько».
+    await db.execute(text("""
+        UPDATE edge.price SET valid_to = now()
+        WHERE item_id = :id AND station_id = :s AND valid_to IS NULL
+    """), {"id": карточка["id"], "s": station_id})
+    await db.execute(text("""
+        INSERT INTO edge.price (item_id, station_id, price, valid_from, author)
+        VALUES (:id, :s, :p, now(), :a)
+    """), {"id": карточка["id"], "s": station_id, "p": цена, "a": автор})
+
+    db.add(EdgeDownlink(
+        company_id=cid, station_id=station_id, kind="nsi_delta",
+        payload={"uuid": item_uuid, "name": карточка["name"], "unit": карточка["unit"],
+                 "vat_rate": карточка["vat_rate"], "deleted": bool(карточка["deleted"]),
+                 "barcodes": list(карточка["codes"] or []),
+                 "price": цена, "price_owner": карточка["price_owner"],
+                 "group_path": карточка["group_path"], "sku_class": карточка["sku_class"],
+                 "marked": bool(карточка["marked"]), "mark_group": карточка["mark_group"],
+                 "adult_only": bool(карточка["adult_only"]),
+                 "mrc": float(карточка["mrc"]) if карточка["mrc"] is not None else None,
+                 "brand": карточка["brand"], "photo_url": карточка["photo_url"]},
+        note=note,
+    ))
+    return True
+
+
 async def apply(db: AsyncSession, cid, правило: dict, отбор: dict, автор: str,
                 stations: list[int] | None = None,
                 только: list[str] | None = None) -> dict:
@@ -255,51 +331,10 @@ async def apply(db: AsyncSession, cid, правило: dict, отбор: dict, �
 
     затронуто: set = set()
     for r in поедут:
-        sid, uuid_ = r["station_id"], r["item_uuid"]
-        карточка = (await db.execute(text("""
-            SELECT i.id, i.external_uuid, i.name, i.unit, i.vat_rate, i.price_owner,
-                   i.sku_class, i.marked, i.mark_group, i.adult_only, i.mrc,
-                   i.brand, i.photo_url, i.deleted, g.path AS group_path,
-                   -- Колонка кода называется code, а не barcode: запрос падал
-                   -- на UndefinedColumn уже после того, как часть цен была
-                   -- записана, — история обновлялась, а задания вниз не
-                   -- уезжали. Берём только активные коды: снятые и отклонённые
-                   -- на станцию слать нельзя, они там перевесят привязку кассы.
-                   coalesce(array_agg(b.code) FILTER (WHERE b.code IS NOT NULL), '{}') AS codes
-            FROM edge.item i
-            LEFT JOIN edge.item_group g ON g.id = i.group_id
-            LEFT JOIN edge.barcode b ON b.item_id = i.id AND b.status = 'active'
-            WHERE i.external_uuid = :u
-            GROUP BY i.id, g.path
-        """), {"u": uuid_})).mappings().first()
-        if карточка is None:
-            continue
-
-        # История: прежняя запись закрывается, новая открывается. Перезаписью
-        # цены на месте станция лишилась бы ответа на «почему было столько».
-        await db.execute(text("""
-            UPDATE edge.price SET valid_to = now()
-            WHERE item_id = :id AND station_id = :s AND valid_to IS NULL
-        """), {"id": карточка["id"], "s": sid})
-        await db.execute(text("""
-            INSERT INTO edge.price (item_id, station_id, price, valid_from, author)
-            VALUES (:id, :s, :p, now(), :a)
-        """), {"id": карточка["id"], "s": sid, "p": r["new_price"], "a": автор})
-
-        db.add(EdgeDownlink(
-            company_id=cid, station_id=sid, kind="nsi_delta",
-            payload={"uuid": uuid_, "name": карточка["name"], "unit": карточка["unit"],
-                     "vat_rate": карточка["vat_rate"], "deleted": bool(карточка["deleted"]),
-                     "barcodes": list(карточка["codes"] or []),
-                     "price": r["new_price"], "price_owner": карточка["price_owner"],
-                     "group_path": карточка["group_path"], "sku_class": карточка["sku_class"],
-                     "marked": bool(карточка["marked"]), "mark_group": карточка["mark_group"],
-                     "adult_only": bool(карточка["adult_only"]),
-                     "mrc": float(карточка["mrc"]) if карточка["mrc"] is not None else None,
-                     "brand": карточка["brand"], "photo_url": карточка["photo_url"]},
-            note=f"переоценка: {карточка['name'][:50]} {r['price']} → {r['new_price']}",
-        ))
-        затронуто.add(sid)
+        if await записать_цену(db, cid, r["station_id"], r["item_uuid"],
+                               r["new_price"], автор,
+                               note=f"переоценка: {r['name'][:50]} {r['price']} → {r['new_price']}"):
+            затронуто.add(r["station_id"])
 
     await db.commit()
     return {"applied": len(поедут), "stations": len(затронуто),

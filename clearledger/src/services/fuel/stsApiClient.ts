@@ -8,6 +8,7 @@
 
 import type { StsShift, StsShiftReport, StsReceipt, StsPrice, StsTransaction } from './types'
 import { getSettings } from '../settingsService'
+import { isDemoMode } from '../apiClient'
 
 const TOKEN_KEY = 'gig-sts-token'
 const TOKEN_EXPIRY_KEY = 'gig-sts-token-expiry'
@@ -51,6 +52,8 @@ function getBaseUrl(): string {
 // ─── HTTP helpers ────────────────────────────────────────────
 
 async function fetchWithRetry(url: string, options: RequestInit, retries = 3): Promise<Response> {
+  if (isDemoMode()) throw new Error('STS API недоступен в демонстрационном контуре')
+
   for (let i = 0; i < retries; i++) {
     try {
       const resp = await fetch(url, { ...options, signal: AbortSignal.timeout(30000) })

@@ -22,7 +22,7 @@ import { useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { Kpi } from './analytics/Kpi'
 import {
-  previewRepricing, applyRepricing,
+  previewRepricing, applyRepricing, putStorePricePlan,
   type RepricingRule, type RepricingPreview,
 } from '@/services/storeService'
 import { fmtMoney } from '@/services/analyticsService'
@@ -84,6 +84,14 @@ export function StoreRepricingPanel({ dateFrom, dateTo, stations }: {
     mutationFn: () => applyRepricing({ ...тело(), items: выбраны.size ? [...выбраны] : undefined }),
     onSuccess: (r) => {
       setИтог(`${r.note}. Позиций: ${r.applied}, станций: ${r.stations}.`)
+      счёт.mutate()
+    },
+  })
+  const вКорзину = useMutation({
+    mutationFn: () => putStorePricePlan({ ...тело(), items: выбраны.size ? [...выбраны] : undefined }),
+    onSuccess: (r) => {
+      setИтог(`${r.note}. Добавлено: ${r.added}, обновлено: ${r.updated}. `
+              + 'Смотрите вкладку «Корзина цен» — там же назначается время применения.')
       счёт.mutate()
     },
   })
@@ -229,16 +237,28 @@ export function StoreRepricingPanel({ dateFrom, dateTo, stations }: {
                   {выбраны.size > 0 && ` Отмечено вручную: ${выбраны.size}.`}
                 </p>
               </div>
-              <button
-                className="h-8 px-4 rounded-md bg-primary text-primary-foreground text-sm disabled:opacity-50"
-                disabled={!centralWrite || применение.isPending || !поедут.length}
-                onClick={() => {
-                  if (confirm(`Применить новые цены к ${отмечено} позициям? Цены уедут на станции заданиями.`)) {
-                    применение.mutate()
-                  }
-                }}>
-                {применение.isPending ? 'Применяем…' : `Применить (${отмечено})`}
-              </button>
+              <div className="flex items-center gap-2">
+                {/* Черновик стоит первым намеренно: массовое правило — самая
+                    опасная операция сети, и между ним и ценой на кассе должен
+                    быть шаг, на котором можно остановиться. «Применить сразу»
+                    остаётся для мелких правок, где смотреть нечего. */}
+                <button
+                  className="h-8 px-4 rounded-md bg-primary text-primary-foreground text-sm disabled:opacity-50"
+                  disabled={!centralWrite || вКорзину.isPending || !поедут.length}
+                  onClick={() => вКорзину.mutate()}>
+                  {вКорзину.isPending ? 'Откладываем…' : `В корзину (${отмечено})`}
+                </button>
+                <button
+                  className="h-8 px-4 rounded-md border border-border/60 text-sm disabled:opacity-50"
+                  disabled={!centralWrite || применение.isPending || !поедут.length}
+                  onClick={() => {
+                    if (confirm(`Применить новые цены к ${отмечено} позициям прямо сейчас? Цены уедут на станции заданиями.`)) {
+                      применение.mutate()
+                    }
+                  }}>
+                  {применение.isPending ? 'Применяем…' : 'Применить сразу'}
+                </button>
+              </div>
             </div>
 
             <div className="overflow-x-auto mt-3">

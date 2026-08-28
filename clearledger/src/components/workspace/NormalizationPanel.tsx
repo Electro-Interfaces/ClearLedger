@@ -9,6 +9,8 @@ import { useCompany } from '@/contexts/CompanyContext'
 import { EnergyNormalizationView } from './EnergyNormalizationView'
 import { FuelNormalizationView } from './FuelNormalizationView'
 import { OfficeDataView } from './OfficeDataView'
+import { DemoSpaceDataView } from '@/demo/DemoSpaceDataView'
+import { isDemoMode } from '@/services/apiClient'
 import { CentralPanelLayout, type CentralMenuItem } from './CentralPanelLayout'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Badge } from '@/components/ui/badge'
@@ -463,6 +465,8 @@ function LogView() {
 export function NormalizationPanel() {
   const { company } = useCompany()
   const [tab, setTab] = useState<NormTab>('pipeline')
+
+  if (isDemoMode()) return <DemoSpaceDataView />
 
   // Energy-профиль (ЭЗС): нормализация источников ПК/эквайер/ОФД (L1→L2), без топлива/смен/1С.
   if (company.profileId === 'energy') return <EnergyNormalizationView />

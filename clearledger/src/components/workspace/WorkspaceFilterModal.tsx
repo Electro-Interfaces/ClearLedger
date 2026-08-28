@@ -21,6 +21,8 @@ import { useCompany } from '@/contexts/CompanyContext'
 import { AdvancedOnly, AdvancedHint } from '@/components/common/AdvancedOnly'
 import { cn } from '@/lib/utils'
 import { useUiLevel } from '@/hooks/useUiLevel'
+import { useWorkspace } from '@/contexts/WorkspaceContext'
+import { STORE_MODES } from '@/config/storeCatalog'
 import { useQuery } from '@tanstack/react-query'
 import { useLocations } from '@/hooks/useLocations'
 import { getStsStationsFromLocations } from '@/services/locationService'
@@ -195,7 +197,11 @@ export function WorkspaceFilterModal({ open, onOpenChange }: { open: boolean; on
   // (613d26b), и пункт меню вёл бы в пустой экран.
   // «Источник STS» — только в расширенном режиме: в простом его содержимое
   // скрыто, и пункт меню вёл бы туда же, в пустоту.
-  const showSource = !isEnergy && isAdvanced
+  // «Источник STS» — про загрузку топливных смен: в «Магазине» он ни на что не
+  // влияет, и раздел вёл бы к настройке, которая не меняет ни одной цифры на
+  // экране (замечание МАГа 25.08.2026). Период и область учёта работают везде.
+  const { coreMode } = useWorkspace()
+  const showSource = !isEnergy && isAdvanced && !STORE_MODES.includes(coreMode)
   const SECTIONS = [
     { key: 'period' as const, label: 'Период', value: periodSummary, icon: CalendarDays },
     { key: 'scope' as const, label: 'Область учёта', value: scopeSummary, icon: MapPinned },

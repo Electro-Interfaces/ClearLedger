@@ -22,6 +22,8 @@ import { scopeStationCodes } from '@/services/locationService'
 import { StoreOverviewPanel } from './StoreOverviewPanel'
 import { StoreSalesPanel } from './StoreSalesPanel'
 import { StoreDynamicsPanel } from './StoreDynamicsPanel'
+import { StoreBasketsPanel } from './StoreBasketsPanel'
+import { StorePriceMrcPanel } from './StorePriceMrcPanel'
 import { StorePricingWorkPanel } from './StorePricingWorkPanel'
 import { StoreNomenclaturePanel } from './StoreNomenclaturePanel'
 import { StoreSkuPanel, type SkuMode } from './StoreSkuPanel'
@@ -71,7 +73,8 @@ import { StoreReceiptDocsPanel } from './StoreReceiptDocsPanel'
 import { StoreDocumentsPanel } from './StoreDocumentsPanel'
 import { Info } from 'lucide-react'
 import {
-  STORE_KEYS, STORE_MODES, STORE_MENU, STORE_HELP_KEYS, getStoreView, storeDefaultKey, storeModeForKey,
+  STORE_ROUTE_KEYS, STORE_MODES, STORE_MENU, STORE_HELP_KEYS, getStoreView,
+  storeCanonKey, storeDefaultKey, storeModeForKey,
   type StoreMode, type StoreStatus, type StoreView,
 } from '@/config/storeCatalog'
 
@@ -164,7 +167,10 @@ export function StorePanel() {
   // «Складе» остался бы валидным «Маржа и наценка» из «Торговли».
   const { coreMode, setCoreMode } = useWorkspace()
   const mode: StoreMode = (STORE_MODES.includes(coreMode) ? coreMode : 'store') as StoreMode
-  const [raw] = useWorkspaceSubView(storeDefaultKey(mode), STORE_KEYS)
+  // Принимаем и исторические ключи: адрес живёт в закладках, и вчерашняя ссылка
+  // обязана открыть тот же экран, а не молча упасть на первый пункт раздела.
+  const [сырой] = useWorkspaceSubView(storeDefaultKey(mode), STORE_ROUTE_KEYS)
+  const raw = storeCanonKey(сырой)
   // Пункт из ЧУЖОГО раздела — старая ссылка (?mode=store&sub=inventory) или закладка:
   // уводим в его раздел ВМЕСТЕ с пунктом, а не на первый экран раздела.
   const owner = storeModeForKey(raw)
@@ -262,6 +268,20 @@ export function StoreView({ sub, companyId, dateFrom, dateTo, stations, demo = f
       </div>
     )
   }
+  if (sub === 'price-mrc') {
+    return (
+      <div className="h-full overflow-y-auto">
+        <StorePriceMrcPanel companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} stations={stations} />
+      </div>
+    )
+  }
+  if (sub === 'baskets') {
+    return (
+      <div className="h-full overflow-y-auto">
+        <StoreBasketsPanel companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} stations={stations} />
+      </div>
+    )
+  }
   if (sub === 'dynamics') {
     return (
       <div className="h-full overflow-y-auto">
@@ -311,7 +331,7 @@ export function StoreView({ sub, companyId, dateFrom, dateTo, stations, demo = f
       </div>
     )
   }
-  if (sub === 'revaluation') {
+  if (sub === 'price-plan') {
     return (
       <div className="h-full overflow-y-auto">
         <StorePricingWorkPanel companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} stations={stations} />

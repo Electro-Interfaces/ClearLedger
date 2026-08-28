@@ -13,11 +13,23 @@
  *     запрашивать сервер. Именно так стол однажды оказался без плиток.
  */
 
+import { demoGet, demoPost, demoWrite } from '@/demo/demoApi'
+
 const BASE_URL = import.meta.env.VITE_API_URL ?? ''
 const TOKEN_KEY = 'clearledger-token'
+const DEMO_KEY = 'tradeledger-demo'
+const DEMO_PATH_PATTERN = /(^|\/)demo(\/|$)/
+
+const demoParam = new URLSearchParams(window.location.search).get('demo')
+if (demoParam === '1') sessionStorage.setItem(DEMO_KEY, '1')
+if (demoParam === '0') sessionStorage.removeItem(DEMO_KEY)
+
+/** Изолированный показ оригинального интерфейса на синтетических данных. */
+export const isDemoPath = (): boolean => DEMO_PATH_PATTERN.test(window.location.pathname)
+export const isDemoMode = (): boolean => isDemoPath() || sessionStorage.getItem(DEMO_KEY) === '1'
 
 /** API сконфигурирован? */
-export const isApiEnabled = (): boolean => !!BASE_URL
+export const isApiEnabled = (): boolean => isDemoMode() || !!BASE_URL
 
 // Активная компания из UI — уходит в заголовке X-Company-Id. Роутеры со скоупом
 // «по юзеру» (fuel/store/…) раньше игнорировали выбор компании в шапке и всегда
@@ -50,7 +62,7 @@ export function getApiOrganization(): string | null {
 
 /** Получить сохранённый токен */
 export function getToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY)
+  return isDemoMode() ? 'demo-session' : localStorage.getItem(TOKEN_KEY)
 }
 
 /** Сохранить токен */
@@ -173,6 +185,7 @@ function headers(extra?: Record<string, string>): Record<string, string> {
 
 /** GET запрос */
 export async function get<T>(path: string, params?: Record<string, string | number | undefined>): Promise<T> {
+  if (isDemoMode()) return demoGet<T>(path, params)
   // База обязательна: в контейнере VITE_API_URL пуст (API на том же origin), и без второго
   // аргумента `new URL('/api/…')` бросает «Invalid URL» — падали все GET с параметрами.
   const url = new URL(`${BASE_URL}${path}`, window.location.origin)
@@ -187,6 +200,7 @@ export async function get<T>(path: string, params?: Record<string, string | numb
 
 /** POST запрос (JSON) */
 export async function post<T>(path: string, body?: unknown): Promise<T> {
+  if (isDemoMode()) return demoPost<T>(path)
   const res = await fetch(`${BASE_URL}${path}`, {
     method: 'POST',
     headers: headers({ 'Content-Type': 'application/json' }),
@@ -197,6 +211,7 @@ export async function post<T>(path: string, body?: unknown): Promise<T> {
 
 /** PATCH запрос */
 export async function patch<T>(path: string, body: unknown): Promise<T> {
+  if (isDemoMode()) return demoWrite<T>()
   const res = await fetch(`${BASE_URL}${path}`, {
     method: 'PATCH',
     headers: headers({ 'Content-Type': 'application/json' }),
@@ -207,6 +222,7 @@ export async function patch<T>(path: string, body: unknown): Promise<T> {
 
 /** PUT запрос */
 export async function put<T>(path: string, body: unknown): Promise<T> {
+  if (isDemoMode()) return demoWrite<T>()
   const res = await fetch(`${BASE_URL}${path}`, {
     method: 'PUT',
     headers: headers({ 'Content-Type': 'application/json' }),
@@ -217,6 +233,7 @@ export async function put<T>(path: string, body: unknown): Promise<T> {
 
 /** DELETE запрос */
 export async function del<T = void>(path: string): Promise<T> {
+  if (isDemoMode()) return demoWrite<T>()
   const res = await fetch(`${BASE_URL}${path}`, {
     method: 'DELETE',
     headers: headers(),
@@ -226,6 +243,7 @@ export async function del<T = void>(path: string): Promise<T> {
 
 /** POST multipart (файлы) */
 export async function upload<T>(path: string, formData: FormData): Promise<T> {
+  if (isDemoMode()) return demoWrite<T>()
   const res = await fetch(`${BASE_URL}${path}`, {
     method: 'POST',
     headers: headers(), // НЕ ставим Content-Type — browser сам добавит boundary
@@ -236,6 +254,7 @@ export async function upload<T>(path: string, formData: FormData): Promise<T> {
 
 /** Скачать файл (blob) */
 export async function downloadBlob(path: string): Promise<Blob> {
+  if (isDemoMode()) return demoWrite<Blob>()
   const res = await fetch(`${BASE_URL}${path}`, { headers: headers() })
   if (!res.ok) throw new ApiError(res.status, res.statusText)
   return res.blob()

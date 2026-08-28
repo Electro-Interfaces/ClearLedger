@@ -70,10 +70,23 @@ def normalize_lines(lines: list[dict] | None) -> list[dict]:
         line["qty_expected"] = round(line["qty_expected"], 3)
         line["qty_fact"] = round(line["qty_fact"], 3)
         line["price"] = round(line["price"], 4)
-        line["amount"] = round(line["qty_fact"] * line["price"], 2)
-        calculated_vat = _vat_from_gross(line["amount"], line.get("vat_rate"))
-        line["vat_amount"] = (calculated_vat if calculated_vat is not None
-                              else round(line["vat_amount"], 2))
+        # Стоимость строки: присланная бумагой главнее произведения.
+        #
+        # В накладной цена округлена до копеек, а стоимость посчитана от
+        # неокруглённой: 20 × 63,36 даёт 1 267,20 против 1 267,21 в графе 5.
+        # Перемножая, центр расходился с поставщиком в каждой строке.
+        присланная = round(_number(source.get("amount"), f"Строка {index}, amount"), 2)
+        line["amount"] = присланная or round(line["qty_fact"] * line["price"], 2)
+        # Сумма налога — тоже из бумаги (графа 8). Пересчитываем её сами ТОЛЬКО
+        # когда станция налога не прислала: формула «выделить из суммы» верна
+        # для цен с НДС, а в УПД цена стоит БЕЗ налога, и выделение занижало
+        # его на пятую часть — 3 659,27 вместо 4 464,35 по документу.
+        присланный_налог = round(line["vat_amount"], 2)
+        if присланный_налог:
+            line["vat_amount"] = присланный_налог
+        else:
+            calculated_vat = _vat_from_gross(line["amount"], line.get("vat_rate"))
+            line["vat_amount"] = calculated_vat if calculated_vat is not None else 0.0
         for field in ("upd_codes", "mark_codes", "pack_codes"):
             codes = line.get(field) or []
             if not isinstance(codes, list) or any(not str(code).strip() for code in codes):

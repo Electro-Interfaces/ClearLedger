@@ -50,6 +50,32 @@ def _station_of_warehouse(code: str | None, stations: list[str]) -> str | None:
     return max(matches, key=len) if matches else None
 
 
+def _поток_смены(station: str, internal_no, чеки: dict, заправки: dict) -> dict:
+    """Чеки с товаром, заправки и конверсия магазина за смену.
+
+    Ключ — внутренний номер смены кассы: печатный строится из даты открытия и на
+    смене через полночь указывает на вчера. Смена без внутреннего номера (старая
+    выгрузка 1С) потока не получает — врать нулём здесь нельзя, ноль читается
+    как «никто не купил».
+    """
+    try:
+        код, номер = int(station), int(internal_no or 0)
+    except (TypeError, ValueError):
+        код, номер = 0, 0
+    if not код or not номер:
+        return {"cheques": None, "fuel_ops": None, "conversion": None}
+    ч = чеки.get((код, номер))
+    з = заправки.get((код, номер))
+    if ч is None and з is None:
+        return {"cheques": None, "fuel_ops": None, "conversion": None}
+    ч = ч or 0
+    # Заправок не может быть меньше, чем чеков с топливом; если топливный контур
+    # отстал, честнее показать прочерк, чем конверсию больше ста процентов.
+    конверсия = round(ч / з * 100, 1) if з else None
+    return {"cheques": ч, "fuel_ops": з,
+            "conversion": конверсия if конверсия is None or конверсия <= 100 else None}
+
+
 def _одна_смена_один_раз(rows: list[DataEntry]) -> list[DataEntry]:
     """Свернуть повторные проекции одной и той же смены внутри одного источника.
 
@@ -808,6 +834,55 @@ class GoodsDashboardService:
             CbRef.company_id == self.company_id, CbRef.kind == kind))).scalars().all()}
 
     # ── Цены и маржа: сегмент (сопутка/общепит/всё) + группы + реестр SKU ──
+    async def _обогатить_ценой(self, skus: list[dict],
+                               stations: list[str] | None) -> None:
+        """Добрать позициям цену на полке, остаток и владельца цены.
+
+        Цена по сети не одна: на разных АЗС она своя, и «средняя цена сети» —
+        число, которого нет ни на одной полке. Поэтому отдаём диапазон: когда
+        min и max сходятся, экран показывает одну цифру, когда расходятся —
+        видно, что позиция стоит по-разному, и это отдельный разговор.
+        """
+        soh = (await self.session.execute(select(StockOnHand).where(
+            StockOnHand.company_id == self.company_id))).scalars().all()
+        цены: dict[str, dict] = {}
+        for r in soh:
+            if not _warehouse_in_stations(r.warehouse_code, stations):
+                continue
+            узел = цены.setdefault(r.nomenclature_ref, {"min": None, "max": None,
+                                                        "qty": 0.0})
+            узел["qty"] += float(r.quantity or 0)
+            цена = float(r.retail_price) if r.retail_price is not None else None
+            if цена and цена > 0:
+                узел["min"] = цена if узел["min"] is None else min(узел["min"], цена)
+                узел["max"] = цена if узел["max"] is None else max(узел["max"], цена)
+
+        # Владелец цены живёт в справочнике сети, а не в остатках: пока центр не
+        # разложил ассортимент по владельцам, там пусто — и это не запрет, а
+        # «правило не задано». Так же читает станция.
+        владельцы: dict[str, str] = {}
+        try:
+            for uid, owner in (await self.session.execute(text(
+                "SELECT external_uuid::text, coalesce(price_owner, '')"
+                " FROM edge.item WHERE external_uuid IS NOT NULL"
+            ))).all():
+                владельцы[str(uid)] = str(owner or "")
+        except Exception:  # noqa: BLE001 — схемы edge может не быть (пространство без станций)
+            владельцы = {}
+
+        for s in skus:
+            узел = цены.get(s["guid"])
+            s["price_min"] = узел["min"] if узел else None
+            s["price_max"] = узел["max"] if узел else None
+            s["stock_qty"] = round(узел["qty"], 3) if узел else 0.0
+            s["price_owner"] = владельцы.get(s["guid"], "")
+            # Фудкост — доля себестоимости в цене: у кухни разговор идёт в нём, а
+            # не в марже. Это та же цифра с другой стороны, поэтому считаем её
+            # здесь, а не заводим второй источник.
+            s["food_cost_pct"] = (round(100 - s["margin_pct"], 1)
+                                  if s["category"] == "Общепит" and s["margin_pct"] is not None
+                                  else None)
+
     async def pricing_analysis(self, date_from: date, date_to: date, *,
                                category: str = "all", stations: list[str] | None = None) -> dict:
         """Анализ цен и маржи: сегмент (all|soputka|obshepit), разбивки по категории и
@@ -851,6 +926,15 @@ class GoodsDashboardService:
                     s["markup_pct"] = round(100 * s["margin"] / cogs, 1) if cogs else None
                     s["cost_source"] = "recipe"
                     s["cost_reliable"] = True
+
+        # Цена на полке, остаток и владелец цены — рядом с маржой, как на станции.
+        #
+        # Без цены таблица отвечает «сколько заработали», но не «с чего»: маржа
+        # 11 % на позиции за 90 ₽ и за 900 ₽ — разговор о разном. Остаток тут же
+        # показывает, есть ли чем зарабатывать дальше. Владелец цены снимает
+        # главный вопрос сетевого товароведа: эту цену правит центр или станция —
+        # то есть могу ли я вообще её тронуть отсюда.
+        await self._обогатить_ценой(skus, stations)
 
         catmap = {"soputka": "Сопутка", "obshepit": "Общепит"}
         if category in catmap:
@@ -2669,6 +2753,27 @@ class GoodsDashboardService:
             "qty": round(a["qty"], 3), "sku_count": len(a["skus"]),
             "share": round(100 * a["rev"] / total, 1),
         } for k, a in agg.items()]
+
+        # Остаток и «хватит на» — только в разрезе по товарам, где вопрос имеет
+        # смысл. «Сколько дней хватит категории “Сопутка”» ответа не имеет, а
+        # цифра в таблице выглядела бы как ответ.
+        #
+        # Раньше за этим ходили в «Ассортимент»: там те же позиции и тот же
+        # остаток, но разговор «что продаётся» и «на сколько хватит» — один, и
+        # разрывать его на два экрана значит заставлять человека сверять списки.
+        if group_by == "sku":
+            дней = max((date_to - date_from).days + 1, 1)
+            остатки: dict[str, float] = defaultdict(float)
+            for r in (await self.session.execute(select(StockOnHand).where(
+                StockOnHand.company_id == self.company_id))).scalars().all():
+                if _warehouse_in_stations(r.warehouse_code, stations):
+                    остатки[r.nomenclature_ref] += float(r.quantity or 0)
+            for г in groups:
+                остаток = остатки.get(г["key"], 0.0)
+                в_день = г["qty"] / дней
+                г["stock_qty"] = round(остаток, 3)
+                г["days_of_supply"] = (round(остаток / в_день, 1)
+                                       if в_день > 0 and остаток > 0 else None)
         if group_by in ("day", "shift"):
             groups.sort(key=lambda x: x["label"])   # хронологически
         else:
@@ -3002,6 +3107,30 @@ class GoodsDashboardService:
             elif r.kind == "revaluation":
                 rv_by_day[key]["count"] += 1
 
+        # Поток людей по смене: чеки с товаром и заправки той же смены.
+        #
+        # Выручка смены сама по себе не говорит ничего: сорок тысяч — это много
+        # или мало, зависит от того, прошло мимо кассы 385 человек или 90. Тот же
+        # вопрос задаёт себе администратор станции в своём реестре смен, и центр
+        # обязан отвечать на него так же — иначе разговор о работе смены
+        # упирается в «а у меня другие цифры».
+        чеки_смены: dict[tuple[int, int], int] = {}
+        for r in (await self.session.execute(text("""
+            SELECT station_id, shift_number, count(*) AS n
+              FROM store_cheques
+             WHERE company_id = :cid AND is_return = false
+             GROUP BY station_id, shift_number
+        """), {"cid": self.company_id})).mappings().all():
+            чеки_смены[(int(r["station_id"]), int(r["shift_number"]))] = int(r["n"])
+        заправки_смены: dict[tuple[int, int], int] = {}
+        for r in (await self.session.execute(text("""
+            SELECT station_code, shift_number, count(DISTINCT receipt) AS n
+              FROM fuel_transactions
+             WHERE company_id = :cid AND shift_number IS NOT NULL
+             GROUP BY station_code, shift_number
+        """), {"cid": self.company_id})).mappings().all():
+            заправки_смены[(int(r["station_code"]), int(r["shift_number"]))] = int(r["n"])
+
         # F6: документы дня (приходы/инвентаризации/списания/перемещения) связаны с
         # днём, не со сменой; на ДВУХСМЕННОМ дне они приписывались КАЖДОЙ смене и
         # задваивались в summary. Привязываем день-документы к ОДНОЙ смене дня
@@ -3040,6 +3169,8 @@ class GoodsDashboardService:
                 "operator": smena.get("Оператор") or None,
                 "register": smena.get("Касса") or None,
                 "internal_no": smena.get("НомерСменыВнутр") or None,
+                **_поток_смены(station, smena.get("НомерСменыВнутр"),
+                               чеки_смены, заправки_смены),
                 "revenue": round(sop_rev + obsh_rev, 2),
                 "soputka": round(sop_rev, 2), "obshepit": round(obsh_rev, 2),
                 "positions": len(sop.get("строки") or []) + len(obsh.get("строки") or []),

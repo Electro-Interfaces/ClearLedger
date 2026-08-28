@@ -26,7 +26,7 @@
 """
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -194,6 +194,134 @@ async def compare(db: AsyncSession, cid, date_from, date_to,
         "down_total": sum(1 for в in вклады if в["delta_margin"] < 0),
         "has_prev": bool(раньше),
     }
+
+
+async def отклики(db: AsyncSession, cid, *, окно: int = 14, лимит: int = 30,
+                  stations: list[int] | None = None) -> dict:
+    """Как спрос ответил на цену: подняли — и что стало.
+
+    Ценообразование без обратной связи — гадание. Журнал цен знает, когда и на
+    сколько сдвинули цену; продажи знают, сколько брали до и после. Сложив их,
+    отвечаем на вопрос, ради которого всё и затевалось: тот подъём на пять
+    процентов принёс деньги или прогнал покупателя.
+
+    Что здесь НЕ считается — «настоящая» эластичность спроса: для неё нужны
+    контрольная группа, сезонность и очищенный от акций ряд. Это наблюдение:
+    столько продавали до, столько после, маржа изменилась так. Экран обязан
+    называть это наблюдением и показывать, на скольких днях оно построено, —
+    иначе цифра начинает работать как закон. Формулы и пороги те же, что на
+    станции (`agent/internal/store/elasticity.go`).
+    """
+    окно = окно if окно > 0 else 14
+    лимит = лимит if лимит > 0 else 30
+    сейчас = datetime.now(timezone.utc)
+    # Изменение младше трёх дней сравнивать не с чем: «после» ещё пустое.
+    граница = сейчас - timedelta(days=3)
+    начало = сейчас - timedelta(days=90)
+
+    p: dict = {"cid": cid, "d0": начало, "d1": граница, "limit": лимит}
+    ф = " AND p.station_id = ANY(:st)" if stations else ""
+    if stations:
+        p["st"] = stations
+    изменения = (await db.execute(text(f"""
+        WITH history AS (
+            SELECT p.station_id, p.price, p.valid_from, p.author,
+                   i.name, i.external_uuid AS item_uuid,
+                   lag(p.price) OVER (PARTITION BY p.item_id, p.station_id
+                                      ORDER BY p.valid_from) AS price_prev
+            FROM edge.price p
+            JOIN edge.item i ON i.id = p.item_id
+            WHERE p.station_id IN (
+                SELECT station_id FROM edge_agents WHERE company_id = :cid
+            ){ф}
+        )
+        SELECT * FROM history
+         WHERE price_prev IS NOT NULL AND price_prev > 0
+           AND valid_from BETWEEN :d0 AND :d1
+         ORDER BY valid_from DESC
+         LIMIT :limit
+    """), p)).mappings().all()
+    if not изменения:
+        return {"window": окно, "rows": [], "total": 0}
+
+    самое_раннее = min(r["valid_from"] for r in изменения) - timedelta(days=окно)
+    доки = await _документы(db, cid, самое_раннее, сейчас,
+                            ["retail_sale_sidegoods"], stations)
+    # (станция, карточка, дата) → [количество, выручка]. По дням, потому что
+    # окно наблюдения режется днями, а не сменами.
+    продажи: dict[tuple, list[float]] = {}
+    for d in доки:
+        когда_док = d["doc_date"]
+        день = когда_док.date() if hasattr(когда_док, "date") else когда_док
+        for l in d["lines"] or []:
+            uuid_ = _ключ_строки(l)
+            if not uuid_:
+                continue
+            узел = продажи.setdefault((d["station_id"], uuid_, день), [0.0, 0.0])
+            узел[0] += _строка(l, "Количество", "qty")
+            узел[1] += _строка(l, "Сумма", "amount")
+
+    себестоимость = await _себестоимости(db, cid, stations, сейчас)
+
+    def за_окно(станция, uuid_, с, по) -> tuple[float, float, int]:
+        кол, выручка = 0.0, 0.0
+        дней = max((по - с).days, 1)
+        for (ст, у, день), (q, s) in продажи.items():
+            if ст == станция and у == uuid_ and с <= день < по:
+                кол += q
+                выручка += s
+        return кол, выручка, дней
+
+    строки = []
+    for r in изменения:
+        станция, uuid_ = r["station_id"], str(r["item_uuid"] or "")
+        когда = r["valid_from"]
+        до_с, до_по = (когда - timedelta(days=окно)).date(), когда.date()
+        после_с = когда.date()
+        после_по = min(когда + timedelta(days=окно), сейчас).date()
+        кол0, выр0, дней0 = за_окно(станция, uuid_, до_с, до_по)
+        кол1, выр1, дней1 = за_окно(станция, uuid_, после_с, после_по)
+        цена0, цена1 = float(r["price_prev"]), float(r["price"] or 0)
+        себес = себестоимость.get(uuid_, 0.0)
+        маржа0 = (выр0 - кол0 * себес) / дней0
+        маржа1 = (выр1 - кол1 * себес) / дней1
+        в_день0, в_день1 = кол0 / дней0, кол1 / дней1
+
+        дц = (цена1 - цена0) / цена0 * 100 if цена0 else 0.0
+        дспрос = (в_день1 - в_день0) / в_день0 * 100 if в_день0 else 0.0
+        дмаржа = (маржа1 - маржа0) / abs(маржа0) * 100 if маржа0 else 0.0
+        # Эластичность осмысленна только при заметном сдвиге цены: на копейке
+        # знаменатель обнуляет смысл, и получается «спрос упал в сто раз».
+        эластичность = round(дспрос / дц, 2) if abs(дц) >= 0.5 else None
+
+        if дней0 < 3 or дней1 < 3 or (кол0 == 0 and кол1 == 0):
+            вывод = "наблюдений мало — рано судить"
+        elif дмаржа > 5:
+            вывод = "маржа выросла — решение сработало"
+        elif дмаржа < -5 and дспрос < -10:
+            вывод = "покупатель ушёл — цена оказалась выше приемлемой"
+        elif дмаржа < -5:
+            вывод = "маржа просела — стоит вернуть цену"
+        else:
+            вывод = "заметной разницы нет"
+
+        строки.append({
+            "station_id": станция, "item_uuid": uuid_, "name": r["name"] or "",
+            "at": когда.isoformat() if когда else None,
+            "author": r["author"] or "",
+            "price_prev": round(цена0, 2), "price": round(цена1, 2),
+            "price_pct": round(дц, 1),
+            "qty_day_prev": round(в_день0, 2), "qty_day": round(в_день1, 2),
+            "qty_pct": round(дспрос, 1),
+            "margin_day_prev": round(маржа0, 2), "margin_day": round(маржа1, 2),
+            "margin_pct": round(дмаржа, 1),
+            "elasticity": эластичность,
+            "days_prev": дней0, "days": дней1,
+            "verdict": вывод,
+        })
+    # Сверху — изменения с самым заметным откликом: их и разбирают.
+    строки.sort(key=lambda с: -abs(с["margin_pct"]))
+    return {"window": окно, "rows": строки, "total": len(строки)}
 
 
 async def price_log(db: AsyncSession, cid, date_from, date_to,

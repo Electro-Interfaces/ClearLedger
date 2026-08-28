@@ -269,6 +269,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception as e:  # noqa: BLE001 — почта не критична для API
         logger.warning(f"Опрос почты не запущен: {e}")
 
+    # Запланированные цены «Магазина»: корзина переоценки применяется в
+    # обещанную минуту, а не когда кто-то откроет экран. Иначе «сменить к
+    # открытию смены» держится ровно до закрытия вкладки.
+    prices_task: asyncio.Task | None = None
+    try:
+        from app.services.store_price_scheduler import run_forever as _prices
+        prices_task = asyncio.create_task(_prices())
+    except Exception as e:  # noqa: BLE001 — исполнитель цен не критичен для API
+        logger.warning(f"Исполнитель запланированных цен не запущен: {e}")
+
     # Чтение боевой БП: реестр документов 1С не должен устаревать молча. Раз в
     # сутки в тихий час — соединение там одно на всех, днём оно занято людьми.
     onec_read_task: asyncio.Task | None = None
@@ -282,6 +292,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
     if onec_read_task is not None:
         onec_read_task.cancel()
+    if prices_task is not None:
+        prices_task.cancel()
     if mail_task is not None:
         mail_task.cancel()
     if tasks_task is not None:

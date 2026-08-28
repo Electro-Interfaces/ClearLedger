@@ -87,6 +87,28 @@ export function useDisabledApps(companyId: string): string[] {
 }
 
 /**
+ * Имена продуктов, как их назвала КОМПАНИЯ.
+ *
+ * Реестр общий на контейнер, а роль продукта в разных пространствах разная: у
+ * аудиторской практики это «Аудитор», у нас внутри — «Агенты». Код при этом один
+ * (`auditor`): переименование кода означало бы миграцию прав и подключений.
+ * Поэтому имя приходит из подключения компании, а надписи в шапке, окне и доке
+ * берут его отсюда, а не хранят свою копию.
+ */
+export function useAppNames(companyId: string): Record<string, string> {
+  const q = useQuery({
+    queryKey: ['company-apps', companyId],
+    queryFn: () => listCompanyApps(companyId),
+    enabled: isApiEnabled() && !!companyId,
+    staleTime: 5 * 60_000,
+    retry: false,
+  })
+  const out: Record<string, string> = {}
+  for (const a of q.data ?? []) if (a.name) out[a.code] = a.name
+  return out
+}
+
+/**
  * Итоговый набор ключей для гейтинга меню Ledger: состав поставки ∩ права роли.
  * `null` с любой стороны = «эта сторона не ограничивает».
  *

@@ -63,8 +63,12 @@ function CompanyScreen({ code }: { code: string }) {
     // сущности и разные разделы, хотя карточка юрлица у них одна.
     case 'counterparties': return <Counterparties companyId={company.id} canManage={canManage} />
     case 'refs': return <SpaceRefs companyId={company.id} canManage={canManage} />
-    // Одна карта на оба охвата — переключатель внутри, как в журнале.
-    case 'map': return <SpaceMap companyId={company.id} isSuperadmin={!!user?.is_superadmin} />
+    // Одна карта на оба охвата — переключатель внутри, как в журнале. Гейт тот же,
+    // что у журнала: ручка `/space-map` отвечает только администратору организации, и
+    // без этой проверки наблюдатель получал не заглушку, а ошибку запроса.
+    case 'map': return canManage
+      ? <SpaceMap companyId={company.id} isSuperadmin={!!user?.is_superadmin} />
+      : <Empty text="Раздел доступен администратору организации" />
     // Две карточки: компания пространства (разрез доступа) и юрлицо, от чьего имени
     // ведётся учёт — его реквизиты приезжают из бухгалтерии и правятся не здесь.
     case 'profile': return (

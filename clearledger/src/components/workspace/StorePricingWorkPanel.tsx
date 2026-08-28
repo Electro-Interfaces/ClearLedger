@@ -11,16 +11,21 @@
 import { useState } from 'react'
 import { StoreRepricingPanel } from './StoreRepricingPanel'
 import { StoreRevaluationPanel } from './StoreRevaluationPanel'
+import { StorePriceCartPanel } from './StorePriceCartPanel'
 
 const ВКЛАДКИ = [
   { key: 'tool', label: 'Изменить цены' },
+  // Корзина — вторым шагом того же дела: правило считает, корзина копит и
+  // назначает время. Отдельным пунктом меню не заводим: это не другой вопрос,
+  // а продолжение того же (и на станции они тоже на одном экране).
+  { key: 'cart', label: 'Корзина цен' },
   { key: 'log', label: 'Реестр из ЦБ' },
 ] as const
 
 export function StorePricingWorkPanel({ companyId, dateFrom, dateTo, stations }: {
   companyId: string; dateFrom: string; dateTo: string; stations?: string[]
 }) {
-  const [вкладка, setВкладка] = useState<'tool' | 'log'>('tool')
+  const [вкладка, setВкладка] = useState<'tool' | 'cart' | 'log'>('tool')
   return (
     <div>
       <div className="px-4 md:px-6 pt-4">
@@ -36,9 +41,13 @@ export function StorePricingWorkPanel({ companyId, dateFrom, dateTo, stations }:
           ))}
         </div>
       </div>
-      {вкладка === 'tool'
-        ? <StoreRepricingPanel companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} stations={stations} />
-        : <StoreRevaluationPanel companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} stations={stations} />}
+      {вкладка === 'tool' && (
+        <StoreRepricingPanel companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} stations={stations} />
+      )}
+      {вкладка === 'cart' && <StorePriceCartPanel companyId={companyId} stations={stations} />}
+      {вкладка === 'log' && (
+        <StoreRevaluationPanel companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} stations={stations} />
+      )}
     </div>
   )
 }

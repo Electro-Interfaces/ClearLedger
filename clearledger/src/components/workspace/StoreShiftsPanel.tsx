@@ -307,6 +307,11 @@ export function StoreShiftsPanel({ companyId, dateFrom, dateTo, stations }: { co
               <Th текст="Сопутка" sort={sort} setSort={setSort} />
               <Th текст="Общепит" sort={sort} setSort={setSort} />
               <Th поле="positions" текст="Позиций" sort={sort} setSort={setSort} />
+              {/* Выручка смены сама по себе не говорит ничего: сорок тысяч —
+                  много или мало, зависит от того, прошло мимо кассы 385 человек
+                  или 90. Тот же вопрос задаёт себе администратор станции. */}
+              <Th текст="Чеков" sort={sort} setSort={setSort} />
+              <Th текст="Конверсия" sort={sort} setSort={setSort} />
               <Th текст="Возвраты" sort={sort} setSort={setSort} />
               <Th поле="receipts_amount" текст="Приходы" sort={sort} setSort={setSort} />
               <Th текст="Инв." align="center" sort={sort} setSort={setSort} />
@@ -335,6 +340,15 @@ export function StoreShiftsPanel({ companyId, dateFrom, dateTo, stations }: { co
                 <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{money(sh.soputka)}</td>
                 <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{money(sh.obshepit)}</td>
                 <td className="px-3 py-1.5 text-right tabular-nums">{nf(sh.positions)}</td>
+                <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground"
+                  title={sh.fuel_ops != null ? `заправок за смену: ${nf(sh.fuel_ops)}` : undefined}>
+                  {sh.cheques == null ? '—' : nf(sh.cheques)}
+                </td>
+                <td className={`px-3 py-1.5 text-right tabular-nums ${
+                  sh.conversion != null && sh.conversion < 20 ? 'text-amber-300/90' : ''}`}
+                  title="доля заправок, дополненных покупкой в магазине">
+                  {sh.conversion == null ? '—' : `${nf(sh.conversion, 1)}%`}
+                </td>
                 <td className={`px-3 py-1.5 text-right tabular-nums ${sh.returns > 0 ? 'text-amber-300/90' : 'text-muted-foreground/50'}`}>{money(sh.returns)}</td>
                 <td className="px-3 py-1.5 text-right tabular-nums">
                   {sh.receipts_amount > 0

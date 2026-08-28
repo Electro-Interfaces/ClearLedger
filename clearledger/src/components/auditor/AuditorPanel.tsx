@@ -89,7 +89,7 @@ function Rating({ runId, verdict, onRated }: {
         <button key={v.key} type="button" disabled={busy}
           onClick={() => (v.ask ? setAsking(v.key) : send(v.key))}
           title={v.label}
-          className={cn('inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] transition-colors',
+          className={cn('inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-xs transition-colors',
             verdict === v.key
               ? 'bg-primary/10 text-primary'
               : 'text-muted-foreground/60 hover:bg-accent hover:text-foreground')}>
@@ -238,17 +238,20 @@ export function AuditorPanel() {
         </span>
       </div>
 
-      <div className="min-h-0 min-w-0 flex-1 space-y-3 overflow-y-auto px-4 py-3">
+      <div className="@container min-h-0 min-w-0 flex-1 space-y-3 overflow-y-auto px-4 py-3">
         {!messages.length && (
           <div className="space-y-3 pt-4 text-sm text-muted-foreground">
             <p>Спросите про то, что видите на экране. Я смотрю данные пространства и отвечаю цифрами.</p>
-            <div className="flex flex-col gap-1.5">
+            {/* На широком окне запуски идут двумя-тремя колонками: столбцом в 1600 px
+                это простыня, по которой не пробежаться глазом. В доке колонка одна —
+                сетка сама сходится к ней по ширине контейнера. */}
+            <div className="grid gap-1.5 @xl:grid-cols-2 @4xl:grid-cols-3">
               {(prompts?.length ? prompts : FALLBACK_PROMPTS).map((q) => (
                 <button key={q.text} type="button" onClick={() => send(q.text)}
                   className="rounded-lg border border-border/60 px-3 py-2 text-left text-foreground transition-colors hover:bg-accent">
                   {q.text}
                   {q.scope === 'company' && (
-                    <span className="ml-2 text-[11px] text-muted-foreground">только у этой организации</span>
+                    <span className="ml-2 text-xs text-muted-foreground">только у этой организации</span>
                   )}
                 </button>
               ))}
@@ -261,7 +264,10 @@ export function AuditorPanel() {
             {m.role === 'user' ? (
               <div className="max-w-[85%] rounded-xl bg-primary px-3 py-2 text-white">{m.content}</div>
             ) : (
-              <div className="space-y-2">
+              // Ответ читается мерой строки, а не шириной окна: на 1600 px строка в
+              // 200 знаков теряется глазом на обратном ходе. Таблицы и находки внутри
+              // разворачиваются шире сами.
+              <div className="max-w-4xl space-y-2">
                 {m.content
                   ? <Markdown content={withoutFindings(m.content)} />
                   : busy && <span className="text-muted-foreground">{status || 'Думаю…'}</span>}

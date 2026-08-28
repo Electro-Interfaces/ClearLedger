@@ -1214,6 +1214,7 @@ async def placed(
     company_id: str = Query(...),
     list_id: str | None = Query(None, alias="list"),
     scope: str = Query("list", pattern="^(list|day|carry|deferred|starred|loose)$"),
+    on: date | None = Query(None, description="день для scope=day; пусто — сегодня"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -1237,7 +1238,9 @@ async def placed(
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Не сказано, какая подборка")
         sel = sel.where(PersonalMark.list_id == _uuid_or_400(list_id, "list"))
     elif scope == "day":
-        sel = sel.where(PersonalMark.taken_for == today)
+        # Календарь спрашивает про конкретный день, «Сегодня» — про сегодняшний:
+        # это один и тот же вопрос с разной датой, и второго разреза не нужно.
+        sel = sel.where(PersonalMark.taken_for == (on or today))
     elif scope == "carry":
         # Вчерашнее, взятое и не закрытое. Само в новый день не переезжает:
         # сброс работает только там, где рядом стоит утренний вопрос «вчера

@@ -289,8 +289,13 @@ async def station_console(
         # меньшем значении центр обрывал бы запрос раньше хаба, подменяя внятный
         # ответ станции своим таймаутом.
         async with httpx.AsyncClient(timeout=130.0, follow_redirects=False) as client:
+            # multi_items, а НЕ dict: dict() схлопывает повторяющиеся ключи и
+            # оставляет последнее значение. Печать ценников шлёт item=A&item=B&
+            # item=C — через центр до станции доезжал один ключ, и вместо
+            # четырнадцати ценников печатался один. Локально на станции те же
+            # экраны работали, потому что прокси в этой дороге нет.
             ответ = await client.request(
-                request.method, цель, params=dict(request.query_params),
+                request.method, цель, params=request.query_params.multi_items(),
                 headers=заголовки, content=тело or None,
             )
     except httpx.HTTPError as exc:

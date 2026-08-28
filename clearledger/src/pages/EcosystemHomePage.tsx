@@ -11,7 +11,7 @@
  *
  * Классификация слоя приходит с бэкенда (`layer` в /api/sso/apps), не хардкодится по коду.
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
@@ -79,7 +79,9 @@ interface TileProps {
   subtitle: string
   icon: typeof FileText
   badge?: string
+  availability?: string
   busy?: boolean
+  inactive?: boolean
   readiness?: Readiness
   onClick: () => void
 }
@@ -97,27 +99,18 @@ const DOT_CLASS: Record<Readiness, string> = {
  * а не по слою: слой говорит, ЧТО это (ядро/сервис/приложение), контур — про чей день.
  */
 // Рабочая строка стола. Порядок — как к продуктам обращаются за день: заявки,
-// продажи, стройка объектов, связь с ними и состояние систем (решение МАГа
+// продажи, расчёты, товары, продвижение и состояние систем (решение МАГа
 // 01.08.2026; отменяет вынос «Поддержки» в сервисы от 31.07.2026 — заявки
 // оказались началом дня, а не общей утилитой вроде чата).
 const COMMERCE_APPS = [
-  'support', 'sales', 'projects', 'netlink', 'diag',
-  'shop', 'corp', 'marketing', 'monitor', 'processing',
+  'support', 'revenue', 'corp', 'retail_store', 'monitor',
 ]
 // «Пульс» — рабочее место руководителя над ВСЕМ пространством, поэтому своя строка
 // вверху стола, а не «чем владеем и как считаем» (ecosystem-deploy/docs/PULSE.md).
 // Круг узкий: у кого права нет, тот этой строки не увидит вовсе.
 const LEAD_APPS = ['pulse']
-// Слой «Планы» — ниже ядра системы (решение МАГа 16.08.2026). Продукты заведены
-// в реестре и когда-нибудь заработают, но сегодня в них нечего делать. Держать их
-// среди рабочих значит каждый день предлагать человеку четыре двери, за которыми
-// заставка: он перестаёт читать стол целиком.
-//
-// Список ведётся руками, а не по признаку готовности: «в подключении» бывает и у
-// продукта, который вот-вот поедет, — решать, что показывать клиенту, должен
-// человек, а не флаг в конфиге.
-const PLANNED_APPS = ['netlink', 'diag', 'shop', 'corp', 'marketing']
-
+const OPERATIONS_APPS = ['projects', 'ops', 'netlink', 'diag']
+const SERVICE_APPS = ['chat', 'docs', 'conf', 'shop', 'marketing']
 /**
  * Карточка продукта: имя, точка готовности и короткое пояснение.
  *
@@ -130,25 +123,41 @@ const PLANNED_APPS = ['netlink', 'diag', 'shop', 'corp', 'marketing']
  * На телефоне плитка складывается в ОДНУ строку — имя во всю ширину. Двухэтажная
  * карточка занимала 99 px, и до нижних продуктов приходилось листать три экрана.
  */
-function Tile({ title, subtitle, icon: Icon, badge, busy, readiness, onClick }: TileProps) {
+function Tile({
+  title, subtitle, icon: Icon, badge, availability, busy, inactive, readiness, onClick,
+}: TileProps) {
   return (
     <button
       type="button"
       onClick={onClick}
-      disabled={busy}
-      title={[title, subtitle, badge, readiness && READINESS_LABEL[readiness]]
+      disabled={busy || inactive}
+      title={[title, availability, subtitle, badge, readiness && READINESS_LABEL[readiness]]
         .filter(Boolean).join(' · ')}
-      className="group relative flex h-full min-h-12 items-center gap-2.5 rounded-xl border border-border bg-card px-3 py-2.5 text-left
-                 transition-colors duration-200 hover:border-primary/50 hover:bg-accent/40 disabled:opacity-60
-                 sm:min-h-0 sm:flex-col sm:items-stretch sm:gap-2"
+      className={`group relative flex h-full min-h-12 snap-start items-center gap-2.5 rounded-xl border px-3 py-2.5 text-left
+                  transition-colors duration-200 sm:min-h-0 sm:flex-col sm:items-stretch sm:gap-2
+                  ${inactive
+                    ? 'cursor-inherit border-dashed border-border bg-card'
+                    : 'border-primary/30 bg-primary/[0.08] hover:border-primary/50 hover:bg-primary/[0.14]'}
+                  ${busy ? 'opacity-60' : ''}`}
     >
       {/* Имя продукта. Готовность — точка в конце строки, а не абсолютом в углу:
           в потоке она занимает своё место и не наезжает на длинное название. */}
       <span className="flex min-w-0 flex-1 items-center gap-2.5 sm:w-full sm:flex-none">
-        <span className="shrink-0 rounded-lg bg-primary/10 p-1.5 text-primary transition-colors group-hover:bg-primary group-hover:text-white">
+        <span className={`shrink-0 rounded-lg p-1.5 transition-colors
+                         ${inactive
+                           ? 'bg-muted text-muted-foreground'
+                           : 'bg-primary/15 text-primary group-hover:bg-primary group-hover:text-primary-foreground'}`}>
           {busy ? <Loader2 className="size-4 animate-spin" /> : <Icon className="size-4" />}
         </span>
         <span className="min-w-0 flex-1 truncate text-sm font-medium leading-snug">{title}</span>
+        {availability && (
+          <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium sm:hidden
+                           ${inactive
+                             ? 'border border-dashed border-border bg-card text-muted-foreground'
+                             : 'bg-primary text-primary-foreground'}`}>
+            {availability}
+          </span>
+        )}
         {/* Свой вход — значком, а не подписью: важен при первом знакомстве, а места
             в строке занимает как буква. Расшифровка — в подсказке всей плитки. */}
         {badge && <ExternalLink className="size-3.5 shrink-0 text-muted-foreground" />}
@@ -163,6 +172,11 @@ function Tile({ title, subtitle, icon: Icon, badge, busy, readiness, onClick }: 
           третья уводит плитку в высоту, полный текст лежит в подсказке. */}
       <span className="hidden text-[11px] leading-snug text-muted-foreground/90
                        sm:line-clamp-2 sm:border-t sm:border-border/60 sm:pt-2">
+        {availability && (
+          <span className={`font-medium ${inactive ? 'text-muted-foreground' : 'text-primary'}`}>
+            {availability} ·{' '}
+          </span>
+        )}
         {subtitle}
       </span>
     </button>
@@ -171,31 +185,110 @@ function Tile({ title, subtitle, icon: Icon, badge, busy, readiness, onClick }: 
 
 /**
  * Слой стола: подпись слева, плитки справа. Заголовок отдельной строкой стоил трёх
- * строк высоты на каждый слой — при трёх слоях это уже экран. Сетка `auto-fill` сама
- * набирает столько колонок, сколько влезает, поэтому широкий экран показывает слой
- * одной строкой, а узкий — переносит.
+ * строк высоты на каждый слой — при трёх слоях это уже экран. Карточки держатся одной
+ * строкой на любой ширине; если строка не помещается, прокручивается только этот слой.
  */
 function Section({ title, hint, children, divider }: {
   title: string; hint?: string; children: React.ReactNode
   /** Линия сверху — граница уровня стола (Ядро · Сервисы · Приложения). */
   divider?: boolean
 }) {
+  const scrollerRef = useRef<HTMLDivElement>(null)
+  const dragRef = useRef({
+    active: false, moved: false, pointerId: -1, startX: 0, startScrollLeft: 0,
+  })
+
+  function startDrag(event: React.PointerEvent<HTMLDivElement>) {
+    const scroller = scrollerRef.current
+    if (event.pointerType !== 'mouse' || event.button !== 0
+      || !scroller || scroller.scrollWidth <= scroller.clientWidth) return
+    dragRef.current = {
+      active: true,
+      moved: false,
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startScrollLeft: scroller.scrollLeft,
+    }
+  }
+
+  function moveDrag(event: React.PointerEvent<HTMLDivElement>) {
+    const drag = dragRef.current
+    if (!drag.active || drag.pointerId !== event.pointerId) return
+    const distance = event.clientX - drag.startX
+    if (!drag.moved && Math.abs(distance) < 5) return
+    if (!drag.moved) {
+      drag.moved = true
+      event.currentTarget.setPointerCapture(event.pointerId)
+    }
+    event.currentTarget.scrollLeft = drag.startScrollLeft - distance
+    event.preventDefault()
+  }
+
+  function finishDrag(event: React.PointerEvent<HTMLDivElement>) {
+    const drag = dragRef.current
+    if (!drag.active || drag.pointerId !== event.pointerId) return
+    drag.active = false
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+    window.setTimeout(() => { drag.moved = false }, 0)
+  }
+
+  function suppressClickAfterDrag(event: React.MouseEvent<HTMLDivElement>) {
+    if (!dragRef.current.moved) return
+    event.preventDefault()
+    event.stopPropagation()
+    dragRef.current.moved = false
+  }
+
   return (
-    <section className={`grid gap-x-4 gap-y-2 md:grid-cols-[116px_1fr]
+    <section className={`grid min-w-0 gap-x-4 gap-y-2 md:grid-cols-[116px_minmax(0,1fr)]
                          ${divider ? 'border-t border-border/60 pt-4' : ''}`}>
       <div className="md:pt-2">
         <h2 className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/60">{title}</h2>
         {hint && <p className="mt-0.5 hidden text-[11px] text-muted-foreground/50 md:block">{hint}</p>}
       </div>
-      {/* Верхняя граница ширины обязательна: с `1fr` карточки растягивались на всю
-          строку и внутри оставался воздух, а показатели всё равно обрезались —
-          выигрывал только пустой фон. Нижняя — предел, за которым три числа с
-          подписями наезжают друг на друга. */}
-      <div className="grid grid-cols-1 gap-2
-                      sm:grid-cols-[repeat(auto-fill,minmax(208px,244px))] sm:justify-start">
+      <div
+        ref={scrollerRef}
+        role="region"
+        aria-label={`${title}: приложения`}
+        tabIndex={0}
+        onPointerDownCapture={startDrag}
+        onPointerMove={moveDrag}
+        onPointerUp={finishDrag}
+        onPointerCancel={finishDrag}
+        onClickCapture={suppressClickAfterDrag}
+        onDragStart={(event) => event.preventDefault()}
+        className="grid min-w-0 snap-x snap-proximity grid-flow-col auto-cols-[minmax(300px,330px)]
+                   cursor-grab select-none gap-2 overflow-x-auto overscroll-x-contain pb-2 pr-1 active:cursor-grabbing
+                   sm:auto-cols-[minmax(208px,244px)]"
+      >
         {children}
       </div>
     </section>
+  )
+}
+
+function DemoAccessLegend() {
+  return (
+    <div
+      className="flex shrink-0 flex-col gap-2 rounded-xl border border-border/70 bg-card/50 px-3 py-2.5
+                 text-xs text-muted-foreground sm:flex-row sm:items-center sm:gap-5"
+      aria-label="Доступность приложений в демонстрации"
+    >
+      <span className="flex items-center gap-2">
+        <span className="shrink-0 whitespace-nowrap rounded-full bg-primary px-2 py-0.5 font-medium text-primary-foreground">
+          Открыть здесь
+        </span>
+        <span>можно нажать и посмотреть в этом демо</span>
+      </span>
+      <span className="flex items-center gap-2">
+        <span className="shrink-0 whitespace-nowrap rounded-full border border-dashed border-border px-2 py-0.5 font-medium text-foreground">
+          Отдельное демо
+        </span>
+        <span>приложение можно подключить к компании, здесь оно не открывается</span>
+      </span>
+    </div>
   )
 }
 
@@ -237,16 +330,14 @@ export function EcosystemHomePage({ embedded, onNavigate }: {
   // Слой каталога говорит, ЧТО это (ядро/сервис/приложение), но место на столе
   // задаёт рабочий контур: «Поддержка» числится сервисом, «Диагностика» — ядром,
   // а работают с ними в общей строке дня (решение МАГа 01.08.2026).
-  // Планируемые вынимаются из общего потока до раскладки по слоям: иначе они
-  // остались бы и внизу, и в «Клиентах и продажах» одновременно.
-  const planned = PLANNED_APPS
-    .map((code) => all.find((a) => a.code === code))
-    .filter((a): a is SsoApp => !!a)
-  const isPlanned = (code: string) => PLANNED_APPS.includes(code)
-
   const management = all.filter((a) => a.layer === 'admin' && !COMMERCE_APPS.includes(a.code))
-  const services = all.filter((a) => a.layer === 'service' && !COMMERCE_APPS.includes(a.code))
-  const apps = all.filter((a) => !isPlanned(a.code) && (COMMERCE_APPS.includes(a.code)
+  const services = [
+    ...SERVICE_APPS.map((code) => all.find((a) => a.code === code))
+      .filter((a): a is SsoApp => !!a),
+    ...all.filter((a) => a.layer === 'service' && !COMMERCE_APPS.includes(a.code)
+      && !SERVICE_APPS.includes(a.code)),
+  ]
+  const apps = all.filter((a) => !SERVICE_APPS.includes(a.code) && (COMMERCE_APPS.includes(a.code)
     || (a.layer !== 'admin' && a.layer !== 'service')))
   // Два контура приложений: обращённый к клиенту (продать, обслужить) и внутренний
   // (построить, содержать, посчитать).
@@ -256,11 +347,15 @@ export function EcosystemHomePage({ embedded, onNavigate }: {
   const commerce = COMMERCE_APPS
     .map((code) => apps.find((a) => a.code === code))
     .filter((a): a is SsoApp => !!a)
+  const operations = OPERATIONS_APPS
+    .map((code) => apps.find((a) => a.code === code))
+    .filter((a): a is SsoApp => !!a)
   // Учётная строка: содержание сети и деньги за неё — в том порядке, в каком
   // цифра идёт от объекта к отчётности.
-  const INTERNAL_ORDER = ['ops', 'finance', 'accounting']
+  const INTERNAL_ORDER = ['econ', 'perimeter', 'books']
   const internal = apps
-    .filter((a) => !COMMERCE_APPS.includes(a.code) && !LEAD_APPS.includes(a.code))
+    .filter((a) => !COMMERCE_APPS.includes(a.code) && !LEAD_APPS.includes(a.code)
+      && !OPERATIONS_APPS.includes(a.code))
     .sort((a, b) => {
       const ia = INTERNAL_ORDER.indexOf(a.code), ib = INTERNAL_ORDER.indexOf(b.code)
       // Незаданные продукты идут следом за перечисленными, порядком реестра.
@@ -305,39 +400,44 @@ export function EcosystemHomePage({ embedded, onNavigate }: {
    *  откроется. Способ входа виден значком «вход отдельный» в углу, а пока подпись занимала
    *  «Открывается по ссылке», описание из реестра не доходило до человека вовсе — и
    *  «Конференции» молчали о том, что вход без регистрации, прямо в браузере. */
-  function ProductTile({ a }: { a: SsoApp }) {
-    const subtitle = a.description
+  function renderProductTile(a: SsoApp) {
+    const isOptional = a.mode === 'internal' && !a.route
+    const description = a.description
       || (a.mode === 'internal' ? 'Продукт пространства'
         : a.mode === 'link' ? 'Открывается по ссылке' : 'Единый вход')
+    const subtitle = isOptional ? `Можно подключить · ${description}` : description
     return (
       <Tile
+        key={a.code}
         title={a.name}
         subtitle={subtitle}
         icon={ICONS[a.icon] ?? LayoutGrid}
         badge={a.mode === 'link' ? 'вход отдельный' : undefined}
+        availability={isOptional ? 'Отдельное демо' : 'Открыть здесь'}
         busy={busy === a.code}
-        readiness={productReadiness(a.code, company.profileId)}
+        inactive={isOptional}
+        readiness={isOptional ? undefined : productReadiness(a.code, company.profileId)}
         onClick={() => openProduct(a)}
       />
     )
   }
 
   /** Слои продуктов — общая часть стола и встроенной панели «Приложения». */
-  function Layers() {
+  function renderLayers() {
     return (
       <>
         {lead.length > 0 && (
           <Section title="Руководство" hint="как идут дела и куда вмешаться">
-            {lead.map((a) => <ProductTile key={a.code} a={a} />)}
+            {lead.map(renderProductTile)}
           </Section>
         )}
         {commerce.length > 0 && (
           <Section title="Клиенты и продажи" hint="кому продаём и как обслуживаем" divider={lead.length > 0}>
-            {commerce.map((a) => <ProductTile key={a.code} a={a} />)}
+            {commerce.map(renderProductTile)}
           </Section>
         )}
-        <Section title="Сеть и учёт" hint="чем владеем и как считаем" divider>
-          {internal.map((a) => <ProductTile key={a.code} a={a} />)}
+        <Section title="Учёт" hint="экономика, периметр и бухгалтерия" divider>
+          {internal.map(renderProductTile)}
           {q.isLoading && (
             <div className="flex items-center gap-2 px-3 py-2.5 text-sm text-muted-foreground">
               <Loader2 className="size-4 animate-spin" /> Загрузка каталога…
@@ -349,19 +449,19 @@ export function EcosystemHomePage({ embedded, onNavigate }: {
             </div>
           )}
         </Section>
+        {operations.length > 0 && (
+          <Section title="Сеть" hint="связь, оборудование и состояние систем" divider>
+            {operations.map(renderProductTile)}
+          </Section>
+        )}
         {services.length > 0 && (
           <Section title="Сервисы экосистемы" hint="общие для всех приложений" divider>
-            {services.map((a) => <ProductTile key={a.code} a={a} />)}
+            {services.map(renderProductTile)}
           </Section>
         )}
         {management.length > 0 && (
           <Section title="Ядро системы" divider>
-            {management.map((a) => <ProductTile key={a.code} a={a} />)}
-          </Section>
-        )}
-        {planned.length > 0 && (
-          <Section title="Планы" hint="заведены, но ещё не работают" divider>
-            {planned.map((a) => <ProductTile key={a.code} a={a} />)}
+            {management.map(renderProductTile)}
           </Section>
         )}
       </>
@@ -373,7 +473,8 @@ export function EcosystemHomePage({ embedded, onNavigate }: {
   if (embedded) {
     return (
       <div className="flex w-full flex-col gap-5 px-4 py-4 sm:px-6">
-        <Layers />
+        <DemoAccessLegend />
+        {renderLayers()}
       </div>
     )
   }
@@ -454,9 +555,11 @@ export function EcosystemHomePage({ embedded, onNavigate }: {
           {user?.name ? `Здравствуйте, ${user.name}` : 'Рабочий стол'}
         </h1>
 
+        <DemoAccessLegend />
+
         {/* Все слои — из ОДНОГО каталога продуктов пространства (`Layers`), тем же
             составом, что и панель «Приложения» в рабочей области приложений. */}
-        <Layers />
+        {renderLayers()}
       </MobileShell>
 
       {/* Окно «Взаимодействие» — то же, что открывают кнопки шапки в приложениях.

@@ -16,7 +16,7 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Kpi } from './analytics/Kpi'
-import { getStoreDynamics, getStorePriceLog, type DynamicsRow } from '@/services/storeService'
+import { getStoreDynamics, getStorePriceLog, getStorePriceResponse, type DynamicsRow } from '@/services/storeService'
 import { fmtMoney } from '@/services/analyticsService'
 
 const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: d }).format(n)
@@ -96,6 +96,12 @@ export function StoreDynamicsPanel({ companyId, dateFrom, dateTo, stations }: {
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['store-dynamics', companyId, dateFrom, dateTo, scopeKey],
     queryFn: () => getStoreDynamics(dateFrom, dateTo, stations),
+  })
+  // Отклик на цену живёт своим горизонтом: он привязан не к периоду экрана, а к
+  // дате самого изменения — окно наблюдения отсчитывается от неё.
+  const { data: отклики } = useQuery({
+    queryKey: ['store-price-response', companyId, scopeKey],
+    queryFn: () => getStorePriceResponse(14, stations),
   })
   const { data: журнал, error: ошибкаЖурнала, refetch: повторитьЖурнал } = useQuery({
     queryKey: ['store-price-log', companyId, dateFrom, dateTo, scopeKey, priceOffset],
@@ -245,6 +251,71 @@ export function StoreDynamicsPanel({ companyId, dateFrom, dateTo, stations }: {
         <section className="rounded-lg border border-red-500/30 p-4 text-sm text-red-400/90">
           Не удалось загрузить журнал цен.{' '}
           <button type="button" className="underline" onClick={() => повторитьЖурнал()}>Повторить</button>
+        </section>
+      )}
+
+      {!!отклики?.rows.length && (
+        <section className="rounded-lg border border-border/50 p-4">
+          <h3 className="text-sm font-semibold">Как спрос ответил на цену</h3>
+          <p className="text-xs text-muted-foreground mt-1 max-w-4xl">
+            Подняли — и что стало. Это <b>наблюдение</b>, а не закон: контрольной группы и
+            очищенного от сезонности ряда у розницы АЗС нет, поэтому рядом с каждой строкой
+            стоит число дней, на которых она построена. Окно — {отклики.window} дней до и после.
+            Эластичность −1 значит «процент цены съел процент спроса»; около нуля — покупателю
+            всё равно, цена ниже возможной.
+          </p>
+          <div className="overflow-x-auto mt-3">
+            <table className="w-full text-xs">
+              <thead className="text-muted-foreground">
+                <tr className="border-b border-border/50">
+                  <th className="text-left py-1.5 pr-3 font-medium">Товар</th>
+                  <th className="text-left py-1.5 pr-3 font-medium">АЗС</th>
+                  <th className="text-right py-1.5 pr-3 font-medium">Цена</th>
+                  <th className="text-right py-1.5 pr-3 font-medium">Спрос в день</th>
+                  <th className="text-right py-1.5 pr-3 font-medium">Маржа в день</th>
+                  <th className="text-right py-1.5 pr-3 font-medium">Чувствительность</th>
+                  <th className="text-left py-1.5 font-medium">Вывод</th>
+                </tr>
+              </thead>
+              <tbody>
+                {отклики.rows.map((о, i) => (
+                  <tr key={`${о.station_id}-${о.item_uuid}-${i}`}
+                      className="border-b border-border/30 hover:bg-accent/30">
+                    <td className="py-1.5 pr-3">
+                      {о.name}
+                      <div className="text-[11px] text-muted-foreground">
+                        {о.at ? new Date(о.at).toLocaleDateString('ru-RU') : '—'} · {о.author || 'без автора'}
+                        {' · '}{о.days_prev} и {о.days} дн.
+                      </div>
+                    </td>
+                    <td className="py-1.5 pr-3 text-muted-foreground">{о.station_id}</td>
+                    <td className="py-1.5 pr-3 text-right">
+                      {fmtMoney(о.price_prev)} → {fmtMoney(о.price)}
+                      <div className="text-[11px] text-muted-foreground">
+                        {знак(о.price_pct)}{nf(о.price_pct, 1)} %
+                      </div>
+                    </td>
+                    <td className="py-1.5 pr-3 text-right">
+                      {nf(о.qty_day_prev, 2)} → {nf(о.qty_day, 2)}
+                      <div className={`text-[11px] ${о.qty_pct < 0 ? 'text-amber-500' : 'text-emerald-500'}`}>
+                        {знак(о.qty_pct)}{nf(о.qty_pct, 1)} %
+                      </div>
+                    </td>
+                    <td className="py-1.5 pr-3 text-right">
+                      {fmtMoney(о.margin_day_prev)} → <b>{fmtMoney(о.margin_day)}</b>
+                      <div className={`text-[11px] ${о.margin_pct < 0 ? 'text-amber-500' : 'text-emerald-500'}`}>
+                        {знак(о.margin_pct)}{nf(о.margin_pct, 1)} %
+                      </div>
+                    </td>
+                    <td className="py-1.5 pr-3 text-right">
+                      {о.elasticity == null ? '—' : nf(о.elasticity, 2)}
+                    </td>
+                    <td className="py-1.5 text-muted-foreground">{о.verdict}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </section>
       )}
 

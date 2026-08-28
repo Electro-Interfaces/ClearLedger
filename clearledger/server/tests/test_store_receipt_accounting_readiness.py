@@ -209,6 +209,12 @@ async def test_canonicalization_appends_fact_and_source_link_without_mutating_ev
     assert document["ВидДокументаНДС"] == "УПД"
     assert document["КонтрольныеИтоги"] == {
         "goods": 100.0, "services": 0.0, "vat": 0.0, "document": 100.0,
+        # Сумма к оплате отдаётся отдельно: в БП «СуммаДокумента» — сумма с
+        # налогом. У этой приёмки цены с НДС внутри, поэтому она равна
+        # товарному итогу.
+        "payable": 100.0,
+        # Подвал накладной оператор не заполнял — сверять нечего.
+        "declared": None,
     }
 
 
@@ -562,3 +568,48 @@ def test_stage3_ddl_and_raw_path_are_fail_closed_and_append_only():
     raw_commit = source.index("await db.commit()", raw_marker)
     assert raw_commit < source.index("await _ingest_receipts", raw_commit)
     assert "status=\"needs_review\"" in source
+
+
+@pytest.mark.asyncio
+async def test_declared_total_is_payable_sum_and_tolerates_rounding():
+    """Контрольный итог накладной — сумма К ОПЛАТЕ, с допуском на округление.
+
+    До 27.08.2026 declared_total сверялся с товарным итогом БЕЗ налога, а
+    станция шлёт сумму к оплате: расхождение выходило на всю величину НДС, и ни
+    одна накладная с заполненным подвалом в БП не уезжала. Плюс сам подвал
+    вводит человек с бумаги, а НДС считается построчно — копейки округления не
+    ошибка ввода и не повод задержать документ.
+    """
+    _company_id, receipt, *_rest, session = _ready_fixture()
+    receipt.evidence = {
+        **receipt.evidence, "vat_included": False,
+        "invoice_kind": "УПД", "invoice_number": "УПД-1", "invoice_date": "2026-08-08",
+    }
+    receipt.lines = [{
+        "line_id": str(uuid.uuid4()), "name": "Энергетик",
+        "nomenclature_ref": str(uuid.uuid4()), "barcode": "9002490100070",
+        "qty_expected": 24, "qty_fact": 24, "price": 100,
+        "vat_rate": "НДС22", "vat_amount": 528, "amount": 2400,
+    }]
+    receipt.total_amount, receipt.vat_amount = 2400, 528
+
+    # Ровно сумма к оплате: 2400 товаров + 528 налога.
+    receipt.evidence["declared_total"] = 2928
+    readiness = await assess_receipt(session, receipt, lock=True)
+    assert readiness.ready, readiness.errors
+    assert readiness.document["СуммаДокумента"] == 2928
+    assert readiness.document["КонтрольныеИтоги"]["payable"] == 2928
+
+    # Копейки построчного округления — не ошибка.
+    receipt.evidence["declared_total"] = 2927.96
+    readiness = await assess_receipt(session, receipt, lock=True)
+    assert readiness.ready, readiness.errors
+    # И в бухгалтерию уезжает именно цифра накладной, а не наш расчёт:
+    # первичный документ — бумага, копейки округления НДС её не отменяют.
+    assert readiness.document["СуммаДокумента"] == 2927.96
+
+    # Товарный итог без налога на месте суммы к оплате — это уже ошибка ввода.
+    receipt.evidence["declared_total"] = 2400
+    readiness = await assess_receipt(session, receipt, lock=True)
+    assert not readiness.ready
+    assert "declared_total" in "; ".join(readiness.errors)

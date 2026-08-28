@@ -132,7 +132,11 @@ export interface AuditorMethod {
 export interface AuditorKnowledge {
   file: string
   /** `space` — общее всем клиентам фирмы, `company` — только этой организации. */
-  scope: 'space' | 'company'
+  /** `person` — личная карточка спросившего: её видит и правит только он сам. */
+  scope: 'space' | 'company' | 'person'
+  /** Направление внутри слоя — папка вроде «processing» или «online-orders».
+   *  Пусто: файл лежит в корне слоя и относится ко всему сразу. */
+  topic?: string | null
   /** Пересчитывается скриптом: правка руками затрётся при следующем пересчёте. */
   generated?: boolean
   title: string

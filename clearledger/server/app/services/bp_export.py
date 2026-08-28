@@ -592,17 +592,31 @@ class BpPackageEmitter:
                         continue
                     owner_id = str(doc["Контрагент"])
                     organization_id = str(doc["Организация"])
-                    contract_nsi[contract_id] = {
+                    # Договор ищется в БП по UUID 1С, а не по нашему идентификатору:
+                    # приёмник сперва смотрит регистр соответствий, и незнакомый
+                    # ключ уводит его на автосоздание — у каждого поставщика
+                    # появился бы второй договор, а расчёты разъехались по двум.
+                    contract_ref = str(contract.external_ref or contract_id)
+                    contract_name = str((contract.raw or {}).get("name") or contract.number or "")
+                    # Номер, равный наименованию, — след импорта из 1С, где номера
+                    # у большинства договоров пустые. Отдать его как номер значит
+                    # запереть приёмник на ветке поиска по номеру: он не найдёт
+                    # («Основной договор» в номере БП не лежит) и до поиска по
+                    # наименованию уже не дойдёт.
+                    contract_number = str(contract.number or "")
+                    if contract_number.strip().casefold() == contract_name.strip().casefold():
+                        contract_number = ""
+                    contract_nsi[contract_ref] = {
                         "owner_ref": owner_id,
                         "organization_ref": organization_id,
-                        "name": str((contract.raw or {}).get("name") or contract.number or ""),
-                        "number": str(contract.number or ""),
+                        "name": contract_name,
+                        "number": contract_number,
                         "date": str(contract.date or "")[:10],
                         "kind": str(contract.kind or contract.type or "СПоставщиком"),
                         "currency": str(contract.currency or "RUB"),
                         "deleted": bool(contract.is_closed),
                     }
-                    doc["ДоговорКонтрагента"] = contract_id
+                    doc["ДоговорКонтрагента"] = contract_ref
                     if organization_id:
                         nsi_org.add(organization_id)
                 for index, service in enumerate(doc.get("Услуги") or [], 1):

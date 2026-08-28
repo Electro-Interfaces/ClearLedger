@@ -15,14 +15,19 @@ import { SupportProvider } from '@/contexts/SupportContext'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { Toaster } from '@/components/ui/sonner'
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute'
-import { MainLayout } from '@/components/layout/MainLayout'
-import { InstallApp, UpdateBanner } from '@/components/common/MobileShell'
 import { TabFilterSync } from '@/components/layout/TabFilterSync'
 import { DocumentTitle } from '@/components/layout/DocumentTitle'
-import { OneCAutoSync } from '@/components/onec/OneCAutoSync'
-import { WorkspaceLayout, ProductStub } from '@/components/workspace/WorkspaceLayout'
 import { ErrorBoundary } from '@/components/common/ErrorBoundary'
+import { DemoBanner } from '@/components/common/DemoBanner'
+import { isDemoMode, isDemoPath } from '@/services/apiClient'
 import { Loader2 } from 'lucide-react'
+
+const MainLayout = lazy(() => import('@/components/layout/MainLayout').then((m) => ({ default: m.MainLayout })))
+const InstallApp = lazy(() => import('@/components/common/MobileShell').then((m) => ({ default: m.InstallApp })))
+const UpdateBanner = lazy(() => import('@/components/common/MobileShell').then((m) => ({ default: m.UpdateBanner })))
+const OneCAutoSync = lazy(() => import('@/components/onec/OneCAutoSync').then((m) => ({ default: m.OneCAutoSync })))
+const WorkspaceLayout = lazy(() => import('@/components/workspace/WorkspaceLayout').then((m) => ({ default: m.WorkspaceLayout })))
+const ProductStub = lazy(() => import('@/components/workspace/WorkspaceLayout').then((m) => ({ default: m.ProductStub })))
 
 const IntakePage = lazy(() => import('@/pages/IntakePage').then((m) => ({ default: m.IntakePage })))
 const FilesPage = lazy(() => import('@/pages/FilesPage').then((m) => ({ default: m.FilesPage })))
@@ -182,7 +187,7 @@ function Providers() {
 function CompanyScopedProviders() {
   const { companyId } = useCompany()
   const { pathname } = useLocation()
-  const isStoreDemo = pathname.endsWith('/demo/shop')
+  const isStoreDemo = pathname.endsWith('/demo/shop') || (isDemoPath() && pathname === '/shop')
   return (
     <TabsProvider key={companyId}>
       <FilterProvider syncUrl={!isStoreDemo}>
@@ -190,13 +195,18 @@ function CompanyScopedProviders() {
           <TooltipProvider>
             {!isStoreDemo && <TabFilterSync />}
             <DocumentTitle />
-            {!isStoreDemo && <OneCAutoSync />}
+            {!isStoreDemo && !isDemoMode() && <Suspense fallback={null}><OneCAutoSync /></Suspense>}
             <Outlet />
+            <DemoBanner />
             {/* Установка приложением и уведомление о выкатке — здесь, а не в
                 оболочке приложений: рабочий стол и «Управление» рисуются своими
                 маршрутами, и на первом же экране обвязка терялась. */}
-            {!isStoreDemo && <InstallApp />}
-            {!isStoreDemo && <UpdateBanner />}
+            {!isStoreDemo && !isDemoMode() && (
+              <Suspense fallback={null}>
+                <InstallApp />
+                <UpdateBanner />
+              </Suspense>
+            )}
             <Toaster position="bottom-right" richColors closeButton />
           </TooltipProvider>
         </SupportProvider>
@@ -211,7 +221,10 @@ function ChannelDetailRedirect() {
   return <Navigate to={`/connectors/${id}`} replace />
 }
 
-const basename = import.meta.env.BASE_URL.replace(/\/$/, '')
+const buildBase = import.meta.env.BASE_URL.replace(/\/$/, '')
+const demoPath = isDemoPath()
+const basename = demoPath ? `${buildBase}/demo` : buildBase || undefined
+const storeDemoPath = demoPath ? '/shop' : '/demo/shop'
 
 /** Страницы Ядра (`SPACE_PAGES`) — общий блок левого меню, один и тот же во всех продуктах. */
 const SPACE_PAGE_ELEMENTS: Record<string, React.ReactNode> = {
@@ -232,7 +245,7 @@ const router = createBrowserRouter([
       // Витрина по ссылке: стоит рядом с приглашением и сбросом пароля — это
       // третий вход без учётки, и открывать его должен кто угодно с токеном.
       { path: '/showcase/:token', element: <LazyPage><ShowcaseLinkPage /></LazyPage> },
-      { path: '/demo/shop', element: <LazyPage><StoreDemoPage /></LazyPage> },
+      { path: storeDemoPath, element: <LazyPage><StoreDemoPage /></LazyPage> },
       // Документ по ссылке: четвёртый вход без учётки. Контрагент смотрит
       // реквизиты, скачивает файлы и подтверждает получение.
       { path: '/doc-share/:token', element: <LazyPage><DocSharePage /></LazyPage> },
@@ -252,7 +265,7 @@ const router = createBrowserRouter([
         ],
       },
       {
-        element: <ProtectedRoute><MainLayout /></ProtectedRoute>,
+        element: <ProtectedRoute><LazyPage><MainLayout /></LazyPage></ProtectedRoute>,
         children: [
           { path: '/workspace', element: <LedgerWorkspace /> },
           // Продукты пространства — разделы Учёта, ставшие самостоятельными рабочими

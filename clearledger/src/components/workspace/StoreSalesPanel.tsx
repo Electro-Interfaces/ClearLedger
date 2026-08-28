@@ -85,7 +85,8 @@ export function StoreSalesPanel({ companyId, dateFrom, dateTo, stations, demo = 
   })
 
   const isPayment = groupBy === 'payment'
-  const showSkuCol = groupBy !== 'sku' && !isPayment
+  const isSku = groupBy === 'sku'
+  const showSkuCol = !isSku && !isPayment
   const показ = useVisible(data?.groups ?? [])
 
   return (
@@ -186,6 +187,11 @@ export function StoreSalesPanel({ companyId, dateFrom, dateTo, stations, demo = 
                   <th className="px-3 py-2 text-right font-medium">Без НДС</th>
                   <th className="px-3 py-2 text-right font-medium">НДС</th>
                   {!isPayment && <th className="px-3 py-2 text-right font-medium">Продано</th>}
+                  {/* Остаток и «хватит на» — только у товаров: «сколько дней
+                      хватит категории Сопутка» ответа не имеет, а цифра в
+                      таблице выглядела бы как ответ. */}
+                  {isSku && <th className="px-3 py-2 text-right font-medium">Остаток</th>}
+                  {isSku && <th className="px-3 py-2 text-right font-medium">Хватит на</th>}
                   {showSkuCol && <th className="px-3 py-2 text-right font-medium">SKU</th>}
                 </tr>
               </thead>
@@ -212,6 +218,17 @@ export function StoreSalesPanel({ companyId, dateFrom, dateTo, stations, demo = 
                     <td className="px-3 py-1.5 text-right tabular-nums">{fmtMoney(g.revenue_net)}</td>
                     <td className="px-3 py-1.5 text-right tabular-nums">{fmtMoney(g.vat)}</td>
                     {!isPayment && <td className="px-3 py-1.5 text-right tabular-nums">{nf(g.qty)}</td>}
+                    {isSku && (
+                      <td className={`px-3 py-1.5 text-right tabular-nums ${(g.stock_qty ?? 0) <= 0 ? 'text-muted-foreground/50' : ''}`}>
+                        {nf(g.stock_qty ?? 0)}
+                      </td>
+                    )}
+                    {isSku && (
+                      <td className={`px-3 py-1.5 text-right tabular-nums ${
+                        g.days_of_supply != null && g.days_of_supply < 7 ? 'text-amber-300/90' : 'text-muted-foreground'}`}>
+                        {g.days_of_supply == null ? '—' : `${nf(g.days_of_supply, 1)} дн.`}
+                      </td>
+                    )}
                     {showSkuCol && <td className="px-3 py-1.5 text-right tabular-nums">{nf(g.sku_count)}</td>}
                   </tr>
                 ))}
