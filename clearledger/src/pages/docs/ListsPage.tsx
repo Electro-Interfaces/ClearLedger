@@ -23,11 +23,16 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
 import {
-  Check, EyeOff, FolderOpen, Loader2, Pencil, Plus, Star, Trash2, X,
+  Check, EyeOff, FolderOpen, Loader2, MoreHorizontal, Pencil, Plus, Star,
+  Trash2, X,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { QueryError } from '@/components/common/QueryError'
 import { useCompany } from '@/contexts/CompanyContext'
 import { PlacedList } from '@/components/docs/PlacedList'
@@ -62,8 +67,12 @@ export function ListsPage({ mode = 'lists' }: { mode?: ListsMode }) {
   const [params, setParams] = useSearchParams()
   const companyId = company?.id ?? ''
   const [новая, setНовая] = useState('')
-  const [заводим, setЗаводим] = useState(false)
+  // Пришли по «Завести подборку» — поле открыто сразу: иначе человек попадает на
+  // экран и ищет глазами ещё одну кнопку с тем же названием.
+  const [заводим, setЗаводим] = useState(() => params.get('new') === '1')
   const [переименование, setПереименование] = useState('')
+  const [правим, setПравим] = useState<string | null>(null)
+  const [имя, setИмя] = useState('')
 
   const q = useQuery({
     queryKey: ['personal-lists', companyId],
@@ -83,6 +92,9 @@ export function ListsPage({ mode = 'lists' }: { mode?: ListsMode }) {
     n.set('view', 'lists')
     if (id) n.set('list', id)
     else n.delete('list')
+    // Признак «пришли заводить» одноразовый: иначе поле ввода открывается
+    // снова при каждом возврате на экран.
+    n.delete('new')
     return n
   }, { replace: true })
 
@@ -181,7 +193,9 @@ export function ListsPage({ mode = 'lists' }: { mode?: ListsMode }) {
             onOpen={открыть} onChanged={refresh}
             заводим={заводим} setЗаводим={setЗаводим}
             новая={новая} setНовая={setНовая}
-            create={() => create.mutate()} creating={create.isPending} />
+            create={() => create.mutate()} creating={create.isPending}
+            правим={правим} setПравим={setПравим} имя={имя} setИмя={setИмя}
+            act={(id, data) => act.mutate({ id, data })} />
         )}
       </div>
     </div>
@@ -192,7 +206,7 @@ export function ListsPage({ mode = 'lists' }: { mode?: ListsMode }) {
  *  вообще не разложено. */
 function Обзор({
   lists, loading, companyId, onOpen, onChanged, заводим, setЗаводим, новая,
-  setНовая, create, creating,
+  setНовая, create, creating, правим, setПравим, имя, setИмя, act,
 }: {
   lists: workService.PersonalListRow[]
   loading: boolean
@@ -205,6 +219,11 @@ function Обзор({
   setНовая: (v: string) => void
   create: () => void
   creating: boolean
+  правим: string | null
+  setПравим: (v: string | null) => void
+  имя: string
+  setИмя: (v: string) => void
+  act: (id: string, data: Parameters<typeof workService.listAction>[2]) => void
 }) {
   return (
     <div className="space-y-4">
@@ -242,11 +261,34 @@ function Обзор({
       ) : lists.length > 0 ? (
         <div className="overflow-hidden rounded-lg border">
           {lists.map((l) => (
-            <button key={l.id} type="button" onClick={() => onOpen(l.id)}
-              className="flex w-full items-center gap-2 border-b px-3 py-2 text-left last:border-b-0 hover:bg-muted/40">
+            <div key={l.id}
+              className="flex items-center gap-2 border-b px-3 py-2 last:border-b-0 hover:bg-muted/40">
               <FolderOpen className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-              <span className="flex-1 truncate text-sm">{l.name}</span>
-              {l.stale_days !== null && l.stale_days > 13 && (
+              {правим === l.id ? (
+                <span className="flex flex-1 items-center gap-1.5">
+                  <Input value={имя} autoFocus className="h-7 max-w-[240px] text-sm"
+                    onChange={(e) => setИмя(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && имя.trim()) {
+                        act(l.id, { name: имя.trim() })
+                        setПравим(null)
+                      }
+                      if (e.key === 'Escape') setПравим(null)
+                    }} />
+                  <Button size="sm" className="h-7 px-2 text-xs" disabled={!имя.trim()}
+                    onClick={() => { act(l.id, { name: имя.trim() }); setПравим(null) }}>
+                    Готово
+                  </Button>
+                  <Button size="sm" variant="ghost" className="h-7 px-2"
+                    onClick={() => setПравим(null)}><X className="h-3 w-3" /></Button>
+                </span>
+              ) : (
+                <button type="button" onClick={() => onOpen(l.id)}
+                  className="flex-1 truncate text-left text-sm">
+                  {l.name}
+                </button>
+              )}
+              {l.stale_days !== null && l.stale_days > 13 && правим !== l.id && (
                 <span className="shrink-0 text-[11px] text-amber-600 dark:text-amber-400">
                   не открывали {l.stale_days} дн.
                 </span>
@@ -254,13 +296,42 @@ function Обзор({
               <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
                 {l.count}
               </span>
-            </button>
+              {/* Правка там, где подборка лежит: заходить внутрь ради
+                  переименования — лишний шаг, которого нет ни у кого. */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button size="sm" variant="ghost" className="h-7 shrink-0 px-2"
+                    title={`Что сделать с подборкой «${l.name}»`}>
+                    <MoreHorizontal className="h-3.5 w-3.5" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56">
+                  <DropdownMenuItem onClick={() => { setИмя(l.name); setПравим(l.id) }}>
+                    <Pencil className="mr-2 h-3.5 w-3.5" />Переименовать
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => act(l.id, { reviewed: true })}>
+                    <Check className="mr-2 h-3.5 w-3.5" />Просмотрел
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => act(l.id, { delete: true })}>
+                    <Trash2 className="mr-2 h-3.5 w-3.5" />
+                    Удалить подборку
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           ))}
         </div>
       ) : (
         <p className="rounded-lg border border-dashed px-4 py-6 text-center text-sm text-muted-foreground">
           Подборок пока нет. Заведите первую — и складывайте в неё что угодно:
           свою запись, чужое поручение, документ на визе.
+        </p>
+      )}
+
+      {lists.length > 0 && (
+        <p className="text-[11px] text-muted-foreground">
+          Удаление подборки не трогает работу: предметы вернутся в «Не разложено».
         </p>
       )}
 

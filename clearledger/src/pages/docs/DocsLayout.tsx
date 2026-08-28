@@ -29,6 +29,11 @@ export interface DocsView {
   /** Какое число показать справа. Числа личного приходят одним запросом
    *  вместе с подборками — считать их поштучно значит пять запросов на открытие. */
   badge?: 'day' | 'starred' | 'deferred'
+  /** Пункт есть в адресе и в проверке вида, но в меню не рисуется: его место
+   *  занимает что-то живое — например, сами подборки человека. Без такого
+   *  пункта `useDocsView` считает вид неизвестным и молча откатывает его на
+   *  первый, а переход выглядит как мёртвая кнопка. */
+  hidden?: boolean
 }
 
 /** Пункты по разделам. Каждый — свой вопрос, с которым приходят отдельно. */
@@ -59,6 +64,7 @@ export const DOCS_VIEWS: Record<string, DocsView[]> = {
     { key: 'approvals', label: 'Визы', hint: 'документы, которые ждут моего согласования', group: 'Ждут от меня' },
     { key: 'acquaints', label: 'Ознакомиться', hint: 'приказы и распоряжения, доведённые до меня', group: 'Ждут от меня' },
     { key: 'mine', label: 'Мои документы', hint: 'где я автор или ответственный', group: 'Ждут от меня' },
+    { key: 'lists', label: 'Подборки', hint: 'свои подборки: завести, переименовать, удалить', hidden: true },
   ],
   // Раздел «Компания» — то же самое, но по всем: где стоит работа целиком.
   '/docs/company': [
@@ -124,7 +130,7 @@ export function DocsLayout() {
 
   const route = docsRouteOf(pathname)
   const views = (DOCS_VIEWS[route] ?? []).filter(
-    (view) => view.key !== 'discipline' || isCompanyAdmin)
+    (view) => (view.key !== 'discipline' || isCompanyAdmin) && !view.hidden)
   const active = useDocsView(route)
 
   // Сохранённые отборы общей ленты — продолжение пунктов, а не отдельный экран:
@@ -155,11 +161,13 @@ export function DocsLayout() {
     ? counts[view.badge] : 0)
 
   /** Открыть подборку: тот же экран подборок, но с выбранной. */
-  const openMyList = (id: string | null) => setParams((p) => {
+  const openMyList = (id: string | null, заводим = false) => setParams((p) => {
     const n = new URLSearchParams(p)
     n.set('view', 'lists')
     if (id) n.set('list', id)
     else n.delete('list')
+    if (заводим) n.set('new', '1')
+    else n.delete('new')
     n.delete('doc')
     n.delete('task')
     return n
@@ -181,7 +189,11 @@ export function DocsLayout() {
 
   useEffect(() => {
     const requested = params.get('view')
-    if (!requested || views.some((view) => view.key === requested)) return
+    // Сверяемся со ВСЕМИ пунктами раздела, включая скрытые: `views` их не
+    // содержит, и вид «Подборки» считался бы неизвестным — эффект переписывал бы
+    // адрес на каждом рендере, хотя вид верный.
+    const known = (DOCS_VIEWS[route] ?? []).some((view) => view.key === requested)
+    if (!requested || known) return
     setParams((current) => {
       const next = new URLSearchParams(current)
       next.set('view', active)
@@ -191,7 +203,7 @@ export function DocsLayout() {
       next.delete('page')
       return next
     }, { replace: true })
-  }, [active, params, setParams, views])
+  }, [active, params, route, setParams])
 
   useEffect(() => {
     if (!narrow) return
@@ -260,7 +272,7 @@ export function DocsLayout() {
               </button>
             ))}
             {route === '/docs/work' && (
-              <button type="button" onClick={() => openMyList(null)}
+              <button type="button" onClick={() => openMyList(null, true)}
                 aria-current={active === 'lists' && !openList ? 'page' : undefined}
                 className="min-h-11 shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-xs text-muted-foreground/80">
                 + Подборка
@@ -349,13 +361,17 @@ export function DocsLayout() {
                   )}
                 </button>
               ))}
-              <button type="button" onClick={() => openMyList(null)}
+              <button type="button" onClick={() => openMyList(null, true)}
                 aria-current={active === 'lists' && !openList ? 'page' : undefined}
                 className={cn('rounded-md px-3 py-1.5 text-left text-[13px] transition-colors',
                   active === 'lists' && !openList
                     ? 'bg-primary/10 font-medium text-primary'
                     : 'text-muted-foreground/80 hover:bg-accent/40 hover:text-foreground')}>
                 {myLists.length ? '+ Ещё подборка' : '+ Завести подборку'}
+              </button>
+              <button type="button" onClick={() => openMyList(null)}
+                className="rounded-md px-3 py-1 text-left text-[11px] text-muted-foreground/60 hover:text-foreground">
+                Управление подборками
               </button>
             </>
           )}
